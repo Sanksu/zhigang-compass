@@ -1,0 +1,127 @@
+"""脉脉爬虫（C 级 — 实验性，合规限制）。
+
+合规措施（S2+S3，project_memory 强制约束）：
+- 注明用于竞赛演示不商用（X-Collection-Purpose 头 + compliance_note 字段）
+- 数据脱敏（CleaningPipeline 自动 PII 清洗：手机号/邮箱/身份证）
+- 限频 ≤100 req/h（settings.RATE_LIMIT.maimai = 5 req/min）
+- 夜间运行 23:00-06:00（start_requests 时间守卫强制）
+
+策略（2026-07-29 重构）：
+- 旧方案：maimai.cn/job/search 是专栏页，无岗位数据；maimai.cn 上无公开职位搜索页
+- 新发现：脉脉职位实际托管在飞书招聘系统 maimai.jobs.feishu.cn
+- 飞书招聘页 SSR 渲染 10 个岗位卡片，无需登录态即可采集
+- 通过 CDP 连接已启动的真实 Chrome/Edge，从 DOM 提取 a[href*="/position/"] 卡片
+- 通过 subprocess 调用独立脚本，避免事件循环冲突
+
+注意：脉脉.jobs.feishu.cn 是脉脉公司自己的招聘页（招聘脉脉员工），
+非脉脉平台全量职位。作为 C 级实验性源的样本数据足够。
+
+前置条件：
+- 启动 CDP 浏览器：python -m crawlers.setup_boss_chrome
+- 飞书招聘页无需登录态，直连即可访问
+
+运行（仅夜间 23:00-06:00）：
+  scrapy crawl maimai -a keywords=Python -o output/maimai.jsonl
+"""
+
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime
+
+from scrapy.exceptions import CloseSpider
+
+from crawlers.base_spider import BaseSpider
+from crawlers.settings import MAIMAI_COMPLIANCE
+
+
+CRAWLER_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "maimai_cdp_crawler.py")
+
+
+# 合规时间窗口（23:00-06:00）
+NIGHT_START_HOUR = MAIMAI_COMPLIANCE["schedule_hours"][0]  # 23
+NIGHT_END_HOUR = MAIMAI_COMPLIANCE["schedule_hours"][1]    # 6
+
+
+class MaimaiSpider(BaseSpider):
+    name = "maimai"
+    platform = "maimai"
+
+    # 脉脉飞书招聘页无城市筛选，固定城市列表仅作日志记录
+    cities = ["北京"]
+
+    def start_requests(self):
+        """合规守卫：仅夜间 23:00-06:00 启动。"""
+        current_hour = datetime.now().hour
+        in_night_window = current_hour >= NIGHT_START_HOUR or current_hour < NIGHT_END_HOUR
+        if not in_night_window:
+            raise CloseSpider(
+                f"合规拒绝：脉脉仅允许在 {NIGHT_START_HOUR}:00-{NIGHT_END_HOUR}:00 夜间运行，"
+                f"当前小时 {current_hour}。请夜间再执行 scrapy crawl maimai"
+            )
+
+        # 脉脉飞书招聘页无关键字搜索功能，keywords 仅作日志记录
+        # 只需调用一次 CDP 采集脚本即可拿到所有岗位
+        python_exe = sys.executable
+        keyword = self.keywords[0] if self.keywords else ""
+
+        self.logger.info(f"开始采集脉脉飞书招聘页（合规声明：{MAIMAI_COMPLIANCE['annotation']}）")
+
+        cmd = [python_exe, CRAWLER_SCRIPT, "--keyword", keyword]
+
+        # 传递 CDP 端口（与 BOSS/Monster 共用）
+        cdp_port = os.environ.get("BOSS_CDP_PORT", "9222")
+        cmd.extend(["--cdp-port", cdp_port])
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                cwd=os.path.dirname(CRAWLER_SCRIPT),
+                env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
+            )
+        except Exception as e:
+            self.logger.error(f"启动 CDP 脚本失败: {e}")
+            return
+
+        # 逐行读取 stdout（JSONL），实时 yield Item
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item_data = json.loads(line)
+            except json.JSONDecodeError as e:
+                self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
+                continue
+
+            yield self.make_item(
+                source_id=str(item_data.get("id", "")),
+                source_url=item_data.get("url", ""),
+                title=item_data.get("title", ""),
+                company=item_data.get("company", "脉脉"),
+                location=item_data.get("location", ""),
+                salary=item_data.get("salary", ""),
+                experience=item_data.get("experience_range", ""),
+                education="",
+                tags=[item_data.get("category", ""), item_data.get("job_type", "")],
+                description=item_data.get("description", ""),
+                requirements="",
+                raw_text=json.dumps(item_data.get("raw", item_data), ensure_ascii=False),
+                job_type=item_data.get("job_type", ""),
+                # 合规字段（CleaningPipeline 会再次设置 is_desensitized=True）
+                compliance_note=MAIMAI_COMPLIANCE["annotation"],
+            )
+
+        # 等待进程结束
+        proc.wait()
+        stderr_output = proc.stderr.read() if proc.stderr else ""
+        if proc.returncode != 0:
+            self.logger.warning(f"CDP 脚本退出码 {proc.returncode}")
+        if stderr_output:
+            for line in stderr_output.strip().splitlines()[-5:]:
+                self.logger.info(f"[cdp] {line}")

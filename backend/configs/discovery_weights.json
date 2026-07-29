@@ -1,0 +1,6 @@
+{
+  "w_count": 0.4,
+  "w_source": 0.3,
+  "w_growth": 0.3,
+  "_comment": "新岗位发现置信度权重（设计文档 7.2.4 节）。w_count=频次, w_source=源多样性, w_growth=增长率。"
+}

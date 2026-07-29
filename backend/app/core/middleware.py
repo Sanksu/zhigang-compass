@@ -1,0 +1,54 @@
+"""CORS / CSP / HSTS / GZip / TraceID 中间件。"""
+
+import uuid
+from datetime import datetime, timezone
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import Request
+from starlette.responses import Response
+
+from app.core.config import settings
+
+
+def setup_middleware(app: FastAPI) -> None:
+    """按顺序注册所有中间件。"""
+
+    # CORS — 白名单模式
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"] if not settings.is_production else [],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # GZip — 响应体 > 1KB 自动压缩
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+    # CSP / HSTS — 自定义响应头
+    app.add_middleware(SecurityHeadersMiddleware)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+
+        # CSP
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "worker-src 'self' blob:; "
+            "img-src 'self' data: https:"
+        )
+
+        if settings.is_production:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        # Trace ID
+        trace_id = request.headers.get("X-Trace-ID", str(uuid.uuid4().hex[:16]))
+        response.headers["X-Trace-ID"] = trace_id
+
+        return response

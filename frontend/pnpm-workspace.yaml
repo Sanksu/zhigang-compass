@@ -1,0 +1,15 @@
+nodeLinker: hoisted
+
+packages:
+  - '.'
+
+onlyBuiltDependencies:
+  - '@swc/core'
+  - 'esbuild'
+
+ignoredOptionalDependencies:
+  - sharp
+
+allowBuilds:
+  '@swc/core': true
+  esbuild: true

@@ -1,0 +1,936 @@
+openapi: 3.1.0
+info:
+  title: 智岗罗盘 API
+  version: 1.0.0
+  description: |
+    多源异构驱动的岗位能力动态演化与人岗匹配系统 API 契约。
+    本文件是前后端并行开发的单一事实源（AGENTS.md 铁律一）。
+    前端通过 `openapi-typescript` 生成类型，不得自行定义与后端不一致的类型。
+  contact:
+    name: 智岗罗盘团队
+    url: https://github.com/zhigang-compass
+
+servers:
+  - url: http://localhost:8000
+    description: 开发环境
+  - url: https://api.zhigang.example.com
+    description: 生产环境
+
+security:
+  - BearerAuth: []
+  - CookieAuth: []
+
+tags:
+  - name: auth
+    description: 认证模块
+  - name: graph
+    description: 图谱模块
+  - name: resume
+    description: 简历模块
+  - name: match
+    description: 匹配模块
+  - name: evolution
+    description: 演化模块
+  - name: admin
+    description: 管理模块
+
+paths:
+  # ============================================================
+  # 认证模块 /api/v1/auth
+  # ============================================================
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      security: []
+      summary: 登录获取双 Token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password }
+      responses:
+        '200':
+          description: 登录成功
+          headers:
+            Set-Cookie:
+              description: access_token (httpOnly, 30min)
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      refresh_token: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      security: [{ BearerAuth: [] }]
+      summary: 刷新 access_token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: 刷新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      security: [{ BearerAuth: [] }]
+      summary: 登出，refresh_token 加入黑名单
+      responses:
+        '200':
+          description: 登出成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/auth/me:
+    get:
+      tags: [auth]
+      security: [{ BearerAuth: [] }]
+      summary: 获取当前用户信息
+      responses:
+        '200':
+          description: 用户信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+
+  /api/v1/auth/register:
+    post:
+      tags: [auth]
+      security: [{ BearerAuth: [] }]
+      summary: 管理员创建用户（admin only）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, role]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password }
+                role: { type: string, enum: [admin, user, guest] }
+      responses:
+        '201':
+          description: 用户创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  # ============================================================
+  # 图谱模块 /api/v1/graph
+  # ============================================================
+  /api/v1/graph/position/{id}:
+    get:
+      tags: [graph]
+      summary: 岗位节点详情
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 岗位详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/graph/position/{id}/skills:
+    get:
+      tags: [graph]
+      summary: 岗位技能列表
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: necessity
+          in: query
+          schema: { type: string, enum: [must, nice] }
+      responses:
+        '200':
+          description: 技能列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/graph/skill/{id}:
+    get:
+      tags: [graph]
+      summary: 技能节点详情
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 技能详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/graph/skill/{id}/evidence:
+    get:
+      tags: [graph]
+      summary: 技能证据列表
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 证据列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/graph/skill/{id}/prerequisites:
+    get:
+      tags: [graph]
+      summary: 先修技能链
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 先修链
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/graph/skill/{id}/courses:
+    get:
+      tags: [graph]
+      summary: 学习课程列表
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 课程列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/graph/skill/{id}/positions:
+    get:
+      tags: [graph]
+      summary: 技能反向查询岗位
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 岗位列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/graph/skill/similar:
+    get:
+      tags: [graph]
+      summary: 相似技能检索（pgvector）
+      parameters:
+        - name: skill_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: top_k
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        '200':
+          description: 相似技能列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/graph/panorama:
+    get:
+      tags: [graph]
+      summary: 全景视图（Neo4j 直接查询，无缓存）
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 600 }
+        - name: min_weight
+          in: query
+          schema: { type: number, default: 0.3, minimum: 0, maximum: 1 }
+        - name: focus
+          in: query
+          schema: { type: string, format: uuid }
+          description: 以某岗位为中心展开
+      responses:
+        '200':
+          description: 全景图数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      nodes: { type: array, items: { type: object } }
+                      edges: { type: array, items: { type: object } }
+                      stats: { type: object }
+
+  /api/v1/graph/view/{view_type}:
+    get:
+      tags: [graph]
+      summary: 视图切换（后端过滤）
+      parameters:
+        - name: view_type
+          in: path
+          required: true
+          schema: { type: string, enum: [panorama, techStack, level, positionCenter] }
+      responses:
+        '200':
+          description: 视图数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/graph/search:
+    get:
+      tags: [graph]
+      summary: 图谱搜索（Neo4j 全文索引）
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: type
+          in: query
+          schema: { type: string, enum: [position, skill, evidence] }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: 搜索结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  # ============================================================
+  # 简历模块 /api/v1/resume
+  # ============================================================
+  /api/v1/resume/parse:
+    post:
+      tags: [resume]
+      summary: 上传简历触发解析（异步，含 PII 脱敏预处理）
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '202':
+          description: 已接受，异步处理中
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      task_id: { type: string, format: uuid }
+
+  /api/v1/resume/task/{task_id}:
+    get:
+      tags: [resume]
+      summary: 查询解析任务状态
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 任务状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/resume/task/{task_id}/stream:
+    get:
+      tags: [resume]
+      summary: SSE 推送任务进度
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: SSE 流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /api/v1/resume/{resume_id}:
+    get:
+      tags: [resume]
+      summary: 获取解析结果
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 简历数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+    put:
+      tags: [resume]
+      summary: 编辑简历信息
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+    delete:
+      tags: [resume]
+      summary: 删除简历
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: 删除成功
+
+  # ============================================================
+  # 匹配模块 /api/v1/match
+  # ============================================================
+  /api/v1/match/recommend:
+    post:
+      tags: [match]
+      summary: 自动推荐 Top-N（异步，含 CII 通胀修正）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resume_id]
+              properties:
+                resume_id: { type: string, format: uuid }
+                top_n: { type: integer, default: 10, maximum: 50 }
+      responses:
+        '202':
+          description: 已接受，异步处理中
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/match/compare:
+    post:
+      tags: [match]
+      summary: 人岗比对（单点同步）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resume_id, position_id]
+              properties:
+                resume_id: { type: string, format: uuid }
+                position_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 匹配结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/match/task/{task_id}:
+    get:
+      tags: [match]
+      summary: 查询推荐任务状态
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 任务状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/match/result/{match_id}:
+    get:
+      tags: [match]
+      summary: 获取匹配结果
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 匹配详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/match/result/{match_id}/gap:
+    get:
+      tags: [match]
+      summary: 获取差距分析
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 差距列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/match/result/{match_id}/path:
+    get:
+      tags: [match]
+      summary: 获取学习路径
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 学习路径
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/match/feedback:
+    post:
+      tags: [match]
+      summary: 提交匹配反馈
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [match_id, score]
+              properties:
+                match_id: { type: string, format: uuid }
+                score: { type: integer, enum: [1, -1], description: "1=👍, -1=👎" }
+      responses:
+        '200':
+          description: 反馈已记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  # ============================================================
+  # 演化模块 /api/v1/evolution
+  # ============================================================
+  /api/v1/evolution/versions:
+    get:
+      tags: [evolution]
+      summary: 获取图谱版本列表
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: 版本列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/evolution/versions/{version_id}:
+    get:
+      tags: [evolution]
+      summary: 获取版本详情
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 版本详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/evolution/diff:
+    get:
+      tags: [evolution]
+      summary: 版本对比
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 差异
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/evolution/trends:
+    get:
+      tags: [evolution]
+      summary: 技能趋势查询
+      parameters:
+        - name: skill
+          in: query
+          required: true
+          schema: { type: string }
+        - name: window
+          in: query
+          schema: { type: integer, default: 90, description: "天数" }
+      responses:
+        '200':
+          description: 趋势数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/evolution/position/{id}/evolution:
+    get:
+      tags: [evolution]
+      summary: 岗位演化历史
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 演化历史
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  # ============================================================
+  # 管理模块 /api/v1/admin
+  # ============================================================
+  /api/v1/admin/users:
+    get:
+      tags: [admin]
+      summary: 用户列表（admin only）
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: 用户列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+    post:
+      tags: [admin]
+      summary: 创建用户
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, role]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password }
+                role: { type: string, enum: [admin, user, guest] }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/users/{id}:
+    put:
+      tags: [admin]
+      summary: 更新用户
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role: { type: string, enum: [admin, user, guest] }
+                status: { type: string, enum: [active, disabled] }
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+    delete:
+      tags: [admin]
+      summary: 禁用用户
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204':
+          description: 禁用成功
+
+  /api/v1/admin/crawl/trigger:
+    post:
+      tags: [admin]
+      summary: 触发爬取任务
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform, keyword]
+              properties:
+                platform: { type: string }
+                keyword: { type: string }
+      responses:
+        '202':
+          description: 任务已触发
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/crawl/status:
+    get:
+      tags: [admin]
+      summary: 爬取状态监控
+      responses:
+        '200':
+          description: 状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/positions/pending:
+    get:
+      tags: [admin]
+      summary: 待审核岗位列表
+      responses:
+        '200':
+          description: 待审核列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/positions/{id}/review:
+    put:
+      tags: [admin]
+      summary: 审核岗位（批准/驳回/编辑）
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [approve, reject, edit] }
+                fields: { type: object, description: "编辑后的字段（action=edit 时）" }
+      responses:
+        '200':
+          description: 审核完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/evolution/pending:
+    get:
+      tags: [admin]
+      summary: 待审核演化变更
+      responses:
+        '200':
+          description: 待审核列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/evolution/{id}/review:
+    put:
+      tags: [admin]
+      summary: 审核演化变更
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [approve, reject] }
+                modified: { type: object }
+      responses:
+        '200':
+          description: 审核完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/audit/logs:
+    get:
+      tags: [admin]
+      summary: 审计日志查询
+      parameters:
+        - name: category
+          in: query
+          schema: { type: string, enum: [AUTH, GRAPH, DATA, ADMIN] }
+        - name: start
+          in: query
+          schema: { type: string, format: date-time }
+        - name: end
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: 日志列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, default: 1, minimum: 1 }
+    Size:
+      name: size
+      in: query
+      schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+
+  responses:
+    Unauthorized:
+      description: 未认证
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+    Forbidden:
+      description: 无权限
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+    RateLimited:
+      description: 请求限流
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiResponse'
+
+  schemas:
+    ApiResponse:
+      type: object
+      required: [code, msg, trace_id]
+      properties:
+        code:
+          type: integer
+          description: "0=成功，非 0=错误码（见设计文档 §2.4.7）"
+        msg:
+          type: string
+        data:
+          description: 业务数据（成功时存在）
+        trace_id:
+          type: string
+          format: uuid
+          description: 链路追踪 ID
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        role: { type: string, enum: [admin, user, guest] }
+        permissions: { type: array, items: { type: string } }

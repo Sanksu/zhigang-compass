@@ -1,0 +1,141 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
+/* ==========================================================================
+   智岗罗盘 — 设计令牌
+   风格：现代简约 Minimalism（Vercel-like）
+   签名：单色基底 + 状态色编码岗位五状态机 + 罗盘标记
+   ========================================================================== */
+
+@theme {
+  /* 字体 — Inter Variable 正文/标题（Vercel 风格），JetBrains Mono 数据/代码 */
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* 背景 — 纯白画布，分层提升 */
+  --color-canvas: #ffffff;
+  --color-subtle: #fafafa;
+  --color-elevated: #f4f4f5;
+
+  /* 墨色 — 近黑为主，zinc 灰阶递减 */
+  --color-ink: #09090b;
+  --color-ink-secondary: #3f3f46;
+  --color-ink-muted: #71717a;
+  --color-ink-faint: #a1a1aa;
+
+  /* 边框 — 1px 细线分区 */
+  --color-border: #e4e4e7;
+  --color-border-strong: #d4d4d8;
+
+  /* 强调 — 主操作用墨色，状态色专属岗位状态机 */
+  --color-accent: #09090b;
+  --color-accent-foreground: #ffffff;
+
+  /* 岗位五状态机 — 状态色仅用于状态指示，不作装饰 */
+  --color-state-candidate: #71717a;  /* 候选 — 灰，中性等待 */
+  --color-state-emerging: #10b981;   /* 新兴 — 绿，信号出现 */
+  --color-state-stable: #3b82f6;     /* 稳定 — 蓝，已确立 */
+  --color-state-declining: #f59e0b;  /* 衰退 — 橙，警示 */
+  --color-state-archived: #ef4444;   /* 归档 — 红，终止 */
+
+  /* 圆角 — 小圆角匹配技术工具气质 */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* 阴影 — 仅浮层使用，普通内容不加阴影 */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.08), 0 2px 6px -2px rgb(0 0 0 / 0.04);
+  --shadow-lg: 0 12px 32px -4px rgb(0 0 0 / 0.10), 0 4px 12px -2px rgb(0 0 0 / 0.06);
+}
+
+/* 深色模式 — 基于 .dark 类的 Tailwind v4 自定义 variant */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* 深色模式 — 在 .dark 下覆盖设计令牌 */
+.dark {
+  --color-canvas: #09090b;
+  --color-subtle: #18181b;
+  --color-elevated: #27272a;
+
+  --color-ink: #fafafa;
+  --color-ink-secondary: #a1a1aa;
+  --color-ink-muted: #71717a;
+  --color-ink-faint: #52525b;
+
+  --color-border: #27272a;
+  --color-border-strong: #3f3f46;
+
+  --color-accent: #fafafa;
+  --color-accent-foreground: #09090b;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.30);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.40), 0 2px 6px -2px rgb(0 0 0 / 0.30);
+  --shadow-lg: 0 12px 32px -4px rgb(0 0 0 / 0.50), 0 4px 12px -2px rgb(0 0 0 / 0.40);
+}
+
+/* ==========================================================================
+   基础样式
+   ========================================================================== */
+
+* {
+  border-color: var(--color-border);
+}
+
+html {
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv01', 'cv02', 'cv03', 'cv04', 'ss01';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  margin: 0;
+  min-height: 100vh;
+}
+
+/* 滚动条 — 细线样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-faint);
+}
+
+/* 焦点可见 — 键盘可访问性 */
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* 选区 */
+::selection {
+  background: var(--color-ink);
+  color: var(--color-canvas);
+}
+
+/* 减少动效 — 尊重 prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

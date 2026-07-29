@@ -1,0 +1,5 @@
+# 爬虫输出目录（JSONL 文件）
+*.jsonl
+*.json
+*.csv
+!.gitkeep

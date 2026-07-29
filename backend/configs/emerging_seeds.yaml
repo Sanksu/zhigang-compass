@@ -1,0 +1,65 @@
+# 新兴岗位种子列表（设计文档 7.2.3 节）
+# 预置 12 个新兴岗位种子，参考 talent-graph-system 的 EMERGING_SEEDS 模式。
+# candidate 命中种子列表时生成岗位定义草案进入 admin 审核队列。
+# 运营可通过追加条目扩展。
+
+seeds:
+  - name: "AI Agent 工程师"
+    aliases: ["Agent 开发", "智能体工程师", "AI Agent Developer"]
+    core_skills: ["Python", "LangChain", "大语言模型", "检索增强生成"]
+    description: "负责基于大语言模型的智能体应用设计与开发"
+
+  - name: "RAG 工程师"
+    aliases: ["检索增强生成工程师", "RAG Developer"]
+    core_skills: ["大语言模型", "检索增强生成", "Python", "pgvector"]
+    description: "专注检索增强生成系统的构建与优化"
+
+  - name: "大模型应用开发"
+    aliases: ["LLM 应用开发", "大模型应用工程师"]
+    core_skills: ["大语言模型", "Python", "OpenAI API", "LangChain"]
+    description: "基于大语言模型构建应用层产品"
+
+  - name: "数据工程师"
+    aliases: ["Data Engineer", "数据开发工程师"]
+    core_skills: ["Python", "SQL", "Airflow", "Apache Spark"]
+    description: "负责数据管道与数据平台建设"
+
+  - name: "MLOps 工程师"
+    aliases: ["机器学习运维", "ML Platform Engineer"]
+    core_skills: ["Python", "Kubernetes", "Docker", "机器学习"]
+    description: "机器学习模型部署与运维平台建设"
+
+  - name: "Prompt 工程师"
+    aliases: ["提示词工程师", "Prompt Engineer"]
+    core_skills: ["大语言模型", "检索增强生成", "自然语言处理"]
+    description: "设计与优化大语言模型提示词"
+
+  - name: "AIGC 工程师"
+    aliases: ["AI 生成内容工程师", "AIGC Developer"]
+    core_skills: ["大语言模型", "深度学习", "Python", "计算机视觉"]
+    description: "AI 生成内容应用开发"
+
+  - name: "向量数据库工程师"
+    aliases: ["Vector DB Engineer"]
+    core_skills: ["pgvector", "Python", "大语言模型", "检索增强生成"]
+    description: "向量检索引擎与数据库优化"
+
+  - name: "AI 产品经理"
+    aliases: ["AI Product Manager", "人工智能产品经理"]
+    core_skills: ["大语言模型", "需求分析", "产品设计"]
+    description: "AI 产品规划与设计"
+
+  - name: "机器学习平台工程师"
+    aliases: ["ML Platform Engineer", "机器学习平台开发"]
+    core_skills: ["Python", "Kubernetes", "机器学习", "Docker"]
+    description: "机器学习训练与推理平台建设"
+
+  - name: "智能客服工程师"
+    aliases: ["AI 客服开发", "对话系统工程师"]
+    core_skills: ["大语言模型", "检索增强生成", "自然语言处理", "Python"]
+    description: "基于大模型的智能客服系统开发"
+
+  - name: "AI 安全工程师"
+    aliases: ["AI Security Engineer", "大模型安全工程师"]
+    core_skills: ["大语言模型", "Python", "机器学习"]
+    description: "大模型应用安全评估与防护"
