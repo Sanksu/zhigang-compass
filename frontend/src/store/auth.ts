@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Role } from '@/lib/constants'
+import { registerAuthFailedHandler } from '@/lib/api'
 
 /**
  * 认证状态 — 设计文档 §12.3
@@ -26,15 +27,25 @@ interface AuthState {
   hasPermission: (perm: string) => boolean
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
-  user: null,
-  isAuthenticated: false,
-  setUser: (user) => set({ user, isAuthenticated: !!user }),
-  logout: () => set({ user: null, isAuthenticated: false }),
-  hasPermission: (perm) => {
-    const { user } = get()
-    if (!user) return false
-    if (user.role === 'admin') return true
-    return user.permissions.includes(perm)
-  },
-}))
+export const useAuthStore = create<AuthState>((set, get) => {
+  // 401 续期失败时由 http 拦截器回调，清理本地状态并跳登录页
+  registerAuthFailedHandler(() => {
+    set({ user: null, isAuthenticated: false })
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      window.location.href = '/login'
+    }
+  })
+
+  return {
+    user: null,
+    isAuthenticated: false,
+    setUser: (user) => set({ user, isAuthenticated: !!user }),
+    logout: () => set({ user: null, isAuthenticated: false }),
+    hasPermission: (perm) => {
+      const { user } = get()
+      if (!user) return false
+      if (user.role === 'admin') return true
+      return user.permissions.includes(perm)
+    },
+  }
+})
