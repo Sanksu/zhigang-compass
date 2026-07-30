@@ -23,6 +23,14 @@ import {
 import { CanvasRenderer } from 'echarts/renderers'
 import type { LearningPathItem, RadarDimension, SkillMatrixItem } from './types'
 
+/** ECharts 回调参数最小类型 — 覆盖本组件使用的 tooltip/label 回调字段 */
+interface EChartsParam {
+  dataType?: string
+  data?: Record<string, unknown>
+  value?: unknown
+  name?: string
+} 
+
 echarts.use([
   GaugeChart,
   ERadar,
@@ -263,7 +271,7 @@ export function SkillHeatmap({ data, className }: SkillHeatmapProps) {
     () => ({
       backgroundColor: 'transparent',
       tooltip: {
-        formatter: (params: any) => {
+        formatter: (params: EChartsParam) => {
           const [xi, yi, val] = params.value as [number, number, number]
           const item = data[xi]
           const who = categories[yi]
@@ -302,8 +310,8 @@ export function SkillHeatmap({ data, className }: SkillHeatmapProps) {
           data: heatData,
           label: {
             show: true,
-            formatter: (p: any) => LEVEL_LABEL[p.value[2] as number] ?? '',
-            color: (p: any) => (p.value[2] >= 2 ? '#fafafa' : '#09090b'),
+            formatter: (p: EChartsParam) => LEVEL_LABEL[(p.value as number[])[2] ?? ''] ?? '',
+            color: (p: EChartsParam) => ((p.value as number[])[2] >= 2 ? '#fafafa' : '#09090b'),
             fontSize: 10,
           },
           emphasis: {
@@ -349,7 +357,7 @@ export function GanttChart({ data, className }: GanttChartProps) {
     () => ({
       backgroundColor: 'transparent',
       tooltip: {
-        formatter: (params: any) => {
+        formatter: (params: EChartsParam) => {
           const item = data.find((d) => d.skill === params.name)
           if (!item) return ''
           const lines = [`<b>${item.skill}</b>`, `时长: ${item.duration_days} 天`, `优先级: ${item.priority}`]
@@ -387,7 +395,7 @@ export function GanttChart({ data, className }: GanttChartProps) {
           label: {
             show: true,
             position: 'right',
-            formatter: (p: any) => `${p.value[1] - p.value[0]}天`,
+            formatter: (p: EChartsParam) => `${(p.value as number[])[1] - (p.value as number[])[0]}天`,
             color: mutedColor,
             fontSize: 10,
           },

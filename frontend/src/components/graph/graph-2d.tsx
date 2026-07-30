@@ -22,6 +22,14 @@ import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 
+/** ECharts 回调参数最小类型 — 覆盖本组件使用的 tooltip/label/select 回调字段 */
+interface EChartsParam {
+  dataType?: string
+  data?: Record<string, unknown>
+  value?: unknown
+  name?: string
+} 
+
 // 按需注册 — 仅 graph 图表 + tooltip 组件 + canvas 渲染器
 // 相比 `import * as echarts from 'echarts'`，可减少约 70% bundle 体积
 echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
@@ -222,9 +230,9 @@ export function Graph2D({ data, selectedId, onSelectNode, className }: Graph2DPr
         borderColor: dark ? '#3f3f46' : '#d4d4d8',
         borderWidth: 1,
         textStyle: { color: textColor, fontSize: 12 },
-        formatter: (params: any) => {
+        formatter: (params: EChartsParam) => {
           if (params.dataType !== 'node' || !params.data) return ''
-          const d = params.data as GraphNode
+          const d = params.data as unknown as GraphNode
           const lines: string[] = [`<b>${d.name}</b>`]
           lines.push(`类型: ${d.type}`)
           if (d.type === 'position' && d.status) lines.push(`状态: ${d.status}`)
@@ -262,7 +270,7 @@ export function Graph2D({ data, selectedId, onSelectNode, className }: Graph2DPr
               borderColor: textColor,
               borderWidth: 3,
               shadowBlur: 12,
-              shadowColor: (params: any) => colorOf(params.data as GraphNode),
+              shadowColor: (params: EChartsParam) => colorOf(params.data as unknown as GraphNode),
             },
             label: {
               show: true,
