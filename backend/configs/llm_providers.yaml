@@ -1,0 +1,93 @@
+# ============================================================
+# 智岗罗盘 — LLM 多 Provider 重试链配置
+# ============================================================
+# 设计文档 §6.5 LLM API 降级策略（单一事实源）
+# 由 LLMProviderChain 读取（M3 实现，见 app/services/extraction/llm_provider.py）
+#
+# 主讯飞星火 → 备 DeepSeek → 三 Qwen Plus，均通过 OpenAI 兼容 API 接入
+# 密钥一律走环境变量（${VAR} 占位），禁止硬编码（AGENTS.md 铁律）
+# base_url / model 提供默认值，可被 .env 中对应环境变量覆盖
+# ============================================================
+
+# ---------- Provider 列表（按优先级升序排序） ----------
+providers:
+  - name: spark            # 主：讯飞星火
+    priority: 1
+    base_url: https://spark-api.xf-yun.com/v1
+    api_key: ${LLM_PRIMARY_API_KEY}
+    # 设计文档 §6.5 指定 v4.0；.env.example 旧值为 spark-v2，以设计文档为准
+    model: v4.0
+    supports_function_calling: true
+    enabled: true
+
+  - name: deepseek         # 备：DeepSeek
+    priority: 2
+    base_url: https://api.deepseek.com/v1
+    api_key: ${LLM_SECONDARY_API_KEY}
+    model: deepseek-chat
+    supports_function_calling: true
+    enabled: true
+
+  - name: qwen             # 三：Qwen Plus
+    priority: 3
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key: ${LLM_TERTIARY_API_KEY}
+    model: qwen-plus
+    supports_function_calling: true
+    enabled: true
+
+# ---------- 路由策略 ----------
+routing:
+  # 同步路由（图谱查询、诊断报告等）：单次尝试，超时即返回 503
+  sync:
+    timeout_seconds: 10
+    retry: false
+    on_failure: return_503
+
+  # 异步任务（ARQ：简历解析、批量抽取、演化计算）：按优先级依次尝试
+  async:
+    per_provider_timeout_seconds: 30
+    total_timeout_seconds: 90      # 30s × 3 = 90s 上限
+    on_all_failed: enqueue_delayed # 全部失败后入延迟队列等待恢复
+
+# ---------- 降级触发条件 ----------
+failover:
+  # 主 API 超时
+  timeout:
+    sync_threshold_seconds: 10
+    async_threshold_seconds: 30
+    sync_action: return_503
+    async_action: switch_to_next_provider
+
+  # 主 API 限流（429）：指数退避后切备 provider
+  rate_limit:
+    status_code: 429
+    backoff_seconds: [30, 60, 120]
+    action: switch_to_next_provider
+
+  # 主 API 不可用（连续 5xx）：全部切备 + 告警
+  unavailable:
+    status_code_range: [500, 599]
+    consecutive_failures: 3
+    action: switch_all_to_backup_and_alert
+
+# ---------- 健康检查 ----------
+health_check:
+  interval_seconds: 300      # 每 5min 调用 /models 端点
+  endpoint: /models
+  result_store: redis        # 结果写入 Redis
+
+# ---------- 恢复策略 ----------
+recovery:
+  # 主 API 健康检查连续 3 次 200 后恢复主 provider
+  healthy_checks_to_recover: 3
+  # 主 API 不可用恢复条件：健康检查通过 5min
+  unavailable_recover_minutes: 5
+  # failed 状态的异步任务自动重新入队重跑（不污染图谱质量）
+  auto_requeue_failed_tasks: true
+
+# ---------- 结构化输出（M3 启用，幻觉防控第一道防线） ----------
+structured_output:
+  library: instructor
+  temperature: 0.1
+  pydantic_validation: true
