@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Query
 
-from app.core.database import get_neo4j, redis_client
+from app.core.database import neo4j_driver, redis_client
 from app.schemas.common import ok
 
 router = APIRouter()
@@ -32,7 +32,7 @@ async def panorama(
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
 
-    with get_neo4j() as session:
+    with neo4j_driver.session() as session:
         if focus:
             rows = session.run(
                 """
@@ -80,7 +80,7 @@ async def panorama(
 @router.get("/skill/{skill_id}/positions")
 async def skill_positions(skill_id: str):
     """技能节点反向查询：返回关联的岗位列表 + necessity + weight + level。"""
-    with get_neo4j() as session:
+    with neo4j_driver.session() as session:
         rows = session.run(
             """
             MATCH (p:Position)-[r:REQUIRES]->(s:Skill {id: $skill_id})
@@ -119,7 +119,7 @@ async def fulltext_search(
     items: list[dict] = []
     total = 0
 
-    with get_neo4j() as session:
+    with neo4j_driver.session() as session:
         if type_ in ("position", "skill"):
             index = "position_search" if type_ == "position" else "skill_search"
             result = session.run(

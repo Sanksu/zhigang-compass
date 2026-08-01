@@ -4,16 +4,19 @@
 契约标注 recommend 为 202 异步，当前按设计文档 9.4 同步执行返回结果（M4 可迁异步）。
 """
 
+import uuid
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db, get_neo4j
+from app.core.database import get_db, neo4j_driver
 from app.models.business import ResumeCache
 from app.schemas.common import ok, error
 from app.services.matching.engine import RuleBasedMatcher
 from app.services.matching.schemas import (
     CandidateProfile,
+    CandidateProject,
     CandidateSkill,
     MatchMode,
     MatchRequest,
@@ -35,6 +38,14 @@ class CompareRequest(BaseModel):
     position_id: str
 
 
+def _parse_resume_id(raw: str) -> str | None:
+    """校验并规范化 resume_id（外部输入，非法 UUID 返回 None）。"""
+    try:
+        return str(uuid.UUID(raw))
+    except (ValueError, AttributeError):
+        return None
+
+
 def _build_candidate(parsed: dict) -> CandidateProfile:
     """从简历解析结果构建候选人画像。
 
@@ -53,13 +64,24 @@ def _build_candidate(parsed: dict) -> CandidateProfile:
                 low_confidence=bool(s.get("low_confidence", False)),
             ))
 
+    projects: list[CandidateProject] = []
+    for pr in parsed.get("projects", []):
+        if isinstance(pr, str):
+            projects.append(CandidateProject(name=pr))
+        elif isinstance(pr, dict):
+            projects.append(CandidateProject(
+                name=pr.get("name", ""),
+                stack=list(pr.get("stack", []) or []),
+                description=pr.get("description", ""),
+            ))
+
     return CandidateProfile(
         user_id=parsed.get("user_id", ""),
         skills=skills,
         total_years=float(parsed.get("total_years", 0) or 0),
         education_level=parsed.get("education_level"),
         domain_experience=parsed.get("domain_experience", []),
-        projects=parsed.get("projects", []),
+        projects=projects,
         certifications=parsed.get("certifications", []),
     )
 
@@ -67,7 +89,7 @@ def _build_candidate(parsed: dict) -> CandidateProfile:
 def _load_positions_from_graph() -> list[PositionProfile]:
     """从图谱聚合岗位画像（轻量聚合层，M3 可由专用聚合任务替换）。"""
     positions: dict[str, PositionProfile] = {}
-    with get_neo4j() as session:
+    with neo4j_driver.session() as session:
         rows = session.run(
             """
             MATCH (p:Position)-[r:REQUIRES]->(s:Skill)
@@ -108,7 +130,10 @@ def _load_positions_from_graph() -> list[PositionProfile]:
 @router.post("/recommend")
 async def recommend(req: RecommendRequest, db: AsyncSession = Depends(get_db)):
     """自动推荐 Top-N 岗位（resume_cache → 匹配引擎）。"""
-    cache = await db.get(ResumeCache, req.resume_id)
+    resume_id = _parse_resume_id(req.resume_id)
+    if resume_id is None:
+        return error(400, "resume_id 格式非法")
+    cache = await db.get(ResumeCache, resume_id)
     if cache is None:
         return error(404, "简历不存在")
 
@@ -123,19 +148,24 @@ async def recommend(req: RecommendRequest, db: AsyncSession = Depends(get_db)):
 @router.post("/compare")
 async def compare(req: CompareRequest, db: AsyncSession = Depends(get_db)):
     """人岗比对：单点同步比对（含差距：matched_must / missing_must）。"""
-    cache = await db.get(ResumeCache, req.resume_id)
+    resume_id = _parse_resume_id(req.resume_id)
+    if resume_id is None:
+        return error(400, "resume_id 格式非法")
+    cache = await db.get(ResumeCache, resume_id)
     if cache is None:
         return error(404, "简历不存在")
 
     candidate = _build_candidate(cache.parsed_data)
     matcher = RuleBasedMatcher(_load_positions_from_graph())
-    results = matcher.match(
-        MatchRequest(
-            candidate=candidate,
-            mode=MatchMode.COMPARE,
-            target_position_id=req.position_id,
+    try:
+        results = matcher.match(
+            MatchRequest(
+                candidate=candidate,
+                mode=MatchMode.COMPARE,
+                target_position_id=req.position_id,
+            )
         )
-    )
-    if not results:
+    except ValueError:
+        # 引擎对不存在的目标岗位抛 ValueError（保持引擎纯计算语义），API 边界转为 404
         return error(404, "岗位不存在")
     return ok(data=results[0].model_dump())

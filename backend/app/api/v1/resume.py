@@ -5,6 +5,7 @@
 """
 
 import hashlib
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -95,7 +96,11 @@ async def parse_resume(
 @router.get("/task/{task_id}")
 async def task_status(task_id: str, db: AsyncSession = Depends(get_db)):
     """轮询异步任务状态。"""
-    task = await db.get(TaskStatus, task_id)
+    try:
+        task_uuid = str(uuid.UUID(task_id))
+    except (ValueError, AttributeError):
+        return error(400, "task_id 格式非法")
+    task = await db.get(TaskStatus, task_uuid)
     if task is None:
         return error(404, "任务不存在")
     return ok(data={
