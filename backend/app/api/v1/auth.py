@@ -14,7 +14,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.models.business import User
+from app.models.business import AuditLog, User
 from app.schemas.business import LoginRequest, RefreshRequest, RegisterRequest
 from app.schemas.common import ok, error
 
@@ -47,6 +47,15 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
 
     access_token = create_access_token(user.id, user.role)
     refresh_token = create_refresh_token(user.id, user.role)
+    # 写审计日志（登录成功，便于管理后台 /admin/audit/logs 追踪）
+    db.add(AuditLog(
+        user_id=user.id,
+        action="auth.login",
+        resource="users",
+        resource_id=user.id,
+        detail={"username": user.username},
+    ))
+    await db.commit()
     return ok(data={
         "access_token": access_token,
         "refresh_token": refresh_token,

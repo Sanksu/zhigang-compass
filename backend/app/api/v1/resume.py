@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +44,33 @@ async def _enqueue_resume_parse(file_path: str) -> None:
         await pool.enqueue_job("resume_parse", file_path=file_path)
     finally:
         await pool.close()
+
+
+@router.get("/list")
+async def list_resumes(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """已解析简历列表（最近 N 条，含候选人画像摘要）。
+
+    供前端载入已有候选人发起匹配（recommend/compare 需要 resume_cache 记录）。
+    """
+    rows = await db.scalars(
+        select(ResumeCache).order_by(ResumeCache.updated_at.desc()).limit(limit)
+    )
+    items = []
+    for r in rows:
+        parsed = r.parsed_data if isinstance(r.parsed_data, dict) else {}
+        skills = parsed.get("skills", [])
+        items.append({
+            "id": r.id,
+            "file_name": r.file_name,
+            "skills": [s.get("name", s) if isinstance(s, dict) else s for s in skills],
+            "total_years": parsed.get("total_years", 0),
+            "education_level": parsed.get("education_level"),
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        })
+    return ok(data={"items": items, "total": len(items)})
 
 
 @router.post("/parse", status_code=202)
