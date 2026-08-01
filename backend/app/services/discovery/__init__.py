@@ -16,7 +16,10 @@ from app.services.discovery.confidence import (
     WILSON_COLD_START_THRESHOLD,
 )
 from app.services.discovery.detector import (
+    COLD_START_DAYS,
+    CandidateProvider,
     DiscoveryDetector,
+    DiscoveryInput,
     MIN_SOURCE_COLD_START,
     Z_SCORE_STRICT,
     Z_SCORE_CONSERVATIVE,
@@ -29,10 +32,13 @@ from app.services.discovery.state_machine import (
 )
 
 __all__ = [
+    "COLD_START_DAYS",
     "CandidatePosition",
+    "CandidateProvider",
     "ConfidenceScore",
     "DiscoveryDetector",
     "DiscoveryFeatures",
+    "DiscoveryInput",
     "MIN_SOURCE_COLD_START",
     "PositionState",
     "PositionStateMachine",

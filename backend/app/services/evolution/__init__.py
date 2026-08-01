@@ -11,6 +11,7 @@ from app.services.evolution.schemas import (
 )
 from app.services.evolution.detector import (
     EvolutionDetector,
+    WindowProvider,
     Z_EMERGING,
     Z_RISING,
     Z_DECLINING,
@@ -28,6 +29,7 @@ __all__ = [
     "MIN_FREQ_FOR_ZSCORE",
     "SkillEvolutionTrend",
     "SkillFrequencyWindow",
+    "WindowProvider",
     "Z_DECLINING",
     "Z_EMERGING",
     "Z_RISING",
