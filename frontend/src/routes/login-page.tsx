@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { useAuthStore } from '@/store/auth'
+import { useAuthStore, permissionsOf } from '@/store/auth'
 import { apiGet, apiPost, ApiError, setAccessToken, setRefreshToken } from '@/lib/api'
 
 interface LoginResult {
@@ -21,15 +21,9 @@ interface MeResult {
   role: 'guest' | 'user' | 'admin'
 }
 
-/** 后端 me 不返回权限列表，按角色映射（与后端 RBAC 规则一致） */
-function permissionsOf(role: MeResult['role']): string[] {
-  if (role === 'admin') return ['*']
-  return []
-}
-
 /**
  * 登录页 — 设计文档 §10.2 /login
- * JWT 双 Token 内存存留，login 后调 /auth/me 获取用户态
+ * JWT 双 Token 内存存留（refresh_token 同时写 httpOnly Cookie），login 后调 /auth/me 获取用户态
  */
 export function LoginPage() {
   const navigate = useNavigate()
