@@ -30,9 +30,6 @@ LOG_DIR=/opt/zhigang-compass/logs
 20 4 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py indeed 50 >> $LOG_DIR/crawl_indeed_$(date +\%Y\%m\%d).log 2>&1
 40 4 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py glassdoor 50 >> $LOG_DIR/crawl_glassdoor_$(date +\%Y\%m\%d).log 2>&1
 
-# ── B 级国内（每日 04:30）──
-30 4 * * * cd $BACKEND_DIR && uv run python scripts/cron/crawl_spider.py lagou 50 >> $LOG_DIR/crawl_lagou_$(date +\%Y\%m\%d).log 2>&1
-
 # ── 脉脉夜间合规窗口（23:00 - 06:00，≤100 req/h）──
 0 23 * * * cd $BACKEND_DIR && uv run python scripts/cron/crawl_spider.py maimai 30 >> $LOG_DIR/crawl_maimai_$(date +\%Y\%m\%d).log 2>&1
 

@@ -147,11 +147,11 @@
 ### 6.4 LLM 集成
 
 - 必须使用 **OpenAI 兼容 API**，通过 `base_url` + `api_key` 切换 provider
-- **多 provider 同步重试链**：主讯飞星火 v4.0 → 备 DeepSeek Chat → 三 Qwen Plus
+- **多 provider 同步重试链**：provider 组合与优先级为运行时可配置项（不限定厂商），管理员可经管理后台前端页面（`/admin/llm`）修改并持久化（api_key 打码不回显），无需改代码
 - 同步路由：主 API 超时 10s 即返回 503，不重试，避免同步阻塞
 - 异步任务（ARQ）：按优先级依次尝试，30s × 3 = 90s 上限，全部失败后入延迟队列
 - LLM 输出必须经 **Pydantic Schema 强校验**（幻觉防控第一道防线）
-- 配置文件：`configs/llm_providers.yaml`
+- 配置文件：`configs/llm_providers.yaml`（单一事实源）
 
 ### 6.5 数据采集
 

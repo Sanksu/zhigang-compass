@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, graph, match, resume, evolution
+from app.api.v1 import admin, auth, evolution, graph, match, resume
 
 router = APIRouter()
 
@@ -11,3 +11,4 @@ router.include_router(graph.router, prefix="/graph", tags=["图谱"])
 router.include_router(match.router, prefix="/match", tags=["匹配"])
 router.include_router(resume.router, prefix="/resume", tags=["简历"])
 router.include_router(evolution.router, prefix="/evolution", tags=["演化"])
+router.include_router(admin.router, prefix="", tags=["管理"])

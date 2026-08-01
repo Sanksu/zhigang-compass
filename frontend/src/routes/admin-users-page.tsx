@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Shield, UserPlus, Users } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -30,6 +30,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { ROLES, type Role } from '@/lib/constants'
+import { apiGet, apiPost, apiPut, ApiError } from '@/lib/api'
 
 type UserStatus = 'active' | 'disabled'
 
@@ -38,21 +39,18 @@ interface UserRow {
   username: string
   role: Role
   status: UserStatus
-  lastLogin: string
   createdAt: string
 }
 
-/** 8 条 mock 用户 — 覆盖三种角色与两种状态 */
-const MOCK_USERS: UserRow[] = [
-  { id: 'u1', username: 'admin_zhang', role: 'admin', status: 'active', lastLogin: '07-29 14:32', createdAt: '2025-03-15' },
-  { id: 'u2', username: 'admin_li', role: 'admin', status: 'active', lastLogin: '07-29 13:18', createdAt: '2025-03-20' },
-  { id: 'u3', username: 'user_wang', role: 'user', status: 'active', lastLogin: '07-29 12:05', createdAt: '2025-04-10' },
-  { id: 'u4', username: 'user_chen', role: 'user', status: 'disabled', lastLogin: '2025-06-01 02:00', createdAt: '2025-05-12' },
-  { id: 'u5', username: 'user_liu', role: 'user', status: 'active', lastLogin: '07-29 10:47', createdAt: '2025-05-20' },
-  { id: 'u6', username: 'guest_zhao', role: 'guest', status: 'active', lastLogin: '07-28 09:00', createdAt: '2025-07-28' },
-  { id: 'u7', username: 'user_sun', role: 'user', status: 'active', lastLogin: '07-29 08:30', createdAt: '2025-07-25' },
-  { id: 'u8', username: 'user_zhou', role: 'user', status: 'active', lastLogin: '07-29 07:15', createdAt: '2025-07-29' },
-]
+/** 后端 /admin/users 返回项 */
+interface BackendUser {
+  id: string
+  username: string
+  role: Role
+  is_active: boolean
+  created_at: string | null
+  updated_at: string | null
+}
 
 /** 角色 Badge variant — admin 墨色凸显权限，user 中性，guest 灰 */
 const ROLE_VARIANT: Record<Role, 'default' | 'outline' | 'candidate'> = {
@@ -66,35 +64,97 @@ const STATUS_META: Record<UserStatus, { variant: 'emerging' | 'archived'; label:
   disabled: { variant: 'archived', label: '禁用' },
 }
 
+function toRow(u: BackendUser): UserRow {
+  return {
+    id: u.id,
+    username: u.username,
+    role: u.role,
+    status: u.is_active ? 'active' : 'disabled',
+    createdAt: u.created_at ? new Date(u.created_at).toLocaleDateString('zh-CN') : '—',
+  }
+}
+
 export function AdminUsersPage() {
-  const [users, setUsers] = useState(MOCK_USERS)
+  const [users, setUsers] = useState<UserRow[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [form, setForm] = useState({ username: '', password: '', role: 'user' as Role })
 
-  function setRole(id: string, role: Role) {
-    setUsers((u) => u.map((x) => (x.id === id ? { ...x, role } : x)))
-  }
-
-  function toggleStatus(id: string) {
-    setUsers((u) =>
-      u.map((x) => (x.id === id ? { ...x, status: x.status === 'active' ? 'disabled' : 'active' } : x)),
-    )
-  }
-
-  function createUser() {
-    if (!form.username.trim()) return
-    const newUser: UserRow = {
-      id: `u-${Date.now()}`,
-      username: form.username.trim(),
-      role: form.role,
-      status: 'active',
-      lastLogin: '—',
-      createdAt: '刚刚',
+  async function load() {
+    try {
+      const res = await apiGet<{ items: BackendUser[]; total: number }>('/admin/users?page=1&size=100')
+      setUsers(res.items.map(toRow))
+      setTotal(res.total)
+      setError(null)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '用户列表加载失败')
+    } finally {
+      setLoading(false)
     }
-    setUsers((u) => [newUser, ...u])
-    setForm({ username: '', password: '', role: 'user' })
-    setCreateOpen(false)
   }
+
+  // 初始加载（setState 均在异步回调内）
+  useEffect(() => {
+    let cancelled = false
+    apiGet<{ items: BackendUser[]; total: number }>('/admin/users?page=1&size=100')
+      .then((res) => {
+        if (cancelled) return
+        setUsers(res.items.map(toRow))
+        setTotal(res.total)
+        setError(null)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof ApiError ? e.message : '用户列表加载失败')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function setRole(id: string, role: Role) {
+    try {
+      await apiPut(`/admin/users/${id}`, { role })
+      await load()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '角色更新失败')
+    }
+  }
+
+  async function toggleStatus(id: string) {
+    const u = users.find((x) => x.id === id)
+    if (!u) return
+    try {
+      await apiPut(`/admin/users/${id}`, { status: u.status === 'active' ? 'disabled' : 'active' })
+      await load()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '状态更新失败')
+    }
+  }
+
+  async function createUser() {
+    if (!form.username.trim()) return
+    try {
+      await apiPost('/admin/users', {
+        username: form.username.trim(),
+        password: form.password,
+        role: form.role,
+      })
+      setForm({ username: '', password: '', role: 'user' })
+      setCreateOpen(false)
+      await load()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '创建失败')
+    }
+  }
+
+  const todayCount = users.filter(
+    (u) => u.createdAt === new Date().toLocaleDateString('zh-CN'),
+  ).length
 
   return (
     <>
@@ -109,7 +169,13 @@ export function AdminUsersPage() {
         }
       />
 
-      {/* 统计卡 */}
+      {error && (
+        <p className="text-sm text-state-archived mb-4" role="alert">
+          {error}
+        </p>
+      )}
+
+      {/* 统计卡（真实 users 表） */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         <Card>
           <CardContent className="py-4">
@@ -117,8 +183,8 @@ export function AdminUsersPage() {
               <Users className="size-4 text-ink-faint" />
               <span className="text-xs font-mono text-ink-faint">全量</span>
             </div>
-            <div className="text-2xl font-semibold tracking-tight tabular-nums">248</div>
-            <div className="text-xs text-ink-muted mt-1">总用户数</div>
+            <div className="text-2xl font-semibold tracking-tight tabular-nums">{total}</div>
+            <div className="text-xs text-ink-muted mt-1">总用户数（真实）</div>
           </CardContent>
         </Card>
         <Card>
@@ -137,15 +203,15 @@ export function AdminUsersPage() {
           <CardContent className="py-4">
             <div className="flex items-center justify-between mb-2">
               <UserPlus className="size-4 text-ink-faint" />
-              <span className="text-xs font-mono text-state-emerging">+5</span>
+              <span className="text-xs font-mono text-state-emerging">+{todayCount}</span>
             </div>
-            <div className="text-2xl font-semibold tracking-tight tabular-nums">5</div>
+            <div className="text-2xl font-semibold tracking-tight tabular-nums">{todayCount}</div>
             <div className="text-xs text-ink-muted mt-1">今日新增</div>
           </CardContent>
         </Card>
       </div>
 
-      {/* 用户列表 */}
+      {/* 用户列表（真实） */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm flex items-center justify-between">
@@ -154,59 +220,67 @@ export function AdminUsersPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>用户名</TableHead>
-                <TableHead>角色</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>最后登录</TableHead>
-                <TableHead>创建时间</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.map((u) => {
-                const roleMeta = ROLE_VARIANT[u.role]
-                const statusMeta = STATUS_META[u.status]
-                return (
-                  <TableRow key={u.id}>
-                    <TableCell className="font-medium font-mono">{u.username}</TableCell>
-                    <TableCell>
-                      <Badge variant={roleMeta}>{ROLES[u.role]}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
-                    </TableCell>
-                    <TableCell className="text-xs font-mono text-ink-muted">{u.lastLogin}</TableCell>
-                    <TableCell className="text-xs font-mono text-ink-muted">{u.createdAt}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center justify-end gap-2">
-                        {/* 行内角色切换 — Select 受控，立即生效 */}
-                        <Select value={u.role} onValueChange={(v) => setRole(u.id, v as Role)}>
-                          <SelectTrigger className="h-8 w-24">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(Object.keys(ROLES) as Role[]).map((r) => (
-                              <SelectItem key={r} value={r}>{ROLES[r]}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <Button
-                          size="sm"
-                          variant={u.status === 'active' ? 'outline' : 'default'}
-                          onClick={() => toggleStatus(u.id)}
-                        >
-                          {u.status === 'active' ? '禁用' : '启用'}
-                        </Button>
-                      </div>
+          {loading ? (
+            <p className="py-8 text-center text-sm text-ink-muted">加载中…</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>用户名</TableHead>
+                  <TableHead>角色</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>创建时间</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {users.map((u) => {
+                  const roleMeta = ROLE_VARIANT[u.role]
+                  const statusMeta = STATUS_META[u.status]
+                  return (
+                    <TableRow key={u.id}>
+                      <TableCell className="font-medium font-mono">{u.username}</TableCell>
+                      <TableCell>
+                        <Badge variant={roleMeta}>{ROLES[u.role]}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs font-mono text-ink-muted">{u.createdAt}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-2">
+                          <Select value={u.role} onValueChange={(v) => setRole(u.id, v as Role)}>
+                            <SelectTrigger className="h-8 w-24">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(Object.keys(ROLES) as Role[]).map((r) => (
+                                <SelectItem key={r} value={r}>{ROLES[r]}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            size="sm"
+                            variant={u.status === 'active' ? 'outline' : 'default'}
+                            onClick={() => toggleStatus(u.id)}
+                          >
+                            {u.status === 'active' ? '禁用' : '启用'}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+                {users.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-sm text-ink-faint py-8">
+                      暂无用户
                     </TableCell>
                   </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+                )}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -232,7 +306,7 @@ export function AdminUsersPage() {
                 type="password"
                 value={form.password}
                 onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                placeholder="••••••••"
+                placeholder="至少 6 字符"
               />
             </div>
             <div className="space-y-1.5">
@@ -249,7 +323,9 @@ export function AdminUsersPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button>
-            <Button disabled={!form.username.trim()} onClick={createUser}>创建</Button>
+            <Button disabled={!form.username.trim() || form.password.length < 6} onClick={createUser}>
+              创建
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

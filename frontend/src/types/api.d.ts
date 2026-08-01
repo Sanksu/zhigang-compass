@@ -640,6 +640,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/resume/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 已解析简历列表（最近 N 条，按更新时间倒序） */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 简历缓存列表（含候选人画像摘要） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/resume/parse": {
         parameters: {
             query?: never;
@@ -1530,6 +1568,81 @@ export interface paths {
             };
         };
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/llm-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读取 LLM provider 配置（api_key 打码，admin only） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 当前生效配置（providers/routing/failover 等，api_key 已打码） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
+        /** 保存 LLM provider 配置（持久化到 llm_providers.yaml） */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description provider 列表，api_key 留空或 **** 表示保持原值 */
+                        providers: {
+                            /** @description provider 标识（英文短横线） */
+                            name: string;
+                            /** Format: uri */
+                            base_url: string;
+                            /** @description 留空或 **** 表示保持原值；明文才更新 */
+                            api_key?: string;
+                            model: string;
+                            /** @description 数字越小优先级越高，列表内唯一 */
+                            priority: number;
+                            enabled: boolean;
+                            supports_function_calling?: boolean;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description 保存成功，返回打码后的最新配置 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;

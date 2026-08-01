@@ -2,7 +2,7 @@
 
 招聘平台分级：
 - A 级（稳定源）：BOSS / 智联 / Monster — 主采集通道
-- B 级（补充源）：拉勾 / Indeed / Glassdoor — 补充数据
+- B 级（补充源）：Indeed / Glassdoor — 补充数据
 - C 级（实验性）：脉脉 / LinkedIn 公开页 — 合规限制，低频采集
 
 非招聘数据源（课程/论文/社区，用于学习路径与技术热点观察池）：
@@ -40,7 +40,6 @@ RATE_LIMIT = {
     "boss":     {"req_per_min": 20,  "delay_range": (2, 5)},
     "zhilian":  {"req_per_min": 20,  "delay_range": (2, 5)},
     "monster":  {"req_per_min": 30,  "delay_range": (1, 3)},
-    "lagou":    {"req_per_min": 10,  "delay_range": (3, 8)},
     "indeed":   {"req_per_min": 15,  "delay_range": (2, 6)},
     "glassdoor":{"req_per_min": 15,  "delay_range": (2, 6)},
     "maimai":   {"req_per_min": 5,   "delay_range": (10, 20)},     # ≤100 req/h

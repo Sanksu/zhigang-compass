@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Box, Database, Network } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
@@ -6,8 +6,8 @@ import { Card } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Graph2D } from '@/components/graph/graph-2d'
 import { NodeDetailPanel } from '@/components/graph/node-detail-panel'
-import { getMockGraphData } from '@/components/graph/mock-data'
-import type { GraphViewType, NodeDetail } from '@/components/graph/types'
+import type { GraphData, GraphEdge, GraphNode, GraphViewType, NodeDetail } from '@/components/graph/types'
+import { apiGet, ApiError } from '@/lib/api'
 
 /** 3D 图谱懒加载 — Three.js 约 1.4MB，仅在用户点击"3D"时按需加载 */
 const Graph3D = lazy(() => import('@/components/graph/graph-3d').then((m) => ({ default: m.Graph3D })))
@@ -36,26 +36,132 @@ function isWebGL2Available(): boolean {
   }
 }
 
+// ============================================================
+// 真实 API 数据适配：后端 /graph/panorama → GraphData
+// ============================================================
+
+interface PanoramaNode {
+  id: string
+  name: string
+  type: string // position | skill
+}
+
+interface PanoramaEdge {
+  source: string
+  target: string
+  weight: number
+  necessity: string
+  level: string
+}
+
+interface PanoramaData {
+  nodes: PanoramaNode[]
+  edges: PanoramaEdge[]
+  stats: { nodes: number; edges: number }
+}
+
+/** 后端 panorama → 前端 GraphData（缺字段给默认值：岗位状态 stable、边关系 requires） */
+function toGraphData(raw: PanoramaData): GraphData {
+  const degree = new Map<string, number>()
+  raw.edges.forEach((e) => {
+    degree.set(e.source, (degree.get(e.source) ?? 0) + 1)
+    degree.set(e.target, (degree.get(e.target) ?? 0) + 1)
+  })
+
+  const nodes: GraphNode[] = raw.nodes.map((n) => ({
+    id: n.id,
+    name: n.name,
+    type: n.type === 'skill' ? 'skill' : 'position',
+    value: degree.get(n.id) ?? 0,
+    status: n.type === 'position' ? 'stable' : undefined,
+  }))
+  const edges: GraphEdge[] = raw.edges.map((e) => ({
+    source: e.source,
+    target: e.target,
+    relation: 'requires',
+    necessity: e.necessity === 'nice' ? 'nice' : 'must',
+    weight: e.weight,
+  }))
+  return {
+    nodes,
+    edges,
+    stats: {
+      totalPositions: nodes.filter((n) => n.type === 'position').length,
+      totalSkills: nodes.filter((n) => n.type === 'skill').length,
+      totalEdges: edges.length,
+      returnedNodes: nodes.length,
+      totalNodesInGraph: nodes.length,
+    },
+  }
+}
+
+/** 非全景视图的本地派生（真实数据规模小，techStack/positionCenter 取首个岗位为中心的子图） */
+function deriveView(data: GraphData, view: GraphViewType): GraphData {
+  if (view === 'panorama' || view === 'level') return data
+  const center = data.nodes.find((n) => n.type === 'position')
+  if (!center) return data
+  const linked = new Set<string>([center.id])
+  data.edges.forEach((e) => {
+    if (e.source === center.id) linked.add(e.target)
+    if (e.target === center.id) linked.add(e.source)
+  })
+  const nodes = data.nodes.filter((n) => linked.has(n.id))
+  const ids = new Set(nodes.map((n) => n.id))
+  const edges = data.edges.filter((e) => ids.has(e.source) && ids.has(e.target))
+  return {
+    nodes,
+    edges,
+    stats: {
+      totalPositions: nodes.filter((n) => n.type === 'position').length,
+      totalSkills: nodes.filter((n) => n.type === 'skill').length,
+      totalEdges: edges.length,
+      returnedNodes: nodes.length,
+      totalNodesInGraph: data.nodes.length,
+    },
+  }
+}
+
 /**
  * 能力图谱页 — 设计文档 §10.3
  *
- * 当前阶段（M3 前端提前启动）：
- * - 数据来源：本地 mock（mock-data.ts），后端 /api/v1/graph/panorama 就绪后改用真实接口
- * - 已实现：2D ECharts 力导向图、四种视图切换、节点点击 + 详情面板、暗色模式
- * - 待实现（M3 后续）：真实 API 接入、min_weight/focus 参数过滤
+ * 数据来源：真实 API /api/v1/graph/panorama（Neo4j 聚合 + Redis 30s 缓存），
+ * 视图切换在真实数据上本地派生（techStack/positionCenter 取首个岗位为中心子图）。
+ * 已实现：2D ECharts 力导向图、四种视图切换、节点点击 + 详情面板、暗色模式。
  */
 export function GraphPage() {
   const [view, setView] = useState<GraphViewType>('panorama')
   const [mode, setMode] = useState<'2d' | '3d'>('2d')
   const [selected, setSelected] = useState<NodeDetail | null>(null)
+  const [raw, setRaw] = useState<GraphData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const data = useMemo(() => getMockGraphData(view), [view])
+  // 加载真实图谱全景（Neo4j 聚合 + Redis 30s 缓存），初始 loading 已是 true
+  useEffect(() => {
+    let cancelled = false
+    apiGet<PanoramaData>('/graph/panorama?limit=200&min_weight=0.3')
+      .then((res) => {
+        if (!cancelled) setRaw(toGraphData(res))
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof ApiError ? e.message : '图谱数据加载失败')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // 视图切换：在已加载的真实数据上本地派生
+  const data = useMemo(() => (raw ? deriveView(raw, view) : null), [raw, view])
   // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
   const webgl2Available = useMemo(() => isWebGL2Available(), [])
 
   // 选中节点的关联统计（从当前视图数据中实时计算）
   const detailStats = useMemo(() => {
-    if (!selected) return undefined
+    if (!selected || !data) return undefined
     const linkedIds = new Set<string>()
     data.edges.forEach((e) => {
       if (e.source === selected.id) linkedIds.add(e.target)
@@ -68,6 +174,34 @@ export function GraphPage() {
       evidenceCount: linked.filter((n) => n.type === 'evidence').length,
     }
   }, [selected, data])
+
+  // 加载 / 错误 / 空态
+  if (loading) {
+    return (
+      <Card className="h-[640px] flex items-center justify-center text-sm text-ink-muted">
+        <div className="flex items-center gap-3">
+          <div className="size-6 rounded-full border-2 border-ink border-t-transparent animate-spin" />
+          正在加载图谱全景…
+        </div>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card className="h-[640px] flex items-center justify-center text-sm text-state-archived">
+        {error}（请确认后端服务与数据库已启动）
+      </Card>
+    )
+  }
+
+  if (!data || data.nodes.length === 0) {
+    return (
+      <Card className="h-[640px] flex items-center justify-center text-sm text-ink-muted">
+        图谱暂无数据，请先通过数据管线导入 JD / 课程
+      </Card>
+    )
+  }
 
   return (
     <>

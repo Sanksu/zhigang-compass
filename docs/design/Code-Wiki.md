@@ -93,7 +93,7 @@
 
 ┌─────────────────────────────────────────────────────────────────┐
 │  数据管线（backend/data/crawlers/）                             │
-│  Scrapy + Playwright，14 源 A/B/C 分级                          │
+│  Scrapy + Playwright，13 源 A/B/C 分级                          │
 │  → CleaningPipeline（脱敏 + 指纹）→ PostgresPipeline（upsert）  │
 └───────────────────────────┬─────────────────────────────────────┘
                             │
@@ -112,7 +112,7 @@
 ### 2.2 数据流
 
 ```
-招聘平台（14 源）
+招聘平台（13 源）
    │ Scrapy + Playwright 采集
    ▼
 JobItem（统一 schema）
@@ -307,9 +307,9 @@ zhigang-compass/
 
 ### 5.5 数据管线（[backend/data/crawlers/](../backend/data/crawlers/)）
 
-Scrapy + Playwright + CDP，14 源招聘 A/B/C 三级分级 + 6 源非招聘数据（课程/论文/社区）。
+Scrapy + Playwright + CDP，13 源招聘 A/B/C 三级分级 + 6 源非招聘数据（课程/论文/社区）。
 
-**招聘数据源**：7 个已贯通源（BOSS / 智联 / Monster / Indeed / LinkedIn / Glassdoor / 脉脉）+ setup_boss_chrome CDP 启动器采用 **「Scrapy Spider + 独立脚本 + subprocess 隔离」** 架构，避免 Playwright(asyncio) / JobSpy(同步) 与 Scrapy Twisted 事件循环冲突。拉勾网（lagou）因阿里云 WAF 拦截 + 登录态要求，已存档待 M2 后续开发。
+**招聘数据源**：7 个已贯通源（BOSS / 智联 / Monster / Indeed / LinkedIn / Glassdoor / 脉脉）+ setup_boss_chrome CDP 启动器采用 **「Scrapy Spider + 独立脚本 + subprocess 隔离」** 架构，避免 Playwright(asyncio) / JobSpy(同步) 与 Scrapy Twisted 事件循环冲突。
 
 **非招聘数据源**（2026-07-29 新增）：6 个爬虫直接继承 `Scrapy.Spider`（非 `BaseSpider`），构造 `CourseItem` / `PaperItem` / `CommunityTrendItem`：
 - 课程 3 个（icourse163/Coursera/edX）：Playwright 渲染搜索页，用于构建 `(:Skill)-[:LEARNABLE_VIA]->(:Course)` 关系
@@ -332,14 +332,13 @@ Scrapy + Playwright + CDP，14 源招聘 A/B/C 三级分级 + 6 源非招聘数�
 | [linkedin_jobspy_crawler.py](../backend/data/crawlers/linkedin_jobspy_crawler.py) | ✅ LinkedIn 独立采集脚本：调用 `python-jobspy` 库解析 JSON-LD 结构化数据。参考 [speedyapply/JobSpy](https://github.com/speedyapply/JobSpy) |
 | [glassdoor_cdp_crawler.py](../backend/data/crawlers/glassdoor_cdp_crawler.py) | ✅ Glassdoor 独立采集脚本：CDP 连接 + SSR DOM 提取（JSON-LD ItemList + data-test 属性双兜底），绕过 Cloudflare |
 | [maimai_cdp_crawler.py](../backend/data/crawlers/maimai_cdp_crawler.py) | ✅ 脉脉独立采集脚本：CDP 连接 + 飞书招聘页 DOM 提取（maimai.jobs.feishu.cn，无需登录态） |
-| [lagou_cdp_crawler.py](../backend/data/crawlers/lagou_cdp_crawler.py) | 📦 拉勾独立采集脚本（已存档，M2 后续开发）：CDP 连接 + 内部 API `positionAjax.json` + 登录态复用，需用户先通过 WAF 滑动验证 + 登录 |
 | [spiders/arxiv.py](../backend/data/crawlers/spiders/arxiv.py) | ✅ arXiv 论文爬虫：官方 API + Atom XML 解析，默认拉取 7 个 cs.* 分类，产出 `PaperItem` |
 | [spiders/github.py](../backend/data/crawlers/spiders/github.py) | ✅ GitHub Trending 爬虫：公开页 HTML 解析 `article.Box-row`，提取 star/fork/language/stars_today，产出 `CommunityTrendItem` |
 | [spiders/stackoverflow.py](../backend/data/crawlers/spiders/stackoverflow.py) | ✅ Stack Overflow 爬虫：标签页 HTML 解析 `div.s-post-summary`，提取 votes/views/answers/tags，产出 `CommunityTrendItem` |
 | [spiders/icourse163.py](../backend/data/crawlers/spiders/icourse163.py) | ✅ 中国大学MOOC 爬虫：Playwright 渲染搜索页，解析课程卡片，产出 `CourseItem`（国内直连） |
 | [spiders/coursera.py](../backend/data/crawlers/spiders/coursera.py) | ✅ Coursera 爬虫：Playwright 渲染搜索页，解析 `li.cds-grid-item` 卡片，产出 `CourseItem`（需代理） |
 | [spiders/edx.py](../backend/data/crawlers/spiders/edx.py) | ✅ edX 爬虫：Playwright 渲染搜索页，解析 `div.d-card-wrapper` 卡片，产出 `CourseItem`（需代理） |
-| [spiders/](../backend/data/crawlers/spiders/) | 13 个贯通 + 1 个存档：boss ✅ / zhilian ✅ / monster ✅ / lagou 📦 / indeed ✅ / glassdoor ✅ / maimai ✅ / linkedin_public ✅ / arxiv ✅ / github ✅ / stackoverflow ✅ / icourse163 ✅ / coursera ✅ / edx ✅ |
+| [spiders/](../backend/data/crawlers/spiders/) | 13 个贯通：boss ✅ / zhilian ✅ / monster ✅ / indeed ✅ / glassdoor ✅ / maimai ✅ / linkedin_public ✅ / arxiv ✅ / github ✅ / stackoverflow ✅ / icourse163 ✅ / coursera ✅ / edx ✅ |
 
 ### 5.6 前端工程（[frontend/](../frontend/)）
 
@@ -621,12 +620,12 @@ NEO4J_PASSWORD=password
 REDIS_URL=redis://localhost:6379/0
 
 # LLM 三 provider（OpenAI 兼容）
-LLM_PRIMARY_BASE_URL=https://spark-api.xf-yun.com/v1
+LLM_PRIMARY_BASE_URL=https://api.deepseek.com/v1
 LLM_PRIMARY_API_KEY=
-LLM_PRIMARY_MODEL=spark-v2
-LLM_SECONDARY_BASE_URL=https://api.deepseek.com/v1
+LLM_PRIMARY_MODEL=deepseek-v4-flash
+LLM_SECONDARY_BASE_URL=https://spark-api.xf-yun.com/v1
 LLM_SECONDARY_API_KEY=
-LLM_SECONDARY_MODEL=deepseek-chat
+LLM_SECONDARY_MODEL=v4.0
 LLM_TERTIARY_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_TERTIARY_API_KEY=
 LLM_TERTIARY_MODEL=qwen-plus
@@ -675,7 +674,7 @@ VITE_API_TARGET=http://localhost:8000 # Vite 开发代理目标
 - ⚠️ 演化检测器 + 图谱版本快照
 - ⚠️ 新岗位发现检测器 + RAG 接地
 - ⚠️ 简历解析
-- ⚠️ 1 个招聘爬虫已存档待后续开发（lagou 需 CDP+登录态过 WAF）；6 个非招聘爬虫已就位（arxiv/github/stackoverflow/icourse163/coursera/edx），待 M3/M4 接入观察池与学习路径
+- ✅ 7 个招聘爬虫已贯通（boss/zhilian/monster/indeed/glassdoor/maimai/linkedin_public）；6 个非招聘爬虫已就位（arxiv/github/stackoverflow/icourse163/coursera/edx），待 M3/M4 接入观察池与学习路径
 - ⚠️ 前端 9 个占位页 + ECharts 图谱接入
 - ⚠️ JWT 密钥文件生成（`keys/private.pem` / `public.pem`）
 - ⚠️ `configs/llm_providers.yaml` 配置

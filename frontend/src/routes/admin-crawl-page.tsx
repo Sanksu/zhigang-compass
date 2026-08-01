@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Activity, AlertCircle, Database, Gauge } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Activity, Database, Gauge } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -21,12 +21,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { apiGet } from '@/lib/api'
 
 /** 爬虫运行状态 — 对应 §4 平台采集生命周期 */
 type CrawlStatus = 'running' | 'idle' | 'failed' | 'archived'
 
 /** 平台分级 — 对齐设计文档 §4 的 A/B/C + 信号 + 课程 */
-type PlatformLevel = 'A' | 'B' | 'C' | '信号' | '课程'
+type PlatformLevel = 'A' | 'B' | 'C' | '信号' | '论文' | '课程'
 
 interface PlatformRow {
   id: string
@@ -59,48 +60,37 @@ interface CurrentTask {
   total: number
 }
 
-/** 顶部指标 — P0 标准要求 ≥100 条/日，故今日采集量是核心健康度 */
-const MOCK_METRICS = [
-  { id: 'today', label: '今日采集量', value: '1,284', delta: '+412', deltaColor: 'text-state-emerging', icon: Database, hint: '国内 826 · 国际 458' },
-  { id: 'active', label: '活跃爬虫数', value: '8', delta: '+2', deltaColor: 'text-state-emerging', icon: Activity, hint: '13 源在线运行' },
-  { id: 'failed', label: '失败任务数', value: '3', delta: '-1', deltaColor: 'text-state-declining', icon: AlertCircle, hint: 'LinkedIn 限频触发' },
-  { id: 'rate', label: '平均采集速率', value: '2.4/s', delta: '+0.3', deltaColor: 'text-state-emerging', icon: Gauge, hint: '近 1 小时滑动均值' },
-]
+/** 后端 /admin/crawl/status 返回项 */
+interface CrawlPlatform {
+  id: string
+  name: string
+  level: PlatformLevel
+  files: number
+  total_count: number
+  last_run: string | null
+}
 
-/**
- * 13 源在线 + 拉勾归档 = 14 行
- * 与仪表盘「14 源数据底座」对齐，归档源保留以体现历史可追溯
- */
-const MOCK_PLATFORMS: PlatformRow[] = [
-  { id: 'boss', name: 'BOSS直聘', level: 'A', status: 'running', todayCount: 412, totalCount: 1842, lastRun: '07-29 14:32' },
-  { id: 'zhaopin', name: '智联招聘', level: 'A', status: 'idle', todayCount: 86, totalCount: 1456, lastRun: '07-29 13:15' },
-  { id: 'monster', name: 'Monster', level: 'A', status: 'idle', todayCount: 42, totalCount: 982, lastRun: '07-29 10:20' },
-  { id: 'indeed', name: 'Indeed', level: 'A', status: 'running', todayCount: 124, totalCount: 1124, lastRun: '07-29 14:30' },
-  { id: 'lagou', name: '拉勾网', level: 'B', status: 'archived', todayCount: 0, totalCount: 0, lastRun: '2024-03-15 归档' },
-  { id: 'glassdoor', name: 'Glassdoor', level: 'B', status: 'idle', todayCount: 28, totalCount: 642, lastRun: '07-29 09:10' },
-  { id: 'linkedin', name: 'LinkedIn', level: 'B', status: 'failed', todayCount: 0, totalCount: 478, lastRun: '07-29 08:45' },
-  { id: 'maimai', name: '脉脉', level: 'C', status: 'idle', todayCount: 0, totalCount: 312, lastRun: '07-29 06:00' },
-  { id: 'github', name: 'GitHub', level: '信号', status: 'running', todayCount: 56, totalCount: 248, lastRun: '07-29 14:35' },
-  { id: 'stackoverflow', name: 'Stack Overflow', level: '信号', status: 'idle', todayCount: 18, totalCount: 186, lastRun: '07-29 12:00' },
-  { id: 'arxiv', name: 'arXiv', level: '信号', status: 'idle', todayCount: 8, totalCount: 94, lastRun: '07-29 05:30' },
-  { id: 'mooc', name: '中国大学MOOC', level: '课程', status: 'idle', todayCount: 12, totalCount: 168, lastRun: '07-29 04:00' },
-  { id: 'coursera', name: 'Coursera', level: '课程', status: 'idle', todayCount: 6, totalCount: 142, lastRun: '07-29 04:15' },
-  { id: 'edx', name: 'edX', level: '课程', status: 'idle', todayCount: 4, totalCount: 76, lastRun: '07-29 04:30' },
-]
+interface CrawlStatusData {
+  metrics: {
+    today_count: number
+    output_total: number
+    raw: { jd: number; course: number; paper: number; community: number }
+  }
+  platforms: CrawlPlatform[]
+}
 
-/** 最近 10 条爬取历史 */
-const MOCK_HISTORY: HistoryRow[] = [
-  { id: 'h1', time: '07-29 14:32', platform: 'BOSS直聘', keyword: '高级前端', count: 412, status: 'success', duration: '22min' },
-  { id: 'h2', time: '07-29 14:30', platform: 'Indeed', keyword: 'Senior SDE', count: 124, status: 'success', duration: '8min' },
-  { id: 'h3', time: '07-29 13:18', platform: 'BOSS直聘', keyword: 'Java 后端', count: 356, status: 'success', duration: '19min' },
-  { id: 'h4', time: '07-29 12:05', platform: 'LinkedIn', keyword: 'Product Manager', count: 0, status: 'failed', duration: '2min' },
-  { id: 'h5', time: '07-29 10:47', platform: '智联招聘', keyword: '数据分析师', count: 86, status: 'partial', duration: '12min' },
-  { id: 'h6', time: '07-29 09:15', platform: '脉脉', keyword: '算法工程师', count: 42, status: 'success', duration: '15min' },
-  { id: 'h7', time: '07-29 05:00', platform: 'arXiv', keyword: 'LLM', count: 8, status: 'success', duration: '6min' },
-  { id: 'h8', time: '07-29 04:30', platform: 'edX', keyword: '课程同步', count: 4, status: 'success', duration: '3min' },
-  { id: 'h9', time: '07-29 04:15', platform: 'Coursera', keyword: '课程同步', count: 6, status: 'success', duration: '4min' },
-  { id: 'h10', time: '07-29 04:00', platform: '中国大学MOOC', keyword: '课程同步', count: 12, status: 'success', duration: '5min' },
-]
+interface MetricCardItem {
+  id: string
+  label: string
+  value: string
+  delta: string
+  deltaColor: string
+  icon: typeof Database
+  hint: string
+}
+
+/** 最近 10 条爬取历史 — 后端暂无历史查询端点，显示空态 */
+const MOCK_HISTORY: HistoryRow[] = []
 
 const STATUS_META: Record<CrawlStatus, { variant: 'stable' | 'candidate' | 'archived'; label: string }> = {
   running: { variant: 'stable', label: '运行中' },
@@ -121,6 +111,7 @@ const LEVEL_CLASS: Record<PlatformLevel, string> = {
   B: 'text-state-stable border-state-stable/30',
   C: 'text-state-declining border-state-declining/30',
   '信号': 'text-ink-secondary border-border-strong',
+  '论文': 'text-ink-secondary border-border-strong',
   '课程': 'text-ink-muted border-border',
 }
 
@@ -132,6 +123,42 @@ export function AdminCrawlPage() {
     maxPages: 30,
   })
   const [currentTask, setCurrentTask] = useState<CurrentTask | null>(null)
+  const [platforms, setPlatforms] = useState<PlatformRow[]>([])
+  const [metrics, setMetrics] = useState<MetricCardItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  // 加载真实爬虫采集状态（raw 表 + output JSONL 统计）
+  useEffect(() => {
+    apiGet<CrawlStatusData>('/admin/crawl/status')
+      .then((res) => {
+        setPlatforms(
+          res.platforms.map((p) => ({
+            id: p.id,
+            name: p.name,
+            level: p.level,
+            status: 'idle',
+            todayCount: 0,
+            totalCount: p.total_count,
+            lastRun: p.last_run ? new Date(p.last_run).toLocaleString('zh-CN') : '—',
+          })),
+        )
+        setMetrics([
+          { id: 'today', label: '今日采集量', value: '0', delta: '调度后统计', deltaColor: 'text-ink-muted', icon: Database, hint: 'ETL 调度（DA-M2-12）接入后统计增量' },
+          { id: 'output', label: '累计采集量', value: res.metrics.output_total.toLocaleString(), delta: `+${res.platforms.length}源`, deltaColor: 'text-state-emerging', icon: Database, hint: 'output/*.jsonl 真实行数合计' },
+          { id: 'raw', label: 'DB 已入库', value: (res.metrics.raw.jd + res.metrics.raw.course).toLocaleString(), delta: `JD ${res.metrics.raw.jd}`, deltaColor: 'text-state-emerging', icon: Activity, hint: 'jd_raw + course_raw 真实计数' },
+          { id: 'files', label: '采集文件数', value: res.platforms.length.toLocaleString(), delta: '13 源', deltaColor: 'text-ink-muted', icon: Gauge, hint: '有采集记录的平台数' },
+        ])
+      })
+      .catch(() => {
+        setMetrics([
+          { id: 'today', label: '今日采集量', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Database, hint: '状态加载失败' },
+          { id: 'output', label: '累计采集量', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Database, hint: '请确认后端服务已启动' },
+          { id: 'raw', label: 'DB 已入库', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Activity, hint: '—' },
+          { id: 'files', label: '采集文件数', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Gauge, hint: '—' },
+        ])
+      })
+      .finally(() => setLoading(false))
+  }, [])
 
   // 任务未完成时禁用所有触发入口，避免并发任务导致调度混乱
   const isBusy = currentTask !== null && currentTask.status !== 'done'
@@ -159,9 +186,9 @@ export function AdminCrawlPage() {
     <>
       <PageHeader title="爬取管理" description="手动触发 13 源采集 · 进度监控 · 历史回溯" />
 
-      {/* 顶部指标卡 */}
+      {/* 顶部指标卡（真实 raw 表 + output 统计） */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {MOCK_METRICS.map((m) => {
+        {metrics.map((m) => {
           const Icon = m.icon
           return (
             <Card key={m.id}>
@@ -184,55 +211,66 @@ export function AdminCrawlPage() {
         <CardHeader>
           <CardTitle className="text-sm flex items-center justify-between">
             <span>平台状态</span>
-            <span className="text-xs font-normal text-ink-faint">13 源在线 · 拉勾归档</span>
+            <span className="text-xs font-normal text-ink-faint">13 源在线</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>平台名</TableHead>
-                <TableHead>等级</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead className="text-right">今日采集</TableHead>
-                <TableHead className="text-right">累计采集</TableHead>
-                <TableHead>最后运行</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {MOCK_PLATFORMS.map((p) => {
-                const meta = STATUS_META[p.status]
-                return (
-                  <TableRow key={p.id} className={p.status === 'archived' ? 'opacity-50' : ''}>
-                    <TableCell className="font-medium">{p.name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={LEVEL_CLASS[p.level]}>{p.level}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={meta.variant}>{meta.label}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums font-mono">{p.todayCount.toLocaleString()}</TableCell>
-                    <TableCell className="text-right tabular-nums font-mono text-ink-muted">{p.totalCount.toLocaleString()}</TableCell>
-                    <TableCell className="text-xs text-ink-muted font-mono">{p.lastRun}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={p.status === 'archived' || isBusy}
-                          onClick={() => triggerCrawl(p.name)}
-                        >
-                          触发
-                        </Button>
-                        <Button size="sm" variant="ghost">日志</Button>
-                      </div>
+          {loading ? (
+            <p className="py-8 text-center text-sm text-ink-muted">加载真实采集状态…</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>平台名</TableHead>
+                  <TableHead>等级</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead className="text-right">今日采集</TableHead>
+                  <TableHead className="text-right">累计采集</TableHead>
+                  <TableHead>最后运行</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {platforms.map((p) => {
+                  const meta = STATUS_META[p.status]
+                  return (
+                    <TableRow key={p.id} className={p.status === 'archived' ? 'opacity-50' : ''}>
+                      <TableCell className="font-medium">{p.name}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={LEVEL_CLASS[p.level]}>{p.level}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={meta.variant}>{meta.label}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-mono">{p.todayCount.toLocaleString()}</TableCell>
+                      <TableCell className="text-right tabular-nums font-mono text-ink-muted">{p.totalCount.toLocaleString()}</TableCell>
+                      <TableCell className="text-xs text-ink-muted font-mono">{p.lastRun}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={p.status === 'archived' || isBusy}
+                            onClick={() => triggerCrawl(p.name)}
+                          >
+                            触发
+                          </Button>
+                          <Button size="sm" variant="ghost">日志</Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+                {platforms.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
+                      暂无采集记录，请先运行爬虫
                     </TableCell>
                   </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+                )}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -249,7 +287,7 @@ export function AdminCrawlPage() {
                 <Select value={form.platform} onValueChange={(v) => setForm((f) => ({ ...f, platform: v }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {MOCK_PLATFORMS.filter((p) => p.status !== 'archived').map((p) => (
+                    {platforms.filter((p) => p.status !== 'archived').map((p) => (
                       <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -353,22 +391,30 @@ export function AdminCrawlPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {MOCK_HISTORY.map((h) => {
-                const meta = HISTORY_STATUS_META[h.status]
-                return (
-                  <TableRow key={h.id}>
-                    <TableCell className="text-xs font-mono text-ink-muted">{h.time}</TableCell>
-                    <TableCell className="font-medium">{h.platform}</TableCell>
-                    <TableCell className="text-ink-secondary">{h.keyword}</TableCell>
-                    <TableCell className="text-right tabular-nums font-mono">{h.count}</TableCell>
-                    <TableCell><Badge variant={meta.variant}>{meta.label}</Badge></TableCell>
-                    <TableCell className="text-right text-xs font-mono text-ink-muted">{h.duration}</TableCell>
-                    <TableCell className="text-right">
-                      <Button size="sm" variant="ghost">详情</Button>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
+              {MOCK_HISTORY.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
+                    爬取历史查询端点待后端交付（可先查看上方"平台状态"的真实采集统计）
+                  </TableCell>
+                </TableRow>
+              ) : (
+                MOCK_HISTORY.map((h) => {
+                  const meta = HISTORY_STATUS_META[h.status]
+                  return (
+                    <TableRow key={h.id}>
+                      <TableCell className="text-xs font-mono text-ink-muted">{h.time}</TableCell>
+                      <TableCell className="font-medium">{h.platform}</TableCell>
+                      <TableCell className="text-ink-secondary">{h.keyword}</TableCell>
+                      <TableCell className="text-right tabular-nums font-mono">{h.count}</TableCell>
+                      <TableCell><Badge variant={meta.variant}>{meta.label}</Badge></TableCell>
+                      <TableCell className="text-right text-xs font-mono text-ink-muted">{h.duration}</TableCell>
+                      <TableCell className="text-right">
+                        <Button size="sm" variant="ghost">详情</Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })
+              )}
             </TableBody>
           </Table>
         </CardContent>

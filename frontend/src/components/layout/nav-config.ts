@@ -8,6 +8,7 @@ import {
   Users,
   Bot,
   CheckSquare,
+  Cpu,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/constants'
@@ -77,6 +78,12 @@ export const adminNav: NavItem[] = [
     label: '岗位审核',
     to: '/admin/review',
     icon: CheckSquare,
+    requireRole: ['admin'],
+  },
+  {
+    label: 'LLM 配置',
+    to: '/admin/llm',
+    icon: Cpu,
     requireRole: ['admin'],
   },
 ]

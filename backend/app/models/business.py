@@ -119,3 +119,26 @@ class ResumeCache(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class GraphVersion(Base):
+    """图谱版本快照（设计文档 7.1 版本管理）。
+
+    snapshot_json 为 APOC 全量快照 {nodes, edges}，用于版本 Diff 与技能趋势回溯。
+    版本保留 90 天，每日 05:00 前发布 T+1 版本。
+    """
+
+    __tablename__ = "graph_versions"
+
+    id: Mapped[str] = mapped_column(
+        String(64), primary_key=True  # 版本号，如 graph_v20260801
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    change_summary: Mapped[str] = mapped_column(Text, default="")
+    triggered_by: Mapped[str] = mapped_column(String(20), default="scheduled")
+    snapshot_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+    node_added: Mapped[int] = mapped_column(Integer, default=0)
+    node_removed: Mapped[int] = mapped_column(Integer, default=0)
+    node_changed: Mapped[int] = mapped_column(Integer, default=0)

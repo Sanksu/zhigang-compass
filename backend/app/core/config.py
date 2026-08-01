@@ -30,12 +30,12 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # ---------- LLM 多 provider ----------
-    llm_primary_base_url: str = "https://spark-api.xf-yun.com/v1"
+    llm_primary_base_url: str = "https://api.deepseek.com/v1"
     llm_primary_api_key: str = ""
-    llm_primary_model: str = "spark-v2"
-    llm_secondary_base_url: str = "https://api.deepseek.com/v1"
+    llm_primary_model: str = "deepseek-v4-flash"
+    llm_secondary_base_url: str = "https://spark-api.xf-yun.com/v1"
     llm_secondary_api_key: str = ""
-    llm_secondary_model: str = "deepseek-chat"
+    llm_secondary_model: str = "v4.0"
     llm_tertiary_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     llm_tertiary_api_key: str = ""
     llm_tertiary_model: str = "qwen-plus"

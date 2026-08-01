@@ -1,8 +1,8 @@
 /**
  * HTTP 客户端 — 设计文档 §12.3 双 Token + §2.4.7 ApiResponse
  *
- * Token 策略：
- * - access_token：httpOnly Cookie（浏览器自动携带，JS 不可读）
+ * Token 策略（与后端 HTTPBearer 一致）：
+ * - access_token：内存变量，请求拦截器附加 Authorization: Bearer
  * - refresh_token：内存变量，通过请求体发送（/auth/refresh）
  *
  * 401 自动续期：响应 401 时用 refresh_token 调 /auth/refresh，成功后重试原请求；
@@ -17,8 +17,17 @@ import axios, {
 
 const BASE_URL = '/api/v1'
 
-/** refresh_token 仅内存存留，不写入 localStorage / sessionStorage */
+/** 双 Token 仅内存存留，不写入 localStorage / sessionStorage */
+let _accessToken: string | null = null
 let _refreshToken: string | null = null
+
+export function setAccessToken(token: string | null) {
+  _accessToken = token
+}
+
+export function getAccessToken(): string | null {
+  return _accessToken
+}
 
 export function setRefreshToken(token: string | null) {
   _refreshToken = token
@@ -54,6 +63,14 @@ export const http: AxiosInstance = axios.create({
   timeout: 30_000,
 })
 
+// 请求拦截器：附加 access_token（后端 deps.py 走 HTTPBearer）
+http.interceptors.request.use((config) => {
+  if (_accessToken) {
+    config.headers.set('Authorization', `Bearer ${_accessToken}`)
+  }
+  return config
+})
+
 let _refreshing: Promise<string | null> | null = null
 let _onAuthFailed: (() => void) | null = null
 
@@ -67,14 +84,14 @@ async function refreshAccessToken(): Promise<string | null> {
   if (_refreshing) return _refreshing
   _refreshing = (async () => {
     try {
-      const res = await axios.post<ApiResponse<{ refresh_token?: string }>>(
+      const res = await axios.post<ApiResponse<{ access_token?: string }>>(
         `${BASE_URL}/auth/refresh`,
         { refresh_token: _refreshToken },
         { withCredentials: true },
       )
-      if (res.data.code === 0 && res.data.data?.refresh_token) {
-        _refreshToken = res.data.data.refresh_token
-        return _refreshToken
+      if (res.data.code === 0 && res.data.data?.access_token) {
+        _accessToken = res.data.data.access_token
+        return _accessToken
       }
       return null
     } catch {
@@ -84,6 +101,13 @@ async function refreshAccessToken(): Promise<string | null> {
     }
   })()
   return _refreshing
+}
+
+// 可选请求标记：401 时静默降级，不触发全局登出（用于游客可访问页面的增强性数据）
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    skipAuthRedirect?: boolean
+  }
 }
 
 http.interceptors.response.use(
@@ -96,15 +120,19 @@ http.interceptors.response.use(
   },
   async (error: AxiosError<ApiResponse>) => {
     const status = error.response?.status
-    const orig = error.config as InternalAxiosRequestConfig & { _retried?: boolean } | undefined
+    const orig = error.config as InternalAxiosRequestConfig & { _retried?: boolean; skipAuthRedirect?: boolean } | undefined
 
-    if (status === 401 && orig && !orig._retried && !orig.url?.includes('/auth/')) {
-      orig._retried = true
-      const ok = await refreshAccessToken()
-      if (ok) return http.request(orig)
-    }
-
-    if (status === 401) {
+    if (status === 401 && orig) {
+      // 可选请求：游客未登录时直接降级，不触发续期/登出
+      if (orig.skipAuthRedirect) {
+        return Promise.reject(new ApiError(401, '需要登录', undefined, 401))
+      }
+      if (!orig._retried && !orig.url?.includes('/auth/')) {
+        orig._retried = true
+        const ok = await refreshAccessToken()
+        if (ok) return http.request(orig)
+      }
+      _accessToken = null
       _refreshToken = null
       _onAuthFailed?.()
     }
@@ -127,5 +155,15 @@ export async function apiGet<T>(url: string, config?: AxiosRequestConfig): Promi
 
 export async function apiPost<T>(url: string, body?: unknown, config?: AxiosRequestConfig): Promise<T> {
   const res = await http.post<ApiResponse<T>>(url, body, config)
+  return res.data.data as T
+}
+
+export async function apiPut<T>(url: string, body?: unknown, config?: AxiosRequestConfig): Promise<T> {
+  const res = await http.put<ApiResponse<T>>(url, body, config)
+  return res.data.data as T
+}
+
+export async function apiDelete<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
+  const res = await http.delete<ApiResponse<T>>(url, config)
   return res.data.data as T
 }
