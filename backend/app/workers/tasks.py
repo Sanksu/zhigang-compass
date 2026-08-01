@@ -16,6 +16,10 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from arq.connections import RedisSettings
+
+from app.core.config import settings
+
 # ── 爬虫项目根（backend/data/crawlers）──
 _CRAWLERS_DIR = Path(__file__).resolve().parents[2] / "data" / "crawlers"
 _OUTPUT_DIR = _CRAWLERS_DIR / "output"
@@ -135,8 +139,6 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
     domestic_platforms = ["boss", "zhilian", "lagou"]
     # 国际 A/B 级（错峰）
     international_platforms = ["monster", "indeed", "glassdoor"]
-    # C 级（脉脉夜间 23:00-06:00；LinkedIn 公开页）
-    experimental_platforms = ["maimai", "linkedin_public"]
     # 非招聘数据源（论文/社区/课程）
     trend_platforms = ["arxiv", "github", "stackoverflow"]
 
@@ -252,10 +254,8 @@ class WorkerSettings:
     ]
     on_startup = on_startup
     on_shutdown = on_shutdown
-    # redis_settings 从 app.core.config.settings.arq_redis_url 取，避免硬编码
-    # ARQ 启动时通过环境变量 ARQ_REDIS_URL 覆盖
-    redis_settings = "redis://localhost:6379/1"
-    concurrency = 10
-    task_timeout = 300
+    redis_settings = RedisSettings.from_dsn(settings.arq_redis_url)
+    concurrency = settings.arq_concurrency
+    task_timeout = settings.arq_task_timeout
     max_retries = 2
     retry_delay = 10
