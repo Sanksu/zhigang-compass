@@ -345,6 +345,23 @@ paths:
   # ============================================================
   # 简历模块 /api/v1/resume
   # ============================================================
+  /api/v1/resume/list:
+    get:
+      tags: [resume]
+      summary: 已解析简历列表（最近 N 条，按更新时间倒序）
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: 简历缓存列表（含候选人画像摘要）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
   /api/v1/resume/parse:
     post:
       tags: [resume]
