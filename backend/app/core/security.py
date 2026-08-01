@@ -14,7 +14,6 @@ from app.core.config import settings
 ROLE_PERMISSIONS = {
     "admin":   {"*"},
     "editor":  {"graph:read", "graph:write", "data:read", "match:run"},
-    "viewer":  {"graph:read", "data:read"},
     "guest":   {"graph:read"},
 }
 

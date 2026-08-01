@@ -15,7 +15,7 @@
         position_id = import_jd(session, extraction_result, evidence_dict)
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from neo4j import Session
 
@@ -24,8 +24,8 @@ from app.services.kg.id_generator import next_id
 
 
 def _now() -> str:
-    """当前 UTC ISO8601 时间戳。"""
-    return datetime.now(timezone.utc).isoformat()
+    """当前 UTC+8 ISO8601 时间戳。"""
+    return datetime.now(timezone(timedelta(hours=8))).isoformat()
 
 
 # ============================================================

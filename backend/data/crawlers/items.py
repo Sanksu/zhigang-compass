@@ -17,7 +17,6 @@ class _BaseItem(Item):
 
     # ---- 合规 ----
     is_desensitized = Field()   # 是否已脱敏
-    compliance_note = Field()   # 合规备注
 
     # ---- 内部 ----
     _fingerprint = Field()      # source + source_id 的 SHA256，用于去重
@@ -40,7 +39,6 @@ class JobItem(_BaseItem):
 
     # ---- 元数据 ----
     post_date = Field()         # 发布日期
-    job_type = Field()          # 全职/兼职/实习
     tags = Field()              # 平台标签列表
 
 
@@ -52,17 +50,14 @@ class CourseItem(_BaseItem):
 
     # ---- 课程信息 ----
     title = Field()             # 课程名
-    instructor = Field()        # 讲师
     institution = Field()       # 院校/机构
     platform = Field()          # 平台（icourse163 / coursera / edx）
     category = Field()          # 分类（如 "计算机科学"）
-    description = Field()       # 课程简介
 
     # ---- 课程元数据 ----
     rating = Field()            # 评分（0-5）
     enrollment = Field()        # 注册人数
     duration = Field()          # 时长（周/小时文本）
-    start_date = Field()        # 开课时间
 
     # ---- 技能 ----
     skills = Field()            # 技能标签列表
@@ -83,9 +78,7 @@ class PaperItem(_BaseItem):
     updated = Field()           # 更新日期
 
     # ---- 元数据 ----
-    doi = Field()               # DOI
     pdf_url = Field()           # PDF 链接
-    citation_count = Field()    # 引用数（若可获取）
 
 
 class CommunityTrendItem(_BaseItem):

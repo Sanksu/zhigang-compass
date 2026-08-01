@@ -166,24 +166,6 @@ export function NodeDetailPanel({ node, stats, onClose }: NodeDetailPanelProps) 
             <p className="text-sm text-ink-secondary leading-relaxed">{node.description}</p>
           </section>
         )}
-
-        {/* 跳转链接（占位 — 待真实 API 接入后启用） */}
-        <section className="border-t border-border pt-3">
-          <p className="text-xs text-ink-faint">
-            下钻接口（M3 后端就绪后启用）：
-          </p>
-          <ul className="mt-1.5 space-y-1 text-xs font-mono text-ink-muted">
-            {node.type === 'position' && (
-              <li>GET /api/v1/graph/position/{node.id}/skills</li>
-            )}
-            {node.type === 'skill' && (
-              <>
-                <li>GET /api/v1/graph/skill/{node.id}/evidence</li>
-                <li>GET /api/v1/graph/skill/{node.id}/positions</li>
-              </>
-            )}
-          </ul>
-        </section>
       </div>
     </div>
   )

@@ -29,6 +29,7 @@ from pathlib import Path
 from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
+from crawlers.settings import SUBPROCESS_TIMEOUT
 
 # 独立采集脚本路径
 CRAWLER_SCRIPT = str(Path(__file__).resolve().parent.parent / "monster_cdp_crawler.py")
@@ -85,7 +86,16 @@ class MonsterSpider(BaseSpider):
                 self.logger.error(f"启动采集脚本失败: {e}")
                 continue
 
-            for line in proc.stdout:
+            # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
+            try:
+                stdout, stderr = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout, stderr = proc.communicate()
+                self.logger.error(f"采集脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+                continue
+
+            for line in stdout.splitlines():
                 line = line.strip()
                 if not line:
                     continue
@@ -103,15 +113,13 @@ class MonsterSpider(BaseSpider):
                     location=item_data.get("location", ""),
                     salary=item_data.get("salary", ""),
                     experience=item_data.get("experience_range", ""),
-                    education="",
+                    education=item_data.get("education", ""),
                     tags=self._build_tags(item_data),
                     description=item_data.get("description", ""),
                     requirements="",
                     raw_text=json.dumps(item_data, ensure_ascii=False),
                 )
 
-            stderr = proc.stderr.read() if proc.stderr else ""
-            proc.wait()
             if proc.returncode != 0:
                 self.logger.error(f"采集脚本退出码 {proc.returncode}: {stderr[-500:]}")
             elif stderr:

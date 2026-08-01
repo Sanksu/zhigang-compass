@@ -16,7 +16,7 @@
   $env:HTTPS_PROXY="http://127.0.0.1:7890"
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from scrapy import Request, Spider
 from scrapy.http import Response
@@ -138,7 +138,7 @@ class GithubSpider(Spider):
         item["source"] = self.platform
         item["source_id"] = repo_full_name  # owner/repo 作为唯一 ID
         item["source_url"] = repo_url
-        item["crawled_at"] = datetime.now(timezone.utc).isoformat()
+        item["crawled_at"] = datetime.now(timezone(timedelta(hours=8))).isoformat()
         item["title"] = repo_full_name
         item["description"] = description
         item["url"] = repo_url
@@ -150,7 +150,6 @@ class GithubSpider(Spider):
         item["trend_type"] = "trending"
         item["raw_text"] = card.get()
         item["is_desensitized"] = False
-        item["compliance_note"] = ""
         return item
 
     @staticmethod

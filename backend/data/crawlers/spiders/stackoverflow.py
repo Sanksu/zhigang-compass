@@ -17,7 +17,7 @@
 """
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urljoin
 
 from scrapy import Request, Spider
@@ -177,7 +177,7 @@ class StackoverflowSpider(Spider):
         item["source"] = self.platform
         item["source_id"] = question_id
         item["source_url"] = url
-        item["crawled_at"] = datetime.now(timezone.utc).isoformat()
+        item["crawled_at"] = datetime.now(timezone(timedelta(hours=8))).isoformat()
         item["title"] = title
         item["description"] = ""  # SO 列表页无摘要
         item["url"] = url
@@ -190,7 +190,6 @@ class StackoverflowSpider(Spider):
         item["trend_type"] = "newest" if self.tab.lower() == "newest" else "hot"
         item["raw_text"] = card.get()
         item["is_desensitized"] = False
-        item["compliance_note"] = ""
         return item
 
     @staticmethod

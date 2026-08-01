@@ -41,7 +41,6 @@ class _RawMixin:
     snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
     raw_text: Mapped[str] = mapped_column(Text, default="")
     is_desensitized: Mapped[bool] = mapped_column(Boolean, default=False)
-    compliance_note: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

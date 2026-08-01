@@ -28,9 +28,10 @@ _TEXT_FIELDS = (
 class CleaningPipeline:
     """基础清洗：去重指纹 + 文本标准化 + 脱敏标记。"""
 
+    # 边界 (?<!\d)/(?!\d) 防止误伤长数字 ID（如 19 位 source_id）中的子串
     PII_PATTERNS = [
-        (re.compile(r"\d{17}[\dXx]"), "ID_CARD"),  # 18 位身份证优先（避免被 PHONE 子串误匹配）
-        (re.compile(r"1[3-9]\d{9}"), "PHONE"),
+        (re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)"), "ID_CARD"),  # 18 位身份证优先（避免被 PHONE 子串误匹配）
+        (re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"), "PHONE"),
         (re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"), "EMAIL"),
     ]
 
@@ -40,11 +41,11 @@ class CleaningPipeline:
             f"{item.get('source', '')}:{item.get('source_id', '')}".encode()
         ).hexdigest()
 
-        # 脉脉合规脱敏
+        # 脉脉合规脱敏（description 与 raw_text 均含原始文本，需一并清洗）
         if item.get("source") == "maimai":
             item["description"] = self._desensitize(item.get("description", ""))
+            item["raw_text"] = self._desensitize(item.get("raw_text", ""))
             item["is_desensitized"] = True
-            item["compliance_note"] = "用于竞赛演示不商用"
 
         # 文本标准化：对所有已知文本字段 strip
         for field in _TEXT_FIELDS:
@@ -152,7 +153,6 @@ class PostgresPipeline:
             snapshot=item_dict,
             raw_text=str(raw_text)[:65535] if raw_text else "",
             is_desensitized=item_dict.get("is_desensitized", False),
-            compliance_note=item_dict.get("compliance_note", ""),
         )
 
         constraint_name = f"uq_{model.__tablename__}_source_id"
@@ -165,7 +165,6 @@ class PostgresPipeline:
                 "snapshot": stmt.excluded.snapshot,
                 "raw_text": stmt.excluded.raw_text,
                 "is_desensitized": stmt.excluded.is_desensitized,
-                "compliance_note": stmt.excluded.compliance_note,
                 "updated_at": func.now(),
             },
         )

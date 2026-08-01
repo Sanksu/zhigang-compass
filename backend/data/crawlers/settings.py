@@ -84,18 +84,20 @@ PROXY_POOL_API_KEY = ""
 # 单个代理的最大失败次数，超过后自动剔除
 PROXY_MAX_FAILURES = 3
 
-# ---------- 重试与退避 ----------
+# ---------- 重试 ----------
 RETRY_TIMES = 3
 RETRY_HTTP_CODES = [429, 500, 502, 503, 504]
-BACKOFF_BASE = 30   # 指数退避起点（秒）
-BACKOFF_MAX = 3600  # 最大退避（1 小时）
+
+# ---------- 独立采集脚本 ----------
+# subprocess 调用（CDP/JobSpy/Playwright 独立脚本）的最大等待秒数，超时后终止子进程
+SUBPROCESS_TIMEOUT = 900
 
 # ---------- 脉脉合规 ----------
 MAIMAI_COMPLIANCE = {
     "annotation": "用于竞赛演示不商用",           # 采集声明
     "desensitization": True,                      # 数据脱敏
     "rate_limit": 100,                            # ≤100 req/h
-    "schedule_hours": (23, 6),                    # 夜间运行 23:00-06:00
+    "schedule_hours": (22, 8),                    # 夜间运行 22:00-08:00
 }
 
 # ---------- 输出 ----------

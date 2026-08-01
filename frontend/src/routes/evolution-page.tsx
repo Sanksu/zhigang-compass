@@ -597,7 +597,7 @@ function VersionDiffView() {
       <CardContent className="pt-0">
         {!diff ? (
           <div className="py-10 text-center text-xs text-ink-muted">
-            mock 数据仅包含 v20260729 vs v20260728 一对真实 diff
+            暂无该版本对比数据
           </div>
         ) : (
           <>

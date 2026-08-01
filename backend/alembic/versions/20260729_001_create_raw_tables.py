@@ -31,7 +31,6 @@ def _raw_columns():
         sa.Column("snapshot", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("raw_text", sa.Text(), nullable=False, server_default=""),
         sa.Column("is_desensitized", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-        sa.Column("compliance_note", sa.String(200), nullable=False, server_default=""),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     ]

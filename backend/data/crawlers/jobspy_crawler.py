@@ -1,14 +1,13 @@
 """JobSpy 采集脚本（独立运行，避免与 Scrapy Twisted 事件循环冲突）。
 
-被 spiders/indeed.py 通过 subprocess 调用，输出 JSONL 到 stdout。
-状态/错误日志输出到 stderr。
+被 spiders/indeed.py、spiders/linkedin_public.py 通过 subprocess 调用，
+输出 JSONL 到 stdout。状态/错误日志输出到 stderr。
 
 参考项目：https://github.com/speedyapply/JobSpy
 """
 
 import argparse
 import json
-import os
 import sys
 import traceback
 
@@ -18,8 +17,8 @@ def log(msg: str):
     print(msg, file=sys.stderr, flush=True)
 
 
-def crawl(keyword: str, city: str, results_wanted: int = 20) -> int:
-    """调用 JobSpy 采集 Indeed 岗位，输出 JSONL 到 stdout。"""
+def crawl(site: str, keyword: str, city: str, results_wanted: int = 20) -> int:
+    """调用 JobSpy 采集岗位，输出 JSONL 到 stdout。"""
     try:
         from jobspy import scrape_jobs
     except ImportError:
@@ -28,7 +27,7 @@ def crawl(keyword: str, city: str, results_wanted: int = 20) -> int:
 
     try:
         result = scrape_jobs(
-            site_name=["indeed"],
+            site_name=[site],
             search_term=keyword,
             location=city,
             results_wanted=results_wanted,
@@ -54,18 +53,19 @@ def crawl(keyword: str, city: str, results_wanted: int = 20) -> int:
         print(json.dumps(item, ensure_ascii=False), flush=True)
         count += 1
 
-    log(f"✅ 采集完成: kw={keyword} city={city} count={count}")
+    log(f"✅ 采集完成: site={site} kw={keyword} city={city} count={count}")
     return 0 if count > 0 else 3
 
 
 def main():
-    parser = argparse.ArgumentParser(description="JobSpy Indeed 采集脚本")
+    parser = argparse.ArgumentParser(description="JobSpy 采集脚本（Indeed/LinkedIn）")
+    parser.add_argument("--site", required=True, choices=["indeed", "linkedin"], help="JobSpy site_name")
     parser.add_argument("--keyword", required=True, help="搜索关键词")
     parser.add_argument("--city", required=True, help="城市")
     parser.add_argument("--results-wanted", type=int, default=20, help="采集数量")
     args = parser.parse_args()
 
-    sys.exit(crawl(args.keyword, args.city, args.results_wanted))
+    sys.exit(crawl(args.site, args.keyword, args.city, args.results_wanted))
 
 
 if __name__ == "__main__":
