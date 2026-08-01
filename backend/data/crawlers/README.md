@@ -137,13 +137,21 @@ python -m crawlers.setup_boss_chrome
 #    - 访问 zhipin.com 完成登录（BOSS）
 #    - 访问 monster.com 完成 DataDome challenge（Monster）
 #    - 访问 glassdoor.com 通过 Cloudflare 验证（Glassdoor，需系统代理）
-#    - 浏览器保持开启，爬虫通过 CDP 连接复用登录态
+#    - 浏览器保持开启，爬虫通过 CDP 连接复用登录态（cookie 由浏览器 profile 维护，无需 env cookie）
 
 # 3. 检查 CDP + 登录态
 python -m crawlers.setup_boss_chrome --check
 
 # 4. 采集完成后关闭浏览器
 python -m crawlers.setup_boss_chrome --stop
+```
+
+**局域网 / Docker 容器部署**：浏览器跑在容器内时，启动加 `--cdp-address 0.0.0.0`
+（如 `python -m crawlers.setup_boss_chrome --cdp-address 0.0.0.0`），端口由 Docker 暴露，
+登录态 profile 挂载 volume 持久化；采集端设置环境变量指向容器地址：
+
+```bash
+export BOSS_CDP_URL=http://192.168.1.10:9222   # 容器所在主机局域网 IP
 ```
 
 ### 各平台采集命令

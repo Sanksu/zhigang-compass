@@ -57,7 +57,7 @@ class MonsterSpider(BaseSpider):
             return
 
         python_exe = sys.executable
-        cdp_port = os.environ.get("BOSS_CDP_PORT", "9222")
+        cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
 
         for task in tasks:
             keyword = task["keyword"]
@@ -69,7 +69,7 @@ class MonsterSpider(BaseSpider):
                 "--keyword", keyword,
                 "--city", city,
                 "--max-pages", str(self.max_pages),
-                "--cdp-port", cdp_port,
+                "--cdp-url", cdp_url,
             ]
 
             try:

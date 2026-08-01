@@ -64,9 +64,9 @@ class GlassdoorSpider(BaseSpider):
                 "--max-pages", str(self.max_pages),
             ]
 
-            # 传递 CDP 端口（与 BOSS/Monster 共用）
-            cdp_port = os.environ.get("BOSS_CDP_PORT", "9222")
-            cmd.extend(["--cdp-port", cdp_port])
+            # 传递 CDP 端点（与 BOSS/Monster 共用）
+            cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
+            cmd.extend(["--cdp-url", cdp_url])
 
             try:
                 proc = subprocess.Popen(
