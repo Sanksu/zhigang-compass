@@ -41,9 +41,12 @@ jobs:
       - name: Run tests
         env:
           APP_ENV: test
-        run: uv run pytest -q --cov=app --cov-report=term-missing
-        # pytest 返回码 5 = 未收集到测试用例，CI 早期阶段允许通过
-        continue-on-error: true
+        # pytest 返回码 5 = 未收集到测试用例（允许通过），其余失败置红（不再 continue-on-error）
+        run: |
+          uv run pytest -q --cov=app --cov-report=term-missing
+          rc=$?
+          if [ $rc -eq 5 ]; then exit 0; fi
+          exit $rc
 
       - name: Import smoke check
         # 验证核心模块可正常 import（捕获循环依赖、缺失依赖等）

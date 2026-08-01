@@ -53,7 +53,7 @@ const GAP_TYPE_LABEL = {
 
 function toRecommendItem(r: BackendMatchResult): RecommendItem {
   const status: RecommendItem['status'] =
-    r.total_score >= 0.6 ? 'stable' : r.total_score >= 0.4 ? 'declining' : 'declining'
+    r.total_score >= 0.6 ? 'stable' : r.total_score >= 0.4 ? 'declining' : 'low'
   return {
     position_id: r.position_id,
     position_name: r.position_name,
