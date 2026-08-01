@@ -1,14 +1,12 @@
 """认证路由：登录、刷新 Token、注册、登出、当前用户。"""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
-    hash_password,
-    verify_password,
 )
 from app.schemas.common import ok, error
 
