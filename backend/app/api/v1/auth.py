@@ -1,13 +1,20 @@
 """认证路由：登录、刷新 Token、注册、登出、当前用户。"""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
 from app.core.config import settings
+from app.core.database import get_db
 from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    hash_password,
+    verify_password,
 )
+from app.models.business import User
 from app.schemas.business import LoginRequest, RefreshRequest, RegisterRequest
 from app.schemas.common import ok, error
 
@@ -15,24 +22,37 @@ router = APIRouter()
 
 
 @router.post("/login")
-async def login(req: LoginRequest):
-    """用户登录，返回双 Token。"""
-    # TODO: 从 DB 查询用户。当前使用 config 中的占位凭据。
-    if req.username == settings.admin_username and req.password == settings.admin_password:
-        user_id = "00000000-0000-0000-0000-000000000001"
-        role = "admin"
-        access_token = create_access_token(user_id, role)
-        refresh_token = create_refresh_token(user_id, role)
-        return ok(data={
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-            "expires_in": 1800,
-        })
+async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+    """用户登录，返回双 Token（凭据校验走 users 表）。"""
+    user = await db.scalar(select(User).where(User.username == req.username))
+    if user is None:
+        # 首次部署 bootstrap：users 表为空时按配置创建 admin 用户，
+        # 创建后即落入 users 表，后续登录走 DB 校验
+        if req.username == settings.admin_username and req.password == settings.admin_password:
+            user = User(
+                username=req.username,
+                password_hash=hash_password(req.password),
+                role="admin",
+            )
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+        else:
+            return error(401, "用户名或密码错误")
+    elif not verify_password(req.password, user.password_hash):
+        return error(401, "用户名或密码错误")
 
-    # 注册用户通过 DB 查询（待 BE-M3-03 集成）
-    # async with db session ...
-    return error(401, "用户名或密码错误")
+    if not user.is_active:
+        return error(403, "账户已禁用")
+
+    access_token = create_access_token(user.id, user.role)
+    refresh_token = create_refresh_token(user.id, user.role)
+    return ok(data={
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": 1800,
+    })
 
 
 @router.post("/refresh")
@@ -48,21 +68,36 @@ async def refresh_token(req: RefreshRequest):
 
 
 @router.post("/register")
-async def register(req: RegisterRequest):
-    """注册新用户。"""
+async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    """注册新用户（默认 guest 角色）。"""
     if len(req.username) < 3 or len(req.password) < 6:
         return error(400, "用户名至少 3 字符，密码至少 6 字符")
-    # TODO: 插入 DB（users 表）
-    # hashed = hash_password(req.password)
-    # async with db session ...
-    return ok(data={"msg": "注册成功（待 DB 集成后生效）"})
+
+    existing = await db.scalar(select(User).where(User.username == req.username))
+    if existing is not None:
+        return error(409, "用户名已存在")
+
+    user = User(
+        username=req.username,
+        password_hash=hash_password(req.password),
+        role="guest",
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return ok(data={"id": user.id, "username": user.username, "role": user.role})
 
 
 @router.get("/me")
-async def me():
+async def me(
+    payload: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """获取当前用户信息（需登录）。"""
-    # TODO: 对接 Depends(get_current_user) + DB 查询
-    return error(501, "待实现 — 对接 Depends + DB")
+    user = await db.get(User, payload["sub"])
+    if user is None or not user.is_active:
+        return error(404, "用户不存在")
+    return ok(data={"id": user.id, "username": user.username, "role": user.role})
 
 
 @router.post("/logout")
