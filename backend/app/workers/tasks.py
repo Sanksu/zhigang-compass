@@ -13,7 +13,7 @@
 import asyncio
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from arq.connections import RedisSettings
@@ -94,35 +94,224 @@ async def crawl_platform(
     }
 
 
-async def validate_temporal(ctx: dict, jd_ids: list[str]) -> dict:
-    """时滞检测任务（设计文档 §4.7）。
+# ============================================================
+# 时滞 / 通胀检测辅助函数（设计文档 §4.7/4.8，M3 接入 jd_raw）
+# ============================================================
 
-    M2 阶段：调用 data_quality 模块的纯函数算法，数据来源为 mock 或图谱层。
-    M3 阶段：从 jd_raw 表读取待评估 JD + 同岗位近 90 天历史，调用 detect_zombie_jd / detect_plagiarism。
+# 与 extraction/schemas.py REQUIRESRelation.level 对齐的岗位级别集合
+_QUALITY_LEVELS = {"初级", "中级", "高级", "资深", "专家"}
 
-    失败处置：标记 content_stale/obsolete/zombie/plagiarism 的 JD 写入 validation_report，
-    降权系数写入 jd_raw.decay_weight（M3 业务表就位后）。
+
+def _extraction_of(row) -> dict | None:
+    """从 jd_raw 行取 LLM 抽取结果（snapshot.extraction），缺失返回 None。"""
+    snap = row.snapshot or {}
+    ext = snap.get("extraction")
+    return ext if isinstance(ext, dict) else None
+
+
+def _skills_of(ext: dict) -> list[str]:
+    """抽取结果的技能名列表（requirements 优先，缺省 skills）。"""
+    reqs = ext.get("requirements") or []
+    if reqs:
+        return [r.get("skill_name", "") for r in reqs if r.get("skill_name")]
+    return [s.get("name", "") for s in (ext.get("skills") or []) if s.get("name")]
+
+
+def _publish_date(snapshot: dict, crawled_at: str) -> date | None:
+    """解析发布日期：snapshot.post_date 优先，缺省用 crawled_at；无法解析返回 None。"""
+    raw = str(snapshot.get("post_date") or crawled_at or "")[:19]
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _skill_first_seen_days(
+    group: list[tuple[int, date, list[str]]],
+    skills: list[str],
+    today: date,
+) -> list[int]:
+    """技能首见时长（天）：同岗位 JD 中该技能最早出现日期到 today 的间隔。
+
+    group: 同岗位已抽取记录 (jd_id, publish_date, skills)，含当前 JD。
+    某技能在同岗位无任何记录时不计入（数据不足不武断判定）。
     """
-    # M2 框架占位：仅记录任务被触发，实际检测在 ETL pipeline 中按需调用纯函数
-    return {
-        "status": "framework_only",
-        "jd_ids": jd_ids,
-        "msg": "M2 框架就绪，M3 接入 jd_raw + 图谱 first_seen_at 后启用",
-    }
+    ages = []
+    for skill in skills:
+        first = None
+        for _, pdate, group_skills in group:
+            if skill in group_skills and (first is None or pdate < first):
+                first = pdate
+        if first is not None:
+            ages.append(max(0, (today - first).days))
+    return ages
 
 
-async def detect_inflation(ctx: dict, jd_ids: list[str]) -> dict:
-    """通胀检测任务（设计文档 §4.8）。
+def _experience_years(snapshot: dict) -> int | None:
+    """解析经验要求最小年限（如 "3-5年" → 3）；无法解析返回 None。"""
+    import re
 
-    M2 阶段：框架占位，实际算法已在 data_quality.inflation_detector 实现。
-    M3 阶段：从 jd_raw + LLM 抽取结果读取 job_level/min_years/skill_count/expert_level_count/education，
-    调用 compute_inflation_score 输出 inflation_score + decay_weight。
+    m = re.search(r"(\d+)", str(snapshot.get("experience") or ""))
+    return int(m.group(1)) if m else None
+
+
+async def validate_temporal(
+    ctx: dict,
+    jd_ids: list[int] | None = None,
+    limit: int = 200,
+) -> dict:
+    """时滞检测（设计文档 §4.7）：jd_raw 已抽取记录接入 SAI/僵尸/抄袭检测。
+
+    技能首见时长无图谱 `first_seen_at` 时，用同岗位 jd_raw 历史最早出现日期近似。
+    检测结果写回 `snapshot["validation"]`（含三类结果 + 叠加降权系数）；
+    数据不足（无技能/无发布日期）的 JD 跳过，不做武断判定。
     """
-    return {
-        "status": "framework_only",
-        "jd_ids": jd_ids,
-        "msg": "M2 框架就绪，M3 LLM 抽取上线后接入四维数据",
-    }
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import JDRaw
+    from app.services.data_quality.temporal_detector import (
+        RECENT_WINDOW_DAYS,
+        apply_temporal_decay,
+        classify_sai,
+        compute_sai,
+        detect_plagiarism,
+        detect_zombie_jd,
+    )
+    from app.services.data_quality.schemas import JDSkillSet
+
+    today = date.today()
+    async with async_session_factory() as session:
+        stmt = select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
+        if jd_ids:
+            stmt = stmt.where(JDRaw.id.in_(jd_ids))
+        rows = (await session.scalars(stmt.order_by(JDRaw.id.asc()).limit(limit))).all()
+
+        # 已抽取记录视图：(jd_id, position, publish_date, skills)
+        views = []
+        for row in rows:
+            ext = _extraction_of(row)
+            if not ext:
+                continue
+            publish = _publish_date(row.snapshot or {}, row.crawled_at or "")
+            skills = _skills_of(ext)
+            if not skills or publish is None:
+                continue
+            views.append((row, (row.id, ext.get("position_name") or "", publish, skills)))
+
+        results: dict = {"checked": 0, "skipped": len(rows) - len(views), "flagged": []}
+        for row, (jd_id, position, publish, skills) in views:
+            group = [(r[0], r[2], r[3]) for r in views if r[1] == position]
+            skill_ages = _skill_first_seen_days(group, skills, today)
+            if not skill_ages:
+                results["skipped"] += 1
+                continue
+
+            # 同岗位近 90 天窗口的技能首见时长聚合，作为 SAI 基线
+            recent_ages = [
+                age
+                for _, pdate, gs in group
+                if (today - pdate).days <= RECENT_WINDOW_DAYS
+                for age in _skill_first_seen_days(group, gs, today)
+            ]
+            sai = classify_sai(compute_sai(skill_ages, recent_ages))
+
+            history_skills = [gs for _, pdate, gs in sorted(group, key=lambda g: g[1]) if gs != skills]
+            zombie = detect_zombie_jd(history_skills, set(skills), sai.sai)
+
+            oldest = min(group, key=lambda g: g[1])
+            plagiarism = None
+            if oldest[0] != jd_id:
+                plagiarism = detect_plagiarism(
+                    JDSkillSet(jd_id=str(jd_id), position_name=position, publish_date=publish, skills=skills),
+                    JDSkillSet(jd_id=str(oldest[0]), position_name=position, publish_date=oldest[1], skills=oldest[2]),
+                )
+
+            decay = apply_temporal_decay(1.0, sai, zombie, plagiarism)
+            snap = dict(row.snapshot or {})
+            snap["validation"] = {
+                "sai": sai.model_dump(),
+                "zombie": zombie.model_dump(),
+                "plagiarism": plagiarism.model_dump() if plagiarism else None,
+                "decay_weight": decay,
+            }
+            row.snapshot = snap
+            results["checked"] += 1
+            flagged = sai.label != "fresh" or zombie.is_zombie or (plagiarism is not None and plagiarism.is_plagiarism)
+            if flagged:
+                results["flagged"].append({
+                    "jd_id": jd_id,
+                    "position": position,
+                    "sai": sai.label,
+                    "zombie": zombie.is_zombie,
+                    "plagiarism": plagiarism.is_plagiarism if plagiarism else False,
+                    "decay_weight": decay,
+                })
+        await session.commit()
+
+    return results
+
+
+async def detect_inflation(
+    ctx: dict,
+    jd_ids: list[int] | None = None,
+    limit: int = 200,
+) -> dict:
+    """通胀检测（设计文档 §4.8）：从 jd_raw + LLM 抽取结果接入四维通胀评分。
+
+    输入：extraction.level（岗位级别）/ education / requirements（数量 + 专家级数量）
+         + snapshot.experience（最小年限，如 "3-5年" → 3）。
+    结果写回 `snapshot["inflation"]`（含四维分 / inflation_score / label / decay_weight）。
+    缺岗位级别或经验解析失败的 JD 跳过，不做武断判定。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import JDRaw
+    from app.services.data_quality.inflation_detector import compute_inflation_score
+
+    async with async_session_factory() as session:
+        stmt = select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
+        if jd_ids:
+            stmt = stmt.where(JDRaw.id.in_(jd_ids))
+        rows = (await session.scalars(stmt.order_by(JDRaw.id.asc()).limit(limit))).all()
+
+        results: dict = {"checked": 0, "skipped": 0, "flagged": []}
+        for row in rows:
+            ext = _extraction_of(row)
+            if not ext:
+                results["skipped"] += 1
+                continue
+            level = ext.get("level") or ""
+            if level not in _QUALITY_LEVELS:
+                results["skipped"] += 1
+                continue
+            min_years = _experience_years(row.snapshot or {})
+            if min_years is None:
+                results["skipped"] += 1
+                continue
+
+            reqs = ext.get("requirements") or []
+            skill_count = len(reqs) if reqs else len(ext.get("skills") or [])
+            expert_count = sum(1 for r in reqs if r.get("level") == "专家")
+            edu = (ext.get("education") or {}).get("level") or "不限"
+            inflation = compute_inflation_score(level, min_years, skill_count, expert_count, edu)
+
+            snap = dict(row.snapshot or {})
+            snap["inflation"] = inflation.model_dump()
+            row.snapshot = snap
+            results["checked"] += 1
+            if inflation.label != "normal":
+                results["flagged"].append({
+                    "jd_id": row.id,
+                    "label": inflation.label,
+                    "inflation_score": inflation.inflation_score,
+                })
+        await session.commit()
+
+    return results
 
 
 async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
@@ -179,11 +368,8 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
     # ── 阶段 4：通胀检测（M3 启用）──
     results["stages"]["detect_inflation"] = await detect_inflation(ctx, jd_ids=[])
 
-    # ── 阶段 5：结构化 + 入库（M3 启用）──
-    results["stages"]["structure_load"] = {
-        "status": "pending_m3",
-        "msg": "依赖 AL-M3-01 LLM 抽取上线 + AL-M3-09 JD 入图",
-    }
+    # ── 阶段 5：结构化 + 入库（M3 启用：LLM 抽取 → snapshot 写回 → Neo4j 入图）──
+    results["stages"]["structure_load"] = await batch_extract(ctx, limit=500)
 
     return results
 
@@ -200,9 +386,90 @@ async def resume_parse(ctx: dict, file_path: str) -> dict:
     raise NotImplementedError("resume_parse 待 M4 实现（pypdf/python-docx/OCR + PII 脱敏 + LLM 抽取）")
 
 
-async def batch_extract(ctx: dict, jd_ids: list[str]) -> dict:
-    """LLM 批量实体抽取异步任务（M3 实现，依赖 AL-M3-01，当前未交付）。"""
-    raise NotImplementedError("batch_extract 待 AL-M3-01 LLM 抽取上线后实现")
+# 参与 JD 正文拼接的 snapshot 字段（按此顺序，跳过来源无关的元数据）
+_JD_TEXT_FIELDS = (
+    "title", "company", "location", "salary", "experience",
+    "education", "description", "requirements",
+)
+
+
+def _build_jd_text(snapshot: dict, raw_text: str) -> str:
+    """拼装 JD 抽取正文。
+
+    优先 snapshot 的干净文本字段（raw_text 为原始 HTML/JSON 备份，不适合喂 LLM）；
+    全部缺失时回退到 raw_text。
+    """
+    parts = [str(snapshot.get(f, "")).strip() for f in _JD_TEXT_FIELDS]
+    text = "\n".join(p for p in parts if p)
+    return text or raw_text
+
+
+async def batch_extract(
+    ctx: dict,
+    jd_ids: list[int] | None = None,
+    limit: int = 100,
+) -> dict:
+    """LLM 批量实体抽取 + JD 入图（M3 实现，依赖 AL-M3-01）。
+
+    选取 jd_raw 中尚未抽取（snapshot 无 extraction 标记）的记录：
+    - 拼装 JD 正文 → JDExtractor.extract（instructor 强校验，失败单条降级规则抽取）
+    - 抽取结果写回 jd_raw.snapshot["extraction"]（可审计、可重跑）
+    - kg_service.import_jd 入图（Neo4j MERGE 幂等，重复执行不产生重复节点）
+
+    单条失败不阻塞整体（批量语义）；全部失败时抛出，由 ARQ 重试机制兜底。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory, neo4j_driver
+    from app.models.raw import JDRaw
+    from app.services.extraction.jd_extractor import JDExtractor
+    from app.services.kg.kg_service import import_jd
+
+    extractor = JDExtractor()
+
+    async with async_session_factory() as session:
+        if jd_ids:
+            rows = (await session.scalars(
+                select(JDRaw).where(JDRaw.id.in_(jd_ids))
+            )).all()
+        else:
+            # 未抽取 = snapshot 无 extraction 键（JSONB 键缺失时为 SQL NULL）
+            rows = (await session.scalars(
+                select(JDRaw)
+                .where(JDRaw.snapshot["extraction"].astext.is_(None))
+                .order_by(JDRaw.id.asc())
+                .limit(limit)
+            )).all()
+
+        results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": []}
+        for row in rows:
+            text = _build_jd_text(row.snapshot or {}, row.raw_text or "")
+            if len(text.strip()) < 10:
+                results["failed"].append({"jd_id": row.id, "error": "JD 正文过短（<10 字符），跳过"})
+                continue
+            results["processed"] += 1
+            try:
+                extraction = extractor.extract(text)
+                snap = dict(row.snapshot or {})
+                snap["extraction"] = extraction.model_dump()
+                row.snapshot = snap
+                evidence = {
+                    "source": row.source,
+                    "source_url": row.source_url,
+                    "crawled_at": row.crawled_at,
+                    "raw_text": text,
+                }
+                with neo4j_driver.session() as neo4j_session:
+                    position_id = import_jd(neo4j_session, extraction, evidence)
+                results["succeeded"] += 1
+                results["positions"].append({"jd_id": row.id, "position_id": position_id})
+            except Exception as e:
+                results["failed"].append({"jd_id": row.id, "error": str(e)[:500]})
+        await session.commit()
+
+    if results["processed"] > 0 and results["succeeded"] == 0:
+        raise RuntimeError(f"批量抽取全部失败: {results['failed'][:5]}")
+    return results
 
 
 async def evolution_compute(ctx: dict, version: str) -> dict:

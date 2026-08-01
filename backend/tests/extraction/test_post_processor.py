@@ -1,0 +1,75 @@
+"""抽取后处理单元测试（设计文档 §5.2）。
+
+覆盖中文后缀清洗、别名归一化、去重、requirements 与 skills 同规则。
+"""
+
+from app.services.extraction.post_processor import (
+    clean_skill_name,
+    dedup_skills,
+    post_process,
+)
+from app.services.extraction.schemas import (
+    JDExtractionResult,
+    REQUIRESRelation,
+    SkillExtracted,
+)
+
+
+class TestCleanSkillName:
+    def test_removes_chinese_suffix(self):
+        assert clean_skill_name("Python 开发工程师") == "Python 开发"
+        assert clean_skill_name("Docker 技术") == "Docker"
+        assert clean_skill_name("数据平台") == "数据"
+
+    def test_no_suffix_unchanged(self):
+        assert clean_skill_name("Python") == "Python"
+        assert clean_skill_name("MySQL") == "MySQL"
+
+    def test_empty_input(self):
+        assert clean_skill_name("") == ""
+        assert clean_skill_name("   ") == ""
+
+
+class TestDedupSkills:
+    def test_case_insensitive_dedup_keeps_first(self):
+        skills = [
+            SkillExtracted(name="Python"),
+            SkillExtracted(name="python"),
+            SkillExtracted(name="Python"),
+        ]
+        names = [s.name for s in dedup_skills(skills)]
+        assert names == ["Python"]
+
+
+class TestPostProcess:
+    def test_normalize_clean_dedup_full_pipeline(self):
+        result = JDExtractionResult(
+            position_name="",
+            skills=[
+                SkillExtracted(name="Docker 技术"),
+                SkillExtracted(name="docker 技术"),
+                SkillExtracted(name="Go"),
+            ],
+            requirements=[
+                REQUIRESRelation(skill_name="Docker 技术", necessity="must"),
+                REQUIRESRelation(skill_name="docker 技术", necessity="must"),
+                REQUIRESRelation(skill_name="Go", necessity="nice"),
+            ],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["Docker", "Go"]
+        # requirements 与 skills 同规则清洗 + 按 (技能, 必要性) 去重
+        assert [(r.skill_name, r.necessity) for r in out.requirements] == [
+            ("Docker", "must"),
+            ("Go", "nice"),
+        ]
+
+    def test_skill_and_requirement_same_rule(self):
+        """requirements 中出现的技能名清洗后与 skills 同名（保证入图对齐）。"""
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="Kubernetes 技术")],
+            requirements=[REQUIRESRelation(skill_name="Kubernetes 技术", necessity="must")],
+        )
+        out = post_process(result)
+        assert out.skills[0].name == out.requirements[0].skill_name == "Kubernetes"
