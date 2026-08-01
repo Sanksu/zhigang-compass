@@ -71,21 +71,23 @@ export function AdminLlmPage() {
   const [editIndex, setEditIndex] = useState<number | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
 
-  async function load() {
-    try {
-      const cfg = await apiGet<LlmConfig>('/admin/llm-config')
-      setProviders(cfg.providers ?? [])
-    } catch (err) {
-      setFeedback({ type: 'err', text: err instanceof Error ? err.message : '配置加载失败' })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // 初始加载：异步回调内 setState（无同步 set-state-in-effect）
+  // 初始加载：promise 链内 setState（避免 set-state-in-effect 级联渲染）
   useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false
+    apiGet<LlmConfig>('/admin/llm-config')
+      .then((cfg) => {
+        if (cancelled) return
+        setProviders(cfg.providers ?? [])
+      })
+      .catch((err) => {
+        if (!cancelled) setFeedback({ type: 'err', text: err instanceof Error ? err.message : '配置加载失败' })
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   function openCreate() {
