@@ -66,7 +66,16 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
             log(f"   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
             return 0
 
-        context = browser.contexts[0] if browser.contexts else await browser.new_context()
+        # 隔离：新建独立 context 并复制主 context 的 cookies（保留 DataDome 验证），
+        # 爬虫导航只发生在隔离 context 内，不触碰用户正在浏览的页面
+        context = await browser.new_context()
+        if browser.contexts:
+            try:
+                _cookies = await browser.contexts[0].cookies()
+                if _cookies:
+                    await context.add_cookies(_cookies)
+            except Exception as e:
+                log(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
         page = await context.new_page()
 
         # 监听所有响应，拦截 Monster 内部 API
@@ -95,7 +104,10 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
             url = f"https://www.monster.com/jobs/search?{urlencode({'q': keyword, 'where': city, 'page': page_num})}"
 
             try:
-                await page.goto(url, wait_until="networkidle", timeout=60000)
+                # networkidle 在隔离 context 的 DataDome 场景下可能长时间不空闲（持续请求），
+                # 改用 domcontentloaded + 等待 SPA 渲染，再靠下方的 API 响应轮询兜底
+                await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                await page.wait_for_timeout(5000)
             except Exception as e:
                 log(f"  导航失败: {e}")
                 if captured_api_responses:

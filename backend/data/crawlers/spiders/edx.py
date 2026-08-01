@@ -31,7 +31,8 @@ from crawlers.settings import RATE_LIMIT
 
 
 EDX_BASE = "https://www.edx.org"
-EDX_SEARCH_URL = "https://www.edx.org/search?search_key={keyword}"
+# edX 搜索参数是 q（search_key 为旧版参数，已失效，返回浏览模式而非搜索结果）
+EDX_SEARCH_URL = "https://www.edx.org/search?q={keyword}"
 
 # 默认搜索关键词（与项目 AI/大数据/全栈方向一致）
 DEFAULT_KEYWORDS = ["Python", "Data Science", "Machine Learning", "SQL", "Java"]
@@ -74,7 +75,7 @@ class EdxSpider(Spider):
             self.logger.info(f"开始采集 edX: 关键词={keyword}")
             yield self._make_playwright_request(
                 url,
-                meta={"keyword": keyword, "page": 1},
+                meta={"keyword": keyword},
             )
 
     def parse(self, response: Response):
@@ -118,15 +119,8 @@ class EdxSpider(Spider):
             if item:
                 yield item
 
-        # 翻页（edX 用 URL 参数 page）
-        current_page = response.meta.get("page", 1)
-        if current_page < self.max_pages:
-            keyword = response.meta["keyword"]
-            next_url = f"{EDX_SEARCH_URL.format(keyword=quote(keyword))}&page={current_page + 1}"
-            yield self._make_playwright_request(
-                next_url,
-                meta={"keyword": keyword, "page": current_page + 1},
-            )
+        # 无 URL 翻页：edX 搜索为 SPA 无限滚动，&page=N 会返回空结果，
+        # 已通过 _make_playwright_request 在页面内滚动触发加载更多
 
     def _card_to_item(self, card, meta: dict) -> CourseItem:
         """将单个大卡片转为 CourseItem。"""
@@ -236,24 +230,31 @@ class EdxSpider(Spider):
         return item
 
     def _make_playwright_request(self, url: str, meta: dict, callback=None):
-        """构造 Playwright 渲染请求，等待课程卡片加载。"""
+        """构造 Playwright 渲染请求，等待课程卡片加载并滚动触发更多结果。
+
+        edX 搜索为 SPA 无限滚动（URL 翻页参数失效），故在单个页面内
+        重复滚动到底部 + 等待，触发动态加载。max_pages 语义 = 滚动次数。
+        """
+        methods = [
+            # 等待大卡片或无结果提示出现
+            # Tailwind 类名含冒号，CSS 选择器需转义为 \:
+            PageMethod(
+                "wait_for_selector",
+                'div[class*="shadow-product-card"], .no-results, [class*="no-results"]',
+                timeout=30000,
+            ),
+        ]
+        # 滚动到底部触发无限滚动加载，滚动次数由 max_pages 控制
+        for _ in range(max(1, self.max_pages)):
+            methods.append(PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"))
+            methods.append(PageMethod("wait_for_timeout", 3500))
+
         return Request(
             url,
             callback=callback or self.parse,
             meta={
                 "playwright": True,
-                "playwright_page_methods": [
-                    # 等待大卡片或无结果提示出现
-                    # Tailwind 类名含冒号，CSS 选择器需转义为 \:
-                    PageMethod(
-                        "wait_for_selector",
-                        'div[class*="shadow-product-card"], .no-results, [class*="no-results"]',
-                        timeout=30000,
-                    ),
-                    PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight/2)"),
-                    # 额外等待动态内容加载
-                    PageMethod("wait_for_timeout", 2000),
-                ],
+                "playwright_page_methods": methods,
                 **meta,
             },
             headers={

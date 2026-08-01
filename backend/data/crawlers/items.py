@@ -20,6 +20,7 @@ class _BaseItem(Item):
 
     # ---- 内部 ----
     _fingerprint = Field()      # source + source_id 的 SHA256，用于去重
+    _simhash = Field()          # 语义指纹（JobItem 由 CleaningPipeline 计算，跨平台近似去重用）
 
 
 class JobItem(_BaseItem):
@@ -51,6 +52,7 @@ class CourseItem(_BaseItem):
     # ---- 课程信息 ----
     title = Field()             # 课程名
     institution = Field()       # 院校/机构
+    instructor = Field()        # 授课教师
     platform = Field()          # 平台（icourse163 / coursera / edx）
     category = Field()          # 分类（如 "计算机科学"）
 
@@ -58,6 +60,8 @@ class CourseItem(_BaseItem):
     rating = Field()            # 评分（0-5）
     enrollment = Field()        # 注册人数
     duration = Field()          # 时长（周/小时文本）
+    description = Field()       # 课程简介
+    start_date = Field()        # 开课日期
 
     # ---- 技能 ----
     skills = Field()            # 技能标签列表
