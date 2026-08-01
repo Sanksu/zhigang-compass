@@ -16,10 +16,10 @@ from app.core.config import settings
 def setup_middleware(app: FastAPI) -> None:
     """按顺序注册所有中间件。"""
 
-    # CORS — 白名单模式
+    # CORS — 可配置白名单模式
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if not settings.is_production else [],
+        allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -47,8 +47,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if settings.is_production:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # Trace ID
-        trace_id = request.headers.get("X-Trace-ID", str(uuid.uuid4().hex[:16]))
+        # Trace ID（服务端生成，不信任客户端传入）
+        trace_id = str(uuid.uuid4().hex[:16])
         response.headers["X-Trace-ID"] = trace_id
 
         return response
