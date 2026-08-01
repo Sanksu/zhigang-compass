@@ -21,6 +21,7 @@ import subprocess
 import sys
 
 from crawlers.base_spider import BaseSpider
+from crawlers.settings import SUBPROCESS_TIMEOUT
 
 
 CRAWLER_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "glassdoor_cdp_crawler.py")
@@ -81,8 +82,16 @@ class GlassdoorSpider(BaseSpider):
                 self.logger.error(f"启动 CDP 脚本失败: {e}")
                 continue
 
-            # 逐行读取 stdout（JSONL），实时 yield Item
-            for line in proc.stdout:
+            # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
+            try:
+                stdout, stderr_output = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout, stderr_output = proc.communicate()
+                self.logger.error(f"CDP 脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+                continue
+
+            for line in stdout.splitlines():
                 line = line.strip()
                 if not line:
                     continue
@@ -100,7 +109,7 @@ class GlassdoorSpider(BaseSpider):
                     location=item_data.get("location", ""),
                     salary=item_data.get("salary", ""),
                     experience=item_data.get("experience_range", ""),
-                    education="",
+                    education=item_data.get("education", ""),
                     tags=self._extract_skills(item_data),
                     description=item_data.get("description", ""),
                     requirements="",

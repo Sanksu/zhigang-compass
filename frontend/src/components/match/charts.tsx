@@ -9,7 +9,7 @@
  *
  * 共用：暗色模式跟随 + 容器尺寸 0 自愈 + 按需导入
  */
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import * as echarts from 'echarts/core'
 import { GaugeChart, RadarChart as ERadar, HeatmapChart, BarChart } from 'echarts/charts'
 import {
@@ -50,7 +50,22 @@ function isDark(): boolean {
   return document.documentElement.classList.contains('dark')
 }
 
-/** 通用 hook：创建 ECharts 实例 + 容器 0 自愈 + 暗色监听 + 重新渲染触发器 */
+/**
+ * 暗色模式响应式订阅：class 变化触发 setDark → 组件 re-render
+ * → useEChart 收到含新 dark 的 optionBuilder，deps 触发 setOption 刷新颜色。
+ */
+function useDarkMode(): boolean {
+  const [dark, setDark] = useState(isDark())
+  useEffect(() => {
+    const el = document.documentElement
+    const observer = new MutationObserver(() => setDark(isDark()))
+    observer.observe(el, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
+  return dark
+}
+
+/** 通用 hook：创建 ECharts 实例 + 容器 0 自愈 + 重新渲染触发器 */
 function useEChart(
   optionBuilder: () => echarts.EChartsCoreOption,
   deps: React.DependencyList,
@@ -76,7 +91,7 @@ function useEChart(
     }
   }, [])
 
-  // 数据/配置变化 → setOption
+  // 数据/配置变化 → setOption（deps 含 dark 时暗色切换也由此触发）
   useEffect(() => {
     chartRef.current?.setOption(optionBuilder(), { replaceMerge: ['series'] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -89,22 +104,6 @@ function useEChart(
     ro.observe(containerRef.current)
     return () => ro.disconnect()
   }, [])
-
-  // 暗色模式变化 → 重新 setOption 刷新颜色
-  useEffect(() => {
-    const el = document.documentElement
-    const observer = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        if (m.attributeName === 'class') {
-          chartRef.current?.setOption(optionBuilder(), { replaceMerge: ['series'] })
-          break
-        }
-      }
-    })
-    observer.observe(el, { attributes: true, attributeFilter: ['class'] })
-    return () => observer.disconnect()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps)
 
   return containerRef
 }
@@ -119,7 +118,7 @@ interface ScoreRingProps {
 }
 
 export function ScoreRing({ score, label = '综合得分', className }: ScoreRingProps) {
-  const dark = isDark()
+  const dark = useDarkMode()
   const textColor = dark ? '#fafafa' : '#09090b'
   const mutedColor = dark ? '#a1a1aa' : '#71717a'
 
@@ -192,7 +191,7 @@ interface RadarChartProps {
 }
 
 export function RadarChart({ data, className }: RadarChartProps) {
-  const dark = isDark()
+  const dark = useDarkMode()
   const textColor = dark ? '#fafafa' : '#09090b'
   const mutedColor = dark ? '#a1a1aa' : '#71717a'
   const splitColor = dark ? '#27272a' : '#e4e4e7'
@@ -255,7 +254,7 @@ interface SkillHeatmapProps {
 const LEVEL_LABEL = ['未掌握', '了解', '熟练', '精通']
 
 export function SkillHeatmap({ data, className }: SkillHeatmapProps) {
-  const dark = isDark()
+  const dark = useDarkMode()
   const mutedColor = dark ? '#a1a1aa' : '#71717a'
 
   // 构造热力图数据：x 轴=技能，y 轴=[候选人, 岗位要求]，值=熟练度
@@ -341,7 +340,7 @@ const PRIORITY_COLOR: Record<string, string> = {
 }
 
 export function GanttChart({ data, className }: GanttChartProps) {
-  const dark = isDark()
+  const dark = useDarkMode()
   const textColor = dark ? '#fafafa' : '#09090b'
   const mutedColor = dark ? '#a1a1aa' : '#71717a'
 

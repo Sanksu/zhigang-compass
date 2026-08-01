@@ -19,7 +19,7 @@
 """
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urljoin
 
 from scrapy import Request, Spider
@@ -222,21 +222,17 @@ class EdxSpider(Spider):
         item["source"] = self.platform
         item["source_id"] = source_id
         item["source_url"] = source_url
-        item["crawled_at"] = datetime.now(timezone.utc).isoformat()
+        item["crawled_at"] = datetime.now(timezone(timedelta(hours=8))).isoformat()
         item["title"] = title
-        item["instructor"] = ""  # edX 列表页通常不显示讲师
         item["institution"] = institution
         item["platform"] = "edx"
         item["category"] = category
-        item["description"] = description
         item["rating"] = rating
         item["enrollment"] = 0  # edX 列表页通常不显示注册人数
         item["duration"] = duration
-        item["start_date"] = ""  # 自节奏课程无固定开课时间
         item["skills"] = []  # 列表页通常无技能标签
         item["raw_text"] = card.get()
         item["is_desensitized"] = False
-        item["compliance_note"] = ""
         return item
 
     def _make_playwright_request(self, url: str, meta: dict, callback=None):

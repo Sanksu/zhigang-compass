@@ -5,7 +5,7 @@
 
 import re
 from app.services.extraction.schemas import JDExtractionResult, SkillExtracted
-from app.services.extraction.dictionary import normalize_skill, SKILL_WHITELIST
+from app.services.extraction.dictionary import normalize_skill
 
 # 需去除的中文后缀（按长度降序排列，优先匹配长后缀）
 SUFFIXES = sorted([
@@ -42,7 +42,6 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     1. 别名归一化
     2. 后缀清洗
     3. 去重
-    4. 白名单标记
     """
     for skill in result.skills:
         skill.name = normalize_skill(skill.name)

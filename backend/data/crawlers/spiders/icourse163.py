@@ -20,13 +20,13 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from scrapy import Request, Spider
 from scrapy.http import Response
 
 from crawlers.items import CourseItem
-from crawlers.settings import RATE_LIMIT
+from crawlers.settings import RATE_LIMIT, SUBPROCESS_TIMEOUT
 
 
 # 默认搜索关键词（与项目 AI/大数据/全栈方向一致）
@@ -111,8 +111,17 @@ class Icourse163Spider(Spider):
                 self.logger.error(f"启动采集脚本失败: {e}")
                 continue
 
+            # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
+            try:
+                stdout, stderr_output = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout, stderr_output = proc.communicate()
+                self.logger.error(f"采集脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+                continue
+
             count = 0
-            for line in proc.stdout:
+            for line in stdout.splitlines():
                 line = line.strip()
                 if not line:
                     continue
@@ -125,8 +134,6 @@ class Icourse163Spider(Spider):
                 yield self._make_item(item_data)
                 count += 1
 
-            proc.wait()
-            stderr_output = proc.stderr.read() if proc.stderr else ""
             if proc.returncode != 0:
                 self.logger.error(
                     f"采集脚本退出码 {proc.returncode}, stderr: {stderr_output[-300:]}"
@@ -149,7 +156,7 @@ class Icourse163Spider(Spider):
         item["source"] = self.platform
         item["source_id"] = data.get("source_id", "")
         item["source_url"] = data.get("source_url", "")
-        item["crawled_at"] = datetime.now(timezone.utc).isoformat()
+        item["crawled_at"] = datetime.now(timezone(timedelta(hours=8))).isoformat()
         item["title"] = data.get("title", "")
         item["instructor"] = data.get("instructor", "")
         item["institution"] = data.get("institution", "")
@@ -163,5 +170,4 @@ class Icourse163Spider(Spider):
         item["skills"] = data.get("skills", [])
         item["raw_text"] = data.get("raw_text", "")
         item["is_desensitized"] = False
-        item["compliance_note"] = ""
         return item

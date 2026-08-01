@@ -8,12 +8,12 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| job_title | string | ✅ | 标准化岗位名（如"后端开发工程师"而非"后端"） |
-| required_skills | string[] | ✅ | 必备技能，归一化后（如"Python"而非"python3"） |
-| bonus_skills | string[] | ✅ | 加分技能 |
-| experience | object | ✅ | {min_years, max_years} |
-| education | string | ✅ | 学历要求（博士/硕士/本科/大专/不限） |
-| core_duties | string[] | ✅ | 核心职责（≤ 5 条） |
+| gold_title | string | ✅ | 标准化岗位名（如"后端开发工程师"而非"后端"） |
+| gold_skills | string[] | ✅ | 必备技能，归一化后（如"Python"而非"python3"） |
+| gold_bonus_skills | string[] | ✅ | 加分技能 |
+| gold_experience | object | ✅ | {min_years, max_years} |
+| gold_education | string | ✅ | 学历要求（博士/硕士/本科/大专/不限） |
+| gold_core_duties | string[] | ✅ | 核心职责（≤ 5 条） |
 
 ### 1.2 技能归一化规则
 

@@ -10,10 +10,10 @@
 - 从 DOM 提取 a[href*="position"] 卡片（飞书招聘标准结构）
 
 合规措施（S2+S3，project_memory 强制约束）：
-- 注明用于竞赛演示不商用（X-Collection-Purpose 头 + compliance_note 字段）
+- 注明用于竞赛演示不商用（X-Collection-Purpose 头）
 - 数据脱敏（CleaningPipeline 自动 PII 清洗：手机号/邮箱/身份证）
 - 限频 ≤100 req/h（settings.RATE_LIMIT.maimai = 5 req/min）
-- 夜间运行 23:00-06:00（start_requests 时间守卫强制）
+- 夜间运行 22:00-08:00（start_requests 时间守卫强制）
 
 DOM 结构（2026-07-29 实测）：
 - 岗位卡片: a[href*="/index/position/{id}/detail"]
@@ -230,7 +230,6 @@ def _map_job_to_item(job: dict, keyword: str) -> dict | None:
             "company_industry": "互联网",
             "experience_range": "",
             "raw": job,
-            "compliance_note": "用于竞赛演示不商用",
         }
     except Exception as e:
         log(f"⚠️ 字段映射失败: {e}")

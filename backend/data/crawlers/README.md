@@ -15,12 +15,11 @@ crawlers/
 ├── settings.py          # 业务配置（速率/代理/合规/重试，含课程/论文/社区）
 ├── items.py             # JobItem / CourseItem / PaperItem / CommunityTrendItem
 ├── pipelines.py         # CleaningPipeline + PostgresPipeline（按 Item 类型路由）
-├── middlewares.py       # UA轮换 + 代理池 + 指数退避
+├── middlewares.py       # UA轮换 + 代理池
 ├── base_spider.py       # BaseSpider 基类（关键字/城市遍历 + JobItem 构造）
 ├── setup_boss_chrome.py # 隔离 Chrome 启动脚本（CDP 9222，BOSS/Monster/Glassdoor/Maimai 共用）✅
 ├── boss_cdp_crawler.py  # BOSS 独立采集脚本（CDP + 内部 API）✅
-├── indeed_jobspy_crawler.py # Indeed 独立采集脚本（JobSpy + JSON-LD）✅
-├── linkedin_jobspy_crawler.py # LinkedIn 独立采集脚本（JobSpy + JSON-LD）✅
+├── jobspy_crawler.py            # JobSpy 独立采集脚本（Indeed/LinkedIn 共用）✅
 ├── monster_cdp_crawler.py   # Monster 独立采集脚本（CDP + XHR 拦截）✅
 ├── glassdoor_cdp_crawler.py # Glassdoor 独立采集脚本（CDP + SSR DOM 提取）✅
 ├── maimai_cdp_crawler.py    # 脉脉独立采集脚本（CDP + 飞书招聘 DOM 提取）✅
@@ -32,10 +31,10 @@ crawlers/
     ├── zhilian.py        # A 级 — 智联招聘 ✅
     ├── monster.py        # A 级 — Monster ✅（subprocess 调 monster_cdp_crawler.py）
     ├── lagou.py          # B 级 — 拉勾网 📦 已存档（subprocess 调 lagou_cdp_crawler.py，M2 后续开发）
-    ├── indeed.py         # B 级 — Indeed ✅（subprocess 调 indeed_jobspy_crawler.py，需代理）
+    ├── indeed.py         # B 级 — Indeed ✅（subprocess 调 jobspy_crawler.py，需代理）
     ├── glassdoor.py      # B 级 — Glassdoor ✅（subprocess 调 glassdoor_cdp_crawler.py）
     ├── maimai.py         # C 级 — 脉脉 ✅（subprocess 调 maimai_cdp_crawler.py，飞书招聘页）
-    ├── linkedin_public.py # C 级 — LinkedIn ✅（subprocess 调 linkedin_jobspy_crawler.py，需代理）
+    ├── linkedin_public.py # C 级 — LinkedIn ✅（subprocess 调 jobspy_crawler.py，需代理）
     ├── arxiv.py          # 论文 — arXiv ✅（官方 API + Atom XML，需代理）
     ├── github.py         # 社区 — GitHub Trending ✅（公开页 HTML，需代理）
     ├── stackoverflow.py  # 社区 — Stack Overflow ✅（标签页 HTML，需代理）
@@ -121,7 +120,7 @@ python-jobspy>=1.1.40   # Indeed/LinkedIn 采集（仅 *_jobspy_crawler.py 使�
 
 ## 合规说明
 
-- **脉脉**：注明用于竞赛演示不商用 + 数据脱敏 + 限频 ≤100 req/h + 夜间运行 23:00-06:00
+- **脉脉**：注明用于竞赛演示不商用 + 数据脱敏 + 限频 ≤100 req/h + 夜间运行 22:00-08:00
 - **国内平台**：单 IP 直连，合理频率
 - **国际平台**：代理池（PROXY_POOL，自动剔除失败代理 + 定时刷新）
 - **全平台**：遵守 robots.txt，仅采集公开搜索页，不绕过登录态
@@ -178,7 +177,7 @@ scrapy crawl glassdoor -a keywords=Python -a cities="New York" -o output/glassdo
 # LinkedIn 公开页（需代理）
 scrapy crawl linkedin_public -a keywords=Python -a cities="New York" -o output/linkedin_public.jsonl
 
-# 脉脉（仅夜间 23:00-06:00，CDP 浏览器保持开启，无需登录态）
+# 脉脉（仅夜间 22:00-08:00，CDP 浏览器保持开启，无需登录态）
 scrapy crawl maimai -a keywords=Python -o output/maimai.jsonl
 
 # ── 非招聘数据源（课程/论文/社区）──

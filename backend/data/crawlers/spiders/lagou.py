@@ -24,6 +24,7 @@ import subprocess
 import sys
 
 from crawlers.base_spider import BaseSpider
+from crawlers.settings import SUBPROCESS_TIMEOUT
 
 
 CRAWLER_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "lagou_cdp_crawler.py")
@@ -81,8 +82,16 @@ class LagouSpider(BaseSpider):
                 self.logger.error(f"启动 CDP 脚本失败: {e}")
                 continue
 
-            # 逐行读取 stdout（JSONL），实时 yield Item
-            for line in proc.stdout:
+            # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
+            try:
+                stdout, stderr_output = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout, stderr_output = proc.communicate()
+                self.logger.error(f"CDP 脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+                continue
+
+            for line in stdout.splitlines():
                 line = line.strip()
                 if not line:
                     continue
@@ -105,12 +114,8 @@ class LagouSpider(BaseSpider):
                     description=item_data.get("description", ""),
                     requirements=item_data.get("requirements", ""),
                     raw_text=item_data.get("raw_text", ""),
-                    job_type=item_data.get("job_type", ""),
                 )
 
-            # 等待进程结束，检查错误
-            proc.wait()
-            stderr_output = proc.stderr.read() if proc.stderr else ""
             if proc.returncode != 0:
                 self.logger.warning(f"CDP 脚本退出码 {proc.returncode}")
             if stderr_output:

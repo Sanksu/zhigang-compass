@@ -52,11 +52,11 @@ if _playwright_proxy:
     PLAYWRIGHT_LAUNCH_OPTIONS["proxy"] = {"server": _playwright_proxy}
 PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 60000  # 60s（SO/Coursera/edX 广告资源多，30s 易超时）
 
-# ── 中间件栈（UA 轮换 → 代理池 → 指数退避）──
+# ── 中间件栈（UA 轮换 → 代理池）──
+# 重试由 Scrapy 内置 RetryMiddleware（RETRY_TIMES / RETRY_HTTP_CODES）负责
 DOWNLOADER_MIDDLEWARES = {
     "crawlers.middlewares.UARotationMiddleware": 400,
     "crawlers.middlewares.ProxyPoolMiddleware": 410,
-    "crawlers.middlewares.ExponentialBackoffMiddleware": 420,
 }
 
 # ── 管道（清洗 → 入库）──

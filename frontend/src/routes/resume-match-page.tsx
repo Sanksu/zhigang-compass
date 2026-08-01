@@ -114,14 +114,10 @@ export function ResumeMatchPage() {
                 <>
                   <div className="size-10 rounded-full border-2 border-ink border-t-transparent animate-spin mb-4" />
                   <p className="text-sm text-ink-muted">LLM 解析中…</p>
-                  <p className="text-xs text-ink-faint font-mono mt-2">POST /api/v1/resume/parse</p>
                 </>
               ) : (
                 <>
                   <p className="text-sm text-ink-muted">推荐结果待简历上传后显示</p>
-                  <p className="text-xs text-ink-faint font-mono mt-2">
-                    POST /api/v1/match/recommend
-                  </p>
                 </>
               )}
             </CardContent>
@@ -249,7 +245,6 @@ export function ResumeMatchPage() {
               <CardContent className="flex flex-col items-center justify-center py-20 text-center">
                 <div className="size-8 rounded-full border-2 border-ink border-t-transparent animate-spin mb-3" />
                 <p className="text-sm text-ink-muted">加载比对详情…</p>
-                <p className="text-xs text-ink-faint font-mono mt-1">POST /api/v1/match/compare</p>
               </CardContent>
             </Card>
           )}

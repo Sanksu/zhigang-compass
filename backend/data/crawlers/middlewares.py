@@ -13,8 +13,6 @@ from crawlers.settings import (
     PROXY_POOL_API_URL,
     PROXY_POOL_API_KEY,
     PROXY_MAX_FAILURES,
-    BACKOFF_BASE,
-    BACKOFF_MAX,
 )
 
 
@@ -114,14 +112,3 @@ class ProxyPoolMiddleware:
                 if proxy in self._pool:
                     self._pool.remove(proxy)
                     spider.logger.warning(f"[ProxyPool] 剔除代理 {proxy}（连续失败 {PROXY_MAX_FAILURES} 次），剩余 {len(self._pool)} 个")
-
-
-class ExponentialBackoffMiddleware:
-    """指数退避重试。"""
-
-    def process_response(self, request, response, spider):
-        if response.status in (429, 503):
-            retries = request.meta.get("retry_times", 0)
-            delay = min(BACKOFF_BASE * (2 ** retries), BACKOFF_MAX)
-            time.sleep(delay)
-        return response

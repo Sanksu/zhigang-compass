@@ -102,8 +102,9 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_port: int = DEF
                     continue
 
             log("  等待 API 响应...")
-            deadline = asyncio.get_event_loop().time() + 20
-            while not captured_api_responses and asyncio.get_event_loop().time() < deadline:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 20
+            while not captured_api_responses and loop.time() < deadline:
                 await asyncio.sleep(0.5)
 
             if not captured_api_responses:
@@ -188,13 +189,50 @@ def _map_job_to_item(job: dict) -> dict:
                 addr.get("addressCountry", ""),
             ]))
 
-        # 薪资（enrichments.normalizedSalary）
-        salary_str = ""
+        # 描述（提前赋值，供下游 salary/experience/education 正则提取）
+        description = posting.get("description", "")
+        if isinstance(description, dict):
+            description = description.get("text", "") or json.dumps(description, ensure_ascii=False)
+
+        # enrichments（提前赋值，供下游 skills 提取）
         enrichments = job.get("enrichments", {}) or {}
-        norm_sal = enrichments.get("normalizedSalary", {})
-        if isinstance(norm_sal, dict):
-            currency = norm_sal.get("currencyCode", {}).get("name", "USD") if isinstance(norm_sal.get("currencyCode"), dict) else "USD"
-            # normalizedSalary 无具体金额，保留字段
+
+        # 薪资/经验/学历：Monster API 不返回结构化字段，从 description 正则提取
+        import re
+        description_text = str(description) if description else ""
+
+        salary_str = ""
+        if description_text:
+            m = re.search(r"\$([\d,]+)\s*(?:-\s*\$([\d,]+))?\s*(?:/yr|/year|per year|annually)", description_text, re.IGNORECASE)
+            if m:
+                if m.group(2):
+                    salary_str = f"${m.group(1)}-${m.group(2)} /year"
+                else:
+                    salary_str = f"${m.group(1)} /year"
+
+        # 经验要求：从 description 提取 "X+ years" 或 "X to Y years"
+        experience_str = ""
+        if description_text:
+            m = re.search(r"(\d+)\+?\s*(?:to\s*(\d+)\+?\s*)?Years?", description_text, re.IGNORECASE)
+            if m:
+                if m.group(2):
+                    experience_str = f"{m.group(1)}-{m.group(2)} Years"
+                else:
+                    experience_str = f"{m.group(1)}+ Years"
+
+        # 学历要求：从 description 提取关键词
+        education_str = ""
+        if description_text:
+            desc_lower = description_text.lower()
+            for keyword, label in [
+                ("phd", "PhD"),
+                ("master", "Master"),
+                ("bachelor", "Bachelor"),
+                ("degree", "Degree"),
+            ]:
+                if keyword in desc_lower:
+                    education_str = label
+                    break
 
         # 技能（enrichments.skills.scoredExtractions）
         skills_list = []
@@ -219,11 +257,6 @@ def _map_job_to_item(job: dict) -> dict:
             tags.append(str(job["jobType"]))
         tags.extend(skills_list)
 
-        # 描述
-        description = posting.get("description", "")
-        if isinstance(description, dict):
-            description = description.get("text", "") or json.dumps(description, ensure_ascii=False)
-
         # URL
         url = job.get("canonicalUrl", "") or posting.get("url", "") or f"https://www.monster.com/job/{job_id}"
         apply_url = job.get("apply", {}).get("applyUrl", "") if isinstance(job.get("apply"), dict) else ""
@@ -246,7 +279,8 @@ def _map_job_to_item(job: dict) -> dict:
             "skills": skills_list,
             "date_posted": str(date_posted),
             "company_industry": "",
-            "experience_range": "",
+            "experience_range": experience_str,
+            "education": education_str,
             "raw": job,
         }
     except Exception as e:

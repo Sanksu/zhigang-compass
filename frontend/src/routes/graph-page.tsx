@@ -26,6 +26,16 @@ const VIEW_DESC: Record<GraphViewType, string> = {
   positionCenter: '以「前端开发工程师」为中心 2-hop 展开',
 }
 
+/** WebGL2 可用性检测 — 不可用时 3D 按钮禁用，保持 2D 模式（设计文档 §6.3） */
+function isWebGL2Available(): boolean {
+  try {
+    const canvas = document.createElement('canvas')
+    return !!canvas.getContext('webgl2')
+  } catch {
+    return false
+  }
+}
+
 /**
  * 能力图谱页 — 设计文档 §10.3
  *
@@ -40,6 +50,8 @@ export function GraphPage() {
   const [selected, setSelected] = useState<NodeDetail | null>(null)
 
   const data = useMemo(() => getMockGraphData(view), [view])
+  // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
+  const webgl2Available = useMemo(() => isWebGL2Available(), [])
 
   // 选中节点的关联统计（从当前视图数据中实时计算）
   const detailStats = useMemo(() => {
@@ -76,6 +88,8 @@ export function GraphPage() {
               size="sm"
               variant={mode === '3d' ? 'default' : 'ghost'}
               onClick={() => setMode('3d')}
+              disabled={!webgl2Available}
+              title={!webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : undefined}
               className="h-7 px-2.5 text-xs"
             >
               3D
@@ -137,9 +151,11 @@ export function GraphPage() {
             <p className="text-[11px] text-ink-muted bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
               {VIEW_DESC[view]}
             </p>
-            <p className="text-[10px] text-ink-faint bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border font-mono">
-              mock · 后端就绪后切真实 API
-            </p>
+            {!webgl2Available && (
+              <p className="text-[10px] text-ink-faint bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
+                WebGL2 不可用，已降级 2D 模式
+              </p>
+            )}
           </div>
         </Card>
 
