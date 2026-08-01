@@ -8,12 +8,31 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 
 from app.workers.tasks import (
+    _build_jd_text,
     _experience_years,
     _extraction_of,
     _publish_date,
     _skill_first_seen_days,
     _skills_of,
 )
+
+
+class TestBuildJdText:
+    def test_body_fields_present_concatenates(self):
+        snap = {"title": "Python开发", "description": "负责后端开发", "requirements": "熟悉Django"}
+        text = _build_jd_text(snap, "RAW")
+        assert "负责后端开发" in text
+        assert "熟悉Django" in text
+        assert "RAW" not in text
+
+    def test_body_missing_falls_back_to_raw_text(self):
+        # 黄金集等数据正文字段缺失，正文只存在 raw_text
+        snap = {"title": "Python开发"}
+        assert _build_jd_text(snap, "RAW_FULL_TEXT") == "RAW_FULL_TEXT"
+
+    def test_body_blank_falls_back_to_raw_text(self):
+        snap = {"title": "Python开发", "description": "  ", "requirements": ""}
+        assert _build_jd_text(snap, "RAW") == "RAW"
 
 
 class TestExtractionOf:
