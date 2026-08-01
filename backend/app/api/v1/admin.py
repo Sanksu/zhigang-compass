@@ -6,7 +6,9 @@
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import re
 
+import yaml
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -222,3 +224,137 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
 async def positions_pending():
     """待审核岗位列表。依赖 LLM 抽取 + 发现检测器（AL-M3/M4 交付），当前为空。"""
     return ok(data={"items": [], "total": 0})
+
+
+# ============================================================
+# LLM provider 配置（持久化到 llm_providers.yaml）
+# ============================================================
+
+_LLM_CONFIG_PATH = Path(__file__).resolve().parents[3] / "configs" / "llm_providers.yaml"
+
+
+def mask_secret(value: str) -> str:
+    """密钥打码：保留后 4 位，其余掩码；空值返回空串。"""
+    value = (value or "").strip()
+    if not value:
+        return ""
+    if len(value) <= 4:
+        return "*" * len(value)
+    return "*" * (len(value) - 4) + value[-4:]
+
+
+def mask_providers(providers: list[dict]) -> list[dict]:
+    """对 provider 列表的 api_key 打码（不修改入参）。"""
+    return [{**p, "api_key": mask_secret(str(p.get("api_key") or ""))} for p in providers]
+
+
+def validate_providers(providers: list) -> str | None:
+    """校验 provider 列表，返回错误信息或 None。
+
+    约束：非空列表；name 唯一且为安全字符；base_url 为 http(s) 地址；
+    model 非空；priority 正整数且唯一；enabled 布尔。
+    """
+    if not isinstance(providers, list) or not providers:
+        return "providers 必须是非空列表"
+    seen_names: set[str] = set()
+    seen_priorities: set[int] = set()
+    for i, p in enumerate(providers):
+        if not isinstance(p, dict):
+            return f"第 {i + 1} 个 provider 必须是对象"
+        name = (p.get("name") or "").strip()
+        base_url = (p.get("base_url") or "").strip()
+        model = (p.get("model") or "").strip()
+        if not name:
+            return f"第 {i + 1} 个 provider 缺少 name"
+        if not re.match(r"^[A-Za-z0-9_-]+$", name):
+            return f"name '{name}' 只能包含字母/数字/下划线/短横线"
+        if name in seen_names:
+            return f"name '{name}' 重复"
+        seen_names.add(name)
+        if not base_url.startswith(("http://", "https://")):
+            return f"provider '{name}' 的 base_url 必须以 http(s):// 开头"
+        if not model:
+            return f"provider '{name}' 缺少 model"
+        priority = p.get("priority")
+        if not isinstance(priority, int) or priority < 1:
+            return f"provider '{name}' 的 priority 必须为正整数"
+        if priority in seen_priorities:
+            return f"priority {priority} 重复（provider '{name}'）"
+        seen_priorities.add(priority)
+        if not isinstance(p.get("enabled", True), bool):
+            return f"provider '{name}' 的 enabled 必须是布尔值"
+    return None
+
+
+def load_llm_config(path: Path) -> dict:
+    """读取 yaml 配置。"""
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def save_llm_config(path: Path, providers: list) -> dict:
+    """校验并写回 yaml，返回写回后的完整配置。
+
+    api_key 为空白或含掩码（*）时保持原值，明文才更新；
+    写回保留原文件头部注释（到顶层键 providers 之前）。
+    """
+    err = validate_providers(providers)
+    if err:
+        raise ValueError(err)
+
+    text = Path(path).read_text(encoding="utf-8")
+    data = yaml.safe_load(text) or {}
+    old = {
+        p["name"]: p for p in data.get("providers", [])
+        if isinstance(p, dict) and p.get("name")
+    }
+
+    clean = []
+    for p in providers:
+        name = (p.get("name") or "").strip()
+        api_key = (p.get("api_key") or "").strip()
+        if not api_key or "*" in api_key:
+            api_key = (old.get(name) or {}).get("api_key", "")
+        clean.append({
+            "name": name,
+            "priority": int(p["priority"]),
+            "base_url": (p.get("base_url") or "").strip(),
+            "api_key": api_key,
+            "model": (p.get("model") or "").strip(),
+            "supports_function_calling": bool(p.get("supports_function_calling", True)),
+            "enabled": bool(p.get("enabled", True)),
+        })
+    data["providers"] = clean
+
+    # 保留原文件头部注释块（到顶层键 providers: 为止），rest 由 dump 生成
+    parts = re.split(r"^providers:\s*$", text, maxsplit=1, flags=re.M)
+    header = parts[0] if len(parts) == 2 else ""
+    body = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    Path(path).write_text(header + body, encoding="utf-8")
+
+    return yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+
+
+@router.get("/llm-config")
+async def get_llm_config():
+    """读取当前生效 LLM provider 配置（api_key 打码，不明文回显）。"""
+    try:
+        cfg = load_llm_config(_LLM_CONFIG_PATH)
+    except (OSError, yaml.YAMLError):
+        return error(500, "LLM 配置读取失败")
+    cfg["providers"] = mask_providers(cfg.get("providers", []))
+    return ok(data=cfg)
+
+
+@router.put("/llm-config")
+async def update_llm_config(req: dict):
+    """保存 LLM provider 配置（持久化到 yaml，api_key 留空/掩码保持原值）。"""
+    providers = req.get("providers")
+    try:
+        saved = save_llm_config(_LLM_CONFIG_PATH, providers)
+    except ValueError as e:
+        return error(400, str(e))
+    except (OSError, yaml.YAMLError):
+        return error(500, "LLM 配置保存失败")
+    saved["providers"] = mask_providers(saved.get("providers", []))
+    return ok(data=saved)
