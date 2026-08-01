@@ -4,31 +4,32 @@
 # 设计文档 §6.5 LLM API 降级策略（单一事实源）
 # 由 LLMProviderChain 读取（M3 实现，见 app/services/extraction/llm_provider.py）
 #
-# 主讯飞星火 → 备 DeepSeek → 三 Qwen Plus，均通过 OpenAI 兼容 API 接入
+# 多 provider 同步重试链：provider 组合与优先级为运行时可配置项（不限定厂商），
+# 下表为当前生效默认组合（DeepSeek → 星火 → Qwen）；
+# 后续支持管理员经管理后台前端页面修改（M4，见设计文档 §6.5）
 # 密钥一律走环境变量（${VAR} 占位），禁止硬编码（AGENTS.md 铁律）
 # base_url / model 提供默认值，可被 .env 中对应环境变量覆盖
 # ============================================================
 
 # ---------- Provider 列表（按优先级升序排序） ----------
 providers:
-  - name: spark            # 主：讯飞星火
+  - name: deepseek        # 主：DeepSeek
     priority: 1
-    base_url: https://spark-api.xf-yun.com/v1
+    base_url: https://api.deepseek.com/v1
     api_key: ${LLM_PRIMARY_API_KEY}
-    # 设计文档 §6.5 指定 v4.0；.env.example 旧值为 spark-v2，以设计文档为准
+    model: deepseek-v4-flash
+    supports_function_calling: true
+    enabled: true
+
+  - name: spark           # 备：讯飞星火
+    priority: 2
+    base_url: https://spark-api.xf-yun.com/v1
+    api_key: ${LLM_SECONDARY_API_KEY}
     model: v4.0
     supports_function_calling: true
     enabled: true
 
-  - name: deepseek         # 备：DeepSeek
-    priority: 2
-    base_url: https://api.deepseek.com/v1
-    api_key: ${LLM_SECONDARY_API_KEY}
-    model: deepseek-chat
-    supports_function_calling: true
-    enabled: true
-
-  - name: qwen             # 三：Qwen Plus
+  - name: qwen            # 三：Qwen Plus
     priority: 3
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     api_key: ${LLM_TERTIARY_API_KEY}

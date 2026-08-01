@@ -781,6 +781,50 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
 
+  /api/v1/admin/llm-config:
+    get:
+      tags: [admin]
+      summary: 读取 LLM provider 配置（api_key 打码，admin only）
+      responses:
+        '200':
+          description: 当前生效配置（providers/routing/failover 等，api_key 已打码）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+    put:
+      tags: [admin]
+      summary: 保存 LLM provider 配置（持久化到 llm_providers.yaml）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [providers]
+              properties:
+                providers:
+                  type: array
+                  description: provider 列表，api_key 留空或 **** 表示保持原值
+                  items:
+                    type: object
+                    required: [name, base_url, model, priority, enabled]
+                    properties:
+                      name: { type: string, description: provider 标识（英文短横线） }
+                      base_url: { type: string, format: uri }
+                      api_key: { type: string, description: "留空或 **** 表示保持原值；明文才更新" }
+                      model: { type: string }
+                      priority: { type: integer, minimum: 1, description: 数字越小优先级越高，列表内唯一 }
+                      enabled: { type: boolean }
+                      supports_function_calling: { type: boolean }
+      responses:
+        '200':
+          description: 保存成功，返回打码后的最新配置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
   /api/v1/admin/positions/pending:
     get:
       tags: [admin]

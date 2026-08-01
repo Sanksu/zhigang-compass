@@ -24,7 +24,8 @@ class LLMProvider:
     """
 
     def __init__(self):
-        self._model = "spark-v2"
+        # 骨架占位模型名（与 configs/llm_providers.yaml 主 provider 对齐，M3 由 yaml 覆盖）
+        self._model = "deepseek-v4-flash"
 
     def extract_structured(
         self,
