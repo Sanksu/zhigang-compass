@@ -198,10 +198,10 @@ class TestCII:
         assert corrected.nice_skills[0].necessity == Necessity.NICE
 
     def test_protects_core_skill_from_demotion(self):
-        """精通且跨 ≥30 源的核心技能不降级。"""
+        """专家熟练度且跨 ≥30 源的核心技能不降级。"""
         musts = [_req(f"sk{i}", Necessity.MUST, weight=0.1) for i in range(1, 9)]
         musts.append(
-            _req("core", Necessity.MUST, weight=0.1, proficiency="精通", source_count=40)
+            _req("core", Necessity.MUST, weight=0.1, proficiency="专家", source_count=40)
         )
         pos = _position("p1", musts=musts)
         corrected = apply_cii_correction(pos)

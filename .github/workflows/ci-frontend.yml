@@ -18,7 +18,7 @@ defaults:
 
 jobs:
   quality:
-    name: Lint + Typecheck + Build
+    name: Lint + Typecheck + Test + Build
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -47,6 +47,9 @@ jobs:
 
       - name: Lint
         run: pnpm lint
+
+      - name: Test
+        run: pnpm test
 
       - name: Build
         run: pnpm build

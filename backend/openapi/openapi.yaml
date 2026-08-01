@@ -6,6 +6,9 @@ info:
     多源异构驱动的岗位能力动态演化与人岗匹配系统 API 契约。
     本文件是前后端并行开发的单一事实源（AGENTS.md 铁律一）。
     前端通过 `openapi-typescript` 生成类型，不得自行定义与后端不一致的类型。
+    认证方案：Bearer 双 Token（access 30min / refresh 7d），不再使用 Cookie。
+    标注规则：summary 前缀 [M3]/[M4] 的端点属对应里程碑规划，
+    后端尚未实现，不得在并行开发中作为已交付功能消费。
   contact:
     name: 智岗罗盘团队
     url: https://github.com/zhigang-compass
@@ -18,7 +21,6 @@ servers:
 
 security:
   - BearerAuth: []
-  - CookieAuth: []
 
 tags:
   - name: auth
@@ -55,19 +57,20 @@ paths:
                 password: { type: string, format: password }
       responses:
         '200':
-          description: 登录成功
-          headers:
-            Set-Cookie:
-              description: access_token (httpOnly, 30min)
-              schema: { type: string }
+          description: 登录成功，返回双 Token（Bearer 方案，前端内存持有）
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
                 properties:
                   data:
+                    type: object
+                    required: [access_token, refresh_token, token_type, expires_in]
                     properties:
+                      access_token: { type: string }
                       refresh_token: { type: string }
+                      token_type: { type: string }
+                      expires_in: { type: integer }
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -98,8 +101,17 @@ paths:
   /api/v1/auth/logout:
     post:
       tags: [auth]
-      security: [{ BearerAuth: [] }]
-      summary: 登出，refresh_token 加入黑名单
+      security: []
+      summary: 登出，refresh_token 加入黑名单（body 传 refresh_token）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
       responses:
         '200':
           description: 登出成功
@@ -127,22 +139,21 @@ paths:
   /api/v1/auth/register:
     post:
       tags: [auth]
-      security: [{ BearerAuth: [] }]
-      summary: 管理员创建用户（admin only）
+      security: []
+      summary: 注册新用户（默认 guest 角色；管理员建号走 /admin/users）
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [username, password, role]
+              required: [username, password]
               properties:
                 username: { type: string }
                 password: { type: string, format: password }
-                role: { type: string, enum: [admin, user, guest] }
       responses:
-        '201':
-          description: 用户创建成功
+        '200':
+          description: 注册成功
           content:
             application/json:
               schema:
@@ -154,7 +165,7 @@ paths:
   /api/v1/graph/position/{id}:
     get:
       tags: [graph]
-      summary: 岗位节点详情
+      summary: "[M4] 岗位节点详情"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -170,7 +181,7 @@ paths:
   /api/v1/graph/position/{id}/skills:
     get:
       tags: [graph]
-      summary: 岗位技能列表
+      summary: "[M4] 岗位技能列表"
       parameters:
         - $ref: '#/components/parameters/Id'
         - name: necessity
@@ -187,7 +198,7 @@ paths:
   /api/v1/graph/skill/{id}:
     get:
       tags: [graph]
-      summary: 技能节点详情
+      summary: "[M4] 技能节点详情"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -201,7 +212,7 @@ paths:
   /api/v1/graph/skill/{id}/evidence:
     get:
       tags: [graph]
-      summary: 技能证据列表
+      summary: "[M4] 技能证据列表"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -215,7 +226,7 @@ paths:
   /api/v1/graph/skill/{id}/prerequisites:
     get:
       tags: [graph]
-      summary: 先修技能链
+      summary: "[M4] 先修技能链"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -229,7 +240,7 @@ paths:
   /api/v1/graph/skill/{id}/courses:
     get:
       tags: [graph]
-      summary: 学习课程列表
+      summary: "[M4] 学习课程列表"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -257,7 +268,7 @@ paths:
   /api/v1/graph/skill/similar:
     get:
       tags: [graph]
-      summary: 相似技能检索（pgvector）
+      summary: "[M4] 相似技能检索（pgvector）"
       parameters:
         - name: skill_id
           in: query
@@ -306,7 +317,7 @@ paths:
   /api/v1/graph/view/{view_type}:
     get:
       tags: [graph]
-      summary: 视图切换（后端过滤）
+      summary: "[M4] 视图切换（后端过滤）"
       parameters:
         - name: view_type
           in: path
@@ -409,7 +420,7 @@ paths:
   /api/v1/resume/task/{task_id}/stream:
     get:
       tags: [resume]
-      summary: SSE 推送任务进度
+      summary: "[M4] SSE 推送任务进度"
       parameters:
         - name: task_id
           in: path
@@ -426,7 +437,7 @@ paths:
   /api/v1/resume/{resume_id}:
     get:
       tags: [resume]
-      summary: 获取解析结果
+      summary: "[M4] 获取解析结果"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -468,7 +479,7 @@ paths:
   /api/v1/match/recommend:
     post:
       tags: [match]
-      summary: 自动推荐 Top-N（异步，含 CII 通胀修正）
+      summary: 自动推荐 Top-N（同步返回，含 CII 通胀修正）
       requestBody:
         required: true
         content:
@@ -480,8 +491,8 @@ paths:
                 resume_id: { type: string }
                 top_n: { type: integer, default: 10, maximum: 50 }
       responses:
-        '202':
-          description: 已接受，异步处理中
+        '200':
+          description: 推荐结果列表
           content:
             application/json:
               schema:
@@ -512,7 +523,7 @@ paths:
   /api/v1/match/task/{task_id}:
     get:
       tags: [match]
-      summary: 查询推荐任务状态
+      summary: "[M4] 查询推荐任务状态"
       parameters:
         - name: task_id
           in: path
@@ -529,7 +540,7 @@ paths:
   /api/v1/match/result/{match_id}:
     get:
       tags: [match]
-      summary: 获取匹配结果
+      summary: "[M4] 获取匹配结果"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -543,7 +554,7 @@ paths:
   /api/v1/match/result/{match_id}/gap:
     get:
       tags: [match]
-      summary: 获取差距分析
+      summary: "[M4] 获取差距分析"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -557,7 +568,7 @@ paths:
   /api/v1/match/result/{match_id}/path:
     get:
       tags: [match]
-      summary: 获取学习路径
+      summary: "[M4] 获取学习路径"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -571,7 +582,7 @@ paths:
   /api/v1/match/feedback:
     post:
       tags: [match]
-      summary: 提交匹配反馈
+      summary: "[M4] 提交匹配反馈"
       requestBody:
         required: true
         content:
@@ -611,7 +622,7 @@ paths:
   /api/v1/evolution/versions/{version_id}:
     get:
       tags: [evolution]
-      summary: 获取版本详情
+      summary: "[M4] 获取版本详情"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -666,7 +677,7 @@ paths:
   /api/v1/evolution/position/{id}/evolution:
     get:
       tags: [evolution]
-      summary: 岗位演化历史
+      summary: "[M4] 岗位演化历史"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -750,7 +761,7 @@ paths:
   /api/v1/admin/crawl/trigger:
     post:
       tags: [admin]
-      summary: 触发爬取任务
+      summary: "[M4] 触发爬取任务"
       requestBody:
         required: true
         content:
@@ -840,7 +851,7 @@ paths:
   /api/v1/admin/positions/{id}/review:
     put:
       tags: [admin]
-      summary: 审核岗位（批准/驳回/编辑）
+      summary: "[M4] 审核岗位（批准/驳回/编辑）"
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -864,7 +875,7 @@ paths:
   /api/v1/admin/evolution/pending:
     get:
       tags: [admin]
-      summary: 待审核演化变更
+      summary: "[M4] 待审核演化变更"
       responses:
         '200':
           description: 待审核列表
@@ -876,7 +887,7 @@ paths:
   /api/v1/admin/evolution/{id}/review:
     put:
       tags: [admin]
-      summary: 审核演化变更
+      summary: "[M4] 审核演化变更"
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
