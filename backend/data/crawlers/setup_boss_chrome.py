@@ -184,18 +184,27 @@ def check_login(cdp_url: str) -> bool:
 
 
 def stop_chrome(cdp_url: str):
-    """关闭专用 Chrome（按 CDP 端点匹配）。"""
+    """关闭专用 Chrome（仅本脚本启动的隔离 Chrome，不误杀用户其他浏览器）。
+
+    优先经 CDP 关闭；失败时按隔离 profile 目录匹配进程（精确匹配，而非 taskkill 全部 chrome.exe）。
+    """
     import urllib.request
-    import json
 
     try:
         with urllib.request.urlopen(f"{cdp_url}/json/close") as resp:
             print("Chrome CDP 已关闭")
     except Exception:
-        # /json/close 可能不支持，用 taskkill
         if sys.platform == "win32":
-            os.system(f"taskkill /F /IM chrome.exe /FI \"WINDOWTITLE eq BOSS*\"")
-        print(f"如需手动关闭，请在任务管理器中结束 Chrome 进程（CDP 端点 {cdp_url}）")
+            profile_str = str(BOSS_CHROME_PROFILE_DIR).replace("\\", "\\\\")
+            ps = (
+                f"Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" "
+                f"| Where-Object {{ $_.CommandLine -like '*{profile_str}*' }} "
+                f"| ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
+            )
+            os.system(f'powershell -NoProfile -Command "{ps}"')
+        else:
+            os.system(f"pkill -f '{BOSS_CHROME_PROFILE_DIR}'")
+        print(f"已关闭隔离 Chrome（profile: {BOSS_CHROME_PROFILE_DIR}）")
 
 
 def main():

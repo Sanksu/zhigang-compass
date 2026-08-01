@@ -24,6 +24,9 @@ from app.core.config import settings
 _CRAWLERS_DIR = Path(__file__).resolve().parents[2] / "data" / "crawlers"
 _OUTPUT_DIR = _CRAWLERS_DIR / "output"
 
+# 显式消费 -a max_results 参数的 spider（其余源由各自默认采集量控制）
+MAX_RESULTS_SUPPORTED = {"arxiv"}
+
 
 # ============================================================
 # ETL 阶段任务
@@ -56,8 +59,12 @@ async def crawl_platform(
         cmd.extend(["-a", f"keywords={','.join(keywords)}"])
     if cities:
         cmd.extend(["-a", f"cities={','.join(cities)}"])
+    # max_results 仅 arxiv 等显式消费该参数的 spider 生效，其余忽略并提示（避免静默失效）
     if max_results:
-        cmd.extend(["-a", f"max_results={max_results}"])
+        if spider_name in MAX_RESULTS_SUPPORTED:
+            cmd.extend(["-a", f"max_results={max_results}"])
+        else:
+            print(f"[crawl_platform] spider={spider_name} 不支持 max_results，参数已忽略", flush=True)
 
     # cwd 设到 crawlers/ 让 scrapy.cfg 生效
     proc = await asyncio.create_subprocess_exec(
@@ -186,42 +193,21 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
 # ============================================================
 
 async def resume_parse(ctx: dict, file_path: str) -> dict:
-    """简历解析异步任务（M4 实现）。"""
-    try:
-        # TODO: 对接 pypdf / python-docx / OCR 管线
-        # 1. 读取文件
-        # 2. PII 脱敏
-        # 3. LLM 抽取结构化信息
-        # 4. 写入 resume_cache 表
-        return {"status": "success", "msg": "解析完成", "file_path": file_path}
-    except Exception as e:
-        return {"status": "failed", "msg": str(e), "file_path": file_path}
+    """简历解析异步任务（M4 实现，当前未交付）。
+
+    未实现时显式抛错（任务标记 failed），不做假成功返回。
+    """
+    raise NotImplementedError("resume_parse 待 M4 实现（pypdf/python-docx/OCR + PII 脱敏 + LLM 抽取）")
 
 
 async def batch_extract(ctx: dict, jd_ids: list[str]) -> dict:
-    """LLM 批量实体抽取异步任务（M3 实现）。"""
-    try:
-        # TODO: 对接 LLM provider + 抽取管线
-        # 1. 从 jd_raw 表读取 snapshot
-        # 2. 调用 LLM 抽取（技能/岗位/证据）
-        # 3. 写入 Neo4j
-        total = len(jd_ids)
-        return {"status": "success", "msg": f"批量抽取完成，共 {total} 条", "count": total}
-    except Exception as e:
-        return {"status": "failed", "msg": str(e), "count": 0}
+    """LLM 批量实体抽取异步任务（M3 实现，依赖 AL-M3-01，当前未交付）。"""
+    raise NotImplementedError("batch_extract 待 AL-M3-01 LLM 抽取上线后实现")
 
 
 async def evolution_compute(ctx: dict, version: str) -> dict:
-    """每日演化计算异步任务（M3 实现）。"""
-    try:
-        # TODO: 对接演化检测管线
-        # 1. 对比当前版本与上一版本快照
-        # 2. 计算技能频次变化
-        # 3. 标记新兴/衰退技能
-        # 4. 写入演化快照
-        return {"status": "success", "msg": f"演化计算完成：版本 {version}", "version": version}
-    except Exception as e:
-        return {"status": "failed", "msg": str(e), "version": version}
+    """每日演化计算异步任务（M3 实现，当前未交付）。"""
+    raise NotImplementedError("evolution_compute 待 AL-M3 演化管线接入后实现")
 
 
 # ============================================================

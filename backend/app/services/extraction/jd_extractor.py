@@ -15,7 +15,7 @@ from typing import Optional
 
 from app.services.extraction.schemas import JDExtractionResult
 from app.services.extraction.llm_provider import LLMProviderChain, LLMExtractionError
-from app.services.extraction.prompts import SYSTEM_PROMPT, TASK_TEMPLATE
+from app.services.extraction.prompts import FEW_SHOT_EXAMPLES, SYSTEM_PROMPT, TASK_TEMPLATE
 from app.services.extraction.post_processor import post_process
 
 
@@ -36,7 +36,11 @@ class JDExtractor:
         # LLM 抽取（无 api_key / 全 provider 失败时降级规则抽取）
         try:
             prompt = TASK_TEMPLATE.format(jd_text=jd_text)
-            result = self._llm.extract_structured(prompt, JDExtractionResult)
+            # 分层 Prompt：system 角色（SYSTEM_PROMPT）+ Few-Shot + 任务输入（§6.2）
+            system_prompt = SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES
+            result = self._llm.extract_structured(
+                prompt, JDExtractionResult, system_prompt=system_prompt
+            )
         except LLMExtractionError:
             result = self._rule_based_extract(jd_text)
 

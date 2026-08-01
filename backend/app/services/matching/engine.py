@@ -19,7 +19,7 @@ from app.services.matching.weights import load_weights
 # CII 通胀修正阈值与比例（设计文档 9.4 节）
 CII_MUST_THRESHOLD = 7          # 必备技能数超过该值才触发降级
 CII_DEMOTE_RATIO = 0.2          # 降级最低权重的 20%
-CII_PROTECT_PROFICIENCY = "精通"  # 高熟练度核心技能受保护
+CII_PROTECT_PROFICIENCY = "专家"  # 高熟练度核心技能受保护（对齐 schemas 熟练度枚举）
 CII_PROTECT_SOURCE_COUNT = 30   # 跨 ≥30 源视为核心技能
 
 # 时效衰减分段（设计文档 9.4 节，基于 LinkedIn IT 技能半衰期估算）

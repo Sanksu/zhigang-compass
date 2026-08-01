@@ -51,8 +51,17 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
 
     result.skills = dedup_skills(result.skills)
 
-    # 对 requirements 也执行归一化
+    # requirements 与 skills 使用同一清洗规则（避免非标准技能名入图），
+    # 并按 (技能, 必要性) 去重，与 skills 去重口径一致
+    cleaned_reqs = []
+    seen: set[tuple[str, str]] = set()
     for req in result.requirements:
-        req.skill_name = normalize_skill(req.skill_name)
+        req.skill_name = clean_skill_name(normalize_skill(req.skill_name))
+        key = (req.skill_name.lower(), req.necessity)
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned_reqs.append(req)
+    result.requirements = cleaned_reqs
 
     return result

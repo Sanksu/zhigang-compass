@@ -84,11 +84,18 @@ class LLMProviderChain:
         prompt: str,
         response_model: Type[T],
         max_retries: int = VALIDATION_RETRIES,
+        system_prompt: Optional[str] = None,
     ) -> T:
-        """抽取接口（jd_extractor 兼容）：走异步语义的重试链。"""
-        return self.call_with_fallback(prompt, response_model, max_retries=max_retries)
+        """抽取接口（jd_extractor 兼容）：走异步语义的重试链。
 
-    def call_sync(self, prompt: str, response_model: Type[T]) -> T:
+        Args:
+            system_prompt: 系统角色提示词（分层 Prompt，§6.2 设计）
+        """
+        return self.call_with_fallback(
+            prompt, response_model, max_retries=max_retries, system_prompt=system_prompt
+        )
+
+    def call_sync(self, prompt: str, response_model: Type[T], system_prompt: Optional[str] = None) -> T:
         """同步路由：仅尝试优先级最高的 provider，超时即抛，不重试、不切换。
 
         供图谱查询/诊断报告等实时路径使用，调用方捕获 `LLMTimeoutError` 返回 503。
@@ -96,7 +103,8 @@ class LLMProviderChain:
         if not self._providers:
             raise LLMConfigurationError("未配置可用 provider（无 api_key 或全部禁用）")
         return self._call_provider(
-            self._providers[0], prompt, response_model, max_retries=0, timeout=SYNC_TIMEOUT_SECONDS
+            self._providers[0], prompt, response_model,
+            max_retries=0, timeout=SYNC_TIMEOUT_SECONDS, system_prompt=system_prompt,
         )
 
     def call_with_fallback(
@@ -104,25 +112,35 @@ class LLMProviderChain:
         prompt: str,
         response_model: Type[T],
         max_retries: int = VALIDATION_RETRIES,
+        system_prompt: Optional[str] = None,
     ) -> T:
-        """异步/批量路由：按优先级依次尝试，单 provider 超时切下一个。"""
+        """异步/批量路由：按优先级依次尝试，任一失败（超时/限流/5xx/连接/校验）切下一个。"""
         if not self._providers:
             raise LLMConfigurationError("未配置可用 provider（无 api_key 或全部禁用）")
         failures = []
         for provider in self._providers:
             try:
                 return self._call_provider(
-                    provider, prompt, response_model, max_retries, ASYNC_TIMEOUT_SECONDS
+                    provider, prompt, response_model, max_retries,
+                    ASYNC_TIMEOUT_SECONDS, system_prompt,
                 )
-            except LLMConfigurationError as e:
-                failures.append(str(e))
-                continue
-            except LLMTimeoutError as e:
+            except LLMExtractionError as e:
+                # 捕获父类：429/5xx/连接错误均包装为 LLMExtractionError，
+                # 任一失败都继续尝试下一个 provider（§6.5 重试链语义）
                 failures.append(str(e))
                 continue
         raise LLMExtractionError("所有 provider 均失败: " + " | ".join(failures))
 
     # ---- 内部 ----
+
+    @staticmethod
+    def _build_messages(prompt: str, system_prompt: Optional[str]) -> list[dict]:
+        """分层 Prompt（§6.2）：可选 system 角色 + user 任务输入。"""
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        return messages
 
     def _call_provider(
         self,
@@ -131,6 +149,7 @@ class LLMProviderChain:
         response_model: Type[T],
         max_retries: int,
         timeout: int,
+        system_prompt: Optional[str] = None,
     ) -> T:
         """调用单个 provider 的结构化抽取（instructor 强校验）。
 
@@ -162,7 +181,7 @@ class LLMProviderChain:
             return client.chat.completions.create(
                 model=provider["model"],
                 response_model=response_model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=self._build_messages(prompt, system_prompt),
                 temperature=self._temperature,
                 max_retries=max_retries,
             )
@@ -170,7 +189,5 @@ class LLMProviderChain:
             raise LLMTimeoutError(f"provider '{provider['name']}' 超时（{timeout}s）") from e
         except (APIConnectionError, RateLimitError, APIStatusError) as e:
             raise LLMExtractionError(f"provider '{provider['name']}' 调用失败: {e}") from e
-        except LLMConfigurationError:
-            raise
         except Exception as e:  # 外部 API/校验异常统一包装，交给重试链
             raise LLMExtractionError(f"provider '{provider['name']}' 调用异常: {e}") from e

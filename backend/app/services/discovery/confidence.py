@@ -56,8 +56,10 @@ def _load_weights() -> tuple[float, float, float]:
 
 
 def _norm(value: float, max_value: float) -> float:
-    """归一化至 [0, 1]。"""
-    return min(value / max_value, 1.0) if max_value > 0 else 0.0
+    """归一化至 [0, 1]（负增长等负值钳制为 0，避免置信度为负）。"""
+    if max_value <= 0:
+        return 0.0
+    return min(max(value, 0.0) / max_value, 1.0)
 
 
 def compute_confidence(
