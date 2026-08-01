@@ -122,8 +122,12 @@ function VersionDiffView() {
   const [versions, setVersions] = useState<EvolutionVersion[]>([])
   const [v1, setV1] = useState<string>('')
   const [v2, setV2] = useState<string>('')
-  const [diff, setDiff] = useState<{ added: VersionDiffItem[]; removed: VersionDiffItem[]; changed: VersionDiffItem[] } | null>(null)
-  const [loading, setLoading] = useState(false)
+  // diff 绑定请求时的版本对，渲染层据此判断当前结果是否仍有效（避免 effect 内同步 setState）
+  const [diff, setDiff] = useState<{
+    v1: string
+    v2: string
+    data: { added: VersionDiffItem[]; removed: VersionDiffItem[]; changed: VersionDiffItem[] }
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // 加载真实版本列表，默认对比最近两个版本
@@ -143,23 +147,27 @@ function VersionDiffView() {
       .catch(() => setError('版本列表加载失败'))
   }, [])
 
-  // 版本对变化 → 拉取真实 diff
+  // 版本对变化 → 拉取真实 diff（setState 均在异步回调内）
   useEffect(() => {
-    if (!v1 || !v2 || v1 === v2) {
-      setDiff(null)
-      return
-    }
-    setLoading(true)
+    if (!v1 || !v2 || v1 === v2) return
+    let cancelled = false
     apiGet<EvolutionDiff>(
       `/evolution/diff?from=${encodeURIComponent(v1)}&to=${encodeURIComponent(v2)}`,
     )
-      .then((d) => setDiff(diffToItems(d)))
-      .catch(() => {
-        setDiff(null)
-        setError('版本对比加载失败')
+      .then((d) => {
+        if (!cancelled) setDiff({ v1, v2, data: diffToItems(d) })
       })
-      .finally(() => setLoading(false))
+      .catch(() => {
+        if (!cancelled) setError('版本对比加载失败')
+      })
+    return () => {
+      cancelled = true
+    }
   }, [v1, v2])
+
+  // 渲染派生：仅展示与当前版本对匹配的 diff；加载态 = 有版本对但结果未就绪
+  const visibleDiff = diff && diff.v1 === v1 && diff.v2 === v2 ? diff.data : null
+  const loading = Boolean(v1 && v2 && v1 !== v2 && !visibleDiff && !error)
 
   return (
     <Card>
@@ -209,27 +217,27 @@ function VersionDiffView() {
         {loading && (
           <div className="py-10 text-center text-xs text-ink-muted">加载版本差异…</div>
         )}
-        {!loading && diff && (
+        {!loading && visibleDiff && (
           <>
             <div className="grid grid-cols-3 gap-3 mb-4">
-              <StatTile label="新增节点" count={diff.added.length} tone="emerging" />
-              <StatTile label="删除节点" count={diff.removed.length} tone="declining" />
-              <StatTile label="变化节点" count={diff.changed.length} tone="stable" />
+              <StatTile label="新增节点" count={visibleDiff.added.length} tone="emerging" />
+              <StatTile label="删除节点" count={visibleDiff.removed.length} tone="declining" />
+              <StatTile label="变化节点" count={visibleDiff.changed.length} tone="stable" />
             </div>
             <Tabs defaultValue="added">
               <TabsList>
-                <TabsTrigger value="added" className="text-xs">新增 ({diff.added.length})</TabsTrigger>
-                <TabsTrigger value="removed" className="text-xs">删除 ({diff.removed.length})</TabsTrigger>
-                <TabsTrigger value="changed" className="text-xs">变化 ({diff.changed.length})</TabsTrigger>
+                <TabsTrigger value="added" className="text-xs">新增 ({visibleDiff.added.length})</TabsTrigger>
+                <TabsTrigger value="removed" className="text-xs">删除 ({visibleDiff.removed.length})</TabsTrigger>
+                <TabsTrigger value="changed" className="text-xs">变化 ({visibleDiff.changed.length})</TabsTrigger>
               </TabsList>
               <TabsContent value="added">
-                <DiffTable items={diff.added} />
+                <DiffTable items={visibleDiff.added} />
               </TabsContent>
               <TabsContent value="removed">
-                <DiffTable items={diff.removed} />
+                <DiffTable items={visibleDiff.removed} />
               </TabsContent>
               <TabsContent value="changed">
-                <DiffTable items={diff.changed} />
+                <DiffTable items={visibleDiff.changed} />
               </TabsContent>
             </Tabs>
           </>

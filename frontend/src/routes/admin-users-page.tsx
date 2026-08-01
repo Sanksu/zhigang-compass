@@ -95,8 +95,25 @@ export function AdminUsersPage() {
     }
   }
 
+  // 初始加载（setState 均在异步回调内）
   useEffect(() => {
-    load()
+    let cancelled = false
+    apiGet<{ items: BackendUser[]; total: number }>('/admin/users?page=1&size=100')
+      .then((res) => {
+        if (cancelled) return
+        setUsers(res.items.map(toRow))
+        setTotal(res.total)
+        setError(null)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof ApiError ? e.message : '用户列表加载失败')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   async function setRole(id: string, role: Role) {

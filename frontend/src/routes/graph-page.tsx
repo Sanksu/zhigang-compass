@@ -136,10 +136,9 @@ export function GraphPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // 加载真实图谱全景（Neo4j 聚合 + Redis 30s 缓存）
+  // 加载真实图谱全景（Neo4j 聚合 + Redis 30s 缓存），初始 loading 已是 true
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
     apiGet<PanoramaData>('/graph/panorama?limit=200&min_weight=0.3')
       .then((res) => {
         if (!cancelled) setRaw(toGraphData(res))
