@@ -196,7 +196,6 @@ export function DashboardPage() {
               { name: '智联招聘', level: 'A', count: 1456 },
               { name: 'Monster', level: 'A', count: 982 },
               { name: 'Indeed', level: 'A', count: 1124 },
-              { name: '拉勾网', level: 'B', count: 0, archived: true },
               { name: 'Glassdoor', level: 'B', count: 642 },
               { name: 'LinkedIn', level: 'B', count: 478 },
               { name: '脉脉', level: 'C', count: 312 },
@@ -209,11 +208,10 @@ export function DashboardPage() {
             ].map((src) => (
               <div
                 key={src.name}
-                className={`rounded-md border p-2 ${src.archived ? 'opacity-50' : ''}`}
+                className="rounded-md border p-2"
               >
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-[10px] text-ink-faint">{src.level}</span>
-                  {src.archived && <span className="text-[9px] text-ink-faint">📦</span>}
                 </div>
                 <p className="text-ink mt-0.5 truncate">{src.name}</p>
                 <p className="text-ink-muted font-mono tabular-nums">{src.count.toLocaleString()}</p>

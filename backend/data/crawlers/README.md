@@ -2,7 +2,7 @@
 
 招聘平台 + 课程/论文/社区爬虫模块。基于 Scrapy + Playwright + CDP。
 
-- **招聘平台**：14 源，A/B/C 三级分级
+- **招聘平台**：13 源，A/B/C 三级分级
 - **非招聘数据源**：课程 3 个（icourse163/Coursera/edX）+ 论文 1 个（arXiv）+ 社区 2 个（GitHub Trending/Stack Overflow），用于学习路径构建与技术热点观察池
 
 ## 目录结构
@@ -23,14 +23,12 @@ crawlers/
 ├── monster_cdp_crawler.py   # Monster 独立采集脚本（CDP + XHR 拦截）✅
 ├── glassdoor_cdp_crawler.py # Glassdoor 独立采集脚本（CDP + SSR DOM 提取）✅
 ├── maimai_cdp_crawler.py    # 脉脉独立采集脚本（CDP + 飞书招聘 DOM 提取）✅
-├── lagou_cdp_crawler.py     # 拉勾独立采集脚本（CDP + 内部 API + 登录态）📦 已存档（M2 后续开发）
 ├── icourse163_crawler.py    # 中国大学MOOC 独立采集脚本（Playwright + 内部 RPC API）✅
 ├── output/              # JSONL 输出目录（.gitignore 忽略）
 └── spiders/
     ├── boss.py           # A 级 — BOSS 直聘 ✅（subprocess 调 boss_cdp_crawler.py）
     ├── zhilian.py        # A 级 — 智联招聘 ✅
     ├── monster.py        # A 级 — Monster ✅（subprocess 调 monster_cdp_crawler.py）
-    ├── lagou.py          # B 级 — 拉勾网 📦 已存档（subprocess 调 lagou_cdp_crawler.py，M2 后续开发）
     ├── indeed.py         # B 级 — Indeed ✅（subprocess 调 jobspy_crawler.py，需代理）
     ├── glassdoor.py      # B 级 — Glassdoor ✅（subprocess 调 glassdoor_cdp_crawler.py）
     ├── maimai.py         # C 级 — 脉脉 ✅（subprocess 调 maimai_cdp_crawler.py，飞书招聘页）
@@ -47,7 +45,7 @@ crawlers/
 
 ### 架构说明（2026-07-29 重构）
 
-7 个已贯通爬虫（BOSS / 智联 / Monster / Indeed / LinkedIn / Glassdoor / 脉脉）+ setup_boss_chrome CDP 启动器采用 **「Scrapy Spider + 独立脚本 + subprocess」** 架构。拉勾网（lagou）因阿里云 WAF 拦截 + 登录态要求，已存档待 M2 后续开发：
+7 个已贯通爬虫（BOSS / 智联 / Monster / Indeed / LinkedIn / Glassdoor / 脉脉）+ setup_boss_chrome CDP 启动器采用 **「Scrapy Spider + 独立脚本 + subprocess」** 架构：
 
 - **Scrapy Spider**：负责任务编排、关键字/城市遍历、Item 构造与管道消费
 - **独立采集脚本**：负责实际 HTTP 请求 / 浏览器自动化
@@ -62,7 +60,6 @@ crawlers/
 | LinkedIn | JobSpy 库（解析 JSON-LD 结构化数据） | [speedyapply/JobSpy](https://github.com/speedyapply/JobSpy) | ✅ |
 | Glassdoor | CDP 连接真实浏览器 + SSR DOM 提取（JSON-LD + data-test 属性） | - | ✅ |
 | 脉脉 | CDP 连接真实浏览器 + 飞书招聘页 DOM 提取（maimai.jobs.feishu.cn） | - | ✅ |
-| 拉勾网 | CDP 连接真实浏览器 + 内部 API `positionAjax.json` + 登录态复用 | - | 📦 已存档（M2 后续开发） |
 
 BOSS / Monster / Glassdoor / Maimai 共用 CDP 端口 9222（同一时刻只能运行其中一个）。
 
@@ -94,7 +91,6 @@ python-jobspy>=1.1.40   # Indeed/LinkedIn 采集（仅 *_jobspy_crawler.py 使�
 | A | BOSS 直聘 | 20 req/min | 直连 | ✅ CDP |
 | A | 智联招聘 | 20 req/min | 直连 | ✅ |
 | A | Monster | 30 req/min | 代理 | ✅ CDP |
-| B | 拉勾网 | 10 req/min | 直连 | 📦 已存档（M2 后续开发） |
 | B | Indeed | 15 req/min | 代理池 | ✅ JobSpy |
 | B | Glassdoor | 15 req/min | 代理池 | ✅ CDP |
 | C | 脉脉 | 5 req/min (≤100/h) | 直连（夜间） | ✅ CDP（飞书招聘页） |
@@ -163,9 +159,6 @@ scrapy crawl zhilian -a keywords=Python -a cities=北京 -o output/zhilian.jsonl
 
 # Monster（需先完成 CDP 前置 + 浏览器保持开启）
 scrapy crawl monster -a keywords=Python -a cities="New York" -o output/monster.jsonl
-
-# 拉勾网（📦 已存档，M2 后续开发，当前不运行）
-# scrapy crawl lagou -a keywords=Python -a cities=北京 -o output/lagou.jsonl
 
 # Indeed（需 Clash/V2Ray 代理：HTTPS_PROXY=http://127.0.0.1:7890）
 $env:HTTPS_PROXY="http://127.0.0.1:7890"
