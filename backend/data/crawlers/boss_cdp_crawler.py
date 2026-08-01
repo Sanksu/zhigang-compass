@@ -54,7 +54,16 @@ async def crawl(cdp_url: str, keyword: str, city_code: str, max_pages: int = 5) 
             log(f"CDP 连接失败: {e}")
             return items
 
-        context = browser.contexts[0] if browser.contexts else await browser.new_context()
+        # 隔离：新建独立 context 并复制主 context 的 cookies（保留登录态），
+        # 爬虫导航只发生在隔离 context 内，不触碰用户正在浏览的页面
+        context = await browser.new_context()
+        if browser.contexts:
+            try:
+                _cookies = await browser.contexts[0].cookies()
+                if _cookies:
+                    await context.add_cookies(_cookies)
+            except Exception as e:
+                log(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
         page = await context.new_page()
 
         # 导航到具体搜索页（而非首页），避免首页重定向导致执行上下文被销毁
