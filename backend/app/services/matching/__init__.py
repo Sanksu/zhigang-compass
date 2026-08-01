@@ -13,7 +13,12 @@ from app.services.matching.schemas import (
     PositionProfile,
     SkillRequirement,
 )
-from app.services.matching.engine import MatchEngine, RuleBasedMatcher
+from app.services.matching.engine import (
+    MatchEngine,
+    RuleBasedMatcher,
+    apply_cii_correction,
+    score_position,
+)
 from app.services.matching.weights import load_weights, DEFAULT_WEIGHTS
 
 __all__ = [
@@ -28,5 +33,7 @@ __all__ = [
     "RuleBasedMatcher",
     "SkillRequirement",
     "DEFAULT_WEIGHTS",
+    "apply_cii_correction",
     "load_weights",
+    "score_position",
 ]

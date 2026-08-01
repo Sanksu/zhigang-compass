@@ -8,11 +8,13 @@
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import random
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 
@@ -66,7 +68,6 @@ async def crawl(cdp_port: int, keyword: str, city_code: str, max_pages: int = 5)
             except Exception as e2:
                 log(f"降级导航也失败: {e2}")
                 await page.close()
-                await browser.close()
                 return items
 
         try:
@@ -158,9 +159,19 @@ async def crawl(cdp_port: int, keyword: str, city_code: str, max_pages: int = 5)
                     ]
                     location = "·".join(p for p in location_parts if p)
 
+                    # _fingerprint: source + source_id 的 SHA256，对齐 _BaseItem 定义
+                    fp_input = f"boss:{encrypt_job_id}".encode("utf-8")
+                    fingerprint = hashlib.sha256(fp_input).hexdigest()
+
+                    # Boss API 列表页无 post_date 字段，发布日期需详情页（反爬无法获取）
                     items.append({
+                        "source": "boss",
                         "source_id": encrypt_job_id,
                         "source_url": source_url,
+                        "crawled_at": datetime.now(timezone(timedelta(hours=8))).isoformat(),
+                        "raw_text": json.dumps(j, ensure_ascii=False),
+                        "is_desensitized": False,
+                        "_fingerprint": fingerprint,
                         "title": j.get("jobName", ""),
                         "company": j.get("brandName", ""),
                         "location": location,
@@ -170,7 +181,7 @@ async def crawl(cdp_port: int, keyword: str, city_code: str, max_pages: int = 5)
                         "tags": tags,
                         "description": "",
                         "requirements": "",
-                        "raw_text": json.dumps(j, ensure_ascii=False),
+                        "post_date": "",
                     })
 
                 if not jobs or current_page >= max_pages:
@@ -183,8 +194,8 @@ async def crawl(cdp_port: int, keyword: str, city_code: str, max_pages: int = 5)
                 current_page += 1
 
         finally:
+            # CDP 模式下不关闭 browser（避免关闭用户的浏览器），与其他 CDP 脚本一致
             await page.close()
-            await browser.close()
 
     return items
 

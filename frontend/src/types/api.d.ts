@@ -863,7 +863,6 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        /** Format: uuid */
                         resume_id: string;
                         /** @default 10 */
                         top_n?: number;
@@ -908,9 +907,7 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        /** Format: uuid */
                         resume_id: string;
-                        /** Format: uuid */
                         position_id: string;
                     };
                 };
@@ -1105,7 +1102,6 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        /** Format: uuid */
                         match_id: string;
                         /**
                          * @description 1=👍, -1=👎
@@ -1756,14 +1752,10 @@ export interface components {
             msg: string;
             /** @description 业务数据（成功时存在） */
             data?: unknown;
-            /**
-             * Format: uuid
-             * @description 链路追踪 ID
-             */
+            /** @description 链路追踪 ID（uuid4 hex 截断 16 位） */
             trace_id: string;
         };
         User: {
-            /** Format: uuid */
             id?: string;
             username?: string;
             /** @enum {string} */

@@ -3,7 +3,7 @@
  *
  * Token 策略：
  * - access_token：httpOnly Cookie（浏览器自动携带，JS 不可读）
- * - refresh_token：内存变量，通过 Authorization: Bearer 头发送
+ * - refresh_token：内存变量，通过请求体发送（/auth/refresh）
  *
  * 401 自动续期：响应 401 时用 refresh_token 调 /auth/refresh，成功后重试原请求；
  * 并发 401 共享同一个刷新 Promise，避免多次刷新；刷新失败则登出并跳 /login。
@@ -52,15 +52,6 @@ export const http: AxiosInstance = axios.create({
   baseURL: BASE_URL,
   withCredentials: true,
   timeout: 30_000,
-})
-
-/** 给需鉴权请求注入 refresh_token（仅 /auth/refresh 自身需要） */
-http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  if (_refreshToken && config.headers?.['X-Use-Refresh'] === '1') {
-    config.headers.Authorization = `Bearer ${_refreshToken}`
-    delete config.headers['X-Use-Refresh']
-  }
-  return config
 })
 
 let _refreshing: Promise<string | null> | null = null
@@ -137,9 +128,4 @@ export async function apiGet<T>(url: string, config?: AxiosRequestConfig): Promi
 export async function apiPost<T>(url: string, body?: unknown, config?: AxiosRequestConfig): Promise<T> {
   const res = await http.post<ApiResponse<T>>(url, body, config)
   return res.data.data as T
-}
-
-/** 调用 /auth/refresh 时显式标记使用 refresh_token */
-export async function apiRefresh<T>(url: string, body?: unknown): Promise<T> {
-  return apiPost<T>(url, body, { headers: { 'X-Use-Refresh': '1' } })
 }

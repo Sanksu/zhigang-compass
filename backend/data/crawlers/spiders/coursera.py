@@ -18,7 +18,7 @@
 """
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urljoin
 
 from scrapy import Request, Spider
@@ -150,6 +150,14 @@ class CourseraSpider(Spider):
         meta_text = card.css(".cds-CommonCard-metadata p::text").get(default="")
         duration, category, level = self._parse_metadata(meta_text)
 
+        # 兜底：meta_text 内嵌 "★ 4.6 (18K)" 评分段时补提评分与评价数
+        if rating == 0.0:
+            rating = self._parse_rating(meta_text)
+        if enrollment == 0:
+            m = re.search(r"\(([\d.]+[KM]?)\)", meta_text)
+            if m:
+                enrollment = self._parse_reviews_count(f"{m.group(1)} reviews")
+
         # 技能：cds-CommonCard-bodyContent 内的 p 文本
         skills_text = card.css(".cds-CommonCard-bodyContent p::text").getall()
         skills = self._parse_skills(skills_text)
@@ -162,21 +170,17 @@ class CourseraSpider(Spider):
         item["source"] = self.platform
         item["source_id"] = source_id
         item["source_url"] = source_url
-        item["crawled_at"] = datetime.now(timezone.utc).isoformat()
+        item["crawled_at"] = datetime.now(timezone(timedelta(hours=8))).isoformat()
         item["title"] = title
-        item["instructor"] = ""  # Coursera 列表页通常不显示讲师
         item["institution"] = institution
         item["platform"] = "coursera"
         item["category"] = category
-        item["description"] = ""  # Coursera 列表页无独立描述，技能就是描述
         item["rating"] = rating
         item["enrollment"] = enrollment
         item["duration"] = duration
-        item["start_date"] = ""  # 自节奏课程无固定开课时间
         item["skills"] = skills
         item["raw_text"] = card.get()
         item["is_desensitized"] = False
-        item["compliance_note"] = ""
         return item
 
     @staticmethod
@@ -202,10 +206,10 @@ class CourseraSpider(Spider):
 
     @staticmethod
     def _parse_rating(text: str) -> float:
-        """从 'Rating, 4.6 out of 5 stars' 或 '4.6 out of 5 stars' 提取评分。"""
+        """从 'Rating, 4.6 out of 5 stars'、'4.6 out of 5 stars' 或 '★ 4.6 (18K)' 提取评分。"""
         if not text:
             return 0.0
-        m = re.search(r"([\d.]+)\s*out of", text)
+        m = re.search(r"([\d.]+)\s*out of", text) or re.search(r"★\s*([\d.]+)", text)
         if m:
             try:
                 return float(m.group(1))
@@ -247,6 +251,8 @@ class CourseraSpider(Spider):
 
         parts = [p.strip() for p in text.split("·") if p.strip()]
         for part in parts:
+            if "★" in part or "Rating" in part:
+                continue  # 评分段（旧版 "★ 4.6 (18K)"），不污染 duration
             if not level and part in ("Beginner", "Intermediate", "Advanced", "Mixed"):
                 level = part
             elif not category and part in (

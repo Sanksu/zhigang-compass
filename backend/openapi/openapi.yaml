@@ -262,7 +262,7 @@ paths:
         - name: skill_id
           in: query
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string }
         - name: top_k
           in: query
           schema: { type: integer, default: 10 }
@@ -287,7 +287,7 @@ paths:
           schema: { type: number, default: 0.3, minimum: 0, maximum: 1 }
         - name: focus
           in: query
-          schema: { type: string, format: uuid }
+          schema: { type: string }
           description: 以某岗位为中心展开
       responses:
         '200':
@@ -370,7 +370,7 @@ paths:
                 properties:
                   data:
                     properties:
-                      task_id: { type: string, format: uuid }
+                      task_id: { type: string }
 
   /api/v1/resume/task/{task_id}:
     get:
@@ -380,7 +380,7 @@ paths:
         - name: task_id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string }
       responses:
         '200':
           description: 任务状态
@@ -397,7 +397,7 @@ paths:
         - name: task_id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string }
       responses:
         '200':
           description: SSE 流
@@ -460,7 +460,7 @@ paths:
               type: object
               required: [resume_id]
               properties:
-                resume_id: { type: string, format: uuid }
+                resume_id: { type: string }
                 top_n: { type: integer, default: 10, maximum: 50 }
       responses:
         '202':
@@ -482,8 +482,8 @@ paths:
               type: object
               required: [resume_id, position_id]
               properties:
-                resume_id: { type: string, format: uuid }
-                position_id: { type: string, format: uuid }
+                resume_id: { type: string }
+                position_id: { type: string }
       responses:
         '200':
           description: 匹配结果
@@ -500,7 +500,7 @@ paths:
         - name: task_id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string }
       responses:
         '200':
           description: 任务状态
@@ -563,7 +563,7 @@ paths:
               type: object
               required: [match_id, score]
               properties:
-                match_id: { type: string, format: uuid }
+                match_id: { type: string }
                 score: { type: integer, enum: [1, -1], description: "1=👍, -1=👎" }
       responses:
         '200':
@@ -874,7 +874,7 @@ components:
       name: id
       in: path
       required: true
-      schema: { type: string, format: uuid }
+      schema: { type: string }
     Page:
       name: page
       in: query
@@ -924,13 +924,12 @@ components:
           description: 业务数据（成功时存在）
         trace_id:
           type: string
-          format: uuid
-          description: 链路追踪 ID
+          description: 链路追踪 ID（uuid4 hex 截断 16 位）
 
     User:
       type: object
       properties:
-        id: { type: string, format: uuid }
+        id: { type: string }
         username: { type: string }
         role: { type: string, enum: [admin, user, guest] }
         permissions: { type: array, items: { type: string } }

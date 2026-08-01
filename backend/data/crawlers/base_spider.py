@@ -1,6 +1,6 @@
 """爬虫基类：统一搜索关键字/城市配置 + 合规声明 + JobItem 构造。"""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 from scrapy import Spider, Request
@@ -70,9 +70,8 @@ class BaseSpider(Spider):
         """构造 JobItem，自动填充 source / crawled_at / 合规标记。"""
         item = JobItem()
         item["source"] = self.platform
-        item["crawled_at"] = datetime.now(timezone.utc).isoformat()
+        item["crawled_at"] = datetime.now(timezone(timedelta(hours=8))).isoformat()
         item["is_desensitized"] = False
-        item["compliance_note"] = ""
         for k, v in fields.items():
             if k in item.fields:
                 item[k] = v

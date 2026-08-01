@@ -1,5 +1,6 @@
 """CORS / CSP / HSTS / GZip / TraceID 中间件。"""
 
+import contextvars
 import uuid
 from datetime import datetime, timezone
 
@@ -12,14 +13,19 @@ from starlette.responses import Response
 
 from app.core.config import settings
 
+# 请求级 Trace ID 上下文，供 ok()/error() 注入响应体
+trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "trace_id", default=""
+)
+
 
 def setup_middleware(app: FastAPI) -> None:
     """按顺序注册所有中间件。"""
 
-    # CORS — 白名单模式
+    # CORS — 可配置白名单模式
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if not settings.is_production else [],
+        allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -34,6 +40,10 @@ def setup_middleware(app: FastAPI) -> None:
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        # Trace ID：服务端生成（不信任客户端传入），供响应头与 ok()/error() 注入响应体
+        trace_id = str(uuid.uuid4().hex[:16])
+        trace_id_var.set(trace_id)
+
         response = await call_next(request)
 
         # CSP
@@ -47,8 +57,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if settings.is_production:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # Trace ID
-        trace_id = request.headers.get("X-Trace-ID", str(uuid.uuid4().hex[:16]))
         response.headers["X-Trace-ID"] = trace_id
 
         return response

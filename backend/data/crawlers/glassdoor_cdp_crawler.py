@@ -195,17 +195,49 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_port: int = DEF
         context = browser.contexts[0] if browser.contexts else await browser.new_context()
         page = await context.new_page()
 
+        # 先导航到 glassdoor.com 首页建立会话，并确认重定向后的实际域（.com → .com.hk）
+        try:
+            await page.goto("https://www.glassdoor.com/", wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:
+            log(f"导航到首页失败: {e}")
+
+        # 通过 typeahead 接口动态解析城市 → locId（避免硬编码城市映射，支持任意城市）
+        loc_params = {}
+        try:
+            term = json.dumps(city)
+            loc_params = await page.evaluate(
+                f"""async () => {{
+                    const term = {term};
+                    const r = await fetch(
+                        location.origin + '/findPopularLocationAjax.htm?maxLocationsToReturn=5&term=' + encodeURIComponent(term),
+                        {{credentials: 'include'}}
+                    );
+                    const arr = await r.json();
+                    if (Array.isArray(arr) && arr.length > 0) {{
+                        return {{id: arr[0].locationId, type: arr[0].locationType || 'C', name: arr[0].longName || ''}};
+                    }}
+                    return null;
+                }}"""
+            )
+        except Exception as e:
+            log(f"城市解析失败（将按全国范围搜索）: {e}")
+
+        if loc_params and loc_params.get("id"):
+            log(f"城市 '{city}' → locId={loc_params['id']} type={loc_params.get('type')}")
+        else:
+            log(f"⚠️ 未解析到城市 '{city}' 的 locId，将按全国范围搜索")
+
         for page_num in range(1, max_pages + 1):
             log(f"=== 采集第 {page_num}/{max_pages} 页 ===")
 
-            # Glassdoor 搜索 URL（locId=1147401 是 San Francisco，作为默认；其他城市需映射）
-            # 注：CDP 浏览器已配置代理，访问 .com 会被重定向到 .com.hk
+            # Glassdoor 搜索 URL；未解析到 locId 时不带位置参数（全国搜索）
             params = {
                 "sc.keyword": keyword,
-                "locT": "C",
-                "locId": "1147401",  # SF，后续可扩展城市映射
                 "page": page_num,
             }
+            if loc_params and loc_params.get("id"):
+                params["locT"] = loc_params.get("type", "C")
+                params["locId"] = str(loc_params["id"])
             url = f"https://www.glassdoor.com/Job/jobs.htm?{urlencode(params)}"
 
             try:
@@ -276,19 +308,51 @@ def _map_job_to_item(job: dict) -> dict | None:
         if not job_id or not title:
             return None
 
+        description = str(job.get("description", ""))
+
+        # 经验要求：从描述片段正则提取（Glassdoor 列表页 DOM 不稳定）
+        experience = ""
+        if description:
+            import re
+            m = re.search(r"(\d+)\+?\s*(?:to\s*(\d+)\+?\s*)?Years?", description, re.IGNORECASE)
+            if m:
+                if m.group(2):
+                    experience = f"{m.group(1)}-{m.group(2)} Years"
+                else:
+                    experience = f"{m.group(1)}+ Years"
+
+        # 学历要求：从描述片段提取关键词
+        education = ""
+        if description:
+            desc_lower = description.lower()
+            for keyword, label in [
+                ("phd", "PhD"),
+                ("master", "Master"),
+                ("ms ", "MS"),
+                ("ms.", "MS"),
+                ("bachelor", "Bachelor"),
+                ("bs ", "BS"),
+                ("bs.", "BS"),
+                ("degree", "Degree"),
+            ]:
+                if keyword in desc_lower:
+                    education = label
+                    break
+
         return {
             "id": f"gd-{job_id}",
             "title": title,
             "company": str(job.get("company", "")),
             "location": str(job.get("location", "")),
             "salary": str(job.get("salary", "")),
-            "description": str(job.get("description", "")),  # 列表页仅描述片段
+            "description": description,  # 列表页仅描述片段
             "url": str(job.get("source_url", "")),
             "is_remote": False,
             "skills": [],
             "date_posted": str(job.get("age", "")),
             "company_industry": "",
-            "experience_range": "",
+            "experience_range": experience,
+            "education": education,
             "raw": job,
         }
     except Exception as e:

@@ -1,7 +1,7 @@
 """arXiv 论文爬虫（技术热点观察池数据源）。
 
 策略：
-- 调用 arXiv 官方 API（http://export.arxiv.org/api/query），返回 Atom XML
+- 调用 arXiv 官方 API（https://export.arxiv.org/api/query），返回 Atom XML
 - 按 cs.* 分类拉取最新论文，每日采集
 - 无需认证，官方限速 1 req/3s（RATE_LIMIT 已配置 3-5s 间隔）
 - 产出 PaperItem，用于「技术热点观察池」，不独立触发 candidate
@@ -16,7 +16,7 @@
   $env:HTTPS_PROXY="http://127.0.0.1:7890"
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 from scrapy import Request, Spider
@@ -27,7 +27,7 @@ from crawlers.settings import RATE_LIMIT
 
 
 # arXiv API 端点
-ARXIV_API = "http://export.arxiv.org/api/query"
+ARXIV_API = "https://export.arxiv.org/api/query"
 
 # 默认拉取的 cs.* 分类（覆盖项目关注的 AI/大数据/全栈方向）
 DEFAULT_CATEGORIES = [
@@ -157,27 +157,18 @@ class ArxivSpider(Spider):
                 pdf_url = link.get("href", "")
                 break
 
-        # DOI（<arxiv:doi>）
-        doi = ""
-        doi_elem = entry.find("{http://arxiv.org/schemas/atom}doi")
-        if doi_elem is not None and doi_elem.text:
-            doi = doi_elem.text.strip()
-
         item = PaperItem()
         item["source"] = self.platform
         item["source_id"] = arxiv_id
         item["source_url"] = source_url
-        item["crawled_at"] = datetime.now(timezone.utc).isoformat()
+        item["crawled_at"] = datetime.now(timezone(timedelta(hours=8))).isoformat()
         item["title"] = title
         item["authors"] = authors
         item["abstract"] = abstract
         item["categories"] = categories or [category]
         item["published"] = published
         item["updated"] = updated
-        item["doi"] = doi
         item["pdf_url"] = pdf_url
-        item["citation_count"] = None  # arXiv API 不返回引用数，需 Semantic Scholar 补
         item["raw_text"] = ET.tostring(entry, encoding="unicode")
         item["is_desensitized"] = False
-        item["compliance_note"] = ""
         return item

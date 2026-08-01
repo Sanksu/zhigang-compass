@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { Box, Database, Network } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,9 @@ import { Graph2D } from '@/components/graph/graph-2d'
 import { NodeDetailPanel } from '@/components/graph/node-detail-panel'
 import { getMockGraphData } from '@/components/graph/mock-data'
 import type { GraphViewType, NodeDetail } from '@/components/graph/types'
+
+/** 3D 图谱懒加载 — Three.js 约 1.4MB，仅在用户点击"3D"时按需加载 */
+const Graph3D = lazy(() => import('@/components/graph/graph-3d').then((m) => ({ default: m.Graph3D })))
 
 const VIEW_LABEL: Record<GraphViewType, string> = {
   panorama: '全景视图',
@@ -23,13 +26,23 @@ const VIEW_DESC: Record<GraphViewType, string> = {
   positionCenter: '以「前端开发工程师」为中心 2-hop 展开',
 }
 
+/** WebGL2 可用性检测 — 不可用时 3D 按钮禁用，保持 2D 模式（设计文档 §6.3） */
+function isWebGL2Available(): boolean {
+  try {
+    const canvas = document.createElement('canvas')
+    return !!canvas.getContext('webgl2')
+  } catch {
+    return false
+  }
+}
+
 /**
  * 能力图谱页 — 设计文档 §10.3
  *
  * 当前阶段（M3 前端提前启动）：
  * - 数据来源：本地 mock（mock-data.ts），后端 /api/v1/graph/panorama 就绪后改用真实接口
  * - 已实现：2D ECharts 力导向图、四种视图切换、节点点击 + 详情面板、暗色模式
- * - 待实现（M3 后续）：真实 API 接入、3D react-force-graph-3d 模式、min_weight/focus 参数过滤
+ * - 待实现（M3 后续）：真实 API 接入、min_weight/focus 参数过滤
  */
 export function GraphPage() {
   const [view, setView] = useState<GraphViewType>('panorama')
@@ -37,6 +50,8 @@ export function GraphPage() {
   const [selected, setSelected] = useState<NodeDetail | null>(null)
 
   const data = useMemo(() => getMockGraphData(view), [view])
+  // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
+  const webgl2Available = useMemo(() => isWebGL2Available(), [])
 
   // 选中节点的关联统计（从当前视图数据中实时计算）
   const detailStats = useMemo(() => {
@@ -73,9 +88,9 @@ export function GraphPage() {
               size="sm"
               variant={mode === '3d' ? 'default' : 'ghost'}
               onClick={() => setMode('3d')}
+              disabled={!webgl2Available}
+              title={!webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : undefined}
               className="h-7 px-2.5 text-xs"
-              disabled
-              title="3D 模式待 M3 后续启用（react-force-graph-3d）"
             >
               3D
             </Button>
@@ -115,20 +130,32 @@ export function GraphPage() {
       {/* 画布 + 详情面板：画布占 70-75%，详情占 25-30% */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
         <Card className="relative overflow-hidden h-[640px]">
-          <Graph2D
-            data={data}
-            selectedId={selected?.id ?? null}
-            onSelectNode={setSelected}
-            className="h-full w-full"
-          />
+          {mode === '2d' ? (
+            <Graph2D
+              data={data}
+              selectedId={selected?.id ?? null}
+              onSelectNode={setSelected}
+              className="h-full w-full"
+            />
+          ) : (
+            <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-sm text-ink-muted">加载 3D 渲染引擎…</div>}>
+              <Graph3D
+                data={data}
+                onSelectNode={setSelected}
+                className="h-full w-full"
+              />
+            </Suspense>
+          )}
           {/* 视图说明 */}
           <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-3 pointer-events-none">
             <p className="text-[11px] text-ink-muted bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
               {VIEW_DESC[view]}
             </p>
-            <p className="text-[10px] text-ink-faint bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border font-mono">
-              mock · 后端就绪后切真实 API
-            </p>
+            {!webgl2Available && (
+              <p className="text-[10px] text-ink-faint bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
+                WebGL2 不可用，已降级 2D 模式
+              </p>
+            )}
           </div>
         </Card>
 

@@ -39,6 +39,7 @@ from scrapy import Request
 from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
+from crawlers.settings import SUBPROCESS_TIMEOUT
 
 # BOSS 直聘城市代码映射
 BOSS_CITY_CODES = {
@@ -91,7 +92,10 @@ class BossSpider(BaseSpider):
         tasks = []
         for keyword in self.keywords:
             for city in self.cities:
-                city_code = BOSS_CITY_CODES.get(city, city)
+                city_code = BOSS_CITY_CODES.get(city)
+                if not city_code:
+                    self.logger.warning(f"跳过未映射城市: {city}（BOSS 城市码表仅含 {list(BOSS_CITY_CODES)}）")
+                    continue
                 tasks.append({
                     "keyword": keyword,
                     "city": city,
@@ -99,7 +103,7 @@ class BossSpider(BaseSpider):
                 })
         return tasks
 
-    async def parse(self, response: Response):
+    def parse(self, response: Response):
         """通过 subprocess 调用独立采集脚本，解析 JSONL 输出并 yield Item。"""
         tasks = response.meta.get("tasks") or self._build_tasks()
         if not tasks:
@@ -139,8 +143,16 @@ class BossSpider(BaseSpider):
                 self.logger.error(f"启动采集脚本失败: {e}")
                 continue
 
-            # 逐行读取 stdout（JSONL），实时 yield Item
-            for line in proc.stdout:
+            # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
+            try:
+                stdout, stderr_output = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout, stderr_output = proc.communicate()
+                self.logger.error(f"采集脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+                continue
+
+            for line in stdout.splitlines():
                 line = line.strip()
                 if not line:
                     continue
@@ -165,9 +177,6 @@ class BossSpider(BaseSpider):
                     raw_text=item_data["raw_text"],
                 )
 
-            # 等待进程结束，检查 stderr
-            proc.wait()
-            stderr_output = proc.stderr.read() if proc.stderr else ""
             if proc.returncode != 0:
                 self.logger.error(
                     f"采集脚本退出码 {proc.returncode}, stderr: {stderr_output[-300:]}"

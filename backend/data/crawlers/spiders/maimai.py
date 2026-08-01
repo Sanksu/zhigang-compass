@@ -1,10 +1,10 @@
 """脉脉爬虫（C 级 — 实验性，合规限制）。
 
 合规措施（S2+S3，project_memory 强制约束）：
-- 注明用于竞赛演示不商用（X-Collection-Purpose 头 + compliance_note 字段）
+- 注明用于竞赛演示不商用（X-Collection-Purpose 头）
 - 数据脱敏（CleaningPipeline 自动 PII 清洗：手机号/邮箱/身份证）
 - 限频 ≤100 req/h（settings.RATE_LIMIT.maimai = 5 req/min）
-- 夜间运行 23:00-06:00（start_requests 时间守卫强制）
+- 夜间运行 22:00-08:00（start_requests 时间守卫强制）
 
 策略（2026-07-29 重构）：
 - 旧方案：maimai.cn/job/search 是专栏页，无岗位数据；maimai.cn 上无公开职位搜索页
@@ -20,7 +20,7 @@
 - 启动 CDP 浏览器：python -m crawlers.setup_boss_chrome
 - 飞书招聘页无需登录态，直连即可访问
 
-运行（仅夜间 23:00-06:00）：
+运行（仅夜间 22:00-08:00）：
   scrapy crawl maimai -a keywords=Python -o output/maimai.jsonl
 """
 
@@ -28,20 +28,20 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from scrapy.exceptions import CloseSpider
 
 from crawlers.base_spider import BaseSpider
-from crawlers.settings import MAIMAI_COMPLIANCE
+from crawlers.settings import MAIMAI_COMPLIANCE, SUBPROCESS_TIMEOUT
 
 
 CRAWLER_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "maimai_cdp_crawler.py")
 
 
-# 合规时间窗口（23:00-06:00）
-NIGHT_START_HOUR = MAIMAI_COMPLIANCE["schedule_hours"][0]  # 23
-NIGHT_END_HOUR = MAIMAI_COMPLIANCE["schedule_hours"][1]    # 6
+# 合规时间窗口（22:00-08:00）
+NIGHT_START_HOUR = MAIMAI_COMPLIANCE["schedule_hours"][0]  # 22
+NIGHT_END_HOUR = MAIMAI_COMPLIANCE["schedule_hours"][1]    # 8
 
 
 class MaimaiSpider(BaseSpider):
@@ -52,8 +52,8 @@ class MaimaiSpider(BaseSpider):
     cities = ["北京"]
 
     def start_requests(self):
-        """合规守卫：仅夜间 23:00-06:00 启动。"""
-        current_hour = datetime.now().hour
+        """合规守卫：仅夜间 22:00-08:00 启动。"""
+        current_hour = datetime.now(timezone(timedelta(hours=8))).hour
         in_night_window = current_hour >= NIGHT_START_HOUR or current_hour < NIGHT_END_HOUR
         if not in_night_window:
             raise CloseSpider(
@@ -88,8 +88,16 @@ class MaimaiSpider(BaseSpider):
             self.logger.error(f"启动 CDP 脚本失败: {e}")
             return
 
-        # 逐行读取 stdout（JSONL），实时 yield Item
-        for line in proc.stdout:
+        # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
+        try:
+            stdout, stderr_output = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr_output = proc.communicate()
+            self.logger.error(f"CDP 脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+            return
+
+        for line in stdout.splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -112,14 +120,8 @@ class MaimaiSpider(BaseSpider):
                 description=item_data.get("description", ""),
                 requirements="",
                 raw_text=json.dumps(item_data.get("raw", item_data), ensure_ascii=False),
-                job_type=item_data.get("job_type", ""),
-                # 合规字段（CleaningPipeline 会再次设置 is_desensitized=True）
-                compliance_note=MAIMAI_COMPLIANCE["annotation"],
             )
 
-        # 等待进程结束
-        proc.wait()
-        stderr_output = proc.stderr.read() if proc.stderr else ""
         if proc.returncode != 0:
             self.logger.warning(f"CDP 脚本退出码 {proc.returncode}")
         if stderr_output:
