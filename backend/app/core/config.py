@@ -62,12 +62,22 @@ class Settings(BaseSettings):
         return self.app_env == "production"
 
     @property
+    def _backend_dir(self) -> Path:
+        return Path(__file__).resolve().parent.parent.parent
+
+    @property
     def jwt_private_key(self) -> str:
-        return Path(self.jwt_private_key_path).read_text()
+        p = Path(self.jwt_private_key_path)
+        if not p.is_absolute():
+            p = self._backend_dir / self.jwt_private_key_path
+        return p.read_text()
 
     @property
     def jwt_public_key(self) -> str:
-        return Path(self.jwt_public_key_path).read_text()
+        p = Path(self.jwt_public_key_path)
+        if not p.is_absolute():
+            p = self._backend_dir / self.jwt_public_key_path
+        return p.read_text()
 
 
 settings = Settings()
