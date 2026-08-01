@@ -18,20 +18,22 @@ import {
 import type { PositionStatus } from '@/components/graph/types'
 import { apiGet, apiPost, ApiError } from '@/lib/api'
 
-const STATUS_LABEL: Record<PositionStatus, string> = {
+const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
   candidate: '候选',
   emerging: '新兴',
   stable: '稳定',
   declining: '衰退',
   archived: '归档',
+  low: '待提升',
 }
 
-const STATUS_CLASS: Record<PositionStatus, string> = {
+const STATUS_CLASS: Record<PositionStatus | 'low', string> = {
   candidate: 'border-state-candidate/30 text-state-candidate bg-state-candidate/10',
   emerging: 'border-state-emerging/30 text-state-emerging bg-state-emerging/10',
   stable: 'border-state-stable/30 text-state-stable bg-state-stable/10',
   declining: 'border-state-declining/30 text-state-declining bg-state-declining/10',
   archived: 'border-state-archived/30 text-state-archived bg-state-archived/10',
+  low: 'border-ink-faint/30 text-ink-muted bg-subtle',
 }
 
 const PRIORITY_LABEL = { high: '高', medium: '中', low: '低' } as const

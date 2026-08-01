@@ -41,8 +41,8 @@ export interface RecommendItem {
   nice_score: number
   exp_score: number
   summary: string
-  /** 岗位状态（后端未产出，按分数映射展示） */
-  status: 'stable' | 'emerging' | 'declining'
+  /** 岗位状态（后端未产出，按分数映射展示：≥0.6 stable / ≥0.4 declining / <0.4 low） */
+  status: 'stable' | 'emerging' | 'declining' | 'low'
   /** 关键差距（前 3 条，来自 missing_must） */
   key_gaps: string[]
 }
