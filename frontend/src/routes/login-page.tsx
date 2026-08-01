@@ -6,22 +6,30 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAuthStore } from '@/store/auth'
-import type { User } from '@/store/auth'
-import { apiPost, ApiError, setRefreshToken } from '@/lib/api'
+import { apiGet, apiPost, ApiError, setAccessToken, setRefreshToken } from '@/lib/api'
 
 interface LoginResult {
+  access_token: string
   refresh_token: string
-  user: {
-    id: string
-    username: string
-    role: 'guest' | 'user' | 'admin'
-    permissions: string[]
-  }
+  token_type: string
+  expires_in: number
+}
+
+interface MeResult {
+  id: string
+  username: string
+  role: 'guest' | 'user' | 'admin'
+}
+
+/** 后端 me 不返回权限列表，按角色映射（与后端 RBAC 规则一致） */
+function permissionsOf(role: MeResult['role']): string[] {
+  if (role === 'admin') return ['*']
+  return []
 }
 
 /**
  * 登录页 — 设计文档 §10.2 /login
- * JWT 双 Token：access_token 由后端 Set-Cookie 写入 httpOnly Cookie
+ * JWT 双 Token 内存存留，login 后调 /auth/me 获取用户态
  */
 export function LoginPage() {
   const navigate = useNavigate()
@@ -40,26 +48,17 @@ export function LoginPage() {
     setLoading(true)
     try {
       const data = await apiPost<LoginResult>('/auth/login', { username, password })
+      setAccessToken(data.access_token)
       setRefreshToken(data.refresh_token)
-      setUser(data.user)
+      // 拉取当前用户态（/auth/me 需 Bearer access_token）
+      const me = await apiGet<MeResult>('/auth/me')
+      setUser({ id: me.id, username: me.username, role: me.role, permissions: permissionsOf(me.role) })
       navigate(from, { replace: true })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '登录失败，请检查用户名与密码')
     } finally {
       setLoading(false)
     }
-  }
-
-  // Dev 专属快捷登录 — 后端未就绪时注入 mock 用户态以访问受保护页面
-  // import.meta.env.DEV 在生产构建中被静态替换为 false，整个块被 tree-shake 移除
-  function loginAsMock(role: User['role']) {
-    const mockUsers: Record<User['role'], User> = {
-      admin: { id: 'dev-admin', username: 'dev_admin', role: 'admin', permissions: ['*'] },
-      user: { id: 'dev-user', username: 'dev_user', role: 'user', permissions: [] },
-      guest: { id: 'dev-guest', username: 'dev_guest', role: 'guest', permissions: [] },
-    }
-    setUser(mockUsers[role])
-    navigate(from, { replace: true })
   }
 
   return (
@@ -118,43 +117,6 @@ export function LoginPage() {
         <p className="text-center text-xs text-ink-faint">
           访客可直接浏览 <a href="/graph" className="underline hover:text-ink">能力图谱</a>
         </p>
-
-        {/* Dev 专属快捷登录 — 后端未就绪时使用，生产构建被 tree-shake 移除 */}
-        {import.meta.env.DEV && (
-          <div className="rounded-md border border-dashed border-state-emerging/40 bg-state-emerging/5 p-3 space-y-2">
-            <p className="text-xs font-medium text-state-emerging">Dev 快捷登录（mock）</p>
-            <p className="text-[10px] text-ink-muted">后端未就绪时跳过真实认证，直接注入 mock 用户态</p>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="default"
-                className="flex-1 h-7 text-xs"
-                onClick={() => loginAsMock('admin')}
-              >
-                admin
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="flex-1 h-7 text-xs"
-                onClick={() => loginAsMock('user')}
-              >
-                user
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="flex-1 h-7 text-xs"
-                onClick={() => loginAsMock('guest')}
-              >
-                guest
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )

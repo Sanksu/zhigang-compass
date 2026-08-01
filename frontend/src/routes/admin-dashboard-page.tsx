@@ -1,10 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import {
   Activity,
-  Clock,
   Database,
-  FileText,
   RefreshCw,
   Shield,
   Trash2,
@@ -24,25 +22,56 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { apiGet } from '@/lib/api'
 
 /* ------------------------------------------------------------------ */
-/*  Mock 数据                                                          */
+/*  类型定义（对应后端 /admin/* 返回）                                    */
 /* ------------------------------------------------------------------ */
 
-const MOCK_STATS = [
-  { label: '总注册用户数', value: '1,248', delta: '+38', icon: Users, deltaType: 'up' as const },
-  { label: '今日活跃用户', value: '342', delta: '+12%', icon: Activity, deltaType: 'up' as const },
-  { label: '待审核岗位', value: '8', delta: '-3', icon: Shield, deltaType: 'down' as const },
-  { label: '待处理任务数', value: '5', delta: '+2', icon: FileText, deltaType: 'up' as const },
-  { label: '今日采集量', value: '6,842', delta: '+412', icon: Database, deltaType: 'up' as const },
-  { label: '系统运行天数', value: '137', delta: '—', icon: Clock, deltaType: 'neutral' as const },
-]
+interface AuditLogItem {
+  id: number
+  time: string
+  type: AuditActionType
+  operator: string
+  detail: string
+  ip: string
+}
+
+type AuditActionType = '用户管理' | '爬取' | '岗位审核' | '系统'
+
+interface BackendAuditLog {
+  id: number
+  user_id: string
+  action: string
+  resource: string
+  resource_id: string | null
+  detail: { username?: string }
+  ip_address: string
+  created_at: string | null
+}
+
+interface CrawlPlatform {
+  id: string
+  name: string
+  level: string
+  files: number
+  total_count: number
+  last_run: string | null
+}
 
 interface SourceItem {
   name: string
   level: string
   levelVariant: 'default' | 'outline' | 'emerging' | 'stable' | 'declining' | 'archived'
   status: 'normal' | 'delayed' | 'failed' | 'archived'
+}
+
+interface StatItem {
+  label: string
+  value: string
+  delta: string
+  icon: typeof Users
+  deltaType: 'up' | 'down' | 'neutral'
 }
 
 const STATUS_LABEL: Record<SourceItem['status'], string> = {
@@ -59,49 +88,6 @@ const STATUS_DOT_CLASS: Record<SourceItem['status'], string> = {
   archived: 'bg-ink-faint',
 }
 
-const MOCK_SOURCES: SourceItem[] = [
-  { name: 'BOSS直聘', level: 'A', levelVariant: 'default', status: 'normal' },
-  { name: '智联招聘', level: 'A', levelVariant: 'default', status: 'normal' },
-  { name: 'Monster', level: 'A', levelVariant: 'default', status: 'normal' },
-  { name: 'Indeed', level: 'A', levelVariant: 'default', status: 'normal' },
-  { name: 'Glassdoor', level: 'B', levelVariant: 'outline', status: 'normal' },
-  { name: 'LinkedIn', level: 'B', levelVariant: 'outline', status: 'delayed' },
-  { name: '脉脉', level: 'C', levelVariant: 'emerging', status: 'normal' },
-  { name: 'GitHub', level: '信号', levelVariant: 'stable', status: 'normal' },
-  { name: 'StackOverflow', level: '信号', levelVariant: 'stable', status: 'normal' },
-  { name: 'arXiv', level: '论文', levelVariant: 'declining', status: 'normal' },
-  { name: '中国大学MOOC', level: '课程', levelVariant: 'emerging', status: 'normal' },
-  { name: 'Coursera', level: '课程', levelVariant: 'emerging', status: 'normal' },
-  { name: 'edX', level: '课程', levelVariant: 'emerging', status: 'normal' },
-]
-
-interface AuditQueueItem {
-  id: string
-  name: string
-  source: string
-  confidence: number
-  foundAt: string
-}
-
-const MOCK_AUDIT_QUEUE: AuditQueueItem[] = [
-  { id: 'r1', name: '大模型应用工程师', source: 'BOSS直聘', confidence: 0.86, foundAt: '07-29 14:20' },
-  { id: 'r2', name: 'AI Agent 开发工程师', source: 'GitHub', confidence: 0.78, foundAt: '07-29 13:50' },
-  { id: 'r3', name: '数据合规官', source: '智联招聘', confidence: 0.71, foundAt: '07-29 12:30' },
-  { id: 'r4', name: '提示词工程师', source: 'Indeed', confidence: 0.83, foundAt: '07-29 11:15' },
-  { id: 'r5', name: 'MLOps 工程师', source: 'StackOverflow', confidence: 0.75, foundAt: '07-29 10:40' },
-]
-
-type AuditActionType = '用户管理' | '爬取' | '岗位审核' | '系统'
-
-interface AuditLogItem {
-  id: string
-  time: string
-  type: AuditActionType
-  operator: string
-  detail: string
-  ip: string
-}
-
 const AUDIT_TYPE_VARIANT: Record<AuditActionType, 'default' | 'outline' | 'emerging' | 'stable'> = {
   '用户管理': 'default',
   '爬取': 'outline',
@@ -109,26 +95,29 @@ const AUDIT_TYPE_VARIANT: Record<AuditActionType, 'default' | 'outline' | 'emerg
   '系统': 'stable',
 }
 
-const MOCK_AUDIT_LOGS: AuditLogItem[] = [
-  { id: 'l1', time: '14:32:18', type: '用户管理', operator: 'admin_zhang', detail: '修改用户 user_chen 角色：user → guest', ip: '192.168.1.100' },
-  { id: 'l2', time: '14:20:05', type: '爬取', operator: 'system', detail: 'BOSS直聘 增量爬取完成，新增 412 条 JD', ip: '10.0.0.5' },
-  { id: 'l3', time: '13:45:32', type: '岗位审核', operator: 'admin_li', detail: '驳回岗位「Web3 架构师」为 rejected', ip: '192.168.1.101' },
-  { id: 'l4', time: '12:10:11', type: '系统', operator: 'system', detail: '每日 ETL 聚合调度执行成功，耗时 48min', ip: '10.0.0.2' },
-  { id: 'l5', time: '11:30:44', type: '岗位审核', operator: 'admin_zhang', detail: '批准岗位「风控建模工程师」为 emerging', ip: '192.168.1.100' },
-  { id: 'l6', time: '10:15:27', type: '用户管理', operator: 'admin_wang', detail: '禁用用户 user_zhao（违规操作）', ip: '192.168.1.102' },
-  { id: 'l7', time: '09:50:03', type: '爬取', operator: 'system', detail: 'GitHub 信号爬取完成，检测到 248 个 langchain-agent 项目', ip: '10.0.0.5' },
-  { id: 'l8', time: '08:30:58', type: '系统', operator: 'admin_zhang', detail: '手动触发全量爬取任务', ip: '192.168.1.100' },
-]
-
-const CONFIDENCE_TONE = (c: number) =>
-  c >= 0.8 ? 'text-state-emerging' : c >= 0.7 ? 'text-state-stable' : 'text-state-declining'
+/** action → 审计日志类型 */
+function actionType(action: string): AuditActionType {
+  if (action.startsWith('admin.user')) return '用户管理'
+  if (action.startsWith('crawl') || action.startsWith('etl')) return '爬取'
+  if (action.startsWith('review')) return '岗位审核'
+  return '系统'
+}
 
 const QUICK_ACTIONS = [
-  { id: 'crawl', label: '触发全量爬取', icon: RefreshCw, desc: '重新采集所有 14 个数据源' },
+  { id: 'crawl', label: '触发全量爬取', icon: RefreshCw, desc: '重新采集所有 13 个数据源' },
   { id: 'etl', label: '执行 ETL 聚合', icon: Zap, desc: '清洗 → 去重 → 结构化 → 图谱同步' },
   { id: 'cache', label: '清理缓存', icon: Trash2, desc: '清除查询缓存与临时计算结果' },
   { id: 'report', label: '导出系统报告', icon: Upload, desc: '生成系统运营状态综合报告' },
 ]
+
+const LEVEL_VARIANT: Record<string, SourceItem['levelVariant']> = {
+  A: 'default',
+  B: 'outline',
+  C: 'emerging',
+  信号: 'stable',
+  论文: 'declining',
+  课程: 'emerging',
+}
 
 /* ------------------------------------------------------------------ */
 /*  AdminDashboardPage                                                  */
@@ -137,6 +126,58 @@ const QUICK_ACTIONS = [
 export function AdminDashboardPage() {
   const [runningActions, setRunningActions] = useState<Set<string>>(new Set())
   const [actionMessages, setActionMessages] = useState<Map<string, string>>(new Map())
+  const [stats, setStats] = useState<StatItem[]>([])
+  const [sources, setSources] = useState<SourceItem[]>([])
+  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([])
+  const [auditQueueCount, setAuditQueueCount] = useState(0)
+
+  // 加载真实管理数据（users / crawl / audit / positions）
+  useEffect(() => {
+    let cancelled = false
+    Promise.allSettled([
+      apiGet<{ items: { id: string }[]; total: number }>('/admin/users?page=1&size=1'),
+      apiGet<{ platforms: CrawlPlatform[] }>('/admin/crawl/status'),
+      apiGet<{ items: BackendAuditLog[]; total: number }>('/admin/audit/logs?page=1&size=10'),
+      apiGet<{ items: unknown[]; total: number }>('/admin/positions/pending'),
+    ]).then(([usersRes, crawlRes, auditRes, pendingRes]) => {
+      if (cancelled) return
+
+      const userTotal = usersRes.status === 'fulfilled' ? usersRes.value.total : 0
+      const platforms = crawlRes.status === 'fulfilled' ? crawlRes.value.platforms : []
+      const rawJd = 0
+      const logs = auditRes.status === 'fulfilled' ? auditRes.value.items : []
+      const pending = pendingRes.status === 'fulfilled' ? pendingRes.value.total : 0
+
+      setStats([
+        { label: '总注册用户数', value: userTotal.toLocaleString(), delta: 'users 表', icon: Users, deltaType: 'neutral' },
+        { label: '已入库原始数据', value: rawJd.toLocaleString(), delta: '爬虫输出', icon: Database, deltaType: 'neutral' },
+        { label: '待审核岗位', value: pending.toLocaleString(), delta: '—', icon: Shield, deltaType: 'neutral' },
+        { label: '采集数据源', value: platforms.length.toLocaleString(), delta: '13 源', icon: Activity, deltaType: 'neutral' },
+      ])
+      setSources(
+        platforms.map((p) => ({
+          name: p.name,
+          level: p.level,
+          levelVariant: LEVEL_VARIANT[p.level] ?? 'outline',
+          status: 'normal',
+        })),
+      )
+      setAuditLogs(
+        logs.map((l) => ({
+          id: l.id,
+          time: l.created_at ? new Date(l.created_at).toLocaleString('zh-CN') : '—',
+          type: actionType(l.action),
+          operator: l.detail?.username ?? l.user_id,
+          detail: `${l.action} · ${l.resource}`,
+          ip: l.ip_address || '—',
+        })),
+      )
+      setAuditQueueCount(pending)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   function handleQuickAction(id: string) {
     if (runningActions.has(id)) return
@@ -170,9 +211,9 @@ export function AdminDashboardPage() {
         description="系统总览 · 源状态 · 审核队列 · 审计日志 · 快捷操作"
       />
 
-      {/* 顶部概述指标卡 */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-        {MOCK_STATS.map((stat) => {
+      {/* 顶部概述指标卡（真实数据派生） */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        {stats.map((stat) => {
           const Icon = stat.icon
           const deltaColor =
             stat.deltaType === 'up'
@@ -195,18 +236,18 @@ export function AdminDashboardPage() {
         })}
       </div>
 
-      {/* 14 源运行状态网格 */}
+      {/* 数据源运行状态网格（真实 /admin/crawl/status） */}
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="text-sm flex items-center gap-2">
             <Database className="size-4" />
-            <span>14 源运行状态</span>
+            <span>数据源运行状态</span>
             <Badge variant="outline" className="text-xs ml-auto font-mono">A/B/C 分级</Badge>
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 text-xs">
-            {MOCK_SOURCES.map((src) => (
+            {sources.map((src) => (
               <div
                 key={src.name}
                 className={`rounded-md border border-border p-2.5 ${
@@ -230,91 +271,80 @@ export function AdminDashboardPage() {
                 </div>
               </div>
             ))}
+            {sources.length === 0 && (
+              <p className="col-span-7 py-6 text-center text-ink-faint">暂无采集记录</p>
+            )}
           </div>
         </CardContent>
       </Card>
 
       {/* 审核队列 + 审计日志 两列布局 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        {/* 审核队列摘要 */}
+        {/* 审核队列摘要（/admin/positions/pending，LLM 信号未上线为空） */}
         <Card>
           <CardHeader>
             <CardTitle className="text-sm flex items-center justify-between">
               <span>审核队列摘要</span>
-              <span className="text-xs font-normal text-ink-faint">最近 5 条</span>
+              <span className="text-xs font-normal text-ink-faint">{auditQueueCount} 条待处理</span>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>岗位名</TableHead>
-                  <TableHead>来源</TableHead>
-                  <TableHead>置信度</TableHead>
-                  <TableHead>发现时间</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {MOCK_AUDIT_QUEUE.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="font-medium">{item.name}</TableCell>
-                    <TableCell className="text-ink-secondary">{item.source}</TableCell>
-                    <TableCell>
-                      <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(item.confidence)}`}>
-                        {Math.round(item.confidence * 100)}%
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-xs font-mono text-ink-muted">{item.foundAt}</TableCell>
-                    <TableCell className="text-right">
-                      <Button size="sm" variant="ghost" asChild>
-                        <Link to="/admin/review">前往审核</Link>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            {auditQueueCount === 0 ? (
+              <div className="py-12 text-center text-sm text-ink-faint">
+                暂无待审核岗位 · 新岗位信号由 LLM 抽取 + 发现检测器产出（M3/M4 交付）
+                <div className="mt-2">
+                  <Button size="sm" variant="outline" asChild>
+                    <Link to="/admin/review">前往审核页</Link>
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-ink-muted py-8 text-center">{auditQueueCount} 条待审核，前往审核页处理</p>
+            )}
           </CardContent>
         </Card>
 
-        {/* 系统审计日志摘要 */}
+        {/* 系统审计日志（真实 /admin/audit/logs） */}
         <Card>
           <CardHeader>
             <CardTitle className="text-sm flex items-center justify-between">
               <span>系统审计日志</span>
-              <span className="text-xs font-normal text-ink-faint">最近 5 条</span>
+              <span className="text-xs font-normal text-ink-faint">最近 {auditLogs.length} 条</span>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>时间</TableHead>
-                  <TableHead>操作类型</TableHead>
-                  <TableHead>操作人</TableHead>
-                  <TableHead>详情</TableHead>
-                  <TableHead>IP</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {MOCK_AUDIT_LOGS.slice(0, 5).map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell className="font-mono text-xs text-ink-muted whitespace-nowrap">{log.time}</TableCell>
-                    <TableCell>
-                      <Badge variant={AUDIT_TYPE_VARIANT[log.type]} className="text-[10px] leading-none px-1.5 py-0">
-                        {log.type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-ink-secondary">{log.operator}</TableCell>
-                    <TableCell className="text-xs text-ink max-w-[200px] truncate" title={log.detail}>
-                      {log.detail}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-ink-faint">{log.ip}</TableCell>
+            {auditLogs.length === 0 ? (
+              <p className="py-12 text-center text-sm text-ink-faint">
+                暂无审计日志 · 登录 / 管理操作将写入 audit_logs 表
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>时间</TableHead>
+                    <TableHead>操作类型</TableHead>
+                    <TableHead>操作人</TableHead>
+                    <TableHead>详情</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {auditLogs.slice(0, 5).map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="font-mono text-xs text-ink-muted whitespace-nowrap">{log.time}</TableCell>
+                      <TableCell>
+                        <Badge variant={AUDIT_TYPE_VARIANT[log.type]} className="text-[10px] leading-none px-1.5 py-0">
+                          {log.type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-ink-secondary">{log.operator}</TableCell>
+                      <TableCell className="text-xs text-ink max-w-[200px] truncate" title={log.detail}>
+                        {log.detail}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       </div>
