@@ -73,7 +73,6 @@ const MOCK_SOURCES: SourceItem[] = [
   { name: '中国大学MOOC', level: '课程', levelVariant: 'emerging', status: 'normal' },
   { name: 'Coursera', level: '课程', levelVariant: 'emerging', status: 'normal' },
   { name: 'edX', level: '课程', levelVariant: 'emerging', status: 'normal' },
-  { name: '拉勾网', level: 'B', levelVariant: 'archived', status: 'archived' },
 ]
 
 interface AuditQueueItem {

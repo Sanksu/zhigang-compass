@@ -33,8 +33,6 @@ $Tasks = @(
     @{ Name = "CrawlMonster";   Time = "04:00"; Script = "crawl_spider.py"; Args = @("monster", "50");  Proxy = $true },
     @{ Name = "CrawlIndeed";    Time = "04:20"; Script = "crawl_spider.py"; Args = @("indeed", "50");   Proxy = $true },
     @{ Name = "CrawlGlassdoor"; Time = "04:40"; Script = "crawl_spider.py"; Args = @("glassdoor", "50"); Proxy = $true },
-    # B 级国内（04:30）
-    @{ Name = "CrawlLagou";     Time = "04:30"; Script = "crawl_spider.py"; Args = @("lagou", "50") },
     # 脉脉夜间合规窗口（23:00）
     @{ Name = "CrawlMaimai";    Time = "23:00"; Script = "crawl_spider.py"; Args = @("maimai", "30") },
     # 国际非招聘源（北京时间 08:00 = UTC 0:00）

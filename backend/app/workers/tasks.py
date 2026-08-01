@@ -136,7 +136,7 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
 
     # 按设计文档 §4.4 数据更新频率分组
     # 国内 A 级 + B 级（02:00 / 04:00）
-    domestic_platforms = ["boss", "zhilian", "lagou"]
+    domestic_platforms = ["boss", "zhilian"]
     # 国际 A/B 级（错峰）
     international_platforms = ["monster", "indeed", "glassdoor"]
     # 非招聘数据源（论文/社区/课程）

@@ -68,15 +68,14 @@ const MOCK_METRICS = [
 ]
 
 /**
- * 13 源在线 + 拉勾归档 = 14 行
- * 与仪表盘「14 源数据底座」对齐，归档源保留以体现历史可追溯
+ * 13 源在线 = 13 行
+ * 与仪表盘「13 源数据底座」对齐
  */
 const MOCK_PLATFORMS: PlatformRow[] = [
   { id: 'boss', name: 'BOSS直聘', level: 'A', status: 'running', todayCount: 412, totalCount: 1842, lastRun: '07-29 14:32' },
   { id: 'zhaopin', name: '智联招聘', level: 'A', status: 'idle', todayCount: 86, totalCount: 1456, lastRun: '07-29 13:15' },
   { id: 'monster', name: 'Monster', level: 'A', status: 'idle', todayCount: 42, totalCount: 982, lastRun: '07-29 10:20' },
   { id: 'indeed', name: 'Indeed', level: 'A', status: 'running', todayCount: 124, totalCount: 1124, lastRun: '07-29 14:30' },
-  { id: 'lagou', name: '拉勾网', level: 'B', status: 'archived', todayCount: 0, totalCount: 0, lastRun: '2024-03-15 归档' },
   { id: 'glassdoor', name: 'Glassdoor', level: 'B', status: 'idle', todayCount: 28, totalCount: 642, lastRun: '07-29 09:10' },
   { id: 'linkedin', name: 'LinkedIn', level: 'B', status: 'failed', todayCount: 0, totalCount: 478, lastRun: '07-29 08:45' },
   { id: 'maimai', name: '脉脉', level: 'C', status: 'idle', todayCount: 0, totalCount: 312, lastRun: '07-29 06:00' },
@@ -184,7 +183,7 @@ export function AdminCrawlPage() {
         <CardHeader>
           <CardTitle className="text-sm flex items-center justify-between">
             <span>平台状态</span>
-            <span className="text-xs font-normal text-ink-faint">13 源在线 · 拉勾归档</span>
+            <span className="text-xs font-normal text-ink-faint">13 源在线</span>
           </CardTitle>
         </CardHeader>
         <CardContent>

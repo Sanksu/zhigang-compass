@@ -41,6 +41,19 @@ class CleaningPipeline:
             f"{item.get('source', '')}:{item.get('source_id', '')}".encode()
         ).hexdigest()
 
+        # 语义指纹：JobItem 计算 SimHash（title+company+description），跨平台近似去重用
+        # 短文本（仅标题）单 token 变化会导致海明距过大，故包含 description 保证判定稳健
+        if isinstance(item, JobItem):
+            from app.services.data_quality.simhash import simhash64
+            item["_simhash"] = simhash64(
+                " ".join(filter(None, [
+                    item.get("title", ""),
+                    item.get("company", ""),
+                    item.get("description", ""),
+                    item.get("requirements", ""),
+                ]))
+            )
+
         # 脉脉合规脱敏（description 与 raw_text 均含原始文本，需一并清洗）
         if item.get("source") == "maimai":
             item["description"] = self._desensitize(item.get("description", ""))

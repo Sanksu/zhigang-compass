@@ -11,7 +11,7 @@
 
 平台调度时段（设计文档 §4.4）：
     02:00  boss / zhilian（国内 A 级）
-    04:00  lagou / monster / indeed / glassdoor（B 级 + 国际 A 级错峰）
+    04:00  monster / indeed / glassdoor（国际 A 级错峰）
     23:00  maimai（脉脉夜间合规窗口 ≤100 req/h）
     00:00  linkedin_public / github / stackoverflow（国际，UTC 0:00）
     03:00  arxiv（UTC 3:00）
@@ -56,7 +56,7 @@ async def enqueue_crawl(spider_name: str, max_results: int | None = None) -> Non
 def main() -> int:
     if len(sys.argv) < 2:
         print("用法: python crawl_spider.py <spider_name> [max_results]", file=sys.stderr)
-        print("可用 spider: boss / zhilian / lagou / monster / indeed / glassdoor / "
+        print("可用 spider: boss / zhilian / monster / indeed / glassdoor / "
               "maimai / linkedin_public / arxiv / github / stackoverflow / "
               "coursera / edx / icourse163", file=sys.stderr)
         return 2

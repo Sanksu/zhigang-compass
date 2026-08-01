@@ -23,7 +23,7 @@ class _BaseItem(Item):
 
 
 class JobItem(_BaseItem):
-    """招聘信息（boss / zhilian / linkedin / monster / lagou / indeed / glassdoor / maimai）。"""
+    """招聘信息（boss / zhilian / linkedin / monster / indeed / glassdoor / maimai）。"""
 
     # ---- 岗位信息 ----
     title = Field()             # 岗位名称
