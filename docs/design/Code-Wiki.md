@@ -620,12 +620,12 @@ NEO4J_PASSWORD=password
 REDIS_URL=redis://localhost:6379/0
 
 # LLM 三 provider（OpenAI 兼容）
-LLM_PRIMARY_BASE_URL=https://spark-api.xf-yun.com/v1
+LLM_PRIMARY_BASE_URL=https://api.deepseek.com/v1
 LLM_PRIMARY_API_KEY=
-LLM_PRIMARY_MODEL=spark-v2
-LLM_SECONDARY_BASE_URL=https://api.deepseek.com/v1
+LLM_PRIMARY_MODEL=deepseek-v4-flash
+LLM_SECONDARY_BASE_URL=https://spark-api.xf-yun.com/v1
 LLM_SECONDARY_API_KEY=
-LLM_SECONDARY_MODEL=deepseek-chat
+LLM_SECONDARY_MODEL=v4.0
 LLM_TERTIARY_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 LLM_TERTIARY_API_KEY=
 LLM_TERTIARY_MODEL=qwen-plus
