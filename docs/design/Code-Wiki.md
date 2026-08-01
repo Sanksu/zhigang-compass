@@ -229,7 +229,7 @@ zhigang-compass/
 
 | 文件 | 职责 |
 |------|------|
-| [config.py](../backend/app/core/config.py) | 配置中心。`Settings(BaseSettings)` 从 `.env` + 环境变量加载；含应用/数据库/LLM 三 provider/JWT/缓存/ARQ/前端目录配置；`is_production` 控制安全开关 |
+| [config.py](../backend/app/core/config.py) | 配置中心。`Settings(BaseSettings)` 从 `.env` + 环境变量加载；含应用/数据库/JWT/缓存/ARQ/前端目录配置（LLM provider 见 `configs/llm_providers.yaml`）；`is_production` 控制安全开关 |
 | [database.py](../backend/app/core/database.py) | 三库连接管理：PostgreSQL（async engine + session 工厂）、Neo4j（同步 driver）、Redis（async client）；提供 `get_db` / `get_neo4j` / `get_redis` 依赖注入 |
 | [middleware.py](../backend/app/core/middleware.py) | 中间件链：CORS（白名单）+ GZip（>1KB）+ SecurityHeaders（CSP/HSTS/TraceID） |
 | [security.py](../backend/app/core/security.py) | JWT RS256 双 Token（access 30min / refresh 7d）+ bcrypt 密码哈希 + RBAC 四角色权限映射 |
@@ -364,7 +364,7 @@ Scrapy + Playwright + CDP，13 源招聘 A/B/C 三级分级 + 6 源非招聘数�
 
 #### `Settings` — [core/config.py](../backend/app/core/config.py)
 应用配置中心，`pydantic-settings` 驱动。
-- 关键字段：`postgres_dsn` / `neo4j_uri` / `redis_url` / `llm_primary_*` / `llm_secondary_*` / `llm_tertiary_*`（三 provider）/ `jwt_*` / `panorama_cache_ttl=30` / `arq_*`
+- 关键字段：`postgres_dsn` / `neo4j_uri` / `redis_url` / `jwt_*` / `panorama_cache_ttl=30` / `arq_*`（LLM provider 配置见 `configs/llm_providers.yaml`，可配置任意 OpenAI 兼容 API）
 - 关键 property：`is_production`（控制 CORS/HSTS/Swagger/SECRET_KEY 守卫）、`jwt_private_key` / `jwt_public_key`（惰性读文件）
 
 #### `create_access_token(user_id, role)` / `create_refresh_token(user_id)` — [core/security.py](../backend/app/core/security.py)
@@ -619,16 +619,10 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
 REDIS_URL=redis://localhost:6379/0
 
-# LLM 三 provider（OpenAI 兼容）
-LLM_PRIMARY_BASE_URL=https://api.deepseek.com/v1
-LLM_PRIMARY_API_KEY=
-LLM_PRIMARY_MODEL=deepseek-v4-flash
-LLM_SECONDARY_BASE_URL=https://spark-api.xf-yun.com/v1
-LLM_SECONDARY_API_KEY=
-LLM_SECONDARY_MODEL=v4.0
-LLM_TERTIARY_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-LLM_TERTIARY_API_KEY=
-LLM_TERTIARY_MODEL=qwen-plus
+# LLM provider（任意 OpenAI 兼容 API）：
+#   组合/优先级/模型/api_key 全部在 configs/llm_providers.yaml（已 gitignore，
+#   api_key 由管理后台 /admin/llm 填写落盘，不入 env）。全新 clone 后复制
+#   configs/llm_providers.yaml.example 为 llm_providers.yaml 即可。
 
 # 前端
 VITE_API_TARGET=http://localhost:8000 # Vite 开发代理目标

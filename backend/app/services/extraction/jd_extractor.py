@@ -5,7 +5,8 @@
 2. 词典后过滤（SKILL_ALIAS 扫描 JD，过滤 LLM 越界技能）
 3. 中文后缀清洗 + 去重
 
-当前为骨架阶段（M2），LLM 调用标记为 NotImplemented。M3 集成后替换。
+LLM 调用走 LLMProviderChain（M3 参考实现）；未配置 api_key 时抛
+LLMConfigurationError（LLMExtractionError 子类），降级规则抽取兜底。
 """
 
 import json
@@ -13,7 +14,7 @@ import re
 from typing import Optional
 
 from app.services.extraction.schemas import JDExtractionResult
-from app.services.extraction.llm_provider import LLMProvider, LLMExtractionError
+from app.services.extraction.llm_provider import LLMProviderChain, LLMExtractionError
 from app.services.extraction.prompts import SYSTEM_PROMPT, TASK_TEMPLATE
 from app.services.extraction.post_processor import post_process
 
@@ -21,24 +22,22 @@ from app.services.extraction.post_processor import post_process
 class JDExtractor:
     """JD 实体抽取器。"""
 
-    def __init__(self, llm: Optional[LLMProvider] = None):
-        self._llm = llm or LLMProvider()
+    def __init__(self, llm: Optional[LLMProviderChain] = None):
+        self._llm = llm or LLMProviderChain()
 
     def extract(self, jd_text: str) -> JDExtractionResult:
         """从 JD 文本中抽取结构化实体。
 
-        M2 骨架阶段: 返回空结果，不调用 LLM。
-        M3 集成后: LLM Few-Shot → 词典过滤 → 后缀清洗 → 去重。
+        LLM 抽取 → 词典过滤 → 后缀清洗 → 去重；LLM 不可用时规则抽取兜底。
         """
         if not jd_text or len(jd_text.strip()) < 10:
             return JDExtractionResult(position_name="")
 
-        # ── M3 集成点：LLM 抽取 ──
+        # LLM 抽取（无 api_key / 全 provider 失败时降级规则抽取）
         try:
             prompt = TASK_TEMPLATE.format(jd_text=jd_text)
             result = self._llm.extract_structured(prompt, JDExtractionResult)
-        except (NotImplementedError, LLMExtractionError):
-            # 骨架阶段：fallback 规则抽取
+        except LLMExtractionError:
             result = self._rule_based_extract(jd_text)
 
         return post_process(result)
