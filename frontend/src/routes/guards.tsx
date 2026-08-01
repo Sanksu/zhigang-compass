@@ -17,7 +17,10 @@ interface GuardProps {
 
 export function AuthGuard({ children, requireRole }: GuardProps) {
   const location = useLocation()
-  const { isAuthenticated, user } = useAuthStore()
+  const { isAuthenticated, user, initialized } = useAuthStore()
+
+  // 会话恢复中：保持挂起，避免刷新页面时闪跳登录页
+  if (!initialized) return null
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location.pathname }} replace />
@@ -31,7 +34,11 @@ export function AuthGuard({ children, requireRole }: GuardProps) {
 }
 
 export function GuestGuard({ children }: GuardProps) {
-  const { isAuthenticated } = useAuthStore()
+  const { isAuthenticated, initialized } = useAuthStore()
+
+  // 会话恢复中：保持挂起，避免已登录用户在刷新时被重定向到首页/登录页
+  if (!initialized) return null
+
   if (isAuthenticated) {
     return <Navigate to="/" replace />
   }

@@ -37,6 +37,37 @@ export function getRefreshToken(): string | null {
   return _refreshToken
 }
 
+/** 会话恢复后的用户信息（来自 /auth/me） */
+export interface SessionUser {
+  id: string
+  username: string
+  role: 'guest' | 'user' | 'admin'
+}
+
+/**
+ * 恢复会话（应用启动/刷新页面时调用）。
+ *
+ * 内存 token 刷新后已清空，此时利用后端写入的 httpOnly Cookie 中的
+ * refresh_token 换新 access_token，再拉取 /auth/me 恢复用户态。
+ * 未登录时静默返回 null（skipAuthRedirect 避免触发全局登出跳转）。
+ */
+export async function restoreSession(): Promise<SessionUser | null> {
+  try {
+    const res = await http.post<ApiResponse<{ access_token?: string }>>(
+      '/auth/refresh',
+      {},
+      { skipAuthRedirect: true },
+    )
+    if (res.data.code !== 0 || !res.data.data?.access_token) return null
+    _accessToken = res.data.data.access_token
+    const me = await http.get<ApiResponse<SessionUser>>('/auth/me', { skipAuthRedirect: true })
+    if (me.data.code !== 0 || !me.data.data) return null
+    return me.data.data
+  } catch {
+    return null
+  }
+}
+
 /** 业务错误（ApiResponse.code !== 0） */
 export class ApiError extends Error {
   constructor(

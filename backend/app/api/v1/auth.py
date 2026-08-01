@@ -1,6 +1,8 @@
 """认证路由：登录、刷新 Token、注册、登出、当前用户。"""
 
-from fastapi import APIRouter, Depends, Request
+from typing import Optional
+
+from fastapi import APIRouter, Body, Depends, Request, Response
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +23,34 @@ from app.schemas.common import ok, error
 
 router = APIRouter()
 
+# httpOnly Cookie 名：存 refresh_token，前端 JS 无法读取，刷新后由浏览器自动携带
+REFRESH_COOKIE_NAME = "refresh_token"
+
+
+def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+    """将 refresh_token 写入 httpOnly Cookie（刷新页面后会话可自动恢复）。"""
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        max_age=settings.jwt_refresh_token_expire_days * 86400,
+        httponly=True,
+        # 生产走 HTTPS 时启用 Secure；本地开发 http 场景不加
+        secure=settings.is_production,
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(REFRESH_COOKIE_NAME, path="/")
+
+
+def _extract_refresh_token(request: Request, req: Optional[RefreshRequest]) -> Optional[str]:
+    """取 refresh_token：优先 body（兼容旧客户端），其次 httpOnly Cookie。"""
+    if req and req.refresh_token:
+        return req.refresh_token
+    return request.cookies.get(REFRESH_COOKIE_NAME)
+
 
 def _client_ip(request: Request) -> str:
     """客户端 IP（反向代理场景可取 X-Forwarded-For，当前直连取 peer IP）。"""
@@ -28,8 +58,16 @@ def _client_ip(request: Request) -> str:
 
 
 @router.post("/login")
-async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    """用户登录，返回双 Token（凭据校验走 users 表）。"""
+async def login(
+    req: LoginRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """用户登录，返回双 Token（凭据校验走 users 表）。
+
+    refresh_token 同时写入 httpOnly Cookie，刷新页面后前端可无感恢复会话。
+    """
     user = await db.scalar(select(User).where(User.username == req.username))
     if user is None:
         # 首次部署 bootstrap：users 表为空时按配置创建 admin 用户，
@@ -55,6 +93,8 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
 
     access_token = create_access_token(user.id, user.role)
     refresh_token = create_refresh_token(user.id, user.role)
+    # refresh_token 写入 httpOnly Cookie（刷新页面后自动恢复会话）
+    _set_refresh_cookie(response, refresh_token)
     # 写审计日志（登录成功，便于管理后台 /admin/audit/logs 追踪）
     db.add(AuditLog(
         user_id=user.id,
@@ -75,15 +115,20 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
 
 @router.post("/refresh")
 async def refresh_token(
-    req: RefreshRequest,
+    req: RefreshRequest = Body(default=None),
+    request: Request = None,
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db),
 ):
     """刷新 access_token。
 
     校验 refresh token 的 jti 是否被登出拉黑，并确认用户仍存在且未禁用。
+    refresh_token 来源：body（旧客户端）或 httpOnly Cookie（刷新恢复会话）。
     """
-    payload = decode_token(req.refresh_token)
+    refresh_token = _extract_refresh_token(request, req)
+    if not refresh_token:
+        return error(401, "缺少 refresh_token")
+    payload = decode_token(refresh_token)
     if payload is None or payload.get("type") != "refresh":
         return error(401, "无效的 refresh_token")
     jti = payload.get("jti")
@@ -135,14 +180,18 @@ async def me(
 
 @router.post("/logout")
 async def logout(
-    req: LogoutRequest,
+    req: LogoutRequest = Body(default=None),
+    request: Request = None,
+    response: Response = None,
     redis: Redis = Depends(get_redis),
 ):
     """登出：将 refresh_token 的 jti 加入 Redis 黑名单（TTL = refresh 有效期）。
 
-    前端同时清除本地 Token。黑名单后的 refresh_token 无法再换取新的 access_token。
+    前端同时清除本地 Token；httpOnly Cookie 中的 refresh_token 一并清除。
+    refresh_token 来源：body（旧客户端）或 httpOnly Cookie。
     """
-    payload = decode_token(req.refresh_token)
+    refresh_token = _extract_refresh_token(request, req)
+    payload = decode_token(refresh_token) if refresh_token else None
     jti = (payload or {}).get("jti")
     if jti:
         await redis.set(
@@ -150,4 +199,5 @@ async def logout(
             "1",
             ex=settings.jwt_refresh_token_expire_days * 86400,
         )
+    _clear_refresh_cookie(response)
     return ok(data={"msg": "已登出"})

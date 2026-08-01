@@ -26,11 +26,13 @@ class TokenResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    # 可选：httpOnly Cookie 场景下 body 可不携带，从 Cookie 读取
+    refresh_token: Optional[str] = None
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str
+    # 可选：httpOnly Cookie 场景下 body 可不携带，从 Cookie 读取
+    refresh_token: Optional[str] = None
 
 
 class UserProfile(BaseModel):
