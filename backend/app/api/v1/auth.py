@@ -1,42 +1,28 @@
 """认证路由：登录、刷新 Token、注册、登出、当前用户。"""
 
 from fastapi import APIRouter
-from pydantic import BaseModel
 
+from app.core.config import settings
 from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
 )
+from app.schemas.business import LoginRequest, RefreshRequest, RegisterRequest
 from app.schemas.common import ok, error
 
 router = APIRouter()
 
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-class RegisterRequest(BaseModel):
-    username: str
-    password: str
-
-
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
 @router.post("/login")
 async def login(req: LoginRequest):
     """用户登录，返回双 Token。"""
-    # TODO: 从 DB 查询用户。当前使用占位逻辑演示。
-    # 暂用内置 admin 账户便于开发
-    if req.username == "admin" and req.password == "admin123":
+    # TODO: 从 DB 查询用户。当前使用 config 中的占位凭据。
+    if req.username == settings.admin_username and req.password == settings.admin_password:
         user_id = "00000000-0000-0000-0000-000000000001"
         role = "admin"
         access_token = create_access_token(user_id, role)
-        refresh_token = create_refresh_token(user_id)
+        refresh_token = create_refresh_token(user_id, role)
         return ok(data={
             "access_token": access_token,
             "refresh_token": refresh_token,

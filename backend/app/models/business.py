@@ -14,6 +14,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Float,
+    ForeignKey,
     Integer,
     String,
     Text,
@@ -57,7 +58,7 @@ class AuditLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), index=True, nullable=False
+        UUID(as_uuid=False), ForeignKey("users.id"), index=True, nullable=False
     )
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     resource: Mapped[str] = mapped_column(String(100), nullable=False)

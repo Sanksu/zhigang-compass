@@ -46,11 +46,16 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
 
+    # ---------- 初始管理员（首次启动用，生产环境务必修改） ----------
+    admin_username: str = "admin"
+    admin_password: str = "admin123"
+
     # ---------- 缓存 ----------
     panorama_cache_ttl: int = 30  # 秒
 
     # ---------- 前端 ----------
     frontend_dist_dir: str = "../frontend/dist"
+    cors_origins: list[str] = ["*"]
 
     # ---------- ARQ ----------
     arq_redis_url: str = "redis://localhost:6379/1"

@@ -1,6 +1,7 @@
 """JWT 双 Token + RBAC 权限。"""
 
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -26,6 +27,7 @@ def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
+@lru_cache(maxsize=2)
 def _load_rsa_key(key_path: str) -> str:
     """加载 RSA 密钥，支持相对于 backend/ 目录的路径。"""
     p = Path(key_path)
@@ -46,9 +48,10 @@ def create_access_token(user_id: str, role: str) -> str:
     return jwt.encode(payload, private_key, algorithm="RS256")
 
 
-def create_refresh_token(user_id: str) -> str:
+def create_refresh_token(user_id: str, role: str = "guest") -> str:
     payload = {
         "sub": user_id,
+        "role": role,
         "type": "refresh",
         "iat": int(time.time()),
         "exp": int(time.time()) + settings.jwt_refresh_token_expire_days * 86400,

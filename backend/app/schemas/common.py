@@ -13,9 +13,9 @@ class APIResponse(BaseModel, Generic[T]):
     trace_id: str = ""
 
 
-def ok(data: Any = None, msg: str = "ok") -> dict:
-    return {"code": 0, "msg": msg, "data": data}
+def ok(data: Any = None, msg: str = "ok") -> APIResponse:
+    return APIResponse(code=0, msg=msg, data=data)
 
 
-def error(code: int, msg: str) -> dict:
-    return {"code": code, "msg": msg, "data": None}
+def error(code: int, msg: str) -> APIResponse:
+    return APIResponse(code=code, msg=msg, data=None)
