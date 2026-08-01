@@ -66,21 +66,22 @@ class BossSpider(BaseSpider):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.cdp_port = int(os.environ.get("BOSS_CDP_PORT", "9222"))
+        # CDP 调试端点：本地默认 http://127.0.0.1:9222，支持局域网内容器浏览器
+        self.cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
         # 采集脚本路径
         self.crawler_script = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
             "boss_cdp_crawler.py",
         )
         self.logger.info(
-            f"BOSS CDP 模式: 端口 {self.cdp_port}。"
+            f"BOSS CDP 模式: {self.cdp_url}。"
             f"如未启动专用 Chrome，请先运行: python -m crawlers.setup_boss_chrome"
         )
 
     def start_requests(self):
         # 发一个占位 Request 到 CDP 端点，触发 parse 方法
         yield Request(
-            f"http://127.0.0.1:{self.cdp_port}/json/version",
+            f"{self.cdp_url}/json/version",
             callback=self.parse,
             meta={"tasks": self._build_tasks()},
             dont_filter=True,
@@ -125,7 +126,7 @@ class BossSpider(BaseSpider):
                 python_exe, self.crawler_script,
                 "--keyword", keyword,
                 "--city-code", city_code,
-                "--cdp-port", str(self.cdp_port),
+                "--cdp-url", self.cdp_url,
                 "--max-pages", "5",
             ]
 

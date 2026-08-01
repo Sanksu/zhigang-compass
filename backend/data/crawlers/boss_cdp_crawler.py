@@ -36,15 +36,20 @@ def log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
-async def crawl(cdp_port: int, keyword: str, city_code: str, max_pages: int = 5) -> list:
-    """通过 CDP 连接已启动的 Chrome，采集岗位数据。"""
+async def crawl(cdp_url: str, keyword: str, city_code: str, max_pages: int = 5) -> list:
+    """通过 CDP 连接已启动的 Chrome，采集岗位数据。
+
+    Args:
+        cdp_url: CDP 调试端点（如 http://127.0.0.1:9222，或局域网内
+            容器中浏览器的 http://192.168.x.x:9222）
+    """
     from playwright.async_api import async_playwright
 
     items = []
 
     async with async_playwright() as p:
         try:
-            browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
+            browser = await p.chromium.connect_over_cdp(cdp_url)
         except Exception as e:
             log(f"CDP 连接失败: {e}")
             return items
@@ -204,11 +209,12 @@ def main():
     parser = argparse.ArgumentParser(description="BOSS 直聘 CDP 采集脚本")
     parser.add_argument("--keyword", required=True, help="搜索关键词")
     parser.add_argument("--city-code", required=True, help="城市代码（如 101010100）")
-    parser.add_argument("--cdp-port", type=int, default=9222, help="CDP 端口")
+    parser.add_argument("--cdp-url", default=os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222"),
+                        help="CDP 调试端点（默认 http://127.0.0.1:9222，支持局域网内容器浏览器）")
     parser.add_argument("--max-pages", type=int, default=5, help="最大页数")
     args = parser.parse_args()
 
-    items = asyncio.run(crawl(args.cdp_port, args.keyword, args.city_code, args.max_pages))
+    items = asyncio.run(crawl(args.cdp_url, args.keyword, args.city_code, args.max_pages))
 
     # 输出 JSONL 到 stdout
     for item in items:
