@@ -179,11 +179,8 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
     # ── 阶段 4：通胀检测（M3 启用）──
     results["stages"]["detect_inflation"] = await detect_inflation(ctx, jd_ids=[])
 
-    # ── 阶段 5：结构化 + 入库（M3 启用）──
-    results["stages"]["structure_load"] = {
-        "status": "pending_m3",
-        "msg": "依赖 AL-M3-01 LLM 抽取上线 + AL-M3-09 JD 入图",
-    }
+    # ── 阶段 5：结构化 + 入库（M3 启用：LLM 抽取 → snapshot 写回 → Neo4j 入图）──
+    results["stages"]["structure_load"] = await batch_extract(ctx, limit=500)
 
     return results
 
@@ -200,9 +197,90 @@ async def resume_parse(ctx: dict, file_path: str) -> dict:
     raise NotImplementedError("resume_parse 待 M4 实现（pypdf/python-docx/OCR + PII 脱敏 + LLM 抽取）")
 
 
-async def batch_extract(ctx: dict, jd_ids: list[str]) -> dict:
-    """LLM 批量实体抽取异步任务（M3 实现，依赖 AL-M3-01，当前未交付）。"""
-    raise NotImplementedError("batch_extract 待 AL-M3-01 LLM 抽取上线后实现")
+# 参与 JD 正文拼接的 snapshot 字段（按此顺序，跳过来源无关的元数据）
+_JD_TEXT_FIELDS = (
+    "title", "company", "location", "salary", "experience",
+    "education", "description", "requirements",
+)
+
+
+def _build_jd_text(snapshot: dict, raw_text: str) -> str:
+    """拼装 JD 抽取正文。
+
+    优先 snapshot 的干净文本字段（raw_text 为原始 HTML/JSON 备份，不适合喂 LLM）；
+    全部缺失时回退到 raw_text。
+    """
+    parts = [str(snapshot.get(f, "")).strip() for f in _JD_TEXT_FIELDS]
+    text = "\n".join(p for p in parts if p)
+    return text or raw_text
+
+
+async def batch_extract(
+    ctx: dict,
+    jd_ids: list[int] | None = None,
+    limit: int = 100,
+) -> dict:
+    """LLM 批量实体抽取 + JD 入图（M3 实现，依赖 AL-M3-01）。
+
+    选取 jd_raw 中尚未抽取（snapshot 无 extraction 标记）的记录：
+    - 拼装 JD 正文 → JDExtractor.extract（instructor 强校验，失败单条降级规则抽取）
+    - 抽取结果写回 jd_raw.snapshot["extraction"]（可审计、可重跑）
+    - kg_service.import_jd 入图（Neo4j MERGE 幂等，重复执行不产生重复节点）
+
+    单条失败不阻塞整体（批量语义）；全部失败时抛出，由 ARQ 重试机制兜底。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory, neo4j_driver
+    from app.models.raw import JDRaw
+    from app.services.extraction.jd_extractor import JDExtractor
+    from app.services.kg.kg_service import import_jd
+
+    extractor = JDExtractor()
+
+    async with async_session_factory() as session:
+        if jd_ids:
+            rows = (await session.scalars(
+                select(JDRaw).where(JDRaw.id.in_(jd_ids))
+            )).all()
+        else:
+            # 未抽取 = snapshot 无 extraction 键（JSONB 键缺失时为 SQL NULL）
+            rows = (await session.scalars(
+                select(JDRaw)
+                .where(JDRaw.snapshot["extraction"].astext.is_(None))
+                .order_by(JDRaw.id.asc())
+                .limit(limit)
+            )).all()
+
+        results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": []}
+        for row in rows:
+            text = _build_jd_text(row.snapshot or {}, row.raw_text or "")
+            if len(text.strip()) < 10:
+                results["failed"].append({"jd_id": row.id, "error": "JD 正文过短（<10 字符），跳过"})
+                continue
+            results["processed"] += 1
+            try:
+                extraction = extractor.extract(text)
+                snap = dict(row.snapshot or {})
+                snap["extraction"] = extraction.model_dump()
+                row.snapshot = snap
+                evidence = {
+                    "source": row.source,
+                    "source_url": row.source_url,
+                    "crawled_at": row.crawled_at,
+                    "raw_text": text,
+                }
+                with neo4j_driver.session() as neo4j_session:
+                    position_id = import_jd(neo4j_session, extraction, evidence)
+                results["succeeded"] += 1
+                results["positions"].append({"jd_id": row.id, "position_id": position_id})
+            except Exception as e:
+                results["failed"].append({"jd_id": row.id, "error": str(e)[:500]})
+        await session.commit()
+
+    if results["processed"] > 0 and results["succeeded"] == 0:
+        raise RuntimeError(f"批量抽取全部失败: {results['failed'][:5]}")
+    return results
 
 
 async def evolution_compute(ctx: dict, version: str) -> dict:
