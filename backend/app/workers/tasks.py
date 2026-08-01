@@ -203,7 +203,12 @@ async def validate_temporal(
 
         results: dict = {"checked": 0, "skipped": len(rows) - len(views), "flagged": []}
         for row, (jd_id, position, publish, skills) in views:
-            group = [(r[0], r[2], r[3]) for r in views if r[1] == position]
+            # views 元素为 (row, (jd_id, position, publish, skills))，需按第二层解包
+            group = [
+                (r_id, r_publish, r_skills)
+                for _, (r_id, r_position, r_publish, r_skills) in views
+                if r_position == position
+            ]
             skill_ages = _skill_first_seen_days(group, skills, today)
             if not skill_ages:
                 results["skipped"] += 1
@@ -218,7 +223,11 @@ async def validate_temporal(
             ]
             sai = classify_sai(compute_sai(skill_ages, recent_ages))
 
-            history_skills = [gs for _, pdate, gs in sorted(group, key=lambda g: g[1]) if gs != skills]
+            history_skills = [
+                set(gs)
+                for _, pdate, gs in sorted(group, key=lambda g: g[1])
+                if gs != skills
+            ]
             zombie = detect_zombie_jd(history_skills, set(skills), sai.sai)
 
             oldest = min(group, key=lambda g: g[1])
@@ -392,16 +401,23 @@ _JD_TEXT_FIELDS = (
     "education", "description", "requirements",
 )
 
+# 批量连续调用 LLM 易触发 provider 限流（429，实测 deepseek 批量 100 条大量失败、
+# 单条重跑全成功），每条请求间隔平滑突发；批量任务允许的额外耗时（100 条 ≈ 30s）
+_BATCH_REQUEST_INTERVAL = 0.3
+
 
 def _build_jd_text(snapshot: dict, raw_text: str) -> str:
     """拼装 JD 抽取正文。
 
-    优先 snapshot 的干净文本字段（raw_text 为原始 HTML/JSON 备份，不适合喂 LLM）；
-    全部缺失时回退到 raw_text。
+    优先 snapshot 的干净文本字段（raw_text 为原始 HTML/JSON 备份，不适合直接喂 LLM）；
+    但正文字段（description/requirements）缺失时拼接结果过短无法抽取，
+    此时回退 raw_text（黄金集等数据正文可能只存在 raw_text 中）。
     """
+    body_fields = (snapshot.get("description"), snapshot.get("requirements"))
+    if not any(str(f or "").strip() for f in body_fields):
+        return raw_text
     parts = [str(snapshot.get(f, "")).strip() for f in _JD_TEXT_FIELDS]
-    text = "\n".join(p for p in parts if p)
-    return text or raw_text
+    return "\n".join(p for p in parts if p)
 
 
 async def batch_extract(
@@ -443,6 +459,7 @@ async def batch_extract(
 
         results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": []}
         for row in rows:
+            await asyncio.sleep(_BATCH_REQUEST_INTERVAL)
             text = _build_jd_text(row.snapshot or {}, row.raw_text or "")
             if len(text.strip()) < 10:
                 results["failed"].append({"jd_id": row.id, "error": "JD 正文过短（<10 字符），跳过"})

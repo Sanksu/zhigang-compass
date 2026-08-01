@@ -315,7 +315,7 @@ def save_llm_config(path: Path, providers: list) -> dict:
         api_key = (p.get("api_key") or "").strip()
         if not api_key or "*" in api_key:
             api_key = (old.get(name) or {}).get("api_key", "")
-        clean.append({
+        entry = {
             "name": name,
             "priority": int(p["priority"]),
             "base_url": (p.get("base_url") or "").strip(),
@@ -323,7 +323,12 @@ def save_llm_config(path: Path, providers: list) -> dict:
             "model": (p.get("model") or "").strip(),
             "supports_function_calling": bool(p.get("supports_function_calling", True)),
             "enabled": bool(p.get("enabled", True)),
-        })
+        }
+        # provider 特定请求参数（如 deepseek 关闭思考模式 thinking.type=disabled），非 dict 忽略
+        extra_body = p.get("extra_body")
+        if isinstance(extra_body, dict) and extra_body:
+            entry["extra_body"] = extra_body
+        clean.append(entry)
     data["providers"] = clean
 
     # 保留原文件头部注释块（到顶层键 providers: 为止），rest 由 dump 生成

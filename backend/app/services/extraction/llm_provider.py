@@ -184,6 +184,9 @@ class LLMProviderChain:
                 messages=self._build_messages(prompt, system_prompt),
                 temperature=self._temperature,
                 max_retries=max_retries,
+                # provider 特定请求参数透传（如 deepseek-v4-flash 关闭思考模式:
+                # {"thinking": {"type": "disabled"}}，见 configs/llm_providers.yaml）
+                extra_body=provider.get("extra_body") or None,
             )
         except APITimeoutError as e:
             raise LLMTimeoutError(f"provider '{provider['name']}' 超时（{timeout}s）") from e

@@ -16,6 +16,16 @@ _BACKEND_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_BACKEND_DIR))
 
 from app.services.extraction.dictionary import SKILL_WHITELIST, SKILL_ALIAS, normalize_skill
+from app.services.extraction.post_processor import clean_skill_name
+
+
+def _norm_skill(s: str) -> str:
+    """评测口径规范化：与抽取管线同规则（后缀清洗 → 别名归一 → 小写）。
+
+    黄金集标注常带后缀（如「大模型算法」）而 LLM 输出为别名标准名（「大语言模型」），
+    仅 normalize_skill 无法对齐，需先 clean_skill_name 再去别名，避免误判漏抽/误抽。
+    """
+    return normalize_skill(clean_skill_name(s)).lower()
 
 _GOLDEN_PATH = _BACKEND_DIR / "data" / "golden_set" / "jd_golden_100.jsonl"
 
@@ -49,9 +59,9 @@ def rule_predict(text: str) -> list[str]:
 
 
 def keyword_match(pred_skills: list[str], gold_skills: list[str]) -> tuple[int, int, int]:
-    """关键词匹配（归一化后精确匹配），返回 (true_positive, false_positive, false_negative)。"""
-    pred_set = {normalize_skill(s).lower() for s in pred_skills}
-    gold_set = {normalize_skill(s).lower() for s in gold_skills}
+    """关键词匹配（管线同规则规范化后精确匹配），返回 (true_positive, false_positive, false_negative)。"""
+    pred_set = {_norm_skill(s) for s in pred_skills}
+    gold_set = {_norm_skill(s) for s in gold_skills}
     tp = len(pred_set & gold_set)
     fp = len(pred_set - gold_set)
     fn = len(gold_set - pred_set)

@@ -17,11 +17,16 @@
 providers:
   - name: deepseek        # 默认组合示例 1
     priority: 1
-    base_url: https://api.deepseek.com/v1
+    base_url: https://api.deepseek.com
     api_key: ""
     model: deepseek-v4-flash
     supports_function_calling: true
     enabled: true
+    # deepseek-v4-flash 思考模式默认开启，不支持 tool_choice/response_format（结构化输出会 400），
+    # 必须显式关闭 thinking（OpenAI SDK 中经 extra_body 透传），见 https://api-docs.deepseek.com/guides/thinking_mode
+    extra_body:
+      thinking:
+        type: disabled
 
   - name: spark           # 默认组合示例 2
     priority: 2
