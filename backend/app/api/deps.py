@@ -21,7 +21,8 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     payload = decode_token(credentials.credentials)
-    if payload is None:
+    if payload is None or payload.get("type") != "access":
+        # 仅接受 access token：refresh token（7 天有效）不得直通受保护接口
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="无效或过期的 Token",

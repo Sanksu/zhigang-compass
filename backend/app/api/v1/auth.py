@@ -1,12 +1,13 @@
 """认证路由：登录、刷新 Token、注册、登出、当前用户。"""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, get_redis
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -15,19 +16,26 @@ from app.core.security import (
     verify_password,
 )
 from app.models.business import AuditLog, User
-from app.schemas.business import LoginRequest, RefreshRequest, RegisterRequest
+from app.schemas.business import LoginRequest, LogoutRequest, RefreshRequest, RegisterRequest
 from app.schemas.common import ok, error
 
 router = APIRouter()
 
 
+def _client_ip(request: Request) -> str:
+    """客户端 IP（反向代理场景可取 X-Forwarded-For，当前直连取 peer IP）。"""
+    return request.client.host if request.client else ""
+
+
 @router.post("/login")
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """用户登录，返回双 Token（凭据校验走 users 表）。"""
     user = await db.scalar(select(User).where(User.username == req.username))
     if user is None:
         # 首次部署 bootstrap：users 表为空时按配置创建 admin 用户，
-        # 创建后即落入 users 表，后续登录走 DB 校验
+        # 创建后即落入 users 表，后续登录走 DB 校验；生产环境禁用该路径
+        if settings.is_production:
+            return error(401, "用户名或密码错误")
         if req.username == settings.admin_username and req.password == settings.admin_password:
             user = User(
                 username=req.username,
@@ -54,6 +62,7 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
         resource="users",
         resource_id=user.id,
         detail={"username": user.username},
+        ip_address=_client_ip(request),
     ))
     await db.commit()
     return ok(data={
@@ -65,14 +74,29 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/refresh")
-async def refresh_token(req: RefreshRequest):
-    """刷新 access_token。"""
+async def refresh_token(
+    req: RefreshRequest,
+    redis: Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db),
+):
+    """刷新 access_token。
+
+    校验 refresh token 的 jti 是否被登出拉黑，并确认用户仍存在且未禁用。
+    """
     payload = decode_token(req.refresh_token)
     if payload is None or payload.get("type") != "refresh":
         return error(401, "无效的 refresh_token")
+    jti = payload.get("jti")
+    if jti:
+        revoked = await redis.get(f"token:blacklist:{jti}")
+        if revoked:
+            return error(401, "refresh_token 已失效")
     user_id = payload["sub"]
+    user = await db.get(User, user_id)
+    if user is None or not user.is_active:
+        return error(401, "用户不存在或已禁用")
     # 重新签发（短 TTL 的 access_token）
-    new_access = create_access_token(user_id, payload.get("role", "guest"))
+    new_access = create_access_token(user_id, user.role)
     return ok(data={"access_token": new_access, "expires_in": 1800})
 
 
@@ -110,7 +134,20 @@ async def me(
 
 
 @router.post("/logout")
-async def logout():
-    """登出（前端清除 Token，服务端可选黑名单）。"""
-    # TODO: 将 refresh_token 加入 Redis 黑名单（TTL = 7d）
+async def logout(
+    req: LogoutRequest,
+    redis: Redis = Depends(get_redis),
+):
+    """登出：将 refresh_token 的 jti 加入 Redis 黑名单（TTL = refresh 有效期）。
+
+    前端同时清除本地 Token。黑名单后的 refresh_token 无法再换取新的 access_token。
+    """
+    payload = decode_token(req.refresh_token)
+    jti = (payload or {}).get("jti")
+    if jti:
+        await redis.set(
+            f"token:blacklist:{jti}",
+            "1",
+            ex=settings.jwt_refresh_token_expire_days * 86400,
+        )
     return ok(data={"msg": "已登出"})

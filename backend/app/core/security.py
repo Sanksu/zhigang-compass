@@ -1,6 +1,7 @@
 """JWT 双 Token + RBAC 权限。"""
 
 import time
+import uuid
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -10,11 +11,11 @@ import jwt
 
 from app.core.config import settings
 
-# RBAC 角色 → 权限映射
+# RBAC 角色 → 权限映射（角色集合与 admin.py / 前端 constants / openapi 统一：admin/user/guest）
 ROLE_PERMISSIONS = {
-    "admin":   {"*"},
-    "editor":  {"graph:read", "graph:write", "data:read", "match:run"},
-    "guest":   {"graph:read"},
+    "admin": {"*"},
+    "user":  {"graph:read", "graph:write", "data:read", "match:run"},
+    "guest": {"graph:read"},
 }
 
 
@@ -52,6 +53,7 @@ def create_refresh_token(user_id: str, role: str = "guest") -> str:
         "sub": user_id,
         "role": role,
         "type": "refresh",
+        "jti": uuid.uuid4().hex,  # 登出黑名单依据（TTL = refresh 有效期）
         "iat": int(time.time()),
         "exp": int(time.time()) + settings.jwt_refresh_token_expire_days * 86400,
     }
