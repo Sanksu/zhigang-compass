@@ -20,6 +20,7 @@ class _BaseItem(Item):
 
     # ---- 内部 ----
     _fingerprint = Field()      # source + source_id 的 SHA256，用于去重
+    _simhash = Field()          # 语义指纹（JobItem 由 CleaningPipeline 计算，跨平台近似去重用）
 
 
 class JobItem(_BaseItem):
