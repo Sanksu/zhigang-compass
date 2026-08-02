@@ -162,6 +162,9 @@ models/checkpoints/
 *.bin
 *.safetensors
 
+# 运行产物（质量报告/评估报告等）
+backend/reports/
+
 # Airflow 运行时
 airflow.db
 airflow-webserver.pid

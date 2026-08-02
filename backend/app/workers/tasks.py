@@ -374,6 +374,60 @@ async def aggregate_positions(ctx: dict) -> dict:
     return write_aggregates(neo4j_driver.session(), agg, now)
 
 
+async def cross_validate_jds(ctx: dict, limit: int | None = None) -> dict:
+    """多平台交叉验证（DA-M3-03，设计文档 §4.5）。
+
+    聚合 jd_raw 已抽取记录按归一化岗位名分组，校验技能一致性（≥2 源印证）、
+    薪资异常、经验分歧、跨源置信度，结果写回 `snapshot["cross_validation"]`
+    （幂等覆盖）。返回组级统计供管线审计。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import JDRaw
+    from app.services.data_quality.cross_validate import (
+        build_position_groups,
+        validate_group,
+    )
+    from app.services.extraction.dictionary import normalize_position_name
+
+    async with async_session_factory() as session:
+        stmt = select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
+        rows = (await session.scalars(stmt.order_by(JDRaw.id.asc()))).all()
+        if limit:
+            rows = rows[:limit]
+
+        records = [
+            {"snapshot": r.snapshot or {}, "source": r.source, "crawled_at": r.crawled_at}
+            for r in rows
+        ]
+        results = [
+            validate_group(pos, group)
+            for pos, group in build_position_groups(records).items()
+        ]
+
+        group_map = {r.position_name: r for r in results}
+        written = 0
+        for row in rows:
+            ext = (row.snapshot or {}).get("extraction") or {}
+            result = group_map.get(normalize_position_name(ext.get("position_name") or ""))
+            if result is None:
+                continue
+            snap = dict(row.snapshot or {})
+            snap["cross_validation"] = result.model_dump()
+            row.snapshot = snap
+            written += 1
+        await session.commit()
+
+    return {
+        "groups": len(results),
+        "multi_source": sum(1 for r in results if r.source_count >= 2),
+        "verified": sum(1 for r in results if r.verified),
+        "below_confidence": sum(1 for r in results if r.confidence < 0.6),
+        "written": written,
+    }
+
+
 async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
     """编排完整 ETL 管线（设计文档 §4.4）。
 
@@ -437,6 +491,9 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
 
     # ── 阶段 7：岗位聚合（Position.freq + REQUIRES weight/source_count）──
     results["stages"]["aggregate_positions"] = await aggregate_positions(ctx)
+
+    # ── 阶段 8：多平台交叉验证（DA-M3-03，技能跨源印证/薪资异常/置信度）──
+    results["stages"]["cross_validate"] = await cross_validate_jds(ctx)
 
     return results
 
@@ -650,6 +707,7 @@ class WorkerSettings:
         batch_extract,
         load_courses,
         aggregate_positions,
+        cross_validate_jds,
         evolution_compute,
     ]
     on_startup = on_startup
