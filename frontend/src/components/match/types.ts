@@ -109,7 +109,7 @@ export interface SkillMatrixItem {
 /** 差距分析项 */
 export interface GapItem {
   skill: string
-  gap_type: 'missing_must' | 'level_gap' | 'missing_nice'
+  gap_type: 'missing_must' | 'level_gap' | 'missing_nice' | 'matched'
   priority: 'high' | 'medium' | 'low'
   current_level: string
   required_level: string
