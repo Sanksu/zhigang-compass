@@ -5,7 +5,7 @@
 
 import re
 from app.services.extraction.schemas import JDExtractionResult, SkillExtracted
-from app.services.extraction.dictionary import normalize_skill
+from app.services.extraction.dictionary import SKILL_STOPWORDS, normalize_skill
 
 # 需去除的中文后缀（按长度降序排列，优先匹配长后缀）
 SUFFIXES = sorted([
@@ -41,26 +41,36 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     """执行完整后处理管线：
     1. 别名归一化
     2. 后缀清洗
-    3. 去重
+    3. 黑名单剔除（行业/业务领域词，防 LLM 幻觉技能入图）
+    4. 去重
     """
-    for skill in result.skills:
-        skill.name = normalize_skill(skill.name)
-        skill.name = clean_skill_name(skill.name)
+    # skills 与 requirements 共用同一清洗规则：别名 → 后缀清洗 → 黑名单剔除
+    def _clean(name: str) -> str:
+        return clean_skill_name(normalize_skill(name))
+
+    result.skills = [
+        SkillExtracted(name=_clean(s.name), category=s.category, description=s.description)
+        for s in result.skills
+        if _clean(s.name) and _clean(s.name) not in SKILL_STOPWORDS
+    ]
+    result.skills = dedup_skills(result.skills)
+
     for tool in result.tools:
         tool.name = normalize_skill(tool.name)
-
-    result.skills = dedup_skills(result.skills)
 
     # requirements 与 skills 使用同一清洗规则（避免非标准技能名入图），
     # 并按 (技能, 必要性) 去重，与 skills 去重口径一致
     cleaned_reqs = []
     seen: set[tuple[str, str]] = set()
     for req in result.requirements:
-        req.skill_name = clean_skill_name(normalize_skill(req.skill_name))
-        key = (req.skill_name.lower(), req.necessity)
+        name = _clean(req.skill_name)
+        if not name or name in SKILL_STOPWORDS:
+            continue
+        key = (name.lower(), req.necessity)
         if key in seen:
             continue
         seen.add(key)
+        req.skill_name = name
         cleaned_reqs.append(req)
     result.requirements = cleaned_reqs
 

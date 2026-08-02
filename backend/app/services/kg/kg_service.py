@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 from neo4j import Session
 
+from app.services.extraction.dictionary import normalize_position_name
 from app.services.extraction.schemas import JDExtractionResult
 from app.services.kg.id_generator import next_id
 
@@ -60,7 +61,11 @@ def import_jd(
 
 def _import_jd_tx(tx, extraction: JDExtractionResult, evidence: dict) -> str:
     now = _now()
-    position_name = extraction.position_name
+    # 岗位名归一化：合并同义重复岗位（如"前端开发/前端工程师" → "前端开发工程师"）
+    position_name = normalize_position_name(extraction.position_name)
+    if not position_name:
+        # 空抽取（正文质量差导致无岗位名）不入图，避免产生空岗位节点
+        return ""
 
     # 1. Position：按 name 合并，不存在时分配新 ID
     result = tx.run(
