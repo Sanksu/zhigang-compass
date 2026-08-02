@@ -323,12 +323,64 @@ async def detect_inflation(
     return results
 
 
+async def load_courses(ctx: dict) -> dict:
+    """课程数据入图（course_raw → Course/Skill 节点 + LEARNABLE_VIA 关系）。
+
+    遍历 course_raw.snapshot 调 import_course（Neo4j MERGE 幂等，重复执行
+    不产生重复节点）。单条失败不阻塞整体（批量语义）。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory, neo4j_driver
+    from app.models.raw import CourseRaw
+    from app.services.kg.kg_service import import_course
+
+    async with async_session_factory() as session:
+        rows = (await session.scalars(select(CourseRaw))).all()
+    data = [dict(r.snapshot or {}) for r in rows]
+
+    imported = 0
+    failed = 0
+    with neo4j_driver.session() as neo4j_session:
+        for course_data in data:
+            try:
+                import_course(neo4j_session, course_data)
+                imported += 1
+            except Exception:
+                failed += 1
+    return {"total": len(data), "imported": imported, "failed": failed}
+
+
+async def aggregate_positions(ctx: dict) -> dict:
+    """岗位聚合（设计文档 §5.5）：jd_raw 抽取结果 → Position 热度 + REQUIRES 边权重。
+
+    全量重算，幂等（覆盖写回 Neo4j）：
+    - Position.freq / required_years / last_updated
+    - REQUIRES.weight / necessity / source_count
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory, neo4j_driver
+    from app.models.raw import JDRaw
+    from app.services.kg.aggregation import build_aggregates, write_aggregates
+
+    async with async_session_factory() as session:
+        rows = (await session.scalars(
+            select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
+        )).all()
+
+    now = datetime.now(timezone(timedelta(hours=8))).isoformat()
+    agg = build_aggregates(rows)
+    return write_aggregates(neo4j_driver.session(), agg, now)
+
+
 async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
     """编排完整 ETL 管线（设计文档 §4.4）。
 
     管线顺序：
         crawl_jds → clean_jds(已在 Scrapy Pipeline 内嵌) → dedup
-        → validate_temporal → detect_inflation → structure → load_to_db → load_to_neo4j
+        → validate_temporal → detect_inflation → structure → load_to_db
+        → load_to_neo4j（含课程入图 + 岗位聚合）
 
     M2 阶段：仅执行 crawl_jds + 框架占位任务（structure/load 依赖 M3 LLM 抽取）
     M3 阶段：完整管线启用
@@ -379,6 +431,12 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
 
     # ── 阶段 5：结构化 + 入库（M3 启用：LLM 抽取 → snapshot 写回 → Neo4j 入图）──
     results["stages"]["structure_load"] = await batch_extract(ctx, limit=500)
+
+    # ── 阶段 6：课程入图（course_raw → Course + LEARNABLE_VIA）──
+    results["stages"]["load_courses"] = await load_courses(ctx)
+
+    # ── 阶段 7：岗位聚合（Position.freq + REQUIRES weight/source_count）──
+    results["stages"]["aggregate_positions"] = await aggregate_positions(ctx)
 
     return results
 
@@ -520,6 +578,8 @@ class WorkerSettings:
         detect_inflation,
         resume_parse,
         batch_extract,
+        load_courses,
+        aggregate_positions,
         evolution_compute,
     ]
     on_startup = on_startup
