@@ -156,10 +156,14 @@ dumps/
 *.cypher
 
 # 模型权重与缓存
+backend/models/
 models/cache/
 models/checkpoints/
 *.bin
 *.safetensors
+
+# 运行产物（质量报告/评估报告等）
+backend/reports/
 
 # Airflow 运行时
 airflow.db
