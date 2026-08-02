@@ -43,13 +43,14 @@ async def panorama(
                 focus=focus, min_weight=min_weight,
             )
         else:
+            # 先按岗位热度取 Top-N 岗位，再展开其边（limit 语义为岗位数，避免低频岗位被边数截断）
             rows = session.run(
                 """
-                MATCH (p:Position)-[r:REQUIRES]->(s:Skill)
+                MATCH (p:Position)
+                WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
+                MATCH (p)-[r:REQUIRES]->(s:Skill)
                 WHERE r.weight >= $min_weight
                 RETURN p, s, r
-                ORDER BY p.freq DESC
-                LIMIT $limit
                 """,
                 limit=limit, min_weight=min_weight,
             )
