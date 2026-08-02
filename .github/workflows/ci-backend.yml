@@ -41,7 +41,9 @@ jobs:
       - name: Run tests
         env:
           APP_ENV: test
-        # pytest 返回码 5 = 未收集到测试用例（允许通过），其余失败置红（不再 continue-on-error）
+        # 覆盖率门禁：--cov=app 启用测量，fail_under=60 阈值由 pyproject.toml
+        # [tool.coverage.report] 声明式配置（设计文档 §15.3 验收 ≥60%）；
+        # 返回码 5 = 未收集到测试用例（允许通过），其余失败置红
         run: |
           uv run pytest -q --cov=app --cov-report=term-missing
           rc=$?

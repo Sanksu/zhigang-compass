@@ -40,6 +40,21 @@ dev-dependencies = [
     "locust>=2.0",
 ]
 
+# ── 单元测试框架（TE-M3-01）──
+# 验收：后端单元测试覆盖 ≥ 60%（核心 ≥ 80%），见设计文档。
+# 覆盖率门禁在 CI 显式启用（uv run pytest -q --cov=app），本地局部跑单文件不触发
+# fail_under，避免被覆盖率拖累；fail_under 阈值仍声明式收敛在 [tool.coverage.report]。
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 60
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
