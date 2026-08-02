@@ -42,6 +42,10 @@ export interface SessionUser {
   id: string
   username: string
   role: 'guest' | 'user' | 'admin'
+  email?: string
+  phone?: string
+  bio?: string
+  created_at?: string
 }
 
 /**

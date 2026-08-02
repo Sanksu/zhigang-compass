@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -21,75 +21,33 @@ import {
   TableRow,
   TableCell,
 } from '@/components/ui/table'
+import type { ResumeSummary } from '@/components/match/types'
+import { apiDelete, apiGet, apiPost, apiPut, ApiError } from '@/lib/api'
 
-/* ── Mock 数据 ── */
-
-interface ResumeRecord {
+/** /auth/me 返回的用户资料 */
+interface MeProfile {
   id: string
-  fileName: string
-  uploadTime: string
-  status: 'completed' | 'processing' | 'failed'
-  parsedData: Record<string, unknown>
+  username: string
+  role: string
+  email: string
+  phone: string
+  bio: string
+  created_at: string | null
 }
 
-const mockUser = {
-  username: '张明',
-  role: 'admin' as const,
-  email: 'zhangming@example.com',
-  phone: '138-0000-0000',
-  bio: '资深 HR 专家，专注于技术岗位人才评估与能力模型构建。',
-  registeredAt: '2025-03-15',
-  resumeCount: 3,
-  matchCount: 28,
-  lastLogin: '2026-07-29 14:32',
-}
-
-const mockResumes: ResumeRecord[] = [
-  {
-    id: '1',
-    fileName: '前端高级工程师_李明_简历.pdf',
-    uploadTime: '2026-07-28 10:15',
-    status: 'completed',
-    parsedData: {
-      姓名: '李明',
-      学历: '本科',
-      工作年限: '8 年',
-      技能: ['React', 'TypeScript', 'Node.js', '系统设计'],
-      匹配岗位: '前端架构师',
-      匹配度: '92%',
-    },
-  },
-  {
-    id: '2',
-    fileName: '后端开发_王芳_简历.pdf',
-    uploadTime: '2026-07-25 16:40',
-    status: 'completed',
-    parsedData: {
-      姓名: '王芳',
-      学历: '硕士',
-      工作年限: '5 年',
-      技能: ['Java', 'Spring Boot', '微服务', 'Kubernetes'],
-      匹配岗位: '高级后端工程师',
-      匹配度: '87%',
-    },
-  },
-  {
-    id: '3',
-    fileName: '产品经理_赵岩_简历.pdf',
-    uploadTime: '2026-07-20 09:00',
-    status: 'processing',
-    parsedData: {},
-  },
-]
-
-/* ── 页面 ── */
+const ROLE_LABEL: Record<string, string> = { admin: '管理员', user: '用户', guest: '访客' }
 
 export function ProfilePage() {
+  /* ── 用户资料（/auth/me 真实数据） ── */
+  const [profile, setProfile] = useState<MeProfile | null>(null)
+  const [loading, setLoading] = useState(true)
+
   /* 个人信息编辑 */
-  const [email, setEmail] = useState(mockUser.email)
-  const [phone, setPhone] = useState(mockUser.phone)
-  const [bio, setBio] = useState(mockUser.bio)
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [bio, setBio] = useState('')
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
   /* 修改密码 */
@@ -98,28 +56,64 @@ export function ProfilePage() {
   const [confirmPwd, setConfirmPwd] = useState('')
   const [pwdError, setPwdError] = useState<string | null>(null)
   const [pwdSuccess, setPwdSuccess] = useState(false)
+  const [pwdSubmitting, setPwdSubmitting] = useState(false)
 
-  /* 简历管理 */
-  const [resumes, setResumes] = useState(mockResumes)
+  /* 简历管理（/resume/list 真实数据） */
+  const [resumes, setResumes] = useState<ResumeSummary[]>([])
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [selectedResume, setSelectedResume] = useState<ResumeRecord | null>(null)
+  const [selectedName, setSelectedName] = useState('')
+  const [selectedParsed, setSelectedParsed] = useState<Record<string, unknown> | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  /* ── Toast 辅助 ── */
   function showToast(msg: string) {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
   }
 
+  /* ── 加载用户资料 + 简历列表 ── */
+  const loadProfile = useCallback(async () => {
+    try {
+      const me = await apiGet<MeProfile>('/auth/me')
+      setProfile(me)
+      setEmail(me.email ?? '')
+      setPhone(me.phone ?? '')
+      setBio(me.bio ?? '')
+    } catch {
+      /* 未登录场景由 AuthGuard 兜底，这里保持空态 */
+    }
+  }, [])
+
+  const loadResumes = useCallback(async () => {
+    try {
+      const data = await apiGet<{ items: ResumeSummary[]; total: number }>('/resume/list')
+      setResumes(data.items)
+    } catch {
+      setResumes([])
+    }
+  }, [])
+
+  useEffect(() => {
+    void Promise.all([loadProfile(), loadResumes()]).finally(() => setLoading(false))
+  }, [loadProfile, loadResumes])
+
   /* ── 保存个人信息 ── */
   async function handleSaveProfile() {
     setSaving(true)
-    await new Promise((r) => setTimeout(r, 3000))
-    setSaving(false)
-    showToast('已保存')
+    setSaveError(null)
+    try {
+      const updated = await apiPut<MeProfile>('/auth/me', { email, phone, bio })
+      setProfile(updated)
+      showToast('已保存')
+    } catch (e) {
+      setSaveError(e instanceof ApiError ? e.message : '保存失败，请重试')
+    } finally {
+      setSaving(false)
+    }
   }
 
   /* ── 修改密码 ── */
-  function handleChangePassword() {
+  async function handleChangePassword() {
     setPwdError(null)
     setPwdSuccess(false)
 
@@ -135,30 +129,52 @@ export function ProfilePage() {
       setPwdError('新密码长度不少于 6 位')
       return
     }
-    setPwdSuccess(true)
-    setOldPwd('')
-    setNewPwd('')
-    setConfirmPwd('')
-  }
-
-  /* ── 简历查看 ── */
-  function handleViewResume(r: ResumeRecord) {
-    setSelectedResume(r)
-    setDialogOpen(true)
-  }
-
-  /* ── 简历删除 ── */
-  function handleDeleteResume(id: string) {
-    if (window.confirm('确认删除该简历？')) {
-      setResumes((prev) => prev.filter((r) => r.id !== id))
+    setPwdSubmitting(true)
+    try {
+      await apiPost('/auth/password', { old_password: oldPwd, new_password: newPwd })
+      setPwdSuccess(true)
+      setOldPwd('')
+      setNewPwd('')
+      setConfirmPwd('')
+    } catch (e) {
+      setPwdError(e instanceof ApiError ? e.message : '密码修改失败，请重试')
+    } finally {
+      setPwdSubmitting(false)
     }
   }
 
-  const statusBadge: Record<ResumeRecord['status'], { label: string; variant: 'candidate' | 'emerging' | 'archived' }> = {
-    completed: { label: '完成', variant: 'candidate' },
-    processing: { label: '处理中', variant: 'emerging' },
-    failed: { label: '失败', variant: 'archived' },
+  /* ── 简历查看（拉取完整画像） ── */
+  async function handleViewResume(r: ResumeSummary) {
+    setSelectedName(r.file_name)
+    setSelectedParsed(null)
+    setDialogOpen(true)
+    setDetailLoading(true)
+    try {
+      const detail = await apiGet<{ parsed_data: Record<string, unknown> }>(`/resume/${r.id}`)
+      setSelectedParsed(detail.parsed_data ?? {})
+    } catch {
+      setSelectedParsed(null)
+    } finally {
+      setDetailLoading(false)
+    }
   }
+
+  /* ── 简历删除 ── */
+  async function handleDeleteResume(id: string) {
+    if (!window.confirm('确认删除该简历？删除后不可恢复')) return
+    setDeletingId(id)
+    try {
+      await apiDelete(`/resume/${id}`)
+      setResumes((prev) => prev.filter((r) => r.id !== id))
+      showToast('已删除')
+    } catch (e) {
+      showToast(e instanceof ApiError ? e.message : '删除失败')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const roleLabel = profile ? ROLE_LABEL[profile.role] ?? profile.role : ''
 
   return (
     <div className="space-y-6">
@@ -171,146 +187,162 @@ export function ProfilePage() {
         </div>
       )}
 
-      {/* ── 顶部用户摘要卡 ── */}
-      <Card>
-        <CardContent className="flex items-center gap-6 p-6">
-          <div className="flex size-16 shrink-0 items-center justify-center rounded-full bg-ink text-xl font-semibold text-canvas">
-            {mockUser.username.charAt(0)}
-          </div>
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="flex items-center gap-3">
-              <h2 className="text-lg font-semibold text-ink">{mockUser.username}</h2>
-              <Badge variant={mockUser.role === 'admin' ? 'default' : 'outline'}>
-                {mockUser.role}
-              </Badge>
-              <span className="text-xs text-ink-muted">注册于 {mockUser.registeredAt}</span>
-            </div>
-            <div className="flex gap-6 text-sm text-ink-secondary">
-              <span>简历数 {mockUser.resumeCount}</span>
-              <span>匹配次数 {mockUser.matchCount}</span>
-              <span>最后登录 {mockUser.lastLogin}</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {loading ? (
+        <p className="py-8 text-center text-sm text-ink-muted">加载中…</p>
+      ) : (
+        <>
+          {/* ── 顶部用户摘要卡 ── */}
+          <Card>
+            <CardContent className="flex items-center gap-6 p-6">
+              <div className="flex size-16 shrink-0 items-center justify-center rounded-full bg-ink text-xl font-semibold text-canvas">
+                {(profile?.username ?? '?').charAt(0)}
+              </div>
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-semibold text-ink">{profile?.username ?? '—'}</h2>
+                  {roleLabel && <Badge variant={profile?.role === 'admin' ? 'default' : 'outline'}>{roleLabel}</Badge>}
+                  {profile?.created_at && (
+                    <span className="text-xs text-ink-muted">
+                      注册于 {profile.created_at.slice(0, 10)}
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-6 text-sm text-ink-secondary">
+                  <span>简历数 {resumes.length}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-      {/* ── 个人信息编辑区 ── */}
-      <Card>
-        <CardHeader>
-          <CardTitle>基本信息</CardTitle>
-          <CardDescription>编辑你的个人资料信息</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3">
-            <Label htmlFor="profile-username">用户名</Label>
-            <Input id="profile-username" value={mockUser.username} disabled />
-          </div>
-          <div className="grid gap-3">
-            <Label htmlFor="profile-email">邮箱</Label>
-            <Input id="profile-email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          </div>
-          <div className="grid gap-3">
-            <Label htmlFor="profile-phone">联系电话</Label>
-            <Input id="profile-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          </div>
-          <div className="grid gap-3">
-            <Label htmlFor="profile-bio">个人简介</Label>
-            <Textarea id="profile-bio" value={bio} onChange={(e) => setBio(e.target.value)} rows={3} />
-          </div>
-          <Button onClick={handleSaveProfile} disabled={saving}>
-            {saving ? '保存中…' : '保存修改'}
-          </Button>
-        </CardContent>
-      </Card>
+          {/* ── 个人信息编辑区 ── */}
+          <Card>
+            <CardHeader>
+              <CardTitle>基本信息</CardTitle>
+              <CardDescription>编辑你的个人资料信息</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3">
+                <Label htmlFor="profile-username">用户名</Label>
+                <Input id="profile-username" value={profile?.username ?? ''} disabled />
+              </div>
+              <div className="grid gap-3">
+                <Label htmlFor="profile-email">邮箱</Label>
+                <Input id="profile-email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              </div>
+              <div className="grid gap-3">
+                <Label htmlFor="profile-phone">联系电话</Label>
+                <Input id="profile-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              </div>
+              <div className="grid gap-3">
+                <Label htmlFor="profile-bio">个人简介</Label>
+                <Textarea id="profile-bio" value={bio} onChange={(e) => setBio(e.target.value)} rows={3} />
+              </div>
+              {saveError && <p className="text-sm text-state-archived">{saveError}</p>}
+              <Button onClick={handleSaveProfile} disabled={saving}>
+                {saving ? '保存中…' : '保存修改'}
+              </Button>
+            </CardContent>
+          </Card>
 
-      {/* ── 修改密码区 ── */}
-      <Card>
-        <CardHeader>
-          <CardTitle>修改密码</CardTitle>
-          <CardDescription>定期更换密码可以提高账户安全性</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3">
-            <Label htmlFor="old-pwd">原密码</Label>
-            <Input id="old-pwd" type="password" value={oldPwd} onChange={(e) => setOldPwd(e.target.value)} />
-          </div>
-          <div className="grid gap-3">
-            <Label htmlFor="new-pwd">新密码</Label>
-            <Input id="new-pwd" type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} />
-          </div>
-          <div className="grid gap-3">
-            <Label htmlFor="confirm-pwd">确认新密码</Label>
-            <Input id="confirm-pwd" type="password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} />
-          </div>
-          {pwdError && <p className="text-sm text-state-archived">{pwdError}</p>}
-          {pwdSuccess && <p className="text-sm text-state-candidate">密码修改成功</p>}
-          <Button onClick={handleChangePassword}>修改密码</Button>
-        </CardContent>
-      </Card>
+          {/* ── 修改密码区 ── */}
+          <Card>
+            <CardHeader>
+              <CardTitle>修改密码</CardTitle>
+              <CardDescription>定期更换密码可以提高账户安全性</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3">
+                <Label htmlFor="old-pwd">原密码</Label>
+                <Input id="old-pwd" type="password" value={oldPwd} onChange={(e) => setOldPwd(e.target.value)} />
+              </div>
+              <div className="grid gap-3">
+                <Label htmlFor="new-pwd">新密码</Label>
+                <Input id="new-pwd" type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} />
+              </div>
+              <div className="grid gap-3">
+                <Label htmlFor="confirm-pwd">确认新密码</Label>
+                <Input id="confirm-pwd" type="password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} />
+              </div>
+              {pwdError && <p className="text-sm text-state-archived">{pwdError}</p>}
+              {pwdSuccess && <p className="text-sm text-state-candidate">密码修改成功</p>}
+              <Button onClick={handleChangePassword} disabled={pwdSubmitting}>
+                {pwdSubmitting ? '提交中…' : '修改密码'}
+              </Button>
+            </CardContent>
+          </Card>
 
-      {/* ── 简历管理列表 ── */}
-      <Card>
-        <CardHeader>
-          <CardTitle>简历管理</CardTitle>
-          <CardDescription>已上传的简历文件列表</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>文件名</TableHead>
-                <TableHead>上传时间</TableHead>
-                <TableHead>解析状态</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {resumes.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="font-medium text-ink">{r.fileName}</TableCell>
-                  <TableCell className="text-ink-secondary">{r.uploadTime}</TableCell>
-                  <TableCell>
-                    <Badge variant={statusBadge[r.status].variant}>{statusBadge[r.status].label}</Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => handleViewResume(r)}>
-                        查看
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleDeleteResume(r.id)}>
-                        删除
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {resumes.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-center text-ink-muted">
-                    暂无简历记录
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+          {/* ── 简历管理列表 ── */}
+          <Card>
+            <CardHeader>
+              <CardTitle>简历管理</CardTitle>
+              <CardDescription>已上传的简历文件列表</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>文件名</TableHead>
+                    <TableHead>技能</TableHead>
+                    <TableHead>更新时间</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {resumes.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell className="max-w-64 truncate font-medium text-ink">{r.file_name}</TableCell>
+                      <TableCell className="text-ink-secondary">
+                        {(r.skills ?? []).slice(0, 5).join('、') || '—'}
+                      </TableCell>
+                      <TableCell className="text-ink-secondary">
+                        {r.updated_at ? r.updated_at.slice(0, 16).replace('T', ' ') : '—'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => handleViewResume(r)}>
+                            查看
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={deletingId === r.id}
+                            onClick={() => handleDeleteResume(r.id)}
+                          >
+                            {deletingId === r.id ? '删除中…' : '删除'}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {resumes.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-ink-muted">
+                        暂无简历记录，可前往「简历匹配」页上传
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </>
+      )}
 
       {/* ── 简历查看 Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>简历解析结果</DialogTitle>
-            <DialogDescription>{selectedResume?.fileName}</DialogDescription>
+            <DialogDescription>{selectedName}</DialogDescription>
           </DialogHeader>
-          {selectedResume?.status === 'completed' ? (
+          {detailLoading ? (
+            <p className="text-sm text-ink-muted">加载中…</p>
+          ) : selectedParsed ? (
             <pre className="max-h-80 overflow-auto rounded border border-border bg-subtle p-4 text-sm text-ink-secondary">
-              {JSON.stringify(selectedResume.parsedData, null, 2)}
+              {JSON.stringify(selectedParsed, null, 2)}
             </pre>
-          ) : selectedResume?.status === 'processing' ? (
-            <p className="text-sm text-ink-muted">该简历正在解析中，请稍后再查看。</p>
           ) : (
-            <p className="text-sm text-ink-muted">解析失败，无法查看内容。</p>
+            <p className="text-sm text-ink-muted">解析详情不可用。</p>
           )}
         </DialogContent>
       </Dialog>
