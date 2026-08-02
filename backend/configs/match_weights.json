@@ -1,6 +1,7 @@
 {
-  "w_must": 0.6,
-  "w_nice": 0.2,
-  "w_exp": 0.2,
+  "w_must": 0.673,
+  "w_nice": 0.129,
+  "w_exp": 0.198,
+  "sim_threshold": 0.831,
   "_comment": "匹配权重默认值（设计文档 9.3 节）。Optuna 搜索结果可覆盖此文件。"
 }

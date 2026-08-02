@@ -1,0 +1,300 @@
+{"candidate_skills": ["Python"], "position_skills": ["Django", "MySQL", "Python"], "label": 1, "position_id": "jd_001"}
+{"candidate_skills": ["2个月"], "position_skills": ["Django", "MySQL", "Python"], "label": 0, "position_id": "jd_001"}
+{"candidate_skills": ["C/C++"], "position_skills": ["Django", "MySQL", "Python"], "label": 0, "position_id": "jd_001"}
+{"candidate_skills": ["Django", "Python"], "position_skills": ["Python", "Django", "MySQL", "Redis"], "label": 1, "position_id": "jd_002"}
+{"candidate_skills": ["C/C++", "大模型算法", "机器学习", "算法工程化经验", "大模型 AI产品开发", "团队管理经验", "Python", "优秀开源项目经历", "Java", "发表算法相关优秀论文", "自然语言处理算法"], "position_skills": ["Python", "Django", "MySQL", "Redis"], "label": 0, "position_id": "jd_002"}
+{"candidate_skills": ["ADAS开发"], "position_skills": ["Python", "Django", "MySQL", "Redis"], "label": 0, "position_id": "jd_002"}
+{"candidate_skills": ["MySQL", "机器学习经验", "云计算经验", "MongoDB", "Scrapy", "微服务经验", "Oracle"], "position_skills": ["Python", "Django", "Flask", "Scrapy", "MySQL", "Oracle", "MongoDB", "Linux开发/部署经验", "机器学习经验", "云计算经验", "分布式经验", "微服务经验"], "label": 1, "position_id": "jd_003"}
+{"candidate_skills": ["Java", "MyBatis"], "position_skills": ["Python", "Django", "Flask", "Scrapy", "MySQL", "Oracle", "MongoDB", "Linux开发/部署经验", "机器学习经验", "云计算经验", "分布式经验", "微服务经验"], "label": 0, "position_id": "jd_003"}
+{"candidate_skills": ["2个月"], "position_skills": ["Python", "Django", "Flask", "Scrapy", "MySQL", "Oracle", "MongoDB", "Linux开发/部署经验", "机器学习经验", "云计算经验", "分布式经验", "微服务经验"], "label": 0, "position_id": "jd_003"}
+{"candidate_skills": ["MySQL", "了解Python Web框架", "Python"], "position_skills": ["Python", "MySQL", "Redis", "了解Python Web框架", "熟悉SQL"], "label": 1, "position_id": "jd_004"}
+{"candidate_skills": ["纵向控制", "算法工程化经验"], "position_skills": ["Python", "MySQL", "Redis", "了解Python Web框架", "熟悉SQL"], "label": 0, "position_id": "jd_004"}
+{"candidate_skills": ["JavaScript", "跨终端适配", "HTML5", "前端工程化", "CSS"], "position_skills": ["Python", "MySQL", "Redis", "了解Python Web框架", "熟悉SQL"], "label": 0, "position_id": "jd_004"}
+{"candidate_skills": ["MySQL"], "position_skills": ["Django", "MySQL", "Python"], "label": 1, "position_id": "jd_005"}
+{"candidate_skills": ["PostgreSQL", "Python"], "position_skills": ["Django", "MySQL", "Python"], "label": 0, "position_id": "jd_005"}
+{"candidate_skills": ["电脑操作"], "position_skills": ["Django", "MySQL", "Python"], "label": 0, "position_id": "jd_005"}
+{"candidate_skills": ["Flask", "其他", "Docker", "Numpy", "Pandas"], "position_skills": ["Docker", "Django", "Pandas", "机器学习经验", "Redis", "其他", "Numpy", "Python", "Flask"], "label": 1, "position_id": "jd_006"}
+{"candidate_skills": ["泊车"], "position_skills": ["Docker", "Django", "Pandas", "机器学习经验", "Redis", "其他", "Numpy", "Python", "Flask"], "label": 0, "position_id": "jd_006"}
+{"candidate_skills": ["算法工程化经验"], "position_skills": ["Docker", "Django", "Pandas", "机器学习经验", "Redis", "其他", "Numpy", "Python", "Flask"], "label": 0, "position_id": "jd_006"}
+{"candidate_skills": ["融合感知算法", "其他", "风控算法", "大模型算法", "推荐算法", "SLAM算法", "Python"], "position_skills": ["C/C++", "机器学习", "深度学习", "大模型算法", "广告算法", "强化学习", "其他", "融合感知算法", "SLAM算法", "风控算法", "推荐算法", "Python"], "label": 1, "position_id": "jd_007"}
+{"candidate_skills": ["保险项目"], "position_skills": ["C/C++", "机器学习", "深度学习", "大模型算法", "广告算法", "强化学习", "其他", "融合感知算法", "SLAM算法", "风控算法", "推荐算法", "Python"], "label": 0, "position_id": "jd_007"}
+{"candidate_skills": ["算法工程化经验"], "position_skills": ["C/C++", "机器学习", "深度学习", "大模型算法", "广告算法", "强化学习", "其他", "融合感知算法", "SLAM算法", "风控算法", "推荐算法", "Python"], "label": 0, "position_id": "jd_007"}
+{"candidate_skills": ["风控算法", "团队管理经验", "优秀开源项目经历", "大模型算法", "Java", "Python", "深度学习", "其他", "大数据处理框架(Spark/Hadoop/Hive)", "机器学习"], "position_skills": ["深度学习", "机器学习", "大模型算法", "强化学习", "自然语言处理算法", "风控算法", "其他", "C/C++", "Python", "Java", "大数据处理框架(Spark/Hadoop/Hive)", "算法工程化经验", "发表算法相关优秀论文", "参加算法相关竞赛/获奖", "团队管理经验", "优秀开源项目经历", "大模型 AI产品开发"], "label": 1, "position_id": "jd_008"}
+{"candidate_skills": ["Python", "Spring", "JavaScript"], "position_skills": ["深度学习", "机器学习", "大模型算法", "强化学习", "自然语言处理算法", "风控算法", "其他", "C/C++", "Python", "Java", "大数据处理框架(Spark/Hadoop/Hive)", "算法工程化经验", "发表算法相关优秀论文", "参加算法相关竞赛/获奖", "团队管理经验", "优秀开源项目经历", "大模型 AI产品开发"], "label": 0, "position_id": "jd_008"}
+{"candidate_skills": ["推荐算法"], "position_skills": ["深度学习", "机器学习", "大模型算法", "强化学习", "自然语言处理算法", "风控算法", "其他", "C/C++", "Python", "Java", "大数据处理框架(Spark/Hadoop/Hive)", "算法工程化经验", "发表算法相关优秀论文", "参加算法相关竞赛/获奖", "团队管理经验", "优秀开源项目经历", "大模型 AI产品开发"], "label": 0, "position_id": "jd_008"}
+{"candidate_skills": ["1年以内"], "position_skills": ["1年以内"], "label": 1, "position_id": "jd_009"}
+{"candidate_skills": ["MySQL", "Python"], "position_skills": ["1年以内"], "label": 0, "position_id": "jd_009"}
+{"candidate_skills": ["音频标注"], "position_skills": ["1年以内"], "label": 0, "position_id": "jd_009"}
+{"candidate_skills": ["全栈项目经验"], "position_skills": ["全栈项目经验"], "label": 1, "position_id": "jd_010"}
+{"candidate_skills": ["Java", "Hive", "C++"], "position_skills": ["全栈项目经验"], "label": 0, "position_id": "jd_010"}
+{"candidate_skills": ["Vue"], "position_skills": ["全栈项目经验"], "label": 0, "position_id": "jd_010"}
+{"candidate_skills": ["在校/应届"], "position_skills": ["在校/应届"], "label": 1, "position_id": "jd_011"}
+{"candidate_skills": ["推荐算法"], "position_skills": ["在校/应届"], "label": 0, "position_id": "jd_011"}
+{"candidate_skills": ["融合感知算法", "SLAM算法", "深度学习", "其他", "大模型算法", "广告算法", "推荐算法", "机器学习"], "position_skills": ["在校/应届"], "label": 0, "position_id": "jd_011"}
+{"candidate_skills": ["JavaScript", "Java", "React"], "position_skills": ["JavaScript", "React", "Java", "GoLang", "Python"], "label": 1, "position_id": "jd_012"}
+{"candidate_skills": ["Java", "Spring"], "position_skills": ["JavaScript", "React", "Java", "GoLang", "Python"], "label": 0, "position_id": "jd_012"}
+{"candidate_skills": ["1年以内"], "position_skills": ["JavaScript", "React", "Java", "GoLang", "Python"], "label": 0, "position_id": "jd_012"}
+{"candidate_skills": ["服务器运维"], "position_skills": ["服务器运维", "系统运维", "IDC/机房运维"], "label": 1, "position_id": "jd_013"}
+{"candidate_skills": ["优秀开源项目经历", "Java", "算法工程化经验", "参加算法相关竞赛/获奖", "风控算法", "机器学习", "C/C++", "团队管理经验", "大模型算法", "强化学习", "其他"], "position_skills": ["服务器运维", "系统运维", "IDC/机房运维"], "label": 0, "position_id": "jd_013"}
+{"candidate_skills": ["临床数据分析"], "position_skills": ["服务器运维", "系统运维", "IDC/机房运维"], "label": 0, "position_id": "jd_013"}
+{"candidate_skills": ["Java"], "position_skills": ["Java"], "label": 1, "position_id": "jd_014"}
+{"candidate_skills": ["MySQL", "Spring"], "position_skills": ["Java"], "label": 0, "position_id": "jd_014"}
+{"candidate_skills": ["交互体验设计"], "position_skills": ["Java"], "label": 0, "position_id": "jd_014"}
+{"candidate_skills": ["React", "数据平台"], "position_skills": ["数据平台", "Vue", "React", "Angular"], "label": 1, "position_id": "jd_015"}
+{"candidate_skills": ["MySQL", "Python"], "position_skills": ["数据平台", "Vue", "React", "Angular"], "label": 0, "position_id": "jd_015"}
+{"candidate_skills": ["推荐算法", "Python", "Shell", "机器学习算法", "PyTorch", "视觉图像算法"], "position_skills": ["数据平台", "Vue", "React", "Angular"], "label": 0, "position_id": "jd_015"}
+{"candidate_skills": ["Vue"], "position_skills": ["Vue"], "label": 1, "position_id": "jd_016"}
+{"candidate_skills": ["Python", "GIS数据处理"], "position_skills": ["Vue"], "label": 0, "position_id": "jd_016"}
+{"candidate_skills": ["PD"], "position_skills": ["Vue"], "label": 0, "position_id": "jd_016"}
+{"candidate_skills": ["JavaScript"], "position_skills": ["JavaScript", "C++", "Java"], "label": 1, "position_id": "jd_017"}
+{"candidate_skills": ["Python"], "position_skills": ["JavaScript", "C++", "Java"], "label": 0, "position_id": "jd_017"}
+{"candidate_skills": ["数据分析"], "position_skills": ["JavaScript", "C++", "Java"], "label": 0, "position_id": "jd_017"}
+{"candidate_skills": ["MySQL", "工程类系统开发", "JAVA后端开发"], "position_skills": ["Spring", "Mybatis", "MySQL", "JAVA后端开发", "工程类系统开发", "系统性能优化"], "label": 1, "position_id": "jd_018"}
+{"candidate_skills": ["GIS数据处理", "PostgreSQL"], "position_skills": ["Spring", "Mybatis", "MySQL", "JAVA后端开发", "工程类系统开发", "系统性能优化"], "label": 0, "position_id": "jd_018"}
+{"candidate_skills": ["在校/应届"], "position_skills": ["Spring", "Mybatis", "MySQL", "JAVA后端开发", "工程类系统开发", "系统性能优化"], "label": 0, "position_id": "jd_018"}
+{"candidate_skills": ["Vue", "跨终端适配", "React", "JavaScript"], "position_skills": ["HTML5", "CSS", "JavaScript", "Vue", "React", "前端工程化", "响应式布局", "跨终端适配"], "label": 1, "position_id": "jd_019"}
+{"candidate_skills": ["Python", "嵌入式开发", "Linux开发", "C语言", "PyTorch", "OpenCV"], "position_skills": ["HTML5", "CSS", "JavaScript", "Vue", "React", "前端工程化", "响应式布局", "跨终端适配"], "label": 0, "position_id": "jd_019"}
+{"candidate_skills": ["NLU测试经验"], "position_skills": ["HTML5", "CSS", "JavaScript", "Vue", "React", "前端工程化", "响应式布局", "跨终端适配"], "label": 0, "position_id": "jd_019"}
+{"candidate_skills": ["UI设计"], "position_skills": ["交互体验设计", "UI设计"], "label": 1, "position_id": "jd_020"}
+{"candidate_skills": ["人力资源系统开发", "PostgreSQL", "MySQL", "Django", "Java"], "position_skills": ["交互体验设计", "UI设计"], "label": 0, "position_id": "jd_020"}
+{"candidate_skills": ["Django", "MySQL"], "position_skills": ["交互体验设计", "UI设计"], "label": 0, "position_id": "jd_020"}
+{"candidate_skills": ["海工结构设计", "海洋水动力工程"], "position_skills": ["海洋水声工程", "海洋测绘工程", "海工结构设计", "海洋水动力工程"], "label": 1, "position_id": "jd_021"}
+{"candidate_skills": ["Python"], "position_skills": ["海洋水声工程", "海洋测绘工程", "海工结构设计", "海洋水动力工程"], "label": 0, "position_id": "jd_021"}
+{"candidate_skills": ["在校/应届"], "position_skills": ["海洋水声工程", "海洋测绘工程", "海工结构设计", "海洋水动力工程"], "label": 0, "position_id": "jd_021"}
+{"candidate_skills": ["Go", "自然语言处理", "深度学习算法", "视觉图像算法", "机器学习算法"], "position_skills": ["Python", "Go", "Shell", "深度学习算法", "机器学习算法", "视觉图像算法", "推荐算法", "自然语言处理", "PyTorch"], "label": 1, "position_id": "jd_022"}
+{"candidate_skills": ["在校/应届"], "position_skills": ["Python", "Go", "Shell", "深度学习算法", "机器学习算法", "视觉图像算法", "推荐算法", "自然语言处理", "PyTorch"], "label": 0, "position_id": "jd_022"}
+{"candidate_skills": ["Python", "C++"], "position_skills": ["Python", "Go", "Shell", "深度学习算法", "机器学习算法", "视觉图像算法", "推荐算法", "自然语言处理", "PyTorch"], "label": 0, "position_id": "jd_022"}
+{"candidate_skills": ["图像算法", "机器学习"], "position_skills": ["Java", "深度学习", "机器学习", "图像算法"], "label": 1, "position_id": "jd_023"}
+{"candidate_skills": ["MySQL", "Django"], "position_skills": ["Java", "深度学习", "机器学习", "图像算法"], "label": 0, "position_id": "jd_023"}
+{"candidate_skills": ["数据分析"], "position_skills": ["Java", "深度学习", "机器学习", "图像算法"], "label": 0, "position_id": "jd_023"}
+{"candidate_skills": ["C++", "Hive", "GO"], "position_skills": ["Hive", "GO", "C++", "Java", "机器学习"], "label": 1, "position_id": "jd_024"}
+{"candidate_skills": ["泊车"], "position_skills": ["Hive", "GO", "C++", "Java", "机器学习"], "label": 0, "position_id": "jd_024"}
+{"candidate_skills": ["优秀开源项目经历", "自然语言处理算法", "大模型算法", "模型加速/性能优化", "图像算法", "Python"], "position_skills": ["Hive", "GO", "C++", "Java", "机器学习"], "label": 0, "position_id": "jd_024"}
+{"candidate_skills": ["电脑操作"], "position_skills": ["电脑操作"], "label": 1, "position_id": "jd_025"}
+{"candidate_skills": ["Python", "其他"], "position_skills": ["电脑操作"], "label": 0, "position_id": "jd_025"}
+{"candidate_skills": ["FLOW"], "position_skills": ["电脑操作"], "label": 0, "position_id": "jd_025"}
+{"candidate_skills": ["ADAS开发"], "position_skills": ["ADAS开发"], "label": 1, "position_id": "jd_026"}
+{"candidate_skills": ["MySQL", "Java"], "position_skills": ["ADAS开发"], "label": 0, "position_id": "jd_026"}
+{"candidate_skills": ["Spark"], "position_skills": ["ADAS开发"], "label": 0, "position_id": "jd_026"}
+{"candidate_skills": ["会计分析大学生实习", "经济分析", "理财数据分析", "资产管理数据分析"], "position_skills": ["金融分析大学生实习", "会计分析大学生实习", "投融资数据分析", "资产管理数据分析", "理财数据分析", "行业分析", "基本面分析", "经济分析"], "label": 1, "position_id": "jd_027"}
+{"candidate_skills": ["全栈无侧重"], "position_skills": ["金融分析大学生实习", "会计分析大学生实习", "投融资数据分析", "资产管理数据分析", "理财数据分析", "行业分析", "基本面分析", "经济分析"], "label": 0, "position_id": "jd_027"}
+{"candidate_skills": ["C/C++"], "position_skills": ["金融分析大学生实习", "会计分析大学生实习", "投融资数据分析", "资产管理数据分析", "理财数据分析", "行业分析", "基本面分析", "经济分析"], "label": 0, "position_id": "jd_027"}
+{"candidate_skills": ["Python"], "position_skills": ["Python"], "label": 1, "position_id": "jd_028"}
+{"candidate_skills": ["PostgreSQL", "Python", "Flask", "Django"], "position_skills": ["Python"], "label": 0, "position_id": "jd_028"}
+{"candidate_skills": ["JavaScript", "全栈侧重后端", "全栈项目经验"], "position_skills": ["Python"], "label": 0, "position_id": "jd_028"}
+{"candidate_skills": ["数据治理"], "position_skills": ["Python", "数据治理"], "label": 1, "position_id": "jd_029"}
+{"candidate_skills": ["MyBatis", "Java"], "position_skills": ["Python", "数据治理"], "label": 0, "position_id": "jd_029"}
+{"candidate_skills": ["Java", "JavaScript"], "position_skills": ["Python", "数据治理"], "label": 0, "position_id": "jd_029"}
+{"candidate_skills": ["多模态模型", "大模型评测", "音频标注"], "position_skills": ["音频标注", "视频标注", "大模型评测", "AIGC", "多模态模型", "音视频模型"], "label": 1, "position_id": "jd_030"}
+{"candidate_skills": ["Redis", "Django", "PostgreSQL", "MySQL"], "position_skills": ["音频标注", "视频标注", "大模型评测", "AIGC", "多模态模型", "音视频模型"], "label": 0, "position_id": "jd_030"}
+{"candidate_skills": ["大模型算法", "机械臂", "SLAM算法", "VLA", "Python", "机器人"], "position_skills": ["音频标注", "视频标注", "大模型评测", "AIGC", "多模态模型", "音视频模型"], "label": 0, "position_id": "jd_030"}
+{"candidate_skills": ["Bootstrap", "JavaScript", "MySQL"], "position_skills": ["Java", "MySQL", "JavaScript", "Bootstrap", "React"], "label": 1, "position_id": "jd_031"}
+{"candidate_skills": ["经济分析", "投融资数据分析", "资产管理数据分析", "行业分析", "会计分析大学生实习"], "position_skills": ["Java", "MySQL", "JavaScript", "Bootstrap", "React"], "label": 0, "position_id": "jd_031"}
+{"candidate_skills": ["数字后端验证"], "position_skills": ["Java", "MySQL", "JavaScript", "Bootstrap", "React"], "label": 0, "position_id": "jd_031"}
+{"candidate_skills": ["GIS数据处理"], "position_skills": ["GIS数据处理", "PostgreSQL", "Python"], "label": 1, "position_id": "jd_032"}
+{"candidate_skills": ["Django", "Python", "AI", "Oracle"], "position_skills": ["GIS数据处理", "PostgreSQL", "Python"], "label": 0, "position_id": "jd_032"}
+{"candidate_skills": ["有前端经验/技能", "MySQL", "HTML、CSS、ACCESS", "Python"], "position_skills": ["GIS数据处理", "PostgreSQL", "Python"], "label": 0, "position_id": "jd_032"}
+{"candidate_skills": ["Django", "MySQL", "人力资源系统开发", "PostgreSQL"], "position_skills": ["Java", "Sql", "Django", "MySQL", "PostgreSQL", "人力资源系统开发", "RESTFUL接口设计", "数据全链路处理"], "label": 1, "position_id": "jd_033"}
+{"candidate_skills": ["算法工程化经验"], "position_skills": ["Java", "Sql", "Django", "MySQL", "PostgreSQL", "人力资源系统开发", "RESTFUL接口设计", "数据全链路处理"], "label": 0, "position_id": "jd_033"}
+{"candidate_skills": ["c#", "JavaScript", "全栈项目经验"], "position_skills": ["Java", "Sql", "Django", "MySQL", "PostgreSQL", "人力资源系统开发", "RESTFUL接口设计", "数据全链路处理"], "label": 0, "position_id": "jd_033"}
+{"candidate_skills": ["Python", "其他", "有前端经验/技能"], "position_skills": ["爬虫经验", "MySQL", "其他", "HTML、CSS、ACCESS", "有前端经验/技能", "Python"], "label": 1, "position_id": "jd_034"}
+{"candidate_skills": ["Redis", "微服务经验", "Spring", "Java"], "position_skills": ["爬虫经验", "MySQL", "其他", "HTML、CSS、ACCESS", "有前端经验/技能", "Python"], "label": 0, "position_id": "jd_034"}
+{"candidate_skills": ["催收", "呼叫中心"], "position_skills": ["爬虫经验", "MySQL", "其他", "HTML、CSS、ACCESS", "有前端经验/技能", "Python"], "label": 0, "position_id": "jd_034"}
+{"candidate_skills": ["Python", "PostgreSQL", "Django", "Redis"], "position_skills": ["Django", "PostgreSQL", "MySQL", "Redis", "Linux开发/部署经验", "Python", "Flask"], "label": 1, "position_id": "jd_035"}
+{"candidate_skills": ["Java", "C++"], "position_skills": ["Django", "PostgreSQL", "MySQL", "Redis", "Linux开发/部署经验", "Python", "Flask"], "label": 0, "position_id": "jd_035"}
+{"candidate_skills": ["机器学习算法", "Python", "推荐算法", "Go", "深度学习算法", "PyTorch"], "position_skills": ["Django", "PostgreSQL", "MySQL", "Redis", "Linux开发/部署经验", "Python", "Flask"], "label": 0, "position_id": "jd_035"}
+{"candidate_skills": ["Python"], "position_skills": ["Python", "自动化测试"], "label": 1, "position_id": "jd_036"}
+{"candidate_skills": ["Vue", "Angular"], "position_skills": ["Python", "自动化测试"], "label": 0, "position_id": "jd_036"}
+{"candidate_skills": ["Docker", "银行项目经验", "Java", "tesla框架"], "position_skills": ["Python", "自动化测试"], "label": 0, "position_id": "jd_036"}
+{"candidate_skills": ["JavaScript"], "position_skills": ["Spring", "MySQL", "JavaScript"], "label": 1, "position_id": "jd_037"}
+{"candidate_skills": ["Flask", "MySQL"], "position_skills": ["Spring", "MySQL", "JavaScript"], "label": 0, "position_id": "jd_037"}
+{"candidate_skills": ["1年以内"], "position_skills": ["Spring", "MySQL", "JavaScript"], "label": 0, "position_id": "jd_037"}
+{"candidate_skills": ["建筑工程系统开发", "JavaScript", "Echarts", "前端架构设计", "CSS"], "position_skills": ["CSS", "JavaScript", "Vue", "React", "Echarts", "Three.js", "建筑工程系统开发", "数据可视化模块开发", "前端架构设计"], "label": 1, "position_id": "jd_038"}
+{"candidate_skills": ["开发", "多线程"], "position_skills": ["CSS", "JavaScript", "Vue", "React", "Echarts", "Three.js", "建筑工程系统开发", "数据可视化模块开发", "前端架构设计"], "label": 0, "position_id": "jd_038"}
+{"candidate_skills": ["图像算法", "机器学习"], "position_skills": ["CSS", "JavaScript", "Vue", "React", "Echarts", "Three.js", "建筑工程系统开发", "数据可视化模块开发", "前端架构设计"], "label": 0, "position_id": "jd_038"}
+{"candidate_skills": ["推荐算法"], "position_skills": ["推荐算法"], "label": 1, "position_id": "jd_039"}
+{"candidate_skills": ["Shell", "视觉图像算法", "自然语言处理", "Go", "PyTorch", "Python"], "position_skills": ["推荐算法"], "label": 0, "position_id": "jd_039"}
+{"candidate_skills": ["Python"], "position_skills": ["推荐算法"], "label": 0, "position_id": "jd_039"}
+{"candidate_skills": ["Python"], "position_skills": ["Python", "数据分析", "测试"], "label": 1, "position_id": "jd_040"}
+{"candidate_skills": ["1年以内"], "position_skills": ["Python", "数据分析", "测试"], "label": 0, "position_id": "jd_040"}
+{"candidate_skills": ["MySQL", "Python"], "position_skills": ["Python", "数据分析", "测试"], "label": 0, "position_id": "jd_040"}
+{"candidate_skills": ["临床数据分析"], "position_skills": ["临床数据分析"], "label": 1, "position_id": "jd_041"}
+{"candidate_skills": ["C++", "HBase", "PHP", "Oracle", "MongoDB", "Python", "Redis", "Docker"], "position_skills": ["临床数据分析"], "label": 0, "position_id": "jd_041"}
+{"candidate_skills": ["MySQL", "AI", "Python", "Django"], "position_skills": ["临床数据分析"], "label": 0, "position_id": "jd_041"}
+{"candidate_skills": ["Python"], "position_skills": ["Python", "Spark"], "label": 1, "position_id": "jd_042"}
+{"candidate_skills": ["机器学习", "算法工程化经验", "优秀开源项目经历", "强化学习", "自然语言处理算法", "风控算法", "C/C++", "Python", "其他", "大模型 AI产品开发", "团队管理经验"], "position_skills": ["Python", "Spark"], "label": 0, "position_id": "jd_042"}
+{"candidate_skills": ["NLU测试经验"], "position_skills": ["Python", "Spark"], "label": 0, "position_id": "jd_042"}
+{"candidate_skills": ["数据分析", "阿里巴巴"], "position_skills": ["Sql", "数据分析", "百度", "阿里巴巴"], "label": 1, "position_id": "jd_043"}
+{"candidate_skills": ["实习生", "模型加速/性能优化", "算法工程化经验", "大模型算法", "优秀开源项目经历", "Python"], "position_skills": ["Sql", "数据分析", "百度", "阿里巴巴"], "label": 0, "position_id": "jd_043"}
+{"candidate_skills": ["MySQL", "Java", "MyBatis", "SpringCloud"], "position_skills": ["Sql", "数据分析", "百度", "阿里巴巴"], "label": 0, "position_id": "jd_043"}
+{"candidate_skills": ["视频标注"], "position_skills": ["音频标注", "视频标注"], "label": 1, "position_id": "jd_044"}
+{"candidate_skills": ["Redis", "tesla框架", "银行项目经验", "Docker"], "position_skills": ["音频标注", "视频标注"], "label": 0, "position_id": "jd_044"}
+{"candidate_skills": ["Vue", "Angular"], "position_skills": ["音频标注", "视频标注"], "label": 0, "position_id": "jd_044"}
+{"candidate_skills": ["全栈项目经验", "Node.js"], "position_skills": ["Java", "Node.js", "Spring/Spring Boot", "全栈项目经验"], "label": 1, "position_id": "jd_045"}
+{"candidate_skills": ["ADAS开发"], "position_skills": ["Java", "Node.js", "Spring/Spring Boot", "全栈项目经验"], "label": 0, "position_id": "jd_045"}
+{"candidate_skills": ["Redis", "其他", "Numpy", "Python", "Pandas", "机器学习经验"], "position_skills": ["Java", "Node.js", "Spring/Spring Boot", "全栈项目经验"], "label": 0, "position_id": "jd_045"}
+{"candidate_skills": ["金融项目"], "position_skills": ["金融项目", "保险项目"], "label": 1, "position_id": "jd_046"}
+{"candidate_skills": ["C++"], "position_skills": ["金融项目", "保险项目"], "label": 0, "position_id": "jd_046"}
+{"candidate_skills": ["SQL", "运筹优化算法", "风控算法", "大数据处理框架(Spark/Hadoop/Hive)", "深度学习"], "position_skills": ["金融项目", "保险项目"], "label": 0, "position_id": "jd_046"}
+{"candidate_skills": ["数据分析"], "position_skills": ["数据分析"], "label": 1, "position_id": "jd_047"}
+{"candidate_skills": ["建筑工程系统开发", "React", "Vue", "数据可视化模块开发", "前端架构设计", "Echarts"], "position_skills": ["数据分析"], "label": 0, "position_id": "jd_047"}
+{"candidate_skills": ["JAVA后端开发", "Mybatis", "工程类系统开发", "系统性能优化"], "position_skills": ["数据分析"], "label": 0, "position_id": "jd_047"}
+{"candidate_skills": ["OPENCLAW"], "position_skills": ["SKILL", "OPENCLAW"], "label": 1, "position_id": "jd_048"}
+{"candidate_skills": ["Pandas", "Flask", "Redis", "Python", "Docker", "其他"], "position_skills": ["SKILL", "OPENCLAW"], "label": 0, "position_id": "jd_048"}
+{"candidate_skills": ["MyBatis", "Java"], "position_skills": ["SKILL", "OPENCLAW"], "label": 0, "position_id": "jd_048"}
+{"candidate_skills": ["NLU测试经验"], "position_skills": ["NLU测试经验", "大语言模型"], "label": 1, "position_id": "jd_049"}
+{"candidate_skills": ["PYTHON开发"], "position_skills": ["NLU测试经验", "大语言模型"], "label": 0, "position_id": "jd_049"}
+{"candidate_skills": ["Java"], "position_skills": ["NLU测试经验", "大语言模型"], "label": 0, "position_id": "jd_049"}
+{"candidate_skills": ["数字后端设计"], "position_skills": ["数字后端设计", "数字后端验证"], "label": 1, "position_id": "jd_050"}
+{"candidate_skills": ["C++"], "position_skills": ["数字后端设计", "数字后端验证"], "label": 0, "position_id": "jd_050"}
+{"candidate_skills": ["Vue"], "position_skills": ["数字后端设计", "数字后端验证"], "label": 0, "position_id": "jd_050"}
+{"candidate_skills": ["FLOW"], "position_skills": ["FLOW"], "label": 1, "position_id": "jd_051"}
+{"candidate_skills": ["Vue"], "position_skills": ["FLOW"], "label": 0, "position_id": "jd_051"}
+{"candidate_skills": ["C/C++", "大模型算法", "融合感知算法", "推荐算法", "机器学习", "深度学习", "其他", "风控算法"], "position_skills": ["FLOW"], "label": 0, "position_id": "jd_051"}
+{"candidate_skills": ["PV"], "position_skills": ["PV", "PD"], "label": 1, "position_id": "jd_052"}
+{"candidate_skills": ["全栈无侧重"], "position_skills": ["PV", "PD"], "label": 0, "position_id": "jd_052"}
+{"candidate_skills": ["Python", "GIS数据处理"], "position_skills": ["PV", "PD"], "label": 0, "position_id": "jd_052"}
+{"candidate_skills": ["Vue", "催收"], "position_skills": ["JavaScript", "Vue", "催收", "呼叫中心"], "label": 1, "position_id": "jd_053"}
+{"candidate_skills": ["Python"], "position_skills": ["JavaScript", "Vue", "催收", "呼叫中心"], "label": 0, "position_id": "jd_053"}
+{"candidate_skills": ["Django", "MySQL", "Oracle", "AI"], "position_skills": ["JavaScript", "Vue", "催收", "呼叫中心"], "label": 0, "position_id": "jd_053"}
+{"candidate_skills": ["Python"], "position_skills": ["MySQL", "Python", "Flask"], "label": 1, "position_id": "jd_054"}
+{"candidate_skills": ["软件自动化", "多线程"], "position_skills": ["MySQL", "Python", "Flask"], "label": 0, "position_id": "jd_054"}
+{"candidate_skills": ["Java"], "position_skills": ["MySQL", "Python", "Flask"], "label": 0, "position_id": "jd_054"}
+{"candidate_skills": ["Docker", "Redis", "Java", "MongoDB", "Oracle", "Django", "C++"], "position_skills": ["Python", "Java", "C++", "PHP", "Django", "Scrapy", "Docker", "Nginx", "Redis", "Oracle", "MongoDB", "HBase"], "label": 1, "position_id": "jd_055"}
+{"candidate_skills": ["PYTHON开发"], "position_skills": ["Python", "Java", "C++", "PHP", "Django", "Scrapy", "Docker", "Nginx", "Redis", "Oracle", "MongoDB", "HBase"], "label": 0, "position_id": "jd_055"}
+{"candidate_skills": ["Python", "c#", "JavaScript"], "position_skills": ["Python", "Java", "C++", "PHP", "Django", "Scrapy", "Docker", "Nginx", "Redis", "Oracle", "MongoDB", "HBase"], "label": 0, "position_id": "jd_055"}
+{"candidate_skills": ["Python"], "position_skills": ["Docker", "MySQL", "Python"], "label": 1, "position_id": "jd_056"}
+{"candidate_skills": ["ADAS开发"], "position_skills": ["Docker", "MySQL", "Python"], "label": 0, "position_id": "jd_056"}
+{"candidate_skills": ["图像算法", "机器学习"], "position_skills": ["Docker", "MySQL", "Python"], "label": 0, "position_id": "jd_056"}
+{"candidate_skills": ["Python", "Java"], "position_skills": ["Python", "Golang", "Java", "C++"], "label": 1, "position_id": "jd_057"}
+{"candidate_skills": ["Java", "MySQL"], "position_skills": ["Python", "Golang", "Java", "C++"], "label": 0, "position_id": "jd_057"}
+{"candidate_skills": ["Python", "Docker"], "position_skills": ["Python", "Golang", "Java", "C++"], "label": 0, "position_id": "jd_057"}
+{"candidate_skills": ["Java", "MySQL", "Redis", "SpringCloud"], "position_skills": ["Java", "SpringCloud", "MySQL", "MyBatis", "Redis", "Spring", "Python"], "label": 1, "position_id": "jd_058"}
+{"candidate_skills": ["Java"], "position_skills": ["Java", "SpringCloud", "MySQL", "MyBatis", "Redis", "Spring", "Python"], "label": 0, "position_id": "jd_058"}
+{"candidate_skills": ["在校/应届"], "position_skills": ["Java", "SpringCloud", "MySQL", "MyBatis", "Redis", "Spring", "Python"], "label": 0, "position_id": "jd_058"}
+{"candidate_skills": ["MySQL", "SpringCloud", "Redis", "团队管理经验"], "position_skills": ["Java", "团队管理经验", "微服务经验", "SpringCloud", "MySQL", "Redis", "Spring"], "label": 1, "position_id": "jd_059"}
+{"candidate_skills": ["英语读写能力良好", "全栈无侧重", "CSS", "Django/Flask", "JavaScript", "TypeScript", "React", "MySQL/Redis/MongoDB"], "position_skills": ["Java", "团队管理经验", "微服务经验", "SpringCloud", "MySQL", "Redis", "Spring"], "label": 0, "position_id": "jd_059"}
+{"candidate_skills": ["2个月"], "position_skills": ["Java", "团队管理经验", "微服务经验", "SpringCloud", "MySQL", "Redis", "Spring"], "label": 0, "position_id": "jd_059"}
+{"candidate_skills": ["MyBatis"], "position_skills": ["Java", "MyBatis", "Spring"], "label": 1, "position_id": "jd_060"}
+{"candidate_skills": ["MongoDB", "Redis", "Docker", "C++", "Python", "Django", "HBase", "Oracle"], "position_skills": ["Java", "MyBatis", "Spring"], "label": 0, "position_id": "jd_060"}
+{"candidate_skills": ["Django", "MySQL"], "position_skills": ["Java", "MyBatis", "Spring"], "label": 0, "position_id": "jd_060"}
+{"candidate_skills": ["Redis", "Java", "MySQL"], "position_skills": ["Java", "Docker", "银行项目经验", "MySQL", "tesla框架", "Redis"], "label": 1, "position_id": "jd_061"}
+{"candidate_skills": ["Java"], "position_skills": ["Java", "Docker", "银行项目经验", "MySQL", "tesla框架", "Redis"], "label": 0, "position_id": "jd_061"}
+{"candidate_skills": ["PV"], "position_skills": ["Java", "Docker", "银行项目经验", "MySQL", "tesla框架", "Redis"], "label": 0, "position_id": "jd_061"}
+{"candidate_skills": ["SpringCloud", "Spring", "Web前端", "MyBatis"], "position_skills": ["Java", "Web前端", "SpringCloud", "MySQL", "MyBatis", "SQL Server", "Spring", "Oracle"], "label": 1, "position_id": "jd_062"}
+{"candidate_skills": ["C++"], "position_skills": ["Java", "Web前端", "SpringCloud", "MySQL", "MyBatis", "SQL Server", "Spring", "Oracle"], "label": 0, "position_id": "jd_062"}
+{"candidate_skills": ["响应式布局", "Vue", "HTML5", "CSS", "前端工程化"], "position_skills": ["Java", "Web前端", "SpringCloud", "MySQL", "MyBatis", "SQL Server", "Spring", "Oracle"], "label": 0, "position_id": "jd_062"}
+{"candidate_skills": ["Spring"], "position_skills": ["Java", "MySQL", "Spring"], "label": 1, "position_id": "jd_063"}
+{"candidate_skills": ["Vue", "React"], "position_skills": ["Java", "MySQL", "Spring"], "label": 0, "position_id": "jd_063"}
+{"candidate_skills": ["CSS", "HTML5", "前端工程化", "响应式布局", "跨终端适配"], "position_skills": ["Java", "MySQL", "Spring"], "label": 0, "position_id": "jd_063"}
+{"candidate_skills": ["Spring", "Java", "分布式经验"], "position_skills": ["Golang", "Java", "不接受居家办公", "分布式经验", "Spring"], "label": 1, "position_id": "jd_064"}
+{"candidate_skills": ["金融项目"], "position_skills": ["Golang", "Java", "不接受居家办公", "分布式经验", "Spring"], "label": 0, "position_id": "jd_064"}
+{"candidate_skills": ["数字后端验证"], "position_skills": ["Golang", "Java", "不接受居家办公", "分布式经验", "Spring"], "label": 0, "position_id": "jd_064"}
+{"candidate_skills": ["在校/应届"], "position_skills": ["在校/应届"], "label": 1, "position_id": "jd_065"}
+{"candidate_skills": ["PostgreSQL", "Python"], "position_skills": ["在校/应届"], "label": 0, "position_id": "jd_065"}
+{"candidate_skills": ["Java", "Spring/Spring Boot"], "position_skills": ["在校/应届"], "label": 0, "position_id": "jd_065"}
+{"candidate_skills": ["MATLAB"], "position_skills": ["C/C++", "MATLAB"], "label": 1, "position_id": "jd_066"}
+{"candidate_skills": ["AGENT", "英语流利"], "position_skills": ["C/C++", "MATLAB"], "label": 0, "position_id": "jd_066"}
+{"candidate_skills": ["PD"], "position_skills": ["C/C++", "MATLAB"], "label": 0, "position_id": "jd_066"}
+{"candidate_skills": ["SLAM算法", "其他", "机器人", "机械臂", "大模型算法"], "position_skills": ["大模型算法", "其他", "SLAM算法", "Python", "VLA", "具身智能", "机械臂", "机器人", "世界模型"], "label": 1, "position_id": "jd_067"}
+{"candidate_skills": ["MySQL", "工程类系统开发", "系统性能优化", "Spring"], "position_skills": ["大模型算法", "其他", "SLAM算法", "Python", "VLA", "具身智能", "机械臂", "机器人", "世界模型"], "label": 0, "position_id": "jd_067"}
+{"candidate_skills": ["ADAS开发"], "position_skills": ["大模型算法", "其他", "SLAM算法", "Python", "VLA", "具身智能", "机械臂", "机器人", "世界模型"], "label": 0, "position_id": "jd_067"}
+{"candidate_skills": ["其他"], "position_skills": ["大模型算法", "Python", "其他"], "label": 1, "position_id": "jd_068"}
+{"candidate_skills": ["在校/应届"], "position_skills": ["大模型算法", "Python", "其他"], "label": 0, "position_id": "jd_068"}
+{"candidate_skills": ["测试", "数据分析"], "position_skills": ["大模型算法", "Python", "其他"], "label": 0, "position_id": "jd_068"}
+{"candidate_skills": ["在校/应届"], "position_skills": ["在校/应届"], "label": 1, "position_id": "jd_069"}
+{"candidate_skills": ["大模型评测", "音视频模型", "视频标注", "多模态模型"], "position_skills": ["在校/应届"], "label": 0, "position_id": "jd_069"}
+{"candidate_skills": ["PYTHON开发"], "position_skills": ["在校/应届"], "label": 0, "position_id": "jd_069"}
+{"candidate_skills": ["SQL", "风控算法", "大模型算法", "深度学习"], "position_skills": ["深度学习", "大模型算法", "推荐算法", "运筹优化算法", "风控算法", "Python", "大数据处理框架(Spark/Hadoop/Hive)", "SQL"], "label": 1, "position_id": "jd_070"}
+{"candidate_skills": ["2个月"], "position_skills": ["深度学习", "大模型算法", "推荐算法", "运筹优化算法", "风控算法", "Python", "大数据处理框架(Spark/Hadoop/Hive)", "SQL"], "label": 0, "position_id": "jd_070"}
+{"candidate_skills": ["图像算法", "Python"], "position_skills": ["深度学习", "大模型算法", "推荐算法", "运筹优化算法", "风控算法", "Python", "大数据处理框架(Spark/Hadoop/Hive)", "SQL"], "label": 0, "position_id": "jd_070"}
+{"candidate_skills": ["C/C++"], "position_skills": ["C/C++", "泊车"], "label": 1, "position_id": "jd_071"}
+{"candidate_skills": ["Python", "PostgreSQL"], "position_skills": ["C/C++", "泊车"], "label": 0, "position_id": "jd_071"}
+{"candidate_skills": ["在校/应届"], "position_skills": ["C/C++", "泊车"], "label": 0, "position_id": "jd_071"}
+{"candidate_skills": ["纵向控制"], "position_skills": ["算法工程化经验", "VLC", "纵向控制"], "label": 1, "position_id": "jd_072"}
+{"candidate_skills": ["Vue"], "position_skills": ["算法工程化经验", "VLC", "纵向控制"], "label": 0, "position_id": "jd_072"}
+{"candidate_skills": ["Python", "PYSPARK"], "position_skills": ["算法工程化经验", "VLC", "纵向控制"], "label": 0, "position_id": "jd_072"}
+{"candidate_skills": ["图像算法", "MATLAB", "C/C++"], "position_skills": ["深度学习", "图像算法", "C/C++", "Python", "MATLAB"], "label": 1, "position_id": "jd_073"}
+{"candidate_skills": ["PostgreSQL", "Python"], "position_skills": ["深度学习", "图像算法", "C/C++", "Python", "MATLAB"], "label": 0, "position_id": "jd_073"}
+{"candidate_skills": ["全栈项目经验", "全栈侧重后端", "Python"], "position_skills": ["深度学习", "图像算法", "C/C++", "Python", "MATLAB"], "label": 0, "position_id": "jd_073"}
+{"candidate_skills": ["算法工程化经验"], "position_skills": ["算法工程化经验"], "label": 1, "position_id": "jd_074"}
+{"candidate_skills": ["Python"], "position_skills": ["算法工程化经验"], "label": 0, "position_id": "jd_074"}
+{"candidate_skills": ["音视频模型", "大模型评测", "AIGC", "音频标注"], "position_skills": ["算法工程化经验"], "label": 0, "position_id": "jd_074"}
+{"candidate_skills": ["2个月"], "position_skills": ["2个月"], "label": 1, "position_id": "jd_075"}
+{"candidate_skills": ["开发", "软件自动化"], "position_skills": ["2个月"], "label": 0, "position_id": "jd_075"}
+{"candidate_skills": ["推荐算法"], "position_skills": ["2个月"], "label": 0, "position_id": "jd_075"}
+{"candidate_skills": ["校招"], "position_skills": ["校招"], "label": 1, "position_id": "jd_076"}
+{"candidate_skills": ["深度学习", "算法工程化经验", "大模型算法", "优秀开源项目经历", "模型加速/性能优化", "自然语言处理算法"], "position_skills": ["校招"], "label": 0, "position_id": "jd_076"}
+{"candidate_skills": ["全栈无侧重"], "position_skills": ["校招"], "label": 0, "position_id": "jd_076"}
+{"candidate_skills": ["算法工程化经验"], "position_skills": ["算法工程化经验"], "label": 1, "position_id": "jd_077"}
+{"candidate_skills": ["数字后端设计"], "position_skills": ["算法工程化经验"], "label": 0, "position_id": "jd_077"}
+{"candidate_skills": ["MySQL", "Django"], "position_skills": ["算法工程化经验"], "label": 0, "position_id": "jd_077"}
+{"candidate_skills": ["算法工程化经验"], "position_skills": ["算法工程化经验"], "label": 1, "position_id": "jd_078"}
+{"candidate_skills": ["UI设计"], "position_skills": ["算法工程化经验"], "label": 0, "position_id": "jd_078"}
+{"candidate_skills": ["FLOW"], "position_skills": ["算法工程化经验"], "label": 0, "position_id": "jd_078"}
+{"candidate_skills": ["实习生", "优秀开源项目经历", "自然语言处理算法", "图像算法", "模型加速/性能优化"], "position_skills": ["深度学习", "大模型算法", "图像算法", "自然语言处理算法", "模型加速/性能优化", "Python", "算法工程化经验", "优秀开源项目经历", "实习生"], "label": 1, "position_id": "jd_079"}
+{"candidate_skills": ["Java", "Redis", "MySQL", "银行项目经验"], "position_skills": ["深度学习", "大模型算法", "图像算法", "自然语言处理算法", "模型加速/性能优化", "Python", "算法工程化经验", "优秀开源项目经历", "实习生"], "label": 0, "position_id": "jd_079"}
+{"candidate_skills": ["C++"], "position_skills": ["深度学习", "大模型算法", "图像算法", "自然语言处理算法", "模型加速/性能优化", "Python", "算法工程化经验", "优秀开源项目经历", "实习生"], "label": 0, "position_id": "jd_079"}
+{"candidate_skills": ["AI开发", "全栈项目经验", "全栈无侧重"], "position_skills": ["全栈无侧重", "JavaScript", "Java", "全栈项目经验", "AI开发"], "label": 1, "position_id": "jd_080"}
+{"candidate_skills": ["全栈无侧重"], "position_skills": ["全栈无侧重", "JavaScript", "Java", "全栈项目经验", "AI开发"], "label": 0, "position_id": "jd_080"}
+{"candidate_skills": ["电脑操作"], "position_skills": ["全栈无侧重", "JavaScript", "Java", "全栈项目经验", "AI开发"], "label": 0, "position_id": "jd_080"}
+{"candidate_skills": ["全栈无侧重"], "position_skills": ["全栈无侧重"], "label": 1, "position_id": "jd_081"}
+{"candidate_skills": ["Golang", "分布式经验", "不接受居家办公"], "position_skills": ["全栈无侧重"], "label": 0, "position_id": "jd_081"}
+{"candidate_skills": ["FLOW"], "position_skills": ["全栈无侧重"], "label": 0, "position_id": "jd_081"}
+{"candidate_skills": ["JavaScript", "全栈无侧重", "Django/Flask", "Python", "全栈项目经验", "英语读写能力良好", "计算机相关专业"], "position_skills": ["全栈无侧重", "JavaScript", "HTML", "CSS", "TypeScript", "React", "Python", "Django/Flask", "MySQL/Redis/MongoDB", "计算机相关专业", "全栈项目经验", "英语读写能力良好"], "label": 1, "position_id": "jd_082"}
+{"candidate_skills": ["Python"], "position_skills": ["全栈无侧重", "JavaScript", "HTML", "CSS", "TypeScript", "React", "Python", "Django/Flask", "MySQL/Redis/MongoDB", "计算机相关专业", "全栈项目经验", "英语读写能力良好"], "label": 0, "position_id": "jd_082"}
+{"candidate_skills": ["FLOW"], "position_skills": ["全栈无侧重", "JavaScript", "HTML", "CSS", "TypeScript", "React", "Python", "Django/Flask", "MySQL/Redis/MongoDB", "计算机相关专业", "全栈项目经验", "英语读写能力良好"], "label": 0, "position_id": "jd_082"}
+{"candidate_skills": ["Python", "JavaScript", "全栈侧重后端"], "position_skills": ["全栈侧重后端", "JavaScript", "Python", "全栈项目经验", "c#"], "label": 1, "position_id": "jd_083"}
+{"candidate_skills": ["SpringCloud", "Spring", "团队管理经验", "微服务经验"], "position_skills": ["全栈侧重后端", "JavaScript", "Python", "全栈项目经验", "c#"], "label": 0, "position_id": "jd_083"}
+{"candidate_skills": ["建筑工程系统开发", "数据可视化模块开发", "前端架构设计", "CSS", "Echarts", "React"], "position_skills": ["全栈侧重后端", "JavaScript", "Python", "全栈项目经验", "c#"], "label": 0, "position_id": "jd_083"}
+{"candidate_skills": ["Java"], "position_skills": ["Python", "C++", "Java"], "label": 1, "position_id": "jd_084"}
+{"candidate_skills": ["Vue"], "position_skills": ["Python", "C++", "Java"], "label": 0, "position_id": "jd_084"}
+{"candidate_skills": ["视频标注"], "position_skills": ["Python", "C++", "Java"], "label": 0, "position_id": "jd_084"}
+{"candidate_skills": ["图像算法", "机器学习"], "position_skills": ["图像算法", "机器学习", "语音识别", "Python"], "label": 1, "position_id": "jd_085"}
+{"candidate_skills": ["JavaScript", "Java"], "position_skills": ["图像算法", "机器学习", "语音识别", "Python"], "label": 0, "position_id": "jd_085"}
+{"candidate_skills": ["ADAS开发"], "position_skills": ["图像算法", "机器学习", "语音识别", "Python"], "label": 0, "position_id": "jd_085"}
+{"candidate_skills": ["Python"], "position_skills": ["Vue", "Python"], "label": 1, "position_id": "jd_086"}
+{"candidate_skills": ["MySQL", "Redis", "tesla框架", "Docker"], "position_skills": ["Vue", "Python"], "label": 0, "position_id": "jd_086"}
+{"candidate_skills": ["AGENT", "英语流利"], "position_skills": ["Vue", "Python"], "label": 0, "position_id": "jd_086"}
+{"candidate_skills": ["Python", "JavaScript", "C++"], "position_skills": ["Python", "JavaScript", "C++", "Spring", "MySQL"], "label": 1, "position_id": "jd_087"}
+{"candidate_skills": ["Python"], "position_skills": ["Python", "JavaScript", "C++", "Spring", "MySQL"], "label": 0, "position_id": "jd_087"}
+{"candidate_skills": ["PV"], "position_skills": ["Python", "JavaScript", "C++", "Spring", "MySQL"], "label": 0, "position_id": "jd_087"}
+{"candidate_skills": ["MySQL"], "position_skills": ["Java", "Django", "MySQL"], "label": 1, "position_id": "jd_088"}
+{"candidate_skills": ["Docker", "MySQL"], "position_skills": ["Java", "Django", "MySQL"], "label": 0, "position_id": "jd_088"}
+{"candidate_skills": ["Sql", "数据分析"], "position_skills": ["Java", "Django", "MySQL"], "label": 0, "position_id": "jd_088"}
+{"candidate_skills": ["PYTHON开发"], "position_skills": ["PYTHON开发"], "label": 1, "position_id": "jd_089"}
+{"candidate_skills": ["多线程", "软件自动化"], "position_skills": ["PYTHON开发"], "label": 0, "position_id": "jd_089"}
+{"candidate_skills": ["在校/应届"], "position_skills": ["PYTHON开发"], "label": 0, "position_id": "jd_089"}
+{"candidate_skills": ["PyTorch", "MySQL", "C语言", "Redis"], "position_skills": ["C语言", "Java", "Web开发", "GIS开发", "三维开发", "PyTorch", "MySQL", "Redis"], "label": 1, "position_id": "jd_090"}
+{"candidate_skills": ["机器学习经验", "MongoDB", "分布式经验", "Django", "Linux开发/部署经验", "Oracle", "云计算经验", "MySQL"], "position_skills": ["C语言", "Java", "Web开发", "GIS开发", "三维开发", "PyTorch", "MySQL", "Redis"], "label": 0, "position_id": "jd_090"}
+{"candidate_skills": ["海工结构设计", "海洋测绘工程"], "position_skills": ["C语言", "Java", "Web开发", "GIS开发", "三维开发", "PyTorch", "MySQL", "Redis"], "label": 0, "position_id": "jd_090"}
+{"candidate_skills": ["英语流利"], "position_skills": ["Python", "英语流利", "AGENT"], "label": 1, "position_id": "jd_091"}
+{"candidate_skills": ["响应式布局", "HTML5", "JavaScript", "跨终端适配", "React"], "position_skills": ["Python", "英语流利", "AGENT"], "label": 0, "position_id": "jd_091"}
+{"candidate_skills": ["全栈项目经验", "Python", "英语读写能力良好", "Django/Flask", "TypeScript", "全栈无侧重", "CSS", "React"], "position_skills": ["Python", "英语流利", "AGENT"], "label": 0, "position_id": "jd_091"}
+{"candidate_skills": ["C++"], "position_skills": ["Python", "C++"], "label": 1, "position_id": "jd_092"}
+{"candidate_skills": ["Java"], "position_skills": ["Python", "C++"], "label": 0, "position_id": "jd_092"}
+{"candidate_skills": ["不接受居家办公", "Golang", "Spring"], "position_skills": ["Python", "C++"], "label": 0, "position_id": "jd_092"}
+{"candidate_skills": ["Python"], "position_skills": ["Python"], "label": 1, "position_id": "jd_093"}
+{"candidate_skills": ["MySQL", "Spring"], "position_skills": ["Python"], "label": 0, "position_id": "jd_093"}
+{"candidate_skills": ["Spark"], "position_skills": ["Python"], "label": 0, "position_id": "jd_093"}
+{"candidate_skills": ["Java"], "position_skills": ["Java"], "label": 1, "position_id": "jd_094"}
+{"candidate_skills": ["JavaScript", "Vue"], "position_skills": ["Java"], "label": 0, "position_id": "jd_094"}
+{"candidate_skills": ["电脑操作"], "position_skills": ["Java"], "label": 0, "position_id": "jd_094"}
+{"candidate_skills": ["Python"], "position_skills": ["C++", "Python"], "label": 1, "position_id": "jd_095"}
+{"candidate_skills": ["1年以内"], "position_skills": ["C++", "Python"], "label": 0, "position_id": "jd_095"}
+{"candidate_skills": ["系统性能优化", "Spring", "Mybatis", "MySQL"], "position_skills": ["C++", "Python"], "label": 0, "position_id": "jd_095"}
+{"candidate_skills": ["Python"], "position_skills": ["Python", "PYSPARK", "Spark"], "label": 1, "position_id": "jd_096"}
+{"candidate_skills": ["在校/应届"], "position_skills": ["Python", "PYSPARK", "Spark"], "label": 0, "position_id": "jd_096"}
+{"candidate_skills": ["Python"], "position_skills": ["Python", "PYSPARK", "Spark"], "label": 0, "position_id": "jd_096"}
+{"candidate_skills": ["Oracle", "Python", "Django"], "position_skills": ["Java", "Python", "Django", "AI", "Oracle", "MySQL"], "label": 1, "position_id": "jd_097"}
+{"candidate_skills": ["Spring", "系统性能优化", "Mybatis", "JAVA后端开发"], "position_skills": ["Java", "Python", "Django", "AI", "Oracle", "MySQL"], "label": 0, "position_id": "jd_097"}
+{"candidate_skills": ["机器学习", "Java", "GO"], "position_skills": ["Java", "Python", "Django", "AI", "Oracle", "MySQL"], "label": 0, "position_id": "jd_097"}
+{"candidate_skills": ["Python"], "position_skills": ["Python", "C++"], "label": 1, "position_id": "jd_098"}
+{"candidate_skills": ["Oracle", "Java", "Python", "MySQL"], "position_skills": ["Python", "C++"], "label": 0, "position_id": "jd_098"}
+{"candidate_skills": ["嵌入式开发", "MySQL", "OpenCV", "Linux开发", "Python", "C语言"], "position_skills": ["Python", "C++"], "label": 0, "position_id": "jd_098"}
+{"candidate_skills": ["MySQL", "Linux开发", "Python", "C语言", "嵌入式开发"], "position_skills": ["C语言", "Java", "Python", "Linux开发", "嵌入式开发", "Web开发", "MySQL", "PyTorch", "OpenCV"], "label": 1, "position_id": "jd_099"}
+{"candidate_skills": ["OPENCLAW"], "position_skills": ["C语言", "Java", "Python", "Linux开发", "嵌入式开发", "Web开发", "MySQL", "PyTorch", "OpenCV"], "label": 0, "position_id": "jd_099"}
+{"candidate_skills": ["ADAS开发"], "position_skills": ["C语言", "Java", "Python", "Linux开发", "嵌入式开发", "Web开发", "MySQL", "PyTorch", "OpenCV"], "label": 0, "position_id": "jd_099"}
+{"candidate_skills": ["软件自动化", "多线程"], "position_skills": ["软件自动化", "多线程", "Python", "开发"], "label": 1, "position_id": "jd_100"}
+{"candidate_skills": ["Java", "Spring"], "position_skills": ["软件自动化", "多线程", "Python", "开发"], "label": 0, "position_id": "jd_100"}
+{"candidate_skills": ["机器学习", "Python"], "position_skills": ["软件自动化", "多线程", "Python", "开发"], "label": 0, "position_id": "jd_100"}

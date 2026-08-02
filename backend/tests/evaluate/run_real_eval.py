@@ -4,11 +4,13 @@ M3 实装 JD 抽取评测：调用 app.services.extraction.jd_extractor
 （instructor 强校验 + 规则兜底）对黄金集 raw_text 抽取技能，与 gold_skills
 标注比对 F1。目标：F1 ≥ 0.90（设计文档 1.1 简历解析准确率 ≥ 90%）。
 
-resume/match 评测待 M4 各自黄金集交付。
+match 评测（AL-M3-03）：弱监督匹配黄金集（golden_set_match.jsonl）上
+Spearman 秩相关 ≥ 0.85 + 二分类准确率。resume 评测待 M4 简历黄金集交付。
 
 用法：
     python tests/evaluate/run_real_eval.py --task jd            # 全量 100 条
     python tests/evaluate/run_real_eval.py --task jd --limit 5  # 小批量冒烟
+    python tests/evaluate/run_real_eval.py --task match         # 匹配评估（需已生成弱监督黄金集）
 """
 
 import argparse
@@ -18,6 +20,8 @@ from pathlib import Path
 # 后端根目录（tests/evaluate/ → backend/）
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_BACKEND_DIR))
+# 调优/评估共用的 evaluate_pairs 位于 backend/scripts/
+sys.path.insert(0, str(_BACKEND_DIR / "scripts"))
 
 from run_baseline import compute_f1, keyword_match, load_golden_set
 
@@ -71,9 +75,20 @@ def evaluate_resume_extraction(golden_set: list[dict]) -> dict:
 
 
 def evaluate_matching(golden_set: list[dict]) -> dict:
-    """人岗匹配端到端评估。"""
-    # TODO: M4 阶段实现（依赖匹配语义增强 + 匹配黄金集）
-    return {"accuracy": None}
+    """人岗匹配端到端评估（AL-M3-03）。
+
+    在弱监督匹配黄金集（data/golden_set/golden_set_match.jsonl，build_match_golden.py
+    生成）上评估语义增强匹配引擎：Spearman 秩相关 + 二分类准确率。
+    """
+    from app.services.matching.semantic import SkillEmbedder
+    from app.services.matching.weights import load_sim_threshold, load_weights
+
+    # 评估逻辑与 Optuna 调优共用（scripts/tune_match_weights.py）
+    from tune_match_weights import evaluate_pairs
+
+    semantic = SkillEmbedder.get()
+    result = evaluate_pairs(golden_set, load_weights(), semantic, load_sim_threshold())
+    return {"spearman": result["spearman"], "accuracy": result["accuracy"]}
 
 
 def main():
@@ -106,12 +121,18 @@ def main():
             print("[SKIP] resume 黄金集未交付（M4）")
 
     if args.task in ("match", "all"):
-        golden = load_golden_set(str(Path(__file__).parent / "golden_set_match.jsonl"))
+        golden = load_golden_set(str(_BACKEND_DIR / "data" / "golden_set" / "golden_set_match.jsonl"))
         if golden:
+            print(f"=== 人岗匹配端到端评估（{len(golden)} 对弱监督黄金集）===")
             results = evaluate_matching(golden)
-            print(f"[Match] Accuracy: {results.get('accuracy', 'N/A')}")
+            print(f"Spearman: {results.get('spearman', 'N/A'):.4f}")
+            print(f"Accuracy: {results.get('accuracy', 'N/A'):.4f}")
+            spearman = results.get("spearman")
+            if spearman is not None:
+                mark = "[OK] 达到 M3 目标" if spearman >= 0.85 else "[WARN] 未达 0.85"
+                print(mark)
         else:
-            print("[SKIP] match 黄金集未交付（M4）")
+            print("[SKIP] match 黄金集不存在（先运行 scripts/build_match_golden.py）")
 
 
 if __name__ == "__main__":

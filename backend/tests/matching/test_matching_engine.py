@@ -266,6 +266,58 @@ class TestSynonymMatch:
         assert results[0].position_id == "go_pos"
 
 
+class _FakeSemantic:
+    """固定相似度表的假语义器（测试注入）。"""
+
+    def __init__(self, table: dict[tuple[str, str], float], fail: bool = False):
+        self.table = table
+        self.fail = fail
+
+    def similarity(self, a: str, b: str) -> float:
+        if self.fail:
+            raise RuntimeError("模型不可用")
+        return self.table.get((a, b), 0.0)
+
+
+class TestSemanticMatching:
+    """语义级同义词匹配（设计文档 9.4：语义级 0.85-1.0，sim ≥ threshold 计入）。"""
+
+    def test_semantic_hit_gets_partial_credit(self):
+        """语义命中按相似度值计入 must_score（非布尔）。"""
+        cand = _candidate(["机器学习"])
+        pos = _position("p1", musts=[_req("深度学习", Necessity.MUST)])
+        sem = _FakeSemantic({("深度学习", "机器学习"): 0.64})
+        result = score_position(cand, pos, weights=W, semantic=sem, sim_threshold=0.5)
+        assert result.must_score == pytest.approx(0.64)
+        assert "深度学习" in result.matched_must
+
+    def test_semantic_below_threshold_misses(self):
+        """相似度低于阈值不计入（语义不武断命中）。"""
+        cand = _candidate(["机器学习"])
+        pos = _position("p1", musts=[_req("深度学习", Necessity.MUST)])
+        sem = _FakeSemantic({("深度学习", "机器学习"): 0.4})
+        result = score_position(cand, pos, weights=W, semantic=sem, sim_threshold=0.5)
+        assert result.must_score == 0.0
+        assert result.unqualified is True
+
+    def test_semantic_unavailable_degrades_to_rule(self):
+        """语义模型异常时降级纯规则（不阻断、不误命中）。"""
+        cand = _candidate(["Python"])
+        pos = _position("p1", musts=[_req("Go", Necessity.MUST)])
+        sem = _FakeSemantic({}, fail=True)
+        result = score_position(cand, pos, weights=W, semantic=sem)
+        assert result.must_score == 0.0
+        assert result.missing_must == ["Go"]
+
+    def test_alias_exact_wins_over_semantic(self):
+        """别名级精确匹配返回 1.0，不因语义分数拉低。"""
+        cand = _candidate(["Go"])
+        pos = _position("p1", musts=[_req("Go", Necessity.MUST)])
+        sem = _FakeSemantic({("Go", "Go"): 0.9})  # 即使语义只有 0.9
+        result = score_position(cand, pos, weights=W, semantic=sem, sim_threshold=0.85)
+        assert result.must_score == 1.0
+
+
 class TestRuleBasedMatcher:
     def test_auto_returns_sorted_top_n(self):
         """AUTO 模式按 total DESC 截取 Top-N。"""

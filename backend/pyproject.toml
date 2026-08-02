@@ -38,6 +38,7 @@ dev-dependencies = [
     "pytest-cov>=5.0",
     "httpx>=0.27",
     "locust>=2.0",
+    "optuna>=4.0",
 ]
 
 # ── 单元测试框架（TE-M3-01）──
