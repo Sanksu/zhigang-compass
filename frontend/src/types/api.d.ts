@@ -1510,7 +1510,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** [M4] 触发爬取任务 */
+        /** 触发爬取任务（平台白名单校验 + ARQ 入队） */
         post: {
             parameters: {
                 query?: never;
@@ -1521,13 +1521,14 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        /** @description 平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx */
                         platform: string;
                         keyword: string;
                     };
                 };
             };
             responses: {
-                /** @description 任务已触发 */
+                /** @description 任务已触发（data 含 task_id/status=pending） */
                 202: {
                     headers: {
                         [name: string]: unknown;
