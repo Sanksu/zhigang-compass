@@ -19,7 +19,8 @@ from app.services.matching.engine import (
     apply_cii_correction,
     score_position,
 )
-from app.services.matching.weights import load_weights, DEFAULT_WEIGHTS
+from app.services.matching.semantic import SemanticUnavailableError, SkillEmbedder
+from app.services.matching.weights import load_weights, DEFAULT_WEIGHTS, load_sim_threshold
 
 __all__ = [
     "CandidateProfile",
@@ -31,9 +32,12 @@ __all__ = [
     "Necessity",
     "PositionProfile",
     "RuleBasedMatcher",
+    "SemanticUnavailableError",
+    "SkillEmbedder",
     "SkillRequirement",
     "DEFAULT_WEIGHTS",
     "apply_cii_correction",
+    "load_sim_threshold",
     "load_weights",
     "score_position",
 ]

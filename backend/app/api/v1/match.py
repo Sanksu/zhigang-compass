@@ -24,6 +24,7 @@ from app.services.matching.schemas import (
     PositionProfile,
     SkillRequirement,
 )
+from app.services.matching.semantic import SkillEmbedder
 
 router = APIRouter()
 
@@ -138,7 +139,10 @@ async def recommend(req: RecommendRequest, db: AsyncSession = Depends(get_db)):
         return error(404, "简历不存在")
 
     candidate = _build_candidate(cache.parsed_data)
-    matcher = RuleBasedMatcher(_load_positions_from_graph())
+    matcher = RuleBasedMatcher(
+        _load_positions_from_graph(),
+        semantic=SkillEmbedder.get(),
+    )
     results = matcher.match(
         MatchRequest(candidate=candidate, mode=MatchMode.AUTO, top_n=req.top_n)
     )
@@ -156,7 +160,10 @@ async def compare(req: CompareRequest, db: AsyncSession = Depends(get_db)):
         return error(404, "简历不存在")
 
     candidate = _build_candidate(cache.parsed_data)
-    matcher = RuleBasedMatcher(_load_positions_from_graph())
+    matcher = RuleBasedMatcher(
+        _load_positions_from_graph(),
+        semantic=SkillEmbedder.get(),
+    )
     try:
         results = matcher.match(
             MatchRequest(

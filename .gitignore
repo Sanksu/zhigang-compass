@@ -156,6 +156,7 @@ dumps/
 *.cypher
 
 # 模型权重与缓存
+backend/models/
 models/cache/
 models/checkpoints/
 *.bin
