@@ -14,9 +14,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_permission
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import hash_password
-from app.models.business import AuditLog, User
+from app.models.business import AuditLog, TaskStatus, User
 from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
 from app.schemas.common import ok, error
 
@@ -214,6 +215,71 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
         },
         "platforms": sorted(by_platform.values(), key=lambda x: (x["level"], x["id"])),
     })
+
+
+# ============================================================
+# 爬取管理（BE-M4-05）：手动触发爬取任务
+# ============================================================
+
+# 平台 ID（前端 PLATFORM_META 口径）→ Scrapy spider 名（crawl_platform 消费）
+_PLATFORM_TO_SPIDER = {
+    **{p: p for p in PLATFORM_META},
+    "linkedin": "linkedin_public",
+}
+
+
+async def _enqueue_crawl(spider: str, keywords: list[str]) -> None:
+    """入队 ARQ crawl_platform 任务；队列不可用抛异常由调用方标记 failed。"""
+    from arq import create_pool
+    from arq.connections import RedisSettings
+    from urllib.parse import urlparse
+
+    parsed = urlparse(settings.arq_redis_url)
+    redis_settings = RedisSettings(
+        host=parsed.hostname or "localhost",
+        port=parsed.port or 6379,
+        database=int(parsed.path.lstrip("/") or "1"),
+        password=parsed.password,
+    )
+    pool = await create_pool(redis_settings)
+    try:
+        await pool.enqueue_job("crawl_platform", spider_name=spider, keywords=keywords)
+    finally:
+        await pool.close()
+
+
+@router.post("/crawl/trigger", status_code=202)
+async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
+    """触发爬取任务（BE-M4-05，契约 /admin/crawl/trigger）。
+
+    校验平台（PLATFORM_META 白名单）→ 建 TaskStatus(pending) → 入队 ARQ
+    crawl_platform → 返回 task_id。队列不可用时标记任务 failed 并返回 500。
+    """
+    platform = (req.get("platform") or "").strip()
+    keyword = (req.get("keyword") or "").strip()
+    if platform not in _PLATFORM_TO_SPIDER:
+        return error(400, f"未知平台: {platform}（可选: {', '.join(sorted(PLATFORM_META))}）")
+    if not keyword:
+        return error(400, "keyword 不能为空")
+
+    task = TaskStatus(
+        task_type="crawl",
+        status="pending",
+        result={"platform": platform, "keyword": keyword},
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
+    try:
+        await _enqueue_crawl(_PLATFORM_TO_SPIDER[platform], [keyword])
+    except Exception as e:
+        task.status = "failed"
+        task.error = f"任务入队失败: {e}"
+        await db.commit()
+        return error(500, f"爬取任务入队失败: {e}")
+
+    return ok(data={"task_id": task.id, "platform": platform, "status": "pending"})
 
 
 # ============================================================
