@@ -112,13 +112,14 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("架构",), "架构师"),
     (("测试",), "测试工程师"),
     (("运维",), "运维工程师"),
+    (("网络",), "网络工程师"),
     (("嵌入式",), "嵌入式开发工程师"),
     (("算法", "推荐", "图像", "视觉", "语音", "NLP", "自然语言", "大模型",
       "深度学习", "机器学习", "AI", "人工智能", "风控"), "算法工程师"),
     (("数据开发", "大数据", "数仓", "ETL"), "大数据开发工程师"),
     (("数据分析", "商业分析", "数据挖掘"), "数据分析师"),
     (("前端", "web", "h5", "html", "css", "ui"), "前端开发工程师"),
-    (("后端", "服务端"), "后端开发工程师"),
+    (("后端", "后台", "服务端"), "后端开发工程师"),
     (("java",), "Java开发工程师"),
     (("python",), "Python开发工程师"),
     (("golang", "go"), "Go开发工程师"),
@@ -139,6 +140,66 @@ _TECH_STACKS: tuple[tuple[str, str], ...] = (
     ("echarts", "ECharts"), ("uni-app", "uni-app"), ("taro", "Taro"),
     ("electron", "Electron"), ("webgl", "WebGL"),
 )
+
+# 英文岗位名 → 中文标准名（国际源 JD 的 position_name 翻译，再与中文岗位合并去重）
+_EN_POSITION_MAP: dict[str, str] = {
+    "software engineer": "软件工程师",
+    "senior software engineer": "软件工程师",
+    "staff software engineer": "软件工程师",
+    "software developer": "软件工程师",
+    "software developer, experiment controls": "软件工程师",
+    "backend software engineer": "后端开发工程师",
+    "back end developer": "后端开发工程师",
+    "backend developer": "后端开发工程师",
+    "backend engineer": "后端开发工程师",
+    "frontend engineer": "前端开发工程师",
+    "frontend software engineer": "前端开发工程师",
+    "front end developer": "前端开发工程师",
+    "frontend developer": "前端开发工程师",
+    "full stack engineer": "全栈工程师",
+    "full-stack engineer": "全栈工程师",
+    "fullstack engineer": "全栈工程师",
+    "full stack developer": "全栈工程师",
+    "data scientist": "数据分析师",
+    "data analyst": "数据分析师",
+    "senior data analyst": "数据分析师",
+    "business analyst": "数据分析师",
+    "analytics engineer": "数据分析师",
+    "data engineer": "大数据开发工程师",
+    "machine learning engineer": "机器学习工程师",
+    "ml engineer": "机器学习工程师",
+    "machine learning operations engineer": "机器学习工程师",
+    "ai engineer": "算法工程师",
+    "nlp engineer": "算法工程师",
+    "applied scientist": "算法工程师",
+    "qa engineer": "测试工程师",
+    "software test engineer": "测试工程师",
+    "senior quality engineer": "测试工程师",
+    "devops engineer": "运维工程师",
+    "site reliability engineer": "运维工程师",
+    "sre": "运维工程师",
+    "network engineer": "网络工程师",
+    "network production engineer": "网络工程师",
+    "embedded engineer": "嵌入式开发工程师",
+    "desktop engineer": "桌面工程师",
+    "security engineer": "网络安全工程师",
+    "cyber security engineer": "网络安全工程师",
+    "quantitative analyst": "量化分析师",
+    "quant analyst": "量化分析师",
+    "quantitative developer": "量化分析师",
+    "product manager": "产品经理",
+    "project manager": "项目经理",
+    "product engineer": "产品工程师",
+    "ui designer": "UI设计师",
+    "ux designer": "UX设计师",
+    "founding engineer": "创始工程师",
+    "founding product engineer": "创始工程师",
+    "forward deployed engineer": "现场工程师",
+    "customer engineer": "客户工程师",
+}
+
+# 无信息量泛岗位词：归一化结果命中时视为空岗位（不入图）
+_POSITION_STOPWORDS: set[str] = {"技术", "开发", "工程师", "管理", "专员", "前台", "文员"}
 
 # 岗位名前缀修饰词（级别/招聘形态），归一化时去除
 _POSITION_PREFIX_RE = re.compile(r"^(初级|中级|高级|资深|专家|助理|实习|见习|应届|研发|资深)")
@@ -163,23 +224,49 @@ def _normalize_base(name: str) -> str:
     return core or name
 
 
+def _translate_en_position(name: str) -> str | None:
+    """英文岗位名 → 中文标准名。
+
+    匹配优先级：精确 → 逗号前主标题 → 最长子串（单词边界，容忍逗号/连字符）。
+    """
+    low = name.strip().lower()
+    if low in _EN_POSITION_MAP:
+        return _EN_POSITION_MAP[low]
+    head = low.split(",")[0].strip()
+    if head in _EN_POSITION_MAP:
+        return _EN_POSITION_MAP[head]
+    for en, zh in sorted(_EN_POSITION_MAP.items(), key=lambda x: -len(x[0])):
+        if re.search(r"(^|[^a-z])" + re.escape(en) + r"($|[^a-z])", low):
+            return zh
+    return None
+
+
 def normalize_position_name(name: str) -> str:
-    """岗位名归一化：合并同义重复岗位，同时保留技术栈细分维度。
+    """岗位名归一化：英文翻译中文 + 合并同义重复岗位，保留技术栈细分维度。
 
     步骤：
-    1. 整体处理（不再按分隔符取第一段）：混合标题如 "后/前端开发、测试" 会在
+    1. 英文岗位名翻译为中文（"Software Engineer" → "软件工程师"），与中文岗位合并去重
+    2. 整体处理（不再按分隔符取第一段）：混合标题如 "后/前端开发、测试" 会在
        整串中命中关键词族（"前端"）归入主族，避免产生 "后" 这类碎片岗位
-    2. 提取技术栈限定词（括号内 "前端开发工程师(React)" 或前缀 "React前端开发工程师"），
+    3. 提取技术栈限定词（括号内 "前端开发工程师(React)" 或前缀 "React前端开发工程师"），
        React/Vue/小程序/鸿蒙等作为细分岗位保留，web/h5/html 视为通用归并
-    3. 基础岗位名归一化（去级别前缀、循环去后缀、关键词族映射）
-    4. 技术栈 + 基础岗位名组合
+    4. 基础岗位名归一化（去级别前缀、循环去后缀、关键词族映射）；
+       归一化结果为泛词（"技术"/"后台" 等无信息量）时返回空串，不入图
 
     示例：
+    - "Software Engineer" / "Senior Software Engineer" → "软件工程师"
     - "前端开发" / "web前端开发工程师" → "前端开发工程师"
     - "React前端开发工程师" / "前端开发工程师(React)" → "React前端开发工程师"
-    - "高级前端开发工程师" → "前端开发工程师"
-    - "后/前端开发、测试" → "前端开发工程师"
+    - "技术" → ""（泛词不入图）
     """
+    translated = _translate_en_position(name)
+    if translated:
+        # 翻译结果再过中文归一化，确保与中文路径岗位名统一（如"软件工程师"→"软件开发工程师"）
+        base = _normalize_base(translated)
+        if not base or base in _POSITION_STOPWORDS:
+            return ""
+        return base
+
     paren = re.search(r"[（(]([^()（）]*)[)）]", name)
     paren_tech = paren.group(1).strip() if paren else ""
     base = re.sub(r"[（(].*?[)）]", "", name).strip()
@@ -195,6 +282,8 @@ def normalize_position_name(name: str) -> str:
             break
 
     base = _normalize_base(base)
+    if not base or base in _POSITION_STOPWORDS:
+        return ""
     if tech:
         return tech + base
     if paren_tech:
