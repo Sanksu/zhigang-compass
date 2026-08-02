@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { apiGet } from '@/lib/api'
+import { apiGet, apiPost, ApiError } from '@/lib/api'
 
 /** 爬虫运行状态 — 对应 §4 平台采集生命周期 */
 type CrawlStatus = 'running' | 'idle' | 'failed' | 'archived'
@@ -117,7 +117,7 @@ const LEVEL_CLASS: Record<PlatformLevel, string> = {
 
 export function AdminCrawlPage() {
   const [form, setForm] = useState({
-    platform: 'BOSS直聘',
+    platform: 'boss',
     keyword: '',
     city: '北京',
     maxPages: 30,
@@ -126,6 +126,7 @@ export function AdminCrawlPage() {
   const [platforms, setPlatforms] = useState<PlatformRow[]>([])
   const [metrics, setMetrics] = useState<MetricCardItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [notice, setNotice] = useState<string | null>(null)
 
   // 加载真实爬虫采集状态（raw 表 + output JSONL 统计）
   useEffect(() => {
@@ -163,28 +164,48 @@ export function AdminCrawlPage() {
   // 任务未完成时禁用所有触发入口，避免并发任务导致调度混乱
   const isBusy = currentTask !== null && currentTask.status !== 'done'
 
-  function triggerCrawl(platform: string) {
+  // 触发爬取 → 真实 POST /admin/crawl/trigger（ARQ 入队，202 返回 task_id）
+  async function triggerCrawl(platform: string) {
     if (isBusy) return
-    const task: CurrentTask = {
-      platform,
-      keyword: form.keyword || '高级前端',
+    const keyword = form.keyword?.trim() || '高级前端'
+    if (!platform || !keyword) {
+      setNotice('请选择平台并填写关键词')
+      return
+    }
+    setCurrentTask({
+      platform: platforms.find((p) => p.id === platform)?.name ?? platform,
+      keyword,
       city: form.city || '北京',
       maxPages: form.maxPages || 30,
       status: 'queued',
       progress: 0,
       collected: 0,
-      total: 300,
+      total: 0,
+    })
+    setNotice(null)
+    try {
+      const res = await apiPost<{ task_id: string; platform: string; status: string }>('/admin/crawl/trigger', {
+        platform,
+        keyword,
+      })
+      setCurrentTask((t) => (t ? { ...t, status: 'running', progress: 10 } : t))
+      setNotice(`爬取任务已入队（task_id: ${res.task_id.slice(0, 8)}…），后台 worker 执行中`)
+    } catch (e) {
+      setCurrentTask(null)
+      setNotice(e instanceof ApiError ? `触发失败：${e.message}` : '触发失败，请检查后端与 Redis 队列')
     }
-    setCurrentTask(task)
-    // 模拟调度延迟：队列中 3s 后进入运行态并展示 mock 进度
-    setTimeout(() => {
-      setCurrentTask((t) => (t ? { ...t, status: 'running', progress: 60, collected: 184 } : t))
-    }, 3000)
   }
 
   return (
     <>
       <PageHeader title="爬取管理" description="手动触发 13 源采集 · 进度监控 · 历史回溯" />
+
+      {/* 触发结果通知 */}
+      {notice && (
+        <div className="mb-4 rounded-md border border-state-candidate/20 bg-state-candidate/5 px-4 py-3 text-sm text-state-candidate">
+          {notice}
+        </div>
+      )}
 
       {/* 顶部指标卡（真实 raw 表 + output 统计） */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -251,7 +272,7 @@ export function AdminCrawlPage() {
                             size="sm"
                             variant="outline"
                             disabled={p.status === 'archived' || isBusy}
-                            onClick={() => triggerCrawl(p.name)}
+                            onClick={() => triggerCrawl(p.id)}
                           >
                             触发
                           </Button>
@@ -288,7 +309,7 @@ export function AdminCrawlPage() {
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {platforms.filter((p) => p.status !== 'archived').map((p) => (
-                      <SelectItem key={p.id} value={p.name}>{p.name}</SelectItem>
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

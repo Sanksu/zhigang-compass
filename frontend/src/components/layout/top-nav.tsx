@@ -15,8 +15,10 @@ export function TopNav() {
   const { user, isAuthenticated, logout } = useAuthStore()
   const { toggleSidebar, theme, toggleTheme } = useUIStore()
 
-  function handleLogout() {
-    logout()
+  async function handleLogout() {
+    // 先等 logout() 完成（服务端黑名单 + 内存 token 清理），再跳登录页；
+    // 否则 navigate 时 isAuthenticated 仍为 true，GuestGuard 会把用户重定向回 /
+    await logout()
     navigate('/login')
   }
 

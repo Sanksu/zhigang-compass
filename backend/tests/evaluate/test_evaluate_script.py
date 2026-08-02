@@ -3,7 +3,7 @@
 使用仓库内真实黄金集验证脚本可运行且输出结构稳定（数据确定性，非 mock）。
 """
 
-from scripts.evaluate import eval_jd, eval_match
+from scripts.evaluate import eval_jd, eval_match, eval_resume
 
 
 class TestEvalJd:
@@ -17,6 +17,15 @@ class TestEvalJd:
         assert 0.0 <= r["recall"] <= 1.0
         assert r["target_f1"] == 0.90
         assert "target_met" in r
+
+
+class TestEvalResume:
+    def test_skipped_when_golden_missing(self):
+        """简历黄金集未交付（M5 补齐）：resume 项跳过并注明原因，不伪造结果。"""
+        r = eval_resume()
+        assert r["task"] == "resume"
+        assert r["skipped"] is True
+        assert r["reason"]
 
 
 class TestEvalMatch:

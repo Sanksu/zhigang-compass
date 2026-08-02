@@ -1,7 +1,7 @@
 """ARQ 异步任务定义。
 
 任务类型（对齐设计文档 §4.4 ETL 管线）：
-- ETL 编排：crawl_platform / run_etl_pipeline / validate_temporal / detect_inflation
+- ETL 编排：crawl_platform / run_etl_pipeline / validate_temporal / detect_inflation / snapshot_graph
 - 业务异步：resume_parse / batch_extract / evolution_compute
 
 设计要点：
@@ -657,6 +657,9 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
     # ── 阶段 11：数据更新新鲜度检查（DA-M4-03，T+1 承诺审计）──
     results["stages"]["check_data_freshness"] = await check_data_freshness(ctx)
 
+    # ── 阶段 12：发布图谱版本快照（§7.1 T+1 版本管理，05:00 前自动发布）──
+    results["stages"]["snapshot_graph"] = await snapshot_graph(ctx, triggered_by="scheduled")
+
     return results
 
 
@@ -841,6 +844,22 @@ async def evolution_compute(ctx: dict, version: str) -> dict:
     raise NotImplementedError("evolution_compute 待 AL-M3 演化管线接入后实现")
 
 
+async def snapshot_graph(ctx: dict, triggered_by: str = "scheduled") -> dict:
+    """每日图谱版本快照（设计文档 §7.1 T+1 版本管理）。
+
+    流程：Neo4j 全量导出 {nodes, edges}（排除 Counter 内部标签）→
+    写入 PostgreSQL graph_versions（幂等：同日期版本覆盖更新）→
+    与上一版本 set 差集计算节点增减 → 90 天保留清理。
+
+    由外部 cron（scripts/cron/snapshot_daily.py）每日 05:00 前触发，
+    或作为 run_etl_pipeline 阶段 12 随 ETL 完成后自动发布。
+    """
+    from app.services.evolution.graph_version import GraphVersionManager
+
+    meta = await GraphVersionManager().create_snapshot(triggered_by=triggered_by)
+    return meta.model_dump()
+
+
 async def discovery_daily(ctx: dict) -> dict:
     """每日新岗位发现（AL-M4-01，设计文档 7.2.3 节）。
 
@@ -995,6 +1014,7 @@ class WorkerSettings:
         aggregate_positions,
         cross_validate_jds,
         discovery_daily,
+        snapshot_graph,
         evolution_compute,
     ]
     on_startup = on_startup
