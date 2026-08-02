@@ -175,7 +175,7 @@ export function ResumeMatchPage() {
       })
   }, [])
 
-  // 上传简历 → 真实异步解析
+  // 上传简历 → 真实异步解析 + SSE 进度推送（GET /resume/task/{id}/stream）
   async function handleFileSelected(file: File) {
     setNotice(null)
     setStage('parsing')
@@ -191,13 +191,61 @@ export function ResumeMatchPage() {
         await loadRecommend(res.resume_id)
         return
       }
-      // 新简历解析任务已入队（后台 worker 处理完成后写入 resume_cache 即可匹配）
-      setStage('upload')
-      setNotice(`解析任务已提交（${file.name}），等待后台处理。可直接从下方"已有简历"载入示例候选人发起匹配。`)
+      // 新简历解析任务已入队 → 订阅 SSE 进度流直至 done/error
+      await streamParseProgress(res.task_id, file.name)
     } catch (e) {
       setStage('upload')
       setNotice(e instanceof ApiError ? e.message : '上传失败，请检查后端服务')
     }
+  }
+
+  // SSE 订阅解析任务进度（event: progress/done/error）
+  async function streamParseProgress(taskId: string, fileName: string) {
+    const ctrl = new AbortController()
+    // 30s 无终态事件则中止（与后端 300s 兜底相比更保守，避免上传卡死）
+    const timer = setTimeout(() => ctrl.abort(), 30_000)
+    try {
+      const resp = await fetch(`/api/v1/resume/task/${taskId}/stream`, { signal: ctrl.signal })
+      if (!resp.ok || !resp.body) throw new Error('SSE 连接失败')
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        // 按 SSE 帧分隔解析 event/data
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop() ?? ''
+        for (const frame of frames) {
+          const event = frame.match(/^event:\s*(.+)$/m)?.[1]
+          const data = frame.match(/^data:\s*(.+)$/m)?.[1]
+          if (event === 'done' && data) {
+            setNotice(`解析完成（${fileName}），已写入简历库，可直接发起匹配。`)
+            setStage('upload')
+            return
+          }
+          if (event === 'error' && data) {
+            const msg = (() => {
+              try {
+                return JSON.parse(data).message ?? '解析失败'
+              } catch {
+                return '解析失败'
+              }
+            })()
+            setNotice(`解析失败：${msg}`)
+            setStage('upload')
+            return
+          }
+        }
+      }
+    } catch {
+      // 超时/中断：不阻塞页面，提示可稍后从"已有简历"载入
+      setNotice(`解析任务已提交（${fileName}），进度推送中断。稍后可从下方"已有简历"载入。`)
+    } finally {
+      clearTimeout(timer)
+    }
+    setStage('upload')
   }
 
   // 载入已有简历 → 真实推荐

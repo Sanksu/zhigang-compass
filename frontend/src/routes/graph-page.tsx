@@ -1,11 +1,18 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { Box, Database, Network } from 'lucide-react'
+import { Box, Database, Network, Search } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Graph2D } from '@/components/graph/graph-2d'
-import { NodeDetailPanel } from '@/components/graph/node-detail-panel'
+import {
+  NodeDetailPanel,
+  type PrerequisiteItem,
+  type SkillCourseItem,
+  type SkillDetail,
+  type SkillPositionItem,
+} from '@/components/graph/node-detail-panel'
 import type { GraphData, GraphEdge, GraphNode, GraphViewType, NodeDetail } from '@/components/graph/types'
 import { apiGet, ApiError } from '@/lib/api'
 
@@ -135,6 +142,12 @@ export function GraphPage() {
   const [raw, setRaw] = useState<GraphData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // 全文检索（GET /graph/search）
+  const [query, setQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<{ id: string; name: string; type: string; score: number }[]>([])
+  const [searching, setSearching] = useState(false)
+  // 技能节点详情（反向岗位 / 先修链 / 课程）
+  const [skillDetail, setSkillDetail] = useState<SkillDetail | null>(null)
 
   // 加载真实图谱全景（Neo4j 聚合 + Redis 30s 缓存），初始 loading 已是 true
   useEffect(() => {
@@ -153,6 +166,58 @@ export function GraphPage() {
       cancelled = true
     }
   }, [])
+
+  // 选中技能节点 → 并行加载反向岗位 / 先修链 / 课程（真实 API）
+  // 同步 loading 态由派生值 skillDetailView 表达，effect 内仅在异步回调中 setState
+  useEffect(() => {
+    if (!selected || selected.type !== 'skill') return
+    let cancelled = false
+    const sid = encodeURIComponent(selected.id)
+    const positions = apiGet<{ positions: SkillPositionItem[] }>(`/graph/skill/${sid}/positions`)
+      .then((r) => r.positions)
+      .catch(() => [] as SkillPositionItem[])
+    const prerequisites = apiGet<{ prerequisites: PrerequisiteItem[] }>(`/graph/skill/${sid}/prerequisites`)
+      .then((r) => r.prerequisites)
+      .catch(() => [] as PrerequisiteItem[])
+    const courses = apiGet<{ courses: SkillCourseItem[] }>(`/graph/skill/${sid}/courses`)
+      .then((r) => r.courses)
+      .catch(() => [] as SkillCourseItem[])
+    Promise.all([positions, prerequisites, courses]).then(([p, prereq, c]) => {
+      if (!cancelled) setSkillDetail({ skill_id: selected.id, positions: p, prerequisites: prereq, courses: c, loading: false })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [selected])
+
+  // skill 详情视图：选中技能节点且详情已就绪（skill_id 匹配）时展示，否则视为加载中
+  const skillDetailView: SkillDetail | null =
+    selected?.type === 'skill'
+      ? skillDetail && skillDetail.skill_id === selected.id && !skillDetail.loading
+        ? skillDetail
+        : { skill_id: '', positions: [], prerequisites: [], courses: [], loading: true }
+      : null
+
+  // 全文检索（设计文档 §5.4 cjk 全文索引）
+  function doSearch(q: string) {
+    const term = q.trim()
+    if (!term) {
+      setSearchResults([])
+      return
+    }
+    setSearching(true)
+    apiGet<{ items: { id: string; name: string; type: string; score: number }[]; total: number }>(
+      `/graph/search?q=${encodeURIComponent(term)}&type=skill&size=8`,
+    )
+      .then((r) => setSearchResults(r.items))
+      .catch(() => setSearchResults([]))
+      .finally(() => setSearching(false))
+  }
+
+  // 点击搜索结果 → 定位技能节点并选中（detailStats 由选中节点实时计算）
+  function focusSearchResult(id: string, name: string) {
+    setSelected({ id, name, type: 'skill' })
+  }
 
   // 视图切换：在已加载的真实数据上本地派生
   const data = useMemo(() => (raw ? deriveView(raw, view) : null), [raw, view])
@@ -209,28 +274,76 @@ export function GraphPage() {
         title="能力图谱"
         description="岗位-技能-证据关系可视化 · 2D 力导向图为主，3D 模式可选"
         actions={
-          <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-            <Button
-              size="sm"
-              variant={mode === '2d' ? 'default' : 'ghost'}
-              onClick={() => setMode('2d')}
-              className="h-7 px-2.5 text-xs"
-            >
-              2D
-            </Button>
-            <Button
-              size="sm"
-              variant={mode === '3d' ? 'default' : 'ghost'}
-              onClick={() => setMode('3d')}
-              disabled={!webgl2Available}
-              title={!webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : undefined}
-              className="h-7 px-2.5 text-xs"
-            >
-              3D
-            </Button>
+          <div className="flex items-center gap-2">
+            {/* 技能全文检索（真实 /graph/search） */}
+            <div className="relative w-64">
+              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') doSearch(query)
+                }}
+                placeholder="搜索技能（如 Python）"
+                className="h-8 pl-8 pr-16 text-xs"
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                className="absolute right-0.5 top-0.5 h-7 px-2 text-xs"
+                onClick={() => doSearch(query)}
+                disabled={searching}
+              >
+                搜索
+              </Button>
+            </div>
+            <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+              <Button
+                size="sm"
+                variant={mode === '2d' ? 'default' : 'ghost'}
+                onClick={() => setMode('2d')}
+                className="h-7 px-2.5 text-xs"
+              >
+                2D
+              </Button>
+              <Button
+                size="sm"
+                variant={mode === '3d' ? 'default' : 'ghost'}
+                onClick={() => setMode('3d')}
+                disabled={!webgl2Available}
+                title={!webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : undefined}
+                className="h-7 px-2.5 text-xs"
+              >
+                3D
+              </Button>
+            </div>
           </div>
         }
       />
+
+      {/* 搜索结果下拉 */}
+      {searchResults.length > 0 && (
+        <Card className="mb-3">
+          <CardContent className="p-2">
+            <ul className="divide-y divide-border">
+              {searchResults.map((r) => (
+                <li key={r.id}>
+                  <button
+                    onClick={() => focusSearchResult(r.id, r.name)}
+                    className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-subtle"
+                  >
+                    <span className="font-medium text-ink">{r.name}</span>
+                    <span className="flex items-center gap-2 text-[10px] text-ink-faint">
+                      <span className="rounded bg-subtle px-1 py-0.5 font-mono">技能</span>
+                      <span className="font-mono">{(r.score * 100).toFixed(0)}</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 视图切换 tabs */}
       <Tabs value={view} onValueChange={(v) => setView(v as GraphViewType)}>
@@ -298,6 +411,7 @@ export function GraphPage() {
           <NodeDetailPanel
             node={selected}
             stats={detailStats}
+            skillDetail={skillDetailView}
             onClose={() => setSelected(null)}
           />
         </Card>

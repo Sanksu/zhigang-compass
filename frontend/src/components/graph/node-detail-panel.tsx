@@ -3,12 +3,49 @@
  *
  * 图谱画布右侧 25-30% 宽度展示选中节点的详细信息：
  * - position：状态机、关联技能数、description
- * - skill：级别、被多少岗位要求、关联证据
+ * - skill：级别、被多少岗位要求、关联证据、反向岗位列表、先修链、学习课程（真实 API）
  * - evidence：来源、描述
  */
-import { X, Network, Cpu, FileText } from 'lucide-react'
+import { X, Network, Cpu, FileText, BookOpen, GitBranch, Briefcase } from 'lucide-react'
 import type { NodeDetail, PositionStatus } from './types'
 import { Badge } from '@/components/ui/badge'
+
+/** 技能反向查询岗位项（GET /graph/skill/{id}/positions） */
+export interface SkillPositionItem {
+  position_id: string
+  position_name: string
+  necessity: 'must' | 'nice'
+  weight: number
+  level: string
+}
+
+/** 先修技能链项（GET /graph/skill/{id}/prerequisites） */
+export interface PrerequisiteItem {
+  skill_id: string | null
+  name: string
+  depth: number
+}
+
+/** 学习课程项（GET /graph/skill/{id}/courses） */
+export interface SkillCourseItem {
+  course_id: string
+  title: string
+  platform: string
+  quality_score?: number | null
+  recommended: boolean
+  source_url: string
+  hours?: number | null
+}
+
+/** 技能节点详情（skill 专属真实 API 数据） */
+export interface SkillDetail {
+  /** 对应技能节点 ID（用于与当前选中节点比对，切换节点时防旧数据闪显） */
+  skill_id: string
+  positions: SkillPositionItem[]
+  prerequisites: PrerequisiteItem[]
+  courses: SkillCourseItem[]
+  loading: boolean
+}
 
 interface NodeDetailPanelProps {
   node: NodeDetail | null
@@ -18,6 +55,8 @@ interface NodeDetailPanelProps {
     skillCount?: number
     evidenceCount?: number
   }
+  /** skill 节点专属：反向岗位/先修链/课程 */
+  skillDetail?: SkillDetail | null
   onClose?: () => void
 }
 
@@ -49,7 +88,7 @@ const TYPE_ICON: Record<NodeDetail['type'], typeof Network> = {
   evidence: FileText,
 }
 
-export function NodeDetailPanel({ node, stats, onClose }: NodeDetailPanelProps) {
+export function NodeDetailPanel({ node, stats, skillDetail, onClose }: NodeDetailPanelProps) {
   if (!node) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-12 text-center">
@@ -165,6 +204,94 @@ export function NodeDetailPanel({ node, stats, onClose }: NodeDetailPanelProps) 
             <h4 className="text-xs font-medium text-ink-muted uppercase tracking-wide">描述</h4>
             <p className="text-sm text-ink-secondary leading-relaxed">{node.description}</p>
           </section>
+        )}
+
+        {/* 技能专属：反向岗位 / 先修链 / 学习课程（真实 API） */}
+        {node.type === 'skill' && skillDetail && (
+          <>
+            <section className="space-y-2">
+              <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted uppercase tracking-wide">
+                <Briefcase className="size-3" />
+                要求该技能的岗位
+              </h4>
+              {skillDetail.loading ? (
+                <p className="text-xs text-ink-faint py-1">加载岗位列表…</p>
+              ) : skillDetail.positions.length === 0 ? (
+                <p className="text-xs text-ink-faint py-1">暂无岗位要求该技能</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {skillDetail.positions.map((p) => (
+                    <li key={p.position_id} className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5">
+                      <span className="text-xs font-medium text-ink truncate">{p.position_name}</span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        <Badge variant="outline" className="text-[10px] font-mono">
+                          {p.necessity === 'must' ? '必备' : '加分'}
+                        </Badge>
+                        <span className="text-[10px] font-mono text-ink-faint">{(p.weight * 100).toFixed(0)}%</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="space-y-2">
+              <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted uppercase tracking-wide">
+                <GitBranch className="size-3" />
+                先修技能链
+              </h4>
+              {skillDetail.loading ? (
+                <p className="text-xs text-ink-faint py-1">加载先修链…</p>
+              ) : skillDetail.prerequisites.length === 0 ? (
+                <p className="text-xs text-ink-faint py-1">无先修技能（基础技能）</p>
+              ) : (
+                <ol className="space-y-1">
+                  {skillDetail.prerequisites.map((p) => (
+                    <li key={`${p.name}-${p.depth}`} className="flex items-center gap-2 text-xs">
+                      <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-subtle font-mono text-[10px] text-ink-muted">
+                        {p.depth}
+                      </span>
+                      <span className="text-ink">{p.name}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </section>
+
+            <section className="space-y-2">
+              <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted uppercase tracking-wide">
+                <BookOpen className="size-3" />
+                推荐课程
+              </h4>
+              {skillDetail.loading ? (
+                <p className="text-xs text-ink-faint py-1">加载课程…</p>
+              ) : skillDetail.courses.length === 0 ? (
+                <p className="text-xs text-ink-faint py-1">暂无推荐课程</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {skillDetail.courses.map((c) => (
+                    <li key={c.course_id}>
+                      <a
+                        href={c.source_url || undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block rounded-md border border-border px-2 py-1.5 transition-colors hover:border-border-strong"
+                      >
+                        <span className="block text-xs font-medium text-ink leading-snug">{c.title}</span>
+                        <span className="mt-0.5 flex items-center gap-2 text-[10px] text-ink-faint">
+                          <span>{c.platform}</span>
+                          {c.hours != null && <span>· {c.hours}h</span>}
+                          {c.quality_score != null && (
+                            <span>· 质量 {(c.quality_score * 100).toFixed(0)}</span>
+                          )}
+                        </span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </>
         )}
       </div>
     </div>

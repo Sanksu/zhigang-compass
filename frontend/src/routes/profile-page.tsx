@@ -65,6 +65,12 @@ export function ProfilePage() {
   const [selectedParsed, setSelectedParsed] = useState<Record<string, unknown> | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  /* 简历编辑（PUT /resume/{id}，编辑 skills 字段） */
+  const [editOpen, setEditOpen] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editSkills, setEditSkills] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   function showToast(msg: string) {
     setToast(msg)
@@ -176,6 +182,35 @@ export function ProfilePage() {
       showToast(e instanceof ApiError ? e.message : '删除失败')
     } finally {
       setDeletingId(null)
+    }
+  }
+
+  /* ── 简历编辑：拉取当前 skills 并打开编辑框 ── */
+  async function handleEditResume(r: ResumeSummary) {
+    setEditId(r.id)
+    setEditError(null)
+    setEditSkills((r.skills ?? []).join('、'))
+    setEditOpen(true)
+  }
+
+  /* ── 简历编辑：PUT /resume/{id} 顶层覆盖 fields.skills ── */
+  async function handleSaveEdit() {
+    if (!editId) return
+    setSavingEdit(true)
+    setEditError(null)
+    try {
+      const skills = editSkills
+        .split(/[、,，]/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+      await apiPut(`/resume/${editId}`, { fields: { skills } })
+      setEditOpen(false)
+      showToast('简历已更新')
+      await loadResumes()
+    } catch (e) {
+      setEditError(e instanceof ApiError ? e.message : '保存失败，请重试')
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -307,6 +342,9 @@ export function ProfilePage() {
                           <Button variant="ghost" size="sm" onClick={() => handleViewResume(r)}>
                             查看
                           </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleEditResume(r)}>
+                            编辑
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -349,6 +387,35 @@ export function ProfilePage() {
           ) : (
             <p className="text-sm text-ink-muted">解析详情不可用。</p>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── 简历编辑 Dialog（PUT /resume/{id}） ── */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>编辑简历技能</DialogTitle>
+            <DialogDescription>修正 LLM 抽取的技能列表（逗号或顿号分隔）</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Label htmlFor="edit-skills">技能列表</Label>
+            <Textarea
+              id="edit-skills"
+              value={editSkills}
+              onChange={(e) => setEditSkills(e.target.value)}
+              rows={4}
+              placeholder="Python、机器学习、深度学习"
+            />
+            {editError && <p className="text-sm text-state-archived">{editError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setEditOpen(false)}>
+                取消
+              </Button>
+              <Button size="sm" onClick={handleSaveEdit} disabled={savingEdit}>
+                {savingEdit ? '保存中…' : '保存'}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
