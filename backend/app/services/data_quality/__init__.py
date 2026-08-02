@@ -14,7 +14,18 @@ from app.services.data_quality.inflation_detector import (
     classify_inflation,
     compute_inflation_score,
 )
+from app.services.data_quality.course_quality import (
+    RECOMMEND_MIN_SCORE,
+    evaluate_course,
+    enrollment_score,
+    platform_authority,
+    project_density,
+    rating_score,
+    recency_score,
+    skill_coverage,
+)
 from app.services.data_quality.schemas import (
+    CourseQualityResult,
     JDSkillSet,
     PlagiarismResult,
     SAIResult,
@@ -39,6 +50,7 @@ __all__ = [
     "ZombieJDResult",
     "PlagiarismResult",
     "InflationResult",
+    "CourseQualityResult",
     # temporal
     "compute_sai",
     "compute_jaccard",
@@ -52,4 +64,13 @@ __all__ = [
     # inflation
     "compute_inflation_score",
     "classify_inflation",
+    # course quality
+    "RECOMMEND_MIN_SCORE",
+    "evaluate_course",
+    "platform_authority",
+    "rating_score",
+    "enrollment_score",
+    "recency_score",
+    "skill_coverage",
+    "project_density",
 ]
