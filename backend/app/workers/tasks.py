@@ -461,6 +461,49 @@ async def diversity_report(ctx: dict, top_n: int = 10) -> dict:
     return {"report_path": str(report_path)}
 
 
+async def check_data_freshness(ctx: dict) -> dict:
+    """数据更新新鲜度检查（DA-M4-03，设计文档 T+1 承诺）。
+
+    按来源聚合四类 raw 表最新抓取时间，判定平台级新鲜度（≤1 天），
+    写入 reports/freshness_{date}.json。过期来源返回在结果中供告警。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
+    from app.services.data_quality.update_status import platform_freshness
+
+    async def _rows(model):
+        async with async_session_factory() as session:
+            return (await session.scalars(select(model))).all()
+
+    def _section(rows):
+        return platform_freshness(
+            [{"source": r.source, "crawled_at": r.crawled_at} for r in rows]
+        )
+
+    report = {
+        "generated_at": datetime.now(timezone(timedelta(hours=8))).isoformat(),
+        "jd": _section(await _rows(JDRaw)),
+        "course": _section(await _rows(CourseRaw)),
+        "paper": _section(await _rows(PaperRaw)),
+        "community": _section(await _rows(CommunityRaw)),
+    }
+
+    report_dir = Path(__file__).resolve().parents[2] / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"freshness_{datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d')}.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    stale = [
+        f"{name}:{source}"
+        for name in ("jd", "course", "paper", "community")
+        for source in report[name]["stale_sources"]
+    ]
+    print(f"[check_data_freshness] 报告已写入: {report_path} 过期来源: {stale}", flush=True)
+    return {"report_path": str(report_path), "stale_sources": stale}
+
+
 async def aggregate_positions(ctx: dict) -> dict:
     """岗位聚合（设计文档 §5.5）：jd_raw 抽取结果 → Position 热度 + REQUIRES 边权重。
 
@@ -610,6 +653,9 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
 
     # ── 阶段 10：数据多样性报告（DA-M4-02，reports/diversity_{date}.json）──
     results["stages"]["diversity_report"] = await diversity_report(ctx)
+
+    # ── 阶段 11：数据更新新鲜度检查（DA-M4-03，T+1 承诺审计）──
+    results["stages"]["check_data_freshness"] = await check_data_freshness(ctx)
 
     return results
 
@@ -945,6 +991,7 @@ class WorkerSettings:
         load_courses,
         evaluate_courses,
         diversity_report,
+        check_data_freshness,
         aggregate_positions,
         cross_validate_jds,
         discovery_daily,

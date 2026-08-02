@@ -10,6 +10,7 @@ from app.workers.tasks import (
     WorkerSettings,
     aggregate_positions,
     batch_extract,
+    check_data_freshness,
     crawl_platform,
     cross_validate_jds,
     detect_inflation,
@@ -33,6 +34,7 @@ EXPECTED_FUNCTIONS = [
     load_courses,
     evaluate_courses,
     diversity_report,
+    check_data_freshness,
     aggregate_positions,
     cross_validate_jds,
     discovery_daily,
@@ -50,13 +52,14 @@ def test_all_tasks_are_async_callables():
 
 
 def test_etl_pipeline_stages_cover_all_quality_tasks():
-    """run_etl_pipeline 的 10 个阶段与检测/聚合/验证任务一一对应。"""
+    """run_etl_pipeline 的 11 个阶段与检测/聚合/验证任务一一对应。"""
     from app.workers import tasks as t
 
     src = inspect.getsource(t.run_etl_pipeline)
     for stage_fn in ("crawl_platform", "validate_temporal", "detect_inflation",
                      "batch_extract", "load_courses", "evaluate_courses",
-                     "aggregate_positions", "cross_validate_jds", "diversity_report"):
+                     "aggregate_positions", "cross_validate_jds",
+                     "diversity_report", "check_data_freshness"):
         assert f"await {stage_fn}" in src, f"run_etl_pipeline 缺少阶段 {stage_fn}"
 
 
