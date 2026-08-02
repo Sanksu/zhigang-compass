@@ -84,15 +84,29 @@ def staleness_penalty(last_updated: str | None, today: date | None = None) -> fl
     return 1.0
 
 
-def _matches(req, candidate_skills) -> bool:
-    """技能匹配：skill_id 或 skill_name 命中任一候选人技能（M2 布尔匹配）。
+def _canonical_name(name: str) -> str:
+    """技能规范名：别名归一化 + 中文后缀清洗 + 小写。
 
-    M3 接入 Sentence-BERT 后，此处在 name 相似度 ≥ sim_threshold 时亦可命中。
+    与 JD 入库口径（post_process._clean）一致，保证候选人侧与图谱侧技能名可比。
+    别名级同义词（"Golang"→"Go"、"Spring"→"Spring Boot"）由此统一。
     """
+    from app.services.extraction.dictionary import normalize_skill
+    from app.services.extraction.post_processor import clean_skill_name
+
+    return clean_skill_name(normalize_skill(name)).strip().lower()
+
+
+def _matches(req, candidate_skills) -> bool:
+    """技能匹配：skill_id 精确或规范名同义词命中（设计文档 9.4 别名级 1.0）。
+
+    先按 skill_id 精确匹配（两侧 ID 均为标准名时直接命中），
+    再按规范名比较覆盖别名变体（如候选人 "golang" 命中岗位 "Go"）。
+    """
+    req_canon = _canonical_name(req.skill_name)
     for cs in candidate_skills:
         if req.skill_id and cs.skill_id and req.skill_id.lower() == cs.skill_id.lower():
             return True
-        if req.skill_name and cs.skill_name and req.skill_name.lower() == cs.skill_name.lower():
+        if req_canon and cs.skill_name and _canonical_name(cs.skill_name) == req_canon:
             return True
     return False
 
@@ -231,14 +245,16 @@ class RuleBasedMatcher(MatchEngine):
     def _rough_select(self, request: MatchRequest) -> list[PositionProfile]:
         """Step 1 粗筛：按候选人技能命中数降序取 Top-K。
 
-        无倒排索引时以"岗位技能 ID ∩ 候选人技能 ID"的交集数近似。
+        候选人 skill_id 为原始名（简历侧未对齐图谱 ID），岗位 skill_id 为图 ID，
+        两侧 ID 无交集，故以规范名交集近似（与 _matches 同义词口径一致）。
         """
-        candidate_ids = {s.skill_id for s in request.candidate.skills}
+        candidate_names = {
+            _canonical_name(s.skill_name) for s in request.candidate.skills if s.skill_name
+        }
 
         def hit_count(position: PositionProfile) -> int:
-            skill_ids = {r.skill_id for r in position.must_skills} | {
-                r.skill_id for r in position.nice_skills
-            }
-            return len(candidate_ids & skill_ids)
+            req_names = {_canonical_name(r.skill_name) for r in position.must_skills}
+            req_names |= {_canonical_name(r.skill_name) for r in position.nice_skills}
+            return len(candidate_names & req_names)
 
         return sorted(self._positions, key=hit_count, reverse=True)[:ROUGH_SELECT_K]
