@@ -30,7 +30,9 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
+from scrapy import Request
 from scrapy.exceptions import CloseSpider
+from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
 from crawlers.settings import MAIMAI_COMPLIANCE, SUBPROCESS_TIMEOUT
@@ -52,7 +54,11 @@ class MaimaiSpider(BaseSpider):
     cities = ["北京"]
 
     def start_requests(self):
-        """合规守卫：仅夜间 22:00-08:00 启动。"""
+        """合规守卫：仅夜间 22:00-08:00 启动。
+
+        飞书招聘页无关键字搜索功能，keywords 仅作日志记录，
+        只需调用一次 CDP 采集脚本即可拿到所有岗位。
+        """
         current_hour = datetime.now(timezone(timedelta(hours=8))).hour
         in_night_window = current_hour >= NIGHT_START_HOUR or current_hour < NIGHT_END_HOUR
         if not in_night_window:
@@ -61,18 +67,27 @@ class MaimaiSpider(BaseSpider):
                 f"当前小时 {current_hour}。请夜间再执行 scrapy crawl maimai"
             )
 
-        # 脉脉飞书招聘页无关键字搜索功能，keywords 仅作日志记录
-        # 只需调用一次 CDP 采集脚本即可拿到所有岗位
-        python_exe = sys.executable
+        cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
         keyword = self.keywords[0] if self.keywords else ""
 
         self.logger.info(f"开始采集脉脉飞书招聘页（合规声明：{MAIMAI_COMPLIANCE['annotation']}）")
 
-        cmd = [python_exe, CRAWLER_SCRIPT, "--keyword", keyword]
+        # 占位 Request 触发 parse（与 BOSS 一致：在 parse 中阻塞调用 CDP 脚本，
+        # 避免 start_requests 直接 yield Item 导致 feed exporter 写入已关闭文件）
+        yield Request(
+            f"{cdp_url}/json/version",
+            callback=self.parse,
+            meta={"keyword": keyword, "cdp_url": cdp_url},
+            dont_filter=True,
+            errback=self._on_error,
+        )
 
-        # 传递 CDP 端口（与 BOSS/Monster 共用）
-        cdp_port = os.environ.get("BOSS_CDP_PORT", "9222")
-        cmd.extend(["--cdp-port", cdp_port])
+    def parse(self, response: Response):
+        """通过 subprocess 调用 CDP 采集脚本，解析 JSONL 输出并 yield Item。"""
+        keyword = response.meta.get("keyword", "")
+        cdp_url = response.meta.get("cdp_url", "http://127.0.0.1:9222")
+
+        cmd = [sys.executable, CRAWLER_SCRIPT, "--keyword", keyword, "--cdp-url", cdp_url]
 
         try:
             proc = subprocess.Popen(
@@ -127,3 +142,10 @@ class MaimaiSpider(BaseSpider):
         if stderr_output:
             for line in stderr_output.strip().splitlines()[-5:]:
                 self.logger.info(f"[cdp] {line}")
+
+    def _on_error(self, failure):
+        """占位请求失败回调。"""
+        self.logger.error(
+            f"占位请求失败: {failure.value}。"
+            f"请确认专用 Chrome 已启动: python -m crawlers.setup_boss_chrome"
+        )

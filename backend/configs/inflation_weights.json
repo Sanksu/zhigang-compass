@@ -1,0 +1,11 @@
+{
+  "experience": 0.689,
+  "skill_count": 0.695,
+  "skill_depth": 0.448,
+  "education": 0.622,
+  "_comment": "通胀检测四维权重（设计文档 §4.8）。默认均权；DA-M3-04 Optuna 调优后覆盖（scripts/tune_inflation.py）。",
+  "_metrics": {
+    "recall": 1.0,
+    "false_positive_rate": 0.0
+  }
+}

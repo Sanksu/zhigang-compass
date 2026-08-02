@@ -23,8 +23,12 @@ router = APIRouter()
 # 上传目录（根 .gitignore 已忽略 uploads/，仅存运行时文件）
 _UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads"
 
+# 上传边界：大小上限 10MB，类型白名单（防内存耗尽与任意文件写入）
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 
-async def _enqueue_resume_parse(file_path: str) -> None:
+
+async def _enqueue_resume_parse(file_path: str, task_id: str) -> None:
     """入队 ARQ resume_parse 任务。
 
     队列不可用时抛出异常由调用方处理（标记任务 failed），不静默吞错。
@@ -41,7 +45,7 @@ async def _enqueue_resume_parse(file_path: str) -> None:
     )
     pool = await create_pool(redis_settings)
     try:
-        await pool.enqueue_job("resume_parse", file_path=file_path)
+        await pool.enqueue_job("resume_parse", file_path=file_path, task_id=task_id)
     finally:
         await pool.close()
 
@@ -82,6 +86,12 @@ async def parse_resume(
     content = await file.read()
     if not content:
         return error(400, "文件为空")
+    if len(content) > MAX_UPLOAD_BYTES:
+        return error(413, f"文件超过 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限")
+
+    suffix = Path(file.filename or "resume").suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        return error(415, "仅支持 pdf/doc/docx/txt 格式")
 
     file_hash = hashlib.sha256(content).hexdigest()
 
@@ -97,21 +107,24 @@ async def parse_resume(
         })
 
     _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    suffix = Path(file.filename or "resume").suffix
     file_path = _UPLOAD_DIR / f"{file_hash}{suffix}"
     file_path.write_bytes(content)
 
     task = TaskStatus(
         task_type="resume_parse",
         status="pending",
-        result={"file_path": str(file_path), "file_hash": file_hash},
+        result={
+            "file_path": str(file_path),
+            "file_hash": file_hash,
+            "file_name": file.filename or "",
+        },
     )
     db.add(task)
     await db.commit()
     await db.refresh(task)
 
     try:
-        await _enqueue_resume_parse(str(file_path))
+        await _enqueue_resume_parse(str(file_path), str(task.id))
     except Exception as e:
         task.status = "failed"
         task.error = f"任务入队失败: {e}"

@@ -29,17 +29,6 @@ class Settings(BaseSettings):
     neo4j_password: str = "password"
     redis_url: str = "redis://localhost:6379/0"
 
-    # ---------- LLM 多 provider ----------
-    llm_primary_base_url: str = "https://api.deepseek.com/v1"
-    llm_primary_api_key: str = ""
-    llm_primary_model: str = "deepseek-v4-flash"
-    llm_secondary_base_url: str = "https://spark-api.xf-yun.com/v1"
-    llm_secondary_api_key: str = ""
-    llm_secondary_model: str = "v4.0"
-    llm_tertiary_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    llm_tertiary_api_key: str = ""
-    llm_tertiary_model: str = "qwen-plus"
-
     # ---------- JWT ----------
     jwt_private_key_path: str = "keys/private.pem"
     jwt_public_key_path: str = "keys/public.pem"
@@ -60,7 +49,7 @@ class Settings(BaseSettings):
     # ---------- ARQ ----------
     arq_redis_url: str = "redis://localhost:6379/1"
     arq_concurrency: int = 10
-    arq_task_timeout: int = 300           # 5 分钟
+    arq_task_timeout: int = 1800  # 30 分钟；须大于爬虫 subprocess 上限 900s（BOSS 多任务翻页）
 
     @property
     def is_production(self) -> bool:

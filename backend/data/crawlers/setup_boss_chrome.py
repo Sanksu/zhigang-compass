@@ -70,8 +70,15 @@ def find_chrome() -> str:
     return candidates[0]
 
 
-def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, url: str = "https://www.zhipin.com/"):
-    """启动隔离 Chrome 并打开 BOSS 直聘登录页。"""
+def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, cdp_address: str = "127.0.0.1", url: str = "https://www.zhipin.com/"):
+    """启动隔离 Chrome 并打开 BOSS 直聘登录页。
+
+    Args:
+        cdp_port: CDP 调试端口
+        cdp_address: CDP 监听地址。Linux 容器部署需局域网连接时设为 0.0.0.0
+            （端口由 Docker 暴露），默认 127.0.0.1 仅本机可连
+        url: 打开的首个页面
+    """
     chrome_path = find_chrome()
     profile_dir = BOSS_CHROME_PROFILE_DIR
     profile_dir.mkdir(parents=True, exist_ok=True)
@@ -79,6 +86,7 @@ def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, url: str = "https://www.zhipi
     cmd = [
         chrome_path,
         f"--remote-debugging-port={cdp_port}",
+        f"--remote-debugging-address={cdp_address}",
         f"--user-data-dir={profile_dir}",
         "--no-first-run",
         "--no-default-browser-check",
@@ -87,7 +95,7 @@ def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, url: str = "https://www.zhipi
 
     print(f"Chrome 路径: {chrome_path}")
     print(f"隔离 profile: {profile_dir}")
-    print(f"CDP 端口: {cdp_port}")
+    print(f"CDP 端点: http://{cdp_address}:{cdp_port}")
     print(f"打开 URL: {url}")
     print("-" * 60)
     print("请在弹出的 Chrome 窗口中：")
@@ -98,18 +106,18 @@ def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, url: str = "https://www.zhipi
     print("-" * 60)
 
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print(f"Chrome 已启动 (PID={proc.pid})，CDP 端口 {cdp_port}")
-    print(f"后续运行爬虫时，设置环境变量：$env:BOSS_CDP_PORT={cdp_port}")
+    print(f"Chrome 已启动 (PID={proc.pid})")
+    print(f"后续运行爬虫时，设置环境变量：$env:BOSS_CDP_URL=http://{cdp_address}:{cdp_port}")
     return proc
 
 
-def check_cdp(cdp_port: int = DEFAULT_CDP_PORT) -> bool:
-    """检查 CDP 端口是否可用（Chrome 是否已启动）。"""
+def check_cdp(cdp_url: str) -> bool:
+    """检查 CDP 端点是否可用（Chrome 是否已启动）。"""
     import urllib.request
     import json
 
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{cdp_port}/json/version", timeout=5) as resp:
+        with urllib.request.urlopen(f"{cdp_url}/json/version", timeout=5) as resp:
             data = json.loads(resp.read().decode())
             print(f"CDP 连接成功: {data.get('Browser', 'unknown')}")
             return True
@@ -119,9 +127,9 @@ def check_cdp(cdp_port: int = DEFAULT_CDP_PORT) -> bool:
         return False
 
 
-def check_login(cdp_port: int = DEFAULT_CDP_PORT) -> bool:
+def check_login(cdp_url: str) -> bool:
     """通过 API 调用检查登录态是否有效。"""
-    if not check_cdp(cdp_port):
+    if not check_cdp(cdp_url):
         return False
 
     import asyncio
@@ -129,7 +137,7 @@ def check_login(cdp_port: int = DEFAULT_CDP_PORT) -> bool:
 
     async def _check():
         async with async_playwright() as p:
-            browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
+            browser = await p.chromium.connect_over_cdp(cdp_url)
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = await context.new_page()
 
@@ -175,34 +183,47 @@ def check_login(cdp_port: int = DEFAULT_CDP_PORT) -> bool:
     return asyncio.run(_check())
 
 
-def stop_chrome(cdp_port: int = DEFAULT_CDP_PORT):
-    """关闭专用 Chrome（按 CDP 端口匹配）。"""
+def stop_chrome(cdp_url: str):
+    """关闭专用 Chrome（仅本脚本启动的隔离 Chrome，不误杀用户其他浏览器）。
+
+    优先经 CDP 关闭；失败时按隔离 profile 目录匹配进程（精确匹配，而非 taskkill 全部 chrome.exe）。
+    """
     import urllib.request
-    import json
 
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{cdp_port}/json/close") as resp:
+        with urllib.request.urlopen(f"{cdp_url}/json/close") as resp:
             print("Chrome CDP 已关闭")
     except Exception:
-        # /json/close 可能不支持，用 taskkill
         if sys.platform == "win32":
-            os.system(f"taskkill /F /IM chrome.exe /FI \"WINDOWTITLE eq BOSS*\"")
-        print(f"如需手动关闭，请在任务管理器中结束 Chrome 进程（CDP 端口 {cdp_port}）")
+            profile_str = str(BOSS_CHROME_PROFILE_DIR).replace("\\", "\\\\")
+            ps = (
+                f"Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" "
+                f"| Where-Object {{ $_.CommandLine -like '*{profile_str}*' }} "
+                f"| ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
+            )
+            os.system(f'powershell -NoProfile -Command "{ps}"')
+        else:
+            os.system(f"pkill -f '{BOSS_CHROME_PROFILE_DIR}'")
+        print(f"已关闭隔离 Chrome（profile: {BOSS_CHROME_PROFILE_DIR}）")
 
 
 def main():
     parser = argparse.ArgumentParser(description="BOSS 直聘专用 Chrome 管理（CDP 模式）")
     parser.add_argument("--check", action="store_true", help="检查 CDP 连接 + 登录态")
     parser.add_argument("--stop", action="store_true", help="关闭专用 Chrome")
-    parser.add_argument("--cdp-port", type=int, default=DEFAULT_CDP_PORT, help="CDP 端口")
+    parser.add_argument("--cdp-url", default=os.environ.get("BOSS_CDP_URL", f"http://127.0.0.1:{DEFAULT_CDP_PORT}"),
+                        help="CDP 调试端点（默认 http://127.0.0.1:9222）")
+    parser.add_argument("--cdp-port", type=int, default=DEFAULT_CDP_PORT, help="启动时 CDP 端口")
+    parser.add_argument("--cdp-address", default="127.0.0.1",
+                        help="启动时 CDP 监听地址（Linux 容器局域网部署设 0.0.0.0）")
     args = parser.parse_args()
 
     if args.check:
-        check_login(args.cdp_port)
+        check_login(args.cdp_url)
     elif args.stop:
-        stop_chrome(args.cdp_port)
+        stop_chrome(args.cdp_url)
     else:
-        start_chrome(args.cdp_port)
+        start_chrome(args.cdp_port, args.cdp_address)
 
 
 if __name__ == "__main__":

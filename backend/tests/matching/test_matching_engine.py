@@ -198,10 +198,10 @@ class TestCII:
         assert corrected.nice_skills[0].necessity == Necessity.NICE
 
     def test_protects_core_skill_from_demotion(self):
-        """精通且跨 ≥30 源的核心技能不降级。"""
+        """专家熟练度且跨 ≥30 源的核心技能不降级。"""
         musts = [_req(f"sk{i}", Necessity.MUST, weight=0.1) for i in range(1, 9)]
         musts.append(
-            _req("core", Necessity.MUST, weight=0.1, proficiency="精通", source_count=40)
+            _req("core", Necessity.MUST, weight=0.1, proficiency="专家", source_count=40)
         )
         pos = _position("p1", musts=musts)
         corrected = apply_cii_correction(pos)
@@ -221,6 +221,101 @@ class TestCII:
         pos = _position("p1", musts=musts)
         result = score_position(cand, pos, weights=W)
         assert result.must_score == 1.0  # 8/8，降级的 edge 不计入
+
+
+class TestSynonymMatch:
+    """技能别名级同义词匹配（设计文档 9.4：别名级 1.0）。"""
+
+    def test_golang_matches_go(self):
+        """候选人写 "Golang"，岗位要求 "Go" → 规范名归一后命中。"""
+        cand = _candidate(["Golang", "Python"], total_years=5)
+        pos = _position(
+            "p1",
+            musts=[_req("Go", Necessity.MUST), _req("Python", Necessity.MUST)],
+        )
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == 1.0
+        assert result.missing_must == []
+
+    def test_spring_matches_spring_boot(self):
+        """候选人写 "Spring"，岗位要求 "Spring Boot" → 命中。"""
+        cand = _candidate(["Spring"])
+        pos = _position("p1", musts=[_req("Spring Boot", Necessity.MUST)])
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == 1.0
+
+    def test_skill_id_exact_still_works(self):
+        """skill_id 精确匹配优先于名称比较。"""
+        cand = CandidateProfile(
+            user_id="u1",
+            skills=[CandidateSkill(skill_id="sk_001", skill_name="无关名", proficiency=2)],
+        )
+        pos = _position("p1", musts=[_req("sk_001", Necessity.MUST)])
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == 1.0
+
+    def test_rough_select_counts_synonym_hits(self):
+        """粗筛 hit_count 以规范名交集计数，别名变体可入围。"""
+        cand = _candidate(["golang"], total_years=3)
+        positions = [
+            _position("go_pos", musts=[_req("Go", Necessity.MUST)]),
+            _position("rust_pos", musts=[_req("Rust", Necessity.MUST)]),
+        ]
+        matcher = RuleBasedMatcher(positions)
+        results = matcher.match(MatchRequest(candidate=cand, mode=MatchMode.AUTO, top_n=2))
+        assert results[0].position_id == "go_pos"
+
+
+class _FakeSemantic:
+    """固定相似度表的假语义器（测试注入）。"""
+
+    def __init__(self, table: dict[tuple[str, str], float], fail: bool = False):
+        self.table = table
+        self.fail = fail
+
+    def similarity(self, a: str, b: str) -> float:
+        if self.fail:
+            raise RuntimeError("模型不可用")
+        return self.table.get((a, b), 0.0)
+
+
+class TestSemanticMatching:
+    """语义级同义词匹配（设计文档 9.4：语义级 0.85-1.0，sim ≥ threshold 计入）。"""
+
+    def test_semantic_hit_gets_partial_credit(self):
+        """语义命中按相似度值计入 must_score（非布尔）。"""
+        cand = _candidate(["机器学习"])
+        pos = _position("p1", musts=[_req("深度学习", Necessity.MUST)])
+        sem = _FakeSemantic({("深度学习", "机器学习"): 0.64})
+        result = score_position(cand, pos, weights=W, semantic=sem, sim_threshold=0.5)
+        assert result.must_score == pytest.approx(0.64)
+        assert "深度学习" in result.matched_must
+
+    def test_semantic_below_threshold_misses(self):
+        """相似度低于阈值不计入（语义不武断命中）。"""
+        cand = _candidate(["机器学习"])
+        pos = _position("p1", musts=[_req("深度学习", Necessity.MUST)])
+        sem = _FakeSemantic({("深度学习", "机器学习"): 0.4})
+        result = score_position(cand, pos, weights=W, semantic=sem, sim_threshold=0.5)
+        assert result.must_score == 0.0
+        assert result.unqualified is True
+
+    def test_semantic_unavailable_degrades_to_rule(self):
+        """语义模型异常时降级纯规则（不阻断、不误命中）。"""
+        cand = _candidate(["Python"])
+        pos = _position("p1", musts=[_req("Go", Necessity.MUST)])
+        sem = _FakeSemantic({}, fail=True)
+        result = score_position(cand, pos, weights=W, semantic=sem)
+        assert result.must_score == 0.0
+        assert result.missing_must == ["Go"]
+
+    def test_alias_exact_wins_over_semantic(self):
+        """别名级精确匹配返回 1.0，不因语义分数拉低。"""
+        cand = _candidate(["Go"])
+        pos = _position("p1", musts=[_req("Go", Necessity.MUST)])
+        sem = _FakeSemantic({("Go", "Go"): 0.9})  # 即使语义只有 0.9
+        result = score_position(cand, pos, weights=W, semantic=sem, sim_threshold=0.85)
+        assert result.must_score == 1.0
 
 
 class TestRuleBasedMatcher:

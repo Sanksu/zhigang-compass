@@ -26,6 +26,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scrapy import Request
 from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
@@ -46,7 +47,7 @@ class MonsterSpider(BaseSpider):
     max_pages = 2
 
     def start_requests(self):
-        """通过 subprocess 调用采集脚本，解析 JSONL 输出并 yield Item。"""
+        """构建采集任务，用占位 Request 触发 parse。"""
         tasks = []
         for keyword in self.keywords:
             for city in self.cities:
@@ -56,8 +57,23 @@ class MonsterSpider(BaseSpider):
             self.logger.error("无采集任务，请通过 -a keywords= -a cities= 指定")
             return
 
+        cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
+
+        # 占位 Request 触发 parse（与 BOSS/maimai 一致：在 parse 中阻塞调用脚本，
+        # 避免 start_requests 直接 yield Item 导致 feed exporter 写入已关闭文件）
+        yield Request(
+            f"{cdp_url}/json/version",
+            callback=self.parse,
+            meta={"tasks": tasks, "cdp_url": cdp_url},
+            dont_filter=True,
+            errback=self._on_error,
+        )
+
+    def parse(self, response: Response):
+        """通过 subprocess 调用采集脚本，解析 JSONL 输出并 yield Item。"""
+        tasks = response.meta.get("tasks") or []
+        cdp_url = response.meta.get("cdp_url", "http://127.0.0.1:9222")
         python_exe = sys.executable
-        cdp_port = os.environ.get("BOSS_CDP_PORT", "9222")
 
         for task in tasks:
             keyword = task["keyword"]
@@ -69,7 +85,7 @@ class MonsterSpider(BaseSpider):
                 "--keyword", keyword,
                 "--city", city,
                 "--max-pages", str(self.max_pages),
-                "--cdp-port", cdp_port,
+                "--cdp-url", cdp_url,
             ]
 
             try:
@@ -125,8 +141,12 @@ class MonsterSpider(BaseSpider):
             elif stderr:
                 self.logger.debug(f"采集 stderr: {stderr[-300:]}")
 
-    def parse(self, response: Response):
-        return
+    def _on_error(self, failure):
+        """占位请求失败回调。"""
+        self.logger.error(
+            f"占位请求失败: {failure.value}。"
+            f"请确认专用 Chrome 已启动: python -m crawlers.setup_boss_chrome"
+        )
 
     @staticmethod
     def _build_tags(item_data: dict) -> list[str]:

@@ -188,6 +188,36 @@ def parse_boss_raw_text(raw_text: str) -> dict:
         return {}
 
 
+# BOSS 原始 job JSON 中的敏感字段（请求签名 / 招聘者 PII / GPS / 内部标识符）
+_SENSITIVE_KEYS = frozenset({
+    "securityId", "bossName", "bossAvatar", "bossCert", "encryptBossId",
+    "bossTitle", "goldHunter", "bossOnline", "encryptJobId", "expectId",
+    "lid", "encryptBrandId", "itemId", "gps", "contact",
+})
+
+
+def strip_sensitive_fields(raw_text: str) -> str:
+    """从原始 raw_text JSON 中剥离敏感字段（签名/PII/GPS/标识符）。
+
+    非 JSON 或解析失败时原样返回；剥离后序列化回 JSON 字符串。
+    """
+    if not raw_text:
+        return ""
+    try:
+        obj = json.loads(raw_text) if isinstance(raw_text, str) else raw_text
+    except json.JSONDecodeError:
+        return raw_text
+
+    def _strip(node):
+        if isinstance(node, dict):
+            return {k: _strip(v) for k, v in node.items() if k not in _SENSITIVE_KEYS}
+        if isinstance(node, list):
+            return [_strip(v) for v in node]
+        return node
+
+    return json.dumps(_strip(obj), ensure_ascii=False)
+
+
 def build_raw_text(item: dict, boss_detail: dict) -> str:
     """基于 Boss API 真实数据合成 raw_text。
 
@@ -341,7 +371,8 @@ def build_golden_entry(idx: int, item: dict) -> dict:
     experience = item.get("experience", "")
     education = item.get("education", "")
     source = item.get("source", "zhilian")
-    original_raw_text = item.get("raw_text", "")
+    # 入库前剥离敏感字段（签名/PII/GPS），避免黄金集随仓库分发泄露
+    original_raw_text = strip_sensitive_fields(item.get("raw_text", ""))
 
     if source == "boss":
         # Boss 数据：从原始 raw_text JSON 解析结构化 skills 字段
@@ -371,7 +402,8 @@ def build_golden_entry(idx: int, item: dict) -> dict:
         "source_id": item.get("source_id", ""),
         "source_url": item.get("source_url", ""),
         "crawled_at": item.get("crawled_at", ""),
-        "is_desensitized": item.get("is_desensitized", False),
+        # original_raw_text 已统一过脱敏（strip_sensitive_fields），黄金集一律声明无 PII
+        "is_desensitized": True,
         "_fingerprint": item.get("_fingerprint", ""),
         "title": title,
         "company": item.get("company", ""),

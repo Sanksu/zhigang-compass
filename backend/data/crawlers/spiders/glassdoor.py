@@ -20,6 +20,9 @@ import os
 import subprocess
 import sys
 
+from scrapy import Request
+from scrapy.http import Response
+
 from crawlers.base_spider import BaseSpider
 from crawlers.settings import SUBPROCESS_TIMEOUT
 
@@ -40,7 +43,7 @@ class GlassdoorSpider(BaseSpider):
         self.max_pages = int(kwargs.get("max_pages", "2"))
 
     def start_requests(self):
-        """通过 subprocess 调用 CDP 采集脚本，解析 JSONL 输出并 yield Item。"""
+        """构建采集任务，用占位 Request 触发 parse。"""
         tasks = []
         for keyword in self.keywords:
             for city in self.cities:
@@ -50,6 +53,22 @@ class GlassdoorSpider(BaseSpider):
             self.logger.error("无采集任务，请通过 -a keywords= -a cities= 指定")
             return
 
+        cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
+
+        # 占位 Request 触发 parse（与 BOSS/maimai 一致：在 parse 中阻塞调用脚本，
+        # 避免 start_requests 直接 yield Item 导致 feed exporter 写入已关闭文件）
+        yield Request(
+            f"{cdp_url}/json/version",
+            callback=self.parse,
+            meta={"tasks": tasks, "cdp_url": cdp_url},
+            dont_filter=True,
+            errback=self._on_error,
+        )
+
+    def parse(self, response: Response):
+        """通过 subprocess 调用 CDP 采集脚本，解析 JSONL 输出并 yield Item。"""
+        tasks = response.meta.get("tasks") or []
+        cdp_url = response.meta.get("cdp_url", "http://127.0.0.1:9222")
         python_exe = sys.executable
 
         for task in tasks:
@@ -62,11 +81,8 @@ class GlassdoorSpider(BaseSpider):
                 "--keyword", keyword,
                 "--city", city,
                 "--max-pages", str(self.max_pages),
+                "--cdp-url", cdp_url,
             ]
-
-            # 传递 CDP 端口（与 BOSS/Monster 共用）
-            cdp_port = os.environ.get("BOSS_CDP_PORT", "9222")
-            cmd.extend(["--cdp-port", cdp_port])
 
             try:
                 proc = subprocess.Popen(
@@ -117,14 +133,18 @@ class GlassdoorSpider(BaseSpider):
                     post_date=item_data.get("date_posted", ""),
                 )
 
-            # 等待进程结束，检查错误
-            proc.wait()
-            stderr_output = proc.stderr.read() if proc.stderr else ""
-            if proc.returncode != 0 and not stderr_output.strip().endswith("count=0"):
+            if proc.returncode != 0 and not (stderr_output and stderr_output.strip().endswith("count=0")):
                 self.logger.warning(f"CDP 脚本退出码 {proc.returncode}")
             if stderr_output:
                 for line in stderr_output.strip().splitlines()[-5:]:
                     self.logger.info(f"[cdp] {line}")
+
+    def _on_error(self, failure):
+        """占位请求失败回调。"""
+        self.logger.error(
+            f"占位请求失败: {failure.value}。"
+            f"请确认专用 Chrome 已启动: python -m crawlers.setup_boss_chrome"
+        )
 
     @staticmethod
     def _extract_skills(item_data: dict) -> list:

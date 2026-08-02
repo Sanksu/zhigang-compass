@@ -3,9 +3,12 @@
 覆盖四维评分边界、综合指数、分级与降权。
 """
 
+import json
+
 import pytest
 
 from app.services.data_quality.inflation_detector import (
+    DEFAULT_WEIGHTS,
     INFLATION_MILD_THRESHOLD,
     INFLATION_SEVERE_THRESHOLD,
     MILD_DECAY_WEIGHT,
@@ -122,6 +125,8 @@ class TestClassifyInflation:
 # ───────────────────────── 综合场景 ─────────────────────────
 
 class TestComputeInflationScore:
+    # 综合指数测试显式传入均权 DEFAULT_WEIGHTS：验证加权+分级机制本身，
+    # 不依赖运行时配置（configs/inflation_weights.json 由 DA-M3-04 调优覆盖）
     def test_typical_inflation_case_junior_ten_years_master(self):
         """设计文档 §4.8 典型样本：初级岗要求 10 年大模型经验。"""
         result = compute_inflation_score(
@@ -130,6 +135,7 @@ class TestComputeInflationScore:
             skill_count=8,
             expert_level_count=3,
             education="硕士",
+            weights=DEFAULT_WEIGHTS,
         )
         # 经验 1.0 + 数量 (8-5)/6=0.5 + 深度 1.0 + 学历 0.5 → 均权后 0.75
         assert result.experience_score == 1.0
@@ -146,6 +152,7 @@ class TestComputeInflationScore:
             skill_count=12,
             expert_level_count=4,
             education="本科",
+            weights=DEFAULT_WEIGHTS,
         )
         assert result.inflation_score == 0.0
         assert result.label == "normal"
@@ -164,6 +171,7 @@ class TestComputeInflationScore:
             skill_count=11,
             expert_level_count=1,
             education="本科",
+            weights=DEFAULT_WEIGHTS,
         )
         assert result.label == "mild_inflation"
         assert result.decay_weight == MILD_DECAY_WEIGHT
@@ -175,9 +183,49 @@ class TestComputeInflationScore:
             skill_count=5,
             expert_level_count=0,
             education="本科",
+            weights=DEFAULT_WEIGHTS,
         )
         assert result.experience_score == 0.0
         assert result.skill_count_score == 0.0
         assert result.skill_depth_score == 0.0
         assert result.education_score == 0.0
         assert result.inflation_score == 0.0
+
+
+# ───────────────────────── 配置化权重加载（DA-M3-04） ─────────────────────────
+
+class TestLoadWeights:
+    def test_config_exists_returns_weighted_values(self, tmp_path, monkeypatch):
+        """配置文件存在且完整时按配置返回。"""
+        cfg = tmp_path / "inflation_weights.json"
+        cfg.write_text(json.dumps(
+            {"experience": 0.7, "skill_count": 0.6, "skill_depth": 0.5, "education": 0.4}
+        ), encoding="utf-8")
+        monkeypatch.setattr("app.services.data_quality.inflation_detector._CONFIG_PATH", cfg)
+        from app.services.data_quality.inflation_detector import load_weights
+        assert load_weights() == {"experience": 0.7, "skill_count": 0.6, "skill_depth": 0.5, "education": 0.4}
+
+    def test_config_missing_falls_back_to_default(self, tmp_path, monkeypatch):
+        """配置文件缺失时回退均权。"""
+        monkeypatch.setattr(
+            "app.services.data_quality.inflation_detector._CONFIG_PATH",
+            tmp_path / "not_exist.json",
+        )
+        from app.services.data_quality.inflation_detector import load_weights
+        assert load_weights() == DEFAULT_WEIGHTS
+
+    def test_config_corrupted_falls_back_to_default(self, tmp_path, monkeypatch):
+        """配置文件损坏（缺键/非法 JSON）时回退均权。"""
+        cfg = tmp_path / "inflation_weights.json"
+        cfg.write_text("{invalid json", encoding="utf-8")
+        monkeypatch.setattr("app.services.data_quality.inflation_detector._CONFIG_PATH", cfg)
+        from app.services.data_quality.inflation_detector import load_weights
+        assert load_weights() == DEFAULT_WEIGHTS
+
+    def test_compute_uses_custom_weights(self):
+        """显式传权重时综合分按自定义权重计算（经验单维满分 1.0 × 0.8 = 0.8 ≥ 0.7 severe）。"""
+        result = compute_inflation_score(
+            job_level="初级", min_years=8, skill_count=3, expert_level_count=0, education="本科",
+            weights={"experience": 0.8, "skill_count": 0.1, "skill_depth": 0.1, "education": 0.0},
+        )
+        assert result.label == "severe_inflation"

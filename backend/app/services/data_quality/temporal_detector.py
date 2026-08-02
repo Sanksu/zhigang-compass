@@ -78,11 +78,19 @@ def compute_sai(
     return float(jd_median / position_median)
 
 
-def classify_sai(sai: float) -> SAIResult:
-    """按 SAI 阈值划分时滞等级并给出降权系数。"""
-    if sai > SAI_OBSOLETE_THRESHOLD:
+def classify_sai(
+    sai: float,
+    stale_threshold: float = SAI_STALE_THRESHOLD,
+    obsolete_threshold: float = SAI_OBSOLETE_THRESHOLD,
+) -> SAIResult:
+    """按 SAI 阈值划分时滞等级并给出降权系数。
+
+    stale_threshold / obsolete_threshold 可覆盖（DA-M3-04 调优），
+    缺省用设计文档 §4.7.2 固定值 1.5 / 2.0。
+    """
+    if sai > obsolete_threshold:
         return SAIResult(sai=sai, label="content_obsolete", decay_weight=OBSOLETE_DECAY_WEIGHT)
-    if sai > SAI_STALE_THRESHOLD:
+    if sai > stale_threshold:
         return SAIResult(sai=sai, label="content_stale", decay_weight=STALE_DECAY_WEIGHT)
     return SAIResult(sai=sai, label="fresh", decay_weight=FRESH_DECAY_WEIGHT)
 
@@ -92,6 +100,9 @@ def detect_zombie_jd(
     current_jd_skills: set[str],
     sai: float,
     consecutive_periods: int | None = None,
+    jaccard_threshold: float = ZOMBIE_JACCARD_THRESHOLD,
+    min_periods: int = ZOMBIE_CONSECUTIVE_PERIODS,
+    sai_threshold: float = ZOMBIE_SAI_THRESHOLD,
 ) -> ZombieJDResult:
     """僵尸 JD 检测（设计文档 §4.7.2）。
 
@@ -104,12 +115,13 @@ def detect_zombie_jd(
         current_jd_skills: 当前 JD 技能集合
         sai: 当前 JD 的 SAI 值（外部预算后传入，避免重复计算）
         consecutive_periods: 显式传入连续周期数；为 None 时按历史序列尾部连续相似计数
+        jaccard_threshold / min_periods / sai_threshold: DA-M3-04 调优可覆盖
 
     处置：仅保留最早版本，后续版本降权 ×0.3。
     """
     if consecutive_periods is None:
         consecutive_periods = _count_consecutive_similar(
-            history_jd_skills, current_jd_skills, ZOMBIE_JACCARD_THRESHOLD
+            history_jd_skills, current_jd_skills, jaccard_threshold
         )
 
     if not history_jd_skills:
@@ -118,8 +130,8 @@ def detect_zombie_jd(
         last_jaccard = compute_jaccard(history_jd_skills[-1], current_jd_skills)
 
     is_zombie = (
-        consecutive_periods >= ZOMBIE_CONSECUTIVE_PERIODS
-        and sai > ZOMBIE_SAI_THRESHOLD
+        consecutive_periods >= min_periods
+        and sai > sai_threshold
     )
     return ZombieJDResult(
         is_zombie=is_zombie,

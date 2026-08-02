@@ -67,3 +67,33 @@ class InflationResult(BaseModel):
         description="通胀等级：<0.4 normal / 0.4-0.7 mild / >0.7 severe"
     )
     decay_weight: float = Field(description="降权系数：normal=1.0 / mild=0.7 / severe=0.4")
+
+
+class CrossValidationResult(BaseModel):
+    """岗位组跨平台交叉验证结果（设计文档 §4.5）。
+
+    聚合口径：`normalize_position_name(岗位名)` 归一的同岗位 JD 为一组。
+    单源岗位：verified=False、confidence 低，入图谱需人工复核（附录：入图谱 ≥0.6）。
+    """
+
+    position_name: str = Field(description="归一化岗位名（组标识）")
+    jd_count: int = Field(description="组内 JD 条数")
+    source_count: int = Field(description="独立数据源数")
+    sources: list[str] = Field(default_factory=list, description="来源列表（去重）")
+    verified: bool = Field(description="≥2 独立源印证（技能级跨源验证通过）")
+    confidence: float = Field(ge=0.0, le=1.0, description="跨源置信度（数据源数/一致性/时效加权）")
+    verified_skill_ratio: float = Field(
+        ge=0.0, le=1.0, description="≥2 源技能占比（跨源一致性）"
+    )
+    unverified_skills: list[str] = Field(
+        default_factory=list, description="单源技能（未达 2 源印证，待人工审核）"
+    )
+    salary_median: float | None = Field(
+        default=None, description="同岗位月薪中位数（元/月），不可解析为 None"
+    )
+    salary_outlier: bool = Field(
+        default=False, description="多平台薪资中位数差异 >50%（跨货币口径见源码注释）"
+    )
+    experience_divergence: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="经验要求跨平台分歧度（0-1，1=完全分歧）"
+    )

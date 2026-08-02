@@ -32,9 +32,11 @@ SEARCH_API_PATH = "/jobs-svx-service/v2/monster/search-jobs/samsearch/en-US"
 
 # 默认 CDP 端口（与 BOSS 共用，同一时刻只能一个爬虫用）
 DEFAULT_CDP_PORT = 9222
+# 默认 CDP 端点（可由环境变量 BOSS_CDP_URL 覆盖，支持局域网内容器浏览器）
+DEFAULT_CDP_URL = os.environ.get("BOSS_CDP_URL", f"http://127.0.0.1:{DEFAULT_CDP_PORT}")
 
 
-async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_port: int = DEFAULT_CDP_PORT) -> int:
+async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFAULT_CDP_URL) -> int:
     """通过 CDP 连接已启动的 Chrome/Edge，拦截 Monster 内部 API XHR 采集岗位。
 
     前置条件：用户需先启动带 CDP 的 Chrome/Edge 并完成 DataDome challenge。
@@ -45,7 +47,7 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_port: int = DEF
         keyword: 搜索关键词
         city: 城市（如 "New York"）
         max_pages: 最大页数
-        cdp_port: CDP 端口
+        cdp_url: CDP 调试端点
 
     Returns:
         采集到的岗位数
@@ -58,13 +60,22 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_port: int = DEF
     async with async_playwright() as p:
         # CDP 连接已启动的浏览器（绕过 DataDome 的 headless 检测）
         try:
-            browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
+            browser = await p.chromium.connect_over_cdp(cdp_url)
         except Exception as e:
-            log(f"❌ CDP 连接失败（端口 {cdp_port}）: {e}")
+            log(f"❌ CDP 连接失败（{cdp_url}）: {e}")
             log(f"   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
             return 0
 
-        context = browser.contexts[0] if browser.contexts else await browser.new_context()
+        # 隔离：新建独立 context 并复制主 context 的 cookies（保留 DataDome 验证），
+        # 爬虫导航只发生在隔离 context 内，不触碰用户正在浏览的页面
+        context = await browser.new_context()
+        if browser.contexts:
+            try:
+                _cookies = await browser.contexts[0].cookies()
+                if _cookies:
+                    await context.add_cookies(_cookies)
+            except Exception as e:
+                log(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
         page = await context.new_page()
 
         # 监听所有响应，拦截 Monster 内部 API
@@ -93,7 +104,10 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_port: int = DEF
             url = f"https://www.monster.com/jobs/search?{urlencode({'q': keyword, 'where': city, 'page': page_num})}"
 
             try:
-                await page.goto(url, wait_until="networkidle", timeout=60000)
+                # networkidle 在隔离 context 的 DataDome 场景下可能长时间不空闲（持续请求），
+                # 改用 domcontentloaded + 等待 SPA 渲染，再靠下方的 API 响应轮询兜底
+                await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                await page.wait_for_timeout(5000)
             except Exception as e:
                 log(f"  导航失败: {e}")
                 if captured_api_responses:
@@ -293,12 +307,12 @@ def main():
     parser.add_argument("--keyword", required=True, help="搜索关键词")
     parser.add_argument("--city", required=True, help="城市")
     parser.add_argument("--max-pages", type=int, default=2, help="最大页数")
-    parser.add_argument("--cdp-port", type=int, default=int(os.environ.get("BOSS_CDP_PORT", DEFAULT_CDP_PORT)),
-                        help=f"CDP 端口（默认 {DEFAULT_CDP_PORT}，复用 BOSS 的隔离 Chrome）")
+    parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL,
+                        help="CDP 调试端点（默认 http://127.0.0.1:9222，支持局域网内容器浏览器）")
     args = parser.parse_args()
 
-    log(f"CDP 端口: {args.cdp_port}")
-    count = asyncio.run(crawl(args.keyword, args.city, args.max_pages, args.cdp_port))
+    log(f"CDP 端点: {args.cdp_url}")
+    count = asyncio.run(crawl(args.keyword, args.city, args.max_pages, args.cdp_url))
     sys.exit(0 if count > 0 else 1)
 
 

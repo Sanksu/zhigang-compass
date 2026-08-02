@@ -117,6 +117,10 @@ coverage/
 secrets.json
 credentials.json
 
+# LLM provider 配置（api_key 由管理后台落盘，不入版本控制；模板保留）
+backend/configs/llm_providers.yaml
+!backend/configs/llm_providers.yaml.example
+
 # ---------- 数据库 ----------
 *.sqlite3
 *.sqlite3-journal
@@ -152,10 +156,14 @@ dumps/
 *.cypher
 
 # 模型权重与缓存
+backend/models/
 models/cache/
 models/checkpoints/
 *.bin
 *.safetensors
+
+# 运行产物（质量报告/评估报告等）
+backend/reports/
 
 # Airflow 运行时
 airflow.db

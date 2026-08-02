@@ -22,11 +22,11 @@ trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
 def setup_middleware(app: FastAPI) -> None:
     """按顺序注册所有中间件。"""
 
-    # CORS — 可配置白名单模式
+    # CORS — 可配置白名单模式；通配 origin（开发默认）时不允许携带凭据
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        allow_credentials="*" not in settings.cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )

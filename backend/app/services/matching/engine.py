@@ -14,12 +14,12 @@ from app.services.matching.schemas import (
     Necessity,
     PositionProfile,
 )
-from app.services.matching.weights import load_weights
+from app.services.matching.weights import load_sim_threshold, load_weights
 
 # CII 通胀修正阈值与比例（设计文档 9.4 节）
 CII_MUST_THRESHOLD = 7          # 必备技能数超过该值才触发降级
 CII_DEMOTE_RATIO = 0.2          # 降级最低权重的 20%
-CII_PROTECT_PROFICIENCY = "精通"  # 高熟练度核心技能受保护
+CII_PROTECT_PROFICIENCY = "专家"  # 高熟练度核心技能受保护（对齐 schemas 熟练度枚举）
 CII_PROTECT_SOURCE_COUNT = 30   # 跨 ≥30 源视为核心技能
 
 # 时效衰减分段（设计文档 9.4 节，基于 LinkedIn IT 技能半衰期估算）
@@ -84,17 +84,49 @@ def staleness_penalty(last_updated: str | None, today: date | None = None) -> fl
     return 1.0
 
 
-def _matches(req, candidate_skills) -> bool:
-    """技能匹配：skill_id 或 skill_name 命中任一候选人技能（M2 布尔匹配）。
+def _canonical_name(name: str) -> str:
+    """技能规范名：别名归一化 + 中文后缀清洗 + 小写。
 
-    M3 接入 Sentence-BERT 后，此处在 name 相似度 ≥ sim_threshold 时亦可命中。
+    与 JD 入库口径（post_process._clean）一致，保证候选人侧与图谱侧技能名可比。
+    别名级同义词（"Golang"→"Go"、"Spring"→"Spring Boot"）由此统一。
     """
+    from app.services.extraction.dictionary import normalize_skill
+    from app.services.extraction.post_processor import clean_skill_name
+
+    return clean_skill_name(normalize_skill(name)).strip().lower()
+
+
+def _skill_similarity(
+    req,
+    candidate_skills,
+    semantic=None,
+    sim_threshold: float | None = None,
+) -> float:
+    """技能匹配相似度（设计文档 9.4：别名级 1.0，语义级 0.85-1.0）。
+
+    匹配优先级：skill_id 精确 → 规范名别名同义词（1.0）→ 语义 Embedding 余弦
+    （≥ sim_threshold 时计相似度值，否则 0）。semantic 为 None（未注入）或
+    模型不可用时退化为纯规则匹配（结果 ∈ {0, 1}），保证现有行为不变。
+    """
+    req_canon = _canonical_name(req.skill_name)
     for cs in candidate_skills:
         if req.skill_id and cs.skill_id and req.skill_id.lower() == cs.skill_id.lower():
-            return True
-        if req.skill_name and cs.skill_name and req.skill_name.lower() == cs.skill_name.lower():
-            return True
-    return False
+            return 1.0
+        if req_canon and cs.skill_name and _canonical_name(cs.skill_name) == req_canon:
+            return 1.0
+
+    if semantic is None or not req.skill_name:
+        return 0.0
+    threshold = load_sim_threshold() if sim_threshold is None else sim_threshold
+    best = 0.0
+    try:
+        for cs in candidate_skills:
+            if cs.skill_name:
+                best = max(best, semantic.similarity(req.skill_name, cs.skill_name))
+    except Exception:
+        # 语义模型不可用（SemanticUnavailableError 等）降级纯规则，不阻断匹配
+        return 0.0
+    return best if best >= threshold else 0.0
 
 
 def _build_summary(
@@ -119,11 +151,14 @@ def score_position(
     position: PositionProfile,
     weights: tuple[float, float, float] | None = None,
     today: date | None = None,
+    semantic=None,
+    sim_threshold: float | None = None,
 ) -> MatchResult:
     """单岗位三维评分（设计文档 9.4 节）。
 
-    - must_score = matched / total（matched/total 天然惩罚缺失）
-    - nice_score = Σ(sim×weight) / Σ(weight)，M2 sim∈{0,1}；岗位无 nice 时取 1.0 不扣分
+    - must_score = Σ(sim) / total（别名级 sim=1.0，语义级 sim∈[threshold,1)，
+      matched/total 天然惩罚缺失；未注入语义时退化为布尔匹配）
+    - nice_score = Σ(sim×weight) / Σ(weight)，岗位无 nice 时取 1.0 不扣分
     - exp_score = min(total_years / required_years, 1.0)，无年限要求时满分
     必备技能全缺失判零（unqualified=True），不纳入推荐排序。
 
@@ -132,25 +167,32 @@ def score_position(
         position: 岗位画像（内部先执行 CII 通胀修正）
         weights: (w_must, w_nice, w_exp)，缺省从 configs/match_weights.json 加载
         today: 时效衰减参考日期，仅测试注入，缺省取系统当天
+        semantic: Sentence-BERT 相似度器（SkillEmbedder），注入后启用语义同义词匹配
+        sim_threshold: 语义命中阈值，None 时从 configs/match_weights.json 读取
     """
     w_must, w_nice, w_exp = weights or load_weights()
     position = apply_cii_correction(position)
 
     must_total = len(position.must_skills)
+    must_sims = [
+        _skill_similarity(req, candidate.skills, semantic, sim_threshold)
+        for req in position.must_skills
+    ]
     matched_must = [
-        req.skill_name for req in position.must_skills if _matches(req, candidate.skills)
+        req.skill_name for req, sim in zip(position.must_skills, must_sims) if sim > 0
     ]
     missing_must = [
-        req.skill_name for req in position.must_skills if not _matches(req, candidate.skills)
+        req.skill_name for req, sim in zip(position.must_skills, must_sims) if sim == 0
     ]
-    must_score = 1.0 if must_total == 0 else len(matched_must) / must_total
+    must_score = 1.0 if must_total == 0 else sum(must_sims) / must_total
 
     nice_total_weight = sum(req.weight for req in position.nice_skills)
     if nice_total_weight == 0:
         nice_score = 1.0
     else:
         nice_score = sum(
-            req.weight for req in position.nice_skills if _matches(req, candidate.skills)
+            req.weight * _skill_similarity(req, candidate.skills, semantic, sim_threshold)
+            for req in position.nice_skills
         ) / nice_total_weight
 
     if position.required_years is None or position.required_years <= 0:
@@ -207,8 +249,15 @@ class RuleBasedMatcher(MatchEngine):
         positions: 全量岗位画像；缺省为空列表（AUTO 模式无岗位可推荐时返回空）。
     """
 
-    def __init__(self, positions: list[PositionProfile] | None = None):
+    def __init__(
+        self,
+        positions: list[PositionProfile] | None = None,
+        semantic=None,
+        sim_threshold: float | None = None,
+    ):
         self._positions = positions or []
+        self._semantic = semantic
+        self._sim_threshold = sim_threshold
 
     def match(self, request: MatchRequest) -> list[MatchResult]:
         if request.mode == MatchMode.COMPARE:
@@ -220,25 +269,39 @@ class RuleBasedMatcher(MatchEngine):
             raise ValueError("COMPARE 模式必须指定 target_position_id")
         for position in self._positions:
             if position.position_id == request.target_position_id:
-                return [score_position(request.candidate, position)]
+                return [
+                    score_position(
+                        request.candidate,
+                        position,
+                        semantic=self._semantic,
+                        sim_threshold=self._sim_threshold,
+                    )
+                ]
         raise ValueError(f"目标岗位不存在: {request.target_position_id}")
 
     def _match_auto(self, request: MatchRequest) -> list[MatchResult]:
-        scored = [score_position(request.candidate, p) for p in self._rough_select(request)]
+        scored = [
+            score_position(
+                request.candidate, p, semantic=self._semantic, sim_threshold=self._sim_threshold
+            )
+            for p in self._rough_select(request)
+        ]
         scored.sort(key=lambda r: r.total_score, reverse=True)
         return scored[: request.top_n]
 
     def _rough_select(self, request: MatchRequest) -> list[PositionProfile]:
         """Step 1 粗筛：按候选人技能命中数降序取 Top-K。
 
-        无倒排索引时以"岗位技能 ID ∩ 候选人技能 ID"的交集数近似。
+        候选人 skill_id 为原始名（简历侧未对齐图谱 ID），岗位 skill_id 为图 ID，
+        两侧 ID 无交集，故以规范名交集近似（与 _matches 同义词口径一致）。
         """
-        candidate_ids = {s.skill_id for s in request.candidate.skills}
+        candidate_names = {
+            _canonical_name(s.skill_name) for s in request.candidate.skills if s.skill_name
+        }
 
         def hit_count(position: PositionProfile) -> int:
-            skill_ids = {r.skill_id for r in position.must_skills} | {
-                r.skill_id for r in position.nice_skills
-            }
-            return len(candidate_ids & skill_ids)
+            req_names = {_canonical_name(r.skill_name) for r in position.must_skills}
+            req_names |= {_canonical_name(r.skill_name) for r in position.nice_skills}
+            return len(candidate_names & req_names)
 
         return sorted(self._positions, key=hit_count, reverse=True)[:ROUGH_SELECT_K]

@@ -1,38 +1,45 @@
 # ============================================================
-# 智岗罗盘 — LLM 多 Provider 重试链配置
+# 智岗罗盘 — LLM 多 Provider 重试链配置模板（.example）
 # ============================================================
-# 设计文档 §6.5 LLM API 降级策略（单一事实源）
-# 由 LLMProviderChain 读取（M3 实现，见 app/services/extraction/llm_provider.py）
+# 使用方法：复制本文件为 llm_providers.yaml（已 gitignore，api_key 落盘不会入库），
+# 再经管理后台 /admin/llm 页面填写 api_key，或直接编辑 llm_providers.yaml。
 #
-# 多 provider 同步重试链：provider 组合与优先级为运行时可配置项（不限定厂商），
-# 下表为当前生效默认组合（DeepSeek → 星火 → Qwen）；
-# 后续支持管理员经管理后台前端页面修改（M4，见设计文档 §6.5）
-# 密钥一律走环境变量（${VAR} 占位），禁止硬编码（AGENTS.md 铁律）
-# base_url / model 提供默认值，可被 .env 中对应环境变量覆盖
+# 设计文档 §6.5 LLM API 降级策略（单一事实源）
+# 由 LLMProviderChain 读取（见 app/services/extraction/llm_provider.py）
+#
+# provider 为任意 OpenAI 兼容 API：可自由增删、调序（priority 决定尝试顺序），
+# 不限定厂商。下方 deepseek/spark/qwen 仅为默认组合示例。
+# api_key 留空时 LLMProviderChain 抛 LLMConfigurationError，
+# JDExtractor 降级规则抽取，保证无 key 环境可运行。
 # ============================================================
 
-# ---------- Provider 列表（按优先级升序排序） ----------
+# ---------- Provider 列表（按 priority 升序尝试） ----------
 providers:
-  - name: deepseek        # 主：DeepSeek
+  - name: deepseek        # 默认组合示例 1
     priority: 1
-    base_url: https://api.deepseek.com/v1
-    api_key: ${LLM_PRIMARY_API_KEY}
+    base_url: https://api.deepseek.com
+    api_key: ""
     model: deepseek-v4-flash
     supports_function_calling: true
     enabled: true
+    # deepseek-v4-flash 思考模式默认开启，不支持 tool_choice/response_format（结构化输出会 400），
+    # 必须显式关闭 thinking（OpenAI SDK 中经 extra_body 透传），见 https://api-docs.deepseek.com/guides/thinking_mode
+    extra_body:
+      thinking:
+        type: disabled
 
-  - name: spark           # 备：讯飞星火
+  - name: spark           # 默认组合示例 2
     priority: 2
     base_url: https://spark-api.xf-yun.com/v1
-    api_key: ${LLM_SECONDARY_API_KEY}
+    api_key: ""
     model: v4.0
     supports_function_calling: true
     enabled: true
 
-  - name: qwen            # 三：Qwen Plus
+  - name: qwen            # 默认组合示例 3
     priority: 3
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    api_key: ${LLM_TERTIARY_API_KEY}
+    api_key: ""
     model: qwen-plus
     supports_function_calling: true
     enabled: true

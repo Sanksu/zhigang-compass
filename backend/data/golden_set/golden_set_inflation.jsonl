@@ -1,0 +1,57 @@
+{"id": "inf_001", "job_level": "初级", "min_years": 10, "skill_count": 8, "expert_level_count": 3, "education": "硕士", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "初级岗要求10年大模型经验（设计文档典型样本）"}
+{"id": "inf_002", "job_level": "专家", "min_years": 20, "skill_count": 30, "expert_level_count": 15, "education": "博士", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "专家岗要求20年+30技能+15项精通，全面通胀"}
+{"id": "inf_003", "job_level": "初级", "min_years": 6, "skill_count": 3, "expert_level_count": 0, "education": "本科", "gold_label": "mild_inflation", "is_inflation": true, "scenario": "初级岗要求6年经验（ceiling 3 翻倍）"}
+{"id": "inf_004", "job_level": "初级", "min_years": 8, "skill_count": 4, "expert_level_count": 0, "education": "本科", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "初级岗要求8年经验"}
+{"id": "inf_005", "job_level": "中级", "min_years": 8, "skill_count": 6, "expert_level_count": 1, "education": "本科", "gold_label": "mild_inflation", "is_inflation": true, "scenario": "中级岗要求8年经验（ceiling 5 超3年）"}
+{"id": "inf_006", "job_level": "中级", "min_years": 10, "skill_count": 6, "expert_level_count": 1, "education": "本科", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "中级岗要求10年经验"}
+{"id": "inf_007", "job_level": "高级", "min_years": 13, "skill_count": 8, "expert_level_count": 2, "education": "本科", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "高级岗要求13年经验"}
+{"id": "inf_008", "job_level": "资深", "min_years": 15, "skill_count": 12, "expert_level_count": 4, "education": "硕士", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "资深岗要求15年经验（ceiling 10 超5年）"}
+{"id": "inf_009", "job_level": "专家", "min_years": 17, "skill_count": 18, "expert_level_count": 8, "education": "博士", "gold_label": "mild_inflation", "is_inflation": true, "scenario": "专家岗要求17年经验（ceiling 12 超5年）"}
+{"id": "inf_010", "job_level": "初级", "min_years": 2, "skill_count": 10, "expert_level_count": 0, "education": "本科", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "初级岗要求10项技能"}
+{"id": "inf_011", "job_level": "中级", "min_years": 4, "skill_count": 13, "expert_level_count": 1, "education": "本科", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "中级岗要求13项技能（ceiling 8 超5项）"}
+{"id": "inf_012", "job_level": "高级", "min_years": 7, "skill_count": 18, "expert_level_count": 2, "education": "本科", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "高级岗要求18项技能（ceiling 12 超6项）"}
+{"id": "inf_013", "job_level": "资深", "min_years": 9, "skill_count": 21, "expert_level_count": 4, "education": "硕士", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "资深岗要求21项技能（ceiling 15 超6项）"}
+{"id": "inf_014", "job_level": "专家", "min_years": 10, "skill_count": 25, "expert_level_count": 6, "education": "博士", "gold_label": "mild_inflation", "is_inflation": true, "scenario": "专家岗要求25项技能（ceiling 20 超5项）"}
+{"id": "inf_015", "job_level": "初级", "min_years": 2, "skill_count": 4, "expert_level_count": 3, "education": "本科", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "初级岗要求3项精通"}
+{"id": "inf_016", "job_level": "中级", "min_years": 4, "skill_count": 7, "expert_level_count": 5, "education": "本科", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "中级岗要求5项精通"}
+{"id": "inf_017", "job_level": "高级", "min_years": 7, "skill_count": 10, "expert_level_count": 7, "education": "本科", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "高级岗要求7项精通（ceiling 4 超3项）"}
+{"id": "inf_018", "job_level": "资深", "min_years": 9, "skill_count": 13, "expert_level_count": 9, "education": "硕士", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "资深岗要求9项精通（ceiling 6 超3项）"}
+{"id": "inf_019", "job_level": "专家", "min_years": 10, "skill_count": 18, "expert_level_count": 13, "education": "博士", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "专家岗要求13项精通（ceiling 10 超3项）"}
+{"id": "inf_020", "job_level": "初级", "min_years": 2, "skill_count": 4, "expert_level_count": 0, "education": "博士", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "初级岗要求博士（ceiling 本科）"}
+{"id": "inf_021", "job_level": "初级", "min_years": 6, "skill_count": 9, "expert_level_count": 1, "education": "硕士", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "初级岗经验+数量+深度+学历四维均溢出"}
+{"id": "inf_022", "job_level": "中级", "min_years": 8, "skill_count": 12, "expert_level_count": 3, "education": "本科", "gold_label": "mild_inflation", "is_inflation": true, "scenario": "中级岗经验+数量+深度三维中度溢出"}
+{"id": "inf_023", "job_level": "初级", "min_years": 7, "skill_count": 10, "expert_level_count": 2, "education": "本科", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "初级岗经验+数量+深度组合溢出"}
+{"id": "inf_024", "job_level": "高级", "min_years": 12, "skill_count": 16, "expert_level_count": 5, "education": "硕士", "gold_label": "mild_inflation", "is_inflation": true, "scenario": "高级岗经验+数量+深度组合溢出"}
+{"id": "inf_025", "job_level": "资深", "min_years": 13, "skill_count": 18, "expert_level_count": 8, "education": "硕士", "gold_label": "mild_inflation", "is_inflation": true, "scenario": "资深岗经验+数量+深度组合溢出"}
+{"id": "inf_026", "job_level": "中级", "min_years": 9, "skill_count": 11, "expert_level_count": 4, "education": "博士", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "中级岗四维组合强溢出"}
+{"id": "inf_027", "job_level": "初级", "min_years": 8, "skill_count": 6, "expert_level_count": 1, "education": "本科", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "初级岗经验强溢出+其他维中度"}
+{"id": "inf_028", "job_level": "高级", "min_years": 15, "skill_count": 14, "expert_level_count": 6, "education": "硕士", "gold_label": "severe_inflation", "is_inflation": true, "scenario": "高级岗经验强溢出+深度溢出"}
+{"id": "inf_029", "job_level": "初级", "min_years": 3, "skill_count": 5, "expert_level_count": 0, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "初级岗合理要求"}
+{"id": "inf_030", "job_level": "初级", "min_years": 2, "skill_count": 4, "expert_level_count": 0, "education": "大专", "gold_label": "normal", "is_inflation": false, "scenario": "初级岗合理要求"}
+{"id": "inf_031", "job_level": "中级", "min_years": 5, "skill_count": 8, "expert_level_count": 2, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "中级岗合理要求"}
+{"id": "inf_032", "job_level": "中级", "min_years": 4, "skill_count": 6, "expert_level_count": 1, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "中级岗合理要求"}
+{"id": "inf_033", "job_level": "高级", "min_years": 8, "skill_count": 12, "expert_level_count": 4, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "高级岗合理要求"}
+{"id": "inf_034", "job_level": "高级", "min_years": 7, "skill_count": 10, "expert_level_count": 3, "education": "硕士", "gold_label": "normal", "is_inflation": false, "scenario": "高级岗合理要求"}
+{"id": "inf_035", "job_level": "资深", "min_years": 10, "skill_count": 15, "expert_level_count": 6, "education": "硕士", "gold_label": "normal", "is_inflation": false, "scenario": "资深岗合理要求"}
+{"id": "inf_036", "job_level": "专家", "min_years": 12, "skill_count": 20, "expert_level_count": 10, "education": "博士", "gold_label": "normal", "is_inflation": false, "scenario": "专家岗合理要求"}
+{"id": "inf_037", "job_level": "初级", "min_years": 3, "skill_count": 5, "expert_level_count": 0, "education": "不限", "gold_label": "normal", "is_inflation": false, "scenario": "初级岗合理要求"}
+{"id": "inf_038", "job_level": "高级", "min_years": 8, "skill_count": 12, "expert_level_count": 4, "education": "硕士", "gold_label": "normal", "is_inflation": false, "scenario": "高级岗合理要求"}
+{"id": "inf_039", "job_level": "专家", "min_years": 10, "skill_count": 20, "expert_level_count": 8, "education": "博士", "gold_label": "normal", "is_inflation": false, "scenario": "专家岗合理要求"}
+{"id": "inf_040", "job_level": "资深", "min_years": 11, "skill_count": 15, "expert_level_count": 6, "education": "硕士", "gold_label": "normal", "is_inflation": false, "scenario": "资深岗合理要求"}
+{"id": "inf_041", "job_level": "中级", "min_years": 7, "skill_count": 8, "expert_level_count": 2, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "中级岗合理要求"}
+{"id": "inf_042", "job_level": "初级", "min_years": 2, "skill_count": 3, "expert_level_count": 0, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "初级岗合理要求"}
+{"id": "inf_043", "job_level": "初级", "min_years": 5, "skill_count": 5, "expert_level_count": 0, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "初级岗5年经验，略超但行业常见"}
+{"id": "inf_044", "job_level": "中级", "min_years": 6, "skill_count": 8, "expert_level_count": 2, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "中级岗6年经验，略超但行业常见"}
+{"id": "inf_045", "job_level": "高级", "min_years": 10, "skill_count": 12, "expert_level_count": 4, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "高级岗10年经验，行业常见"}
+{"id": "inf_046", "job_level": "初级", "min_years": 3, "skill_count": 6, "expert_level_count": 0, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "初级岗6项技能，略超但合理"}
+{"id": "inf_047", "job_level": "中级", "min_years": 5, "skill_count": 9, "expert_level_count": 2, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "中级岗9项技能，略超但合理"}
+{"id": "inf_048", "job_level": "高级", "min_years": 8, "skill_count": 13, "expert_level_count": 4, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "高级岗13项技能，略超但合理"}
+{"id": "inf_049", "job_level": "初级", "min_years": 3, "skill_count": 5, "expert_level_count": 1, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "初级岗1项精通，可接受"}
+{"id": "inf_050", "job_level": "中级", "min_years": 5, "skill_count": 8, "expert_level_count": 3, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "中级岗3项精通，可接受"}
+{"id": "inf_051", "job_level": "高级", "min_years": 8, "skill_count": 12, "expert_level_count": 5, "education": "硕士", "gold_label": "normal", "is_inflation": false, "scenario": "高级岗5项精通，可接受"}
+{"id": "inf_052", "job_level": "初级", "min_years": 3, "skill_count": 5, "expert_level_count": 0, "education": "硕士", "gold_label": "normal", "is_inflation": false, "scenario": "初级岗要求硕士，行业常见"}
+{"id": "inf_053", "job_level": "资深", "min_years": 10, "skill_count": 16, "expert_level_count": 6, "education": "硕士", "gold_label": "normal", "is_inflation": false, "scenario": "资深岗16项技能，略超但合理"}
+{"id": "inf_054", "job_level": "初级", "min_years": 4, "skill_count": 6, "expert_level_count": 0, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "初级岗4年+6技能，轻微超但整体合理"}
+{"id": "inf_055", "job_level": "中级", "min_years": 4, "skill_count": 7, "expert_level_count": 1, "education": "博士", "gold_label": "normal", "is_inflation": false, "scenario": "中级岗要求博士，研究岗常见"}
+{"id": "inf_056", "job_level": "高级", "min_years": 7, "skill_count": 10, "expert_level_count": 2, "education": "博士", "gold_label": "normal", "is_inflation": false, "scenario": "高级岗要求博士，研究岗常见"}
+{"id": "inf_057", "job_level": "高级", "min_years": 8, "skill_count": 14, "expert_level_count": 4, "education": "本科", "gold_label": "normal", "is_inflation": false, "scenario": "高级岗14项技能，略超但合理"}
