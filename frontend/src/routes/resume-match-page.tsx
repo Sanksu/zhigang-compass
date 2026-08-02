@@ -49,6 +49,7 @@ const GAP_TYPE_LABEL = {
   missing_must: '必备缺失',
   level_gap: '熟练度差距',
   missing_nice: '加分项缺失',
+  matched: '已具备',
 } as const
 
 // ============================================================
@@ -72,14 +73,21 @@ function toRecommendItem(r: BackendMatchResult): RecommendItem {
 }
 
 function toGapItem(g: BackendGapItem): GapItem {
+  // 后端三态（missing/weak/matched）→ 前端四态；matched 是已匹配而非缺失
   const gap_type =
-    g.gap_type === 'weak' ? 'level_gap' : g.necessity === 'must' ? 'missing_must' : 'missing_nice'
+    g.gap_type === 'matched'
+      ? 'matched'
+      : g.gap_type === 'weak'
+        ? 'level_gap'
+        : g.necessity === 'must'
+          ? 'missing_must'
+          : 'missing_nice'
   return {
     skill: g.skill,
     gap_type,
     priority: g.priority,
     current_level: g.current_proficiency ?? '未掌握',
-    required_level: g.required_proficiency ?? '熟练',
+    required_level: g.required_proficiency ?? '不限',
   }
 }
 
@@ -606,7 +614,9 @@ export function ResumeMatchPage() {
                             ? 'text-state-archived'
                             : gap.gap_type === 'level_gap'
                               ? 'text-state-declining'
-                              : 'text-ink-faint'
+                              : gap.gap_type === 'matched'
+                                ? 'text-state-stable'
+                                : 'text-ink-faint'
                         return (
                           <div
                             key={i}
