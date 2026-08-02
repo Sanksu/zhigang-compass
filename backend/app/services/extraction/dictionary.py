@@ -117,8 +117,8 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
       "深度学习", "机器学习", "AI", "人工智能", "风控"), "算法工程师"),
     (("数据开发", "大数据", "数仓", "ETL"), "大数据开发工程师"),
     (("数据分析", "商业分析", "数据挖掘"), "数据分析师"),
-    (("前端", "web", "h5", "html", "react", "vue", "小程序", "css", "ui"), "前端开发工程师"),
-    (("后端",), "后端开发工程师"),
+    (("前端", "web", "h5", "html", "css", "ui"), "前端开发工程师"),
+    (("后端", "服务端"), "后端开发工程师"),
     (("java",), "Java开发工程师"),
     (("python",), "Python开发工程师"),
     (("golang", "go"), "Go开发工程师"),
@@ -126,7 +126,19 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("全栈",), "全栈工程师"),
     (("游戏",), "游戏开发工程师"),
     (("硬件",), "硬件工程师"),
+    (("软件",), "软件开发工程师"),
 ]
+
+# 需保留的技术栈限定词（岗位细分维度）：(匹配串, 显示名)。
+# 如 "React前端开发工程师" 与 "前端开发工程师" 分列；web/h5/html 视为通用归并
+_TECH_STACKS: tuple[tuple[str, str], ...] = (
+    ("小程序", "小程序"), ("鸿蒙", "鸿蒙"), ("移动端", "移动端"), ("移动", "移动"),
+    ("桌面", "桌面"), ("可视化", "可视化"), ("大屏", "大屏"),
+    ("next.js", "Next.js"), ("three.js", "Three.js"), ("typescript", "TypeScript"),
+    ("react", "React"), ("vue", "Vue"), ("angular", "Angular"), ("node", "Node.js"),
+    ("echarts", "ECharts"), ("uni-app", "uni-app"), ("taro", "Taro"),
+    ("electron", "Electron"), ("webgl", "WebGL"),
+)
 
 # 岗位名前缀修饰词（级别/招聘形态），归一化时去除
 _POSITION_PREFIX_RE = re.compile(r"^(初级|中级|高级|资深|专家|助理|实习|见习|应届|研发|资深)")
@@ -134,37 +146,62 @@ _POSITION_PREFIX_RE = re.compile(r"^(初级|中级|高级|资深|专家|助理|�
 _POSITION_SUFFIX_RE = re.compile(
     r"(工程师|技术员|程序员|研发人员|研发|开发|设计师|经理|主管|负责人|专员)$"
 )
-# 多岗位混合标题的分隔符（"前端开发/后端开发/全栈"、"Java、C++、Python"）
-_POSITION_SEPARATOR_RE = re.compile(r"[/、，,|]")
 
 
-def normalize_position_name(name: str) -> str:
-    """岗位名归一化：合并同义重复岗位。
-
-    步骤：
-    1. 多岗位混合标题取第一段（如 "前端开发/后端开发/全栈工程师" → "前端开发"）
-    2. 去除括号内容与级别前缀（"高级前端开发工程师(React)" → "前端"）
-    3. 循环去除岗位后缀（"工程师/开发/技术员"等），保证 "软件开发工程师" 与
-       "软件开发" 收敛到同一核心词（避免图谱唯一约束冲突）
-    4. 按关键词映射为标准岗位名（前端/Java/Python 等族），无匹配则回退清洗后的原名
-
-    注意：映射为有损合并（丢失级别/技术栈细分），换取图谱岗位去重。
-    """
-    first = _POSITION_SEPARATOR_RE.split(name)[0].strip()
-    first = re.sub(r"[（(].*?[)）]", "", first).strip()
-    first = _POSITION_PREFIX_RE.sub("", first).strip()
-    core = first
+def _normalize_base(name: str) -> str:
+    """基础岗位名归一化：循环去后缀至核心词，再按关键词族映射。"""
+    core = name
     while core:
-        # 每层先按完整核心词做关键词匹配，命中即返回（避免"数据开发工程师"被过度去后缀）
         low = core.lower()
         for keywords, standard in _POSITION_KEYWORDS:
-            if any(k in low for k in keywords):
+            if any(k.lower() in low for k in keywords):
                 return standard
         next_core = _POSITION_SUFFIX_RE.sub("", core).strip()
         if next_core == core or not next_core:
             break
         core = next_core
-    return core or first
+    return core or name
+
+
+def normalize_position_name(name: str) -> str:
+    """岗位名归一化：合并同义重复岗位，同时保留技术栈细分维度。
+
+    步骤：
+    1. 整体处理（不再按分隔符取第一段）：混合标题如 "后/前端开发、测试" 会在
+       整串中命中关键词族（"前端"）归入主族，避免产生 "后" 这类碎片岗位
+    2. 提取技术栈限定词（括号内 "前端开发工程师(React)" 或前缀 "React前端开发工程师"），
+       React/Vue/小程序/鸿蒙等作为细分岗位保留，web/h5/html 视为通用归并
+    3. 基础岗位名归一化（去级别前缀、循环去后缀、关键词族映射）
+    4. 技术栈 + 基础岗位名组合
+
+    示例：
+    - "前端开发" / "web前端开发工程师" → "前端开发工程师"
+    - "React前端开发工程师" / "前端开发工程师(React)" → "React前端开发工程师"
+    - "高级前端开发工程师" → "前端开发工程师"
+    - "后/前端开发、测试" → "前端开发工程师"
+    """
+    paren = re.search(r"[（(]([^()（）]*)[)）]", name)
+    paren_tech = paren.group(1).strip() if paren else ""
+    base = re.sub(r"[（(].*?[)）]", "", name).strip()
+    base = _POSITION_PREFIX_RE.sub("", base).strip()
+
+    # 前缀技术栈提取（"React前端开发工程师" → tech=React, base=前端开发工程师）
+    tech = ""
+    low = base.lower()
+    for match, display in sorted(_TECH_STACKS, key=lambda t: len(t[0]), reverse=True):
+        if low.startswith(match):
+            tech = display
+            base = base[len(match):].strip()
+            break
+
+    base = _normalize_base(base)
+    if tech:
+        return tech + base
+    if paren_tech:
+        for match, display in _TECH_STACKS:
+            if paren_tech.lower() == match:
+                return display + base
+    return base
 
 
 def normalize_skill(raw: str) -> str:

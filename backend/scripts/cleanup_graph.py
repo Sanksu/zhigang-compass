@@ -237,18 +237,32 @@ def main() -> None:
         }
         print(f"清理前: {before}")
 
-        print("\n[1/3] 技能过滤")
+        print("\n[1/4] 技能过滤")
         skills = filter_skills(session, args.dry_run)
         print(f"  {skills}")
 
-        print("\n[2/3] 岗位合并")
+        print("\n[2/4] 删除空岗位")
+        if args.dry_run:
+            empty_count = _count(
+                session, "MATCH (p:Position) WHERE p.name IS NULL OR p.name = '' RETURN count(p) AS c"
+            )
+            print(f"  空岗位 {empty_count} 个")
+        else:
+            with session.begin_transaction() as tx:
+                result = tx.run(
+                    "MATCH (p:Position) WHERE p.name IS NULL OR p.name = '' "
+                    "DETACH DELETE p RETURN count(p) AS c"
+                )
+                print(f"  删除空岗位 {result.single()['c']} 个")
+
+        print("\n[3/4] 岗位合并")
         pos = merge_positions(session, args.dry_run)
         print(f"  groups={pos['duplicate_groups']} nodes={pos['duplicate_nodes']}")
         for s in (pos.get("samples") or [])[:5]:
             print(f"    {s['std']} ← {len(s['dups'])+1} 个节点: 主={s['primary']} 副={s['dups']}")
 
         if not args.dry_run:
-            print("\n[3/3] 重新聚合岗位（归一化岗位名）")
+            print("\n[4/4] 重新聚合岗位（归一化岗位名）")
             result = _reaggregate()
             print(f"  {result}")
 
