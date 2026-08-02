@@ -445,12 +445,82 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
 # 业务异步任务（M3/M4 实现）
 # ============================================================
 
-async def resume_parse(ctx: dict, file_path: str) -> dict:
-    """简历解析异步任务（M4 实现，当前未交付）。
+async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) -> dict:
+    """简历解析异步任务（M4 实现）。
 
-    未实现时显式抛错（任务标记 failed），不做假成功返回。
+    流程：文件文本抽取 → PII 脱敏 → LLM 抽取（规则兜底）→ 画像落库 resume_cache。
+    - 结果按 file_hash upsert 到 resume_cache（幂等，重复执行覆盖更新）
+    - 任务状态经 TaskStatus 追踪（parse_resume 路由入队时携带 task_id）
+    - 任一环节失败标记 task failed 并记录错误，不做假成功返回
     """
-    raise NotImplementedError("resume_parse 待 M4 实现（pypdf/python-docx/OCR + PII 脱敏 + LLM 抽取）")
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.business import ResumeCache, TaskStatus
+    from app.services.resume.extractor import ResumeExtractor
+    from app.services.resume.file_parser import extract_text
+    from app.services.resume.pii_mask import mask_pii
+
+    async with async_session_factory() as session:
+        task = await session.get(TaskStatus, task_id) if task_id else None
+        if task is None:
+            # 兼容未携带 task_id 的旧入队：按 result.file_path 定位
+            task = await session.scalar(
+                select(TaskStatus).where(
+                    TaskStatus.result["file_path"].astext == str(file_path)
+                )
+            )
+        if task is None:
+            return {"status": "failed", "error": "TaskStatus 不存在"}
+
+        result_info = task.result or {}
+        task.status = "running"
+        task.progress = 0.2
+        await session.commit()
+
+        try:
+            # 1. 文件文本抽取（pdf/docx/txt；扫描件抛 ResumeParseError）
+            text = extract_text(file_path)
+
+            # 2. PII 脱敏（送入 LLM 前必须先脱敏，设计文档 §8.2）
+            masked, _mapping = mask_pii(text)
+
+            # 3. LLM 结构化抽取（无 api_key / 全 provider 失败降级规则抽取）
+            task.progress = 0.6
+            await session.commit()
+            result = ResumeExtractor().extract(masked)
+
+            # 4. 画像落库（按 file_hash upsert，幂等可重跑）
+            parsed = result.model_dump()
+            cache = await session.scalar(
+                select(ResumeCache).where(ResumeCache.file_hash == result_info["file_hash"])
+            )
+            if cache is None:
+                cache = ResumeCache(
+                    file_hash=result_info["file_hash"],
+                    file_name=result_info.get("file_name") or Path(file_path).name,
+                    parsed_data=parsed,
+                )
+                session.add(cache)
+            else:
+                cache.parsed_data = parsed
+                cache.version += 1
+            await session.flush()
+
+            task.status = "success"
+            task.progress = 1.0
+            task.result = {
+                "resume_id": str(cache.id),
+                "skills": [s.get("name") for s in parsed.get("skills", []) if s.get("name")],
+            }
+        except Exception as e:
+            task.status = "failed"
+            task.error = str(e)[:500]
+        await session.commit()
+
+        if task.status == "success":
+            return {"status": "success", "resume_id": task.result["resume_id"]}
+        return {"status": "failed", "error": task.error}
 
 
 # 参与 JD 正文拼接的 snapshot 字段（按此顺序，跳过来源无关的元数据）
