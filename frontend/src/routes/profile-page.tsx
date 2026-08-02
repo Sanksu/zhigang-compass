@@ -94,7 +94,12 @@ export function ProfilePage() {
   }, [])
 
   useEffect(() => {
-    void Promise.all([loadProfile(), loadResumes()]).finally(() => setLoading(false))
+    // 异步加载用户资料 + 简历列表；setState 均发生在 await 之后的回调中，
+    // 避免在 effect 体内同步调用 setState 触发级联渲染（react-hooks/set-state-in-effect）
+    void (async () => {
+      await Promise.all([loadProfile(), loadResumes()])
+      setLoading(false)
+    })()
   }, [loadProfile, loadResumes])
 
   /* ── 保存个人信息 ── */
