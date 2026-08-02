@@ -351,6 +351,41 @@ async def load_courses(ctx: dict) -> dict:
     return {"total": len(data), "imported": imported, "failed": failed}
 
 
+async def evaluate_courses(ctx: dict) -> dict:
+    """课程质量评估（DA-M4-01，设计文档 §4.6）。
+
+    遍历 course_raw 全量课程 → 六维加权质量评分 → 幂等写回
+    `snapshot["quality"]`（覆盖更新）。返回推荐池统计，供学习路径取 Top-3。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import CourseRaw
+    from app.services.data_quality.course_quality import (
+        RECOMMEND_MIN_SCORE,
+        evaluate_course,
+    )
+
+    async with async_session_factory() as session:
+        rows = (await session.scalars(select(CourseRaw).order_by(CourseRaw.id.asc()))).all()
+        results = []
+        for row in rows:
+            snap = dict(row.snapshot or {})
+            result = evaluate_course(snap)
+            snap["quality"] = result.model_dump()
+            row.snapshot = snap
+            results.append(result)
+        await session.commit()
+
+    recommended = [r for r in results if r.recommended]
+    return {
+        "total": len(results),
+        "recommended": len(recommended),
+        "recommend_min_score": RECOMMEND_MIN_SCORE,
+        "top3": [r.model_dump() for r in sorted(results, key=lambda r: r.quality_score, reverse=True)[:3]],
+    }
+
+
 async def aggregate_positions(ctx: dict) -> dict:
     """岗位聚合（设计文档 §5.5）：jd_raw 抽取结果 → Position 热度 + REQUIRES 边权重。
 
@@ -489,10 +524,13 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
     # ── 阶段 6：课程入图（course_raw → Course + LEARNABLE_VIA）──
     results["stages"]["load_courses"] = await load_courses(ctx)
 
-    # ── 阶段 7：岗位聚合（Position.freq + REQUIRES weight/source_count）──
+    # ── 阶段 7：课程质量评估（DA-M4-01，六维加权 → 推荐池写回 snapshot["quality"]）──
+    results["stages"]["evaluate_courses"] = await evaluate_courses(ctx)
+
+    # ── 阶段 8：岗位聚合（Position.freq + REQUIRES weight/source_count）──
     results["stages"]["aggregate_positions"] = await aggregate_positions(ctx)
 
-    # ── 阶段 8：多平台交叉验证（DA-M3-03，技能跨源印证/薪资异常/置信度）──
+    # ── 阶段 9：多平台交叉验证（DA-M3-03，技能跨源印证/薪资异常/置信度）──
     results["stages"]["cross_validate"] = await cross_validate_jds(ctx)
 
     return results
@@ -827,6 +865,7 @@ class WorkerSettings:
         resume_parse,
         batch_extract,
         load_courses,
+        evaluate_courses,
         aggregate_positions,
         cross_validate_jds,
         discovery_daily,

@@ -69,6 +69,26 @@ class InflationResult(BaseModel):
     decay_weight: float = Field(description="降权系数：normal=1.0 / mild=0.7 / severe=0.4")
 
 
+class CourseQualityResult(BaseModel):
+    """课程质量评估结果（设计文档 §4.6 六维加权）。
+
+    综合分 = 平台权威性×0.25 + 用户评分×0.20 + 注册量与完成率×0.15
+             + 时效性×0.20 + 技能覆盖度×0.10 + 实战项目密度×0.10。
+    综合分 ≥ 0.65 进入推荐池；学习路径按质量分取 Top-3。
+    """
+
+    title: str = Field(description="课程名")
+    platform: str = Field(description="课程平台")
+    platform_score: float = Field(ge=0.0, le=1.0, description="平台权威性分")
+    rating_score: float = Field(ge=0.0, le=1.0, description="用户评分分")
+    enrollment_score: float = Field(ge=0.0, le=1.0, description="注册量与完成率分")
+    recency_score: float = Field(ge=0.0, le=1.0, description="时效性分")
+    skill_coverage_score: float = Field(ge=0.0, le=1.0, description="技能覆盖度分")
+    project_density_score: float = Field(ge=0.0, le=1.0, description="实战项目密度分")
+    quality_score: float = Field(ge=0.0, le=1.0, description="六维加权综合质量分")
+    recommended: bool = Field(description="是否进入推荐池（≥0.65）")
+
+
 class CrossValidationResult(BaseModel):
     """岗位组跨平台交叉验证结果（设计文档 §4.5）。
 

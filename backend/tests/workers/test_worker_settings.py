@@ -14,6 +14,7 @@ from app.workers.tasks import (
     cross_validate_jds,
     detect_inflation,
     discovery_daily,
+    evaluate_courses,
     evolution_compute,
     load_courses,
     resume_parse,
@@ -29,6 +30,7 @@ EXPECTED_FUNCTIONS = [
     resume_parse,
     batch_extract,
     load_courses,
+    evaluate_courses,
     aggregate_positions,
     cross_validate_jds,
     discovery_daily,
@@ -51,8 +53,8 @@ def test_etl_pipeline_stages_cover_all_quality_tasks():
 
     src = inspect.getsource(t.run_etl_pipeline)
     for stage_fn in ("crawl_platform", "validate_temporal", "detect_inflation",
-                     "batch_extract", "load_courses", "aggregate_positions",
-                     "cross_validate_jds"):
+                     "batch_extract", "load_courses", "evaluate_courses",
+                     "aggregate_positions", "cross_validate_jds"):
         assert f"await {stage_fn}" in src, f"run_etl_pipeline 缺少阶段 {stage_fn}"
 
 
