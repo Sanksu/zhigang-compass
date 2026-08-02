@@ -223,6 +223,49 @@ class TestCII:
         assert result.must_score == 1.0  # 8/8，降级的 edge 不计入
 
 
+class TestSynonymMatch:
+    """技能别名级同义词匹配（设计文档 9.4：别名级 1.0）。"""
+
+    def test_golang_matches_go(self):
+        """候选人写 "Golang"，岗位要求 "Go" → 规范名归一后命中。"""
+        cand = _candidate(["Golang", "Python"], total_years=5)
+        pos = _position(
+            "p1",
+            musts=[_req("Go", Necessity.MUST), _req("Python", Necessity.MUST)],
+        )
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == 1.0
+        assert result.missing_must == []
+
+    def test_spring_matches_spring_boot(self):
+        """候选人写 "Spring"，岗位要求 "Spring Boot" → 命中。"""
+        cand = _candidate(["Spring"])
+        pos = _position("p1", musts=[_req("Spring Boot", Necessity.MUST)])
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == 1.0
+
+    def test_skill_id_exact_still_works(self):
+        """skill_id 精确匹配优先于名称比较。"""
+        cand = CandidateProfile(
+            user_id="u1",
+            skills=[CandidateSkill(skill_id="sk_001", skill_name="无关名", proficiency=2)],
+        )
+        pos = _position("p1", musts=[_req("sk_001", Necessity.MUST)])
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == 1.0
+
+    def test_rough_select_counts_synonym_hits(self):
+        """粗筛 hit_count 以规范名交集计数，别名变体可入围。"""
+        cand = _candidate(["golang"], total_years=3)
+        positions = [
+            _position("go_pos", musts=[_req("Go", Necessity.MUST)]),
+            _position("rust_pos", musts=[_req("Rust", Necessity.MUST)]),
+        ]
+        matcher = RuleBasedMatcher(positions)
+        results = matcher.match(MatchRequest(candidate=cand, mode=MatchMode.AUTO, top_n=2))
+        assert results[0].position_id == "go_pos"
+
+
 class TestRuleBasedMatcher:
     def test_auto_returns_sorted_top_n(self):
         """AUTO 模式按 total DESC 截取 Top-N。"""
