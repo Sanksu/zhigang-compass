@@ -1,21 +1,25 @@
-"""简历路由：上传、解析任务、任务状态轮询。
+"""简历路由：上传、解析任务、任务状态轮询、SSE 推送、编辑。
 
 上传链路：文件 → SHA256 去重（命中 resume_cache 直接复用）→ 落盘 uploads/
 → 创建 TaskStatus → 入队 ARQ resume_parse 任务（PII 脱敏在任务内完成）。
 """
 
+import asyncio
 import hashlib
+import json
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_optional_user
 from app.core.config import settings
-from app.core.database import get_db
-from app.models.business import ResumeCache, TaskStatus
+from app.core.database import async_session_factory, get_db
+from app.models.business import AuditLog, ResumeCache, TaskStatus
 from app.schemas.common import ok, error
 
 router = APIRouter()
@@ -159,8 +163,61 @@ def _parse_resume_id(resume_id: str) -> str | None:
     """校验并规范化简历 UUID，非法返回 None。"""
     try:
         return str(uuid.UUID(resume_id))
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError, TypeError):
         return None
+
+
+def _merge_fields(parsed: dict, fields: dict) -> dict:
+    """顶层字段覆盖合并（编辑简历画像的字段更新语义）。"""
+    merged = dict(parsed)
+    merged.update(fields)
+    return merged
+
+
+def _sse_payload(task: TaskStatus) -> dict:
+    """任务状态 → SSE data 载荷（TaskStatus ORM 对象不可直接 JSON 序列化）。"""
+    return {
+        "task_id": task.id,
+        "task_type": task.task_type,
+        "status": task.status,
+        "progress": task.progress,
+        "result": task.result,
+        "error": task.error,
+    }
+
+
+async def _task_stream_events(
+    task_uuid: str,
+    get_task,
+    *,
+    poll_interval: float = 1.0,
+    timeout: float = 300.0,
+):
+    """SSE 事件序列（可注入任务查询函数便于测试）。
+
+    get_task: async callable(task_uuid) -> dict | None（已序列化载荷，见 _sse_payload）。
+    事件流：progress 周期推送 → 终态 success/failed 推送 done/error 并结束；
+    任务不存在 / 超时推送 error 后结束。
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    while True:
+        task = await get_task(task_uuid)
+        if task is None:
+            yield f"event: error\ndata: {json.dumps({'message': '任务不存在'}, ensure_ascii=False)}\n\n"
+            return
+        if task["status"] == "success":
+            yield f"event: done\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
+            return
+        if task["status"] == "failed":
+            yield f"event: error\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
+            return
+        yield f"event: progress\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
+        if time.monotonic() >= deadline:
+            yield f"event: error\ndata: {json.dumps({'message': '推送超时'}, ensure_ascii=False)}\n\n"
+            return
+        await asyncio.sleep(poll_interval)
 
 
 @router.get("/{resume_id}")
@@ -180,6 +237,77 @@ async def get_resume(resume_id: str, db: AsyncSession = Depends(get_db)):
         "created_at": resume.created_at.isoformat() if resume.created_at else None,
         "updated_at": resume.updated_at.isoformat() if resume.updated_at else None,
     })
+
+
+@router.put("/{resume_id}")
+async def update_resume(
+    resume_id: str,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict | None = Depends(get_optional_user),
+):
+    """编辑简历画像（BE-M4-01，契约 PUT /resume/{resume_id}）。
+
+    LLM 抽取可能有误，允许用户手动修正。请求体 `{"fields": {...}}` 中的
+    字段按顶层覆盖合并进 parsed_data（设计文档 §2.4.3），version 递增，
+    写审计日志（认证用户存在时；匿名场景跳过，与现有 resume 端点无认证一致）。
+    """
+    rid = _parse_resume_id(resume_id)
+    if rid is None:
+        return error(400, "resume_id 格式非法")
+    resume = await db.get(ResumeCache, rid)
+    if resume is None:
+        return error(404, "简历不存在")
+
+    fields = req.get("fields")
+    if not isinstance(fields, dict) or not fields:
+        return error(400, "fields 必须为非空对象")
+
+    resume.parsed_data = _merge_fields(resume.parsed_data or {}, fields)
+    resume.version += 1
+
+    if current_user:
+        db.add(AuditLog(
+            user_id=current_user.get("sub", ""),
+            action="resume.update",
+            resource="resume_cache",
+            resource_id=rid,
+            detail={"fields": list(fields.keys()), "version": resume.version},
+        ))
+    await db.commit()
+
+    return ok(data={
+        "id": resume.id,
+        "file_name": resume.file_name,
+        "parsed_data": resume.parsed_data,
+        "version": resume.version,
+        "updated_at": resume.updated_at.isoformat() if resume.updated_at else None,
+    })
+
+
+@router.get("/task/{task_id}/stream")
+async def task_stream(task_id: str):
+    """SSE 推送任务进度（BE-M4-01，契约 GET /resume/task/{task_id}/stream）。
+
+    事件流：初始 status/progress → 周期推送 progress 事件 → 终态
+    （success/failed）推送 done/error 事件并关闭。任务不存在推送 error 后关闭。
+    轮询间隔 1s，上限 300s 兜底（防客户端挂起占用连接）。
+    """
+    try:
+        task_uuid = str(uuid.UUID(task_id))
+    except (ValueError, AttributeError):
+        return error(400, "task_id 格式非法")
+
+    async def _get_task(tid: str) -> dict | None:
+        async with async_session_factory() as session:
+            task = await session.get(TaskStatus, tid)
+        return _sse_payload(task) if task is not None else None
+
+    async def _event_gen():
+        async for event in _task_stream_events(task_uuid, _get_task):
+            yield event
+
+    return StreamingResponse(_event_gen(), media_type="text/event-stream")
 
 
 @router.delete("/{resume_id}", status_code=200)
