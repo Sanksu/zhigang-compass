@@ -420,7 +420,7 @@ paths:
   /api/v1/resume/task/{task_id}/stream:
     get:
       tags: [resume]
-      summary: "[M4] SSE 推送任务进度"
+      summary: SSE 推送任务进度（event: progress/done/error）
       parameters:
         - name: task_id
           in: path
@@ -437,7 +437,7 @@ paths:
   /api/v1/resume/{resume_id}:
     get:
       tags: [resume]
-      summary: "[M4] 获取解析结果"
+      summary: 获取解析结果
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
