@@ -6,6 +6,9 @@
 FROM python:3.11-slim AS builder
 
 ENV UV_SYSTEM_PYTHON=1
+# 项目依赖直接装入 /usr/local（系统 site-packages + bin）：
+# uv sync 默认建 /build/.venv，运行时 COPY 系统路径将缺失依赖
+ENV UV_PROJECT_ENVIRONMENT=/usr/local
 
 RUN pip install --no-cache-dir uv
 
