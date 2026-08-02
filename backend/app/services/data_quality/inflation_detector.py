@@ -6,10 +6,12 @@
 - 0.4-0.7 mild_inflation（×0.7）
 - >0.7 severe_inflation（×0.4）
 
-设计文档未明确四维权重，M2 阶段取均权 0.25 作为框架占位，
-M3 用黄金集反向调优后写入 `configs/inflation_weights.json`。
+权重默认均权 0.25，DA-M3-04 经 Optuna 在合成标注集上反向调优后
+写入 `configs/inflation_weights.json`（load_weights 读取，缺失不阻断）。
 """
 
+import json
+from pathlib import Path
 from typing import Literal
 
 from app.services.data_quality.schemas import InflationResult
@@ -24,13 +26,32 @@ SEVERE_DECAY_WEIGHT = 0.4
 # ── 岗位级别（与 schemas.py JDExtractionResult.level 对齐）──
 JobLevel = Literal["初级", "中级", "高级", "资深", "专家"]
 
-# ── M2 框架占位权重（M3 调优）──
-WEIGHTS = {
+# ── 默认均权（configs/inflation_weights.json 缺失时兜底）──
+DEFAULT_WEIGHTS = {
     "experience": 0.25,
     "skill_count": 0.25,
     "skill_depth": 0.25,
     "education": 0.25,
 }
+
+WEIGHTS = DEFAULT_WEIGHTS
+
+# 配置文件路径（相对 backend 根目录）
+_CONFIG_PATH = Path(__file__).resolve().parents[3] / "configs" / "inflation_weights.json"
+
+
+def load_weights() -> dict[str, float]:
+    """加载运行时四维权重，配置缺失/损坏时回退均权。"""
+    if not _CONFIG_PATH.exists():
+        return dict(DEFAULT_WEIGHTS)
+    try:
+        data = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+        keys = ("experience", "skill_count", "skill_depth", "education")
+        if all(k in data for k in keys):
+            return {k: float(data[k]) for k in keys}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return dict(DEFAULT_WEIGHTS)
 
 # ── 经验通胀阈值：超出对应年限开始计分（设计文档 §4.8「初级岗要求 10 年大模型经验」是典型样本）──
 _EXPERIENCE_CEILINGS: dict[JobLevel, int] = {
@@ -137,19 +158,26 @@ def compute_inflation_score(
     skill_count: int,
     expert_level_count: int,
     education: str,
+    weights: dict[str, float] | None = None,
 ) -> InflationResult:
-    """计算四维加权综合通胀指数（设计文档 §4.8）。"""
+    """计算四维加权综合通胀指数（设计文档 §4.8）。
+
+    weights 缺省时用均权（或 configs/inflation_weights.json 调优值），
+    显式传入用于调优搜索（Optuna 试各候选权重，不改全局配置）。
+    """
+    w = weights or load_weights()
     exp_score = compute_experience_score(min_years, job_level)
     count_score = compute_skill_count_score(skill_count, job_level)
     depth_score = compute_skill_depth_score(expert_level_count, job_level)
     edu_score = compute_education_score(education, job_level)
 
-    inflation_score = (
-        WEIGHTS["experience"] * exp_score
-        + WEIGHTS["skill_count"] * count_score
-        + WEIGHTS["skill_depth"] * depth_score
-        + WEIGHTS["education"] * edu_score
-    )
+    # 权重独立搜索后加权和可超 1，通胀分封顶 1.0（与 schema le=1.0 对齐）
+    inflation_score = min(1.0, (
+        w["experience"] * exp_score
+        + w["skill_count"] * count_score
+        + w["skill_depth"] * depth_score
+        + w["education"] * edu_score
+    ))
 
     label = classify_inflation(inflation_score)
     decay = {
