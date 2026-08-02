@@ -65,7 +65,7 @@ const protectedRoutes = [
   },
 ]
 
-export const router = createBrowserRouter([
+const router = createBrowserRouter([
   {
     path: '/login',
     element: <GuestGuard><Suspense fallback={<RouteLoading />}><LoginPage /></Suspense></GuestGuard>,

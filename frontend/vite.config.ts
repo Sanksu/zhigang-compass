@@ -1,4 +1,3 @@
-/// <reference types="vitest/config" />
 import { configDefaults, defineConfig } from 'vitest/config'
 import { loadEnv } from 'vite'
 import react from '@vitejs/plugin-react-swc'
