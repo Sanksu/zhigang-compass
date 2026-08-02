@@ -153,3 +153,52 @@ async def task_status(task_id: str, db: AsyncSession = Depends(get_db)):
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
     })
+
+
+def _parse_resume_id(resume_id: str) -> str | None:
+    """校验并规范化简历 UUID，非法返回 None。"""
+    try:
+        return str(uuid.UUID(resume_id))
+    except (ValueError, AttributeError):
+        return None
+
+
+@router.get("/{resume_id}")
+async def get_resume(resume_id: str, db: AsyncSession = Depends(get_db)):
+    """简历解析详情（FE-M4-04 个人中心"查看"：完整画像）。"""
+    rid = _parse_resume_id(resume_id)
+    if rid is None:
+        return error(400, "resume_id 格式非法")
+    resume = await db.get(ResumeCache, rid)
+    if resume is None:
+        return error(404, "简历不存在")
+    return ok(data={
+        "id": resume.id,
+        "file_name": resume.file_name,
+        "parsed_data": resume.parsed_data if isinstance(resume.parsed_data, dict) else {},
+        "version": resume.version,
+        "created_at": resume.created_at.isoformat() if resume.created_at else None,
+        "updated_at": resume.updated_at.isoformat() if resume.updated_at else None,
+    })
+
+
+@router.delete("/{resume_id}", status_code=200)
+async def delete_resume(resume_id: str, db: AsyncSession = Depends(get_db)):
+    """删除简历记录及落盘文件（FE-M4-04 个人中心）。"""
+    rid = _parse_resume_id(resume_id)
+    if rid is None:
+        return error(400, "resume_id 格式非法")
+    resume = await db.get(ResumeCache, rid)
+    if resume is None:
+        return error(404, "简历不存在")
+
+    # 删除落盘文件（uploads/{file_hash}{suffix}），文件缺失不阻塞删除
+    for f in _UPLOAD_DIR.glob(f"{resume.file_hash}.*"):
+        try:
+            f.unlink()
+        except OSError:
+            pass
+
+    await db.delete(resume)
+    await db.commit()
+    return ok(data={"deleted": True})

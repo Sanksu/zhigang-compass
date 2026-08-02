@@ -40,6 +40,10 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="guest")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # 个人资料（FE-M4-04 个人中心：默认空串，PUT /auth/me 更新）
+    email: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    phone: Mapped[str] = mapped_column(String(50), default="", nullable=False)
+    bio: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

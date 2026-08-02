@@ -18,7 +18,14 @@ from app.core.security import (
     verify_password,
 )
 from app.models.business import AuditLog, User
-from app.schemas.business import LoginRequest, LogoutRequest, RefreshRequest, RegisterRequest
+from app.schemas.business import (
+    ChangePasswordRequest,
+    LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
+    RegisterRequest,
+    UpdateProfileRequest,
+)
 from app.schemas.common import ok, error
 
 router = APIRouter()
@@ -175,7 +182,86 @@ async def me(
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
         return error(404, "用户不存在")
-    return ok(data={"id": user.id, "username": user.username, "role": user.role})
+    return ok(data={
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "email": user.email,
+        "phone": user.phone,
+        "bio": user.bio,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    })
+
+
+@router.put("/me")
+async def update_me(
+    req: UpdateProfileRequest,
+    request: Request,
+    payload: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """更新当前用户资料（FE-M4-04 个人中心）。
+
+    仅更新显式传入的字段（None 保持原值）；空串即清空该字段。
+    """
+    user = await db.get(User, payload["sub"])
+    if user is None or not user.is_active:
+        return error(404, "用户不存在")
+    if req.email is not None:
+        user.email = req.email
+    if req.phone is not None:
+        user.phone = req.phone
+    if req.bio is not None:
+        user.bio = req.bio
+    db.add(AuditLog(
+        user_id=user.id,
+        action="auth.update_profile",
+        resource="users",
+        resource_id=user.id,
+        detail={"username": user.username},
+        ip_address=_client_ip(request),
+    ))
+    await db.commit()
+    return ok(data={
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "email": user.email,
+        "phone": user.phone,
+        "bio": user.bio,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    })
+
+
+@router.post("/password")
+async def change_password(
+    req: ChangePasswordRequest,
+    request: Request,
+    payload: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """修改当前用户密码（FE-M4-04 个人中心）。
+
+    需校验旧密码；新旧密码不可相同。
+    """
+    user = await db.get(User, payload["sub"])
+    if user is None or not user.is_active:
+        return error(404, "用户不存在")
+    if not verify_password(req.old_password, user.password_hash):
+        return error(400, "原密码错误")
+    if req.old_password == req.new_password:
+        return error(400, "新密码不能与原密码相同")
+    user.password_hash = hash_password(req.new_password)
+    db.add(AuditLog(
+        user_id=user.id,
+        action="auth.change_password",
+        resource="users",
+        resource_id=user.id,
+        detail={"username": user.username},
+        ip_address=_client_ip(request),
+    ))
+    await db.commit()
+    return ok(data={"updated": True})
 
 
 @router.post("/logout")

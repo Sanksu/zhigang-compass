@@ -40,7 +40,23 @@ class UserProfile(BaseModel):
     username: str
     role: str
     is_active: bool
+    email: str = ""
+    phone: str = ""
+    bio: str = ""
     created_at: datetime
+
+
+class UpdateProfileRequest(BaseModel):
+    """个人中心资料更新（FE-M4-04）：空串即清空，未传字段保持原值。"""
+
+    email: Optional[str] = Field(default=None, max_length=255)
+    phone: Optional[str] = Field(default=None, max_length=50)
+    bio: Optional[str] = Field(default=None, max_length=2000)
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(..., min_length=6, max_length=256)
+    new_password: str = Field(..., min_length=6, max_length=256)
 
 
 # ── 审计日志 ──
