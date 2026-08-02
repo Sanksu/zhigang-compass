@@ -11,6 +11,7 @@
 """
 
 import asyncio
+import json
 import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -386,6 +387,80 @@ async def evaluate_courses(ctx: dict) -> dict:
     }
 
 
+async def diversity_report(ctx: dict, top_n: int = 10) -> dict:
+    """数据多样性报告（DA-M4-02）。
+
+    聚合四类 raw 表多样性指标，写入 reports/diversity_{date}.json（幂等覆盖）。
+    指标口径见 app/services/data_quality/diversity.py。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
+    from app.services.data_quality.diversity import (
+        course_diversity,
+        dedup_stats,
+        position_diversity,
+        source_distribution,
+    )
+
+    async def _jd_items(rows):
+        items = []
+        for r in rows:
+            ext = (r.snapshot or {}).get("extraction") or {}
+            name = (ext.get("position_name") or "").strip()
+            if not name:
+                continue
+            skills = [s.get("name") for s in (ext.get("skills") or []) if s.get("name")]
+            items.append({"position_name": name, "skills": skills})
+        return items
+
+    async def _course_items(rows):
+        items = []
+        for r in rows:
+            snap = r.snapshot or {}
+            skills = snap.get("skills") or []
+            if isinstance(skills, str):
+                skills = [s.strip() for s in skills.split(",") if s.strip()]
+            items.append({"platform": snap.get("platform", r.source), "skills": skills})
+        return items
+
+    async with async_session_factory() as session:
+        jd_rows = (await session.scalars(select(JDRaw))).all()
+        course_rows = (await session.scalars(select(CourseRaw))).all()
+        paper_rows = (await session.scalars(select(PaperRaw))).all()
+        community_rows = (await session.scalars(select(CommunityRaw))).all()
+
+    report = {
+        "generated_at": datetime.now(timezone(timedelta(hours=8))).isoformat(),
+        "jd": {
+            "total": len(jd_rows),
+            "sources": source_distribution([{"source": r.source} for r in jd_rows]),
+            "dedup": dedup_stats([{"fingerprint": r.fingerprint} for r in jd_rows]),
+            "positions": position_diversity(await _jd_items(jd_rows), top_n=top_n),
+        },
+        "course": {
+            **course_diversity(await _course_items(course_rows)),
+            "dedup": dedup_stats([{"fingerprint": r.fingerprint} for r in course_rows]),
+        },
+        "paper": {
+            "total": len(paper_rows),
+            "sources": source_distribution([{"source": r.source} for r in paper_rows]),
+        },
+        "community": {
+            "total": len(community_rows),
+            "sources": source_distribution([{"source": r.source} for r in community_rows]),
+        },
+    }
+
+    report_dir = Path(__file__).resolve().parents[2] / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"diversity_{datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d')}.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[diversity_report] 报告已写入: {report_path}", flush=True)
+    return {"report_path": str(report_path)}
+
+
 async def aggregate_positions(ctx: dict) -> dict:
     """岗位聚合（设计文档 §5.5）：jd_raw 抽取结果 → Position 热度 + REQUIRES 边权重。
 
@@ -532,6 +607,9 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
 
     # ── 阶段 9：多平台交叉验证（DA-M3-03，技能跨源印证/薪资异常/置信度）──
     results["stages"]["cross_validate"] = await cross_validate_jds(ctx)
+
+    # ── 阶段 10：数据多样性报告（DA-M4-02，reports/diversity_{date}.json）──
+    results["stages"]["diversity_report"] = await diversity_report(ctx)
 
     return results
 
@@ -866,6 +944,7 @@ class WorkerSettings:
         batch_extract,
         load_courses,
         evaluate_courses,
+        diversity_report,
         aggregate_positions,
         cross_validate_jds,
         discovery_daily,

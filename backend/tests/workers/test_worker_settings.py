@@ -14,6 +14,7 @@ from app.workers.tasks import (
     cross_validate_jds,
     detect_inflation,
     discovery_daily,
+    diversity_report,
     evaluate_courses,
     evolution_compute,
     load_courses,
@@ -31,6 +32,7 @@ EXPECTED_FUNCTIONS = [
     batch_extract,
     load_courses,
     evaluate_courses,
+    diversity_report,
     aggregate_positions,
     cross_validate_jds,
     discovery_daily,
@@ -48,13 +50,13 @@ def test_all_tasks_are_async_callables():
 
 
 def test_etl_pipeline_stages_cover_all_quality_tasks():
-    """run_etl_pipeline 的 8 个阶段与检测/聚合/验证任务一一对应（DA-M3-03/04 接入）。"""
+    """run_etl_pipeline 的 10 个阶段与检测/聚合/验证任务一一对应。"""
     from app.workers import tasks as t
 
     src = inspect.getsource(t.run_etl_pipeline)
     for stage_fn in ("crawl_platform", "validate_temporal", "detect_inflation",
                      "batch_extract", "load_courses", "evaluate_courses",
-                     "aggregate_positions", "cross_validate_jds"):
+                     "aggregate_positions", "cross_validate_jds", "diversity_report"):
         assert f"await {stage_fn}" in src, f"run_etl_pipeline 缺少阶段 {stage_fn}"
 
 
