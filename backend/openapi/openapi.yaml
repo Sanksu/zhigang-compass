@@ -226,12 +226,12 @@ paths:
   /api/v1/graph/skill/{id}/prerequisites:
     get:
       tags: [graph]
-      summary: "[M4] 先修技能链"
+      summary: 技能先修技能链（先修字典，拓扑序）
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
         '200':
-          description: 先修链
+          description: 先修链（data 含 skill_id/skill_name/prerequisites[{skill_id,name,depth}]）
           content:
             application/json:
               schema:
@@ -240,12 +240,12 @@ paths:
   /api/v1/graph/skill/{id}/courses:
     get:
       tags: [graph]
-      summary: "[M4] 学习课程列表"
+      summary: 学习课程列表（LEARNABLE_VIA + 质量分降序）
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
         '200':
-          description: 课程列表
+          description: 课程列表（data 含 skill_id/skill_name/courses[CourseRecommendation]）
           content:
             application/json:
               schema:
@@ -501,7 +501,7 @@ paths:
   /api/v1/match/compare:
     post:
       tags: [match]
-      summary: 人岗比对（单点同步）
+      summary: 人岗比对（含差距三态 + 学习路径）
       requestBody:
         required: true
         content:
@@ -514,7 +514,9 @@ paths:
                 position_id: { type: string }
       responses:
         '200':
-          description: 匹配结果
+          description: |
+            匹配结果 + gaps（GapSkill[]，三态）+ learning_path
+            （LearningPathItem[]，missing/weak 技能先修链 + 课程 Top-3）
           content:
             application/json:
               schema:
@@ -1005,3 +1007,39 @@ components:
         username: { type: string }
         role: { type: string, enum: [admin, user, guest] }
         permissions: { type: array, items: { type: string } }
+
+    GapSkill:
+      type: object
+      description: 技能差距项（设计文档 §9.5 三态）
+      properties:
+        skill: { type: string, description: 技能名 }
+        skill_id: { type: string, nullable: true, description: 图谱技能 ID }
+        necessity: { type: string, enum: [must, nice] }
+        gap_type: { type: string, enum: [missing, weak, matched] }
+        weight: { type: number, description: 技能权重 }
+        priority: { type: string, enum: [high, medium, low] }
+        current_proficiency: { type: string, nullable: true, description: 候选人当前熟练度 }
+        required_proficiency: { type: string, nullable: true, description: 岗位期望熟练度 }
+
+    CourseRecommendation:
+      type: object
+      description: 学习课程推荐（质量分 Top-3，设计文档 §4.6）
+      properties:
+        course_id: { type: string, description: 图谱 Course ID }
+        title: { type: string }
+        platform: { type: string }
+        quality_score: { type: number, nullable: true, minimum: 0, maximum: 1 }
+        recommended: { type: boolean }
+        source_url: { type: string }
+        hours: { type: number, nullable: true, description: 课程时长（小时） }
+
+    LearningPathItem:
+      type: object
+      description: 单技能学习路径项（甘特图格式，设计文档 §9.5）
+      properties:
+        skill: { type: string, description: 目标技能名 }
+        skill_id: { type: string, nullable: true }
+        prerequisites: { type: array, items: { type: string }, description: 先修技能链（先修在前） }
+        courses: { type: array, items: { $ref: '#/components/schemas/CourseRecommendation' } }
+        estimated_hours: { type: number, description: 预计学习学时 }
+        priority: { type: string, enum: [high, medium, low] }

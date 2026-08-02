@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { ResumeUploader } from '@/components/resume/resume-uploader'
 import { ScoreRing, RadarChart, SkillHeatmap, GanttChart } from '@/components/match/charts'
 import {
+  type BackendGapItem,
+  type BackendLearningPathItem,
   type BackendMatchResult,
   type CandidateProfile,
   type GapItem,
@@ -69,6 +71,40 @@ function toRecommendItem(r: BackendMatchResult): RecommendItem {
   }
 }
 
+function toGapItem(g: BackendGapItem): GapItem {
+  const gap_type =
+    g.gap_type === 'weak' ? 'level_gap' : g.necessity === 'must' ? 'missing_must' : 'missing_nice'
+  return {
+    skill: g.skill,
+    gap_type,
+    priority: g.priority,
+    current_level: g.current_proficiency ?? '未掌握',
+    required_level: g.required_proficiency ?? '熟练',
+  }
+}
+
+/** 后端 estimated_hours（学时）→ 甘特图天数：每天 8 学时折算，起点按前序累计 */
+function toLearningPath(items: BackendLearningPathItem[]): MatchResult['learning_path'] {
+  let offset = 0
+  return items.map((item) => {
+    const duration_days = Math.max(1, Math.ceil(item.estimated_hours / 8))
+    const start_offset = offset
+    offset += duration_days
+    return {
+      skill: item.skill,
+      duration_days,
+      start_offset,
+      prerequisites: item.prerequisites,
+      courses: item.courses.map((c) => ({
+        title: c.title,
+        platform: c.platform,
+        hours: c.hours ?? 0,
+      })),
+      priority: item.priority,
+    }
+  })
+}
+
 function toMatchResult(r: BackendMatchResult): MatchResult {
   const skill_matrix: SkillMatrixItem[] = [
     ...r.matched_must.map((s) => ({
@@ -78,9 +114,7 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
       skill: s, candidate_level: 0, required_level: 3, necessity: 'must' as const, match: 'missing' as const,
     })),
   ]
-  const gaps: GapItem[] = r.missing_must.map((s) => ({
-    skill: s, gap_type: 'missing_must' as const, priority: 'high' as const, current_level: '未掌握', required_level: '熟练',
-  }))
+  const gaps: GapItem[] = (r.gaps ?? []).map(toGapItem)
   return {
     position_id: r.position_id,
     position_name: r.position_name,
@@ -98,8 +132,8 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
     ],
     skill_matrix: skill_matrix,
     gaps,
-    // 学习路径 / 证据引用依赖课程图谱与证据追溯（M4 交付），后端暂未产出 → 空态
-    learning_path: [],
+    learning_path: toLearningPath(r.learning_path ?? []),
+    // 证据引用依赖证据图谱（设计文档要求 100% 覆盖率），后端暂未产出 → 空态
     evidence_refs: [],
   }
 }
@@ -118,8 +152,8 @@ function toCandidate(s: ResumeSummary): CandidateProfile {
  *
  * 数据来源：真实后端 API
  * 上传 → POST /resume/parse；载入已有简历 → GET /resume/list；
- * 推荐 → POST /match/recommend；比对 → POST /match/compare。
- * 学习路径 / 证据引用后端未产出（M4），显示空态。
+ * 推荐 → POST /match/recommend；比对 → POST /match/compare（含差距三态 + 学习路径）。
+ * 证据引用依赖证据图谱，后端暂未产出 → 空态。
  */
 export function ResumeMatchPage() {
   const [stage, setStage] = useState<'upload' | 'parsing' | 'matched'>('upload')

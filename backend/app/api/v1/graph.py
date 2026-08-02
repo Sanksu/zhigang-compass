@@ -1,4 +1,4 @@
-"""图谱路由：全景、技能反向查询、全文检索。"""
+"""图谱路由：全景、技能反向查询、全文检索、先修链、学习课程。"""
 
 import json
 from typing import Optional
@@ -6,7 +6,9 @@ from typing import Optional
 from fastapi import APIRouter, Query
 
 from app.core.database import neo4j_driver, redis_client
-from app.schemas.common import ok
+from app.schemas.common import error, ok
+from app.services.learning_path.courses import load_courses_for_skill
+from app.services.learning_path.prerequisites import prerequisite_chain
 
 router = APIRouter()
 
@@ -167,3 +169,67 @@ async def fulltext_search(
         ]
 
     return ok(data={"items": items, "total": total, "page": page, "size": size})
+
+
+def _load_skill(skill_id: str) -> dict | None:
+    """按 ID 查询技能节点（id + name），不存在返回 None。"""
+    with neo4j_driver.session() as session:
+        rec = session.run(
+            "MATCH (s:Skill {id: $skill_id}) RETURN s.id AS id, s.name AS name",
+            skill_id=skill_id,
+        ).single()
+    return dict(rec) if rec else None
+
+
+@router.get("/skill/{skill_id}/prerequisites")
+async def skill_prerequisites(skill_id: str):
+    """技能先修技能链（AL-M4-03，设计文档 §9.5）。
+
+    先修链来自人工维护字典 configs/skill_prerequisites.yaml（图谱无
+    PREREQUISITE_OF 边），返回拓扑序（先修在前），并富化图谱技能 ID。
+    """
+    skill = _load_skill(skill_id)
+    if skill is None:
+        return error(404, "技能不存在")
+
+    chain = prerequisite_chain(skill["name"])
+    id_by_name: dict[str, str] = {}
+    if chain:
+        with neo4j_driver.session() as session:
+            rows = session.run(
+                "MATCH (s:Skill) WHERE s.name IN $names RETURN s.name AS name, s.id AS id",
+                names=chain,
+            )
+            id_by_name = {rec["name"]: rec["id"] for rec in rows}
+    prerequisites = [
+        {"skill_id": id_by_name.get(name), "name": name, "depth": i + 1}
+        for i, name in enumerate(chain)
+    ]
+    return ok(
+        data={
+            "skill_id": skill_id,
+            "skill_name": skill["name"],
+            "prerequisites": prerequisites,
+        }
+    )
+
+
+@router.get("/skill/{skill_id}/courses")
+async def skill_courses(skill_id: str):
+    """技能学习课程列表（AL-M4-03，设计文档 §4.6）。
+
+    图谱 LEARNABLE_VIA 课程按质量分降序返回（质量分来自 course_raw 评估产物），
+    top 3 为学习路径推荐课程。
+    """
+    skill = _load_skill(skill_id)
+    if skill is None:
+        return error(404, "技能不存在")
+
+    courses = await load_courses_for_skill(skill_id, skill["name"], top_k=None)
+    return ok(
+        data={
+            "skill_id": skill_id,
+            "skill_name": skill["name"],
+            "courses": [c.model_dump() for c in courses],
+        }
+    )
