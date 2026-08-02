@@ -79,6 +79,35 @@ async def version_diff(
     return ok(data=_diff_snapshots(va.snapshot_json, vb.snapshot_json))
 
 
+@router.get("/signals")
+async def evolution_signals(
+    top_n: int = Query(default=10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """新兴/衰退技能 Top-N（设计文档 §7.1 Z-score 信号）。
+
+    从 graph_versions 快照序列重建技能频次窗口 → EvolutionDetector 计算
+    Z-score → 按 confidence 降序取 emerging（z>2.0）/ declining（z<-1.5）。
+    快照不足 2 期（冷启动）时返回空列表，不武断判定。
+    """
+    rows = await db.scalars(
+        select(GraphVersion).order_by(GraphVersion.created_at.asc())
+    )
+    snapshots = [v.snapshot_json or {} for v in rows]
+
+    from app.services.evolution.trend_service import detect_signals_from_snapshots, rank_signals
+
+    signals = detect_signals_from_snapshots(snapshots)
+    emerging = rank_signals(signals, "emerging", top_n)
+    declining = rank_signals(signals, "declining", top_n)
+
+    return ok(data={
+        "window_count": len(snapshots),
+        "emerging": [s.model_dump() for s in emerging],
+        "declining": [s.model_dump() for s in declining],
+    })
+
+
 @router.get("/trends")
 async def skill_trends(
     skill: str,

@@ -9,15 +9,17 @@
  * 后端未产出的部分（新兴/衰退信号、技能趋势、状态机流转）显示空态，等待 M4。
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Calendar, GitBranch } from 'lucide-react'
+import { Calendar, GitBranch, TrendingUp, TrendingDown } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
-import { apiGet } from '@/lib/api'
+import { apiGet, ApiError } from '@/lib/api'
 
 // ===== Types =====
 
@@ -56,6 +58,213 @@ interface EvolutionDiff {
   nodes_changed: string[]
   edges_added: string[]
   edges_removed: string[]
+}
+
+/** 后端 /evolution/trends 返回项 */
+interface EvolutionTrends {
+  skill: string
+  window: number
+  points: { date: string | null; version: string; freq: number }[]
+}
+
+/** 后端 /evolution/signals 返回项（EvolutionSignal 序列化） */
+interface EvolutionSignal {
+  skill_id: string
+  skill_name: string
+  z_score: number | null
+  mom_growth: number | null
+  current_freq: number
+  historical_mean: number | null
+  historical_std: number | null
+  trend: 'emerging' | 'rising' | 'stable' | 'declining' | 'protected'
+  confidence: number
+  evidence_refs: string[]
+}
+
+interface EvolutionSignalsData {
+  window_count: number
+  emerging: EvolutionSignal[]
+  declining: EvolutionSignal[]
+}
+
+// ===== SignalsView =====
+
+/** 新兴/衰退技能 Top-N（真实 GET /evolution/signals） */
+function SignalsView() {
+  const [data, setData] = useState<EvolutionSignalsData | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    apiGet<EvolutionSignalsData>('/evolution/signals?top_n=10')
+      .then(setData)
+      .catch((e) => setError(e instanceof ApiError ? e.message : '信号加载失败'))
+  }, [])
+
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-xs text-state-archived">{error}</CardContent>
+      </Card>
+    )
+  }
+  if (!data) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-xs text-ink-muted">加载演化信号…</CardContent>
+      </Card>
+    )
+  }
+
+  function renderList(items: EvolutionSignal[], tone: 'emerging' | 'declining', windowCount: number) {
+    if (items.length === 0) {
+      return (
+        <p className="py-6 text-center text-xs text-ink-faint">
+          {windowCount < 2
+            ? `历史快照不足（当前 ${windowCount} 期，需 ≥2 期），冷启动阶段暂不判定`
+            : '本期无该趋势信号'}
+        </p>
+      )
+    }
+    const toneColor = tone === 'emerging' ? 'text-state-emerging' : 'text-state-declining'
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-8">#</TableHead>
+            <TableHead>技能</TableHead>
+            <TableHead className="text-right">Z-score</TableHead>
+            <TableHead className="text-right">当期频次</TableHead>
+            <TableHead className="text-right">置信度</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {items.map((s, i) => (
+            <TableRow key={s.skill_id}>
+              <TableCell className="text-xs font-mono text-ink-faint">{i + 1}</TableCell>
+              <TableCell className="font-medium text-ink">{s.skill_name}</TableCell>
+              <TableCell className={cn('text-right font-mono tabular-nums', toneColor)}>
+                {s.z_score != null ? s.z_score.toFixed(2) : '—'}
+              </TableCell>
+              <TableCell className="text-right font-mono tabular-nums text-ink-secondary">{s.current_freq}</TableCell>
+              <TableCell className="text-right font-mono tabular-nums text-ink-muted">
+                {(s.confidence * 100).toFixed(0)}%
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <TrendingUp className="size-4 text-state-emerging" />
+            <span>新兴技能 Top-10</span>
+            <span className="text-[10px] font-normal text-ink-faint">z &gt; 2.0</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>{renderList(data.emerging, 'emerging', data.window_count)}</CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <TrendingDown className="size-4 text-state-declining" />
+            <span>衰退技能 Top-10</span>
+            <span className="text-[10px] font-normal text-ink-faint">z &lt; -1.5</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>{renderList(data.declining, 'declining', data.window_count)}</CardContent>
+      </Card>
+    </div>
+  )
+}
+
+// ===== SkillTrendView =====
+
+/** 技能频次趋势（真实 GET /evolution/trends，按技能节点 ID 查询） */
+function SkillTrendView() {
+  const [skillId, setSkillId] = useState('')
+  const [data, setData] = useState<EvolutionTrends | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function load() {
+    const id = skillId.trim()
+    if (!id) {
+      setError('请输入技能节点 ID（如 sk_xxxx）')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    apiGet<EvolutionTrends>(`/evolution/trends?skill=${encodeURIComponent(id)}&window=90`)
+      .then((r) => setData(r))
+      .catch((e) => {
+        setData(null)
+        setError(e instanceof ApiError ? e.message : '趋势查询失败')
+      })
+      .finally(() => setLoading(false))
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-sm">
+          <span className="flex items-center gap-2">
+            <TrendingUp className="size-4" />
+            <span>技能频次趋势 · 最近 90 天</span>
+          </span>
+          <div className="flex items-center gap-2">
+            <Input
+              value={skillId}
+              onChange={(e) => setSkillId(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') load()
+              }}
+              placeholder="技能节点 ID（sk_xxxx）"
+              className="h-8 w-56 font-mono text-xs"
+            />
+            <Button size="sm" variant="outline" className="h-8" onClick={load} disabled={loading}>
+              {loading ? '查询中…' : '查询'}
+            </Button>
+          </div>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {error && <p className="py-6 text-center text-xs text-state-archived">{error}</p>}
+        {!error && !data && (
+          <p className="py-6 text-center text-xs text-ink-faint">
+            输入技能节点 ID 查询各版本快照中的关联频次（技能 ID 可在「能力图谱」详情面板查看）
+          </p>
+        )}
+        {!error && data && data.points.length === 0 && (
+          <p className="py-6 text-center text-xs text-ink-faint">该技能在各版本快照中无关联边</p>
+        )}
+        {!error && data && data.points.length > 0 && (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>快照日期</TableHead>
+                <TableHead>版本</TableHead>
+                <TableHead className="text-right">关联岗位数</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.points.map((p) => (
+                <TableRow key={p.version}>
+                  <TableCell className="text-xs font-mono text-ink-muted">{p.date ?? '—'}</TableCell>
+                  <TableCell className="font-mono text-xs text-ink-secondary">{p.version}</TableCell>
+                  <TableCell className="text-right tabular-nums font-mono">{p.freq}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  )
 }
 
 // ===== MetricCard =====
@@ -336,7 +545,7 @@ export function EvolutionPage() {
       { key: 'total', label: '图谱版本数', value: versions.length, delta: versions.length, tone: 'stable', hint: 'T+1 05:00 发布 · 保留 90 天' },
       { key: 'version', label: '当前版本号', value: latest?.version_id ?? '—', delta: 0, tone: 'stable', hint: latest?.change_summary || '暂无版本快照' },
       { key: 'nodes', label: '最新版本节点变化', value: latest ? latest.node_added + latest.node_changed : 0, delta: latest?.node_added ?? 0, tone: 'emerging', hint: `新增 ${latest?.node_added ?? 0} · 变化 ${latest?.node_changed ?? 0}` },
-      { key: 'signals', label: '新兴/衰退信号', value: '—', delta: 0, tone: 'stable', hint: '信号检测后端待交付（M4）' },
+      { key: 'signals', label: '新兴/衰退信号', value: '—', delta: 0, tone: 'stable', hint: '下方"新兴/衰退技能 Top-10"实时展示' },
     ]
   }, [versions])
 
@@ -360,19 +569,13 @@ export function EvolutionPage() {
         ))}
       </div>
 
-      {/* 技能频次趋势（后端待交付） */}
+      {/* 技能频次趋势（真实 /evolution/trends） */}
       <div className="mb-4">
-        <PendingCard
-          title="技能频次趋势 · 最近 90 天"
-          hint="技能频次趋势由演化检测管线产出，等待后端交付（M4）"
-        />
+        <SkillTrendView />
       </div>
 
-      {/* 新兴 / 衰退 Top-10（后端待交付） */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-        <PendingCard title="新兴技能 Top-10" hint="新兴信号（z > 2.0）等待后端交付（M4）" />
-        <PendingCard title="衰退技能 Top-10" hint="衰退信号（z < -1.5）等待后端交付（M4）" />
-      </div>
+      {/* 新兴 / 衰退技能 Top-10（真实 /evolution/signals） */}
+      <SignalsView />
 
       {/* 版本快照对比（真实） */}
       <div className="mb-4">
