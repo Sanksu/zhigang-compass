@@ -679,6 +679,127 @@ async def evolution_compute(ctx: dict, version: str) -> dict:
     raise NotImplementedError("evolution_compute 待 AL-M3 演化管线接入后实现")
 
 
+async def discovery_daily(ctx: dict) -> dict:
+    """每日新岗位发现（AL-M4-01，设计文档 7.2.3 节）。
+
+    流程：聚合 jd_raw 已抽取记录 → 计算候选特征（freq/源多样性/Z-score）
+    → 阶段一门控（detect_candidates）→ 阶段二 RAG 接地（权威库 + 种子）
+    → 幂等 upsert discovery_candidates 候选池 → 自动状态流转持久化。
+
+    幂等设计：按 position_name upsert，重复执行覆盖更新（同岗位不重复入池）。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import JDRaw
+    from app.services.discovery.detector import DiscoveryDetector, DiscoveryInput
+    from app.services.discovery.confidence import compute_confidence
+    from app.services.extraction.dictionary import normalize_position_name
+    from app.services.discovery.schemas import DiscoveryFeatures
+
+    # ── 1. 聚合 jd_raw 已抽取记录 → 岗位频次/源多样性 ──
+    async with async_session_factory() as session:
+        rows = (await session.scalars(
+            select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
+        )).all()
+
+    position_stats: dict[str, dict] = {}
+    for row in rows:
+        ext = (row.snapshot or {}).get("extraction") or {}
+        name = normalize_position_name(ext.get("position_name") or "")
+        if not name:
+            continue
+        stat = position_stats.setdefault(name, {"count": 0, "sources": set()})
+        stat["count"] += 1
+        stat["sources"].add(row.source)
+
+    if not position_stats:
+        return {"candidates": 0, "detail": "无已抽取岗位记录"}
+
+    # ── 2. 组装 DiscoveryInput（Z-score 数据不足 90 天 → 冷启动 Wilson 兜底）──
+    jd_total = sum(s["count"] for s in position_stats.values())
+    inputs = []
+    for name, stat in position_stats.items():
+        freq = float(stat["count"])
+        # 单日窗口无法计算 Z-score，走冷启动（source_diversity ≥ 3 触发）
+        inputs.append(
+            DiscoveryInput(
+                position_name=name,
+                features=DiscoveryFeatures(
+                    jd_freq_ma3=freq,
+                    z_score=None,
+                    source_diversity=len(stat["sources"]),
+                ),
+                history_days=1,
+                cold_successes=stat["count"],
+                cold_total=jd_total,
+            )
+        )
+
+    # ── 3. 阶段一门控 + 阶段二 RAG 接地 ──
+    detector = DiscoveryDetector()
+    candidates = detector.detect_candidates(_Provider(inputs))
+    grounded = []
+    async with async_session_factory() as session:
+        for cand in candidates:
+            c = await detector.ground_with_rag(cand, session)
+            # 置信度：冷启动样本下用来源多样性近似（无历史 Z-score 时 base 恒 0）
+            conf = compute_confidence(
+                jd_count=int(cand.features.jd_freq_ma3),
+                source_count=cand.features.source_diversity,
+                growth_rate=0.0,
+            )
+            c = c.model_copy(update={"confidence": conf})
+            grounded.append(c)
+            await _upsert_candidate(session, c)
+        await session.commit()
+
+    # 注：自动态迁移（emerging→stable / declining 等）依赖历史窗口 freq 序列，
+    # 当前单日快照不提供窗口表；candidate→emerging/rejected 由 admin 审核端点
+    # 调用状态机评估，每日任务只负责入池与 RAG 接地。
+
+    return {
+        "candidates": len(grounded),
+        "seed_matched": sum(1 for c in grounded if c.seed_matched),
+        "rag_matched": sum(1 for c in grounded if c.rag_matched),
+    }
+
+
+class _Provider:
+    """适配 CandidateProvider Protocol 的内存数据源。"""
+
+    def __init__(self, inputs):
+        self._inputs = inputs
+
+    def iter_inputs(self):
+        return iter(self._inputs)
+
+
+async def _upsert_candidate(session, cand) -> None:
+    """按 position_name upsert 候选池（幂等：同岗位覆盖更新特征/状态）。"""
+    from app.models.business import DiscoveryCandidate
+    from sqlalchemy import select
+
+    row = await session.scalar(
+        select(DiscoveryCandidate).where(DiscoveryCandidate.position_name == cand.position_name)
+    )
+    payload = {
+        "state": cand.state.value,
+        "features": cand.features.model_dump() if hasattr(cand.features, "model_dump") else cand.features,
+        "confidence": cand.confidence.model_dump() if cand.confidence else {},
+        "evidence_refs": cand.evidence_refs,
+        "seed_matched": cand.seed_matched,
+        "rag_matched": cand.rag_matched,
+        "definition_draft": cand.definition_draft,
+        "detected_at": cand.detected_at,
+    }
+    if row is None:
+        session.add(DiscoveryCandidate(id=cand.candidate_id, position_name=cand.position_name, **payload))
+    else:
+        for k, v in payload.items():
+            setattr(row, k, v)
+
+
 # ============================================================
 # ARQ Worker 注册
 # ============================================================
@@ -708,6 +829,7 @@ class WorkerSettings:
         load_courses,
         aggregate_positions,
         cross_validate_jds,
+        discovery_daily,
         evolution_compute,
     ]
     on_startup = on_startup

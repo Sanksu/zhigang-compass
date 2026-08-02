@@ -217,13 +217,130 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
 
 
 # ============================================================
-# 岗位审核（LLM 抽取信号未上线 → 空）
+# 岗位审核（AL-M4-01 新岗位发现：候选池 pending 列表 + 审核流转）
 # ============================================================
 
 @router.get("/positions/pending")
-async def positions_pending():
-    """待审核岗位列表。依赖 LLM 抽取 + 发现检测器（AL-M3/M4 交付），当前为空。"""
-    return ok(data={"items": [], "total": 0})
+async def positions_pending(
+    state: str | None = Query(default=None, pattern="^(candidate|emerging|stable|declining)$"),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """待审核岗位列表（新岗位发现候选池）。
+
+    默认返回 candidate（待 admin 审核是否晋升 emerging），可切换状态过滤。
+    """
+    from app.models.business import DiscoveryCandidate
+
+    stmt = select(DiscoveryCandidate)
+    count_stmt = select(func.count()).select_from(DiscoveryCandidate)
+    if state:
+        stmt = stmt.where(DiscoveryCandidate.state == state)
+        count_stmt = count_stmt.where(DiscoveryCandidate.state == state)
+    total = await db.scalar(count_stmt)
+    rows = await db.scalars(
+        stmt.order_by(DiscoveryCandidate.detected_at.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+    )
+    items = [
+        {
+            "id": c.id,
+            "position_name": c.position_name,
+            "state": c.state,
+            "features": c.features,
+            "confidence": c.confidence,
+            "evidence_refs": c.evidence_refs,
+            "seed_matched": c.seed_matched,
+            "rag_matched": c.rag_matched,
+            "definition_draft": c.definition_draft,
+            "detected_at": c.detected_at,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in rows
+    ]
+    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+
+
+@router.post("/positions/{candidate_id}/review")
+async def review_position(
+    candidate_id: str,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """审核 candidate：approve → emerging / reject → rejected。
+
+    流程：读候选池 → 组装 CandidatePosition → 状态机校验（emerging 需
+    置信度 ≥ 0.6 AND 源 ≥ 2）→ Neo4j Position.status 同步 → 写审计日志
+    → 更新候选池状态。
+
+    Args:
+        req: {"action": "approve" | "reject", "reason": "..."}，reason 必填
+    """
+    from app.core.database import neo4j_driver
+    from app.models.business import DiscoveryCandidate
+    from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
+    from app.services.discovery.state_machine import PositionStateMachine
+
+    action = req.get("action")
+    reason = (req.get("reason") or "").strip()
+    if action not in ("approve", "reject"):
+        return error(400, "action 必须为 approve 或 reject")
+    if not reason:
+        return error(400, "审核必须填写 reason")
+
+    cand_row = await db.get(DiscoveryCandidate, candidate_id)
+    if cand_row is None:
+        return error(404, "候选岗位不存在")
+    if cand_row.state != "candidate":
+        return error(409, f"候选岗位当前状态 {cand_row.state}，不可审核")
+
+    features = DiscoveryFeatures(**cand_row.features)
+    candidate = CandidatePosition(
+        candidate_id=cand_row.id,
+        position_name=cand_row.position_name,
+        state=PositionState.CANDIDATE,
+        features=features,
+        detected_at=cand_row.detected_at,
+        evidence_refs=cand_row.evidence_refs,
+        seed_matched=cand_row.seed_matched,
+        rag_matched=cand_row.rag_matched,
+        definition_draft=cand_row.definition_draft,
+    )
+    target = PositionState.EMERGING if action == "approve" else PositionState.REJECTED
+    if action == "approve":
+        # 置信度 ≥ 0.6 AND 源多样性 ≥ 2 才允许晋升（设计文档 7.2.4 阈值表）
+        from app.services.discovery.state_machine import can_promote_to_emerging
+
+        conf = cand_row.confidence or {}
+        if not can_promote_to_emerging(candidate, confidence=float(conf.get("final_confidence", 0.0))):
+            return error(400, "置信度 < 0.6 或独立源 < 2，不满足 emerging 晋升条件")
+
+    machine = PositionStateMachine()
+    with neo4j_driver.session() as neo4j_session:
+        updated = machine.persist(
+            neo4j_session,
+            candidate,
+            target,
+            db=db,
+            operator=current_user.get("sub") or current_user.get("user_id", "admin"),
+            reason=reason,
+        )
+
+    cand_row.state = updated.state.value
+    await db.commit()
+
+    return ok(
+        data={
+            "id": cand_row.id,
+            "position_name": cand_row.position_name,
+            "state": cand_row.state,
+            "reason": reason,
+        },
+        msg=f"已{'通过晋升 emerging' if action == 'approve' else '驳回'}: {cand_row.position_name}",
+    )
 
 
 # ============================================================

@@ -27,8 +27,20 @@ from app.services.discovery.detector import (
     passes_cold_start_gate,
 )
 from app.services.discovery.state_machine import (
+    WindowFreq,
+    can_promote_to_emerging,
+    decline_rate,
+    evaluate_auto_transition,
+    has_recovery,
+    window_volatility,
     PositionStateMachine,
     VALID_TRANSITIONS,
+)
+from app.services.discovery.grounding import (
+    RagGroundingResult,
+    ground_with_rag,
+    match_seed,
+    search_authoritative,
 )
 
 __all__ = [
@@ -42,12 +54,22 @@ __all__ = [
     "MIN_SOURCE_COLD_START",
     "PositionState",
     "PositionStateMachine",
+    "RagGroundingResult",
     "VALID_TRANSITIONS",
     "WILSON_COLD_START_THRESHOLD",
+    "WindowFreq",
     "Z_SCORE_CONSERVATIVE",
     "Z_SCORE_STRICT",
+    "can_promote_to_emerging",
     "compute_confidence",
+    "decline_rate",
+    "evaluate_auto_transition",
+    "ground_with_rag",
+    "has_recovery",
+    "match_seed",
     "passes_cold_start_gate",
     "passes_gate",
+    "search_authoritative",
     "wilson_lower",
+    "window_volatility",
 ]

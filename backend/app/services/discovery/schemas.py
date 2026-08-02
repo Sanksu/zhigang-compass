@@ -54,3 +54,18 @@ class CandidatePosition(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list, description="证据 JD 的 evidence_id 列表")
     seed_matched: bool = Field(default=False, description="是否匹配预置种子列表")
     rag_matched: bool = Field(default=False, description="是否匹配权威岗位库（RAG 接地）")
+    definition_draft: str = Field(default="", description="RAG 阶段二生成的岗位定义草案（种子/权威库命中时）")
+
+
+class RagGroundingResult(BaseModel):
+    """RAG 接地结果（阶段二输出，设计文档 7.2.3 节）。
+
+    权威库命中时由 `occupations` 表 + 种子列表产出定义草案；
+    LLM 生成失败不影响接地判定（草案可缺省，仅记录匹配状态）。
+    """
+    matched: bool = Field(default=False, description="是否命中种子列表或权威库")
+    seed_matched: bool = Field(default=False, description="命中预置种子列表")
+    rag_matched: bool = Field(default=False, description="命中权威岗位库（O*NET occupations 表）")
+    matched_name: str = Field(default="", description="命中的权威岗位名（英文）或种子名")
+    occupation_code: str = Field(default="", description="命中的 O*NET-SOC 代码，种子命中时为空")
+    definition: str = Field(default="", description="岗位定义草案（LLM 生成或权威库原文兜底）")

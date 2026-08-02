@@ -13,6 +13,7 @@ from app.workers.tasks import (
     crawl_platform,
     cross_validate_jds,
     detect_inflation,
+    discovery_daily,
     evolution_compute,
     load_courses,
     resume_parse,
@@ -30,6 +31,7 @@ EXPECTED_FUNCTIONS = [
     load_courses,
     aggregate_positions,
     cross_validate_jds,
+    discovery_daily,
     evolution_compute,
 ]
 

@@ -29,7 +29,7 @@ class TestExtractText:
         assert "姓名：李四" in text
         assert "Go、Kubernetes" in text  # 表格内容也被抽取
 
-    def test_pdf_without_text_raises(self, tmp_path):
+    def test_pdf_without_text_raises(self, tmp_path, monkeypatch):
         from pypdf import PdfWriter
 
         writer = PdfWriter()
@@ -38,12 +38,58 @@ class TestExtractText:
         with open(path, "wb") as f:
             writer.write(f)
 
+        # 隔离真实 OCR：空白页场景下 OCR 引擎无文本可识别 → 抛"扫描件"错误。
+        # 不加载 Paddle 模型（单测依赖外部模型下载会拖慢并受网络影响）。
+        import app.services.resume.file_parser as fp
+
+        monkeypatch.setattr(fp, "_ocr_bytes", lambda data, ocr: "")
+        monkeypatch.setattr(
+            fp, "_ocr_engine", lambda: object()
+        )
+
         with pytest.raises(ResumeParseError, match="扫描件"):
             extract_text(path)
 
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(ResumeParseError, match="文件不存在"):
             extract_text(tmp_path / "nope.pdf")
+
+    def test_ocr_image_extracts_text(self, tmp_path, monkeypatch):
+        """图片简历走 OCR 成功路径：_ocr_bytes 收集 rec_texts 并拼接。"""
+        from PIL import Image
+
+        import app.services.resume.file_parser as fp
+
+        img_path = tmp_path / "resume.png"
+        Image.new("RGB", (100, 100), "white").save(img_path)
+
+        class _FakeOcr:
+            def predict(self, arr):
+                return [{"rec_texts": ["姓名：张三", "技能：Python"]}]
+
+        monkeypatch.setattr(fp, "_ocr_engine", lambda: _FakeOcr())
+
+        text = extract_text(img_path)
+        assert "姓名：张三" in text
+        assert "Python" in text
+
+    def test_ocr_image_empty_raises(self, tmp_path, monkeypatch):
+        """OCR 无可识别文本 → 抛 ResumeParseError（不假成功返回）。"""
+        from PIL import Image
+
+        import app.services.resume.file_parser as fp
+
+        img_path = tmp_path / "blank.png"
+        Image.new("RGB", (100, 100), "white").save(img_path)
+
+        class _EmptyOcr:
+            def predict(self, arr):
+                return [{"rec_texts": []}]
+
+        monkeypatch.setattr(fp, "_ocr_engine", lambda: _EmptyOcr())
+
+        with pytest.raises(ResumeParseError, match="无可识别文本"):
+            extract_text(img_path)
 
     def test_unsupported_extension_raises(self, tmp_path):
         path = tmp_path / "resume.doc"  # 旧格式 .doc 明确不支持
