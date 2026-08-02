@@ -146,3 +146,65 @@ class GraphVersion(Base):
     node_added: Mapped[int] = mapped_column(Integer, default=0)
     node_removed: Mapped[int] = mapped_column(Integer, default=0)
     node_changed: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Occupation(Base):
+    """权威岗位库（O*NET 标准职业分类，设计文档 5.1 Occupation 节点）。
+
+    作为新岗位发现阶段二 RAG 接地（§7.2.3）的权威检索源：candidate 岗位名
+    通过关键词/别名命中权威定义后，生成岗位定义草案进入 admin 审核队列。
+    数据由 scripts/import_occupations.py 从 O*NET 官方 CSV 一次性导入。
+    """
+
+    __tablename__ = "occupations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(
+        String(10), unique=True, index=True, nullable=False  # O*NET-SOC 代码，如 15-1252.00
+    )
+    name: Mapped[str] = mapped_column(String(150), nullable=False)  # O*NET-SOC 标题（英文）
+    category: Mapped[str] = mapped_column(String(100), default="")  # SOC major group，如 Computer and Mathematical
+    definition: Mapped[str] = mapped_column(Text, default="")  # 职业定义
+    aliases: Mapped[list] = mapped_column(JSONB, default=list)  # 别名/俗称（Job Titles 聚合）
+    source: Mapped[str] = mapped_column(String(20), default="onet")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class DiscoveryCandidate(Base):
+    """新岗位发现候选池（设计文档 7.2.3 判定流程输出落库）。
+
+    每日发现任务将门控命中 + RAG 接地后的 candidate 写入本表，
+    admin 审核端点读取 pending 列表并执行 candidate→emerging/rejected 流转
+    （状态同步到 Neo4j Position.status，见 state_machine.persist）。
+    """
+
+    __tablename__ = "discovery_candidates"
+
+    id: Mapped[str] = mapped_column(
+        String(40), primary_key=True  # candidate_id，如 cand-xxxx
+    )
+    position_name: Mapped[str] = mapped_column(
+        String(150), unique=True, index=True, nullable=False
+    )
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="candidate")
+    features: Mapped[dict] = mapped_column(JSONB, default=dict)
+    confidence: Mapped[dict] = mapped_column(JSONB, default=dict)
+    evidence_refs: Mapped[list] = mapped_column(JSONB, default=list)
+    seed_matched: Mapped[bool] = mapped_column(Boolean, default=False)
+    rag_matched: Mapped[bool] = mapped_column(Boolean, default=False)
+    definition_draft: Mapped[str] = mapped_column(Text, default="")
+    detected_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
