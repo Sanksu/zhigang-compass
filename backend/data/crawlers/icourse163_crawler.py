@@ -96,8 +96,9 @@ def parse_course_list(api_data: dict, keyword: str) -> list:
     lst = result.get("list") or []
 
     for entry in lst:
-        # type=301 是在线课程，type=308 是教材，跳过教材
-        if entry.get("type") != 301:
+        # type=301 在线课程、type=306 专业/培训课程（均含 courseId/课程名，可入库）；
+        # type=308 是教材，跳过
+        if entry.get("type") not in (301, 306):
             continue
 
         card = entry.get("mocCourseKyCardBaseInfoDto") or {}
