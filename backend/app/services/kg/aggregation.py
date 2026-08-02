@@ -19,7 +19,7 @@ weight 取离散两档而非出现率连续值的原因：与匹配引擎 CII �
 from __future__ import annotations
 
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from statistics import median
 
 # 图谱 weight 两档约定
@@ -29,13 +29,22 @@ _WEIGHT_NICE = 0.4
 _MUST_MAJORITY = 0.5
 
 
+def _most_common_level(levels: list[str]) -> str:
+    """熟练度众数（并列取出现最早的一档）；无 level 返回空串。"""
+    if not levels:
+        return ""
+    return Counter(levels).most_common(1)[0][0]
+
+
 class SkillAgg:
-    __slots__ = ("hit", "must_count", "sources")
+    __slots__ = ("hit", "must_count", "sources", "levels")
 
     def __init__(self) -> None:
         self.hit = 0
         self.must_count = 0
         self.sources: set[str] = set()
+        # 该技能在岗位 JD 中的熟练度 level 收集（聚合取众数写回 REQUIRES.level）
+        self.levels: list[str] = []
 
 
 class PositionAgg:
@@ -53,17 +62,21 @@ def _min_experience_years(snapshot: dict) -> float | None:
     return float(m.group(1)) if m else None
 
 
-def _position_skills(ext: dict) -> list[tuple[str, str]]:
-    """岗位技能列表 (skill_name, necessity)。requirements 优先，缺省 skills。"""
+def _position_skills(ext: dict) -> list[tuple[str, str, str]]:
+    """岗位技能列表 (skill_name, necessity, level)。requirements 优先，缺省 skills。"""
     reqs = ext.get("requirements") or []
     if reqs:
         return [
-            (r.get("skill_name", "").strip(), r.get("necessity", "nice"))
+            (
+                r.get("skill_name", "").strip(),
+                r.get("necessity", "nice"),
+                r.get("level") or "",
+            )
             for r in reqs
             if r.get("skill_name") and r["skill_name"].strip()
         ]
     return [
-        (s.get("name", "").strip(), "nice")
+        (s.get("name", "").strip(), "nice", "")
         for s in (ext.get("skills") or [])
         if s.get("name") and s["name"].strip()
     ]
@@ -73,13 +86,16 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
     """从 jd_raw 已抽取记录聚合。
 
     rows 需为 JDRaw ORM 行（使用 row.snapshot / row.source）。
-    空岗位名（正文质量差导致的空抽取）不参与聚合。
+    岗位名经 normalize_position_name 归一化（与 import_jd 入图命名一致，
+    否则聚合写回 MATCH {name} 匹配不上图谱节点）；空岗位名不参与聚合。
     """
+    from app.services.extraction.dictionary import normalize_position_name
+
     agg: dict[str, PositionAgg] = defaultdict(PositionAgg)
     for row in rows:
         snap = row.snapshot or {}
         ext = snap.get("extraction") or {}
-        pos = (ext.get("position_name") or "").strip()
+        pos = normalize_position_name((ext.get("position_name") or "").strip())
         if not pos:
             continue
         pa = agg[pos]
@@ -88,10 +104,12 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
         if years is not None:
             pa.exp_years.append(years)
         source = row.source or ""
-        for skill, necessity in _position_skills(ext):
+        for skill, necessity, level in _position_skills(ext):
             sa = pa.skills[skill]
             sa.hit += 1
             sa.sources.add(source)
+            if level:
+                sa.levels.append(level)
             if necessity == "must":
                 sa.must_count += 1
     return agg
@@ -116,6 +134,7 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
                 "weight": _WEIGHT_MUST if is_must else _WEIGHT_NICE,
                 "necessity": "must" if is_must else "nice",
                 "source_count": len(sa.sources),
+                "level": _most_common_level(sa.levels),
             })
 
     with session:
@@ -138,7 +157,8 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
                 MERGE (p)-[r:REQUIRES]->(s)
                 SET r.weight = e.weight,
                     r.necessity = e.necessity,
-                    r.source_count = e.source_count
+                    r.source_count = e.source_count,
+                    r.level = e.level
                 """,
                 edges=edges,
             )
