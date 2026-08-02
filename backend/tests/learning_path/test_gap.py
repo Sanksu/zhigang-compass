@@ -1,0 +1,107 @@
+"""差距分析三态单元测试（AL-M4-03，设计文档 §9.5）。"""
+
+from app.services.learning_path.gap import analyze_gaps
+from app.services.learning_path.schemas import GapType
+from app.services.matching.schemas import (
+    CandidateProfile,
+    CandidateSkill,
+    Necessity,
+    PositionProfile,
+    SkillRequirement,
+)
+
+
+def _candidate(skills: list[tuple[str, int]]) -> CandidateProfile:
+    return CandidateProfile(
+        user_id="u1",
+        skills=[
+            CandidateSkill(skill_id=name, skill_name=name, proficiency=proficiency)
+            for name, proficiency in skills
+        ],
+    )
+
+
+def _req(name: str, necessity: Necessity = Necessity.MUST, weight: float = 1.0, proficiency=None):
+    return SkillRequirement(
+        skill_id=name, skill_name=name, necessity=necessity, weight=weight, proficiency=proficiency
+    )
+
+
+def _position(musts: list, nices: list | None = None) -> PositionProfile:
+    return PositionProfile(position_id="p1", name="p1", must_skills=musts, nice_skills=nices or [])
+
+
+class TestGapTypes:
+    def test_missing_skill(self):
+        """候选人缺失必备技能 → missing，优先级 high。"""
+        cand = _candidate([("Python", 2)])
+        gaps = analyze_gaps(cand, _position([_req("Java", weight=0.8)]))
+        assert len(gaps) == 1
+        assert gaps[0].gap_type == GapType.MISSING
+        assert gaps[0].necessity == "must"
+        assert gaps[0].priority == "high"
+        assert gaps[0].current_proficiency is None
+
+    def test_matched_skill(self):
+        cand = _candidate([("Python", 3)])
+        gaps = analyze_gaps(cand, _position([_req("Python")]))
+        assert gaps[0].gap_type == GapType.MATCHED
+        assert gaps[0].priority == "low"
+        assert gaps[0].current_proficiency == "精通"
+
+    def test_weak_when_proficiency_below_required(self):
+        """候选人含技能但熟练度低于岗位期望 → weak。"""
+        cand = _candidate([("Python", 1)])  # 了解
+        gaps = analyze_gaps(cand, _position([_req("Python", proficiency="中级")]))
+        assert gaps[0].gap_type == GapType.WEAK
+        assert gaps[0].priority == "medium"
+        assert gaps[0].current_proficiency == "了解"
+        assert gaps[0].required_proficiency == "中级"
+
+    def test_matched_when_proficiency_meets_required(self):
+        cand = _candidate([("Python", 2)])  # 熟悉 ≥ 中级
+        gaps = analyze_gaps(cand, _position([_req("Python", proficiency="中级")]))
+        assert gaps[0].gap_type == GapType.MATCHED
+
+    def test_no_required_level_is_not_weak(self):
+        """岗位未声明期望熟练度 → 不判 weak。"""
+        cand = _candidate([("Python", 1)])
+        gaps = analyze_gaps(cand, _position([_req("Python")]))
+        assert gaps[0].gap_type == GapType.MATCHED
+
+    def test_missing_nice_priority_medium(self):
+        cand = _candidate([])
+        gaps = analyze_gaps(cand, _position([], nices=[_req("Go", necessity=Necessity.NICE)]))
+        assert gaps[0].gap_type == GapType.MISSING
+        assert gaps[0].priority == "medium"
+
+    def test_weak_nice_priority_low(self):
+        cand = _candidate([("Go", 1)])
+        gaps = analyze_gaps(
+            cand, _position([], nices=[_req("Go", necessity=Necessity.NICE, proficiency="高级")])
+        )
+        assert gaps[0].gap_type == GapType.WEAK
+        assert gaps[0].priority == "low"
+
+
+class TestGapSorting:
+    def test_missing_before_weak_before_matched(self):
+        cand = _candidate([("Python", 1), ("Go", 3)])
+        pos = _position(
+            musts=[
+                _req("Python", weight=0.5, proficiency="专家"),  # weak
+                _req("Java", weight=0.9),  # missing
+                _req("Go", weight=0.4),  # matched
+            ]
+        )
+        gaps = analyze_gaps(cand, pos)
+        types = [g.gap_type for g in gaps]
+        assert types == [GapType.MISSING, GapType.WEAK, GapType.MATCHED]
+
+    def test_weight_desc_within_same_type(self):
+        cand = _candidate([])
+        pos = _position(
+            musts=[_req("A", weight=0.3), _req("B", weight=0.9), _req("C", weight=0.6)]
+        )
+        gaps = analyze_gaps(cand, pos)
+        assert [g.skill for g in gaps] == ["B", "C", "A"]

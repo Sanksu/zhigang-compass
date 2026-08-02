@@ -20,6 +20,43 @@ export interface BackendMatchResult {
   missing_must: string[]
   summary: string
   unqualified: boolean
+  /** compare 专属：差距三态（missing/weak/matched，按优先级排序） */
+  gaps?: BackendGapItem[]
+  /** compare 专属：学习路径（missing/weak 技能的先修链 + 课程 Top-3） */
+  learning_path?: BackendLearningPathItem[]
+}
+
+/** 后端差距项 */
+export interface BackendGapItem {
+  skill: string
+  skill_id?: string | null
+  necessity: 'must' | 'nice'
+  gap_type: 'missing' | 'weak' | 'matched'
+  weight: number
+  priority: 'high' | 'medium' | 'low'
+  current_proficiency?: string | null
+  required_proficiency?: string | null
+}
+
+/** 后端学习路径项 */
+export interface BackendLearningPathItem {
+  skill: string
+  skill_id?: string | null
+  prerequisites: string[]
+  courses: BackendCourseRecommendation[]
+  estimated_hours: number
+  priority: 'high' | 'medium' | 'low'
+}
+
+/** 后端课程推荐 */
+export interface BackendCourseRecommendation {
+  course_id: string
+  title: string
+  platform: string
+  quality_score?: number | null
+  recommended: boolean
+  source_url: string
+  hours?: number | null
 }
 
 /** 已解析简历摘要（GET /resume/list） */

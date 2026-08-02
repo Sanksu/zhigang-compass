@@ -25,6 +25,7 @@ from app.services.matching.schemas import (
     SkillRequirement,
 )
 from app.services.matching.semantic import SkillEmbedder
+from app.services.learning_path.generator import LearningPathGenerator
 
 router = APIRouter()
 
@@ -151,7 +152,11 @@ async def recommend(req: RecommendRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/compare")
 async def compare(req: CompareRequest, db: AsyncSession = Depends(get_db)):
-    """人岗比对：单点同步比对（含差距：matched_must / missing_must）。"""
+    """人岗比对：单点同步比对（含差距三态 + 学习路径）。
+
+    返回匹配结果 + gaps（missing/weak/matched 三态）+ learning_path
+    （missing/weak 技能的先修链 + 课程 Top-3，设计文档 §9.5 / §4.6）。
+    """
     resume_id = _parse_resume_id(req.resume_id)
     if resume_id is None:
         return error(400, "resume_id 格式非法")
@@ -160,19 +165,26 @@ async def compare(req: CompareRequest, db: AsyncSession = Depends(get_db)):
         return error(404, "简历不存在")
 
     candidate = _build_candidate(cache.parsed_data)
-    matcher = RuleBasedMatcher(
-        _load_positions_from_graph(),
-        semantic=SkillEmbedder.get(),
-    )
-    try:
-        results = matcher.match(
-            MatchRequest(
-                candidate=candidate,
-                mode=MatchMode.COMPARE,
-                target_position_id=req.position_id,
-            )
-        )
-    except ValueError:
-        # 引擎对不存在的目标岗位抛 ValueError（保持引擎纯计算语义），API 边界转为 404
+    positions = _load_positions_from_graph()
+    target = next((p for p in positions if p.position_id == req.position_id), None)
+    if target is None:
         return error(404, "岗位不存在")
-    return ok(data=results[0].model_dump())
+
+    semantic = SkillEmbedder.get()
+    matcher = RuleBasedMatcher(positions, semantic=semantic)
+    result = matcher.match(
+        MatchRequest(
+            candidate=candidate,
+            mode=MatchMode.COMPARE,
+            target_position_id=req.position_id,
+        )
+    )[0]
+
+    path = await LearningPathGenerator().generate(candidate, target, semantic=semantic)
+    return ok(
+        data={
+            **result.model_dump(),
+            "gaps": [g.model_dump() for g in path.gaps],
+            "learning_path": [item.model_dump() for item in path.items],
+        }
+    )
