@@ -938,13 +938,20 @@ async def batch_extract(
             )).all()
 
         results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": []}
-        for row in rows:
+        total = len(rows)
+        for i, row in enumerate(rows, start=1):
             await asyncio.sleep(_BATCH_REQUEST_INTERVAL)
             text = _build_jd_text(row.snapshot or {}, row.raw_text or "")
             if len(text.strip()) < 10:
                 results["failed"].append({"jd_id": row.id, "error": "JD 正文过短（<10 字符），跳过"})
                 continue
             results["processed"] += 1
+            # 逐条打印 jd_id + 进度百分比：batch_extract 只在循环结束 commit，
+            # 中间进度 DB 不可见，靠此日志实时确认推进（worker.err.log）
+            print(
+                f"[batch_extract] 处理 jd_id={row.id}（{i}/{total}，{i / total * 100:.0f}%）",
+                flush=True,
+            )
             try:
                 extraction = extractor.extract(text)
                 snap = dict(row.snapshot or {})
