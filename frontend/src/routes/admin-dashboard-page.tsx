@@ -6,6 +6,7 @@ import {
   RefreshCw,
   Shield,
   Users,
+  Workflow,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -112,6 +113,7 @@ function actionType(action: string): AuditActionType {
 
 const QUICK_ACTIONS = [
   { id: 'crawl', label: '触发全量爬取', icon: RefreshCw, desc: '重新采集所有数据源' },
+  { id: 'etl', label: '触发数据入图', icon: Workflow, desc: '抽取已爬数据并写入图谱' },
 ]
 
 const LEVEL_VARIANT: Record<string, SourceItem['levelVariant']> = {
@@ -194,6 +196,13 @@ export function AdminDashboardPage() {
       return next
     })
     try {
+      if (id === 'etl') {
+        // 数据入图：对已爬取数据执行 LLM 抽取 → Neo4j 入图 → 聚合（POST /admin/etl/trigger）
+        const res = await apiPost<{ task_id: string; status: string }>('/admin/etl/trigger')
+        console.log(`[quick-action] 入图任务已入队: ${res.task_id}`)
+        setActionMessages((prev) => new Map(prev).set(id, '入图任务已入队'))
+        return
+      }
       // 真实触发：对每个平台入队 crawl_platform 任务（POST /admin/crawl/trigger）
       const res = await apiGet<CrawlStatusData>('/admin/crawl/status')
       console.log(`[quick-action] 获取平台列表: ${res.platforms.length} 个`)

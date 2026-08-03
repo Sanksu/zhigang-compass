@@ -21,6 +21,7 @@ from app.workers.tasks import (
     load_courses,
     resume_parse,
     run_etl_pipeline,
+    run_ingest,
     snapshot_graph,
     validate_temporal,
 )
@@ -28,6 +29,7 @@ from app.workers.tasks import (
 EXPECTED_FUNCTIONS = [
     crawl_platform,
     run_etl_pipeline,
+    run_ingest,
     validate_temporal,
     detect_inflation,
     resume_parse,

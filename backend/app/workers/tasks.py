@@ -767,6 +767,31 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
     return results
 
 
+async def run_ingest(ctx: dict, task_id: str | None = None) -> dict:
+    """数据入图（不含爬虫）：LLM 抽取 → Neo4j 入图 → 课程/岗位聚合 → 版本快照。
+
+    与 run_etl_pipeline 的差异：跳过阶段 1 爬虫，仅执行阶段 5-12，供管理端
+    「触发数据入图」按钮手动触发（对已爬取入库的原始数据重跑抽取与入图）。
+    各阶段幂等，可安全重复执行；task_id 存在时同步 TaskStatus 状态。
+    """
+    await _update_crawl_task(task_id, status="running", progress=0.2, result={"action": "run_ingest"})
+    stages: dict = {}
+    try:
+        stages["structure_load"] = await batch_extract(ctx, limit=500)
+        stages["load_courses"] = await load_courses(ctx)
+        stages["evaluate_courses"] = await evaluate_courses(ctx)
+        stages["aggregate_positions"] = await aggregate_positions(ctx)
+        stages["cross_validate"] = await cross_validate_jds(ctx)
+        stages["diversity_report"] = await diversity_report(ctx)
+        stages["check_data_freshness"] = await check_data_freshness(ctx)
+        stages["snapshot_graph"] = await snapshot_graph(ctx, triggered_by="manual")
+    except Exception as e:
+        await _update_crawl_task(task_id, status="failed", error=str(e)[:500])
+        raise
+    await _update_crawl_task(task_id, status="success", progress=1.0, result={"stages": stages})
+    return {"stages": stages}
+
+
 # ============================================================
 # 业务异步任务（M3/M4 实现）
 # ============================================================
@@ -1107,6 +1132,7 @@ class WorkerSettings:
     functions = [
         crawl_platform,
         run_etl_pipeline,
+        run_ingest,
         validate_temporal,
         detect_inflation,
         resume_parse,

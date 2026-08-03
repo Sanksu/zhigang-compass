@@ -293,6 +293,57 @@ async def _enqueue_crawl(spider: str, keywords: list[str], task_id: str | None =
         await pool.close()
 
 
+async def _enqueue_etl(task_id: str) -> None:
+    """入队 ARQ run_ingest（数据入图）任务；队列不可用抛异常由调用方标记 failed。"""
+    from arq import create_pool
+    from arq.connections import RedisSettings
+    from urllib.parse import urlparse
+
+    parsed = urlparse(settings.arq_redis_url)
+    redis_settings = RedisSettings(
+        host=parsed.hostname or "localhost",
+        port=parsed.port or 6379,
+        database=int(parsed.path.lstrip("/") or "1"),
+        password=parsed.password,
+    )
+    pool = await create_pool(redis_settings)
+    try:
+        await pool.enqueue_job("run_ingest", task_id=task_id)
+    finally:
+        await pool.close()
+
+
+@router.post("/etl/trigger", status_code=202)
+async def etl_trigger(db: AsyncSession = Depends(get_db)):
+    """触发数据入图（契约 /admin/etl/trigger）。
+
+    对已爬取入库的原始数据执行 LLM 抽取 → Neo4j 入图 → 课程/岗位聚合
+    → 版本快照（run_ingest 任务，不含爬虫）。队列不可用时标记任务 failed。
+    """
+    logger.info("[etl/trigger] 收到数据入图触发请求")
+    task = TaskStatus(
+        task_type="etl",
+        status="pending",
+        result={"action": "run_ingest"},
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    logger.info(f"[etl/trigger] 任务已建: task_id={task.id}")
+
+    try:
+        await _enqueue_etl(str(task.id))
+        logger.info(f"[etl/trigger] 任务入队成功: task_id={task.id}")
+    except Exception as e:
+        task.status = "failed"
+        task.error = f"任务入队失败: {e}"
+        await db.commit()
+        logger.error(f"[etl/trigger] 任务入队失败: task_id={task.id} err={e}")
+        return error(500, f"入图任务入队失败: {e}")
+
+    return ok(data={"task_id": task.id, "status": "pending"})
+
+
 @router.post("/crawl/trigger", status_code=202)
 async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
     """触发爬取任务（BE-M4-05，契约 /admin/crawl/trigger）。
