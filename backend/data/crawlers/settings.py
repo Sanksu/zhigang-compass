@@ -66,6 +66,10 @@ POOL_REQUIRED = {
     "arxiv", "github", "stackoverflow",
 }
 
+# 开发环境默认代理（本地 Clash/V2Ray 默认端口；生产以 PROXY_POOL/API 配置为准）
+# 中间件回退链：PROXY_POOL → 环境变量 HTTPS_PROXY/HTTP_PROXY → DEFAULT_PROXY
+DEFAULT_PROXY = "http://127.0.0.1:7890"
+
 # 代理池列表（可扩展：支持 HTTP/HTTPS/SOCKS5）
 # 格式: scheme://user:pass@host:port
 PROXY_POOL = [
