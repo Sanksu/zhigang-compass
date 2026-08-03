@@ -3,6 +3,7 @@
 启动：uv run uvicorn app.main:app --reload --port 8000
 """
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -11,6 +12,14 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.middleware import setup_middleware
+
+# 应用内 logger（auth/admin 等模块）输出到标准输出，便于运行排错；
+# root 默认 WARNING 会吞掉模块 INFO 日志，故启动时统一配置
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    force=True,
+)
 
 
 @asynccontextmanager

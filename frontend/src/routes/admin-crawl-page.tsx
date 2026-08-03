@@ -91,6 +91,7 @@ interface CrawlPlatform {
   level: PlatformLevel
   files: number
   total_count: number
+  today_count: number
   last_run: string | null
 }
 
@@ -324,13 +325,13 @@ export function AdminCrawlPage() {
             name: p.name,
             level: p.level,
             status: 'idle',
-            todayCount: 0,
+            todayCount: p.today_count ?? 0,
             totalCount: p.total_count,
             lastRun: p.last_run ? new Date(p.last_run).toLocaleString('zh-CN') : '—',
           })),
         )
         setMetrics([
-          { id: 'today', label: '今日采集量', value: '0', delta: '调度后统计', deltaColor: 'text-ink-muted', icon: Database, hint: 'ETL 调度（DA-M2-12）接入后统计增量' },
+          { id: 'today', label: '今日采集量', value: res.metrics.today_count.toLocaleString(), delta: '今日新增', deltaColor: 'text-state-emerging', icon: Database, hint: '今日 output/*.jsonl 新增行数（CST）' },
           { id: 'output', label: '累计采集量', value: res.metrics.output_total.toLocaleString(), delta: `+${res.platforms.length}源`, deltaColor: 'text-state-emerging', icon: Database, hint: 'output/*.jsonl 真实行数合计' },
           { id: 'raw', label: 'DB 已入库', value: (res.metrics.raw.jd + res.metrics.raw.course).toLocaleString(), delta: `JD ${res.metrics.raw.jd}`, deltaColor: 'text-state-emerging', icon: Activity, hint: 'jd_raw + course_raw 真实计数' },
           { id: 'files', label: '采集文件数', value: res.platforms.length.toLocaleString(), delta: '13 源', deltaColor: 'text-ink-muted', icon: Gauge, hint: '有采集记录的平台数' },
