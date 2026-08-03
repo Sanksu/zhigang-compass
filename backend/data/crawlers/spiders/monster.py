@@ -31,6 +31,7 @@ from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
 from crawlers.settings import SUBPROCESS_TIMEOUT
+from crawlers.setup_boss_chrome import ensure_cdp_chrome
 
 # 独立采集脚本路径
 CRAWLER_SCRIPT = str(Path(__file__).resolve().parent.parent / "monster_cdp_crawler.py")
@@ -59,6 +60,16 @@ class MonsterSpider(BaseSpider):
 
         cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
 
+        # 确保 CDP Chrome 可用（被环境回收时自动拉起），避免占位请求直接失败
+        import time as _time
+        t0 = _time.monotonic()
+        self.logger.info(f"[monster] 检查 CDP Chrome（{cdp_url}）...")
+        if ensure_cdp_chrome(cdp_url):
+            self.logger.info(f"[monster] CDP Chrome 就绪（耗时 {_time.monotonic() - t0:.1f}s）")
+        else:
+            self.logger.error(f"[monster] CDP Chrome 启动失败（{cdp_url}），本次采集终止")
+            return
+
         # 占位 Request 触发 parse（与 BOSS/maimai 一致：在 parse 中阻塞调用脚本，
         # 避免 start_requests 直接 yield Item 导致 feed exporter 写入已关闭文件）
         yield Request(
@@ -78,7 +89,7 @@ class MonsterSpider(BaseSpider):
         for task in tasks:
             keyword = task["keyword"]
             city = task["city"]
-            self.logger.info(f"开始采集: kw={keyword} city={city}")
+            self.logger.info(f"[monster] 开始采集: kw={keyword} city={city}（调用 CDP 脚本）")
 
             cmd = [
                 python_exe, CRAWLER_SCRIPT,
@@ -111,6 +122,7 @@ class MonsterSpider(BaseSpider):
                 self.logger.error(f"采集脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
                 continue
 
+            item_count = 0
             for line in stdout.splitlines():
                 line = line.strip()
                 if not line:
@@ -121,6 +133,7 @@ class MonsterSpider(BaseSpider):
                     self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
                     continue
 
+                item_count += 1
                 yield self.make_item(
                     source_id=str(item_data.get("id", "")),
                     source_url=item_data.get("url", ""),
@@ -131,15 +144,22 @@ class MonsterSpider(BaseSpider):
                     experience=item_data.get("experience_range", ""),
                     education=item_data.get("education", ""),
                     tags=self._build_tags(item_data),
+                    post_date=item_data.get("date_posted", ""),
                     description=item_data.get("description", ""),
                     requirements="",
                     raw_text=json.dumps(item_data, ensure_ascii=False),
                 )
 
             if proc.returncode != 0:
-                self.logger.error(f"采集脚本退出码 {proc.returncode}: {stderr[-500:]}")
+                self.logger.error(f"[monster] CDP 脚本退出码 {proc.returncode}: {stderr[-500:]}")
             elif stderr:
-                self.logger.debug(f"采集 stderr: {stderr[-300:]}")
+                # 转发 CDP 脚本关键日志（连接/cookies/导航/拦截），便于实时排查。
+                # 跳过脚本自身的"采集完成"汇总（下方输出产出统计，避免重复反馈）
+                for line in stderr.strip().splitlines()[-20:]:
+                    if "采集完成" in line:
+                        continue
+                    self.logger.info(f"[cdp] {line}")
+            self.logger.info(f"[monster] kw={keyword} city={city} 完成：产出 {item_count} 条")
 
     def _on_error(self, failure):
         """占位请求失败回调。"""

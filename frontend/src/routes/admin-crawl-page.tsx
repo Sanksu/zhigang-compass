@@ -145,12 +145,13 @@ interface SseLogResult {
 
 /**
  * 读取爬虫实时日志 SSE（GET /admin/crawl/task/{taskId}/stream），onLog 逐行回调。
- * 60s 无终态事件则中止（与后端 600s 兜底相比更保守，避免连接悬挂）；
+ * 10 分钟无终态事件则中止（与后端 600s 兜底一致；短任务如 boss 可达数分钟，
+ * 60s 会误断导致"连接中断或超时"）；
  * admin 端点需认证，fetch 不会自动附加 token，手动加 Bearer。
  */
 async function readSseCrawlLog(taskId: string, onLog: (line: string) => void): Promise<SseLogResult> {
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 60_000)
+  const timer = setTimeout(() => ctrl.abort(), 600_000)
   try {
     const headers: Record<string, string> = {}
     const token = getAccessToken()

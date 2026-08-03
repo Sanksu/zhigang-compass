@@ -93,7 +93,7 @@ class JobSpyBaseSpider(BaseSpider):
                     continue
 
                 salary = self._format_salary(
-                    item_data.get("interval"),
+                    item_data.get("salary_interval"),
                     item_data.get("min_amount"),
                     item_data.get("max_amount"),
                     item_data.get("currency", "USD"),
@@ -109,6 +109,7 @@ class JobSpyBaseSpider(BaseSpider):
                     experience=item_data.get("experience_range", "") or item_data.get("job_level", ""),
                     education="",
                     tags=self._build_tags(item_data),
+                    post_date=item_data.get("date_posted", ""),
                     description=item_data.get("description", ""),
                     requirements="",
                     raw_text=json.dumps(item_data, ensure_ascii=False),

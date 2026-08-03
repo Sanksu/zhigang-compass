@@ -86,7 +86,8 @@ EXTRACT_JOBS_JS = """
             const afterCity = metaLine.slice(city.length);
             const typeIdx = afterCity.search(/全职|兼职|实习/);
             if (typeIdx >= 0) {
-                category = afterCity.slice(afterCity.indexOf('全职') + 2 || afterCity.indexOf('兼职') + 2 || afterCity.indexOf('实习') + 2).trim();
+                // 用 typeIdx 定位类型词后截取（旧的 indexOf||短路在"全职"缺失时会误截首字符）
+                category = afterCity.slice(typeIdx + 2).trim();
             }
         }
 
@@ -199,8 +200,6 @@ async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
             return 0
 
         log(f"提取到 {len(jobs)} 条岗位")
-        if jobs:
-            log(f"样本: {json.dumps(jobs[0], ensure_ascii=False)[:200]}")
 
         all_jobs_data.extend(jobs)
         await page.close()

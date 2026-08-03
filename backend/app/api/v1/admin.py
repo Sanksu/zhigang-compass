@@ -165,6 +165,13 @@ async def audit_logs(
 # 爬虫状态
 # ============================================================
 
+def _match_platform(stem: str) -> str | None:
+    """从 output 文件名解析平台：{platform}.jsonl 或 {platform}_{YYYYMMDD}_{HHMMSS}.jsonl。"""
+    for pid in PLATFORM_META:
+        if stem == pid or stem.startswith(pid + "_"):
+            return pid
+    return None
+
 @router.get("/crawl/status")
 async def crawl_status(db: AsyncSession = Depends(get_db)):
     """爬取状态监控：raw 表计数 + output JSONL 文件统计。"""
@@ -175,13 +182,27 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
         "community": await db.scalar(select(func.count()).select_from(CommunityRaw)) or 0,
     }
 
-    # 从 output/{platform}.jsonl 统计各平台采集文件
+    # 各平台最后触发时间（task_status 记录，含失败；比文件 mtime 更及时）
+    # 注：PG 对参数化的 result->>spider 分组等价识别有坑，故 Python 侧分组（crawl 任务量小）
+    task_last_run: dict[str, str] = {}
+    crawl_tasks = await db.scalars(
+        select(TaskStatus).where(TaskStatus.task_type == "crawl")
+    )
+    for t in crawl_tasks:
+        spider = (t.result or {}).get("spider")
+        if not spider:
+            continue
+        ts = t.created_at.isoformat() if t.created_at else None
+        if ts and (spider not in task_last_run or ts > task_last_run[spider]):
+            task_last_run[spider] = ts
+
+    # 从 output/*.jsonl 统计各平台采集文件（文件名含时间戳后缀）
     platforms = []
     output_total = 0
     if _OUTPUT_DIR.exists():
         for f in sorted(_OUTPUT_DIR.glob("*.jsonl")):
-            platform = f.stem
-            if platform not in PLATFORM_META:
+            platform = _match_platform(f.stem)
+            if platform is None:
                 continue
             try:
                 count = sum(1 for _ in f.open(encoding="utf-8"))
@@ -195,7 +216,7 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
                 "mtime": datetime.fromtimestamp(f.stat().st_mtime, tz=timezone(timedelta(hours=8))).isoformat(),
             })
 
-    # 按平台聚合（最新文件时间 + 累计条数）
+    # 按平台聚合（最新文件时间 + 累计条数；last_run 优先取 task_status）
     by_platform: dict[str, dict] = {}
     for p in platforms:
         meta = PLATFORM_META[p["platform"]]
@@ -211,6 +232,12 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
         entry["total_count"] += p["count"]
         if entry["last_run"] is None or p["mtime"] > entry["last_run"]:
             entry["last_run"] = p["mtime"]
+
+    # task_status 记录比文件时间更新时采用（覆盖无文件/失败场景）
+    for entry in by_platform.values():
+        ts = task_last_run.get(entry["id"])
+        if ts and (entry["last_run"] is None or ts > entry["last_run"]):
+            entry["last_run"] = ts
 
     return ok(data={
         "metrics": {

@@ -40,6 +40,7 @@ from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
 from crawlers.settings import SUBPROCESS_TIMEOUT
+from crawlers.setup_boss_chrome import ensure_cdp_chrome
 
 # BOSS 直聘城市代码映射
 BOSS_CITY_CODES = {
@@ -79,6 +80,10 @@ class BossSpider(BaseSpider):
         )
 
     def start_requests(self):
+        # 确保 CDP Chrome 可用（被环境回收时自动拉起），避免占位请求直接失败
+        if not ensure_cdp_chrome(self.cdp_url):
+            self.logger.error(f"CDP Chrome 启动失败（{self.cdp_url}），本次采集终止")
+            return
         # 发一个占位 Request 到 CDP 端点，触发 parse 方法
         yield Request(
             f"{self.cdp_url}/json/version",
@@ -154,6 +159,7 @@ class BossSpider(BaseSpider):
                 self.logger.error(f"采集脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
                 continue
 
+            item_count = 0
             for line in stdout.splitlines():
                 line = line.strip()
                 if not line:
@@ -164,25 +170,34 @@ class BossSpider(BaseSpider):
                     self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
                     continue
 
+                item_count += 1
                 yield self.make_item(
-                    source_id=item_data["source_id"],
-                    source_url=item_data["source_url"],
-                    title=item_data["title"],
-                    company=item_data["company"],
-                    location=item_data["location"],
-                    salary=item_data["salary"],
-                    experience=item_data["experience"],
-                    education=item_data["education"],
-                    tags=item_data["tags"],
-                    description=item_data["description"],
-                    requirements=item_data["requirements"],
-                    raw_text=item_data["raw_text"],
+                    source_id=item_data.get("source_id", ""),
+                    source_url=item_data.get("source_url", ""),
+                    title=item_data.get("title", ""),
+                    company=item_data.get("company", ""),
+                    location=item_data.get("location", ""),
+                    salary=item_data.get("salary", ""),
+                    experience=item_data.get("experience", ""),
+                    education=item_data.get("education", ""),
+                    tags=item_data.get("tags") or [],
+                    description=item_data.get("description", ""),
+                    requirements=item_data.get("requirements", ""),
+                    raw_text=item_data.get("raw_text", ""),
                 )
 
             if proc.returncode != 0:
                 self.logger.error(
                     f"采集脚本退出码 {proc.returncode}, stderr: {stderr_output[-300:]}"
                 )
+            elif stderr_output:
+                # 转发 CDP 脚本关键日志（连接/cookies/导航/API 请求），便于实时排查。
+                # 跳过脚本自身的"采集完成"汇总（下方输出产出统计，避免重复反馈）
+                for line in stderr_output.strip().splitlines()[-20:]:
+                    if "采集完成" in line:
+                        continue
+                    self.logger.info(f"[cdp] {line}")
+            self.logger.info(f"[boss] kw={keyword} city={city} 完成：产出 {item_count} 条")
 
             # 不同 keyword/city 之间不加延迟（脚本内部已有翻页延迟）
 

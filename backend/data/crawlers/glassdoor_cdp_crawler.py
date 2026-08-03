@@ -283,8 +283,6 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                 continue
 
             log(f"  第 {page_num} 页提取 {len(jobs)} 条岗位")
-            if jobs:
-                log(f"  样本: {json.dumps(jobs[0], ensure_ascii=False)[:200]}")
 
             if not jobs:
                 log(f"  第 {page_num} 页无岗位，结束采集")

@@ -10,7 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.api.v1.admin import PLATFORM_META, _PLATFORM_TO_SPIDER, _history_row
+from app.api.v1.admin import (
+    PLATFORM_META,
+    _PLATFORM_TO_SPIDER,
+    _history_row,
+    _match_platform,
+)
 
 _SPIDERS_DIR = Path(__file__).resolve().parents[2] / "data" / "crawlers" / "spiders"
 
@@ -34,6 +39,20 @@ def test_all_mapped_spiders_exist():
 def test_platform_meta_has_no_removed_source():
     """拉勾网已移除（设计文档 R-14），不应出现在平台白名单。"""
     assert "lagou" not in PLATFORM_META
+
+
+class TestMatchPlatform:
+    """output 文件名 → 平台解析（手动触发文件带时间戳后缀，修复 last_run 不更新）。"""
+
+    def test_plain_stem(self):
+        assert _match_platform("monster") == "monster"
+
+    def test_timestamp_suffix(self):
+        assert _match_platform("monster_20260803_150430") == "monster"
+
+    def test_unknown_stem(self):
+        assert _match_platform("lowfreq_monster") is None
+        assert _match_platform("random") is None
 
 
 class TestHistoryRow:
