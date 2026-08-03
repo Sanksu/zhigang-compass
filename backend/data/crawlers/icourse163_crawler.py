@@ -31,6 +31,10 @@ ICOURSE163_SEARCH_RPC = (
     "https://www.icourse163.org/web/j/mocSearchBean.searchCourse.rpc"
 )
 
+# 培训/应试类课程标题黑名单：关键词模糊匹配命中的课程（专升本辅导/期末冲刺等）
+# 与岗位技能学习路径无关且质量差，直接跳过入库（2026-08-03 真实库含 29 条此类脏数据）
+TITLE_BLACKLIST = ("专升本", "期末")
+
 # 在页面内执行 fetch 调用 API 的 JS 表达式
 # 注意：csrfKey 在 URL 上由页面 JS 动态生成，最稳的做法是直接在页面上下文
 # 调 fetch 让浏览器自己处理同源和 cookie，然后再拼上同源的 csrfKey。
@@ -123,6 +127,11 @@ def parse_course_list(api_data: dict, keyword: str) -> list:
             course_name = course_name.replace("{##", "").replace("##}", "")
 
         if not course_name:
+            continue
+
+        # 培训/应试类课程（专升本/期末冲刺等）与技能学习路径无关，跳过
+        if any(black in course_name for black in TITLE_BLACKLIST):
+            log(f"  跳过培训/应试类课程: {course_name[:50]}")
             continue
 
         source_url = f"https://www.icourse163.org/course/{course_id}"

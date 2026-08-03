@@ -28,7 +28,7 @@ type TrendTone = 'emerging' | 'declining' | 'stable'
 interface VersionDiffItem {
   id: string
   name: string
-  type: 'position' | 'skill' | 'evidence'
+  type: 'position' | 'skill' | 'evidence' | 'course' | 'tool'
   change: 'added' | 'removed' | 'changed'
   detail: string
 }
@@ -316,11 +316,20 @@ function MetricCard({ metric }: { metric: MetricItem }) {
 
 // ===== VersionDiffView =====
 
-/** 从节点 ID 前缀推断类型（id_generator 约定 pos_/sk_/ev_） */
+/** 从节点 ID 前缀推断类型（id_generator 约定 pos_/sk_/ev_/co_） */
 function typeOf(id: string): VersionDiffItem['type'] {
   if (id.startsWith('pos_')) return 'position'
   if (id.startsWith('ev_')) return 'evidence'
+  if (id.startsWith('co_')) return 'course'
   return 'skill'
+}
+
+/** 节点类型：优先用后端快照 type（course/tool 等精确类型），未知时回退 id 前缀推断 */
+function nodeTypeOf(n: EvolutionDiffNode): VersionDiffItem['type'] {
+  if (n.type === 'position' || n.type === 'skill' || n.type === 'evidence' || n.type === 'course' || n.type === 'tool') {
+    return n.type
+  }
+  return typeOf(n.id)
 }
 
 function diffToItems(d: EvolutionDiff): {
@@ -333,7 +342,7 @@ function diffToItems(d: EvolutionDiff): {
     change: VersionDiffItem['change'],
     detail: string,
   ): VersionDiffItem[] =>
-    list.map((n) => ({ id: n.id, name: n.name, type: typeOf(n.id), change, detail }))
+    list.map((n) => ({ id: n.id, name: n.name, type: nodeTypeOf(n), change, detail }))
   return {
     added: toItems(d.nodes_added, 'added', '节点新增'),
     removed: toItems(d.nodes_removed, 'removed', '节点删除'),
@@ -496,6 +505,8 @@ function DiffTable({ items }: { items: VersionDiffItem[] }) {
     position: '岗位',
     skill: '技能',
     evidence: '证据',
+    course: '课程',
+    tool: '工具',
   }
   return (
     <Table>
