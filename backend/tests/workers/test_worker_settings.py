@@ -69,3 +69,12 @@ def test_etl_pipeline_stages_cover_all_quality_tasks():
 def test_worker_settings_has_redis_config():
     assert WorkerSettings.max_retries == 2
     assert WorkerSettings.redis_settings is not None
+
+
+def test_worker_settings_job_timeout_not_task_timeout():
+    """arq 参数名是 job_timeout（task_timeout 会被忽略，默认 300s 杀掉长任务）。
+
+    回归：坑 22——长任务（爬虫/批量 LLM 抽取）需 30 分钟窗口。
+    """
+    assert getattr(WorkerSettings, "job_timeout", None) == 1800
+    assert not hasattr(WorkerSettings, "task_timeout")

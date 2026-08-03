@@ -33,6 +33,10 @@ _OUTPUT_DIR = _CRAWLERS_DIR / "output"
 # 显式消费 -a max_results 参数的 spider（其余源由各自默认采集量控制）
 MAX_RESULTS_SUPPORTED = {"arxiv"}
 
+# CDP 爬虫：需连接真实 Chrome（9222）复用登录态，无登录态时会自动拉起浏览器
+# （ensure_cdp_chrome），本地手动触发 ETL 可 skip_cdp=True 跳过，避免干扰用户浏览器
+CDP_SPIDERS = {"boss", "monster", "glassdoor", "maimai"}
+
 # 爬虫日志队列 key 前缀（Redis LIST，SSE 端点按 offset 增量拉取）
 _CRAWL_LOG_PREFIX = "crawl:log:"
 _CRAWL_LOG_TTL_SECONDS = 3600
@@ -685,7 +689,7 @@ async def cross_validate_jds(ctx: dict, limit: int | None = None) -> dict:
     }
 
 
-async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
+async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: bool = False) -> dict:
     """编排完整 ETL 管线（设计文档 §4.4）。
 
     管线顺序：
@@ -698,6 +702,8 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
 
     Args:
         run_date: 调度日期 YYYY-MM-DD，None 时取 UTC+8 当日
+        skip_cdp: True 时跳过 CDP 爬虫（boss/monster/glassdoor/maimai，需真实
+            Chrome 登录态），仅爬非 CDP 源——本地手动触发且无浏览器登录态时使用
     """
     if run_date is None:
         run_date = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
@@ -710,6 +716,10 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
     # 非招聘数据源（论文/社区/课程）
     trend_platforms = ["arxiv", "github", "stackoverflow"]
 
+    crawl_platforms = domestic_platforms + international_platforms + trend_platforms
+    if skip_cdp:
+        crawl_platforms = [p for p in crawl_platforms if p not in CDP_SPIDERS]
+
     results: dict = {
         "run_date": run_date,
         "stages": {},
@@ -717,7 +727,7 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
 
     # ── 阶段 1：爬虫（A 级国内主源）──
     crawl_results = []
-    for spider in domestic_platforms + international_platforms + trend_platforms:
+    for spider in crawl_platforms:
         try:
             r = await crawl_platform(ctx, spider)
             crawl_results.append(r)
@@ -1150,6 +1160,6 @@ class WorkerSettings:
     on_shutdown = on_shutdown
     redis_settings = RedisSettings.from_dsn(settings.arq_redis_url)
     concurrency = settings.arq_concurrency
-    task_timeout = settings.arq_task_timeout
+    job_timeout = settings.arq_job_timeout
     max_retries = 2
     retry_delay = 10
