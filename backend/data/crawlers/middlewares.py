@@ -1,5 +1,6 @@
 """Scrapy 共享中间件：UA 轮换 / 代理池 / 指数退避。"""
 
+import os
 import random
 import time
 from threading import Lock
@@ -7,6 +8,7 @@ from threading import Lock
 import requests
 
 from crawlers.settings import (
+    DEFAULT_PROXY,
     POOL_REQUIRED,
     PROXY_POOL,
     PROXY_POOL_REFRESH_INTERVAL,
@@ -40,7 +42,7 @@ class ProxyPoolMiddleware:
     """
 
     def __init__(self):
-        self._pool = list(PROXY_POOL)           # 可用代理
+        self._pool = self._init_pool()          # 可用代理
         self._failures: dict[str, int] = {}      # 代理 → 连续失败次数
         self._lock = Lock()
         self._last_refresh = 0.0
@@ -71,6 +73,19 @@ class ProxyPoolMiddleware:
 
     # ---- internal ----
 
+    @staticmethod
+    def _env_proxies() -> list[str]:
+        """环境变量代理（HTTPS_PROXY 优先，HTTP_PROXY 兜底）。
+
+        scrapy 的 Twisted 下载器不读环境变量，需经此注入 request.meta["proxy"]；
+        与 settings.py 契约及各国 spider 文档（HTTPS_PROXY=http://127.0.0.1:7890）一致。
+        """
+        return [p for p in (os.environ.get("HTTPS_PROXY"), os.environ.get("HTTP_PROXY")) if p]
+
+    def _init_pool(self) -> list[str]:
+        """代理池初始化：显式配置 → 环境变量 → 开发默认代理。"""
+        return list(PROXY_POOL) or self._env_proxies() or ([DEFAULT_PROXY] if DEFAULT_PROXY else [])
+
     def _ensure_pool(self, spider):
         if time.time() - self._last_refresh < PROXY_POOL_REFRESH_INTERVAL:
             return
@@ -93,11 +108,12 @@ class ProxyPoolMiddleware:
             except Exception as e:
                 spider.logger.warning(f"[ProxyPool] API 刷新失败: {e}")
 
-        # API 不可用时使用静态池
+        # API 不可用时使用静态池/环境变量代理
         with self._lock:
-            if not self._pool and PROXY_POOL:
-                self._pool = list(PROXY_POOL)
-                spider.logger.info(f"[ProxyPool] 使用静态代理池: {len(self._pool)} 个")
+            if not self._pool:
+                self._pool = self._init_pool()
+                if self._pool:
+                    spider.logger.info(f"[ProxyPool] 使用静态代理池: {len(self._pool)} 个")
 
     def _pick_proxy(self) -> str | None:
         with self._lock:
