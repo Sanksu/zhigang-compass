@@ -785,7 +785,8 @@ async def run_ingest(ctx: dict, task_id: str | None = None) -> dict:
         stages["diversity_report"] = await diversity_report(ctx)
         stages["check_data_freshness"] = await check_data_freshness(ctx)
         stages["snapshot_graph"] = await snapshot_graph(ctx, triggered_by="manual")
-    except Exception as e:
+    except BaseException as e:
+        # BaseException 含 CancelledError（ARQ 超时取消）——超时也要标记 failed，避免任务永久 stuck running
         await _update_crawl_task(task_id, status="failed", error=str(e)[:500])
         raise
     await _update_crawl_task(task_id, status="success", progress=1.0, result={"stages": stages})
@@ -1151,6 +1152,7 @@ class WorkerSettings:
     on_shutdown = on_shutdown
     redis_settings = RedisSettings.from_dsn(settings.arq_redis_url)
     concurrency = settings.arq_concurrency
-    task_timeout = settings.arq_task_timeout
+    # arq 参数名为 job_timeout（task_timeout 会被忽略，默认 300s，大任务必超时）
+    job_timeout = settings.arq_task_timeout
     max_retries = 2
     retry_delay = 10
