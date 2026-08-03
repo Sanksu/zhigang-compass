@@ -51,6 +51,10 @@ dev-dependencies = [
 # fail_under，避免被覆盖率拖累；fail_under 阈值仍声明式收敛在 [tool.coverage.report]。
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["-m", "not integration"]
+markers = [
+    "integration: 真实 LLM API 集成测试（产生费用，需有效 api_key，默认不跑，显式 -m integration 执行）",
+]
 
 [tool.coverage.run]
 source = ["app"]
