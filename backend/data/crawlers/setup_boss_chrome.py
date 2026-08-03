@@ -90,6 +90,9 @@ def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, cdp_address: str = "127.0.0.1
         f"--user-data-dir={profile_dir}",
         "--no-first-run",
         "--no-default-browser-check",
+        # Chrome 111+ 限制 CDP WebSocket 来源，不加则 playwright connect_over_cdp 报
+        # "Failed to open a new tab"（Target.createTarget 被拒）
+        "--remote-allow-origins=*",
         url,
     ]
 
