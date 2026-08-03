@@ -263,10 +263,12 @@ export function ResumeMatchPage() {
     setActiveResumeId(resumeId)
     setStage('parsing')
     try {
-      const res = await apiPost<{ items: BackendMatchResult[] }>('/match/recommend', {
-        resume_id: resumeId,
-        top_n: 10,
-      })
+      // 匹配含 SBERT 语义计算 + 全量岗位加载，实测 ~9s；放宽超时防冷启动/图谱扩大误报
+      const res = await apiPost<{ items: BackendMatchResult[] }>(
+        '/match/recommend',
+        { resume_id: resumeId, top_n: 10 },
+        { timeout: 60_000 },
+      )
       const items = res.items.map(toRecommendItem)
       setRecommendations(items)
       setStage('matched')
@@ -285,10 +287,14 @@ export function ResumeMatchPage() {
     setLoadingDetail(true)
     setMatchResult(null)
     try {
-      const res = await apiPost<BackendMatchResult>('/match/compare', {
-        resume_id: activeResumeId,
-        position_id: rec.position_id,
-      })
+      const res = await apiPost<BackendMatchResult>(
+        '/match/compare',
+        {
+          resume_id: activeResumeId,
+          position_id: rec.position_id,
+        },
+        { timeout: 60_000 },
+      )
       setMatchResult(toMatchResult(res))
     } catch (e) {
       setNotice(e instanceof ApiError ? e.message : '比对失败')
