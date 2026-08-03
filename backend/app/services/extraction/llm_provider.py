@@ -85,14 +85,18 @@ class LLMProviderChain:
         response_model: Type[T],
         max_retries: int = VALIDATION_RETRIES,
         system_prompt: Optional[str] = None,
+        timeout: Optional[int] = None,
     ) -> T:
         """抽取接口（jd_extractor 兼容）：走异步语义的重试链。
 
         Args:
             system_prompt: 系统角色提示词（分层 Prompt，§6.2 设计）
+            timeout: 单 provider 超时（秒）。缺省用 ASYNC_TIMEOUT_SECONDS；
+                批量抽取输出 token 线性放大，需传更大独立超时（设计文档 6.5）
         """
         return self.call_with_fallback(
-            prompt, response_model, max_retries=max_retries, system_prompt=system_prompt
+            prompt, response_model, max_retries=max_retries,
+            system_prompt=system_prompt, timeout=timeout,
         )
 
     def call_sync(self, prompt: str, response_model: Type[T], system_prompt: Optional[str] = None) -> T:
@@ -113,16 +117,22 @@ class LLMProviderChain:
         response_model: Type[T],
         max_retries: int = VALIDATION_RETRIES,
         system_prompt: Optional[str] = None,
+        timeout: Optional[int] = None,
     ) -> T:
-        """异步/批量路由：按优先级依次尝试，任一失败（超时/限流/5xx/连接/校验）切下一个。"""
+        """异步/批量路由：按优先级依次尝试，任一失败（超时/限流/5xx/连接/校验）切下一个。
+
+        Args:
+            timeout: 单 provider 超时（秒），缺省 ASYNC_TIMEOUT_SECONDS（30s）
+        """
         if not self._providers:
             raise LLMConfigurationError("未配置可用 provider（无 api_key 或全部禁用）")
+        effective_timeout = timeout or ASYNC_TIMEOUT_SECONDS
         failures = []
         for provider in self._providers:
             try:
                 return self._call_provider(
                     provider, prompt, response_model, max_retries,
-                    ASYNC_TIMEOUT_SECONDS, system_prompt,
+                    effective_timeout, system_prompt,
                 )
             except LLMExtractionError as e:
                 # 捕获父类：429/5xx/连接错误均包装为 LLMExtractionError，
