@@ -95,8 +95,6 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                         jobs = body.get("jobResults", [])
                         captured_api_responses.append(body)
                         log(f"  ✅ 拦截到搜索 API 响应: {len(jobs)} 条岗位 (totalSize={body.get('totalSize')})")
-                        if jobs:
-                            log(f"  样本字段: {list(jobs[0].keys())[:15]}")
                 except Exception as e:
                     log(f"  ⚠️ 拦截响应解析失败: {e}")
 
@@ -112,7 +110,7 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                 # 改用 domcontentloaded + 等待 SPA 渲染，再靠下方的 API 响应轮询兜底
                 await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 await page.wait_for_timeout(5000)
-                log(f"  导航完成: {url}\n  当前 URL: {page.url} | 标题: {await page.title()}")
+                log(f"  页面已加载 | 当前 URL: {page.url} | 标题: {await page.title()}")
             except Exception as e:
                 log(f"  导航失败: {e}")
                 try:

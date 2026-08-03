@@ -159,6 +159,7 @@ class BossSpider(BaseSpider):
                 self.logger.error(f"采集脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
                 continue
 
+            item_count = 0
             for line in stdout.splitlines():
                 line = line.strip()
                 if not line:
@@ -169,6 +170,7 @@ class BossSpider(BaseSpider):
                     self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
                     continue
 
+                item_count += 1
                 yield self.make_item(
                     source_id=item_data.get("source_id", ""),
                     source_url=item_data.get("source_url", ""),
@@ -188,6 +190,14 @@ class BossSpider(BaseSpider):
                 self.logger.error(
                     f"采集脚本退出码 {proc.returncode}, stderr: {stderr_output[-300:]}"
                 )
+            elif stderr_output:
+                # 转发 CDP 脚本关键日志（连接/cookies/导航/API 请求），便于实时排查。
+                # 跳过脚本自身的"采集完成"汇总（下方输出产出统计，避免重复反馈）
+                for line in stderr_output.strip().splitlines()[-20:]:
+                    if "采集完成" in line:
+                        continue
+                    self.logger.info(f"[cdp] {line}")
+            self.logger.info(f"[boss] kw={keyword} city={city} 完成：产出 {item_count} 条")
 
             # 不同 keyword/city 之间不加延迟（脚本内部已有翻页延迟）
 

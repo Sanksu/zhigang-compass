@@ -200,8 +200,6 @@ async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
             return 0
 
         log(f"提取到 {len(jobs)} 条岗位")
-        if jobs:
-            log(f"样本: {json.dumps(jobs[0], ensure_ascii=False)[:200]}")
 
         all_jobs_data.extend(jobs)
         await page.close()

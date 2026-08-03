@@ -153,8 +153,11 @@ class MonsterSpider(BaseSpider):
             if proc.returncode != 0:
                 self.logger.error(f"[monster] CDP 脚本退出码 {proc.returncode}: {stderr[-500:]}")
             elif stderr:
-                # 转发 CDP 脚本关键日志（连接/cookies/导航/拦截），便于实时排查
+                # 转发 CDP 脚本关键日志（连接/cookies/导航/拦截），便于实时排查。
+                # 跳过脚本自身的"采集完成"汇总（下方输出产出统计，避免重复反馈）
                 for line in stderr.strip().splitlines()[-20:]:
+                    if "采集完成" in line:
+                        continue
                     self.logger.info(f"[cdp] {line}")
             self.logger.info(f"[monster] kw={keyword} city={city} 完成：产出 {item_count} 条")
 

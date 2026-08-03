@@ -50,8 +50,9 @@ async def crawl(cdp_url: str, keyword: str, city_code: str, max_pages: int = 5) 
     async with async_playwright() as p:
         try:
             browser = await p.chromium.connect_over_cdp(cdp_url)
+            log(f"✅ CDP 连接成功: {cdp_url}（浏览器版本: {browser.version}）")
         except Exception as e:
-            log(f"CDP 连接失败: {e}")
+            log(f"❌ CDP 连接失败（{cdp_url}）: {e}")
             return items
 
         # 隔离：新建独立 context 并复制主 context 的 cookies（保留登录态），
@@ -62,6 +63,7 @@ async def crawl(cdp_url: str, keyword: str, city_code: str, max_pages: int = 5) 
                 _cookies = await browser.contexts[0].cookies()
                 if _cookies:
                     await context.add_cookies(_cookies)
+                    log(f"ℹ️ 已复制 {len(_cookies)} 个 cookies 到隔离 context")
             except Exception as e:
                 log(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
         page = await context.new_page()
@@ -229,7 +231,7 @@ def main():
     for item in items:
         print(json.dumps(item, ensure_ascii=False), flush=True)
 
-    log(f"采集完成，共 {len(items)} 条")
+    log(f"✅ 采集完成: kw={args.keyword} city={args.city_code} count={len(items)}")
     # 非零退出码让 spider 端感知失败（与其他 CDP 采集脚本一致）
     sys.exit(0 if items else 1)
 
