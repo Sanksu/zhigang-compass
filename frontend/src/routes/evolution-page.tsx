@@ -26,6 +26,7 @@ import { apiGet, ApiError } from '@/lib/api'
 type TrendTone = 'emerging' | 'declining' | 'stable'
 
 interface VersionDiffItem {
+  id: string
   name: string
   type: 'position' | 'skill' | 'evidence'
   change: 'added' | 'removed' | 'changed'
@@ -51,11 +52,18 @@ interface EvolutionVersion {
   node_changed: number
 }
 
+/** 后端 /evolution/diff 返回的节点项（含真实名称） */
+interface EvolutionDiffNode {
+  id: string
+  name: string
+  type: string
+}
+
 /** 后端 /evolution/diff 返回项 */
 interface EvolutionDiff {
-  nodes_added: string[]
-  nodes_removed: string[]
-  nodes_changed: string[]
+  nodes_added: EvolutionDiffNode[]
+  nodes_removed: EvolutionDiffNode[]
+  nodes_changed: EvolutionDiffNode[]
   edges_added: string[]
   edges_removed: string[]
 }
@@ -320,10 +328,16 @@ function diffToItems(d: EvolutionDiff): {
   removed: VersionDiffItem[]
   changed: VersionDiffItem[]
 } {
+  const toItems = (
+    list: EvolutionDiffNode[],
+    change: VersionDiffItem['change'],
+    detail: string,
+  ): VersionDiffItem[] =>
+    list.map((n) => ({ id: n.id, name: n.name, type: typeOf(n.id), change, detail }))
   return {
-    added: d.nodes_added.map((id) => ({ name: id, type: typeOf(id), change: 'added', detail: '节点新增' })),
-    removed: d.nodes_removed.map((id) => ({ name: id, type: typeOf(id), change: 'removed', detail: '节点删除' })),
-    changed: d.nodes_changed.map((id) => ({ name: id, type: typeOf(id), change: 'changed', detail: '节点属性变化' })),
+    added: toItems(d.nodes_added, 'added', '节点新增'),
+    removed: toItems(d.nodes_removed, 'removed', '节点删除'),
+    changed: toItems(d.nodes_changed, 'changed', '节点属性变化'),
   }
 }
 
@@ -493,8 +507,8 @@ function DiffTable({ items }: { items: VersionDiffItem[] }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {items.map((item, i) => (
-          <TableRow key={item.name + item.change + i}>
+        {items.map((item) => (
+          <TableRow key={item.id}>
             <TableCell className="font-medium text-ink">{item.name}</TableCell>
             <TableCell>
               <Badge variant="outline" className="text-[10px] font-mono">

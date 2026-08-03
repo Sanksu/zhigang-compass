@@ -20,17 +20,33 @@ router = APIRouter()
 def _diff_snapshots(a: dict, b: dict) -> dict:
     """对比两个版本快照（set 差集，设计文档 7.1 Diff）。
 
-    快照结构约定为 {nodes: [{id, ...}], edges: [{source, target, ...}]}。
+    快照结构约定为 {nodes: [{id, name, type}], edges: [{source, target}]}。
+    返回的 nodes_* 为 [{id, name, type}]，供前端直接展示节点真实名称。
     """
-    a_nodes = {n["id"] for n in a.get("nodes", []) if isinstance(n, dict)}
-    b_nodes = {n["id"] for n in b.get("nodes", []) if isinstance(n, dict)}
+    a_nodes = {n["id"]: n for n in a.get("nodes", []) if isinstance(n, dict) and n.get("id")}
+    b_nodes = {n["id"]: n for n in b.get("nodes", []) if isinstance(n, dict) and n.get("id")}
     a_edges = {f"{e.get('source')}->{e.get('target')}" for e in a.get("edges", [])}
     b_edges = {f"{e.get('source')}->{e.get('target')}" for e in b.get("edges", [])}
 
+    def _ref(node_id: str) -> dict:
+        # 名称取新版本优先（节点删除时回退旧版本），无 name 属性时退回 id
+        n = b_nodes.get(node_id) or a_nodes.get(node_id)
+        return {
+            "id": node_id,
+            "name": n.get("name") or node_id,
+            "type": n.get("type", ""),
+        }
+
     return {
-        "nodes_added": sorted(b_nodes - a_nodes),
-        "nodes_removed": sorted(a_nodes - b_nodes),
-        "nodes_changed": sorted(a_nodes & b_nodes),
+        "nodes_added": sorted(
+            (_ref(i) for i in b_nodes.keys() - a_nodes.keys()), key=lambda x: x["id"]
+        ),
+        "nodes_removed": sorted(
+            (_ref(i) for i in a_nodes.keys() - b_nodes.keys()), key=lambda x: x["id"]
+        ),
+        "nodes_changed": sorted(
+            (_ref(i) for i in a_nodes.keys() & b_nodes.keys()), key=lambda x: x["id"]
+        ),
         "edges_added": sorted(b_edges - a_edges),
         "edges_removed": sorted(a_edges - b_edges),
     }
