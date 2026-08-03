@@ -125,7 +125,8 @@ if ($Frontend) {
         Write-Host "[4/4] 5173 已有前端 dev server，跳过" -ForegroundColor Yellow
     } else {
         Write-Host "[4/4] 启动前端 dev server（vite :5173）..." -ForegroundColor Cyan
-        $feProc = Start-Process -FilePath "pnpm" -ArgumentList @("dev") -WorkingDirectory $FrontendDir `
+        # pnpm 是 .cmd shim，Start-Process 需显式 .cmd 才能启动（直接写 pnpm 报"非有效 Win32 应用程序"）
+        $feProc = Start-Process -FilePath "pnpm.cmd" -ArgumentList @("dev") -WorkingDirectory $FrontendDir `
             -WindowStyle Hidden -RedirectStandardOutput (Join-Path $LogDir "frontend.log") `
             -RedirectStandardError (Join-Path $LogDir "frontend.err.log") -PassThru
         Start-Sleep -Seconds 5
