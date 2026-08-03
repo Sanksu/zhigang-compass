@@ -114,20 +114,42 @@ def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, cdp_address: str = "127.0.0.1
     return proc
 
 
-def check_cdp(cdp_url: str) -> bool:
-    """检查 CDP 端点是否可用（Chrome 是否已启动）。"""
+def check_cdp(cdp_url: str, quiet: bool = False) -> bool:
+    """检查 CDP 端点是否可用（Chrome 是否已启动）。quiet=True 时不打印（供轮询）。"""
     import urllib.request
     import json
 
     try:
         with urllib.request.urlopen(f"{cdp_url}/json/version", timeout=5) as resp:
             data = json.loads(resp.read().decode())
-            print(f"CDP 连接成功: {data.get('Browser', 'unknown')}")
+            if not quiet:
+                print(f"CDP 连接成功: {data.get('Browser', 'unknown')}")
             return True
     except Exception as e:
-        print(f"CDP 连接失败: {e}")
-        print(f"请先运行: python -m crawlers.setup_boss_chrome")
+        if not quiet:
+            print(f"CDP 连接失败: {e}")
+            print(f"请先运行: python -m crawlers.setup_boss_chrome")
         return False
+
+
+def ensure_cdp_chrome(cdp_url: str | None = None, wait_seconds: int = 20) -> bool:
+    """确保 CDP Chrome 可用：不可用时自动启动（about:blank，避免站点页干扰）并轮询就绪。
+
+    CDP 爬虫（BOSS/Monster/Glassdoor/脉脉）发占位请求前调用，避免 Chrome
+    被系统/环境回收后爬虫直接失败。
+    """
+    import os
+    import time
+
+    cdp_url = cdp_url or os.environ.get("BOSS_CDP_URL", f"http://127.0.0.1:{DEFAULT_CDP_PORT}")
+    if check_cdp(cdp_url, quiet=True):
+        return True
+    start_chrome(url="about:blank")
+    for _ in range(wait_seconds * 2):
+        time.sleep(0.5)
+        if check_cdp(cdp_url, quiet=True):
+            return True
+    return False
 
 
 def check_login(cdp_url: str) -> bool:

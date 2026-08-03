@@ -36,6 +36,7 @@ from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
 from crawlers.settings import MAIMAI_COMPLIANCE, SUBPROCESS_TIMEOUT
+from crawlers.setup_boss_chrome import ensure_cdp_chrome
 
 
 CRAWLER_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "maimai_cdp_crawler.py")
@@ -71,6 +72,11 @@ class MaimaiSpider(BaseSpider):
         keyword = self.keywords[0] if self.keywords else ""
 
         self.logger.info(f"开始采集脉脉飞书招聘页（合规声明：{MAIMAI_COMPLIANCE['annotation']}）")
+
+        # 确保 CDP Chrome 可用（被环境回收时自动拉起），避免占位请求直接失败
+        if not ensure_cdp_chrome(cdp_url):
+            self.logger.error(f"CDP Chrome 启动失败（{cdp_url}），本次采集终止")
+            return
 
         # 占位 Request 触发 parse（与 BOSS 一致：在 parse 中阻塞调用 CDP 脚本，
         # 避免 start_requests 直接 yield Item 导致 feed exporter 写入已关闭文件）

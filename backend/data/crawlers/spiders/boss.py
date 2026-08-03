@@ -40,6 +40,7 @@ from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
 from crawlers.settings import SUBPROCESS_TIMEOUT
+from crawlers.setup_boss_chrome import ensure_cdp_chrome
 
 # BOSS 直聘城市代码映射
 BOSS_CITY_CODES = {
@@ -79,6 +80,10 @@ class BossSpider(BaseSpider):
         )
 
     def start_requests(self):
+        # 确保 CDP Chrome 可用（被环境回收时自动拉起），避免占位请求直接失败
+        if not ensure_cdp_chrome(self.cdp_url):
+            self.logger.error(f"CDP Chrome 启动失败（{self.cdp_url}），本次采集终止")
+            return
         # 发一个占位 Request 到 CDP 端点，触发 parse 方法
         yield Request(
             f"{self.cdp_url}/json/version",

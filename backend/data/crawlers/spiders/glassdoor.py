@@ -25,6 +25,7 @@ from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
 from crawlers.settings import SUBPROCESS_TIMEOUT
+from crawlers.setup_boss_chrome import ensure_cdp_chrome
 
 
 CRAWLER_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "glassdoor_cdp_crawler.py")
@@ -57,6 +58,11 @@ class GlassdoorSpider(BaseSpider):
             return
 
         cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
+
+        # 确保 CDP Chrome 可用（被环境回收时自动拉起），避免占位请求直接失败
+        if not ensure_cdp_chrome(cdp_url):
+            self.logger.error(f"CDP Chrome 启动失败（{cdp_url}），本次采集终止")
+            return
 
         # 占位 Request 触发 parse（与 BOSS/maimai 一致：在 parse 中阻塞调用脚本，
         # 避免 start_requests 直接 yield Item 导致 feed exporter 写入已关闭文件）
