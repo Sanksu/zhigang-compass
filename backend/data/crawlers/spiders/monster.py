@@ -31,7 +31,7 @@ from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
 from crawlers.settings import SUBPROCESS_TIMEOUT
-from crawlers.setup_boss_chrome import ensure_cdp_chrome
+from crawlers.setup_boss_chrome import ensure_cdp_chrome, platform_profile_dir
 
 # 独立采集脚本路径
 CRAWLER_SCRIPT = str(Path(__file__).resolve().parent.parent / "monster_cdp_crawler.py")
@@ -58,13 +58,16 @@ class MonsterSpider(BaseSpider):
             self.logger.error("无采集任务，请通过 -a keywords= -a cities= 指定")
             return
 
-        cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
+        # Monster 独立 CDP 浏览器：端口 9223 + 独立 profile（登录态/验证互不污染）
+        cdp_url = os.environ.get("MONSTER_CDP_URL", "http://127.0.0.1:9223")
 
-        # 确保 CDP Chrome 可用（被环境回收时自动拉起），避免占位请求直接失败
+        # 确保 CDP Chrome 可用（被环境回收时自动拉起），避免占位请求直接失败。
+        # 启动时打开 monster 首页，便于用户完成 DataDome 验证
         import time as _time
         t0 = _time.monotonic()
         self.logger.info(f"[monster] 检查 CDP Chrome（{cdp_url}）...")
-        if ensure_cdp_chrome(cdp_url):
+        if ensure_cdp_chrome(cdp_url, profile_dir=platform_profile_dir("monster"),
+                             url="https://www.monster.com/"):
             self.logger.info(f"[monster] CDP Chrome 就绪（耗时 {_time.monotonic() - t0:.1f}s）")
         else:
             self.logger.error(f"[monster] CDP Chrome 启动失败（{cdp_url}），本次采集终止")
@@ -83,7 +86,7 @@ class MonsterSpider(BaseSpider):
     def parse(self, response: Response):
         """通过 subprocess 调用采集脚本，解析 JSONL 输出并 yield Item。"""
         tasks = response.meta.get("tasks") or []
-        cdp_url = response.meta.get("cdp_url", "http://127.0.0.1:9222")
+        cdp_url = response.meta.get("cdp_url", "http://127.0.0.1:9223")
         python_exe = sys.executable
 
         for task in tasks:

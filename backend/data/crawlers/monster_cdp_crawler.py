@@ -30,10 +30,10 @@ def log(msg: str):
 API_HOST = "appsapi.monster.io"
 SEARCH_API_PATH = "/jobs-svx-service/v2/monster/search-jobs/samsearch/en-US"
 
-# 默认 CDP 端口（与 BOSS 共用，同一时刻只能一个爬虫用）
-DEFAULT_CDP_PORT = 9222
-# 默认 CDP 端点（可由环境变量 BOSS_CDP_URL 覆盖，支持局域网内容器浏览器）
-DEFAULT_CDP_URL = os.environ.get("BOSS_CDP_URL", f"http://127.0.0.1:{DEFAULT_CDP_PORT}")
+# 默认 CDP 端口（Monster 独立浏览器 9223，不与 BOSS 共享）
+DEFAULT_CDP_PORT = 9223
+# 默认 CDP 端点（可由环境变量 MONSTER_CDP_URL 覆盖，支持局域网内容器浏览器）
+DEFAULT_CDP_URL = os.environ.get("MONSTER_CDP_URL", f"http://127.0.0.1:{DEFAULT_CDP_PORT}")
 
 
 async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFAULT_CDP_URL) -> int:

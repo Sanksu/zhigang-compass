@@ -1,9 +1,15 @@
-"""BOSS 直聘 CDP 采集脚本（独立运行，避免事件循环冲突）。
+"""BOSS 直聘采集脚本（独立运行，避免与 Scrapy Twisted 事件循环冲突）。
 
-被 BossSpider 通过 subprocess 调用，输出 JSONL 到 stdout。
-也可以独立运行：python -m crawlers.boss_cdp_crawler --keyword Python --city 101010100
+方案演进（2026-08-04）：
+- 旧方案：CDP 连接浏览器 → 页面内 evaluate fetch 调 BOSS 内部 API。
+  问题：zhipin 反爬检测 CDP 自动化，页面内 fetch 被拦截（Failed to fetch），
+  导航 zhipin 甚至触发风控关闭整个浏览器（实测）。
+- 新方案：CDP 仅读取浏览器登录态 cookies，采集走纯 HTTP（httpx）直接调 API。
+  实测服务端对带登录 cookies 的正常 HTTP 请求不拦截（code=0 正常返回岗位）。
+  不导航页面、不执行页面 JS，浏览器保持存活，登录态仅作为 cookies 来源。
 
-技术方案：用 Playwright CDP 连接已启动的 Chrome/Edge，复用真实登录态。
+被 spiders/boss.py 通过 subprocess 调用，输出 JSONL 到 stdout。
+前置条件：已启动 CDP Chrome 并手动登录 zhipin.com（登录态持久到 profile）。
 """
 
 import argparse
@@ -13,22 +19,21 @@ import json
 import os
 import random
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
+import httpx
 
 # BOSS 内部搜索 API
 BOSS_API_URL = "https://www.zhipin.com/wapi/zpgeek/search/joblist.json"
 
-# 在页面内执行 fetch 调用 API 的 JS 表达式
-FETCH_API_JS = """
-async (apiUrl) => {
-    const r = await fetch(apiUrl, {credentials: 'include'});
-    const t = await r.text();
-    return JSON.stringify({status: r.status, body: t});
+# 与浏览器一致的请求头（复用登录态 + 真实指纹 UA）
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+    "Referer": "https://www.zhipin.com/",
+    "Accept": "application/json, text/plain, */*",
 }
-"""
 
 
 def log(msg):
@@ -36,188 +41,132 @@ def log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
-async def crawl(cdp_url: str, keyword: str, city_code: str, max_pages: int = 5) -> list:
-    """通过 CDP 连接已启动的 Chrome，采集岗位数据。
+async def read_zhipin_cookies(cdp_url: str) -> httpx.Cookies | None:
+    """经 CDP 读取浏览器登录态 cookies（仅读取，不导航/不操作页面）。
 
-    Args:
-        cdp_url: CDP 调试端点（如 http://127.0.0.1:9222，或局域网内
-            容器中浏览器的 http://192.168.x.x:9222）
+    Returns:
+        httpx.Cookies；无 zhipin 登录 cookies 时返回 None。
     """
     from playwright.async_api import async_playwright
-
-    items = []
 
     async with async_playwright() as p:
         try:
             browser = await p.chromium.connect_over_cdp(cdp_url)
-            log(f"✅ CDP 连接成功: {cdp_url}（浏览器版本: {browser.version}）")
         except Exception as e:
             log(f"❌ CDP 连接失败（{cdp_url}）: {e}")
-            return items
-
-        # 隔离：新建独立 context 并复制主 context 的 cookies（保留登录态），
-        # 爬虫导航只发生在隔离 context 内，不触碰用户正在浏览的页面
-        context = await browser.new_context()
-        if browser.contexts:
-            try:
-                _cookies = await browser.contexts[0].cookies()
-                if _cookies:
-                    await context.add_cookies(_cookies)
-                    log(f"ℹ️ 已复制 {len(_cookies)} 个 cookies 到隔离 context")
-            except Exception as e:
-                log(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
-        page = await context.new_page()
-
-        # 导航到具体搜索页（而非首页），避免首页重定向导致执行上下文被销毁
-        # wait_until="networkidle" 等待网络空闲，确保页面完全加载
-        search_page_url = f"https://www.zhipin.com/web/geek/job?query={keyword}&city={city_code}"
+            return None
         try:
-            await page.goto(search_page_url, wait_until="networkidle", timeout=30000)
-            # 额外等待 DOM 稳定，避免 SPA 框架的重定向
-            await page.wait_for_load_state("domcontentloaded")
+            if browser.contexts:
+                all_cookies = await browser.contexts[0].cookies()
+                zhipin = [c for c in all_cookies if "zhipin" in c.get("domain", "")]
+                if zhipin:
+                    jar = httpx.Cookies()
+                    for c in zhipin:
+                        jar.set(c["name"], c["value"], domain=c["domain"], path=c.get("path", "/"))
+                    log(f"✅ 已读取 {len(zhipin)} 个 zhipin cookies（登录态有效）")
+                    return jar
+            log("⚠️ 主 context 无 zhipin cookies（未登录）")
         except Exception as e:
-            log(f"导航到搜索页失败: {e}")
-            # 降级：仅导航到首页，再尝试 evaluate
+            log(f"⚠️ 读取 cookies 失败: {e}")
+    return None
+
+
+async def crawl(cdp_url: str, keyword: str, city_code: str, max_pages: int = 5) -> list:
+    """读取登录态 cookies，纯 HTTP 采集 BOSS 岗位。
+
+    不导航页面、不执行页面 JS，避免触发 zhipin 风控（页面内 fetch 被拦、
+    导航会关闭浏览器；纯 HTTP 带 cookies 请求正常返回岗位）。
+    """
+    cookies = await read_zhipin_cookies(cdp_url)
+    if cookies is None:
+        log("⚠️ 未读取到 zhipin 登录态：请在弹出的 Chrome 中【手动】打开 zhipin.com 完成登录后重跑爬虫")
+        return []
+
+    items = []
+    with httpx.Client(cookies=cookies, headers=_HEADERS, timeout=20, follow_redirects=True) as client:
+        for page_num in range(1, max_pages + 1):
+            params = {
+                "scene": "1",
+                "query": keyword,
+                "city": city_code,
+                "experience": "",
+                "payType": "",
+                "partTime": "",
+                "degree": "",
+                "industry": "",
+                "scale": "",
+                "position": "",
+                "jobType": "",
+                "salary": "",
+                "multiBusinessDistrict": "",
+                "multiSubway": "",
+                "page": page_num,
+            }
+            api_url = f"{BOSS_API_URL}?{urlencode(params)}"
             try:
-                await page.goto("https://www.zhipin.com/", wait_until="domcontentloaded", timeout=15000)
-                await page.wait_for_timeout(2000)
-            except Exception as e2:
-                log(f"降级导航也失败: {e2}")
-                await page.close()
-                return items
+                resp = client.get(api_url)
+                data = resp.json()
+            except Exception as e:
+                log(f"[page={page_num}] API 请求/解析失败: {e}")
+                break
 
-        try:
-            current_page = 1
-            while current_page <= max_pages:
-                api_params = {
-                    "scene": "1",
-                    "query": keyword,
-                    "city": city_code,
-                    "experience": "",
-                    "payType": "",
-                    "partTime": "",
-                    "degree": "",
-                    "industry": "",
-                    "scale": "",
-                    "position": "",
-                    "jobType": "",
-                    "salary": "",
-                    "multiBusinessDistrict": "",
-                    "multiSubway": "",
-                    "page": current_page,
-                }
-                api_url = f"{BOSS_API_URL}?{urlencode(api_params)}"
+            code = data.get("code")
+            if code != 0:
+                log(f"BOSS API 错误: code={code}, message={data.get('message', '')}")
+                if code in (35, 36, 37):
+                    log("⚠️ BOSS 风控/登录态失效：请在弹出的 Chrome 中重新完成登录后重跑爬虫")
+                break
 
-                # evaluate 失败时重试 2 次（页面可能因 SPA 路由切换导致上下文短暂销毁）
-                raw = None
-                last_err = None
-                for attempt in range(3):
-                    try:
-                        raw = await page.evaluate(FETCH_API_JS, api_url)
-                        break
-                    except Exception as e:
-                        last_err = e
-                        log(f"fetch 调用失败 (page={current_page}, attempt={attempt+1}/3): {e}")
-                        if attempt < 2:
-                            await page.wait_for_timeout(2000)
-                            # 重新导航到搜索页，恢复执行上下文
-                            try:
-                                await page.goto(search_page_url, wait_until="networkidle", timeout=20000)
-                            except Exception:
-                                pass
-                if raw is None:
-                    log(f"fetch 3 次重试均失败，跳过 page={current_page}: {last_err}")
-                    break
+            jobs = (data.get("zpData") or {}).get("jobList") or []
+            log(f"[kw={keyword} city={city_code} page={page_num}] 获取 {len(jobs)} 条岗位")
 
-                if not raw:
-                    log(f"[page={current_page}] API 返回空")
-                    break
+            for j in jobs:
+                encrypt_job_id = j.get("encryptJobId", "")
+                if not encrypt_job_id:
+                    continue
+                source_url = f"https://www.zhipin.com/job_detail/{encrypt_job_id}.html"
+                tech_tags = j.get("skills", []) or []
+                job_labels = j.get("jobLabels", []) or []
+                tags = list(tech_tags) + list(job_labels)
+                location_parts = [
+                    j.get("cityName", ""),
+                    j.get("areaDistrict", ""),
+                    j.get("businessDistrict", ""),
+                ]
+                location = "·".join(p for p in location_parts if p)
+                fp_input = f"boss:{encrypt_job_id}".encode("utf-8")
+                items.append({
+                    "source": "boss",
+                    "source_id": encrypt_job_id,
+                    "source_url": source_url,
+                    "crawled_at": datetime.now(timezone(timedelta(hours=8))).isoformat(),
+                    "raw_text": json.dumps(j, ensure_ascii=False),
+                    "is_desensitized": False,
+                    "_fingerprint": hashlib.sha256(fp_input).hexdigest(),
+                    "title": j.get("jobName", ""),
+                    "company": j.get("brandName", ""),
+                    "location": location,
+                    "salary": j.get("salaryDesc", ""),
+                    "experience": j.get("jobExperience", ""),
+                    "education": j.get("jobDegree", ""),
+                    "tags": tags,
+                    "description": "",
+                    "requirements": "",
+                    "post_date": "",
+                })
 
-                try:
-                    fetch_result = json.loads(raw)
-                except json.JSONDecodeError as e:
-                    log(f"fetch 结果 JSON 解析失败: {e}")
-                    break
-
-                if fetch_result.get("status") != 200:
-                    log(f"API HTTP {fetch_result.get('status')}")
-                    break
-
-                body = fetch_result.get("body", "")
-                try:
-                    data = json.loads(body)
-                except json.JSONDecodeError as e:
-                    log(f"API body JSON 解析失败: {e}")
-                    break
-
-                api_code = data.get("code")
-                if api_code not in (0, None):
-                    log(f"BOSS API 错误: code={api_code}, message={data.get('message', '')}")
-                    break
-
-                jobs = (data.get("zpData") or {}).get("jobList") or []
-                log(f"[kw={keyword} city={city_code} page={current_page}] 获取 {len(jobs)} 条岗位")
-
-                for j in jobs:
-                    encrypt_job_id = j.get("encryptJobId", "")
-                    if not encrypt_job_id:
-                        continue
-
-                    source_url = f"https://www.zhipin.com/job_detail/{encrypt_job_id}.html"
-                    tech_tags = j.get("skills", []) or []
-                    job_labels = j.get("jobLabels", []) or []
-                    tags = list(tech_tags) + list(job_labels)
-
-                    location_parts = [
-                        j.get("cityName", ""),
-                        j.get("areaDistrict", ""),
-                        j.get("businessDistrict", ""),
-                    ]
-                    location = "·".join(p for p in location_parts if p)
-
-                    # _fingerprint: source + source_id 的 SHA256，对齐 _BaseItem 定义
-                    fp_input = f"boss:{encrypt_job_id}".encode("utf-8")
-                    fingerprint = hashlib.sha256(fp_input).hexdigest()
-
-                    # Boss API 列表页无 post_date 字段，发布日期需详情页（反爬无法获取）
-                    items.append({
-                        "source": "boss",
-                        "source_id": encrypt_job_id,
-                        "source_url": source_url,
-                        "crawled_at": datetime.now(timezone(timedelta(hours=8))).isoformat(),
-                        "raw_text": json.dumps(j, ensure_ascii=False),
-                        "is_desensitized": False,
-                        "_fingerprint": fingerprint,
-                        "title": j.get("jobName", ""),
-                        "company": j.get("brandName", ""),
-                        "location": location,
-                        "salary": j.get("salaryDesc", ""),
-                        "experience": j.get("jobExperience", ""),
-                        "education": j.get("jobDegree", ""),
-                        "tags": tags,
-                        "description": "",
-                        "requirements": "",
-                        "post_date": "",
-                    })
-
-                if not jobs or current_page >= max_pages:
-                    break
-
-                # 翻页间隔 12-22 秒
-                delay = random.uniform(12, 22)
-                log(f"翻页等待 {delay:.1f}s...")
-                await asyncio.sleep(delay)
-                current_page += 1
-
-        finally:
-            # CDP 模式下不关闭 browser（避免关闭用户的浏览器），与其他 CDP 脚本一致
-            await page.close()
+            if not jobs or page_num >= max_pages:
+                break
+            # 翻页间隔（低频率，尊重平台限频）
+            delay = random.uniform(12, 22)
+            log(f"翻页等待 {delay:.1f}s...")
+            await asyncio.sleep(delay)
 
     return items
 
 
 def main():
-    parser = argparse.ArgumentParser(description="BOSS 直聘 CDP 采集脚本")
+    parser = argparse.ArgumentParser(description="BOSS 直聘采集脚本（CDP 读 cookies + HTTP 采集）")
     parser.add_argument("--keyword", required=True, help="搜索关键词")
     parser.add_argument("--city-code", required=True, help="城市代码（如 101010100）")
     parser.add_argument("--cdp-url", default=os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222"),

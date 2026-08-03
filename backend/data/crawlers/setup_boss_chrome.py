@@ -24,8 +24,20 @@ import sys
 import time
 from pathlib import Path
 
-# 隔离 Chrome profile 目录（持久保存登录态）
-BOSS_CHROME_PROFILE_DIR = Path.home() / ".zhigang-compass" / "boss-chrome-profile"
+# 隔离 Chrome profile 根目录（每 CDP 平台独立 profile，互不共享登录态/验证状态）
+_CHROME_PROFILE_ROOT = Path.home() / ".zhigang-compass"
+
+
+def platform_profile_dir(platform: str) -> Path:
+    """返回指定 CDP 平台的隔离 Chrome profile 目录（含登录态/验证状态）。"""
+    return _CHROME_PROFILE_ROOT / f"{platform}-chrome-profile"
+
+
+# BOSS 默认 profile（向后兼容；其他平台经 platform_profile_dir 取各自目录）
+BOSS_CHROME_PROFILE_DIR = platform_profile_dir("boss")
+
+# 各 CDP 平台独立浏览器端口（与 spider/crawler 默认值对齐，互不共享）
+CDP_PORT_BY_PLATFORM = {"boss": 9222, "monster": 9223, "glassdoor": 9224, "maimai": 9225}
 
 # CDP 默认端口
 DEFAULT_CDP_PORT = 9222
@@ -70,17 +82,19 @@ def find_chrome() -> str:
     return candidates[0]
 
 
-def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, cdp_address: str = "127.0.0.1", url: str = "https://www.zhipin.com/"):
-    """启动隔离 Chrome 并打开 BOSS 直聘登录页。
+def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, cdp_address: str = "127.0.0.1",
+                 url: str = "https://www.zhipin.com/", profile_dir: Path | None = None):
+    """启动隔离 Chrome（独立 profile + 独立 CDP 端口）。
 
     Args:
         cdp_port: CDP 调试端口
         cdp_address: CDP 监听地址。Linux 容器部署需局域网连接时设为 0.0.0.0
             （端口由 Docker 暴露），默认 127.0.0.1 仅本机可连
         url: 打开的首个页面
+        profile_dir: 该平台的隔离 profile 目录（None 时用 BOSS 默认）
     """
     chrome_path = find_chrome()
-    profile_dir = BOSS_CHROME_PROFILE_DIR
+    profile_dir = profile_dir or BOSS_CHROME_PROFILE_DIR
     profile_dir.mkdir(parents=True, exist_ok=True)
 
     cmd = [
@@ -132,19 +146,29 @@ def check_cdp(cdp_url: str, quiet: bool = False) -> bool:
         return False
 
 
-def ensure_cdp_chrome(cdp_url: str | None = None, wait_seconds: int = 20) -> bool:
-    """确保 CDP Chrome 可用：不可用时自动启动（about:blank，避免站点页干扰）并轮询就绪。
+def ensure_cdp_chrome(cdp_url: str | None = None, wait_seconds: int = 20,
+                      profile_dir: Path | None = None, url: str | None = None) -> bool:
+    """确保 CDP Chrome 可用：不可用时自动启动并轮询就绪。
 
     CDP 爬虫（BOSS/Monster/Glassdoor/脉脉）发占位请求前调用，避免 Chrome
-    被系统/环境回收后爬虫直接失败。
+    被系统/环境回收后爬虫直接失败。profile_dir 传入各平台独立目录，
+    保证各爬虫使用自己的浏览器实例（登录态/验证状态互不污染）。
+
+    Args:
+        url: 启动时打开的平台首页（便于用户完成登录/风控验证）。
+            None 时打开 about:blank（不干扰用户浏览）。
     """
     import os
     import time
+    from urllib.parse import urlparse
 
     cdp_url = cdp_url or os.environ.get("BOSS_CDP_URL", f"http://127.0.0.1:{DEFAULT_CDP_PORT}")
     if check_cdp(cdp_url, quiet=True):
         return True
-    start_chrome(url="about:blank")
+    # 从 cdp_url 解析端口：各平台独立端口（9222/9223/9224/9225），
+    # 拉起的独立 Chrome 必须与爬虫连接的端点一致，否则采集连接失败
+    cdp_port = urlparse(cdp_url).port or DEFAULT_CDP_PORT
+    start_chrome(cdp_port=cdp_port, url=url or "about:blank", profile_dir=profile_dir)
     for _ in range(wait_seconds * 2):
         time.sleep(0.5)
         if check_cdp(cdp_url, quiet=True):
@@ -208,19 +232,20 @@ def check_login(cdp_url: str) -> bool:
     return asyncio.run(_check())
 
 
-def stop_chrome(cdp_url: str):
+def stop_chrome(cdp_url: str, profile_dir: Path | None = None):
     """关闭专用 Chrome（仅本脚本启动的隔离 Chrome，不误杀用户其他浏览器）。
 
     优先经 CDP 关闭；失败时按隔离 profile 目录匹配进程（精确匹配，而非 taskkill 全部 chrome.exe）。
     """
     import urllib.request
 
+    profile_dir = profile_dir or BOSS_CHROME_PROFILE_DIR
     try:
         with urllib.request.urlopen(f"{cdp_url}/json/close") as resp:
             print("Chrome CDP 已关闭")
     except Exception:
         if sys.platform == "win32":
-            profile_str = str(BOSS_CHROME_PROFILE_DIR).replace("\\", "\\\\")
+            profile_str = str(profile_dir).replace("\\", "\\\\")
             ps = (
                 f"Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" "
                 f"| Where-Object {{ $_.CommandLine -like '*{profile_str}*' }} "
@@ -228,27 +253,34 @@ def stop_chrome(cdp_url: str):
             )
             os.system(f'powershell -NoProfile -Command "{ps}"')
         else:
-            os.system(f"pkill -f '{BOSS_CHROME_PROFILE_DIR}'")
-        print(f"已关闭隔离 Chrome（profile: {BOSS_CHROME_PROFILE_DIR}）")
+            os.system(f"pkill -f '{profile_dir}'")
+        print(f"已关闭隔离 Chrome（profile: {profile_dir}）")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="BOSS 直聘专用 Chrome 管理（CDP 模式）")
-    parser.add_argument("--check", action="store_true", help="检查 CDP 连接 + 登录态")
-    parser.add_argument("--stop", action="store_true", help="关闭专用 Chrome")
-    parser.add_argument("--cdp-url", default=os.environ.get("BOSS_CDP_URL", f"http://127.0.0.1:{DEFAULT_CDP_PORT}"),
-                        help="CDP 调试端点（默认 http://127.0.0.1:9222）")
-    parser.add_argument("--cdp-port", type=int, default=DEFAULT_CDP_PORT, help="启动时 CDP 端口")
+    parser = argparse.ArgumentParser(
+        description="CDP 隔离浏览器管理（每平台独立浏览器：独立 profile + 独立端口）"
+    )
+    parser.add_argument("--platform", default="boss", choices=sorted(CDP_PORT_BY_PLATFORM),
+                        help="CDP 平台（决定独立 profile 与默认端口）：boss/monster/glassdoor/maimai")
+    parser.add_argument("--check", action="store_true", help="检查 CDP 连接 + 登录态（boss 专用）")
+    parser.add_argument("--stop", action="store_true", help="关闭该平台的隔离 Chrome")
+    parser.add_argument("--cdp-url", default=None, help="CDP 调试端点（默认按平台端口）")
+    parser.add_argument("--cdp-port", type=int, default=None, help="启动时 CDP 端口（默认按平台）")
     parser.add_argument("--cdp-address", default="127.0.0.1",
                         help="启动时 CDP 监听地址（Linux 容器局域网部署设 0.0.0.0）")
     args = parser.parse_args()
 
+    profile_dir = platform_profile_dir(args.platform)
+    cdp_port = args.cdp_port or CDP_PORT_BY_PLATFORM[args.platform]
+    cdp_url = args.cdp_url or f"http://127.0.0.1:{cdp_port}"
+
     if args.check:
-        check_login(args.cdp_url)
+        check_login(cdp_url)
     elif args.stop:
-        stop_chrome(args.cdp_url)
+        stop_chrome(cdp_url, profile_dir=profile_dir)
     else:
-        start_chrome(args.cdp_port, args.cdp_address)
+        start_chrome(cdp_port, args.cdp_address, profile_dir=profile_dir)
 
 
 if __name__ == "__main__":
