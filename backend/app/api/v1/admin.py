@@ -199,6 +199,8 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
     # 从 output/*.jsonl 统计各平台采集文件（文件名含时间戳后缀）
     platforms = []
     output_total = 0
+    today_count = 0
+    today = datetime.now(timezone(timedelta(hours=8))).date()
     if _OUTPUT_DIR.exists():
         for f in sorted(_OUTPUT_DIR.glob("*.jsonl")):
             platform = _match_platform(f.stem)
@@ -209,11 +211,14 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
             except (OSError, UnicodeDecodeError):
                 count = 0
             output_total += count
+            mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone(timedelta(hours=8)))
+            if mtime.date() == today:
+                today_count += count
             platforms.append({
                 "platform": platform,
                 "count": count,
                 "file": f.name,
-                "mtime": datetime.fromtimestamp(f.stat().st_mtime, tz=timezone(timedelta(hours=8))).isoformat(),
+                "mtime": mtime.isoformat(),
             })
 
     # 按平台聚合（最新文件时间 + 累计条数；last_run 优先取 task_status）
@@ -241,7 +246,7 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
 
     return ok(data={
         "metrics": {
-            "today_count": 0,  # 真实调度未运行，今日增量由 ETL 调度写入后统计
+            "today_count": today_count,  # 今日（CST）output/*.jsonl 新增行数
             "output_total": output_total,
             "raw": raw_counts,
         },
