@@ -6,13 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
   Table,
   TableHeader,
   TableBody,
@@ -20,38 +13,26 @@ import {
   TableRow,
   TableCell,
 } from '@/components/ui/table'
-
-/* ── Mock 数据 ── */
-
-type UserRole = 'admin' | 'user' | 'guest'
-
-interface CreatedUser {
-  id: string
-  username: string
-  role: UserRole
-  createdAt: string
-  status: 'active' | 'inactive'
-}
-
-const mockRecentUsers: CreatedUser[] = [
-  { id: '1', username: '赵岩', role: 'user', createdAt: '2026-07-29 10:30', status: 'active' },
-  { id: '2', username: '钱枫', role: 'user', createdAt: '2026-07-28 16:20', status: 'active' },
-  { id: '3', username: '孙丽', role: 'guest', createdAt: '2026-07-25 09:15', status: 'inactive' },
-  { id: '4', username: '李华', role: 'user', createdAt: '2026-07-20 14:00', status: 'active' },
-  { id: '5', username: '周敏', role: 'admin', createdAt: '2026-07-18 11:45', status: 'active' },
-]
+import { apiPost, ApiError } from '@/lib/api'
 
 /* ── 页面 ── */
+
+interface RegisteredUser {
+  id: string
+  username: string
+  role: string
+  createdAt: string
+}
 
 export function RegisterPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [role, setRole] = useState<UserRole>('user')
   const [creating, setCreating] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [success, setSuccess] = useState<string | null>(null)
-  const [recentUsers, setRecentUsers] = useState(mockRecentUsers)
+  // 本会话注册成功的账户（初始为空，来自真实 /auth/register 返回）
+  const [recentUsers, setRecentUsers] = useState<RegisteredUser[]>([])
 
   function validate(): boolean {
     const next: Record<string, string> = {}
@@ -69,49 +50,41 @@ export function RegisterPage() {
     if (!validate()) return
 
     setCreating(true)
-    await new Promise((r) => setTimeout(r, 1500))
-    setCreating(false)
-
-    const newUser: CreatedUser = {
-      id: crypto.randomUUID(),
-      username: username.trim(),
-      role,
-      createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
-      status: 'active',
+    try {
+      const res = await apiPost<{ id: string; username: string; role: string }>('/auth/register', {
+        username: username.trim(),
+        password,
+      })
+      setRecentUsers((prev) => [
+        {
+          id: res.id,
+          username: res.username,
+          role: res.role,
+          createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+        },
+        ...prev,
+      ])
+      setSuccess(`账户 ${res.username} 注册成功`)
+      setUsername('')
+      setPassword('')
+      setConfirmPassword('')
+      setErrors({})
+    } catch (e) {
+      setErrors({ username: e instanceof ApiError ? e.message : '注册失败，请稍后重试' })
+    } finally {
+      setCreating(false)
     }
-
-    setRecentUsers((prev) => [newUser, ...prev])
-    setSuccess(`用户 ${newUser.username} 创建成功（角色: ${role}）`)
-    setUsername('')
-    setPassword('')
-    setConfirmPassword('')
-    setRole('user')
-    setErrors({})
-  }
-
-  const roleBadge: Record<UserRole, { label: string }> = {
-    admin: { label: '管理员' },
-    user: { label: '用户' },
-    guest: { label: '访客' },
-  }
-
-  const statusBadge: Record<CreatedUser['status'], { label: string; variant: 'candidate' | 'archived' }> = {
-    active: { label: '活跃', variant: 'candidate' },
-    inactive: { label: '停用', variant: 'archived' },
   }
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="注册"
-        description="管理员可创建新用户账户，创建的用户将收到初始密码通知"
-      />
+      <PageHeader title="注册" description="创建新账户，注册成功后可直接登录" />
 
-      {/* 创建用户表单 */}
+      {/* 注册表单 */}
       <Card>
         <CardHeader>
-          <CardTitle>创建新用户</CardTitle>
-          <CardDescription>填写用户信息后点击创建</CardDescription>
+          <CardTitle>注册新账户</CardTitle>
+          <CardDescription>填写账户信息后点击注册</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3">
@@ -151,20 +124,6 @@ export function RegisterPage() {
             )}
           </div>
 
-          <div className="grid gap-3">
-            <Label>角色</Label>
-            <Select value={role} onValueChange={(v: UserRole) => setRole(v)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="admin">admin</SelectItem>
-                <SelectItem value="user">user</SelectItem>
-                <SelectItem value="guest">guest</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
           {success && (
             <div className="rounded-md border border-state-candidate/20 bg-state-candidate/5 px-4 py-3 text-sm text-state-candidate">
               {success}
@@ -172,44 +131,42 @@ export function RegisterPage() {
           )}
 
           <Button onClick={handleCreate} disabled={creating}>
-            {creating ? '创建中…' : '创建用户'}
+            {creating ? '注册中…' : '注册'}
           </Button>
         </CardContent>
       </Card>
 
-      {/* 最近创建的用户列表 */}
+      {/* 本会话注册的账户列表 */}
       <Card>
         <CardHeader>
-          <CardTitle>最近创建的用户</CardTitle>
-          <CardDescription>所有已创建的用户账户列表</CardDescription>
+          <CardTitle>最近注册的账户</CardTitle>
+          <CardDescription>本次会话中注册成功的账户</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>用户名</TableHead>
-                <TableHead>角色</TableHead>
-                <TableHead>创建时间</TableHead>
-                <TableHead>状态</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {recentUsers.map((u) => (
-                <TableRow key={u.id}>
-                  <TableCell className="font-medium text-ink">{u.username}</TableCell>
-                  <TableCell>
-                    <Badge variant={u.role === 'admin' ? 'default' : 'outline'}>
-                      {roleBadge[u.role].label}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-ink-secondary">{u.createdAt}</TableCell>
-                  <TableCell>
-                    <Badge variant={statusBadge[u.status].variant}>{statusBadge[u.status].label}</Badge>
-                  </TableCell>
+          {recentUsers.length === 0 ? (
+            <p className="py-8 text-center text-sm text-ink-faint">暂无注册记录</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>用户名</TableHead>
+                  <TableHead>角色</TableHead>
+                  <TableHead>注册时间</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {recentUsers.map((u) => (
+                  <TableRow key={u.id}>
+                    <TableCell className="font-medium text-ink">{u.username}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{u.role}</Badge>
+                    </TableCell>
+                    <TableCell className="text-ink-secondary">{u.createdAt}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>

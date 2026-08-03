@@ -4,7 +4,6 @@
  * 基于 react-force-graph-3d（Three.js WebGL 渲染）。
  *
  * 设计决策：
- * - 与 Graph2D 共享同一套 mock-data.ts 数据，切换时无需重新获取
  * - 节点配色与 2D 完全一致（position 五状态机 / skill 墨色 / evidence 灰色）
  * - 暗色模式自动跟随（MutationObserver 监听 .dark 类）
  * - 容器尺寸由 ResizeObserver 自动追踪
