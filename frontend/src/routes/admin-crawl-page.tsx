@@ -29,6 +29,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+
+/** 脉脉合规窗口判断：仅夜间 22:00-08:00 可采集（与后端 maimai.py 时间守卫一致，CST） */
+function isMaimaiNightWindow(): boolean {
+  const hour = Number(
+    new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: 'numeric', hour12: false }).format(new Date()),
+  )
+  return hour >= 22 || hour < 8
+}
 
 /** 爬虫运行状态 — 对应 §4 平台采集生命周期 */
 type CrawlStatus = 'running' | 'idle' | 'failed' | 'archived'
@@ -476,14 +490,29 @@ export function AdminCrawlPage() {
                       <TableCell className="text-xs text-ink-muted font-mono">{p.lastRun}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={p.status === 'archived' || isBusy}
-                            onClick={() => triggerCrawl(p.id)}
-                          >
-                            触发
-                          </Button>
+                          {p.id === 'maimai' && !isMaimaiNightWindow() ? (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="inline-flex">
+                                    <Button size="sm" variant="outline" disabled>
+                                      触发
+                                    </Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>脉脉仅限夜间 22:00-08:00 采集，当前时段禁用</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={p.status === 'archived' || isBusy}
+                              onClick={() => triggerCrawl(p.id)}
+                            >
+                              触发
+                            </Button>
+                          )}
                           <Button size="sm" variant="ghost" onClick={() => setLogDialog({
                             platformName: p.name,
                             taskId: history.find((h) => h.platformKey === p.id)?.id ?? null,
