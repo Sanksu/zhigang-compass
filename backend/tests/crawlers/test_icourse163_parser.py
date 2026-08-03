@@ -79,3 +79,24 @@ def test_parse_mixed_types():
     }
     items = parse_course_list(api_data, "Java")
     assert [i["title"] for i in items] == ["Java程序设计", "Vue.js实战"]
+
+
+def test_parse_skips_zhongshengben_training_course():
+    """标题含「专升本」的培训/应试课程跳过（与技能学习路径无关）。"""
+    api_data = {"result": {"list": [_entry(301, "4001", "2027年山西专升本无忧畅学班【C程序设计】")]}}
+    items = parse_course_list(api_data, "C")
+    assert items == []
+
+
+def test_parse_skips_exam_cram_course():
+    """标题含「期末」的冲刺/复习课程跳过，正常课程保留。"""
+    api_data = {
+        "result": {
+            "list": [
+                _entry(301, "5001", "Python期末冲刺-4小时突击Python"),
+                _entry(301, "5002", "Python程序设计基础"),
+            ]
+        }
+    }
+    items = parse_course_list(api_data, "Python")
+    assert [i["title"] for i in items] == ["Python程序设计基础"]
