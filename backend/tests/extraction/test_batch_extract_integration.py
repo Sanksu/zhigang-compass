@@ -8,10 +8,11 @@
 - 每次运行会真实调用 LLM API（产生费用/耗时），默认不进入 CI 全量测试
   （pytest 已配置 `-m not integration` 默认排除）
 - 运行：`uv run python -m pytest tests/extraction/test_batch_extract_integration.py -m integration -v -s`
-- 无有效 api_key 时自动 fail（模块加载即读 yaml，找不到 enabled provider 直接报错）
+- configs/llm_providers.yaml 缺失（CI/全新检出）或无可用 provider 时整体 skip
 """
 
 import time
+from pathlib import Path
 
 import pytest
 import yaml
@@ -27,8 +28,19 @@ from app.services.extraction.schemas import JDExtractionBatch, JDExtractionResul
 # 真实 LLM 链适配器（对齐 llm_provider._call_provider 的 client 参数）
 # ============================================================
 
-_CONFIG = yaml.safe_load(open("configs/llm_providers.yaml", encoding="utf-8"))
-_PROVIDER = next(p for p in _CONFIG["providers"] if p["enabled"])
+# configs/llm_providers.yaml 为 gitignore 文件（api_key 不入库），CI/全新检出不存在。
+# 缺配置时整体 skip（而非 collection error），本文件仅在本地真实联调时运行。
+_CONFIG_PATH = Path(__file__).resolve().parents[3] / "configs" / "llm_providers.yaml"
+if _CONFIG_PATH.exists():
+    _CONFIG = yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    _PROVIDER = next((p for p in _CONFIG.get("providers", []) if p.get("enabled")), None)
+else:
+    _PROVIDER = None
+
+pytestmark = pytest.mark.skipif(
+    _PROVIDER is None,
+    reason="缺少 configs/llm_providers.yaml（gitignore），集成测试需本地真实 api_key",
+)
 
 
 class _RealLLMAdapter:
