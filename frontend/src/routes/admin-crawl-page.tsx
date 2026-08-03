@@ -22,6 +22,13 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiGet, apiPost, ApiError, getAccessToken } from '@/lib/api'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 /** 爬虫运行状态 — 对应 §4 平台采集生命周期 */
 type CrawlStatus = 'running' | 'idle' | 'failed' | 'archived'
@@ -53,6 +60,8 @@ interface CrawlHistoryItem {
 
 interface HistoryRow {
   id: string
+  /** 原始 spider 名（日志弹窗按平台匹配最近任务） */
+  platformKey: string
   time: string
   platform: string
   keyword: string
@@ -128,6 +137,137 @@ const LEVEL_CLASS: Record<PlatformLevel, string> = {
   '课程': 'text-ink-muted border-border',
 }
 
+/** SSE 日志读取结果：done=任务成功 / failed=任务失败 / closed=流结束（可能仍在后台执行） */
+interface SseLogResult {
+  status: 'done' | 'failed' | 'closed'
+  message?: string
+}
+
+/**
+ * 读取爬虫实时日志 SSE（GET /admin/crawl/task/{taskId}/stream），onLog 逐行回调。
+ * 60s 无终态事件则中止（与后端 600s 兜底相比更保守，避免连接悬挂）；
+ * admin 端点需认证，fetch 不会自动附加 token，手动加 Bearer。
+ */
+async function readSseCrawlLog(taskId: string, onLog: (line: string) => void): Promise<SseLogResult> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 60_000)
+  try {
+    const headers: Record<string, string> = {}
+    const token = getAccessToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+    const resp = await fetch(`/api/v1/admin/crawl/task/${taskId}/stream`, {
+      signal: ctrl.signal,
+      headers,
+    })
+    if (!resp.ok || !resp.body) return { status: 'closed', message: 'SSE 连接失败' }
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      // 按 SSE 帧分隔解析 event/data
+      const frames = buffer.split('\n\n')
+      buffer = frames.pop() ?? ''
+      for (const frame of frames) {
+        const event = frame.match(/^event:\s*(.+)$/m)?.[1]
+        const data = frame.match(/^data:\s*(.+)$/m)?.[1]
+        if (!data) continue
+        const payload = (() => {
+          try {
+            return JSON.parse(data)
+          } catch {
+            return {}
+          }
+        })()
+        if (event === 'log') {
+          const line = String(payload.line ?? '')
+          if (line) onLog(line)
+        } else if (event === 'done') {
+          return { status: 'done' }
+        } else if (event === 'error') {
+          return { status: 'failed', message: String(payload.message ?? payload.error ?? '任务执行失败') }
+        }
+      }
+    }
+    return { status: 'closed' }
+  } catch {
+    return { status: 'closed', message: '连接中断或超时' }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** 平台日志弹窗：SSE 实时/回溯展示该平台最近一次爬取任务的日志 */
+function CrawlLogDialog({ taskId, platformName, onClose }: {
+  taskId: string | null
+  platformName: string
+  onClose: () => void
+}) {
+  const [lines, setLines] = useState<string[]>([])
+  // 初始状态由 taskId 派生（key 保证重新挂载，无需在 effect 里重置）
+  const [status, setStatus] = useState<'loading' | 'done' | 'failed' | 'empty'>(taskId ? 'loading' : 'empty')
+  const [message, setMessage] = useState('')
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!taskId) return
+    let cancelled = false
+    readSseCrawlLog(taskId, (ln) => {
+      if (!cancelled) setLines((prev) => [...prev, ln].slice(-300))
+    }).then((r) => {
+      if (cancelled) return
+      if (r.status === 'failed') {
+        setStatus('failed')
+        setMessage(r.message ?? '任务执行失败')
+      } else {
+        setStatus('done')
+        setMessage(r.message ?? '')
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [taskId])
+
+  useEffect(() => {
+    if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight
+  }, [lines.length])
+
+  const statusText =
+    status === 'loading' ? '实时推送中' : status === 'done' ? '已结束' : status === 'failed' ? '失败' : '无记录'
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>爬虫日志 · {platformName}</DialogTitle>
+          <DialogDescription>
+            {taskId ? `task_id ${taskId.slice(0, 8)}… · ${statusText}` : '该平台暂无爬取记录'}
+          </DialogDescription>
+        </DialogHeader>
+        <div
+          ref={boxRef}
+          className="max-h-80 min-h-32 overflow-y-auto rounded-md border border-border bg-ink/[0.03] p-2 font-mono text-[10px] leading-relaxed text-ink-secondary whitespace-pre-wrap"
+        >
+          {status === 'empty' ? (
+            <span className="text-ink-faint">该平台暂无爬取记录</span>
+          ) : lines.length === 0 ? (
+            <span className="text-ink-faint">
+              {status === 'loading' ? '等待日志…' : '日志为空（Redis 日志 TTL 1h，可能已过期）'}
+            </span>
+          ) : (
+            lines.map((ln, i) => <div key={i}>{ln}</div>)
+          )}
+        </div>
+        {status === 'failed' && message && (
+          <p className="text-xs text-state-archived whitespace-pre-wrap">{message}</p>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function AdminCrawlPage() {
   const [form, setForm] = useState({
     platform: 'boss',
@@ -141,6 +281,9 @@ export function AdminCrawlPage() {
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
   const [history, setHistory] = useState<HistoryRow[]>([])
+  /** 日志弹窗：{platformName, taskId}，taskId 为该平台最近任务的 id（无记录为 null） */
+  const [logDialog, setLogDialog] = useState<{ platformName: string; taskId: string | null } | null>(null)
+  const [detailRow, setDetailRow] = useState<HistoryRow | null>(null)
 
   // 实时日志滚动区：新日志到达自动滚到底部
   const logRef = useRef<HTMLDivElement>(null)
@@ -155,6 +298,7 @@ export function AdminCrawlPage() {
         setHistory(
           res.items.map((h) => ({
             id: h.id,
+            platformKey: h.platform,
             time: h.created_at ? new Date(h.created_at).toLocaleString('zh-CN') : '—',
             platform: h.platform_name || h.platform || '—',
             keyword: h.keyword || '—',
@@ -239,72 +383,23 @@ export function AdminCrawlPage() {
     }
   }
 
-  // 订阅爬虫实时日志 SSE（GET /admin/crawl/task/{taskId}/stream，逐行推送 scrapy 输出）
+  // 订阅爬虫实时日志 SSE（触发后自动展示在当前任务卡片）
   async function streamCrawlLogs(taskId: string) {
-    const ctrl = new AbortController()
-    // 60s 无终态事件则中止（与后端 600s 兜底相比更保守，避免前端连接悬挂）
-    const timer = setTimeout(() => ctrl.abort(), 60_000)
-    try {
-      // admin 端点需认证，fetch 不会自动附加 token（resume SSE 端点无认证故无此问题）
-      const headers: Record<string, string> = {}
-      const token = getAccessToken()
-      if (token) headers.Authorization = `Bearer ${token}`
-      const resp = await fetch(`/api/v1/admin/crawl/task/${taskId}/stream`, {
-        signal: ctrl.signal,
-        headers,
-      })
-      if (!resp.ok || !resp.body) throw new Error('SSE 连接失败')
-      const reader = resp.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        // 按 SSE 帧分隔解析 event/data
-        const frames = buffer.split('\n\n')
-        buffer = frames.pop() ?? ''
-        for (const frame of frames) {
-          const event = frame.match(/^event:\s*(.+)$/m)?.[1]
-          const data = frame.match(/^data:\s*(.+)$/m)?.[1]
-          if (!data) continue
-          const payload = (() => {
-            try {
-              return JSON.parse(data)
-            } catch {
-              return {}
-            }
-          })()
-          if (event === 'log') {
-            const line = String(payload.line ?? '')
-            if (line) {
-              setCurrentTask((t) =>
-                t ? { ...t, logs: [...t.logs, line].slice(-200) } : t,
-              )
-            }
-          } else if (event === 'progress') {
-            setCurrentTask((t) => (t ? { ...t, status: 'running' } : t))
-          } else if (event === 'done') {
-            setNotice('爬取任务执行完成，数据已写入 output/*.jsonl')
-            setCurrentTask((t) => (t ? { ...t, status: 'done', progress: 100 } : t))
-            return
-          } else if (event === 'error') {
-            const msg = payload.message ?? payload.error ?? '任务执行失败'
-            setNotice(`爬取任务失败：${msg}`)
-            setCurrentTask((t) => (t ? { ...t, status: 'failed' } : t))
-            return
-          }
-        }
-      }
-    } catch {
-      // 超时/中断：SSE 结束，任务可能仍在后台执行
-      setNotice('日志推送结束（任务可能在后台继续执行），可查看 output 文件确认结果')
-    } finally {
-      clearTimeout(timer)
+    const result = await readSseCrawlLog(taskId, (line) => {
+      setCurrentTask((t) => (t ? { ...t, logs: [...t.logs, line].slice(-200) } : t))
+    })
+    if (result.status === 'done') {
+      setNotice('爬取任务执行完成，数据已写入 output/*.jsonl')
+      setCurrentTask((t) => (t ? { ...t, status: 'done', progress: 100 } : t))
+    } else if (result.status === 'failed') {
+      setNotice(`爬取任务失败：${result.message}`)
+      setCurrentTask((t) => (t ? { ...t, status: 'failed' } : t))
+    } else {
+      setNotice(result.message ?? '日志推送结束（任务可能在后台继续执行），可查看 output 文件确认结果')
+      setCurrentTask((t) =>
+        t && t.status !== 'done' && t.status !== 'failed' ? { ...t, status: 'done' } : t,
+      )
     }
-    setCurrentTask((t) =>
-      t && t.status !== 'done' && t.status !== 'failed' ? { ...t, status: 'done' } : t,
-    )
   }
 
   return (
@@ -387,7 +482,10 @@ export function AdminCrawlPage() {
                           >
                             触发
                           </Button>
-                          <Button size="sm" variant="ghost">日志</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setLogDialog({
+                            platformName: p.name,
+                            taskId: history.find((h) => h.platformKey === p.id)?.id ?? null,
+                          })}>日志</Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -568,7 +666,7 @@ export function AdminCrawlPage() {
                       <TableCell><Badge variant={meta.variant}>{meta.label}</Badge></TableCell>
                       <TableCell className="text-xs text-ink-muted truncate max-w-[220px]">{h.error || '—'}</TableCell>
                       <TableCell className="text-right">
-                        <Button size="sm" variant="ghost">详情</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setDetailRow(h)}>详情</Button>
                       </TableCell>
                     </TableRow>
                   )
@@ -578,6 +676,60 @@ export function AdminCrawlPage() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* 平台日志弹窗（SSE 实时/回溯） */}
+      {logDialog && (
+        <CrawlLogDialog
+          key={logDialog.taskId ?? 'empty'}
+          taskId={logDialog.taskId}
+          platformName={logDialog.platformName}
+          onClose={() => setLogDialog(null)}
+        />
+      )}
+
+      {/* 任务详情弹窗 */}
+      {detailRow && (
+        <Dialog open onOpenChange={(o) => { if (!o) setDetailRow(null) }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>任务详情</DialogTitle>
+              <DialogDescription>task_id: {detailRow.id}</DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <div className="text-xs text-ink-muted mb-0.5">时间</div>
+                <div className="font-mono text-xs text-ink-secondary">{detailRow.time}</div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-muted mb-0.5">平台</div>
+                <div className="font-medium">{detailRow.platform}</div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-muted mb-0.5">关键词</div>
+                <div className="text-ink-secondary">{detailRow.keyword}</div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-muted mb-0.5">采集数</div>
+                <div className="font-mono tabular-nums">{detailRow.count}</div>
+              </div>
+              <div className="col-span-2">
+                <div className="text-xs text-ink-muted mb-1">状态</div>
+                <Badge variant={HISTORY_STATUS_META[detailRow.status].variant}>
+                  {HISTORY_STATUS_META[detailRow.status].label}
+                </Badge>
+              </div>
+              {detailRow.error && (
+                <div className="col-span-2">
+                  <div className="text-xs text-ink-muted mb-1">错误/说明</div>
+                  <div className="rounded-md border border-border bg-ink/[0.03] p-2 text-xs whitespace-pre-wrap text-state-archived">
+                    {detailRow.error}
+                  </div>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   )
 }
