@@ -88,6 +88,9 @@ def run_task(task: CrawlTask, proxy: str | None, with_cdp: bool) -> tuple[str, s
     env = os.environ.copy()
     # crawlers 包位于 backend/data/ 下（crawlers 是其子包），需将该目录加入 PYTHONPATH
     env["PYTHONPATH"] = os.pathsep.join([str(BACKEND_DIR), str(CRAWLERS_DIR.parent)])
+    # 子进程 stdout/stderr 强制 UTF-8（中文 Windows 默认 GBK 管道，capture 解码会乱码）
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     if task.needs_proxy and proxy:
         env["HTTP_PROXY"] = proxy
         env["HTTPS_PROXY"] = proxy

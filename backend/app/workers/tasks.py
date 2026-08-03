@@ -12,6 +12,7 @@
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -21,12 +22,62 @@ from arq.connections import RedisSettings
 
 from app.core.config import settings
 
+# 子进程 stdout/stderr 强制 UTF-8（中文 Windows 默认 GBK 管道，按 UTF-8 解码会乱码）
+# 与 crawlers/spiders 下各 spider 调外部进程的模式一致
+_UTF8_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+
 # ── 爬虫项目根（backend/data/crawlers）──
 _CRAWLERS_DIR = Path(__file__).resolve().parents[2] / "data" / "crawlers"
 _OUTPUT_DIR = _CRAWLERS_DIR / "output"
 
 # 显式消费 -a max_results 参数的 spider（其余源由各自默认采集量控制）
 MAX_RESULTS_SUPPORTED = {"arxiv"}
+
+# 爬虫日志队列 key 前缀（Redis LIST，SSE 端点按 offset 增量拉取）
+_CRAWL_LOG_PREFIX = "crawl:log:"
+_CRAWL_LOG_TTL_SECONDS = 3600
+
+
+async def _push_crawl_log(ctx: dict, task_id: str | None, line: str) -> None:
+    """把爬虫输出行写入 Redis 日志队列（供 SSE 实时推送）。
+
+    日志写入失败不阻断爬虫（仅丢失实时日志）；task_id 缺失（ETL 编排直接
+    调用场景）跳过。ctx["redis"] 为 ARQ 注入的连接，缺失时跳过。
+    """
+    if not task_id or not line:
+        return
+    try:
+        redis = ctx.get("redis")
+        if redis is None:
+            return
+        key = _CRAWL_LOG_PREFIX + task_id
+        await redis.rpush(key, line)
+        await redis.expire(key, _CRAWL_LOG_TTL_SECONDS)
+    except Exception:
+        pass
+
+
+async def _update_crawl_task(task_id: str | None, **fields) -> None:
+    """更新 crawl 任务状态（TaskStatus：running/success/failed + result/error）。
+
+    任务不存在或 DB 不可用时静默跳过，不阻断爬虫（状态追踪为增强能力）。
+    """
+    if not task_id:
+        return
+    from app.core.database import async_session_factory
+    from app.models.business import TaskStatus
+
+    async with async_session_factory() as s:
+        task = await s.get(TaskStatus, task_id)
+        if task is None:
+            return
+        for k, v in fields.items():
+            if k == "result" and isinstance(v, dict):
+                # 合并而非覆盖：保留触发时写入的 platform/keyword（历史查询依赖）
+                task.result = {**(task.result or {}), **v}
+            else:
+                setattr(task, k, v)
+        await s.commit()
 
 
 # ============================================================
@@ -39,12 +90,17 @@ async def crawl_platform(
     keywords: list[str] | None = None,
     cities: list[str] | None = None,
     max_results: int | None = None,
+    task_id: str | None = None,
 ) -> dict:
     """触发单个 Scrapy 爬虫。
 
     通过 subprocess 调用而非 in-process，原因：
     - Scrapy 基于 Twisted reactor，与 asyncio event loop 不兼容
     - subprocess 隔离崩溃，单爬虫失败不污染 worker
+
+    task_id 存在时（手动触发场景）：
+    - 输出逐行写入 Redis 日志队列（SSE 端点 /admin/crawl/task/{task_id}/stream 实时推送）
+    - 同步 TaskStatus 状态（running → success/failed），进度 0.1 → 1.0
 
     输出：output/{spider}_{YYYYMMDD_HHMMSS}.jsonl
     """
@@ -67,25 +123,66 @@ async def crawl_platform(
         else:
             print(f"[crawl_platform] spider={spider_name} 不支持 max_results，参数已忽略", flush=True)
 
-    # cwd 设到 crawlers/ 让 scrapy.cfg 生效
+    await _update_crawl_task(
+        task_id,
+        status="running",
+        progress=0.1,
+        result={"spider": spider_name, "output_file": str(output_file)},
+    )
+
+    # cwd 设到 crawlers/ 让 scrapy.cfg 生效；env 强制子进程 UTF-8 输出（防中文日志乱码）
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(_CRAWLERS_DIR),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=_UTF8_ENV,
     )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"爬虫 {spider_name} 退出码 {proc.returncode}: "
-            f"{stderr.decode('utf-8', errors='replace')[-2000:]}"
-        )
+
+    # 并发逐行读取 stdout/stderr：实时写入日志队列，stderr 尾部留存用于失败信息
+    stderr_tail: list[str] = []
+
+    async def _drain(stream, tail: list[str] | None = None):
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").rstrip()
+            await _push_crawl_log(ctx, task_id, text)
+            if tail is not None:
+                tail.append(text)
+                if len(tail) > 200:
+                    tail.pop(0)
+
+    await asyncio.gather(
+        _drain(proc.stdout),
+        _drain(proc.stderr, stderr_tail),
+    )
+    returncode = await proc.wait()
+
+    if returncode != 0:
+        detail = "\n".join(stderr_tail[-20:])[-2000:]
+        msg = f"爬虫 {spider_name} 退出码 {returncode}: {detail}"
+        await _update_crawl_task(task_id, status="failed", error=msg[:500])
+        raise RuntimeError(msg)
 
     # 统计产出条数（按行数）
     line_count = 0
     if output_file.exists():
         with output_file.open(encoding="utf-8") as f:
             line_count = sum(1 for _ in f)
+
+    await _update_crawl_task(
+        task_id,
+        status="success",
+        progress=1.0,
+        result={
+            "spider": spider_name,
+            "output_file": str(output_file.relative_to(_CRAWLERS_DIR.parent.parent)),
+            "items": line_count,
+            "crawled_at": timestamp,
+        },
+    )
 
     return {
         "spider": spider_name,

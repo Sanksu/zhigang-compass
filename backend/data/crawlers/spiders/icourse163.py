@@ -106,6 +106,7 @@ class Icourse163Spider(Spider):
                     text=True,
                     encoding="utf-8",
                     cwd=os.path.dirname(self.crawler_script),
+                    env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
                 )
             except Exception as e:
                 self.logger.error(f"启动采集脚本失败: {e}")

@@ -6,10 +6,15 @@
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import asyncio
+import json
 import re
+import time
+import uuid
 
 import yaml
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -228,7 +233,7 @@ _PLATFORM_TO_SPIDER = {
 }
 
 
-async def _enqueue_crawl(spider: str, keywords: list[str]) -> None:
+async def _enqueue_crawl(spider: str, keywords: list[str], task_id: str | None = None) -> None:
     """入队 ARQ crawl_platform 任务；队列不可用抛异常由调用方标记 failed。"""
     from arq import create_pool
     from arq.connections import RedisSettings
@@ -243,7 +248,8 @@ async def _enqueue_crawl(spider: str, keywords: list[str]) -> None:
     )
     pool = await create_pool(redis_settings)
     try:
-        await pool.enqueue_job("crawl_platform", spider_name=spider, keywords=keywords)
+        # task_id 供 crawl_platform 实时写日志队列 + 更新任务状态（SSE 端点消费）
+        await pool.enqueue_job("crawl_platform", spider_name=spider, keywords=keywords, task_id=task_id)
     finally:
         await pool.close()
 
@@ -272,7 +278,7 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
     await db.refresh(task)
 
     try:
-        await _enqueue_crawl(_PLATFORM_TO_SPIDER[platform], [keyword])
+        await _enqueue_crawl(_PLATFORM_TO_SPIDER[platform], [keyword], task_id=str(task.id))
     except Exception as e:
         task.status = "failed"
         task.error = f"任务入队失败: {e}"
@@ -280,6 +286,150 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
         return error(500, f"爬取任务入队失败: {e}")
 
     return ok(data={"task_id": task.id, "platform": platform, "status": "pending"})
+
+
+# ============================================================
+# 爬虫实时日志（SSE）：手动触发后逐行推送 scrapy 终端输出
+# ============================================================
+
+def _crawl_task_payload(task) -> dict:
+    """crawl 任务状态 → SSE data 载荷（TaskStatus ORM 对象不可直接 JSON 序列化）。"""
+    return {
+        "task_id": task.id,
+        "task_type": task.task_type,
+        "status": task.status,
+        "progress": task.progress,
+        "result": task.result,
+        "error": task.error,
+    }
+
+
+async def _crawl_log_events(
+    task_uuid: str,
+    get_logs,
+    get_task,
+    *,
+    poll_interval: float = 0.5,
+    timeout: float = 600.0,
+):
+    """爬虫实时日志 SSE 事件序列（可注入日志/任务查询函数便于测试）。
+
+    事件流：log（每行 scrapy 输出）→ progress（周期心跳，含任务状态）→
+    终态 success 推送 done、failed 推送 error 后关闭；任务不存在/超时推送
+    error 后关闭。日志按 offset 增量拉取，避免重复推送。
+    """
+    offset = 0
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            lines = await get_logs(task_uuid, offset)
+        except Exception:
+            lines = []
+        for ln in lines:
+            yield f"event: log\ndata: {json.dumps({'line': ln}, ensure_ascii=False)}\n\n"
+        offset += len(lines)
+
+        task = await get_task(task_uuid)
+        if task is None:
+            yield f"event: error\ndata: {json.dumps({'message': '任务不存在'}, ensure_ascii=False)}\n\n"
+            return
+        if task["status"] == "success":
+            yield f"event: done\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
+            return
+        if task["status"] == "failed":
+            yield f"event: error\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
+            return
+        yield f"event: progress\ndata: {json.dumps({'status': task['status'], 'progress': task['progress']}, ensure_ascii=False)}\n\n"
+        if time.monotonic() >= deadline:
+            yield f"event: error\ndata: {json.dumps({'message': '推送超时'}, ensure_ascii=False)}\n\n"
+            return
+        await asyncio.sleep(poll_interval)
+
+
+@router.get("/crawl/task/{task_id}/stream")
+async def crawl_task_stream(task_id: str):
+    """SSE 实时推送爬虫终端日志（手动触发场景，BE-M4-05 扩展）。
+
+    日志来源为 crawl_platform 逐行写入 Redis 的 LIST（crawl:log:{task_id}，
+    TTL 1h），按 offset 增量拉取；任务状态由 TaskStatus 驱动终态
+    （success → done / failed → error）。任务不存在 / 推送超时（600s）结束。
+    """
+    try:
+        task_uuid = str(uuid.UUID(task_id))
+    except (ValueError, AttributeError):
+        return error(400, "task_id 格式非法")
+
+    from arq import create_pool
+    from arq.connections import RedisSettings
+    from urllib.parse import urlparse
+
+    parsed = urlparse(settings.arq_redis_url)
+    redis_settings = RedisSettings(
+        host=parsed.hostname or "localhost",
+        port=parsed.port or 6379,
+        database=int(parsed.path.lstrip("/") or "1"),
+        password=parsed.password,
+    )
+
+    async def _get_task(tid: str) -> dict | None:
+        from app.core.database import async_session_factory
+        from app.models.business import TaskStatus
+
+        async with async_session_factory() as session:
+            task = await session.get(TaskStatus, tid)
+        return _crawl_task_payload(task) if task is not None else None
+
+    async def _get_logs(tid: str, start: int) -> list[str]:
+        pool = await create_pool(redis_settings)
+        try:
+            raw = await pool.lrange(f"crawl:log:{tid}", start, -1)
+            return [ln.decode("utf-8", errors="replace") if isinstance(ln, bytes) else str(ln) for ln in raw]
+        finally:
+            await pool.close()
+
+    async def _event_gen():
+        async for event in _crawl_log_events(task_uuid, _get_logs, _get_task):
+            yield event
+
+    return StreamingResponse(_event_gen(), media_type="text/event-stream")
+
+
+@router.get("/crawl/history")
+async def crawl_history(
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """爬取历史（BE-M4-05 扩展）：task_status 中 crawl 任务列表，倒序分页。
+
+    字段来源 task.result（触发时写 platform/keyword，crawl_platform 合并写入
+    spider/output_file/items），status 为 pending/running/success/failed。
+    """
+    stmt = select(TaskStatus).where(TaskStatus.task_type == "crawl")
+    count_stmt = (
+        select(func.count()).select_from(TaskStatus).where(TaskStatus.task_type == "crawl")
+    )
+    total = await db.scalar(count_stmt) or 0
+    rows = await db.scalars(
+        stmt.order_by(TaskStatus.created_at.desc()).offset((page - 1) * size).limit(size)
+    )
+    return ok(data={"items": [_history_row(t) for t in rows], "total": total, "page": page, "size": size})
+
+
+def _history_row(task) -> dict:
+    """crawl 任务 → 历史行（platform 取 spider 名回退触发时 platform，映射中文名）。"""
+    result = task.result or {}
+    spider = result.get("spider") or result.get("platform") or ""
+    return {
+        "id": task.id,
+        "platform": spider,
+        "platform_name": PLATFORM_META.get(spider, {}).get("name", spider or "—"),
+        "keyword": result.get("keyword") or "",
+        "status": task.status,
+        "items": result.get("items") or 0,
+        "error": task.error or "",
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+    }
 
 
 # ============================================================
