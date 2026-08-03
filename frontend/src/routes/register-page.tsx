@@ -49,12 +49,14 @@ export function RegisterPage() {
     setSuccess(null)
     if (!validate()) return
 
+    console.log('[register] 开始提交注册:', { username: username.trim() })
     setCreating(true)
     try {
       const res = await apiPost<{ id: string; username: string; role: string }>('/auth/register', {
         username: username.trim(),
         password,
       })
+      console.log('[register] 注册成功:', { id: res.id, username: res.username, role: res.role })
       setRecentUsers((prev) => [
         {
           id: res.id,
@@ -70,6 +72,7 @@ export function RegisterPage() {
       setConfirmPassword('')
       setErrors({})
     } catch (e) {
+      console.error('[register] 注册失败:', e)
       setErrors({ username: e instanceof ApiError ? e.message : '注册失败，请稍后重试' })
     } finally {
       setCreating(false)

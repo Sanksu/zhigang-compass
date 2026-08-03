@@ -1,5 +1,6 @@
 """认证路由：登录、刷新 Token、注册、登出、当前用户。"""
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Request, Response
@@ -27,6 +28,8 @@ from app.schemas.business import (
     UpdateProfileRequest,
 )
 from app.schemas.common import ok, error
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -155,11 +158,14 @@ async def refresh_token(
 @router.post("/register")
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """注册新用户（默认 guest 角色）。"""
+    logger.info(f"[register] 收到注册请求: username={req.username}")
     if len(req.username) < 3 or len(req.password) < 6:
+        logger.warning(f"[register] 参数校验失败: username={req.username}")
         return error(400, "用户名至少 3 字符，密码至少 6 字符")
 
     existing = await db.scalar(select(User).where(User.username == req.username))
     if existing is not None:
+        logger.warning(f"[register] 用户名已存在: username={req.username}")
         return error(409, "用户名已存在")
 
     user = User(
@@ -170,6 +176,16 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    # 写审计日志（注册成功，便于管理后台 /admin/audit/logs 追踪）
+    db.add(AuditLog(
+        user_id=user.id,
+        action="auth.register",
+        resource="users",
+        resource_id=user.id,
+        detail={"username": user.username},
+    ))
+    await db.commit()
+    logger.info(f"[register] 注册成功: id={user.id} username={user.username} role={user.role}")
     return ok(data={"id": user.id, "username": user.username, "role": user.role})
 
 

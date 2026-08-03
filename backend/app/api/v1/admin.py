@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import asyncio
 import json
+import logging
 import re
 import time
 import uuid
@@ -27,6 +28,8 @@ from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
 from app.schemas.common import ok, error
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_permission("admin:*"))])
+
+logger = logging.getLogger(__name__)
 
 # 爬虫平台元信息（对齐前端 13 源展示，拉勾网已移除）
 PLATFORM_META: dict[str, dict] = {
@@ -299,9 +302,12 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
     """
     platform = (req.get("platform") or "").strip()
     keyword = (req.get("keyword") or "").strip()
+    logger.info(f"[crawl/trigger] 收到触发请求: platform={platform} keyword={keyword}")
     if platform not in _PLATFORM_TO_SPIDER:
+        logger.warning(f"[crawl/trigger] 未知平台: {platform}")
         return error(400, f"未知平台: {platform}（可选: {', '.join(sorted(PLATFORM_META))}）")
     if not keyword:
+        logger.warning("[crawl/trigger] keyword 为空")
         return error(400, "keyword 不能为空")
 
     task = TaskStatus(
@@ -312,13 +318,16 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
     db.add(task)
     await db.commit()
     await db.refresh(task)
+    logger.info(f"[crawl/trigger] 任务已建: task_id={task.id} platform={platform} keyword={keyword}")
 
     try:
         await _enqueue_crawl(_PLATFORM_TO_SPIDER[platform], [keyword], task_id=str(task.id))
+        logger.info(f"[crawl/trigger] 任务入队成功: task_id={task.id} spider={_PLATFORM_TO_SPIDER[platform]}")
     except Exception as e:
         task.status = "failed"
         task.error = f"任务入队失败: {e}"
         await db.commit()
+        logger.error(f"[crawl/trigger] 任务入队失败: task_id={task.id} err={e}")
         return error(500, f"爬取任务入队失败: {e}")
 
     return ok(data={"task_id": task.id, "platform": platform, "status": "pending"})
