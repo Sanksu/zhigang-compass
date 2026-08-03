@@ -51,3 +51,15 @@ class JDExtractionResult(BaseModel):
     education: Optional[EducationExtracted] = Field(default=None, description="教育要求")
     certifications: list[CertificationExtracted] = Field(default_factory=list, description="证书要求")
     requirements: list[REQUIRESRelation] = Field(default_factory=list, description="岗位→技能要求关系")
+
+
+class JDExtractionBatch(BaseModel):
+    """批量 JD 抽取容器（instructor 对 list[BaseModel] 用包装模型更稳）。
+
+    用于一次 LLM 调用抽取多条 JD：`results` 顺序与输入 JD 严格一一对应，
+    编排层据此拆条落库；条数不符即判定错位风险降级逐条。
+    """
+    results: list[JDExtractionResult] = Field(
+        default_factory=list,
+        description="批量抽取结果，数组第 i 个元素对应输入第 i 条 JD",
+    )

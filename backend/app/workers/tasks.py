@@ -908,11 +908,13 @@ async def batch_extract(
     """LLM 批量实体抽取 + JD 入图（M3 实现，依赖 AL-M3-01）。
 
     选取 jd_raw 中尚未抽取（snapshot 无 extraction 标记）的记录：
-    - 拼装 JD 正文 → JDExtractor.extract（instructor 强校验，失败单条降级规则抽取）
+    - 拼装 JD 正文 → JDExtractor.extract_batch（N 条/批一次 LLM 调用，设计文档 §6.5
+      批量抽取优化：批量输出 token 线性放大，走独立 batch_timeout；整批失败/条数
+      错位时该批降级逐条 extract，单条失败不阻塞整体）
     - 抽取结果写回 jd_raw.snapshot["extraction"]（可审计、可重跑）
     - kg_service.import_jd 入图（Neo4j MERGE 幂等，重复执行不产生重复节点）
 
-    单条失败不阻塞整体（批量语义）；全部失败时抛出，由 ARQ 重试机制兜底。
+    全部失败时抛出，由 ARQ 重试机制兜底。
     """
     from sqlalchemy import select
 
@@ -937,15 +939,31 @@ async def batch_extract(
                 .limit(limit)
             )).all()
 
+        # 过滤过短正文（<10 字符无法抽取），有效条目进入批量抽取
+        valid: list[JDRaw] = []
         results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": []}
-        total = len(rows)
-        for i, row in enumerate(rows, start=1):
-            await asyncio.sleep(_BATCH_REQUEST_INTERVAL)
-            text = _build_jd_text(row.snapshot or {}, row.raw_text or "")
-            if len(text.strip()) < 10:
+        for row in rows:
+            if len((_build_jd_text(row.snapshot or {}, row.raw_text or "") or "").strip()) < 10:
                 results["failed"].append({"jd_id": row.id, "error": "JD 正文过短（<10 字符），跳过"})
-                continue
-            results["processed"] += 1
+            else:
+                valid.append(row)
+
+        # 批量抽取：一次调用处理全部有效 JD——组批（batch_size 条数 + max_batch_chars
+        # 文本总长双封顶）→ 每批一次 LLM 调用（独立 batch_timeout，设计文档 §6.5）→
+        # 拆条落库。返回顺序与 valid 一一对应（错位/失败批次已降级逐条）。
+        total = len(valid)
+        texts = [_build_jd_text(r.snapshot or {}, r.raw_text or "") for r in valid]
+        if texts:
+            extractions = extractor.extract_batch(
+                texts,
+                batch_size=5,
+                batch_timeout=90,  # 批量输出 token 放大，独立超时
+                max_batch_chars=8000,
+            )
+        else:
+            extractions = []
+
+        for i, (row, extraction) in enumerate(zip(valid, extractions), start=1):
             # 逐条打印 jd_id + 进度百分比：batch_extract 只在循环结束 commit，
             # 中间进度 DB 不可见，靠此日志实时确认推进（worker.err.log）
             print(
@@ -953,7 +971,6 @@ async def batch_extract(
                 flush=True,
             )
             try:
-                extraction = extractor.extract(text)
                 snap = dict(row.snapshot or {})
                 snap["extraction"] = extraction.model_dump()
                 row.snapshot = snap
@@ -961,10 +978,11 @@ async def batch_extract(
                     "source": row.source,
                     "source_url": row.source_url,
                     "crawled_at": row.crawled_at,
-                    "raw_text": text,
+                    "raw_text": _build_jd_text(row.snapshot or {}, row.raw_text or ""),
                 }
                 with neo4j_driver.session() as neo4j_session:
                     position_id = import_jd(neo4j_session, extraction, evidence)
+                results["processed"] += 1
                 results["succeeded"] += 1
                 results["positions"].append({"jd_id": row.id, "position_id": position_id})
             except Exception as e:
