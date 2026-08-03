@@ -210,8 +210,8 @@ export function ResumeMatchPage() {
   // SSE 订阅解析任务进度（event: progress/done/error）
   async function streamParseProgress(taskId: string, fileName: string) {
     const ctrl = new AbortController()
-    // 30s 无终态事件则中止（与后端 300s 兜底相比更保守，避免上传卡死）
-    const timer = setTimeout(() => ctrl.abort(), 30_000)
+    // 略大于后端 300s 兜底超时：PDF 走 OCR（如字体无 ToUnicode 的扫描件）可耗时约 3 分钟
+    const timer = setTimeout(() => ctrl.abort(), 320_000)
     try {
       const resp = await fetch(`/api/v1/resume/task/${taskId}/stream`, { signal: ctrl.signal })
       if (!resp.ok || !resp.body) throw new Error('SSE 连接失败')

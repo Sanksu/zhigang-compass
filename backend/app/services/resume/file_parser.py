@@ -50,10 +50,55 @@ def _extract_pdf(path: Path) -> str:
     reader = PdfReader(str(path))
     parts = [page.extract_text() or "" for page in reader.pages]
     text = "\n".join(parts).strip()
-    if text:
+    if text and not _is_garbled_text(text):
         return text
-    # 文本型提取为空 → 扫描件，走 OCR（pymupdf 渲染每页）
+    # 文本为空（扫描件）或提取为字形乱码（字体无 ToUnicode）→ OCR 兜底
     return _ocr_pdf(path)
+
+
+def _is_garbled_text(text: str, threshold: float = 0.1) -> bool:
+    """判断 pypdf 提取的文本是否为字形乱码。
+
+    字体缺少 ToUnicode 映射时，`extract_text()` 返回字形 ID 而非真实字符：
+    中文简历会提取出零/极少 CJK 字符（实测 740 字全无 CJK），并夹杂大量
+    非常见脚本字符（格鲁吉亚文/西里尔文/马拉雅拉姆文等）。
+    判定需同时满足"外来脚本字符占比高"与"CJK 占比低"两个条件——
+    纯英文简历 CJK 占比也是 0，但外来脚本占比接近 0，不会被误判。
+    """
+    if not text:
+        return False
+
+    total = 0
+    suspicious = 0
+    cjk = 0
+    for ch in text:
+        if ch.isspace():
+            continue
+        total += 1
+        cp = ord(ch)
+        if 0x4E00 <= cp <= 0x9FFF:  # CJK 统一表意文字
+            cjk += 1
+            continue
+        if _is_common_resume_char(cp):
+            continue
+        suspicious += 1
+    return suspicious / total > threshold and cjk / total < 0.5
+
+
+def _is_common_resume_char(cp: int) -> bool:
+    """正常简历常见字符（ASCII/CJK 标点/拉丁扩展/制表符等）。"""
+    return (
+        0x20 <= cp <= 0x7E        # ASCII 可打印
+        or 0x00A0 <= cp <= 0x017F  # 拉丁-1 补充 + 拉丁扩展-A（· é ü 等）
+        or 0x2E80 <= cp <= 0x2EFF  # CJK 部首扩展
+        or 0x3000 <= cp <= 0x303F  # CJK 标点
+        or 0xFE30 <= cp <= 0xFE4F  # CJK 兼容形式（竖排标点）
+        or 0xFF00 <= cp <= 0xFFEF  # 全角字符
+        or 0x2000 <= cp <= 0x206F  # 通用标点
+        or 0x2190 <= cp <= 0x21FF  # 箭头
+        or 0x2500 <= cp <= 0x25FF  # 制表符/几何图形
+        or 0x2460 <= cp <= 0x24FF  # 带圈数字等
+    )
 
 
 def _ocr_pdf(path: Path) -> str:

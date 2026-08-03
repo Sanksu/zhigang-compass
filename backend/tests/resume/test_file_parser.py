@@ -50,6 +50,35 @@ class TestExtractText:
         with pytest.raises(ResumeParseError, match="扫描件"):
             extract_text(path)
 
+    def test_is_garbled_text_detects_glyph_garbage(self):
+        """字形乱码（缅甸文/藏文等非常见区块）判为乱码；正常中文/英文简历不误判。"""
+        import app.services.resume.file_parser as fp
+
+        # 乱码：非常见 Unicode 区块字符占多数，仅零星 ASCII/CJK 幸存
+        assert fp._is_garbled_text("ဥကကီင်း བོད་ཡིག Python 技能")
+        # 正常简历（中文/英文）不应误判
+        assert not fp._is_garbled_text("姓名：张三\n技能：Python、MySQL")
+        assert not fp._is_garbled_text("Name: Alice\nSkills: Python, SQL")
+
+    def test_pdf_garbled_text_falls_back_to_ocr(self, tmp_path, monkeypatch):
+        """pypdf 提取出字形乱码（字体无 ToUnicode）→ 不返回乱码，落 OCR 兜底。"""
+        import app.services.resume.file_parser as fp
+
+        class _FakePage:
+            def extract_text(self):
+                return "ဥကကီင်းབོད་ཡིག Python"  # 字形乱码
+
+        class _FakeReader:
+            pages = [_FakePage()]
+
+        path = tmp_path / "garbled.pdf"
+        path.write_bytes(b"%PDF-1.4\nfake")  # 文件须存在；reader 已被替换，不真实解析
+
+        monkeypatch.setattr("pypdf.PdfReader", lambda *a, **k: _FakeReader())
+        monkeypatch.setattr(fp, "_ocr_pdf", lambda p: "OCR 姓名：张三\n技能：Python")
+
+        assert extract_text(path) == "OCR 姓名：张三\n技能：Python"
+
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(ResumeParseError, match="文件不存在"):
             extract_text(tmp_path / "nope.pdf")
