@@ -61,6 +61,7 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
         # CDP 连接已启动的浏览器（绕过 DataDome 的 headless 检测）
         try:
             browser = await p.chromium.connect_over_cdp(cdp_url)
+            log(f"✅ CDP 连接成功: {cdp_url}（浏览器版本: {browser.version}）")
         except Exception as e:
             log(f"❌ CDP 连接失败（{cdp_url}）: {e}")
             log(f"   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
@@ -74,6 +75,9 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                 _cookies = await browser.contexts[0].cookies()
                 if _cookies:
                     await context.add_cookies(_cookies)
+                    log(f"ℹ️ 已复制 {len(_cookies)} 个 cookies 到隔离 context")
+                else:
+                    log(f"⚠️ 主 context 无 cookies（DataDome 验证可能未完成）")
             except Exception as e:
                 log(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
         page = await context.new_page()
@@ -108,8 +112,13 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                 # 改用 domcontentloaded + 等待 SPA 渲染，再靠下方的 API 响应轮询兜底
                 await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 await page.wait_for_timeout(5000)
+                log(f"  导航完成: {url}\n  当前 URL: {page.url} | 标题: {await page.title()}")
             except Exception as e:
                 log(f"  导航失败: {e}")
+                try:
+                    log(f"  当前 URL: {page.url} | 标题: {await page.title()}")
+                except Exception:
+                    pass
                 if captured_api_responses:
                     log(f"  导航超时但已有 API 响应，继续处理")
                 else:
