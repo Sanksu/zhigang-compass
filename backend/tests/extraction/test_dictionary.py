@@ -55,6 +55,34 @@ class TestNormalizePositionName:
         assert normalize_position_name("machine learning engineer") == "算法工程师"
         assert normalize_position_name("frontend developer") == "前端开发工程师"
 
+    def test_intl_source_en_translation(self):
+        # 国际源冷门英文岗位 → 翻译归并到中文族（_EN_POSITION_MAP 扩充条目）
+        assert normalize_position_name("Business Analytics Senior Analyst") == "数据分析师"
+        assert normalize_position_name("Sr. Analyst, Marketing Analytics") == "数据分析师"
+        assert normalize_position_name("Model/Anlys/Valid Sr Analyst") == "数据分析师"
+        assert normalize_position_name("Data Automation Engineer") == "大数据开发工程师"
+        assert normalize_position_name("Snowflake Engineer") == "大数据开发工程师"
+        assert normalize_position_name("Kafka Streaming Architect") == "大数据开发工程师"
+        assert normalize_position_name("Inference Engineer, GPU Kernel Optimization") == "算法工程师"
+        # 安全岗翻译后含"网络"关键词，与现有 security engineer 一致归网络族
+        assert normalize_position_name("Threat Context Analyst") == "网络工程师"
+        assert normalize_position_name(
+            "Advanced Cyber Threat Response & Forensics Lead/Manager"
+        ) == "网络工程师"
+        assert normalize_position_name("Member of Technical Staff") == "软件开发工程师"
+        assert normalize_position_name("Seismic Developer") == "软件开发工程师"
+        assert normalize_position_name("Engineering Manager, Platform Engineering") == "运维工程师"
+        assert normalize_position_name("Senior Supervisor, Quality Engineering") == "测试工程师"
+        assert normalize_position_name("Sensor Test R&D Mechatronics Engineer") == "嵌入式开发工程师"
+        assert normalize_position_name("RFIC System Engineer") == "硬件工程师"
+
+    def test_unmappable_en_kept_unchanged(self):
+        # 金融/专业独有岗位无法归类，归一化返回原名（脚本跳过，保留英文）
+        assert normalize_position_name("Manager, Logistics") == "Manager, Logistics"
+        assert normalize_position_name(
+            "Executive Director - North America Delta 1 Flow Swaps Trading"
+        ) == "Executive Director - North America Delta 1 Flow Swaps Trading"
+
     def test_generic_words_are_empty(self):
         # 泛词不入图：归一化结果为空串由 kg_service 跳过
         assert normalize_position_name("技术") == ""

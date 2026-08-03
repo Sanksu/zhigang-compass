@@ -196,6 +196,45 @@ _EN_POSITION_MAP: dict[str, str] = {
     "founding product engineer": "创始工程师",
     "forward deployed engineer": "现场工程师",
     "customer engineer": "客户工程师",
+    # 国际源 Analyst/分析类 → 数据分析师
+    "analyst, strategy & analytics": "数据分析师",
+    "analytics avp": "数据分析师",
+    "applications development technology lead analyst": "数据分析师",
+    "business analytics senior analyst": "数据分析师",
+    "data analysis manager": "数据分析师",
+    "director, planning & analytics": "数据分析师",
+    "fsr analyst": "数据分析师",
+    "financial & credit analytics analyst": "数据分析师",
+    "manager capital markets financial analysis": "数据分析师",
+    "model/anlys/valid sr analyst": "数据分析师",
+    "senior measurement analyst": "数据分析师",
+    "senior statistical analyst": "数据分析师",
+    "specialist, hr data, analytics & insights": "数据分析师",
+    "sr analyst intl solutions business intelligence": "数据分析师",
+    "sr. analyst, marketing analytics": "数据分析师",
+    "visualization software and data specialist": "数据分析师",
+    # 数据工程类 → 大数据开发工程师
+    "data automation engineer": "大数据开发工程师",
+    "kafka streaming architect": "大数据开发工程师",
+    "snowflake engineer": "大数据开发工程师",
+    # 推理优化 → 算法工程师
+    "inference engineer, gpu kernel optimization": "算法工程师",
+    # 安全/威胁响应 → 网络安全工程师（归一化后并入网络工程师，与 security engineer 一致）
+    "advanced cyber threat response & forensics lead/manager": "网络安全工程师",
+    "threat context analyst": "网络安全工程师",
+    # 软件开发类
+    "member of technical staff": "软件开发工程师",
+    "principal subsystem engineer": "软件开发工程师",
+    "regulatory developer vp": "软件开发工程师",
+    "seismic developer": "软件开发工程师",
+    # 平台工程 → 运维工程师
+    "engineering manager, platform engineering": "运维工程师",
+    # 质量工程 → 测试工程师
+    "senior supervisor, quality engineering": "测试工程师",
+    # 机电/传感器测试 → 嵌入式开发工程师
+    "sensor test r&d mechatronics engineer": "嵌入式开发工程师",
+    # 射频芯片 → 硬件工程师
+    "rfic system engineer": "硬件工程师",
 }
 
 # 无信息量泛岗位词：归一化结果命中时视为空岗位（不入图）
