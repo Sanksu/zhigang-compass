@@ -124,34 +124,47 @@ python-jobspy>=1.1.40   # Indeed/LinkedIn 采集（仅 *_jobspy_crawler.py 使�
 
 ## 运行
 
-### 前置：CDP 浏览器（BOSS / Monster / Glassdoor / Maimai 共用）
+### 前置：CDP 浏览器（BOSS / Monster / Glassdoor / Maimai 各自独立）
 
-BOSS 直聘、Monster、Glassdoor、脉脉都需先启动带 CDP 的真实浏览器并完成人工验证：
+四个 CDP 平台使用**独立浏览器**（独立 profile + 独立端口），登录态/验证状态互不污染：
+
+| 平台 | 默认端口 | 独立 profile | 覆盖环境变量 |
+|---|---|---|---|
+| boss | 9222 | `~/.zhigang-compass/boss-chrome-profile` | BOSS_CDP_URL |
+| monster | 9223 | `~/.zhigang-compass/monster-chrome-profile` | MONSTER_CDP_URL |
+| glassdoor | 9224 | `~/.zhigang-compass/glassdoor-chrome-profile` | GLASSDOOR_CDP_URL |
+| maimai | 9225 | `~/.zhigang-compass/maimai-chrome-profile` | MAIMAI_CDP_URL |
+
+每个平台先启动各自的 CDP 浏览器并完成人工验证：
 
 ```bash
 cd backend/data/crawlers
-# 1. 启动隔离 Chrome/Edge（CDP 端口 9222，登录态持久保存到 ~/.zhigang-compass/boss-chrome-profile）
-python -m crawlers.setup_boss_chrome
+# 1. 启动隔离 Chrome/Edge（--platform 指定平台；默认 boss）
+python -m crawlers.setup_boss_chrome --platform boss        # 端口 9222
+python -m crawlers.setup_boss_chrome --platform monster     # 端口 9223
+python -m crawlers.setup_boss_chrome --platform glassdoor   # 端口 9224
+python -m crawlers.setup_boss_chrome --platform maimai      # 端口 9225
 
 # 2. 在弹出的浏览器中：
-#    - 访问 zhipin.com 完成登录（BOSS）
-#    - 访问 monster.com 完成 DataDome challenge（Monster）
-#    - 访问 glassdoor.com 通过 Cloudflare 验证（Glassdoor，需系统代理）
-#    - 浏览器保持开启，爬虫通过 CDP 连接复用登录态（cookie 由浏览器 profile 维护，无需 env cookie）
+#    - boss：手动打开 zhipin.com 完成登录（登录态持久到 profile）
+#    - monster：访问 monster.com 完成 DataDome challenge
+#    - glassdoor：访问 glassdoor.com 通过 Cloudflare 验证（需系统代理）
+#    - 浏览器保持开启：boss 采集仅经 CDP 读取登录态 cookies（不导航页面），
+#      monster/glassdoor 经 CDP 连接复用验证状态
 
-# 3. 检查 CDP + 登录态
-python -m crawlers.setup_boss_chrome --check
+# 3. 检查 CDP + 登录态（boss 专用）
+python -m crawlers.setup_boss_chrome --platform boss --check
 
-# 4. 采集完成后关闭浏览器
-python -m crawlers.setup_boss_chrome --stop
+# 4. 采集完成后关闭对应平台的浏览器
+python -m crawlers.setup_boss_chrome --platform monster --stop
 ```
 
 **局域网 / Docker 容器部署**：浏览器跑在容器内时，启动加 `--cdp-address 0.0.0.0`
-（如 `python -m crawlers.setup_boss_chrome --cdp-address 0.0.0.0`），端口由 Docker 暴露，
+（如 `python -m crawlers.setup_boss_chrome --platform monster --cdp-address 0.0.0.0`），端口由 Docker 暴露，
 登录态 profile 挂载 volume 持久化；采集端设置环境变量指向容器地址：
 
 ```bash
-export BOSS_CDP_URL=http://192.168.1.10:9222   # 容器所在主机局域网 IP
+export MONSTER_CDP_URL=http://192.168.1.10:9223   # 容器所在主机局域网 IP
 ```
 
 ### 各平台采集命令
@@ -159,7 +172,8 @@ export BOSS_CDP_URL=http://192.168.1.10:9222   # 容器所在主机局域网 IP
 ```bash
 cd backend/data/crawlers
 
-# BOSS 直聘（需先完成 CDP 前置 + 浏览器保持开启）
+# BOSS 直聘（CDP 仅读登录态 cookies + HTTP 采集，需先手动登录 zhipin 并保持浏览器开启；
+#   不走页面采集——zhipin 风控会拦截页面内 fetch 并关闭浏览器）
 scrapy crawl boss -a keywords=Python,Java -a cities=北京,上海 -o output/boss.jsonl
 
 # 智联招聘（直连，列表页直接产出 Item，详情页有验证码故留空）

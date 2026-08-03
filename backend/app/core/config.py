@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     # ---------- ARQ ----------
     arq_redis_url: str = "redis://localhost:6379/1"
     arq_concurrency: int = 10
-    arq_task_timeout: int = 1800  # 30 分钟；须大于爬虫 subprocess 上限 900s（BOSS 多任务翻页）
+    arq_job_timeout: int = 1800  # 30 分钟；须大于爬虫 subprocess 上限 900s（BOSS 多任务翻页）
 
     @property
     def is_production(self) -> bool:
