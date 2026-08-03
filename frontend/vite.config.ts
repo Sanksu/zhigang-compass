@@ -17,9 +17,12 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
+      // 同时监听 IPv4(127.0.0.1) 与 IPv6(::1)：默认仅绑 localhost 时 127.0.0.1 会被拒连
+      host: true,
       proxy: {
         '/api': {
-          target: env.VITE_API_TARGET || 'http://localhost:8000',
+          // api 监听 127.0.0.1:8000；target 用 127.0.0.1 避免 localhost 解析到 IPv6 后代理失败
+          target: env.VITE_API_TARGET || 'http://127.0.0.1:8000',
           changeOrigin: true,
         },
       },
