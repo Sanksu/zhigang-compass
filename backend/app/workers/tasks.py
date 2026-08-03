@@ -172,6 +172,13 @@ async def crawl_platform(
         with output_file.open(encoding="utf-8") as f:
             line_count = sum(1 for _ in f)
 
+    # 退出码 0 但无产出视为失败：爬虫"跑通"但未拿到数据，不能显示成功
+    if line_count == 0:
+        detail = "\n".join(stderr_tail[-20:])[-2000:]
+        msg = f"爬虫 {spider_name} 产出 0 条数据: {detail}"
+        await _update_crawl_task(task_id, status="failed", error=msg[:500])
+        raise RuntimeError(msg)
+
     await _update_crawl_task(
         task_id,
         status="success",
