@@ -57,6 +57,7 @@ def _run_subprocess(step_name: str, cmd: list[str]) -> None:
         full_cmd,
         cwd=str(_BACKEND_DIR),
         check=True,  # 非零退出码抛 CalledProcessError → fail-fast
+        env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
     )
 
 
