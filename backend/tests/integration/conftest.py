@@ -80,8 +80,18 @@ def base_url() -> str:
 def client(base_url: str) -> httpx.Client:
     """同步 httpx 客户端（集成测试不需要 pytest-asyncio）。
 
-    超时放宽到 120s：recommend/compare 首次调用会冷加载 SBERT 模型
-    （paraphrase-multilingual-MiniLM，约 30s），超时过短会误报失败。
+    先预热 SBERT：/match/recommend 首次调用会冷加载 paraphrase-multilingual-MiniLM
+    （实测 143s，随图谱数据量增长变慢），预热一次后后续匹配测试走缓存 ~22s，
+    避免超时误报。预热用临时长超时 client（180s），正式 client 保持 120s。
     """
+    with httpx.Client(base_url=base_url, timeout=180) as warmup:
+        try:
+            resumes = warmup.get("/api/v1/resume/list", params={"limit": 1}).json()["data"]
+            if resumes.get("items"):
+                rid = resumes["items"][0]["id"]
+                warmup.post("/api/v1/match/recommend", json={"resume_id": rid, "top_n": 1})
+        except (httpx.HTTPError, KeyError, TypeError, IndexError):
+            pass  # 预热失败不阻断测试（无简历/接口异常时用例自身会 skip）
+
     with httpx.Client(base_url=base_url, timeout=120) as c:
         yield c
