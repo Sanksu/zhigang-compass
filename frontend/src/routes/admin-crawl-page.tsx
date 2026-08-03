@@ -91,6 +91,7 @@ interface CrawlPlatform {
   level: PlatformLevel
   files: number
   total_count: number
+  today_count: number
   last_run: string | null
 }
 
@@ -324,7 +325,7 @@ export function AdminCrawlPage() {
             name: p.name,
             level: p.level,
             status: 'idle',
-            todayCount: 0,
+            todayCount: p.today_count ?? 0,
             totalCount: p.total_count,
             lastRun: p.last_run ? new Date(p.last_run).toLocaleString('zh-CN') : '—',
           })),

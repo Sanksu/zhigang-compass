@@ -212,11 +212,13 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
                 count = 0
             output_total += count
             mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone(timedelta(hours=8)))
-            if mtime.date() == today:
+            is_today = mtime.date() == today
+            if is_today:
                 today_count += count
             platforms.append({
                 "platform": platform,
                 "count": count,
+                "today": count if is_today else 0,
                 "file": f.name,
                 "mtime": mtime.isoformat(),
             })
@@ -231,10 +233,12 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
             "level": meta["level"],
             "files": 0,
             "total_count": 0,
+            "today_count": 0,
             "last_run": None,
         })
         entry["files"] += 1
         entry["total_count"] += p["count"]
+        entry["today_count"] += p["today"]
         if entry["last_run"] is None or p["mtime"] > entry["last_run"]:
             entry["last_run"] = p["mtime"]
 
