@@ -131,6 +131,7 @@ class MonsterSpider(BaseSpider):
                     experience=item_data.get("experience_range", ""),
                     education=item_data.get("education", ""),
                     tags=self._build_tags(item_data),
+                    post_date=item_data.get("date_posted", ""),
                     description=item_data.get("description", ""),
                     requirements="",
                     raw_text=json.dumps(item_data, ensure_ascii=False),

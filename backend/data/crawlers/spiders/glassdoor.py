@@ -39,8 +39,11 @@ class GlassdoorSpider(BaseSpider):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # 允许通过 -a max_pages=3 覆盖页数
-        self.max_pages = int(kwargs.get("max_pages", "2"))
+        # 允许通过 -a max_pages=3 覆盖页数（非法输入回退默认 2，避免实例化崩溃）
+        try:
+            self.max_pages = int(kwargs.get("max_pages", "2"))
+        except ValueError:
+            self.max_pages = 2
 
     def start_requests(self):
         """构建采集任务，用占位 Request 触发 parse。"""

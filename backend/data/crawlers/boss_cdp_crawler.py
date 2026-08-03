@@ -230,6 +230,8 @@ def main():
         print(json.dumps(item, ensure_ascii=False), flush=True)
 
     log(f"采集完成，共 {len(items)} 条")
+    # 非零退出码让 spider 端感知失败（与其他 CDP 采集脚本一致）
+    sys.exit(0 if items else 1)
 
 
 if __name__ == "__main__":

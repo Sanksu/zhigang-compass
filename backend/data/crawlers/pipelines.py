@@ -35,7 +35,7 @@ class CleaningPipeline:
         (re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"), "EMAIL"),
     ]
 
-    def process_item(self, item, spider):
+    def process_item(self, item):
         # 去重指纹：source + source_id 的 SHA256
         item["_fingerprint"] = hashlib.sha256(
             f"{item.get('source', '')}:{item.get('source_id', '')}".encode()
@@ -107,36 +107,54 @@ class PostgresPipeline:
     """
 
     def __init__(self):
+        self.crawler = None
         self.engine = None
         self.session_factory = None
 
-    async def open_spider(self, spider):
+    @classmethod
+    def from_crawler(cls, crawler):
+        """scrapy 2.12+ 移除 pipeline 方法中的 spider 参数，经 crawler 访问 spider。"""
+        pipe = cls()
+        pipe.crawler = crawler
+        return pipe
+
+    def _spider(self):
+        return self.crawler.spider if self.crawler is not None else None
+
+    async def open_spider(self):
+        spider = self._spider()
         try:
             from app.core.config import settings
             self.engine = create_async_engine(settings.postgres_dsn, echo=False)
             self.session_factory = async_sessionmaker(
                 self.engine, class_=AsyncSession, expire_on_commit=False
             )
-            spider.logger.info("PostgresPipeline 已连接 PostgreSQL")
+            if spider:
+                spider.logger.info("PostgresPipeline 已连接 PostgreSQL")
         except Exception as e:
-            spider.logger.warning(
-                f"PostgresPipeline 初始化失败，降级为仅 JSONL 输出: {e}"
-            )
+            if spider:
+                spider.logger.warning(
+                    f"PostgresPipeline 初始化失败，降级为仅 JSONL 输出: {e}"
+                )
             self.engine = None
 
-    async def close_spider(self, spider):
+    async def close_spider(self):
+        spider = self._spider()
         if self.engine:
             await self.engine.dispose()
-            spider.logger.info("PostgresPipeline 已关闭数据库连接")
+            if spider:
+                spider.logger.info("PostgresPipeline 已关闭数据库连接")
 
-    async def process_item(self, item, spider):
+    async def process_item(self, item):
+        spider = self._spider()
         if not self.engine:
             return item  # 降级模式
 
         model_map = _get_item_model_map()
         model = model_map.get(type(item))
         if not model:
-            spider.logger.warning(f"未知 Item 类型: {type(item).__name__}，跳过入库")
+            if spider:
+                spider.logger.warning(f"未知 Item 类型: {type(item).__name__}，跳过入库")
             return item
 
         try:
@@ -144,9 +162,10 @@ class PostgresPipeline:
                 await self._upsert(session, model, item)
                 await session.commit()
         except Exception as e:
-            spider.logger.error(
-                f"PostgresPipeline 写入 {model.__tablename__} 失败: {e}"
-            )
+            if spider:
+                spider.logger.error(
+                    f"PostgresPipeline 写入 {model.__tablename__} 失败: {e}"
+                )
 
         return item
 

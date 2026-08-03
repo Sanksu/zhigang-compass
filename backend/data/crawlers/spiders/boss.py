@@ -165,18 +165,18 @@ class BossSpider(BaseSpider):
                     continue
 
                 yield self.make_item(
-                    source_id=item_data["source_id"],
-                    source_url=item_data["source_url"],
-                    title=item_data["title"],
-                    company=item_data["company"],
-                    location=item_data["location"],
-                    salary=item_data["salary"],
-                    experience=item_data["experience"],
-                    education=item_data["education"],
-                    tags=item_data["tags"],
-                    description=item_data["description"],
-                    requirements=item_data["requirements"],
-                    raw_text=item_data["raw_text"],
+                    source_id=item_data.get("source_id", ""),
+                    source_url=item_data.get("source_url", ""),
+                    title=item_data.get("title", ""),
+                    company=item_data.get("company", ""),
+                    location=item_data.get("location", ""),
+                    salary=item_data.get("salary", ""),
+                    experience=item_data.get("experience", ""),
+                    education=item_data.get("education", ""),
+                    tags=item_data.get("tags") or [],
+                    description=item_data.get("description", ""),
+                    requirements=item_data.get("requirements", ""),
+                    raw_text=item_data.get("raw_text", ""),
                 )
 
             if proc.returncode != 0:

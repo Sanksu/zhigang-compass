@@ -140,8 +140,8 @@ class ArxivSpider(Spider):
         # 发布/更新时间
         published_elem = entry.find(f"{{{ns}}}published")
         updated_elem = entry.find(f"{{{ns}}}updated")
-        published = published_elem.text.strip() if published_elem is not None else ""
-        updated = updated_elem.text.strip() if updated_elem is not None else ""
+        published = (published_elem.text or "").strip() if published_elem is not None else ""
+        updated = (updated_elem.text or "").strip() if updated_elem is not None else ""
 
         # 所有分类（<category term="...">）
         categories = []

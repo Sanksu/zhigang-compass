@@ -110,8 +110,10 @@ class CourseraSpider(Spider):
 
     def _card_to_item(self, card, meta: dict) -> CourseItem:
         """将单个课程卡片转为 CourseItem。"""
-        # 标题与链接
-        title_link = card.css("a.cds-CommonCard-titleLink")
+        # 标题与链接（兼容两种卡片：div 包裹 a / a 元素自身）
+        title_link = card.xpath(
+            'self::a[contains(@class, "cds-CommonCard-titleLink")] | .//a[contains(@class, "cds-CommonCard-titleLink")]'
+        )
         title = title_link.css("h3::text, h2::text, ::text").get(default="").strip()
         href = title_link.css("::attr(href)").get()
 
@@ -121,6 +123,9 @@ class CourseraSpider(Spider):
         # href 可能是 /learn/{slug}（旧版）或 /search?query=...&xdpModal=course~{id}（新版 modal UX）
         # 从 href 提取 source_id 和 source_url
         source_id, source_url = self._extract_ids(href)
+        # source_id 缺失时跳过（避免共用 "unknown" 常量导致 upsert 互相覆盖）
+        if not source_id:
+            return None
 
         # 院校/机构：cds-ProductCard-partnerNames（注意是 ProductCard 不是 CommonCard）
         institution = card.css(
@@ -200,9 +205,9 @@ class CourseraSpider(Spider):
         m = re.search(r"xdpModal=course(?:~|%7E)([\w-]+)", href, re.IGNORECASE)
         if m:
             return m.group(1), course_url
-        # 兜底：取 URL 最后一段
-        fallback = href.rstrip("/").split("/")[-1].split("?")[0] or "unknown"
-        return fallback, course_url
+        # 兜底：取 URL 最后一段（取不到稳定 ID 时返回 None，由调用方跳过）
+        fallback = href.rstrip("/").split("/")[-1].split("?")[0]
+        return (fallback, course_url) if fallback else (None, None)
 
     @staticmethod
     def _parse_rating(text: str) -> float:

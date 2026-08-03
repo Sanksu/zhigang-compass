@@ -55,8 +55,8 @@ class ZhilianSpider(BaseSpider):
         for text in script_text:
             if "__INITIAL_STATE__" not in text or "publishTime" not in text:
                 continue
-            # __INITIAL_STATE__={...} 格式，截取 JSON 部分
-            match = re.search(r"__INITIAL_STATE__\s*=\s*(\{.+)", text, re.DOTALL)
+            # __INITIAL_STATE__={...} 格式，截取 JSON 部分（非贪婪 + 尾部锚定，避免贪婪吞掉后续 JS）
+            match = re.search(r"__INITIAL_STATE__\s*=\s*(\{.*\})\s*;?\s*$", text, re.DOTALL)
             if not match:
                 continue
             try:
@@ -92,6 +92,13 @@ class ZhilianSpider(BaseSpider):
         publish_time_map = self._extract_publish_time_map(response)
 
         cards = response.css(".joblist-box__item")
+
+        if not cards:
+            self.logger.warning(
+                f"列表页无岗位卡片（kw={response.meta.get('keyword')}），"
+                f"页面标题: {response.css('title::text').get(default='')}"
+            )
+            return
 
         for card in cards:
             title = card.css(".jobinfo__name::text").get(default="").strip()

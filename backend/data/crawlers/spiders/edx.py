@@ -99,8 +99,8 @@ class EdxSpider(Spider):
         cards = response.xpath(EDX_CARD_LINK_XPATH)
 
         if not cards:
-            # 兜底：直接找含 shadow-product-card 的 div 的父级 a
-            cards = response.css('div[class*="shadow-product-card"]::parent')
+            # 兜底：找含 shadow-product-card 的 div 的父节点（parsel 不支持 ::parent，用 XPath）
+            cards = response.xpath('//div[contains(@class, "shadow-product-card")]/..')
             cards = [c for c in cards if c.root.tag == 'a'] if cards else []
 
         if not cards:

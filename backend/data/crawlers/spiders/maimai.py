@@ -131,7 +131,7 @@ class MaimaiSpider(BaseSpider):
                 salary=item_data.get("salary", ""),
                 experience=item_data.get("experience_range", ""),
                 education="",
-                tags=[item_data.get("category", ""), item_data.get("job_type", "")],
+                tags=[t for t in (item_data.get("category", ""), item_data.get("job_type", "")) if t],
                 description=item_data.get("description", ""),
                 requirements="",
                 raw_text=json.dumps(item_data.get("raw", item_data), ensure_ascii=False),
