@@ -102,10 +102,14 @@ class ArxivSpider(Spider):
             self.logger.debug(f"响应前 500 字符: {response.text[:500]}")
             return
 
+        item_count = 0
         for entry in entries:
             item = self._entry_to_item(entry, response.meta["category"])
             if item:
+                item_count += 1
                 yield item
+
+        self.logger.info(f"[arxiv] 分类 {response.meta['category']} 产出 {item_count} 条论文")
 
     def _entry_to_item(self, entry, category: str) -> PaperItem:
         """将 Atom <entry> 元素转为 PaperItem。"""

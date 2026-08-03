@@ -89,10 +89,11 @@ class MonsterSpider(BaseSpider):
         cdp_url = response.meta.get("cdp_url", "http://127.0.0.1:9223")
         python_exe = sys.executable
 
-        for task in tasks:
+        task_total = len(tasks)
+        for task_idx, task in enumerate(tasks):
             keyword = task["keyword"]
             city = task["city"]
-            self.logger.info(f"[monster] 开始采集: kw={keyword} city={city}（调用 CDP 脚本）")
+            self.logger.info(f"[monster] 进度 {task_idx + 1}/{task_total}: 开始采集 kw={keyword} city={city}（调用 CDP 脚本）")
 
             cmd = [
                 python_exe, CRAWLER_SCRIPT,
@@ -162,7 +163,7 @@ class MonsterSpider(BaseSpider):
                     if "采集完成" in line:
                         continue
                     self.logger.info(f"[cdp] {line}")
-            self.logger.info(f"[monster] kw={keyword} city={city} 完成：产出 {item_count} 条")
+            self.logger.info(f"[monster] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条")
 
     def _on_error(self, failure):
         """占位请求失败回调。"""

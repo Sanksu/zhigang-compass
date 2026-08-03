@@ -121,6 +121,7 @@ class MaimaiSpider(BaseSpider):
             self.logger.error(f"CDP 脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
             return
 
+        item_count = 0
         for line in stdout.splitlines():
             line = line.strip()
             if not line:
@@ -131,6 +132,7 @@ class MaimaiSpider(BaseSpider):
                 self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
                 continue
 
+            item_count += 1
             yield self.make_item(
                 source_id=str(item_data.get("id", "")),
                 source_url=item_data.get("url", ""),
@@ -151,6 +153,7 @@ class MaimaiSpider(BaseSpider):
         if stderr_output:
             for line in stderr_output.strip().splitlines()[-5:]:
                 self.logger.info(f"[cdp] {line}")
+        self.logger.info(f"[maimai] 采集完成：产出 {item_count} 条")
 
     def _on_error(self, failure):
         """占位请求失败回调。"""

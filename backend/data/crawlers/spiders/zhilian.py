@@ -95,11 +95,12 @@ class ZhilianSpider(BaseSpider):
 
         if not cards:
             self.logger.warning(
-                f"列表页无岗位卡片（kw={response.meta.get('keyword')}），"
+                f"[zhilian] 列表页无岗位卡片（kw={response.meta.get('keyword')} 页={response.meta.get('page')}），"
                 f"页面标题: {response.css('title::text').get(default='')}"
             )
             return
 
+        yield_count = 0
         for card in cards:
             title = card.css(".jobinfo__name::text").get(default="").strip()
             company = card.css(".companyinfo__name::text").get(default="").strip()
@@ -135,6 +136,7 @@ class ZhilianSpider(BaseSpider):
                 f"技能标签：{', '.join(tags)}",
             ])
 
+            yield_count += 1
             yield self.make_item(
                 source_id=source_id,
                 source_url=detail_url,
@@ -153,6 +155,10 @@ class ZhilianSpider(BaseSpider):
 
         # 翻页（最多 5 页，避免过度采集触发反爬）
         current_page = response.meta.get("page", 1)
+        self.logger.info(
+            f"[zhilian] kw={response.meta.get('keyword')} city={response.meta.get('city')} "
+            f"页={current_page} 产出 {yield_count} 条"
+        )
         if current_page < 5:
             next_href = response.css(".next-page::attr(href), a.pageset[rel=next]::attr(href)").get()
             if next_href:

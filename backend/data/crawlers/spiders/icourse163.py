@@ -88,9 +88,10 @@ class Icourse163Spider(Spider):
             return
 
         python_exe = sys.executable
+        keyword_total = len(keywords)
 
-        for keyword in keywords:
-            self.logger.info(f"开始采集中国大学MOOC: 关键词={keyword}")
+        for kw_idx, keyword in enumerate(keywords):
+            self.logger.info(f"[icourse163] 进度 {kw_idx + 1}/{keyword_total}: 开始采集 关键词={keyword}")
 
             cmd = [
                 python_exe, self.crawler_script,
@@ -145,7 +146,7 @@ class Icourse163Spider(Spider):
                     if stderr_line:
                         self.logger.info(f"[script] {stderr_line}")
 
-            self.logger.info(f"关键词={keyword} 采集完成，共 {count} 条")
+            self.logger.info(f"[icourse163] 进度 {kw_idx + 1}/{keyword_total}: 关键词={keyword} 采集完成，共 {count} 条")
 
     def _on_error(self, failure):
         """占位请求失败回调（正常情况，本地 1 端口不通）。"""

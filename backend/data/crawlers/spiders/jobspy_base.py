@@ -46,10 +46,11 @@ class JobSpyBaseSpider(BaseSpider):
 
         python_exe = sys.executable
 
-        for task in tasks:
+        task_total = len(tasks)
+        for task_idx, task in enumerate(tasks):
             keyword = task["keyword"]
             city = task["city"]
-            self.logger.info(f"开始采集: kw={keyword} city={city}")
+            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}: 开始采集 kw={keyword} city={city}")
 
             cmd = [
                 python_exe, self.crawler_script,
@@ -82,6 +83,7 @@ class JobSpyBaseSpider(BaseSpider):
                 self.logger.error(f"JobSpy 脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
                 continue
 
+            item_count = 0
             for line in stdout.splitlines():
                 line = line.strip()
                 if not line:
@@ -92,6 +94,7 @@ class JobSpyBaseSpider(BaseSpider):
                     self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
                     continue
 
+                item_count += 1
                 salary = self._format_salary(
                     item_data.get("salary_interval"),
                     item_data.get("min_amount"),
@@ -119,6 +122,7 @@ class JobSpyBaseSpider(BaseSpider):
                 self.logger.error(f"JobSpy 脚本退出码 {proc.returncode}: {stderr[-500:]}")
             elif stderr:
                 self.logger.debug(f"JobSpy stderr: {stderr[-300:]}")
+            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条")
 
     def parse(self, response: Response):
         """占位：start_requests 已直接 yield Item，无需 parse。"""
