@@ -37,11 +37,11 @@ interface ReviewItem {
   updated_at: string | null
 }
 
-/** 综合置信度（后端 confidence 为多维对象，取 confidence_score 或 0.5 中性值） */
+/** 综合置信度（后端 confidence 为多维对象，取 final_confidence 或 0.5 中性值） */
 function confidenceOf(item: ReviewItem): number {
   const c = item.confidence
   if (c && typeof c === 'object') {
-    const score = (c as Record<string, unknown>).confidence_score
+    const score = (c as Record<string, unknown>).final_confidence
     if (typeof score === 'number') return score
   }
   return 0.5
