@@ -136,10 +136,11 @@ export function GraphPage() {
   // 切换视图不清 loading，数据到达后原子替换，避免闪屏。
   useEffect(() => {
     let cancelled = false
-    setError(null)
     apiGet<PanoramaData>(`/graph/view/${view}?limit=200`)
       .then((res) => {
-        if (!cancelled) setRaw(toGraphData(res))
+        if (cancelled) return
+        setRaw(toGraphData(res))
+        setError(null)
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof ApiError ? e.message : '图谱数据加载失败')
@@ -185,12 +186,11 @@ export function GraphPage() {
     }
   }, [selected])
 
-  // 选中岗位节点 → GET /graph/position/{id}（任职要求 + 必备/加分技能）
+  // 选中岗位节点 → GET /graph/position/{id}（任职要求 + 必备/加分技能）。
+  // 非 position 节点时不清空 positionDetail：渲染处按 selected 类型 + id 匹配派生过滤，
+  // 避免 effect 内同步 setState（react-hooks/set-state-in-effect）。
   useEffect(() => {
-    if (!selected || selected.type !== 'position') {
-      setPositionDetail(null)
-      return
-    }
+    if (!selected || selected.type !== 'position') return
     let cancelled = false
     const pid = encodeURIComponent(selected.id)
     apiGet<PositionDetail>(`/graph/position/${pid}`)
@@ -428,7 +428,7 @@ export function GraphPage() {
             node={selected}
             stats={detailStats}
             skillDetail={skillDetailView}
-            positionDetail={positionDetail}
+            positionDetail={selected?.type === 'position' && positionDetail && positionDetail.id === selected.id ? positionDetail : null}
             skillEvidence={selected && skillDetail && skillDetail.skill_id === selected.id ? skillEvidence : []}
             similarSkills={selected && skillDetail && skillDetail.skill_id === selected.id ? similarSkills : []}
             onSelectSkill={focusSkill}
