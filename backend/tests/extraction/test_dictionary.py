@@ -7,12 +7,28 @@
 import pytest
 
 from app.services.extraction.dictionary import (
+    SKILL_WHITELIST,
+    SOFT_SKILL_WHITELIST,
     _normalize_base,
     _translate_en_position,
     normalize_position_name,
     normalize_proficiency,
     normalize_skill,
 )
+
+
+class TestSoftSkillWhitelist:
+    """软技能白名单约束（设计文档 9.2：岗位本体维护共 20 项）。"""
+
+    def test_exactly_20_items(self):
+        assert len(SOFT_SKILL_WHITELIST) == 20
+
+    def test_is_subset_of_skill_whitelist(self):
+        # 软技能是技能白名单的标记性子集，JD/简历抽取共用同一枚举域
+        assert SOFT_SKILL_WHITELIST.issubset(SKILL_WHITELIST)
+
+    def test_representative_entries(self):
+        assert {"团队协作", "沟通能力", "项目管理", "领导力"}.issubset(SOFT_SKILL_WHITELIST)
 
 
 class TestNormalizeSkill:

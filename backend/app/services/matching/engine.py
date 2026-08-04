@@ -31,6 +31,15 @@ STALENESS_PENALTY_STRONG = 0.85
 # 粗筛保留数（设计文档 9.4 节 Step 1，K=200）
 ROUGH_SELECT_K = 200
 
+# LLM 推断软技能命中降权系数（设计文档 9.2 节：low_confidence 匹配时降权 ×0.5）。
+# 推断来源（项目角色/经历）置信度低于文本直述，同技能命中计一半分。
+SOFT_SKILL_DOWNWEIGHT = 0.5
+
+
+def _soft_multiplier(cs) -> float:
+    """候选技能置信度乘数：LLM 推断软技能 ×0.5，显式技能 ×1.0。"""
+    return SOFT_SKILL_DOWNWEIGHT if cs.low_confidence else 1.0
+
 
 def apply_cii_correction(position: PositionProfile) -> PositionProfile:
     """CII 通胀修正：必备技能数 > 7 时降级最低权重 20% 为加分技能。
@@ -111,22 +120,29 @@ def _skill_similarity(
     req_canon = _canonical_name(req.skill_name)
     for cs in candidate_skills:
         if req.skill_id and cs.skill_id and req.skill_id.lower() == cs.skill_id.lower():
-            return 1.0
+            return _soft_multiplier(cs)
         if req_canon and cs.skill_name and _canonical_name(cs.skill_name) == req_canon:
-            return 1.0
+            return _soft_multiplier(cs)
 
     if semantic is None or not req.skill_name:
         return 0.0
     threshold = load_sim_threshold() if sim_threshold is None else sim_threshold
     best = 0.0
+    best_cs = None
     try:
         for cs in candidate_skills:
             if cs.skill_name:
-                best = max(best, semantic.similarity(req.skill_name, cs.skill_name))
+                sim = semantic.similarity(req.skill_name, cs.skill_name)
+                if sim > best:
+                    best = sim
+                    best_cs = cs
     except Exception:
         # 语义模型不可用（SemanticUnavailableError 等）降级纯规则，不阻断匹配
         return 0.0
-    return best if best >= threshold else 0.0
+    # 阈值基于原始相似度判断（与显式技能口径一致），降权只作用于最终贡献分
+    if best_cs is None or best < threshold:
+        return 0.0
+    return best * _soft_multiplier(best_cs)
 
 
 def _build_summary(

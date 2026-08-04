@@ -29,6 +29,11 @@ class TestCleanSkillName:
         assert clean_skill_name("") == ""
         assert clean_skill_name("   ") == ""
 
+    def test_soft_skill_preserved(self):
+        # 软技能白名单整体跳过后缀清洗："项目管理"不以"管理"为后缀退化
+        assert clean_skill_name("项目管理") == "项目管理"
+        assert clean_skill_name("产品设计") == "产品设计"
+
 
 class TestDedupSkills:
     def test_case_insensitive_dedup_keeps_first(self):
@@ -73,3 +78,18 @@ class TestPostProcess:
         )
         out = post_process(result)
         assert out.skills[0].name == out.requirements[0].skill_name == "Kubernetes"
+
+    def test_soft_skills_filtered_to_whitelist(self):
+        """soft_skills 仅保留岗位本体白名单 + 去重（LLM 越界输出在此拦截）。"""
+        result = JDExtractionResult(
+            position_name="",
+            soft_skills=["团队协作", "沟通能力", "团队协作", "领导力", "体力好"],
+        )
+        out = post_process(result)
+        assert out.soft_skills == ["团队协作", "沟通能力", "领导力"]
+
+    def test_soft_skill_normalized_before_filter(self):
+        """软技能经别名归一化后命中白名单（无别名则原样）。"""
+        result = JDExtractionResult(position_name="", soft_skills=["团队协作"])
+        out = post_process(result)
+        assert out.soft_skills == ["团队协作"]

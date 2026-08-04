@@ -22,6 +22,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
+from pgvector.sqlalchemy import Vector
 
 from app.models.base import Base
 
@@ -167,6 +168,9 @@ class Occupation(Base):
     definition: Mapped[str] = mapped_column(Text, default="")  # 职业定义
     aliases: Mapped[list] = mapped_column(JSONB, default=list)  # 别名/俗称（Job Titles 聚合）
     source: Mapped[str] = mapped_column(String(20), default="onet")
+    # 语义向量（Sentence-BERT 384 维，T-06 RAG 接地双路之 pgvector 语义检索；
+    # 由 scripts/import_occupations.py 生成，模型不可用时为 NULL，语义路降级）
+    embedding: Mapped[list | None] = mapped_column(Vector(384), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -369,3 +369,66 @@ class TestRuleBasedMatcher:
             matcher.match(
                 MatchRequest(candidate=_candidate([]), mode=MatchMode.COMPARE, target_position_id="nope")
             )
+
+
+class TestSoftSkillDownweight:
+    """LLM 推断软技能（low_confidence）匹配降权 ×0.5（设计文档 9.2 节）。"""
+
+    def _soft_candidate(self, name: str, low: bool = True) -> CandidateProfile:
+        return CandidateProfile(
+            user_id="u1",
+            skills=[CandidateSkill(skill_id=name, skill_name=name, proficiency=2, low_confidence=low)],
+            total_years=5,
+        )
+
+    def test_exact_match_low_confidence_half_credit(self):
+        """推断软技能精确命中 → must_score=0.5（×0.5 降权）。"""
+        cand = self._soft_candidate("团队协作")
+        pos = _position(
+            "p1",
+            musts=[_req("团队协作", Necessity.MUST)],
+            nices=[_req("Python", Necessity.NICE)],
+            required_years=3,
+        )
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == pytest.approx(0.5)
+        assert result.total_score == pytest.approx(0.5 * 0.6 + 0 + 0.2)
+        assert "团队协作" in result.matched_must
+
+    def test_explicit_skill_full_credit(self):
+        """同一技能文本直述（low_confidence=False）→ 满分 1.0。"""
+        cand = self._soft_candidate("团队协作", low=False)
+        pos = _position("p1", musts=[_req("团队协作", Necessity.MUST)], required_years=3)
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == 1.0
+
+    def test_semantic_hit_low_confidence_downsized(self):
+        """语义命中（0.9 ≥ 阈值）后按 ×0.5 降权贡献分。"""
+        cand = self._soft_candidate("沟通能力")
+        pos = _position("p1", musts=[_req("团队协作", Necessity.MUST)])
+        sem = _FakeSemantic({("团队协作", "沟通能力"): 0.9})
+        result = score_position(cand, pos, weights=W, semantic=sem, sim_threshold=0.5)
+        assert result.must_score == pytest.approx(0.45)
+
+    def test_semantic_below_threshold_still_misses(self):
+        """语义原始相似度低于阈值 → 不计入（降权不影响阈值判定）。"""
+        cand = self._soft_candidate("沟通能力")
+        pos = _position("p1", musts=[_req("团队协作", Necessity.MUST)])
+        sem = _FakeSemantic({("团队协作", "沟通能力"): 0.4})
+        result = score_position(cand, pos, weights=W, semantic=sem, sim_threshold=0.5)
+        assert result.must_score == 0.0
+
+    def test_soft_skill_nice_requirement_scored(self):
+        """岗位侧 soft_skills 并入 nice 后，推断软技能命中按 ×0.5 计入 nice_score。"""
+        cand = self._soft_candidate("团队协作")
+        pos = _position(
+            "p1",
+            musts=[],
+            nices=[
+                _req("Python", Necessity.NICE, weight=0.4),
+                _req("团队协作", Necessity.NICE, weight=0.4),
+            ],
+        )
+        result = score_position(cand, pos, weights=W)
+        # 命中团队协作 0.5×0.4，未命中 Python → 0.2 / 0.8 = 0.25
+        assert result.nice_score == pytest.approx(0.25)

@@ -51,6 +51,10 @@ class JDExtractionResult(BaseModel):
     education: Optional[EducationExtracted] = Field(default=None, description="教育要求")
     certifications: list[CertificationExtracted] = Field(default_factory=list, description="证书要求")
     requirements: list[REQUIRESRelation] = Field(default_factory=list, description="岗位→技能要求关系")
+    soft_skills: list[str] = Field(
+        default_factory=list,
+        description="软技能要求列表（仅限岗位本体维护的 20 项白名单，见 dictionary.SOFT_SKILL_WHITELIST）",
+    )
 
 
 class JDExtractionBatch(BaseModel):

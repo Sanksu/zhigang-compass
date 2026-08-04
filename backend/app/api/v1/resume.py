@@ -27,9 +27,12 @@ router = APIRouter()
 # 上传目录（根 .gitignore 已忽略 uploads/，仅存运行时文件）
 _UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads"
 
-# 上传边界：大小上限 10MB，类型白名单（防内存耗尽与任意文件写入）
+# 上传边界：大小上限 10MB，类型白名单（防内存耗尽与任意文件写入）。
+# 白名单以解析器支持能力为单一事实源，避免上传通过后解析却失败的漂移（T-03）
+from app.services.resume.file_parser import SUPPORTED_EXTENSIONS
+
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
+ALLOWED_EXTENSIONS = SUPPORTED_EXTENSIONS
 
 
 async def _enqueue_resume_parse(file_path: str, task_id: str) -> None:
@@ -95,7 +98,9 @@ async def parse_resume(
 
     suffix = Path(file.filename or "resume").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        return error(415, "仅支持 pdf/doc/docx/txt 格式")
+        supported = "/".join(sorted(ext.lstrip(".") for ext in ALLOWED_EXTENSIONS))
+        hint = "，.doc 请转存为 .docx" if suffix == ".doc" else ""
+        return error(415, f"仅支持 {supported} 格式{hint}")
 
     file_hash = hashlib.sha256(content).hexdigest()
 

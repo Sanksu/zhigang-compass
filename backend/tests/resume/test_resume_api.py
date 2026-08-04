@@ -4,13 +4,33 @@
 - `_parse_resume_id`：UUID 校验
 - `_merge_fields`：编辑字段顶层覆盖合并语义
 - `_task_stream_events`：SSE 事件序列（progress/done/error/不存在/超时），注入假任务查询
+- 上传白名单与解析器能力一致性（T-03）
 """
 
 import asyncio
 
 import pytest
 
-from app.api.v1.resume import _merge_fields, _parse_resume_id, _task_stream_events
+from app.api.v1.resume import ALLOWED_EXTENSIONS, _merge_fields, _parse_resume_id, _task_stream_events
+from app.services.resume.file_parser import SUPPORTED_EXTENSIONS
+
+
+class TestUploadWhitelist:
+    """上传白名单必须以解析器能力为单一事实源（T-03：原白名单放行 .doc、
+    却拒绝解析器支持的图片，上传通过后解析必然失败）。"""
+
+    def test_whitelist_equals_parser_support(self):
+        # 防止白名单再次与解析器漂移
+        assert ALLOWED_EXTENSIONS == SUPPORTED_EXTENSIONS
+
+    def test_design_doc_formats_all_uploadable(self):
+        # 设计文档 §8.1/§10.4：PDF / Word / 图片 三类均可上传
+        for ext in (".pdf", ".docx", ".png", ".jpg", ".jpeg"):
+            assert ext in ALLOWED_EXTENSIONS
+
+    def test_legacy_doc_rejected(self):
+        # python-docx 无法解析 .doc，上传层须拦截而非放行后解析失败
+        assert ".doc" not in ALLOWED_EXTENSIONS
 
 
 class TestParseResumeId:

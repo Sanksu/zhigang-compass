@@ -87,6 +87,13 @@ class SkillEmbedder:
         for key, vec in zip(missing, vecs):
             self._cache[key] = vec
 
+    def embed(self, text: str) -> list:
+        """文本 → 384 维向量（list[float]），供 pgvector 查询绑定与批量入库。
+
+        模型不可用时抛 SemanticUnavailableError（调用方降级语义路）。
+        """
+        return list(self._vec(text))
+
     def similarity(self, a: str, b: str) -> float:
         """技能名语义余弦相似度（[0,1]）。
 

@@ -94,3 +94,41 @@ class TestExtract:
         extractor = ResumeExtractor(llm=_FailingLLM())
         out = extractor.extract("硕士毕业于 XX 大学，本科就读于 YY 大学")
         assert out.education_level == "硕士"  # 按从高到低取首个命中
+
+
+class TestSoftSkillInference:
+    """LLM 推断软技能全链路（设计文档 9.2 节：标 low_confidence，匹配降权 ×0.5）。"""
+
+    def test_soft_skills_merged_with_low_confidence(self):
+        raw = ResumeExtractionResult(
+            skills=[ResumeSkill(name="Python", proficiency=3)],
+            soft_skills=["团队协作", "沟通能力", "项目管理"],
+        )
+        out = ResumeExtractor(llm=_FakeLLM(raw)).extract("这是一份足够长的简历文本，用于验证抽取流程")
+        by_name = {s.name: s for s in out.skills}
+        assert by_name["Python"].low_confidence is False  # 显式技能不降权
+        assert by_name["团队协作"].low_confidence is True
+        assert by_name["沟通能力"].low_confidence is True
+        assert by_name["项目管理"].low_confidence is True
+
+    def test_non_whitelist_soft_skill_dropped(self):
+        raw = ResumeExtractionResult(soft_skills=["体力好"])  # 白名单外
+        out = ResumeExtractor(llm=_FakeLLM(raw)).extract("这是一份足够长的简历文本，用于验证抽取流程")
+        assert out.skills == []
+
+    def test_explicit_skill_wins_over_inferred(self):
+        """文本直述的软技能（显式）不被推断项覆盖，保持不降权。"""
+        raw = ResumeExtractionResult(
+            skills=[ResumeSkill(name="项目管理", proficiency=3)],
+            soft_skills=["项目管理"],
+        )
+        out = ResumeExtractor(llm=_FakeLLM(raw)).extract("这是一份足够长的简历文本，用于验证抽取流程")
+        assert len(out.skills) == 1
+        assert out.skills[0].low_confidence is False
+        assert out.skills[0].proficiency == 3
+
+    def test_rule_based_path_has_no_soft_skills(self):
+        """规则兜底不产生 soft_skills（软技能仅走 LLM 推断通道）。"""
+        extractor = ResumeExtractor(llm=_FailingLLM())
+        out = extractor.extract("[NAME]\n5年经验，熟悉 Python，项目：团队协作完成推荐系统开发")
+        assert out.soft_skills == []

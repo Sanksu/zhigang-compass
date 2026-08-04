@@ -7,6 +7,7 @@
 - Position.freq           = 命中该岗位名的 JD 条数（Evidence 数）
 - Position.required_years = 该岗位 JD 经验要求最小年限的中位数（无则保留原值）
 - Position.last_updated   = 本次聚合时间
+- Position.soft_skills    = 软技能白名单（按 JD 命中数降序，设计文档 9.2 节）
 - REQUIRES.weight         = must=0.8 / nice=0.4（沿用图谱现有两档约定）
 - REQUIRES.necessity      = 该技能在岗位 JD 中 must 占比 ≥ 0.5 判 must，否则 nice
 - REQUIRES.source_count   = 命中该技能的独立招聘源数
@@ -21,6 +22,8 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from statistics import median
+
+from app.services.extraction.dictionary import SOFT_SKILL_WHITELIST
 
 # 图谱 weight 两档约定
 _WEIGHT_MUST = 0.8
@@ -48,12 +51,14 @@ class SkillAgg:
 
 
 class PositionAgg:
-    __slots__ = ("jd_count", "skills", "exp_years")
+    __slots__ = ("jd_count", "skills", "exp_years", "soft_skills")
 
     def __init__(self) -> None:
         self.jd_count = 0
         self.skills: dict[str, SkillAgg] = defaultdict(SkillAgg)
         self.exp_years: list[float] = []
+        # 软技能白名单命中的 JD 数（写回 Position.soft_skills，设计文档 9.2 节）
+        self.soft_skills: Counter = Counter()
 
 
 def _min_experience_years(snapshot: dict) -> float | None:
@@ -112,6 +117,11 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
                 sa.levels.append(level)
             if necessity == "must":
                 sa.must_count += 1
+        # 软技能：仅统计岗位本体白名单（JD 抽取已过滤，此处兜底再校验）
+        for soft in ext.get("soft_skills") or []:
+            soft = soft.strip()
+            if soft in SOFT_SKILL_WHITELIST:
+                pa.soft_skills[soft] += 1
     return agg
 
 
@@ -125,6 +135,8 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
             "freq": pa.jd_count,
             "req_years": median(pa.exp_years) if pa.exp_years else None,
             "now": now,
+            # 软技能按 JD 命中数降序（低频软技能不写入岗位本体）
+            "soft_skills": [s for s, _ in pa.soft_skills.most_common()],
         })
         for skill, sa in pa.skills.items():
             is_must = sa.must_count / sa.hit >= _MUST_MAJORITY
@@ -145,7 +157,8 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
                 MATCH (p:Position {name: it.pos})
                 SET p.freq = it.freq,
                     p.last_updated = it.now,
-                    p.required_years = coalesce(it.req_years, p.required_years)
+                    p.required_years = coalesce(it.req_years, p.required_years),
+                    p.soft_skills = it.soft_skills
                 """,
                 items=positions,
             )

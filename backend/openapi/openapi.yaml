@@ -581,6 +581,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
 
+  /api/v1/match/result/{match_id}/diagnosis:
+    get:
+      tags: [match]
+      summary: "[M4] 获取人岗比对诊断报告"
+      description: LLM 基于结果快照（分数/差距/学习路径/证据）生成结构化诊断报告，结果缓存 24h
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 诊断报告（overall_summary / radar_analysis / top_gaps / path_analysis / recommendations）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: 该匹配结果无差距数据（仅人岗比对可生成诊断报告）
+        '404':
+          description: 匹配结果不存在或已过期
+        '503':
+          description: 诊断报告生成失败（LLM 不可用或超时）
+
   /api/v1/match/feedback:
     post:
       tags: [match]

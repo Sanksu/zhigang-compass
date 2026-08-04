@@ -39,7 +39,8 @@ class ResumeExtractor:
         except LLMExtractionError:
             result = self._rule_based_extract(resume_text)
 
-        return self._filter_skills(result)
+        result = self._filter_skills(result)
+        return self._merge_soft_skills(result)
 
     @staticmethod
     def _filter_skills(result: ResumeExtractionResult) -> ResumeExtractionResult:
@@ -61,6 +62,31 @@ class ResumeExtractor:
             seen.add(key)
             cleaned.append(s.model_copy(update={"name": name}))
         result.skills = cleaned
+        return result
+
+    @staticmethod
+    def _merge_soft_skills(result: ResumeExtractionResult) -> ResumeExtractionResult:
+        """将 LLM 推断的软技能并入技能列表，标记 low_confidence。
+
+        软技能仅限岗位本体白名单（SOFT_SKILL_WHITELIST）；推断来源（项目角色/
+        经历）置信度低，匹配时降权 ×0.5（设计文档 9.2 节）。与显式技能重名时
+        保留显式技能（不降权），避免推断项覆盖文本直述的更强证据。
+        """
+        from app.services.extraction.dictionary import (
+            SOFT_SKILL_WHITELIST,
+            normalize_skill,
+        )
+        from app.services.extraction.post_processor import clean_skill_name
+
+        existing = {s.name.lower() for s in result.skills}
+        for name in result.soft_skills:
+            cleaned = clean_skill_name(normalize_skill(name)).strip()
+            if not cleaned or cleaned not in SOFT_SKILL_WHITELIST:
+                continue
+            if cleaned.lower() in existing:
+                continue
+            existing.add(cleaned.lower())
+            result.skills.append(ResumeSkill(name=cleaned, proficiency=2, low_confidence=True))
         return result
 
     def _rule_based_extract(self, resume_text: str) -> ResumeExtractionResult:
