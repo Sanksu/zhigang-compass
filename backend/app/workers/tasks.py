@@ -1060,9 +1060,18 @@ async def discovery_daily(ctx: dict) -> dict:
     detector = DiscoveryDetector()
     candidates = detector.detect_candidates(_Provider(inputs))
     grounded = []
+    # LLM 实例（定义草案中文生成）：未配置 api_key 时 LLMProviderChain 构造
+    # 即抛 LLMConfigurationError，fallback 到权威库原文，接地不阻塞。
+    from app.services.extraction.jd_extractor import JDExtractor
+
+    llm = None
+    try:
+        llm = JDExtractor()._llm
+    except Exception:
+        llm = None
     async with async_session_factory() as session:
         for cand in candidates:
-            c = await detector.ground_with_rag(cand, session)
+            c = await detector.ground_with_rag(cand, session, llm=llm)
             # 置信度：冷启动样本下用来源多样性近似（无历史 Z-score 时 base 恒 0）
             conf = compute_confidence(
                 jd_count=int(cand.features.jd_freq_ma3),
@@ -1074,14 +1083,110 @@ async def discovery_daily(ctx: dict) -> dict:
             await _upsert_candidate(session, c)
         await session.commit()
 
-    # 注：自动态迁移（emerging→stable / declining 等）依赖历史窗口 freq 序列，
-    # 当前单日快照不提供窗口表；candidate→emerging/rejected 由 admin 审核端点
-    # 调用状态机评估，每日任务只负责入池与 RAG 接地。
+    # 注：自动态迁移（emerging→stable / declining 等）由 discovery_auto_transition
+    # 任务负责（依赖 graph_versions 快照序列的窗口频次）；本任务只负责
+    # candidate 入池与 RAG 接地。candidate→emerging/rejected 由 admin 审核端点
+    # 调用状态机评估。
 
     return {
         "candidates": len(grounded),
         "seed_matched": sum(1 for c in grounded if c.seed_matched),
         "rag_matched": sum(1 for c in grounded if c.rag_matched),
+    }
+
+
+async def discovery_auto_transition(ctx: dict) -> dict:
+    """自动状态流转（设计文档 7.2.1 状态机：emerging/stable/declining 自动迁移）。
+
+    从 graph_versions 快照序列重建岗位频次窗口（30 天粒度）→ 对
+    discovery_candidates 中 state ∈ {emerging, stable, declining} 的岗位调用
+    evaluate_auto_transition 判定 → 命中则 PositionStateMachine.persist
+    （Neo4j Position.status + 候选池状态 + system 审计日志）。
+
+    emerging → stable: confidence ≥ 0.8 AND 连续 2 窗口波动 < 25% AND 源 ≥ 2
+    emerging/stable → declining: 连续 3 窗口频次下降 > 40%
+    declining → stable: 连续 2 窗口 z_score > 0（回升）
+
+    幂等：persist 按 name MERGE，重复执行结果一致；无命中不产生副作用。
+
+    数据不足（快照 < 2 期或岗位无窗口序列）时跳过，不武断判定（冷启动）。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory, neo4j_driver
+    from app.models.business import DiscoveryCandidate, GraphVersion
+    from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
+    from app.services.discovery.state_machine import WindowFreq, evaluate_auto_transition, PositionStateMachine, position_freq_windows
+    from app.services.extraction.dictionary import normalize_position_name
+
+    # ── 1. 加载全部快照（按创建时间升序，即时间窗口序列）──
+    async with async_session_factory() as session:
+        snapshots = (await session.scalars(
+            select(GraphVersion).order_by(GraphVersion.created_at.asc())
+        )).all()
+
+    if len(snapshots) < 2:
+        return {"transitions": 0, "detail": "快照 < 2 期，无法计算窗口序列（冷启动）"}
+
+    # ── 2. 对候选池中自动可迁移状态的岗位执行判定 ──
+    machine = PositionStateMachine()
+    transitions: list[dict] = []
+    async with async_session_factory() as session:
+        rows = (await session.scalars(
+            select(DiscoveryCandidate).where(
+                DiscoveryCandidate.state.in_(
+                    [PositionState.EMERGING.value, PositionState.STABLE.value, PositionState.DECLINING.value]
+                )
+            )
+        )).all()
+
+        # 按岗位名重建窗口频次序列（同一批次一次构建）
+        names = {r.position_name for r in rows}
+        freq_windows = position_freq_windows(
+            [s.snapshot_json or {} for s in snapshots], names
+        )
+
+        for row in rows:
+            name = normalize_position_name(row.position_name)
+            if not name:
+                continue
+            freqs = freq_windows.get(name, [])
+            if len(freqs) < 2:
+                continue
+
+            features = DiscoveryFeatures(**row.features)
+            candidate = CandidatePosition(
+                candidate_id=row.id,
+                position_name=row.position_name,
+                state=PositionState(row.state),
+                features=features,
+                detected_at=row.detected_at,
+                evidence_refs=row.evidence_refs,
+                seed_matched=row.seed_matched,
+                rag_matched=row.rag_matched,
+                definition_draft=row.definition_draft,
+            )
+            conf = float((row.confidence or {}).get("final_confidence", 0.0))
+            windows = WindowFreq(freqs=freqs)
+            target = evaluate_auto_transition(candidate, windows, confidence=conf)
+            if target is None:
+                continue
+
+            with neo4j_driver.session() as neo4j_session:
+                updated = machine.persist(
+                    neo4j_session, candidate, target, operator="system",
+                )
+            row.state = updated.state.value
+            transitions.append({
+                "position_name": row.position_name,
+                "from_state": candidate.state.value,
+                "to_state": updated.state.value,
+            })
+        await session.commit()
+
+    return {
+        "transitions": len(transitions),
+        "detail": transitions,
     }
 
 
@@ -1153,6 +1258,7 @@ class WorkerSettings:
         aggregate_positions,
         cross_validate_jds,
         discovery_daily,
+        discovery_auto_transition,
         snapshot_graph,
         evolution_compute,
     ]

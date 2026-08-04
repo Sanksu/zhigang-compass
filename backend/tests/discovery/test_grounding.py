@@ -7,7 +7,11 @@ import asyncio
 
 import pytest
 
-from app.services.discovery.grounding import match_seed, search_authoritative
+from app.services.discovery.grounding import (
+    _generate_definition,
+    match_seed,
+    search_authoritative,
+)
 
 _SEEDS = [
     {
@@ -82,3 +86,72 @@ class TestSearchAuthoritative:
             return await search_authoritative("100% 岗_位", _FakeDb())
 
         asyncio.run(_run())
+
+
+class TestGenerateDefinition:
+    """LLM 中文定义草案生成（修复：LLM 真正参与生成，失败回退原文）。"""
+
+    class _FakeLLM:
+        """返回固定定义草案文本的 LLM 桩。"""
+
+        def __init__(self, text: str = "负责大语言模型相关系统的设计、开发与落地部署。"):
+            self._text = text
+            self.calls = 0
+
+        def extract_structured(self, prompt, response_model, system_prompt=None, **kwargs):
+            self.calls += 1
+            return response_model(text=self._text)
+
+    class _FailingLLM:
+        def extract_structured(self, *args, **kwargs):
+            raise RuntimeError("provider 全挂")
+
+    @staticmethod
+    def _run(coro):
+        return asyncio.run(coro)
+
+    def test_llm_generates_chinese_definition(self):
+        """权威库命中时 LLM 把英文定义翻译为中文草案。"""
+        llm = self._FakeLLM(text="负责开发与维护推荐系统算法。")
+        occupation = {
+            "code": "15-1252.00",
+            "name": "Software Developers",
+            "definition": "Design and develop software systems.",
+        }
+        draft = self._run(_generate_definition("推荐算法工程师", None, occupation, llm))
+        assert draft == "负责开发与维护推荐系统算法。"
+        assert llm.calls == 1  # LLM 真实参与
+
+    def test_llm_failure_falls_back_to_original(self):
+        """LLM 失败静默回退权威库原文，不阻塞接地判定。"""
+        occupation = {
+            "code": "15-1252.00",
+            "name": "Software Developers",
+            "definition": "Design and develop software systems.",
+        }
+        draft = self._run(_generate_definition("软件开发工程师", None, occupation, self._FailingLLM()))
+        assert draft == "Design and develop software systems."
+
+    def test_seed_description_used_without_occupation(self):
+        """仅种子命中时用种子描述作基座（LLM 可用则生成）。"""
+        llm = self._FakeLLM(text="负责检索增强生成系统构建。")
+        seed = {"name": "RAG 工程师", "description": "专注 RAG 系统构建"}
+        draft = self._run(_generate_definition("RAG 工程师", seed, None, llm))
+        assert draft == "负责检索增强生成系统构建。"
+
+    def test_no_reference_returns_empty(self):
+        """无权威库/种子参考时返回空串（不触发 LLM）。"""
+        llm = self._FakeLLM()
+        draft = self._run(_generate_definition("未知岗位", None, None, llm))
+        assert draft == ""
+        assert llm.calls == 0
+
+    def test_no_llm_falls_back_to_reference(self):
+        """llm 为 None 时直接返回权威库原文（降级路径）。"""
+        occupation = {
+            "code": "15-1252.00",
+            "name": "Software Developers",
+            "definition": "Design and develop software systems.",
+        }
+        draft = self._run(_generate_definition("软件开发工程师", None, occupation, None))
+        assert draft == "Design and develop software systems."

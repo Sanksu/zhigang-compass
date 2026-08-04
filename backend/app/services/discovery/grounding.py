@@ -13,10 +13,12 @@ RAG 接地是"辅助确认"而非"硬门控"：未命中权威库/种子的 cand
 仍留在 candidate 池标记 unverified，由 admin 人工判断（设计文档 7.2.3）。
 """
 
+import asyncio
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Optional
 
 import yaml
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,6 +109,24 @@ async def search_authoritative(
     return results[:limit]
 
 
+_DEFINITION_SYSTEM_PROMPT = """你是岗位定义专家。根据岗位名称与参考信息，\
+用中文撰写简洁的岗位定义草案（1-3 句话）。参考信息可能是英文 O*NET 定义，\
+请翻译并结合岗位名凝练成中文。只输出定义本身，不要前缀如"岗位定义："。"""
+
+_DEFINITION_TASK_TEMPLATE = """岗位名称：{position_name}
+
+参考信息（英文权威定义，请翻译并凝练）：
+{reference}
+
+输出中文岗位定义草案："""
+
+
+class _DefinitionDraft(BaseModel):
+    """LLM 定义草案输出约束（幻觉防控第一道防线：JSON Schema 强校验）。"""
+
+    text: str
+
+
 async def _generate_definition(
     position_name: str,
     seed: Optional[dict],
@@ -115,14 +135,37 @@ async def _generate_definition(
 ) -> str:
     """生成岗位定义草案。
 
-    优先级：LLM 聚合生成（可配置）→ 种子描述 → 权威库定义原文。
-    LLM 失败静默回退，不阻塞接地判定。
+    优先级：LLM 聚合生成（可配置）→ 权威库定义原文 → 种子描述。
+    LLM 失败静默回退，不阻塞接地判定（RAG 接地是"辅助确认"而非硬门控）。
     """
+    reference = ""
     if occupation and occupation.get("definition"):
-        return occupation["definition"]
-    if seed and seed.get("description"):
-        return seed["description"]
-    return ""
+        reference = occupation["definition"]
+    elif seed and seed.get("description"):
+        reference = seed["description"]
+
+    if not reference:
+        return ""
+
+    if llm is not None:
+        try:
+            # LLM 参与定义草案生成：英文 O*NET 定义 → 中文凝练
+            draft = await asyncio.to_thread(
+                llm.extract_structured,
+                _DEFINITION_TASK_TEMPLATE.format(
+                    position_name=position_name, reference=reference
+                ),
+                _DefinitionDraft,
+                system_prompt=_DEFINITION_SYSTEM_PROMPT,
+            )
+            if draft.text and draft.text.strip():
+                return draft.text.strip()
+        except Exception:
+            # LLM 失败静默回退到原文，不阻塞接地判定
+            pass
+
+    # 回退：权威库定义原文（英文）或种子描述
+    return reference
 
 
 async def ground_with_rag(

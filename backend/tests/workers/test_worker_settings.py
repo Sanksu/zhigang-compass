@@ -15,6 +15,7 @@ from app.workers.tasks import (
     cross_validate_jds,
     detect_inflation,
     discovery_daily,
+    discovery_auto_transition,
     diversity_report,
     evaluate_courses,
     evolution_compute,
@@ -39,6 +40,7 @@ EXPECTED_FUNCTIONS = [
     aggregate_positions,
     cross_validate_jds,
     discovery_daily,
+    discovery_auto_transition,
     snapshot_graph,
     evolution_compute,
 ]

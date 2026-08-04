@@ -13,6 +13,7 @@ from app.services.discovery.state_machine import (
     decline_rate,
     evaluate_auto_transition,
     has_recovery,
+    position_freq_windows,
     window_volatility,
     PositionStateMachine,
 )
@@ -47,6 +48,64 @@ class TestWindowHelpers:
         assert has_recovery(WindowFreq([1, 2, 3], z_scores=[0.5, 0.8, 1.2])) is True
         assert has_recovery(WindowFreq([1, 2, 3], z_scores=[0.5, -0.1])) is False
         assert has_recovery(WindowFreq([1, 2], z_scores=[0.5])) is False
+
+
+class TestPositionFreqWindows:
+    """从图谱版本快照重建岗位频次窗口序列（自动流转数据源）。"""
+
+    @staticmethod
+    def _snapshot(position_edges: dict[str, list[str]]) -> dict:
+        """构造快照：position_edges 为 {岗位名: [关联边源 id 列表]}。
+
+        边以岗位 id 为 source、技能 id（sk_xxx）为 target 计数。
+        """
+        nodes = [{"id": f"pos_{name}", "name": name, "type": "position"} for name in position_edges]
+        edges = []
+        for name, targets in position_edges.items():
+            for i, t in enumerate(targets):
+                edges.append({"source": f"pos_{name}", "target": t})
+        return {"nodes": nodes, "edges": edges}
+
+    def test_sequence_built_in_time_order(self):
+        """跨快照频次序列按时间升序（第一期在前）。"""
+        snap1 = self._snapshot({"Java 开发工程师": ["sk_1", "sk_2", "sk_3"]})
+        snap2 = self._snapshot({"Java 开发工程师": ["sk_1", "sk_2"]})
+        out = position_freq_windows([snap1, snap2], {"Java 开发工程师"})
+        assert out["Java 开发工程师"] == [3.0, 2.0]
+
+    def test_ignores_unrelated_positions(self):
+        """不在 position_names 中的岗位不参与构建。"""
+        snap = self._snapshot({"Java 开发工程师": ["sk_1"], "无关岗位": ["sk_9"]})
+        out = position_freq_windows([snap], {"Java 开发工程师"})
+        assert "无关岗位" not in out
+        assert out["Java 开发工程师"] == [1.0]
+
+    def test_merged_same_name_sums_windows(self):
+        """同名岗位多 id 时频次逐窗口求和（归一化合并口径）。"""
+        snap = {
+            "nodes": [
+                {"id": "pos_a", "name": "软件开发工程师", "type": "position"},
+                {"id": "pos_b", "name": "软件开发工程师", "type": "position"},
+            ],
+            "edges": [
+                {"source": "pos_a", "target": "sk_1"},
+                {"source": "pos_b", "target": "sk_2"},
+                {"source": "pos_b", "target": "sk_3"},
+            ],
+        }
+        out = position_freq_windows([snap], {"软件开发工程师"})
+        assert out["软件开发工程师"] == [3.0]
+
+    def test_empty_snapshots(self):
+        assert position_freq_windows([], {"Java 开发工程师"}) == {}
+
+    def test_position_without_edges_has_empty_sequence(self):
+        snap = {
+            "nodes": [{"id": "pos_x", "name": "孤岗", "type": "position"}],
+            "edges": [],
+        }
+        out = position_freq_windows([snap, snap], {"孤岗"})
+        assert out["孤岗"] == []
 
 
 class TestAutoTransition:
@@ -84,6 +143,91 @@ class TestAutoTransition:
         c = _candidate(PositionState.CANDIDATE)
         w = WindowFreq([10, 9, 10], z_scores=[0.5, 0.6])
         assert evaluate_auto_transition(c, w) is None
+
+
+class TestAutoTransitionFromSnapshots:
+    """从 3 期以上图谱快照重建窗口序列，验证 emerging→stable 自动流转全链路。
+
+    对齐 discovery_auto_transition 任务的数据链：
+    graph_versions 快照序列 → position_freq_windows → evaluate_auto_transition。
+    """
+
+    @staticmethod
+    def _snapshot(name: str, edge_count: int) -> dict:
+        return TestPositionFreqWindows._snapshot(
+            {name: [f"sk_{i}" for i in range(edge_count)]}
+        )
+
+    def test_emerging_to_stable_across_four_windows(self):
+        """4 期快照频次平稳（波动 < 25%）+ 高置信 → emerging 自动升级 stable。"""
+        name = "RAG 工程师"
+        snaps = [
+            self._snapshot(name, 10),
+            self._snapshot(name, 11),
+            self._snapshot(name, 10),
+            self._snapshot(name, 11),
+        ]
+        windows = position_freq_windows(snaps, {name})
+        assert windows[name] == [10.0, 11.0, 10.0, 11.0]
+
+        c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
+        target = evaluate_auto_transition(c, WindowFreq(freqs=windows[name]))
+        assert target == PositionState.STABLE
+
+    def test_single_window_reaches_stable_without_task_gate(self):
+        """单期序列波动 0 会判定 STABLE——因此任务层必须保留快照 < 2 期闸门。
+
+        discovery_auto_transition 在 len(snapshots) < 2 时直接返回（冷启动不武断），
+        该闸门在任务层而非判定层，此处验证判定层对单期序列的固有行为。
+        """
+        name = "RAG 工程师"
+        snaps = [self._snapshot(name, 10)]
+        windows = position_freq_windows(snaps, {name})
+        assert windows[name] == [10.0]
+
+        c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
+        # 单期波动 (max-min)/max = 0 < 25%，判定层会升级；任务层闸门负责拦截
+        assert evaluate_auto_transition(c, WindowFreq(freqs=windows[name])) == PositionState.STABLE
+
+    def test_emerging_not_promoted_when_window_unstable(self):
+        """3 期快照波动大（> 25%）→ 不升级。"""
+        name = "RAG 工程师"
+        snaps = [
+            self._snapshot(name, 10),
+            self._snapshot(name, 6),
+            self._snapshot(name, 10),
+        ]
+        windows = position_freq_windows(snaps, {name})
+        c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
+        target = evaluate_auto_transition(c, WindowFreq(freqs=windows[name]))
+        assert target is None
+
+    def test_stable_persist_idempotent_after_promotion(self):
+        """emerging→stable 判定后 persist 幂等：重复执行产生相同 MERGE。"""
+        name = "RAG 工程师"
+        snaps = [self._snapshot(name, 10), self._snapshot(name, 11), self._snapshot(name, 11)]
+        windows = position_freq_windows(snaps, {name})
+        c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
+        target = evaluate_auto_transition(c, WindowFreq(freqs=windows[name]))
+        assert target == PositionState.STABLE
+
+        machine = PositionStateMachine()
+        executed = []
+
+        class _FakeSession:
+            def execute_write(self, fn):
+                executed.append(fn)
+                fn(_FakeTx())
+
+        class _FakeTx:
+            def run(self, query, **params):
+                assert "MERGE (p:Position {name: $name})" in query
+                assert params["state"] == "stable"
+                assert params["name"] == name
+
+        out = machine.persist(_FakeSession(), c, target, operator="system")
+        assert out.state == PositionState.STABLE
+        assert len(executed) == 1
 
 
 class TestPromoteToEmerging:

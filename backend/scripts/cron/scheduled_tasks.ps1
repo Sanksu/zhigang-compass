@@ -42,7 +42,9 @@ $Tasks = @(
     # arXiv（北京时间 11:00 = UTC 3:00）
     @{ Name = "CrawlArxiv";     Time = "11:00"; Script = "crawl_spider.py"; Args = @("arxiv", "50");   Proxy = $true },
     # ETL 主管线（05:00）
-    @{ Name = "ETLDaily";       Time = "05:00"; Script = "etl_daily.py";    Args = @() }
+    @{ Name = "ETLDaily";       Time = "05:00"; Script = "etl_daily.py";    Args = @() },
+    # 新岗位发现 + 自动状态流转（05:30，ETL 阶段 12 快照发布后）
+    @{ Name = "DiscoveryDaily"; Time = "05:30"; Script = "discovery_daily.py"; Args = @() }
 )
 
 if (-not (Test-Path $LogDir)) {

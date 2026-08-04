@@ -55,6 +55,55 @@ class WindowFreq:
     z_scores: list[float] = field(default_factory=list)
 
 
+def position_freq_windows(
+    snapshots: list[dict],
+    position_names: set[str],
+) -> dict[str, list[float]]:
+    """从图谱版本快照序列重建岗位频次窗口序列（时间升序）。
+
+    每期快照：岗位节点作为边的源节点的计数即当期频次；同名归一化岗位
+    归并为同一序列。返回 {岗位名: [各期频次]}（按快照时间升序）。
+
+    Args:
+        snapshots: graph_versions.snapshot_json 列表（[{nodes, edges}]，时间升序）
+        position_names: 关注的岗位名集合（快照 nodes 中 name 匹配）
+
+    Returns:
+        岗位名 → 频次序列；岗位在快照中无关联边时其序列可能为空列表
+    """
+    name_by_id: dict[str, str] = {}
+    for snap in snapshots:
+        for n in (snap or {}).get("nodes", []):
+            if n.get("type") == "position" and n.get("name") in position_names:
+                name_by_id[n.get("id", "")] = n.get("name", "")
+
+    freq_windows: dict[str, list[int]] = {}
+    for snap in snapshots:
+        freq: dict[str, int] = {}
+        for e in (snap or {}).get("edges", []):
+            src = e.get("source", "")
+            if src in name_by_id:
+                freq[src] = freq.get(src, 0) + 1
+        for pos_id, count in freq.items():
+            freq_windows.setdefault(pos_id, []).append(count)
+
+    # 同名岗位可能对应多个 pos_id（归一化合并）：按窗口逐项求和，
+    # 即该岗位名当期被引用的总边数（与聚合口径一致）
+    merged: dict[str, list[float]] = {}
+    for pos_id, name in name_by_id.items():
+        seq = [float(c) for c in freq_windows.get(pos_id, [])]
+        if name not in merged:
+            merged[name] = seq
+            continue
+        # 与已有序列逐窗口求和（不足的窗口补 0）
+        n = max(len(merged[name]), len(seq))
+        merged[name] = [
+            merged[name][i] + (seq[i] if i < len(seq) else 0.0)
+            for i in range(n)
+        ]
+    return merged
+
+
 def window_volatility(w: WindowFreq, n: int = 2) -> float:
     """最近 n 个窗口的频次波动（(max-min)/max，0 频次时取 0）。"""
     recent = w.freqs[:n]
