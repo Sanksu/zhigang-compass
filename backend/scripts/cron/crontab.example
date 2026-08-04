@@ -49,5 +49,9 @@ LOG_DIR=/opt/zhigang-compass/logs
 # ── ETL 主管线（每日 05:00 触发编排，5:00 前完成 T+1 图谱更新）──
 0 5 * * * cd $BACKEND_DIR && uv run python scripts/cron/etl_daily.py >> $LOG_DIR/etl_$(date +\%Y\%m\%d).log 2>&1
 
+# ── 新岗位发现 + 自动状态流转（每日 05:30，ETL 阶段 12 快照发布后执行）──
+# 入队 discovery_daily（候选池 RAG 接地）+ discovery_auto_transition（emerging→stable 等自动流转）
+30 5 * * * cd $BACKEND_DIR && uv run python scripts/cron/discovery_daily.py >> $LOG_DIR/discovery_$(date +\%Y\%m\%d).log 2>&1
+
 # ── 时效衰减每日凌晨 4:00 重算（设计文档 §4.7.5）──
 # 由 run_etl_pipeline 内 validate_temporal 阶段覆盖，无需独立任务

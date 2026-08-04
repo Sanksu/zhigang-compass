@@ -145,6 +145,91 @@ class TestAutoTransition:
         assert evaluate_auto_transition(c, w) is None
 
 
+class TestAutoTransitionFromSnapshots:
+    """从 3 期以上图谱快照重建窗口序列，验证 emerging→stable 自动流转全链路。
+
+    对齐 discovery_auto_transition 任务的数据链：
+    graph_versions 快照序列 → position_freq_windows → evaluate_auto_transition。
+    """
+
+    @staticmethod
+    def _snapshot(name: str, edge_count: int) -> dict:
+        return TestPositionFreqWindows._snapshot(
+            {name: [f"sk_{i}" for i in range(edge_count)]}
+        )
+
+    def test_emerging_to_stable_across_four_windows(self):
+        """4 期快照频次平稳（波动 < 25%）+ 高置信 → emerging 自动升级 stable。"""
+        name = "RAG 工程师"
+        snaps = [
+            self._snapshot(name, 10),
+            self._snapshot(name, 11),
+            self._snapshot(name, 10),
+            self._snapshot(name, 11),
+        ]
+        windows = position_freq_windows(snaps, {name})
+        assert windows[name] == [10.0, 11.0, 10.0, 11.0]
+
+        c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
+        target = evaluate_auto_transition(c, WindowFreq(freqs=windows[name]))
+        assert target == PositionState.STABLE
+
+    def test_single_window_reaches_stable_without_task_gate(self):
+        """单期序列波动 0 会判定 STABLE——因此任务层必须保留快照 < 2 期闸门。
+
+        discovery_auto_transition 在 len(snapshots) < 2 时直接返回（冷启动不武断），
+        该闸门在任务层而非判定层，此处验证判定层对单期序列的固有行为。
+        """
+        name = "RAG 工程师"
+        snaps = [self._snapshot(name, 10)]
+        windows = position_freq_windows(snaps, {name})
+        assert windows[name] == [10.0]
+
+        c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
+        # 单期波动 (max-min)/max = 0 < 25%，判定层会升级；任务层闸门负责拦截
+        assert evaluate_auto_transition(c, WindowFreq(freqs=windows[name])) == PositionState.STABLE
+
+    def test_emerging_not_promoted_when_window_unstable(self):
+        """3 期快照波动大（> 25%）→ 不升级。"""
+        name = "RAG 工程师"
+        snaps = [
+            self._snapshot(name, 10),
+            self._snapshot(name, 6),
+            self._snapshot(name, 10),
+        ]
+        windows = position_freq_windows(snaps, {name})
+        c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
+        target = evaluate_auto_transition(c, WindowFreq(freqs=windows[name]))
+        assert target is None
+
+    def test_stable_persist_idempotent_after_promotion(self):
+        """emerging→stable 判定后 persist 幂等：重复执行产生相同 MERGE。"""
+        name = "RAG 工程师"
+        snaps = [self._snapshot(name, 10), self._snapshot(name, 11), self._snapshot(name, 11)]
+        windows = position_freq_windows(snaps, {name})
+        c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
+        target = evaluate_auto_transition(c, WindowFreq(freqs=windows[name]))
+        assert target == PositionState.STABLE
+
+        machine = PositionStateMachine()
+        executed = []
+
+        class _FakeSession:
+            def execute_write(self, fn):
+                executed.append(fn)
+                fn(_FakeTx())
+
+        class _FakeTx:
+            def run(self, query, **params):
+                assert "MERGE (p:Position {name: $name})" in query
+                assert params["state"] == "stable"
+                assert params["name"] == name
+
+        out = machine.persist(_FakeSession(), c, target, operator="system")
+        assert out.state == PositionState.STABLE
+        assert len(executed) == 1
+
+
 class TestPromoteToEmerging:
     def test_confidence_and_sources_ok(self):
         c = _candidate(PositionState.CANDIDATE, source_diversity=2, confidence=0.65)
