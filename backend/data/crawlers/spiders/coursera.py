@@ -92,13 +92,18 @@ class CourseraSpider(Spider):
             self.logger.debug(f"页面前 1000 字符: {response.text[:1000]}")
             return
 
+        item_count = 0
         for card in cards:
             item = self._card_to_item(card, response.meta)
             if item:
+                item_count += 1
                 yield item
 
         # 翻页（Coursera 搜索是无限滚动 + URL 翻页参数）
         current_page = response.meta.get("page", 1)
+        self.logger.info(
+            f"[coursera] kw={response.meta['keyword']} 页={current_page} 产出 {item_count} 条"
+        )
         if current_page < self.max_pages:
             # Coursera 用 &page=N 翻页
             keyword = response.meta["keyword"]

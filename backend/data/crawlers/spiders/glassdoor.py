@@ -83,10 +83,11 @@ class GlassdoorSpider(BaseSpider):
         cdp_url = response.meta.get("cdp_url", "http://127.0.0.1:9224")
         python_exe = sys.executable
 
-        for task in tasks:
+        task_total = len(tasks)
+        for task_idx, task in enumerate(tasks):
             keyword = task["keyword"]
             city = task["city"]
-            self.logger.info(f"开始采集: kw={keyword} city={city}")
+            self.logger.info(f"[glassdoor] 进度 {task_idx + 1}/{task_total}: 开始采集 kw={keyword} city={city}")
 
             cmd = [
                 python_exe, CRAWLER_SCRIPT,
@@ -119,6 +120,7 @@ class GlassdoorSpider(BaseSpider):
                 self.logger.error(f"CDP 脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
                 continue
 
+            item_count = 0
             for line in stdout.splitlines():
                 line = line.strip()
                 if not line:
@@ -129,6 +131,7 @@ class GlassdoorSpider(BaseSpider):
                     self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
                     continue
 
+                item_count += 1
                 yield self.make_item(
                     source_id=str(item_data.get("id", "")),
                     source_url=item_data.get("url", ""),
@@ -150,6 +153,7 @@ class GlassdoorSpider(BaseSpider):
             if stderr_output:
                 for line in stderr_output.strip().splitlines()[-5:]:
                     self.logger.info(f"[cdp] {line}")
+            self.logger.info(f"[glassdoor] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条")
 
     def _on_error(self, failure):
         """占位请求失败回调。"""

@@ -122,12 +122,13 @@ class BossSpider(BaseSpider):
         # Python 解释器路径（与当前进程相同）
         python_exe = sys.executable
 
+        task_total = len(tasks)
         for task_idx, task in enumerate(tasks):
             keyword = task["keyword"]
             city = task["city"]
             city_code = task["city_code"]
 
-            self.logger.info(f"开始采集: kw={keyword} city={city} ({city_code})")
+            self.logger.info(f"[boss] 进度 {task_idx + 1}/{task_total}: 开始采集 kw={keyword} city={city} ({city_code})")
 
             # 调用独立采集脚本
             cmd = [
@@ -200,7 +201,7 @@ class BossSpider(BaseSpider):
                     if "采集完成" in line:
                         continue
                     self.logger.info(f"[cdp] {line}")
-            self.logger.info(f"[boss] kw={keyword} city={city} 完成：产出 {item_count} 条")
+            self.logger.info(f"[boss] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条")
 
             # 不同 keyword/city 之间不加延迟（脚本内部已有翻页延迟）
 
