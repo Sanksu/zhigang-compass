@@ -157,38 +157,41 @@ def _load_evidence_for_position(position_id: str) -> list[dict]:
 
     图谱中每个技能关联若干原始 JD 证据（ev_xxxx），返回每条技能的
     代表性证据（每技能至多 3 条，总上限 20），供前端"证据引用"展示。
-    置信度按技能支持度（REQUIRES.source_count 独立 JD 源数）归一化。
+    置信度 = 该技能证据量 / 归一化基数（8 条证据视为满置信 1.0），
+    证据越多置信度越高（反映技能支持的跨源充分度）。
     """
     rows: list[dict] = []
     with neo4j_driver.session() as session:
         recs = session.run(
             """
-            MATCH (p:Position {id: $pid})-[r:REQUIRES]->(s:Skill)-[:MENTIONED_IN]->(e:Evidence)
-            RETURN s.name AS skill, e.source AS source, e.source_url AS url,
-                   r.source_count AS source_count
-            ORDER BY s.name
+            MATCH (p:Position {id: $pid})-[:REQUIRES]->(s:Skill)-[:MENTIONED_IN]->(e:Evidence)
+            WITH s.name AS skill, collect(DISTINCT e) AS evs
+            RETURN skill, size(evs) AS evidence_count,
+                   [e IN evs | {source: e.source, source_url: e.source_url}] AS all_samples
+            ORDER BY skill
             """,
             pid=position_id,
         )
-        seen: set[tuple] = set()
-        per_skill: dict[str, int] = {}
         for rec in recs:
-            skill = rec["skill"]
-            if per_skill.get(skill, 0) >= 3 or len(rows) >= 20:
-                continue
-            key = (skill, rec["url"])
-            if key in seen:
-                continue
-            seen.add(key)
-            per_skill[skill] = per_skill.get(skill, 0) + 1
-            # 置信度 = 技能独立 JD 源数归一化（5 个独立源视为满置信）
-            cnt = float(rec.get("source_count") or 0)
-            rows.append({
-                "skill": skill,
-                "source": rec["source"],
-                "url": rec["url"],
-                "confidence": round(min(cnt / 5, 1.0), 2),
-            })
+            if len(rows) >= 20:
+                break
+            count = rec["evidence_count"]
+            confidence = round(min(count / 8.0, 1.0), 2)
+            # 代表证据按源去重（每源至多 1 条），避免同源 JD 重复展示
+            seen_sources: set[str] = set()
+            for s in rec["all_samples"]:
+                src = s["source"] or ""
+                if src in seen_sources:
+                    continue
+                seen_sources.add(src)
+                rows.append({
+                    "skill": rec["skill"],
+                    "source": src,
+                    "url": s["source_url"],
+                    "confidence": confidence,
+                })
+                if len(seen_sources) >= 3:
+                    break
     return rows
 
 

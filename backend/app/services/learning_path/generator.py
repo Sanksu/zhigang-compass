@@ -21,8 +21,11 @@ _TOP_COURSES = 3
 # 学习路径项上限（设计文档 §9.5：差距按优先级 Top-5 作为重点改进项）
 _MAX_PATH_ITEMS = 5
 
-# 课程加载器签名：输入 (skill_id, skill_name, top_k)，输出按质量分排序的课程
-CourseLoader = Callable[[str, str, int], Awaitable[list[CourseRecommendation]]]
+# 课程加载器签名：输入 (skill_id, skill_name, top_k, semantic, sim_threshold)，
+# 输出按质量分排序的课程。semantic 供语义 fallback（岗位中文技能 → 课程英文标准名）
+CourseLoader = Callable[
+    [str, str, int, object, float | None], Awaitable[list[CourseRecommendation]]
+]
 
 
 class LearningPathGenerator:
@@ -59,7 +62,9 @@ class LearningPathGenerator:
         items: list[LearningPathItem] = []
         for gap in path_gaps:
             chain = prerequisite_chain(gap.skill)
-            courses = await self._course_loader(gap.skill_id or "", gap.skill, _TOP_COURSES)
+            courses = await self._course_loader(
+                gap.skill_id or "", gap.skill, _TOP_COURSES, semantic, sim_threshold
+            )
             hours = sum(base_hours(s) for s in [gap.skill, *chain])
             items.append(
                 LearningPathItem(
