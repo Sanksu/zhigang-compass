@@ -20,6 +20,8 @@ export interface BackendMatchResult {
   missing_must: string[]
   summary: string
   unqualified: boolean
+  /** 结果快照 ID（compare 同步执行后持久化，供 /match/result|gap|path|feedback 查询） */
+  match_id?: string
   /** compare 专属：差距三态（missing/weak/matched，按优先级排序） */
   gaps?: BackendGapItem[]
   /** compare 专属：学习路径（missing/weak 技能的先修链 + 课程 Top-3） */

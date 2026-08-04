@@ -8,9 +8,12 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Graph2D } from '@/components/graph/graph-2d'
 import {
   NodeDetailPanel,
+  type PositionDetail,
   type PrerequisiteItem,
+  type SimilarSkillItem,
   type SkillCourseItem,
   type SkillDetail,
+  type SkillEvidenceItem,
   type SkillPositionItem,
 } from '@/components/graph/node-detail-panel'
 import type { GraphData, GraphEdge, GraphNode, GraphViewType, NodeDetail } from '@/components/graph/types'
@@ -28,9 +31,9 @@ const VIEW_LABEL: Record<GraphViewType, string> = {
 
 const VIEW_DESC: Record<GraphViewType, string> = {
   panorama: 'Top-N 高频岗位及其关联技能',
-  techStack: 'Louvain 聚类后选中技能簇的子图',
+  techStack: 'Top 高频技能及其关联岗位（技能为中心）',
   level: '按级别（如中级）过滤的岗位-技能关系子图',
-  positionCenter: '以「前端开发工程师」为中心 2-hop 展开',
+  positionCenter: '以高频岗位为中心展开岗位-技能关系',
 }
 
 /** WebGL2 可用性检测 — 不可用时 3D 按钮禁用，保持 2D 模式（设计文档 §6.3） */
@@ -102,31 +105,7 @@ function toGraphData(raw: PanoramaData): GraphData {
   }
 }
 
-/** 非全景视图的本地派生（真实数据规模小，techStack/positionCenter 取首个岗位为中心的子图） */
-function deriveView(data: GraphData, view: GraphViewType): GraphData {
-  if (view === 'panorama' || view === 'level') return data
-  const center = data.nodes.find((n) => n.type === 'position')
-  if (!center) return data
-  const linked = new Set<string>([center.id])
-  data.edges.forEach((e) => {
-    if (e.source === center.id) linked.add(e.target)
-    if (e.target === center.id) linked.add(e.source)
-  })
-  const nodes = data.nodes.filter((n) => linked.has(n.id))
-  const ids = new Set(nodes.map((n) => n.id))
-  const edges = data.edges.filter((e) => ids.has(e.source) && ids.has(e.target))
-  return {
-    nodes,
-    edges,
-    stats: {
-      totalPositions: nodes.filter((n) => n.type === 'position').length,
-      totalSkills: nodes.filter((n) => n.type === 'skill').length,
-      totalEdges: edges.length,
-      returnedNodes: nodes.length,
-      totalNodesInGraph: data.nodes.length,
-    },
-  }
-}
+/** 非全景视图已由后端 /graph/view/{view_type} 提供（技术栈/级别/岗位中心均为服务端过滤）。 */
 
 /**
  * 能力图谱页 — 设计文档 §10.3
@@ -146,13 +125,19 @@ export function GraphPage() {
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<{ id: string; name: string; type: string; score: number }[]>([])
   const [searching, setSearching] = useState(false)
-  // 技能节点详情（反向岗位 / 先修链 / 课程）
+  // 技能节点详情（反向岗位 / 先修链 / 课程 / 证据 / 相似）
   const [skillDetail, setSkillDetail] = useState<SkillDetail | null>(null)
+  const [skillEvidence, setSkillEvidence] = useState<SkillEvidenceItem[]>([])
+  const [similarSkills, setSimilarSkills] = useState<SimilarSkillItem[]>([])
+  // 岗位节点详情（GET /graph/position/{id}）
+  const [positionDetail, setPositionDetail] = useState<PositionDetail | null>(null)
 
-  // 加载真实图谱全景（Neo4j 聚合 + Redis 30s 缓存），初始 loading 已是 true
+  // 视图切换 → 真实后端过滤（GET /graph/view/{view_type}），初始 panorama 同样走后端视图端点。
+  // 切换视图不清 loading，数据到达后原子替换，避免闪屏。
   useEffect(() => {
     let cancelled = false
-    apiGet<PanoramaData>('/graph/panorama?limit=200&min_weight=0.3')
+    setError(null)
+    apiGet<PanoramaData>(`/graph/view/${view}?limit=200`)
       .then((res) => {
         if (!cancelled) setRaw(toGraphData(res))
       })
@@ -165,9 +150,9 @@ export function GraphPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [view])
 
-  // 选中技能节点 → 并行加载反向岗位 / 先修链 / 课程（真实 API）
+  // 选中技能节点 → 并行加载反向岗位 / 先修链 / 课程 / 证据 / 相似技能（真实 API）
   // 同步 loading 态由派生值 skillDetailView 表达，effect 内仅在异步回调中 setState
   useEffect(() => {
     if (!selected || selected.type !== 'skill') return
@@ -182,9 +167,39 @@ export function GraphPage() {
     const courses = apiGet<{ courses: SkillCourseItem[] }>(`/graph/skill/${sid}/courses`)
       .then((r) => r.courses)
       .catch(() => [] as SkillCourseItem[])
-    Promise.all([positions, prerequisites, courses]).then(([p, prereq, c]) => {
-      if (!cancelled) setSkillDetail({ skill_id: selected.id, positions: p, prerequisites: prereq, courses: c, loading: false })
+    const evidence = apiGet<{ evidence: SkillEvidenceItem[] }>(`/graph/skill/${sid}/evidence`)
+      .then((r) => r.evidence)
+      .catch(() => [] as SkillEvidenceItem[])
+    const similar = apiGet<{ similar: SimilarSkillItem[] }>(`/graph/skill/similar?skill_id=${sid}&top_k=6`)
+      .then((r) => r.similar)
+      .catch(() => [] as SimilarSkillItem[])
+    Promise.all([positions, prerequisites, courses, evidence, similar]).then(([p, prereq, c, ev, sim]) => {
+      if (!cancelled) {
+        setSkillDetail({ skill_id: selected.id, positions: p, prerequisites: prereq, courses: c, loading: false })
+        setSkillEvidence(ev)
+        setSimilarSkills(sim)
+      }
     })
+    return () => {
+      cancelled = true
+    }
+  }, [selected])
+
+  // 选中岗位节点 → GET /graph/position/{id}（任职要求 + 必备/加分技能）
+  useEffect(() => {
+    if (!selected || selected.type !== 'position') {
+      setPositionDetail(null)
+      return
+    }
+    let cancelled = false
+    const pid = encodeURIComponent(selected.id)
+    apiGet<PositionDetail>(`/graph/position/${pid}`)
+      .then((d) => {
+        if (!cancelled) setPositionDetail(d)
+      })
+      .catch(() => {
+        if (!cancelled) setPositionDetail(null)
+      })
     return () => {
       cancelled = true
     }
@@ -214,13 +229,14 @@ export function GraphPage() {
       .finally(() => setSearching(false))
   }
 
-  // 点击搜索结果 → 定位技能节点并选中（detailStats 由选中节点实时计算）
-  function focusSearchResult(id: string, name: string) {
+  // 点击搜索结果 / 相似技能 / 岗位必备技能 → 定位技能节点并选中
+  // （detailStats 由选中节点实时计算，选中变化会自动触发详情面板重新加载）
+  function focusSkill(id: string, name: string) {
     setSelected({ id, name, type: 'skill' })
   }
 
-  // 视图切换：在已加载的真实数据上本地派生
-  const data = useMemo(() => (raw ? deriveView(raw, view) : null), [raw, view])
+  // 视图数据即后端返回（四种视图均由 GET /graph/view/{view_type} 提供）
+  const data = raw
   // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
   const webgl2Available = useMemo(() => isWebGL2Available(), [])
 
@@ -329,7 +345,7 @@ export function GraphPage() {
               {searchResults.map((r) => (
                 <li key={r.id}>
                   <button
-                    onClick={() => focusSearchResult(r.id, r.name)}
+                    onClick={() => focusSkill(r.id, r.name)}
                     className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-subtle"
                   >
                     <span className="font-medium text-ink">{r.name}</span>
@@ -412,6 +428,10 @@ export function GraphPage() {
             node={selected}
             stats={detailStats}
             skillDetail={skillDetailView}
+            positionDetail={positionDetail}
+            skillEvidence={selected && skillDetail && skillDetail.skill_id === selected.id ? skillEvidence : []}
+            similarSkills={selected && skillDetail && skillDetail.skill_id === selected.id ? similarSkills : []}
+            onSelectSkill={focusSkill}
             onClose={() => setSelected(null)}
           />
         </Card>
