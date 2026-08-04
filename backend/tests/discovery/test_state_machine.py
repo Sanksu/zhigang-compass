@@ -12,6 +12,7 @@ from app.services.discovery.state_machine import (
     can_promote_to_emerging,
     decline_rate,
     evaluate_auto_transition,
+    freq_z_scores,
     has_recovery,
     position_freq_windows,
     window_volatility,
@@ -48,6 +49,27 @@ class TestWindowHelpers:
         assert has_recovery(WindowFreq([1, 2, 3], z_scores=[0.5, 0.8, 1.2])) is True
         assert has_recovery(WindowFreq([1, 2, 3], z_scores=[0.5, -0.1])) is False
         assert has_recovery(WindowFreq([1, 2], z_scores=[0.5])) is False
+
+    def test_recovery_checks_recent_windows(self):
+        """最近 2 窗口回升才算回迁；早期窗口为负不影响判定。"""
+        assert has_recovery(WindowFreq([1, 2, 3], z_scores=[-1.5, 0.5, 0.8])) is True
+        assert has_recovery(WindowFreq([1, 2, 3], z_scores=[0.5, 0.8, -0.2])) is False
+
+
+class TestFreqZScores:
+    """频次序列逐窗口 Z-score（declining → stable 回迁判定输入）。"""
+
+    def test_basic_math(self):
+        zs = freq_z_scores([5, 6, 8])
+        # mean=19/3, std≈1.247
+        assert zs == pytest.approx([-1.069, -0.267, 1.336], abs=1e-3)
+
+    def test_empty(self):
+        assert freq_z_scores([]) == []
+
+    def test_constant_series_has_no_signal(self):
+        """标准差为 0（全相等）时各窗口 z 取 0，不触发回迁。"""
+        assert freq_z_scores([8, 8, 8]) == [0.0, 0.0, 0.0]
 
 
 class TestPositionFreqWindows:
@@ -200,6 +222,42 @@ class TestAutoTransitionFromSnapshots:
         windows = position_freq_windows(snaps, {name})
         c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
         target = evaluate_auto_transition(c, WindowFreq(freqs=windows[name]))
+        assert target is None
+
+    def test_declining_to_stable_recovery_across_snapshots(self):
+        """4 期快照频次先降后升（最近 2 窗口 z > 0）→ declining 自动回迁 stable。
+
+        覆盖 T-01 修复：z_scores 由频次序列重建后传入，回迁判定不再失效。
+        """
+        name = "RAG 工程师"
+        snaps = [
+            self._snapshot(name, 10),
+            self._snapshot(name, 4),
+            self._snapshot(name, 8),
+            self._snapshot(name, 8),
+        ]
+        windows = position_freq_windows(snaps, {name})
+        c = _candidate(PositionState.DECLINING, source_diversity=2)
+        target = evaluate_auto_transition(
+            c,
+            WindowFreq(freqs=windows[name], z_scores=freq_z_scores(windows[name])),
+        )
+        assert target == PositionState.STABLE
+
+    def test_declining_holds_when_no_recovery(self):
+        """频次持续下降（最近 2 窗口 z ≤ 0）→ 不回迁，保持 declining。"""
+        name = "RAG 工程师"
+        snaps = [
+            self._snapshot(name, 10),
+            self._snapshot(name, 6),
+            self._snapshot(name, 5),
+        ]
+        windows = position_freq_windows(snaps, {name})
+        c = _candidate(PositionState.DECLINING, source_diversity=2)
+        target = evaluate_auto_transition(
+            c,
+            WindowFreq(freqs=windows[name], z_scores=freq_z_scores(windows[name])),
+        )
         assert target is None
 
     def test_stable_persist_idempotent_after_promotion(self):

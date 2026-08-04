@@ -193,6 +193,39 @@ class TestAutoTransitionTask:
         assert row.state == "emerging"
         assert driver.queries == []
 
+    def test_recovery_from_declining_to_stable(self):
+        """频次先降后升（最近 2 窗口 z > 0）→ declining 自动回迁 stable。
+
+        覆盖 T-01 修复：z_scores 由频次序列重建并传入判定，
+        declining → stable 回迁不再永久失效。
+        """
+        name = "RAG"
+        snaps = [
+            _snapshot_row(_snapshot_json(name, 10), "2026-07-01T00:00:00+08:00"),
+            _snapshot_row(_snapshot_json(name, 4), "2026-07-11T00:00:00+08:00"),
+            _snapshot_row(_snapshot_json(name, 8), "2026-07-21T00:00:00+08:00"),
+            _snapshot_row(_snapshot_json(name, 8), "2026-08-01T00:00:00+08:00"),
+        ]
+        row = _candidate_row(name, state="declining")
+        snap_session = _FakeSession(snaps)
+        cand_session = _FakeSession([row])
+        driver = _FakeDriver()
+
+        result = _run_task([snap_session, cand_session], driver)
+
+        assert result["transitions"] == 1
+        assert result["detail"] == [{
+            "position_name": name,
+            "from_state": "declining",
+            "to_state": "stable",
+        }]
+        assert row.state == "stable"
+        assert cand_session.committed is True
+        assert len(driver.queries) == 1
+        query, params = driver.queries[0]
+        assert "SET p.status = $state" in query
+        assert params["state"] == "stable"
+
     def test_non_migratable_state_ignored(self):
         """候选池仅含 candidate（非自动可迁移状态）→ 不处理。"""
         name = "RAG"

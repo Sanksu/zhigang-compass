@@ -1119,7 +1119,7 @@ async def discovery_auto_transition(ctx: dict) -> dict:
     from app.core.database import async_session_factory, neo4j_driver
     from app.models.business import DiscoveryCandidate, GraphVersion
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
-    from app.services.discovery.state_machine import WindowFreq, evaluate_auto_transition, PositionStateMachine, position_freq_windows
+    from app.services.discovery.state_machine import WindowFreq, evaluate_auto_transition, freq_z_scores, PositionStateMachine, position_freq_windows
     from app.services.extraction.dictionary import normalize_position_name
 
     # ── 1. 加载全部快照（按创建时间升序，即时间窗口序列）──
@@ -1170,7 +1170,9 @@ async def discovery_auto_transition(ctx: dict) -> dict:
                 definition_draft=row.definition_draft,
             )
             conf = float((row.confidence or {}).get("final_confidence", 0.0))
-            windows = WindowFreq(freqs=freqs)
+            # z_scores 由频次序列自身重建（freq_z_scores）：declining 岗位回升
+            # 时最近 2 窗口 z > 0，触发 declining → stable 自动回迁
+            windows = WindowFreq(freqs=freqs, z_scores=freq_z_scores(freqs))
             target = evaluate_auto_transition(candidate, windows, confidence=conf)
             if target is None:
                 continue

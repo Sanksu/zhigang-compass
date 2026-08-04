@@ -120,9 +120,28 @@ def decline_rate(w: WindowFreq, n: int = 3) -> float:
     return (recent[0] - recent[-1]) / recent[0]
 
 
+def freq_z_scores(freqs: list[float]) -> list[float]:
+    """频次序列的逐窗口 Z-score（与 freqs 等长、同顺序）。
+
+    以序列自身均值/标准差为基准：z > 0 表示当期频次高于历史均值，
+    用于 declining → stable 的回迁判定（连续 2 窗口回升）。
+
+    Returns:
+        等长 z-score 序列；序列标准差为 0（全部相等）时各窗口 z 取 0（无信号）
+    """
+    if not freqs:
+        return []
+    mean = sum(freqs) / len(freqs)
+    variance = sum((f - mean) ** 2 for f in freqs) / len(freqs)
+    std = variance ** 0.5
+    if std == 0:
+        return [0.0] * len(freqs)
+    return [(f - mean) / std for f in freqs]
+
+
 def has_recovery(w: WindowFreq, n: int = RECOVERY_WINDOW_COUNT) -> bool:
-    """连续 n 个窗口 z_score > 0（频次回升）。"""
-    return len(w.z_scores) >= n and all(z > 0 for z in w.z_scores[:n])
+    """最近连续 n 个窗口 z_score > 0（频次回升，declining → stable 回迁）。"""
+    return len(w.z_scores) >= n and all(z > 0 for z in w.z_scores[-n:])
 
 
 def can_promote_to_emerging(

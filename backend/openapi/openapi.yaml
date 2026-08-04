@@ -420,7 +420,7 @@ paths:
   /api/v1/resume/task/{task_id}/stream:
     get:
       tags: [resume]
-      summary: SSE 推送任务进度（event: progress/done/error）
+      summary: "SSE 推送任务进度（event: progress/done/error）"
       parameters:
         - name: task_id
           in: path
@@ -863,9 +863,9 @@ paths:
                 $ref: '#/components/schemas/ApiResponse'
 
   /api/v1/admin/positions/{id}/review:
-    put:
+    post:
       tags: [admin]
-      summary: "[M4] 审核岗位（批准/驳回/编辑）"
+      summary: "[M4] 审核岗位（批准/驳回）"
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -874,10 +874,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [action]
+              required: [action, reason]
               properties:
-                action: { type: string, enum: [approve, reject, edit] }
-                fields: { type: object, description: "编辑后的字段（action=edit 时）" }
+                action: { type: string, enum: [approve, reject] }
+                reason: { type: string, description: "审核理由（必填）" }
       responses:
         '200':
           description: 审核完成
@@ -885,6 +885,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: 参数不合法 / 不满足晋升条件
+        '404':
+          description: 候选岗位不存在
+        '409':
+          description: 候选岗位当前状态不可审核
 
   /api/v1/admin/positions/declining:
     get:
