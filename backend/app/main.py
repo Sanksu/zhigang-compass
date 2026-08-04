@@ -28,8 +28,22 @@ async def lifespan(app: FastAPI):
     if settings.is_production:
         if settings.secret_key == "change-me-in-production":
             raise RuntimeError("SECRET_KEY 未修改，生产环境拒绝启动")
+    _prewarm_semantic()
     yield
     # 关闭时 — 资源由各自模块管理
+
+
+def _prewarm_semantic() -> None:
+    """后台预加载 SBERT 模型，避免首次匹配请求触发模型加载（>30s 超时）。
+
+    模型加载约 5-15s，放后台线程执行，不阻塞 API 启动；失败静默
+    （语义不可用时匹配自动降级纯规则，见 semantic.SemanticUnavailableError）。
+    """
+    import threading
+
+    from app.services.matching.semantic import SkillEmbedder
+
+    threading.Thread(target=SkillEmbedder.get().preload, daemon=True).start()
 
 
 app = FastAPI(

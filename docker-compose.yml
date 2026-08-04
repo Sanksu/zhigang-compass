@@ -60,6 +60,10 @@ services:
     container_name: zhigang-api
     ports:
       - "8000:8000"
+    env_file:
+      # SECRET_KEY / LLM_API_KEY 等项目敏感配置在 backend/.env（git 忽略），
+      # 由 compose 注入容器；environment 块仅保留容器内联解析的地址类变量
+      - ./backend/.env
     environment:
       APP_ENV: production
       POSTGRES_DSN: postgresql+asyncpg://zhigang:zhigang@postgres:5432/zhigang
@@ -67,7 +71,6 @@ services:
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: password
       REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
     depends_on:
       postgres:
         condition: service_healthy
@@ -77,6 +80,9 @@ services:
         condition: service_healthy
     volumes:
       - ./frontend/dist:/app/frontend-dist:ro
+      # SBERT 模型（backend/models/sbert）挂载进容器：镜像内无模型文件，
+      # 不挂载时 SkillEmbedder 会尝试从 HuggingFace 下载（外网受限挂起）
+      - ./backend/models:/app/models:ro
 
   # ARQ 异步任务 worker（BE-M3-04）：消费 resume_parse / run_etl_pipeline 等队列任务
   worker:
