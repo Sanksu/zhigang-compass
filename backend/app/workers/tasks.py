@@ -1101,7 +1101,10 @@ async def discovery_auto_transition(ctx: dict) -> dict:
     从 graph_versions 快照序列重建岗位频次窗口（30 天粒度）→ 对
     discovery_candidates 中 state ∈ {emerging, stable, declining} 的岗位调用
     evaluate_auto_transition 判定 → 命中则 PositionStateMachine.persist
-    （Neo4j Position.status + 候选池状态 + system 审计日志）。
+    （Neo4j Position.status + 候选池状态）。
+
+    注意：自动流转 operator="system"，不写 AuditLog（audit_logs.user_id 为
+    users 外键，system 无对应用户）。人工流转记录见 /evolution/state-machine。
 
     emerging → stable: confidence ≥ 0.8 AND 连续 2 窗口波动 < 25% AND 源 ≥ 2
     emerging/stable → declining: 连续 3 窗口频次下降 > 40%

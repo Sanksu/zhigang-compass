@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Clock, FileText, ShieldCheck, XCircle, TrendingUp } from 'lucide-react'
+import { CheckCircle2, Clock, FileText, ShieldCheck, XCircle, TrendingUp, Archive } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -64,6 +64,17 @@ interface EvolutionItem {
   updated_at: string | null
 }
 
+/** 后端 /admin/positions/declining 项（declining 待归档） */
+interface DecliningItem {
+  id: string
+  position_name: string
+  state: string
+  confidence: number | null
+  evidence_refs: string[]
+  detected_at: string
+  updated_at: string | null
+}
+
 /**
  * 岗位审核页 — 设计文档 §7.2.2 + AL-M4-01
  *
@@ -119,7 +130,7 @@ export function AdminReviewPage() {
     <>
       <PageHeader
         title="岗位审核"
-        description="新兴岗位审批 · 候选晋升（candidate → emerging / rejected）与演化晋级（emerging → stable / declining）"
+        description="六状态机全链路人工审核：候选晋升（candidate → emerging / rejected）· 演化晋级（emerging → stable / declining）· 衰退归档（declining → archived）"
       />
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'candidate' | 'evolution')}>
         <TabsList>
@@ -374,6 +385,12 @@ function EvolutionReviewTab() {
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  /* 衰退归档（declining → archived 终态） */
+  const [decliningItems, setDecliningItems] = useState<DecliningItem[]>([])
+  const [decliningLoading, setDecliningLoading] = useState(true)
+  const [archiveTarget, setArchiveTarget] = useState<DecliningItem | null>(null)
+  const [archiveReason, setArchiveReason] = useState('')
+  const [archiving, setArchiving] = useState(false)
 
   const load = () => {
     apiGet<{ items: EvolutionItem[]; total: number }>('/admin/evolution/pending')
@@ -382,8 +399,16 @@ function EvolutionReviewTab() {
       .finally(() => setLoading(false))
   }
 
+  const loadDeclining = () => {
+    apiGet<{ items: DecliningItem[]; total: number }>('/admin/positions/declining')
+      .then((res) => setDecliningItems(res.items))
+      .catch(() => setDecliningItems([]))
+      .finally(() => setDecliningLoading(false))
+  }
+
   useEffect(() => {
     load()
+    loadDeclining()
   }, [])
 
   async function submitReview(action: 'approve' | 'reject') {
@@ -400,6 +425,28 @@ function EvolutionReviewTab() {
       setNotice(e instanceof ApiError ? e.message : '审核提交失败，请重试')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  // 确认衰退归档（PUT /admin/positions/{id}/archive，declining → archived 终态）
+  async function submitArchive() {
+    if (!archiveTarget) return
+    if (!archiveReason.trim()) {
+      setNotice('归档必须填写 reason')
+      return
+    }
+    setArchiving(true)
+    setNotice(null)
+    try {
+      await apiPut(`/admin/positions/${archiveTarget.id}/archive`, { reason: archiveReason.trim() })
+      setArchiveTarget(null)
+      setArchiveReason('')
+      setNotice(`已归档（终态）：${archiveTarget.position_name}`)
+      loadDeclining()
+    } catch (e) {
+      setNotice(e instanceof ApiError ? e.message : '归档提交失败，请重试')
+    } finally {
+      setArchiving(false)
     }
   }
 
@@ -574,6 +621,119 @@ function EvolutionReviewTab() {
               <Button size="sm" disabled={submitting} onClick={() => submitReview('approve')}>
                 <CheckCircle2 className="size-3.5 mr-1" />
                 确认晋级 stable
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 衰退归档（declining → archived 终态，真实 GET /admin/positions/declining） */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Archive className="size-4" />
+              衰退归档（declining）
+            </span>
+            <span className="text-xs font-normal text-ink-faint">{decliningItems.length} 条待归档</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {decliningLoading ? (
+            <p className="py-8 text-center text-sm text-ink-muted">加载衰退岗位…</p>
+          ) : decliningItems.length === 0 ? (
+            <div className="py-8 text-center text-sm text-ink-faint">
+              <p>暂无待归档的 declining 岗位</p>
+              <p className="text-xs mt-2">
+                连续 3 窗口频次下降 &gt;40% 自动进入 declining，需人工确认归档（终态）
+              </p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>岗位名</TableHead>
+                  <TableHead>发现时间</TableHead>
+                  <TableHead>置信度</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {decliningItems.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
+                    <TableCell className="text-xs font-mono text-ink-muted">{item.detected_at}</TableCell>
+                    <TableCell>
+                      {item.confidence != null ? (
+                        <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(item.confidence)}`}>
+                          {Math.round(item.confidence * 100)}%
+                        </span>
+                      ) : (
+                        <span className="text-xs text-ink-faint">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-state-archived"
+                        onClick={() => {
+                          setArchiveTarget(item)
+                          setArchiveReason('')
+                          setNotice(null)
+                        }}
+                      >
+                        <Archive className="size-3.5 mr-1" />
+                        确认归档
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 归档确认 Dialog（PUT /admin/positions/{id}/archive） */}
+      <Dialog open={archiveTarget !== null} onOpenChange={(o) => !o && setArchiveTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认衰退归档：{archiveTarget?.position_name}</DialogTitle>
+            <DialogDescription>
+              归档为终态（archived），岗位将从活跃画像移除。Neo4j Position.status 同步与审计记录由后端完成。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {archiveTarget && (
+              <div className="rounded-md bg-subtle p-3 text-xs text-ink-secondary">
+                <span className="text-ink-faint">证据引用：</span>
+                <span className="font-mono text-[10px] text-ink-faint break-all">
+                  {archiveTarget.evidence_refs.length > 0 ? archiveTarget.evidence_refs.join('、') : '—'}
+                </span>
+              </div>
+            )}
+            <label className="block space-y-1.5">
+              <span className="text-xs text-ink-muted">归档原因（必填）</span>
+              <Textarea
+                value={archiveReason}
+                onChange={(e) => setArchiveReason(e.target.value)}
+                rows={2}
+                placeholder="填写归档原因（状态机强制要求，写入审计日志）"
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setArchiveTarget(null)}>
+                取消
+              </Button>
+              <Button
+                size="sm"
+                className="bg-state-archived hover:bg-state-archived/90"
+                disabled={archiving}
+                onClick={submitArchive}
+              >
+                <Archive className="size-3.5 mr-1" />
+                确认归档（终态）
               </Button>
             </div>
           </div>

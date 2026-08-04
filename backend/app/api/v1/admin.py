@@ -723,6 +723,106 @@ async def review_evolution(
     )
 
 
+@router.get("/positions/declining")
+async def positions_declining(
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """[M4] 待归档岗位列表：declining 状态（admin 确认衰退 → archived 终态）。
+
+    与 /positions/pending（candidate）、/evolution/pending（emerging）并列，
+    覆盖六状态机全部人工审核入口。
+    """
+    from app.models.business import DiscoveryCandidate
+
+    stmt = select(DiscoveryCandidate).where(DiscoveryCandidate.state == "declining")
+    count_stmt = select(func.count()).select_from(DiscoveryCandidate).where(
+        DiscoveryCandidate.state == "declining"
+    )
+    total = await db.scalar(count_stmt)
+    rows = await db.scalars(
+        stmt.order_by(DiscoveryCandidate.updated_at.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+    )
+    items = [
+        {
+            "id": c.id,
+            "position_name": c.position_name,
+            "state": c.state,
+            "confidence": c.confidence,
+            "evidence_refs": c.evidence_refs,
+            "detected_at": c.detected_at,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in rows
+    ]
+    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+
+
+@router.put("/positions/{candidate_id}/archive")
+async def archive_position(
+    candidate_id: str,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """[M4] 确认衰退归档：declining → archived（终态）。
+
+    六状态机最后一环：人工确认后 Neo4j Position.status 同步 + AuditLog
+    记录（reason 必填）。与 /positions/{id}/review（candidate → emerging/
+    rejected）和 /evolution/{id}/review（emerging → stable/declining）并列。
+    """
+    from app.core.database import neo4j_driver
+    from app.models.business import DiscoveryCandidate
+    from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
+    from app.services.discovery.state_machine import PositionStateMachine
+
+    reason = (req.get("reason") or "").strip()
+    if not reason:
+        return error(400, "归档必须填写 reason")
+
+    cand_row = await db.get(DiscoveryCandidate, candidate_id)
+    if cand_row is None:
+        return error(404, "候选岗位不存在")
+    if cand_row.state != "declining":
+        return error(409, f"候选岗位当前状态 {cand_row.state}，仅 declining 可归档")
+
+    candidate = CandidatePosition(
+        candidate_id=cand_row.id,
+        position_name=cand_row.position_name,
+        state=PositionState.DECLINING,
+        features=DiscoveryFeatures(**cand_row.features),
+        detected_at=cand_row.detected_at,
+        evidence_refs=cand_row.evidence_refs,
+        seed_matched=cand_row.seed_matched,
+        rag_matched=cand_row.rag_matched,
+        definition_draft=cand_row.definition_draft,
+    )
+    machine = PositionStateMachine()
+    with neo4j_driver.session() as neo4j_session:
+        updated = machine.persist(
+            neo4j_session,
+            candidate,
+            PositionState.ARCHIVED,
+            db=db,
+            operator=current_user.get("sub") or current_user.get("user_id", "admin"),
+            reason=reason,
+        )
+    cand_row.state = updated.state.value
+    await db.commit()
+
+    return ok(
+        data={
+            "id": cand_row.id,
+            "position_name": cand_row.position_name,
+            "state": cand_row.state,
+        },
+        msg=f"已归档（终态）: {cand_row.position_name}",
+    )
+
+
 # ============================================================
 # LLM provider 配置（持久化到 llm_providers.yaml）
 # ============================================================

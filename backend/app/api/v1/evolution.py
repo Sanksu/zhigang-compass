@@ -221,3 +221,47 @@ async def skill_trends(
         })
 
     return ok(data={"skill": skill, "window": window, "points": points})
+
+
+@router.get("/state-machine")
+async def state_machine_overview(db: AsyncSession = Depends(get_db)):
+    """[M4] 岗位状态机总览：六态分布 + 最近流转记录（登录用户可读）。
+
+    - states: discovery_candidates 按 state 分组计数（candidate/emerging/
+      stable/declining/archived/rejected 六态，含 rejected 终态）
+    - transitions: audit_logs 中 action=discovery.state_transition 最近 20 条
+      （detail.from_state / to_state / reason，resource_id = 岗位名）
+
+    流转记录仅覆盖人工审核（operator 为 admin 用户名）。自动流转由每日
+    discovery_auto_transition 任务直接落 Neo4j Position.status + 候选池
+    状态，不写 AuditLog（system 无 users 外键，见 tasks.py 注释）。
+    """
+    from app.models.business import AuditLog, DiscoveryCandidate
+
+    state_rows = (await db.execute(
+        select(DiscoveryCandidate.state, func.count()).group_by(DiscoveryCandidate.state)
+    )).all()
+    order = ["candidate", "emerging", "stable", "declining", "archived", "rejected"]
+    counts = {state: 0 for state in order}
+    for state, cnt in state_rows:
+        counts[state] = counts.get(state, 0) + cnt
+
+    logs = (await db.scalars(
+        select(AuditLog)
+        .where(AuditLog.action == "discovery.state_transition")
+        .order_by(AuditLog.created_at.desc())
+        .limit(20)
+    )).all()
+    transitions = [
+        {
+            "id": log.id,
+            "position_name": log.resource_id,
+            "operator": log.user_id,
+            "from_state": (log.detail or {}).get("from_state"),
+            "to_state": (log.detail or {}).get("to_state"),
+            "reason": (log.detail or {}).get("reason", ""),
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        }
+        for log in logs
+    ]
+    return ok(data={"states": counts, "transitions": transitions})

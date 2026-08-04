@@ -8,14 +8,13 @@
  * - GET /api/v1/evolution/trends    → 技能频次趋势
  * - GET /api/v1/evolution/signals   → 新兴/衰退信号
  * - GET /api/v1/evolution/position/{id}/evolution → 岗位演化历史
- *
- * 后端未产出的部分（岗位状态机流转）显示空态，等待 M4。
+ * - GET /api/v1/evolution/state-machine → 岗位状态机流转（六态分布 + 人工审核记录）
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Calendar, GitBranch, TrendingUp, TrendingDown, Eye, Boxes } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -760,17 +759,120 @@ function DiffTable({ items }: { items: VersionDiffItem[] }) {
   )
 }
 
-/** 后端未产出模块的统一空态卡片 */
-function PendingCard({ title, hint }: { title: string; hint: string }) {
+/** 六态元信息（与图谱状态机一致 + rejected 终态） */
+const STATE_META: Record<
+  string,
+  { label: string; dot: string; badge: BadgeProps['variant'] }
+> = {
+  candidate: { label: '候选', dot: 'bg-state-candidate', badge: 'candidate' },
+  emerging: { label: '新兴', dot: 'bg-state-emerging', badge: 'emerging' },
+  stable: { label: '稳定', dot: 'bg-state-stable', badge: 'stable' },
+  declining: { label: '衰退', dot: 'bg-state-declining', badge: 'declining' },
+  archived: { label: '归档', dot: 'bg-state-archived', badge: 'archived' },
+  rejected: { label: '驳回', dot: 'bg-state-archived', badge: 'archived' },
+}
+
+/** 六态分布 + 最近流转记录（GET /evolution/state-machine） */
+interface StateMachineData {
+  states: Record<string, number>
+  transitions: {
+    id: number
+    position_name: string
+    operator: string
+    from_state: string
+    to_state: string
+    reason: string
+    created_at: string | null
+  }[]
+}
+
+/** 岗位状态机流转（真实 GET /evolution/state-machine，六态分布 + 人工流转记录） */
+function StateMachineView() {
+  const [data, setData] = useState<StateMachineData | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    apiGet<StateMachineData>('/evolution/state-machine')
+      .then(setData)
+      .catch(() => setError('状态机流转记录加载失败'))
+  }, [])
+
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm">{title}</CardTitle>
+        <CardTitle className="text-sm flex items-center gap-2">
+          <GitBranch className="size-4" />
+          岗位状态机流转
+          <span className="text-[10px] font-normal text-ink-faint">
+            六态生命周期 · 人工审核流转记录（自动流转不写审计，见后端说明）
+          </span>
+        </CardTitle>
       </CardHeader>
-      <CardContent>
-        <p className="text-xs text-ink-faint py-10 text-center border border-dashed border-border rounded-md">
-          {hint}
-        </p>
+      <CardContent className="space-y-4">
+        {error && <p className="py-4 text-center text-xs text-state-archived">{error}</p>}
+        {!error && !data && <p className="py-4 text-center text-xs text-ink-faint">加载中…</p>}
+        {!error && data && (
+          <>
+            {/* 六态分布（真实候选池状态聚合） */}
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+              {Object.entries(STATE_META).map(([state, meta]) => (
+                <div key={state} className="rounded-md border border-border p-2.5">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-ink">
+                    <span className={`size-2 rounded-full ${meta.dot}`} />
+                    {meta.label}
+                  </div>
+                  <div className="mt-1 text-xl font-semibold tabular-nums">{data.states[state] ?? 0}</div>
+                </div>
+              ))}
+            </div>
+            {/* 最近人工流转记录（audit_logs discovery.state_transition） */}
+            <div>
+              <h4 className="mb-2 text-xs font-medium text-ink-muted uppercase tracking-wide">最近人工流转</h4>
+              {data.transitions.length === 0 ? (
+                <p className="py-6 text-center text-xs text-ink-faint border border-dashed border-border rounded-md">
+                  暂无流转记录（人工审核后在此展示）
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>时间</TableHead>
+                      <TableHead>岗位</TableHead>
+                      <TableHead>流转</TableHead>
+                      <TableHead>操作者</TableHead>
+                      <TableHead>原因</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.transitions.map((t) => (
+                      <TableRow key={t.id}>
+                        <TableCell className="text-xs font-mono text-ink-muted whitespace-nowrap">
+                          {t.created_at ? t.created_at.replace('T', ' ').slice(0, 16) : '—'}
+                        </TableCell>
+                        <TableCell className="text-xs font-medium text-ink max-w-40 truncate">
+                          {t.position_name}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          <span className="inline-flex items-center gap-1">
+                            <Badge variant={STATE_META[t.from_state]?.badge ?? 'outline'} className="text-[9px]">
+                              {t.from_state}
+                            </Badge>
+                            <span className="text-ink-faint">→</span>
+                            <Badge variant={STATE_META[t.to_state]?.badge ?? 'outline'} className="text-[9px]">
+                              {t.to_state}
+                            </Badge>
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-xs text-ink-secondary">{t.operator}</TableCell>
+                        <TableCell className="text-xs text-ink-muted max-w-48 truncate">{t.reason || '—'}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   )
@@ -838,8 +940,8 @@ export function EvolutionPage() {
         <VersionDiffView />
       </div>
 
-      {/* 岗位状态机流转（后端待交付） */}
-      <PendingCard title="岗位状态机流转" hint="六状态机流转记录等待后端交付（M4）" />
+      {/* 岗位状态机流转（真实 /evolution/state-machine） */}
+      <StateMachineView />
     </>
   )
 }
