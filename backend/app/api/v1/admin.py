@@ -50,6 +50,9 @@ PLATFORM_META: dict[str, dict] = {
 
 _OUTPUT_DIR = Path(__file__).resolve().parents[3] / "data" / "crawlers" / "output"
 
+# raw 表 source（spider 名）→ 平台 id（linkedin_public 对应 linkedin）
+_SPIDER_TO_PLATFORM = {**{p: p for p in PLATFORM_META}, "linkedin_public": "linkedin"}
+
 
 # ============================================================
 # 用户管理
@@ -177,16 +180,36 @@ def _match_platform(stem: str) -> str | None:
 
 @router.get("/crawl/status")
 async def crawl_status(db: AsyncSession = Depends(get_db)):
-    """爬取状态监控：raw 表计数 + output JSONL 文件统计。"""
-    raw_counts = {
-        "jd": await db.scalar(select(func.count()).select_from(JDRaw)) or 0,
-        "course": await db.scalar(select(func.count()).select_from(CourseRaw)) or 0,
-        "paper": await db.scalar(select(func.count()).select_from(PaperRaw)) or 0,
-        "community": await db.scalar(select(func.count()).select_from(CommunityRaw)) or 0,
-    }
+    """爬取状态监控：raw 表实际入库统计（每源条数/今日/最近）+ output 文件数。
 
-    # 各平台最后触发时间（task_status 记录，含失败；比文件 mtime 更及时）
-    # 注：PG 对参数化的 result->>spider 分组等价识别有坑，故 Python 侧分组（crawl 任务量小）
+    平台计数以 raw 表为准（output JSONL 可能被清理/未保留，入库数据才是最终状态）；
+    files 为 output/*.jsonl 文件数，last_run 取 raw 最近入库与 task_status 触发时间较新者。
+    """
+    today_cst_start = (
+        datetime.now(timezone(timedelta(hours=8)))
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        .astimezone(timezone.utc)
+    )
+    # 各 raw 表按 source（spider 名）统计：总条数 / 今日（CST）新增 / 最近入库
+    raw_stats: dict[str, dict] = {}
+    for model in (JDRaw, CourseRaw, PaperRaw, CommunityRaw):
+        rows = await db.execute(
+            select(
+                model.source,
+                func.count(),
+                func.count().filter(model.created_at >= today_cst_start),
+                func.max(model.created_at),
+            ).group_by(model.source)
+        )
+        for source, total, today, last_ts in rows.all():
+            pid = _SPIDER_TO_PLATFORM.get(source, source)
+            entry = raw_stats.setdefault(pid, {"total": 0, "today": 0, "last": None})
+            entry["total"] += total or 0
+            entry["today"] += today or 0
+            if last_ts and (entry["last"] is None or last_ts > entry["last"]):
+                entry["last"] = last_ts
+
+    # 各平台最后触发时间（task_status 记录，含失败；spider 名归一化为平台 id）
     task_last_run: dict[str, str] = {}
     crawl_tasks = await db.scalars(
         select(TaskStatus).where(TaskStatus.task_type == "crawl")
@@ -195,69 +218,50 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
         spider = (t.result or {}).get("spider")
         if not spider:
             continue
+        pid = _SPIDER_TO_PLATFORM.get(spider, spider)
         ts = t.created_at.isoformat() if t.created_at else None
-        if ts and (spider not in task_last_run or ts > task_last_run[spider]):
-            task_last_run[spider] = ts
+        if ts and (pid not in task_last_run or ts > task_last_run[pid]):
+            task_last_run[pid] = ts
 
-    # 从 output/*.jsonl 统计各平台采集文件（文件名含时间戳后缀）
-    platforms = []
-    output_total = 0
-    today_count = 0
-    today = datetime.now(timezone(timedelta(hours=8))).date()
+    # 平台 → output/*.jsonl 文件数
+    file_counts: dict[str, int] = {}
     if _OUTPUT_DIR.exists():
         for f in sorted(_OUTPUT_DIR.glob("*.jsonl")):
             platform = _match_platform(f.stem)
-            if platform is None:
-                continue
-            try:
-                count = sum(1 for _ in f.open(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError):
-                count = 0
-            output_total += count
-            mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone(timedelta(hours=8)))
-            is_today = mtime.date() == today
-            if is_today:
-                today_count += count
-            platforms.append({
-                "platform": platform,
-                "count": count,
-                "today": count if is_today else 0,
-                "file": f.name,
-                "mtime": mtime.isoformat(),
-            })
+            if platform is not None:
+                file_counts[platform] = file_counts.get(platform, 0) + 1
 
-    # 按平台聚合（最新文件时间 + 累计条数；last_run 优先取 task_status）
-    by_platform: dict[str, dict] = {}
-    for p in platforms:
-        meta = PLATFORM_META[p["platform"]]
-        entry = by_platform.setdefault(p["platform"], {
-            "id": p["platform"],
+    # 全量平台聚合（13 源）：raw 入库为准，无记录平台也列出（前端展示"归档"状态）
+    platforms = []
+    for pid, meta in PLATFORM_META.items():
+        st = raw_stats.get(pid, {"total": 0, "today": 0, "last": None})
+        last_run = st["last"].isoformat() if st["last"] else None
+        ts = task_last_run.get(pid)
+        if ts and (last_run is None or ts > last_run):
+            last_run = ts
+        platforms.append({
+            "id": pid,
             "name": meta["name"],
             "level": meta["level"],
-            "files": 0,
-            "total_count": 0,
-            "today_count": 0,
-            "last_run": None,
+            "files": file_counts.get(pid, 0),
+            "total_count": st["total"],
+            "today_count": st["today"],
+            "last_run": last_run,
         })
-        entry["files"] += 1
-        entry["total_count"] += p["count"]
-        entry["today_count"] += p["today"]
-        if entry["last_run"] is None or p["mtime"] > entry["last_run"]:
-            entry["last_run"] = p["mtime"]
 
-    # task_status 记录比文件时间更新时采用（覆盖无文件/失败场景）
-    for entry in by_platform.values():
-        ts = task_last_run.get(entry["id"])
-        if ts and (entry["last_run"] is None or ts > entry["last_run"]):
-            entry["last_run"] = ts
-
+    raw_counts = {
+        "jd": await db.scalar(select(func.count()).select_from(JDRaw)) or 0,
+        "course": await db.scalar(select(func.count()).select_from(CourseRaw)) or 0,
+        "paper": await db.scalar(select(func.count()).select_from(PaperRaw)) or 0,
+        "community": await db.scalar(select(func.count()).select_from(CommunityRaw)) or 0,
+    }
     return ok(data={
         "metrics": {
-            "today_count": today_count,  # 今日（CST）output/*.jsonl 新增行数
-            "output_total": output_total,
+            "today_count": sum(s["today"] for s in raw_stats.values()),  # 今日（CST）入库新增
+            "output_total": sum(file_counts.values()),
             "raw": raw_counts,
         },
-        "platforms": sorted(by_platform.values(), key=lambda x: (x["level"], x["id"])),
+        "platforms": sorted(platforms, key=lambda x: (x["level"], x["id"])),
     })
 
 
@@ -601,6 +605,221 @@ async def review_position(
             "reason": reason,
         },
         msg=f"已{'通过晋升 emerging' if action == 'approve' else '驳回'}: {cand_row.position_name}",
+    )
+
+
+# ============================================================
+# 岗位演化审核（[M4]：emerging → stable / declining 人工确认）
+# ============================================================
+
+@router.get("/evolution/pending")
+async def evolution_pending(
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """[M4] 待审核演化变更：emerging 状态岗位列表。
+
+    与 /positions/pending（candidate 待晋升）互补——这里聚焦已晋升
+    emerging 的岗位，需 admin 确认晋级 stable 或判定进入 declining。
+    """
+    from app.models.business import DiscoveryCandidate
+
+    stmt = select(DiscoveryCandidate).where(DiscoveryCandidate.state == "emerging")
+    count_stmt = select(func.count()).select_from(DiscoveryCandidate).where(
+        DiscoveryCandidate.state == "emerging"
+    )
+    total = await db.scalar(count_stmt)
+    rows = await db.scalars(
+        stmt.order_by(DiscoveryCandidate.updated_at.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+    )
+    items = [
+        {
+            "id": c.id,
+            "position_name": c.position_name,
+            "state": c.state,
+            "confidence": c.confidence,
+            "evidence_refs": c.evidence_refs,
+            "seed_matched": c.seed_matched,
+            "rag_matched": c.rag_matched,
+            "definition_draft": c.definition_draft,
+            "detected_at": c.detected_at,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in rows
+    ]
+    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+
+
+@router.put("/evolution/{candidate_id}/review")
+async def review_evolution(
+    candidate_id: str,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """[M4] 审核演化变更：emerging 岗位 approve → stable / reject → declining。
+
+    复用六状态机（PositionStateMachine）持久化 Neo4j Position.status，
+    approve 且携带 modified 时合并进候选池 features（演化确认的属性修订）。
+
+    Args:
+        req: {"action": "approve" | "reject", "modified": {...}?}
+    """
+    from app.core.database import neo4j_driver
+    from app.models.business import DiscoveryCandidate
+    from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
+    from app.services.discovery.state_machine import PositionStateMachine
+
+    action = req.get("action")
+    if action not in ("approve", "reject"):
+        return error(400, "action 必须为 approve 或 reject")
+
+    cand_row = await db.get(DiscoveryCandidate, candidate_id)
+    if cand_row is None:
+        return error(404, "候选岗位不存在")
+    if cand_row.state != "emerging":
+        return error(409, f"候选岗位当前状态 {cand_row.state}，仅 emerging 可执行演化审核")
+
+    candidate = CandidatePosition(
+        candidate_id=cand_row.id,
+        position_name=cand_row.position_name,
+        state=PositionState.EMERGING,
+        features=DiscoveryFeatures(**cand_row.features),
+        detected_at=cand_row.detected_at,
+        evidence_refs=cand_row.evidence_refs,
+        seed_matched=cand_row.seed_matched,
+        rag_matched=cand_row.rag_matched,
+        definition_draft=cand_row.definition_draft,
+    )
+    target = PositionState.STABLE if action == "approve" else PositionState.DECLINING
+
+    machine = PositionStateMachine()
+    with neo4j_driver.session() as neo4j_session:
+        updated = machine.persist(
+            neo4j_session,
+            candidate,
+            target,
+            db=db,
+            operator=current_user.get("sub") or current_user.get("user_id", "admin"),
+            reason=(req.get("reason") or "").strip() or "admin evolution review",
+        )
+
+    cand_row.state = updated.state.value
+    modified = req.get("modified")
+    if action == "approve" and isinstance(modified, dict) and modified:
+        cand_row.features = {**(cand_row.features or {}), **modified}
+    await db.commit()
+
+    return ok(
+        data={
+            "id": cand_row.id,
+            "position_name": cand_row.position_name,
+            "state": cand_row.state,
+        },
+        msg=f"已{'确认晋级 stable' if action == 'approve' else '确认衰退 declining'}: {cand_row.position_name}",
+    )
+
+
+@router.get("/positions/declining")
+async def positions_declining(
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """[M4] 待归档岗位列表：declining 状态（admin 确认衰退 → archived 终态）。
+
+    与 /positions/pending（candidate）、/evolution/pending（emerging）并列，
+    覆盖六状态机全部人工审核入口。
+    """
+    from app.models.business import DiscoveryCandidate
+
+    stmt = select(DiscoveryCandidate).where(DiscoveryCandidate.state == "declining")
+    count_stmt = select(func.count()).select_from(DiscoveryCandidate).where(
+        DiscoveryCandidate.state == "declining"
+    )
+    total = await db.scalar(count_stmt)
+    rows = await db.scalars(
+        stmt.order_by(DiscoveryCandidate.updated_at.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+    )
+    items = [
+        {
+            "id": c.id,
+            "position_name": c.position_name,
+            "state": c.state,
+            "confidence": c.confidence,
+            "evidence_refs": c.evidence_refs,
+            "detected_at": c.detected_at,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in rows
+    ]
+    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+
+
+@router.put("/positions/{candidate_id}/archive")
+async def archive_position(
+    candidate_id: str,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """[M4] 确认衰退归档：declining → archived（终态）。
+
+    六状态机最后一环：人工确认后 Neo4j Position.status 同步 + AuditLog
+    记录（reason 必填）。与 /positions/{id}/review（candidate → emerging/
+    rejected）和 /evolution/{id}/review（emerging → stable/declining）并列。
+    """
+    from app.core.database import neo4j_driver
+    from app.models.business import DiscoveryCandidate
+    from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
+    from app.services.discovery.state_machine import PositionStateMachine
+
+    reason = (req.get("reason") or "").strip()
+    if not reason:
+        return error(400, "归档必须填写 reason")
+
+    cand_row = await db.get(DiscoveryCandidate, candidate_id)
+    if cand_row is None:
+        return error(404, "候选岗位不存在")
+    if cand_row.state != "declining":
+        return error(409, f"候选岗位当前状态 {cand_row.state}，仅 declining 可归档")
+
+    candidate = CandidatePosition(
+        candidate_id=cand_row.id,
+        position_name=cand_row.position_name,
+        state=PositionState.DECLINING,
+        features=DiscoveryFeatures(**cand_row.features),
+        detected_at=cand_row.detected_at,
+        evidence_refs=cand_row.evidence_refs,
+        seed_matched=cand_row.seed_matched,
+        rag_matched=cand_row.rag_matched,
+        definition_draft=cand_row.definition_draft,
+    )
+    machine = PositionStateMachine()
+    with neo4j_driver.session() as neo4j_session:
+        updated = machine.persist(
+            neo4j_session,
+            candidate,
+            PositionState.ARCHIVED,
+            db=db,
+            operator=current_user.get("sub") or current_user.get("user_id", "admin"),
+            reason=reason,
+        )
+    cand_row.state = updated.state.value
+    await db.commit()
+
+    return ok(
+        data={
+            "id": cand_row.id,
+            "position_name": cand_row.position_name,
+            "state": cand_row.state,
+        },
+        msg=f"已归档（终态）: {cand_row.position_name}",
     )
 
 

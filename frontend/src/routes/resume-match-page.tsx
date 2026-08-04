@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw, FileText } from 'lucide-react'
+import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw, FileText, ThumbsUp, ThumbsDown, RefreshCw } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -141,8 +141,8 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
     skill_matrix: skill_matrix,
     gaps,
     learning_path: toLearningPath(r.learning_path ?? []),
-    // 证据引用依赖证据图谱（设计文档要求 100% 覆盖率），后端暂未产出 → 空态
-    evidence_refs: [],
+    // 证据引用：技能 → 原始 JD（图谱 MENTIONED_IN 链路，后端 compare 返回）
+    evidence_refs: r.evidence_refs ?? [],
   }
 }
 
@@ -160,8 +160,8 @@ function toCandidate(s: ResumeSummary): CandidateProfile {
  *
  * 数据来源：真实后端 API
  * 上传 → POST /resume/parse；载入已有简历 → GET /resume/list；
- * 推荐 → POST /match/recommend；比对 → POST /match/compare（含差距三态 + 学习路径）。
- * 证据引用依赖证据图谱，后端暂未产出 → 空态。
+ * 推荐 → POST /match/recommend；比对 → POST /match/compare
+ * （含差距三态 + 学习路径 + 证据引用）。
  */
 export function ResumeMatchPage() {
   const [stage, setStage] = useState<'upload' | 'parsing' | 'matched'>('upload')
@@ -170,6 +170,11 @@ export function ResumeMatchPage() {
   const [selectedPosition, setSelectedPosition] = useState<RecommendItem | null>(null)
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  // 结果快照 ID（compare 返回，供 /match/result|gap|path|feedback 查询）
+  const [matchId, setMatchId] = useState<string | null>(null)
+  // 用户反馈（1=有用 / -1=没用，POST /match/feedback）
+  const [feedback, setFeedback] = useState<number | null>(null)
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
   const [resumeList, setResumeList] = useState<ResumeSummary[]>([])
   const [activeResumeId, setActiveResumeId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -284,16 +289,81 @@ export function ResumeMatchPage() {
     setSelectedPosition(rec)
     setLoadingDetail(true)
     setMatchResult(null)
+    setMatchId(null)
+    setFeedback(null)
     try {
       const res = await apiPost<BackendMatchResult>('/match/compare', {
         resume_id: activeResumeId,
         position_id: rec.position_id,
       })
+      setMatchId(res.match_id ?? null)
       setMatchResult(toMatchResult(res))
     } catch (e) {
       setNotice(e instanceof ApiError ? e.message : '比对失败')
     } finally {
       setLoadingDetail(false)
+    }
+  }
+
+  // 从结果快照重新加载：先校验任务状态（GET /match/task/{id}），再拉取快照（GET /match/result/{id}）。
+  // 相比重新跑 compare，快照在 Redis（TTL 24h）中读取，秒级返回且不重复计算。
+  async function reloadFromSnapshot() {
+    if (!matchId) return
+    setNotice(null)
+    try {
+      const task = await apiGet<{ status: string }>(`/match/task/${matchId}`)
+      if (task.status !== 'success') {
+        setNotice('匹配任务尚未完成，请稍后重试')
+        return
+      }
+      const res = await apiGet<BackendMatchResult>(`/match/result/${matchId}`)
+      if (res.position_id) {
+        setMatchResult(toMatchResult(res))
+        setFeedback(null)
+        setNotice('已从结果快照刷新（无需重新计算）')
+      }
+    } catch (e) {
+      setNotice(e instanceof ApiError ? e.message : '快照刷新失败（结果可能已过期，请重新比对）')
+    }
+  }
+
+  // 差距分析独立刷新（GET /match/result/{id}/gap）
+  async function refreshGaps() {
+    if (!matchId) return
+    try {
+      const res = await apiGet<{ gaps: BackendGapItem[] }>(`/match/result/${matchId}/gap`)
+      setMatchResult((prev) => (prev ? { ...prev, gaps: res.gaps.map(toGapItem) } : prev))
+      setNotice('差距分析已从快照刷新')
+    } catch (e) {
+      setNotice(e instanceof ApiError ? e.message : '差距刷新失败')
+    }
+  }
+
+  // 学习路径独立刷新（GET /match/result/{id}/path）
+  async function refreshPath() {
+    if (!matchId) return
+    try {
+      const res = await apiGet<{ learning_path: BackendLearningPathItem[] }>(`/match/result/${matchId}/path`)
+      setMatchResult((prev) => (prev ? { ...prev, learning_path: toLearningPath(res.learning_path) } : prev))
+      setNotice('学习路径已从快照刷新')
+    } catch (e) {
+      setNotice(e instanceof ApiError ? e.message : '学习路径刷新失败')
+    }
+  }
+
+  // 提交匹配反馈（POST /match/feedback，match_id 校验 + Redis 记录 90 天）
+  async function submitFeedback(score: 1 | -1) {
+    if (!matchId || feedbackSubmitting) return
+    setFeedbackSubmitting(true)
+    setNotice(null)
+    try {
+      await apiPost('/match/feedback', { match_id: matchId, score })
+      setFeedback(score)
+      setNotice(`已记录反馈（${score === 1 ? '👍 匹配结果有用' : '👎 匹配结果不准确'}）`)
+    } catch (e) {
+      setNotice(e instanceof ApiError ? e.message : '反馈提交失败')
+    } finally {
+      setFeedbackSubmitting(false)
     }
   }
 
@@ -303,6 +373,8 @@ export function ResumeMatchPage() {
     setRecommendations([])
     setSelectedPosition(null)
     setMatchResult(null)
+    setMatchId(null)
+    setFeedback(null)
     setActiveResumeId(null)
     setNotice(null)
   }
@@ -525,6 +597,39 @@ export function ResumeMatchPage() {
                     </Badge>
                     <span className="text-xs font-mono text-ink-faint ml-auto">{matchResult.position_id}</span>
                   </CardTitle>
+                  {/* 结果快照 ID + 反馈 + 快照重载（POST /match/feedback / GET /match/task|result） */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    {matchId && (
+                      <span className="text-[10px] font-mono text-ink-faint" title="结果快照 ID（Redis 24h）">
+                        #{matchId.slice(0, 8)}
+                      </span>
+                    )}
+                    <div className="flex items-center gap-1 ml-auto">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={`h-7 px-2 text-xs ${feedback === 1 ? 'border-state-stable text-state-stable' : ''}`}
+                        disabled={feedbackSubmitting || feedback !== null}
+                        title="匹配结果有用"
+                        onClick={() => submitFeedback(1)}
+                      >
+                        <ThumbsUp className="size-3.5 mr-1" />有用
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={`h-7 px-2 text-xs ${feedback === -1 ? 'border-state-archived text-state-archived' : ''}`}
+                        disabled={feedbackSubmitting || feedback !== null}
+                        title="匹配结果不准确"
+                        onClick={() => submitFeedback(-1)}
+                      >
+                        <ThumbsDown className="size-3.5 mr-1" />没用
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={reloadFromSnapshot}>
+                        <RefreshCw className="size-3.5 mr-1" />重载
+                      </Button>
+                    </div>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
@@ -590,9 +695,18 @@ export function ResumeMatchPage() {
                   <CardTitle className="text-sm flex items-center gap-2">
                     <AlertCircle className="size-4 text-state-declining" />
                     差距分析
-                    <Badge variant="outline" className="text-[10px] ml-auto">
+                    <Badge variant="outline" className="text-[10px]">
                       {matchResult.gaps.length} 项
                     </Badge>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-1.5 text-[10px] ml-auto"
+                      onClick={refreshGaps}
+                      title="从结果快照刷新差距分析"
+                    >
+                      <RefreshCw className="size-3 mr-1" />刷新
+                    </Button>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -648,24 +762,35 @@ export function ResumeMatchPage() {
                 </CardContent>
               </Card>
 
-              {/* 学习路径甘特图（后端 M4 交付 → 空态） */}
+              {/* 学习路径甘特图（先修链 + 推荐课程 Top-3，后端 compare 返回） */}
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">学习路径规划</CardTitle>
-                  <CardDescription>基于课程图谱的补足路径 · 后端待交付（M4）</CardDescription>
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <span>学习路径规划</span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-1.5 text-[10px] ml-auto"
+                      onClick={refreshPath}
+                      title="从结果快照刷新学习路径"
+                    >
+                      <RefreshCw className="size-3 mr-1" />刷新
+                    </Button>
+                  </CardTitle>
+                  <CardDescription>基于课程图谱的补足路径（先修链 + 推荐课程）</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {matchResult.learning_path.length > 0 ? (
                     <GanttChart data={matchResult.learning_path} />
                   ) : (
                     <p className="text-xs text-ink-faint py-10 text-center">
-                      学习路径由课程图谱生成，等待后端交付（M4）
+                      无需要补足的技能差距，岗位要求已全部满足
                     </p>
                   )}
                 </CardContent>
               </Card>
 
-              {/* 证据引用（后端 M4 交付 → 空态） */}
+              {/* 证据引用（技能 → 原始 JD，图谱 MENTIONED_IN 链路） */}
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm flex items-center gap-2">
@@ -700,7 +825,7 @@ export function ResumeMatchPage() {
                     </div>
                   ) : (
                     <p className="text-xs text-ink-faint py-10 text-center">
-                      证据追溯依赖 Evidence 链路，等待后端交付（M4）
+                      该岗位技能未关联可追溯的原始 JD 证据
                     </p>
                   )}
                 </CardContent>

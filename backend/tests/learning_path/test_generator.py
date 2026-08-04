@@ -43,7 +43,9 @@ class _FakeCourseLoader:
     def __init__(self, courses_by_skill: dict[str, list[CourseRecommendation]]):
         self.courses_by_skill = courses_by_skill
 
-    async def __call__(self, skill_id: str, skill_name: str, top_k: int):
+    async def __call__(
+        self, skill_id: str, skill_name: str, top_k: int, semantic=None, sim_threshold=None
+    ):
         return self.courses_by_skill.get(skill_name, [])[:top_k]
 
 
@@ -139,7 +141,7 @@ async def test_course_loader_receives_skill_id_and_top_k(monkeypatch):
     monkeypatch.setattr(mod, "load_prerequisite_config", lambda: {"default_hours_per_skill": 30.0, "skills": {}})
     received = {}
 
-    async def spy_loader(skill_id: str, skill_name: str, top_k: int):
+    async def spy_loader(skill_id: str, skill_name: str, top_k: int, semantic=None, sim_threshold=None):
         received["skill_id"] = skill_id
         received["top_k"] = top_k
         return [CourseRecommendation(course_id="c1", title="t", platform="p")]

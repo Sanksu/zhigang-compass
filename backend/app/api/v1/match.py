@@ -2,16 +2,20 @@
 
 数据链路：resume_cache（候选人画像）→ Neo4j 图谱聚合岗位画像 → RuleBasedMatcher。
 契约标注 recommend 为 202 异步，当前按设计文档 9.4 同步执行返回结果（M4 可迁异步）。
+同步执行后结果持久化 Redis（TTL 24h）并返回 match_id，供 match/result|gap|path|feedback 查询。
 """
 
+import json
 import time
 import uuid
+
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db, neo4j_driver
+from app.core.database import get_db, neo4j_driver, redis_client
 from app.models.business import ResumeCache
 from app.schemas.common import ok, error
 from app.services.matching.engine import RuleBasedMatcher
@@ -152,9 +156,78 @@ def _load_positions_from_graph() -> list[PositionProfile]:
     return result
 
 
+def _load_evidence_for_position(position_id: str) -> list[dict]:
+    """查询岗位技能链路的证据引用（Skill-MENTIONED_IN->Evidence 原始 JD）。
+
+    图谱中每个技能关联若干原始 JD 证据（ev_xxxx），返回每条技能的
+    代表性证据（每技能至多 3 条，总上限 20），供前端"证据引用"展示。
+    置信度 = 该技能证据量 / 归一化基数（8 条证据视为满置信 1.0），
+    证据越多置信度越高（反映技能支持的跨源充分度）。
+    """
+    rows: list[dict] = []
+    with neo4j_driver.session() as session:
+        recs = session.run(
+            """
+            MATCH (p:Position {id: $pid})-[:REQUIRES]->(s:Skill)-[:MENTIONED_IN]->(e:Evidence)
+            WITH s.name AS skill, collect(DISTINCT e) AS evs
+            RETURN skill, size(evs) AS evidence_count,
+                   [e IN evs | {source: e.source, source_url: e.source_url}] AS all_samples
+            ORDER BY skill
+            """,
+            pid=position_id,
+        )
+        for rec in recs:
+            if len(rows) >= 20:
+                break
+            count = rec["evidence_count"]
+            confidence = round(min(count / 8.0, 1.0), 2)
+            # 代表证据按源去重（每源至多 1 条），避免同源 JD 重复展示
+            seen_sources: set[str] = set()
+            for s in rec["all_samples"]:
+                src = s["source"] or ""
+                if src in seen_sources:
+                    continue
+                seen_sources.add(src)
+                rows.append({
+                    "skill": rec["skill"],
+                    "source": src,
+                    "url": s["source_url"],
+                    "confidence": confidence,
+                })
+                if len(seen_sources) >= 3:
+                    break
+    return rows
+
+
+# 匹配结果 Redis 持久化 TTL：24h（契约 M4 异步链路 result/gap/path/feedback 的存储底座）
+_MATCH_RESULT_TTL = 60 * 60 * 24
+
+
+def _ts() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+async def _persist_match_result(match_id: str, data: dict) -> None:
+    """同步执行完成 → 写入结果快照 + 任务状态（同步即 success）。"""
+    await redis_client.set(f"match:result:{match_id}", json.dumps(data), ex=_MATCH_RESULT_TTL)
+    await redis_client.set(
+        f"match:task:{match_id}",
+        json.dumps({"match_id": match_id, "status": "success", "created_at": _ts()}),
+        ex=_MATCH_RESULT_TTL,
+    )
+
+
+async def _load_match_result(match_id: str) -> dict | None:
+    cached = await redis_client.get(f"match:result:{match_id}")
+    return json.loads(cached) if cached else None
+
+
 @router.post("/recommend")
 async def recommend(req: RecommendRequest, db: AsyncSession = Depends(get_db)):
-    """自动推荐 Top-N 岗位（resume_cache → 匹配引擎）。"""
+    """自动推荐 Top-N 岗位（resume_cache → 匹配引擎）。
+
+    同步执行后将结果快照写入 Redis 并返回 match_id（供 match/result 等查询）。
+    """
     resume_id = _parse_resume_id(req.resume_id)
     if resume_id is None:
         return error(400, "resume_id 格式非法")
@@ -170,7 +243,10 @@ async def recommend(req: RecommendRequest, db: AsyncSession = Depends(get_db)):
     results = matcher.match(
         MatchRequest(candidate=candidate, mode=MatchMode.AUTO, top_n=req.top_n)
     )
-    return ok(data={"items": [r.model_dump() for r in results]})
+    match_id = str(uuid.uuid4())
+    data = {"items": [r.model_dump() for r in results], "match_id": match_id}
+    await _persist_match_result(match_id, data)
+    return ok(data=data)
 
 
 @router.post("/compare")
@@ -178,7 +254,8 @@ async def compare(req: CompareRequest, db: AsyncSession = Depends(get_db)):
     """人岗比对：单点同步比对（含差距三态 + 学习路径）。
 
     返回匹配结果 + gaps（missing/weak/matched 三态）+ learning_path
-    （missing/weak 技能的先修链 + 课程 Top-3，设计文档 §9.5 / §4.6）。
+    （missing/weak 技能的先修链 + 课程 Top-3，设计文档 §9.5 / §4.6），
+    并持久化快照返回 match_id（供 match/result|gap|path|feedback 查询）。
     """
     resume_id = _parse_resume_id(req.resume_id)
     if resume_id is None:
@@ -204,10 +281,69 @@ async def compare(req: CompareRequest, db: AsyncSession = Depends(get_db)):
     )[0]
 
     path = await LearningPathGenerator().generate(candidate, target, semantic=semantic)
-    return ok(
-        data={
-            **result.model_dump(),
-            "gaps": [g.model_dump() for g in path.gaps],
-            "learning_path": [item.model_dump() for item in path.items],
-        }
-    )
+    match_id = str(uuid.uuid4())
+    data = {
+        "match_id": match_id,
+        **result.model_dump(),
+        "gaps": [g.model_dump() for g in path.gaps],
+        "learning_path": [item.model_dump() for item in path.items],
+        "evidence_refs": _load_evidence_for_position(req.position_id),
+    }
+    await _persist_match_result(match_id, data)
+    return ok(data=data)
+
+
+@router.get("/task/{task_id}")
+async def match_task_status(task_id: str):
+    """[M4] 查询推荐任务状态（同步执行已完成即返回 success）。"""
+    cached = await redis_client.get(f"match:task:{task_id}")
+    if cached is None:
+        return error(404, "匹配任务不存在或已过期")
+    return ok(data=json.loads(cached))
+
+
+@router.get("/result/{match_id}")
+async def match_result(match_id: str):
+    """[M4] 获取匹配结果（recommend/compare 返回的 match_id）。"""
+    data = await _load_match_result(match_id)
+    if data is None:
+        return error(404, "匹配结果不存在或已过期")
+    return ok(data=data)
+
+
+@router.get("/result/{match_id}/gap")
+async def match_result_gap(match_id: str):
+    """[M4] 获取差距分析（compare 结果的 gaps 三态列表）。"""
+    data = await _load_match_result(match_id)
+    if data is None:
+        return error(404, "匹配结果不存在或已过期")
+    return ok(data={"match_id": match_id, "gaps": data.get("gaps", [])})
+
+
+@router.get("/result/{match_id}/path")
+async def match_result_path(match_id: str):
+    """[M4] 获取学习路径（compare 结果的 missing/weak 技能先修链 + 课程）。"""
+    data = await _load_match_result(match_id)
+    if data is None:
+        return error(404, "匹配结果不存在或已过期")
+    return ok(data={"match_id": match_id, "learning_path": data.get("learning_path", [])})
+
+
+class FeedbackRequest(BaseModel):
+    match_id: str
+    score: Literal[1, -1]
+
+
+@router.post("/feedback")
+async def match_feedback(req: FeedbackRequest):
+    """[M4] 提交匹配反馈（1=👍 / -1=👎）。
+
+    校验 match_id 结果存在后追加记录（保留 90 天，供后续匹配效果评估）。
+    """
+    cached = await _load_match_result(req.match_id)
+    if cached is None:
+        return error(404, "匹配结果不存在或已过期")
+    key = f"match:feedback:{req.match_id}"
+    await redis_client.rpush(key, json.dumps({"score": req.score, "created_at": _ts()}))
+    await redis_client.expire(key, 90 * 24 * 3600)
+    return ok(msg="反馈已记录")

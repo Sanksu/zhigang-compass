@@ -71,6 +71,8 @@ services:
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: password
       REDIS_URL: redis://redis:6379/0
+      # 前端静态资源挂载点（backend/.env 的相对路径 ../frontend/dist 在容器内不成立）
+      FRONTEND_DIST_DIR: /app/frontend-dist
     depends_on:
       postgres:
         condition: service_healthy

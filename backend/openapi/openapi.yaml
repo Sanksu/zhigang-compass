@@ -690,6 +690,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
 
+  /api/v1/evolution/state-machine:
+    get:
+      tags: [evolution]
+      summary: "[M4] 岗位状态机总览（六态分布 + 最近人工流转记录）"
+      responses:
+        '200':
+          description: 状态机总览
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
   # ============================================================
   # 管理模块 /api/v1/admin
   # ============================================================
@@ -869,6 +881,41 @@ paths:
       responses:
         '200':
           description: 审核完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/positions/declining:
+    get:
+      tags: [admin]
+      summary: "[M4] 待归档岗位列表（declining 状态）"
+      responses:
+        '200':
+          description: 待归档列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/positions/{id}/archive:
+    put:
+      tags: [admin]
+      summary: "[M4] 确认衰退归档（declining → archived 终态）"
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, description: "归档原因（必填，写入审计日志）" }
+      responses:
+        '200':
+          description: 归档完成
           content:
             application/json:
               schema:

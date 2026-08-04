@@ -6,7 +6,7 @@
  * - skill：级别、被多少岗位要求、关联证据、反向岗位列表、先修链、学习课程（真实 API）
  * - evidence：来源、描述
  */
-import { X, Network, Cpu, FileText, BookOpen, GitBranch, Briefcase } from 'lucide-react'
+import { X, Network, Cpu, FileText, BookOpen, GitBranch, Briefcase, ExternalLink } from 'lucide-react'
 import type { NodeDetail, PositionStatus } from './types'
 import { Badge } from '@/components/ui/badge'
 
@@ -17,6 +17,42 @@ export interface SkillPositionItem {
   necessity: 'must' | 'nice'
   weight: number
   level: string
+}
+
+/** 岗位详情必备/加分技能项（GET /graph/position/{id}） */
+export interface PositionSkillItem {
+  skill_id: string
+  skill_name: string
+  necessity: 'must' | 'nice'
+  weight: number
+  level: string
+  source_count: number
+}
+
+/** 岗位节点详情（GET /graph/position/{id}） */
+export interface PositionDetail {
+  id: string
+  name: string
+  required_years?: number | null
+  required_education?: string | null
+  status?: PositionStatus
+  must_skills: PositionSkillItem[]
+  nice_skills: PositionSkillItem[]
+}
+
+/** 技能证据项（GET /graph/skill/{id}/evidence） */
+export interface SkillEvidenceItem {
+  id: string
+  source: string
+  source_url: string
+  crawled_at?: string | null
+}
+
+/** 相似技能项（GET /graph/skill/similar） */
+export interface SimilarSkillItem {
+  skill_id: string
+  skill_name: string
+  similarity: number
 }
 
 /** 先修技能链项（GET /graph/skill/{id}/prerequisites） */
@@ -57,6 +93,14 @@ interface NodeDetailPanelProps {
   }
   /** skill 节点专属：反向岗位/先修链/课程 */
   skillDetail?: SkillDetail | null
+  /** 岗位节点专属：详情（GET /graph/position/{id}） */
+  positionDetail?: PositionDetail | null
+  /** 技能节点专属：证据来源（GET /graph/skill/{id}/evidence） */
+  skillEvidence?: SkillEvidenceItem[]
+  /** 技能节点专属：相似技能（GET /graph/skill/similar） */
+  similarSkills?: SimilarSkillItem[]
+  /** 技能节点专属：相似技能点击 → 定位图谱节点 */
+  onSelectSkill?: (id: string, name: string) => void
   onClose?: () => void
 }
 
@@ -88,7 +132,16 @@ const TYPE_ICON: Record<NodeDetail['type'], typeof Network> = {
   evidence: FileText,
 }
 
-export function NodeDetailPanel({ node, stats, skillDetail, onClose }: NodeDetailPanelProps) {
+export function NodeDetailPanel({
+  node,
+  stats,
+  skillDetail,
+  positionDetail,
+  skillEvidence,
+  similarSkills,
+  onSelectSkill,
+  onClose,
+}: NodeDetailPanelProps) {
   if (!node) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-12 text-center">
@@ -206,6 +259,72 @@ export function NodeDetailPanel({ node, stats, skillDetail, onClose }: NodeDetai
           </section>
         )}
 
+        {/* 岗位专属：任职要求 + 必备/加分技能（真实 GET /graph/position/{id}） */}
+        {node.type === 'position' && positionDetail && (
+          <>
+            {(positionDetail.required_years != null || positionDetail.required_education) && (
+              <section className="space-y-1.5">
+                <h4 className="text-xs font-medium text-ink-muted uppercase tracking-wide">任职要求</h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {positionDetail.required_years != null && (
+                    <Badge variant="outline" className="text-xs">{positionDetail.required_years} 年经验</Badge>
+                  )}
+                  {positionDetail.required_education && (
+                    <Badge variant="outline" className="text-xs">{positionDetail.required_education}</Badge>
+                  )}
+                </div>
+              </section>
+            )}
+            <section className="space-y-2">
+              <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted uppercase tracking-wide">
+                <Briefcase className="size-3" />
+                必备技能
+                <span className="ml-auto font-mono text-[10px]">{positionDetail.must_skills.length}</span>
+              </h4>
+              {positionDetail.must_skills.length === 0 ? (
+                <p className="text-xs text-ink-faint py-1">图谱中暂无必备技能数据</p>
+              ) : (
+                <ul className="space-y-1">
+                  {positionDetail.must_skills.map((s) => (
+                    <li key={s.skill_id}>
+                      <button
+                        onClick={() => onSelectSkill?.(s.skill_id, s.skill_name)}
+                        className="flex w-full items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 text-left transition-colors hover:border-border-strong hover:bg-subtle"
+                      >
+                        <span className="text-xs font-medium text-ink truncate">{s.skill_name}</span>
+                        <span className="flex items-center gap-1.5 shrink-0">
+                          {s.level && <span className="text-[10px] text-ink-faint">{s.level}</span>}
+                          <span className="text-[10px] font-mono text-ink-faint">{(s.weight * 100).toFixed(0)}%</span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            {positionDetail.nice_skills.length > 0 && (
+              <section className="space-y-2">
+                <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted uppercase tracking-wide">
+                  <Briefcase className="size-3" />
+                  加分技能
+                  <span className="ml-auto font-mono text-[10px]">{positionDetail.nice_skills.length}</span>
+                </h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {positionDetail.nice_skills.map((s) => (
+                    <button
+                      key={s.skill_id}
+                      onClick={() => onSelectSkill?.(s.skill_id, s.skill_name)}
+                      className="rounded-full border border-border px-2 py-0.5 text-[10px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle"
+                    >
+                      {s.skill_name}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
+        )}
+
         {/* 技能专属：反向岗位 / 先修链 / 学习课程（真实 API） */}
         {node.type === 'skill' && skillDetail && (
           <>
@@ -291,6 +410,67 @@ export function NodeDetailPanel({ node, stats, skillDetail, onClose }: NodeDetai
                 </ul>
               )}
             </section>
+
+            {/* 相似技能（真实 GET /graph/skill/similar，语义相似度 ≥0.5） */}
+            {similarSkills && similarSkills.length > 0 && (
+              <section className="space-y-2">
+                <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted uppercase tracking-wide">
+                  <Network className="size-3" />
+                  相似技能
+                </h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {similarSkills.map((s) => (
+                    <button
+                      key={s.skill_id}
+                      onClick={() => onSelectSkill?.(s.skill_id, s.skill_name)}
+                      title={`相似度 ${(s.similarity * 100).toFixed(0)}%（点击定位图谱节点）`}
+                      className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle"
+                    >
+                      {s.skill_name}
+                      <span className="font-mono text-[9px] text-ink-faint">
+                        {(s.similarity * 100).toFixed(0)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* 证据来源（真实 GET /graph/skill/{id}/evidence，Skill-MENTIONED_IN->Evidence） */}
+            {skillEvidence && skillEvidence.length > 0 && (
+              <section className="space-y-2">
+                <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted uppercase tracking-wide">
+                  <ExternalLink className="size-3" />
+                  证据来源
+                  <span className="ml-auto font-mono text-[10px]">{skillEvidence.length}</span>
+                </h4>
+                <ul className="space-y-1">
+                  {skillEvidence.slice(0, 8).map((ev) => (
+                    <li key={ev.id}>
+                      <a
+                        href={ev.source_url || undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between gap-2 rounded-md border border-border px-2 py-1.5 transition-colors hover:border-border-strong"
+                      >
+                        <span className="flex items-center gap-1.5 text-xs text-ink truncate">
+                          <ExternalLink className="size-3 shrink-0 text-ink-faint" />
+                          {ev.source || '原始 JD'}
+                        </span>
+                        {ev.crawled_at && (
+                          <span className="text-[10px] font-mono text-ink-faint shrink-0">
+                            {ev.crawled_at.slice(0, 10)}
+                          </span>
+                        )}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+                {skillEvidence.length > 8 && (
+                  <p className="text-[10px] text-ink-faint">仅显示前 8 条，共 {skillEvidence.length} 条</p>
+                )}
+              </section>
+            )}
           </>
         )}
       </div>
