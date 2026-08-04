@@ -162,8 +162,9 @@ export function ScoreRing({ score, label = '综合得分', className }: ScoreRin
           detail: {
             valueAnimation: true,
             offsetCenter: ['0%', '-10%'],
-            // 统一整数百分比（如 87 分），避免长小数（如 87.123456）
-            formatter: (v: { value?: number }) => String(Math.round(Number(v.value ?? 0))),
+            // ECharts gauge detail.formatter 回调参数是裸数值 value（number），
+            // 不是 {value} 对象；按整数百分比显示（如 87 分）
+            formatter: (value: number) => String(Math.round(value)),
             color: textColor,
             fontSize: 28,
             fontWeight: 600,

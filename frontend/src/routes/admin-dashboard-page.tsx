@@ -71,6 +71,11 @@ interface SourceItem {
   level: string
   levelVariant: 'default' | 'outline' | 'emerging' | 'stable' | 'declining' | 'archived'
   status: 'normal' | 'delayed' | 'failed' | 'archived'
+  /** /admin/crawl/status 返回的采集指标 */
+  files: number
+  totalCount: number
+  todayCount: number
+  lastRun: string | null
 }
 
 interface StatItem {
@@ -123,6 +128,14 @@ const LEVEL_VARIANT: Record<string, SourceItem['levelVariant']> = {
   课程: 'emerging',
 }
 
+/** ISO 时间 → 紧凑 MM-dd HH:mm（窄卡片避免长日期撑破布局） */
+function formatRunTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 /* ------------------------------------------------------------------ */
 /*  AdminDashboardPage                                                  */
 /* ------------------------------------------------------------------ */
@@ -165,6 +178,10 @@ export function AdminDashboardPage() {
           levelVariant: LEVEL_VARIANT[p.level] ?? 'outline',
           // 状态由真实采集数据派生：今日有产出→正常 / 有历史无今日→延迟 / 无记录→归档
           status: p.today_count > 0 ? 'normal' : p.total_count > 0 ? 'delayed' : 'archived',
+          files: p.files,
+          totalCount: p.total_count,
+          todayCount: p.today_count,
+          lastRun: p.last_run,
         })),
       )
       setAuditLogs(
@@ -286,6 +303,17 @@ export function AdminDashboardPage() {
                     {src.name.charAt(0)}
                   </span>
                   <span className="text-ink truncate font-medium">{src.name}</span>
+                </div>
+                {/* 采集指标：累计 / 今日 / 文件数 / 最近运行 */}
+                <div className="mt-2 space-y-0.5 text-[10px] text-ink-faint tabular-nums">
+                  <div>
+                    累计 {src.totalCount.toLocaleString()}
+                    {src.todayCount > 0 && <span className="text-state-emerging"> · 今日 +{src.todayCount}</span>}
+                  </div>
+                  <div>
+                    文件 {src.files}
+                    <span className="ml-1">{src.lastRun ? `最近 ${formatRunTime(src.lastRun)}` : '· 未采集'}</span>
+                  </div>
                 </div>
               </div>
             ))}

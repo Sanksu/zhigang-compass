@@ -512,7 +512,8 @@ function DiffTable({ items }: { items: VersionDiffItem[] }) {
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead className="w-[180px]">节点名</TableHead>
+          <TableHead className="w-[150px]">节点名</TableHead>
+          <TableHead>名称</TableHead>
           <TableHead className="w-[60px]">类型</TableHead>
           <TableHead>变化说明</TableHead>
         </TableRow>
@@ -520,6 +521,7 @@ function DiffTable({ items }: { items: VersionDiffItem[] }) {
       <TableBody>
         {items.map((item) => (
           <TableRow key={item.id}>
+            <TableCell className="font-mono text-xs text-ink-muted">{item.id}</TableCell>
             <TableCell className="font-medium text-ink">{item.name}</TableCell>
             <TableCell>
               <Badge variant="outline" className="text-[10px] font-mono">
