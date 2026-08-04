@@ -4,6 +4,7 @@
 契约标注 recommend 为 202 异步，当前按设计文档 9.4 同步执行返回结果（M4 可迁异步）。
 """
 
+import time
 import uuid
 
 from fastapi import APIRouter, Depends
@@ -28,6 +29,11 @@ from app.services.matching.semantic import SkillEmbedder
 from app.services.learning_path.generator import LearningPathGenerator
 
 router = APIRouter()
+
+# 岗位画像进程级缓存：图谱结构变化低频，TTL 内复用，
+# 避免每次匹配请求实时聚合（97 岗位 × ~15000 边）拖慢响应
+_POSITIONS_CACHE_TTL = 300  # 秒
+_positions_cache: dict = {"ts": 0.0, "positions": None}
 
 
 class RecommendRequest(BaseModel):
@@ -89,7 +95,16 @@ def _build_candidate(parsed: dict) -> CandidateProfile:
 
 
 def _load_positions_from_graph() -> list[PositionProfile]:
-    """从图谱聚合岗位画像（轻量聚合层，M3 可由专用聚合任务替换）。"""
+    """从图谱聚合岗位画像（进程级 TTL 缓存；加载时批量预热技能向量）。
+
+    语义向量缓存到 SkillEmbedder，评分阶段全部 cache hit，
+    避免首次匹配请求触发全量 embedding 计算（>30s 前端超时的主因）。
+    """
+    now = time.monotonic()
+    cached = _positions_cache.get("positions")
+    if cached is not None and now - _positions_cache["ts"] < _POSITIONS_CACHE_TTL:
+        return cached
+
     positions: dict[str, PositionProfile] = {}
     with neo4j_driver.session() as session:
         rows = session.run(
@@ -126,7 +141,15 @@ def _load_positions_from_graph() -> list[PositionProfile]:
                 pos.must_skills.append(skill)
             else:
                 pos.nice_skills.append(skill)
-    return list(positions.values())
+
+    result = list(positions.values())
+    # 预热语义向量：一次 batch encode 所有岗位技能名，评分时不再逐条前向推理
+    SkillEmbedder.get().warm(
+        [s.skill_name for p in result for s in (*p.must_skills, *p.nice_skills)]
+    )
+    _positions_cache["ts"] = now
+    _positions_cache["positions"] = result
+    return result
 
 
 @router.post("/recommend")

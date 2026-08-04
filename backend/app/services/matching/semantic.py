@@ -9,6 +9,7 @@
   匹配引擎捕获后降级为纯规则匹配，不阻塞主流程
 """
 
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -24,7 +25,7 @@ class SemanticUnavailableError(Exception):
 class SkillEmbedder:
     """技能名 → 向量 + 余弦相似度（懒加载 + 名称向量缓存）。
 
-    单例使用（进程内共享模型），线程安全由 GIL + 幂等初始化保证。
+    单例使用（进程内共享模型），线程安全由锁 + 幂等初始化保证。
     """
 
     _instance: Optional["SkillEmbedder"] = None
@@ -32,6 +33,7 @@ class SkillEmbedder:
     def __init__(self) -> None:
         self._model = None
         self._cache: dict[str, object] = {}
+        self._lock = threading.Lock()
 
     @classmethod
     def get(cls) -> "SkillEmbedder":
@@ -44,13 +46,14 @@ class SkillEmbedder:
 
     def _load(self):
         """加载 SBERT 模型（仅首次，失败包装为 SemanticUnavailableError）。"""
-        if self._model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
+        with self._lock:
+            if self._model is None:
+                try:
+                    from sentence_transformers import SentenceTransformer
 
-                self._model = SentenceTransformer(MODEL_NAME, cache_folder=str(_CACHE_DIR))
-            except Exception as e:  # 网络/依赖/资源错误统一视为不可用
-                raise SemanticUnavailableError(f"SBERT 模型加载失败: {e}") from e
+                    self._model = SentenceTransformer(MODEL_NAME, cache_folder=str(_CACHE_DIR))
+                except Exception as e:  # 网络/依赖/资源错误统一视为不可用
+                    raise SemanticUnavailableError(f"SBERT 模型加载失败: {e}") from e
         return self._model
 
     def _vec(self, text: str) -> object:
@@ -61,13 +64,50 @@ class SkillEmbedder:
 
     # ---- 对外接口 ----
 
+    def preload(self) -> None:
+        """预热：加载模型（进程启动后后台执行，避免首次匹配请求阻塞 >30s）。"""
+        try:
+            self._load()
+        except Exception:
+            pass
+
+    def warm(self, names: list[str]) -> None:
+        """批量预计算技能名向量（一次 batch encode，避免评分时逐条前向推理）。
+
+        names 为技能名集合；已缓存的跳过。模型不可用时静默忽略——
+        后续单条调用同样会捕获 SemanticUnavailableError 降级纯规则匹配。
+        """
+        missing = [n.strip() for n in names if n and n.strip() not in self._cache]
+        if not missing:
+            return
+        try:
+            vecs = self._load().encode(missing)
+        except Exception:
+            return
+        for key, vec in zip(missing, vecs):
+            self._cache[key] = vec
+
     def similarity(self, a: str, b: str) -> float:
-        """技能名语义余弦相似度（[0,1]）。"""
+        """技能名语义余弦相似度（[0,1]）。
+
+        向量为 SBERT encode 的 numpy 数组，用 numpy 点积（纯 Python 逐元素
+        循环在评分全量调用下会成为瓶颈：单次 ~47ms × 数万次 >> 30s）。
+        """
         va = self._vec(a)
         vb = self._vec(b)
-        norm_a = float(sum(x * x for x in va) ** 0.5)
-        norm_b = float(sum(x * x for x in vb) ** 0.5)
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-        dot = float(sum(x * y for x, y in zip(va, vb)))
-        return dot / (norm_a * norm_b)
+        try:
+            import numpy as np
+
+            norm_a = float(np.linalg.norm(va))
+            norm_b = float(np.linalg.norm(vb))
+            if norm_a == 0 or norm_b == 0:
+                return 0.0
+            return float(np.dot(va, vb) / (norm_a * norm_b))
+        except ImportError:
+            # 防御：numpy 缺失时退回纯 Python 点积
+            norm_a = float(sum(x * x for x in va) ** 0.5)
+            norm_b = float(sum(x * x for x in vb) ** 0.5)
+            if norm_a == 0 or norm_b == 0:
+                return 0.0
+            dot = float(sum(x * y for x, y in zip(va, vb)))
+            return dot / (norm_a * norm_b)
