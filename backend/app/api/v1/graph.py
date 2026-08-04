@@ -1,7 +1,7 @@
 """图谱路由：全景、技能反向查询、全文检索、先修链、学习课程。"""
 
 import json
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Query
 
@@ -9,6 +9,7 @@ from app.core.database import neo4j_driver, redis_client
 from app.schemas.common import error, ok
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
+from app.services.matching.semantic import SkillEmbedder, SemanticUnavailableError
 
 router = APIRouter()
 
@@ -233,3 +234,292 @@ async def skill_courses(skill_id: str):
             "courses": [c.model_dump() for c in courses],
         }
     )
+
+
+def _load_position(id: str) -> dict | None:
+    """按 ID 查询岗位节点基础属性（不含技能边），不存在返回 None。"""
+    with neo4j_driver.session() as session:
+        rec = session.run(
+            """
+            MATCH (p:Position {id: $id})
+            RETURN p.id AS id, p.name AS name, p.required_years AS required_years,
+                   p.required_education AS required_education, p.last_updated AS last_updated,
+                   p.status AS status, p.freq AS freq
+            """,
+            id=id,
+        ).single()
+    return dict(rec) if rec else None
+
+
+@router.get("/position/{id}")
+async def position_detail(id: str):
+    """[M4] 岗位节点详情：基础属性 + REQUIRES 技能聚合（must/nice）。"""
+    position = _load_position(id)
+    if position is None:
+        return error(404, "岗位不存在")
+
+    skills: dict[str, dict] = {}
+    with neo4j_driver.session() as session:
+        rows = session.run(
+            """
+            MATCH (p:Position {id: $id})-[r:REQUIRES]->(s:Skill)
+            RETURN s.id AS skill_id, s.name AS skill_name,
+                   r.necessity AS necessity, r.weight AS weight,
+                   r.level AS level, r.source_count AS source_count
+            ORDER BY r.weight DESC
+            """,
+            id=id,
+        )
+        for rec in rows:
+            necessity = rec.get("necessity", "must")
+            skills.setdefault(necessity, []).append({
+                "skill_id": rec["skill_id"],
+                "skill_name": rec.get("skill_name", rec["skill_id"]),
+                "necessity": necessity,
+                "weight": rec.get("weight", 0.0),
+                "level": rec.get("level", "中级"),
+                "source_count": rec.get("source_count", 1),
+            })
+
+    return ok(data={
+        "id": position["id"],
+        "name": position.get("name", position["id"]),
+        "required_years": position.get("required_years"),
+        "required_education": position.get("required_education"),
+        "last_updated": position.get("last_updated"),
+        "status": position.get("status"),
+        "must_skills": skills.get("must", []),
+        "nice_skills": skills.get("nice", []),
+    })
+
+
+@router.get("/position/{id}/skills")
+async def position_skills(
+    id: str,
+    necessity: Optional[Literal["must", "nice"]] = Query(default=None),
+):
+    """[M4] 岗位技能列表（可按 necessity 过滤）。"""
+    if _load_position(id) is None:
+        return error(404, "岗位不存在")
+
+    query = """
+        MATCH (p:Position {id: $id})-[r:REQUIRES]->(s:Skill)
+        WHERE ($necessity IS NULL OR r.necessity = $necessity)
+        RETURN s.id AS skill_id, s.name AS skill_name,
+               r.necessity AS necessity, r.weight AS weight,
+               r.level AS level, r.source_count AS source_count
+        ORDER BY r.weight DESC
+    """
+    with neo4j_driver.session() as session:
+        rows = session.run(query, id=id, necessity=necessity)
+        items = [
+            {
+                "skill_id": rec["skill_id"],
+                "skill_name": rec.get("skill_name", rec["skill_id"]),
+                "necessity": rec.get("necessity", "must"),
+                "weight": rec.get("weight", 0.0),
+                "level": rec.get("level", "中级"),
+                "source_count": rec.get("source_count", 1),
+            }
+            for rec in rows
+        ]
+
+    return ok(data={"position_id": id, "skills": items})
+
+
+@router.get("/skill/{skill_id}/evidence")
+async def skill_evidence(skill_id: str):
+    """[M4] 技能证据列表：Skill-MENTIONED_IN->Evidence 原始 JD。"""
+    skill = _load_skill(skill_id)
+    if skill is None:
+        return error(404, "技能不存在")
+
+    with neo4j_driver.session() as session:
+        rows = session.run(
+            """
+            MATCH (s:Skill {id: $skill_id})-[:MENTIONED_IN]->(e:Evidence)
+            RETURN e.id AS id, e.source AS source, e.source_url AS source_url,
+                   e.crawled_at AS crawled_at
+            ORDER BY e.crawled_at DESC
+            """,
+            skill_id=skill_id,
+        )
+        evidence = [
+            {
+                "id": rec["id"],
+                "source": rec.get("source", ""),
+                "source_url": rec.get("source_url", ""),
+                "crawled_at": rec.get("crawled_at"),
+            }
+            for rec in rows
+        ]
+
+    return ok(data={
+        "skill_id": skill_id,
+        "skill_name": skill["name"],
+        "evidence": evidence,
+        "evidence_count": len(evidence),
+    })
+
+
+@router.get("/skill/similar")
+async def skill_similar(
+    skill_id: str = Query(...),
+    top_k: int = Query(default=10, ge=1, le=50),
+):
+    """[M4] 相似技能检索（语义相似度，设计文档 5.3 预留 pgvector 演进）。
+
+    用 SkillEmbedder 对全部图谱技能名计算余弦相似度取 Top-K（阈值 0.5，
+    过低不返回）。SBERT 不可用时返回 503（语义能力缺失，不降级为猜）。
+    """
+    skill = _load_skill(skill_id)
+    if skill is None:
+        return error(404, "技能不存在")
+
+    with neo4j_driver.session() as session:
+        rows = session.run(
+            "MATCH (s:Skill) RETURN s.id AS id, s.name AS name"
+        )
+        all_skills = [(rec["id"], rec.get("name", rec["id"])) for rec in rows]
+    if not all_skills:
+        return ok(data={"skill_id": skill_id, "skill_name": skill["name"], "similar": []})
+
+    embedder = SkillEmbedder.get()
+    try:
+        scores = [
+            (sid, name, embedder.similarity(skill["name"], name))
+            for sid, name in all_skills
+            if sid != skill_id
+        ]
+    except SemanticUnavailableError:
+        return error(503, "语义模型不可用，无法计算相似技能")
+
+    similar = sorted(
+        (s for s in scores if s[2] >= 0.5),
+        key=lambda x: x[2],
+        reverse=True,
+    )[:top_k]
+    return ok(data={
+        "skill_id": skill_id,
+        "skill_name": skill["name"],
+        "similar": [
+            {"skill_id": sid, "skill_name": name, "similarity": round(score, 4)}
+            for sid, name, score in similar
+        ],
+    })
+
+
+@router.get("/skill/{skill_id}")
+async def skill_detail(skill_id: str):
+    """[M4] 技能节点详情：基础属性 + 关联计数（岗位/证据/课程）。
+
+    定义在 /skill/similar 之后，避免静态段 similar 被 {skill_id} 参数路径截胡。
+    """
+    skill = _load_skill(skill_id)
+    if skill is None:
+        return error(404, "技能不存在")
+
+    with neo4j_driver.session() as session:
+        rec = session.run(
+            """
+            MATCH (s:Skill {id: $skill_id})
+            OPTIONAL MATCH (p:Position)-[r:REQUIRES]->(s)
+            OPTIONAL MATCH (s)-[:MENTIONED_IN]->(e:Evidence)
+            RETURN count(DISTINCT p) AS positions_count, count(DISTINCT e) AS evidence_count
+            """,
+            skill_id=skill_id,
+        ).single()
+        counts = dict(rec) if rec else {}
+
+    courses = await load_courses_for_skill(skill_id, skill["name"], top_k=None)
+    return ok(data={
+        "id": skill_id,
+        "name": skill["name"],
+        "positions_count": counts.get("positions_count", 0),
+        "evidence_count": counts.get("evidence_count", 0),
+        "courses_count": len(courses),
+    })
+
+
+@router.get("/view/{view_type}")
+async def graph_view(
+    view_type: Literal["panorama", "techStack", "level", "positionCenter"],
+    limit: int = Query(default=100, ge=1, le=600),
+):
+    """[M4] 视图切换（后端过滤，同构于全景图）。
+
+    四种视图统一返回 {view_type, nodes, edges, stats}：
+    - panorama / positionCenter: 岗位中心展开（岗位→技能）
+    - techStack: 技能为中心，边反向为技能→岗位，节点按技能频次排序
+    - level: 岗位中心展开 + 按熟练度级别过滤（只保留明确 level 的边）
+    """
+    cache_key = f"graph:view:{view_type}:{limit}"
+    cached = await redis_client.get(cache_key)
+    if cached is not None:
+        return ok(data=json.loads(cached))
+
+    if view_type == "techStack":
+        with neo4j_driver.session() as session:
+            rows = list(session.run(
+                """
+                MATCH (s:Skill)<-[r:REQUIRES]-(p:Position)
+                WITH s, count(p) AS heat
+                ORDER BY heat DESC LIMIT $limit
+                MATCH (s)<-[r:REQUIRES]-(p:Position)
+                RETURN s.id AS sid, s.name AS sname, p.id AS pid, p.name AS pname, r
+                """,
+                limit=limit,
+            ))
+        nodes: dict[str, dict] = {}
+        edges: list[dict] = []
+        for record in rows:
+            s_id, p_id = record["sid"], record["pid"]
+            nodes.setdefault(s_id, {"id": s_id, "name": record.get("sname", s_id), "type": "skill"})
+            nodes.setdefault(p_id, {"id": p_id, "name": record.get("pname", p_id), "type": "position"})
+            edges.append({
+                "source": s_id,
+                "target": p_id,
+                "weight": record["r"].get("weight", 0.0),
+                "necessity": record["r"].get("necessity", "must"),
+                "level": record["r"].get("level", "中级"),
+            })
+        data = {
+            "view_type": view_type,
+            "nodes": list(nodes.values()),
+            "edges": edges,
+            "stats": {"nodes": len(nodes), "edges": len(edges)},
+        }
+    else:
+        with neo4j_driver.session() as session:
+            rows = list(session.run(
+                """
+                MATCH (p:Position)
+                WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
+                MATCH (p)-[r:REQUIRES]->(s:Skill)
+                RETURN p, s, r
+                """,
+                limit=limit,
+            ))
+        nodes = {}
+        edges = []
+        for record in rows:
+            p, s, r = record["p"], record["s"], record["r"]
+            p_id, s_id = p.get("id", ""), s.get("id", "")
+            nodes.setdefault(p_id, {"id": p_id, "name": p.get("name", p_id), "type": "position"})
+            nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
+            edges.append({
+                "source": p_id,
+                "target": s_id,
+                "weight": r.get("weight", 0.0),
+                "necessity": r.get("necessity", "must"),
+                "level": r.get("level", "中级"),
+            })
+        data = {
+            "view_type": view_type,
+            "nodes": list(nodes.values()),
+            "edges": edges,
+            "stats": {"nodes": len(nodes), "edges": len(edges)},
+        }
+
+    await redis_client.set(cache_key, json.dumps(data), ex=30)
+    return ok(data=data)

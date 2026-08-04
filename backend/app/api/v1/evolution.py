@@ -124,6 +124,73 @@ async def evolution_signals(
     })
 
 
+@router.get("/versions/{version_id}")
+async def version_detail(version_id: str, db: AsyncSession = Depends(get_db)):
+    """[M4] 获取版本详情：元信息 + 快照统计 + 节点列表（不含边，避免超载）。
+
+    节点列表 [{id, name, type}]，与 Diff 端点同构，可直接展示。
+    """
+    v = await db.get(GraphVersion, version_id)
+    if v is None:
+        return error(404, "版本不存在")
+
+    snapshot = v.snapshot_json or {}
+    nodes = snapshot.get("nodes", [])
+    edges = snapshot.get("edges", [])
+    by_type: dict[str, int] = {}
+    for n in nodes:
+        t = n.get("type", "unknown")
+        by_type[t] = by_type.get(t, 0) + 1
+
+    return ok(data={
+        "version_id": v.id,
+        "created_at": v.created_at.isoformat() if v.created_at else None,
+        "change_summary": v.change_summary,
+        "triggered_by": v.triggered_by,
+        "node_added": v.node_added,
+        "node_removed": v.node_removed,
+        "node_changed": v.node_changed,
+        "stats": {"nodes": len(nodes), "edges": len(edges), "by_type": by_type},
+        "nodes": [
+            {"id": n.get("id"), "name": n.get("name", n.get("id")), "type": n.get("type")}
+            for n in nodes if isinstance(n, dict)
+        ],
+    })
+
+
+@router.get("/position/{id}/evolution")
+async def position_evolution(id: str, db: AsyncSession = Depends(get_db)):
+    """[M4] 岗位演化历史：从版本快照序列重建该岗位节点存在性与引用边数变化。
+
+    返回 points（时间升序，date/version/freq=该岗位被引用边数），
+    并附当前岗位名（快照中最近出现过的名称）。
+    """
+    rows = await db.scalars(
+        select(GraphVersion).order_by(GraphVersion.created_at.asc())
+    )
+    snapshots = [v for v in rows]
+    if not snapshots:
+        return error(404, "无图谱版本数据")
+
+    name = None
+    points = []
+    for v in snapshots:
+        snapshot = v.snapshot_json or {}
+        nodes = {n.get("id"): n for n in snapshot.get("nodes", []) if isinstance(n, dict)}
+        node = nodes.get(id)
+        if node is not None:
+            name = node.get("name") or name
+        freq = sum(1 for e in snapshot.get("edges", []) if e.get("source") == id)
+        points.append({
+            "date": v.created_at.date().isoformat() if v.created_at else None,
+            "version": v.id,
+            "freq": freq,
+            "present": node is not None,
+        })
+
+    return ok(data={"position_id": id, "position_name": name or id, "points": points})
+
+
 @router.get("/trends")
 async def skill_trends(
     skill: str,

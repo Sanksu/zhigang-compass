@@ -609,6 +609,121 @@ async def review_position(
 
 
 # ============================================================
+# 岗位演化审核（[M4]：emerging → stable / declining 人工确认）
+# ============================================================
+
+@router.get("/evolution/pending")
+async def evolution_pending(
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """[M4] 待审核演化变更：emerging 状态岗位列表。
+
+    与 /positions/pending（candidate 待晋升）互补——这里聚焦已晋升
+    emerging 的岗位，需 admin 确认晋级 stable 或判定进入 declining。
+    """
+    from app.models.business import DiscoveryCandidate
+
+    stmt = select(DiscoveryCandidate).where(DiscoveryCandidate.state == "emerging")
+    count_stmt = select(func.count()).select_from(DiscoveryCandidate).where(
+        DiscoveryCandidate.state == "emerging"
+    )
+    total = await db.scalar(count_stmt)
+    rows = await db.scalars(
+        stmt.order_by(DiscoveryCandidate.updated_at.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+    )
+    items = [
+        {
+            "id": c.id,
+            "position_name": c.position_name,
+            "state": c.state,
+            "confidence": c.confidence,
+            "evidence_refs": c.evidence_refs,
+            "seed_matched": c.seed_matched,
+            "rag_matched": c.rag_matched,
+            "definition_draft": c.definition_draft,
+            "detected_at": c.detected_at,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in rows
+    ]
+    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+
+
+@router.put("/evolution/{candidate_id}/review")
+async def review_evolution(
+    candidate_id: str,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """[M4] 审核演化变更：emerging 岗位 approve → stable / reject → declining。
+
+    复用六状态机（PositionStateMachine）持久化 Neo4j Position.status，
+    approve 且携带 modified 时合并进候选池 features（演化确认的属性修订）。
+
+    Args:
+        req: {"action": "approve" | "reject", "modified": {...}?}
+    """
+    from app.core.database import neo4j_driver
+    from app.models.business import DiscoveryCandidate
+    from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
+    from app.services.discovery.state_machine import PositionStateMachine
+
+    action = req.get("action")
+    if action not in ("approve", "reject"):
+        return error(400, "action 必须为 approve 或 reject")
+
+    cand_row = await db.get(DiscoveryCandidate, candidate_id)
+    if cand_row is None:
+        return error(404, "候选岗位不存在")
+    if cand_row.state != "emerging":
+        return error(409, f"候选岗位当前状态 {cand_row.state}，仅 emerging 可执行演化审核")
+
+    candidate = CandidatePosition(
+        candidate_id=cand_row.id,
+        position_name=cand_row.position_name,
+        state=PositionState.EMERGING,
+        features=DiscoveryFeatures(**cand_row.features),
+        detected_at=cand_row.detected_at,
+        evidence_refs=cand_row.evidence_refs,
+        seed_matched=cand_row.seed_matched,
+        rag_matched=cand_row.rag_matched,
+        definition_draft=cand_row.definition_draft,
+    )
+    target = PositionState.STABLE if action == "approve" else PositionState.DECLINING
+
+    machine = PositionStateMachine()
+    with neo4j_driver.session() as neo4j_session:
+        updated = machine.persist(
+            neo4j_session,
+            candidate,
+            target,
+            db=db,
+            operator=current_user.get("sub") or current_user.get("user_id", "admin"),
+            reason=(req.get("reason") or "").strip() or "admin evolution review",
+        )
+
+    cand_row.state = updated.state.value
+    modified = req.get("modified")
+    if action == "approve" and isinstance(modified, dict) and modified:
+        cand_row.features = {**(cand_row.features or {}), **modified}
+    await db.commit()
+
+    return ok(
+        data={
+            "id": cand_row.id,
+            "position_name": cand_row.position_name,
+            "state": cand_row.state,
+        },
+        msg=f"已{'确认晋级 stable' if action == 'approve' else '确认衰退 declining'}: {cand_row.position_name}",
+    )
+
+
+# ============================================================
 # LLM provider 配置（持久化到 llm_providers.yaml）
 # ============================================================
 
