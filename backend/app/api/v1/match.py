@@ -152,6 +152,46 @@ def _load_positions_from_graph() -> list[PositionProfile]:
     return result
 
 
+def _load_evidence_for_position(position_id: str) -> list[dict]:
+    """查询岗位技能链路的证据引用（Skill-MENTIONED_IN->Evidence 原始 JD）。
+
+    图谱中每个技能关联若干原始 JD 证据（ev_xxxx），返回每条技能的
+    代表性证据（每技能至多 3 条，总上限 20），供前端"证据引用"展示。
+    置信度按技能支持度（REQUIRES.source_count 独立 JD 源数）归一化。
+    """
+    rows: list[dict] = []
+    with neo4j_driver.session() as session:
+        recs = session.run(
+            """
+            MATCH (p:Position {id: $pid})-[r:REQUIRES]->(s:Skill)-[:MENTIONED_IN]->(e:Evidence)
+            RETURN s.name AS skill, e.source AS source, e.source_url AS url,
+                   r.source_count AS source_count
+            ORDER BY s.name
+            """,
+            pid=position_id,
+        )
+        seen: set[tuple] = set()
+        per_skill: dict[str, int] = {}
+        for rec in recs:
+            skill = rec["skill"]
+            if per_skill.get(skill, 0) >= 3 or len(rows) >= 20:
+                continue
+            key = (skill, rec["url"])
+            if key in seen:
+                continue
+            seen.add(key)
+            per_skill[skill] = per_skill.get(skill, 0) + 1
+            # 置信度 = 技能独立 JD 源数归一化（5 个独立源视为满置信）
+            cnt = float(rec.get("source_count") or 0)
+            rows.append({
+                "skill": skill,
+                "source": rec["source"],
+                "url": rec["url"],
+                "confidence": round(min(cnt / 5, 1.0), 2),
+            })
+    return rows
+
+
 @router.post("/recommend")
 async def recommend(req: RecommendRequest, db: AsyncSession = Depends(get_db)):
     """自动推荐 Top-N 岗位（resume_cache → 匹配引擎）。"""
@@ -209,5 +249,6 @@ async def compare(req: CompareRequest, db: AsyncSession = Depends(get_db)):
             **result.model_dump(),
             "gaps": [g.model_dump() for g in path.gaps],
             "learning_path": [item.model_dump() for item in path.items],
+            "evidence_refs": _load_evidence_for_position(req.position_id),
         }
     )

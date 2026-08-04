@@ -141,8 +141,8 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
     skill_matrix: skill_matrix,
     gaps,
     learning_path: toLearningPath(r.learning_path ?? []),
-    // 证据引用依赖证据图谱（设计文档要求 100% 覆盖率），后端暂未产出 → 空态
-    evidence_refs: [],
+    // 证据引用：技能 → 原始 JD（图谱 MENTIONED_IN 链路，后端 compare 返回）
+    evidence_refs: r.evidence_refs ?? [],
   }
 }
 
@@ -160,8 +160,8 @@ function toCandidate(s: ResumeSummary): CandidateProfile {
  *
  * 数据来源：真实后端 API
  * 上传 → POST /resume/parse；载入已有简历 → GET /resume/list；
- * 推荐 → POST /match/recommend；比对 → POST /match/compare（含差距三态 + 学习路径）。
- * 证据引用依赖证据图谱，后端暂未产出 → 空态。
+ * 推荐 → POST /match/recommend；比对 → POST /match/compare
+ * （含差距三态 + 学习路径 + 证据引用）。
  */
 export function ResumeMatchPage() {
   const [stage, setStage] = useState<'upload' | 'parsing' | 'matched'>('upload')
@@ -648,24 +648,24 @@ export function ResumeMatchPage() {
                 </CardContent>
               </Card>
 
-              {/* 学习路径甘特图（后端 M4 交付 → 空态） */}
+              {/* 学习路径甘特图（先修链 + 推荐课程 Top-3，后端 compare 返回） */}
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm">学习路径规划</CardTitle>
-                  <CardDescription>基于课程图谱的补足路径 · 后端待交付（M4）</CardDescription>
+                  <CardDescription>基于课程图谱的补足路径（先修链 + 推荐课程）</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {matchResult.learning_path.length > 0 ? (
                     <GanttChart data={matchResult.learning_path} />
                   ) : (
                     <p className="text-xs text-ink-faint py-10 text-center">
-                      学习路径由课程图谱生成，等待后端交付（M4）
+                      无需要补足的技能差距，岗位要求已全部满足
                     </p>
                   )}
                 </CardContent>
               </Card>
 
-              {/* 证据引用（后端 M4 交付 → 空态） */}
+              {/* 证据引用（技能 → 原始 JD，图谱 MENTIONED_IN 链路） */}
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm flex items-center gap-2">
@@ -700,7 +700,7 @@ export function ResumeMatchPage() {
                     </div>
                   ) : (
                     <p className="text-xs text-ink-faint py-10 text-center">
-                      证据追溯依赖 Evidence 链路，等待后端交付（M4）
+                      该岗位技能未关联可追溯的原始 JD 证据
                     </p>
                   )}
                 </CardContent>

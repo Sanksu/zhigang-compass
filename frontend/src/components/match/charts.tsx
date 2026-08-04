@@ -162,7 +162,8 @@ export function ScoreRing({ score, label = '综合得分', className }: ScoreRin
           detail: {
             valueAnimation: true,
             offsetCenter: ['0%', '-10%'],
-            formatter: '{value}',
+            // 统一整数百分比（如 87 分），避免长小数（如 87.123456）
+            formatter: (v: { value?: number }) => String(Math.round(Number(v.value ?? 0))),
             color: textColor,
             fontSize: 28,
             fontWeight: 600,
