@@ -6,9 +6,9 @@ info:
     多源异构驱动的岗位能力动态演化与人岗匹配系统 API 契约。
     本文件是前后端并行开发的单一事实源（AGENTS.md 铁律一）。
     前端通过 `openapi-typescript` 生成类型，不得自行定义与后端不一致的类型。
-    认证方案：Bearer 双 Token（access 30min / refresh 7d），不再使用 Cookie。
-    标注规则：summary 前缀 [M3]/[M4] 的端点属对应里程碑规划，
-    后端尚未实现，不得在并行开发中作为已交付功能消费。
+    认证方案：Bearer 双 Token（access 30min / refresh 7d）；refresh_token 同时
+    写入 httpOnly Cookie（httponly + samesite=lax），供页面刷新后静默恢复会话。
+    标注规则：全部端点已实现（M1-M4 全量交付），契约不含里程碑占位标注。
   contact:
     name: 智岗罗盘团队
     url: https://github.com/zhigang-compass
@@ -165,7 +165,7 @@ paths:
   /api/v1/graph/position/{id}:
     get:
       tags: [graph]
-      summary: "[M4] 岗位节点详情"
+      summary: 岗位节点详情"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -181,7 +181,7 @@ paths:
   /api/v1/graph/position/{id}/skills:
     get:
       tags: [graph]
-      summary: "[M4] 岗位技能列表"
+      summary: 岗位技能列表"
       parameters:
         - $ref: '#/components/parameters/Id'
         - name: necessity
@@ -198,7 +198,7 @@ paths:
   /api/v1/graph/skill/{id}:
     get:
       tags: [graph]
-      summary: "[M4] 技能节点详情"
+      summary: 技能节点详情"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -212,7 +212,7 @@ paths:
   /api/v1/graph/skill/{id}/evidence:
     get:
       tags: [graph]
-      summary: "[M4] 技能证据列表"
+      summary: 技能证据列表"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -268,7 +268,7 @@ paths:
   /api/v1/graph/skill/similar:
     get:
       tags: [graph]
-      summary: "[M4] 相似技能检索（pgvector）"
+      summary: 相似技能检索（pgvector）"
       parameters:
         - name: skill_id
           in: query
@@ -317,7 +317,7 @@ paths:
   /api/v1/graph/view/{view_type}:
     get:
       tags: [graph]
-      summary: "[M4] 视图切换（后端过滤）"
+      summary: 视图切换（后端过滤）"
       parameters:
         - name: view_type
           in: path
@@ -525,7 +525,7 @@ paths:
   /api/v1/match/task/{task_id}:
     get:
       tags: [match]
-      summary: "[M4] 查询推荐任务状态"
+      summary: 查询推荐任务状态"
       parameters:
         - name: task_id
           in: path
@@ -542,7 +542,7 @@ paths:
   /api/v1/match/result/{match_id}:
     get:
       tags: [match]
-      summary: "[M4] 获取匹配结果"
+      summary: 获取匹配结果"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -556,7 +556,7 @@ paths:
   /api/v1/match/result/{match_id}/gap:
     get:
       tags: [match]
-      summary: "[M4] 获取差距分析"
+      summary: 获取差距分析"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -570,7 +570,7 @@ paths:
   /api/v1/match/result/{match_id}/path:
     get:
       tags: [match]
-      summary: "[M4] 获取学习路径"
+      summary: 获取学习路径"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -581,10 +581,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
 
+  /api/v1/match/result/{match_id}/diagnosis:
+    get:
+      tags: [match]
+      summary: 获取人岗比对诊断报告"
+      description: LLM 基于结果快照（分数/差距/学习路径/证据）生成结构化诊断报告，结果缓存 24h
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 诊断报告（overall_summary / radar_analysis / top_gaps / path_analysis / recommendations）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: 该匹配结果无差距数据（仅人岗比对可生成诊断报告）
+        '404':
+          description: 匹配结果不存在或已过期
+        '503':
+          description: 诊断报告生成失败（LLM 不可用或超时）
+
   /api/v1/match/feedback:
     post:
       tags: [match]
-      summary: "[M4] 提交匹配反馈"
+      summary: 提交匹配反馈"
       requestBody:
         required: true
         content:
@@ -624,7 +645,7 @@ paths:
   /api/v1/evolution/versions/{version_id}:
     get:
       tags: [evolution]
-      summary: "[M4] 获取版本详情"
+      summary: 获取版本详情"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -679,7 +700,7 @@ paths:
   /api/v1/evolution/position/{id}/evolution:
     get:
       tags: [evolution]
-      summary: "[M4] 岗位演化历史"
+      summary: 岗位演化历史"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -693,10 +714,26 @@ paths:
   /api/v1/evolution/state-machine:
     get:
       tags: [evolution]
-      summary: "[M4] 岗位状态机总览（六态分布 + 最近人工流转记录）"
+      summary: 岗位状态机总览（六态分布 + 最近人工流转记录）"
       responses:
         '200':
           description: 状态机总览
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/evolution/signals:
+    get:
+      tags: [evolution]
+      summary: 新兴/衰退技能 Top-N（快照序列 Z-score 信号）
+      parameters:
+        - name: top_n
+          in: query
+          schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
+      responses:
+        '200':
+          description: 信号列表（data 含 window_count/emerging/declining）
           content:
             application/json:
               schema:
@@ -806,6 +843,38 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
 
+  /api/v1/admin/crawl/history:
+    get:
+      tags: [admin]
+      summary: 爬取历史（task_status 中 crawl 任务，倒序分页）
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: 爬取历史列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/crawl/task/{task_id}/stream:
+    get:
+      tags: [admin]
+      summary: "爬虫实时日志 SSE（event: log/progress/done/error）"
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: SSE 流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
   /api/v1/admin/llm-config:
     get:
       tags: [admin]
@@ -865,7 +934,7 @@ paths:
   /api/v1/admin/positions/{id}/review:
     post:
       tags: [admin]
-      summary: "[M4] 审核岗位（批准/驳回）"
+      summary: 审核岗位（批准/驳回）"
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -895,7 +964,7 @@ paths:
   /api/v1/admin/positions/declining:
     get:
       tags: [admin]
-      summary: "[M4] 待归档岗位列表（declining 状态）"
+      summary: 待归档岗位列表（declining 状态）"
       responses:
         '200':
           description: 待归档列表
@@ -907,7 +976,7 @@ paths:
   /api/v1/admin/positions/{id}/archive:
     put:
       tags: [admin]
-      summary: "[M4] 确认衰退归档（declining → archived 终态）"
+      summary: 确认衰退归档（declining → archived 终态）"
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -930,7 +999,7 @@ paths:
   /api/v1/admin/evolution/pending:
     get:
       tags: [admin]
-      summary: "[M4] 待审核演化变更"
+      summary: 待审核演化变更"
       responses:
         '200':
           description: 待审核列表
@@ -942,7 +1011,7 @@ paths:
   /api/v1/admin/evolution/{id}/review:
     put:
       tags: [admin]
-      summary: "[M4] 审核演化变更"
+      summary: 审核演化变更"
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:

@@ -71,6 +71,21 @@ export interface BackendCourseRecommendation {
   hours?: number | null
 }
 
+/** LLM 诊断报告 — 设计文档 §9.5（GET /match/result/{id}/diagnosis，结果缓存 24h） */
+export interface BackendDiagnosisReport {
+  match_id: string
+  /** 总体匹配度解读 */
+  overall_summary: string
+  /** 三维雷达图解读（必备/加分/经验） */
+  radar_analysis: string
+  /** 关键差距 Top-5 及改进建议（evidence_id 可点击追溯） */
+  top_gaps: { skill: string; advice: string; evidence_id: string }[]
+  /** 学习路径解读 */
+  path_analysis: string
+  /** 整体改进建议清单 */
+  recommendations: string[]
+}
+
 /** 已解析简历摘要（GET /resume/list） */
 export interface ResumeSummary {
   id: string

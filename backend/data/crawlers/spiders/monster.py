@@ -24,6 +24,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from scrapy import Request
@@ -90,10 +91,11 @@ class MonsterSpider(BaseSpider):
         python_exe = sys.executable
 
         task_total = len(tasks)
+        _started = time.monotonic()
         for task_idx, task in enumerate(tasks):
             keyword = task["keyword"]
             city = task["city"]
-            self.logger.info(f"[monster] 进度 {task_idx + 1}/{task_total}: 开始采集 kw={keyword} city={city}（调用 CDP 脚本）")
+            self.logger.info(f"[monster] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword} city={city}（调用 CDP 脚本）")
 
             cmd = [
                 python_exe, CRAWLER_SCRIPT,
@@ -123,7 +125,7 @@ class MonsterSpider(BaseSpider):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 stdout, stderr = proc.communicate()
-                self.logger.error(f"采集脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+                self.logger.error(f"[monster] 任务 {task_idx + 1}/{task_total} 超时（>{SUBPROCESS_TIMEOUT}s），已终止")
                 continue
 
             item_count = 0

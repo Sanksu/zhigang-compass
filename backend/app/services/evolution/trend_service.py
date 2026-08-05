@@ -67,10 +67,19 @@ def rank_signals(
     trend: str,
     top_n: int = 10,
 ) -> list[EvolutionSignal]:
-    """按趋势过滤并按 confidence 降序取 Top-N。
+    """按趋势过滤并按 confidence 降序、|z| 强度二级降序取 Top-N。
 
     trend: "emerging"（z > 2.0）或 "declining"（z < -1.5）。
+
+    二级排序原因：confidence = min(|z|/4, 1)，|z|≥4 时全部饱和为 1.0，
+    若只按 confidence 排序会退化为稳定输入序，Top-N 可能漏掉最强信号。
     """
     matches = [s for s in signals if s.trend.value == trend]
-    matches.sort(key=lambda s: s.confidence, reverse=True)
+    matches.sort(
+        key=lambda s: (
+            s.confidence,
+            abs(s.z_score) if s.z_score is not None else -1.0,
+        ),
+        reverse=True,
+    )
     return matches[:top_n]

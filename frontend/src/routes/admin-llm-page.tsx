@@ -40,6 +40,8 @@ interface LlmProviderConfig {
   model: string
   supports_function_calling?: boolean
   enabled?: boolean
+  /** provider 特定请求参数（如 deepseek 关闭思考模式 thinking.type），编辑时须保留 */
+  extra_body?: Record<string, unknown>
 }
 
 interface LlmConfig {

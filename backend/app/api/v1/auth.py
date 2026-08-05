@@ -63,7 +63,15 @@ def _extract_refresh_token(request: Request, req: Optional[RefreshRequest]) -> O
 
 
 def _client_ip(request: Request) -> str:
-    """客户端 IP（反向代理场景可取 X-Forwarded-For，当前直连取 peer IP）。"""
+    """客户端 IP。
+
+    仅生产环境信任 `X-Forwarded-For`（负载均衡终止 TLS 场景），取信任链首个
+    IP（离客户端最近）；开发/直连场景取 peer IP，避免未经验证的伪造头污染审计。
+    """
+    if settings.is_production:
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            return xff.split(",")[0].strip()
     return request.client.host if request.client else ""
 
 

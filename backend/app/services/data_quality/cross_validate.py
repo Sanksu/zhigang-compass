@@ -46,12 +46,16 @@ _SALARY_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(rf"USD\s*\$?([\d,]+(?:\.\d+)?)\s*{_SEP}\s*\$?([\d,]+(?:\.\d+)?)", re.IGNORECASE), "usd_year"),
     (re.compile(rf"([\d,]+(?:\.\d+)?)\s*{_SEP}\s*\$?([\d,]+(?:\.\d+)?)\s*/\s*year", re.IGNORECASE), "usd_year"),
 ]
-# 单值格式：up to $120/hour、up to 170k、$171,000.00、$120/hour
+# 单值格式：up to $120/hour、$171,000.00、$120/hour
 _SINGLE_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"up to\s*\$?([\d.]+)\s*k", re.IGNORECASE), "cn_k"),
-    (re.compile(r"up to\s*\$?\s*([\d.]+)\s*/hour", re.IGNORECASE), "usd_hour"),
+    (re.compile(r"up to\s*\$\s*([\d,]+(?:\.\d+)?)\s*k", re.IGNORECASE), "usd_year"),
+    (re.compile(r"up to\s*\$?([\d.]+)\s*/hour", re.IGNORECASE), "usd_hour"),
     (re.compile(r"\$\s*([\d,]+(?:\.\d+)?)\s*/hour", re.IGNORECASE), "usd_hour"),
 ]
+
+# "up to 170k"（无货币符号）：国际源按年薪（usd_year），国内源按千元/月（cn_k）
+_UP_TO_K_RE = re.compile(r"up to\s*\$?([\d,]+(?:\.\d+)?)\s*k", re.IGNORECASE)
+_INTL_SOURCES = {"indeed", "monster", "glassdoor", "linkedin_public"}
 
 
 def _to_monthly_cny(value: float, kind: str) -> float:
@@ -69,12 +73,16 @@ def _to_monthly_cny(value: float, kind: str) -> float:
     raise ValueError(f"未知薪资类型: {kind}")
 
 
-def parse_monthly_salary(raw: str) -> Optional[float]:
+def parse_monthly_salary(raw: str, source: str | None = None) -> Optional[float]:
     """解析薪资文本为月薪中值（元/月）；无法解析返回 None。
 
     支持的格式（对齐实际数据）：
     "1.5-3万·14薪"、"50-80K"、"200-220元/天"、"$171,000.00 - $260,000.00 / year"、
     "USD 175000.0-250000.0/年"、"up to $120/hour"、"up to 170k"
+
+    source 用于 `up to 170k` 无货币符号时的口径判定：国际源（indeed/monster/
+    glassdoor/linkedin_public）按年薪折算（usd_year），国内源按千元/月（cn_k），
+    避免国际年薪被误判为国内月薪导致薪资异常误报。
     """
     if not raw or not isinstance(raw, str):
         return None
@@ -86,6 +94,11 @@ def parse_monthly_salary(raw: str) -> Optional[float]:
         if m:
             low, high = float(m.group(1)), float(m.group(2))
             return round(_to_monthly_cny((low + high) / 2, kind), 2)
+    m = _UP_TO_K_RE.search(text)
+    if m:
+        has_dollar = "$" in m.group(0)
+        kind = "usd_year" if has_dollar or (source or "") in _INTL_SOURCES else "cn_k"
+        return round(_to_monthly_cny(float(m.group(1)), kind), 2)
     for pattern, kind in _SINGLE_PATTERNS:
         m = pattern.search(text)
         if m:
@@ -166,7 +179,7 @@ def validate_group(position_name: str, group: list[dict]) -> CrossValidationResu
     for rec in group:
         ext = (rec.get("snapshot") or {}).get("extraction") or {}
         raw = ext.get("salary_range") or (rec.get("snapshot") or {}).get("salary")
-        value = parse_monthly_salary(raw)
+        value = parse_monthly_salary(raw, rec.get("source"))
         if value is not None:
             salaries.append(value)
     salary_median = median(salaries) if salaries else None

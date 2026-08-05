@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Database, Network, Search } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
@@ -214,19 +214,28 @@ export function GraphPage() {
       : null
 
   // 全文检索（设计文档 §5.4 cjk 全文索引）
+  // 搜索序号：连续搜索时旧请求响应作废，避免慢响应覆盖新结果
+  const searchSeqRef = useRef(0)
   function doSearch(q: string) {
     const term = q.trim()
     if (!term) {
       setSearchResults([])
       return
     }
+    const seq = ++searchSeqRef.current
     setSearching(true)
     apiGet<{ items: { id: string; name: string; type: string; score: number }[]; total: number }>(
       `/graph/search?q=${encodeURIComponent(term)}&type=skill&size=8`,
     )
-      .then((r) => setSearchResults(r.items))
-      .catch(() => setSearchResults([]))
-      .finally(() => setSearching(false))
+      .then((r) => {
+        if (searchSeqRef.current === seq) setSearchResults(r.items)
+      })
+      .catch(() => {
+        if (searchSeqRef.current === seq) setSearchResults([])
+      })
+      .finally(() => {
+        if (searchSeqRef.current === seq) setSearching(false)
+      })
   }
 
   // 点击搜索结果 / 相似技能 / 岗位必备技能 → 定位技能节点并选中

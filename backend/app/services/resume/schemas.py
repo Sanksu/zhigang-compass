@@ -1,8 +1,9 @@
 """简历抽取的数据模型（Pydantic，兼作 LLM JSON Schema 约束）。
 
 对齐设计文档 §8.3 抽取字段与 matching/schemas.py CandidateProfile 画像：
-- 文本已先经 PII 脱敏（pii_mask.py），name/phone/email 为 [NAME]/[PHONE]/[EMAIL]
-  占位符，直接保留不入库真实值（脱敏映射仅存内存，设计文档 §8.2）。
+- 文本已先经 PII 脱敏（pii_mask.py），name/phone/email 在抽取时呈
+  [NAME]/[PHONE]/[EMAIL] 占位符；LLM 抽取完成后由 tasks.resume_parse 经
+  restore_pii 映射表回填为原始值（设计文档 §8.2），parsed_data 落库含真实值。
 - parsed_data 落库形态为 model_dump()，供 match.py `_build_candidate` 构建画像。
 """
 
@@ -55,6 +56,11 @@ class ResumeExtractionResult(BaseModel):
     education: list[ResumeEducation] = Field(default_factory=list, description="教育背景")
     work_experience: list[ResumeWorkExperience] = Field(default_factory=list, description="工作经历")
     skills: list[ResumeSkill] = Field(default_factory=list, description="技能列表")
+    soft_skills: list[str] = Field(
+        default_factory=list,
+        description="软技能（LLM 从项目角色/经历推断，仅限岗位本体 20 项白名单；"
+        "并入 skills 时标记 low_confidence，匹配降权 ×0.5，设计文档 9.2 节）",
+    )
     projects: list[ResumeProject] = Field(default_factory=list, description="项目经验")
     certifications: list[str] = Field(default_factory=list, description="证书")
     domain_experience: list[str] = Field(default_factory=list, description="领域经验（如金融/电商/自动驾驶）")

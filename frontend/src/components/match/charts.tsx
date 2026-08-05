@@ -22,6 +22,7 @@ import {
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { LearningPathItem, RadarDimension, SkillMatrixItem } from './types'
+import { escapeHtml } from '@/lib/utils'
 
 /** ECharts 回调参数最小类型 — 覆盖本组件使用的 tooltip/label 回调字段 */
 interface EChartsParam {
@@ -276,7 +277,7 @@ export function SkillHeatmap({ data, className }: SkillHeatmapProps) {
           const [xi, yi, val] = params.value as [number, number, number]
           const item = data[xi]
           const who = categories[yi]
-          return `<b>${skills[xi]}</b><br/>${who}: ${LEVEL_LABEL[val]}<br/>必要性: ${item.necessity}`
+          return `<b>${escapeHtml(skills[xi])}</b><br/>${who}: ${LEVEL_LABEL[val]}<br/>必要性: ${escapeHtml(item.necessity)}`
         },
       },
       grid: { left: 70, right: 20, top: 20, bottom: 90 },
@@ -361,11 +362,11 @@ export function GanttChart({ data, className }: GanttChartProps) {
         formatter: (params: EChartsParam) => {
           const item = data.find((d) => d.skill === params.name)
           if (!item) return ''
-          const lines = [`<b>${item.skill}</b>`, `时长: ${item.duration_days} 天`, `优先级: ${item.priority}`]
-          if (item.prerequisites.length) lines.push(`先修: ${item.prerequisites.join(', ')}`)
+          const lines = [`<b>${escapeHtml(item.skill)}</b>`, `时长: ${item.duration_days} 天`, `优先级: ${escapeHtml(item.priority)}`]
+          if (item.prerequisites.length) lines.push(`先修: ${item.prerequisites.map(escapeHtml).join(', ')}`)
           if (item.courses.length) {
             lines.push('<br/>推荐课程:')
-            item.courses.forEach((c) => lines.push(`• ${c.title} (${c.platform}, ${c.hours}h)`))
+            item.courses.forEach((c) => lines.push(`• ${escapeHtml(c.title)} (${escapeHtml(c.platform)}, ${c.hours}h)`))
           }
           return lines.join('<br/>')
         },

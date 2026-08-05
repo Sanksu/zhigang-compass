@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw, FileText, ThumbsUp, ThumbsDown, RefreshCw } from 'lucide-react'
+import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw, FileText, ThumbsUp, ThumbsDown, RefreshCw, Sparkles } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { ResumeUploader } from '@/components/resume/resume-uploader'
 import { ScoreRing, RadarChart, SkillHeatmap, GanttChart } from '@/components/match/charts'
 import {
+  type BackendDiagnosisReport,
   type BackendGapItem,
   type BackendLearningPathItem,
   type BackendMatchResult,
@@ -18,7 +19,7 @@ import {
   type SkillMatrixItem,
 } from '@/components/match/types'
 import type { PositionStatus } from '@/components/graph/types'
-import { apiGet, apiPost, ApiError } from '@/lib/api'
+import { apiGet, apiPost, ApiError, getAccessToken } from '@/lib/api'
 
 const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
   candidate: '候选',
@@ -170,8 +171,11 @@ export function ResumeMatchPage() {
   const [selectedPosition, setSelectedPosition] = useState<RecommendItem | null>(null)
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
-  // 结果快照 ID（compare 返回，供 /match/result|gap|path|feedback 查询）
+  // 结果快照 ID（compare 返回，供 /match/result|gap|path|diagnosis|feedback 查询）
   const [matchId, setMatchId] = useState<string | null>(null)
+  // AI 诊断报告（GET /match/result/{id}/diagnosis，LLM 生成 + Redis 缓存 24h）
+  const [diagnosis, setDiagnosis] = useState<BackendDiagnosisReport | null>(null)
+  const [diagnosisLoading, setDiagnosisLoading] = useState(false)
   // 用户反馈（1=有用 / -1=没用，POST /match/feedback）
   const [feedback, setFeedback] = useState<number | null>(null)
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
@@ -180,12 +184,16 @@ export function ResumeMatchPage() {
   const [notice, setNotice] = useState<string | null>(null)
 
   // 载入已解析简历列表（后端 /resume/list）
-  useEffect(() => {
+  function loadResumeList() {
     apiGet<{ items: ResumeSummary[]; total: number }>('/resume/list')
       .then((res) => setResumeList(res.items))
       .catch(() => {
         /* 列表加载失败不阻塞页面 */
       })
+  }
+
+  useEffect(() => {
+    loadResumeList()
   }, [])
 
   // 上传简历 → 真实异步解析 + SSE 进度推送（GET /resume/task/{id}/stream）
@@ -218,7 +226,12 @@ export function ResumeMatchPage() {
     // 30s 无终态事件则中止（与后端 300s 兜底相比更保守，避免上传卡死）
     const timer = setTimeout(() => ctrl.abort(), 30_000)
     try {
-      const resp = await fetch(`/api/v1/resume/task/${taskId}/stream`, { signal: ctrl.signal })
+      // 端点要求 user+ 认证，fetch 不走 axios 拦截器，需手动携带 Bearer
+      const token = getAccessToken()
+      const resp = await fetch(`/api/v1/resume/task/${taskId}/stream`, {
+        signal: ctrl.signal,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
       if (!resp.ok || !resp.body) throw new Error('SSE 连接失败')
       const reader = resp.body.getReader()
       const decoder = new TextDecoder()
@@ -234,6 +247,19 @@ export function ResumeMatchPage() {
           const event = frame.match(/^event:\s*(.+)$/m)?.[1]
           const data = frame.match(/^data:\s*(.+)$/m)?.[1]
           if (event === 'done' && data) {
+            // done 事件 data 为完整任务载荷，result.resume_id 为新解析简历画像 ID；
+            // 刷新已有简历列表并直接触发推荐，避免用户整页刷新后才可发起匹配
+            let resumeId: string | null = null
+            try {
+              resumeId = JSON.parse(data)?.result?.resume_id ?? null
+            } catch {
+              /* SSE data 非 JSON，退化为仅提示 */
+            }
+            if (resumeId) {
+              loadResumeList()
+              await loadRecommend(resumeId)
+              return
+            }
             setNotice(`解析完成（${fileName}），已写入简历库，可直接发起匹配。`)
             setStage('upload')
             return
@@ -290,6 +316,7 @@ export function ResumeMatchPage() {
     setLoadingDetail(true)
     setMatchResult(null)
     setMatchId(null)
+    setDiagnosis(null)
     setFeedback(null)
     try {
       const res = await apiPost<BackendMatchResult>('/match/compare', {
@@ -351,6 +378,22 @@ export function ResumeMatchPage() {
     }
   }
 
+  // 生成/刷新 AI 诊断报告（GET /match/result/{id}/diagnosis，LLM 不可用返回 503 不阻断主流程）
+  async function loadDiagnosis() {
+    if (!matchId || diagnosisLoading) return
+    setDiagnosisLoading(true)
+    setNotice(null)
+    try {
+      const report = await apiGet<BackendDiagnosisReport>(`/match/result/${matchId}/diagnosis`)
+      setDiagnosis(report)
+    } catch (e) {
+      setDiagnosis(null)
+      setNotice(e instanceof ApiError ? e.message : '诊断报告生成失败，请稍后重试')
+    } finally {
+      setDiagnosisLoading(false)
+    }
+  }
+
   // 提交匹配反馈（POST /match/feedback，match_id 校验 + Redis 记录 90 天）
   async function submitFeedback(score: 1 | -1) {
     if (!matchId || feedbackSubmitting) return
@@ -374,6 +417,7 @@ export function ResumeMatchPage() {
     setSelectedPosition(null)
     setMatchResult(null)
     setMatchId(null)
+    setDiagnosis(null)
     setFeedback(null)
     setActiveResumeId(null)
     setNotice(null)
@@ -786,6 +830,113 @@ export function ResumeMatchPage() {
                     <p className="text-xs text-ink-faint py-10 text-center">
                       无需要补足的技能差距，岗位要求已全部满足
                     </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* AI 诊断报告（GET /match/result/{id}/diagnosis，LLM 生成 + Redis 缓存 24h） */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Sparkles className="size-4 text-state-emerging" />
+                    AI 诊断报告
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-1.5 text-[10px] ml-auto"
+                      onClick={loadDiagnosis}
+                      disabled={diagnosisLoading}
+                      title="生成/刷新诊断报告（LLM 生成，结果缓存 24h）"
+                    >
+                      <RefreshCw className="size-3 mr-1" />
+                      {diagnosis ? '刷新' : '生成'}
+                    </Button>
+                  </CardTitle>
+                  <CardDescription>基于匹配结果 + 差距 + 学习路径的 LLM 结构化诊断（§9.5）</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {diagnosisLoading ? (
+                    <div className="flex flex-col items-center justify-center py-10 text-center">
+                      <div className="size-6 rounded-full border-2 border-ink border-t-transparent animate-spin mb-3" />
+                      <p className="text-xs text-ink-muted">诊断报告生成中（LLM 推理约需数秒）…</p>
+                    </div>
+                  ) : diagnosis ? (
+                    <div className="space-y-4">
+                      {/* 总体匹配度解读 */}
+                      <div>
+                        <h4 className="text-xs font-medium text-ink mb-1">总体匹配度解读</h4>
+                        <p className="text-sm text-ink-muted leading-relaxed">{diagnosis.overall_summary}</p>
+                      </div>
+                      {/* 三维雷达图解读 */}
+                      <div>
+                        <h4 className="text-xs font-medium text-ink mb-1">三维雷达图解读</h4>
+                        <p className="text-sm text-ink-muted leading-relaxed">{diagnosis.radar_analysis}</p>
+                      </div>
+                      {/* 关键差距 Top-5（含证据追溯） */}
+                      {diagnosis.top_gaps.length > 0 && (
+                        <div>
+                          <h4 className="text-xs font-medium text-ink mb-2">关键差距与改进建议</h4>
+                          <div className="space-y-2">
+                            {diagnosis.top_gaps.map((g, i) => (
+                              <div key={i} className="rounded-md border border-border p-2.5">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-sm font-medium text-ink">{g.skill}</span>
+                                  {g.evidence_id ? (
+                                    g.evidence_id.startsWith('http') ? (
+                                      <a
+                                        href={g.evidence_id}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="ml-auto flex items-center gap-0.5 text-[10px] text-ink-muted hover:text-ink underline"
+                                      >
+                                        <ExternalLink className="size-3" />证据追溯
+                                      </a>
+                                    ) : (
+                                      <Badge variant="outline" className="ml-auto text-[10px] font-mono" title="证据引用">
+                                        {g.evidence_id}
+                                      </Badge>
+                                    )
+                                  ) : (
+                                    <Badge variant="outline" className="ml-auto text-[10px] text-ink-faint" title="无对应证据">
+                                      无证据
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="text-xs text-ink-muted leading-relaxed">{g.advice}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* 学习路径解读 */}
+                      {diagnosis.path_analysis && (
+                        <div>
+                          <h4 className="text-xs font-medium text-ink mb-1">学习路径解读</h4>
+                          <p className="text-sm text-ink-muted leading-relaxed">{diagnosis.path_analysis}</p>
+                        </div>
+                      )}
+                      {/* 整体改进建议 */}
+                      {diagnosis.recommendations.length > 0 && (
+                        <div>
+                          <h4 className="text-xs font-medium text-ink mb-2">整体改进建议</h4>
+                          <ul className="space-y-1.5">
+                            {diagnosis.recommendations.map((rec, i) => (
+                              <li key={i} className="flex items-start gap-2 text-sm text-ink-muted leading-relaxed">
+                                <CheckCircle2 className="size-3.5 mt-0.5 shrink-0 text-state-stable" />
+                                {rec}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <Sparkles className="size-5 text-ink-faint mb-2" />
+                      <p className="text-xs text-ink-muted">
+                        生成一份由 LLM 撰写的结构化诊断报告，覆盖总体匹配度、差距建议与学习路径解读
+                      </p>
+                    </div>
                   )}
                 </CardContent>
               </Card>

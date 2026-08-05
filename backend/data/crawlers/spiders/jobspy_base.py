@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from scrapy.http import Response
@@ -47,10 +48,11 @@ class JobSpyBaseSpider(BaseSpider):
         python_exe = sys.executable
 
         task_total = len(tasks)
+        _started = time.monotonic()
         for task_idx, task in enumerate(tasks):
             keyword = task["keyword"]
             city = task["city"]
-            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}: 开始采集 kw={keyword} city={city}")
+            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword} city={city}")
 
             cmd = [
                 python_exe, self.crawler_script,
@@ -80,7 +82,7 @@ class JobSpyBaseSpider(BaseSpider):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 stdout, stderr = proc.communicate()
-                self.logger.error(f"JobSpy 脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+                self.logger.error(f"[{self.platform}] 任务 {task_idx + 1}/{task_total} 超时（>{SUBPROCESS_TIMEOUT}s），已终止")
                 continue
 
             item_count = 0

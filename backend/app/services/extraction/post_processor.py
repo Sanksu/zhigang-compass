@@ -5,13 +5,18 @@
 
 import re
 from app.services.extraction.schemas import JDExtractionResult, SkillExtracted
-from app.services.extraction.dictionary import SKILL_STOPWORDS, normalize_skill
+from app.services.extraction.dictionary import (
+    SOFT_SKILL_WHITELIST,
+    SKILL_STOPWORDS,
+    normalize_skill,
+)
 
-# 需去除的中文后缀（按长度降序排列，优先匹配长后缀）
+# 需去除的中文后缀（按长度降序排列，优先匹配长后缀）。
+# 不含"服务"：剥除后产生碎片（"微服务"→"微"），且无合理剥除场景
 SUFFIXES = sorted([
     "工程师", "技术", "系统", "框架", "平台", "工具", "软件", "开发",
-    "设计", "管理", "应用", "服务", "方案", "产品", "项目", "算法",
-    "架构", "引擎", "组件", "中间件", "协议", "标准", "接口", "协议",
+    "设计", "管理", "应用", "方案", "产品", "项目", "算法",
+    "架构", "引擎", "组件", "中间件", "协议", "标准", "接口",
 ], key=len, reverse=True)
 
 _SKILL_SUFFIX_RE = re.compile(
@@ -20,7 +25,13 @@ _SKILL_SUFFIX_RE = re.compile(
 
 
 def clean_skill_name(name: str) -> str:
-    """清洗技能名称中的中文后缀。"""
+    """清洗技能名称中的中文后缀。
+
+    软技能白名单整体跳过（"项目管理"不以"管理"为后缀退化），
+    其余技能按后缀表剥除（"前端开发"→"前端"）。
+    """
+    if name in SOFT_SKILL_WHITELIST:
+        return name
     name = _SKILL_SUFFIX_RE.sub("", name).strip()
     return name
 
@@ -54,6 +65,17 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
         if _clean(s.name) and _clean(s.name) not in SKILL_STOPWORDS
     ]
     result.skills = dedup_skills(result.skills)
+
+    # 软技能：仅保留岗位本体白名单（LLM 越界输出在此拦截，防非白名单词入岗位本体）
+    seen_soft: set[str] = set()
+    cleaned_soft: list[str] = []
+    for s in result.soft_skills:
+        name = clean_skill_name(normalize_skill(s)).strip()
+        if not name or name in seen_soft or name not in SOFT_SKILL_WHITELIST:
+            continue
+        seen_soft.add(name)
+        cleaned_soft.append(name)
+    result.soft_skills = cleaned_soft
 
     for tool in result.tools:
         tool.name = normalize_skill(tool.name)

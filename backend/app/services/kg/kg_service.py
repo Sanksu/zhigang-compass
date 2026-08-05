@@ -56,6 +56,12 @@ def import_jd(
     返回：
         Position 节点 ID（如 pos_0001）
     """
+    # 岗位名语义对齐（规则归并 + 图谱已有岗位匹配）在事务外执行，避免嵌套
+    # Neo4j 会话。幂等：batch_extract 已对齐时此处命中图谱直接返回原值；
+    # 直接调用本函数（rebuild_graph 等）也能得到对齐后的标准名。
+    from app.services.extraction.position_align import PositionAligner
+
+    extraction.position_name = PositionAligner.get().align(extraction.position_name)
     return session.execute_write(_import_jd_tx, extraction, evidence)
 
 

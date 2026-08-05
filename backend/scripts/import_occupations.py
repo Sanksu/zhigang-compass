@@ -1,7 +1,11 @@
 """O*NET 权威岗位库导入脚本（AL-M4-01，设计文档 5.1 Occupation 节点 / 7.2.3 RAG 接地）。
 
 从 O*NET 官方 CSV（30.3 版）下载 Occupation Data（1016 标准职业）与 Job Titles
-（别名表）→ 聚合 → 幂等 upsert 至 PostgreSQL `occupations` 表。
+（别名表）→ 聚合 → 幂等 upsert 至 PostgreSQL `occupations` 表，并同步双路检索索引：
+1. pgvector 语义向量（occupations.embedding，Sentence-BERT 384 维，模型不可用跳过）
+2. Neo4j Occupation 节点（occupation_search 全文索引数据源，Neo4j 不可达跳过）
+
+任一索引同步失败不影响入库（RAG 接地是辅助确认，降级 ILIKE 关键词路）。
 
 用法：
     python scripts/import_occupations.py                    # 在线下载后导入（全量刷新）
@@ -133,6 +137,72 @@ async def _upsert(session, code: str, name: str, category: str, definition: str,
     return False
 
 
+def _embed_text(name: str, category: str) -> str:
+    """向量化文本：岗位名为主（跨语言语义匹配），叠加大类名增强上下文。"""
+    return f"{name} {category}".strip()
+
+
+async def _fill_embeddings(session) -> int:
+    """为 occupations 批量生成 embedding 向量（pgvector 语义路）。
+
+    模型不可用/加载失败时静默跳过（向量保持 NULL，接地语义路降级为关键词路），
+    不阻塞导入。
+    """
+    from app.services.matching.semantic import SemanticUnavailableError, SkillEmbedder
+
+    rows = (await session.scalars(select(Occupation))).all()
+    if not rows:
+        return 0
+    try:
+        embedder = SkillEmbedder.get()
+        texts = [_embed_text(r.name, r.category) for r in rows]
+        embedder.warm(texts)  # 一次 batch encode 填缓存，避免逐条前向推理
+        vecs = [embedder.embed(t) for t in texts]
+    except SemanticUnavailableError as e:
+        print(f"  ! 语义模型不可用，跳过向量生成: {e}")
+        return 0
+    for occ, vec in zip(rows, vecs):
+        occ.embedding = vec
+    await session.commit()
+    return len(rows)
+
+
+async def _sync_neo4j(session) -> int:
+    """同步 Occupation 节点到 Neo4j（occupation_search 全文索引数据源）。
+
+    MERGE by code 幂等 upsert；Neo4j 不可达时打印告警不失败
+    （接地关键词路降级为 PostgreSQL ILIKE）。
+    """
+    from app.core.database import neo4j_driver
+
+    rows = (await session.scalars(select(Occupation))).all()
+    if not rows:
+        return 0
+    payload = [
+        {
+            "code": occ.code,
+            "name": occ.name,
+            "category": occ.category,
+            "definition": occ.definition,
+            "aliases": occ.aliases,
+        }
+        for occ in rows
+    ]
+    try:
+        with neo4j_driver.session() as ns:
+            ns.run(
+                "UNWIND $rows AS r "
+                "MERGE (o:Occupation {code: r.code}) "
+                "SET o.name = r.name, o.category = r.category, "
+                "o.definition = r.definition, o.aliases = r.aliases",
+                rows=payload,
+            )
+    except Exception as e:
+        print(f"  ! Neo4j 同步失败（接地将降级为 ILIKE）: {e}")
+        return 0
+    return len(rows)
+
+
 async def main(write: bool, csv_dir: Path | None) -> None:
     occupation_rows = _load_occupation_data(csv_dir)
     alias_map = _load_job_titles(csv_dir)
@@ -157,6 +227,13 @@ async def main(write: bool, csv_dir: Path | None) -> None:
         print("冒烟模式（--no-write）：解析校验通过，未写库")
         return
     print(f"导入完成: 新建 {created} / 更新 {updated} | 总量 {created + updated}")
+
+    # 双路检索索引同步（T-06）：向量（语义路）+ Neo4j 全文（关键词路）
+    async with async_session_factory() as session:
+        vec_count = await _fill_embeddings(session)
+        neo4j_count = await _sync_neo4j(session)
+    print(f"索引同步: pgvector 向量 {vec_count} 条 | Neo4j Occupation 节点 {neo4j_count} 个")
+
     # 抽样展示 IT 大类（15/17）数据，便于人工核验
     sample = [r for r in occupation_rows if r[0].startswith(("15-", "17-"))][:5]
     for row in sample:

@@ -38,7 +38,13 @@ class BaseSpider(Spider):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # 平台级限速接线：从 RATE_LIMIT.delay_range 取中点设置
+        # download_delay，与 arxiv/coursera 等非招聘源一致；避免招聘爬虫走
+        # 全局默认 2s（折算 ~40 req/min）超出 settings.py 声明的 20 req/min 上限
         self.limit = RATE_LIMIT.get(self.platform, {})
+        delay_range = self.limit.get("delay_range")
+        if delay_range and len(delay_range) == 2:
+            self.download_delay = sum(delay_range) / 2
         # 支持 -a keywords=Python,Java -a cities=北京,上海 运行时覆盖
         if kwargs.get("keywords"):
             self.keywords = kwargs["keywords"].split(",")

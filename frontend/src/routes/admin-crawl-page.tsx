@@ -150,9 +150,15 @@ interface SseLogResult {
  * 60s 会误断导致"连接中断或超时"）；
  * admin 端点需认证，fetch 不会自动附加 token，手动加 Bearer。
  */
-async function readSseCrawlLog(taskId: string, onLog: (line: string) => void): Promise<SseLogResult> {
+async function readSseCrawlLog(taskId: string, onLog: (line: string) => void, signal?: AbortSignal): Promise<SseLogResult> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 600_000)
+  // 外部 signal（组件卸载/弹窗关闭）触发时联动中止内部 ctrl，避免 SSE 连接泄漏
+  const onAbort = () => ctrl.abort()
+  if (signal) {
+    if (signal.aborted) ctrl.abort()
+    else signal.addEventListener('abort', onAbort, { once: true })
+  }
   try {
     const headers: Record<string, string> = {}
     const token = getAccessToken()
@@ -198,6 +204,7 @@ async function readSseCrawlLog(taskId: string, onLog: (line: string) => void): P
     return { status: 'closed', message: '连接中断或超时' }
   } finally {
     clearTimeout(timer)
+    if (signal) signal.removeEventListener('abort', onAbort)
   }
 }
 
@@ -216,9 +223,10 @@ function CrawlLogDialog({ taskId, platformName, onClose }: {
   useEffect(() => {
     if (!taskId) return
     let cancelled = false
+    const ctrl = new AbortController()
     readSseCrawlLog(taskId, (ln) => {
       if (!cancelled) setLines((prev) => [...prev, ln].slice(-300))
-    }).then((r) => {
+    }, ctrl.signal).then((r) => {
       if (cancelled) return
       if (r.status === 'failed') {
         setStatus('failed')
@@ -229,7 +237,9 @@ function CrawlLogDialog({ taskId, platformName, onClose }: {
       }
     })
     return () => {
+      // 弹窗关闭/组件卸载时中止 SSE 连接，避免挂起到 600s 超时
       cancelled = true
+      ctrl.abort()
     }
   }, [taskId])
 
@@ -292,6 +302,10 @@ export function AdminCrawlPage() {
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [currentTask?.logs.length])
+
+  // 触发后 SSE 连接的中止句柄：组件卸载时中止，避免连接挂起到 600s 超时
+  const sseAbortRef = useRef<AbortController | null>(null)
+  useEffect(() => () => sseAbortRef.current?.abort(), [])
 
   // 加载爬取历史（真实 /admin/crawl/history，task_status 倒序）
   useEffect(() => {
@@ -387,20 +401,26 @@ export function AdminCrawlPage() {
 
   // 订阅爬虫实时日志 SSE（触发后自动展示在当前任务卡片）
   async function streamCrawlLogs(taskId: string) {
-    const result = await readSseCrawlLog(taskId, (line) => {
-      setCurrentTask((t) => (t ? { ...t, logs: [...t.logs, line].slice(-200) } : t))
-    })
-    if (result.status === 'done') {
-      setNotice('爬取任务执行完成，数据已写入 output/*.jsonl')
-      setCurrentTask((t) => (t ? { ...t, status: 'done', progress: 100 } : t))
-    } else if (result.status === 'failed') {
-      setNotice(`爬取任务失败：${result.message}`)
-      setCurrentTask((t) => (t ? { ...t, status: 'failed' } : t))
-    } else {
-      setNotice(result.message ?? '日志推送结束（任务可能在后台继续执行），可查看 output 文件确认结果')
-      setCurrentTask((t) =>
-        t && t.status !== 'done' && t.status !== 'failed' ? { ...t, status: 'done' } : t,
-      )
+    const ctrl = new AbortController()
+    sseAbortRef.current = ctrl
+    try {
+      const result = await readSseCrawlLog(taskId, (line) => {
+        setCurrentTask((t) => (t ? { ...t, logs: [...t.logs, line].slice(-200) } : t))
+      }, ctrl.signal)
+      if (result.status === 'done') {
+        setNotice('爬取任务执行完成，数据已写入 output/*.jsonl')
+        setCurrentTask((t) => (t ? { ...t, status: 'done', progress: 100 } : t))
+      } else if (result.status === 'failed') {
+        setNotice(`爬取任务失败：${result.message}`)
+        setCurrentTask((t) => (t ? { ...t, status: 'failed' } : t))
+      } else {
+        setNotice(result.message ?? '日志推送结束（任务可能在后台继续执行），可查看 output 文件确认结果')
+        setCurrentTask((t) =>
+          t && t.status !== 'done' && t.status !== 'failed' ? { ...t, status: 'done' } : t,
+        )
+      }
+    } finally {
+      sseAbortRef.current = null
     }
   }
 

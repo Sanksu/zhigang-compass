@@ -9,6 +9,8 @@ import pytest
 
 from app.services.discovery.grounding import (
     _generate_definition,
+    _merge_hits,
+    _sanitize_fulltext,
     match_seed,
     search_authoritative,
 )
@@ -155,3 +157,208 @@ class TestGenerateDefinition:
         }
         draft = self._run(_generate_definition("软件开发工程师", None, occupation, None))
         assert draft == "Design and develop software systems."
+
+
+class _FakeEmbedder:
+    """固定相似度的假 embedder（embed 返回 384 维向量）。"""
+
+    def __init__(self, similarity: float = 0.9):
+        self._similarity = similarity
+
+    def embed(self, text):
+        return [0.1] * 384
+
+    def similarity(self, a, b):
+        return self._similarity
+
+
+class _FakeDb:
+    """假 AsyncSession：记录 stmt，返回预设 Occupation 行。fail=True 时恒抛。"""
+
+    def __init__(self, rows=None, fail: bool = False):
+        self._rows = rows or []
+        self._fail = fail
+        self.stmts = []
+
+    async def scalars(self, stmt):
+        self.stmts.append(stmt)
+        if self._fail:
+            raise RuntimeError("db down")
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FailingOnceDb:
+    """第一次调用（语义路）抛错、后续（关键词路）正常的假 db。"""
+
+    def __init__(self, rows):
+        self._rows = rows
+        self._calls = 0
+
+    async def scalars(self, stmt):
+        self._calls += 1
+        if self._calls == 1:
+            raise RuntimeError("vector 列缺失")
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeNeo4jSession:
+    def __init__(self, rows=None, fail: bool = False):
+        self._rows = rows or []
+        self._fail = fail
+        self.query = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def run(self, query, **params):
+        self.query = query
+        if self._fail:
+            raise RuntimeError("neo4j down")
+        return self
+
+    def data(self):
+        return self._rows
+
+
+class _FakeNeo4j:
+    def __init__(self, session: _FakeNeo4jSession):
+        self._session = session
+
+    def session(self):
+        return self._session
+
+
+def _occ(code="15-1252.00", name="Software Developers", aliases=None):
+    from app.models.business import Occupation
+
+    return Occupation(
+        code=code,
+        name=name,
+        category="Computer and Mathematical",
+        definition="Design and develop software systems.",
+        aliases=aliases or [],
+    )
+
+
+class TestFulltextSanitize:
+    def test_strips_lucene_specials(self):
+        assert _sanitize_fulltext("C++ 工程师") == "C 工程师"
+        assert _sanitize_fulltext("岗位:(高级)") == "岗位高级"
+
+    def test_empty_after_sanitize(self):
+        assert _sanitize_fulltext(":::") == ""
+
+
+class TestMergeHits:
+    def test_dedup_by_code_keeps_highest_score(self):
+        hits = [
+            {"code": "a", "score": 0.3},
+            {"code": "b", "score": 0.9},
+            {"code": "a", "score": 0.8},
+        ]
+        out = _merge_hits(hits, 5)
+        assert [h["code"] for h in out] == ["b", "a"]
+        assert out[1]["score"] == 0.8
+
+    def test_truncates_to_limit(self):
+        hits = [{"code": f"c{i}", "score": float(i)} for i in range(5)]
+        assert len(_merge_hits(hits, 2)) == 2
+
+
+class TestDualPathRetrieval:
+    """双路检索（设计 7.2.3）：pgvector 语义 + Neo4j 全文，降级 ILIKE。"""
+
+    def test_semantic_path_scores_and_normalizes(self):
+        async def _run():
+            db = _FakeDb(rows=[_occ()])
+            hits = await search_authoritative("大模型应用工程师", db, embedder=_FakeEmbedder(0.8))
+            assert len(hits) == 1
+            assert hits[0]["code"] == "15-1252.00"
+            assert hits[0]["score"] == pytest.approx(0.8)
+            assert hits[0]["source"] == "semantic"
+            assert hits[0]["name_hit"] is False  # 中文岗位名不子串命中英文名
+
+        asyncio.run(_run())
+
+    def test_semantic_error_degrades_to_keyword(self):
+        """向量列缺失等异常 → 语义路降级，关键词路（ILIKE）仍返回。"""
+        async def _run():
+            db = _FailingOnceDb(rows=[_occ(name="软件开发")])
+            hits = await search_authoritative("软件开发", db, embedder=_FakeEmbedder())
+            assert len(hits) == 1
+            assert hits[0]["source"] == "keyword"
+            assert hits[0]["score"] == 1.0  # name 命中
+
+        asyncio.run(_run())
+
+    def test_neo4j_keyword_path_used_and_normalized(self):
+        async def _run():
+            rows = [
+                {
+                    "code": "15-1252.00",
+                    "name": "Software Developers",
+                    "category": "Computer and Mathematical",
+                    "definition": "Design software.",
+                    "aliases": ["Software Developers II"],
+                    "score": 0.9,
+                }
+            ]
+            db = _FakeDb([])
+            hits = await search_authoritative(
+                "Software Developers", db, neo4j=_FakeNeo4j(_FakeNeo4jSession(rows=rows))
+            )
+            assert len(hits) == 1
+            assert hits[0]["source"] == "keyword"
+            assert hits[0]["score"] == pytest.approx(0.9)
+            assert hits[0]["name_hit"] is True
+            assert hits[0]["alias_hits"] == ["Software Developers II"]
+
+        asyncio.run(_run())
+
+    def test_neo4j_unavailable_falls_back_to_ilike(self):
+        async def _run():
+            db = _FakeDb(rows=[_occ()])
+            hits = await search_authoritative(
+                "Software Developers", db, neo4j=_FakeNeo4j(_FakeNeo4jSession(fail=True))
+            )
+            assert len(hits) == 1
+            assert hits[0]["source"] == "keyword"
+            assert hits[0]["score"] == 1.0
+
+        asyncio.run(_run())
+
+    def test_merge_dedup_semantic_and_keyword(self):
+        """同一 code 两路命中 → 合并去重保留高分。"""
+        async def _run():
+            db = _FakeDb(rows=[_occ()])
+            key_rows = [
+                {
+                    "code": "15-1252.00",
+                    "name": "Software Developers",
+                    "category": "",
+                    "definition": "",
+                    "aliases": [],
+                    "score": 0.95,
+                }
+            ]
+            hits = await search_authoritative(
+                "大模型应用工程师",
+                db,
+                neo4j=_FakeNeo4j(_FakeNeo4jSession(rows=key_rows)),
+                embedder=_FakeEmbedder(0.8),
+            )
+            assert len(hits) == 1
+            assert hits[0]["source"] == "keyword"
+            assert hits[0]["score"] == pytest.approx(0.95)
+
+        asyncio.run(_run())
+

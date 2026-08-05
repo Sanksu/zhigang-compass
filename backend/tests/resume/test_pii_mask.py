@@ -4,7 +4,7 @@
 技术名词不被误伤、身份证先于手机号处理避免误脱敏。
 """
 
-from app.services.resume.pii_mask import mask_pii
+from app.services.resume.pii_mask import mask_pii, restore_pii
 
 
 class TestMaskPii:
@@ -61,3 +61,46 @@ class TestMaskPii:
         masked, mapping = mask_pii("无敏感信息的纯技术文本")
         assert masked == "无敏感信息的纯技术文本"
         assert mapping == {}
+
+
+class TestRestorePii:
+    def test_restore_placeholder_in_nested_fields(self):
+        """结构化结果中的占位符按映射回填为原始值（含嵌套 list/dict）。"""
+        parsed = {
+            "name": "[NAME]",
+            "phone": "[PHONE]",
+            "email": "[EMAIL]",
+            "work_experience": [
+                {"company": "[NAME]科技", "description": "联系 [PHONE] 或 [EMAIL]"}
+            ],
+        }
+        mapping = {"[NAME]": "张三", "[PHONE]": "13800138000", "[EMAIL]": "a@b.com"}
+        restored = restore_pii(parsed, mapping)
+        assert restored["name"] == "张三"
+        assert restored["phone"] == "13800138000"
+        assert restored["email"] == "a@b.com"
+        assert restored["work_experience"][0]["company"] == "张三科技"
+        assert restored["work_experience"][0]["description"] == "联系 13800138000 或 a@b.com"
+
+    def test_restore_unknown_placeholder_kept(self):
+        """映射中不存在的占位符保持原样（该类型原文未被脱敏命中）。"""
+        parsed = {"name": "[NAME]", "phone": "[PHONE]"}
+        restored = restore_pii(parsed, {"[PHONE]": "13800138000"})
+        assert restored == {"name": "[NAME]", "phone": "13800138000"}
+
+    def test_restore_empty_mapping_identity(self):
+        parsed = {"name": "[NAME]", "skills": ["Python"]}
+        assert restore_pii(parsed, {}) == parsed
+
+    def test_mask_restore_roundtrip(self):
+        """mask → LLM 抽取形态（占位符透传）→ restore 应恢复原始联系方式。"""
+        text = "姓名：张三\n电话 13800138000\n邮箱 zhangsan@example.com\n技能：Python"
+        masked, mapping = mask_pii(text)
+        assert "[NAME]" in masked and "[PHONE]" in masked and "[EMAIL]" in masked
+        extracted = {"name": "[NAME]", "phone": "[PHONE]", "email": "[EMAIL]"}
+        restored = restore_pii(extracted, mapping)
+        assert restored == {
+            "name": "张三",
+            "phone": "13800138000",
+            "email": "zhangsan@example.com",
+        }
