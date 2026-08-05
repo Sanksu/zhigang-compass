@@ -62,6 +62,8 @@ def import_jd(
     - (Position)-[:REQUIRES {necessity: 'must'}]->(Education|Certification)
     - (Position)-[:HAS_EVIDENCE]->(Evidence)
     - (Skill)-[:MENTIONED_IN]->(Evidence)
+    - (Position)-[:BELONGS_TO_OCCUPATION]->(Occupation)（规则优先 + 语义兜底对齐，
+      设计文档 §5.1；对齐未命中/模型不可用时无此边，不阻塞入图）
 
     参数：
         session: Neo4j Session
@@ -77,10 +79,25 @@ def import_jd(
     from app.services.extraction.position_align import PositionAligner
 
     extraction.position_name = PositionAligner.get().align(extraction.position_name)
-    return session.execute_write(_import_jd_tx, extraction, evidence)
+    # Occupation 对齐也在事务外执行（语义嵌入耗时，避免长事务）；
+    # 任何失败降级为无 occupation 边，不阻塞入图主链路。
+    occupation: tuple[str, float] | None = None
+    if extraction.position_name:
+        try:
+            from app.services.kg.occupation_align import OccupationAligner
+
+            occupation = OccupationAligner.get().align(extraction.position_name)
+        except Exception:
+            occupation = None
+    return session.execute_write(_import_jd_tx, extraction, evidence, occupation)
 
 
-def _import_jd_tx(tx, extraction: JDExtractionResult, evidence: dict) -> str:
+def _import_jd_tx(
+    tx,
+    extraction: JDExtractionResult,
+    evidence: dict,
+    occupation: tuple[str, float] | None = None,
+) -> str:
     now = _now()
     # 岗位名归一化：合并同义重复岗位（如"前端开发/前端工程师" → "前端开发工程师"）
     position_name = normalize_position_name(extraction.position_name)
@@ -131,6 +148,21 @@ def _import_jd_tx(tx, extraction: JDExtractionResult, evidence: dict) -> str:
             industry=extraction.industry or "",
             salary_range=extraction.salary_range or "",
             now=now,
+        )
+
+    # 1.5 Occupation 归属（设计文档 §5.1 (Position)-[:BELONGS_TO_OCCUPATION]->(Occupation)）。
+    # occupation 由 import_jd 事务外对齐（规则优先 + SBERT 语义兜底），未命中为 None 不入边。
+    if occupation is not None:
+        occ_code, occ_conf = occupation
+        tx.run(
+            """
+            MATCH (p:Position {id: $position_id})
+            SET p.occupation_code = $code
+            MERGE (p)-[:BELONGS_TO_OCCUPATION {confidence: $conf}]->(o:Occupation {code: $code})
+            """,
+            position_id=position_id,
+            code=occ_code,
+            conf=occ_conf,
         )
 
     # 2. Evidence：每次创建新节点（每个 JD 原文对应一个 Evidence）
