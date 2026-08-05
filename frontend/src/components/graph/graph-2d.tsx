@@ -21,6 +21,7 @@ import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
+import { escapeHtml } from '@/lib/utils'
 
 /** ECharts 回调参数最小类型 — 覆盖本组件使用的 tooltip/label/select 回调字段 */
 interface EChartsParam {
@@ -233,13 +234,14 @@ export function Graph2D({ data, selectedId, onSelectNode, className }: Graph2DPr
         formatter: (params: EChartsParam) => {
           if (params.dataType !== 'node' || !params.data) return ''
           const d = params.data as unknown as GraphNode
-          const lines: string[] = [`<b>${d.name}</b>`]
-          lines.push(`类型: ${d.type}`)
-          if (d.type === 'position' && d.status) lines.push(`状态: ${d.status}`)
-          if (d.type === 'skill' && d.level) lines.push(`级别: ${d.level}`)
-          if (d.type === 'evidence' && d.source) lines.push(`来源: ${d.source}`)
+          // tooltip 经 innerHTML 渲染，外部可控的 name/description 等必须先转义（防 XSS）
+          const lines: string[] = [`<b>${escapeHtml(d.name)}</b>`]
+          lines.push(`类型: ${escapeHtml(d.type)}`)
+          if (d.type === 'position' && d.status) lines.push(`状态: ${escapeHtml(d.status)}`)
+          if (d.type === 'skill' && d.level) lines.push(`级别: ${escapeHtml(d.level)}`)
+          if (d.type === 'evidence' && d.source) lines.push(`来源: ${escapeHtml(d.source)}`)
           if (typeof d.value === 'number') lines.push(`权重: ${d.value}`)
-          if (d.description) lines.push(`<span style="color:${mutedColor}">${d.description}</span>`)
+          if (d.description) lines.push(`<span style="color:${mutedColor}">${escapeHtml(d.description)}</span>`)
           return lines.join('<br/>')
         },
       },

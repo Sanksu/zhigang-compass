@@ -500,6 +500,7 @@ function VersionDiffView() {
   const [detailError, setDetailError] = useState<string | null>(null)
 
   function loadDetail(id: string) {
+    setDetailOpen(true)
     setDetailVersion(id)
     setDetail(null)
     setDetailError(null)

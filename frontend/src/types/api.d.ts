@@ -221,7 +221,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 岗位节点详情 */
+        /** 岗位节点详情" */
         get: {
             parameters: {
                 query?: never;
@@ -260,7 +260,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 岗位技能列表 */
+        /** 岗位技能列表" */
         get: {
             parameters: {
                 query?: {
@@ -300,7 +300,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 技能节点详情 */
+        /** 技能节点详情" */
         get: {
             parameters: {
                 query?: never;
@@ -338,7 +338,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 技能证据列表 */
+        /** 技能证据列表" */
         get: {
             parameters: {
                 query?: never;
@@ -490,7 +490,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 相似技能检索（pgvector） */
+        /** 相似技能检索（pgvector）" */
         get: {
             parameters: {
                 query: {
@@ -570,7 +570,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 视图切换（后端过滤） */
+        /** 视图切换（后端过滤）" */
         get: {
             parameters: {
                 query?: never;
@@ -768,7 +768,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] SSE 推送任务进度 */
+        /** SSE 推送任务进度（event: progress/done/error） */
         get: {
             parameters: {
                 query?: never;
@@ -806,7 +806,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 获取解析结果 */
+        /** 获取解析结果 */
         get: {
             parameters: {
                 query?: never;
@@ -980,7 +980,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 查询推荐任务状态 */
+        /** 查询推荐任务状态" */
         get: {
             parameters: {
                 query?: never;
@@ -1018,7 +1018,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 获取匹配结果 */
+        /** 获取匹配结果" */
         get: {
             parameters: {
                 query?: never;
@@ -1056,7 +1056,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 获取差距分析 */
+        /** 获取差距分析" */
         get: {
             parameters: {
                 query?: never;
@@ -1094,7 +1094,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 获取学习路径 */
+        /** 获取学习路径" */
         get: {
             parameters: {
                 query?: never;
@@ -1125,6 +1125,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/match/result/{match_id}/diagnosis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取人岗比对诊断报告"
+         * @description LLM 基于结果快照（分数/差距/学习路径/证据）生成结构化诊断报告，结果缓存 24h
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 诊断报告（overall_summary / radar_analysis / top_gaps / path_analysis / recommendations） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 该匹配结果无差距数据（仅人岗比对可生成诊断报告） */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 匹配结果不存在或已过期 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 诊断报告生成失败（LLM 不可用或超时） */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/match/feedback": {
         parameters: {
             query?: never;
@@ -1134,7 +1196,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** [M4] 提交匹配反馈 */
+        /** 提交匹配反馈" */
         post: {
             parameters: {
                 query?: never;
@@ -1218,7 +1280,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 获取版本详情 */
+        /** 获取版本详情" */
         get: {
             parameters: {
                 query?: never;
@@ -1334,7 +1396,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 岗位演化历史 */
+        /** 岗位演化历史" */
         get: {
             parameters: {
                 query?: never;
@@ -1347,6 +1409,80 @@ export interface paths {
             requestBody?: never;
             responses: {
                 /** @description 演化历史 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/state-machine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 岗位状态机总览（六态分布 + 最近人工流转记录）" */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 状态机总览 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/signals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 新兴/衰退技能 Top-N（快照序列 Z-score 信号） */
+        get: {
+            parameters: {
+                query?: {
+                    top_n?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 信号列表（data 含 window_count/emerging/declining） */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1581,6 +1717,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/crawl/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 爬取历史（task_status 中 crawl 任务，倒序分页） */
+        get: {
+            parameters: {
+                query?: {
+                    page?: components["parameters"]["Page"];
+                    size?: components["parameters"]["Size"];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 爬取历史列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/crawl/task/{task_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 爬虫实时日志 SSE（event: log/progress/done/error） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    task_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description SSE 流 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/event-stream": string;
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/llm-config": {
         parameters: {
             query?: never;
@@ -1700,8 +1913,9 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** [M4] 审核岗位（批准/驳回/编辑） */
-        put: {
+        put?: never;
+        /** 审核岗位（批准/驳回）" */
+        post: {
             parameters: {
                 query?: never;
                 header?: never;
@@ -1714,14 +1928,115 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        action: "approve" | "reject" | "edit";
-                        /** @description 编辑后的字段（action=edit 时） */
-                        fields?: Record<string, never>;
+                        action: "approve" | "reject";
+                        /** @description 审核理由（必填） */
+                        reason: string;
                     };
                 };
             };
             responses: {
                 /** @description 审核完成 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 参数不合法 / 不满足晋升条件 */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 候选岗位不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 候选岗位当前状态不可审核 */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/positions/declining": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 待归档岗位列表（declining 状态）" */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 待归档列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/positions/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 确认衰退归档（declining → archived 终态）" */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description 归档原因（必填，写入审计日志） */
+                        reason: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description 归档完成 */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1746,7 +2061,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** [M4] 待审核演化变更 */
+        /** 待审核演化变更" */
         get: {
             parameters: {
                 query?: never;
@@ -1783,7 +2098,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** [M4] 审核演化变更 */
+        /** 审核演化变更" */
         put: {
             parameters: {
                 query?: never;

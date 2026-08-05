@@ -19,7 +19,7 @@ import {
   type SkillMatrixItem,
 } from '@/components/match/types'
 import type { PositionStatus } from '@/components/graph/types'
-import { apiGet, apiPost, ApiError } from '@/lib/api'
+import { apiGet, apiPost, ApiError, getAccessToken } from '@/lib/api'
 
 const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
   candidate: '候选',
@@ -184,12 +184,16 @@ export function ResumeMatchPage() {
   const [notice, setNotice] = useState<string | null>(null)
 
   // 载入已解析简历列表（后端 /resume/list）
-  useEffect(() => {
+  function loadResumeList() {
     apiGet<{ items: ResumeSummary[]; total: number }>('/resume/list')
       .then((res) => setResumeList(res.items))
       .catch(() => {
         /* 列表加载失败不阻塞页面 */
       })
+  }
+
+  useEffect(() => {
+    loadResumeList()
   }, [])
 
   // 上传简历 → 真实异步解析 + SSE 进度推送（GET /resume/task/{id}/stream）
@@ -222,7 +226,12 @@ export function ResumeMatchPage() {
     // 30s 无终态事件则中止（与后端 300s 兜底相比更保守，避免上传卡死）
     const timer = setTimeout(() => ctrl.abort(), 30_000)
     try {
-      const resp = await fetch(`/api/v1/resume/task/${taskId}/stream`, { signal: ctrl.signal })
+      // 端点要求 user+ 认证，fetch 不走 axios 拦截器，需手动携带 Bearer
+      const token = getAccessToken()
+      const resp = await fetch(`/api/v1/resume/task/${taskId}/stream`, {
+        signal: ctrl.signal,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
       if (!resp.ok || !resp.body) throw new Error('SSE 连接失败')
       const reader = resp.body.getReader()
       const decoder = new TextDecoder()
@@ -238,6 +247,19 @@ export function ResumeMatchPage() {
           const event = frame.match(/^event:\s*(.+)$/m)?.[1]
           const data = frame.match(/^data:\s*(.+)$/m)?.[1]
           if (event === 'done' && data) {
+            // done 事件 data 为完整任务载荷，result.resume_id 为新解析简历画像 ID；
+            // 刷新已有简历列表并直接触发推荐，避免用户整页刷新后才可发起匹配
+            let resumeId: string | null = null
+            try {
+              resumeId = JSON.parse(data)?.result?.resume_id ?? null
+            } catch {
+              /* SSE data 非 JSON，退化为仅提示 */
+            }
+            if (resumeId) {
+              loadResumeList()
+              await loadRecommend(resumeId)
+              return
+            }
             setNotice(`解析完成（${fileName}），已写入简历库，可直接发起匹配。`)
             setStage('upload')
             return
