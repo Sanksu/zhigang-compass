@@ -44,12 +44,18 @@ class ResumeExtractor:
 
     @staticmethod
     def _filter_skills(result: ResumeExtractionResult) -> ResumeExtractionResult:
-        """技能清洗：别名归一化 + 中文后缀清洗 + 黑名单剔除 + 去重。
+        """技能清洗：别名归一化 + 中文后缀清洗 + 黑名单剔除 + 去重 + 未匹配标记。
 
         与 JD 抽取 post_process 同口径（normalize_skill + clean_skill_name +
         SKILL_STOPWORDS），保证候选技能名与图谱标准技能名一致，匹配时可命中。
+        归一化后仍不在 SKILL_WHITELIST 的长尾技能原样保留并标记 unmapped=True，
+        走人工确认（设计文档 8.4 节），不静默丢弃也不强并入标准实体。
         """
-        from app.services.extraction.dictionary import SKILL_STOPWORDS, normalize_skill
+        from app.services.extraction.dictionary import (
+            SKILL_STOPWORDS,
+            SKILL_WHITELIST,
+            normalize_skill,
+        )
         from app.services.extraction.post_processor import clean_skill_name
 
         seen: set[str] = set()
@@ -60,7 +66,9 @@ class ResumeExtractor:
             if not name or name in SKILL_STOPWORDS or key in seen:
                 continue
             seen.add(key)
-            cleaned.append(s.model_copy(update={"name": name}))
+            cleaned.append(s.model_copy(
+                update={"name": name, "unmapped": name not in SKILL_WHITELIST}
+            ))
         result.skills = cleaned
         return result
 

@@ -43,6 +43,10 @@ class ResumeSkill(BaseModel):
     name: str = Field(description="技能名称")
     proficiency: int = Field(default=2, ge=1, le=3, description="熟练度：1 了解 / 2 熟悉 / 3 精通")
     low_confidence: bool = Field(default=False, description="LLM 推断（非明确出现）标记")
+    unmapped: bool = Field(
+        default=False,
+        description="未命中标准技能白名单（保留待人工确认，设计文档 8.4 节）",
+    )
 
 
 class ResumeExtractionResult(BaseModel):

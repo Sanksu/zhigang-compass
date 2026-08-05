@@ -11,6 +11,7 @@ from app.workers.tasks import (
     aggregate_positions,
     batch_extract,
     check_data_freshness,
+    check_llm_providers_health,
     crawl_platform,
     cross_validate_jds,
     dedup_simhash,
@@ -45,6 +46,7 @@ EXPECTED_FUNCTIONS = [
     discovery_auto_transition,
     snapshot_graph,
     evolution_compute,
+    check_llm_providers_health,
 ]
 
 

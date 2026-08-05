@@ -1,16 +1,27 @@
-"""O*NET 权威岗位库导入脚本（AL-M4-01，设计文档 5.1 Occupation 节点 / 7.2.3 RAG 接地）。
+"""权威岗位库三源导入脚本（AL-M4-01，设计文档 5.1 Occupation 节点 / 7.2.3 RAG 接地）。
 
-从 O*NET 官方 CSV（30.3 版）下载 Occupation Data（1016 标准职业）与 Job Titles
-（别名表）→ 聚合 → 幂等 upsert 至 PostgreSQL `occupations` 表，并同步双路检索索引：
+三源：O*NET / 人社部《国家职业分类大典（2022版）》/ LinkedIn Emerging Jobs，
+均落同一 `occupations` 表（source 字段区分），供 RAG 接地一次检索天然覆盖。
+
+- `--source onet`：从 O*NET 官方 CSV（30.3 版）下载 Occupation Data（1016 标准职业）
+  与 Job Titles（别名表）→ 聚合 → 幂等 upsert。
+- `--source hrss` / `--source linkedin`：默认导入内置精简样例子集（仅用于验证三源检索
+  链路，code/定义以权威文件为准）；如需导入正式数据，用 `--csv-dir` 提供
+  `hrss_occupations.csv` / `linkedin_occupations.csv`（列：code,name,category,definition,aliases，
+  aliases 分号分隔）。
+
+导入后同步双路检索索引：
 1. pgvector 语义向量（occupations.embedding，Sentence-BERT 384 维，模型不可用跳过）
 2. Neo4j Occupation 节点（occupation_search 全文索引数据源，Neo4j 不可达跳过）
 
 任一索引同步失败不影响入库（RAG 接地是辅助确认，降级 ILIKE 关键词路）。
 
 用法：
-    python scripts/import_occupations.py                    # 在线下载后导入（全量刷新）
-    python scripts/import_occupations.py --no-write         # 仅下载/统计，不写库（冒烟）
-    python scripts/import_occupations.py --csv-dir data/onet  # 使用本地缓存 CSV（离线）
+    python scripts/import_occupations.py                            # O*NET 在线导入（全量刷新）
+    python scripts/import_occupations.py --source hrss              # 人社部样例子集导入
+    python scripts/import_occupations.py --source linkedin          # LinkedIn 样例子集导入
+    python scripts/import_occupations.py --source hrss --no-write   # 仅解析/统计，不写库（冒烟）
+    python scripts/import_occupations.py --csv-dir data/onet        # 使用本地缓存 CSV（离线）
 """
 
 import argparse
@@ -33,6 +44,38 @@ from app.models.business import Occupation
 # O*NET 30.3 官方 CSV 地址（Creative Commons 许可，见 onetcenter.org/license_db.html）
 _OCCUPATION_DATA_URL = "https://www.onetcenter.org/dl_files/database/db_30_3_csv/occupation_data.csv"
 _JOB_TITLES_URL = "https://www.onetcenter.org/dl_files/database/db_30_3_csv/job_titles.csv"
+
+# 人社部《国家职业分类大典（2022版）》数字技术职业内置精简样例子集。
+# 示例数据，仅用于验证三源检索链路；code 与定义以权威文件为准，
+# 正式数据请用 --csv-dir 提供 hrss_occupations.csv 覆盖。
+# 列：code,name,category,definition,aliases（aliases 分号分隔）
+_HRSS_SAMPLE_CSV = """code,name,category,definition,aliases
+2-02-38-01,人工智能工程技术人员,数字技术工程技术人员,从事人工智能相关算法、深度学习技术的分析研究开发，设计优化运维管理和应用人工智能系统,AI工程师;人工智能研发工程师
+2-02-38-03,大数据工程技术人员,数字技术工程技术人员,从事大数据采集、清洗、分析、治理、挖掘及大数据系统规划设计开发和运维,大数据工程师
+2-02-38-04,云计算工程技术人员,数字技术工程技术人员,从事云计算系统架构规划设计开发部署与运维,云计算工程师
+2-02-38-08,区块链工程技术人员,数字技术工程技术人员,从事区块链底层技术架构、共识机制、智能合约及区块链系统开发运维,区块链工程师
+2-02-38-12,数据安全工程技术人员,数字技术工程技术人员,从事数据安全治理、数据全生命周期安全防护及数据安全评估,数据安全工程师
+2-02-30-09,数据分析处理工程技术人员,数字技术工程技术人员,从事数据分析处理系统的设计开发与数据分析应用,数据分析师;数据分析工程师
+2-06-07-13,数字化管理师,数字技术相关管理人员,利用数字化技术将业务流程与数字化工具结合以提升管理效能,数字化运营;数字化转型顾问
+4-04-04-04,信息安全测试员,数字技术应用与服务人员,对信息系统与网络开展安全测试、漏洞挖掘与风险评估,渗透测试工程师;安全测试工程师
+2-02-10-03,计算机软件工程技术人员,数字技术工程技术人员,从事计算机软件的设计开发测试维护与技术服务,软件工程师;软件开发工程师
+2-02-10-07,信息安全工程技术人员,数字技术工程技术人员,从事信息安全系统的规划设计集成运维与风险评估,信息安全工程师
+"""
+
+# LinkedIn Emerging Jobs 年度报告核心新兴岗位内置精简样例子集。
+# 示例数据，仅用于验证三源检索链路；正式数据请用 --csv-dir 提供 linkedin_occupations.csv 覆盖。
+_LINKEDIN_SAMPLE_CSV = """code,name,category,definition,aliases
+LI-0001,AI Engineer,Artificial Intelligence,Designs and deploys AI/LLM solutions including RAG pipelines agent systems and model tuning,AI工程师;人工智能工程师
+LI-0002,Machine Learning Engineer,Artificial Intelligence,Builds and maintains ML models and MLOps pipelines for production,机器学习工程师
+LI-0003,Data Engineer,Data Infrastructure,Designs data pipelines warehouses and streaming infrastructure,数据工程师
+LI-0004,Cloud Engineer,Cloud Infrastructure,Architects and operates multi-cloud platforms and CI/CD infrastructure,云计算工程师;云平台工程师
+LI-0005,MLOps Engineer,Machine Learning,Operationalizes ML model lifecycle including deployment monitoring and retraining,MLOps工程师
+LI-0006,RAG Engineer,Generative AI,Develops retrieval-augmented generation systems and vector-based knowledge retrieval,检索增强生成工程师;RAG开发工程师
+LI-0007,AI Agent Engineer,Generative AI,Builds LLM-powered autonomous agents and orchestration workflows,智能体工程师;AI Agent开发
+LI-0008,Generative AI Engineer,Generative AI,Designs generative model applications for content and code generation,AIGC工程师;生成式AI工程师
+LI-0009,Cybersecurity Specialist,Cybersecurity,Protects systems against cyber threats and manages incident response,网络安全专家;信息安全专家
+LI-0010,Data Scientist,Data Science,Analyzes data to derive insights and build predictive models,数据科学家
+"""
 
 # SOC major group（前两位代码 → 大类名，用于 category 字段）
 _SOC_MAJOR_GROUPS = {
@@ -83,6 +126,21 @@ def _parse_rows(handle: io.StringIO, expected: int) -> list[list[str]]:
     return rows
 
 
+def _parse_sample_csv(text: str) -> list[list[str]]:
+    """解析内置样例子集 CSV（首行为表头，跳过 # 注释行与空行）。"""
+    reader = csv.reader(io.StringIO(text))
+    next(reader, None)  # 表头
+    return [
+        row for row in reader
+        if row and row[0].strip() and not row[0].lstrip().startswith("#")
+    ]
+
+
+def _parse_aliases(cell: str) -> list[str]:
+    """解析别名列（分号分隔）。"""
+    return [a.strip() for a in (cell or "").split(";") if a.strip()]
+
+
 def _load_occupation_data(csv_dir: Path | None) -> list[list[str]]:
     """加载 Occupation Data（code, title, description）。优先本地缓存，否则在线下载。"""
     if csv_dir is not None:
@@ -115,7 +173,48 @@ def _load_job_titles(csv_dir: Path | None) -> dict[str, list[str]]:
     return dict(aliases)
 
 
-async def _upsert(session, code: str, name: str, category: str, definition: str, aliases: list[str]) -> bool:
+def _load_source_rows(source: str, csv_dir: Path | None) -> list[tuple[str, str, str, str, list[str]]]:
+    """加载指定来源岗位数据（code, name, category, definition, aliases）。
+
+    onet 沿用 O*NET 官方 CSV（occupation_data + job_titles）；
+    hrss/linkedin 优先读取本地 <source>_occupations.csv（--csv-dir 提供），
+    缺省使用内置精简样例子集（示例数据，正式以权威文件为准）。
+    """
+    if source == "onet":
+        occupation_rows = _load_occupation_data(csv_dir)
+        alias_map = _load_job_titles(csv_dir)
+        return [
+            (
+                r[0].strip(),
+                r[1].strip(),
+                _category_for(r[0].strip()),
+                r[2].strip() if len(r) > 2 else "",
+                alias_map.get(r[0].strip(), []),
+            )
+            for r in occupation_rows
+        ]
+    if csv_dir is not None:
+        path = csv_dir / f"{source}_occupations.csv"
+        if not path.exists():
+            raise FileNotFoundError(f"本地 CSV 不存在: {path}")
+        text = path.read_text(encoding="utf-8")
+    else:
+        text = _HRSS_SAMPLE_CSV if source == "hrss" else _LINKEDIN_SAMPLE_CSV
+    return [
+        (
+            r[0].strip(),
+            r[1].strip(),
+            r[2].strip() if len(r) > 2 else "",
+            r[3].strip() if len(r) > 3 else "",
+            _parse_aliases(r[4] if len(r) > 4 else ""),
+        )
+        for r in _parse_sample_csv(text)
+    ]
+
+
+async def _upsert(
+    session, code: str, name: str, category: str, definition: str, aliases: list[str], source: str
+) -> bool:
     """按 code upsert 单条记录，返回是否新建。"""
     existing = await session.scalar(select(Occupation).where(Occupation.code == code))
     if existing is None:
@@ -126,7 +225,7 @@ async def _upsert(session, code: str, name: str, category: str, definition: str,
                 category=category,
                 definition=definition,
                 aliases=aliases,
-                source="onet",
+                source=source,
             )
         )
         return True
@@ -134,6 +233,7 @@ async def _upsert(session, code: str, name: str, category: str, definition: str,
     existing.category = category
     existing.definition = definition
     existing.aliases = aliases
+    existing.source = source
     return False
 
 
@@ -203,21 +303,17 @@ async def _sync_neo4j(session) -> int:
     return len(rows)
 
 
-async def main(write: bool, csv_dir: Path | None) -> None:
-    occupation_rows = _load_occupation_data(csv_dir)
-    alias_map = _load_job_titles(csv_dir)
-    print(f"Occupation Data {len(occupation_rows)} 条 | Job Titles 别名 {sum(len(v) for v in alias_map.values())} 条")
+async def main(write: bool, csv_dir: Path | None, source: str) -> None:
+    rows = _load_source_rows(source, csv_dir)
+    alias_total = sum(len(aliases) for _, _, _, _, aliases in rows)
+    print(f"来源 {source}: 岗位 {len(rows)} 条 | 别名 {alias_total} 条")
 
     created = updated = 0
     async with async_session_factory() as session:
-        for row in occupation_rows:
-            code, name = row[0].strip(), row[1].strip()
-            definition = row[2].strip() if len(row) > 2 else ""
-            category = _category_for(code)
-            aliases = alias_map.get(code, [])
+        for code, name, category, definition, aliases in rows:
             if not write:
                 continue
-            is_new = await _upsert(session, code, name, category, definition, aliases)
+            is_new = await _upsert(session, code, name, category, definition, aliases, source)
             created += is_new
             updated += not is_new
         if write:
@@ -229,20 +325,26 @@ async def main(write: bool, csv_dir: Path | None) -> None:
     print(f"导入完成: 新建 {created} / 更新 {updated} | 总量 {created + updated}")
 
     # 双路检索索引同步（T-06）：向量（语义路）+ Neo4j 全文（关键词路）
+    # 全量刷新（occupations 表整体重算向量/重写节点，覆盖三源）
     async with async_session_factory() as session:
         vec_count = await _fill_embeddings(session)
         neo4j_count = await _sync_neo4j(session)
     print(f"索引同步: pgvector 向量 {vec_count} 条 | Neo4j Occupation 节点 {neo4j_count} 个")
 
-    # 抽样展示 IT 大类（15/17）数据，便于人工核验
-    sample = [r for r in occupation_rows if r[0].startswith(("15-", "17-"))][:5]
-    for row in sample:
-        print(f"  {row[0]} | {row[1]} | aliases={alias_map.get(row[0].strip(), [])[:3]}")
+    # 抽样展示本次导入数据，便于人工核验
+    for code, name, *_ in rows[:5]:
+        print(f"  {code} | {name}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="导入 O*NET 权威岗位库")
-    parser.add_argument("--no-write", action="store_true", help="仅下载解析，不写库")
+    parser = argparse.ArgumentParser(description="导入权威岗位库（三源）")
+    parser.add_argument(
+        "--source",
+        choices=("onet", "hrss", "linkedin"),
+        default="onet",
+        help="导入来源：onet（O*NET 官方 CSV）/ hrss（人社部大典）/ linkedin（LinkedIn Emerging Jobs）",
+    )
+    parser.add_argument("--no-write", action="store_true", help="仅解析，不写库（冒烟）")
     parser.add_argument("--csv-dir", type=Path, default=None, help="本地 CSV 目录（离线模式）")
     args = parser.parse_args()
-    asyncio.run(main(write=not args.no_write, csv_dir=args.csv_dir))
+    asyncio.run(main(write=not args.no_write, csv_dir=args.csv_dir, source=args.source))

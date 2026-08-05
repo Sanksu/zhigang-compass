@@ -45,6 +45,7 @@ class TestExtract:
         out = ResumeExtractor(llm=fake).extract("这是一份足够长的简历文本，用于验证抽取流程")
         assert fake.calls == 1
         assert [s.name for s in out.skills] == ["Python"]  # "金融" 被黑名单剔除
+        assert out.skills[0].unmapped is False  # 白名单技能不标记 unmapped
         assert out.projects[0].name == "推荐系统"
 
     def test_llm_path_normalizes_skills(self):
@@ -59,8 +60,22 @@ class TestExtract:
         )
         out = ResumeExtractor(llm=_FakeLLM(raw)).extract("这是一份足够长的简历文本，用于验证抽取流程")
         assert [s.name for s in out.skills] == ["Go", "Spring Boot", "Vue.js"]
-        # 归一化后保留首次熟练度
+        # 归一化后保留首次熟练度；白名单标准名不标记 unmapped
         assert out.skills[0].proficiency == 3
+        assert all(not s.unmapped for s in out.skills)
+
+    def test_non_whitelist_skill_kept_with_unmapped_flag(self):
+        """白名单外的长尾技能保留但标记 unmapped（设计文档 8.4 走人工确认）。"""
+        raw = ResumeExtractionResult(skills=[ResumeSkill(name="数据仓库", proficiency=2)])
+        out = ResumeExtractor(llm=_FakeLLM(raw)).extract("这是一份足够长的简历文本，用于验证抽取流程")
+        assert [s.name for s in out.skills] == ["数据仓库"]
+        assert out.skills[0].unmapped is True
+
+    def test_stopword_skill_never_revived_by_unmapped(self):
+        """黑名单词（行业/业务领域）仍被剔除，不因 unmapped 机制复活。"""
+        raw = ResumeExtractionResult(skills=[ResumeSkill(name="金融", proficiency=2)])
+        out = ResumeExtractor(llm=_FakeLLM(raw)).extract("这是一份足够长的简历文本，用于验证抽取流程")
+        assert out.skills == []
 
     def test_llm_failure_falls_back_to_rule_based(self):
         extractor = ResumeExtractor(llm=_FailingLLM())

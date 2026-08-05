@@ -19,6 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from arq.connections import RedisSettings
+from arq.cron import cron
 
 from app.core.config import settings
 
@@ -1183,11 +1184,18 @@ async def discovery_daily(ctx: dict) -> dict:
     async with async_session_factory() as session:
         for cand in candidates:
             c = await detector.ground_with_rag(cand, session, llm=llm)
-            # 置信度：冷启动样本下用来源多样性近似（无历史 Z-score 时 base 恒 0）
+            # 置信度：jd_count/source_diversity 来自候选特征，
+            # growth_rate 用快照窗口重建的环比增长率（§7.2.4 三维加权公式）
             conf = compute_confidence(
                 jd_count=int(cand.features.jd_freq_ma3),
                 source_count=cand.features.source_diversity,
-                growth_rate=0.0,
+                growth_rate=growth_by_position.get(cand.position_name, 0.0),
+                # 学术/社区异常信号待 M4 数据管线接通：DiscoveryFeatures 的
+                # arxiv_paper_count/github_star_velocity 目前无上游填充
+                # （arxiv/github 爬虫数据仅入技术热点观察池，未关联 jd_raw），
+                # 不凭空造数据源，保持 False（对应 test_cases.md TC-PD-05）
+                arxiv_anomaly=False,
+                github_anomaly=False,
             )
             c = c.model_copy(update={"confidence": conf})
             grounded.append(c)
@@ -1349,6 +1357,26 @@ async def _upsert_candidate(session, cand) -> None:
 # ARQ Worker 注册
 # ============================================================
 
+async def check_llm_providers_health(ctx: dict) -> dict:
+    """LLM provider 健康检查（设计文档 §6.5：每 5min 调 /models 端点）。
+
+    遍历 enabled provider 探测 /models 可用性，结果写 Redis（llm:health:{name}），
+    供调用链展示/运维排查。配置缺失（无 yaml）时跳过并返回原因，不触发
+    ARQ 重试；单 provider 探测失败仅记 unhealthy，由熔断/退避机制在调用侧兜底。
+    """
+    from app.services.extraction.llm_provider import (
+        LLMConfigurationError,
+        health_check_all,
+    )
+
+    try:
+        checked = health_check_all()
+    except LLMConfigurationError as e:
+        return {"status": "skipped", "reason": str(e)}
+    print(f"[check_llm_providers_health] {checked}", flush=True)
+    return {"status": "ok", "healthy": checked}
+
+
 async def on_startup(ctx: dict) -> None:
     """Worker 启动钩子。"""
     print(f"[ARQ Worker] 启动，PID={ctx.get('worker_pid')}")
@@ -1382,6 +1410,7 @@ class WorkerSettings:
         discovery_auto_transition,
         snapshot_graph,
         evolution_compute,
+        check_llm_providers_health,
     ]
     on_startup = on_startup
     on_shutdown = on_shutdown
@@ -1390,3 +1419,12 @@ class WorkerSettings:
     job_timeout = settings.arq_job_timeout
     max_retries = 2
     retry_delay = 10
+    # 定时任务（设计文档 §6.5）：每 5min 探测 provider 健康并写 Redis；
+    # run_at_startup 让 worker 启动即跑一次，快速发现不可用 provider
+    cron_jobs = [
+        cron(
+            check_llm_providers_health,
+            minute=set(range(0, 60, 5)),
+            run_at_startup=True,
+        ),
+    ]

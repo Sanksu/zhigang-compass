@@ -22,33 +22,43 @@ class TestHealth:
 
 
 class TestGraph:
-    def test_panorama_returns_nodes_and_edges(self, client: httpx.Client):
+    def test_panorama_returns_nodes_and_edges(self, client: httpx.Client, auth_headers):
         """全景：真实 Neo4j 有 Position/REQUIRES 数据，节点与边非空。"""
-        r = client.get("/api/v1/graph/panorama", params={"limit": 50})
+        import pytest
+
+        if not auth_headers:
+            pytest.skip("admin 登录失败（库已初始化且密码非默认），跳过认证用例")
+        r = client.get("/api/v1/graph/panorama", params={"limit": 50}, headers=auth_headers)
         assert r.status_code == 200
         data = r.json()["data"]
         assert data["stats"]["nodes"] > 0
         assert data["stats"]["edges"] > 0
 
-    def test_fulltext_search_position(self, client: httpx.Client):
+    def test_fulltext_search_position(self, client: httpx.Client, auth_headers):
         """全文检索：真实库 717 JD 入图，搜"算法"应有结果。"""
-        r = client.get("/api/v1/graph/search", params={"q": "算法", "type": "position"})
+        import pytest
+
+        if not auth_headers:
+            pytest.skip("admin 登录失败（库已初始化且密码非默认），跳过认证用例")
+        r = client.get("/api/v1/graph/search", params={"q": "算法", "type": "position"}, headers=auth_headers)
         assert r.status_code == 200
         data = r.json()["data"]
         assert data["total"] >= 0
         assert all(isinstance(i["id"], str) for i in data["items"])
 
-    def test_skill_prerequisites_structure(self, client: httpx.Client):
+    def test_skill_prerequisites_structure(self, client: httpx.Client, auth_headers):
         """技能先修链：先取一个真实技能节点，验证拓扑链结构合法。"""
-        pano = client.get("/api/v1/graph/panorama", params={"limit": 100}).json()["data"]
+        import pytest
+
+        if not auth_headers:
+            pytest.skip("admin 登录失败（库已初始化且密码非默认），跳过认证用例")
+        pano = client.get("/api/v1/graph/panorama", params={"limit": 100}, headers=auth_headers).json()["data"]
         skill_id = next(
             (n["id"] for n in pano["nodes"] if n["type"] == "skill"), None
         )
         if skill_id is None:
-            import pytest
-
             pytest.skip("图谱无技能节点，跳过先修链用例")
-        r = client.get(f"/api/v1/graph/skill/{skill_id}/prerequisites")
+        r = client.get(f"/api/v1/graph/skill/{skill_id}/prerequisites", headers=auth_headers)
         assert r.status_code == 200
         data = r.json()["data"]
         assert data["skill_id"] == skill_id
@@ -56,17 +66,19 @@ class TestGraph:
         depths = [p["depth"] for p in data["prerequisites"]]
         assert depths == sorted(depths)
 
-    def test_skill_courses_structure(self, client: httpx.Client):
+    def test_skill_courses_structure(self, client: httpx.Client, auth_headers):
         """技能课程：LEARNABLE_VIA 无课程时返回空列表（不视为失败）。"""
-        pano = client.get("/api/v1/graph/panorama", params={"limit": 100}).json()["data"]
+        import pytest
+
+        if not auth_headers:
+            pytest.skip("admin 登录失败（库已初始化且密码非默认），跳过认证用例")
+        pano = client.get("/api/v1/graph/panorama", params={"limit": 100}, headers=auth_headers).json()["data"]
         skill_id = next(
             (n["id"] for n in pano["nodes"] if n["type"] == "skill"), None
         )
         if skill_id is None:
-            import pytest
-
             pytest.skip("图谱无技能节点，跳过课程用例")
-        r = client.get(f"/api/v1/graph/skill/{skill_id}/courses")
+        r = client.get(f"/api/v1/graph/skill/{skill_id}/courses", headers=auth_headers)
         assert r.status_code == 200
         assert isinstance(r.json()["data"]["courses"], list)
 
@@ -94,9 +106,13 @@ class TestMatch:
 
 
 class TestEvolution:
-    def test_versions_list(self, client: httpx.Client):
+    def test_versions_list(self, client: httpx.Client, auth_headers):
         """版本列表：真实 graph_versions 有 2 快照，分页结构合法。"""
-        r = client.get("/api/v1/evolution/versions")
+        import pytest
+
+        if not auth_headers:
+            pytest.skip("admin 登录失败（库已初始化且密码非默认），跳过认证用例")
+        r = client.get("/api/v1/evolution/versions", headers=auth_headers)
         assert r.status_code == 200
         data = r.json()["data"]
         assert data["total"] >= 0

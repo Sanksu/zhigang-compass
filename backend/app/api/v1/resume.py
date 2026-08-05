@@ -1,7 +1,8 @@
 """简历路由：上传、解析任务、任务状态轮询、SSE 推送、编辑。
 
 上传链路：文件 → SHA256 去重（命中 resume_cache 直接复用）→ 落盘 uploads/
-→ 创建 TaskStatus → 入队 ARQ resume_parse 任务（PII 脱敏在任务内完成）。
+→ 原始文件字节落库 resume_files（仅上传者本人可下载）→ 创建 TaskStatus
+→ 入队 ARQ resume_parse 任务（PII 脱敏在任务内完成）。
 """
 
 import asyncio
@@ -9,17 +10,17 @@ import hashlib
 import json
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
-from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from fastapi.responses import Response, StreamingResponse
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
 from app.core.config import settings
 from app.core.database import async_session_factory, get_db
-from app.models.business import AuditLog, ResumeCache, TaskStatus
+from app.models.business import AuditLog, ResumeCache, ResumeFile, TaskStatus
 from app.schemas.common import ok, error
 
 router = APIRouter()
@@ -55,6 +56,33 @@ async def _enqueue_resume_parse(file_path: str, task_id: str) -> None:
         await pool.enqueue_job("resume_parse", file_path=file_path, task_id=task_id)
     finally:
         await pool.close()
+
+
+async def _persist_resume_file(
+    db: AsyncSession,
+    *,
+    resume_id: str,
+    user_id: str,
+    file_hash: str,
+    file_name: str,
+    content_type: str,
+    content: bytes,
+) -> None:
+    """简历原始文件落库（设计文档 §8.1：resume_files 留存，仅上传者本人可下载）。
+
+    上传时同步写行（命中解析缓存的分支不写），删除简历时联动删除。
+    """
+    db.add(
+        ResumeFile(
+            resume_id=resume_id,
+            user_id=user_id,
+            file_hash=file_hash,
+            file_name=file_name,
+            content_type=content_type,
+            content=content,
+            file_size=len(content),
+        )
+    )
 
 
 @router.get("/list")
@@ -131,6 +159,18 @@ async def parse_resume(
         },
     )
     db.add(task)
+    await db.flush()  # 先落 task 拿 id，作为 resume_files.resume_id（前端 resume_id 即任务 id）
+
+    # 原始文件字节落库（§8.1：仅上传者本人可下载），与任务同事务提交保证原子性
+    await _persist_resume_file(
+        db,
+        resume_id=str(task.id),
+        user_id=user.get("sub", ""),
+        file_hash=file_hash,
+        file_name=file.filename or "",
+        content_type=file.content_type or "",
+        content=content,
+    )
     await db.commit()
     await db.refresh(task)
 
@@ -153,7 +193,7 @@ async def task_status(task_id: str, db: AsyncSession = Depends(get_db), user: di
         return error(400, "task_id 格式非法")
     task = await db.get(TaskStatus, task_uuid)
     if task is None:
-        return error(404, "任务不存在")
+        return error(4040, "任务不存在", http_status=404)
     return ok(data={
         "task_id": task.id,
         "task_type": task.task_type,
@@ -235,7 +275,7 @@ async def get_resume(resume_id: str, db: AsyncSession = Depends(get_db), user: d
         return error(400, "resume_id 格式非法")
     resume = await db.get(ResumeCache, rid)
     if resume is None:
-        return error(404, "简历不存在")
+        return error(4040, "简历不存在", http_status=404)
     return ok(data={
         "id": resume.id,
         "file_name": resume.file_name,
@@ -264,7 +304,7 @@ async def update_resume(
         return error(400, "resume_id 格式非法")
     resume = await db.get(ResumeCache, rid)
     if resume is None:
-        return error(404, "简历不存在")
+        return error(4040, "简历不存在", http_status=404)
 
     fields = req.get("fields")
     if not isinstance(fields, dict) or not fields:
@@ -324,7 +364,10 @@ async def delete_resume(resume_id: str, db: AsyncSession = Depends(get_db), user
         return error(400, "resume_id 格式非法")
     resume = await db.get(ResumeCache, rid)
     if resume is None:
-        return error(404, "简历不存在")
+        return error(4040, "简历不存在", http_status=404)
+
+    # 删除落库原始文件（§8.1：resume_files 与简历记录联动删除）
+    await db.execute(delete(ResumeFile).where(ResumeFile.resume_id == rid))
 
     # 删除落盘文件（uploads/{file_hash}{suffix}），文件缺失不阻塞删除
     for f in _UPLOAD_DIR.glob(f"{resume.file_hash}.*"):
@@ -336,3 +379,46 @@ async def delete_resume(resume_id: str, db: AsyncSession = Depends(get_db), user
     await db.delete(resume)
     await db.commit()
     return ok(data={"deleted": True})
+
+
+async def _fetch_resume_file(db: AsyncSession, resume_id: str) -> ResumeFile | None:
+    """按 resume_id 查询原始文件行（resume_id 已校验为 UUID）。"""
+    return await db.scalar(select(ResumeFile).where(ResumeFile.resume_id == resume_id))
+
+
+def _download_disposition(filename: str) -> str:
+    """下载响应 Content-Disposition（与 starlette FileResponse 同格式）。
+
+    非 ASCII 文件名走 RFC 5987 filename*（引号内无法安全放中文/空格）。
+    """
+    quoted = quote(filename)
+    if quoted == filename:
+        return f'attachment; filename="{filename}"'
+    return f"attachment; filename*=utf-8''{quoted}"
+
+
+@router.get("/files/{resume_id}/download")
+async def download_resume_file(
+    resume_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
+):
+    """下载简历原始文件（设计文档 §8.1：仅上传者本人可下载，管理员无权访问原文）。
+
+    文件字节从 resume_files 表读取（DB 留存），不依赖 uploads/ 落盘文件。
+    注：starlette 1.3.1 的 FileResponse 仅支持真实文件路径，DB 字节下载用
+    Response + 同格式 Content-Disposition 实现同等语义。
+    """
+    rid = _parse_resume_id(resume_id)
+    if rid is None:
+        return error(400, "resume_id 格式非法")
+    row = await _fetch_resume_file(db, rid)
+    if row is None:
+        return error(4040, "简历文件不存在", http_status=404)
+    if row.user_id != user.get("sub", ""):
+        return error(4030, "无权下载该简历文件", http_status=403)
+    return Response(
+        content=row.content,
+        media_type=row.content_type or "application/octet-stream",
+        headers={"Content-Disposition": _download_disposition(row.file_name)},
+    )

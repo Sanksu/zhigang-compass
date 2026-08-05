@@ -23,9 +23,10 @@ from app.api.deps import require_permission
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import hash_password
-from app.models.business import AuditLog, TaskStatus, User
+from app.models.business import AuditLog, RejectedChange, TaskStatus, User
 from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
 from app.schemas.common import ok, error
+from app.services.kg.id_generator import next_id
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_permission("admin:*"))])
 
@@ -113,7 +114,7 @@ async def update_user(
     """更新用户角色 / 启用状态（M6 自保护：不可降级/禁用自己）。"""
     user = await db.get(User, user_id)
     if user is None:
-        return error(404, "用户不存在")
+        return error(4040, "用户不存在", http_status=404)
     # 自保护：当前登录管理员不允许降级自己的角色或禁用自己，避免后台锁死
     if user_id == current_user.get("sub"):
         if req.get("status") is not None and req["status"] != "active":
@@ -505,6 +506,18 @@ def _history_row(task) -> dict:
 # 岗位审核（AL-M4-01 新岗位发现：候选池 pending 列表 + 审核流转）
 # ============================================================
 
+async def _persist_rejected_change(
+    db: AsyncSession, position_name: str, change_type: str, reason: str
+) -> None:
+    """审核驳回变更落库（§11.4.1 rejected_changes：驳回可追溯）。"""
+    db.add(
+        RejectedChange(
+            position_name=position_name, change_type=change_type, reason=reason
+        )
+    )
+    await db.commit()
+
+
 @router.get("/positions/pending")
 async def positions_pending(
     state: str | None = Query(default=None, pattern="^(candidate|emerging|stable|declining)$"),
@@ -578,7 +591,7 @@ async def review_position(
 
     cand_row = await db.get(DiscoveryCandidate, candidate_id)
     if cand_row is None:
-        return error(404, "候选岗位不存在")
+        return error(4040, "候选岗位不存在", http_status=404)
     if cand_row.state != "candidate":
         return error(409, f"候选岗位当前状态 {cand_row.state}，不可审核")
 
@@ -615,6 +628,9 @@ async def review_position(
         )
 
     cand_row.state = updated.state.value
+    if action == "reject":
+        # 审核驳回变更落库（§11.4.1 rejected_changes），驳回可追溯
+        await _persist_rejected_change(db, cand_row.position_name, "discovery_reject", reason)
     await db.commit()
 
     return ok(
@@ -699,7 +715,7 @@ async def review_evolution(
 
     cand_row = await db.get(DiscoveryCandidate, candidate_id)
     if cand_row is None:
-        return error(404, "候选岗位不存在")
+        return error(4040, "候选岗位不存在", http_status=404)
     if cand_row.state != "emerging":
         return error(409, f"候选岗位当前状态 {cand_row.state}，仅 emerging 可执行演化审核")
 
@@ -805,7 +821,7 @@ async def archive_position(
 
     cand_row = await db.get(DiscoveryCandidate, candidate_id)
     if cand_row is None:
-        return error(404, "候选岗位不存在")
+        return error(4040, "候选岗位不存在", http_status=404)
     if cand_row.state != "declining":
         return error(409, f"候选岗位当前状态 {cand_row.state}，仅 declining 可归档")
 
@@ -840,6 +856,266 @@ async def archive_position(
             "state": cand_row.state,
         },
         msg=f"已归档（终态）: {cand_row.position_name}",
+    )
+
+
+# ============================================================
+# 岗位人工编辑（设计文档 12.2：审核员直接编辑岗位定义，改动写 PositionEditLog）
+# ============================================================
+
+# 技能权重默认值：图谱 REQUIRES 关系未持久化 weight 时按 1.0 展示（与 match.py 同口径）
+DEFAULT_SKILL_WEIGHT = 1.0
+NECESSITY_WHITELIST = ("must", "nice")
+
+
+def validate_position_edit(skills, core_duties, scenarios) -> str | None:
+    """校验岗位编辑请求，返回错误信息或 None。
+
+    约束：skills 每项 name 非空、necessity ∈ {must, nice}、weight ∈ [0.0, 1.0]；
+    core_duties/scenarios 提供时必须是字符串数组。
+    """
+    if skills is not None:
+        if not isinstance(skills, list):
+            return "skills 必须是数组"
+        for i, s in enumerate(skills):
+            if not isinstance(s, dict):
+                return f"skills[{i}] 必须是对象"
+            name = (s.get("name") or "").strip()
+            if not name:
+                return f"skills[{i}] 缺少 name"
+            if s.get("necessity") not in NECESSITY_WHITELIST:
+                return f"技能 '{name}' 的 necessity 必须为 must 或 nice"
+            weight = s.get("weight")
+            if (
+                isinstance(weight, bool)
+                or not isinstance(weight, (int, float))
+                or not 0.0 <= weight <= 1.0
+            ):
+                return f"技能 '{name}' 的 weight 必须在 0.0-1.0 之间"
+    for field, value in (("core_duties", core_duties), ("scenarios", scenarios)):
+        if value is not None and (
+            not isinstance(value, list) or not all(isinstance(x, str) for x in value)
+        ):
+            return f"{field} 必须是字符串数组"
+    return None
+
+
+def position_edit_diff(current: dict, skills, core_duties, scenarios) -> str:
+    """生成编辑 diff 摘要（如 'skills +A/B, ~C, -D; core_duties 更新'）。
+
+    技能按 name 对比：+ 新增、~ 变更（necessity/weight）、- 移除；
+    文本字段实际变化时以 '字段名 更新' 追加。无变更返回空串。
+    """
+    parts = []
+    if skills is not None:
+        current_skills = {s["name"]: s for s in current["skills"]}
+        new_skills = {s["name"]: s for s in skills}
+        added = sorted(set(new_skills) - set(current_skills))
+        removed = sorted(set(current_skills) - set(new_skills))
+        updated = sorted(
+            n
+            for n in set(current_skills) & set(new_skills)
+            if (current_skills[n]["necessity"], current_skills[n]["weight"])
+            != (new_skills[n]["necessity"], new_skills[n]["weight"])
+        )
+        if added or removed or updated:
+            ops = []
+            if added:
+                ops.append("+" + "/".join(added))
+            if updated:
+                ops.append("~" + "/".join(updated))
+            if removed:
+                ops.append("-" + "/".join(removed))
+            parts.append("skills " + ", ".join(ops))
+    if core_duties is not None and core_duties != current.get("core_duties", []):
+        parts.append("core_duties 更新")
+    if scenarios is not None and scenarios != current.get("scenarios", []):
+        parts.append("scenarios 更新")
+    return "; ".join(parts)
+
+
+def _get_position_detail_tx(tx, position_name: str) -> dict | None:
+    """读岗位详情（Position 属性 + REQUIRES 技能/学历/证书），岗位不存在返回 None。"""
+    pos = tx.run(
+        """
+        MATCH (p:Position {name: $name})
+        RETURN p.id AS id, p.name AS name, p.level AS level, p.industry AS industry,
+               p.salary_range AS salary_range, p.status AS status,
+               p.core_duties AS core_duties, p.scenarios AS scenarios,
+               p.created_at AS created_at, p.updated_at AS updated_at
+        """,
+        name=position_name,
+    ).single()
+    if pos is None:
+        return None
+
+    detail = {
+        "id": pos["id"],
+        "name": pos["name"],
+        "level": pos["level"] or "",
+        "industry": pos["industry"] or "",
+        "salary_range": pos["salary_range"] or "",
+        "status": pos["status"] or "",
+        "core_duties": pos["core_duties"] or [],
+        "scenarios": pos["scenarios"] or [],
+        "created_at": pos["created_at"] or "",
+        "updated_at": pos["updated_at"] or "",
+        "skills": [],
+        "education": [],
+        "certifications": [],
+    }
+    for rec in tx.run(
+        """
+        MATCH (p:Position {name: $name})-[r:REQUIRES]->(target)
+        WHERE target:Skill OR target:Education OR target:Certification
+        RETURN CASE
+                   WHEN target:Skill THEN 'skill'
+                   WHEN target:Education THEN 'education'
+                   WHEN target:Certification THEN 'certification'
+               END AS kind,
+               target.name AS name, r.necessity AS necessity,
+               r.weight AS weight, r.level AS level
+        """,
+        name=position_name,
+    ):
+        entry = {
+            "name": rec["name"],
+            "necessity": rec["necessity"],
+            "level": rec["level"] or "",
+        }
+        if rec["kind"] == "skill":
+            weight = rec["weight"]
+            entry["weight"] = float(weight if weight is not None else DEFAULT_SKILL_WEIGHT)
+            detail["skills"].append(entry)
+        elif rec["kind"] == "education":
+            detail["education"].append(entry)
+        else:
+            detail["certifications"].append(entry)
+    return detail
+
+
+def _edit_position_tx(tx, position_name, editor_id, skills, core_duties, scenarios) -> dict:
+    """执行岗位编辑（技能全量替换 + 文本字段更新），有实际变更时写 PositionEditLog。
+
+    Returns:
+        {"exists": bool, "updated": bool, "diff_summary": str}；
+        exists=False 表示岗位不存在（不做任何写入）。
+    """
+    current = _get_position_detail_tx(tx, position_name)
+    if current is None:
+        return {"exists": False, "updated": False, "diff_summary": ""}
+
+    diff_summary = position_edit_diff(current, skills, core_duties, scenarios)
+    if not diff_summary:
+        return {"exists": True, "updated": False, "diff_summary": ""}
+
+    now = datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
+    if skills is not None:
+        # 全量替换：逐个 MERGE Skill 节点 + REQUIRES 关系并 SET necessity/weight，
+        # 新增与更新幂等合一；仅删关系的技能不删节点（Skill 可被其他岗位复用）
+        for s in skills:
+            tx.run(
+                """
+                MATCH (p:Position {name: $position_name})
+                MERGE (sk:Skill {name: $skill_name})
+                MERGE (p)-[r:REQUIRES]->(sk)
+                SET r.necessity = $necessity, r.weight = $weight
+                """,
+                position_name=position_name,
+                skill_name=s["name"],
+                necessity=s["necessity"],
+                weight=s["weight"],
+            )
+        current_names = {s["name"] for s in current["skills"]}
+        new_names = {s["name"] for s in skills}
+        for name in sorted(current_names - new_names):
+            tx.run(
+                """
+                MATCH (p:Position {name: $position_name})-[r:REQUIRES]->(sk:Skill {name: $skill_name})
+                DELETE r
+                """,
+                position_name=position_name,
+                skill_name=name,
+            )
+
+    # 文本字段按提供项动态 SET（字段名来自固定白名单，无注入面）
+    set_clauses = ["p.updated_at = $now"]
+    params = {"name": position_name, "now": now}
+    if core_duties is not None:
+        set_clauses.append("p.core_duties = $core_duties")
+        params["core_duties"] = core_duties
+    if scenarios is not None:
+        set_clauses.append("p.scenarios = $scenarios")
+        params["scenarios"] = scenarios
+    tx.run(f"MATCH (p:Position {{name: $name}}) SET {', '.join(set_clauses)}", **params)
+
+    # 编辑日志（§12.2：审核员 ID + 时间戳 + diff 摘要，支持版本回溯）
+    tx.run(
+        """
+        CREATE (l:PositionEditLog {
+            id: $id,
+            position_name: $position_name,
+            editor_id: $editor_id,
+            created_at: $created_at,
+            diff_summary: $diff_summary
+        })
+        """,
+        id=next_id(tx, "PositionEditLog"),
+        position_name=position_name,
+        editor_id=editor_id,
+        created_at=now,
+        diff_summary=diff_summary,
+    )
+    return {"exists": True, "updated": True, "diff_summary": diff_summary}
+
+
+@router.get("/positions/{position_name}")
+async def get_position_detail(position_name: str):
+    """岗位详情（§12.2 岗位人工编辑：编辑前查看技能/学历/证书与文本定义）。"""
+    from app.core.database import neo4j_driver
+
+    with neo4j_driver.session() as session:
+        detail = session.execute_read(_get_position_detail_tx, position_name)
+    if detail is None:
+        return error(4040, f"岗位不存在: {position_name}", http_status=404)
+    return ok(data=detail)
+
+
+@router.put("/positions/{position_name}")
+async def update_position_definition(
+    position_name: str,
+    req: dict,
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """人工编辑岗位定义（§12.2），所有实际变更写入 PositionEditLog 节点。
+
+    请求体（均可选，无字段时为空操作返回"无变更"）：
+        skills: 技能列表全量替换，每项 {name, necessity: must|nice, weight: 0.0-1.0}
+        core_duties / scenarios: 字符串数组，更新 Position 节点属性
+    """
+    from app.core.database import neo4j_driver
+
+    skills = req.get("skills")
+    core_duties = req.get("core_duties")
+    scenarios = req.get("scenarios")
+    err = validate_position_edit(skills, core_duties, scenarios)
+    if err:
+        return error(400, err)
+
+    editor_id = current_user.get("sub") or current_user.get("user_id", "admin")
+    with neo4j_driver.session() as session:
+        result = session.execute_write(
+            _edit_position_tx, position_name, editor_id, skills, core_duties, scenarios
+        )
+    if not result["exists"]:
+        return error(4040, f"岗位不存在: {position_name}", http_status=404)
+    return ok(
+        data={
+            "position_name": position_name,
+            "updated": result["updated"],
+            "diff_summary": result["diff_summary"],
+        },
+        msg="无变更" if not result["updated"] else "已保存编辑",
     )
 
 

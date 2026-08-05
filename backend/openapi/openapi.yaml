@@ -434,6 +434,30 @@ paths:
               schema:
                 type: string
 
+  /api/v1/resume/files/{resume_id}/download:
+    get:
+      tags: [resume]
+      summary: 下载简历原始文件（仅上传者本人可下载，admin 无权访问原文）
+      parameters:
+        - name: resume_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 原始文件字节流
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: resume_id 格式非法
+        '403':
+          description: 非本人无权下载
+        '404':
+          description: 简历文件不存在
+
   /api/v1/resume/{resume_id}:
     get:
       tags: [resume]
@@ -918,6 +942,69 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/positions/{position_name}:
+    get:
+      tags: [admin]
+      summary: 岗位详情（人工编辑前查看技能/学历/证书与文本定义）
+      parameters:
+        - name: position_name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 岗位详情（skills 列表 + core_duties/scenarios + education/certifications）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          description: 岗位不存在
+    put:
+      tags: [admin]
+      summary: 人工编辑岗位定义（技能增删/necessity 切换/weight 调整/文本修改），变更写入 PositionEditLog 节点
+      parameters:
+        - name: position_name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                skills:
+                  type: array
+                  description: 技能全量替换（缺省不变更），每项含 name/necessity/weight
+                  items:
+                    type: object
+                    required: [name, necessity, weight]
+                    properties:
+                      name: { type: string, description: 技能名 }
+                      necessity: { type: string, enum: [must, nice] }
+                      weight: { type: number, minimum: 0.0, maximum: 1.0 }
+                core_duties:
+                  type: array
+                  description: 核心职责（字符串数组，全量替换）
+                  items: { type: string }
+                scenarios:
+                  type: array
+                  description: 典型场景（字符串数组，全量替换）
+                  items: { type: string }
+      responses:
+        '200':
+          description: 保存结果（updated/diff_summary）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: 参数不合法（weight 越界 / necessity 非法等）
+        '404':
+          description: 岗位不存在
 
   /api/v1/admin/positions/pending:
     get:
