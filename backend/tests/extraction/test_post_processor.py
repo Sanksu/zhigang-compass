@@ -34,6 +34,12 @@ class TestCleanSkillName:
         assert clean_skill_name("项目管理") == "项目管理"
         assert clean_skill_name("产品设计") == "产品设计"
 
+    def test_microservice_suffix_preserved(self):
+        # 微服务是完整技能词，不能被"服务"后缀剥成"微"（历史 bug 回归测试）
+        assert clean_skill_name("微服务") == "微服务"
+        assert clean_skill_name("微服务架构") == "微服务"
+        assert clean_skill_name("云原生") == "云原生"
+
 
 class TestDedupSkills:
     def test_case_insensitive_dedup_keeps_first(self):

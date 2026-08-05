@@ -31,6 +31,18 @@ class TestSoftSkillWhitelist:
         assert {"团队协作", "沟通能力", "项目管理", "领导力"}.issubset(SOFT_SKILL_WHITELIST)
 
 
+class TestSkillWhitelist:
+    """技能白名单应覆盖高频真实技能（历史审计：SQL/AWS/Azure 等绕过白名单）。"""
+
+    def test_high_freq_real_skills_covered(self):
+        # 图谱审计中白名单外的高频真实技能，必须入白名单
+        assert {"SQL", "AWS", "Azure", "GCP", "Linux", "Tableau", "Agile",
+                "Excel", "NoSQL", "SAS", "ETL", "Snowflake", "DevOps",
+                "Power BI", "RESTful API", "JSON", "API", "JIRA",
+                "Maven", "JUnit", "Hibernate", "Pandas", "Transformer",
+                "AI", "C", "MATLAB"}.issubset(SKILL_WHITELIST)
+
+
 class TestNormalizeSkill:
     def test_alias_case_insensitive(self):
         assert normalize_skill("golang") == "Go"
@@ -42,6 +54,18 @@ class TestNormalizeSkill:
     def test_no_alias_returns_raw(self):
         assert normalize_skill("Python") == "Python"
         assert normalize_skill("  Redis  ") == "Redis"  # 首尾空白去除
+
+    def test_whitelist_case_normalized(self):
+        # 白名单词的大小写变体统一到标准写法（历史数据存在 GO/Matlab/Javascript 等变体）
+        assert normalize_skill("GO") == "Go"
+        assert normalize_skill("go") == "Go"
+        assert normalize_skill("MATLAB") == "MATLAB"
+        assert normalize_skill("matlab") == "MATLAB"
+        assert normalize_skill("Echarts") == "ECharts"
+        assert normalize_skill("Javascript") == "JavaScript"
+        assert normalize_skill("FASTAPI") == "FastAPI"
+        assert normalize_skill("LANGCHAIN") == "LangChain"
+        assert normalize_skill("Hbase") == "HBase"
 
     def test_chinese_alias(self):
         assert normalize_skill("大模型") == "大语言模型"
@@ -104,6 +128,36 @@ class TestNormalizePositionName:
         assert normalize_position_name("技术") == ""
         assert normalize_position_name("开发") == ""
         assert normalize_position_name("工程师") == ""
+
+    def test_internship_filtered(self):
+        # 实习类岗位不入图（招聘形态，非正式岗位族）
+        assert normalize_position_name("财务分析师实习生") == ""
+        assert normalize_position_name("对日开发实习生") == ""
+        assert normalize_position_name("研究实习员") == ""
+        assert normalize_position_name("实习前端开发") == ""
+
+    def test_analyst_scientist_suffix_family(self):
+        # 分析师已拆细分族（方案 C）：财务/业务/量化 等核心词命中细分标准名
+        assert normalize_position_name("财务分析师") == "财务分析师"
+        assert normalize_position_name("业务分析师") == "业务分析师"
+        assert normalize_position_name("量化分析师") == "量化分析师"
+        assert normalize_position_name("信贷政策与决策分析师") == "信贷分析师"
+        assert normalize_position_name("数据建模分析师") == "数据分析师"
+        # 无细分核心词的通用"分析师"兜底保留（原统一族行为）
+        assert normalize_position_name("分析师") == "分析师"
+        # 细分仅对"分析师"结尾生效：非分析师岗位不被误吸
+        assert normalize_position_name("精算师") == "精算师"
+        assert normalize_position_name("量化研究员") == "研究员"
+        assert normalize_position_name("商业智能工程师") == "商业智能"
+        # 科学家族未拆，保持统一族
+        assert normalize_position_name("研究科学家") == "科学家"
+        # 已有细分族优先命中，不受兜底族影响
+        assert normalize_position_name("数据分析师") == "数据分析师"
+
+    def test_trailing_level_word_stripped(self):
+        # 尾部级别词剥离（"DevOps高级" → "DevOps"），与 A 类合并口径一致
+        assert normalize_position_name("DevOps 高级") == "DevOps"
+        assert normalize_position_name("包裹洞察与定价高级") == "包裹洞察与定价"
 
     def test_backend_family(self):
         assert normalize_position_name("后台") == "后端开发工程师"

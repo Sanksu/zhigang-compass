@@ -82,7 +82,13 @@ def merge_positions(session, dry_run: bool) -> dict:
 
     merged = 0
     plans: list[dict] = []
+    empty_nodes: list[str] = []
     for std, members in groups.items():
+        # 空族：岗位名无法归一化（泛词/过滤词），无标准名可合并，直接删除而非
+        # 合并成空名主节点（空名节点会污染聚合与快照）
+        if not std:
+            empty_nodes.extend(m["id"] for m in members)
+            continue
         if len(members) <= 1:
             continue
         members.sort(key=lambda m: m["name"])  # 稳定顺序，首个为主节点
@@ -92,9 +98,12 @@ def merge_positions(session, dry_run: bool) -> dict:
 
     if dry_run:
         return {"duplicate_groups": len(plans), "duplicate_nodes": merged,
-                "samples": plans[:10]}
+                "empty_nodes": len(empty_nodes), "samples": plans[:10]}
 
     with session.begin_transaction() as tx:
+        # 空族节点不保留：无归一化标准名，属于抽取出错/泛词
+        for nid in empty_nodes:
+            tx.run("MATCH (d:Position {id: $nid}) DETACH DELETE d", nid=nid)
         for p in plans:
             for dup in p["dups"]:
                 # 重连 REQUIRES（Position→Skill/Tool）
