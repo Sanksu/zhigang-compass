@@ -9,6 +9,7 @@ import hashlib
 import re
 from datetime import datetime, timezone
 
+from scrapy.exceptions import DropItem
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -24,9 +25,43 @@ _TEXT_FIELDS = (
     "abstract",
 )
 
+# ── 实习/兼职岗位源头过滤 ──
+# 岗位标题或平台标签（job_type 常写入 tags）命中即拦截，不落 jd_raw，
+# 避免下游抽取/聚合处理无效岗位。英文词边界设计：
+#   \bintern(?:ship)?s?\b 不匹配 internal/internet/international；
+#   part[\s_\-]?time 覆盖 part-time / part time / parttime / PART_TIME。
+_EMPLOYMENT_INTERN_RE = re.compile(r"\bintern(?:ship)?s?\b", re.IGNORECASE)
+_EMPLOYMENT_PARTTIME_RE = re.compile(r"\bpart[\s_\-]?time\b", re.IGNORECASE)
+_EMPLOYMENT_INTERN_CN = "实习"    # 含"实习生"
+_EMPLOYMENT_PARTTIME_CN = "兼职"
+
+
+def _employment_reason(item) -> str | None:
+    """实习/兼职岗位的拦截原因；未命中返回 None。
+
+    标题为岗位名，中文"实习/兼职"与英文 intern/part-time 均检查；
+    tags 多为平台 job_type 标签（INTERNSHIP / PART_TIME / parttime），
+    仅查英文词——中文标签（如智联"金融分析大学生实习"）是技能/招聘对象
+    标签而非就业类型，避免误拦截正式岗位。
+    """
+    title = str(item.get("title") or "")
+    tags_text = " ".join(
+        str(t) for t in (item.get("tags") or []) if isinstance(t, str)
+    )
+    if _EMPLOYMENT_INTERN_CN in title or _EMPLOYMENT_INTERN_RE.search(title):
+        return "实习岗位"
+    if _EMPLOYMENT_PARTTIME_CN in title or _EMPLOYMENT_PARTTIME_RE.search(title):
+        return "兼职岗位"
+    # 英文 job_type 标签（中文标签含招聘对象描述，不以此判定）
+    if _EMPLOYMENT_INTERN_RE.search(tags_text):
+        return "实习岗位"
+    if _EMPLOYMENT_PARTTIME_RE.search(tags_text):
+        return "兼职岗位"
+    return None
+
 
 class CleaningPipeline:
-    """基础清洗：去重指纹 + 文本标准化 + 脱敏标记。"""
+    """基础清洗：去重指纹 + 文本标准化 + 脱敏标记 + 实习/兼职岗位源头过滤。"""
 
     # 边界 (?<!\d)/(?!\d) 防止误伤长数字 ID（如 19 位 source_id）中的子串
     PII_PATTERNS = [
@@ -35,13 +70,56 @@ class CleaningPipeline:
         (re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"), "EMAIL"),
     ]
 
+    def __init__(self):
+        self.crawler = None
+        self._filtered_count = 0  # 本次采集拦截的实习/兼职岗位数（close_spider 汇总日志）
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        """scrapy 2.12+ 移除 pipeline 方法中的 spider 参数，经 crawler 访问 spider。"""
+        pipe = cls()
+        pipe.crawler = crawler
+        return pipe
+
+    def _spider(self):
+        return self.crawler.spider if self.crawler is not None else None
+
     def process_item(self, item):
-        # 去重指纹：source + source_id 的 SHA256
+        # 实习/兼职岗位源头拦截：在清洗阶段丢弃（不计算指纹、不落库），
+        # 拦截日志保留 title/company 便于核对误杀
+        if isinstance(item, JobItem):
+            reason = _employment_reason(item)
+            if reason:
+                self._filtered_count += 1
+                spider = self._spider()
+                if spider:
+                    spider.logger.info(
+                        "[岗位过滤] 拦截岗位 原因=%s source=%s title=%r company=%r",
+                        reason,
+                        item.get("source", ""),
+                        item.get("title", ""),
+                        item.get("company", ""),
+                    )
+                raise DropItem(f"{reason}: {item.get('title', '')}")
+
+        # 去重指纹：source + source_id 的 SHA256；source_id 缺失时回退 source_url
+        # （避免不同记录指纹相同且按 (source, source_id) upsert 互相覆盖）
+        if not item.get("source_id"):
+            item["source_id"] = item.get("source_url", "") or item.get("title", "")
         item["_fingerprint"] = hashlib.sha256(
             f"{item.get('source', '')}:{item.get('source_id', '')}".encode()
         ).hexdigest()
 
-        # 语义指纹：JobItem 计算 SimHash（title+company+description），跨平台近似去重用
+        # PII 脱敏：description/requirements/raw_text 均可能含手机/邮箱/身份证，
+        # 对所有招聘源统一脱敏，is_desensitized 标记
+        if isinstance(item, JobItem):
+            for field in ("description", "requirements", "raw_text"):
+                if item.get(field) and isinstance(item.get(field), str):
+                    item[field] = self._desensitize(item[field])
+            item["is_desensitized"] = True
+
+        # 语义指纹：JobItem 计算 SimHash（title+company+description），跨平台近似去重用。
+        # 基于脱敏后文本计算，与落库形态一致。
         # 短文本（仅标题）单 token 变化会导致海明距过大，故包含 description 保证判定稳健
         if isinstance(item, JobItem):
             from app.services.data_quality.simhash import simhash64
@@ -54,12 +132,6 @@ class CleaningPipeline:
                 ]))
             )
 
-        # 脉脉合规脱敏（description 与 raw_text 均含原始文本，需一并清洗）
-        if item.get("source") == "maimai":
-            item["description"] = self._desensitize(item.get("description", ""))
-            item["raw_text"] = self._desensitize(item.get("raw_text", ""))
-            item["is_desensitized"] = True
-
         # 文本标准化：对所有已知文本字段 strip
         for field in _TEXT_FIELDS:
             if item.get(field) and isinstance(item.get(field), str):
@@ -68,6 +140,13 @@ class CleaningPipeline:
             item["raw_text"] = item["raw_text"].strip()
 
         return item
+
+    def close_spider(self):
+        spider = self._spider()
+        if self._filtered_count and spider:
+            spider.logger.info(
+                "[岗位过滤] 本次采集共拦截实习/兼职岗位 %d 条", self._filtered_count
+            )
 
     @staticmethod
     def _desensitize(text: str) -> str:
