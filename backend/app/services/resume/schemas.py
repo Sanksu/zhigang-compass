@@ -1,8 +1,9 @@
 """简历抽取的数据模型（Pydantic，兼作 LLM JSON Schema 约束）。
 
 对齐设计文档 §8.3 抽取字段与 matching/schemas.py CandidateProfile 画像：
-- 文本已先经 PII 脱敏（pii_mask.py），name/phone/email 为 [NAME]/[PHONE]/[EMAIL]
-  占位符，直接保留不入库真实值（脱敏映射仅存内存，设计文档 §8.2）。
+- 文本已先经 PII 脱敏（pii_mask.py），name/phone/email 在抽取时呈
+  [NAME]/[PHONE]/[EMAIL] 占位符；LLM 抽取完成后由 tasks.resume_parse 经
+  restore_pii 映射表回填为原始值（设计文档 §8.2），parsed_data 落库含真实值。
 - parsed_data 落库形态为 model_dump()，供 match.py `_build_candidate` 构建画像。
 """
 

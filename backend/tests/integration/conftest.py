@@ -77,19 +77,42 @@ def base_url() -> str:
 
 
 @pytest.fixture(scope="session")
-def client(base_url: str) -> httpx.Client:
+def auth_headers(base_url: str) -> dict | None:
+    """登录 admin 获取 Bearer（H1 认证修复后 resume/match 端点需 user+ 角色）。
+
+    开发环境 bootstrap admin 仅在 users 表为空时创建；真实库已初始化且
+    密码非默认值时登录失败返回 None，调用方对认证用例执行 skip。
+    """
+    try:
+        r = httpx.post(
+            f"{base_url}/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            token = r.json()["data"]["access_token"]
+            return {"Authorization": f"Bearer {token}"}
+    except (httpx.HTTPError, KeyError, TypeError):
+        pass
+    return None
+
+
+@pytest.fixture(scope="session")
+def client(base_url: str, auth_headers: dict | None) -> httpx.Client:
     """同步 httpx 客户端（集成测试不需要 pytest-asyncio）。
 
     先预热 SBERT：/match/recommend 首次调用会冷加载 paraphrase-multilingual-MiniLM
     （实测 143s，随图谱数据量增长变慢），预热一次后后续匹配测试走缓存 ~22s，
     避免超时误报。预热用临时长超时 client（180s），正式 client 保持 120s。
+    认证端点预热需携带 Bearer（/resume/list 需 user+ 角色）。
     """
+    warm_headers = auth_headers or {}
     with httpx.Client(base_url=base_url, timeout=180) as warmup:
         try:
-            resumes = warmup.get("/api/v1/resume/list", params={"limit": 1}).json()["data"]
+            resumes = warmup.get("/api/v1/resume/list", params={"limit": 1}, headers=warm_headers).json()["data"]
             if resumes.get("items"):
                 rid = resumes["items"][0]["id"]
-                warmup.post("/api/v1/match/recommend", json={"resume_id": rid, "top_n": 1})
+                warmup.post("/api/v1/match/recommend", json={"resume_id": rid, "top_n": 1}, headers=warm_headers)
         except (httpx.HTTPError, KeyError, TypeError, IndexError):
             pass  # 预热失败不阻断测试（无简历/接口异常时用例自身会 skip）
 

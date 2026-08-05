@@ -14,7 +14,7 @@ import time
 import uuid
 
 import yaml
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -104,11 +104,22 @@ async def create_user(req: dict, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/users/{user_id}")
-async def update_user(user_id: str, req: dict, db: AsyncSession = Depends(get_db)):
-    """更新用户角色 / 启用状态。"""
+async def update_user(
+    user_id: str,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """更新用户角色 / 启用状态（M6 自保护：不可降级/禁用自己）。"""
     user = await db.get(User, user_id)
     if user is None:
         return error(404, "用户不存在")
+    # 自保护：当前登录管理员不允许降级自己的角色或禁用自己，避免后台锁死
+    if user_id == current_user.get("sub"):
+        if req.get("status") is not None and req["status"] != "active":
+            return error(400, "不能禁用当前登录账户")
+        if req.get("role") and req["role"] != "admin":
+            return error(400, "不能降级当前登录账户")
     if "role" in req and req["role"] in ("admin", "user", "guest"):
         user.role = req["role"]
     if "status" in req:
@@ -118,11 +129,20 @@ async def update_user(user_id: str, req: dict, db: AsyncSession = Depends(get_db
 
 
 @router.delete("/users/{user_id}", status_code=204)
-async def disable_user(user_id: str, db: AsyncSession = Depends(get_db)):
-    """禁用用户（软删除，is_active=False）。"""
+async def disable_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """禁用用户（软删除，is_active=False；M6 自保护：不可禁用自己）。
+
+    契约 204 无 body，自保护场景用 HTTPException 携带 400 语义。
+    """
+    if user_id == current_user.get("sub"):
+        raise HTTPException(status_code=400, detail="不能禁用当前登录账户")
     user = await db.get(User, user_id)
     if user is None:
-        return error(404, "用户不存在")
+        raise HTTPException(status_code=404, detail="用户不存在")
     user.is_active = False
     await db.commit()
     return None

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_role
 from app.core.database import get_db, neo4j_driver, redis_client
 from app.models.business import ResumeCache
 from app.schemas.common import ok, error
@@ -250,7 +251,11 @@ async def _load_match_result(match_id: str) -> dict | None:
 
 
 @router.post("/recommend")
-async def recommend(req: RecommendRequest, db: AsyncSession = Depends(get_db)):
+async def recommend(
+    req: RecommendRequest,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
+):
     """自动推荐 Top-N 岗位（resume_cache → 匹配引擎）。
 
     同步执行后将结果快照写入 Redis 并返回 match_id（供 match/result 等查询）。
@@ -277,7 +282,11 @@ async def recommend(req: RecommendRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/compare")
-async def compare(req: CompareRequest, db: AsyncSession = Depends(get_db)):
+async def compare(
+    req: CompareRequest,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
+):
     """人岗比对：单点同步比对（含差距三态 + 学习路径）。
 
     返回匹配结果 + gaps（missing/weak/matched 三态）+ learning_path
@@ -321,7 +330,7 @@ async def compare(req: CompareRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/task/{task_id}")
-async def match_task_status(task_id: str):
+async def match_task_status(task_id: str, user: dict = Depends(require_role("user"))):
     """[M4] 查询推荐任务状态（同步执行已完成即返回 success）。"""
     cached = await redis_client.get(f"match:task:{task_id}")
     if cached is None:
@@ -330,7 +339,7 @@ async def match_task_status(task_id: str):
 
 
 @router.get("/result/{match_id}")
-async def match_result(match_id: str):
+async def match_result(match_id: str, user: dict = Depends(require_role("user"))):
     """[M4] 获取匹配结果（recommend/compare 返回的 match_id）。"""
     data = await _load_match_result(match_id)
     if data is None:
@@ -339,7 +348,7 @@ async def match_result(match_id: str):
 
 
 @router.get("/result/{match_id}/gap")
-async def match_result_gap(match_id: str):
+async def match_result_gap(match_id: str, user: dict = Depends(require_role("user"))):
     """[M4] 获取差距分析（compare 结果的 gaps 三态列表）。"""
     data = await _load_match_result(match_id)
     if data is None:
@@ -348,7 +357,7 @@ async def match_result_gap(match_id: str):
 
 
 @router.get("/result/{match_id}/path")
-async def match_result_path(match_id: str):
+async def match_result_path(match_id: str, user: dict = Depends(require_role("user"))):
     """[M4] 获取学习路径（compare 结果的 missing/weak 技能先修链 + 课程）。"""
     data = await _load_match_result(match_id)
     if data is None:
@@ -357,7 +366,7 @@ async def match_result_path(match_id: str):
 
 
 @router.get("/result/{match_id}/diagnosis")
-async def match_diagnosis(match_id: str):
+async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user"))):
     """[M4] 获取人岗比对诊断报告（LLM 生成，结果缓存 24h）。
 
     以结果快照的分数/差距/学习路径/证据为 context 生成结构化报告
@@ -399,7 +408,10 @@ class FeedbackRequest(BaseModel):
 
 
 @router.post("/feedback")
-async def match_feedback(req: FeedbackRequest):
+async def match_feedback(
+    req: FeedbackRequest,
+    user: dict = Depends(require_role("user")),
+):
     """[M4] 提交匹配反馈（1=👍 / -1=👎）。
 
     校验 match_id 结果存在后追加记录（保留 90 天，供后续匹配效果评估）。

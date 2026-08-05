@@ -47,11 +47,16 @@ def extract_text(file_path: str | Path) -> str:
 def _extract_pdf(path: Path) -> str:
     from pypdf import PdfReader
 
+    from app.services.resume.reflow import reflow_pdf
+
     reader = PdfReader(str(path))
     parts = [page.extract_text() or "" for page in reader.pages]
     text = "\n".join(parts).strip()
     if text:
-        return text
+        # 双栏版式（设计文档 §8.1）：pdfplumber 检测并按阅读顺序重组；
+        # 重组为空串（单栏页）时保留 pypdf 提取结果
+        reflowed = reflow_pdf(path)
+        return reflowed or text
     # 文本型提取为空 → 扫描件，走 OCR（pymupdf 渲染每页）
     return _ocr_pdf(path)
 

@@ -72,15 +72,23 @@ class TestGraph:
 
 
 class TestMatch:
-    def test_recommend_with_real_resume(self, client: httpx.Client):
+    def test_recommend_with_real_resume(self, client: httpx.Client, auth_headers):
         """自动推荐：真实 resume_cache 驱动，返回 Top-N 列表。"""
-        resumes = client.get("/api/v1/resume/list", params={"limit": 5}).json()["data"]
-        if not resumes["items"]:
-            import pytest
+        import pytest
 
+        if not auth_headers:
+            pytest.skip("admin 登录失败（库已初始化且密码非默认），跳过认证用例")
+        resumes = client.get(
+            "/api/v1/resume/list", params={"limit": 5}, headers=auth_headers
+        ).json()["data"]
+        if not resumes["items"]:
             pytest.skip("真实库无简历缓存，跳过推荐用例")
         resume_id = resumes["items"][0]["id"]
-        r = client.post("/api/v1/match/recommend", json={"resume_id": resume_id, "top_n": 3})
+        r = client.post(
+            "/api/v1/match/recommend",
+            json={"resume_id": resume_id, "top_n": 3},
+            headers=auth_headers,
+        )
         assert r.status_code == 200
         assert isinstance(r.json()["data"]["items"], list)
 
@@ -96,9 +104,13 @@ class TestEvolution:
 
 
 class TestResume:
-    def test_resume_list(self, client: httpx.Client):
+    def test_resume_list(self, client: httpx.Client, auth_headers):
         """简历列表端点连通（真实 resume_cache 1 条）。"""
-        r = client.get("/api/v1/resume/list", params={"limit": 10})
+        import pytest
+
+        if not auth_headers:
+            pytest.skip("admin 登录失败（库已初始化且密码非默认），跳过认证用例")
+        r = client.get("/api/v1/resume/list", params={"limit": 10}, headers=auth_headers)
         assert r.status_code == 200
         data = r.json()["data"]
         assert isinstance(data["items"], list)

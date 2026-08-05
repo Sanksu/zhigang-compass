@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_optional_user
+from app.api.deps import require_role
 from app.core.config import settings
 from app.core.database import async_session_factory, get_db
 from app.models.business import AuditLog, ResumeCache, TaskStatus
@@ -61,6 +61,7 @@ async def _enqueue_resume_parse(file_path: str, task_id: str) -> None:
 async def list_resumes(
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
 ):
     """已解析简历列表（最近 N 条，含候选人画像摘要）。
 
@@ -88,6 +89,7 @@ async def list_resumes(
 async def parse_resume(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
 ):
     """上传简历触发解析（异步任务，含 PII 脱敏预处理）。"""
     content = await file.read()
@@ -143,7 +145,7 @@ async def parse_resume(
 
 
 @router.get("/task/{task_id}")
-async def task_status(task_id: str, db: AsyncSession = Depends(get_db)):
+async def task_status(task_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("user"))):
     """轮询异步任务状态。"""
     try:
         task_uuid = str(uuid.UUID(task_id))
@@ -226,7 +228,7 @@ async def _task_stream_events(
 
 
 @router.get("/{resume_id}")
-async def get_resume(resume_id: str, db: AsyncSession = Depends(get_db)):
+async def get_resume(resume_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("user"))):
     """简历解析详情（FE-M4-04 个人中心"查看"：完整画像）。"""
     rid = _parse_resume_id(resume_id)
     if rid is None:
@@ -249,13 +251,13 @@ async def update_resume(
     resume_id: str,
     req: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: dict | None = Depends(get_optional_user),
+    user: dict = Depends(require_role("user")),
 ):
     """编辑简历画像（BE-M4-01，契约 PUT /resume/{resume_id}）。
 
     LLM 抽取可能有误，允许用户手动修正。请求体 `{"fields": {...}}` 中的
     字段按顶层覆盖合并进 parsed_data（设计文档 §2.4.3），version 递增，
-    写审计日志（认证用户存在时；匿名场景跳过，与现有 resume 端点无认证一致）。
+    写审计日志（登录用户）。端点要求 user+ 角色（设计文档 §2.4.3）。
     """
     rid = _parse_resume_id(resume_id)
     if rid is None:
@@ -271,14 +273,13 @@ async def update_resume(
     resume.parsed_data = _merge_fields(resume.parsed_data or {}, fields)
     resume.version += 1
 
-    if current_user:
-        db.add(AuditLog(
-            user_id=current_user.get("sub", ""),
-            action="resume.update",
-            resource="resume_cache",
-            resource_id=rid,
-            detail={"fields": list(fields.keys()), "version": resume.version},
-        ))
+    db.add(AuditLog(
+        user_id=user.get("sub", ""),
+        action="resume.update",
+        resource="resume_cache",
+        resource_id=rid,
+        detail={"fields": list(fields.keys()), "version": resume.version},
+    ))
     await db.commit()
 
     return ok(data={
@@ -291,7 +292,7 @@ async def update_resume(
 
 
 @router.get("/task/{task_id}/stream")
-async def task_stream(task_id: str):
+async def task_stream(task_id: str, user: dict = Depends(require_role("user"))):
     """SSE 推送任务进度（BE-M4-01，契约 GET /resume/task/{task_id}/stream）。
 
     事件流：初始 status/progress → 周期推送 progress 事件 → 终态
@@ -316,7 +317,7 @@ async def task_stream(task_id: str):
 
 
 @router.delete("/{resume_id}", status_code=200)
-async def delete_resume(resume_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_resume(resume_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("user"))):
     """删除简历记录及落盘文件（FE-M4-04 个人中心）。"""
     rid = _parse_resume_id(resume_id)
     if rid is None:

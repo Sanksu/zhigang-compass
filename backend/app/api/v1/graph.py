@@ -16,6 +16,20 @@ router = APIRouter()
 # 全景查询缓存 TTL（设计文档 10.3：panorama 短 TTL 30s）
 PANORAMA_CACHE_TTL = 30
 
+# 节点详情缓存 TTL（设计文档 §11.3.5：position:{id} 5min，skill 同档）
+_NODE_CACHE_TTL = 300
+
+
+async def _cache_get(key: str):
+    """Redis 缓存读取（JSON 反序列化），未命中返回 None。"""
+    cached = await redis_client.get(key)
+    return json.loads(cached) if cached else None
+
+
+async def _cache_set(key: str, data, ttl: int = _NODE_CACHE_TTL) -> None:
+    """Redis 缓存写入（JSON 序列化）。"""
+    await redis_client.set(key, json.dumps(data), ex=ttl)
+
 
 @router.get("/panorama")
 async def panorama(
@@ -84,6 +98,10 @@ async def panorama(
 @router.get("/skill/{skill_id}/positions")
 async def skill_positions(skill_id: str):
     """技能节点反向查询：返回关联的岗位列表 + necessity + weight + level。"""
+    cache_key = f"graph:skill:{skill_id}:positions"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return ok(data=cached)
     with neo4j_driver.session() as session:
         rows = session.run(
             """
@@ -104,7 +122,9 @@ async def skill_positions(skill_id: str):
             }
             for rec in rows
         ]
-    return ok(data={"skill_id": skill_id, "positions": positions})
+    data = {"skill_id": skill_id, "positions": positions}
+    await _cache_set(cache_key, data)
+    return ok(data=data)
 
 
 @router.get("/search")
@@ -116,8 +136,8 @@ async def fulltext_search(
 ):
     """Neo4j 全文检索（cjk 分词器，设计文档 5.4）。
 
-    position/skill 走全文索引；evidence 无全文索引（schema 未建），
-    用 CONTAINS 属性过滤兜底。
+    position/skill 走全文索引；evidence 走 evidence_search 全文索引
+    （M17 新增，索引缺失时降级 CONTAINS）。
     """
     offset = (page - 1) * size
     items: list[dict] = []
@@ -140,23 +160,40 @@ async def fulltext_search(
             ).single()
             total = total_row["c"] if total_row else 0
         else:
-            result = session.run(
-                """
-                MATCH (e:Evidence)
-                WHERE e.name CONTAINS $q OR e.source CONTAINS $q
-                RETURN e.id AS id, e.name AS name, 0.0 AS score
-                ORDER BY id SKIP $offset LIMIT $size
-                """,
-                q=q, offset=offset, size=size,
-            )
-            total_row = session.run(
-                """
-                MATCH (e:Evidence)
-                WHERE e.name CONTAINS $q OR e.source CONTAINS $q
-                RETURN count(e) AS c
-                """,
-                q=q,
-            ).single()
+            # Evidence 全文索引：schema.cypher 建 evidence_search
+            # （ON source, raw_text，cjk 分词）。Evidence 无 name 属性，返回 source
+            # 作为展示名；索引缺失（旧库未重跑 init_neo4j）时降级 CONTAINS 兜底。
+            try:
+                result = session.run(
+                    "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
+                    "YIELD node, score "
+                    "RETURN node.id AS id, node.source AS name, score "
+                    "ORDER BY score DESC SKIP $offset LIMIT $size",
+                    q=q, offset=offset, size=size,
+                )
+                total_row = session.run(
+                    "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
+                    "YIELD node RETURN count(node) AS c",
+                    q=q,
+                ).single()
+            except Exception:
+                result = session.run(
+                    """
+                    MATCH (e:Evidence)
+                    WHERE e.source CONTAINS $q OR e.raw_text CONTAINS $q
+                    RETURN e.id AS id, e.source AS name, 0.0 AS score
+                    ORDER BY id SKIP $offset LIMIT $size
+                    """,
+                    q=q, offset=offset, size=size,
+                )
+                total_row = session.run(
+                    """
+                    MATCH (e:Evidence)
+                    WHERE e.source CONTAINS $q OR e.raw_text CONTAINS $q
+                    RETURN count(e) AS c
+                    """,
+                    q=q,
+                ).single()
             total = total_row["c"] if total_row else 0
 
         items = [
@@ -254,6 +291,10 @@ def _load_position(id: str) -> dict | None:
 @router.get("/position/{id}")
 async def position_detail(id: str):
     """[M4] 岗位节点详情：基础属性 + REQUIRES 技能聚合（must/nice）。"""
+    cache_key = f"graph:position:{id}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return ok(data=cached)
     position = _load_position(id)
     if position is None:
         return error(404, "岗位不存在")
@@ -281,7 +322,7 @@ async def position_detail(id: str):
                 "source_count": rec.get("source_count", 1),
             })
 
-    return ok(data={
+    data = {
         "id": position["id"],
         "name": position.get("name", position["id"]),
         "required_years": position.get("required_years"),
@@ -290,7 +331,9 @@ async def position_detail(id: str):
         "status": position.get("status"),
         "must_skills": skills.get("must", []),
         "nice_skills": skills.get("nice", []),
-    })
+    }
+    await _cache_set(cache_key, data)
+    return ok(data=data)
 
 
 @router.get("/position/{id}/skills")
@@ -330,6 +373,10 @@ async def position_skills(
 @router.get("/skill/{skill_id}/evidence")
 async def skill_evidence(skill_id: str):
     """[M4] 技能证据列表：Skill-MENTIONED_IN->Evidence 原始 JD。"""
+    cache_key = f"graph:skill:{skill_id}:evidence"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return ok(data=cached)
     skill = _load_skill(skill_id)
     if skill is None:
         return error(404, "技能不存在")
@@ -354,12 +401,14 @@ async def skill_evidence(skill_id: str):
             for rec in rows
         ]
 
-    return ok(data={
+    data = {
         "skill_id": skill_id,
         "skill_name": skill["name"],
         "evidence": evidence,
         "evidence_count": len(evidence),
-    })
+    }
+    await _cache_set(cache_key, data)
+    return ok(data=data)
 
 
 @router.get("/skill/similar")
@@ -376,13 +425,20 @@ async def skill_similar(
     if skill is None:
         return error(404, "技能不存在")
 
+    cache_key = f"graph:skill:similar:{skill_id}:{top_k}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+
     with neo4j_driver.session() as session:
         rows = session.run(
             "MATCH (s:Skill) RETURN s.id AS id, s.name AS name"
         )
         all_skills = [(rec["id"], rec.get("name", rec["id"])) for rec in rows]
     if not all_skills:
-        return ok(data={"skill_id": skill_id, "skill_name": skill["name"], "similar": []})
+        data = {"skill_id": skill_id, "skill_name": skill["name"], "similar": []}
+        await _cache_set(cache_key, data)
+        return ok(data=data)
 
     embedder = SkillEmbedder.get()
     try:
@@ -399,14 +455,16 @@ async def skill_similar(
         key=lambda x: x[2],
         reverse=True,
     )[:top_k]
-    return ok(data={
+    data = {
         "skill_id": skill_id,
         "skill_name": skill["name"],
         "similar": [
             {"skill_id": sid, "skill_name": name, "similarity": round(score, 4)}
             for sid, name, score in similar
         ],
-    })
+    }
+    await _cache_set(cache_key, data)
+    return ok(data=data)
 
 
 @router.get("/skill/{skill_id}")
@@ -415,6 +473,10 @@ async def skill_detail(skill_id: str):
 
     定义在 /skill/similar 之后，避免静态段 similar 被 {skill_id} 参数路径截胡。
     """
+    cache_key = f"graph:skill:{skill_id}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return ok(data=cached)
     skill = _load_skill(skill_id)
     if skill is None:
         return error(404, "技能不存在")
@@ -432,13 +494,15 @@ async def skill_detail(skill_id: str):
         counts = dict(rec) if rec else {}
 
     courses = await load_courses_for_skill(skill_id, skill["name"], top_k=None)
-    return ok(data={
+    data = {
         "id": skill_id,
         "name": skill["name"],
         "positions_count": counts.get("positions_count", 0),
         "evidence_count": counts.get("evidence_count", 0),
         "courses_count": len(courses),
-    })
+    }
+    await _cache_set(cache_key, data)
+    return ok(data=data)
 
 
 @router.get("/view/{view_type}")

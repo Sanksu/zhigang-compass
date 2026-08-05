@@ -66,3 +66,29 @@ def mask_pii(text: str) -> tuple[str, dict[str, str]]:
         if hits:
             mapping[placeholder] = sorted(hits)[0]
     return masked, mapping
+
+
+def restore_pii(parsed: dict, mapping: dict[str, str]) -> dict:
+    """将结构化抽取结果中的脱敏占位符回填为原始值（设计文档 §8.2）。
+
+    LLM 抽取在脱敏文本上进行，name/phone/email/教育经历等字段可能携带
+    [NAME]/[PHONE]/[EMAIL]/[ID_CARD] 占位符；回填映射仅在当前任务内存中
+    存活，不回填日志。映射不含某占位符时保留原占位符（该类型原文未被
+    脱敏命中，属正常状态）。
+    """
+    if not mapping:
+        return parsed
+
+    def _restore(value):
+        if isinstance(value, str):
+            for placeholder, original in mapping.items():
+                if placeholder in value:
+                    value = value.replace(placeholder, original)
+            return value
+        if isinstance(value, list):
+            return [_restore(v) for v in value]
+        if isinstance(value, dict):
+            return {k: _restore(v) for k, v in value.items()}
+        return value
+
+    return _restore(parsed)
