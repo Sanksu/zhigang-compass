@@ -26,6 +26,7 @@ from app.workers.tasks import (
     run_etl_pipeline,
     snapshot_graph,
     validate_temporal,
+    watch_signal_daily,
 )
 
 EXPECTED_FUNCTIONS = [
@@ -44,6 +45,7 @@ EXPECTED_FUNCTIONS = [
     cross_validate_jds,
     discovery_daily,
     discovery_auto_transition,
+    watch_signal_daily,
     snapshot_graph,
     evolution_compute,
     check_llm_providers_health,

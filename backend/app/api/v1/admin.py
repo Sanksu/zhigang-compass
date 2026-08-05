@@ -1256,3 +1256,42 @@ async def update_llm_config(req: dict):
         return error(500, "LLM 配置保存失败")
     saved["providers"] = mask_providers(saved.get("providers", []))
     return ok(data=saved)
+
+
+# ============================================================
+# 技术热点观察池（设计文档 7.2.5，admin 周报可见）
+# ============================================================
+
+@router.get("/discovery/watch")
+async def list_technology_watch(
+    db: AsyncSession = Depends(get_db),
+    status: str | None = Query(default=None, description="watch / candidate_promoted / archived"),
+    source: str | None = Query(default=None, description="jd / arxiv / course / github / stackoverflow"),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=50, ge=1, le=200),
+):
+    """观察池周报：技术热点信号列表（admin 可见，供运营周报/审核）。"""
+    from app.models.business import TechnologyWatch
+
+    stmt = select(TechnologyWatch).order_by(TechnologyWatch.updated_at.desc())
+    if status:
+        stmt = stmt.where(TechnologyWatch.status == status)
+    if source:
+        stmt = stmt.where(TechnologyWatch.signal_source == source)
+    total = (await db.scalar(select(func.count()).select_from(stmt.subquery()))) or 0
+    rows = (await db.scalars(
+        stmt.offset((page - 1) * size).limit(size)
+    )).all()
+    items = [
+        {
+            "skill_name": r.skill_name,
+            "signal_source": r.signal_source,
+            "signal_value": r.signal_value,
+            "period": r.period,
+            "status": r.status,
+            "first_seen_at": r.first_seen_at.isoformat() if r.first_seen_at else None,
+            "last_signal_at": r.last_signal_at.isoformat() if r.last_signal_at else None,
+        }
+        for r in rows
+    ]
+    return ok(data={"items": items, "total": total, "page": page, "size": size})
