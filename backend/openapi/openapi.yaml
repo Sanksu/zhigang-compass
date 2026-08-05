@@ -314,6 +314,110 @@ paths:
                       edges: { type: array, items: { type: object } }
                       stats: { type: object }
 
+  /api/v1/graph/algorithms/pagerank:
+    get:
+      tags: [graph]
+      summary: PageRank 技能重要性 Top-N（纯 Python，Neo4j 社区版无 GDS）
+      parameters:
+        - name: top_n
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+        - name: min_weight
+          in: query
+          schema: { type: number, default: 1.0, minimum: 1.0 }
+          description: 共现边权重下限（共现岗位数）
+      responses:
+        '200':
+          description: 技能重要性排名
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      skills:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: { type: string }
+                            name: { type: string }
+                            score: { type: number }
+                      top_n: { type: integer }
+
+  /api/v1/graph/algorithms/skill-clusters:
+    get:
+      tags: [graph]
+      summary: Louvain 技能簇识别（纯 Python）
+      parameters:
+        - name: min_size
+          in: query
+          schema: { type: integer, default: 2, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: 技能簇列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      clusters:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: { type: integer }
+                            size: { type: integer }
+                            skills:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  id: { type: string }
+                                  name: { type: string }
+                      cluster_count: { type: integer }
+
+  /api/v1/graph/algorithms/shortest-path:
+    get:
+      tags: [graph]
+      summary: 技能最短路径（shortestPath((:Skill)-[*..6]-(:Skill))）
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string }
+          description: 起点技能 ID
+        - name: to
+          in: query
+          required: true
+          schema: { type: string }
+          description: 终点技能 ID
+      responses:
+        '200':
+          description: 最短路径节点序列
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      from: { type: string }
+                      to: { type: string }
+                      path:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: { type: string }
+                            name: { type: string }
+                            type: { type: string }
+        '404':
+          description: 两技能间不存在 ≤6 跳可达路径
+
   /api/v1/graph/view/{view_type}:
     get:
       tags: [graph]
@@ -763,6 +867,22 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
 
+  /api/v1/evolution/watch:
+    get:
+      tags: [evolution]
+      summary: 观察池公开摘要 + MLI 产业化拐点排名（前端看板）
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: 观察池摘要（data 含 items/total，item 含 mli/ready_to_industrialize）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
   # ============================================================
   # 管理模块 /api/v1/admin
   # ============================================================
@@ -1094,6 +1214,51 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/discovery/watch:
+    get:
+      tags: [admin]
+      summary: 技术热点观察池周报（§7.2.5，admin 可见，供运营周报/审核）
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [watch, candidate_promoted, archived] }
+          description: 状态过滤
+        - name: source
+          in: query
+          schema: { type: string }
+          description: 信号源过滤（jd/arxiv/course/github/stackoverflow）
+        - name: page
+          in: query
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: size
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+      responses:
+        '200':
+          description: 观察池信号分页列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            skill_name: { type: string }
+                            signal_source: { type: string }
+                            signal_value: { type: number }
+                            period: { type: string }
+                            status: { type: string }
+                            first_seen_at: { type: string, nullable: true }
+                            last_signal_at: { type: string, nullable: true }
+                      total: { type: integer }
+                      page: { type: integer }
+                      size: { type: integer }
 
   /api/v1/admin/evolution/{id}/review:
     put:
