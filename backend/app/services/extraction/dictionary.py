@@ -2,13 +2,77 @@
 
 用于 LLM 抽取后的词典后过滤（设计文档 5.2 节）：
 1. SKILL_ALIAS — 将别名/口语化表述映射为标准技能名
-2. SKILL_WHITELIST — 标准技能白名单（幻觉防控第三道防线）
+2. SKILL_WHITELIST — 标准技能白名单（幻觉防控第三道防线，单一事实源
+   configs/skill_whitelist.yaml，设计文档 6.3 节要求 500+ 标准技能）
 3. SOFT_SKILL_WHITELIST — 软技能白名单（岗位本体维护，共 20 项，设计文档 9.2 节）
 4. SKILL_STOPWORDS — 行业/业务领域词黑名单（防 LLM 幻觉技能入图）
 5. normalize_position_name — 岗位名归一化（合并同义重复岗位）
 """
 
 import re
+from pathlib import Path
+
+import yaml
+
+# 白名单 yaml 路径（dictionary.py 位于 backend/app/services/extraction/，
+# parents[3] = backend/）。与 skill_prerequisites.yaml 的读取口径一致
+_SKILL_WHITELIST_PATH = Path(__file__).resolve().parents[3] / "configs" / "skill_whitelist.yaml"
+
+# 内置回退白名单：yaml 缺失/损坏时兜底启动不失败。
+# 内容与原硬编码 SKILL_WHITELIST 一致，仅在配置文件缺失时生效。
+_FALLBACK_SKILL_WHITELIST: set[str] = {
+    "Python", "Java", "JavaScript", "TypeScript", "Go", "Rust", "C++", "C#",
+    "Ruby", "PHP", "Swift", "Kotlin", "Scala", "R", "MATLAB", "Shell",
+    "C", "SQL", "React", "Vue.js", "Angular", "HTML", "HTML5", "CSS",
+    "Webpack", "Vite", "Tailwind CSS", "Next.js", "Nuxt.js", "Bootstrap",
+    "ECharts", "Three.js", "数据可视化", "UI设计", "前端工程化",
+    "React Native", "jQuery", "ElementUI", "Spring Boot", "Spring Cloud",
+    "Django", "Flask", "FastAPI", "Express.js", "Node.js", "ASP.NET",
+    "Microservices", "MyBatis", "Scrapy", "RESTful API", "REST", "JSON", "API",
+    "MySQL", "PostgreSQL", "MongoDB", "Redis", "Elasticsearch", "SQLite",
+    "Oracle", "SQL Server", "Cassandra", "ClickHouse", "NoSQL",
+    "Hadoop", "Apache Spark", "Apache Flink", "Apache Kafka", "Hive", "HBase",
+    "Airflow", "PySpark", "数据治理", "ETL", "Snowflake", "数据建模", "数据挖掘",
+    "Docker", "Kubernetes", "Jenkins", "Git", "GitHub Actions", "Terraform",
+    "Ansible", "Prometheus", "Grafana", "CI/CD", "Nginx", "系统运维",
+    "AWS", "Azure", "GCP", "Linux", "DevOps",
+    "PyTorch", "TensorFlow", "scikit-learn", "大语言模型", "检索增强生成",
+    "机器学习", "深度学习", "自然语言处理", "计算机视觉", "数据分析",
+    "OpenAI API", "LangChain", "LlamaIndex",
+    "大模型算法", "推荐算法", "图像算法", "风控算法", "强化学习", "SLAM算法",
+    "广告算法", "AIGC", "多模态模型", "语音识别", "运筹优化算法", "具身智能",
+    "机器人", "OpenCV", "嵌入式开发", "自动化测试", "多线程", "三维开发",
+    "GIS开发", "大模型评测", "音频标注", "视频标注",
+    "AI", "Transformer", "Agentic AI", "Pandas", "NumPy", "Matplotlib",
+    "统计学", "Excel", "Tableau", "Power BI", "SAS", "Agile", "Scrum",
+    "Maven", "JUnit", "Hibernate", "JDBC", "Core Java", "JIRA",
+    "SIEM", "SOAR",
+    "团队协作", "沟通能力", "项目管理", "需求分析", "产品设计",
+    "问题解决", "逻辑思维", "学习能力", "抗压能力", "时间管理",
+    "领导力", "跨部门协作", "创新思维", "客户服务意识", "责任心",
+    "主动性", "文档撰写", "汇报能力", "数据分析思维", "执行力",
+}
+
+
+def _load_skill_whitelist() -> set[str]:
+    """启动时从 configs/skill_whitelist.yaml 加载白名单。
+
+    yaml 缺失/解析失败/内容为空时回退内置集，保证启动不失败
+    （第三道防线降级为内置集，不阻塞抽取链路）。
+    """
+    try:
+        data = yaml.safe_load(_SKILL_WHITELIST_PATH.read_text(encoding="utf-8")) or {}
+        skills = data.get("skills") or []
+        loaded = {s["name"] for s in skills if isinstance(s, dict) and s.get("name")}
+    except (OSError, yaml.YAMLError):
+        return set(_FALLBACK_SKILL_WHITELIST)
+    return loaded if loaded else set(_FALLBACK_SKILL_WHITELIST)
+
+
+# 标准技能白名单（第三道防线，未命中走审核）。
+# 由 configs/skill_whitelist.yaml 加载（yaml 缺失回退内置集），API 保持 set 不变。
+SKILL_WHITELIST: set[str] = _load_skill_whitelist()
+
 
 # 技能别名映射：非标准表述 → 标准名
 SKILL_ALIAS: dict[str, str] = {
@@ -62,54 +126,6 @@ SKILL_ALIAS: dict[str, str] = {
     # 工具
     "git": "Git",
     "jenkins": "Jenkins",
-}
-
-# 标准技能白名单（第三道防线，未命中走审核）
-SKILL_WHITELIST: set[str] = {
-    # 编程语言
-    "Python", "Java", "JavaScript", "TypeScript", "Go", "Rust", "C++", "C#",
-    "Ruby", "PHP", "Swift", "Kotlin", "Scala", "R", "MATLAB", "Shell",
-    "C", "SQL",
-    # 前端
-    "React", "Vue.js", "Angular", "HTML", "HTML5", "CSS", "Webpack", "Vite",
-    "Tailwind CSS", "Next.js", "Nuxt.js", "Bootstrap", "ECharts", "Three.js",
-    "数据可视化", "UI设计", "前端工程化", "React Native", "jQuery", "ElementUI",
-    # 后端
-    "Spring Boot", "Spring Cloud", "Django", "Flask", "FastAPI", "Express.js",
-    "Node.js", "ASP.NET", "Microservices", "MyBatis", "Scrapy",
-    "RESTful API", "REST", "JSON", "API",
-    # 数据库
-    "MySQL", "PostgreSQL", "MongoDB", "Redis", "Elasticsearch", "SQLite",
-    "Oracle", "SQL Server", "Cassandra", "ClickHouse", "NoSQL",
-    # 大数据
-    "Hadoop", "Apache Spark", "Apache Flink", "Apache Kafka", "Hive", "HBase",
-    "Airflow", "PySpark", "数据治理", "ETL", "Snowflake", "数据建模", "数据挖掘",
-    # 云原生/DevOps
-    "Docker", "Kubernetes", "Jenkins", "Git", "GitHub Actions", "Terraform",
-    "Ansible", "Prometheus", "Grafana", "CI/CD", "Nginx", "系统运维",
-    "AWS", "Azure", "GCP", "Linux", "DevOps",
-    # AI/ML
-    "PyTorch", "TensorFlow", "scikit-learn", "大语言模型", "检索增强生成",
-    "机器学习", "深度学习", "自然语言处理", "计算机视觉", "数据分析",
-    "OpenAI API", "LangChain", "LlamaIndex",
-    "大模型算法", "推荐算法", "图像算法", "风控算法", "强化学习", "SLAM算法",
-    "广告算法", "AIGC", "多模态模型", "语音识别", "运筹优化算法", "具身智能",
-    "机器人", "OpenCV", "嵌入式开发", "自动化测试", "多线程", "三维开发",
-    "GIS开发", "大模型评测", "音频标注", "视频标注",
-    "AI", "Transformer", "Agentic AI", "Pandas", "NumPy", "Matplotlib",
-    # 数据/分析方法论与工程协作
-    "统计学", "Excel", "Tableau", "Power BI", "SAS", "Agile", "Scrum",
-    # Java 生态
-    "Maven", "JUnit", "Hibernate", "JDBC", "Core Java",
-    # 工程协作
-    "JIRA",
-    # 安全
-    "SIEM", "SOAR",
-    # 通用软技能（见 SOFT_SKILL_WHITELIST，岗位本体维护 20 项）
-    "团队协作", "沟通能力", "项目管理", "需求分析", "产品设计",
-    "问题解决", "逻辑思维", "学习能力", "抗压能力", "时间管理",
-    "领导力", "跨部门协作", "创新思维", "客户服务意识", "责任心",
-    "主动性", "文档撰写", "汇报能力", "数据分析思维", "执行力",
 }
 
 # 软技能白名单（岗位本体维护，共 20 项，设计文档 9.2 节）。
