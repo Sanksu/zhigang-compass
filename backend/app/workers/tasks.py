@@ -266,6 +266,21 @@ def _experience_years(snapshot: dict) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _history_skill_sets(group: list[tuple[int, date, list[str]]], jd_id: int) -> list[set[str]]:
+    """同岗位历史 JD 的技能集合（按发布时间升序），排除当前 JD 自身。
+
+    僵尸 JD 判定依赖"连续 N 期技能几乎不变"，与当前技能完全相同的历期
+    （Jaccard=1.0）是最强信号，必须保留参与相似度计数；仅排除当前 JD 自身
+    （原实现 `if gs != skills` 误排除了完全相同技能的历期，
+    导致 detect_zombie_jd 的连续周期永远数不足 4 期，僵尸检测失效）。
+    """
+    return [
+        set(gs)
+        for r_id, pdate, gs in sorted(group, key=lambda g: g[1])
+        if r_id != jd_id
+    ]
+
+
 async def validate_temporal(
     ctx: dict,
     jd_ids: list[int] | None = None,
@@ -293,7 +308,11 @@ async def validate_temporal(
 
     today = date.today()
     async with async_session_factory() as session:
-        stmt = select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
+        stmt = select(JDRaw).where(
+            JDRaw.snapshot["extraction"].astext.isnot(None),
+            # 游标：仅处理未做时滞检测的记录（幂等，重复执行不空转旧数据）
+            JDRaw.snapshot["validation"].astext.is_(None),
+        )
         if jd_ids:
             stmt = stmt.where(JDRaw.id.in_(jd_ids))
         rows = (await session.scalars(stmt.order_by(JDRaw.id.asc()).limit(limit))).all()
@@ -332,11 +351,7 @@ async def validate_temporal(
             ]
             sai = classify_sai(compute_sai(skill_ages, recent_ages))
 
-            history_skills = [
-                set(gs)
-                for _, pdate, gs in sorted(group, key=lambda g: g[1])
-                if gs != skills
-            ]
+            history_skills = _history_skill_sets(group, jd_id)
             zombie = detect_zombie_jd(history_skills, set(skills), sai.sai)
 
             oldest = min(group, key=lambda g: g[1])
@@ -391,7 +406,11 @@ async def detect_inflation(
     from app.services.data_quality.inflation_detector import compute_inflation_score
 
     async with async_session_factory() as session:
-        stmt = select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
+        stmt = select(JDRaw).where(
+            JDRaw.snapshot["extraction"].astext.isnot(None),
+            # 游标：仅处理未做通胀检测的记录（幂等，重复执行不空转旧数据）
+            JDRaw.snapshot["inflation"].astext.is_(None),
+        )
         if jd_ids:
             stmt = stmt.where(JDRaw.id.in_(jd_ids))
         rows = (await session.scalars(stmt.order_by(JDRaw.id.asc()).limit(limit))).all()
@@ -430,6 +449,51 @@ async def detect_inflation(
         await session.commit()
 
     return results
+
+
+async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
+    """SimHash 跨平台近似去重（设计文档 §4.2 消费方）。
+
+    扫描 jd_raw 已入库记录的 snapshot->_simhash（CleaningPipeline 采集时写入，
+    基于脱敏后文本），批量 find_similar_pairs（汉明距 ≤ 3）找出近似重复 JD，
+    将后入库记录标记 `snapshot["_duplicate_of"]` = 先入库记录 id。
+    聚合层（aggregation.build_aggregates）跳过被标记记录，避免重复 JD 虚高频次。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import JDRaw
+    from app.services.data_quality.simhash import find_similar_pairs
+
+    async with async_session_factory() as session:
+        stmt = select(JDRaw).order_by(JDRaw.id.asc())
+        rows = (await session.scalars(stmt)).all()
+        if limit:
+            rows = rows[:limit]
+
+        records: list[tuple[str, int]] = []
+        for r in rows:
+            sh = (r.snapshot or {}).get("_simhash")
+            if isinstance(sh, int) and sh:
+                records.append((str(r.id), sh))
+
+        pairs = find_similar_pairs(records)
+
+        # pairs 顺序即 records 输入顺序（id 升序），先入库者保留，后入库者标记
+        id_map = {str(r.id): r for r in rows}
+        marked = 0
+        for id_a, id_b in pairs:
+            dup = id_map.get(id_b)
+            if dup is None:
+                continue
+            snap = dict(dup.snapshot or {})
+            if snap.get("_duplicate_of") != id_a:
+                snap["_duplicate_of"] = id_a
+                dup.snapshot = snap
+                marked += 1
+        await session.commit()
+
+    return {"checked": len(records), "pairs": len(pairs), "marked": marked}
 
 
 async def load_courses(ctx: dict) -> dict:
@@ -737,12 +801,14 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
     results["stages"]["crawl"] = crawl_results
 
     # ── 阶段 2：清洗 + 去重 ──
-    # 已嵌入 Scrapy CleaningPipeline（SHA256 指纹 upsert 即去重）
-    # SimHash 去重为 DA-M3-08 遗留项
+    # 已嵌入 Scrapy CleaningPipeline（SHA256 指纹 upsert 即精确去重）
+    # SimHash 近似去重（跨平台）由阶段 2.5 执行
     results["stages"]["clean_dedup"] = {
         "status": "embedded_in_scrapy_pipeline",
-        "simhash_pending": "DA-M3-08",
     }
+
+    # ── 阶段 2.5：SimHash 跨平台近似去重（标记重复，聚合层跳过）──
+    results["stages"]["dedup_simhash"] = await dedup_simhash(ctx)
 
     # ── 阶段 3：时滞检测（M3 启用）──
     results["stages"]["validate_temporal"] = await validate_temporal(ctx, jd_ids=[])
@@ -795,7 +861,7 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
     from app.models.business import ResumeCache, TaskStatus
     from app.services.resume.extractor import ResumeExtractor
     from app.services.resume.file_parser import extract_text
-    from app.services.resume.pii_mask import mask_pii
+    from app.services.resume.pii_mask import mask_pii, restore_pii
 
     async with async_session_factory() as session:
         task = await session.get(TaskStatus, task_id) if task_id else None
@@ -819,15 +885,17 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
             text = extract_text(file_path)
 
             # 2. PII 脱敏（送入 LLM 前必须先脱敏，设计文档 §8.2）
-            masked, _mapping = mask_pii(text)
+            masked, pii_mapping = mask_pii(text)
 
             # 3. LLM 结构化抽取（无 api_key / 全 provider 失败降级规则抽取）
             task.progress = 0.6
             await session.commit()
             result = ResumeExtractor().extract(masked)
 
-            # 4. 画像落库（按 file_hash upsert，幂等可重跑）
-            parsed = result.model_dump()
+            # 4. 占位符回填为原始值（设计文档 §8.2：LLM 抽取完成后经映射表回填）。
+            #    映射仅当前任务内存存活，不外泄日志；回填后画像含真实联系方式，
+            #    受 resume/match 端点 user+ 认证保护
+            parsed = restore_pii(result.model_dump(), pii_mapping)
             cache = await session.scalar(
                 select(ResumeCache).where(ResumeCache.file_hash == result_info["file_hash"])
             )
@@ -947,6 +1015,20 @@ async def batch_extract(
         else:
             extractions = []
 
+        # 岗位名语义对齐（RAG 检索：与图谱已有岗位匹配，减少相近岗位被区分开）：
+        # LLM 抽取的岗位名先经规则归并（normalize_position_name），规则未归并的
+        # 再做图谱语义匹配（SBERT 余弦 ≥0.9 命中替换为已有岗位名）。对齐在抽取后、
+        # 写快照前统一进行，保证快照存储值与入图/聚合命名一致。
+        if extractions:
+            from app.services.extraction.position_align import PositionAligner
+
+            aligner = PositionAligner.get()
+            for extraction, aligned in zip(
+                extractions, aligner.align_many([e.position_name for e in extractions])
+            ):
+                if aligned and aligned != extraction.position_name:
+                    extraction.position_name = aligned
+
         for i, (row, extraction) in enumerate(zip(valid, extractions), start=1):
             # 逐条打印 jd_id + 进度百分比：batch_extract 只在循环结束 commit，
             # 中间进度 DB 不可见，靠此日志实时确认推进（worker.err.log）
@@ -1036,21 +1118,50 @@ async def discovery_daily(ctx: dict) -> dict:
     if not position_stats:
         return {"candidates": 0, "detail": "无已抽取岗位记录"}
 
-    # ── 2. 组装 DiscoveryInput（Z-score 数据不足 90 天 → 冷启动 Wilson 兜底）──
+    # ── 2. 组装 DiscoveryInput（Z-score 门控 + 冷启动 Wilson 兜底）──
     jd_total = sum(s["count"] for s in position_stats.values())
+
+    # 从 graph_versions 快照序列重建岗位频次窗口，计算真实 Z-score /
+    # 3 月移动平均 / 环比增长率，替代此前 history_days=1/z_score=None 硬编码
+    # （否则正常 Z-score 门控永不触发，只能走冷启动）
+    from app.models.business import GraphVersion
+    from app.services.discovery.state_machine import freq_z_scores, position_freq_windows
+
+    async with async_session_factory() as session:
+        snap_rows = (await session.scalars(
+            select(GraphVersion).order_by(GraphVersion.created_at.asc())
+        )).all()
+    snapshots = [s.snapshot_json or {} for s in snap_rows]
+    freq_windows = position_freq_windows(snapshots, set(position_stats))
+    window_days = 0
+    if len(snap_rows) >= 2:
+        span = (snap_rows[-1].created_at - snap_rows[0].created_at)
+        window_days = max(span.days, 0) if span else 0
+
     inputs = []
     for name, stat in position_stats.items():
         freq = float(stat["count"])
-        # 单日窗口无法计算 Z-score，走冷启动（source_diversity ≥ 3 触发）
+        freqs = freq_windows.get(name, [])
+        # 快照窗口 ≥ 2 期时用真实 Z-score/MA3/环比；否则保持保守冷启动信号
+        z_score = None
+        growth_rate = 0.0
+        jd_freq_ma3 = freq
+        if len(freqs) >= 2:
+            zs = freq_z_scores(freqs)
+            z_score = float(zs[-1])
+            recent3 = freqs[-3:]
+            jd_freq_ma3 = sum(recent3) / len(recent3)
+            if freqs[-2] > 0:
+                growth_rate = (freqs[-1] - freqs[-2]) / freqs[-2]
         inputs.append(
             DiscoveryInput(
                 position_name=name,
                 features=DiscoveryFeatures(
-                    jd_freq_ma3=freq,
-                    z_score=None,
+                    jd_freq_ma3=jd_freq_ma3,
+                    z_score=z_score,
                     source_diversity=len(stat["sources"]),
                 ),
-                history_days=1,
+                history_days=window_days or 1,
                 cold_successes=stat["count"],
                 cold_total=jd_total,
             )
@@ -1226,6 +1337,10 @@ async def _upsert_candidate(session, cand) -> None:
     if row is None:
         session.add(DiscoveryCandidate(id=cand.candidate_id, position_name=cand.position_name, **payload))
     else:
+        # 已晋升（emerging/stable/declining 等）的岗位不被 discovery_daily
+        # 打回 candidate；仅仍为 candidate 的行允许状态覆盖
+        if row.state != "candidate":
+            payload.pop("state", None)
         for k, v in payload.items():
             setattr(row, k, v)
 
@@ -1252,6 +1367,7 @@ class WorkerSettings:
     functions = [
         crawl_platform,
         run_etl_pipeline,
+        dedup_simhash,
         validate_temporal,
         detect_inflation,
         resume_parse,

@@ -99,6 +99,10 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
     agg: dict[str, PositionAgg] = defaultdict(PositionAgg)
     for row in rows:
         snap = row.snapshot or {}
+        # SimHash 近似重复（设计文档 §4.2 消费方）：保留先入库版本，
+        # 被标记 _duplicate_of 的后入库记录不参与聚合，避免重复 JD 虚高频次
+        if snap.get("_duplicate_of"):
+            continue
         ext = snap.get("extraction") or {}
         pos = normalize_position_name((ext.get("position_name") or "").strip())
         if not pos:

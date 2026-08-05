@@ -78,3 +78,21 @@ def test_rank_signals_respects_top_n():
     ]
     signals = detect_signals_from_snapshots(snapshots)
     assert len(rank_signals(signals, "emerging", top_n=1)) == 1
+
+
+def test_rank_signals_uses_abs_z_as_secondary_key():
+    """confidence 饱和（|z|≥4 → 1.0）时，按 |z| 强度二级排序（回归：Top-N 曾退化为稳定序）。"""
+    snapshots = [
+        _snapshot("v1", {"sk_x": 50, "sk_y": 10}),
+        _snapshot("v2", {"sk_x": 52, "sk_y": 12}),
+        _snapshot("v3", {"sk_x": 70, "sk_y": 60}),
+    ]
+    signals = detect_signals_from_snapshots(snapshots)
+    by_id = {s.skill_id: s for s in signals}
+    # 两者均为 emerging 且 confidence 饱和 1.0（|z| ≥ 4）
+    assert by_id["sk_x"].confidence == 1.0
+    assert by_id["sk_y"].confidence == 1.0
+    assert abs(by_id["sk_y"].z_score) > abs(by_id["sk_x"].z_score)
+    # 修复前：confidence 并列时稳定排序保留输入序（sk_x 在前）；修复后：|z| 强者在前
+    emerging = rank_signals(signals, "emerging", top_n=10)
+    assert [s.skill_id for s in emerging][0] == "sk_y"

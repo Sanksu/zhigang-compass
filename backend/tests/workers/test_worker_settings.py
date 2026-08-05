@@ -13,6 +13,7 @@ from app.workers.tasks import (
     check_data_freshness,
     crawl_platform,
     cross_validate_jds,
+    dedup_simhash,
     detect_inflation,
     discovery_daily,
     discovery_auto_transition,
@@ -29,6 +30,7 @@ from app.workers.tasks import (
 EXPECTED_FUNCTIONS = [
     crawl_platform,
     run_etl_pipeline,
+    dedup_simhash,
     validate_temporal,
     detect_inflation,
     resume_parse,
@@ -60,7 +62,7 @@ def test_etl_pipeline_stages_cover_all_quality_tasks():
     from app.workers import tasks as t
 
     src = inspect.getsource(t.run_etl_pipeline)
-    for stage_fn in ("crawl_platform", "validate_temporal", "detect_inflation",
+    for stage_fn in ("crawl_platform", "dedup_simhash", "validate_temporal", "detect_inflation",
                      "batch_extract", "load_courses", "evaluate_courses",
                      "aggregate_positions", "cross_validate_jds",
                      "diversity_report", "check_data_freshness",
