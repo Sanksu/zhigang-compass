@@ -265,3 +265,49 @@ async def state_machine_overview(db: AsyncSession = Depends(get_db)):
         for log in logs
     ]
     return ok(data={"states": counts, "transitions": transitions})
+
+
+@router.get("/watch")
+async def technology_watch_overview(
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """观察池公开摘要 + MLI 产业化拐点排名（设计文档 §7.2.5，前端看板）。
+
+    按技能聚合 technology_watch 各源最新信号值，用 MLI（媒介落差指数，四维
+    等权）排序输出 Top-N；mli > 0.6 标记 ready_to_industrialize。
+    数据来自 watch_signal_daily 每日任务，仅返回公开摘要（无审核队列细节）。
+    """
+    from app.models.business import TechnologyWatch
+    from app.services.discovery.mli import compute_mli
+
+    rows = (await db.scalars(
+        select(TechnologyWatch).order_by(TechnologyWatch.last_signal_at.desc())
+    )).all()
+    # 按技能聚合各源最新信号值
+    by_skill: dict[str, dict] = {}
+    for r in rows:
+        entry = by_skill.setdefault(r.skill_name, {})
+        entry.setdefault("sources", {})[r.signal_source] = r.signal_value
+        entry["status"] = r.status
+        entry["last_signal_at"] = r.last_signal_at
+
+    items = []
+    for skill, info in by_skill.items():
+        src = info["sources"]
+        mli = compute_mli(
+            z_paper=src.get("arxiv"),
+            z_course=src.get("course"),
+            z_community=src.get("github") or src.get("community"),
+            growth_jd=src.get("jd"),
+        )
+        items.append({
+            "skill_name": skill,
+            "sources": sorted(src),
+            "mli": mli.mli,
+            "ready_to_industrialize": mli.ready_to_industrialize,
+            "status": info["status"],
+            "last_signal_at": info["last_signal_at"].isoformat() if info.get("last_signal_at") else None,
+        })
+    items.sort(key=lambda x: (-x["mli"], x["skill_name"]))
+    return ok(data={"items": items[:limit], "total": len(items)})

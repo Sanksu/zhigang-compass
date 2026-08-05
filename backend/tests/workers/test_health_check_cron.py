@@ -14,8 +14,8 @@ from app.workers.tasks import WorkerSettings, check_llm_providers_health
 
 def test_worker_settings_registers_health_check_cron():
     jobs = WorkerSettings.cron_jobs
-    assert len(jobs) == 1
-    job = jobs[0]
+    # 含观察池监测（§7.2.5）等 cron；定位健康检查项验证其配置
+    job = next(j for j in jobs if j.coroutine is check_llm_providers_health)
     assert isinstance(job, CronJob)
     assert job.coroutine is check_llm_providers_health
     # 每 5min 触发一次，worker 启动即跑一次（快速发现不可用 provider）

@@ -66,9 +66,9 @@ class TestExtract:
 
     def test_non_whitelist_skill_kept_with_unmapped_flag(self):
         """白名单外的长尾技能保留但标记 unmapped（设计文档 8.4 走人工确认）。"""
-        raw = ResumeExtractionResult(skills=[ResumeSkill(name="数据仓库", proficiency=2)])
+        raw = ResumeExtractionResult(skills=[ResumeSkill(name="WebAssembly", proficiency=2)])
         out = ResumeExtractor(llm=_FakeLLM(raw)).extract("这是一份足够长的简历文本，用于验证抽取流程")
-        assert [s.name for s in out.skills] == ["数据仓库"]
+        assert [s.name for s in out.skills] == ["WebAssembly"]
         assert out.skills[0].unmapped is True
 
     def test_stopword_skill_never_revived_by_unmapped(self):

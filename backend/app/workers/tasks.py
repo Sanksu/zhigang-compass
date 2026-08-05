@@ -1354,6 +1354,140 @@ async def _upsert_candidate(session, cand) -> None:
 
 
 # ============================================================
+# 技术热点观察池（设计文档 7.2.5）
+# ============================================================
+
+async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
+    """每日技术热点信号监测（设计文档 7.2.5 观察池 + MLI 拐点）。
+
+    流程：聚合 4 源 raw 表（jd/course/paper/community）周频次 → 判定
+    命中阈值（JD 3 月移动平均环比 > 50%；学术/社区/课程 2σ）→ 幂等
+    upsert technology_watch → JD 源命中且该技能此前已在观察池的技能提升
+    candidate（写入 discovery_candidates，设计 §7.2.5 / 方案 §2）。
+
+    幂等：technology_watch 按 (skill, source, period) 唯一约束 upsert；
+    候选池提升仅对已有观察历史且未晋升的技能生效（不重复提升）。
+
+    Args:
+        run_date: 统计周期 YYYY-MM-DD（缺省用当天）
+    """
+    from datetime import date, timedelta
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.business import TechnologyWatch
+    from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
+    from app.services.discovery.watch_pool import aggregate_weekly_freqs, build_signals
+
+    period = run_date or date.today().isoformat()
+    # 观察窗口：过去 12 周（JD 3 月移动平均需 12 周以上历史）
+    since = (date.fromisoformat(period) - timedelta(weeks=12)).isoformat()
+
+    # ── 1. 读取 4 源 raw 行（crawled_at >= since）──
+    async with async_session_factory() as session:
+        jd_rows = (await session.scalars(
+            select(JDRaw).where(JDRaw.crawled_at >= since)
+        )).all()
+        course_rows = (await session.scalars(
+            select(CourseRaw).where(CourseRaw.crawled_at >= since)
+        )).all()
+        paper_rows = (await session.scalars(
+            select(PaperRaw).where(PaperRaw.crawled_at >= since)
+        )).all()
+        community_rows = (await session.scalars(
+            select(CommunityRaw).where(CommunityRaw.crawled_at >= since)
+        )).all()
+
+    all_rows = [*jd_rows, *course_rows, *paper_rows, *community_rows]
+    if not all_rows:
+        return {"signals": 0, "detail": f"{period} 无 raw 数据"}
+
+    freqs = aggregate_weekly_freqs(all_rows)
+    signals = build_signals(freqs, period)
+
+    # ── 2. 幂等 upsert technology_watch + 计算 MLI ──
+    promoted: list[str] = []
+    upserted = 0
+    async with async_session_factory() as session:
+        for sig in signals:
+            row = await session.scalar(
+                select(TechnologyWatch).where(
+                    TechnologyWatch.skill_name == sig.skill_name,
+                    TechnologyWatch.signal_source == sig.signal_source,
+                    TechnologyWatch.period == sig.period,
+                )
+            )
+            if row is None:
+                session.add(TechnologyWatch(
+                    skill_name=sig.skill_name,
+                    signal_source=sig.signal_source,
+                    signal_value=sig.signal_value,
+                    period=sig.period,
+                    status="watch",
+                ))
+            else:
+                row.signal_value = sig.signal_value
+                row.last_signal_at = datetime.now(timezone.utc)
+            upserted += 1
+        await session.commit()
+
+        # ── 3. 提升候选：JD 源命中且该技能此前已在观察池（设计 §7.2.5 / 方案 §2）──
+        from app.models.business import DiscoveryCandidate
+        from app.services.discovery.watch_pool import promotable_skills
+
+        prior_rows = (await session.scalars(
+            select(TechnologyWatch.skill_name).where(
+                TechnologyWatch.period < period,
+            )
+        )).all()
+        previously_watched = {name for name in prior_rows}
+
+        for skill in promotable_skills(signals, previously_watched):
+            existing = await session.scalar(
+                select(DiscoveryCandidate).where(
+                    DiscoveryCandidate.position_name == skill
+                )
+            )
+            if existing is not None:
+                continue  # 已在候选池/已晋升，不重复提升
+            jd_value = next(
+                (sig.signal_value for sig in signals
+                 if sig.skill_name == skill and sig.signal_source == "jd"),
+                0.0,
+            )
+            session.add(DiscoveryCandidate(
+                id=f"cand-{skill[:20]}",
+                position_name=skill,
+                state="candidate",
+                features={"jd_mom_growth": jd_value, "z_score": None, "source_diversity": 1},
+                confidence={"final_confidence": 0.0, "jd_signal": jd_value},
+                evidence_refs=[f"watch:{period}:{skill}"],
+                seed_matched=False,
+                rag_matched=False,
+                definition_draft="",
+                detected_at=period,
+            ))
+            promoted.append(skill)
+            # 状态流转：该技能本期 watch 行 → candidate_promoted
+            watch_rows = (await session.scalars(
+                select(TechnologyWatch).where(
+                    TechnologyWatch.skill_name == skill,
+                    TechnologyWatch.period == period,
+                    TechnologyWatch.status == "watch",
+                )
+            )).all()
+            for r in watch_rows:
+                r.status = "candidate_promoted"
+        await session.commit()
+
+    return {
+        "signals": upserted,
+        "promoted": len(promoted),
+        "detail": promoted,
+    }
+
+
+# ============================================================
 # ARQ Worker 注册
 # ============================================================
 
@@ -1408,6 +1542,7 @@ class WorkerSettings:
         cross_validate_jds,
         discovery_daily,
         discovery_auto_transition,
+        watch_signal_daily,
         snapshot_graph,
         evolution_compute,
         check_llm_providers_health,
@@ -1427,4 +1562,6 @@ class WorkerSettings:
             minute=set(range(0, 60, 5)),
             run_at_startup=True,
         ),
+        # 设计文档 §7.2.5 观察池：每日 06:00 监测技术热点信号（ETL 之后）
+        cron(watch_signal_daily, hour=6, minute=0),
     ]

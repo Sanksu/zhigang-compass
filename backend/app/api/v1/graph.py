@@ -510,6 +510,97 @@ async def skill_detail(skill_id: str, user: dict = Depends(require_role("guest")
     return ok(data=data)
 
 
+@router.get("/algorithms/pagerank")
+async def graph_pagerank(
+    top_n: int = Query(default=20, ge=1, le=100),
+    min_weight: float = Query(default=1.0, ge=1.0),
+    user: dict = Depends(require_role("guest")),
+):
+    """PageRank 技能重要性 Top-N（设计文档 7.1 图算法应用）。
+
+    技能网络 = 岗位共现（两技能被同一岗位 REQUIRES 即连边），纯 Python
+    幂迭代（Neo4j 社区版无 GDS 插件）。30s Redis TTL 缓存。
+    """
+    from app.services.graph_algorithms.network import load_skill_cooccurrence
+    from app.services.graph_algorithms.pagerank import pagerank
+
+    cache_key = f"graph:algo:pagerank:{top_n}:{min_weight}"
+    cached = await redis_client.get(cache_key)
+    if cached is not None:
+        return ok(data=json.loads(cached))
+
+    with neo4j_driver.session() as session:
+        graph, name_map = load_skill_cooccurrence(session, min_weight=min_weight)
+    scores = pagerank(graph)
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+    skills = [
+        {"id": sid, "name": name_map.get(sid, sid), "score": round(score, 6)}
+        for sid, score in ranked
+    ]
+    data = {"skills": skills, "top_n": len(skills)}
+    await redis_client.set(cache_key, json.dumps(data), ex=30)
+    return ok(data=data)
+
+
+@router.get("/algorithms/skill-clusters")
+async def graph_skill_clusters(
+    min_size: int = Query(default=2, ge=1, le=100),
+    user: dict = Depends(require_role("guest")),
+):
+    """Louvain 技能簇（设计文档 7.1 图算法应用，技术栈视图支撑）。
+
+    同一簇内技能常共现于同一批岗位（如大数据栈 / AI 栈），纯 Python
+    两阶段 Louvain。min_size 过滤过小簇。30s Redis TTL 缓存。
+    """
+    from app.services.graph_algorithms.louvain import louvain
+    from app.services.graph_algorithms.network import load_skill_cooccurrence
+
+    cache_key = f"graph:algo:clusters:{min_size}"
+    cached = await redis_client.get(cache_key)
+    if cached is not None:
+        return ok(data=json.loads(cached))
+
+    with neo4j_driver.session() as session:
+        graph, name_map = load_skill_cooccurrence(session, min_weight=1.0)
+    clusters = louvain(graph)
+    by_cluster: dict[int, list[str]] = {}
+    for sid, cid in clusters.items():
+        by_cluster.setdefault(cid, []).append(sid)
+    items = []
+    for cid in sorted(by_cluster):
+        members = sorted(by_cluster[cid])
+        if len(members) < min_size:
+            continue
+        items.append({
+            "id": cid,
+            "size": len(members),
+            "skills": [{"id": sid, "name": name_map.get(sid, sid)} for sid in members],
+        })
+    data = {"clusters": items, "cluster_count": len(items)}
+    await redis_client.set(cache_key, json.dumps(data), ex=30)
+    return ok(data=data)
+
+
+@router.get("/algorithms/shortest-path")
+async def graph_shortest_path(
+    from_skill: str = Query(..., alias="from"),
+    to_skill: str = Query(..., alias="to"),
+    user: dict = Depends(require_role("guest")),
+):
+    """技能最短路径（设计文档 7.1 图算法应用，学习路径先修排序）。
+
+    shortestPath((:Skill)-[*..6]-(:Skill))，路径可能经过 Position 节点
+    （岗位共现边），节点序列按 type 区分。不存在可达路径返回 404。
+    """
+    from app.services.graph_algorithms.shortest_path import shortest_path
+
+    with neo4j_driver.session() as session:
+        path = shortest_path(session, from_skill, to_skill)
+    if path is None:
+        return error(4040, "两技能间不存在 ≤6 跳的可达路径", http_status=404)
+    return ok(data={"from": from_skill, "to": to_skill, "path": path})
+
+
 @router.get("/view/{view_type}")
 async def graph_view(
     view_type: Literal["panorama", "techStack", "level", "positionCenter"],

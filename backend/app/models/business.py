@@ -19,6 +19,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -349,4 +350,53 @@ class ResumeFile(Base):
     file_size: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class TechnologyWatch(Base):
+    """技术热点观察池（设计文档 §7.2.5 趋势监测）。
+
+    学术/社区源（arXiv/GitHub/SO）与课程源的技术热点信号汇总，admin 周报
+    可见，不独立触发 candidate。JD 源命中阈值时自动提升为 candidate
+    （status=candidate_promoted，写入 discovery_candidates 交 admin 审核）。
+
+    信号判定阈值（§7.2.5 条件监测矩阵）：
+    - jd：3 月移动平均环比增长率 > 50%
+    - arxiv/github/community：周频次超过历史均值 2σ
+    - course：新增课程技能频次 2σ
+    """
+
+    __tablename__ = "technology_watch"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    skill_name: Mapped[str] = mapped_column(String(128), index=True, nullable=False)
+    signal_source: Mapped[str] = mapped_column(
+        String(16), nullable=False  # jd / arxiv / github / course / community
+    )
+    signal_value: Mapped[float] = mapped_column(Float, nullable=False)  # 2σ 偏离或环比增长率
+    period: Mapped[str] = mapped_column(
+        String(16), nullable=False  # 统计周期 YYYY-MM-DD
+    )
+    status: Mapped[str] = mapped_column(
+        String(24), default="watch", nullable=False
+    )  # watch / candidate_promoted / archived
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_signal_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        # 幂等 upsert 约束：同一技能同源同周期仅一行
+        UniqueConstraint("skill_name", "signal_source", "period", name="uq_technology_watch_skill_period"),
     )
