@@ -162,7 +162,7 @@ Neo4j 能力图谱（Position / Skill / Evidence / Course ...）
 | 大模型 | OpenAI 兼容 API（讯飞星火 / DeepSeek / Qwen） | Instructor + Pydantic 结构化 |
 | 数据管线 | Scrapy + Playwright | SimHash/MinHash 去重 |
 | 认证 | JWT RS256 双 Token + RBAC | access 30min / refresh 7d |
-| 容器化 | Docker Compose（4 服务） | api / postgres / redis / neo4j |
+| 容器化 | Docker Compose（5 服务） | api / postgres / redis / neo4j / worker |
 | 测试 | PyTest + Vitest + Playwright + Locust | 测试金字塔 70/20/10 |
 | Python 包管理 | uv | `pyproject.toml` + `uv.lock` |
 
@@ -174,7 +174,7 @@ Neo4j 能力图谱（Position / Skill / Evidence / Course ...）
 zhigang-compass/
 ├── README.md                       # 根入口
 ├── AGENTS.md                       # AI 协作入口（铁律、模块导航）
-├── docker-compose.yml              # 4 服务一键部署
+├── docker-compose.yml              # 5 服务一键部署
 ├── docs/                           # 项目文档
 │   ├── README.md                   # 文档索引
 │   ├── design/                     # 设计文档
@@ -533,7 +533,7 @@ cd frontend && pnpm install && pnpm build && cd ..
 # 3. 配置环境变量
 cp backend/.env.example backend/.env   # 填入 LLM API Key、SECRET_KEY 等
 
-# 4. 一键启动 4 服务（api / postgres / redis / neo4j）
+# 4. 一键启动 5 服务（api / postgres / redis / neo4j / worker）
 docker compose up -d
 
 # 5. 健康检查
@@ -655,7 +655,7 @@ VITE_API_TARGET=http://localhost:8000 # Vite 开发代理目标
 - ✅ 纯函数算法逻辑（Z-score、Wilson score、置信度、词典归一化、后处理、ID 生成）
 - ✅ 数据管线骨架（Scrapy + Playwright + CDP + 代理池 + 脱敏 + 13 爬虫已贯通测试产出：7 招聘源 BOSS/智联/Monster/Indeed/LinkedIn/GlassDoor/脉脉 + 6 非招聘源 arxiv/github/stackoverflow/icourse163/coursera/edx；非招聘爬虫待 M3 接入观察池与学习路径）
 - ✅ 前端骨架（11 页路由 + AppShell 布局 + 设计令牌 + 登录/仪表盘初版）
-- ✅ Docker Compose 4 服务编排
+- ✅ Docker Compose 5 服务编排
 - ✅ Neo4j 建库脚本（约束 + 索引）
 - ✅ 评测基线脚本（run_baseline.py：关键词匹配 + F1 计算 + 合理性校验，可独立运行）
 - ✅ 爬虫中间件栈（UA 轮换 400 / 代理池 410 / 退避重试 420）
