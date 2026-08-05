@@ -239,3 +239,11 @@ scrapy crawl edx -a keywords=Python,Data-Science -o output/edx.jsonl -s ROBOTSTX
 | Stack Overflow 返回 0 条 | 页面改版 / Cloudflare 拦截 | 检查代理，对照真实页面验证 `div.s-post-summary` 选择器 |
 | Coursera/edX 返回 0 条课程 | Cloudflare 拦截 / Playwright 超时 | 检查代理，延长 `PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT` |
 | icourse163 返回 0 条课程 | 反爬拦截 / 页面改版 | 检查 Playwright 是否正常启动，对照真实页面验证选择器 |
+
+## 已知权衡
+
+- **CDP/JobSpy 类 spider 在 parse 内同步调用子进程脚本**（boss/monster/glassdoor/icourse163 及
+  Indeed/LinkedIn 的 JobSpy 基类），串行阻塞 Twisted 事件循环——多任务采集耗时较长、
+  调试时 Ctrl+C 无法中断。该阻塞仅影响当前 spider 子进程（由 ARQ worker 通过 subprocess 启动），
+  不影响 API/前端。已通过 `SUBPROCESS_TIMEOUT=300` 收敛单任务上限 + 进度日志（含任务序号与累计耗时）
+  提升可观测性。如需真正并行化，可评估将采集脚本改为 ARQ 直接调度（脱离 Scrapy spider 层）。

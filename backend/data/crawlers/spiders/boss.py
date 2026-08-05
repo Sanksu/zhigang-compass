@@ -33,6 +33,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from urllib.parse import urlencode
 
 from scrapy import Request
@@ -123,12 +124,13 @@ class BossSpider(BaseSpider):
         python_exe = sys.executable
 
         task_total = len(tasks)
+        _started = time.monotonic()
         for task_idx, task in enumerate(tasks):
             keyword = task["keyword"]
             city = task["city"]
             city_code = task["city_code"]
 
-            self.logger.info(f"[boss] 进度 {task_idx + 1}/{task_total}: 开始采集 kw={keyword} city={city} ({city_code})")
+            self.logger.info(f"[boss] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword} city={city} ({city_code})")
 
             # 调用独立采集脚本
             cmd = [
@@ -160,7 +162,7 @@ class BossSpider(BaseSpider):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 stdout, stderr_output = proc.communicate()
-                self.logger.error(f"采集脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+                self.logger.error(f"[boss] 任务 {task_idx + 1}/{task_total} 超时（>{SUBPROCESS_TIMEOUT}s），已终止")
                 continue
 
             item_count = 0

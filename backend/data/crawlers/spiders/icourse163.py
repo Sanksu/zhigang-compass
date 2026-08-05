@@ -20,6 +20,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 from scrapy import Request, Spider
@@ -89,9 +90,10 @@ class Icourse163Spider(Spider):
 
         python_exe = sys.executable
         keyword_total = len(keywords)
+        _started = time.monotonic()
 
         for kw_idx, keyword in enumerate(keywords):
-            self.logger.info(f"[icourse163] 进度 {kw_idx + 1}/{keyword_total}: 开始采集 关键词={keyword}")
+            self.logger.info(f"[icourse163] 进度 {kw_idx + 1}/{keyword_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 关键词={keyword}")
 
             cmd = [
                 python_exe, self.crawler_script,
@@ -119,7 +121,7 @@ class Icourse163Spider(Spider):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 stdout, stderr_output = proc.communicate()
-                self.logger.error(f"采集脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+                self.logger.error(f"[icourse163] 任务 {kw_idx + 1}/{keyword_total} 超时（>{SUBPROCESS_TIMEOUT}s），已终止")
                 continue
 
             count = 0
