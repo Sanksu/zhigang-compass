@@ -3,8 +3,9 @@
 import json
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from app.api.deps import require_role
 from app.core.database import neo4j_driver, redis_client
 from app.schemas.common import error, ok
 from app.services.learning_path.courses import load_courses_for_skill
@@ -36,6 +37,7 @@ async def panorama(
     limit: int = Query(default=100, ge=1, le=600),
     min_weight: float = Query(default=0.3, ge=0.0, le=1.0),
     focus: Optional[str] = Query(default=None),
+    user: dict = Depends(require_role("guest")),
 ):
     """图谱全景视图（30s Redis TTL 缓存，见设计文档 10.3）。
 
@@ -96,7 +98,7 @@ async def panorama(
 
 
 @router.get("/skill/{skill_id}/positions")
-async def skill_positions(skill_id: str):
+async def skill_positions(skill_id: str, user: dict = Depends(require_role("guest"))):
     """技能节点反向查询：返回关联的岗位列表 + necessity + weight + level。"""
     cache_key = f"graph:skill:{skill_id}:positions"
     cached = await _cache_get(cache_key)
@@ -133,6 +135,7 @@ async def fulltext_search(
     type_: str = Query(default="position", alias="type", enum=["position", "skill", "evidence"]),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
+    user: dict = Depends(require_role("guest")),
 ):
     """Neo4j 全文检索（cjk 分词器，设计文档 5.4）。
 
@@ -220,7 +223,7 @@ def _load_skill(skill_id: str) -> dict | None:
 
 
 @router.get("/skill/{skill_id}/prerequisites")
-async def skill_prerequisites(skill_id: str):
+async def skill_prerequisites(skill_id: str, user: dict = Depends(require_role("guest"))):
     """技能先修技能链（AL-M4-03，设计文档 §9.5）。
 
     先修链来自人工维护字典 configs/skill_prerequisites.yaml（图谱无
@@ -228,7 +231,7 @@ async def skill_prerequisites(skill_id: str):
     """
     skill = _load_skill(skill_id)
     if skill is None:
-        return error(404, "技能不存在")
+        return error(4040, "技能不存在", http_status=404)
 
     chain = prerequisite_chain(skill["name"])
     id_by_name: dict[str, str] = {}
@@ -253,7 +256,7 @@ async def skill_prerequisites(skill_id: str):
 
 
 @router.get("/skill/{skill_id}/courses")
-async def skill_courses(skill_id: str):
+async def skill_courses(skill_id: str, user: dict = Depends(require_role("guest"))):
     """技能学习课程列表（AL-M4-03，设计文档 §4.6）。
 
     图谱 LEARNABLE_VIA 课程按质量分降序返回（质量分来自 course_raw 评估产物），
@@ -261,7 +264,7 @@ async def skill_courses(skill_id: str):
     """
     skill = _load_skill(skill_id)
     if skill is None:
-        return error(404, "技能不存在")
+        return error(4040, "技能不存在", http_status=404)
 
     courses = await load_courses_for_skill(skill_id, skill["name"], top_k=None)
     return ok(
@@ -289,7 +292,7 @@ def _load_position(id: str) -> dict | None:
 
 
 @router.get("/position/{id}")
-async def position_detail(id: str):
+async def position_detail(id: str, user: dict = Depends(require_role("guest"))):
     """[M4] 岗位节点详情：基础属性 + REQUIRES 技能聚合（must/nice）。"""
     cache_key = f"graph:position:{id}"
     cached = await _cache_get(cache_key)
@@ -297,7 +300,7 @@ async def position_detail(id: str):
         return ok(data=cached)
     position = _load_position(id)
     if position is None:
-        return error(404, "岗位不存在")
+        return error(4040, "岗位不存在", http_status=404)
 
     skills: dict[str, dict] = {}
     with neo4j_driver.session() as session:
@@ -340,10 +343,11 @@ async def position_detail(id: str):
 async def position_skills(
     id: str,
     necessity: Optional[Literal["must", "nice"]] = Query(default=None),
+    user: dict = Depends(require_role("guest")),
 ):
     """[M4] 岗位技能列表（可按 necessity 过滤）。"""
     if _load_position(id) is None:
-        return error(404, "岗位不存在")
+        return error(4040, "岗位不存在", http_status=404)
 
     query = """
         MATCH (p:Position {id: $id})-[r:REQUIRES]->(s:Skill)
@@ -371,7 +375,7 @@ async def position_skills(
 
 
 @router.get("/skill/{skill_id}/evidence")
-async def skill_evidence(skill_id: str):
+async def skill_evidence(skill_id: str, user: dict = Depends(require_role("guest"))):
     """[M4] 技能证据列表：Skill-MENTIONED_IN->Evidence 原始 JD。"""
     cache_key = f"graph:skill:{skill_id}:evidence"
     cached = await _cache_get(cache_key)
@@ -379,7 +383,7 @@ async def skill_evidence(skill_id: str):
         return ok(data=cached)
     skill = _load_skill(skill_id)
     if skill is None:
-        return error(404, "技能不存在")
+        return error(4040, "技能不存在", http_status=404)
 
     with neo4j_driver.session() as session:
         rows = session.run(
@@ -415,6 +419,7 @@ async def skill_evidence(skill_id: str):
 async def skill_similar(
     skill_id: str = Query(...),
     top_k: int = Query(default=10, ge=1, le=50),
+    user: dict = Depends(require_role("guest")),
 ):
     """[M4] 相似技能检索（语义相似度，设计文档 5.3 预留 pgvector 演进）。
 
@@ -423,7 +428,7 @@ async def skill_similar(
     """
     skill = _load_skill(skill_id)
     if skill is None:
-        return error(404, "技能不存在")
+        return error(4040, "技能不存在", http_status=404)
 
     cache_key = f"graph:skill:similar:{skill_id}:{top_k}"
     cached = await _cache_get(cache_key)
@@ -468,7 +473,7 @@ async def skill_similar(
 
 
 @router.get("/skill/{skill_id}")
-async def skill_detail(skill_id: str):
+async def skill_detail(skill_id: str, user: dict = Depends(require_role("guest"))):
     """[M4] 技能节点详情：基础属性 + 关联计数（岗位/证据/课程）。
 
     定义在 /skill/similar 之后，避免静态段 similar 被 {skill_id} 参数路径截胡。
@@ -479,7 +484,7 @@ async def skill_detail(skill_id: str):
         return ok(data=cached)
     skill = _load_skill(skill_id)
     if skill is None:
-        return error(404, "技能不存在")
+        return error(4040, "技能不存在", http_status=404)
 
     with neo4j_driver.session() as session:
         rec = session.run(
@@ -509,6 +514,7 @@ async def skill_detail(skill_id: str):
 async def graph_view(
     view_type: Literal["panorama", "techStack", "level", "positionCenter"],
     limit: int = Query(default=100, ge=1, le=600),
+    user: dict = Depends(require_role("guest")),
 ):
     """[M4] 视图切换（后端过滤，同构于全景图）。
 

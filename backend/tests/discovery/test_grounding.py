@@ -362,3 +362,23 @@ class TestDualPathRetrieval:
 
         asyncio.run(_run())
 
+    def test_default_limit_is_10(self):
+        """设计 7.2.3 top-10 口径：缺省 limit=10，12 条命中截断到 10。"""
+        async def _run():
+            db = _FakeDb(rows=[_occ(code=f"c{i}") for i in range(12)])
+            hits = await search_authoritative("大模型应用工程师", db, embedder=_FakeEmbedder())
+            assert len(hits) == 10
+
+        asyncio.run(_run())
+
+    def test_explicit_limit_override(self):
+        """调用方显式 limit 覆盖默认值。"""
+        async def _run():
+            db = _FakeDb(rows=[_occ(code=f"c{i}") for i in range(12)])
+            hits = await search_authoritative(
+                "大模型应用工程师", db, embedder=_FakeEmbedder(), limit=3
+            )
+            assert len(hits) == 3
+
+        asyncio.run(_run())
+

@@ -129,3 +129,42 @@ class TestGenerateDiagnosis:
             raise AssertionError("应抛出 LLMConfigurationError")
         except LLMConfigurationError:
             pass
+
+    def test_rag_chunks_rendered_with_evidence_id(self):
+        """RAG 图谱上下文渲染进 prompt，且附带 evidence_id 供追溯。"""
+        report = DiagnosisReport(
+            overall_summary="总体匹配度中等",
+            radar_analysis="必备偏弱、加分尚可",
+            top_gaps=[],
+            path_analysis="",
+            recommendations=[],
+        )
+        fake = _FakeLLM(report)
+        rag_chunks = [
+            {
+                "content": "AI Agent 工程师：负责智能体应用设计开发",
+                "evidence_id": "position:AI Agent 工程师",
+                "source": "position_definition",
+            },
+            {
+                "content": "岗位 AI 工程师 历史诊断：总体匹配度中等",
+                "evidence_id": "diagnosis:abc-123",
+                "source": "diagnosis",
+            },
+        ]
+        out = generate_diagnosis(_sample_data(), llm=fake, rag_chunks=rag_chunks)
+        assert out.overall_summary == "总体匹配度中等"
+        assert "AI Agent 工程师：负责智能体应用设计开发" in fake.prompt
+        assert "evidence_id: position:AI Agent 工程师" in fake.prompt
+        assert "evidence_id: diagnosis:abc-123" in fake.prompt
+        assert "【图谱参考上下文】" in fake.prompt
+
+    def test_rag_chunks_empty_falls_back_to_wu(self):
+        """无 RAG 上下文时图谱上下文区块渲染为「无」。"""
+        report = DiagnosisReport(
+            overall_summary="", radar_analysis="", top_gaps=[],
+            path_analysis="", recommendations=[],
+        )
+        fake = _FakeLLM(report)
+        generate_diagnosis(_sample_data(), llm=fake, rag_chunks=None)
+        assert "【图谱参考上下文】\n无" in fake.prompt

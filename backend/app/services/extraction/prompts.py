@@ -38,6 +38,18 @@ JD 文本：招聘高级 Java 开发工程师，精通 Java、Spring Boot、MySQ
 示例 2：
 JD 文本：招聘 AI 产品经理，负责 AI 产品规划与设计，熟悉大模型应用者优先，硕士及以上学历，有 TOEFL 成绩优先
 输出：{{"position_name": "AI 产品经理", "skills": [{{"name": "大模型应用"}}], "education": {{"level": "硕士"}}, "certifications": [{{"name": "TOEFL"}}], "requirements": [{{"skill_name": "大模型应用", "necessity": "nice", "level": "初级"}}]}}
+
+示例 3：
+JD 文本：招聘资深数据仓库工程师，精通 SQL 与 Hive，熟练使用 Spark、Airflow 调度任务，熟悉数据建模方法论，计算机相关专业本科及以上学历，持有 AWS 数据类认证者优先
+输出：{{"position_name": "数据仓库工程师", "level": "资深", "skills": [{{"name": "SQL"}}, {{"name": "Hive"}}, {{"name": "Spark"}}, {{"name": "Airflow"}}, {{"name": "数据建模"}}], "tools": [], "education": {{"level": "本科", "major": "计算机"}}, "certifications": [{{"name": "AWS 数据类认证"}}], "requirements": [{{"skill_name": "SQL", "necessity": "must", "level": "高级"}}, {{"skill_name": "Hive", "necessity": "must", "level": "高级"}}, {{"skill_name": "Spark", "necessity": "must", "level": "中级"}}, {{"skill_name": "Airflow", "necessity": "must"}}, {{"skill_name": "数据建模", "necessity": "must"}}]}}
+
+示例 4：
+JD 文本：招聘前端开发工程师，精通 React 与 TypeScript，掌握前端工程化，熟练使用 ECharts 做数据可视化，大专以上学历，具备良好的团队协作与沟通能力
+输出：{{"position_name": "前端开发工程师", "skills": [{{"name": "React"}}, {{"name": "TypeScript"}}, {{"name": "前端工程化"}}, {{"name": "ECharts"}}, {{"name": "数据可视化"}}], "tools": [], "education": {{"level": "大专"}}, "soft_skills": ["团队协作", "沟通能力"], "requirements": [{{"skill_name": "React", "necessity": "must", "level": "高级"}}, {{"skill_name": "TypeScript", "necessity": "must", "level": "高级"}}, {{"skill_name": "ECharts", "necessity": "nice"}}]}}
+
+示例 5：
+JD 文本：招聘网络安全工程师，负责渗透测试与安全运维，熟悉 Linux 与 Python，1-3 年经验，本科及以上学历，持有 CISP 或 OSCP 证书者优先
+输出：{{"position_name": "网络安全工程师", "skills": [{{"name": "Linux"}}, {{"name": "Python"}}, {{"name": "渗透测试"}}], "tools": [], "education": {{"level": "本科"}}, "certifications": [{{"name": "CISP"}}, {{"name": "OSCP"}}], "requirements": [{{"skill_name": "Linux", "necessity": "must", "level": "中级"}}, {{"skill_name": "Python", "necessity": "must", "level": "中级"}}, {{"skill_name": "渗透测试", "necessity": "must"}}]}}
 """
 
 BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输出 JSON 数组（每条 JD 对应一个对象，数组第 i 个元素对应"JD文本 i"）。

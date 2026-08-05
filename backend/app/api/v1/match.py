@@ -1,12 +1,15 @@
 """匹配路由：自动推荐、人岗比对。
 
 数据链路：resume_cache（候选人画像）→ Neo4j 图谱聚合岗位画像 → RuleBasedMatcher。
-契约标注 recommend 为 202 异步，当前按设计文档 9.4 同步执行返回结果（M4 可迁异步）。
-同步执行后结果持久化 Redis（TTL 24h）并返回 match_id，供 match/result|gap|path|feedback 查询。
+契约（设计 §2.4.4）标注 recommend 为 202 异步 + task_id，当前同步执行返回结果，
+M4（8/16）迁移；同步执行后结果持久化 Redis（TTL 24h）并返回 match_id，
+供 match/result|gap|path|feedback 查询。匹配结果/反馈另按 §11.4.1 落 PostgreSQL
+（match_results / match_feedback，Redis 为主存储，落库失败不阻断响应）。
 """
 
 import asyncio
 import json
+import logging
 import time
 import uuid
 
@@ -14,11 +17,17 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
-from app.core.database import get_db, neo4j_driver, redis_client
-from app.models.business import ResumeCache
+from app.core.database import async_session_factory, get_db, neo4j_driver, redis_client
+from app.models.business import (
+    DiagnosisReportRecord,
+    MatchFeedbackRecord,
+    MatchResultRecord,
+    ResumeCache,
+)
 from app.schemas.common import ok, error
 from app.services.matching.engine import RuleBasedMatcher
 from app.services.matching.schemas import (
@@ -35,6 +44,8 @@ from app.services.matching.semantic import SkillEmbedder
 from app.services.learning_path.generator import LearningPathGenerator
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 # 岗位画像进程级缓存：图谱结构变化低频，TTL 内复用，
 # 避免每次匹配请求实时聚合（97 岗位 × ~15000 边）拖慢响应
@@ -250,6 +261,53 @@ async def _load_match_result(match_id: str) -> dict | None:
     return json.loads(cached) if cached else None
 
 
+async def _persist_diagnosis_report(
+    session: AsyncSession, match_id: str, position_name: str, payload: dict
+) -> None:
+    """诊断报告幂等落库（match_id 唯一，重复生成更新而非追加）。"""
+    row = await session.scalar(
+        select(DiagnosisReportRecord).where(DiagnosisReportRecord.match_id == match_id)
+    )
+    if row is None:
+        session.add(
+            DiagnosisReportRecord(
+                match_id=match_id, position_name=position_name, report=payload
+            )
+        )
+    else:
+        row.position_name = position_name
+        row.report = payload
+    await session.commit()
+
+
+async def _persist_match_result_db(
+    session: AsyncSession, match_id: str, position_name: str, user_id: str, data: dict
+) -> None:
+    """匹配结果幂等落库（§11.4.1 match_results：match_id 唯一，重复生成更新）。"""
+    row = await session.scalar(
+        select(MatchResultRecord).where(MatchResultRecord.match_id == match_id)
+    )
+    if row is None:
+        session.add(
+            MatchResultRecord(
+                match_id=match_id, position_name=position_name, user_id=user_id, result=data
+            )
+        )
+    else:
+        row.position_name = position_name
+        row.user_id = user_id
+        row.result = data
+    await session.commit()
+
+
+async def _persist_feedback(
+    session: AsyncSession, match_id: str, score: int, comment: str = ""
+) -> None:
+    """匹配反馈落库（§11.4.1 match_feedback；Redis List 为主存储，本表追加记录）。"""
+    session.add(MatchFeedbackRecord(match_id=match_id, score=score, comment=comment))
+    await session.commit()
+
+
 @router.post("/recommend")
 async def recommend(
     req: RecommendRequest,
@@ -258,14 +316,15 @@ async def recommend(
 ):
     """自动推荐 Top-N 岗位（resume_cache → 匹配引擎）。
 
-    同步执行后将结果快照写入 Redis 并返回 match_id（供 match/result 等查询）。
+    设计 §2.4.4 契约要求异步（202 + task_id），M4（8/16）迁移；当前同步执行，
+    执行后将结果快照写入 Redis 并返回 match_id（供 match/result 等查询）。
     """
     resume_id = _parse_resume_id(req.resume_id)
     if resume_id is None:
         return error(400, "resume_id 格式非法")
     cache = await db.get(ResumeCache, resume_id)
     if cache is None:
-        return error(404, "简历不存在")
+        return error(4040, "简历不存在", http_status=404)
 
     candidate = _build_candidate(cache.parsed_data)
     matcher = RuleBasedMatcher(
@@ -278,6 +337,18 @@ async def recommend(
     match_id = str(uuid.uuid4())
     data = {"items": [r.model_dump() for r in results], "match_id": match_id}
     await _persist_match_result(match_id, data)
+    # 匹配结果落库（§11.4.1 match_results）：失败仅记日志，Redis 为主存储
+    try:
+        async with async_session_factory() as session:
+            await _persist_match_result_db(
+                session,
+                match_id,
+                position_name=results[0].position_name if results else "",
+                user_id=user.get("sub") or "",
+                data=data,
+            )
+    except Exception:
+        logger.exception("匹配结果落库失败，跳过（不影响本次响应）")
     return ok(data=data)
 
 
@@ -298,13 +369,13 @@ async def compare(
         return error(400, "resume_id 格式非法")
     cache = await db.get(ResumeCache, resume_id)
     if cache is None:
-        return error(404, "简历不存在")
+        return error(4040, "简历不存在", http_status=404)
 
     candidate = _build_candidate(cache.parsed_data)
     positions = _load_positions_from_graph()
     target = next((p for p in positions if p.position_id == req.position_id), None)
     if target is None:
-        return error(404, "岗位不存在")
+        return error(4040, "岗位不存在", http_status=404)
 
     semantic = SkillEmbedder.get()
     matcher = RuleBasedMatcher(positions, semantic=semantic)
@@ -326,6 +397,18 @@ async def compare(
         "evidence_refs": _load_evidence_for_position(req.position_id),
     }
     await _persist_match_result(match_id, data)
+    # 匹配结果落库（§11.4.1 match_results）：失败仅记日志，Redis 为主存储
+    try:
+        async with async_session_factory() as session:
+            await _persist_match_result_db(
+                session,
+                match_id,
+                position_name=target.name,
+                user_id=user.get("sub") or "",
+                data=data,
+            )
+    except Exception:
+        logger.exception("匹配结果落库失败，跳过（不影响本次响应）")
     return ok(data=data)
 
 
@@ -334,7 +417,7 @@ async def match_task_status(task_id: str, user: dict = Depends(require_role("use
     """[M4] 查询推荐任务状态（同步执行已完成即返回 success）。"""
     cached = await redis_client.get(f"match:task:{task_id}")
     if cached is None:
-        return error(404, "匹配任务不存在或已过期")
+        return error(4040, "匹配任务不存在或已过期", http_status=404)
     return ok(data=json.loads(cached))
 
 
@@ -343,7 +426,7 @@ async def match_result(match_id: str, user: dict = Depends(require_role("user"))
     """[M4] 获取匹配结果（recommend/compare 返回的 match_id）。"""
     data = await _load_match_result(match_id)
     if data is None:
-        return error(404, "匹配结果不存在或已过期")
+        return error(4040, "匹配结果不存在或已过期", http_status=404)
     return ok(data=data)
 
 
@@ -352,7 +435,7 @@ async def match_result_gap(match_id: str, user: dict = Depends(require_role("use
     """[M4] 获取差距分析（compare 结果的 gaps 三态列表）。"""
     data = await _load_match_result(match_id)
     if data is None:
-        return error(404, "匹配结果不存在或已过期")
+        return error(4040, "匹配结果不存在或已过期", http_status=404)
     return ok(data={"match_id": match_id, "gaps": data.get("gaps", [])})
 
 
@@ -361,22 +444,23 @@ async def match_result_path(match_id: str, user: dict = Depends(require_role("us
     """[M4] 获取学习路径（compare 结果的 missing/weak 技能先修链 + 课程）。"""
     data = await _load_match_result(match_id)
     if data is None:
-        return error(404, "匹配结果不存在或已过期")
+        return error(4040, "匹配结果不存在或已过期", http_status=404)
     return ok(data={"match_id": match_id, "learning_path": data.get("learning_path", [])})
 
 
 @router.get("/result/{match_id}/diagnosis")
 async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user"))):
-    """[M4] 获取人岗比对诊断报告（LLM 生成，结果缓存 24h）。
+    """[M4] 获取人岗比对诊断报告（LLM 生成，结果缓存 24h + 落库）。
 
-    以结果快照的分数/差距/学习路径/证据为 context 生成结构化报告
+    以结果快照的分数/差距/学习路径/证据为 context，并动态检索图谱上下文
+    （§6.4 通用 RAG：岗位定义 + 技能 + 历史诊断报告）生成结构化报告
     （设计文档 §9.5：总体匹配度 + 雷达解读 + 关键差距 Top-5 + 路径解读 + 改进建议，
     每条差距断言附 evidence_id 可追溯）。仅人岗比对（compare）快照含 gaps，
     AUTO 推荐快照返回 400；LLM 不可用/超时返回 503（诊断是增强功能，不阻断主流程）。
     """
     data = await _load_match_result(match_id)
     if data is None:
-        return error(404, "匹配结果不存在或已过期")
+        return error(4040, "匹配结果不存在或已过期", http_status=404)
     if not data.get("gaps"):
         return error(400, "该匹配结果无差距数据，仅人岗比对可生成诊断报告")
 
@@ -390,8 +474,32 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
         LLMTimeoutError,
     )
 
+    # 动态检索图谱上下文（§6.4）：岗位定义/技能/历史诊断报告，失败降级为空上下文
+    rag_chunks: list[dict] = []
+    position_name = data.get("position_name", "")
+    if position_name:
+        from app.services.matching.semantic import SemanticUnavailableError, SkillEmbedder
+        from app.services.rag.retrieval import retrieve_context
+
+        try:
+            embedder = SkillEmbedder.get()
+        except SemanticUnavailableError:
+            # 语义模型不可用 → 降级为关键词路检索，不阻塞诊断
+            embedder = None
+        try:
+            async with async_session_factory() as session:
+                chunks = await retrieve_context(
+                    position_name, session, neo4j=neo4j_driver, embedder=embedder
+                )
+            rag_chunks = [c.__dict__ for c in chunks]
+        except Exception:
+            # RAG 是增强：检索失败不阻塞诊断生成（§6.4 证据不足时明确说明）
+            logger.exception("图谱上下文检索失败，诊断降级为无 RAG 上下文")
+
     try:
-        report = await asyncio.to_thread(generate_diagnosis, data)
+        report = await asyncio.to_thread(
+            generate_diagnosis, data, rag_chunks=rag_chunks
+        )
     except (LLMConfigurationError, LLMTimeoutError) as e:
         return error(503, f"诊断报告生成失败：{e}")
 
@@ -399,6 +507,12 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
     await redis_client.set(
         f"match:diagnosis:{match_id}", json.dumps(payload), ex=_MATCH_RESULT_TTL
     )
+    # 诊断报告落库（§6.4 RAG 检索源之一）：失败不影响响应（Redis 为主存储）
+    try:
+        async with async_session_factory() as session:
+            await _persist_diagnosis_report(session, match_id, position_name, payload)
+    except Exception:
+        logger.exception("诊断报告落库失败，跳过（不影响本次响应）")
     return ok(data=payload)
 
 
@@ -418,8 +532,14 @@ async def match_feedback(
     """
     cached = await _load_match_result(req.match_id)
     if cached is None:
-        return error(404, "匹配结果不存在或已过期")
+        return error(4040, "匹配结果不存在或已过期", http_status=404)
     key = f"match:feedback:{req.match_id}"
     await redis_client.rpush(key, json.dumps({"score": req.score, "created_at": _ts()}))
     await redis_client.expire(key, 90 * 24 * 3600)
+    # 反馈落库（§11.4.1 match_feedback）：失败仅记日志，Redis 为主存储
+    try:
+        async with async_session_factory() as session:
+            await _persist_feedback(session, req.match_id, req.score)
+    except Exception:
+        logger.exception("反馈落库失败，跳过（不影响本次响应）")
     return ok(msg="反馈已记录")

@@ -1,7 +1,8 @@
 """新岗位发现阶段二：RAG 接地（设计文档 7.2.3 节）。
 
 candidate 触发后执行两层接地：
-1. 权威岗位库检索：O*NET occupations（PostgreSQL 语义向量 + Neo4j 全文双路），
+1. 权威岗位库检索：occupations 三源（O*NET / 人社部大典 / LinkedIn，
+   同一表 source 字段区分；PostgreSQL 语义向量 + Neo4j 全文双路），
    命中后取权威定义（英文）作为定义草案基座。
 2. 种子列表匹配：预置 12 个新兴岗位种子（configs/emerging_seeds.yaml），
    命中后取种子描述作为定义草案基座。
@@ -195,23 +196,24 @@ async def _semantic_search(db: AsyncSession, pos: str, embedder, limit: int) -> 
 async def search_authoritative(
     position_name: str,
     db: AsyncSession,
-    limit: int = 5,
+    limit: int = 10,
     *,
     neo4j=None,
     embedder=None,
 ) -> list[dict]:
-    """在权威岗位库（O*NET occupations）检索候选岗位（设计文档 7.2.3 双路）。
+    """在权威岗位库（occupations 三源：O*NET / 人社部大典 / LinkedIn）检索候选岗位。
 
     检索方法：pgvector 语义 top-k（occupations.embedding 余弦）+ Neo4j 全文
     关键词 top-k（occupation_search 索引），按 code 合并去重取前 limit 条。
-    降级链：语义路（向量列/扩展/模型任一不可用）→ 跳过；关键词路
+    三源数据均落在同一 occupations 表（source 字段区分），一次检索天然覆盖
+    全部来源。降级链：语义路（向量列/扩展/模型任一不可用）→ 跳过；关键词路
     （Neo4j 未同步/不可用）→ PostgreSQL ILIKE。接地是"辅助确认"而非硬门控，
     任一检索源失败不阻塞判定。
 
     Args:
         position_name: candidate 岗位名
         db: PostgreSQL 会话（权威库检索）
-        limit: 返回条数上限
+        limit: 返回条数上限（默认 10，对齐设计文档 7.2.3 的 top-10 口径）
         neo4j: Neo4j 驱动（默认 None → 跳过全文路，仅 ILIKE 关键词路）
         embedder: SkillEmbedder（默认 None → 跳过语义路）
 

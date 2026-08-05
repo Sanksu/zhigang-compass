@@ -91,7 +91,7 @@ async def version_diff(
     va = await db.get(GraphVersion, from_version)
     vb = await db.get(GraphVersion, to_version)
     if va is None or vb is None:
-        return error(404, "版本不存在")
+        return error(4040, "版本不存在", http_status=404)
     return ok(data=_diff_snapshots(va.snapshot_json, vb.snapshot_json))
 
 
@@ -132,7 +132,7 @@ async def version_detail(version_id: str, db: AsyncSession = Depends(get_db)):
     """
     v = await db.get(GraphVersion, version_id)
     if v is None:
-        return error(404, "版本不存在")
+        return error(4040, "版本不存在", http_status=404)
 
     snapshot = v.snapshot_json or {}
     nodes = snapshot.get("nodes", [])
@@ -170,7 +170,7 @@ async def position_evolution(id: str, db: AsyncSession = Depends(get_db)):
     )
     snapshots = [v for v in rows]
     if not snapshots:
-        return error(404, "无图谱版本数据")
+        return error(4040, "无图谱版本数据", http_status=404)
 
     name = None
     points = []

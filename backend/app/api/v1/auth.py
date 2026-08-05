@@ -91,7 +91,7 @@ async def login(
         # 首次部署 bootstrap：users 表为空时按配置创建 admin 用户，
         # 创建后即落入 users 表，后续登录走 DB 校验；生产环境禁用该路径
         if settings.is_production:
-            return error(401, "用户名或密码错误")
+            return error(4010, "用户名或密码错误", http_status=401)
         if req.username == settings.admin_username and req.password == settings.admin_password:
             user = User(
                 username=req.username,
@@ -102,12 +102,12 @@ async def login(
             await db.commit()
             await db.refresh(user)
         else:
-            return error(401, "用户名或密码错误")
+            return error(4010, "用户名或密码错误", http_status=401)
     elif not verify_password(req.password, user.password_hash):
-        return error(401, "用户名或密码错误")
+        return error(4010, "用户名或密码错误", http_status=401)
 
     if not user.is_active:
-        return error(403, "账户已禁用")
+        return error(4030, "账户已禁用", http_status=403)
 
     access_token = create_access_token(user.id, user.role)
     refresh_token = create_refresh_token(user.id, user.role)
@@ -145,19 +145,19 @@ async def refresh_token(
     """
     refresh_token = _extract_refresh_token(request, req)
     if not refresh_token:
-        return error(401, "缺少 refresh_token")
+        return error(4010, "缺少 refresh_token", http_status=401)
     payload = decode_token(refresh_token)
     if payload is None or payload.get("type") != "refresh":
-        return error(401, "无效的 refresh_token")
+        return error(4010, "无效的 refresh_token", http_status=401)
     jti = payload.get("jti")
     if jti:
         revoked = await redis.get(f"token:blacklist:{jti}")
         if revoked:
-            return error(401, "refresh_token 已失效")
+            return error(4010, "refresh_token 已失效", http_status=401)
     user_id = payload["sub"]
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
-        return error(401, "用户不存在或已禁用")
+        return error(4010, "用户不存在或已禁用", http_status=401)
     # 重新签发（短 TTL 的 access_token）
     new_access = create_access_token(user_id, user.role)
     return ok(data={"access_token": new_access, "expires_in": 1800})

@@ -162,6 +162,99 @@ def _build_summary(
     return "；".join(parts)
 
 
+# 学历层级映射（设计文档 §9.2 学历匹配方法：层级映射 + 学校加权）。
+# 关键词包含式匹配，兼容"本科及以上"等表述；仅用于雷达维度近似评分。
+_EDU_LEVELS = (
+    ("博士", 4),
+    ("硕士", 3),
+    ("研究生", 3),
+    ("本科", 2),
+    ("学士", 2),
+    ("大专", 1),
+    ("专科", 1),
+    ("高中", 0),
+    ("中专", 0),
+)
+
+
+def _edu_level(text: str | None) -> int | None:
+    """学历文本 → 层级分（无法识别返回 None）。"""
+    if not text:
+        return None
+    for keyword, level in _EDU_LEVELS:
+        if keyword in text:
+            return level
+    return None
+
+
+def _education_score(required: str | None, candidate_level: str | None) -> float | None:
+    """雷达"学历"维度近似分（0.0-1.0）：候选人层级 ≥ 岗位要求 → 1.0，
+    低一级 → 0.5，其余 → 0.0；任一侧无数据返回 None。
+
+    设计文档 §9.2 学历匹配为"层级映射 + 学校加权"，本次仅实现层级映射的
+    保守近似（school_tier 加权待 M5 完善）。
+    """
+    req = _edu_level(required)
+    cand = _edu_level(candidate_level)
+    if req is None or cand is None:
+        return None
+    if cand >= req:
+        return 1.0
+    if cand == req - 1:
+        return 0.5
+    return 0.0
+
+
+def _project_score(candidate, position: PositionProfile, semantic) -> float | None:
+    """雷达"项目"维度近似分（0.0-1.0）：候选人项目（名+描述）与岗位典型场景
+    的语义相似度均值；无项目/岗位无典型场景/语义模型不可用 → None。
+
+    设计文档 §9.2 项目匹配为"项目 Embedding 与场景余弦均值"，本次复用
+    SkillEmbedder 文本相似度近似（待 M5 换 pgvector project_embeddings）。
+    岗位侧场景取 PositionProfile.typical_scenarios（聚合层已按需填充，
+    当前图谱加载未填时该维度自然返回 None，不阻断比对）。
+    """
+    projects = [p for p in candidate.projects if p.name or p.description]
+    scenarios = [s for s in position.typical_scenarios if s]
+    if not projects or not scenarios or semantic is None:
+        return None
+    try:
+        sims = []
+        for project in projects:
+            text = project.name + (f"：{project.description}" if project.description else "")
+            for scenario in scenarios:
+                sims.append(semantic.similarity(text, scenario))
+        return sum(sims) / len(sims) if sims else None
+    except Exception:
+        # 语义模型不可用降级（与 _skill_similarity 口径一致），不阻断匹配
+        return None
+
+
+def build_radar(
+    must_score: float,
+    nice_score: float,
+    exp_score: float,
+    candidate,
+    position: PositionProfile,
+    semantic=None,
+) -> dict:
+    """人岗比对五维雷达（设计文档 §9.5：完整五维雷达图）。
+
+    五维构成（§9.2 六类特征中实现可达的五维）：must（必备技能）/ nice（加分技能）/
+    experience（经验）/ education（学历）/ projects（项目）。软技能已并入 must/nice
+    （low_confidence 降权 ×0.5），证书维度当前图谱侧 required_certs 数据稀疏
+    暂不入雷达，故为五维而非六维。
+    education/projects 为保守近似：无数据返回 None，公式标注待 M5 完善。
+    """
+    return {
+        "must": round(must_score, 4),
+        "nice": round(nice_score, 4),
+        "experience": round(exp_score, 4),
+        "education": _education_score(position.required_education, candidate.education_level),
+        "projects": _project_score(candidate, position, semantic),
+    }
+
+
 def score_position(
     candidate,
     position: PositionProfile,
@@ -238,6 +331,7 @@ def score_position(
         missing_must=missing_must,
         summary=_build_summary(position.name, matched_must, missing_must, must_score, unqualified),
         unqualified=unqualified,
+        radar=build_radar(must_score, nice_score, exp_score, candidate, position, semantic),
     )
 
 

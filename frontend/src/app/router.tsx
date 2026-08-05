@@ -30,13 +30,13 @@ const protectedRoutes = [
   {
     element: <AppShell />,
     children: [
-      { index: true, element: <Suspense fallback={<RouteLoading />}><DashboardPage /></Suspense> },
-      { path: 'graph', element: <Suspense fallback={<RouteLoading />}><GraphPage /></Suspense> },
+      { index: true, element: <AuthGuard><Suspense fallback={<RouteLoading />}><DashboardPage /></Suspense></AuthGuard> },
+      { path: 'graph', element: <AuthGuard><Suspense fallback={<RouteLoading />}><GraphPage /></Suspense></AuthGuard> },
       {
         path: 'resume-match',
         element: <AuthGuard requireRole={['user', 'admin']}><Suspense fallback={<RouteLoading />}><ResumeMatchPage /></Suspense></AuthGuard>,
       },
-      { path: 'evolution', element: <Suspense fallback={<RouteLoading />}><EvolutionPage /></Suspense> },
+      { path: 'evolution', element: <AuthGuard><Suspense fallback={<RouteLoading />}><EvolutionPage /></Suspense></AuthGuard> },
       {
         path: 'profile',
         element: <AuthGuard><Suspense fallback={<RouteLoading />}><ProfilePage /></Suspense></AuthGuard>,

@@ -15,18 +15,31 @@
         position_id = import_jd(session, extraction_result, evidence_dict)
 """
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 from neo4j import Session
 
 from app.services.extraction.dictionary import normalize_position_name
 from app.services.extraction.schemas import JDExtractionResult
-from app.services.kg.id_generator import next_id
+from app.services.kg.id_generator import PREFIX_MAP, next_id
 
 
 def _now() -> str:
     """当前 UTC+8 ISO8601 时间戳。"""
     return datetime.now(timezone(timedelta(hours=8))).isoformat()
+
+
+def _stable_id(entity_type: str, name: str) -> str:
+    """基于实体名生成稳定 ID（`{prefix}_{sha1(name)[:8]}`）。
+
+    Education/Certification 按内容归并（同一学历/证书要求跨 JD 复用同一节点，
+    schema.cypher §5：REQUIRES 目标含 Education/Certification）：用 name 哈希
+    派生 ID，重复导入同名实体 ID 一致，MERGE 天然幂等、不产生 ID 漂移
+    （区别于 Position/Skill 的 Counter 自增，见 id_generator.PREFIX_MAP）。
+    """
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+    return f"{PREFIX_MAP[entity_type]}_{digest}"
 
 
 # ============================================================
@@ -44,7 +57,9 @@ def import_jd(
     - (Position {name: extraction.position_name})
     - (Evidence {source, source_url, crawled_at, raw_text})
     - (Skill {name: ...}) × N
+    - (Education {name: level·major}) / (Certification {name: ...})（学历/证书要求）
     - (Position)-[:REQUIRES {necessity, level}]->(Skill)
+    - (Position)-[:REQUIRES {necessity: 'must'}]->(Education|Certification)
     - (Position)-[:HAS_EVIDENCE]->(Evidence)
     - (Skill)-[:MENTIONED_IN]->(Evidence)
 
@@ -232,6 +247,64 @@ def _import_jd_tx(tx, extraction: JDExtractionResult, evidence: dict) -> str:
             """,
             position_id=position_id,
             tool_name=tool_name,
+        )
+
+    # 5. Education（学历/专业要求节点，schema.cypher §5：REQUIRES 目标含 Education）。
+    # JD 侧抽取结果无 institution 字段（JDExtractionResult.education 仅 level/major），
+    # 故节点不含 institution；name 取 level·major 组合，同名要求跨 JD 归并到同一节点。
+    if extraction.education:
+        edu = extraction.education
+        edu_name = " · ".join(part for part in (edu.level or "", edu.major or "") if part)
+        if edu_name:
+            education_id = _stable_id("Education", edu_name)
+            tx.run(
+                """
+                MERGE (e:Education {id: $id})
+                ON CREATE SET e.created_at = $now
+                SET e.name = $name, e.level = $level, e.major = $major
+                """,
+                id=education_id,
+                name=edu_name,
+                level=edu.level or "",
+                major=edu.major or "",
+                now=now,
+            )
+            # Position → REQUIRES → Education（学历要求为 JD 必备项）
+            tx.run(
+                """
+                MATCH (p:Position {id: $position_id}), (e:Education {id: $education_id})
+                MERGE (p)-[:REQUIRES {necessity: 'must'}]->(e)
+                """,
+                position_id=position_id,
+                education_id=education_id,
+            )
+
+    # 6. Certifications（证书要求节点，schema.cypher §5：REQUIRES 目标含 Certification）。
+    # JD 侧抽取结果无 issuer 字段（JDExtractionResult.certifications 仅 name），
+    # 故节点不含 issuer；同名证书要求跨 JD 归并到同一节点。
+    for cert in extraction.certifications:
+        cert_name = cert.name.strip()
+        if not cert_name:
+            continue
+        certification_id = _stable_id("Certification", cert_name)
+        tx.run(
+            """
+            MERGE (c:Certification {id: $id})
+            ON CREATE SET c.created_at = $now
+            SET c.name = $name
+            """,
+            id=certification_id,
+            name=cert_name,
+            now=now,
+        )
+        # Position → REQUIRES → Certification（证书要求为 JD 必备项）
+        tx.run(
+            """
+            MATCH (p:Position {id: $position_id}), (c:Certification {id: $certification_id})
+            MERGE (p)-[:REQUIRES {necessity: 'must'}]->(c)
+            """,
+            position_id=position_id,
+            certification_id=certification_id,
         )
 
     return position_id
