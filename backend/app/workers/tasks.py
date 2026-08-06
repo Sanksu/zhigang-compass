@@ -776,8 +776,10 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
     # 按设计文档 §4.4 数据更新频率分组
     # 国内 A 级 + B 级（02:00 / 04:00）
     domestic_platforms = ["boss", "zhilian"]
-    # 国际 A/B 级（错峰）
-    international_platforms = ["monster", "indeed", "glassdoor"]
+    # 国际 A/B 级（错峰）。monster 的 DataDome 防护（IP 信誉 + 浏览器真实性双重
+    # 校验）在容器环境实测不可绕过（headless/CDP/指纹伪装/xdotool 全被拦截），
+    # 暂从自动采集列表移除；保留 spider 代码，待有住宅代理/指纹浏览器后再启用
+    international_platforms = ["indeed", "glassdoor"]
     # 非招聘数据源（论文/社区/课程）
     trend_platforms = ["arxiv", "github", "stackoverflow"]
 

@@ -11,7 +11,7 @@
 
 任务分组（对齐设计文档 §4.4 数据更新频率）：
     02:00  国内 A/B 级招聘平台（boss/zhilian）
-    04:00  国际 A/B 级招聘平台（monster/indeed/glassdoor）
+    04:00  国际 A/B 级招聘平台（indeed/glassdoor；monster 因 DataDome 防护不可绕过已停采）
     04:30  时效衰减重算（每日凌晨）
     05:00  ETL 主管线编排（含爬虫→清洗→去重→时滞→通胀→结构化→入图）
 

@@ -11,7 +11,7 @@
 
 平台调度时段（设计文档 §4.4）：
     02:00  boss / zhilian（国内 A 级）
-    04:00  monster / indeed / glassdoor（国际 A 级错峰）
+    04:00  indeed / glassdoor（国际 A 级错峰；monster 因 DataDome 防护不可绕过已停采）
     23:00  maimai（脉脉夜间合规窗口 ≤100 req/h）
     00:00  linkedin_public / github / stackoverflow（国际，UTC 0:00）
     03:00  arxiv（UTC 3:00）

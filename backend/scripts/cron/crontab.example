@@ -26,7 +26,7 @@ LOG_DIR=/opt/zhigang-compass/logs
 15 2 * * * cd $BACKEND_DIR && uv run python scripts/cron/crawl_spider.py zhilian 100 >> $LOG_DIR/crawl_zhilian_$(date +\%Y\%m\%d).log 2>&1
 
 # ── 国际招聘平台（每日 04:00，UTC 0:00 对应北京时间 08:00，错峰至 04:00 减少白天负载）──
-0 4 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py monster 50 >> $LOG_DIR/crawl_monster_$(date +\%Y\%m\%d).log 2>&1
+# monster 已停采（DataDome 防护在容器环境不可绕过，见 tasks.py run_etl_pipeline 注释）
 20 4 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py indeed 50 >> $LOG_DIR/crawl_indeed_$(date +\%Y\%m\%d).log 2>&1
 40 4 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py glassdoor 50 >> $LOG_DIR/crawl_glassdoor_$(date +\%Y\%m\%d).log 2>&1
 
