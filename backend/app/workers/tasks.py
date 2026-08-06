@@ -1140,6 +1140,8 @@ async def discovery_daily(ctx: dict) -> dict:
         window_days = max(span.days, 0) if span else 0
 
     inputs = []
+    # 岗位 → 快照环比增长率（置信度三维加权 §7.2.4 用，见下方 compute_confidence）
+    growth_by_position: dict[str, float] = {}
     for name, stat in position_stats.items():
         freq = float(stat["count"])
         freqs = freq_windows.get(name, [])
@@ -1154,6 +1156,7 @@ async def discovery_daily(ctx: dict) -> dict:
             jd_freq_ma3 = sum(recent3) / len(recent3)
             if freqs[-2] > 0:
                 growth_rate = (freqs[-1] - freqs[-2]) / freqs[-2]
+        growth_by_position[name] = growth_rate
         inputs.append(
             DiscoveryInput(
                 position_name=name,
