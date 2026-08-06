@@ -71,7 +71,12 @@ def evaluate_pairs(pairs: list[dict], weights, semantic, sim_threshold: float) -
     hits = sum(1 for s, lb in zip(scores, labels) if (s >= 0.5) == (lb == 1))
     accuracy = hits / len(scores) if scores else 0.0
     corr = spearmanr(scores, labels).statistic
-    return {"spearman": float(corr) if corr == corr else 0.0, "accuracy": accuracy}
+    return {
+        "spearman": float(corr) if corr == corr else 0.0,
+        "accuracy": accuracy,
+        "scores": scores,
+        "labels": labels,
+    }
 
 
 def _weights_tuple(w_must: float, w_nice: float, w_exp: float) -> tuple[float, float, float]:
