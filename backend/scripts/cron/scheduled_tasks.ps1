@@ -41,6 +41,10 @@ $Tasks = @(
     @{ Name = "CrawlSO";        Time = "08:30"; Script = "crawl_spider.py"; Args = @("stackoverflow", "50"); Proxy = $true },
     # arXiv（北京时间 11:00 = UTC 3:00）
     @{ Name = "CrawlArxiv";     Time = "11:00"; Script = "crawl_spider.py"; Args = @("arxiv", "50");   Proxy = $true },
+    # 课程平台每周日全量同步（北京时间 10:00 = UTC 2:00，对齐 crontab.example）
+    @{ Name = "CrawlCoursera";   Time = "10:00"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("coursera", "100"); Proxy = $true },
+    @{ Name = "CrawlEdx";        Time = "10:30"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("edx", "100"); Proxy = $true },
+    @{ Name = "CrawlIcourse163"; Time = "11:00"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("icourse163", "100") },
     # ETL 主管线（05:00）
     @{ Name = "ETLDaily";       Time = "05:00"; Script = "etl_daily.py";    Args = @() },
     # 新岗位发现 + 自动状态流转（05:30，ETL 阶段 12 快照发布后）
@@ -74,9 +78,14 @@ foreach ($task in $Tasks) {
         $cmd = '$env:HTTPS_PROXY="http://127.0.0.1:7890"; ' + $cmd
     }
 
-    # 解析时间（HH:mm）为每日触发
+    # 解析时间（HH:mm）；指定 DaysOfWeek 的任务为每周触发（课程平台），否则每日
     $timeParts = $task.Time.Split(':')
-    $trigger = New-ScheduledTaskTrigger -Daily -At "$($timeParts[0]):$($timeParts[1])"
+    $at = "$($timeParts[0]):$($timeParts[1])"
+    if ($task.DaysOfWeek) {
+        $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $task.DaysOfWeek -At $at
+    } else {
+        $trigger = New-ScheduledTaskTrigger -Daily -At $at
+    }
 
     # 以当前用户登录时运行
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
