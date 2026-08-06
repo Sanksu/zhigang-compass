@@ -20,16 +20,8 @@ RUN uv lock && uv sync --no-dev --frozen
 FROM python:3.11-slim
 
 # 运行时依赖（仅 system 包）
-# noVNC 人工验证环境（monster DataDome 等风控检测 CDP 调试连接，自动方案 403，
-# 需容器内 Xvfb 虚拟显示 + 无 CDP 有头 chromium 经 noVNC 暴露给用户人工验证）：
-# xvfb / x11vnc / websockify / novnc；procps 提供 pkill（setup_boss_chrome --verify-stop 用）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    xvfb \
-    x11vnc \
-    websockify \
-    novnc \
-    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # 从 builder 拷贝 site-packages
