@@ -10,6 +10,8 @@
     python -m crawlers.setup_boss_chrome              # 启动并等待登录
     python -m crawlers.setup_boss_chrome --check      # 检查 CDP + 登录态
     python -m crawlers.setup_boss_chrome --stop       # 关闭专用 Chrome
+    python -m crawlers.setup_boss_chrome --platform monster --verify   # noVNC 人工验证环境
+    python -m crawlers.setup_boss_chrome --platform monster --verify-stop  # 关闭验证环境
 
 为什么不用 Playwright 启动浏览器？
     Playwright/Selenium 启动的浏览器指纹与真实 Chrome 不同，BOSS 风控会识别
@@ -41,6 +43,26 @@ CDP_PORT_BY_PLATFORM = {"boss": 9222, "monster": 9223, "glassdoor": 9224, "maima
 
 # CDP 默认端口
 DEFAULT_CDP_PORT = 9222
+
+# 风控环境（monster DataDome 等）对 headless 默认 UA 直接 403，统一覆盖为
+# Windows Chrome UA。验证浏览器与采集浏览器必须一致，验证态（cookie）才可复用。
+_DESKTOP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
+
+# 各平台验证/采集默认打开的首个页面（noVNC 人工验证时打开搜索页触发风控）
+_VERIFY_URL_BY_PLATFORM = {
+    "monster": "https://www.monster.com/jobs/search?q=Python&where=New+York",
+    "glassdoor": "https://www.glassdoor.com/Job/jobs.htm?sc.keyword=Python",
+    "boss": "https://www.zhipin.com/",
+    "maimai": "https://maimai.cn/",
+}
+
+# noVNC 人工验证环境（monster DataDome 等会检测 CDP/DevTools 调试连接并强制
+# 403，自动方案全失效；改由容器内 Xvfb 虚拟显示 + 无 CDP 有头 chromium，
+# 经 noVNC 暴露给用户人工完成验证）
+_VERIFY_DISPLAY = ":99"
+_VERIFY_VNC_PORT = 5900
+_VERIFY_HTTP_PORT = 6080
 
 
 def find_chrome() -> str:
@@ -75,6 +97,9 @@ def find_chrome() -> str:
         "/usr/bin/microsoft-edge",
         "/usr/bin/chromium-browser",
         "/usr/bin/chromium",
+        # Debian 正式 chromium（apt 安装）优先于 playwright 的 Chrome for Testing：
+        # DataDome 等风控能从 DOM 横幅识别 CfT（"Chrome for Testing ... automated testing"）
+        "/usr/lib/chromium/chromium",
     ]
     for c in candidates:
         if Path(c).exists():
@@ -109,12 +134,26 @@ def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, cdp_address: str = "127.0.0.1
         "--remote-allow-origins=*",
         url,
     ]
-    # Linux 容器内以非 root 用户运行且无 SUID 沙箱时必需（Windows 上该参数被忽略）
+    # Linux 容器内 Debian chromium 需 --no-sandbox --no-zygote：Docker 默认
+    # seccomp 禁止 namespace 操作，SUID sandbox 起不来会 FATAL 崩溃（实测）
     if sys.platform != "win32":
         cmd.append("--no-sandbox")
+        cmd.append("--no-zygote")
+        # 容器内 /dev/shm 默认仅 64MB，headless 渲染大页面（glassdoor 首页）时
+        # renderer 因共享内存不足崩溃（实测 Page crashed）；改用 /tmp 内存文件
+        cmd.append("--disable-dev-shm-usage")
     # 容器无显示服务器时以无头模式运行（compose 设 CDP_HEADLESS=1；本地桌面保持有头以完成登录）
     if os.environ.get("CDP_HEADLESS") == "1":
         cmd.append("--headless")
+        # headless 默认 UA 含 HeadlessChrome，被 glassdoor 等风控拦截（实测 403）；
+        # 覆盖为 Windows Chrome UA，crawler 的隔离 context 不设 UA 也继承真实指纹
+        cmd.append("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
+    # 国际源（glassdoor 等）需走代理：CDP_PROXY 非空时注入 --proxy-server。
+    # 容器内经 host.docker.internal 指向宿主机 Clash；本地桌面直连则不设。
+    cdp_proxy = os.environ.get("CDP_PROXY")
+    if cdp_proxy:
+        cmd.append(f"--proxy-server={cdp_proxy}")
 
     print(f"Chrome 路径: {chrome_path}")
     print(f"隔离 profile: {profile_dir}")
@@ -132,6 +171,95 @@ def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, cdp_address: str = "127.0.0.1
     print(f"Chrome 已启动 (PID={proc.pid})")
     print(f"后续运行爬虫时，设置环境变量：$env:BOSS_CDP_URL=http://{cdp_address}:{cdp_port}")
     return proc
+
+
+def start_verify_browser(platform: str):
+    """启动该平台的 noVNC 人工验证环境（Xvfb + 无 CDP 有头 chromium）。
+
+    monster 的 DataDome 会检测 CDP/DevTools 调试连接（console 提示 "Please
+    close the DevTools panel" 并强制 403），playwright 等自动方案全部失效。
+    本函数在容器内拉起 Xvfb 虚拟显示 + 无 CDP 的有头 chromium，经 x11vnc +
+    websockify 暴露为 noVNC 页面，由用户人工完成验证；验证态 cookies 落盘到
+    该平台 profile，供 headless CDP 采集复用（UA/代理须一致，见 _DESKTOP_UA）。
+    """
+    profile_dir = platform_profile_dir(platform)
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    # 幂等：残留的验证进程会占用 display/端口，且验证浏览器与采集浏览器共用
+    # profile（Chromium 同 profile 加锁），重复启动前先清理
+    stop_verify_browser(platform)
+
+    chrome_path = find_chrome()
+    url = _VERIFY_URL_BY_PLATFORM.get(platform, "https://www.google.com/")
+
+    # 1. Xvfb 虚拟显示
+    subprocess.Popen(
+        ["Xvfb", _VERIFY_DISPLAY, "-screen", "0", "1920x1080x24", "-nolisten", "tcp"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    time.sleep(1)
+
+    # 2. 有头 chromium：不设 --remote-debugging-port（CDP 会被 DataDome 识别），
+    #    不设 --headless；强制 Windows Chrome UA + 走 CDP_PROXY 代理，保证
+    #    验证态与采集态指纹一致。
+    #    --no-sandbox --no-zygote：Docker 默认 seccomp 禁止 namespace 操作，
+    #    Debian chromium 的 SUID sandbox 起不来会 FATAL 崩溃（实测），只能用
+    #    该组合（Debian 容器内标准跑法）。--no-sandbox 会显示
+    #    "unsupported command-line flag" 警示条，但实测 DataDome 对 monster
+    #    的拦截由 IP 信誉主导，警示条不构成决定性因素（住宅 IP 下带警示条
+    #    仍可出滑块页）
+    cmd = [
+        chrome_path,
+        f"--user-data-dir={profile_dir}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--no-sandbox",
+        "--no-zygote",
+        "--disable-dev-shm-usage",
+        f"--user-agent={_DESKTOP_UA}",
+        "--window-size=1920,1080",
+        url,
+    ]
+    cdp_proxy = os.environ.get("CDP_PROXY")
+    if cdp_proxy:
+        cmd.append(f"--proxy-server={cdp_proxy}")
+    subprocess.Popen(cmd, env=dict(os.environ, DISPLAY=_VERIFY_DISPLAY),
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # 3. x11vnc（把 Xvfb 显示导出为 VNC 端口）
+    subprocess.Popen(
+        ["x11vnc", "-display", _VERIFY_DISPLAY, "-forever", "-shared", "-nopw",
+         "-rfbport", str(_VERIFY_VNC_PORT)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    # 4. websockify：VNC → WebSocket，配合 noVNC 前端在浏览器里查看
+    subprocess.Popen(
+        ["websockify", "--web", "/usr/share/novnc", str(_VERIFY_HTTP_PORT),
+         f"localhost:{_VERIFY_VNC_PORT}"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    time.sleep(2)
+
+    print(f"noVNC 人工验证环境已启动（platform={platform}）")
+    print(f"  浏览器地址: http://localhost:{_VERIFY_HTTP_PORT}/vnc.html")
+    print(f"  1. 在浏览器打开上述地址，进入容器内 Chromium 桌面")
+    print(f"  2. 在打开的 {url} 完成 DataDome 人机验证")
+    print("  3. 验证通过（页面正常显示结果）后，运行 --verify-stop 关闭本环境")
+    print("  4. 验证态 cookies 已存入 profile，运行爬虫即可复用")
+
+
+def stop_verify_browser(platform: str):
+    """关闭该平台的 noVNC 人工验证环境（chromium / x11vnc / websockify / Xvfb）。
+
+    chromium 按平台 profile 目录精确匹配（避免误杀其他平台的浏览器）；
+    其余进程按 display/端口匹配（验证环境独占该虚拟显示与端口）。
+    """
+    profile_dir = platform_profile_dir(platform)
+    os.system(f"pkill -f '{profile_dir}'")
+    os.system(f"pkill -f 'Xvfb {_VERIFY_DISPLAY}'")
+    os.system(f"pkill -f 'x11vnc.*{_VERIFY_DISPLAY}'")
+    os.system(f"pkill -f 'websockify.*{_VERIFY_HTTP_PORT}'")
+    print(f"已关闭 {platform} 的 noVNC 验证环境")
 
 
 def check_cdp(cdp_url: str, quiet: bool = False) -> bool:
@@ -271,6 +399,10 @@ def main():
                         help="CDP 平台（决定独立 profile 与默认端口）：boss/monster/glassdoor/maimai")
     parser.add_argument("--check", action="store_true", help="检查 CDP 连接 + 登录态（boss 专用）")
     parser.add_argument("--stop", action="store_true", help="关闭该平台的隔离 Chrome")
+    parser.add_argument("--verify", action="store_true",
+                        help="启动 noVNC 人工验证环境（Xvfb + 无 CDP 有头 chromium）")
+    parser.add_argument("--verify-stop", action="store_true",
+                        help="关闭 noVNC 人工验证环境")
     parser.add_argument("--cdp-url", default=None, help="CDP 调试端点（默认按平台端口）")
     parser.add_argument("--cdp-port", type=int, default=None, help="启动时 CDP 端口（默认按平台）")
     parser.add_argument("--cdp-address", default="127.0.0.1",
@@ -285,6 +417,10 @@ def main():
         check_login(cdp_url)
     elif args.stop:
         stop_chrome(cdp_url, profile_dir=profile_dir)
+    elif args.verify:
+        start_verify_browser(args.platform)
+    elif args.verify_stop:
+        stop_verify_browser(args.platform)
     else:
         start_chrome(cdp_port, args.cdp_address, profile_dir=profile_dir)
 

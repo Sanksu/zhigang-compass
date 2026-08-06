@@ -93,6 +93,9 @@ services:
       dockerfile: Dockerfile
     container_name: zhigang-worker
     entrypoint: ["sh", "-c", "exec arq app.workers.tasks.WorkerSettings"]
+    ports:
+      # noVNC 人工验证环境（monster DataDome 等风控需人工验证，见 setup_boss_chrome --verify）
+      - "6080:6080"
     # 覆盖 Dockerfile 中 API 的 healthcheck（worker 无 HTTP 端口，且
     # slim 镜像无 pgrep），改为检查容器主进程（exec 后的 arq worker）存活
     healthcheck:
@@ -115,6 +118,8 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       # 容器无显示服务器：CDP 浏览器以无头模式运行（本地桌面保持有头以完成登录/验证）
       CDP_HEADLESS: "1"
+      # CDP 浏览器代理（glassdoor 等国际源）：容器内经 host.docker.internal 指向宿主机 Clash
+      CDP_PROXY: http://host.docker.internal:7890
       # boss 登录态文件（宿主机经 export-cookies 导出；采集从文件读 cookies，无浏览器依赖）
       BOSS_COOKIES_FILE: /home/app/.zhigang-compass/boss-cookies.json
     volumes:
