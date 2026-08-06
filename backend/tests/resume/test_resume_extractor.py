@@ -4,7 +4,9 @@
 过短文本返回空、空白文本不触发 LLM 调用。
 """
 
-from app.services.extraction.llm_provider import LLMExtractionError
+from unittest.mock import patch
+
+from app.services.extraction.llm_provider import LLMConfigurationError, LLMExtractionError
 from app.services.resume.extractor import ResumeExtractor
 from app.services.resume.schemas import (
     ResumeExtractionResult,
@@ -91,6 +93,25 @@ class TestExtract:
         assert {"Python", "MySQL", "Docker"}.issubset(names)
         assert out.education_level == "本科"
         assert out.total_years == 5.0
+
+    def test_no_llm_config_falls_back_to_rule_based(self):
+        """LLM 配置缺失（构造期即抛 LLMConfigurationError）：无参构造降级规则兜底。"""
+        with patch(
+            "app.services.resume.extractor.LLMProviderChain",
+            side_effect=LLMConfigurationError("配置缺失"),
+        ):
+            extractor = ResumeExtractor()
+        text = (
+            "[NAME]\n"
+            "求职意向：Python 后端开发\n"
+            "教育背景：本科\n"
+            "5年工作经验，熟悉 Python、MySQL、Docker 容器化部署\n"
+            "项目：电商平台订单系统"
+        )
+        out = extractor.extract(text)
+        names = {s.name for s in out.skills}
+        assert {"Python", "MySQL", "Docker"}.issubset(names)
+        assert out.education_level == "本科"
 
     def test_short_text_returns_empty(self):
         extractor = ResumeExtractor(llm=_FakeLLM(ResumeExtractionResult()))

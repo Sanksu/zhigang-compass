@@ -100,7 +100,7 @@ def eval_resume() -> dict:
         "skipped": False,
         "method": "真实抽取（LLM + 规则兜底）",
         "samples": len(load_golden_set(str(_RESUME_GOLDEN))) - skipped - errors,
-        "skipped": skipped,
+        "skipped_samples": skipped,
         "errors": errors,
         "precision": round(precision, 4),
         "recall": round(recall, 4),
