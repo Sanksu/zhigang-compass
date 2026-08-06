@@ -87,7 +87,9 @@ def eval_resume() -> dict:
         except Exception:
             errors += 1
             continue
-        tp, fp, fn = keyword_match(pred, gold)
+        # exclude_noise：简历黄金集规避短技能，pred 侧残留占位符/子串触发的单字母噪音
+        # （AI/C/R 等），对称过滤与生成脚本自检口径一致，避免评测误报
+        tp, fp, fn = keyword_match(pred, gold, exclude_noise=True)
         total_tp += tp
         total_fp += fp
         total_fn += fn
