@@ -8,7 +8,11 @@
 import re
 from typing import Optional
 
-from app.services.extraction.llm_provider import LLMProviderChain, LLMExtractionError
+from app.services.extraction.llm_provider import (
+    LLMConfigurationError,
+    LLMExtractionError,
+    LLMProviderChain,
+)
 from app.services.resume.prompts import RESUME_SYSTEM_PROMPT, RESUME_TASK_TEMPLATE
 from app.services.resume.schemas import ResumeExtractionResult, ResumeSkill
 
@@ -21,7 +25,12 @@ class ResumeExtractor:
     """简历实体抽取器。"""
 
     def __init__(self, llm: Optional[LLMProviderChain] = None):
-        self._llm = llm or LLMProviderChain()
+        try:
+            self._llm = llm or LLMProviderChain()
+        except LLMConfigurationError:
+            # LLM 未配置（configs/llm_providers.yaml 缺失）：与调用期 LLM 失败同语义，
+            # 降级纯规则抽取（见类 docstring「LLM 不可用时规则抽取兜底」）
+            self._llm = None
 
     def extract(self, resume_text: str) -> ResumeExtractionResult:
         """从（已脱敏）简历文本中抽取结构化实体。
@@ -31,13 +40,16 @@ class ResumeExtractor:
         if not resume_text or len(resume_text.strip()) < 10:
             return ResumeExtractionResult()
 
-        try:
-            prompt = RESUME_TASK_TEMPLATE.format(resume_text=resume_text)
-            result = self._llm.extract_structured(
-                prompt, ResumeExtractionResult, system_prompt=RESUME_SYSTEM_PROMPT
-            )
-        except LLMExtractionError:
+        if self._llm is None:
             result = self._rule_based_extract(resume_text)
+        else:
+            try:
+                prompt = RESUME_TASK_TEMPLATE.format(resume_text=resume_text)
+                result = self._llm.extract_structured(
+                    prompt, ResumeExtractionResult, system_prompt=RESUME_SYSTEM_PROMPT
+                )
+            except LLMExtractionError:
+                result = self._rule_based_extract(resume_text)
 
         result = self._filter_skills(result)
         return self._merge_soft_skills(result)
@@ -102,10 +114,16 @@ class ResumeExtractor:
         import app.services.extraction.dictionary as d
 
         text_low = resume_text.lower()
-        found = []
+        found_names = set()
         for skill in d.SKILL_WHITELIST:
             if skill.lower() in text_low:
-                found.append(ResumeSkill(name=skill, proficiency=2))
+                found_names.add(skill)
+        # 别名写法（TS/JS/k8s/Vue 等，真实简历与黄金集常见）：命中后归一为标准名，
+        # 避免漏抽；标准名已命中时跳过（同一技能的别名与标准名只记一次）
+        for alias, std in d.SKILL_ALIAS.items():
+            if std not in found_names and alias.lower() in text_low:
+                found_names.add(std)
+        found = [ResumeSkill(name=name, proficiency=2) for name in found_names]
 
         education_level = next(
             (level for level in _EDUCATION_LEVELS if level in resume_text), ""

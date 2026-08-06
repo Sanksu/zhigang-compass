@@ -5,7 +5,15 @@
 """
 
 import json
+import sys
 from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent  # tests/evaluate/
+_BACKEND_DIR = _HERE.parents[1]          # backend/
+sys.path.insert(0, str(_HERE))
+sys.path.insert(0, str(_BACKEND_DIR))
+
+from run_baseline import load_golden_set  # noqa: E402
 
 
 def judge_jd_extraction(pred: dict, gold: dict, judge_llm) -> dict:
@@ -29,8 +37,7 @@ def compute_agreement(judge_scores: list[dict]) -> float:
 
 
 def main():
-    eval_dir = Path(__file__).parent
-    golden = load_golden_set(str(eval_dir / "golden_set_jd.jsonl"))
+    golden = load_golden_set(str(_BACKEND_DIR / "data" / "golden_set" / "jd_golden_100.jsonl"))
 
     if not golden:
         print("[SKIP] 黄金集不存在")

@@ -20,12 +20,20 @@ class TestEvalJd:
 
 
 class TestEvalResume:
-    def test_skipped_when_golden_missing(self):
-        """简历黄金集未交付（M5 补齐）：resume 项跳过并注明原因，不伪造结果。"""
+    def test_returns_expected_schema(self):
+        """简历黄金集已交付（AL-M5-02）：resume 项真实评测并返回结构。
+
+        无 LLM 配置环境（CI）走规则兜底，不崩溃、不伪造结果。
+        """
         r = eval_resume()
         assert r["task"] == "resume"
-        assert r["skipped"] is True
-        assert r["reason"]
+        assert r["skipped"] is False
+        assert r["samples"] > 0
+        assert 0.0 <= r["f1"] <= 1.0
+        assert 0.0 <= r["precision"] <= 1.0
+        assert 0.0 <= r["recall"] <= 1.0
+        assert r["target_f1"] == 0.90
+        assert "target_met" in r
 
 
 class TestEvalMatch:

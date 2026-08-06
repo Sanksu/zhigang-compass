@@ -113,7 +113,7 @@ def main():
                 print(mark)
 
     if args.task in ("resume", "all"):
-        golden = load_golden_set(str(Path(__file__).parent / "golden_set_resume.jsonl"))
+        golden = load_golden_set(str(_BACKEND_DIR / "data" / "golden_set" / "golden_set_resume.jsonl"))
         if golden:
             results = evaluate_resume_extraction(golden)
             print(f"[Resume] F1: {results.get('f1', 'N/A')}")
