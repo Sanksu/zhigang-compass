@@ -109,6 +109,12 @@ def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, cdp_address: str = "127.0.0.1
         "--remote-allow-origins=*",
         url,
     ]
+    # Linux 容器内以非 root 用户运行且无 SUID 沙箱时必需（Windows 上该参数被忽略）
+    if sys.platform != "win32":
+        cmd.append("--no-sandbox")
+    # 容器无显示服务器时以无头模式运行（compose 设 CDP_HEADLESS=1；本地桌面保持有头以完成登录）
+    if os.environ.get("CDP_HEADLESS") == "1":
+        cmd.append("--headless")
 
     print(f"Chrome 路径: {chrome_path}")
     print(f"隔离 profile: {profile_dir}")

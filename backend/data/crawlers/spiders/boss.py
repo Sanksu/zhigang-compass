@@ -70,24 +70,36 @@ class BossSpider(BaseSpider):
         super().__init__(*args, **kwargs)
         # CDP 调试端点：本地默认 http://127.0.0.1:9222，支持局域网内容器浏览器
         self.cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
+        # cookies 文件模式：容器等无 CDP 浏览器环境复用导出的登录态文件
+        self.cookies_file = os.environ.get("BOSS_COOKIES_FILE")
         # 采集脚本路径
         self.crawler_script = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
             "boss_cdp_crawler.py",
         )
-        self.logger.info(
-            f"BOSS CDP 模式: {self.cdp_url}。"
-            f"如未启动专用 Chrome，请先运行: python -m crawlers.setup_boss_chrome"
-        )
+        if self.cookies_file:
+            self.logger.info(
+                f"BOSS cookies 文件模式: {self.cookies_file}。"
+                f"登录态从文件读取，CDP 仅作占位请求靶子。"
+                f"导出命令: python boss_cdp_crawler.py --export-cookies {self.cookies_file}"
+            )
+        else:
+            self.logger.info(
+                f"BOSS CDP 模式: {self.cdp_url}。"
+                f"如未启动专用 Chrome，请先运行: python -m crawlers.setup_boss_chrome"
+            )
 
     def start_requests(self):
-        # 确保 CDP Chrome 可用（被环境回收时自动拉起），避免占位请求直接失败。
-        # boss 独立 profile（9222 + boss-chrome-profile）；主窗口保持 about:blank——
-        # zhipin 反爬会检测 CDP 自动化并关闭 zhipin 页面，若主窗口是 zhipin 会导致
-        # Chrome 整个退出；用户需手动在浏览器中打开 zhipin.com 完成登录（手动操作不被风控）
-        if not ensure_cdp_chrome(self.cdp_url, profile_dir=platform_profile_dir("boss")):
-            self.logger.error(f"CDP Chrome 启动失败（{self.cdp_url}），本次采集终止")
-            return
+        # cookies 文件模式无需 CDP 浏览器（容器无真实 Chrome，登录态从文件读）：
+        # 占位请求仍发向 CDP 端点触发 parse——端点不可达属预期，由 errback 转发到 parse。
+        if not self.cookies_file:
+            # 确保 CDP Chrome 可用（被环境回收时自动拉起），避免占位请求直接失败。
+            # boss 独立 profile（9222 + boss-chrome-profile）；主窗口保持 about:blank——
+            # zhipin 反爬会检测 CDP 自动化并关闭 zhipin 页面，若主窗口是 zhipin 会导致
+            # Chrome 整个退出；用户需手动在浏览器中打开 zhipin.com 完成登录（手动操作不被风控）
+            if not ensure_cdp_chrome(self.cdp_url, profile_dir=platform_profile_dir("boss")):
+                self.logger.error(f"CDP Chrome 启动失败（{self.cdp_url}），本次采集终止")
+                return
         # 发一个占位 Request 到 CDP 端点，触发 parse 方法
         yield Request(
             f"{self.cdp_url}/json/version",
@@ -140,6 +152,9 @@ class BossSpider(BaseSpider):
                 "--cdp-url", self.cdp_url,
                 "--max-pages", "5",
             ]
+            if self.cookies_file:
+                cmd.append("--cookies-file")
+                cmd.append(self.cookies_file)
 
             try:
                 # 用 subprocess.Popen 实时读取 stdout
@@ -209,6 +224,12 @@ class BossSpider(BaseSpider):
 
     def _on_error(self, failure):
         """请求失败回调。"""
+        if self.cookies_file:
+            # cookies 模式：CDP 端点不可达属预期（不依赖浏览器），转发到 parse 继续采集。
+            # parse 是生成器，必须 yield from 才能把产出的 Item 流转给引擎。
+            # parse 仅依赖 response.meta（= request.meta），传 request 即可。
+            yield from self.parse(failure.request)
+            return
         self.logger.error(
             f"占位请求失败: {failure.value}。"
             f"请确认专用 Chrome 已启动: python -m crawlers.setup_boss_chrome"
