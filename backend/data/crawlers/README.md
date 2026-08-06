@@ -2,7 +2,7 @@
 
 招聘平台 + 课程/论文/社区爬虫模块。基于 Scrapy + Playwright + CDP。
 
-- **招聘平台**：13 源，A/B/C 三级分级
+- **招聘平台**：12 源，A/B/C 三级分级（monster 08.06 起因 DataDome 防护停采，代码保留）
 - **非招聘数据源**：课程 3 个（icourse163/Coursera/edX）+ 论文 1 个（arXiv）+ 社区 2 个（GitHub Trending/Stack Overflow），用于学习路径构建与技术热点观察池
 
 ## 目录结构
@@ -28,7 +28,7 @@ crawlers/
 └── spiders/
     ├── boss.py           # A 级 — BOSS 直聘 ✅（subprocess 调 boss_cdp_crawler.py）
     ├── zhilian.py        # A 级 — 智联招聘 ✅
-    ├── monster.py        # A 级 — Monster ✅（subprocess 调 monster_cdp_crawler.py）
+    ├── monster.py        # A 级 — Monster ⏸ 停采（subprocess 调 monster_cdp_crawler.py）
     ├── indeed.py         # B 级 — Indeed ✅（subprocess 调 jobspy_crawler.py，需代理）
     ├── glassdoor.py      # B 级 — Glassdoor ✅（subprocess 调 glassdoor_cdp_crawler.py）
     ├── maimai.py         # C 级 — 脉脉 ✅（subprocess 调 maimai_cdp_crawler.py，飞书招聘页）
@@ -55,7 +55,7 @@ crawlers/
 |------|----------|----------|------|
 | BOSS 直聘 | CDP 连接真实浏览器 + 内部 API `/wapi/zpgeek/search/joblist.json` | [eatmoreduck/boss-zhipin-scraper](https://github.com/eatmoreduck/boss-zhipin-scraper) | ✅ |
 | 智联招聘 | Playwright + CSS 选择器（列表页直出） | - | ✅ |
-| Monster | CDP 连接真实浏览器 + XHR 拦截 `appsapi.monster.io` | [shahidirfan100/Monster-Job-Scraper](https://github.com/shahidirfan100/Monster-Job-Scraper) | ✅ |
+| Monster | CDP 连接真实浏览器 + XHR 拦截 `appsapi.monster.io` | [shahidirfan100/Monster-Job-Scraper](https://github.com/shahidirfan100/Monster-Job-Scraper) | ⏸ 停采（08.06，DataDome 不可绕过） |
 | Indeed | JobSpy 库（解析 JSON-LD 结构化数据） | [speedyapply/JobSpy](https://github.com/speedyapply/JobSpy) | ✅ |
 | LinkedIn | JobSpy 库（解析 JSON-LD 结构化数据） | [speedyapply/JobSpy](https://github.com/speedyapply/JobSpy) | ✅ |
 | Glassdoor | CDP 连接真实浏览器 + SSR DOM 提取（JSON-LD + data-test 属性） | - | ✅ |
@@ -90,7 +90,7 @@ python-jobspy>=1.1.40   # Indeed/LinkedIn 采集（仅 *_jobspy_crawler.py 使�
 |------|------|--------|------|------|
 | A | BOSS 直聘 | 20 req/min | 直连 | ✅ CDP |
 | A | 智联招聘 | 20 req/min | 直连 | ✅ |
-| A | Monster | 30 req/min | 代理 | ✅ CDP |
+| A | Monster | 30 req/min | 代理 | ⏸ 停采（08.06，DataDome 不可绕过） |
 | B | Indeed | 15 req/min | 代理池 | ✅ JobSpy |
 | B | Glassdoor | 15 req/min | 代理池 | ✅ CDP |
 | C | 脉脉 | 5 req/min (≤100/h) | 直连（夜间） | ✅ CDP（飞书招聘页） |
