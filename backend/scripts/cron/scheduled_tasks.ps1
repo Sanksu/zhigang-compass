@@ -29,8 +29,8 @@ $Tasks = @(
     # 国内 A 级招聘平台（02:00 / 02:15）
     @{ Name = "CrawlBoss";     Time = "02:00"; Script = "crawl_spider.py"; Args = @("boss", "100") },
     @{ Name = "CrawlZhilian";  Time = "02:15"; Script = "crawl_spider.py"; Args = @("zhilian", "100") },
-    # 国际 A/B 级招聘平台（04:00 错峰）
-    @{ Name = "CrawlMonster";   Time = "04:00"; Script = "crawl_spider.py"; Args = @("monster", "50");  Proxy = $true },
+    # 国际 A/B 级招聘平台（04:00 错峰）。monster 已从自动采集移除（DataDome
+    # 防护在容器环境不可绕过，见 tasks.py run_etl_pipeline 注释）
     @{ Name = "CrawlIndeed";    Time = "04:20"; Script = "crawl_spider.py"; Args = @("indeed", "50");   Proxy = $true },
     @{ Name = "CrawlGlassdoor"; Time = "04:40"; Script = "crawl_spider.py"; Args = @("glassdoor", "50"); Proxy = $true },
     # 脉脉夜间合规窗口（23:00）

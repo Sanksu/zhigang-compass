@@ -48,6 +48,11 @@ class ResumeExtractor:
                 result = self._llm.extract_structured(
                     prompt, ResumeExtractionResult, system_prompt=RESUME_SYSTEM_PROMPT
                 )
+                # LLM 返回空对象（provider/instructor 层解析失败，实测 3 个样本稳定复现）：
+                # 视同抽取失败，与 LLMExtractionError 同语义回退规则兜底。
+                # 简历技能为空即视为失败——黄金集实证规则兜底对其 F1=1.0，回退为纯收益。
+                if not result.skills and not result.soft_skills:
+                    result = self._rule_based_extract(resume_text)
             except LLMExtractionError:
                 result = self._rule_based_extract(resume_text)
 

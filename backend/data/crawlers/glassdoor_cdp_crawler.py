@@ -196,40 +196,43 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
 
         # 隔离：新建独立 context 并复制主 context 的 cookies（保留 Cloudflare 验证），
         # 爬虫导航只发生在隔离 context 内，不触碰用户正在浏览的页面
-        context = await browser.new_context()
-        if browser.contexts:
-            try:
-                _cookies = await browser.contexts[0].cookies()
-                if _cookies:
-                    await context.add_cookies(_cookies)
-            except Exception as e:
-                log(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
-        page = await context.new_page()
+        async def _new_page():
+            """新建隔离 context+page，并复制主 context 的 cookies（保留 Cloudflare 验证态）。"""
+            context = await browser.new_context()
+            if browser.contexts:
+                try:
+                    _cookies = await browser.contexts[0].cookies()
+                    if _cookies:
+                        await context.add_cookies(_cookies)
+                except Exception as e:
+                    log(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
+            return context, await context.new_page()
 
-        # 先导航到 glassdoor.com 首页建立会话，并确认重定向后的实际域（.com → .com.hk）
-        try:
-            await page.goto("https://www.glassdoor.com/", wait_until="domcontentloaded", timeout=30000)
-        except Exception as e:
-            log(f"导航到首页失败: {e}")
-
-        # 通过 typeahead 接口动态解析城市 → locId（避免硬编码城市映射，支持任意城市）
+        # 城市解析：headless 下 Cloudflare 仅放行每个 context 的首次导航（实测同 context
+        # 第二次导航即 challenge），故用独立 context 完成首页导航 + typeahead 查询，
+        # 不占用采集 context 的首次导航配额
         loc_params = {}
         try:
-            term = json.dumps(city)
-            loc_params = await page.evaluate(
-                f"""async () => {{
-                    const term = {term};
-                    const r = await fetch(
-                        location.origin + '/findPopularLocationAjax.htm?maxLocationsToReturn=5&term=' + encodeURIComponent(term),
-                        {{credentials: 'include'}}
-                    );
-                    const arr = await r.json();
-                    if (Array.isArray(arr) && arr.length > 0) {{
-                        return {{id: arr[0].locationId, type: arr[0].locationType || 'C', name: arr[0].longName || ''}};
-                    }}
-                    return null;
-                }}"""
-            )
+            resolve_ctx, resolve_page = await _new_page()
+            try:
+                await resolve_page.goto("https://www.glassdoor.com/", wait_until="domcontentloaded", timeout=30000)
+                term = json.dumps(city)
+                loc_params = await resolve_page.evaluate(
+                    f"""async () => {{
+                        const term = {term};
+                        const r = await fetch(
+                            location.origin + '/findPopularLocationAjax.htm?maxLocationsToReturn=5&term=' + encodeURIComponent(term),
+                            {{credentials: 'include'}}
+                        );
+                        const arr = await r.json();
+                        if (Array.isArray(arr) && arr.length > 0) {{
+                            return {{id: arr[0].locationId, type: arr[0].locationType || 'C', name: arr[0].longName || ''}};
+                        }}
+                        return null;
+                    }}"""
+                )
+            finally:
+                await resolve_ctx.close()
         except Exception as e:
             log(f"城市解析失败（将按全国范围搜索）: {e}")
 
@@ -251,51 +254,54 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                 params["locId"] = str(loc_params["id"])
             url = f"https://www.glassdoor.com/Job/jobs.htm?{urlencode(params)}"
 
+            # 每页新建 context：headless 下 Cloudflare 对同 context 的第二次导航
+            # 触发 challenge（实测 首页→搜索页 5/5 拦截、逐页新 context 3/3 放行）
+            ctx, page = await _new_page()
             try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            except Exception as e:
-                log(f"  导航失败: {e}")
-                continue
-
-            # 等待岗位卡片渲染
-            try:
-                await page.wait_for_selector('li[data-jobid][data-test="jobListing"]', timeout=15000)
-            except Exception as e:
-                log(f"  ⚠️ 等待岗位卡片超时: {e}")
                 try:
-                    title = await page.title()
-                    log(f"  页面标题: {title}")
-                    if "blocked" in title.lower() or "access" in title.lower():
-                        log(f"  ❌ 疑似被 Cloudflare 拦截，请在浏览器中先访问 glassdoor.com 完成验证")
-                        break
-                except Exception:
-                    pass
-                continue
+                    await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                except Exception as e:
+                    log(f"  导航失败: {e}")
+                    continue
 
-            # 额外等待 JSON-LD 渲染完成
-            await page.wait_for_timeout(2000)
+                # 等待岗位卡片渲染
+                try:
+                    await page.wait_for_selector('li[data-jobid][data-test="jobListing"]', timeout=15000)
+                except Exception as e:
+                    log(f"  ⚠️ 等待岗位卡片超时: {e}")
+                    try:
+                        title = await page.title()
+                        log(f"  页面标题: {title}")
+                        if "blocked" in title.lower() or "access" in title.lower():
+                            log(f"  ❌ 疑似被 Cloudflare 拦截，请在浏览器中先访问 glassdoor.com 完成验证")
+                            break
+                    except Exception:
+                        pass
+                    continue
 
-            # 从 DOM 提取岗位
-            try:
-                jobs = await page.evaluate(EXTRACT_JOBS_JS)
-            except Exception as e:
-                log(f"  ❌ DOM 提取失败: {e}")
-                continue
+                # 额外等待 JSON-LD 渲染完成
+                await page.wait_for_timeout(2000)
 
-            log(f"  第 {page_num} 页提取 {len(jobs)} 条岗位")
+                # 从 DOM 提取岗位
+                try:
+                    jobs = await page.evaluate(EXTRACT_JOBS_JS)
+                except Exception as e:
+                    log(f"  ❌ DOM 提取失败: {e}")
+                    continue
 
-            if not jobs:
-                log(f"  第 {page_num} 页无岗位，结束采集")
-                break
+                log(f"  第 {page_num} 页提取 {len(jobs)} 条岗位")
 
-            all_jobs_data.extend(jobs)
+                if not jobs:
+                    log(f"  第 {page_num} 页无岗位，结束采集")
+                    break
+
+                all_jobs_data.extend(jobs)
+            finally:
+                await ctx.close()
 
             if page_num < max_pages:
                 log("  翻页间隔 5 秒...")
                 await asyncio.sleep(5)
-
-        # CDP 模式下不关闭 browser（避免关闭用户的浏览器）
-        await page.close()
 
     # 输出 JSONL
     count = 0

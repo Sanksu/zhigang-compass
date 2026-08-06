@@ -5,6 +5,8 @@ __pycache__
 .venv
 .pytest_cache
 tests/
-data/
+data/*
+!data/crawlers/
+data/crawlers/output/
 *.md
 .DS_Store

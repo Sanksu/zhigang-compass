@@ -110,6 +110,20 @@ services:
       REDIS_URL: redis://redis:6379/0
       ARQ_REDIS_URL: redis://redis:6379/1
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      # 国际源走系统代理（与本地爬虫一致，国内源不设即直连）
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      # 容器无显示服务器：CDP 浏览器以无头模式运行（本地桌面保持有头以完成登录/验证）
+      CDP_HEADLESS: "1"
+      # CDP 浏览器代理（glassdoor 等国际源）：容器内经 host.docker.internal 指向宿主机 Clash
+      CDP_PROXY: http://host.docker.internal:7890
+      # boss 登录态文件（宿主机经 export-cookies 导出；采集从文件读 cookies，无浏览器依赖）
+      BOSS_COOKIES_FILE: /home/app/.zhigang-compass/boss-cookies.json
+    volumes:
+      # 爬虫输出持久化：容器重建不丢 JSONL
+      - ./backend/data/crawlers/output:/app/data/crawlers/output
+      # boss 登录态文件（导出: cd backend/data/crawlers && python boss_cdp_crawler.py --export-cookies ~/.zhigang-compass/boss-cookies.json）
+      - ${USERPROFILE:-~}/.zhigang-compass/boss-cookies.json:/home/app/.zhigang-compass/boss-cookies.json
     depends_on:
       postgres:
         condition: service_healthy
