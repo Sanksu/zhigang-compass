@@ -140,3 +140,16 @@ class TestSimilarPairs:
         normalizer = SkillNormalizer(embedder=embedder, alias_map={})
         normalized = {"Go": SkillNormResult("Go", 1.0)}
         assert normalizer.similar_pairs(normalized) == []
+
+    def test_embedder_unavailable_skips_pairs(self):
+        # 模型中途不可用：该对跳过（不建边、不抛错），其余对不受影响
+        class BrokenEmbedder:
+            def similarity(self, a, b):
+                raise RuntimeError("model down")
+
+        normalizer = SkillNormalizer(embedder=BrokenEmbedder(), alias_map={})
+        normalized = {
+            "Python3": SkillNormResult("Python", 0.9),
+            "Python": SkillNormResult("Python", 1.0),
+        }
+        assert normalizer.similar_pairs(normalized) == []

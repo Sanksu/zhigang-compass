@@ -99,3 +99,24 @@ class TestPostProcess:
         result = JDExtractionResult(position_name="", soft_skills=["团队协作"])
         out = post_process(result)
         assert out.soft_skills == ["团队协作"]
+
+    def test_single_char_fragment_filtered(self):
+        """清洗后为单字且不在白名单 → 丢弃（防碎片入图）；白名单单字语言保留。"""
+        result = JDExtractionResult(
+            position_name="",
+            skills=[
+                SkillExtracted(name="X技术"),  # clean → "X"，非白名单单字 → 丢弃
+                SkillExtracted(name="C技术"),  # clean → "C"，白名单单字语言 → 保留
+            ],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["C"]
+
+    def test_requirement_single_char_fragment_filtered(self):
+        """requirements 同规则：清洗为单字碎片 → 该条剔除。"""
+        result = JDExtractionResult(
+            position_name="",
+            requirements=[REQUIRESRelation(skill_name="X技术", necessity="must")],
+        )
+        out = post_process(result)
+        assert out.requirements == []
