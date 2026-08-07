@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI):
     if settings.is_production:
         if settings.secret_key == "change-me-in-production":
             raise RuntimeError("SECRET_KEY 未修改，生产环境拒绝启动")
+        if settings.admin_password == "admin123":
+            raise RuntimeError("ADMIN_PASSWORD 仍为默认弱口令，生产环境拒绝启动")
     _prewarm_semantic()
     yield
     # 关闭时 — 资源由各自模块管理

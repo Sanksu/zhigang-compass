@@ -80,6 +80,11 @@ class MatchRequest(BaseModel):
     mode: MatchMode = MatchMode.AUTO
     target_position_id: Optional[str] = Field(default=None, description="COMPARE 模式下指定目标岗位")
     top_n: int = Field(default=10, ge=1, le=100, description="AUTO 模式返回数量")
+    project_vectors: dict[str, list[float]] = Field(
+        default_factory=dict,
+        description="项目文本 → 384 维向量（project_embeddings 回填产物），"
+        "项目维度评分优先使用，缺失回退 SBERT 文本相似度",
+    )
 
 
 class MatchResult(BaseModel):

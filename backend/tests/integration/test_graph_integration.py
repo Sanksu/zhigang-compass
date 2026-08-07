@@ -85,7 +85,7 @@ class TestGraph:
 
 class TestMatch:
     def test_recommend_with_real_resume(self, client: httpx.Client, auth_headers):
-        """自动推荐：真实 resume_cache 驱动，返回 Top-N 列表。"""
+        """自动推荐：真实 resume_cache 驱动，202 异步契约 + task_id 可查询。"""
         import pytest
 
         if not auth_headers:
@@ -101,8 +101,13 @@ class TestMatch:
             json={"resume_id": resume_id, "top_n": 3},
             headers=auth_headers,
         )
-        assert r.status_code == 200
-        assert isinstance(r.json()["data"]["items"], list)
+        # §2.4.4 异步契约：202 + task_id，轮询 /match/task/{task_id}
+        assert r.status_code == 202
+        task_id = r.json()["data"]["task_id"]
+        assert isinstance(task_id, str) and task_id
+        t = client.get(f"/api/v1/match/task/{task_id}", headers=auth_headers)
+        assert t.status_code == 200
+        assert t.json()["data"]["status"] in ("pending", "running", "success", "failed")
 
 
 class TestEvolution:

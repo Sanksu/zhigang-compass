@@ -134,6 +134,56 @@ class TestSingleFallbackPath:
         assert len(out) == 4
 
 
+class TestConcurrentBatches:
+    """concurrency>1 并行路径：顺序保持、条数正确、失败降级。
+
+    回归：LLM 生成时间由输出 token 总量决定，并发（而非调大 batch_size）
+    才是吞吐瓶颈；并发须保持与串行完全一致的契约。
+    """
+
+    def test_concurrency_keeps_order_and_count(self):
+        """4 条分 2 批（batch_size=2）并发 2 → 每批 1 次批量调用，返回 4 条且有序。"""
+        batch = JDExtractionBatch(results=[_make_result("批量1"), _make_result("批量2")])
+        out = JDExtractor(llm=_LockedBatchLLM(batch)).extract_batch(
+            TEXTS, batch_size=2, concurrency=2
+        )
+        assert len(out) == 4
+
+    def test_concurrency_equals_serial_results(self):
+        """同一输入下并发结果与串行完全一致（顺序/内容）。"""
+        batch = JDExtractionBatch(results=[_make_result("批量1"), _make_result("批量2")])
+        serial = JDExtractor(llm=_FakeBatchLLM(batch)).extract_batch(TEXTS, batch_size=2)
+        concurrent = JDExtractor(llm=_LockedBatchLLM(batch)).extract_batch(
+            TEXTS, batch_size=2, concurrency=2
+        )
+        assert [r.position_name for r in concurrent] == [r.position_name for r in serial]
+
+    def test_concurrency_failure_falls_back_to_single(self):
+        """并发下整批失败仍降级逐条（每批内降级，批间并行）。"""
+        llm = _FailingBatchLLM(_make_result("单条"))
+        out = JDExtractor(llm=llm).extract_batch(TEXTS, batch_size=2, concurrency=2)
+        assert len(out) == 4
+        assert [r.position_name for r in out] == ["单条"] * 4
+
+
+class _LockedBatchLLM(_FakeBatchLLM):
+    """线程安全版假 LLM 链：锁保护调用计数，供并发测试断言（防 += 竞态丢计数）。"""
+
+    def __init__(self, batch: JDExtractionBatch):
+        super().__init__(batch)
+        import threading
+
+        self._lock = threading.Lock()
+
+    def extract_structured(self, prompt, response_model, **kwargs):
+        with self._lock:
+            self.calls += 1
+            self.timeouts.append(kwargs.get("timeout"))
+        if response_model is JDExtractionResult:
+            return _make_result("单条")
+        return self.batch
+
+
 class TestDynamicBatching:
     LONG_TEXTS = [
         "JD 文本 A：" + "很长很长的 JD 正文" * 50,  # ~800 字符

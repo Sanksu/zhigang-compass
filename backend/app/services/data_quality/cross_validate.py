@@ -107,9 +107,15 @@ def parse_monthly_salary(raw: str, source: str | None = None) -> Optional[float]
 
 
 def _freshness_factor(crawled_at: str, reference: datetime) -> float:
-    """时效因子：近 7 天 1.0 / 7-30 天 0.8 / 更旧 0.6（解析失败视为新鲜）。"""
+    """时效因子：近 7 天 1.0 / 7-30 天 0.8 / 更旧 0.6（解析失败视为新鲜）。
+
+    crawled_at 缺时区时按 +08:00（CST）假定——国内 crawler 写入为 naive 本地时间，
+    与 aware reference 直接相减会抛 TypeError（落入 except 恒判新鲜）。
+    """
     try:
         crawled = datetime.fromisoformat(crawled_at)
+        if crawled.tzinfo is None:
+            crawled = crawled.replace(tzinfo=timezone(timedelta(hours=8)))
     except (ValueError, TypeError):
         return 1.0
     days = (reference - crawled).days
@@ -174,26 +180,27 @@ def validate_group(position_name: str, group: list[dict]) -> CrossValidationResu
         skill for skill, srcs in skill_sources.items() if len(srcs) < VERIFIED_MIN_SOURCES
     )
 
-    # 薪资：组内各 JD 可解析月薪中值
+    # 薪资：组内各 JD 可解析月薪中值（过滤非正数，防除零/无意义中位数）
     salaries = []
     for rec in group:
         ext = (rec.get("snapshot") or {}).get("extraction") or {}
         raw = ext.get("salary_range") or (rec.get("snapshot") or {}).get("salary")
         value = parse_monthly_salary(raw, rec.get("source"))
-        if value is not None:
+        if value and value > 0:
             salaries.append(value)
     salary_median = median(salaries) if salaries else None
     salary_outlier = (
         len(salaries) >= 2 and (max(salaries) / min(salaries)) > SALARY_OUTLIER_RATIO
     )
 
-    # 经验分歧度：组内 experience 唯一值占比（完全一致 0，全不同 1）
+    # 经验分歧度：有经验值记录中唯一值占比（完全一致 0，全不同 1）。
+    # 缺经验值记录不进分母，避免稀释分歧度（审查修复）。
     exp_values = [
         (rec.get("snapshot") or {}).get("experience") or ""
         for rec in group
     ]
-    exp_unique = len({v for v in exp_values if v})
-    exp_divergence = exp_unique / len(exp_values) if exp_values else 0.0
+    exp_values = [v for v in exp_values if v]
+    exp_divergence = len(set(exp_values)) / len(exp_values) if exp_values else 0.0
 
     # 置信度：数据源数 / 一致性 / 时效（取组内最新 crawled_at）
     newest_crawled = max(

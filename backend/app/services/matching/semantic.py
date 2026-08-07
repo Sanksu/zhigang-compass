@@ -118,3 +118,33 @@ class SkillEmbedder:
                 return 0.0
             dot = float(sum(x * y for x, y in zip(va, vb)))
             return dot / (norm_a * norm_b)
+
+    def similarity_vec(self, vec: list, text: str) -> float:
+        """预计算向量 × 文本的余弦相似度（pgvector project_embeddings 路径）。
+
+        向量为数据库回填的项目向量（384 维 list），text 为岗位场景文本；
+        与 similarity(a, b) 数值口径一致，仅一侧改为外部向量。
+        """
+        vb = self._vec(text)
+        return cosine_similarity(list(vec), list(vb))
+
+
+def cosine_similarity(vec_a: list, vec_b: list) -> float:
+    """两个 384 维向量的余弦相似度（[0,1]）。
+
+    独立函数供 semantic 与 vector_store 共用（纯 Python 实现避免循环依赖）。
+    """
+    try:
+        import numpy as np
+
+        norm_a = float(np.linalg.norm(vec_a))
+        norm_b = float(np.linalg.norm(vec_b))
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return float(np.dot(vec_a, vec_b) / (norm_a * norm_b))
+    except ImportError:
+        norm_a = sum(x * x for x in vec_a) ** 0.5
+        norm_b = sum(x * x for x in vec_b) ** 0.5
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return float(sum(x * y for x, y in zip(vec_a, vec_b))) / (norm_a * norm_b)

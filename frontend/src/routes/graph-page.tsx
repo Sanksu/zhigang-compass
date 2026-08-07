@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Database, Network, Search } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
@@ -131,9 +131,21 @@ export function GraphPage() {
   const [similarSkills, setSimilarSkills] = useState<SimilarSkillItem[]>([])
   // 岗位节点详情（GET /graph/position/{id}）
   const [positionDetail, setPositionDetail] = useState<PositionDetail | null>(null)
+  // 展开的岗位 id 集合：点击岗位展开其技能（再点收起），多岗位独立展开
+  const [expandedPositions, setExpandedPositions] = useState<Set<string>>(() => new Set())
+
+  const togglePosition = useCallback((id: string) => {
+    setExpandedPositions((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
 
   // 视图切换 → 真实后端过滤（GET /graph/view/{view_type}），初始 panorama 同样走后端视图端点。
   // 切换视图不清 loading，数据到达后原子替换，避免闪屏。
+  // 展开状态在 Tabs 事件回调中同步清空（effect 内 setState 会触发 cascading renders）
   useEffect(() => {
     let cancelled = false
     apiGet<PanoramaData>(`/graph/view/${view}?limit=200`)
@@ -246,6 +258,29 @@ export function GraphPage() {
 
   // 视图数据即后端返回（四种视图均由 GET /graph/view/{view_type} 提供）
   const data = raw
+  // 画布可见数据：默认仅岗位节点；展开岗位后并入其关联技能与边（本地过滤，无网络往返）
+  const visibleData = useMemo<GraphData | null>(() => {
+    if (!data) return null
+    if (expandedPositions.size === 0) {
+      return {
+        ...data,
+        nodes: data.nodes.filter((n) => n.type === 'position'),
+        edges: [],
+      }
+    }
+    const skillIds = new Set<string>()
+    data.edges.forEach((e) => {
+      if (expandedPositions.has(e.source)) skillIds.add(e.target)
+      if (expandedPositions.has(e.target)) skillIds.add(e.source)
+    })
+    return {
+      ...data,
+      nodes: data.nodes.filter((n) => n.type === 'position' || skillIds.has(n.id)),
+      edges: data.edges.filter(
+        (e) => expandedPositions.has(e.source) || expandedPositions.has(e.target),
+      ),
+    }
+  }, [data, expandedPositions])
   // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
   const webgl2Available = useMemo(() => isWebGL2Available(), [])
 
@@ -371,7 +406,14 @@ export function GraphPage() {
       )}
 
       {/* 视图切换 tabs */}
-      <Tabs value={view} onValueChange={(v) => setView(v as GraphViewType)}>
+      <Tabs
+        value={view}
+        onValueChange={(v) => {
+          // 视图切换：同步清空展开的岗位（新视图技能集不同），再切换数据
+          setExpandedPositions(new Set())
+          setView(v as GraphViewType)
+        }}
+      >
         <div className="flex items-center justify-between gap-4 mb-3">
           <TabsList>
             {(Object.keys(VIEW_LABEL) as GraphViewType[]).map((v) => (
@@ -404,16 +446,20 @@ export function GraphPage() {
         <Card className="relative overflow-hidden h-[640px]">
           {mode === '2d' ? (
             <Graph2D
-              data={data}
+              data={visibleData!}
+              expandedPositions={expandedPositions}
               selectedId={selected?.id ?? null}
               onSelectNode={setSelected}
+              onTogglePosition={togglePosition}
               className="h-full w-full"
             />
           ) : (
             <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-sm text-ink-muted">加载 3D 渲染引擎…</div>}>
               <Graph3D
-                data={data}
+                data={visibleData!}
+                expandedPositions={expandedPositions}
                 onSelectNode={setSelected}
+                onTogglePosition={togglePosition}
                 className="h-full w-full"
               />
             </Suspense>

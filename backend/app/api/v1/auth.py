@@ -135,6 +135,7 @@ async def login(
 async def refresh_token(
     req: RefreshRequest = Body(default=None),
     request: Request = None,
+    response: Response = None,
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db),
 ):
@@ -142,6 +143,7 @@ async def refresh_token(
 
     校验 refresh token 的 jti 是否被登出拉黑，并确认用户仍存在且未禁用。
     refresh_token 来源：body（旧客户端）或 httpOnly Cookie（刷新恢复会话）。
+    每次刷新轮换 refresh_token（旧 jti 拉黑 + 重写 Cookie），降低重放风险。
     """
     refresh_token = _extract_refresh_token(request, req)
     if not refresh_token:
@@ -158,9 +160,21 @@ async def refresh_token(
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
         return error(4010, "用户不存在或已禁用", http_status=401)
-    # 重新签发（短 TTL 的 access_token）
+    # 轮换：旧 refresh 拉黑防重放，签发新 refresh 并重写 httpOnly Cookie
+    if jti:
+        await redis.set(
+            f"token:blacklist:{jti}",
+            "1",
+            ex=settings.jwt_refresh_token_expire_days * 86400,
+        )
     new_access = create_access_token(user_id, user.role)
-    return ok(data={"access_token": new_access, "expires_in": 1800})
+    new_refresh = create_refresh_token(user_id, user.role)
+    _set_refresh_cookie(response, new_refresh)
+    return ok(data={
+        "access_token": new_access,
+        "refresh_token": new_refresh,
+        "expires_in": 1800,
+    })
 
 
 @router.post("/register")

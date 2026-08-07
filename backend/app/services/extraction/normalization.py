@@ -163,7 +163,10 @@ class SkillNormalizer:
         pairs: list[tuple[str, str, float]] = []
         for standard, members in groups.items():
             for member in members:
-                sim = self._embedder.similarity(standard, member)
+                try:
+                    sim = self._embedder.similarity(standard, member)
+                except Exception:
+                    continue  # 模型中途不可用，该对跳过（不建边）
                 if sim >= threshold:
                     pairs.append((standard, member, round(sim, 4)))
         return pairs

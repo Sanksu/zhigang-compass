@@ -18,11 +18,12 @@
 import asyncio
 import sys
 from collections import Counter
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
 
-sys.path.insert(0, "c:/Users/87088/Desktop/zglp/zhigang-compass/backend")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.database import async_session_factory
 from app.models.raw import JDRaw

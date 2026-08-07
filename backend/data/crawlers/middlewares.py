@@ -7,6 +7,7 @@ from threading import Lock
 from urllib.parse import urlsplit
 
 import requests
+from twisted.internet import reactor
 
 from crawlers.settings import (
     DEFAULT_PROXY,
@@ -32,6 +33,61 @@ class UARotationMiddleware:
 
     def process_request(self, request):
         request.headers.setdefault("User-Agent", random.choice(self.USER_AGENTS))
+
+
+# 指数退避序列（设计文档 §4：30s → 60s → 120s → 300s 封顶）
+_BACKOFF_START = 30
+_BACKOFF_MAX = 300
+
+
+def backoff_delay(retries: int) -> int:
+    """第 retries 次退避重试前的等待秒数（30×2^n，3 次起封顶 300s）。"""
+    return _BACKOFF_MAX if retries >= 3 else _BACKOFF_START * (2 ** retries)
+
+
+class BackoffRetryMiddleware:
+    """429/403 指数退避重试（设计文档 §4 失败处理）。
+
+    收到 429/403 后按 30s→60s→120s→300s 指数退避重新调度原请求
+    （reactor.callLater 延迟调度，不阻塞事件循环）；
+    同一请求累计重试达 RETRY_TIMES 次仍失败则置 dont_retry 交给
+    内置 RetryMiddleware 收尾，避免即时重试叠加。
+
+    注：单日单源"连续失败当日停止并告警"需跨请求状态，未纳入本中间件；
+    当前为请求级退避上限，更激进的源级熔断留待后续（如 Arq 任务失败计数）。
+    """
+
+    def __init__(self, crawler):
+        self.crawler = crawler
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(crawler)
+
+    def process_response(self, request, response, spider):
+        if response.status not in (429, 403):
+            return response
+        retries = request.meta.get("backoff_count", 0)
+        if retries >= spider.settings.getint("RETRY_TIMES", 3):
+            # 退避次数用尽：终止本请求的再重试，让内置 RetryMiddleware 收尾
+            request.meta["dont_retry"] = True
+            spider.logger.error(
+                f"[退避] {spider.name} {request.url} 连续 {retries} 次 {response.status}，放弃重试"
+            )
+            return response
+
+        delay = backoff_delay(retries)
+        retry_request = request.replace(dont_filter=True)
+        retry_request.meta = {**request.meta, "backoff_count": retries + 1}
+        spider.logger.warning(
+            f"[退避] {spider.name} 收到 {response.status}，指数退避 {delay}s 后重试 {request.url}"
+        )
+        try:
+            reactor.callLater(delay, self.crawler.engine.schedule, retry_request, spider)
+        except Exception as e:
+            spider.logger.error(f"[退避] 延迟重试调度失败: {e}")
+        # 返回 None：请求已由延迟调度接管，不触发内置 RetryMiddleware 的即时重试
+        return None
 
 
 class ProxyPoolMiddleware:

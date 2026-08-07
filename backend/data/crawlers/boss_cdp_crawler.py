@@ -7,6 +7,8 @@
 - 新方案：CDP 仅读取浏览器登录态 cookies，采集走纯 HTTP（httpx）直接调 API。
   实测服务端对带登录 cookies 的正常 HTTP 请求不拦截（code=0 正常返回岗位）。
   不导航页面、不执行页面 JS，浏览器保持存活，登录态仅作为 cookies 来源。
+- cookies 文件模式（2026-08-06）：登录态可先经 --export-cookies 导出成文件，
+  容器等无 CDP 浏览器环境用 --cookies-file 直接读取，采集完全不需要浏览器。
 
 被 spiders/boss.py 通过 subprocess 调用，输出 JSONL 到 stdout。
 前置条件：已启动 CDP Chrome 并手动登录 zhipin.com（登录态持久到 profile）。
@@ -20,6 +22,7 @@ import os
 import random
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx
@@ -41,12 +44,63 @@ def log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
-async def read_zhipin_cookies(cdp_url: str) -> httpx.Cookies | None:
-    """经 CDP 读取浏览器登录态 cookies（仅读取，不导航/不操作页面）。
+def _load_cookies_from_file(path: str) -> httpx.Cookies | None:
+    """从 JSON cookies 文件读取 zhipin cookies（--export-cookies 导出的同格式文件）。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError) as e:
+        log(f"⚠️ cookies 文件读取失败（{path}）: {e}")
+        return None
+
+    jar = httpx.Cookies()
+    count = 0
+    for c in raw:
+        jar.set(c.get("name", ""), c.get("value", ""),
+                domain=c.get("domain", ""), path=c.get("path", "/"))
+        count += 1
+    if not count:
+        log(f"⚠️ cookies 文件为空（{path}）")
+        return None
+    log(f"✅ 已从文件读取 {count} 个 zhipin cookies（{path}）")
+    return jar
+
+
+async def _read_zhipin_cookies_raw(cdp_url: str) -> list[dict]:
+    """经 CDP 读取浏览器 zhipin cookies 原始 dict（供导出序列化）。"""
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as p:
+        try:
+            browser = await p.chromium.connect_over_cdp(cdp_url)
+        except Exception as e:
+            log(f"❌ CDP 连接失败（{cdp_url}）: {e}")
+            return []
+        try:
+            if browser.contexts:
+                all_cookies = await browser.contexts[0].cookies()
+                zhipin = [c for c in all_cookies if "zhipin" in c.get("domain", "")]
+                if zhipin:
+                    log(f"✅ 已读取 {len(zhipin)} 个 zhipin cookies（登录态有效）")
+                    return zhipin
+                log("⚠️ 主 context 无 zhipin cookies（未登录）")
+        except Exception as e:
+            log(f"⚠️ 读取 cookies 失败: {e}")
+    return []
+
+
+async def read_zhipin_cookies(cdp_url: str, cookies_file: str | None = None) -> httpx.Cookies | None:
+    """获取 zhipin 登录态 cookies：优先从文件读取，无文件时经 CDP 读取。
 
     Returns:
         httpx.Cookies；无 zhipin 登录 cookies 时返回 None。
     """
+    if cookies_file:
+        jar = _load_cookies_from_file(cookies_file)
+        if jar is not None:
+            return jar
+        log(f"⚠️ cookies 文件不可用，回退 CDP 读取（{cdp_url}）")
+
     from playwright.async_api import async_playwright
 
     async with async_playwright() as p:
@@ -71,13 +125,26 @@ async def read_zhipin_cookies(cdp_url: str) -> httpx.Cookies | None:
     return None
 
 
-async def crawl(cdp_url: str, keyword: str, city_code: str, max_pages: int = 5) -> list:
+async def export_cookies(cdp_url: str, out_path: str) -> int:
+    """经 CDP 读取 zhipin cookies 并序列化到文件（供无浏览器环境复用登录态）。"""
+    raw = await _read_zhipin_cookies_raw(cdp_url)
+    if not raw:
+        return 0
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(raw, f, ensure_ascii=False, indent=2)
+    return len(raw)
+
+
+async def crawl(cdp_url: str, keyword: str, city_code: str, max_pages: int = 5,
+                cookies_file: str | None = None) -> list:
     """读取登录态 cookies，纯 HTTP 采集 BOSS 岗位。
 
     不导航页面、不执行页面 JS，避免触发 zhipin 风控（页面内 fetch 被拦、
     导航会关闭浏览器；纯 HTTP 带 cookies 请求正常返回岗位）。
     """
-    cookies = await read_zhipin_cookies(cdp_url)
+    cookies = await read_zhipin_cookies(cdp_url, cookies_file)
     if cookies is None:
         log("⚠️ 未读取到 zhipin 登录态：请在弹出的 Chrome 中【手动】打开 zhipin.com 完成登录后重跑爬虫")
         return []
@@ -166,15 +233,32 @@ async def crawl(cdp_url: str, keyword: str, city_code: str, max_pages: int = 5) 
 
 
 def main():
-    parser = argparse.ArgumentParser(description="BOSS 直聘采集脚本（CDP 读 cookies + HTTP 采集）")
-    parser.add_argument("--keyword", required=True, help="搜索关键词")
-    parser.add_argument("--city-code", required=True, help="城市代码（如 101010100）")
+    parser = argparse.ArgumentParser(description="BOSS 直聘采集脚本（cookies 文件 / CDP 读 cookies + HTTP 采集）")
+    parser.add_argument("--keyword", help="搜索关键词")
+    parser.add_argument("--city-code", help="城市代码（如 101010100）")
     parser.add_argument("--cdp-url", default=os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222"),
-                        help="CDP 调试端点（默认 http://127.0.0.1:9222，支持局域网内容器浏览器）")
+                        help="CDP 调试端点（默认 http://127.0.0.1:9222）")
     parser.add_argument("--max-pages", type=int, default=5, help="最大页数")
+    parser.add_argument("--cookies-file", default=os.environ.get("BOSS_COOKIES_FILE"),
+                        help="JSON cookies 文件路径（采集模式优先从文件读登录态，无浏览器依赖）")
+    parser.add_argument("--export-cookies", default=None,
+                        help="导出模式：经 CDP 读 zhipin cookies 序列化到指定文件后退出")
     args = parser.parse_args()
 
-    items = asyncio.run(crawl(args.cdp_url, args.keyword, args.city_code, args.max_pages))
+    # 导出模式：--export-cookies 与采集参数互斥
+    if args.export_cookies:
+        n = asyncio.run(export_cookies(args.cdp_url, args.export_cookies))
+        if n:
+            log(f"✅ 已导出 {n} 个 zhipin cookies → {args.export_cookies}")
+            sys.exit(0)
+        log("❌ 未读取到 zhipin 登录态：请确认 CDP Chrome 已登录 zhipin.com 后重试")
+        sys.exit(1)
+
+    if not args.keyword or not args.city_code:
+        parser.error("采集模式需要 --keyword 与 --city-code（或使用 --export-cookies 导出模式）")
+
+    items = asyncio.run(crawl(args.cdp_url, args.keyword, args.city_code, args.max_pages,
+                              args.cookies_file))
 
     # 输出 JSONL 到 stdout
     for item in items:

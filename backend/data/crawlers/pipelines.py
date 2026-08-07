@@ -6,8 +6,10 @@
 """
 
 import hashlib
+import math
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from typing import Optional
 
 from scrapy.exceptions import DropItem
 from sqlalchemy import func
@@ -36,6 +38,51 @@ _EMPLOYMENT_INTERN_CN = "实习"    # 含"实习生"
 _EMPLOYMENT_PARTTIME_CN = "兼职"
 
 
+# ── 非正常岗位源头过滤（2026-08-07 补充）──
+# 批量聚合招聘帖：标题为技术栈列表（Java/C++/Python/前端/测试…）或招聘话术，
+# 无明确岗位名——不是单一岗位，LLM 抽取/聚合会产生污染岗位（如"系统""解决方案"）。
+# 判定：标题不含强岗位词（中英）+ （含 ≥2 个技术栈分隔符 或 批量招募话术）。
+# 强岗位词须含英文岗位词（Engineer/Developer/Analyst 等）：国际源标题为英文，
+# 否则 "Software Engineer, AI/ML" 会被"分隔符+无中文岗位词"误判为聚合帖。
+# "前端"不进表：聚合帖常列"前端"项，"前端"单独出现多为简写岗位名（靠
+# "全栈/工程师"等词保底正常岗，如"前端全栈工程师"）。
+_POS_NAME_STRONG_RE = re.compile(
+    r"工程师|开发|分析|设计|运营|经理|架构|研究|评测|技术|主管|顾问|讲师|教师|"
+    r"销售|助理|专家|咨询|运维|实施|产品|专员|管培|储备|总监|教练|审核|主播|护士|"
+    r"客服|财务|人事|市场|编辑|司机|厨师|保安|保洁|前台|全栈|算法|数据|后端"
+    r"|标注|训练|翻译|美工|剪辑|修图|撰写|美编|策划|摄影|摄像|主持|文员|秘书"
+    r"|软件测试|测试开发|测试工程师"  # "测试"单独是聚合帖列表项，不进表；带岗位前缀/后缀的组合词保正常岗
+    r"|Engineer|Developer|Analyst|Manager|Architect|Scientist|Researcher|Specialist|"
+    r"Consultant|Director|Officer|Operator|Designer|Editor|Nurse|Driver|Chef|Trainer|"
+    r"Coordinator|Administrator|Intern|Trainee|Tester|Lead|Principal|Staff"
+)
+# 技术栈分隔符（含中文顿号/斜杠/加号变体/半角逗号）
+_STACK_SEP_RE = re.compile(r"[/、＋＋+，,·]")
+# 批量招募话术（无岗位名时出现这些词 → 聚合帖）
+_RECRUIT_SPAM_RE = re.compile(
+    r"接受应届|无经验|不限语言|线上面试|可投|高薪|急招|双休|16薪|14薪|六险一金|"
+    r"拒绝内卷|月入过万|核心项目|年终奖|导师带教|长期项目"
+)
+
+
+def _invalid_job_reason(item) -> str | None:
+    """非正常岗位（批量聚合帖/话术帖）拦截原因；未命中返回 None。
+
+    与 _employment_reason 并列：实习/兼职在标题判定，聚合帖在标题+技术栈
+    分隔+话术判定。正常岗位（含岗位名强词，如"Java开发工程师（接受应届）"）
+    不拦截，避免误杀。
+    """
+    title = str(item.get("title") or "")
+    if not title:
+        return None
+    if _POS_NAME_STRONG_RE.search(title):
+        return None
+    seps = len(_STACK_SEP_RE.findall(title))
+    if seps >= 2 or _RECRUIT_SPAM_RE.search(title):
+        return "批量聚合帖（无岗位名）"
+    return None
+
+
 def _employment_reason(item) -> str | None:
     """实习/兼职岗位的拦截原因；未命中返回 None。
 
@@ -60,8 +107,130 @@ def _employment_reason(item) -> str | None:
     return None
 
 
+# ── 质量过滤（设计文档 §4.2：长度过滤 → 核心词检测 → 质量评分 → 时效加权）──
+MIN_JD_LENGTH = 50            # JD 全文长度 < 50 字丢弃
+QUALITY_REVIEW_THRESHOLD = 0.6  # 质量评分 < 0.6 入人工复核
+_JD_TEXT_LENGTH_FULL = 200    # 文本长度维度满分基准（200 字）
+_JD_KEYWORD_FULL = 3          # 核心词命中维度满分基准（3 词）
+
+# 招聘核心词集（中英）：JD 文本命中任一即视为含招聘意图，
+# 供核心词检测维度使用（质量评分组成之一）。
+_JD_CORE_KEYWORDS = (
+    "负责", "职责", "要求", "经验", "熟悉", "掌握", "具备", "优先",
+    "开发", "设计", "维护", "测试", "交付", "能力", "技能",
+    "responsib", "requir", "experience", "skill", "develop",
+    "design", "build", "manage", "support", "ability",
+)
+
+# 格式规范：控制字符或同一字符连续 20+（乱码/爬虫噪声）视为格式异常
+_BAD_FORMAT_RE = re.compile(r"([^\W\d_])\1{19,}|[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def jd_quality_breakdown(
+    title: str,
+    description: str = "",
+    requirements: str = "",
+    company: str = "",
+    location: str = "",
+    salary: str = "",
+    raw_text: str = "",
+) -> dict:
+    """质量评分分量明细（score 及各维度分数/输入）。
+
+    拆出明细供日志排查评分异常（哪一维拖低/命中哪些核心词），
+    jd_quality_score 只取 score，避免重复计算。
+    """
+    # raw_text 计入文本长度/核心词/格式维度（与长度过滤口径一致），
+    # 但不计入字段完整度——它是原始抓取转储而非结构化字段
+    text = " ".join(filter(None, (title, description, requirements, raw_text)))
+    fields = [title, company, location, salary, description, requirements]
+    completeness = sum(1 for f in fields if str(f or "").strip()) / len(fields)
+    length_score = min(len(text) / _JD_TEXT_LENGTH_FULL, 1.0)
+    hits = [kw for kw in _JD_CORE_KEYWORDS if kw in text]
+    keyword_score = min(len(hits) / _JD_KEYWORD_FULL, 1.0)
+    format_score = 0.5 if _BAD_FORMAT_RE.search(text) else 1.0
+    return {
+        "text_len": len(text),
+        "completeness": round(completeness, 3),
+        "length_score": round(length_score, 3),
+        "keyword_hits": hits,
+        "keyword_score": round(keyword_score, 3),
+        "format_score": format_score,
+        "score": round(
+            0.4 * completeness
+            + 0.3 * length_score
+            + 0.2 * keyword_score
+            + 0.1 * format_score,
+            3,
+        ),
+    }
+
+
+def jd_quality_score(
+    title: str,
+    description: str = "",
+    requirements: str = "",
+    company: str = "",
+    location: str = "",
+    salary: str = "",
+    raw_text: str = "",
+) -> float:
+    """JD 质量评分（设计文档 §4.2：字段完整度 0.4 + 文本长度 0.3 + 核心词 0.2 + 格式规范 0.1）。"""
+    return jd_quality_breakdown(
+        title, description, requirements, company, location, salary, raw_text
+    )["score"]
+
+
+def _parse_date(value) -> Optional[date]:
+    """宽松解析日期：ISO8601 或 YYYY-MM-DD 前缀；失败返回 None。"""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+    except ValueError:
+        m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(value))
+        if m:
+            return date(*map(int, m.groups()))
+        return None
+
+
+def jd_decay_breakdown(publish_time, today: Optional[date] = None) -> dict:
+    """时效加权分量明细（解析出的发布日期/距今天数/衰减权重）。
+
+    拆出明细供日志排查时效异常（post_date 解析失败 vs 超 30 天衰减），
+    jd_decay_weight 只取权重，避免重复计算。
+    """
+    pub = _parse_date(publish_time)
+    if pub is None:
+        return {"publish_date": None, "days_ago": None, "decay_weight": 1.0}
+    days = (today or date.today()) - pub
+    days_ago = days.days
+    weight = 1.0 if days_ago <= 30 else math.exp(-0.01 * (days_ago - 30))
+    return {
+        "publish_date": pub.isoformat(),
+        "days_ago": days_ago,
+        "decay_weight": round(weight, 3),
+    }
+
+
+def jd_decay_weight(publish_time, today: Optional[date] = None) -> float:
+    """时效加权（设计文档 §4.2）：≤30 天 1.0，>30 天 exp(-0.01×(days_ago-30))。
+
+    无发布信息返回 1.0（不惩罚无日期标注的采集数据）。
+    """
+    return jd_decay_breakdown(publish_time, today)["decay_weight"]
+
+
 class CleaningPipeline:
-    """基础清洗：去重指纹 + 文本标准化 + 脱敏标记 + 实习/兼职岗位源头过滤。"""
+    """基础清洗：长度过滤 + 去重指纹 + 文本标准化 + 脱敏标记 + 实习/兼职岗位源头过滤。
+
+    对齐设计文档 §4.2 管线（raw_JD → 长度过滤 → 核心词检测 → 质量评分
+    → 去重 → 时效加权 → 结构化输出）：
+    - 实习/兼职岗位源头拦截（最早，避免无效岗位进入下游）
+    - 全文长度 < MIN_JD_LENGTH 丢弃
+    - 质量评分写入 snapshot.quality（核心词检测为评分维度之一），< 0.6 标 needs_review
+    - 时效加权写入 snapshot.decay_weight
+    """
 
     # 边界 (?<!\d)/(?!\d) 防止误伤长数字 ID（如 19 位 source_id）中的子串
     PII_PATTERNS = [
@@ -85,10 +254,10 @@ class CleaningPipeline:
         return self.crawler.spider if self.crawler is not None else None
 
     def process_item(self, item):
-        # 实习/兼职岗位源头拦截：在清洗阶段丢弃（不计算指纹、不落库），
+        # 实习/兼职 + 批量聚合帖源头拦截：在清洗阶段丢弃（不计算指纹、不落库），
         # 拦截日志保留 title/company 便于核对误杀
         if isinstance(item, JobItem):
-            reason = _employment_reason(item)
+            reason = _employment_reason(item) or _invalid_job_reason(item)
             if reason:
                 self._filtered_count += 1
                 spider = self._spider()
@@ -101,6 +270,18 @@ class CleaningPipeline:
                         item.get("company", ""),
                     )
                 raise DropItem(f"{reason}: {item.get('title', '')}")
+
+            # 长度过滤（设计文档 §4.2）：JD 全文 < 50 字丢弃（缺失正文的占位数据）
+            full_text = " ".join(filter(None, (
+                item.get("title", ""),
+                item.get("description", ""),
+                item.get("requirements", ""),
+                item.get("raw_text", ""),
+            )))
+            if len(full_text) < MIN_JD_LENGTH:
+                raise DropItem(
+                    f"JD 文本过短（{len(full_text)} 字 < {MIN_JD_LENGTH}）: {item.get('title', '')}"
+                )
 
         # 去重指纹：source + source_id 的 SHA256；source_id 缺失时回退 source_url
         # （避免不同记录指纹相同且按 (source, source_id) upsert 互相覆盖）
@@ -131,6 +312,53 @@ class CleaningPipeline:
                     item.get("requirements", ""),
                 ]))
             )
+
+            # 质量评分 + 时效加权（设计文档 §4.2）：写入 snapshot 供下游与人工复核。
+            # 核心词检测为评分维度之一；< 0.6 标 needs_review（不丢弃，进人工复核队列）
+            q = jd_quality_breakdown(
+                title=str(item.get("title") or ""),
+                description=str(item.get("description") or ""),
+                requirements=str(item.get("requirements") or ""),
+                company=str(item.get("company") or ""),
+                location=str(item.get("location") or ""),
+                salary=str(item.get("salary") or ""),
+                raw_text=str(item.get("raw_text") or ""),
+            )
+            d = jd_decay_breakdown(item.get("post_date"))
+            item["quality"] = q["score"]
+            item["needs_review"] = q["score"] < QUALITY_REVIEW_THRESHOLD
+            item["decay_weight"] = d["decay_weight"]
+
+            # 详细日志（排查评分/时效异常）：记录各维度输入与分数，尤其核心词
+            # 命中明细（空命中→keyword_score=0）与时效（post_date 解析失败→1.0）。
+            # needs_review 命中时用 warning 级别，便于人工复核及时关注
+            spider = self._spider()
+            if spider:
+                log_line = (
+                    "[清洗质量] source=%s title=%r quality=%.3f needs_review=%s "
+                    "| 完整度=%.2f 长度=%.2f(%d字) 核心词=%.2f(命中%d:%s) 格式=%.2f"
+                    " | 时效=%.3f(发布=%s 距今=%s天)"
+                )
+                log_args = (
+                    item.get("source", ""),
+                    item.get("title", ""),
+                    q["score"],
+                    item["needs_review"],
+                    q["completeness"],
+                    q["length_score"],
+                    q["text_len"],
+                    q["keyword_score"],
+                    len(q["keyword_hits"]),
+                    "/".join(q["keyword_hits"]) or "-",
+                    q["format_score"],
+                    d["decay_weight"],
+                    d["publish_date"],
+                    d["days_ago"],
+                )
+                if item["needs_review"]:
+                    spider.logger.warning(log_line, *log_args)
+                else:
+                    spider.logger.info(log_line, *log_args)
 
         # 文本标准化：对所有已知文本字段 strip
         for field in _TEXT_FIELDS:
@@ -273,7 +501,10 @@ class PostgresPipeline:
                 "source_url": stmt.excluded.source_url,
                 "crawled_at": stmt.excluded.crawled_at,
                 "fingerprint": stmt.excluded.fingerprint,
-                "snapshot": stmt.excluded.snapshot,
+                # JSONB 合并（右覆盖左同键）：保留已有 extraction/validation/
+                # inflation 等下游写入字段，新抓取字段覆盖同名键。此前整体覆盖
+                # 会在每次重爬时把已抽取记录"打回"未抽取，导致 ETL 重复 LLM 抽取
+                "snapshot": model.__table__.c.snapshot.op("||")(stmt.excluded.snapshot),
                 "raw_text": stmt.excluded.raw_text,
                 "is_desensitized": stmt.excluded.is_desensitized,
                 "updated_at": func.now(),

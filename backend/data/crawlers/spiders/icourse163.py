@@ -9,7 +9,7 @@
 
 合规：
 - 仅采集公开课程元数据（标题/讲师/院校/注册数/标签）
-- 每周全量同步，请求间隔 6-12s
+- 每周全量同步，请求间隔 8-15s
 - 不绕过登录态（icourse163 搜索页本身是公开的）
 
 运行：
@@ -58,7 +58,7 @@ class Icourse163Spider(Spider):
         self.max_pages = int(kwargs.get("max_pages", "3"))
         # 请求间隔（仅用于日志展示，实际延迟在脚本内）
         limit = RATE_LIMIT.get(self.platform, {})
-        delay_range = limit.get("delay_range", (6, 12))
+        delay_range = limit.get("delay_range", (8, 15))
         self.download_delay = sum(delay_range) / 2
         # 采集脚本路径
         self.crawler_script = os.path.join(

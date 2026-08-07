@@ -20,6 +20,7 @@ from pathlib import Path
 
 from arq.connections import RedisSettings
 from arq.cron import cron
+from arq.worker import func
 
 from app.core.config import settings
 
@@ -30,6 +31,16 @@ _UTF8_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
 # ── 爬虫项目根（backend/data/crawlers）──
 _CRAWLERS_DIR = Path(__file__).resolve().parents[2] / "data" / "crawlers"
 _OUTPUT_DIR = _CRAWLERS_DIR / "output"
+
+# 爬虫子进程需 import crawlers 包（位于 backend/data/，scrapy.cfg 同目录），
+# 显式设置 PYTHONPATH——worker 以服务方式启动时继承不到交互终端的 PYTHONPATH，
+# 缺省会导致 `ModuleNotFoundError: No module named 'crawlers'`，全部爬虫静默失败
+_CRAWL_ENV = {
+    **_UTF8_ENV,
+    "PYTHONPATH": os.pathsep.join(
+        [str(_CRAWLERS_DIR.parent), str(_CRAWLERS_DIR.parent.parent)]
+    ),
+}
 
 # 显式消费 -a max_results 参数的 spider（其余源由各自默认采集量控制）
 MAX_RESULTS_SUPPORTED = {"arxiv"}
@@ -56,8 +67,8 @@ async def _push_crawl_log(ctx: dict, task_id: str | None, line: str) -> None:
         if redis is None:
             return
         key = _CRAWL_LOG_PREFIX + task_id
-        await redis.rpush(key, line)
-        await redis.expire(key, _CRAWL_LOG_TTL_SECONDS)
+        # rpush + expire 合并为一次管道往返，避免日志高频写入时的双倍 RTT
+        await redis.pipeline().rpush(key, line).expire(key, _CRAWL_LOG_TTL_SECONDS).execute()
     except Exception:
         pass
 
@@ -135,13 +146,13 @@ async def crawl_platform(
         result={"spider": spider_name, "output_file": str(output_file)},
     )
 
-    # cwd 设到 crawlers/ 让 scrapy.cfg 生效；env 强制子进程 UTF-8 输出（防中文日志乱码）
+    # cwd 设到 crawlers/ 让 scrapy.cfg 生效；env 强制 UTF-8 + PYTHONPATH（见 _CRAWL_ENV）
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(_CRAWLERS_DIR),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=_UTF8_ENV,
+        env=_CRAWL_ENV,
     )
 
     # 并发逐行读取 stdout/stderr：实时写入日志队列，stderr 尾部留存用于失败信息
@@ -330,14 +341,33 @@ async def validate_temporal(
                 continue
             views.append((row, (row.id, ext.get("position_name") or "", publish, skills)))
 
+        # 历史组补齐：时滞检测的技能首见时长/抄袭比对需要同岗位全量历史
+        # （含此前已验证批次）。仅用本次未验证的 limit 条记录，首见时长会被
+        # 低估、抄袭比对缺参照（审查 major：validate_temporal 历史组不齐）。
+        position_names = {v[1][1] for v in views}
+        hist_by_pos: dict[str, list[tuple[int, date, list[str]]]] = {}
+        if position_names:
+            hist = (await session.scalars(
+                select(JDRaw).where(
+                    JDRaw.snapshot["extraction"].astext.isnot(None),
+                    JDRaw.snapshot["extraction"]["position_name"].astext.in_(position_names),
+                )
+            )).all()
+            for row in hist:
+                ext = _extraction_of(row)
+                if not ext:
+                    continue
+                publish = _publish_date(row.snapshot or {}, row.crawled_at or "")
+                skills = _skills_of(ext)
+                if not skills or publish is None:
+                    continue
+                pos = ext.get("position_name") or ""
+                hist_by_pos.setdefault(pos, []).append((row.id, publish, skills))
+
         results: dict = {"checked": 0, "skipped": len(rows) - len(views), "flagged": []}
         for row, (jd_id, position, publish, skills) in views:
-            # views 元素为 (row, (jd_id, position, publish, skills))，需按第二层解包
-            group = [
-                (r_id, r_publish, r_skills)
-                for _, (r_id, r_position, r_publish, r_skills) in views
-                if r_position == position
-            ]
+            # group 覆盖同岗位全部历史记录（含当前批次），按首见时长/抄袭比对口径
+            group = hist_by_pos.get(position, [])
             skill_ages = _skill_first_seen_days(group, skills, today)
             if not skill_ages:
                 results["skipped"] += 1
@@ -456,7 +486,9 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     """SimHash 跨平台近似去重（设计文档 §4.2 消费方）。
 
     扫描 jd_raw 已入库记录的 snapshot->_simhash（CleaningPipeline 采集时写入，
-    基于脱敏后文本），批量 find_similar_pairs（汉明距 ≤ 3）找出近似重复 JD，
+    基于脱敏后文本），批量 find_similar_pairs（汉明距 ≤ 3）找出近似重复 JD。
+    jd_embeddings 语义辅助（§11.4.3）：两记录的向量余弦 < 0.9 视为语义不相似，
+    不标记重复（降低 SimHash 误判）；向量缺失时保留 SimHash 判定。
     将后入库记录标记 `snapshot["_duplicate_of"]` = 先入库记录 id。
     聚合层（aggregation.build_aggregates）跳过被标记记录，避免重复 JD 虚高频次。
     """
@@ -465,12 +497,21 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     from app.core.database import async_session_factory
     from app.models.raw import JDRaw
     from app.services.data_quality.simhash import find_similar_pairs
+    from app.services.embeddings.vector_store import load_jd_vectors
+    from app.services.matching.semantic import cosine_similarity
+
+    # JD 语义去重辅助阈值（§11.4.3 jd_embeddings Cosine）：低于该值不标记
+    _EMBED_DEDUP_THRESHOLD = 0.9
 
     async with async_session_factory() as session:
-        stmt = select(JDRaw).order_by(JDRaw.id.asc())
-        rows = (await session.scalars(stmt)).all()
+        # 只加载带 _simhash 的记录，避免全表拉取（审查 major：dedup_simhash 全表加载）
+        stmt = select(JDRaw).where(
+            JDRaw.snapshot["_simhash"].astext.isnot(None),
+        )
         if limit:
-            rows = rows[:limit]
+            stmt = stmt.limit(limit)
+        stmt = stmt.order_by(JDRaw.id.asc())
+        rows = (await session.scalars(stmt)).all()
 
         records: list[tuple[str, int]] = []
         for r in rows:
@@ -480,10 +521,22 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
 
         pairs = find_similar_pairs(records)
 
+        # 语义辅助：SimHash 命中对用 jd_embeddings 向量校验（缺向量不拦截）
+        emb_map = await load_jd_vectors(session)
+        verified_pairs: list[tuple[str, str]] = []
+        skipped_emb = 0
+        for id_a, id_b in pairs:
+            va, vb = emb_map.get(id_a), emb_map.get(id_b)
+            if va is not None and vb is not None:
+                if cosine_similarity(va, vb) < _EMBED_DEDUP_THRESHOLD:
+                    skipped_emb += 1
+                    continue  # 语义不相似，SimHash 误判，不标记重复
+            verified_pairs.append((id_a, id_b))
+
         # pairs 顺序即 records 输入顺序（id 升序），先入库者保留，后入库者标记
         id_map = {str(r.id): r for r in rows}
         marked = 0
-        for id_a, id_b in pairs:
+        for id_a, id_b in verified_pairs:
             dup = id_map.get(id_b)
             if dup is None:
                 continue
@@ -494,7 +547,12 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
                 marked += 1
         await session.commit()
 
-    return {"checked": len(records), "pairs": len(pairs), "marked": marked}
+    return {
+        "checked": len(records),
+        "pairs": len(pairs),
+        "skipped_emb": skipped_emb,
+        "marked": marked,
+    }
 
 
 async def load_courses(ctx: dict) -> dict:
@@ -513,15 +571,20 @@ async def load_courses(ctx: dict) -> dict:
         rows = (await session.scalars(select(CourseRaw))).all()
     data = [dict(r.snapshot or {}) for r in rows]
 
-    imported = 0
-    failed = 0
-    with neo4j_driver.session() as neo4j_session:
-        for course_data in data:
-            try:
-                import_course(neo4j_session, course_data)
-                imported += 1
-            except Exception:
-                failed += 1
+    def _import_all():
+        # 同步 Neo4j 写入放线程池，避免阻塞 ARQ 事件循环（Redis 心跳超时崩溃根因）
+        imported = 0
+        failed = 0
+        with neo4j_driver.session() as neo4j_session:
+            for course_data in data:
+                try:
+                    import_course(neo4j_session, course_data)
+                    imported += 1
+                except Exception:
+                    failed += 1
+        return imported, failed
+
+    imported, failed = await asyncio.to_thread(_import_all)
     return {"total": len(data), "imported": imported, "failed": failed}
 
 
@@ -697,7 +760,13 @@ async def aggregate_positions(ctx: dict) -> dict:
 
     now = datetime.now(timezone(timedelta(hours=8))).isoformat()
     agg = build_aggregates(rows)
-    return write_aggregates(neo4j_driver.session(), agg, now)
+
+    def _write():
+        # 同步 Neo4j 写入放线程池，并正确关闭 session（原实现 session 泄漏）
+        with neo4j_driver.session() as session:
+            return write_aggregates(session, agg, now)
+
+    return await asyncio.to_thread(_write)
 
 
 async def cross_validate_jds(ctx: dict, limit: int | None = None) -> dict:
@@ -727,10 +796,15 @@ async def cross_validate_jds(ctx: dict, limit: int | None = None) -> dict:
             {"snapshot": r.snapshot or {}, "source": r.source, "crawled_at": r.crawled_at}
             for r in rows
         ]
-        results = [
-            validate_group(pos, group)
-            for pos, group in build_position_groups(records).items()
-        ]
+
+        def _validate():
+            # 纯 CPU 分组校验，放线程池避免阻塞事件循环
+            return [
+                validate_group(pos, group)
+                for pos, group in build_position_groups(records).items()
+            ]
+
+        results = await asyncio.to_thread(_validate)
 
         group_map = {r.position_name: r for r in results}
         written = 0
@@ -752,6 +826,89 @@ async def cross_validate_jds(ctx: dict, limit: int | None = None) -> dict:
         "below_confidence": sum(1 for r in results if r.confidence < 0.6),
         "written": written,
     }
+
+
+async def sync_skill_normalization(ctx: dict) -> dict:
+    """技能归一化 + SIMILAR_TO 建边（设计文档 §5.3，ETL 阶段 9.5）。
+
+    对图谱全量 Skill 名做 SBERT 层次聚类，回写 `Skill.normalized_name`，
+    同簇相似度 ≥ 0.85 自动建 `SIMILAR_TO {similarity}` 关系（幂等 MERGE）。
+
+    模型不可用时归一化退化为词典路径（normalize_skill 在线词典不变），
+    不阻塞 ETL 主线。
+    """
+
+    def _run():
+        # 同步 Neo4j 全量读取 + SBERT 聚类 + 关系回写为 CPU/IO 密集，整体放线程池
+        from app.core.database import neo4j_driver
+        from app.services.extraction.normalization import SkillNormalizer
+
+        with neo4j_driver.session() as session:
+            rows = session.run("MATCH (s:Skill) RETURN s.name AS name").data()
+            names = [r["name"] for r in rows if r.get("name")]
+        if not names:
+            return {"skills": 0, "normalized": 0, "similar_pairs": 0, "detail": "图谱无 Skill 节点"}
+
+        normalizer = SkillNormalizer()
+        normalized = normalizer.normalize_many(names)
+        if not normalized:
+            return {"skills": len(names), "normalized": 0, "similar_pairs": 0, "detail": "归一化无输出"}
+
+        changed = sum(1 for n, r in normalized.items() if r.standard != n)
+        written = 0
+        skipped_standard = 0
+        name_set = set(names)  # 图谱现存技能名：过滤 standard 不在图谱的对，避免 MERGE 空匹配丢边
+        with neo4j_driver.session() as session:
+            # 回写 normalized_name（含自指 SET，幂等）
+            for name, res in normalized.items():
+                session.run(
+                    "MATCH (s:Skill {name: $name}) SET s.normalized_name = $standard",
+                    name=name, standard=res.standard,
+                )
+            # SIMILAR_TO 关系：同标准名组内相似度 ≥ 0.85（§5.3 阈值过滤，非自指）
+            for standard, member, sim in normalizer.similar_pairs(normalized):
+                if standard not in name_set:
+                    skipped_standard += 1
+                    continue
+                session.run(
+                    """
+                    MATCH (a:Skill {name: $standard}), (b:Skill {name: $member})
+                    MERGE (a)-[r:SIMILAR_TO]->(b)
+                    SET r.similarity = $similarity
+                    """,
+                    standard=standard, member=member, similarity=sim,
+                )
+                written += 1
+
+        return {
+            "skills": len(names),
+            "normalized": changed,
+            "similar_pairs": written,
+            "skipped_standard": skipped_standard,
+            "detail": "SIMILAR_TO 已回写（幂等）",
+        }
+
+    return await asyncio.to_thread(_run)
+
+
+async def backfill_embeddings(ctx: dict) -> dict:
+    """pgvector 三表向量回填（设计文档 §11.4.3，ETL 阶段 13）。
+
+    从 Neo4j Skill、jd_raw、resume_cache 生成向量写入
+    skill_embeddings / jd_embeddings / project_embeddings（幂等）。
+    模型不可用时跳过，不阻塞 ETL 主线（语义路降级为关键词/内存相似度）。
+    """
+    from app.core.database import async_session_factory
+    from app.services.embeddings.backfill import run_backfill
+    from app.services.matching.semantic import SemanticUnavailableError, SkillEmbedder
+
+    try:
+        # 单例首次获取会同步加载 SBERT 模型（可达分钟级），放线程池避免阻塞事件循环
+        embedder = await asyncio.to_thread(SkillEmbedder.get)
+        async with async_session_factory() as db:
+            return await run_backfill(db, embedder)
+    except SemanticUnavailableError:
+        return {"detail": "语义模型不可用，回填跳过"}
 
 
 async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: bool = False) -> dict:
@@ -776,8 +933,10 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
     # 按设计文档 §4.4 数据更新频率分组
     # 国内 A 级 + B 级（02:00 / 04:00）
     domestic_platforms = ["boss", "zhilian"]
-    # 国际 A/B 级（错峰）
-    international_platforms = ["monster", "indeed", "glassdoor"]
+    # 国际 A/B 级（错峰）。monster 的 DataDome 防护（IP 信誉 + 浏览器真实性双重
+    # 校验）在容器环境实测不可绕过（headless/CDP/指纹伪装/xdotool 全被拦截），
+    # 暂从自动采集列表移除；保留 spider 代码，待有住宅代理/指纹浏览器后再启用
+    international_platforms = ["indeed", "glassdoor"]
     # 非招聘数据源（论文/社区/课程）
     trend_platforms = ["arxiv", "github", "stackoverflow"]
 
@@ -811,14 +970,14 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
     # ── 阶段 2.5：SimHash 跨平台近似去重（标记重复，聚合层跳过）──
     results["stages"]["dedup_simhash"] = await dedup_simhash(ctx)
 
-    # ── 阶段 3：时滞检测（M3 启用）──
+    # ── 阶段 3：结构化 + 入库（M3 启用：LLM 抽取 → snapshot 写回 → Neo4j 入图）──
+    results["stages"]["structure_load"] = await batch_extract(ctx, limit=500)
+
+    # ── 阶段 4：时滞检测（M3 启用，须在抽取之后：依赖 snapshot.extraction）──
     results["stages"]["validate_temporal"] = await validate_temporal(ctx, jd_ids=[])
 
-    # ── 阶段 4：通胀检测（M3 启用）──
+    # ── 阶段 5：通胀检测（M3 启用，须在抽取之后：依赖 snapshot.extraction）──
     results["stages"]["detect_inflation"] = await detect_inflation(ctx, jd_ids=[])
-
-    # ── 阶段 5：结构化 + 入库（M3 启用：LLM 抽取 → snapshot 写回 → Neo4j 入图）──
-    results["stages"]["structure_load"] = await batch_extract(ctx, limit=500)
 
     # ── 阶段 6：课程入图（course_raw → Course + LEARNABLE_VIA）──
     results["stages"]["load_courses"] = await load_courses(ctx)
@@ -832,14 +991,47 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
     # ── 阶段 9：多平台交叉验证（DA-M3-03，技能跨源印证/薪资异常/置信度）──
     results["stages"]["cross_validate"] = await cross_validate_jds(ctx)
 
+    # ── 阶段 9.5：技能归一化 + SIMILAR_TO 建边（§5.3，SBERT 聚类，幂等）──
+    results["stages"]["skill_normalization"] = await sync_skill_normalization(ctx)
+
     # ── 阶段 10：数据多样性报告（DA-M4-02，reports/diversity_{date}.json）──
     results["stages"]["diversity_report"] = await diversity_report(ctx)
 
     # ── 阶段 11：数据更新新鲜度检查（DA-M4-03，T+1 承诺审计）──
     results["stages"]["check_data_freshness"] = await check_data_freshness(ctx)
 
-    # ── 阶段 12：发布图谱版本快照（§7.1 T+1 版本管理，05:00 前自动发布）──
+    # ── 阶段 12.5：技能关系建边（§5.1：PREREQUISITE_OF/BELONGS_TO/ALTERNATIVE_OF，字典驱动，幂等）──
+    from app.services.kg.skill_relations import sync_skill_relations
+    from app.core.database import neo4j_driver as _neo4j_driver
+
+    def _run_skill_relations() -> dict:
+        # 同步 Neo4j 全量建边放线程池，避免阻塞事件循环（ARQ 心跳超时）
+        with _neo4j_driver.session() as _ns:
+            return sync_skill_relations(_ns)
+
+    results["stages"]["skill_relations"] = await asyncio.to_thread(_run_skill_relations)
+
+    # ── 阶段 12.6：岗位演化关系推导（§5.1：EVOLVED_FROM，版本 diff，幂等）──
+    from app.services.evolution.evolved_from import derive_evolved_from
+
+    results["stages"]["evolved_from"] = await derive_evolved_from()
+
+    # ── 阶段 13：pgvector 三表向量回填（§11.4.3，模型不可用时跳过）──
+    results["stages"]["backfill_embeddings"] = await backfill_embeddings(ctx)
+
+    # ── 阶段 14：发布图谱版本快照（§7.1 T+1 版本管理）──
+    # 置于 skill_relations/evolved_from 之后：快照须覆盖本管线全部图变更，
+    # 否则发布的版本缺失 SIMILAR_TO/EVOLVED_FROM 等边（审查 major：snapshot 顺序）。
     results["stages"]["snapshot_graph"] = await snapshot_graph(ctx, triggered_by="scheduled")
+
+    # ── 阶段 15：新岗位发现 + 自动状态流转（须在快照发布后：依赖当日窗口序列）──
+    # 链入 ETL 而非独立 cron，保证 discovery_auto_transition 读到当日快照。
+    # 单侧失败仅记录，不阻塞 ETL 整体（ETL 结果可审计）。
+    try:
+        results["stages"]["discovery_daily"] = await discovery_daily(ctx)
+        results["stages"]["discovery_auto_transition"] = await discovery_auto_transition(ctx)
+    except Exception as e:
+        results["stages"]["discovery"] = {"error": str(e)[:500]}
 
     return results
 
@@ -883,20 +1075,21 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
 
         try:
             # 1. 文件文本抽取（pdf/docx/txt；扫描件抛 ResumeParseError）
-            text = extract_text(file_path)
+            text = await asyncio.to_thread(extract_text, file_path)
 
             # 2. PII 脱敏（送入 LLM 前必须先脱敏，设计文档 §8.2）
-            masked, pii_mapping = mask_pii(text)
+            masked, pii_mapping = await asyncio.to_thread(mask_pii, text)
 
-            # 3. LLM 结构化抽取（无 api_key / 全 provider 失败降级规则抽取）
+            # 3. LLM 结构化抽取（无 api_key / 全 provider 失败降级规则抽取）。
+            #    同步 LLM 网络调用放线程池，避免阻塞 ARQ 事件循环（Redis 心跳超时崩溃）
             task.progress = 0.6
             await session.commit()
-            result = ResumeExtractor().extract(masked)
+            result = await asyncio.to_thread(ResumeExtractor().extract, masked)
 
             # 4. 占位符回填为原始值（设计文档 §8.2：LLM 抽取完成后经映射表回填）。
             #    映射仅当前任务内存存活，不外泄日志；回填后画像含真实联系方式，
             #    受 resume/match 端点 user+ 认证保护
-            parsed = restore_pii(result.model_dump(), pii_mapping)
+            parsed = await asyncio.to_thread(restore_pii, result.model_dump(), pii_mapping)
             cache = await session.scalar(
                 select(ResumeCache).where(ResumeCache.file_hash == result_info["file_hash"])
             )
@@ -925,6 +1118,121 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
 
         if task.status == "success":
             return {"status": "success", "resume_id": task.result["resume_id"]}
+        return {"status": "failed", "error": task.error}
+
+
+# 匹配结果 Redis 快照 TTL（与 match.py 对齐：24h，供 result/gap/path/feedback 查询）
+_MATCH_RESULT_TTL = 24 * 60 * 60
+
+
+async def match_recommend(
+    ctx: dict,
+    resume_id: str,
+    top_n: int = 10,
+    task_id: str | None = None,
+    user_id: str = "",
+) -> dict:
+    """自动推荐 Top-N 岗位（异步任务，落地 §2.4.4 202 + task_id 契约）。
+
+    流程：resume_cache 候选人画像 → 图谱岗位画像 → RuleBasedMatcher 匹配 →
+    结果写 Redis match:result（TTL 24h）+ match_results 幂等落库（§11.4.1，
+    Redis 为主存储，落库失败仅记日志不阻断成功）。
+    任务状态经 TaskStatus 追踪（match/recommend 路由入队时携带 task_id）。
+    """
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory, redis_client
+    from app.models.business import MatchResultRecord, ResumeCache, TaskStatus
+    from app.services.matching.engine import RuleBasedMatcher
+    from app.services.matching.loaders import build_candidate, load_positions_from_graph
+    from app.services.matching.schemas import MatchMode, MatchRequest
+    from app.services.matching.semantic import SkillEmbedder
+
+    async with async_session_factory() as session:
+        task = await session.get(TaskStatus, task_id) if task_id else None
+        if task is None:
+            return {"status": "failed", "error": "TaskStatus 不存在"}
+
+        cache = await session.get(ResumeCache, resume_id)
+        if cache is None:
+            task.status = "failed"
+            task.error = "简历不存在"
+            await session.commit()
+            return {"status": "failed", "error": "简历不存在"}
+
+        task.status = "running"
+        task.progress = 0.3
+        await session.commit()
+
+        try:
+            candidate = build_candidate(cache.parsed_data)
+            task.progress = 0.6
+            await session.commit()
+            # 项目向量（pgvector project_embeddings）：未回填时为空 dict，评分回退文本相似度
+            from app.services.embeddings.vector_store import load_project_vectors
+
+            project_vectors = await load_project_vectors(session, resume_id)
+
+            def _match():
+                # 同步 Neo4j 图谱加载 + SBERT + 规则匹配放线程池，避免阻塞事件循环
+                matcher = RuleBasedMatcher(
+                    load_positions_from_graph(),
+                    semantic=SkillEmbedder.get(),
+                )
+                return matcher.match(
+                    MatchRequest(
+                        candidate=candidate, mode=MatchMode.AUTO, top_n=top_n,
+                        project_vectors=project_vectors,
+                    )
+                )
+
+            results = await asyncio.to_thread(_match)
+            match_id = str(uuid.uuid4())
+            data = {
+                "items": [r.model_dump() for r in results],
+                "match_id": match_id,
+                "user_id": user_id,
+            }
+            await redis_client.set(
+                f"match:result:{match_id}",
+                json.dumps(data, ensure_ascii=False),
+                ex=_MATCH_RESULT_TTL,
+            )
+            # match_results 幂等落库（§11.4.1）：失败仅记日志，Redis 为主存储
+            try:
+                row = await session.scalar(
+                    select(MatchResultRecord).where(
+                        MatchResultRecord.match_id == match_id
+                    )
+                )
+                if row is None:
+                    session.add(MatchResultRecord(
+                        match_id=match_id,
+                        position_name=results[0].position_name if results else "",
+                        user_id=user_id,
+                        result=data,
+                    ))
+                else:
+                    row.result = data
+                await session.flush()
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "匹配结果落库失败，跳过（不影响任务成功）"
+                )
+
+            task.status = "success"
+            task.progress = 1.0
+            task.result = {"match_id": match_id, "top_n": len(results)}
+        except Exception as e:
+            task.status = "failed"
+            task.error = str(e)[:500]
+        await session.commit()
+
+        if task.status == "success":
+            return {"status": "success", "match_id": task.result["match_id"]}
         return {"status": "failed", "error": task.error}
 
 
@@ -1007,11 +1315,16 @@ async def batch_extract(
         total = len(valid)
         texts = [_build_jd_text(r.snapshot or {}, r.raw_text or "") for r in valid]
         if texts:
-            extractions = extractor.extract_batch(
+            # 同步 LLM 批量调用放线程池，避免阻塞 ARQ 事件循环（Redis 心跳超时崩溃根因）。
+            # concurrency=3：LLM 生成时间由输出 token 总量决定，批大小不线性提速，
+            # 并发才提吞吐；≥4 易触发 provider 429（退避期整批降级逐条反而更慢）。
+            extractions = await asyncio.to_thread(
+                extractor.extract_batch,
                 texts,
                 batch_size=5,
                 batch_timeout=90,  # 批量输出 token 放大，独立超时
                 max_batch_chars=8000,
+                concurrency=3,
             )
         else:
             extractions = []
@@ -1024,9 +1337,11 @@ async def batch_extract(
             from app.services.extraction.position_align import PositionAligner
 
             aligner = PositionAligner.get()
-            for extraction, aligned in zip(
-                extractions, aligner.align_many([e.position_name for e in extractions])
-            ):
+            # SBERT 对齐为 CPU 密集，放线程池
+            aligned_names = await asyncio.to_thread(
+                aligner.align_many, [e.position_name for e in extractions]
+            )
+            for extraction, aligned in zip(extractions, aligned_names):
                 if aligned and aligned != extraction.position_name:
                     extraction.position_name = aligned
 
@@ -1048,7 +1363,10 @@ async def batch_extract(
                     "raw_text": _build_jd_text(row.snapshot or {}, row.raw_text or ""),
                 }
                 with neo4j_driver.session() as neo4j_session:
-                    position_id = import_jd(neo4j_session, extraction, evidence)
+                    # 同步 Neo4j 写入放线程池，避免阻塞事件循环
+                    position_id = await asyncio.to_thread(
+                        import_jd, neo4j_session, extraction, evidence
+                    )
                 results["processed"] += 1
                 results["succeeded"] += 1
                 results["positions"].append({"jd_id": row.id, "position_id": position_id})
@@ -1094,27 +1412,45 @@ async def discovery_daily(ctx: dict) -> dict:
     from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import JDRaw
+    from app.models.raw import CommunityRaw, JDRaw, PaperRaw
     from app.services.discovery.detector import DiscoveryDetector, DiscoveryInput
     from app.services.discovery.confidence import compute_confidence
     from app.services.extraction.dictionary import normalize_position_name
     from app.services.discovery.schemas import DiscoveryFeatures
 
     # ── 1. 聚合 jd_raw 已抽取记录 → 岗位频次/源多样性 ──
-    async with async_session_factory() as session:
-        rows = (await session.scalars(
-            select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
-        )).all()
-
+    # keyset 游标分批加载，避免全表拉取（与 dedup_simhash 修复一致）
     position_stats: dict[str, dict] = {}
-    for row in rows:
-        ext = (row.snapshot or {}).get("extraction") or {}
-        name = normalize_position_name(ext.get("position_name") or "")
-        if not name:
-            continue
-        stat = position_stats.setdefault(name, {"count": 0, "sources": set()})
-        stat["count"] += 1
-        stat["sources"].add(row.source)
+    position_skills: dict[str, set[str]] = {}
+    _PAGE = 2000
+    last_id = 0
+    async with async_session_factory() as session:
+        while True:
+            batch = (await session.scalars(
+                select(JDRaw)
+                .where(
+                    JDRaw.snapshot["extraction"].astext.isnot(None),
+                    JDRaw.id > last_id,
+                )
+                .order_by(JDRaw.id.asc())
+                .limit(_PAGE)
+            )).all()
+            if not batch:
+                break
+            for row in batch:
+                ext = (row.snapshot or {}).get("extraction") or {}
+                name = normalize_position_name(ext.get("position_name") or "")
+                if not name:
+                    continue
+                stat = position_stats.setdefault(name, {"count": 0, "sources": set()})
+                stat["count"] += 1
+                stat["sources"].add(row.source)
+                # 收集岗位关联技能（供 §7.2.2 辅助加分特征关联 arxiv/github 信号）
+                skills = position_skills.setdefault(name, set())
+                for s in ext.get("skills") or []:
+                    if isinstance(s, dict) and s.get("name"):
+                        skills.add(s["name"])
+            last_id = batch[-1].id
 
     if not position_stats:
         return {"candidates": 0, "detail": "无已抽取岗位记录"}
@@ -1174,6 +1510,25 @@ async def discovery_daily(ctx: dict) -> dict:
     # ── 3. 阶段一门控 + 阶段二 RAG 接地 ──
     detector = DiscoveryDetector()
     candidates = detector.detect_candidates(_Provider(inputs))
+
+    # ── 3.1 学术/社区异常信号（设计 §7.2.2 辅助加分特征，M4 接通观察池）──
+    # paper_raw(arxiv) / community_raw(github) 过去 12 周聚合 → (技能,源) 周频次，
+    # 候选岗位关联技能任一命中 2σ 即标记 arxiv/github_anomaly（仅置信度加分，
+    # 不参与 candidate 触发门控，对齐"学术/社区源不独立触发 candidate"）。
+    from datetime import date, timedelta
+
+    from app.services.discovery.watch_pool import aggregate_weekly_freqs, anomaly_flags
+
+    since = (date.today() - timedelta(weeks=12)).isoformat()
+    async with async_session_factory() as session:
+        paper_rows = (await session.scalars(
+            select(PaperRaw).where(PaperRaw.crawled_at >= since)
+        )).all()
+        community_rows = (await session.scalars(
+            select(CommunityRaw).where(CommunityRaw.crawled_at >= since)
+        )).all()
+    academic_freqs = aggregate_weekly_freqs([*paper_rows, *community_rows])
+
     grounded = []
     # LLM 实例（定义草案中文生成）：未配置 api_key 时 LLMProviderChain 构造
     # 即抛 LLMConfigurationError，fallback 到权威库原文，接地不阻塞。
@@ -1189,16 +1544,15 @@ async def discovery_daily(ctx: dict) -> dict:
             c = await detector.ground_with_rag(cand, session, llm=llm)
             # 置信度：jd_count/source_diversity 来自候选特征，
             # growth_rate 用快照窗口重建的环比增长率（§7.2.4 三维加权公式）
+            flags = anomaly_flags(academic_freqs, position_skills.get(cand.position_name, set()))
             conf = compute_confidence(
                 jd_count=int(cand.features.jd_freq_ma3),
                 source_count=cand.features.source_diversity,
                 growth_rate=growth_by_position.get(cand.position_name, 0.0),
-                # 学术/社区异常信号待 M4 数据管线接通：DiscoveryFeatures 的
-                # arxiv_paper_count/github_star_velocity 目前无上游填充
-                # （arxiv/github 爬虫数据仅入技术热点观察池，未关联 jd_raw），
-                # 不凭空造数据源，保持 False（对应 test_cases.md TC-PD-05）
-                arxiv_anomaly=False,
-                github_anomaly=False,
+                # 学术/社区异常信号（§7.2.2 辅助加分特征，M4 接通观察池）：
+                # paper_raw/community_raw 周频次 2σ 判定，仅作置信度加分
+                arxiv_anomaly=flags["arxiv"],
+                github_anomaly=flags["github"],
             )
             c = c.model_copy(update={"confidence": conf})
             grounded.append(c)
@@ -1299,10 +1653,14 @@ async def discovery_auto_transition(ctx: dict) -> dict:
             if target is None:
                 continue
 
-            with neo4j_driver.session() as neo4j_session:
-                updated = machine.persist(
-                    neo4j_session, candidate, target, operator="system",
-                )
+            def _persist_transition() -> CandidatePosition:
+                # machine.persist 含同步 Neo4j 写（MERGE + SET status），放线程池
+                with neo4j_driver.session() as neo4j_session:
+                    return machine.persist(
+                        neo4j_session, candidate, target, operator="system",
+                    )
+
+            updated = await asyncio.to_thread(_persist_transition)
             row.state = updated.state.value
             transitions.append({
                 "position_name": row.position_name,
@@ -1507,7 +1865,7 @@ async def check_llm_providers_health(ctx: dict) -> dict:
     )
 
     try:
-        checked = health_check_all()
+        checked = await asyncio.to_thread(health_check_all)
     except LLMConfigurationError as e:
         return {"status": "skipped", "reason": str(e)}
     print(f"[check_llm_providers_health] {checked}", flush=True)
@@ -1531,11 +1889,14 @@ class WorkerSettings:
     """
     functions = [
         crawl_platform,
-        run_etl_pipeline,
+        # ETL 主管线含 7 平台爬虫 subprocess（单源上限 900s）+ LLM 批量抽取 + 全量入图，
+        # 超出全局 job_timeout(1800s)，per-function 放宽至 3h；max_tries=1 防整管线重跑
+        func(run_etl_pipeline, timeout=10800, max_tries=1),
         dedup_simhash,
         validate_temporal,
         detect_inflation,
         resume_parse,
+        match_recommend,
         batch_extract,
         load_courses,
         evaluate_courses,
@@ -1543,6 +1904,8 @@ class WorkerSettings:
         check_data_freshness,
         aggregate_positions,
         cross_validate_jds,
+        sync_skill_normalization,
+        backfill_embeddings,
         discovery_daily,
         discovery_auto_transition,
         watch_signal_daily,

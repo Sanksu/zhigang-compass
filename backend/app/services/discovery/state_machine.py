@@ -48,8 +48,8 @@ _TZ_CN = timezone(timedelta(hours=8))
 class WindowFreq:
     """岗位频次窗口数据（判定输入）。
 
-    freqs: 最近窗口频次（index 0 为当前窗口，按时间倒序）
-    z_scores: 对应窗口 Z-score（仅 recovery 判定用，可为空）
+    freqs: 最近窗口频次（index 0 为最早窗口，按快照时间升序）
+    z_scores: 对应窗口 Z-score（与 freqs 等长同顺序，仅 recovery 判定用，可为空）
     """
     freqs: list[float]
     z_scores: list[float] = field(default_factory=list)
@@ -69,7 +69,7 @@ def position_freq_windows(
         position_names: 关注的岗位名集合（快照 nodes 中 name 匹配）
 
     Returns:
-        岗位名 → 频次序列；岗位在快照中无关联边时其序列可能为空列表
+        岗位名 → 频次序列（与快照窗口数等长，某期无关联边补 0）
     """
     name_by_id: dict[str, str] = {}
     for snap in snapshots:
@@ -77,29 +77,31 @@ def position_freq_windows(
             if n.get("type") == "position" and n.get("name") in position_names:
                 name_by_id[n.get("id", "")] = n.get("name", "")
 
-    freq_windows: dict[str, list[int]] = {}
-    for snap in snapshots:
+    n_windows = len(snapshots)
+    # 每岗位 id 预置全 0 序列：岗位在某期快照无关联边时补 0，
+    # 保证不同岗位序列等长对齐（否则跨岗位比较窗口错位）
+    freq_by_id: dict[str, list[int]] = {
+        pid: [0] * n_windows for pid in name_by_id
+    }
+    for wi, snap in enumerate(snapshots):
         freq: dict[str, int] = {}
         for e in (snap or {}).get("edges", []):
             src = e.get("source", "")
             if src in name_by_id:
                 freq[src] = freq.get(src, 0) + 1
         for pos_id, count in freq.items():
-            freq_windows.setdefault(pos_id, []).append(count)
+            freq_by_id[pos_id][wi] = count
 
     # 同名岗位可能对应多个 pos_id（归一化合并）：按窗口逐项求和，
     # 即该岗位名当期被引用的总边数（与聚合口径一致）
     merged: dict[str, list[float]] = {}
     for pos_id, name in name_by_id.items():
-        seq = [float(c) for c in freq_windows.get(pos_id, [])]
+        seq = freq_by_id[pos_id]
         if name not in merged:
-            merged[name] = seq
+            merged[name] = [float(c) for c in seq]
             continue
-        # 与已有序列逐窗口求和（不足的窗口补 0）
-        n = max(len(merged[name]), len(seq))
         merged[name] = [
-            merged[name][i] + (seq[i] if i < len(seq) else 0.0)
-            for i in range(n)
+            merged[name][i] + seq[i] for i in range(n_windows)
         ]
     return merged
 

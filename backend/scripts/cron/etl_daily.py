@@ -11,7 +11,7 @@
 
 任务分组（对齐设计文档 §4.4 数据更新频率）：
     02:00  国内 A/B 级招聘平台（boss/zhilian）
-    04:00  国际 A/B 级招聘平台（monster/indeed/glassdoor）
+    04:00  国际 A/B 级招聘平台（indeed/glassdoor；monster 因 DataDome 防护不可绕过已停采）
     04:30  时效衰减重算（每日凌晨）
     05:00  ETL 主管线编排（含爬虫→清洗→去重→时滞→通胀→结构化→入图）
 
@@ -54,6 +54,10 @@ async def enqueue_etl_pipeline() -> None:
     client = await create_pool(redis_settings)
     try:
         run_date = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+        # 超时/重试由 WorkerSettings 中 func(run_etl_pipeline, timeout=10800,
+        # max_tries=1) 的 per-function 配置负责（arq enqueue 不接收 _timeout/
+        # _max_tries，传了会被当作任务参数导致 TypeError）。单源失败已在阶段内
+        # 捕获，整管线重跑会重复爬取/重复抽取（入图幂等但网络与算力浪费）。
         job = await client.enqueue_job(
             "run_etl_pipeline",
             run_date=run_date,

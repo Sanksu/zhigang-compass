@@ -9,13 +9,13 @@
     # Windows 计划任务
     cd backend; uv run python scripts/cron/crawl_spider.py boss
 
-平台调度时段（设计文档 §4.4）：
-    02:00  boss / zhilian（国内 A 级）
-    04:00  monster / indeed / glassdoor（国际 A 级错峰）
+平台调度时段（设计文档 §4.4，均为北京时间；实际调度以 crontab.example / scheduled_tasks.ps1 为准）：
+    02:00  boss / 02:15 zhilian（国内 A 级）
+    04:20  indeed / 04:40 glassdoor（国际错峰；monster 因 DataDome 防护不可绕过已停采）
     23:00  maimai（脉脉夜间合规窗口 ≤100 req/h）
-    00:00  linkedin_public / github / stackoverflow（国际，UTC 0:00）
-    03:00  arxiv（UTC 3:00）
-    周日 02:00  coursera / edx / icourse163（课程平台全量同步）
+    08:00  linkedin_public / github / stackoverflow（国际非招聘源，= UTC 0:00）
+    11:00  arxiv（= UTC 3:00）
+    周日 10:00  coursera / edx / icourse163（课程平台全量同步，= UTC 2:00）
 """
 
 import asyncio

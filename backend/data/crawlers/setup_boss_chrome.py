@@ -75,6 +75,9 @@ def find_chrome() -> str:
         "/usr/bin/microsoft-edge",
         "/usr/bin/chromium-browser",
         "/usr/bin/chromium",
+        # Debian 正式 chromium（apt 安装）优先于 playwright 的 Chrome for Testing：
+        # DataDome 等风控能从 DOM 横幅识别 CfT（"Chrome for Testing ... automated testing"）
+        "/usr/lib/chromium/chromium",
     ]
     for c in candidates:
         if Path(c).exists():
@@ -109,6 +112,26 @@ def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, cdp_address: str = "127.0.0.1
         "--remote-allow-origins=*",
         url,
     ]
+    # Linux 容器内 Debian chromium 需 --no-sandbox --no-zygote：Docker 默认
+    # seccomp 禁止 namespace 操作，SUID sandbox 起不来会 FATAL 崩溃（实测）
+    if sys.platform != "win32":
+        cmd.append("--no-sandbox")
+        cmd.append("--no-zygote")
+        # 容器内 /dev/shm 默认仅 64MB，headless 渲染大页面（glassdoor 首页）时
+        # renderer 因共享内存不足崩溃（实测 Page crashed）；改用 /tmp 内存文件
+        cmd.append("--disable-dev-shm-usage")
+    # 容器无显示服务器时以无头模式运行（compose 设 CDP_HEADLESS=1；本地桌面保持有头以完成登录）
+    if os.environ.get("CDP_HEADLESS") == "1":
+        cmd.append("--headless")
+        # headless 默认 UA 含 HeadlessChrome，被 glassdoor 等风控拦截（实测 403）；
+        # 覆盖为 Windows Chrome UA，crawler 的隔离 context 不设 UA 也继承真实指纹
+        cmd.append("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
+    # 国际源（glassdoor 等）需走代理：CDP_PROXY 非空时注入 --proxy-server。
+    # 容器内经 host.docker.internal 指向宿主机 Clash；本地桌面直连则不设。
+    cdp_proxy = os.environ.get("CDP_PROXY")
+    if cdp_proxy:
+        cmd.append(f"--proxy-server={cdp_proxy}")
 
     print(f"Chrome 路径: {chrome_path}")
     print(f"隔离 profile: {profile_dir}")

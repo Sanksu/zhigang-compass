@@ -9,6 +9,7 @@ import inspect
 from app.workers.tasks import (
     WorkerSettings,
     aggregate_positions,
+    backfill_embeddings,
     batch_extract,
     check_data_freshness,
     check_llm_providers_health,
@@ -16,15 +17,17 @@ from app.workers.tasks import (
     cross_validate_jds,
     dedup_simhash,
     detect_inflation,
-    discovery_daily,
     discovery_auto_transition,
+    discovery_daily,
     diversity_report,
     evaluate_courses,
     evolution_compute,
     load_courses,
+    match_recommend,
     resume_parse,
     run_etl_pipeline,
     snapshot_graph,
+    sync_skill_normalization,
     validate_temporal,
     watch_signal_daily,
 )
@@ -36,6 +39,7 @@ EXPECTED_FUNCTIONS = [
     validate_temporal,
     detect_inflation,
     resume_parse,
+    match_recommend,
     batch_extract,
     load_courses,
     evaluate_courses,
@@ -43,6 +47,8 @@ EXPECTED_FUNCTIONS = [
     check_data_freshness,
     aggregate_positions,
     cross_validate_jds,
+    sync_skill_normalization,
+    backfill_embeddings,
     discovery_daily,
     discovery_auto_transition,
     watch_signal_daily,
@@ -52,13 +58,25 @@ EXPECTED_FUNCTIONS = [
 ]
 
 
+def _name(fn):
+    """Function 实例（arq.worker.func 包装）取 .name，普通函数取 __qualname__。"""
+    return fn.name if hasattr(fn, "name") else fn.__qualname__
+
+
+def _coroutine(fn):
+    """Function 实例解包为原始协程函数。"""
+    return fn.coroutine if hasattr(fn, "coroutine") else fn
+
+
 def test_worker_settings_registers_all_tasks():
-    assert WorkerSettings.functions == EXPECTED_FUNCTIONS
+    assert [_name(f) for f in WorkerSettings.functions] == [
+        f.__qualname__ for f in EXPECTED_FUNCTIONS
+    ]
 
 
 def test_all_tasks_are_async_callables():
     for fn in EXPECTED_FUNCTIONS:
-        assert inspect.iscoroutinefunction(fn), f"{fn.__name__} 不是 async 函数"
+        assert inspect.iscoroutinefunction(_coroutine(fn)), f"{_name(fn)} 不是 async 函数"
 
 
 def test_etl_pipeline_stages_cover_all_quality_tasks():
@@ -86,3 +104,16 @@ def test_worker_settings_job_timeout_not_task_timeout():
     """
     assert getattr(WorkerSettings, "job_timeout", None) == 1800
     assert not hasattr(WorkerSettings, "task_timeout")
+
+
+def test_etl_pipeline_has_per_function_timeout():
+    """ETL 主管线 per-function 超时 3h / 不重试。
+
+    回归：arq enqueue 不接收 _timeout/_max_tries（传了会被当作任务参数导致
+    TypeError），超时/重试须在 WorkerSettings.functions 用 func() 配置。
+    """
+    etl = next(
+        f for f in WorkerSettings.functions if _name(f) == run_etl_pipeline.__qualname__
+    )
+    assert etl.timeout_s == 10800
+    assert etl.max_tries == 1

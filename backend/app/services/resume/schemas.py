@@ -62,7 +62,7 @@ class ResumeExtractionResult(BaseModel):
     skills: list[ResumeSkill] = Field(default_factory=list, description="技能列表")
     soft_skills: list[str] = Field(
         default_factory=list,
-        description="软技能（LLM 从项目角色/经历推断，仅限岗位本体 20 项白名单；"
+        description="软技能（仅提取文本明确写出的，限岗位本体 20 项白名单；"
         "并入 skills 时标记 low_confidence，匹配降权 ×0.5，设计文档 9.2 节）",
     )
     projects: list[ResumeProject] = Field(default_factory=list, description="项目经验")

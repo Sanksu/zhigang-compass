@@ -1,6 +1,7 @@
 """CORS / CSP / HSTS / GZip / TraceID / 限流中间件。"""
 
 import contextvars
+import ipaddress
 import uuid
 from datetime import datetime, timezone
 
@@ -56,11 +57,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _client_ip(request: Request) -> str:
-        """生产信任 X-Forwarded-For（负载均衡终止 TLS），开发取 peer IP。"""
+        """生产信任 X-Forwarded-For（负载均衡终止 TLS），但仅接受合法 IP。
+
+        攻击者可伪造 XFF 头；逐项校验为合法 IP 才采用，非法值回退 peer IP，
+        防止伪造垃圾值污染限流键空间（仍无法防 IP 伪造，限流为增强能力）。
+        """
         if settings.is_production:
             xff = request.headers.get("x-forwarded-for", "")
-            if xff:
-                return xff.split(",")[0].strip()
+            for candidate in (c.strip() for c in xff.split(",") if c.strip()):
+                try:
+                    ipaddress.ip_address(candidate)
+                except ValueError:
+                    continue
+                return candidate
         return request.client.host if request.client else ""
 
     @staticmethod
@@ -70,8 +79,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
-        # 仅限流 API 路由；认证端（登录/注册/刷新）、健康检查与静态资源放行
-        if not path.startswith("/api/v1") or path.startswith("/api/v1/auth/"):
+        # 仅限流 API 路由（认证端同样纳入，防恶意批量注册/暴力破解）；静态资源放行
+        if not path.startswith("/api/v1"):
             return await call_next(request)
         ip = self._client_ip(request)
         if not ip:

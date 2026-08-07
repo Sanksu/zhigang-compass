@@ -185,6 +185,76 @@ class Occupation(Base):
     )
 
 
+class SkillEmbedding(Base):
+    """技能语义向量（设计文档 §11.4.3 skill_embeddings，IVFFLAT + Cosine）。
+
+    id 取 Neo4j skill_id（字符串），embedding 由 scripts/backfill_embeddings.py
+    生成（Sentence-BERT MiniLM 384 维），metadata 存技能名。skill/similar
+    端点 pgvector 语义检索（§5.3 预留的演进落地）。
+    """
+
+    __tablename__ = "skill_embeddings"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # Neo4j skill_id
+    embedding: Mapped[list] = mapped_column(Vector(384), nullable=False)
+    # 数据库列名 metadata（SQLAlchemy Declarative 保留属性名，ORM 侧用 payload）
+    payload: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class ProjectEmbedding(Base):
+    """项目语义向量（设计文档 §11.4.3 project_embeddings，IVFFLAT + Cosine）。
+
+    简历项目文本（name + 描述）向量，供人岗匹配 project_embeddings 比对
+    （engine._project_score 优先使用预计算向量，缺失时回退 SBERT 文本相似度）。
+    metadata: {"resume_id", "project_index", "project_name", "description", "text"}
+    """
+
+    __tablename__ = "project_embeddings"
+    __table_args__ = (
+        UniqueConstraint("resume_id", "project_index", name="uq_project_embeddings_resume_project"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    embedding: Mapped[list] = mapped_column(Vector(384), nullable=False)
+    payload: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    resume_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    project_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class JdEmbedding(Base):
+    """JD 语义向量（设计文档 §11.4.3 jd_embeddings，HNSW + Cosine）。
+
+    JD 标题+公司+城市文本向量，dedup_simhash 语义去重辅助（HNSW 支持高
+    吞吐近似检索）。metadata: {"jd_id", "title", "company", "city"}
+    """
+
+    __tablename__ = "jd_embeddings"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    embedding: Mapped[list] = mapped_column(Vector(384), nullable=False)
+    payload: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    jd_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class DiscoveryCandidate(Base):
     """新岗位发现候选池（设计文档 7.2.3 判定流程输出落库）。
 

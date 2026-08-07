@@ -3,7 +3,7 @@
 合规措施（S2+S3，project_memory 强制约束）：
 - 注明用于竞赛演示不商用（X-Collection-Purpose 头）
 - 数据脱敏（CleaningPipeline 自动 PII 清洗：手机号/邮箱/身份证）
-- 限频 ≤100 req/h（settings.RATE_LIMIT.maimai = 5 req/min）
+- 限频 ≤100 req/h（settings.RATE_LIMIT.maimai = 4 req/min）
 - 夜间运行 22:00-08:00（start_requests 时间守卫强制）
 
 策略（2026-07-29 重构）：

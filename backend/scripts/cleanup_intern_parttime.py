@@ -61,7 +61,7 @@ async def _load_jd_rows():
 
 
 def _delete_evidence(urls: list[str]) -> int:
-    """删除指定 source_url 的 Evidence 节点（DETACH 连带删除 HAS_EVIDENCE/MENTIONED_IN 边）。"""
+    """删除指定 source_url 的 Evidence 节点（DETACH 连带删除 HAS_EVIDENCE/EVIDENCED_BY 边）。"""
     with neo4j_driver.session() as session:
         before = session.run(
             "MATCH (e:Evidence) WHERE e.source_url IN $urls RETURN count(e) AS c", urls=urls

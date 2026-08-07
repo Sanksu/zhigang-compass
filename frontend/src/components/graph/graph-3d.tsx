@@ -14,7 +14,11 @@ import type { GraphData, GraphNode, NodeDetail, PositionStatus } from './types'
 
 interface Graph3DProps {
   data: GraphData
+  /** 已展开的岗位 id 集合（画布已只含这些岗位的技能，用于样式标记） */
+  expandedPositions?: Set<string>
   onSelectNode: (node: NodeDetail | null) => void
+  /** 点击岗位 → 展开/收起其技能 */
+  onTogglePosition: (id: string) => void
   className?: string
 }
 
@@ -49,7 +53,7 @@ function isDark(): boolean {
   return document.documentElement.classList.contains('dark')
 }
 
-export function Graph3D({ data, onSelectNode, className }: Graph3DProps) {
+export function Graph3D({ data, expandedPositions, onSelectNode, onTogglePosition, className }: Graph3DProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 640 })
   const [dark, setDark] = useState(isDark)
@@ -104,8 +108,10 @@ export function Graph3D({ data, onSelectNode, className }: Graph3DProps) {
         value: node.value,
         description: node.description,
       })
+      // 岗位节点同时切换技能展开/收起（与 2D 交互一致）
+      if (node.type === 'position') onTogglePosition(node.id)
     },
-    [onSelectNode],
+    [onSelectNode, onTogglePosition],
   )
 
   // 点击空白区域清除选中
@@ -122,7 +128,12 @@ export function Graph3D({ data, onSelectNode, className }: Graph3DProps) {
           graphData={fgData}
           backgroundColor={bgColor}
           nodeColor={(node: unknown) => nodeColor(node as GraphNode, dark)}
-          nodeVal={(node: unknown) => nodeVal(node as GraphNode)}
+          nodeVal={(node: unknown) => {
+            const n = node as GraphNode
+            // 展开的岗位放大，提示其技能当前可见（可点击收起）
+            const v = nodeVal(n)
+            return expandedPositions?.has(n.id) ? v * 1.3 : v
+          }}
           nodeLabel={(node: unknown) => {
             const n = node as GraphNode
             const lines = [n.name]

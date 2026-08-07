@@ -50,21 +50,29 @@ def mask_pii(text: str) -> tuple[str, dict[str, str]]:
     """脱敏简历文本中的 PII（身份证/手机/邮箱/中文姓名 → 占位符）。
 
     Returns:
-        (脱敏文本, 映射 {placeholder: 首次命中的原始值})。
-        映射仅供内存使用（如 UI 回显原文），不落日志、不入数据库。
+        (脱敏文本, 映射 {placeholder: 原始值})。
+        同一类型多处命中时生成带序号的唯一占位符（如 [PHONE_2]），首个命中保留
+        无序号占位符（[PHONE]），保证 restore_pii 时各占位符回填各自的原值，
+        而不是全部回填为首个命中值。映射仅供内存使用（如 UI 回显原文），
+        不落日志、不入数据库。
     """
     masked = text
     mapping: dict[str, str] = {}
     for pattern, placeholder in _PII_PATTERNS:
-        hits: set[str] = set()
+        hits: list[str] = []
 
-        def _replace(m: re.Match, placeholder: str = placeholder, hits: set[str] = hits) -> str:
-            hits.add(m.group(0))
-            return placeholder
+        def _replace(m: re.Match, placeholder: str = placeholder, hits: list[str] = hits) -> str:
+            hits.append(m.group(0))
+            if len(hits) == 1:
+                return placeholder
+            return f"{placeholder[:-1]}_{len(hits)}]"
 
         masked = pattern.sub(_replace, masked)
-        if hits:
-            mapping[placeholder] = sorted(hits)[0]
+        if not hits:
+            continue
+        mapping[placeholder] = hits[0]
+        for i, original in enumerate(hits[1:], start=2):
+            mapping[f"{placeholder[:-1]}_{i}]"] = original
     return masked, mapping
 
 
@@ -74,7 +82,8 @@ def restore_pii(parsed: dict, mapping: dict[str, str]) -> dict:
     LLM 抽取在脱敏文本上进行，name/phone/email/教育经历等字段可能携带
     [NAME]/[PHONE]/[EMAIL]/[ID_CARD] 占位符；回填映射仅在当前任务内存中
     存活，不回填日志。映射不含某占位符时保留原占位符（该类型原文未被
-    脱敏命中，属正常状态）。
+    脱敏命中，属正常状态）。同一类型多处命中时占位符带序号
+    （如 [PHONE_2]），映射按 key 一一回填各自原值。
     """
     if not mapping:
         return parsed

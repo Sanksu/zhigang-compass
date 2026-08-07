@@ -31,15 +31,6 @@ async def get_current_user(
     return payload
 
 
-async def get_optional_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-) -> Optional[dict]:
-    """可选认证：有 Token 则解析，无 Token 返回 None。"""
-    if credentials is None:
-        return None
-    return decode_token(credentials.credentials)
-
-
 def require_permission(permission: str):
     """RBAC 权限检查依赖。
 

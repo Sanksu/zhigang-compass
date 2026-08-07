@@ -12,6 +12,7 @@ import json
 import logging
 import time
 import uuid
+from urllib.parse import urlparse
 
 from typing import Literal
 
@@ -21,39 +22,27 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
+from app.core.config import settings
 from app.core.database import async_session_factory, get_db, neo4j_driver, redis_client
 from app.models.business import (
     DiagnosisReportRecord,
     MatchFeedbackRecord,
     MatchResultRecord,
     ResumeCache,
+    ResumeFile,
+    TaskStatus,
 )
 from app.schemas.common import ok, error
+from app.services.embeddings.vector_store import load_project_vectors
 from app.services.matching.engine import RuleBasedMatcher
-from app.services.matching.schemas import (
-    CandidateProfile,
-    CandidateProject,
-    CandidateSkill,
-    MatchMode,
-    MatchRequest,
-    Necessity,
-    PositionProfile,
-    SkillRequirement,
-)
+from app.services.matching.loaders import build_candidate, load_positions_from_graph
+from app.services.matching.schemas import MatchMode, MatchRequest
 from app.services.matching.semantic import SkillEmbedder
 from app.services.learning_path.generator import LearningPathGenerator
 
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
-
-# 岗位画像进程级缓存：图谱结构变化低频，TTL 内复用，
-# 避免每次匹配请求实时聚合（97 岗位 × ~15000 边）拖慢响应
-_POSITIONS_CACHE_TTL = 300  # 秒
-_positions_cache: dict = {"ts": 0.0, "positions": None}
-
-# 岗位侧软技能并入 nice 时的权重（与聚合层 nice 两档中的低档一致）
-_SOFT_SKILL_WEIGHT = 0.4
 
 
 class RecommendRequest(BaseModel):
@@ -74,129 +63,18 @@ def _parse_resume_id(raw: str) -> str | None:
         return None
 
 
-def _build_candidate(parsed: dict) -> CandidateProfile:
-    """从简历解析结果构建候选人画像。
-
-    技能字段支持字符串列表或对象列表（resume_cache.parsed_data 两种形态兼容）。
-    """
-    skills: list[CandidateSkill] = []
-    for s in parsed.get("skills", []):
-        if isinstance(s, str):
-            skills.append(CandidateSkill(skill_id=s, skill_name=s, proficiency=2))
-        elif isinstance(s, dict):
-            name = s.get("name", s.get("skill_id", ""))
-            skills.append(CandidateSkill(
-                skill_id=s.get("skill_id", name),
-                skill_name=name,
-                proficiency=int(s.get("proficiency", 2) or 2),
-                low_confidence=bool(s.get("low_confidence", False)),
-            ))
-
-    projects: list[CandidateProject] = []
-    for pr in parsed.get("projects", []):
-        if isinstance(pr, str):
-            projects.append(CandidateProject(name=pr))
-        elif isinstance(pr, dict):
-            projects.append(CandidateProject(
-                name=pr.get("name", ""),
-                stack=list(pr.get("stack", []) or []),
-                description=pr.get("description", ""),
-            ))
-
-    return CandidateProfile(
-        user_id=parsed.get("user_id", ""),
-        skills=skills,
-        total_years=float(parsed.get("total_years", 0) or 0),
-        education_level=parsed.get("education_level"),
-        domain_experience=parsed.get("domain_experience", []),
-        projects=projects,
-        certifications=parsed.get("certifications", []),
-    )
-
-
-def _load_positions_from_graph() -> list[PositionProfile]:
-    """从图谱聚合岗位画像（进程级 TTL 缓存；加载时批量预热技能向量）。
-
-    语义向量缓存到 SkillEmbedder，评分阶段全部 cache hit，
-    避免首次匹配请求触发全量 embedding 计算（>30s 前端超时的主因）。
-    """
-    now = time.monotonic()
-    cached = _positions_cache.get("positions")
-    if cached is not None and now - _positions_cache["ts"] < _POSITIONS_CACHE_TTL:
-        return cached
-
-    positions: dict[str, PositionProfile] = {}
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            """
-            MATCH (p:Position)-[r:REQUIRES]->(s:Skill)
-            RETURN p.id AS pid, p.name AS pname,
-                   p.required_years AS req_years, p.last_updated AS last_updated,
-                   s.id AS sid, s.name AS sname,
-                   r.necessity AS necessity, r.weight AS weight,
-                   r.level AS level, r.source_count AS source_count
-            """
+async def _owns_resume(db: AsyncSession, resume_id: str, user_id: str) -> bool:
+    """校验当前用户是否拥有该简历（resume_cache 无 user_id，归属记录在 resume_files）。"""
+    row = await db.scalar(
+        select(ResumeFile.id).where(
+            ResumeFile.resume_id == resume_id, ResumeFile.user_id == user_id
         )
-        for rec in rows:
-            pid = rec["pid"]
-            pos = positions.get(pid)
-            if pos is None:
-                pos = PositionProfile(
-                    position_id=pid,
-                    name=rec.get("pname") or pid,
-                    required_years=rec.get("req_years"),
-                    last_updated=rec.get("last_updated"),
-                )
-                positions[pid] = pos
-
-            skill = SkillRequirement(
-                skill_id=rec["sid"],
-                skill_name=rec.get("sname") or rec["sid"],
-                necessity=Necessity.MUST if rec.get("necessity") == "must" else Necessity.NICE,
-                weight=float(rec.get("weight", 1.0) or 1.0),
-                proficiency=rec.get("level"),
-                source_count=int(rec.get("source_count", 1) or 1),
-            )
-            if skill.necessity == Necessity.MUST:
-                pos.must_skills.append(skill)
-            else:
-                pos.nice_skills.append(skill)
-
-        # 岗位侧软技能（Position.soft_skills，聚合层写回）：并入 nice 要求参与评分。
-        # 候选人侧 LLM 推断软技能（low_confidence）命中时按 ×0.5 降权（engine._skill_similarity），
-        # 与设计文档 9.2 节"LLM 推断兜底（标 low_confidence，匹配时降权 ×0.5）"一致。
-        soft_rows = session.run(
-            """
-            MATCH (p:Position)
-            RETURN p.id AS pid, p.soft_skills AS soft
-            """
-        )
-        for rec in soft_rows:
-            pos = positions.get(rec["pid"])
-            if pos is None:
-                continue
-            soft = [s for s in (rec.get("soft") or []) if s]
-            pos.soft_skills = soft
-            for name in soft:
-                pos.nice_skills.append(SkillRequirement(
-                    skill_id=name,
-                    skill_name=name,
-                    necessity=Necessity.NICE,
-                    weight=_SOFT_SKILL_WEIGHT,
-                ))
-
-    result = list(positions.values())
-    # 预热语义向量：一次 batch encode 所有岗位技能名，评分时不再逐条前向推理
-    SkillEmbedder.get().warm(
-        [s.skill_name for p in result for s in (*p.must_skills, *p.nice_skills)]
     )
-    _positions_cache["ts"] = now
-    _positions_cache["positions"] = result
-    return result
+    return row is not None
 
 
 def _load_evidence_for_position(position_id: str) -> list[dict]:
-    """查询岗位技能链路的证据引用（Skill-MENTIONED_IN->Evidence 原始 JD）。
+    """查询岗位技能链路的证据引用（Skill-EVIDENCED_BY->Evidence 原始 JD）。
 
     图谱中每个技能关联若干原始 JD 证据（ev_xxxx），返回每条技能的
     代表性证据（每技能至多 3 条，总上限 20），供前端"证据引用"展示。
@@ -207,7 +85,7 @@ def _load_evidence_for_position(position_id: str) -> list[dict]:
     with neo4j_driver.session() as session:
         recs = session.run(
             """
-            MATCH (p:Position {id: $pid})-[:REQUIRES]->(s:Skill)-[:MENTIONED_IN]->(e:Evidence)
+            MATCH (p:Position {id: $pid})-[:REQUIRES]->(s:Skill)-[:EVIDENCED_BY]->(e:Evidence)
             WITH s.name AS skill, collect(DISTINCT e) AS evs
             RETURN skill, size(evs) AS evidence_count,
                    [e IN evs | {source: e.source, source_url: e.source_url}] AS all_samples
@@ -256,9 +134,26 @@ async def _persist_match_result(match_id: str, data: dict) -> None:
     )
 
 
-async def _load_match_result(match_id: str) -> dict | None:
+async def _load_match_result(match_id: str, user_id: str) -> dict | None:
+    """加载匹配结果并校验归属（越权防护）。
+
+    快照内 user_id（新写点）优先；存量快照无该字段时回退 match_results 表校验，
+    防止本人访问修复前生成的结果被误拦。
+    """
     cached = await redis_client.get(f"match:result:{match_id}")
-    return json.loads(cached) if cached else None
+    if cached is None:
+        return None
+    data = json.loads(cached)
+    if data.get("user_id") == user_id:
+        return data
+    async with async_session_factory() as session:
+        owner = await session.scalar(
+            select(MatchResultRecord.id).where(
+                MatchResultRecord.match_id == match_id,
+                MatchResultRecord.user_id == user_id,
+            )
+        )
+    return data if owner is not None else None
 
 
 async def _persist_diagnosis_report(
@@ -308,16 +203,47 @@ async def _persist_feedback(
     await session.commit()
 
 
-@router.post("/recommend")
+async def _enqueue_match_recommend(
+    resume_id: str, top_n: int, task_id: str, user_id: str
+) -> None:
+    """入队 ARQ match_recommend 任务。
+
+    队列不可用时抛出异常由调用方处理（标记任务 failed），不静默吞错。
+    """
+    from arq import create_pool
+    from arq.connections import RedisSettings
+
+    parsed = urlparse(settings.arq_redis_url)
+    redis_settings = RedisSettings(
+        host=parsed.hostname or "localhost",
+        port=parsed.port or 6379,
+        database=int(parsed.path.lstrip("/") or "1"),
+        password=parsed.password,
+    )
+    pool = await create_pool(redis_settings)
+    try:
+        await pool.enqueue_job(
+            "match_recommend",
+            resume_id=resume_id,
+            top_n=top_n,
+            task_id=task_id,
+            user_id=user_id,
+        )
+    finally:
+        await pool.close()
+
+
+@router.post("/recommend", status_code=202)
 async def recommend(
     req: RecommendRequest,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("user")),
 ):
-    """自动推荐 Top-N 岗位（resume_cache → 匹配引擎）。
+    """自动推荐 Top-N 岗位（§2.4.4 契约：202 + task_id 异步）。
 
-    设计 §2.4.4 契约要求异步（202 + task_id），M4（8/16）迁移；当前同步执行，
-    执行后将结果快照写入 Redis 并返回 match_id（供 match/result 等查询）。
+    创建 TaskStatus（match_recommend）入队 ARQ worker；任务完成后写入
+    match:result（Redis TTL 24h）+ match_results 落库，前端轮询
+    GET /match/task/{task_id} 拿到 match_id 后再取结果。
     """
     resume_id = _parse_resume_id(req.resume_id)
     if resume_id is None:
@@ -325,31 +251,32 @@ async def recommend(
     cache = await db.get(ResumeCache, resume_id)
     if cache is None:
         return error(4040, "简历不存在", http_status=404)
+    if not await _owns_resume(db, resume_id, user.get("sub", "")):
+        return error(4030, "无权使用该简历发起匹配", http_status=403)
 
-    candidate = _build_candidate(cache.parsed_data)
-    matcher = RuleBasedMatcher(
-        _load_positions_from_graph(),
-        semantic=SkillEmbedder.get(),
+    task = TaskStatus(
+        task_type="match_recommend",
+        status="pending",
+        result={
+            "resume_id": resume_id,
+            "top_n": req.top_n,
+            "user_id": user.get("sub", ""),
+        },
     )
-    results = matcher.match(
-        MatchRequest(candidate=candidate, mode=MatchMode.AUTO, top_n=req.top_n)
-    )
-    match_id = str(uuid.uuid4())
-    data = {"items": [r.model_dump() for r in results], "match_id": match_id}
-    await _persist_match_result(match_id, data)
-    # 匹配结果落库（§11.4.1 match_results）：失败仅记日志，Redis 为主存储
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
     try:
-        async with async_session_factory() as session:
-            await _persist_match_result_db(
-                session,
-                match_id,
-                position_name=results[0].position_name if results else "",
-                user_id=user.get("sub") or "",
-                data=data,
-            )
-    except Exception:
-        logger.exception("匹配结果落库失败，跳过（不影响本次响应）")
-    return ok(data=data)
+        await _enqueue_match_recommend(
+            resume_id, req.top_n, str(task.id), user.get("sub", "")
+        )
+    except Exception as e:
+        task.status = "failed"
+        task.error = f"任务入队失败: {e}"
+        await db.commit()
+
+    return ok(data={"task_id": task.id})
 
 
 @router.post("/compare")
@@ -370,31 +297,46 @@ async def compare(
     cache = await db.get(ResumeCache, resume_id)
     if cache is None:
         return error(4040, "简历不存在", http_status=404)
+    if not await _owns_resume(db, resume_id, user.get("sub", "")):
+        return error(4030, "无权使用该简历发起比对", http_status=403)
 
-    candidate = _build_candidate(cache.parsed_data)
-    positions = _load_positions_from_graph()
-    target = next((p for p in positions if p.position_id == req.position_id), None)
-    if target is None:
+    # 项目向量（pgvector project_embeddings 回填产物）：未回填时为空 dict，评分回退文本相似度
+    project_vectors = await load_project_vectors(db, resume_id)
+
+    def _compute():
+        # 图谱加载 + SBERT 语义 + 规则匹配为 CPU/IO 密集，
+        # 放线程池避免同步 Neo4j/SBERT 阻塞事件循环
+        candidate = build_candidate(cache.parsed_data)
+        positions = load_positions_from_graph()
+        target = next((p for p in positions if p.position_id == req.position_id), None)
+        if target is None:
+            return None
+        semantic = SkillEmbedder.get()
+        matcher = RuleBasedMatcher(positions, semantic=semantic)
+        result = matcher.match(
+            MatchRequest(
+                candidate=candidate,
+                mode=MatchMode.COMPARE,
+                target_position_id=req.position_id,
+                project_vectors=project_vectors,
+            )
+        )[0]
+        return candidate, target, result, semantic
+
+    computed = await asyncio.to_thread(_compute)
+    if computed is None:
         return error(4040, "岗位不存在", http_status=404)
-
-    semantic = SkillEmbedder.get()
-    matcher = RuleBasedMatcher(positions, semantic=semantic)
-    result = matcher.match(
-        MatchRequest(
-            candidate=candidate,
-            mode=MatchMode.COMPARE,
-            target_position_id=req.position_id,
-        )
-    )[0]
-
+    candidate, target, result, semantic = computed
     path = await LearningPathGenerator().generate(candidate, target, semantic=semantic)
+
     match_id = str(uuid.uuid4())
     data = {
         "match_id": match_id,
+        "user_id": user.get("sub", ""),
         **result.model_dump(),
         "gaps": [g.model_dump() for g in path.gaps],
         "learning_path": [item.model_dump() for item in path.items],
-        "evidence_refs": _load_evidence_for_position(req.position_id),
+        "evidence_refs": await asyncio.to_thread(_load_evidence_for_position, req.position_id),
     }
     await _persist_match_result(match_id, data)
     # 匹配结果落库（§11.4.1 match_results）：失败仅记日志，Redis 为主存储
@@ -413,8 +355,36 @@ async def compare(
 
 
 @router.get("/task/{task_id}")
-async def match_task_status(task_id: str, user: dict = Depends(require_role("user"))):
-    """[M4] 查询推荐任务状态（同步执行已完成即返回 success）。"""
+async def match_task_status(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
+):
+    """查询推荐任务状态。
+
+    优先查 TaskStatus（recommend 异步任务的真实状态：pending/running/success/failed），
+    success 时附 match_id 供前端拉取结果；未命中则回退 Redis match:task 快照
+    （compare 同步结果校验，兼容既有前端轮询语义）。
+    仅返回当前用户发起的任务（TaskStatus.result.user_id），他人任务按不存在处理。
+    """
+    try:
+        task_uuid = str(uuid.UUID(task_id))
+    except (ValueError, AttributeError):
+        return error(400, "task_id 格式非法")
+    task = await db.get(TaskStatus, task_uuid)
+    if task is not None:
+        if (task.result or {}).get("user_id") != user.get("sub", ""):
+            return error(4040, "匹配任务不存在或已过期", http_status=404)
+        data = {
+            "task_id": task.id,
+            "status": task.status,
+            "progress": task.progress,
+            "error": task.error or "",
+        }
+        if task.status == "success":
+            data["match_id"] = (task.result or {}).get("match_id")
+        return ok(data=data)
+
     cached = await redis_client.get(f"match:task:{task_id}")
     if cached is None:
         return error(4040, "匹配任务不存在或已过期", http_status=404)
@@ -423,8 +393,8 @@ async def match_task_status(task_id: str, user: dict = Depends(require_role("use
 
 @router.get("/result/{match_id}")
 async def match_result(match_id: str, user: dict = Depends(require_role("user"))):
-    """[M4] 获取匹配结果（recommend/compare 返回的 match_id）。"""
-    data = await _load_match_result(match_id)
+    """[M4] 获取匹配结果（recommend/compare 返回的 match_id，仅限本人结果）。"""
+    data = await _load_match_result(match_id, user.get("sub", ""))
     if data is None:
         return error(4040, "匹配结果不存在或已过期", http_status=404)
     return ok(data=data)
@@ -432,8 +402,8 @@ async def match_result(match_id: str, user: dict = Depends(require_role("user"))
 
 @router.get("/result/{match_id}/gap")
 async def match_result_gap(match_id: str, user: dict = Depends(require_role("user"))):
-    """[M4] 获取差距分析（compare 结果的 gaps 三态列表）。"""
-    data = await _load_match_result(match_id)
+    """[M4] 获取差距分析（compare 结果的 gaps 三态列表，仅限本人结果）。"""
+    data = await _load_match_result(match_id, user.get("sub", ""))
     if data is None:
         return error(4040, "匹配结果不存在或已过期", http_status=404)
     return ok(data={"match_id": match_id, "gaps": data.get("gaps", [])})
@@ -441,8 +411,8 @@ async def match_result_gap(match_id: str, user: dict = Depends(require_role("use
 
 @router.get("/result/{match_id}/path")
 async def match_result_path(match_id: str, user: dict = Depends(require_role("user"))):
-    """[M4] 获取学习路径（compare 结果的 missing/weak 技能先修链 + 课程）。"""
-    data = await _load_match_result(match_id)
+    """[M4] 获取学习路径（compare 结果的 missing/weak 技能先修链 + 课程，仅限本人结果）。"""
+    data = await _load_match_result(match_id, user.get("sub", ""))
     if data is None:
         return error(4040, "匹配结果不存在或已过期", http_status=404)
     return ok(data={"match_id": match_id, "learning_path": data.get("learning_path", [])})
@@ -458,7 +428,7 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
     每条差距断言附 evidence_id 可追溯）。仅人岗比对（compare）快照含 gaps，
     AUTO 推荐快照返回 400；LLM 不可用/超时返回 503（诊断是增强功能，不阻断主流程）。
     """
-    data = await _load_match_result(match_id)
+    data = await _load_match_result(match_id, user.get("sub", ""))
     if data is None:
         return error(4040, "匹配结果不存在或已过期", http_status=404)
     if not data.get("gaps"):
@@ -528,9 +498,9 @@ async def match_feedback(
 ):
     """[M4] 提交匹配反馈（1=👍 / -1=👎）。
 
-    校验 match_id 结果存在后追加记录（保留 90 天，供后续匹配效果评估）。
+    校验 match_id 结果存在（归属）后追加记录（保留 90 天，供后续匹配效果评估）。
     """
-    cached = await _load_match_result(req.match_id)
+    cached = await _load_match_result(req.match_id, user.get("sub", ""))
     if cached is None:
         return error(4040, "匹配结果不存在或已过期", http_status=404)
     key = f"match:feedback:{req.match_id}"

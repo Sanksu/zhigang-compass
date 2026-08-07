@@ -287,25 +287,48 @@ export function ResumeMatchPage() {
     setStage('upload')
   }
 
-  // 载入已有简历 → 真实推荐
+  // 载入已有简历 → 真实推荐（§2.4.4 契约：202 + task_id 异步，轮询后再取结果）
   async function loadRecommend(resumeId: string) {
     const summary = resumeList.find((r) => r.id === resumeId)
     if (summary) setCandidate(toCandidate(summary))
     setActiveResumeId(resumeId)
     setStage('parsing')
+    setNotice('推荐计算中，请稍候…')
     try {
-      const res = await apiPost<{ items: BackendMatchResult[] }>('/match/recommend', {
+      const submitted = await apiPost<{ task_id: string }>('/match/recommend', {
         resume_id: resumeId,
         top_n: 10,
       })
-      const items = res.items.map(toRecommendItem)
+      const task = await pollMatchTask(submitted.task_id)
+      if (task.status !== 'success' || !task.match_id) {
+        throw new Error(task.error || '推荐失败，请稍后重试')
+      }
+      const result = await apiGet<{ items: BackendMatchResult[] }>(`/match/result/${task.match_id}`)
+      const items = result.items.map(toRecommendItem)
       setRecommendations(items)
       setStage('matched')
       setSelectedPosition(null)
       setMatchResult(null)
+      setNotice(null)
     } catch (e) {
       setStage('upload')
       setNotice(e instanceof ApiError ? e.message : '推荐失败，请检查后端服务')
+    }
+  }
+
+  // 轮询推荐任务状态：pending/running 等待，success/failed 结束，超时抛错
+  async function pollMatchTask(
+    taskId: string,
+    maxWaitMs = 90_000,
+  ): Promise<{ status: string; match_id?: string; error?: string }> {
+    const deadline = Date.now() + maxWaitMs
+    for (;;) {
+      const task = await apiGet<{ status: string; match_id?: string; error?: string }>(
+        `/match/task/${taskId}`,
+      )
+      if (task.status === 'success' || task.status === 'failed') return task
+      if (Date.now() > deadline) throw new Error('推荐计算超时，请稍后从"已有简历"重试')
+      await new Promise((r) => setTimeout(r, 1500))
     }
   }
 
@@ -941,7 +964,7 @@ export function ResumeMatchPage() {
                 </CardContent>
               </Card>
 
-              {/* 证据引用（技能 → 原始 JD，图谱 MENTIONED_IN 链路） */}
+              {/* 证据引用（技能 → 原始 JD，图谱 EVIDENCED_BY 链路） */}
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm flex items-center gap-2">

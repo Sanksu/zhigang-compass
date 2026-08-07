@@ -6,11 +6,36 @@
 from types import SimpleNamespace
 
 from app.services.kg.aggregation import (
+    _is_must,
     _most_common_level,
     _position_skills,
     build_aggregates,
     write_aggregates,
 )
+
+
+class TestMustJudgment:
+    """must 判定（设计文档 §5.5）：jd_count≥3 按 must 标注覆盖率 >1/2；
+    样本不足回退 must 标注占比 ≥1/2。"""
+
+    def _sa(self, hit: int, must_count: int):
+        return SimpleNamespace(hit=hit, must_count=must_count)
+
+    def test_coverage_over_half_is_must(self):
+        # jd_count=4，3 条 JD 标 must → 3/4 > 1/2 → must
+        assert _is_must(self._sa(hit=4, must_count=3), jd_count=4) is True
+
+    def test_coverage_exactly_half_is_nice(self):
+        # jd_count=4，2 条标 must → 2/4 = 1/2，严格不大于 → nice
+        assert _is_must(self._sa(hit=4, must_count=2), jd_count=4) is False
+
+    def test_small_sample_fallback_to_must_ratio(self):
+        # jd_count=2（样本不足）：must 标注占比 1/1 ≥ 1/2 → 按原逻辑 must
+        assert _is_must(self._sa(hit=1, must_count=1), jd_count=2) is True
+
+    def test_small_sample_under_half_is_nice(self):
+        # jd_count=2：1 条 JD 出现技能但未标 must → 0/1 < 1/2 → nice
+        assert _is_must(self._sa(hit=1, must_count=0), jd_count=2) is False
 
 
 class TestPositionSkills:

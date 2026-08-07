@@ -403,7 +403,7 @@ class TestRuleBasedMatcher:
         assert results[0].total_score >= results[1].total_score
 
     def test_auto_does_not_include_unqualified_first(self):
-        """判零岗位排在末尾。"""
+        """判零岗位被排除（不合格不参与推荐）。"""
         cand = _candidate(["Python"])
         positions = [
             _position("zero", musts=[_req("Java", Necessity.MUST)]),
@@ -411,9 +411,7 @@ class TestRuleBasedMatcher:
         ]
         matcher = RuleBasedMatcher(positions)
         results = matcher.match(MatchRequest(candidate=cand, mode=MatchMode.AUTO, top_n=10))
-        assert results[0].position_id == "ok"
-        assert results[-1].position_id == "zero"
-        assert results[-1].unqualified is True
+        assert [r.position_id for r in results] == ["ok"]
 
     def test_compare_returns_single_position(self):
         cand = _candidate(["Python"])

@@ -11,6 +11,12 @@
 #   3. PostgreSQL + Neo4j 已启动
 #   4. 国际源需配置 HTTPS_PROXY 环境变量（Clash/V2Ray Rule 模式）
 #
+# 采集责任划分：
+#   - boss/zhilian/indeed/glassdoor/arxiv/github/stackoverflow 由 ETL 主管线
+#     （05:00）阶段 1 统一采集，不再单独调度（避免同一平台每日重复采集）；
+#   - maimai 为夜间合规窗口（23:00 - 06:00，≤100 req/h），保持独立调度；
+#   - linkedin_public / 课程平台不在 ETL 采集列表内，保持独立调度。
+#
 # 时区：所有时间为服务器本地时间（建议 Asia/Shanghai）
 # 日志：每日独立日志文件 logs/etl_YYYYMMDD.log
 
@@ -21,37 +27,22 @@ MAILTO=""
 BACKEND_DIR=/opt/zhigang-compass/backend
 LOG_DIR=/opt/zhigang-compass/logs
 
-# ── 国内 A 级招聘平台（每日 02:00）──
-0 2 * * * cd $BACKEND_DIR && uv run python scripts/cron/crawl_spider.py boss 100 >> $LOG_DIR/crawl_boss_$(date +\%Y\%m\%d).log 2>&1
-15 2 * * * cd $BACKEND_DIR && uv run python scripts/cron/crawl_spider.py zhilian 100 >> $LOG_DIR/crawl_zhilian_$(date +\%Y\%m\%d).log 2>&1
-
-# ── 国际招聘平台（每日 04:00，UTC 0:00 对应北京时间 08:00，错峰至 04:00 减少白天负载）──
-0 4 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py monster 50 >> $LOG_DIR/crawl_monster_$(date +\%Y\%m\%d).log 2>&1
-20 4 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py indeed 50 >> $LOG_DIR/crawl_indeed_$(date +\%Y\%m\%d).log 2>&1
-40 4 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py glassdoor 50 >> $LOG_DIR/crawl_glassdoor_$(date +\%Y\%m\%d).log 2>&1
-
 # ── 脉脉夜间合规窗口（23:00 - 06:00，≤100 req/h）──
 0 23 * * * cd $BACKEND_DIR && uv run python scripts/cron/crawl_spider.py maimai 30 >> $LOG_DIR/crawl_maimai_$(date +\%Y\%m\%d).log 2>&1
 
 # ── 国际非招聘源（每日 UTC 0:00 = 北京时间 08:00）──
 0 8 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py linkedin_public 50 >> $LOG_DIR/crawl_linkedin_$(date +\%Y\%m\%d).log 2>&1
-15 8 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py github 50 >> $LOG_DIR/crawl_github_$(date +\%Y\%m\%d).log 2>&1
-30 8 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py stackoverflow 50 >> $LOG_DIR/crawl_stackoverflow_$(date +\%Y\%m\%d).log 2>&1
-
-# ── arXiv 论文（每日 UTC 3:00 = 北京时间 11:00）──
-0 11 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py arxiv 50 >> $LOG_DIR/crawl_arxiv_$(date +\%Y\%m\%d).log 2>&1
 
 # ── 课程平台每周日全量同步（UTC 2:00 = 北京时间 10:00）──
 0 10 * * 0 cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py coursera 100 >> $LOG_DIR/crawl_coursera_$(date +\%Y\%m\%d).log 2>&1
 30 10 * * 0 cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py edx 100 >> $LOG_DIR/crawl_edx_$(date +\%Y\%m\%d).log 2>&1
 0 11 * * 0 cd $BACKEND_DIR && uv run python scripts/cron/crawl_spider.py icourse163 100 >> $LOG_DIR/crawl_icourse163_$(date +\%Y\%m\%d).log 2>&1
 
-# ── ETL 主管线（每日 05:00 触发编排，5:00 前完成 T+1 图谱更新）──
+# ── ETL 主管线（每日 05:00）──
+# 阶段 1 采集 boss/zhilian/indeed/glassdoor/arxiv/github/stackoverflow，
+# 后续依次执行去重→LLM 抽取→时滞/通胀→入图→快照→发现+自动流转（阶段 15）。
+# _timeout 已放宽至 3h，_max_tries=1（整管线重跑会重复爬取，阶段内已容错）。
 0 5 * * * cd $BACKEND_DIR && uv run python scripts/cron/etl_daily.py >> $LOG_DIR/etl_$(date +\%Y\%m\%d).log 2>&1
-
-# ── 新岗位发现 + 自动状态流转（每日 05:30，ETL 阶段 12 快照发布后执行）──
-# 入队 discovery_daily（候选池 RAG 接地）+ discovery_auto_transition（emerging→stable 等自动流转）
-30 5 * * * cd $BACKEND_DIR && uv run python scripts/cron/discovery_daily.py >> $LOG_DIR/discovery_$(date +\%Y\%m\%d).log 2>&1
 
 # ── 时效衰减每日凌晨 4:00 重算（设计文档 §4.7.5）──
 # 由 run_etl_pipeline 内 validate_temporal 阶段覆盖，无需独立任务

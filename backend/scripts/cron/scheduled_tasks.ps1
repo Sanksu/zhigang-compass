@@ -25,26 +25,23 @@ param(
 $TaskPrefix = "ZhigangETL_"
 
 # 调度任务定义（对齐设计文档 §4.4）
+# 采集责任划分：
+#   - boss/zhilian/indeed/glassdoor/arxiv/github/stackoverflow 由 ETL 主管线
+#     （05:00）阶段 1 统一采集，不再单独调度（避免同一平台每日重复采集）；
+#   - maimai 为夜间合规窗口（23:00 - 06:00，≤100 req/h），保持独立调度；
+#   - linkedin_public / 课程平台不在 ETL 采集列表内，保持独立调度；
+#   - 新岗位发现 + 自动流转已链入 ETL 阶段 15（快照发布之后），无需独立任务。
 $Tasks = @(
-    # 国内 A 级招聘平台（02:00 / 02:15）
-    @{ Name = "CrawlBoss";     Time = "02:00"; Script = "crawl_spider.py"; Args = @("boss", "100") },
-    @{ Name = "CrawlZhilian";  Time = "02:15"; Script = "crawl_spider.py"; Args = @("zhilian", "100") },
-    # 国际 A/B 级招聘平台（04:00 错峰）
-    @{ Name = "CrawlMonster";   Time = "04:00"; Script = "crawl_spider.py"; Args = @("monster", "50");  Proxy = $true },
-    @{ Name = "CrawlIndeed";    Time = "04:20"; Script = "crawl_spider.py"; Args = @("indeed", "50");   Proxy = $true },
-    @{ Name = "CrawlGlassdoor"; Time = "04:40"; Script = "crawl_spider.py"; Args = @("glassdoor", "50"); Proxy = $true },
     # 脉脉夜间合规窗口（23:00）
     @{ Name = "CrawlMaimai";    Time = "23:00"; Script = "crawl_spider.py"; Args = @("maimai", "30") },
     # 国际非招聘源（北京时间 08:00 = UTC 0:00）
     @{ Name = "CrawlLinkedIn";  Time = "08:00"; Script = "crawl_spider.py"; Args = @("linkedin_public", "50"); Proxy = $true },
-    @{ Name = "CrawlGithub";    Time = "08:15"; Script = "crawl_spider.py"; Args = @("github", "50");   Proxy = $true },
-    @{ Name = "CrawlSO";        Time = "08:30"; Script = "crawl_spider.py"; Args = @("stackoverflow", "50"); Proxy = $true },
-    # arXiv（北京时间 11:00 = UTC 3:00）
-    @{ Name = "CrawlArxiv";     Time = "11:00"; Script = "crawl_spider.py"; Args = @("arxiv", "50");   Proxy = $true },
-    # ETL 主管线（05:00）
-    @{ Name = "ETLDaily";       Time = "05:00"; Script = "etl_daily.py";    Args = @() },
-    # 新岗位发现 + 自动状态流转（05:30，ETL 阶段 12 快照发布后）
-    @{ Name = "DiscoveryDaily"; Time = "05:30"; Script = "discovery_daily.py"; Args = @() }
+    # 课程平台每周日全量同步（北京时间 10:00 = UTC 2:00，对齐 crontab.example）
+    @{ Name = "CrawlCoursera";   Time = "10:00"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("coursera", "100"); Proxy = $true },
+    @{ Name = "CrawlEdx";        Time = "10:30"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("edx", "100"); Proxy = $true },
+    @{ Name = "CrawlIcourse163"; Time = "11:00"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("icourse163", "100") },
+    # ETL 主管线（05:00；阶段 1 采集 + LLM 抽取 + 快照 + 发现/自动流转）
+    @{ Name = "ETLDaily";       Time = "05:00"; Script = "etl_daily.py";    Args = @() }
 )
 
 if (-not (Test-Path $LogDir)) {
@@ -74,9 +71,14 @@ foreach ($task in $Tasks) {
         $cmd = '$env:HTTPS_PROXY="http://127.0.0.1:7890"; ' + $cmd
     }
 
-    # 解析时间（HH:mm）为每日触发
+    # 解析时间（HH:mm）；指定 DaysOfWeek 的任务为每周触发（课程平台），否则每日
     $timeParts = $task.Time.Split(':')
-    $trigger = New-ScheduledTaskTrigger -Daily -At "$($timeParts[0]):$($timeParts[1])"
+    $at = "$($timeParts[0]):$($timeParts[1])"
+    if ($task.DaysOfWeek) {
+        $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $task.DaysOfWeek -At $at
+    } else {
+        $trigger = New-ScheduledTaskTrigger -Daily -At $at
+    }
 
     # 以当前用户登录时运行
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited

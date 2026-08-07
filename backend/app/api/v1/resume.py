@@ -85,6 +85,24 @@ async def _persist_resume_file(
     )
 
 
+async def _owns_resume(db: AsyncSession, resume_id: str, user_id: str) -> bool:
+    """校验当前用户是否拥有该简历（resume_cache 无 user_id，归属记录在 resume_files）。"""
+    row = await db.scalar(
+        select(ResumeFile.id).where(
+            ResumeFile.resume_id == resume_id, ResumeFile.user_id == user_id
+        )
+    )
+    return row is not None
+
+
+async def _user_owns_task(db: AsyncSession, task: TaskStatus, user_id: str) -> bool:
+    """任务归属校验：resume_parse 任务的 task_id 即 resume_id，按简历归属判定；
+    其余任务类型（批量采集等系统任务）不向普通用户暴露。"""
+    if task.task_type != "resume_parse":
+        return False
+    return await _owns_resume(db, task.id, user_id)
+
+
 @router.get("/list")
 async def list_resumes(
     limit: int = Query(default=20, ge=1, le=100),
@@ -94,9 +112,15 @@ async def list_resumes(
     """已解析简历列表（最近 N 条，含候选人画像摘要）。
 
     供前端载入已有候选人发起匹配（recommend/compare 需要 resume_cache 记录）。
+    归属过滤：resume_cache 无 user_id，仅返回当前用户有 ResumeFile 归属的简历。
     """
     rows = await db.scalars(
-        select(ResumeCache).order_by(ResumeCache.updated_at.desc()).limit(limit)
+        select(ResumeCache)
+        .join(ResumeFile, ResumeFile.resume_id == ResumeCache.id)
+        .where(ResumeFile.user_id == user.get("sub", ""))
+        .order_by(ResumeCache.updated_at.desc())
+        .limit(limit)
+        .distinct()
     )
     items = []
     for r in rows:
@@ -139,6 +163,19 @@ async def parse_resume(
         select(ResumeCache).where(ResumeCache.file_hash == file_hash)
     )
     if cached is not None:
+        # 缓存按内容哈希全局唯一；命中时补建当前用户归属记录，
+        # 否则他人上传的文件复用后当前用户将无 ResumeFile 关联、无法访问
+        if not await _owns_resume(db, cached.id, user.get("sub", "")):
+            await _persist_resume_file(
+                db,
+                resume_id=cached.id,
+                user_id=user.get("sub", ""),
+                file_hash=file_hash,
+                file_name=file.filename or "",
+                content_type=file.content_type or "",
+                content=content,
+            )
+            await db.commit()
         return ok(data={
             "task_id": cached.id,
             "resume_id": cached.id,
@@ -194,12 +231,16 @@ async def task_status(task_id: str, db: AsyncSession = Depends(get_db), user: di
     task = await db.get(TaskStatus, task_uuid)
     if task is None:
         return error(4040, "任务不存在", http_status=404)
+    if not await _user_owns_task(db, task, user.get("sub", "")):
+        return error(4030, "无权查看该任务", http_status=403)
+    result = dict(task.result or {})
+    result.pop("file_path", None)  # 不向客户端暴露服务端绝对路径
     return ok(data={
         "task_id": task.id,
         "task_type": task.task_type,
         "status": task.status,
         "progress": task.progress,
-        "result": task.result,
+        "result": result,
         "error": task.error,
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
@@ -223,12 +264,14 @@ def _merge_fields(parsed: dict, fields: dict) -> dict:
 
 def _sse_payload(task: TaskStatus) -> dict:
     """任务状态 → SSE data 载荷（TaskStatus ORM 对象不可直接 JSON 序列化）。"""
+    result = dict(task.result or {})
+    result.pop("file_path", None)  # 不向客户端暴露服务端绝对路径
     return {
         "task_id": task.id,
         "task_type": task.task_type,
         "status": task.status,
         "progress": task.progress,
-        "result": task.result,
+        "result": result,
         "error": task.error,
     }
 
@@ -276,6 +319,8 @@ async def get_resume(resume_id: str, db: AsyncSession = Depends(get_db), user: d
     resume = await db.get(ResumeCache, rid)
     if resume is None:
         return error(4040, "简历不存在", http_status=404)
+    if not await _owns_resume(db, rid, user.get("sub", "")):
+        return error(4030, "无权访问该简历", http_status=403)
     return ok(data={
         "id": resume.id,
         "file_name": resume.file_name,
@@ -305,6 +350,8 @@ async def update_resume(
     resume = await db.get(ResumeCache, rid)
     if resume is None:
         return error(4040, "简历不存在", http_status=404)
+    if not await _owns_resume(db, rid, user.get("sub", "")):
+        return error(4030, "无权修改该简历", http_status=403)
 
     fields = req.get("fields")
     if not isinstance(fields, dict) or not fields:
@@ -347,7 +394,13 @@ async def task_stream(task_id: str, user: dict = Depends(require_role("user"))):
     async def _get_task(tid: str) -> dict | None:
         async with async_session_factory() as session:
             task = await session.get(TaskStatus, tid)
-        return _sse_payload(task) if task is not None else None
+            if task is None:
+                return None
+            # SSE 与轮询端点同权：仅当前用户拥有的 resume_parse 任务可订阅
+            if not await _user_owns_task(session, task, user.get("sub", "")):
+                return None
+            payload = _sse_payload(task)
+        return payload
 
     async def _event_gen():
         async for event in _task_stream_events(task_uuid, _get_task):
@@ -365,18 +418,28 @@ async def delete_resume(resume_id: str, db: AsyncSession = Depends(get_db), user
     resume = await db.get(ResumeCache, rid)
     if resume is None:
         return error(4040, "简历不存在", http_status=404)
+    if not await _owns_resume(db, rid, user.get("sub", "")):
+        return error(4030, "无权删除该简历", http_status=403)
 
-    # 删除落库原始文件（§8.1：resume_files 与简历记录联动删除）
-    await db.execute(delete(ResumeFile).where(ResumeFile.resume_id == rid))
+    # 仅删除当前用户的归属记录；resume_cache 按内容哈希全局唯一，
+    # 其他用户命中同一缓存时仍有归属，不得连坐删除
+    await db.execute(
+        delete(ResumeFile).where(
+            ResumeFile.resume_id == rid, ResumeFile.user_id == user.get("sub", "")
+        )
+    )
 
-    # 删除落盘文件（uploads/{file_hash}{suffix}），文件缺失不阻塞删除
-    for f in _UPLOAD_DIR.glob(f"{resume.file_hash}.*"):
-        try:
-            f.unlink()
-        except OSError:
-            pass
-
-    await db.delete(resume)
+    other_owner = await db.scalar(
+        select(ResumeFile.id).where(ResumeFile.resume_id == rid)
+    )
+    if other_owner is None:
+        # 无其他用户引用时删除落盘文件与缓存记录（文件缺失不阻塞删除）
+        for f in _UPLOAD_DIR.glob(f"{resume.file_hash}.*"):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        await db.delete(resume)
     await db.commit()
     return ok(data={"deleted": True})
 

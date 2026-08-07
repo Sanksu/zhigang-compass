@@ -1,21 +1,20 @@
 """每日新岗位发现 + 自动状态流转调度入口（设计文档 7.2.3 / 7.2.1）。
 
-被系统 cron / Windows 计划任务调用，依次将发现与自动流转任务入队到 ARQ。
+日常调度：发现与自动流转已链入 run_etl_pipeline 阶段 15（快照发布之后），
+保证 discovery_auto_transition 读到当日快照窗口序列；本脚本仅用于手动触发
+或一次性补跑。
 
 调用方式：
-    # Linux cron（crontab -e，ETL/快照发布后运行）
-    30 5 * * * cd /path/to/backend && uv run python scripts/cron/discovery_daily.py >> logs/discovery_$(date +\%Y\%m\%d).log 2>&1
+    # 手动触发
+    cd backend && uv run python scripts/cron/discovery_daily.py
 
-    # Windows 计划任务（PowerShell，每日 05:30）
-    cd backend; uv run python scripts/cron/discovery_daily.py
-
-任务编排（入队顺序即 ARQ 消费顺序）：
+任务编排：
     1. discovery_daily：聚合 jd_raw → 阶段一门控 → RAG 接地 → 候选池 upsert
     2. discovery_auto_transition：读 graph_versions 窗口序列 → emerging/stable/
        declining 自动流转判定 → Neo4j + 候选池幂等持久化
 
 依赖：Redis 已启动、ARQ Worker 已运行（arq app.workers.tasks.WorkerSettings）、
-ETL 主管线已完成（auto_transition 依赖当日快照参与窗口序列）。
+快照已发布（auto_transition 依赖快照参与窗口序列）。
 """
 
 import asyncio
@@ -49,8 +48,10 @@ async def enqueue_discovery() -> None:
     try:
         job1 = await client.enqueue_job("discovery_daily")
         print(f"[discovery_daily] 已入队 discovery_daily, job_id={job1.job_id}")
-        job2 = await client.enqueue_job("discovery_auto_transition")
-        print(f"[discovery_daily] 已入队 discovery_auto_transition, job_id={job2.job_id}")
+        # ARQ 多 worker 并发下 FIFO 不保证消费顺序，给 discovery_daily 5min
+        # 领先时间再入队自动流转（避免 auto_transition 读到空候选池）
+        job2 = await client.enqueue_job("discovery_auto_transition", _defer_by=300)
+        print(f"[discovery_daily] 已入队 discovery_auto_transition（延迟 5min）, job_id={job2.job_id}")
     finally:
         await client.close()
 

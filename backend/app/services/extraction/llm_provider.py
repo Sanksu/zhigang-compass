@@ -115,6 +115,27 @@ def _redis_delete(key: str) -> None:
         pass
 
 
+def _redis_incr(key: str) -> int:
+    """原子自增并返回新值（并发下不丢失计数）。
+
+    覆盖 get-then-set 的竞态：多个 worker 同时命中 429/5xx 时，旧实现
+    可能各自读到相同计数导致重复写入（熔断/退避档位低估）。返回 0
+    表示 Redis 不可用（fail-open，调用方按未命中处理）。
+    """
+    try:
+        return int(_get_redis_client().incr(key))
+    except Exception:
+        return 0
+
+
+def _redis_expire(key: str, ttl: int) -> None:
+    """刷新 key TTL（计数归零由 TTL 控制）。"""
+    try:
+        _get_redis_client().expire(key, ttl)
+    except Exception:
+        pass
+
+
 def _now() -> float:
     """当前 epoch 秒（模块级可注入，测试替换为可控时钟）。"""
     return time.time()
@@ -148,17 +169,13 @@ def _record_429(name: str) -> None:
     TTL 同为退避期，退避结束后计数归零，下次 429 从 30s 重新递进。
     """
     count_key = _state_key("backoff_count", name)
-    raw = _redis_get(count_key)
-    count = 1
-    if raw is not None:
-        try:
-            count = int(raw) + 1
-        except ValueError:
-            count = 1
+    count = _redis_incr(count_key)
+    if count <= 0:
+        return  # Redis 不可用，fail-open（调用链不依赖降级状态）
     delay = BACKOFF_SECONDS[min(count - 1, len(BACKOFF_SECONDS) - 1)]
     until = _now() + delay
     _redis_set(_state_key("backoff", name), str(until), ttl=int(delay))
-    _redis_set(count_key, str(count), ttl=int(delay))
+    _redis_expire(count_key, int(delay))
 
 
 def _record_5xx(name: str) -> None:
@@ -168,13 +185,9 @@ def _record_5xx(name: str) -> None:
     失败会从既有计数继续累计（连续失败语义）。熔断写入时计数清零。
     """
     count_key = _state_key("5xx_count", name)
-    raw = _redis_get(count_key)
-    count = 1
-    if raw is not None:
-        try:
-            count = int(raw) + 1
-        except ValueError:
-            count = 1
+    count = _redis_incr(count_key)
+    if count <= 0:
+        return  # Redis 不可用，fail-open（调用链不依赖降级状态）
     if count >= CONSECUTIVE_5XX_TO_OPEN:
         until = _now() + CIRCUIT_BREAKER_WINDOW_SECONDS
         _redis_set(
@@ -186,7 +199,7 @@ def _record_5xx(name: str) -> None:
             name, count, CIRCUIT_BREAKER_WINDOW_SECONDS,
         )
     else:
-        _redis_set(count_key, str(count), ttl=_5XX_COUNT_TTL_SECONDS)
+        _redis_expire(count_key, _5XX_COUNT_TTL_SECONDS)
 
 
 def _clear_state(name: str) -> None:

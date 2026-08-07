@@ -6,8 +6,9 @@
 import re
 from app.services.extraction.schemas import JDExtractionResult, SkillExtracted
 from app.services.extraction.dictionary import (
-    SOFT_SKILL_WHITELIST,
     SKILL_STOPWORDS,
+    SKILL_WHITELIST,
+    SOFT_SKILL_WHITELIST,
     normalize_skill,
 )
 
@@ -48,6 +49,19 @@ def dedup_skills(skills: list[SkillExtracted]) -> list[SkillExtracted]:
     return result
 
 
+def _is_valid_skill_name(name: str) -> bool:
+    """技能名校验：黑名单剔除 + 单字符碎片过滤。
+
+    清洗剥后缀可能产生单字碎片（如"微服务"→"微"），此类碎片无技能语义；
+    白名单单字语言（C/R/Go/SQL 等）是合法技能，保留。
+    """
+    if name in SKILL_STOPWORDS:
+        return False
+    if len(name) < 2 and name not in SKILL_WHITELIST:
+        return False
+    return True
+
+
 def post_process(result: JDExtractionResult) -> JDExtractionResult:
     """执行完整后处理管线：
     1. 别名归一化
@@ -62,7 +76,7 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     result.skills = [
         SkillExtracted(name=_clean(s.name), category=s.category, description=s.description)
         for s in result.skills
-        if _clean(s.name) and _clean(s.name) not in SKILL_STOPWORDS
+        if _is_valid_skill_name(_clean(s.name))
     ]
     result.skills = dedup_skills(result.skills)
 
@@ -86,7 +100,7 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     seen: set[tuple[str, str]] = set()
     for req in result.requirements:
         name = _clean(req.skill_name)
-        if not name or name in SKILL_STOPWORDS:
+        if not _is_valid_skill_name(name):
             continue
         key = (name.lower(), req.necessity)
         if key in seen:

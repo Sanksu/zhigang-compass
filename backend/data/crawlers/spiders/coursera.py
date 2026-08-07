@@ -8,7 +8,7 @@
 
 合规：
 - 仅采集公开搜索页元数据（标题/讲师/院校/评分/注册数）
-- 每周全量同步，请求间隔 3-6s
+- 每周全量同步，请求间隔 10-20s
 - 遵循 Coursera robots.txt
 
 运行：
@@ -54,7 +54,7 @@ class CourseraSpider(Spider):
         self.max_pages = int(kwargs.get("max_pages", "3"))
         # 请求间隔
         limit = RATE_LIMIT.get(self.platform, {})
-        delay_range = limit.get("delay_range", (3, 6))
+        delay_range = limit.get("delay_range", (10, 20))
         self.download_delay = sum(delay_range) / 2
 
     async def start(self):

@@ -74,6 +74,11 @@ def compute_sai(
     jd_median = median(jd_skill_ages)
     position_median = median(position_recent_skill_ages)
     if position_median == 0:
+        # 岗位近 90 天参考技能中位首见时长为 0（全是新技能）：JD 中位数 > 0
+        # 说明其技能相对岗位整体明显更旧 → 视为过时；两侧均 0 才返回 0（数据不足）。
+        # 返回越过 obsolete 阈值的有限上界，避免 JSON 序列化 inf。
+        if jd_median > 0:
+            return float(SAI_OBSOLETE_THRESHOLD + 1.0)
         return 0.0
     return float(jd_median / position_median)
 

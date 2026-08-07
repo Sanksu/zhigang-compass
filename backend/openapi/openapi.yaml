@@ -165,7 +165,8 @@ paths:
   /api/v1/graph/position/{id}:
     get:
       tags: [graph]
-      summary: 岗位节点详情"
+      security: []
+      summary: 岗位节点详情
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -181,7 +182,8 @@ paths:
   /api/v1/graph/position/{id}/skills:
     get:
       tags: [graph]
-      summary: 岗位技能列表"
+      security: []
+      summary: 岗位技能列表
       parameters:
         - $ref: '#/components/parameters/Id'
         - name: necessity
@@ -198,7 +200,8 @@ paths:
   /api/v1/graph/skill/{id}:
     get:
       tags: [graph]
-      summary: 技能节点详情"
+      security: []
+      summary: 技能节点详情
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -212,7 +215,8 @@ paths:
   /api/v1/graph/skill/{id}/evidence:
     get:
       tags: [graph]
-      summary: 技能证据列表"
+      security: []
+      summary: 技能证据列表
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -226,12 +230,13 @@ paths:
   /api/v1/graph/skill/{id}/prerequisites:
     get:
       tags: [graph]
-      summary: 技能先修技能链（先修字典，拓扑序）
+      security: []
+      summary: 技能先修技能链（图谱 PREREQUISITE_OF 优先，先修字典回退）
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
         '200':
-          description: 先修链（data 含 skill_id/skill_name/prerequisites[{skill_id,name,depth}]）
+          description: 先修链（图谱 PREREQUISITE_OF 边优先，未建边回退人工字典；data 含 skill_id/skill_name/prerequisites[{skill_id,name,depth}]）
           content:
             application/json:
               schema:
@@ -240,6 +245,7 @@ paths:
   /api/v1/graph/skill/{id}/courses:
     get:
       tags: [graph]
+      security: []
       summary: 学习课程列表（LEARNABLE_VIA + 质量分降序）
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -254,6 +260,7 @@ paths:
   /api/v1/graph/skill/{id}/positions:
     get:
       tags: [graph]
+      security: []
       summary: 技能反向查询岗位
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -268,7 +275,8 @@ paths:
   /api/v1/graph/skill/similar:
     get:
       tags: [graph]
-      summary: 相似技能检索（pgvector）"
+      security: []
+      summary: 相似技能检索（pgvector）
       parameters:
         - name: skill_id
           in: query
@@ -288,6 +296,7 @@ paths:
   /api/v1/graph/panorama:
     get:
       tags: [graph]
+      security: []
       summary: 全景视图（Neo4j 直接查询，无缓存）
       parameters:
         - name: limit
@@ -317,6 +326,7 @@ paths:
   /api/v1/graph/algorithms/pagerank:
     get:
       tags: [graph]
+      security: []
       summary: PageRank 技能重要性 Top-N（纯 Python，Neo4j 社区版无 GDS）
       parameters:
         - name: top_n
@@ -349,6 +359,7 @@ paths:
   /api/v1/graph/algorithms/skill-clusters:
     get:
       tags: [graph]
+      security: []
       summary: Louvain 技能簇识别（纯 Python）
       parameters:
         - name: min_size
@@ -383,6 +394,7 @@ paths:
   /api/v1/graph/algorithms/shortest-path:
     get:
       tags: [graph]
+      security: []
       summary: 技能最短路径（shortestPath((:Skill)-[*..6]-(:Skill))）
       parameters:
         - name: from
@@ -421,7 +433,8 @@ paths:
   /api/v1/graph/view/{view_type}:
     get:
       tags: [graph]
-      summary: 视图切换（后端过滤）"
+      security: []
+      summary: 视图切换（后端过滤）
       parameters:
         - name: view_type
           in: path
@@ -438,6 +451,7 @@ paths:
   /api/v1/graph/search:
     get:
       tags: [graph]
+      security: []
       summary: 图谱搜索（Neo4j 全文索引）
       parameters:
         - name: q
@@ -607,7 +621,7 @@ paths:
   /api/v1/match/recommend:
     post:
       tags: [match]
-      summary: 自动推荐 Top-N（同步返回，含 CII 通胀修正）
+      summary: 自动推荐 Top-N（异步，ARQ 队列 + 含 CII 通胀修正）
       requestBody:
         required: true
         content:
@@ -619,8 +633,8 @@ paths:
                 resume_id: { type: string }
                 top_n: { type: integer, default: 10, maximum: 50 }
       responses:
-        '200':
-          description: 推荐结果列表
+        '202':
+          description: 任务已入队，返回 task_id（轮询 /match/task/{task_id} 获取进度与结果）
           content:
             application/json:
               schema:
@@ -653,7 +667,7 @@ paths:
   /api/v1/match/task/{task_id}:
     get:
       tags: [match]
-      summary: 查询推荐任务状态"
+      summary: 查询推荐任务状态
       parameters:
         - name: task_id
           in: path
@@ -670,7 +684,7 @@ paths:
   /api/v1/match/result/{match_id}:
     get:
       tags: [match]
-      summary: 获取匹配结果"
+      summary: 获取匹配结果
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -684,7 +698,7 @@ paths:
   /api/v1/match/result/{match_id}/gap:
     get:
       tags: [match]
-      summary: 获取差距分析"
+      summary: 获取差距分析
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -698,7 +712,7 @@ paths:
   /api/v1/match/result/{match_id}/path:
     get:
       tags: [match]
-      summary: 获取学习路径"
+      summary: 获取学习路径
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -712,7 +726,7 @@ paths:
   /api/v1/match/result/{match_id}/diagnosis:
     get:
       tags: [match]
-      summary: 获取人岗比对诊断报告"
+      summary: 获取人岗比对诊断报告
       description: LLM 基于结果快照（分数/差距/学习路径/证据）生成结构化诊断报告，结果缓存 24h
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -733,7 +747,7 @@ paths:
   /api/v1/match/feedback:
     post:
       tags: [match]
-      summary: 提交匹配反馈"
+      summary: 提交匹配反馈
       requestBody:
         required: true
         content:
@@ -773,7 +787,7 @@ paths:
   /api/v1/evolution/versions/{version_id}:
     get:
       tags: [evolution]
-      summary: 获取版本详情"
+      summary: 获取版本详情
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -828,7 +842,7 @@ paths:
   /api/v1/evolution/position/{id}/evolution:
     get:
       tags: [evolution]
-      summary: 岗位演化历史"
+      summary: 岗位演化历史
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -842,7 +856,7 @@ paths:
   /api/v1/evolution/state-machine:
     get:
       tags: [evolution]
-      summary: 岗位状态机总览（六态分布 + 最近人工流转记录）"
+      summary: 岗位状态机总览（六态分布 + 最近人工流转记录）
       responses:
         '200':
           description: 状态机总览
@@ -1141,7 +1155,7 @@ paths:
   /api/v1/admin/positions/{id}/review:
     post:
       tags: [admin]
-      summary: 审核岗位（批准/驳回）"
+      summary: 审核岗位（批准/驳回）
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -1171,7 +1185,7 @@ paths:
   /api/v1/admin/positions/declining:
     get:
       tags: [admin]
-      summary: 待归档岗位列表（declining 状态）"
+      summary: 待归档岗位列表（declining 状态）
       responses:
         '200':
           description: 待归档列表
@@ -1183,7 +1197,7 @@ paths:
   /api/v1/admin/positions/{id}/archive:
     put:
       tags: [admin]
-      summary: 确认衰退归档（declining → archived 终态）"
+      summary: 确认衰退归档（declining → archived 终态）
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -1206,7 +1220,7 @@ paths:
   /api/v1/admin/evolution/pending:
     get:
       tags: [admin]
-      summary: 待审核演化变更"
+      summary: 待审核演化变更
       responses:
         '200':
           description: 待审核列表
@@ -1263,7 +1277,7 @@ paths:
   /api/v1/admin/evolution/{id}/review:
     put:
       tags: [admin]
-      summary: 审核演化变更"
+      summary: 审核演化变更
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:

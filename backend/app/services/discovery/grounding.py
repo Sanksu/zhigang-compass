@@ -123,6 +123,21 @@ async def _pg_ilike(db: AsyncSession, pos: str, limit: int) -> list[dict]:
     ]
 
 
+def _query_fulltext(neo4j, q: str, limit: int) -> list[dict]:
+    """同步 Neo4j 全文查询（线程池调用，异常由调用方降级 ILIKE）。"""
+    with neo4j.session() as session:
+        return session.run(
+            "CALL db.index.fulltext.queryNodes('occupation_search', $q) "
+            "YIELD node, score "
+            "RETURN node.code AS code, node.name AS name, "
+            "node.category AS category, node.definition AS definition, "
+            "node.aliases AS aliases, score "
+            "LIMIT $limit",
+            q=q,
+            limit=limit,
+        ).data()
+
+
 async def _neo4j_fulltext(neo4j, pos: str, limit: int) -> list[dict]:
     """Neo4j occupation_search 全文索引关键词检索（设计 7.2.3 双路之一）。
 
@@ -133,17 +148,8 @@ async def _neo4j_fulltext(neo4j, pos: str, limit: int) -> list[dict]:
     if not q:
         return []
     try:
-        with neo4j.session() as session:
-            rows = session.run(
-                "CALL db.index.fulltext.queryNodes('occupation_search', $q) "
-                "YIELD node, score "
-                "RETURN node.code AS code, node.name AS name, "
-                "node.category AS category, node.definition AS definition, "
-                "node.aliases AS aliases, score "
-                "LIMIT $limit",
-                q=q,
-                limit=limit,
-            ).data()
+        # 同步 Neo4j 查询放线程池，避免阻塞事件循环
+        rows = await asyncio.to_thread(_query_fulltext, neo4j, q, limit)
     except Exception:
         # Neo4j 未同步/不可达：降级 ILIKE，不阻塞接地
         return []
@@ -177,19 +183,26 @@ async def _semantic_search(db: AsyncSession, pos: str, embedder, limit: int) -> 
         return []
     from app.models.business import Occupation
 
-    qvec = embedder.embed(pos)
+    # SBERT 推理放线程池（embed 同步，避免阻塞事件循环）
+    qvec = await asyncio.to_thread(embedder.embed, pos)
     stmt = (
         select(Occupation)
         .order_by(Occupation.embedding.cosine_distance(qvec))
         .limit(limit)
     )
     rows = (await db.scalars(stmt)).all()
+
+    # 逐行相似度计算放线程池（量小但仍是同步 SBERT encode）
+    names = [r.name for r in rows]
+    scores = await asyncio.to_thread(
+        lambda: [embedder.similarity(name, pos) for name in names]
+    )
     return [
         _normalize_hit(
             occ.code, occ.name, occ.category, occ.definition, occ.aliases,
-            pos, embedder.similarity(occ.name, pos), "semantic",
+            pos, score, "semantic",
         )
-        for occ in rows
+        for occ, score in zip(rows, scores)
     ]
 
 
@@ -328,7 +341,8 @@ async def ground_with_rag(
     if embedder is None:
         from app.services.matching.semantic import SkillEmbedder
 
-        embedder = SkillEmbedder.get()
+        # 单例首次获取会同步加载 SBERT 模型（可达分钟级），放线程池
+        embedder = await asyncio.to_thread(SkillEmbedder.get)
 
     hits = await search_authoritative(position_name, db, neo4j=neo4j, embedder=embedder)
     occupation = hits[0] if hits else None
