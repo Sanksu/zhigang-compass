@@ -38,7 +38,8 @@ from crawlers.zhilian_detail import extract_job_detail
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
 # 平台限速间隔（对齐 crawlers.settings.RATE_LIMIT：zhilian 8-15s）
-_DELAY_RANGE = (8, 15)
+# 2026-08-07 用户确认收紧至 7-10s 提速；若触发验证码/封禁需回调
+_DELAY_RANGE = (7, 10)
 _DETAIL_TIMEOUT = 20
 # 每 N 条打印一行进度（百分比 + 已用/预计剩余，日志友好无控制字符）
 _PROGRESS_EVERY = 20
