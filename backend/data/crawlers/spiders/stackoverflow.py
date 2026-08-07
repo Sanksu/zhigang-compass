@@ -53,7 +53,7 @@ class StackoverflowSpider(Spider):
         self.max_pages = int(kwargs.get("max_pages", "1"))
         # 请求间隔（API 官方限速宽松，沿用平台配置）
         limit = RATE_LIMIT.get(self.platform, {})
-        delay_range = limit.get("delay_range", (6, 12))
+        delay_range = limit.get("delay_range", (10, 20))
         self.download_delay = sum(delay_range) / 2
 
     async def start(self):

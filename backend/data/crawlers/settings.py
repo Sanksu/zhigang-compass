@@ -34,25 +34,25 @@ RANDOMIZE_DOWNLOAD_DELAY = True     # 随机化延迟
 CONCURRENT_REQUESTS = 8             # 全局并发
 CONCURRENT_REQUESTS_PER_DOMAIN = 2  # 单域名并发
 
-# 平台级速率限制
+# 平台级速率限制（设计文档 §4 爬虫工程参数：国内 8-15s / 国际 10-20s 随机）
 RATE_LIMIT = {
     # 招聘平台
-    "boss":     {"req_per_min": 20,  "delay_range": (2, 5)},
-    "zhilian":  {"req_per_min": 20,  "delay_range": (2, 5)},
-    "monster":  {"req_per_min": 30,  "delay_range": (1, 3)},
-    "indeed":   {"req_per_min": 15,  "delay_range": (2, 6)},
-    "glassdoor":{"req_per_min": 15,  "delay_range": (2, 6)},
-    "maimai":   {"req_per_min": 5,   "delay_range": (10, 20)},     # ≤100 req/h
-    "linkedin_public": {"req_per_min": 5, "delay_range": (10, 20)},
+    "boss":     {"req_per_min": 5,  "delay_range": (8, 15)},    # 国内直连
+    "zhilian":  {"req_per_min": 5,  "delay_range": (8, 15)},    # 国内直连
+    "monster":  {"req_per_min": 4,  "delay_range": (10, 20)},   # 国际代理
+    "indeed":   {"req_per_min": 4,  "delay_range": (10, 20)},   # 国际代理
+    "glassdoor":{"req_per_min": 4,  "delay_range": (10, 20)},   # 国际代理
+    "maimai":   {"req_per_min": 4,  "delay_range": (10, 20)},   # 国际源，≤100 req/h
+    "linkedin_public": {"req_per_min": 4, "delay_range": (10, 20)},
     # 课程平台（每周全量同步，限流宽松）
-    "icourse163": {"req_per_min": 10, "delay_range": (6, 12)},     # 国内直连，反爬较严
-    "coursera":   {"req_per_min": 20, "delay_range": (3, 6)},      # 国际代理
-    "edx":        {"req_per_min": 20, "delay_range": (3, 6)},      # 国际代理
+    "icourse163": {"req_per_min": 5, "delay_range": (8, 15)},   # 国内直连，反爬较严
+    "coursera":   {"req_per_min": 4, "delay_range": (10, 20)},  # 国际代理
+    "edx":        {"req_per_min": 4, "delay_range": (10, 20)},  # 国际代理
     # 论文（arXiv 官方约束 1 req/3s = 20 req/min）
     "arxiv":      {"req_per_min": 20, "delay_range": (3, 5)},
-    # 社区（公开页爬取，保守限速）
-    "github":     {"req_per_min": 10, "delay_range": (6, 12)},     # trending 公开页
-    "stackoverflow": {"req_per_min": 10, "delay_range": (6, 12)},  # 标签页公开页
+    # 社区（国际公开页，保守限速）
+    "github":     {"req_per_min": 4, "delay_range": (10, 20)},  # trending 公开页
+    "stackoverflow": {"req_per_min": 4, "delay_range": (10, 20)},  # 标签页公开页
 }
 
 # ---------- 代理池 ----------

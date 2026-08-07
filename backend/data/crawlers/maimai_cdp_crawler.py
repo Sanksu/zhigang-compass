@@ -12,7 +12,7 @@
 合规措施（S2+S3，project_memory 强制约束）：
 - 注明用于竞赛演示不商用（X-Collection-Purpose 头）
 - 数据脱敏（CleaningPipeline 自动 PII 清洗：手机号/邮箱/身份证）
-- 限频 ≤100 req/h（settings.RATE_LIMIT.maimai = 5 req/min）
+- 限频 ≤100 req/h（settings.RATE_LIMIT.maimai = 4 req/min）
 - 夜间运行 22:00-08:00（start_requests 时间守卫强制）
 
 DOM 结构（2026-07-29 实测）：
@@ -30,7 +30,14 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 from urllib.parse import urljoin
+
+# 独立脚本经 sys.executable 调用时 sys.path[0] 为 crawlers/ 目录，
+# data/ 不在路径上；显式加入以导入 crawlers.settings（与 scripts/ 下脚本的路径引导一致）
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from crawlers.settings import MAIMAI_COMPLIANCE
 
 
 def log(msg: str):
@@ -140,6 +147,10 @@ async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
         # 隔离：新建独立 context 并复制主 context 的 cookies，
         # 爬虫导航只发生在隔离 context 内，不触碰用户正在浏览的页面
         context = await browser.new_context()
+        # 合规声明（S2/S3）：导航前注入 X-Collection-Purpose 头，声明数据仅用于竞赛演示不商用
+        await context.set_extra_http_headers(
+            {"X-Collection-Purpose": MAIMAI_COMPLIANCE["annotation"]}
+        )
         if browser.contexts:
             try:
                 _cookies = await browser.contexts[0].cookies()
