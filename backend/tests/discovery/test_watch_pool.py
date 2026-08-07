@@ -12,6 +12,7 @@ from app.services.discovery.mli import MLI_WEIGHTS, compute_mli
 from app.services.discovery.watch_pool import (
     WatchSignal,
     aggregate_weekly_freqs,
+    anomaly_flags,
     build_signals,
     detect_jd_mom_signal,
     detect_z_signal,
@@ -181,3 +182,50 @@ class TestPromotableSkills:
             WatchSignal("PyTorch", "jd", 0.6, "2026-08-05"),
         ]
         assert promotable_skills(signals, {"Rust", "PyTorch"}) == ["Rust", "PyTorch"]
+
+
+# ============================================================
+# 辅助加分特征异常标记（设计 §7.2.2：arxiv/github 2σ 判定）
+# ============================================================
+
+class TestAnomalyFlags:
+    @staticmethod
+    def _freqs() -> dict:
+        """arxiv cs.AI 末周暴增（命中 2σ）+ github Python 平稳（不命中）。"""
+        rows = []
+        for date in ["2026-07-01", "2026-07-02", "2026-07-02"]:
+            rows.append(_Row("arxiv", {"categories": ["cs.AI"]}, date))
+        for date in ["2026-07-08", "2026-07-15"]:
+            rows.append(_Row("arxiv", {"categories": ["cs.AI"]}, date))
+        for _ in range(30):
+            rows.append(_Row("arxiv", {"categories": ["cs.AI"]}, "2026-07-22"))
+        for date in ["2026-07-01", "2026-07-08", "2026-07-15", "2026-07-22", "2026-07-29"]:
+            rows.append(_Row("github", {"language": "Python"}, date))
+        return aggregate_weekly_freqs(rows)
+
+    def test_arxiv_hit_github_miss(self):
+        flags = anomaly_flags(self._freqs(), {"cs.AI"})
+        assert flags["arxiv"] is True
+        assert flags["github"] is False
+
+    def test_stable_github_not_hit(self):
+        flags = anomaly_flags(self._freqs(), {"Python"})
+        assert flags == {"arxiv": False, "github": False}
+
+    def test_empty_skill_set(self):
+        assert anomaly_flags(self._freqs(), set()) == {"arxiv": False, "github": False}
+
+    def test_any_skill_hits(self):
+        # 技能集中任一命中即标记该源异常
+        flags = anomaly_flags(self._freqs(), {"无关技能", "cs.AI"})
+        assert flags["arxiv"] is True
+
+    def test_both_sources_hit(self):
+        rows = []
+        # 双源各自历史有波动 + 末周暴增（z 显著 > 2）
+        for date, n in [("2026-07-01", 5), ("2026-07-08", 6), ("2026-07-15", 5), ("2026-07-22", 30)]:
+            rows += [_Row("arxiv", {"categories": ["cs.LG"]}, date) for _ in range(n)]
+            rows += [_Row("github", {"language": "Python"}, date) for _ in range(n)]
+        freqs = aggregate_weekly_freqs(rows)
+        flags = anomaly_flags(freqs, {"cs.LG", "Python"})
+        assert flags == {"arxiv": True, "github": True}

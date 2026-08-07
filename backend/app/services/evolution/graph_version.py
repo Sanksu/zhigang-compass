@@ -10,6 +10,7 @@ M4 实现（原 M3 占位）：
 - 90 天保留策略（删除更早版本）
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
@@ -57,7 +58,8 @@ class GraphVersionManager:
         版本号按 CST 当日 `graph_v{YYYYMMDD}`；同日多次执行只保留最新快照，
         保证 T+1 语义（同一天内图谱数据不变，覆盖无副作用）。
         """
-        nodes, edges = self._export_neo4j()
+        # 同步 Neo4j 全量导出放线程池，避免阻塞事件循环（ARQ 心跳超时）
+        nodes, edges = await asyncio.to_thread(self._export_neo4j)
 
         version_id = f"graph_v{datetime.now(_CST):%Y%m%d}"
         summary = change_summary or (
@@ -152,14 +154,26 @@ class GraphVersionManager:
         previous: GraphVersion | None,
         nodes: list[dict],
     ) -> tuple[int, int, int]:
-        """与上一版本快照对比节点增减（set 差集，设计文档 7.1 Diff）。"""
+        """与上一版本快照对比节点增减与变化（set 差集，设计文档 7.1 Diff）。
+
+        Returns:
+            (added, removed, changed)：added 新增节点数、removed 删除节点数、
+            changed 两版本共有且 name/type 发生变化的节点数。
+        """
         if previous is None:
             return len(nodes), 0, 0
-        prev_ids = {n["id"] for n in (previous.snapshot_json or {}).get("nodes", [])}
-        cur_ids = {n["id"] for n in nodes}
+        prev_nodes = {n["id"]: n for n in (previous.snapshot_json or {}).get("nodes", [])}
+        cur_nodes = {n["id"]: n for n in nodes}
+        prev_ids, cur_ids = set(prev_nodes), set(cur_nodes)
         added = len(cur_ids - prev_ids)
         removed = len(prev_ids - cur_ids)
-        changed = len(cur_ids & prev_ids)
+        # node_changed：共有节点中 name/type 不同的数量（旧实现统计共有数，语义错误）
+        changed = sum(
+            1
+            for nid in (cur_ids & prev_ids)
+            if cur_nodes[nid].get("name") != prev_nodes[nid].get("name")
+            or cur_nodes[nid].get("type") != prev_nodes[nid].get("type")
+        )
         return added, removed, changed
 
     def diff_versions(

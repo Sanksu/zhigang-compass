@@ -96,8 +96,9 @@ def aggregate_weekly_freqs(
 def _z_score(series: list[float]) -> float | None:
     """最近一周 vs 历史窗口（不含最近周）的 z 偏离。
 
-    历史 σ 为 0 时：历史均值为 0 返回 None（无历史，不判定）；否则
-    （全相同且非零）按无穷大处理为 2σ 命中（持续同频也超均值）。
+    历史 σ 为 0 时：历史均值为 0 返回 None（无历史基线，不判定）；
+    历史全相同且非零时，完全平稳（recent == mean）返回 0.0，突变更大
+    返回 Z_SIGMA / 更小返回 -Z_SIGMA（无法计算有限 z，按超阈值处理）。
     """
     if len(series) < 2:
         return None
@@ -109,17 +110,25 @@ def _z_score(series: list[float]) -> float | None:
     else:
         stdev = 0.0
     if stdev == 0:
-        return None if mean == 0 else Z_SIGMA  # 命中阈值（持续非零同频）
+        if mean == 0:
+            return None
+        if recent == mean:
+            return 0.0
+        return Z_SIGMA if recent > mean else -Z_SIGMA
     return (recent - mean) / stdev
 
 
 def detect_z_signal(weekly: dict[str, int]) -> tuple[float, bool] | None:
-    """周序列 → (z 偏离, 是否命中 2σ)。不足 2 周返回 None。"""
+    """周序列 → (z 偏离, 是否命中 2σ)。不足 2 周返回 None。
+
+    用 z >= Z_SIGMA 而非 >：历史 σ=0 且突变时 z 取 Z_SIGMA（阈值本身），
+    > 会把该退化分支判为未命中（死分支）。
+    """
     series = [float(weekly[k]) for k in sorted(weekly)]
     z = _z_score(series)
     if z is None:
         return None
-    return z, z > Z_SIGMA
+    return z, z >= Z_SIGMA
 
 
 def _moving_avg(series: list[float], window: int) -> list[float]:
@@ -201,3 +210,23 @@ def promotable_skills(signals: list[WatchSignal], previously_watched: set[str]) 
                 seen.add(sig.skill_name)
                 out.append(sig.skill_name)
     return out
+
+
+def anomaly_flags(
+    freqs: dict[tuple[str, str], dict[str, int]],
+    skill_names: set[str],
+) -> dict[str, bool]:
+    """技能集在学术/社区源上的 2σ 异常标记（设计 §7.2.2 辅助加分特征）。
+
+    对每个技能查 (skill, arxiv)/(skill, github) 周频次 z 偏离是否命中 2σ，
+    任一技能命中即标记该源异常。作为 candidate→emerging 置信度加分输入
+    （arxiv_anomaly/github_anomaly），不参与 candidate 触发门控。
+    """
+    flags = {"arxiv": False, "github": False}
+    for skill in skill_names:
+        for source in flags:
+            weekly = freqs.get((skill, source), {})
+            sig = detect_z_signal(weekly)
+            if sig is not None and sig[1]:
+                flags[source] = True
+    return flags
