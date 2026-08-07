@@ -70,8 +70,15 @@ class TestSAI:
         assert compute_sai([100, 100], []) == 0.0
 
     def test_zero_baseline_median_returns_zero_avoid_div_zero(self):
-        # 同岗位近期技能都是新出现的（age=0）→ 不应除零
-        assert compute_sai([100], [0, 0]) == 0.0
+        # 岗位参考与 JD 技能首见时长均为 0（数据不足）→ 不除零，返回 0 不武断判定
+        assert compute_sai([0, 0], [0, 0]) == 0.0
+
+    def test_zero_baseline_jd_older_flagged_obsolete(self):
+        # 岗位近 90 天参考技能全为新技能（median=0），JD 技能中位数 100 天
+        # → 技能相对岗位明显更旧，视为过时（越 obsolete 阈值，而非"新鲜"）
+        sai = compute_sai([100], [0, 0])
+        assert sai > SAI_OBSOLETE_THRESHOLD
+        assert classify_sai(sai).label == "content_obsolete"
 
 
 class TestClassifySAI:

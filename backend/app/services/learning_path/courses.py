@@ -10,6 +10,7 @@ course_raw.snapshot["quality"]（DA-M4-01 课程质量评估产物）→ 按质�
 sim_threshold 找图谱中有课程的相近技能，返回其课程。
 """
 
+import asyncio
 import re
 import threading
 import time
@@ -122,8 +123,8 @@ def _semantic_match_skill(
     return best_name if best_sim > sim_threshold else None
 
 
-async def _query_courses(skill_id: str, skill_name: str) -> list[dict]:
-    """图谱精确查询技能课程（skill_id 优先，name 兜底）。"""
+def _query_courses_sync(skill_id: str, skill_name: str) -> list[dict]:
+    """图谱精确查询技能课程（skill_id 优先，name 兜底）。同步 Neo4j，由线程池调用。"""
     with neo4j_driver.session() as session:
         return [
             dict(rec)
@@ -139,6 +140,11 @@ async def _query_courses(skill_id: str, skill_name: str) -> list[dict]:
                 skill_name=skill_name,
             )
         ]
+
+
+async def _query_courses(skill_id: str, skill_name: str) -> list[dict]:
+    """图谱精确查询技能课程（Neo4j 同步调用放线程池，避免阻塞事件循环）。"""
+    return await asyncio.to_thread(_query_courses_sync, skill_id, skill_name)
 
 
 async def load_courses_for_skill(
@@ -161,7 +167,8 @@ async def load_courses_for_skill(
     rows = await _query_courses(skill_id, skill_name)
     if not rows and semantic is not None:
         threshold = _COURSE_MATCH_THRESHOLD if sim_threshold is None else sim_threshold
-        matched = _semantic_match_skill(skill_name, semantic, threshold)
+        # 语义 fallback 含同步 Neo4j 全图扫描与 SBERT 计算，放线程池避免阻塞事件循环
+        matched = await asyncio.to_thread(_semantic_match_skill, skill_name, semantic, threshold)
         if matched:
             rows = await _query_courses("", matched)
     if not rows:

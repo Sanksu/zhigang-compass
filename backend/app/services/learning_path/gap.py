@@ -1,7 +1,8 @@
 """差距分析（AL-M4-03，设计文档 §9.5 三态）。
 
 missing：候选人不包含该技能；weak：包含但熟练度不达标；matched：匹配成功。
-排序口径：gap_type（missing > weak > matched）内按 skill_weight DESC。
+排序口径（设计文档 §9.5 原文「按 skill_weight DESC, gap_type (missing > weak) 排序」）：
+skill_weight DESC 优先，权重相同再按 gap_type（missing > weak > matched）。
 熟练度判定复用匹配引擎 `_skill_similarity` 的同义匹配口径，保证匹配与差距分析一致。
 """
 
@@ -63,7 +64,7 @@ def analyze_gaps(candidate, position, semantic=None, sim_threshold: float | None
         sim_threshold: 语义命中阈值，None 时从 configs/match_weights.json 读取
 
     Returns:
-        差距列表，按 (missing > weak > matched, weight DESC) 排序。
+        差距列表，按 (weight DESC, missing > weak > matched) 排序。
     """
     gaps: list[GapSkill] = []
     for req in [*position.must_skills, *position.nice_skills]:
@@ -99,5 +100,6 @@ def analyze_gaps(candidate, position, semantic=None, sim_threshold: float | None
         )
 
     order = {GapType.MISSING: 0, GapType.WEAK: 1, GapType.MATCHED: 2}
-    gaps.sort(key=lambda g: (order[g.gap_type], -g.weight))
+    # 设计文档 §9.5：weight DESC 优先，再按 gap_type（missing > weak > matched）
+    gaps.sort(key=lambda g: (-g.weight, order[g.gap_type]))
     return gaps

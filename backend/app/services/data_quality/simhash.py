@@ -67,18 +67,49 @@ def find_similar_pairs(
     records: list[tuple[str, int]],
     threshold: int = DEFAULT_HAMMING_THRESHOLD,
 ) -> list[tuple[str, str]]:
-    """批量查找近似重复对。
+    """批量查找近似重复对（分桶索引，避免全量 O(n²) 两两比较）。
+
+    抽屉原理：64-bit 指纹分 4 块（各 16 bit），汉明距 ≤ threshold(3) 的两指纹
+    必然在至少一个 16-bit 块上完全相同（若每块都不同则 ≥ 4 位不同）。
+    故按 (块号, 块值) 分桶，仅比较同桶内的候选对；记录量级为万级时
+    比较量从 O(n²) 降为近 O(n·k)。
 
     Args:
         records: [(record_id, simhash), ...]
-        threshold: 汉明距阈值
+        threshold: 汉明距阈值（>16 时抽屉原理不成立，退化为全量比较）
 
     Returns:
         近似重复记录 ID 对列表 [(id_a, id_b)]（a < b 顺序）
     """
-    pairs: list[tuple[str, str]] = []
-    for i in range(len(records)):
-        for j in range(i + 1, len(records)):
-            if hamming_distance(records[i][1], records[j][1]) <= threshold:
-                pairs.append((records[i][0], records[j][0]))
+    if len(records) < 2:
+        return []
+
+    block_bits = _BITS // 4
+    if threshold >= block_bits:
+        # 阈值 ≥ 块宽时无法保证某块完全相同，退回全量比较
+        pairs: list[tuple[str, str]] = []
+        for i in range(len(records)):
+            for j in range(i + 1, len(records)):
+                if hamming_distance(records[i][1], records[j][1]) <= threshold:
+                    pairs.append((records[i][0], records[j][0]))
+        return pairs
+
+    buckets: dict[tuple[int, int], list[int]] = {}
+    for idx, (_, fp) in enumerate(records):
+        for b in range(4):
+            block = (fp >> (b * block_bits)) & ((1 << block_bits) - 1)
+            buckets.setdefault((b, block), []).append(idx)
+
+    pairs = []
+    seen: set[tuple[int, int]] = set()
+    for indices in buckets.values():
+        for i in range(len(indices)):
+            for j in range(i + 1, len(indices)):
+                a, b = indices[i], indices[j]
+                key = (a, b) if a < b else (b, a)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if hamming_distance(records[a][1], records[b][1]) <= threshold:
+                    pairs.append((records[a][0], records[b][0]))
     return pairs
