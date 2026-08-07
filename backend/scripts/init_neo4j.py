@@ -34,10 +34,11 @@ def _parse_statements(text: str) -> list[str]:
     return stmts
 
 
-def run():
+def run() -> int:
+    """执行 schema 初始化，返回退出码（0=全部成功，1=存在失败语句）。"""
     if not SCHEMA_PATH.exists():
         print(f"✗ schema.cypher 未找到: {SCHEMA_PATH}")
-        sys.exit(1)
+        return 1
 
     cypher_text = SCHEMA_PATH.read_text(encoding="utf-8")
     statements = _parse_statements(cypher_text)
@@ -73,6 +74,9 @@ def run():
     finally:
         driver.close()
 
+    # 存在失败语句返回非 0：部署脚本/CI 可据此判定初始化失败
+    return 1 if errors else 0
+
 
 if __name__ == "__main__":
-    run()
+    sys.exit(run())
