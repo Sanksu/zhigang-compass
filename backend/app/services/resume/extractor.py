@@ -18,7 +18,14 @@ from app.services.resume.schemas import ResumeExtractionResult, ResumeSkill
 
 # 学历关键词按从高到低排列，规则兜底时取首个命中（即最高学历）
 _EDUCATION_LEVELS = ("博士", "硕士", "本科", "大专")
-_YEARS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*年")
+
+# 年限抽取分两级（顺序重要）：
+# 1. _EXPERIENCE_RE：优先匹配「经验 N 年」上下文，避免「2018年入职，5年经验」把年份当年限；
+# 2. _YEARS_RE：兜底匹配「N 年」，但用负向前瞻排除 1900-2099 的年份数字（如「2018年-2022年」）。
+_EXPERIENCE_RE = re.compile(
+    r"经验[^\d年]{0,4}(\d+(?:\.\d+)?)\s*年|(\d+(?:\.\d+)?)\s*年[^\d]{0,4}经验"
+)
+_YEARS_RE = re.compile(r"(?<!\d)(?!19\d{2}|20\d{2})(\d+(?:\.\d+)?)\s*年")
 
 
 class ResumeExtractor:
@@ -135,9 +142,12 @@ class ResumeExtractor:
         )
 
         total_years = 0.0
-        m = _YEARS_RE.search(resume_text)
+        m = _EXPERIENCE_RE.search(resume_text)
+        if not m:
+            m = _YEARS_RE.search(resume_text)
         if m:
-            total_years = float(m.group(1))
+            # 两个捕获组分别对应「经验 N 年」与「N 年经验」两种写法
+            total_years = float(m.group(1) or m.group(2))
 
         return ResumeExtractionResult(
             skills=found,

@@ -57,6 +57,16 @@ class TestMaskPii:
         assert mapping["[PHONE]"] == "13800138000"
         assert mapping["[EMAIL]"] == "a@b.com"
 
+    def test_multiple_values_get_unique_placeholders(self):
+        """同一类型多处命中：首个保留无序号占位符，后续带序号，映射记录全部原值。"""
+        masked, mapping = mask_pii("电话 13800138000 和 13900139000，邮箱 a@b.com 与 c@d.com")
+        assert "[PHONE]" in masked and "[PHONE_2]" in masked
+        assert "[EMAIL]" in masked and "[EMAIL_2]" in masked
+        assert mapping["[PHONE]"] == "13800138000"
+        assert mapping["[PHONE_2]"] == "13900139000"
+        assert mapping["[EMAIL]"] == "a@b.com"
+        assert mapping["[EMAIL_2]"] == "c@d.com"
+
     def test_no_pii_unchanged(self):
         masked, mapping = mask_pii("无敏感信息的纯技术文本")
         assert masked == "无敏感信息的纯技术文本"
@@ -103,4 +113,20 @@ class TestRestorePii:
             "name": "张三",
             "phone": "13800138000",
             "email": "zhangsan@example.com",
+        }
+
+    def test_mask_restore_multiple_values(self):
+        """多个同类型原值：每个占位符回填各自原值，不再全部回填为首个值。"""
+        text = "姓名：张三，联系人：李四，电话 13800138000 和 13900139000"
+        masked, mapping = mask_pii(text)
+        extracted = {
+            "name": "[NAME]",
+            "contact": "[NAME_2]",
+            "phones": ["[PHONE]", "[PHONE_2]"],
+        }
+        restored = restore_pii(extracted, mapping)
+        assert restored == {
+            "name": "张三",
+            "contact": "李四",
+            "phones": ["13800138000", "13900139000"],
         }
