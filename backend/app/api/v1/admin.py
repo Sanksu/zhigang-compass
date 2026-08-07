@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_permission
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, redis_client
 from app.core.security import hash_password
 from app.models.business import AuditLog, RejectedChange, TaskStatus, User
 from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
@@ -1007,7 +1007,7 @@ def _edit_position_tx(tx, position_name, editor_id, skills, core_duties, scenari
 
     diff_summary = position_edit_diff(current, skills, core_duties, scenarios)
     if not diff_summary:
-        return {"exists": True, "updated": False, "diff_summary": ""}
+        return {"exists": True, "updated": False, "diff_summary": "", "id": current["id"]}
 
     now = datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
     if skills is not None:
@@ -1109,6 +1109,9 @@ async def update_position_definition(
         )
     if not result["exists"]:
         return error(4040, f"岗位不存在: {position_name}", http_status=404)
+    # 编辑已生效：失效岗位详情缓存（graph:position:{id}），避免用户读到 5min 旧数据
+    if result["id"]:
+        await redis_client.delete(f"graph:position:{result['id']}")
     return ok(
         data={
             "position_name": position_name,

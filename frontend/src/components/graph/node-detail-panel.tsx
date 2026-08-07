@@ -436,7 +436,7 @@ export function NodeDetailPanel({
               </section>
             )}
 
-            {/* 证据来源（真实 GET /graph/skill/{id}/evidence，Skill-MENTIONED_IN->Evidence） */}
+            {/* 证据来源（真实 GET /graph/skill/{id}/evidence，Skill-EVIDENCED_BY->Evidence） */}
             {skillEvidence && skillEvidence.length > 0 && (
               <section className="space-y-2">
                 <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted uppercase tracking-wide">
