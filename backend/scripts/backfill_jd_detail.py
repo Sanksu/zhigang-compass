@@ -17,8 +17,10 @@ requirements 为空，raw_text 仅为元数据摘要（平均 117 字），LLM �
 
 import argparse
 import asyncio
+import logging
 import random
 import sys
+import time
 from pathlib import Path
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -38,6 +40,11 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 # 平台限速间隔（对齐 crawlers.settings.RATE_LIMIT：zhilian 8-15s）
 _DELAY_RANGE = (8, 15)
 _DETAIL_TIMEOUT = 20
+# 每 N 条打印一行进度（百分比 + 已用/预计剩余，日志友好无控制字符）
+_PROGRESS_EVERY = 20
+
+# 抑制 SQLAlchemy echo（settings.debug 开启时全量打印 SQL，会淹没进度日志）
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 
 async def _pending_rows(limit: int) -> list[tuple[int, str, str, dict]]:
@@ -87,6 +94,7 @@ async def backfill_zhilian(limit: int, dry_run: bool, keep_extraction: bool) -> 
 
     updated = 0
     failed: list[dict] = []
+    _started = time.monotonic()
     async with httpx.AsyncClient(
         timeout=_DETAIL_TIMEOUT, follow_redirects=True
     ) as client:
@@ -119,6 +127,16 @@ async def backfill_zhilian(limit: int, dry_run: bool, keep_extraction: bool) -> 
                 f"[{idx}/{len(rows)}] id={row_id} 回填成功 "
                 f"(desc={len(detail['description'])} req={len(detail['requirements'])})"
             )
+
+            # 周期进度：百分比 + 已用/预计剩余时间（便于日志文件实时查看）
+            if idx % _PROGRESS_EVERY == 0 or idx == len(rows):
+                elapsed = time.monotonic() - _started
+                eta = elapsed / idx * (len(rows) - idx)
+                print(
+                    f"[进度 {idx}/{len(rows)} {idx / len(rows):.1%} | "
+                    f"已用 {elapsed / 60:.1f}min | 预计剩余 {eta / 60:.0f}min "
+                    f"| 成功 {updated} 失败 {len(failed)}]"
+                )
 
             await asyncio.sleep(random.uniform(*_DELAY_RANGE))
 
