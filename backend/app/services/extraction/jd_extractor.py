@@ -9,15 +9,17 @@ LLM 调用走 LLMProviderChain（M3 参考实现）；未配置 api_key 时抛
 LLMConfigurationError（LLMExtractionError 子类），降级规则抽取兜底。
 """
 
-import json
-import re
 from typing import Optional
 
 from app.services.extraction.schemas import (
     JDExtractionBatch,
     JDExtractionResult,
 )
-from app.services.extraction.llm_provider import LLMProviderChain, LLMExtractionError
+from app.services.extraction.llm_provider import (
+    LLMConfigurationError,
+    LLMExtractionError,
+    LLMProviderChain,
+)
 from app.services.extraction.prompts import (
     BATCH_TASK_TEMPLATE,
     FEW_SHOT_EXAMPLES,
@@ -31,7 +33,12 @@ class JDExtractor:
     """JD 实体抽取器。"""
 
     def __init__(self, llm: Optional[LLMProviderChain] = None):
-        self._llm = llm or LLMProviderChain()
+        try:
+            self._llm = llm or LLMProviderChain()
+        except LLMConfigurationError:
+            # LLM 未配置（configs/llm_providers.yaml 缺失）：与调用期 LLM 失败同语义，
+            # 降级纯规则抽取（见类 docstring「LLM 不可用时规则抽取兜底」）
+            self._llm = None
 
     def extract(self, jd_text: str) -> JDExtractionResult:
         """从 JD 文本中抽取结构化实体。
@@ -41,16 +48,19 @@ class JDExtractor:
         if not jd_text or len(jd_text.strip()) < 10:
             return JDExtractionResult(position_name="")
 
-        # LLM 抽取（无 api_key / 全 provider 失败时降级规则抽取）
-        try:
-            prompt = TASK_TEMPLATE.format(jd_text=jd_text)
-            # 分层 Prompt：system 角色（SYSTEM_PROMPT）+ Few-Shot + 任务输入（§6.2）
-            system_prompt = SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES
-            result = self._llm.extract_structured(
-                prompt, JDExtractionResult, system_prompt=system_prompt
-            )
-        except LLMExtractionError:
+        if self._llm is None:
             result = self._rule_based_extract(jd_text)
+        else:
+            # LLM 抽取（无 api_key / 全 provider 失败时降级规则抽取）
+            try:
+                prompt = TASK_TEMPLATE.format(jd_text=jd_text)
+                # 分层 Prompt：system 角色（SYSTEM_PROMPT）+ Few-Shot + 任务输入（§6.2）
+                system_prompt = SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES
+                result = self._llm.extract_structured(
+                    prompt, JDExtractionResult, system_prompt=system_prompt
+                )
+            except LLMExtractionError:
+                result = self._rule_based_extract(jd_text)
 
         return post_process(result)
 
@@ -82,6 +92,10 @@ class JDExtractor:
         """
         if not jd_texts:
             return []
+
+        # LLM 未配置时直接逐条规则抽取（与 extract 单条降级口径一致）
+        if self._llm is None:
+            return [self.extract(text) for text in jd_texts]
 
         chunks = list(self._chunk_texts(jd_texts, batch_size, max_batch_chars))
         if concurrency <= 1:
