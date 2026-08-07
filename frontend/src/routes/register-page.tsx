@@ -1,177 +1,124 @@
-import { useState } from 'react'
-import { PageHeader } from '@/components/layout/page-header'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router'
+import { CompassMark } from '@/components/layout/compass-mark'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-} from '@/components/ui/table'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiPost, ApiError } from '@/lib/api'
 
-/* ── 页面 ── */
-
-interface RegisteredUser {
+interface RegisterResult {
   id: string
   username: string
   role: string
-  createdAt: string
 }
 
+/**
+ * 注册页 — 与登录页同款布局（设计文档 §10.2）
+ * 调用 /auth/register（默认 guest 角色），注册成功后跳转登录页
+ */
 export function RegisterPage() {
+  const navigate = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const [success, setSuccess] = useState<string | null>(null)
-  // 本会话注册成功的账户（初始为空，来自真实 /auth/register 返回）
-  const [recentUsers, setRecentUsers] = useState<RegisteredUser[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  function validate(): boolean {
-    const next: Record<string, string> = {}
-    if (!username.trim()) next.username = '请输入用户名'
-    if (!password) next.password = '请输入密码'
-    else if (password.length < 6) next.password = '密码至少 6 位'
-    if (!confirmPassword) next.confirmPassword = '请确认密码'
-    else if (password !== confirmPassword) next.confirmPassword = '两次密码不一致'
-    setErrors(next)
-    return Object.keys(next).length === 0
-  }
-
-  async function handleCreate() {
-    setSuccess(null)
-    if (!validate()) return
-
-    console.log('[register] 开始提交注册:', { username: username.trim() })
-    setCreating(true)
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    if (password.length < 6) {
+      setError('密码至少 6 位')
+      return
+    }
+    if (password !== confirmPassword) {
+      setError('两次输入的密码不一致')
+      return
+    }
+    setLoading(true)
     try {
-      const res = await apiPost<{ id: string; username: string; role: string }>('/auth/register', {
+      await apiPost<RegisterResult>('/auth/register', {
         username: username.trim(),
         password,
       })
-      console.log('[register] 注册成功:', { id: res.id, username: res.username, role: res.role })
-      setRecentUsers((prev) => [
-        {
-          id: res.id,
-          username: res.username,
-          role: res.role,
-          createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
-        },
-        ...prev,
-      ])
-      setSuccess(`账户 ${res.username} 注册成功`)
-      setUsername('')
-      setPassword('')
-      setConfirmPassword('')
-      setErrors({})
-    } catch (e) {
-      console.error('[register] 注册失败:', e)
-      setErrors({ username: e instanceof ApiError ? e.message : '注册失败，请稍后重试' })
+      navigate('/login', { replace: true })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '注册失败，请稍后重试')
     } finally {
-      setCreating(false)
+      setLoading(false)
     }
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader title="注册" description="创建新账户，注册成功后可直接登录" />
-
-      {/* 注册表单 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>注册新账户</CardTitle>
-          <CardDescription>填写账户信息后点击注册</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3">
-            <Label htmlFor="reg-username">用户名 *</Label>
-            <Input
-              id="reg-username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="输入用户名"
-            />
-            {errors.username && <p className="text-sm text-state-archived">{errors.username}</p>}
+    <div className="flex min-h-screen items-center justify-center bg-subtle px-4">
+      <div className="w-full max-w-sm space-y-6">
+        <div className="flex flex-col items-center gap-3">
+          <CompassMark size="lg" className="text-ink" />
+          <div className="text-center">
+            <h1 className="text-xl font-semibold tracking-tight">智岗罗盘</h1>
+            <p className="text-sm text-ink-muted">多源异构驱动的岗位能力动态演化系统</p>
           </div>
+        </div>
 
-          <div className="grid gap-3">
-            <Label htmlFor="reg-password">密码 *</Label>
-            <Input
-              id="reg-password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="至少 6 位"
-            />
-            {errors.password && <p className="text-sm text-state-archived">{errors.password}</p>}
-          </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>注册</CardTitle>
+            <CardDescription>创建新账户（默认访客权限）</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="username">用户名</Label>
+                <Input
+                  id="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="请输入用户名（至少 3 字符）"
+                  required
+                  autoComplete="username"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">密码</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="请输入密码（至少 6 位）"
+                  required
+                  autoComplete="new-password"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">确认密码</Label>
+                <Input
+                  id="confirmPassword"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="请再次输入密码"
+                  required
+                  autoComplete="new-password"
+                />
+              </div>
+              {error && (
+                <p className="text-sm text-state-archived" role="alert">
+                  {error}
+                </p>
+              )}
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? '注册中…' : '注册'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
 
-          <div className="grid gap-3">
-            <Label htmlFor="reg-confirm">确认密码 *</Label>
-            <Input
-              id="reg-confirm"
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="再次输入密码"
-            />
-            {errors.confirmPassword && (
-              <p className="text-sm text-state-archived">{errors.confirmPassword}</p>
-            )}
-          </div>
-
-          {success && (
-            <div className="rounded-md border border-state-candidate/20 bg-state-candidate/5 px-4 py-3 text-sm text-state-candidate">
-              {success}
-            </div>
-          )}
-
-          <Button onClick={handleCreate} disabled={creating}>
-            {creating ? '注册中…' : '注册'}
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* 本会话注册的账户列表 */}
-      <Card>
-        <CardHeader>
-          <CardTitle>最近注册的账户</CardTitle>
-          <CardDescription>本次会话中注册成功的账户</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {recentUsers.length === 0 ? (
-            <p className="py-8 text-center text-sm text-ink-faint">暂无注册记录</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>用户名</TableHead>
-                  <TableHead>角色</TableHead>
-                  <TableHead>注册时间</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentUsers.map((u) => (
-                  <TableRow key={u.id}>
-                    <TableCell className="font-medium text-ink">{u.username}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{u.role}</Badge>
-                    </TableCell>
-                    <TableCell className="text-ink-secondary">{u.createdAt}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+        <p className="text-center text-xs text-ink-faint">
+          已有账户？<a href="/login" className="underline hover:text-ink">返回登录</a>
+        </p>
+      </div>
     </div>
   )
 }

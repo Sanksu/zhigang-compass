@@ -109,7 +109,8 @@ export function LoginPage() {
         </Card>
 
         <p className="text-center text-xs text-ink-faint">
-          访客可直接浏览 <a href="/graph" className="underline hover:text-ink">能力图谱</a>
+          访客可直接浏览 <a href="/graph" className="underline hover:text-ink">能力图谱</a> · 还没有账户？{' '}
+          <a href="/register" className="underline hover:text-ink">立即注册</a>
         </p>
       </div>
     </div>
