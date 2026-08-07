@@ -145,8 +145,8 @@ export function GraphPage() {
 
   // 视图切换 → 真实后端过滤（GET /graph/view/{view_type}），初始 panorama 同样走后端视图端点。
   // 切换视图不清 loading，数据到达后原子替换，避免闪屏。
+  // 展开状态在 Tabs 事件回调中同步清空（effect 内 setState 会触发 cascading renders）
   useEffect(() => {
-    setExpandedPositions(new Set())
     let cancelled = false
     apiGet<PanoramaData>(`/graph/view/${view}?limit=200`)
       .then((res) => {
@@ -406,7 +406,14 @@ export function GraphPage() {
       )}
 
       {/* 视图切换 tabs */}
-      <Tabs value={view} onValueChange={(v) => setView(v as GraphViewType)}>
+      <Tabs
+        value={view}
+        onValueChange={(v) => {
+          // 视图切换：同步清空展开的岗位（新视图技能集不同），再切换数据
+          setExpandedPositions(new Set())
+          setView(v as GraphViewType)
+        }}
+      >
         <div className="flex items-center justify-between gap-4 mb-3">
           <TabsList>
             {(Object.keys(VIEW_LABEL) as GraphViewType[]).map((v) => (

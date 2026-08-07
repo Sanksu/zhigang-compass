@@ -357,7 +357,7 @@ export function Graph2D({ data, selectedId, expandedPositions, onSelectNode, onT
     }
 
     // 默认 merge（不 replaceMerge）：ECharts 按 name diff 保留已有节点坐标，
-    // 展开/收起时仅新增/移除技能节点，已有岗位节点位置不动（避免 force 全量重排抖动）
+    // 展开/收起时仅新增/移除技能节点，已有节点位置不被重置
     chart.setOption(option)
   }, [data, themeVersion, expandedPositions])
 
