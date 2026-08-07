@@ -12,6 +12,8 @@
 """
 
 import asyncio
+import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -19,11 +21,33 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+# 环境变量须在第三方库导入前设置（HF 未登录告警 / telemetry）
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
 from app.workers.tasks import aggregate_positions, batch_extract
+import app.core.database  # 显式触发 create_async_engine(echo=settings.debug)（tasks 内为惰性导入）
+
+# ── 噪音抑制（须在引擎创建之后）──
+# echo 会为 sqlalchemy.engine.Engine 追加 StreamHandler 并绕过 logger 级别检查直接驱动输出，
+# 须移除 handler 而非仅 setLevel（诊断验证）；HF/Neo4j 走标准 logger，setLevel 即可。
+def _quiet_logger(name: str) -> None:
+    lg = logging.getLogger(name)
+    lg.setLevel(logging.WARNING)
+    for h in list(lg.handlers):
+        lg.removeHandler(h)
+
+
+_quiet_logger("sqlalchemy.engine")
+_quiet_logger("sqlalchemy.engine.Engine")
+logging.getLogger("neo4j").setLevel(logging.ERROR)
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
 # 每批条数（tasks.py 注释：批量过大易触发 provider 限流，100 条/批实测稳定）
 _BATCH_SIZE = 100
-_MAX_ROUNDS = 15
+# 轮次安全上限（防异常死循环；全库 no_ext ~2335 条需 24 轮，留足余量）
+_MAX_ROUNDS = 60
 # 等待回填结束：日志出现"完成："且文件大小连续两次采样不变
 _BACKFILL_LOG = _BACKEND_DIR / "logs" / "backfill.log"
 _WAIT_TIMEOUT_SECONDS = 6 * 3600
@@ -56,17 +80,51 @@ async def wait_backfill() -> None:
     print(f"[wait] 等待回填完成超时（{_WAIT_TIMEOUT_SECONDS}s），继续重抽")
 
 
+def _progress_bar(done: int, total: int, width: int = 30) -> str:
+    """文本进度条（日志友好，无控制字符）。"""
+    ratio = min(done / total, 1.0) if total else 1.0
+    filled = int(ratio * width)
+    return f"[{'#' * filled}{'-' * (width - filled)}] {ratio:.0%}"
+
+
+async def _count_no_ext() -> int:
+    """当前未抽取记录数（与 batch_extract 判定一致：snapshot 无 extraction 键）。"""
+    from sqlalchemy import func, select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import JDRaw
+
+    async with async_session_factory() as session:
+        return (
+            await session.scalar(
+                select(func.count())
+                .select_from(JDRaw)
+                .where(JDRaw.snapshot["extraction"].astext.is_(None))
+            )
+        ) or 0
+
+
 async def reingest() -> dict:
     """重抽：循环批量抽取（覆盖回填清除标记的记录）+ 岗位重聚合。"""
     rounds = 0
     succeeded = 0
+    remaining = await _count_no_ext()
+    total = remaining
+    total_rounds = max(1, (total + _BATCH_SIZE - 1) // _BATCH_SIZE)
+    started = time.monotonic()
+    print(f"[reingest] 待抽取 {total} 条，预计 {total_rounds} 轮")
     while rounds < _MAX_ROUNDS:
         rounds += 1
         r = await batch_extract({}, limit=_BATCH_SIZE)
         succeeded += r["succeeded"]
+        remaining = await _count_no_ext()
+        elapsed = time.monotonic() - started
+        eta_min = elapsed / rounds * (total_rounds - rounds) / 60 if rounds else 0
         print(
-            f"[reingest round {rounds}] processed={r['processed']} "
-            f"succeeded={r['succeeded']} failed={len(r['failed'])}"
+            f"[reingest round {rounds}/{total_rounds}] {_progress_bar(rounds, total_rounds)} | "
+            f"已抽 {succeeded} 条 | 剩余 {remaining} 条 | "
+            f"本轮 成功 {r['succeeded']} 失败 {len(r['failed'])} | "
+            f"用时 {elapsed / 60:.1f}min 预计剩余 {eta_min:.1f}min"
         )
         if r["processed"] == 0:
             break
