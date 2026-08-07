@@ -72,6 +72,41 @@ class TestNormalizeSkill:
         assert normalize_skill("自然语言处理算法") == "自然语言处理"
 
 
+class TestP1AliasExpansion:
+    """P1-1：高频同义变体归一化到白名单标准词（评估报告 3.4 别名缺失）。"""
+
+    def test_frontend_aliases(self):
+        assert normalize_skill("Vue3") == "Vue.js"
+        assert normalize_skill("vue2") == "Vue.js"
+        assert normalize_skill("ReactJS") == "React"
+        assert normalize_skill("ES6") == "JavaScript"
+        assert normalize_skill("Element Plus") == "ElementUI"
+        assert normalize_skill("uniapp") == "uni-app"
+        assert normalize_skill("微信小程序") == "小程序"
+
+    def test_backend_aliases(self):
+        assert normalize_skill("SpringMVC") == "Spring MVC"
+        assert normalize_skill("MyBatis-Plus") == "MyBatis"
+        assert normalize_skill("REST API") == "RESTful API"
+        assert normalize_skill("restful") == "RESTful API"
+        assert normalize_skill("MQ") == "消息队列"
+        assert normalize_skill("SQL优化") == "SQL"
+        assert normalize_skill("微服务架构") == "微服务"
+
+    def test_ai_aliases(self):
+        assert normalize_skill("NLP") == "自然语言处理"
+        assert normalize_skill("Prompt Engineering") == "提示工程"
+        assert normalize_skill("prompt工程") == "提示工程"
+        assert normalize_skill("AI Agent") == "Agentic AI"
+        assert normalize_skill("SFT") == "模型微调"
+
+    def test_other_aliases(self):
+        assert normalize_skill("沟通协作") == "沟通能力"
+        assert normalize_skill("敏捷") == "敏捷开发"
+        assert normalize_skill("大屏可视化") == "数据可视化"
+        assert normalize_skill("ROS2") == "ROS"
+
+
 class TestNormalizePositionName:
     def test_synonym_merge(self):
         assert normalize_position_name("前端开发") == "前端开发工程师"

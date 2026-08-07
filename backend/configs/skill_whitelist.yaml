@@ -47,8 +47,8 @@ skills:
   - {name: "汇编", category: "编程语言"}
   - {name: "COBOL", category: "编程语言"}
   - {name: "Fortran", category: "编程语言"}
-  - {name: "Verilog", category: "编程语言"}
-  - {name: "VHDL", category: "编程语言"}
+  - {name: "Verilog", category: "硬件/芯片"}
+  - {name: "VHDL", category: "硬件/芯片"}
 
   # ---- 前端 ----
   - {name: "React", category: "前端"}
@@ -110,13 +110,13 @@ skills:
   - {name: "Express.js", category: "后端"}
   - {name: "Node.js", category: "后端"}
   - {name: "ASP.NET", category: "后端"}
-  - {name: "Microservices", category: "后端"}
+  - {name: "Microservices", category: "计算机基础"}
   - {name: "MyBatis", category: "后端"}
   - {name: "Scrapy", category: "后端"}
-  - {name: "RESTful API", category: "后端"}
-  - {name: "REST", category: "后端"}
-  - {name: "JSON", category: "后端"}
-  - {name: "API", category: "后端"}
+  - {name: "RESTful API", category: "网络/协议"}
+  - {name: "REST", category: "网络/协议"}
+  - {name: "JSON", category: "网络/协议"}
+  - {name: "API", category: "网络/协议"}
   - {name: "J2EE", category: "后端"}
   - {name: "JPA", category: "后端"}
   - {name: "Hibernate", category: "后端"}
@@ -131,11 +131,11 @@ skills:
   - {name: "WebSocket", category: "后端"}
   - {name: "SOAP", category: "后端"}
   - {name: "Web Services", category: "后端"}
-  - {name: "高并发", category: "后端"}
-  - {name: "分布式", category: "后端"}
-  - {name: "微服务", category: "后端"}
-  - {name: "消息队列", category: "后端"}
-  - {name: "RabbitMQ", category: "后端"}
+  - {name: "高并发", category: "计算机基础"}
+  - {name: "分布式", category: "计算机基础"}
+  - {name: "微服务", category: "计算机基础"}
+  - {name: "消息队列", category: "消息/中间件"}
+  - {name: "RabbitMQ", category: "消息/中间件"}
   - {name: "搜索引擎", category: "后端"}
   - {name: "分布式计算", category: "后端"}
   - {name: "事件驱动", category: "后端"}
@@ -156,8 +156,8 @@ skills:
   - {name: "MariaDB", category: "数据库"}
   - {name: "DB2", category: "数据库"}
   - {name: "关系型数据库", category: "数据库"}
-  - {name: "数据仓库", category: "数据库"}
-  - {name: "数据湖", category: "数据库"}
+  - {name: "数据仓库", category: "大数据"}
+  - {name: "数据湖", category: "大数据"}
   - {name: "InfluxDB", category: "数据库"}
   - {name: "时序数据库", category: "数据库"}
   - {name: "向量数据库", category: "数据库"}
@@ -173,7 +173,7 @@ skills:
   - {name: "Hadoop", category: "大数据"}
   - {name: "Apache Spark", category: "大数据"}
   - {name: "Apache Flink", category: "大数据"}
-  - {name: "Apache Kafka", category: "大数据"}
+  - {name: "Apache Kafka", category: "消息/中间件"}
   - {name: "Hive", category: "大数据"}
   - {name: "HBase", category: "大数据"}
   - {name: "Airflow", category: "大数据"}
@@ -225,10 +225,10 @@ skills:
   - {name: "OpenTelemetry", category: "云原生/DevOps"}
   - {name: "Helm", category: "云原生/DevOps"}
   - {name: "GitOps", category: "云原生/DevOps"}
-  - {name: "负载均衡", category: "云原生/DevOps"}
-  - {name: "反向代理", category: "云原生/DevOps"}
-  - {name: "CDN", category: "云原生/DevOps"}
-  - {name: "DNS", category: "云原生/DevOps"}
+  - {name: "负载均衡", category: "网络/协议"}
+  - {name: "反向代理", category: "网络/协议"}
+  - {name: "CDN", category: "网络/协议"}
+  - {name: "DNS", category: "网络/协议"}
   - {name: "监控告警", category: "云原生/DevOps"}
   - {name: "日志分析", category: "云原生/DevOps"}
   - {name: "Kibana", category: "云原生/DevOps"}
@@ -236,7 +236,7 @@ skills:
   - {name: "服务器运维", category: "云原生/DevOps"}
   - {name: "网络工程", category: "云原生/DevOps"}
   - {name: "网络自动化", category: "云原生/DevOps"}
-  - {name: "TCP/IP", category: "云原生/DevOps"}
+  - {name: "TCP/IP", category: "网络/协议"}
   - {name: "阿里云", category: "云原生/DevOps"}
   - {name: "腾讯云", category: "云原生/DevOps"}
   - {name: "华为云", category: "云原生/DevOps"}
@@ -251,7 +251,7 @@ skills:
   - {name: "深度学习", category: "AI/机器学习"}
   - {name: "自然语言处理", category: "AI/机器学习"}
   - {name: "计算机视觉", category: "AI/机器学习"}
-  - {name: "数据分析", category: "AI/机器学习"}
+  - {name: "数据分析", category: "数据分析/商业"}
   - {name: "OpenAI API", category: "AI/机器学习"}
   - {name: "LangChain", category: "AI/机器学习"}
   - {name: "LlamaIndex", category: "AI/机器学习"}
@@ -269,11 +269,11 @@ skills:
   - {name: "具身智能", category: "AI/机器学习"}
   - {name: "机器人", category: "AI/机器学习"}
   - {name: "OpenCV", category: "AI/机器学习"}
-  - {name: "嵌入式开发", category: "AI/机器学习"}
-  - {name: "自动化测试", category: "AI/机器学习"}
-  - {name: "多线程", category: "AI/机器学习"}
-  - {name: "三维开发", category: "AI/机器学习"}
-  - {name: "GIS开发", category: "AI/机器学习"}
+  - {name: "嵌入式开发", category: "硬件/芯片"}
+  - {name: "自动化测试", category: "测试"}
+  - {name: "多线程", category: "计算机基础"}
+  - {name: "三维开发", category: "游戏/数字孪生"}
+  - {name: "GIS开发", category: "后端"}
   - {name: "大模型评测", category: "AI/机器学习"}
   - {name: "音频标注", category: "AI/机器学习"}
   - {name: "视频标注", category: "AI/机器学习"}
@@ -361,7 +361,7 @@ skills:
   - {name: "Stata", category: "数据分析/商业"}
   - {name: "预测分析", category: "数据分析/商业"}
   - {name: "经营分析", category: "数据分析/商业"}
-  - {name: "数据分析思维", category: "数据分析/商业"}
+  - {name: "数据分析思维", category: "软技能"}
 
   # ---- 测试 ----
   - {name: "软件测试", category: "测试"}
@@ -401,7 +401,7 @@ skills:
 
   # ---- 工程协作 / 项目管理 ----
   - {name: "JIRA", category: "工程协作"}
-  - {name: "Maven", category: "工程协作"}
+  - {name: "Maven", category: "后端"}
   - {name: "代码审查", category: "工程协作"}
   - {name: "敏捷开发", category: "工程协作"}
   - {name: "Kanban", category: "工程协作"}
@@ -409,10 +409,10 @@ skills:
   - {name: "架构设计", category: "工程协作"}
   - {name: "系统设计", category: "工程协作"}
   - {name: "领域驱动设计", category: "工程协作"}
-  - {name: "Postman", category: "工程协作"}
-  - {name: "JMeter", category: "工程协作"}
-  - {name: "Swagger", category: "工程协作"}
-  - {name: "Figma", category: "工程协作"}
+  - {name: "Postman", category: "测试"}
+  - {name: "JMeter", category: "测试"}
+  - {name: "Swagger", category: "后端"}
+  - {name: "Figma", category: "前端"}
   - {name: "GitLab", category: "工程协作"}
   - {name: "GitHub", category: "工程协作"}
   - {name: "代码规范", category: "工程协作"}
@@ -462,9 +462,9 @@ skills:
   - {name: "CPU芯片", category: "硬件/芯片"}
   - {name: "DSP", category: "硬件/芯片"}
   - {name: "FPGA", category: "硬件/芯片"}
-  - {name: "Qt", category: "硬件/芯片"}
-  - {name: "HALCON", category: "硬件/芯片"}
-  - {name: "Open3D", category: "硬件/芯片"}
+  - {name: "Qt", category: "前端"}
+  - {name: "HALCON", category: "AI/机器学习"}
+  - {name: "Open3D", category: "AI/机器学习"}
   - {name: "仿真", category: "硬件/芯片"}
   - {name: "有限元分析", category: "硬件/芯片"}
   - {name: "流体仿真", category: "硬件/芯片"}
@@ -494,10 +494,10 @@ skills:
   - {name: "流媒体", category: "音视频"}
   - {name: "视频编解码", category: "音视频"}
   - {name: "音频编解码", category: "音视频"}
-  - {name: "TTS", category: "音视频"}
-  - {name: "ASR", category: "音视频"}
-  - {name: "声纹识别", category: "音视频"}
-  - {name: "语音合成", category: "音视频"}
+  - {name: "TTS", category: "AI/机器学习"}
+  - {name: "ASR", category: "AI/机器学习"}
+  - {name: "声纹识别", category: "AI/机器学习"}
+  - {name: "语音合成", category: "AI/机器学习"}
   - {name: "直播视频", category: "音视频"}
 
   # ---- 移动 / 桌面 ----
@@ -510,23 +510,23 @@ skills:
   - {name: "移动开发", category: "移动/桌面"}
 
   # ---- 数据库扩展 ----
-  - {name: "HDFS", category: "数据库"}
+  - {name: "HDFS", category: "大数据"}
   - {name: "MinIO", category: "数据库"}
   - {name: "Ceph", category: "数据库"}
-  - {name: "Presto", category: "数据库"}
-  - {name: "Trino", category: "数据库"}
-  - {name: "Impala", category: "数据库"}
-  - {name: "Kudu", category: "数据库"}
-  - {name: "Iceberg", category: "数据库"}
-  - {name: "Hudi", category: "数据库"}
-  - {name: "Delta Lake", category: "数据库"}
-  - {name: "Doris", category: "数据库"}
-  - {name: "StarRocks", category: "数据库"}
+  - {name: "Presto", category: "大数据"}
+  - {name: "Trino", category: "大数据"}
+  - {name: "Impala", category: "大数据"}
+  - {name: "Kudu", category: "大数据"}
+  - {name: "Iceberg", category: "大数据"}
+  - {name: "Hudi", category: "大数据"}
+  - {name: "Delta Lake", category: "大数据"}
+  - {name: "Doris", category: "大数据"}
+  - {name: "StarRocks", category: "大数据"}
   - {name: "OceanBase", category: "数据库"}
-  - {name: "DolphinScheduler", category: "数据库"}
-  - {name: "数据血缘", category: "数据库"}
-  - {name: "数据指标", category: "数据库"}
-  - {name: "数据标准", category: "数据库"}
+  - {name: "DolphinScheduler", category: "大数据"}
+  - {name: "数据血缘", category: "大数据"}
+  - {name: "数据指标", category: "大数据"}
+  - {name: "数据标准", category: "大数据"}
 
   # ---- 消息 / 中间件 ----
   - {name: "RocketMQ", category: "消息/中间件"}
@@ -556,7 +556,7 @@ skills:
   - {name: "VXLAN", category: "网络/协议"}
   - {name: "WiFi", category: "网络/协议"}
   - {name: "蓝牙", category: "网络/协议"}
-  - {name: "GPS", category: "网络/协议"}
+  - {name: "GPS", category: "智能驾驶/机器人"}
 
   # ---- 安全扩展 ----
   - {name: "零信任", category: "安全"}

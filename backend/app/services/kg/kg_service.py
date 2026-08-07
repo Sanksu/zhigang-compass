@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 from neo4j import Session
 
-from app.services.extraction.dictionary import normalize_position_name
+from app.services.extraction.dictionary import normalize_position_name, skill_category
 from app.services.extraction.schemas import JDExtractionResult
 from app.services.kg.id_generator import PREFIX_MAP, next_id
 
@@ -220,10 +220,12 @@ def _import_jd_tx(
                 MERGE (s:Skill {name: $name})
                 ON CREATE SET s.id = $id,
                     s.name = $name,
+                    s.category = $category,
                     s.created_at = $now
                 """,
                 id=skill_id,
                 name=skill_name,
+                category=skill_category(skill_name),
                 now=now,
             )
 
@@ -481,10 +483,12 @@ def _import_course_tx(tx, course_data: dict) -> str:
                 MERGE (s:Skill {name: $name})
                 ON CREATE SET s.id = $id,
                     s.name = $name,
+                    s.category = $category,
                     s.created_at = $now
                 """,
                 id=skill_id,
                 name=skill_name,
+                category=skill_category(skill_name),
                 now=now,
             )
 

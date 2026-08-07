@@ -17,10 +17,12 @@ _BACKEND_DIR = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_BACKEND_DIR))
 
 from app.services.extraction.dictionary import (
+    SKILL_CATEGORY,
     SKILL_WHITELIST,
     SOFT_SKILL_WHITELIST,
     _SKILL_WHITELIST_PATH,
     _load_skill_whitelist,
+    skill_category,
 )
 
 
@@ -47,6 +49,34 @@ class TestSkillWhitelistScale:
             "白名单存在大小写重复项（normalize_skill 依赖小写映射唯一）"
 
 
+class TestSkillCategory:
+    """P0-1/P0-2/P0-3：技能分类映射（Skill.category 入图的单一事实源）。"""
+
+    def test_all_entries_have_category(self):
+        # 正常加载路径下每项都有非空分类（回退路径为空串是降级预期）
+        assert all(SKILL_CATEGORY.values()), "存在无分类的白名单条目"
+
+    def test_known_categories(self):
+        assert skill_category("Python") == "编程语言"
+        assert skill_category("消息队列") == "消息/中间件"
+        assert skill_category("数据仓库") == "大数据"
+        assert skill_category("操作系统") == "计算机基础"
+
+    def test_reclassified_skills(self):
+        # P0-2 重分类：归类错误修正
+        assert skill_category("Verilog") == "硬件/芯片"
+        assert skill_category("嵌入式开发") == "硬件/芯片"
+        assert skill_category("自动化测试") == "测试"
+        assert skill_category("微服务") == "计算机基础"
+
+    def test_soft_skill_reclassified(self):
+        # P0-3：数据分析思维从"数据分析/商业"移入软技能
+        assert skill_category("数据分析思维") == "软技能"
+
+    def test_unknown_returns_uncategorized(self):
+        assert skill_category("不存在的技能XYZ") == "未分类"
+
+
 class TestSkillWhitelistYaml:
     """yaml 单一事实源加载与回退。"""
 
@@ -69,7 +99,8 @@ class TestSkillWhitelistYaml:
         monkeypatch.setattr(_SKILL_WHITELIST_PATH.__class__, "read_text",
                             lambda self, *a, **k: (_ for _ in ()).throw(OSError("缺失")))
         loaded = _load_skill_whitelist()
-        assert loaded == _FALLBACK_SKILL_WHITELIST
+        assert set(loaded) == _FALLBACK_SKILL_WHITELIST
+        assert all(v == "" for v in loaded.values()), "回退集无分类，category 应为空串"
 
     def test_fallback_when_yaml_empty(self, monkeypatch):
         # yaml 内容为空时回退内置集
@@ -82,7 +113,7 @@ class TestSkillWhitelistYaml:
             lambda *a, **k: None,
         )
         loaded = _load_skill_whitelist()
-        assert loaded == _FALLBACK_SKILL_WHITELIST
+        assert set(loaded) == _FALLBACK_SKILL_WHITELIST
 
 
 class TestFallbackWhitelist:

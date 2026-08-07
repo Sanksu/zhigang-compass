@@ -54,24 +54,35 @@ _FALLBACK_SKILL_WHITELIST: set[str] = {
 }
 
 
-def _load_skill_whitelist() -> set[str]:
-    """启动时从 configs/skill_whitelist.yaml 加载白名单。
+def _load_skill_whitelist() -> dict[str, str]:
+    """启动时从 configs/skill_whitelist.yaml 加载 name → category 映射。
 
     yaml 缺失/解析失败/内容为空时回退内置集，保证启动不失败
-    （第三道防线降级为内置集，不阻塞抽取链路）。
+    （第三道防线降级为内置集，不阻塞抽取链路；回退集无分类，category 置空串）。
     """
     try:
         data = yaml.safe_load(_SKILL_WHITELIST_PATH.read_text(encoding="utf-8")) or {}
         skills = data.get("skills") or []
-        loaded = {s["name"] for s in skills if isinstance(s, dict) and s.get("name")}
+        loaded = {
+            s["name"]: s.get("category", "")
+            for s in skills
+            if isinstance(s, dict) and s.get("name")
+        }
     except (OSError, yaml.YAMLError):
-        return set(_FALLBACK_SKILL_WHITELIST)
-    return loaded if loaded else set(_FALLBACK_SKILL_WHITELIST)
+        return {name: "" for name in _FALLBACK_SKILL_WHITELIST}
+    return loaded if loaded else {name: "" for name in _FALLBACK_SKILL_WHITELIST}
 
 
-# 标准技能白名单（第三道防线，未命中走审核）。
-# 由 configs/skill_whitelist.yaml 加载（yaml 缺失回退内置集），API 保持 set 不变。
-SKILL_WHITELIST: set[str] = _load_skill_whitelist()
+# 标准技能白名单（第三道防线，未命中走审核）+ 分类映射（P0-1 落地）。
+# SKILL_CATEGORY 由 configs/skill_whitelist.yaml 加载（yaml 缺失回退内置集，category 空串）；
+# SKILL_WHITELIST 保持 set API 不变（单一事实源仅 yaml）。
+SKILL_CATEGORY: dict[str, str] = _load_skill_whitelist()
+SKILL_WHITELIST: set[str] = set(SKILL_CATEGORY)
+
+
+def skill_category(name: str) -> str:
+    """技能名 → 分类；白名单外返回 '未分类'（P0-1，供入图时写入 Skill.category）。"""
+    return SKILL_CATEGORY.get(name) or "未分类"
 
 
 # 技能别名映射：非标准表述 → 标准名
@@ -126,6 +137,54 @@ SKILL_ALIAS: dict[str, str] = {
     # 工具
     "git": "Git",
     "jenkins": "Jenkins",
+    # P1-1 高频同义变体（评估报告 3.4 别名缺失，归一化到白名单标准词）
+    # 前端
+    "vue3": "Vue.js",
+    "vue2": "Vue.js",
+    "reactjs": "React",
+    "es6": "JavaScript",
+    "element plus": "ElementUI",
+    "uniapp": "uni-app",
+    "微信小程序": "小程序",
+    "小程序开发": "小程序",
+    # 后端
+    "springmvc": "Spring MVC",
+    "mybatis-plus": "MyBatis",
+    "mybatis plus": "MyBatis",
+    "rest api": "RESTful API",
+    "restful": "RESTful API",
+    "mq": "消息队列",
+    "sql优化": "SQL",
+    "sql 优化": "SQL",
+    "分布式事务": "分布式",
+    "微服务架构": "微服务",
+    # AI/ML
+    "nlp": "自然语言处理",
+    "prompt engineering": "提示工程",
+    "prompt工程": "提示工程",
+    "prompt 工程": "提示工程",
+    "ai agent": "Agentic AI",
+    "llm agent": "智能体",
+    "agent开发": "Agent开发",
+    "sft": "模型微调",
+    # 计算机基础
+    "面向对象编程": "面向对象",
+    "面向对象设计": "面向对象",
+    "算法设计": "算法",
+    "计算机网络基础": "计算机网络",
+    # 测试
+    "单元测试编写": "单元测试",
+    "自动化测试框架": "自动化测试",
+    # 软技能
+    "沟通协作": "沟通能力",
+    "团队协作能力": "团队协作",
+    "解决问题能力": "问题解决",
+    # 其他
+    "性能优化": "性能调优",
+    "多传感器融合": "传感器融合",
+    "ros2": "ROS",
+    "敏捷": "敏捷开发",
+    "大屏可视化": "数据可视化",
 }
 
 # 软技能白名单（岗位本体维护，共 20 项，设计文档 9.2 节）。
@@ -150,6 +209,10 @@ SKILL_STOPWORDS: set[str] = {
     "采购", "前台", "助理岗", "兼职", "实习岗",
     # 碎片/泛词（历史图谱审计残留，正常技能应指向"微服务""软件"的完整语义）
     "微", "软件",
+    # P1-2 泛词碎片（评估报告 3.5：JD 高频泛词被 LLM 误抽为技能）
+    # 白名单词（操作系统/自动化测试/嵌入式开发/计算机网络 等）已整体保护不受影响
+    "系统", "操作", "网络", "前端", "自动化", "嵌入式", "安全", "监控",
+    "数据处理",
 }
 
 # 岗位名关键词 → 标准岗位名（合并同义重复岗位，设计文档 4.5 实体对齐的轻量实现）

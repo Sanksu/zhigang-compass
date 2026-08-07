@@ -40,6 +40,48 @@ class TestCleanSkillName:
         assert clean_skill_name("微服务架构") == "微服务"
         assert clean_skill_name("云原生") == "云原生"
 
+    def test_whitelist_words_preserved(self):
+        # P1-2 白名单词整体保护：不以中文后缀退化成泛词碎片
+        assert clean_skill_name("操作系统") == "操作系统"
+        assert clean_skill_name("嵌入式开发") == "嵌入式开发"
+        assert clean_skill_name("自动化测试") == "自动化测试"
+        assert clean_skill_name("计算机网络") == "计算机网络"
+        assert clean_skill_name("消息队列") == "消息队列"
+
+
+class TestStopwordInterception:
+    """P1-2 泛词停用拦截：JD 高频泛词被 LLM 误抽为技能时在此剔除。"""
+
+    def test_generic_fragments_filtered(self):
+        result = JDExtractionResult(
+            position_name="",
+            skills=[
+                SkillExtracted(name="系统"),
+                SkillExtracted(name="前端"),
+                SkillExtracted(name="操作"),
+                SkillExtracted(name="数据处理"),
+            ],
+        )
+        out = post_process(result)
+        assert out.skills == []
+
+    def test_whitelist_word_never_intercepted(self):
+        # 白名单词与泛词同源（操作系统/系统），整体保护不误杀
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="操作系统")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["操作系统"]
+
+    def test_requirement_fragment_filtered(self):
+        result = JDExtractionResult(
+            position_name="",
+            requirements=[REQUIRESRelation(skill_name="监控", necessity="must")],
+        )
+        out = post_process(result)
+        assert out.requirements == []
+
 
 class TestDedupSkills:
     def test_case_insensitive_dedup_keeps_first(self):
