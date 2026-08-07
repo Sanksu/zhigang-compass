@@ -6,7 +6,9 @@
 顺序说明：
 - init_neo4j → import_occupations → backfill（JD 抽取+课程入图）
 - rebuild_graph 会清空图谱（保留 Counter），故课程入图须在 rebuild 之后重跑
-- cleanup（技能过滤+岗位合并+聚合）→ 质量评估 → 发布首期版本快照
+- cleanup（技能过滤+岗位合并+聚合）→ 证据关系迁移（MENTIONED_IN→EVIDENCED_BY）
+  → 技能归一化（SIMILAR_TO）→ 质量评估 → 发布首期版本快照
+- 快照之后补关系建边（PREREQUISITE_OF/BELONGS_TO/ALTERNATIVE_OF）、演化推导（EVOLVED_FROM）与 pgvector 向量回填，与每日 ETL 阶段 9.5/12.5/12.6/13 对齐
 
 前置条件（本脚本不涉及，见 docs/冷启动指南.md）：
 - docker compose up -d（postgres/redis/neo4j）+ alembic upgrade head
@@ -43,10 +45,20 @@ _STEPS: list[tuple[str, str, dict]] = [
      {"async": "load_courses"}),
     ("cleanup", "技能过滤 + 岗位合并 + 重新聚合（防幻觉技能）",
      {"cmd": ["cleanup_graph"]}),
+    ("evidence_relations", "证据关系迁移 MENTIONED_IN → EVIDENCED_BY（历史库命名对齐 §5.1）",
+     {"cmd": ["migrate_evidence_relations"]}),
+    ("skill_normalization", "技能归一化回写 + SIMILAR_TO 建边（ETL 阶段 9.5）",
+     {"cmd": ["sync_skill_normalization"]}),
     ("evaluate", "课程质量评估（六维加权，写回 snapshot[quality]）",
      {"cmd": ["evaluate_courses"]}),
     ("snapshot", "发布图谱版本快照（graph_v{YYYYMMDD}，T+1 首期）",
      {"async": "snapshot"}),
+    ("skill_relations", "技能关系建边：PREREQUISITE_OF/BELONGS_TO/ALTERNATIVE_OF（ETL 阶段 12.5）",
+     {"cmd": ["sync_skill_relations"]}),
+    ("evolved_from", "基于相邻快照推导 EVOLVED_FROM（ETL 阶段 12.6，首期无前序快照则跳过）",
+     {"async": "evolved_from"}),
+    ("backfill_embeddings", "pgvector 三表向量回填（ETL 阶段 13，模型不可用跳过）",
+     {"async": "backfill_embeddings"}),
 ]
 
 
@@ -63,7 +75,7 @@ def _run_subprocess(step_name: str, cmd: list[str]) -> None:
 
 
 async def _run_async(step_name: str, target: str) -> None:
-    """内联运行无独立 CLI 的异步阶段（load_courses / snapshot）。"""
+    """内联运行无独立 CLI 的异步阶段（load_courses / snapshot / evolved_from / backfill_embeddings）。"""
     print(f"\n▶ [{step_name}] 异步任务 {target}")
     if target == "load_courses":
         from app.workers.tasks import load_courses
@@ -75,6 +87,14 @@ async def _run_async(step_name: str, target: str) -> None:
         result = (await GraphVersionManager().create_snapshot(
             triggered_by="bootstrap"
         )).model_dump()
+    elif target == "evolved_from":
+        from app.services.evolution.evolved_from import derive_evolved_from
+
+        result = await derive_evolved_from()
+    elif target == "backfill_embeddings":
+        from app.workers.tasks import backfill_embeddings
+
+        result = await backfill_embeddings({})
     else:
         raise ValueError(f"未知异步阶段: {target}")
     print(f"  → {result}")

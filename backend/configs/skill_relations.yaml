@@ -1,0 +1,73 @@
+# 技能关系字典（设计文档 §5.1 九类关系补齐：BELONGS_TO / ALTERNATIVE_OF）
+#
+# 由 scripts/sync_skill_relations.py 同步为 Neo4j 边（幂等 MERGE）：
+# - PREREQUISITE_OF：从 configs/skill_prerequisites.yaml 先修字典派生（见
+#   app/services/kg/skill_relations.py，本文件不再重复维护先修条目）
+# - BELONGS_TO：父子技能（子 → 父），如 Spring Boot 属于 Java
+# - ALTERNATIVE_OF：可替代技能（双向建边），如 React ↔ Vue
+#
+# 约定：
+# - 技能名采用图谱归一化后的规范名（与 configs/skill_whitelist.yaml 一致）
+# - 仅对图谱已存在的 Skill 节点建边，字典条目未在图谱时跳过（不凭空造节点）
+# - 同一技能同时具备 parent 与 alternatives 时必须合并为单行，
+#   否则 yaml 重复 key 会相互覆盖导致数据丢失
+# - 词典为"机制 + 常见条目"，后续随数据增长持续补充
+
+skills:
+  # ---- 父子技能（BELONGS_TO：子 → 父）+ 可替代技能（ALTERNATIVE_OF：双向）----
+  Spring Boot: { parent: [Java] }
+  Spring Cloud: { parent: [Java] }
+  MyBatis: { parent: [Java] }
+  Hibernate: { parent: [Java] }
+  JUnit: { parent: [Java] }
+  React: { parent: [JavaScript], alternatives: [Vue.js, Angular] }
+  React Native: { parent: [React] }
+  Vue.js: { parent: [JavaScript], alternatives: [React, Angular] }
+  Next.js: { parent: [React] }
+  Nuxt.js: { parent: [Vue.js] }
+  Webpack: { parent: [JavaScript], alternatives: [Vite] }
+  Vite: { parent: [JavaScript], alternatives: [Webpack] }
+  TypeScript: { parent: [JavaScript] }
+  Node.js: { parent: [JavaScript] }
+  Express.js: { parent: [Node.js] }
+  jQuery: { parent: [JavaScript], alternatives: [Vue.js] }
+  Tailwind CSS: { parent: [CSS] }
+  Bootstrap: { parent: [CSS] }
+  Three.js: { parent: [JavaScript] }
+  Flutter: { parent: [Dart] }
+  Django: { parent: [Python] }
+  Flask: { parent: [Python] }
+  FastAPI: { parent: [Python] }
+  PyTorch: { parent: [Python], alternatives: [TensorFlow] }
+  TensorFlow: { parent: [Python], alternatives: [PyTorch] }
+  scikit-learn: { parent: [Python] }
+  Pandas: { parent: [Python] }
+  NumPy: { parent: [Python] }
+  Gin: { parent: [Go] }
+  Docker: { parent: [Linux], alternatives: [Podman] }
+  Kubernetes: { parent: [Docker] }
+  PostgreSQL: { parent: [SQL], alternatives: [MySQL] }
+  MySQL: { parent: [SQL], alternatives: [PostgreSQL] }
+  SQLite: { parent: [SQL] }
+  Redis: { parent: [NoSQL] }
+  MongoDB: { parent: [NoSQL], alternatives: [Redis] }
+  Elasticsearch: { parent: [NoSQL] }
+  Apache Spark: { parent: [Scala] }
+  Hadoop: { parent: [Java] }
+  Hive: { parent: [SQL] }
+  Apache Kafka: { parent: [Java] }
+  Apache Flink: { parent: [Java] }
+  OpenCV: { parent: [Python] }
+  Qt: { parent: [C++] }
+  CMake: { parent: [C++] }
+  Keras: { parent: [TensorFlow] }
+
+  # ---- 仅可替代技能（ALTERNATIVE_OF：双向）----
+  Angular: { alternatives: [React, Vue.js] }
+  Redux: { alternatives: [MobX] }
+  GitLab: { alternatives: [GitHub] }
+  Jira: { alternatives: [Trello] }
+  Jenkins: { alternatives: [GitHub Actions] }
+  Nginx: { alternatives: [Apache] }
+  Grunt: { alternatives: [Gulp] }
+  Mocha: { alternatives: [Jest] }
