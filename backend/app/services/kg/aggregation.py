@@ -9,7 +9,8 @@
 - Position.last_updated   = 本次聚合时间
 - Position.soft_skills    = 软技能白名单（按 JD 命中数降序，设计文档 9.2 节）
 - REQUIRES.weight         = must=0.8 / nice=0.4（沿用图谱现有两档约定）
-- REQUIRES.necessity      = 该技能在岗位 JD 中 must 占比 ≥ 0.5 判 must，否则 nice
+- REQUIRES.necessity      = JD 数 ≥3 时 must 标注覆盖率（must_count/jd_count）> 1/2 判 must；
+                            样本不足（<3 条）回退 must 标注占比（must_count/hit）≥ 1/2
 - REQUIRES.source_count   = 命中该技能的独立招聘源数
 
 weight 取离散两档而非出现率连续值的原因：与匹配引擎 CII 降级（按 weight
@@ -28,8 +29,9 @@ from app.services.extraction.dictionary import SOFT_SKILL_WHITELIST
 # 图谱 weight 两档约定
 _WEIGHT_MUST = 0.8
 _WEIGHT_NICE = 0.4
-# 技能判 must 的 must 出现占比阈值
-_MUST_MAJORITY = 0.5
+# must 判定阈值：jd_count≥3 时要求 must 标注覆盖率 >1/2；
+# 样本不足（<3 条）回退 must 标注占比 ≥1/2（两处阈值一致，分母不同）
+_MUST_THRESHOLD = 0.5
 
 
 def _most_common_level(levels: list[str]) -> str:
@@ -37,6 +39,19 @@ def _most_common_level(levels: list[str]) -> str:
     if not levels:
         return ""
     return Counter(levels).most_common(1)[0][0]
+
+
+def _is_must(sa: SkillAgg, jd_count: int) -> bool:
+    """技能边是否判 must（设计文档 §5.5 聚合口径）。
+
+    岗位 JD 数 ≥3 时按 must 标注覆盖率判定（must_count/jd_count > 1/2）：
+    技能须在该岗位过半数 JD 中被 LLM 标为 must 才算必须——原"must 标注占比
+    过半"口径下每条 JD 各自抽取的 must 技能差异大，导致 85% 边被判 must；
+    样本不足（<3 条）回退原逻辑（must 标注占比 ≥1/2），不因样本少武断降级。
+    """
+    if jd_count >= 3:
+        return sa.must_count / jd_count > _MUST_THRESHOLD
+    return sa.must_count / sa.hit >= _MUST_THRESHOLD
 
 
 class SkillAgg:
@@ -143,7 +158,7 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
             "soft_skills": [s for s, _ in pa.soft_skills.most_common()],
         })
         for skill, sa in pa.skills.items():
-            is_must = sa.must_count / sa.hit >= _MUST_MAJORITY
+            is_must = _is_must(sa, pa.jd_count)
             edges.append({
                 "pos": pos,
                 "skill": skill,
