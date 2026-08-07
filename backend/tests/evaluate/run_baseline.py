@@ -58,10 +58,29 @@ def rule_predict(text: str) -> list[str]:
     return sorted(hits)
 
 
-def keyword_match(pred_skills: list[str], gold_skills: list[str]) -> tuple[int, int, int]:
-    """关键词匹配（管线同规则规范化后精确匹配），返回 (true_positive, false_positive, false_negative)。"""
+# 固有噪音键上限：规范化后长度 ≤ 2 的键（单字母/短别名，如 AI/C/R/Go 及 es/JS/TS）
+# 由 [EMAIL] 等脱敏占位符或英文单词子串触发，非真实技能标注。与生成脚本
+# build_resume_golden_set.py 的 _NOISE_KEY_MAX_LEN 自检口径保持一致。
+_NOISE_KEY_MAX_LEN = 2
+
+
+def keyword_match(
+    pred_skills: list[str],
+    gold_skills: list[str],
+    *,
+    exclude_noise: bool = False,
+) -> tuple[int, int, int]:
+    """关键词匹配（管线同规则规范化后精确匹配），返回 (true_positive, false_positive, false_negative)。
+
+    exclude_noise=True 时对称过滤规范化后长度 ≤ 2 的固有噪音键：
+    简历黄金集已规避短技能（gold 无短键），pred 侧仅残留占位符/子串触发的单字母白名单词，
+    过滤后与自检口径一致，避免评测误报。JD 黄金集标注含真实短技能（Go/AI/C 等），保持不过滤。
+    """
     pred_set = {_norm_skill(s) for s in pred_skills}
     gold_set = {_norm_skill(s) for s in gold_skills}
+    if exclude_noise:
+        pred_set = {k for k in pred_set if len(k) > _NOISE_KEY_MAX_LEN}
+        gold_set = {k for k in gold_set if len(k) > _NOISE_KEY_MAX_LEN}
     tp = len(pred_set & gold_set)
     fp = len(pred_set - gold_set)
     fn = len(gold_set - pred_set)

@@ -2,12 +2,77 @@
 
 用于 LLM 抽取后的词典后过滤（设计文档 5.2 节）：
 1. SKILL_ALIAS — 将别名/口语化表述映射为标准技能名
-2. SKILL_WHITELIST — 标准技能白名单（幻觉防控第三道防线）
-3. SKILL_STOPWORDS — 行业/业务领域词黑名单（防 LLM 幻觉技能入图）
-4. normalize_position_name — 岗位名归一化（合并同义重复岗位）
+2. SKILL_WHITELIST — 标准技能白名单（幻觉防控第三道防线，单一事实源
+   configs/skill_whitelist.yaml，设计文档 6.3 节要求 500+ 标准技能）
+3. SOFT_SKILL_WHITELIST — 软技能白名单（岗位本体维护，共 20 项，设计文档 9.2 节）
+4. SKILL_STOPWORDS — 行业/业务领域词黑名单（防 LLM 幻觉技能入图）
+5. normalize_position_name — 岗位名归一化（合并同义重复岗位）
 """
 
 import re
+from pathlib import Path
+
+import yaml
+
+# 白名单 yaml 路径（dictionary.py 位于 backend/app/services/extraction/，
+# parents[3] = backend/）。与 skill_prerequisites.yaml 的读取口径一致
+_SKILL_WHITELIST_PATH = Path(__file__).resolve().parents[3] / "configs" / "skill_whitelist.yaml"
+
+# 内置回退白名单：yaml 缺失/损坏时兜底启动不失败。
+# 内容与原硬编码 SKILL_WHITELIST 一致，仅在配置文件缺失时生效。
+_FALLBACK_SKILL_WHITELIST: set[str] = {
+    "Python", "Java", "JavaScript", "TypeScript", "Go", "Rust", "C++", "C#",
+    "Ruby", "PHP", "Swift", "Kotlin", "Scala", "R", "MATLAB", "Shell",
+    "C", "SQL", "React", "Vue.js", "Angular", "HTML", "HTML5", "CSS",
+    "Webpack", "Vite", "Tailwind CSS", "Next.js", "Nuxt.js", "Bootstrap",
+    "ECharts", "Three.js", "数据可视化", "UI设计", "前端工程化",
+    "React Native", "jQuery", "ElementUI", "Spring Boot", "Spring Cloud",
+    "Django", "Flask", "FastAPI", "Express.js", "Node.js", "ASP.NET",
+    "Microservices", "MyBatis", "Scrapy", "RESTful API", "REST", "JSON", "API",
+    "MySQL", "PostgreSQL", "MongoDB", "Redis", "Elasticsearch", "SQLite",
+    "Oracle", "SQL Server", "Cassandra", "ClickHouse", "NoSQL",
+    "Hadoop", "Apache Spark", "Apache Flink", "Apache Kafka", "Hive", "HBase",
+    "Airflow", "PySpark", "数据治理", "ETL", "Snowflake", "数据建模", "数据挖掘",
+    "Docker", "Kubernetes", "Jenkins", "Git", "GitHub Actions", "Terraform",
+    "Ansible", "Prometheus", "Grafana", "CI/CD", "Nginx", "系统运维",
+    "AWS", "Azure", "GCP", "Linux", "DevOps",
+    "PyTorch", "TensorFlow", "scikit-learn", "大语言模型", "检索增强生成",
+    "机器学习", "深度学习", "自然语言处理", "计算机视觉", "数据分析",
+    "OpenAI API", "LangChain", "LlamaIndex",
+    "大模型算法", "推荐算法", "图像算法", "风控算法", "强化学习", "SLAM算法",
+    "广告算法", "AIGC", "多模态模型", "语音识别", "运筹优化算法", "具身智能",
+    "机器人", "OpenCV", "嵌入式开发", "自动化测试", "多线程", "三维开发",
+    "GIS开发", "大模型评测", "音频标注", "视频标注",
+    "AI", "Transformer", "Agentic AI", "Pandas", "NumPy", "Matplotlib",
+    "统计学", "Excel", "Tableau", "Power BI", "SAS", "Agile", "Scrum",
+    "Maven", "JUnit", "Hibernate", "JDBC", "Core Java", "JIRA",
+    "SIEM", "SOAR",
+    "团队协作", "沟通能力", "项目管理", "需求分析", "产品设计",
+    "问题解决", "逻辑思维", "学习能力", "抗压能力", "时间管理",
+    "领导力", "跨部门协作", "创新思维", "客户服务意识", "责任心",
+    "主动性", "文档撰写", "汇报能力", "数据分析思维", "执行力",
+}
+
+
+def _load_skill_whitelist() -> set[str]:
+    """启动时从 configs/skill_whitelist.yaml 加载白名单。
+
+    yaml 缺失/解析失败/内容为空时回退内置集，保证启动不失败
+    （第三道防线降级为内置集，不阻塞抽取链路）。
+    """
+    try:
+        data = yaml.safe_load(_SKILL_WHITELIST_PATH.read_text(encoding="utf-8")) or {}
+        skills = data.get("skills") or []
+        loaded = {s["name"] for s in skills if isinstance(s, dict) and s.get("name")}
+    except (OSError, yaml.YAMLError):
+        return set(_FALLBACK_SKILL_WHITELIST)
+    return loaded if loaded else set(_FALLBACK_SKILL_WHITELIST)
+
+
+# 标准技能白名单（第三道防线，未命中走审核）。
+# 由 configs/skill_whitelist.yaml 加载（yaml 缺失回退内置集），API 保持 set 不变。
+SKILL_WHITELIST: set[str] = _load_skill_whitelist()
+
 
 # 技能别名映射：非标准表述 → 标准名
 SKILL_ALIAS: dict[str, str] = {
@@ -63,38 +128,16 @@ SKILL_ALIAS: dict[str, str] = {
     "jenkins": "Jenkins",
 }
 
-# 标准技能白名单（第三道防线，未命中走审核）
-SKILL_WHITELIST: set[str] = {
-    # 编程语言
-    "Python", "Java", "JavaScript", "TypeScript", "Go", "Rust", "C++", "C#",
-    "Ruby", "PHP", "Swift", "Kotlin", "Scala", "R", "MATLAB", "Shell",
-    # 前端
-    "React", "Vue.js", "Angular", "HTML", "HTML5", "CSS", "Webpack", "Vite",
-    "Tailwind CSS", "Next.js", "Nuxt.js", "Bootstrap", "ECharts", "Three.js",
-    "数据可视化", "UI设计", "前端工程化",
-    # 后端
-    "Spring Boot", "Spring Cloud", "Django", "Flask", "FastAPI", "Express.js",
-    "Node.js", "ASP.NET", "Microservices", "MyBatis", "Scrapy",
-    # 数据库
-    "MySQL", "PostgreSQL", "MongoDB", "Redis", "Elasticsearch", "SQLite",
-    "Oracle", "SQL Server", "Cassandra", "ClickHouse",
-    # 大数据
-    "Hadoop", "Apache Spark", "Apache Flink", "Apache Kafka", "Hive", "HBase",
-    "Airflow", "PySpark", "数据治理",
-    # 云原生/DevOps
-    "Docker", "Kubernetes", "Jenkins", "Git", "GitHub Actions", "Terraform",
-    "Ansible", "Prometheus", "Grafana", "CI/CD", "Nginx", "系统运维",
-    # AI/ML
-    "PyTorch", "TensorFlow", "scikit-learn", "大语言模型", "检索增强生成",
-    "机器学习", "深度学习", "自然语言处理", "计算机视觉", "数据分析",
-    "OpenAI API", "LangChain", "LlamaIndex",
-    "大模型算法", "推荐算法", "图像算法", "风控算法", "强化学习", "SLAM算法",
-    "广告算法", "AIGC", "多模态模型", "语音识别", "运筹优化算法", "具身智能",
-    "机器人", "OpenCV", "嵌入式开发", "自动化测试", "多线程", "三维开发",
-    "GIS开发", "大模型评测", "音频标注", "视频标注",
-    # 通用软技能
+# 软技能白名单（岗位本体维护，共 20 项，设计文档 9.2 节）。
+# 与 SKILL_WHITELIST 的关系：软技能是其中标记性的子集——JD 侧从正文抽取
+# 软技能要求、候选人侧由 LLM 从项目角色/经历推断，均以此清单为唯一枚举域。
+# 后缀清洗（clean_skill_name）对该集合内的词整体跳过，避免"项目管理→项目"式退化。
+SOFT_SKILL_WHITELIST: frozenset[str] = frozenset({
     "团队协作", "沟通能力", "项目管理", "需求分析", "产品设计",
-}
+    "问题解决", "逻辑思维", "学习能力", "抗压能力", "时间管理",
+    "领导力", "跨部门协作", "创新思维", "客户服务意识", "责任心",
+    "主动性", "文档撰写", "汇报能力", "数据分析思维", "执行力",
+})
 
 
 # 行业/业务领域/招聘福利词黑名单：LLM 在正文缺失的 JD 上常将这些词误抽为技能
@@ -105,6 +148,8 @@ SKILL_STOPWORDS: set[str] = {
     "公积金", "双休", "不加班", "福利", "年终奖", "提成", "股票期权",
     "运营", "销售", "客服", "市场", "行政", "财务", "人力资源", "公关",
     "采购", "前台", "助理岗", "兼职", "实习岗",
+    # 碎片/泛词（历史图谱审计残留，正常技能应指向"微服务""软件"的完整语义）
+    "微", "软件",
 }
 
 # 岗位名关键词 → 标准岗位名（合并同义重复岗位，设计文档 4.5 实体对齐的轻量实现）
@@ -128,7 +173,34 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("游戏",), "游戏开发工程师"),
     (("硬件",), "硬件工程师"),
     (("软件",), "软件开发工程师"),
+    # 后缀类兜底族：统一低频同类岗，防止剥后缀后产生"财务/业务/研究"等碎片。
+    # 已有细分族（数据分析等）位于其前，优先命中不受影响。
+    # "分析师"已拆为细分族（_ANALYST_SUB_FAMILIES），不再走统一兜底族
+    (("科学家",), "科学家"),
+    (("研究员",), "研究员"),
+    (("专家",), "专家"),
+    (("顾问",), "顾问"),
 ]
+
+
+# 分析师细分族（方案 C 拆分）：核心词 → 细分岗位名。
+# 仅对以"分析师"结尾的岗位名生效（_normalize_base 中优先于后缀剥离判断），
+# 避免子串匹配误吸"商业智能工程师""精算师""量化研究员"等非分析师岗位；
+# 通用"分析师"（无细分核心词）为兜底，保持原统一族行为。
+_ANALYST_SUB_FAMILIES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("量化", "quant"), "量化分析师"),
+    (("精算", "actuar"), "精算分析师"),
+    (("投资", "invest"), "投资分析师"),
+    (("信贷", "贷款", "credit", "mortgage", "抵押"), "信贷分析师"),
+    (("保险", "再保险", "insur"), "保险分析师"),
+    (("财务", "金融", "财会", "融资"), "财务分析师"),
+    (("商业智能", "bi", "intelligence"), "商业智能分析师"),
+    (("市场", "market", "marketing"), "市场分析师"),
+    (("可持续", "sustain"), "可持续发展分析师"),
+    (("业务", "business"), "业务分析师"),
+    (("策略", "strategy", "planning"), "策略分析师"),
+    (("数据建模", "数据挖掘"), "数据分析师"),
+)
 
 # 需保留的技术栈限定词（岗位细分维度）：(匹配串, 显示名)。
 # 如 "React前端开发工程师" 与 "前端开发工程师" 分列；web/h5/html 视为通用归并
@@ -196,6 +268,45 @@ _EN_POSITION_MAP: dict[str, str] = {
     "founding product engineer": "创始工程师",
     "forward deployed engineer": "现场工程师",
     "customer engineer": "客户工程师",
+    # 国际源 Analyst/分析类 → 数据分析师
+    "analyst, strategy & analytics": "数据分析师",
+    "analytics avp": "数据分析师",
+    "applications development technology lead analyst": "数据分析师",
+    "business analytics senior analyst": "数据分析师",
+    "data analysis manager": "数据分析师",
+    "director, planning & analytics": "数据分析师",
+    "fsr analyst": "数据分析师",
+    "financial & credit analytics analyst": "数据分析师",
+    "manager capital markets financial analysis": "数据分析师",
+    "model/anlys/valid sr analyst": "数据分析师",
+    "senior measurement analyst": "数据分析师",
+    "senior statistical analyst": "数据分析师",
+    "specialist, hr data, analytics & insights": "数据分析师",
+    "sr analyst intl solutions business intelligence": "数据分析师",
+    "sr. analyst, marketing analytics": "数据分析师",
+    "visualization software and data specialist": "数据分析师",
+    # 数据工程类 → 大数据开发工程师
+    "data automation engineer": "大数据开发工程师",
+    "kafka streaming architect": "大数据开发工程师",
+    "snowflake engineer": "大数据开发工程师",
+    # 推理优化 → 算法工程师
+    "inference engineer, gpu kernel optimization": "算法工程师",
+    # 安全/威胁响应 → 网络安全工程师（归一化后并入网络工程师，与 security engineer 一致）
+    "advanced cyber threat response & forensics lead/manager": "网络安全工程师",
+    "threat context analyst": "网络安全工程师",
+    # 软件开发类
+    "member of technical staff": "软件开发工程师",
+    "principal subsystem engineer": "软件开发工程师",
+    "regulatory developer vp": "软件开发工程师",
+    "seismic developer": "软件开发工程师",
+    # 平台工程 → 运维工程师
+    "engineering manager, platform engineering": "运维工程师",
+    # 质量工程 → 测试工程师
+    "senior supervisor, quality engineering": "测试工程师",
+    # 机电/传感器测试 → 嵌入式开发工程师
+    "sensor test r&d mechatronics engineer": "嵌入式开发工程师",
+    # 射频芯片 → 硬件工程师
+    "rfic system engineer": "硬件工程师",
 }
 
 # 无信息量泛岗位词：归一化结果命中时视为空岗位（不入图）
@@ -203,9 +314,13 @@ _POSITION_STOPWORDS: set[str] = {"技术", "开发", "工程师", "管理", "专
 
 # 岗位名前缀修饰词（级别/招聘形态），归一化时去除
 _POSITION_PREFIX_RE = re.compile(r"^(初级|中级|高级|资深|专家|助理|实习|见习|应届|研发|资深)")
-# 岗位名后缀（含"开发/技术员/程序员"等变体），归一化时去除后按关键词重映射
+# 岗位名后缀（含"开发/技术员/程序员"等变体），归一化时去除后按关键词重映射。
+# 科学家/研究员/专家/顾问 为低频同类岗的统一族后缀（由兜底关键词族承接，
+# 避免剥后缀后产生"财务/业务"等碎片）；"分析师"由细分族（_ANALYST_SUB_FAMILIES）
+# 在剥后缀前拦截，不走此兜底；"高级"用于剥离尾部级别词（如"DevOps高级"）
 _POSITION_SUFFIX_RE = re.compile(
-    r"(工程师|技术员|程序员|研发人员|研发|开发|设计师|经理|主管|负责人|专员)$"
+    r"(工程师|技术员|程序员|研发人员|研发|开发|设计师|经理|主管|负责人|专员|"
+    r"分析师|科学家|研究员|专家|顾问|高级)$"
 )
 
 
@@ -217,6 +332,15 @@ def _normalize_base(name: str) -> str:
         for keywords, standard in _POSITION_KEYWORDS:
             if any(k.lower() in low for k in keywords):
                 return standard
+        # 分析师细分族：岗位名以"分析师"结尾 → 查细分映射（量化/财务/信贷…），
+        # 命中返回细分标准名，否则兜底"分析师"。仅限"分析师"结尾（方案 C），
+        # 避免子串匹配误吸"商业智能工程师""精算师""量化研究员"等非分析师岗位
+        if core.endswith("分析师"):
+            stem = core[:-3].strip().lower()
+            for keywords, standard in _ANALYST_SUB_FAMILIES:
+                if any(k.lower() in stem for k in keywords):
+                    return standard
+            return "分析师"
         next_core = _POSITION_SUFFIX_RE.sub("", core).strip()
         if next_core == core or not next_core:
             break
@@ -260,6 +384,9 @@ def normalize_position_name(name: str) -> str:
     - "技术" → ""（泛词不入图）
     """
     translated = _translate_en_position(name)
+    # 实习类岗位不入图（招聘形态，非正式岗位族；含"实习"即过滤，含翻译结果）
+    if "实习" in (translated or name):
+        return ""
     if translated:
         # 翻译结果再过中文归一化，确保与中文路径岗位名统一（如"软件工程师"→"软件开发工程师"）
         base = _normalize_base(translated)
@@ -294,12 +421,49 @@ def normalize_position_name(name: str) -> str:
 
 
 def normalize_skill(raw: str) -> str:
-    """归一化技能名称：查别名（大小写不敏感），去除首尾空白。
+    """归一化技能名称：查别名（大小写不敏感）→ 白名单词大小写统一 → 原样返回。
 
     别名键统一小写，输入可能是任意大小写（如黄金集标注 "Spring"），
-    因此先精确查找，再按小写查找。
+    因此先精确查找，再按小写查找。白名单词的大小写变体（如 "GO"→"Go"、
+    "matlab"→"MATLAB"、"Echarts"→"ECharts"）统一到白名单标准写法，
+    避免同一技能因大小写不同建出多个图谱节点。
     """
     raw = raw.strip()
     if raw in SKILL_ALIAS:
         return SKILL_ALIAS[raw]
-    return SKILL_ALIAS.get(raw.lower(), raw)
+    alias = SKILL_ALIAS.get(raw.lower())
+    if alias is not None:
+        return alias
+    canonical = _SKILL_WHITELIST_LOWER.get(raw.lower())
+    if canonical is not None:
+        return canonical
+    return raw
+
+
+# 白名单词小写 → 标准写法映射（normalize_skill 用于大小写统一）
+_SKILL_WHITELIST_LOWER: dict[str, str] = {w.lower(): w for w in SKILL_WHITELIST}
+
+
+# 熟练度映射（JD 自然语言 → level 三档，按优先级从高到低匹配）：
+# 高级词先匹配（"精通/深入/专家/资深"），避免被中级/初级子串误吞（如"熟练掌握"）
+_PROFICIENCY_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
+    (("精通", "深入", "专家", "资深"), "高级"),
+    (("掌握", "熟练", "独立"), "中级"),
+    (("熟悉", "了解", "入门", "基础"), "初级"),
+]
+
+
+def normalize_proficiency(text: str) -> str | None:
+    """JD 自然语言熟练度 → level 三档（了解/熟悉→初级、掌握→中级、精通→高级）。
+
+    直接命中规范枚举（初级/中级/高级）原样返回；未命中返回 None（不武断判定）。
+    """
+    if not text:
+        return None
+    t = text.strip()
+    if t in ("初级", "中级", "高级"):
+        return t
+    for keywords, level in _PROFICIENCY_KEYWORDS:
+        if any(k in t for k in keywords):
+            return level
+    return None

@@ -146,12 +146,30 @@ class DiscoveryDetector:
             detected_at=datetime.now(_TZ_CN).isoformat(timespec="seconds"),
         )
 
-    def ground_with_rag(
+    async def ground_with_rag(
         self,
         candidate: CandidatePosition,
+        db,
+        *,
+        llm=None,
     ) -> CandidatePosition:
-        """RAG 接地：检索权威岗位库（人社部 + LinkedIn + O*NET）+ 种子列表匹配。
+        """RAG 接地（阶段二）：检索权威岗位库 + 种子列表匹配，生成定义草案。
 
-        M4 开放自动 emerging 判定，M3 影子模式仅人工触发。
+        Args:
+            candidate: candidate 池中的岗位
+            db: PostgreSQL 会话（occupations 权威库检索）
+            llm: LLMProviderChain（可选，定义草案 LLM 生成）
+
+        Returns:
+            更新 seed_matched / rag_matched / definition_draft 后的副本
         """
-        raise NotImplementedError("RAG 接地实现将在 M4 由算法岗完成")
+        from app.services.discovery.grounding import ground_with_rag as _ground
+
+        result = await _ground(candidate.position_name, db, llm=llm)
+        return candidate.model_copy(
+            update={
+                "seed_matched": result.seed_matched,
+                "rag_matched": result.rag_matched,
+                "definition_draft": result.definition,
+            }
+        )

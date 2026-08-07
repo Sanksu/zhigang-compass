@@ -12,6 +12,7 @@
 | Certification| ce    | ce_0007    |
 | Education   | ed     | ed_0001    |
 | Tool        | tl     | tl_0012    |
+| PositionEditLog | pl | pl_0001    |
 """
 
 PREFIX_MAP = {
@@ -23,6 +24,7 @@ PREFIX_MAP = {
     "Certification": "ce",
     "Education": "ed",
     "Tool": "tl",
+    "PositionEditLog": "pl",
 }
 
 

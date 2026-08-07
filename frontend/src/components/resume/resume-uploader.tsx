@@ -9,8 +9,8 @@ import { Button } from '@/components/ui/button'
  * 支持 PDF/Word/图片，≤ 10MB；拖拽或点击触发。
  * 简历文本先经 PII 脱敏处理后再送入 LLM（PIPL/GDPR 合规）。
  */
-const ACCEPTED_TYPES = ['.pdf', '.doc', '.docx', '.png', '.jpg', '.jpeg']
-const ACCEPTED_MIME = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/png', 'image/jpeg']
+const ACCEPTED_TYPES = ['.pdf', '.docx', '.png', '.jpg', '.jpeg']
+const ACCEPTED_MIME = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/png', 'image/jpeg']
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
 
 interface ResumeUploaderProps {

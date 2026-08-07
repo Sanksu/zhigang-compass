@@ -133,8 +133,8 @@
 
 ### 6.2 部署栈
 
-- Docker Compose **4 服务**：`api / postgres(pgvector) / redis / neo4j`
-- FastAPI 通过 `StaticFiles` 同端口托管前端静态资源，中间件承担 CORS/CSP/HSTS/gzip
+- Docker Compose **5 服务**：`api / postgres(pgvector) / redis / neo4j / worker(ARQ)`
+- FastAPI 通过 `StaticFiles` 同端口托管前端静态资源，中间件承担 CORS/CSP/HSTS/gzip/限流
 - 一键 `docker compose up -d` 启动，所有服务通过健康检查
 - 生产环境 fail-fast：`APP_ENV=production` 时强校验 SECRET_KEY 长度、Redis 密码、禁用 Swagger
 
@@ -155,7 +155,7 @@
 
 ### 6.5 数据采集
 
-- 14 源 A/B/C 三级分级
+- 13 源 A/B/C 三级分级（拉勾网 2026-08-01 移除，原 14 源）
 - 国内单 IP 直连 + 国际走代理池（ProxyPoolMiddleware 随机轮换，失败自动剔除）
 - 黄金集 M2 末 ≥ 50 条 / M3 中段 ≥ 100 条（题目硬性要求）
 
@@ -168,7 +168,7 @@
 ## 8. 常用命令速查
 
 ```bash
-# 启动开发环境（4 服务：api/postgres/redis/neo4j，FastAPI 托管前端）
+# 启动开发环境（5 服务：api/postgres/redis/neo4j/worker，FastAPI 托管前端）
 docker compose up -d
 
 # 后端开发

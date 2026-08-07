@@ -36,6 +36,7 @@ from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
 from crawlers.settings import MAIMAI_COMPLIANCE, SUBPROCESS_TIMEOUT
+from crawlers.setup_boss_chrome import ensure_cdp_chrome, platform_profile_dir
 
 
 CRAWLER_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "maimai_cdp_crawler.py")
@@ -67,10 +68,18 @@ class MaimaiSpider(BaseSpider):
                 f"当前小时 {current_hour}。请夜间再执行 scrapy crawl maimai"
             )
 
-        cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
+        # 脉脉独立 CDP 浏览器：端口 9225 + 独立 profile（登录态/验证互不污染）
+        cdp_url = os.environ.get("MAIMAI_CDP_URL", "http://127.0.0.1:9225")
         keyword = self.keywords[0] if self.keywords else ""
 
         self.logger.info(f"开始采集脉脉飞书招聘页（合规声明：{MAIMAI_COMPLIANCE['annotation']}）")
+
+        # 确保 CDP Chrome 可用（被环境回收时自动拉起），避免占位请求直接失败。
+        # 启动时打开脉脉飞书招聘页（无需登录态），便于用户直观看到采集页面
+        if not ensure_cdp_chrome(cdp_url, profile_dir=platform_profile_dir("maimai"),
+                                 url="https://maimai.jobs.feishu.cn/index"):
+            self.logger.error(f"CDP Chrome 启动失败（{cdp_url}），本次采集终止")
+            return
 
         # 占位 Request 触发 parse（与 BOSS 一致：在 parse 中阻塞调用 CDP 脚本，
         # 避免 start_requests 直接 yield Item 导致 feed exporter 写入已关闭文件）
@@ -85,7 +94,7 @@ class MaimaiSpider(BaseSpider):
     def parse(self, response: Response):
         """通过 subprocess 调用 CDP 采集脚本，解析 JSONL 输出并 yield Item。"""
         keyword = response.meta.get("keyword", "")
-        cdp_url = response.meta.get("cdp_url", "http://127.0.0.1:9222")
+        cdp_url = response.meta.get("cdp_url", "http://127.0.0.1:9225")
 
         cmd = [sys.executable, CRAWLER_SCRIPT, "--keyword", keyword, "--cdp-url", cdp_url]
 
@@ -112,6 +121,7 @@ class MaimaiSpider(BaseSpider):
             self.logger.error(f"CDP 脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
             return
 
+        item_count = 0
         for line in stdout.splitlines():
             line = line.strip()
             if not line:
@@ -122,6 +132,7 @@ class MaimaiSpider(BaseSpider):
                 self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
                 continue
 
+            item_count += 1
             yield self.make_item(
                 source_id=str(item_data.get("id", "")),
                 source_url=item_data.get("url", ""),
@@ -131,7 +142,7 @@ class MaimaiSpider(BaseSpider):
                 salary=item_data.get("salary", ""),
                 experience=item_data.get("experience_range", ""),
                 education="",
-                tags=[item_data.get("category", ""), item_data.get("job_type", "")],
+                tags=[t for t in (item_data.get("category", ""), item_data.get("job_type", "")) if t],
                 description=item_data.get("description", ""),
                 requirements="",
                 raw_text=json.dumps(item_data.get("raw", item_data), ensure_ascii=False),
@@ -142,6 +153,7 @@ class MaimaiSpider(BaseSpider):
         if stderr_output:
             for line in stderr_output.strip().splitlines()[-5:]:
                 self.logger.info(f"[cdp] {line}")
+        self.logger.info(f"[maimai] 采集完成：产出 {item_count} 条")
 
     def _on_error(self, failure):
         """占位请求失败回调。"""

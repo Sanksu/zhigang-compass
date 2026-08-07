@@ -80,13 +80,18 @@ class StackoverflowSpider(Spider):
             return
 
         items = data.get("items", [])
+        item_count = 0
         for it in items:
             item = self._api_item_to_item(it, response.meta)
             if item:
+                item_count += 1
                 yield item
 
         # 翻页：has_more 且未达 max_pages
         current_page = response.meta.get("page", 1)
+        self.logger.info(
+            f"[stackoverflow] tag={response.meta['tag']} 页={current_page} 产出 {item_count} 条"
+        )
         if data.get("has_more") and current_page < self.max_pages:
             tag = response.meta["tag"]
             next_url = self._build_api_url(tag, current_page + 1)

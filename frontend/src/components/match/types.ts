@@ -20,6 +20,70 @@ export interface BackendMatchResult {
   missing_must: string[]
   summary: string
   unqualified: boolean
+  /** 结果快照 ID（compare 同步执行后持久化，供 /match/result|gap|path|feedback 查询） */
+  match_id?: string
+  /** compare 专属：差距三态（missing/weak/matched，按优先级排序） */
+  gaps?: BackendGapItem[]
+  /** compare 专属：学习路径（missing/weak 技能的先修链 + 课程 Top-3） */
+  learning_path?: BackendLearningPathItem[]
+  /** compare 专属：证据引用（技能 → 原始 JD，图谱 MENTIONED_IN 链路） */
+  evidence_refs?: BackendEvidenceRef[]
+}
+
+/** 后端证据引用项 */
+export interface BackendEvidenceRef {
+  skill: string
+  source: string
+  url: string
+  confidence: number
+}
+
+/** 后端差距项 */
+export interface BackendGapItem {
+  skill: string
+  skill_id?: string | null
+  necessity: 'must' | 'nice'
+  gap_type: 'missing' | 'weak' | 'matched'
+  weight: number
+  priority: 'high' | 'medium' | 'low'
+  current_proficiency?: string | null
+  required_proficiency?: string | null
+}
+
+/** 后端学习路径项 */
+export interface BackendLearningPathItem {
+  skill: string
+  skill_id?: string | null
+  prerequisites: string[]
+  courses: BackendCourseRecommendation[]
+  estimated_hours: number
+  priority: 'high' | 'medium' | 'low'
+}
+
+/** 后端课程推荐 */
+export interface BackendCourseRecommendation {
+  course_id: string
+  title: string
+  platform: string
+  quality_score?: number | null
+  recommended: boolean
+  source_url: string
+  hours?: number | null
+}
+
+/** LLM 诊断报告 — 设计文档 §9.5（GET /match/result/{id}/diagnosis，结果缓存 24h） */
+export interface BackendDiagnosisReport {
+  match_id: string
+  /** 总体匹配度解读 */
+  overall_summary: string
+  /** 三维雷达图解读（必备/加分/经验） */
+  radar_analysis: string
+  /** 关键差距 Top-5 及改进建议（evidence_id 可点击追溯） */
+  top_gaps: { skill: string; advice: string; evidence_id: string }[]
+  /** 学习路径解读 */
+  path_analysis: string
+  /** 整体改进建议清单 */
+  recommendations: string[]
 }
 
 /** 已解析简历摘要（GET /resume/list） */
@@ -72,7 +136,7 @@ export interface SkillMatrixItem {
 /** 差距分析项 */
 export interface GapItem {
   skill: string
-  gap_type: 'missing_must' | 'level_gap' | 'missing_nice'
+  gap_type: 'missing_must' | 'level_gap' | 'missing_nice' | 'matched'
   priority: 'high' | 'medium' | 'low'
   current_level: string
   required_level: string

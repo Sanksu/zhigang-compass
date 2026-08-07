@@ -58,3 +58,30 @@ def require_permission(permission: str):
         return user
 
     return _check
+
+
+# 角色等级（设计文档 §2.4.3/2.4.4 中 "user+" 语义：guest < user < admin）
+_ROLE_RANK = {"guest": 0, "user": 1, "admin": 2}
+
+
+def require_role(min_role: str = "user"):
+    """角色门槛依赖：登录用户角色须达到 min_role 及以上。
+
+    用于设计文档声明 "user+" 的端点（如简历上传/匹配计算），
+    guest 角色即使已登录也无权调用。
+
+    用法：
+        @router.post("/parse")
+        async def parse(user: dict = Depends(require_role("user"))):
+            ...
+    """
+
+    async def _check(user: dict = Depends(get_current_user)) -> dict:
+        if _ROLE_RANK.get(user.get("role", "guest"), 0) < _ROLE_RANK.get(min_role, 1):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"需要 {min_role} 及以上角色",
+            )
+        return user
+
+    return _check

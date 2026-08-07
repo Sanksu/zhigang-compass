@@ -66,6 +66,10 @@ POOL_REQUIRED = {
     "arxiv", "github", "stackoverflow",
 }
 
+# 开发环境默认代理（本地 Clash/V2Ray 默认端口；生产以 PROXY_POOL/API 配置为准）
+# 中间件回退链：PROXY_POOL → 环境变量 HTTPS_PROXY/HTTP_PROXY → DEFAULT_PROXY
+DEFAULT_PROXY = "http://127.0.0.1:7890"
+
 # 代理池列表（可扩展：支持 HTTP/HTTPS/SOCKS5）
 # 格式: scheme://user:pass@host:port
 PROXY_POOL = [
@@ -88,8 +92,10 @@ RETRY_TIMES = 3
 RETRY_HTTP_CODES = [429, 500, 502, 503, 504]
 
 # ---------- 独立采集脚本 ----------
-# subprocess 调用（CDP/JobSpy/Playwright 独立脚本）的最大等待秒数，超时后终止子进程
-SUBPROCESS_TIMEOUT = 900
+# subprocess 调用（CDP/JobSpy/Playwright 独立脚本）的最大等待秒数，超时后终止子进程。
+# 300s：boss 默认 max_pages=5 每任务约 1-3min，足够覆盖正常任务；900s 会让异常任务
+# 长期占用且串行放大（8 关键词 × 5 城市最坏 40×900s）。
+SUBPROCESS_TIMEOUT = 300
 
 # ---------- 脉脉合规 ----------
 MAIMAI_COMPLIANCE = {

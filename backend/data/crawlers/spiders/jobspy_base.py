@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from scrapy.http import Response
@@ -46,10 +47,12 @@ class JobSpyBaseSpider(BaseSpider):
 
         python_exe = sys.executable
 
-        for task in tasks:
+        task_total = len(tasks)
+        _started = time.monotonic()
+        for task_idx, task in enumerate(tasks):
             keyword = task["keyword"]
             city = task["city"]
-            self.logger.info(f"开始采集: kw={keyword} city={city}")
+            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword} city={city}")
 
             cmd = [
                 python_exe, self.crawler_script,
@@ -79,9 +82,10 @@ class JobSpyBaseSpider(BaseSpider):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 stdout, stderr = proc.communicate()
-                self.logger.error(f"JobSpy 脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+                self.logger.error(f"[{self.platform}] 任务 {task_idx + 1}/{task_total} 超时（>{SUBPROCESS_TIMEOUT}s），已终止")
                 continue
 
+            item_count = 0
             for line in stdout.splitlines():
                 line = line.strip()
                 if not line:
@@ -92,8 +96,9 @@ class JobSpyBaseSpider(BaseSpider):
                     self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
                     continue
 
+                item_count += 1
                 salary = self._format_salary(
-                    item_data.get("interval"),
+                    item_data.get("salary_interval"),
                     item_data.get("min_amount"),
                     item_data.get("max_amount"),
                     item_data.get("currency", "USD"),
@@ -109,6 +114,7 @@ class JobSpyBaseSpider(BaseSpider):
                     experience=item_data.get("experience_range", "") or item_data.get("job_level", ""),
                     education="",
                     tags=self._build_tags(item_data),
+                    post_date=item_data.get("date_posted", ""),
                     description=item_data.get("description", ""),
                     requirements="",
                     raw_text=json.dumps(item_data, ensure_ascii=False),
@@ -118,6 +124,7 @@ class JobSpyBaseSpider(BaseSpider):
                 self.logger.error(f"JobSpy 脚本退出码 {proc.returncode}: {stderr[-500:]}")
             elif stderr:
                 self.logger.debug(f"JobSpy stderr: {stderr[-300:]}")
+            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条")
 
     def parse(self, response: Response):
         """占位：start_requests 已直接 yield Item，无需 parse。"""

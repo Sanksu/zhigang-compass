@@ -20,6 +20,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 from scrapy import Request, Spider
@@ -88,9 +89,11 @@ class Icourse163Spider(Spider):
             return
 
         python_exe = sys.executable
+        keyword_total = len(keywords)
+        _started = time.monotonic()
 
-        for keyword in keywords:
-            self.logger.info(f"开始采集中国大学MOOC: 关键词={keyword}")
+        for kw_idx, keyword in enumerate(keywords):
+            self.logger.info(f"[icourse163] 进度 {kw_idx + 1}/{keyword_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 关键词={keyword}")
 
             cmd = [
                 python_exe, self.crawler_script,
@@ -106,6 +109,7 @@ class Icourse163Spider(Spider):
                     text=True,
                     encoding="utf-8",
                     cwd=os.path.dirname(self.crawler_script),
+                    env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
                 )
             except Exception as e:
                 self.logger.error(f"启动采集脚本失败: {e}")
@@ -117,7 +121,7 @@ class Icourse163Spider(Spider):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 stdout, stderr_output = proc.communicate()
-                self.logger.error(f"采集脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+                self.logger.error(f"[icourse163] 任务 {kw_idx + 1}/{keyword_total} 超时（>{SUBPROCESS_TIMEOUT}s），已终止")
                 continue
 
             count = 0
@@ -144,7 +148,7 @@ class Icourse163Spider(Spider):
                     if stderr_line:
                         self.logger.info(f"[script] {stderr_line}")
 
-            self.logger.info(f"关键词={keyword} 采集完成，共 {count} 条")
+            self.logger.info(f"[icourse163] 进度 {kw_idx + 1}/{keyword_total}: 关键词={keyword} 采集完成，共 {count} 条")
 
     def _on_error(self, failure):
         """占位请求失败回调（正常情况，本地 1 端口不通）。"""

@@ -6,9 +6,9 @@ info:
     多源异构驱动的岗位能力动态演化与人岗匹配系统 API 契约。
     本文件是前后端并行开发的单一事实源（AGENTS.md 铁律一）。
     前端通过 `openapi-typescript` 生成类型，不得自行定义与后端不一致的类型。
-    认证方案：Bearer 双 Token（access 30min / refresh 7d），不再使用 Cookie。
-    标注规则：summary 前缀 [M3]/[M4] 的端点属对应里程碑规划，
-    后端尚未实现，不得在并行开发中作为已交付功能消费。
+    认证方案：Bearer 双 Token（access 30min / refresh 7d）；refresh_token 同时
+    写入 httpOnly Cookie（httponly + samesite=lax），供页面刷新后静默恢复会话。
+    标注规则：全部端点已实现（M1-M4 全量交付），契约不含里程碑占位标注。
   contact:
     name: 智岗罗盘团队
     url: https://github.com/zhigang-compass
@@ -165,7 +165,7 @@ paths:
   /api/v1/graph/position/{id}:
     get:
       tags: [graph]
-      summary: "[M4] 岗位节点详情"
+      summary: 岗位节点详情"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -181,7 +181,7 @@ paths:
   /api/v1/graph/position/{id}/skills:
     get:
       tags: [graph]
-      summary: "[M4] 岗位技能列表"
+      summary: 岗位技能列表"
       parameters:
         - $ref: '#/components/parameters/Id'
         - name: necessity
@@ -198,7 +198,7 @@ paths:
   /api/v1/graph/skill/{id}:
     get:
       tags: [graph]
-      summary: "[M4] 技能节点详情"
+      summary: 技能节点详情"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -212,7 +212,7 @@ paths:
   /api/v1/graph/skill/{id}/evidence:
     get:
       tags: [graph]
-      summary: "[M4] 技能证据列表"
+      summary: 技能证据列表"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -226,12 +226,12 @@ paths:
   /api/v1/graph/skill/{id}/prerequisites:
     get:
       tags: [graph]
-      summary: "[M4] 先修技能链"
+      summary: 技能先修技能链（先修字典，拓扑序）
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
         '200':
-          description: 先修链
+          description: 先修链（data 含 skill_id/skill_name/prerequisites[{skill_id,name,depth}]）
           content:
             application/json:
               schema:
@@ -240,12 +240,12 @@ paths:
   /api/v1/graph/skill/{id}/courses:
     get:
       tags: [graph]
-      summary: "[M4] 学习课程列表"
+      summary: 学习课程列表（LEARNABLE_VIA + 质量分降序）
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
         '200':
-          description: 课程列表
+          description: 课程列表（data 含 skill_id/skill_name/courses[CourseRecommendation]）
           content:
             application/json:
               schema:
@@ -268,7 +268,7 @@ paths:
   /api/v1/graph/skill/similar:
     get:
       tags: [graph]
-      summary: "[M4] 相似技能检索（pgvector）"
+      summary: 相似技能检索（pgvector）"
       parameters:
         - name: skill_id
           in: query
@@ -314,10 +314,114 @@ paths:
                       edges: { type: array, items: { type: object } }
                       stats: { type: object }
 
+  /api/v1/graph/algorithms/pagerank:
+    get:
+      tags: [graph]
+      summary: PageRank 技能重要性 Top-N（纯 Python，Neo4j 社区版无 GDS）
+      parameters:
+        - name: top_n
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+        - name: min_weight
+          in: query
+          schema: { type: number, default: 1.0, minimum: 1.0 }
+          description: 共现边权重下限（共现岗位数）
+      responses:
+        '200':
+          description: 技能重要性排名
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      skills:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: { type: string }
+                            name: { type: string }
+                            score: { type: number }
+                      top_n: { type: integer }
+
+  /api/v1/graph/algorithms/skill-clusters:
+    get:
+      tags: [graph]
+      summary: Louvain 技能簇识别（纯 Python）
+      parameters:
+        - name: min_size
+          in: query
+          schema: { type: integer, default: 2, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: 技能簇列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      clusters:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: { type: integer }
+                            size: { type: integer }
+                            skills:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  id: { type: string }
+                                  name: { type: string }
+                      cluster_count: { type: integer }
+
+  /api/v1/graph/algorithms/shortest-path:
+    get:
+      tags: [graph]
+      summary: 技能最短路径（shortestPath((:Skill)-[*..6]-(:Skill))）
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string }
+          description: 起点技能 ID
+        - name: to
+          in: query
+          required: true
+          schema: { type: string }
+          description: 终点技能 ID
+      responses:
+        '200':
+          description: 最短路径节点序列
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      from: { type: string }
+                      to: { type: string }
+                      path:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: { type: string }
+                            name: { type: string }
+                            type: { type: string }
+        '404':
+          description: 两技能间不存在 ≤6 跳可达路径
+
   /api/v1/graph/view/{view_type}:
     get:
       tags: [graph]
-      summary: "[M4] 视图切换（后端过滤）"
+      summary: 视图切换（后端过滤）"
       parameters:
         - name: view_type
           in: path
@@ -420,7 +524,7 @@ paths:
   /api/v1/resume/task/{task_id}/stream:
     get:
       tags: [resume]
-      summary: "[M4] SSE 推送任务进度"
+      summary: "SSE 推送任务进度（event: progress/done/error）"
       parameters:
         - name: task_id
           in: path
@@ -434,10 +538,34 @@ paths:
               schema:
                 type: string
 
+  /api/v1/resume/files/{resume_id}/download:
+    get:
+      tags: [resume]
+      summary: 下载简历原始文件（仅上传者本人可下载，admin 无权访问原文）
+      parameters:
+        - name: resume_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 原始文件字节流
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: resume_id 格式非法
+        '403':
+          description: 非本人无权下载
+        '404':
+          description: 简历文件不存在
+
   /api/v1/resume/{resume_id}:
     get:
       tags: [resume]
-      summary: "[M4] 获取解析结果"
+      summary: 获取解析结果
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -501,7 +629,7 @@ paths:
   /api/v1/match/compare:
     post:
       tags: [match]
-      summary: 人岗比对（单点同步）
+      summary: 人岗比对（含差距三态 + 学习路径）
       requestBody:
         required: true
         content:
@@ -514,7 +642,9 @@ paths:
                 position_id: { type: string }
       responses:
         '200':
-          description: 匹配结果
+          description: |
+            匹配结果 + gaps（GapSkill[]，三态）+ learning_path
+            （LearningPathItem[]，missing/weak 技能先修链 + 课程 Top-3）
           content:
             application/json:
               schema:
@@ -523,7 +653,7 @@ paths:
   /api/v1/match/task/{task_id}:
     get:
       tags: [match]
-      summary: "[M4] 查询推荐任务状态"
+      summary: 查询推荐任务状态"
       parameters:
         - name: task_id
           in: path
@@ -540,7 +670,7 @@ paths:
   /api/v1/match/result/{match_id}:
     get:
       tags: [match]
-      summary: "[M4] 获取匹配结果"
+      summary: 获取匹配结果"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -554,7 +684,7 @@ paths:
   /api/v1/match/result/{match_id}/gap:
     get:
       tags: [match]
-      summary: "[M4] 获取差距分析"
+      summary: 获取差距分析"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -568,7 +698,7 @@ paths:
   /api/v1/match/result/{match_id}/path:
     get:
       tags: [match]
-      summary: "[M4] 获取学习路径"
+      summary: 获取学习路径"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -579,10 +709,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
 
+  /api/v1/match/result/{match_id}/diagnosis:
+    get:
+      tags: [match]
+      summary: 获取人岗比对诊断报告"
+      description: LLM 基于结果快照（分数/差距/学习路径/证据）生成结构化诊断报告，结果缓存 24h
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 诊断报告（overall_summary / radar_analysis / top_gaps / path_analysis / recommendations）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: 该匹配结果无差距数据（仅人岗比对可生成诊断报告）
+        '404':
+          description: 匹配结果不存在或已过期
+        '503':
+          description: 诊断报告生成失败（LLM 不可用或超时）
+
   /api/v1/match/feedback:
     post:
       tags: [match]
-      summary: "[M4] 提交匹配反馈"
+      summary: 提交匹配反馈"
       requestBody:
         required: true
         content:
@@ -622,7 +773,7 @@ paths:
   /api/v1/evolution/versions/{version_id}:
     get:
       tags: [evolution]
-      summary: "[M4] 获取版本详情"
+      summary: 获取版本详情"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -677,12 +828,56 @@ paths:
   /api/v1/evolution/position/{id}/evolution:
     get:
       tags: [evolution]
-      summary: "[M4] 岗位演化历史"
+      summary: 岗位演化历史"
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
         '200':
           description: 演化历史
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/evolution/state-machine:
+    get:
+      tags: [evolution]
+      summary: 岗位状态机总览（六态分布 + 最近人工流转记录）"
+      responses:
+        '200':
+          description: 状态机总览
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/evolution/signals:
+    get:
+      tags: [evolution]
+      summary: 新兴/衰退技能 Top-N（快照序列 Z-score 信号）
+      parameters:
+        - name: top_n
+          in: query
+          schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
+      responses:
+        '200':
+          description: 信号列表（data 含 window_count/emerging/declining）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/evolution/watch:
+    get:
+      tags: [evolution]
+      summary: 观察池公开摘要 + MLI 产业化拐点排名（前端看板）
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: 观察池摘要（data 含 items/total，item 含 mli/ready_to_industrialize）
           content:
             application/json:
               schema:
@@ -761,7 +956,7 @@ paths:
   /api/v1/admin/crawl/trigger:
     post:
       tags: [admin]
-      summary: "[M4] 触发爬取任务"
+      summary: 触发爬取任务（平台白名单校验 + ARQ 入队）
       requestBody:
         required: true
         content:
@@ -770,11 +965,11 @@ paths:
               type: object
               required: [platform, keyword]
               properties:
-                platform: { type: string }
+                platform: { type: string, description: "平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx" }
                 keyword: { type: string }
       responses:
         '202':
-          description: 任务已触发
+          description: 任务已触发（data 含 task_id/status=pending）
           content:
             application/json:
               schema:
@@ -791,6 +986,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/crawl/history:
+    get:
+      tags: [admin]
+      summary: 爬取历史（task_status 中 crawl 任务，倒序分页）
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: 爬取历史列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/crawl/task/{task_id}/stream:
+    get:
+      tags: [admin]
+      summary: "爬虫实时日志 SSE（event: log/progress/done/error）"
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: SSE 流
+          content:
+            text/event-stream:
+              schema:
+                type: string
 
   /api/v1/admin/llm-config:
     get:
@@ -836,6 +1063,69 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
 
+  /api/v1/admin/positions/{position_name}:
+    get:
+      tags: [admin]
+      summary: 岗位详情（人工编辑前查看技能/学历/证书与文本定义）
+      parameters:
+        - name: position_name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 岗位详情（skills 列表 + core_duties/scenarios + education/certifications）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '404':
+          description: 岗位不存在
+    put:
+      tags: [admin]
+      summary: 人工编辑岗位定义（技能增删/necessity 切换/weight 调整/文本修改），变更写入 PositionEditLog 节点
+      parameters:
+        - name: position_name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                skills:
+                  type: array
+                  description: 技能全量替换（缺省不变更），每项含 name/necessity/weight
+                  items:
+                    type: object
+                    required: [name, necessity, weight]
+                    properties:
+                      name: { type: string, description: 技能名 }
+                      necessity: { type: string, enum: [must, nice] }
+                      weight: { type: number, minimum: 0.0, maximum: 1.0 }
+                core_duties:
+                  type: array
+                  description: 核心职责（字符串数组，全量替换）
+                  items: { type: string }
+                scenarios:
+                  type: array
+                  description: 典型场景（字符串数组，全量替换）
+                  items: { type: string }
+      responses:
+        '200':
+          description: 保存结果（updated/diff_summary）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: 参数不合法（weight 越界 / necessity 非法等）
+        '404':
+          description: 岗位不存在
+
   /api/v1/admin/positions/pending:
     get:
       tags: [admin]
@@ -849,9 +1139,9 @@ paths:
                 $ref: '#/components/schemas/ApiResponse'
 
   /api/v1/admin/positions/{id}/review:
-    put:
+    post:
       tags: [admin]
-      summary: "[M4] 审核岗位（批准/驳回/编辑）"
+      summary: 审核岗位（批准/驳回）"
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -860,13 +1150,54 @@ paths:
           application/json:
             schema:
               type: object
-              required: [action]
+              required: [action, reason]
               properties:
-                action: { type: string, enum: [approve, reject, edit] }
-                fields: { type: object, description: "编辑后的字段（action=edit 时）" }
+                action: { type: string, enum: [approve, reject] }
+                reason: { type: string, description: "审核理由（必填）" }
       responses:
         '200':
           description: 审核完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: 参数不合法 / 不满足晋升条件
+        '404':
+          description: 候选岗位不存在
+        '409':
+          description: 候选岗位当前状态不可审核
+
+  /api/v1/admin/positions/declining:
+    get:
+      tags: [admin]
+      summary: 待归档岗位列表（declining 状态）"
+      responses:
+        '200':
+          description: 待归档列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/admin/positions/{id}/archive:
+    put:
+      tags: [admin]
+      summary: 确认衰退归档（declining → archived 终态）"
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, description: "归档原因（必填，写入审计日志）" }
+      responses:
+        '200':
+          description: 归档完成
           content:
             application/json:
               schema:
@@ -875,7 +1206,7 @@ paths:
   /api/v1/admin/evolution/pending:
     get:
       tags: [admin]
-      summary: "[M4] 待审核演化变更"
+      summary: 待审核演化变更"
       responses:
         '200':
           description: 待审核列表
@@ -884,10 +1215,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
 
+  /api/v1/admin/discovery/watch:
+    get:
+      tags: [admin]
+      summary: 技术热点观察池周报（§7.2.5，admin 可见，供运营周报/审核）
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [watch, candidate_promoted, archived] }
+          description: 状态过滤
+        - name: source
+          in: query
+          schema: { type: string }
+          description: 信号源过滤（jd/arxiv/course/github/stackoverflow）
+        - name: page
+          in: query
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: size
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+      responses:
+        '200':
+          description: 观察池信号分页列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            skill_name: { type: string }
+                            signal_source: { type: string }
+                            signal_value: { type: number }
+                            period: { type: string }
+                            status: { type: string }
+                            first_seen_at: { type: string, nullable: true }
+                            last_signal_at: { type: string, nullable: true }
+                      total: { type: integer }
+                      page: { type: integer }
+                      size: { type: integer }
+
   /api/v1/admin/evolution/{id}/review:
     put:
       tags: [admin]
-      summary: "[M4] 审核演化变更"
+      summary: 审核演化变更"
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -1005,3 +1381,39 @@ components:
         username: { type: string }
         role: { type: string, enum: [admin, user, guest] }
         permissions: { type: array, items: { type: string } }
+
+    GapSkill:
+      type: object
+      description: 技能差距项（设计文档 §9.5 三态）
+      properties:
+        skill: { type: string, description: 技能名 }
+        skill_id: { type: string, nullable: true, description: 图谱技能 ID }
+        necessity: { type: string, enum: [must, nice] }
+        gap_type: { type: string, enum: [missing, weak, matched] }
+        weight: { type: number, description: 技能权重 }
+        priority: { type: string, enum: [high, medium, low] }
+        current_proficiency: { type: string, nullable: true, description: 候选人当前熟练度 }
+        required_proficiency: { type: string, nullable: true, description: 岗位期望熟练度 }
+
+    CourseRecommendation:
+      type: object
+      description: 学习课程推荐（质量分 Top-3，设计文档 §4.6）
+      properties:
+        course_id: { type: string, description: 图谱 Course ID }
+        title: { type: string }
+        platform: { type: string }
+        quality_score: { type: number, nullable: true, minimum: 0, maximum: 1 }
+        recommended: { type: boolean }
+        source_url: { type: string }
+        hours: { type: number, nullable: true, description: 课程时长（小时） }
+
+    LearningPathItem:
+      type: object
+      description: 单技能学习路径项（甘特图格式，设计文档 §9.5）
+      properties:
+        skill: { type: string, description: 目标技能名 }
+        skill_id: { type: string, nullable: true }
+        prerequisites: { type: array, items: { type: string }, description: 先修技能链（先修在前） }
+        courses: { type: array, items: { $ref: '#/components/schemas/CourseRecommendation' } }
+        estimated_hours: { type: number, description: 预计学习学时 }
+        priority: { type: string, enum: [high, medium, low] }

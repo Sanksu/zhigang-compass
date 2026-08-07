@@ -3,14 +3,29 @@
 启动：uv run uvicorn app.main:app --reload --port 8000
 """
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
-from app.core.middleware import setup_middleware
+from app.core.errors import ERR_INTERNAL, ERR_VALIDATION, HTTP_STATUS_ERROR_CODE
+from app.core.middleware import setup_middleware, trace_id_var
+from app.schemas.common import APIResponse
+
+# 应用内 logger（auth/admin 等模块）输出到标准输出，便于运行排错；
+# root 默认 WARNING 会吞掉模块 INFO 日志，故启动时统一配置
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    force=True,
+)
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -19,8 +34,22 @@ async def lifespan(app: FastAPI):
     if settings.is_production:
         if settings.secret_key == "change-me-in-production":
             raise RuntimeError("SECRET_KEY 未修改，生产环境拒绝启动")
+    _prewarm_semantic()
     yield
     # 关闭时 — 资源由各自模块管理
+
+
+def _prewarm_semantic() -> None:
+    """后台预加载 SBERT 模型，避免首次匹配请求触发模型加载（>30s 超时）。
+
+    模型加载约 5-15s，放后台线程执行，不阻塞 API 启动；失败静默
+    （语义不可用时匹配自动降级纯规则，见 semantic.SemanticUnavailableError）。
+    """
+    import threading
+
+    from app.services.matching.semantic import SkillEmbedder
+
+    threading.Thread(target=SkillEmbedder.get().preload, daemon=True).start()
 
 
 app = FastAPI(
@@ -37,6 +66,46 @@ setup_middleware(app)
 from app.api.v1 import router as v1_router
 
 app.include_router(v1_router, prefix="/api/v1")
+
+
+# ---------- 全局异常处理器（设计文档 §2.4.7：错误响应体一律统一 APIResponse） ----------
+def _error_body(code: int, msg: str) -> dict:
+    return APIResponse(code=code, msg=msg, data=None, trace_id=trace_id_var.get("")).model_dump()
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Pydantic 校验失败 → 422 + code 4000。"""
+    first = exc.errors()[0] if exc.errors() else {}
+    loc = ".".join(str(p) for p in first.get("loc", []) if p not in ("body", "query", "path"))
+    msg = f"参数校验失败: {loc} {first.get('msg', '')}".strip() if loc else "参数校验失败"
+    return JSONResponse(status_code=422, content=_error_body(ERR_VALIDATION, msg))
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """HTTPException：保持原 status，code 按 status 映射（401→4010…其余→5000）。
+
+    business_error() 构造的 detail 已是统一 body dict 时直接透传。
+    """
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        body = exc.detail
+    else:
+        code = HTTP_STATUS_ERROR_CODE.get(exc.status_code, ERR_INTERNAL)
+        msg = exc.detail if isinstance(exc.detail, str) else "请求失败"
+        body = _error_body(code, msg)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=body,
+        headers=dict(exc.headers) if exc.headers else None,
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """未捕获异常 → 500 + code 5000；保留 traceback 便于排错。"""
+    logger.exception("未捕获异常: %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content=_error_body(ERR_INTERNAL, "服务器内部错误"))
 
 
 @app.get("/health")

@@ -55,8 +55,8 @@ class ZhilianSpider(BaseSpider):
         for text in script_text:
             if "__INITIAL_STATE__" not in text or "publishTime" not in text:
                 continue
-            # __INITIAL_STATE__={...} 格式，截取 JSON 部分
-            match = re.search(r"__INITIAL_STATE__\s*=\s*(\{.+)", text, re.DOTALL)
+            # __INITIAL_STATE__={...} 格式，截取 JSON 部分（非贪婪 + 尾部锚定，避免贪婪吞掉后续 JS）
+            match = re.search(r"__INITIAL_STATE__\s*=\s*(\{.*\})\s*;?\s*$", text, re.DOTALL)
             if not match:
                 continue
             try:
@@ -93,6 +93,14 @@ class ZhilianSpider(BaseSpider):
 
         cards = response.css(".joblist-box__item")
 
+        if not cards:
+            self.logger.warning(
+                f"[zhilian] 列表页无岗位卡片（kw={response.meta.get('keyword')} 页={response.meta.get('page')}），"
+                f"页面标题: {response.css('title::text').get(default='')}"
+            )
+            return
+
+        yield_count = 0
         for card in cards:
             title = card.css(".jobinfo__name::text").get(default="").strip()
             company = card.css(".companyinfo__name::text").get(default="").strip()
@@ -128,6 +136,7 @@ class ZhilianSpider(BaseSpider):
                 f"技能标签：{', '.join(tags)}",
             ])
 
+            yield_count += 1
             yield self.make_item(
                 source_id=source_id,
                 source_url=detail_url,
@@ -146,6 +155,10 @@ class ZhilianSpider(BaseSpider):
 
         # 翻页（最多 5 页，避免过度采集触发反爬）
         current_page = response.meta.get("page", 1)
+        self.logger.info(
+            f"[zhilian] kw={response.meta.get('keyword')} city={response.meta.get('city')} "
+            f"页={current_page} 产出 {yield_count} 条"
+        )
         if current_page < 5:
             next_href = response.css(".next-page::attr(href), a.pageset[rel=next]::attr(href)").get()
             if next_href:

@@ -3,6 +3,9 @@
 from app.models.base import Base
 from app.models.business import (
     AuditLog,
+    DiscoveryCandidate,
+    GraphVersion,
+    Occupation,
     ResumeCache,
     TaskStatus,
     User,
@@ -19,7 +22,10 @@ __all__ = [
     "AuditLog",
     "CommunityRaw",
     "CourseRaw",
+    "DiscoveryCandidate",
+    "GraphVersion",
     "JDRaw",
+    "Occupation",
     "PaperRaw",
     "ResumeCache",
     "TaskStatus",

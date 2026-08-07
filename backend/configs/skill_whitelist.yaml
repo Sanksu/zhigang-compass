@@ -1,0 +1,663 @@
+# 标准技能白名单（设计文档 §6.3 第三道防线：500+ 标准技能）
+#
+# 单一事实源：SKILL_WHITELIST 由本文件加载（dictionary.py 启动时读取）。
+# 结构：skills 列表，每项 {name, category}，category 与 schema.cypher 的
+# `skill.category` 索引对应。
+#
+# 扩充机制（不靠手写硬编码）：
+#   python scripts/expand_skill_whitelist.py --top 500
+# 从 jd_raw 结构化抽取结果挖掘白名单外高频技能 → 人工审核 → 追加本文件。
+#
+# 约定：
+# - 技能名采用图谱归一化后的规范名（normalize_skill 口径一致）
+# - 软技能子集（SOFT_SKILL_WHITELIST 20 项）必须包含在本清单内
+# - 新增条目建议注明 category，便于分类检索
+
+skills:
+  # ---- 编程语言 ----
+  - {name: "Python", category: "编程语言"}
+  - {name: "Java", category: "编程语言"}
+  - {name: "JavaScript", category: "编程语言"}
+  - {name: "TypeScript", category: "编程语言"}
+  - {name: "Go", category: "编程语言"}
+  - {name: "Rust", category: "编程语言"}
+  - {name: "C++", category: "编程语言"}
+  - {name: "C#", category: "编程语言"}
+  - {name: "C", category: "编程语言"}
+  - {name: "C语言", category: "编程语言"}
+  - {name: "Ruby", category: "编程语言"}
+  - {name: "PHP", category: "编程语言"}
+  - {name: "Swift", category: "编程语言"}
+  - {name: "Kotlin", category: "编程语言"}
+  - {name: "Scala", category: "编程语言"}
+  - {name: "R", category: "编程语言"}
+  - {name: "MATLAB", category: "编程语言"}
+  - {name: "Shell", category: "编程语言"}
+  - {name: "SQL", category: "编程语言"}
+  - {name: "Perl", category: "编程语言"}
+  - {name: "VBA", category: "编程语言"}
+  - {name: "Lua", category: "编程语言"}
+  - {name: "Dart", category: "编程语言"}
+  - {name: "Julia", category: "编程语言"}
+  - {name: "Groovy", category: "编程语言"}
+  - {name: "Objective-C", category: "编程语言"}
+  - {name: "PowerShell", category: "编程语言"}
+  - {name: "Bash", category: "编程语言"}
+  - {name: "Tcl", category: "编程语言"}
+  - {name: "汇编", category: "编程语言"}
+  - {name: "COBOL", category: "编程语言"}
+  - {name: "Fortran", category: "编程语言"}
+  - {name: "Verilog", category: "编程语言"}
+  - {name: "VHDL", category: "编程语言"}
+
+  # ---- 前端 ----
+  - {name: "React", category: "前端"}
+  - {name: "Vue.js", category: "前端"}
+  - {name: "Angular", category: "前端"}
+  - {name: "HTML", category: "前端"}
+  - {name: "HTML5", category: "前端"}
+  - {name: "CSS", category: "前端"}
+  - {name: "CSS3", category: "前端"}
+  - {name: "Webpack", category: "前端"}
+  - {name: "Vite", category: "前端"}
+  - {name: "Tailwind CSS", category: "前端"}
+  - {name: "Next.js", category: "前端"}
+  - {name: "Nuxt.js", category: "前端"}
+  - {name: "Bootstrap", category: "前端"}
+  - {name: "ECharts", category: "前端"}
+  - {name: "Three.js", category: "前端"}
+  - {name: "数据可视化", category: "前端"}
+  - {name: "UI设计", category: "前端"}
+  - {name: "前端工程化", category: "前端"}
+  - {name: "React Native", category: "前端"}
+  - {name: "jQuery", category: "前端"}
+  - {name: "ElementUI", category: "前端"}
+  - {name: "Ant Design", category: "前端"}
+  - {name: "uni-app", category: "前端"}
+  - {name: "Taro", category: "前端"}
+  - {name: "Flutter", category: "前端"}
+  - {name: "Redux", category: "前端"}
+  - {name: "Vuex", category: "前端"}
+  - {name: "Pinia", category: "前端"}
+  - {name: "Zustand", category: "前端"}
+  - {name: "Sass", category: "前端"}
+  - {name: "Less", category: "前端"}
+  - {name: "Stylus", category: "前端"}
+  - {name: "PostCSS", category: "前端"}
+  - {name: "D3.js", category: "前端"}
+  - {name: "Chart.js", category: "前端"}
+  - {name: "Canvas", category: "前端"}
+  - {name: "WebGL", category: "前端"}
+  - {name: "PWA", category: "前端"}
+  - {name: "响应式布局", category: "前端"}
+  - {name: "移动端适配", category: "前端"}
+  - {name: "微前端", category: "前端"}
+  - {name: "AJAX", category: "前端"}
+  - {name: "Axios", category: "前端"}
+  - {name: "跨浏览器兼容", category: "前端"}
+  - {name: "小程序", category: "前端"}
+  - {name: "鸿蒙", category: "前端"}
+
+  # ---- 后端 ----
+  - {name: "Spring Boot", category: "后端"}
+  - {name: "Spring Cloud", category: "后端"}
+  - {name: "Spring", category: "后端"}
+  - {name: "Spring MVC", category: "后端"}
+  - {name: "Spring Framework", category: "后端"}
+  - {name: "Django", category: "后端"}
+  - {name: "Flask", category: "后端"}
+  - {name: "FastAPI", category: "后端"}
+  - {name: "Express.js", category: "后端"}
+  - {name: "Node.js", category: "后端"}
+  - {name: "ASP.NET", category: "后端"}
+  - {name: "Microservices", category: "后端"}
+  - {name: "MyBatis", category: "后端"}
+  - {name: "Scrapy", category: "后端"}
+  - {name: "RESTful API", category: "后端"}
+  - {name: "REST", category: "后端"}
+  - {name: "JSON", category: "后端"}
+  - {name: "API", category: "后端"}
+  - {name: "J2EE", category: "后端"}
+  - {name: "JPA", category: "后端"}
+  - {name: "Hibernate", category: "后端"}
+  - {name: "JDBC", category: "后端"}
+  - {name: "Struts", category: "后端"}
+  - {name: "Dubbo", category: "后端"}
+  - {name: "Tornado", category: "后端"}
+  - {name: "Tomcat", category: "后端"}
+  - {name: "Netty", category: "后端"}
+  - {name: "gRPC", category: "后端"}
+  - {name: "GraphQL", category: "后端"}
+  - {name: "WebSocket", category: "后端"}
+  - {name: "SOAP", category: "后端"}
+  - {name: "Web Services", category: "后端"}
+  - {name: "高并发", category: "后端"}
+  - {name: "分布式", category: "后端"}
+  - {name: "微服务", category: "后端"}
+  - {name: "消息队列", category: "后端"}
+  - {name: "RabbitMQ", category: "后端"}
+  - {name: "搜索引擎", category: "后端"}
+  - {name: "分布式计算", category: "后端"}
+  - {name: "事件驱动", category: "后端"}
+  - {name: "接口设计", category: "后端"}
+
+  # ---- 数据库 ----
+  - {name: "MySQL", category: "数据库"}
+  - {name: "PostgreSQL", category: "数据库"}
+  - {name: "MongoDB", category: "数据库"}
+  - {name: "Redis", category: "数据库"}
+  - {name: "Elasticsearch", category: "数据库"}
+  - {name: "SQLite", category: "数据库"}
+  - {name: "Oracle", category: "数据库"}
+  - {name: "SQL Server", category: "数据库"}
+  - {name: "Cassandra", category: "数据库"}
+  - {name: "ClickHouse", category: "数据库"}
+  - {name: "NoSQL", category: "数据库"}
+  - {name: "MariaDB", category: "数据库"}
+  - {name: "DB2", category: "数据库"}
+  - {name: "关系型数据库", category: "数据库"}
+  - {name: "数据仓库", category: "数据库"}
+  - {name: "数据湖", category: "数据库"}
+  - {name: "InfluxDB", category: "数据库"}
+  - {name: "时序数据库", category: "数据库"}
+  - {name: "向量数据库", category: "数据库"}
+  - {name: "pgvector", category: "数据库"}
+  - {name: "图数据库", category: "数据库"}
+  - {name: "Neo4j", category: "数据库"}
+  - {name: "TiDB", category: "数据库"}
+  - {name: "缓存", category: "数据库"}
+  - {name: "分布式存储", category: "数据库"}
+  - {name: "对象存储", category: "数据库"}
+
+  # ---- 大数据 ----
+  - {name: "Hadoop", category: "大数据"}
+  - {name: "Apache Spark", category: "大数据"}
+  - {name: "Apache Flink", category: "大数据"}
+  - {name: "Apache Kafka", category: "大数据"}
+  - {name: "Hive", category: "大数据"}
+  - {name: "HBase", category: "大数据"}
+  - {name: "Airflow", category: "大数据"}
+  - {name: "PySpark", category: "大数据"}
+  - {name: "数据治理", category: "大数据"}
+  - {name: "ETL", category: "大数据"}
+  - {name: "Snowflake", category: "大数据"}
+  - {name: "数据建模", category: "大数据"}
+  - {name: "数据挖掘", category: "大数据"}
+  - {name: "大数据分析", category: "大数据"}
+  - {name: "数据工程", category: "大数据"}
+  - {name: "数据管道", category: "大数据"}
+  - {name: "数据采集", category: "大数据"}
+  - {name: "数据清洗", category: "大数据"}
+  - {name: "实时计算", category: "大数据"}
+  - {name: "流计算", category: "大数据"}
+  - {name: "数据集成", category: "大数据"}
+  - {name: "数据统计", category: "大数据"}
+  - {name: "数据质量", category: "大数据"}
+
+  # ---- 云原生 / DevOps ----
+  - {name: "Docker", category: "云原生/DevOps"}
+  - {name: "Kubernetes", category: "云原生/DevOps"}
+  - {name: "Jenkins", category: "云原生/DevOps"}
+  - {name: "Git", category: "云原生/DevOps"}
+  - {name: "GitHub Actions", category: "云原生/DevOps"}
+  - {name: "Terraform", category: "云原生/DevOps"}
+  - {name: "Ansible", category: "云原生/DevOps"}
+  - {name: "Prometheus", category: "云原生/DevOps"}
+  - {name: "Grafana", category: "云原生/DevOps"}
+  - {name: "CI/CD", category: "云原生/DevOps"}
+  - {name: "Nginx", category: "云原生/DevOps"}
+  - {name: "系统运维", category: "云原生/DevOps"}
+  - {name: "AWS", category: "云原生/DevOps"}
+  - {name: "Azure", category: "云原生/DevOps"}
+  - {name: "GCP", category: "云原生/DevOps"}
+  - {name: "Linux", category: "云原生/DevOps"}
+  - {name: "DevOps", category: "云原生/DevOps"}
+  - {name: "云原生", category: "云原生/DevOps"}
+  - {name: "云计算", category: "云原生/DevOps"}
+  - {name: "云基础设施", category: "云原生/DevOps"}
+  - {name: "容器化", category: "云原生/DevOps"}
+  - {name: "虚拟化", category: "云原生/DevOps"}
+  - {name: "基础设施即代码", category: "云原生/DevOps"}
+  - {name: "IaC", category: "云原生/DevOps"}
+  - {name: "OpenShift", category: "云原生/DevOps"}
+  - {name: "Serverless", category: "云原生/DevOps"}
+  - {name: "可观测性", category: "云原生/DevOps"}
+  - {name: "OpenTelemetry", category: "云原生/DevOps"}
+  - {name: "Helm", category: "云原生/DevOps"}
+  - {name: "GitOps", category: "云原生/DevOps"}
+  - {name: "负载均衡", category: "云原生/DevOps"}
+  - {name: "反向代理", category: "云原生/DevOps"}
+  - {name: "CDN", category: "云原生/DevOps"}
+  - {name: "DNS", category: "云原生/DevOps"}
+  - {name: "监控告警", category: "云原生/DevOps"}
+  - {name: "日志分析", category: "云原生/DevOps"}
+  - {name: "Kibana", category: "云原生/DevOps"}
+  - {name: "Logstash", category: "云原生/DevOps"}
+  - {name: "服务器运维", category: "云原生/DevOps"}
+  - {name: "网络工程", category: "云原生/DevOps"}
+  - {name: "网络自动化", category: "云原生/DevOps"}
+  - {name: "TCP/IP", category: "云原生/DevOps"}
+  - {name: "阿里云", category: "云原生/DevOps"}
+  - {name: "腾讯云", category: "云原生/DevOps"}
+  - {name: "华为云", category: "云原生/DevOps"}
+
+  # ---- AI / 机器学习 ----
+  - {name: "PyTorch", category: "AI/机器学习"}
+  - {name: "TensorFlow", category: "AI/机器学习"}
+  - {name: "scikit-learn", category: "AI/机器学习"}
+  - {name: "大语言模型", category: "AI/机器学习"}
+  - {name: "检索增强生成", category: "AI/机器学习"}
+  - {name: "机器学习", category: "AI/机器学习"}
+  - {name: "深度学习", category: "AI/机器学习"}
+  - {name: "自然语言处理", category: "AI/机器学习"}
+  - {name: "计算机视觉", category: "AI/机器学习"}
+  - {name: "数据分析", category: "AI/机器学习"}
+  - {name: "OpenAI API", category: "AI/机器学习"}
+  - {name: "LangChain", category: "AI/机器学习"}
+  - {name: "LlamaIndex", category: "AI/机器学习"}
+  - {name: "大模型算法", category: "AI/机器学习"}
+  - {name: "推荐算法", category: "AI/机器学习"}
+  - {name: "图像算法", category: "AI/机器学习"}
+  - {name: "风控算法", category: "AI/机器学习"}
+  - {name: "强化学习", category: "AI/机器学习"}
+  - {name: "SLAM算法", category: "AI/机器学习"}
+  - {name: "广告算法", category: "AI/机器学习"}
+  - {name: "AIGC", category: "AI/机器学习"}
+  - {name: "多模态模型", category: "AI/机器学习"}
+  - {name: "语音识别", category: "AI/机器学习"}
+  - {name: "运筹优化算法", category: "AI/机器学习"}
+  - {name: "具身智能", category: "AI/机器学习"}
+  - {name: "机器人", category: "AI/机器学习"}
+  - {name: "OpenCV", category: "AI/机器学习"}
+  - {name: "嵌入式开发", category: "AI/机器学习"}
+  - {name: "自动化测试", category: "AI/机器学习"}
+  - {name: "多线程", category: "AI/机器学习"}
+  - {name: "三维开发", category: "AI/机器学习"}
+  - {name: "GIS开发", category: "AI/机器学习"}
+  - {name: "大模型评测", category: "AI/机器学习"}
+  - {name: "音频标注", category: "AI/机器学习"}
+  - {name: "视频标注", category: "AI/机器学习"}
+  - {name: "AI", category: "AI/机器学习"}
+  - {name: "Transformer", category: "AI/机器学习"}
+  - {name: "Agentic AI", category: "AI/机器学习"}
+  - {name: "Pandas", category: "AI/机器学习"}
+  - {name: "NumPy", category: "AI/机器学习"}
+  - {name: "Matplotlib", category: "AI/机器学习"}
+  - {name: "多模态", category: "AI/机器学习"}
+  - {name: "生成式AI", category: "AI/机器学习"}
+  - {name: "AGENT", category: "AI/机器学习"}
+  - {name: "智能体", category: "AI/机器学习"}
+  - {name: "提示工程", category: "AI/机器学习"}
+  - {name: "MCP", category: "AI/机器学习"}
+  - {name: "知识图谱", category: "AI/机器学习"}
+  - {name: "信息抽取", category: "AI/机器学习"}
+  - {name: "信息检索", category: "AI/机器学习"}
+  - {name: "文本分类", category: "AI/机器学习"}
+  - {name: "对话式AI", category: "AI/机器学习"}
+  - {name: "图像识别", category: "AI/机器学习"}
+  - {name: "图像处理", category: "AI/机器学习"}
+  - {name: "人脸识别", category: "AI/机器学习"}
+  - {name: "OCR", category: "AI/机器学习"}
+  - {name: "目标检测", category: "AI/机器学习"}
+  - {name: "语义分割", category: "AI/机器学习"}
+  - {name: "YOLO", category: "AI/机器学习"}
+  - {name: "CNN", category: "AI/机器学习"}
+  - {name: "RNN", category: "AI/机器学习"}
+  - {name: "LSTM", category: "AI/机器学习"}
+  - {name: "ViT", category: "AI/机器学习"}
+  - {name: "GNN", category: "AI/机器学习"}
+  - {name: "模型微调", category: "AI/机器学习"}
+  - {name: "模型量化", category: "AI/机器学习"}
+  - {name: "模型蒸馏", category: "AI/机器学习"}
+  - {name: "模型评测", category: "AI/机器学习"}
+  - {name: "特征工程", category: "AI/机器学习"}
+  - {name: "XGBoost", category: "AI/机器学习"}
+  - {name: "LightGBM", category: "AI/机器学习"}
+  - {name: "SVM", category: "AI/机器学习"}
+  - {name: "决策树", category: "AI/机器学习"}
+  - {name: "随机森林", category: "AI/机器学习"}
+  - {name: "聚类算法", category: "AI/机器学习"}
+  - {name: "降维", category: "AI/机器学习"}
+  - {name: "异常检测", category: "AI/机器学习"}
+  - {name: "时间序列", category: "AI/机器学习"}
+  - {name: "多智能体编排", category: "AI/机器学习"}
+  - {name: "AutoGen", category: "AI/机器学习"}
+  - {name: "GPT", category: "AI/机器学习"}
+  - {name: "Claude", category: "AI/机器学习"}
+  - {name: "机器学习算法", category: "AI/机器学习"}
+  - {name: "深度学习算法", category: "AI/机器学习"}
+
+  # ---- 智能驾驶 / 机器人 ----
+  - {name: "智能驾驶", category: "智能驾驶/机器人"}
+  - {name: "自动驾驶", category: "智能驾驶/机器人"}
+  - {name: "ADAS", category: "智能驾驶/机器人"}
+  - {name: "机器视觉", category: "智能驾驶/机器人"}
+  - {name: "运动控制", category: "智能驾驶/机器人"}
+  - {name: "运动规划", category: "智能驾驶/机器人"}
+  - {name: "路径规划", category: "智能驾驶/机器人"}
+  - {name: "导航定位", category: "智能驾驶/机器人"}
+  - {name: "SLAM", category: "智能驾驶/机器人"}
+  - {name: "卡尔曼滤波", category: "智能驾驶/机器人"}
+  - {name: "机器避障", category: "智能驾驶/机器人"}
+  - {name: "人形机器人", category: "智能驾驶/机器人"}
+  - {name: "移动机器人", category: "智能驾驶/机器人"}
+  - {name: "ROS", category: "智能驾驶/机器人"}
+
+  # ---- 数据分析 / 商业 ----
+  - {name: "统计学", category: "数据分析/商业"}
+  - {name: "Excel", category: "数据分析/商业"}
+  - {name: "Tableau", category: "数据分析/商业"}
+  - {name: "Power BI", category: "数据分析/商业"}
+  - {name: "SAS", category: "数据分析/商业"}
+  - {name: "Agile", category: "数据分析/商业"}
+  - {name: "Scrum", category: "数据分析/商业"}
+  - {name: "概率论", category: "数据分析/商业"}
+  - {name: "线性代数", category: "数据分析/商业"}
+  - {name: "微积分", category: "数据分析/商业"}
+  - {name: "A/B测试", category: "数据分析/商业"}
+  - {name: "商业分析", category: "数据分析/商业"}
+  - {name: "财务建模", category: "数据分析/商业"}
+  - {name: "SPSS", category: "数据分析/商业"}
+  - {name: "Stata", category: "数据分析/商业"}
+  - {name: "预测分析", category: "数据分析/商业"}
+  - {name: "经营分析", category: "数据分析/商业"}
+  - {name: "数据分析思维", category: "数据分析/商业"}
+
+  # ---- 测试 ----
+  - {name: "软件测试", category: "测试"}
+  - {name: "单元测试", category: "测试"}
+  - {name: "集成测试", category: "测试"}
+  - {name: "系统测试", category: "测试"}
+  - {name: "性能测试", category: "测试"}
+  - {name: "接口测试", category: "测试"}
+  - {name: "UI自动化测试", category: "测试"}
+  - {name: "Selenium", category: "测试"}
+  - {name: "Cypress", category: "测试"}
+  - {name: "Playwright", category: "测试"}
+  - {name: "Jest", category: "测试"}
+  - {name: "JUnit", category: "测试"}
+  - {name: "Mockito", category: "测试"}
+  - {name: "TestNG", category: "测试"}
+  - {name: "测试用例设计", category: "测试"}
+  - {name: "测试管理", category: "测试"}
+  - {name: "Cucumber", category: "测试"}
+
+  # ---- 安全 ----
+  - {name: "SIEM", category: "安全"}
+  - {name: "SOAR", category: "安全"}
+  - {name: "渗透测试", category: "安全"}
+  - {name: "信息安全", category: "安全"}
+  - {name: "网络安全", category: "安全"}
+  - {name: "数据安全", category: "安全"}
+  - {name: "威胁狩猎", category: "安全"}
+  - {name: "威胁检测", category: "安全"}
+  - {name: "漏洞挖掘", category: "安全"}
+  - {name: "IAM", category: "安全"}
+  - {name: "OAuth2", category: "安全"}
+  - {name: "JWT", category: "安全"}
+  - {name: "SSO", category: "安全"}
+  - {name: "VPN", category: "安全"}
+  - {name: "加密", category: "安全"}
+
+  # ---- 工程协作 / 项目管理 ----
+  - {name: "JIRA", category: "工程协作"}
+  - {name: "Maven", category: "工程协作"}
+  - {name: "代码审查", category: "工程协作"}
+  - {name: "敏捷开发", category: "工程协作"}
+  - {name: "Kanban", category: "工程协作"}
+  - {name: "SAFe", category: "工程协作"}
+  - {name: "架构设计", category: "工程协作"}
+  - {name: "系统设计", category: "工程协作"}
+  - {name: "领域驱动设计", category: "工程协作"}
+  - {name: "Postman", category: "工程协作"}
+  - {name: "JMeter", category: "工程协作"}
+  - {name: "Swagger", category: "工程协作"}
+  - {name: "Figma", category: "工程协作"}
+  - {name: "GitLab", category: "工程协作"}
+  - {name: "GitHub", category: "工程协作"}
+  - {name: "代码规范", category: "工程协作"}
+  - {name: "技术文档", category: "工程协作"}
+
+  # ---- 计算机基础 ----
+  - {name: "计算机基础", category: "计算机基础"}
+  - {name: "操作系统", category: "计算机基础"}
+  - {name: "计算机网络", category: "计算机基础"}
+  - {name: "数据结构", category: "计算机基础"}
+  - {name: "算法", category: "计算机基础"}
+  - {name: "数据库", category: "计算机基础"}
+  - {name: "大数据", category: "计算机基础"}
+  - {name: "面向对象", category: "计算机基础"}
+  - {name: "多线程编程", category: "计算机基础"}
+  - {name: "软件工程", category: "计算机基础"}
+  - {name: "编译原理", category: "计算机基础"}
+  - {name: "设计模式", category: "计算机基础"}
+  - {name: "分布式系统", category: "计算机基础"}
+
+  # ---- 软技能（SOFT_SKILL_WHITELIST 对应项，必须保留） ----
+  - {name: "团队协作", category: "软技能"}
+  - {name: "沟通能力", category: "软技能"}
+  - {name: "项目管理", category: "软技能"}
+  - {name: "需求分析", category: "软技能"}
+  - {name: "产品设计", category: "软技能"}
+  - {name: "问题解决", category: "软技能"}
+  - {name: "逻辑思维", category: "软技能"}
+  - {name: "学习能力", category: "软技能"}
+  - {name: "抗压能力", category: "软技能"}
+  - {name: "时间管理", category: "软技能"}
+  - {name: "领导力", category: "软技能"}
+  - {name: "跨部门协作", category: "软技能"}
+  - {name: "创新思维", category: "软技能"}
+  - {name: "客户服务意识", category: "软技能"}
+  - {name: "责任心", category: "软技能"}
+  - {name: "主动性", category: "软技能"}
+  - {name: "文档撰写", category: "软技能"}
+  - {name: "汇报能力", category: "软技能"}
+  - {name: "执行力", category: "软技能"}
+
+  # ---- 硬件 / 芯片 / 嵌入式 ----
+  - {name: "数字后端", category: "硬件/芯片"}
+  - {name: "数字前端", category: "硬件/芯片"}
+  - {name: "SoC芯片", category: "硬件/芯片"}
+  - {name: "ASIC芯片", category: "硬件/芯片"}
+  - {name: "CPU芯片", category: "硬件/芯片"}
+  - {name: "DSP", category: "硬件/芯片"}
+  - {name: "FPGA", category: "硬件/芯片"}
+  - {name: "Qt", category: "硬件/芯片"}
+  - {name: "HALCON", category: "硬件/芯片"}
+  - {name: "Open3D", category: "硬件/芯片"}
+  - {name: "仿真", category: "硬件/芯片"}
+  - {name: "有限元分析", category: "硬件/芯片"}
+  - {name: "流体仿真", category: "硬件/芯片"}
+  - {name: "热仿真", category: "硬件/芯片"}
+  - {name: "热分析", category: "硬件/芯片"}
+  - {name: "RF设计", category: "硬件/芯片"}
+  - {name: "模拟电路", category: "硬件/芯片"}
+  - {name: "数字电路", category: "硬件/芯片"}
+  - {name: "PCB设计", category: "硬件/芯片"}
+  - {name: "硬件设计", category: "硬件/芯片"}
+  - {name: "嵌入式Linux", category: "硬件/芯片"}
+  - {name: "RTOS", category: "硬件/芯片"}
+  - {name: "FreeRTOS", category: "硬件/芯片"}
+  - {name: "MCU", category: "硬件/芯片"}
+  - {name: "ARM", category: "硬件/芯片"}
+  - {name: "STM32", category: "硬件/芯片"}
+  - {name: "CAN总线", category: "硬件/芯片"}
+  - {name: "串口通信", category: "硬件/芯片"}
+  - {name: "SPI", category: "硬件/芯片"}
+  - {name: "I2C", category: "硬件/芯片"}
+
+  # ---- 音视频 / 多媒体 ----
+  - {name: "FFmpeg", category: "音视频"}
+  - {name: "WebRTC", category: "音视频"}
+  - {name: "HLS", category: "音视频"}
+  - {name: "RTMP", category: "音视频"}
+  - {name: "流媒体", category: "音视频"}
+  - {name: "视频编解码", category: "音视频"}
+  - {name: "音频编解码", category: "音视频"}
+  - {name: "TTS", category: "音视频"}
+  - {name: "ASR", category: "音视频"}
+  - {name: "声纹识别", category: "音视频"}
+  - {name: "语音合成", category: "音视频"}
+  - {name: "直播视频", category: "音视频"}
+
+  # ---- 移动 / 桌面 ----
+  - {name: "iOS", category: "移动/桌面"}
+  - {name: "Android", category: "移动/桌面"}
+  - {name: "Windows", category: "移动/桌面"}
+  - {name: "macOS", category: "移动/桌面"}
+  - {name: "Electron", category: "移动/桌面"}
+  - {name: "跨端开发", category: "移动/桌面"}
+  - {name: "移动开发", category: "移动/桌面"}
+
+  # ---- 数据库扩展 ----
+  - {name: "HDFS", category: "数据库"}
+  - {name: "MinIO", category: "数据库"}
+  - {name: "Ceph", category: "数据库"}
+  - {name: "Presto", category: "数据库"}
+  - {name: "Trino", category: "数据库"}
+  - {name: "Impala", category: "数据库"}
+  - {name: "Kudu", category: "数据库"}
+  - {name: "Iceberg", category: "数据库"}
+  - {name: "Hudi", category: "数据库"}
+  - {name: "Delta Lake", category: "数据库"}
+  - {name: "Doris", category: "数据库"}
+  - {name: "StarRocks", category: "数据库"}
+  - {name: "OceanBase", category: "数据库"}
+  - {name: "DolphinScheduler", category: "数据库"}
+  - {name: "数据血缘", category: "数据库"}
+  - {name: "数据指标", category: "数据库"}
+  - {name: "数据标准", category: "数据库"}
+
+  # ---- 消息 / 中间件 ----
+  - {name: "RocketMQ", category: "消息/中间件"}
+  - {name: "Pulsar", category: "消息/中间件"}
+  - {name: "ActiveMQ", category: "消息/中间件"}
+  - {name: "ZooKeeper", category: "消息/中间件"}
+  - {name: "Nacos", category: "消息/中间件"}
+  - {name: "Consul", category: "消息/中间件"}
+  - {name: "Eureka", category: "消息/中间件"}
+  - {name: "etcd", category: "消息/中间件"}
+  - {name: "Sentinel", category: "消息/中间件"}
+  - {name: "Seata", category: "消息/中间件"}
+  - {name: "XXL-Job", category: "消息/中间件"}
+  - {name: "Quartz", category: "消息/中间件"}
+  - {name: "Celery", category: "消息/中间件"}
+
+  # ---- 网络 / 协议 ----
+  - {name: "HTTP", category: "网络/协议"}
+  - {name: "HTTPS", category: "网络/协议"}
+  - {name: "IPv6", category: "网络/协议"}
+  - {name: "BGP", category: "网络/协议"}
+  - {name: "OSPF", category: "网络/协议"}
+  - {name: "SNMP", category: "网络/协议"}
+  - {name: "IPSec", category: "网络/协议"}
+  - {name: "VPN网关", category: "网络/协议"}
+  - {name: "SDN", category: "网络/协议"}
+  - {name: "VXLAN", category: "网络/协议"}
+  - {name: "WiFi", category: "网络/协议"}
+  - {name: "蓝牙", category: "网络/协议"}
+  - {name: "GPS", category: "网络/协议"}
+
+  # ---- 安全扩展 ----
+  - {name: "零信任", category: "安全"}
+  - {name: "WAF", category: "安全"}
+  - {name: "IDS", category: "安全"}
+  - {name: "IPS", category: "安全"}
+  - {name: "DLP", category: "安全"}
+  - {name: "漏洞扫描", category: "安全"}
+  - {name: "安全审计", category: "安全"}
+  - {name: "威胁情报", category: "安全"}
+  - {name: "MITRE ATT&CK", category: "安全"}
+  - {name: "HIPAA", category: "安全"}
+  - {name: "ISO 27001", category: "安全"}
+  - {name: "GDPR", category: "安全"}
+
+  # ---- AI 扩展 ----
+  - {name: "扩散模型", category: "AI/机器学习"}
+  - {name: "Stable Diffusion", category: "AI/机器学习"}
+  - {name: "LoRA", category: "AI/机器学习"}
+  - {name: "RLHF", category: "AI/机器学习"}
+  - {name: "模型部署", category: "AI/机器学习"}
+  - {name: "模型服务", category: "AI/机器学习"}
+  - {name: "vLLM", category: "AI/机器学习"}
+  - {name: "ONNX", category: "AI/机器学习"}
+  - {name: "TensorRT", category: "AI/机器学习"}
+  - {name: "OpenVINO", category: "AI/机器学习"}
+  - {name: "Hugging Face", category: "AI/机器学习"}
+  - {name: "MLflow", category: "AI/机器学习"}
+  - {name: "LangGraph", category: "AI/机器学习"}
+  - {name: "CrewAI", category: "AI/机器学习"}
+  - {name: "Function Calling", category: "AI/机器学习"}
+  - {name: "Agent开发", category: "AI/机器学习"}
+  - {name: "多智能体", category: "AI/机器学习"}
+  - {name: "强化学习算法", category: "AI/机器学习"}
+  - {name: "深度强化学习", category: "AI/机器学习"}
+  - {name: "图像生成", category: "AI/机器学习"}
+  - {name: "视频生成", category: "AI/机器学习"}
+  - {name: "3D重建", category: "AI/机器学习"}
+  - {name: "点云处理", category: "AI/机器学习"}
+
+  # ---- 车载 / 机器人扩展 ----
+  - {name: "激光雷达", category: "智能驾驶/机器人"}
+  - {name: "毫米波雷达", category: "智能驾驶/机器人"}
+  - {name: "IMU", category: "智能驾驶/机器人"}
+  - {name: "传感器融合", category: "智能驾驶/机器人"}
+  - {name: "VIO", category: "智能驾驶/机器人"}
+  - {name: "机械臂", category: "智能驾驶/机器人"}
+  - {name: "运动学", category: "智能驾驶/机器人"}
+  - {name: "动力学控制", category: "智能驾驶/机器人"}
+  - {name: "智能座舱", category: "智能驾驶/机器人"}
+  - {name: "车联网", category: "智能驾驶/机器人"}
+  - {name: "AUTOSAR", category: "智能驾驶/机器人"}
+
+  # ---- 游戏 / 数字孪生 ----
+  - {name: "Unity", category: "游戏/数字孪生"}
+  - {name: "Unreal Engine", category: "游戏/数字孪生"}
+  - {name: "Cocos Creator", category: "游戏/数字孪生"}
+  - {name: "Godot", category: "游戏/数字孪生"}
+  - {name: "Cesium", category: "游戏/数字孪生"}
+  - {name: "BIM", category: "游戏/数字孪生"}
+  - {name: "数字孪生", category: "游戏/数字孪生"}
+
+  # ---- 测试扩展 ----
+  - {name: "压测", category: "测试"}
+  - {name: "性能调优", category: "测试"}
+  - {name: "兼容性测试", category: "测试"}
+  - {name: "移动测试", category: "测试"}
+  - {name: "APP测试", category: "测试"}
+  - {name: "代码覆盖率", category: "测试"}
+  - {name: "SonarQube", category: "测试"}
+  - {name: "Vitest", category: "测试"}
+  - {name: "Storybook", category: "测试"}
+  - {name: "Playwright测试", category: "测试"}
+
+  # ---- 前端扩展 ----
+  - {name: "Electron应用", category: "前端"}
+  - {name: "Tauri", category: "前端"}
+  - {name: "Bun", category: "前端"}
+  - {name: "Deno", category: "前端"}
+  - {name: "React Query", category: "前端"}
+  - {name: "Svelte", category: "前端"}
+  - {name: "AngularJS", category: "前端"}
+  - {name: "语义化HTML", category: "前端"}
+
+  # ---- 后端扩展 ----
+  - {name: "Feign", category: "后端"}
+  - {name: "OpenFeign", category: "后端"}
+  - {name: "Resilience4j", category: "后端"}
+  - {name: "API网关", category: "后端"}
+  - {name: "Spring Security", category: "后端"}
+  - {name: "Shiro", category: "后端"}
+  - {name: "接口联调", category: "后端"}
+
+  # ---- 数据分析扩展 ----
+  - {name: "统计分析", category: "数据分析/商业"}
+  - {name: "临床数据分析", category: "数据分析/商业"}
+  - {name: "战略分析", category: "数据分析/商业"}
+  - {name: "归因分析", category: "数据分析/商业"}
+  - {name: "漏斗分析", category: "数据分析/商业"}
+  - {name: "用户画像", category: "数据分析/商业"}
+  - {name: "埋点分析", category: "数据分析/商业"}
+  - {name: "BI报表", category: "数据分析/商业"}
+  - {name: "Superset", category: "数据分析/商业"}
+  - {name: "FineReport", category: "数据分析/商业"}

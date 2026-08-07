@@ -1,5 +1,6 @@
 """认证路由：登录、刷新 Token、注册、登出、当前用户。"""
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Request, Response
@@ -18,8 +19,17 @@ from app.core.security import (
     verify_password,
 )
 from app.models.business import AuditLog, User
-from app.schemas.business import LoginRequest, LogoutRequest, RefreshRequest, RegisterRequest
+from app.schemas.business import (
+    ChangePasswordRequest,
+    LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
+    RegisterRequest,
+    UpdateProfileRequest,
+)
 from app.schemas.common import ok, error
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -53,7 +63,15 @@ def _extract_refresh_token(request: Request, req: Optional[RefreshRequest]) -> O
 
 
 def _client_ip(request: Request) -> str:
-    """客户端 IP（反向代理场景可取 X-Forwarded-For，当前直连取 peer IP）。"""
+    """客户端 IP。
+
+    仅生产环境信任 `X-Forwarded-For`（负载均衡终止 TLS 场景），取信任链首个
+    IP（离客户端最近）；开发/直连场景取 peer IP，避免未经验证的伪造头污染审计。
+    """
+    if settings.is_production:
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            return xff.split(",")[0].strip()
     return request.client.host if request.client else ""
 
 
@@ -73,7 +91,7 @@ async def login(
         # 首次部署 bootstrap：users 表为空时按配置创建 admin 用户，
         # 创建后即落入 users 表，后续登录走 DB 校验；生产环境禁用该路径
         if settings.is_production:
-            return error(401, "用户名或密码错误")
+            return error(4010, "用户名或密码错误", http_status=401)
         if req.username == settings.admin_username and req.password == settings.admin_password:
             user = User(
                 username=req.username,
@@ -84,12 +102,12 @@ async def login(
             await db.commit()
             await db.refresh(user)
         else:
-            return error(401, "用户名或密码错误")
+            return error(4010, "用户名或密码错误", http_status=401)
     elif not verify_password(req.password, user.password_hash):
-        return error(401, "用户名或密码错误")
+        return error(4010, "用户名或密码错误", http_status=401)
 
     if not user.is_active:
-        return error(403, "账户已禁用")
+        return error(4030, "账户已禁用", http_status=403)
 
     access_token = create_access_token(user.id, user.role)
     refresh_token = create_refresh_token(user.id, user.role)
@@ -127,19 +145,19 @@ async def refresh_token(
     """
     refresh_token = _extract_refresh_token(request, req)
     if not refresh_token:
-        return error(401, "缺少 refresh_token")
+        return error(4010, "缺少 refresh_token", http_status=401)
     payload = decode_token(refresh_token)
     if payload is None or payload.get("type") != "refresh":
-        return error(401, "无效的 refresh_token")
+        return error(4010, "无效的 refresh_token", http_status=401)
     jti = payload.get("jti")
     if jti:
         revoked = await redis.get(f"token:blacklist:{jti}")
         if revoked:
-            return error(401, "refresh_token 已失效")
+            return error(4010, "refresh_token 已失效", http_status=401)
     user_id = payload["sub"]
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
-        return error(401, "用户不存在或已禁用")
+        return error(4010, "用户不存在或已禁用", http_status=401)
     # 重新签发（短 TTL 的 access_token）
     new_access = create_access_token(user_id, user.role)
     return ok(data={"access_token": new_access, "expires_in": 1800})
@@ -148,11 +166,14 @@ async def refresh_token(
 @router.post("/register")
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """注册新用户（默认 guest 角色）。"""
+    logger.info(f"[register] 收到注册请求: username={req.username}")
     if len(req.username) < 3 or len(req.password) < 6:
+        logger.warning(f"[register] 参数校验失败: username={req.username}")
         return error(400, "用户名至少 3 字符，密码至少 6 字符")
 
     existing = await db.scalar(select(User).where(User.username == req.username))
     if existing is not None:
+        logger.warning(f"[register] 用户名已存在: username={req.username}")
         return error(409, "用户名已存在")
 
     user = User(
@@ -163,6 +184,16 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    # 写审计日志（注册成功，便于管理后台 /admin/audit/logs 追踪）
+    db.add(AuditLog(
+        user_id=user.id,
+        action="auth.register",
+        resource="users",
+        resource_id=user.id,
+        detail={"username": user.username},
+    ))
+    await db.commit()
+    logger.info(f"[register] 注册成功: id={user.id} username={user.username} role={user.role}")
     return ok(data={"id": user.id, "username": user.username, "role": user.role})
 
 
@@ -175,7 +206,86 @@ async def me(
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
         return error(404, "用户不存在")
-    return ok(data={"id": user.id, "username": user.username, "role": user.role})
+    return ok(data={
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "email": user.email,
+        "phone": user.phone,
+        "bio": user.bio,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    })
+
+
+@router.put("/me")
+async def update_me(
+    req: UpdateProfileRequest,
+    request: Request,
+    payload: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """更新当前用户资料（FE-M4-04 个人中心）。
+
+    仅更新显式传入的字段（None 保持原值）；空串即清空该字段。
+    """
+    user = await db.get(User, payload["sub"])
+    if user is None or not user.is_active:
+        return error(404, "用户不存在")
+    if req.email is not None:
+        user.email = req.email
+    if req.phone is not None:
+        user.phone = req.phone
+    if req.bio is not None:
+        user.bio = req.bio
+    db.add(AuditLog(
+        user_id=user.id,
+        action="auth.update_profile",
+        resource="users",
+        resource_id=user.id,
+        detail={"username": user.username},
+        ip_address=_client_ip(request),
+    ))
+    await db.commit()
+    return ok(data={
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "email": user.email,
+        "phone": user.phone,
+        "bio": user.bio,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+    })
+
+
+@router.post("/password")
+async def change_password(
+    req: ChangePasswordRequest,
+    request: Request,
+    payload: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """修改当前用户密码（FE-M4-04 个人中心）。
+
+    需校验旧密码；新旧密码不可相同。
+    """
+    user = await db.get(User, payload["sub"])
+    if user is None or not user.is_active:
+        return error(404, "用户不存在")
+    if not verify_password(req.old_password, user.password_hash):
+        return error(400, "原密码错误")
+    if req.old_password == req.new_password:
+        return error(400, "新密码不能与原密码相同")
+    user.password_hash = hash_password(req.new_password)
+    db.add(AuditLog(
+        user_id=user.id,
+        action="auth.change_password",
+        resource="users",
+        resource_id=user.id,
+        detail={"username": user.username},
+        ip_address=_client_ip(request),
+    ))
+    await db.commit()
+    return ok(data={"updated": True})
 
 
 @router.post("/logout")

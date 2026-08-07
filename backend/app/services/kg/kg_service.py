@@ -15,18 +15,31 @@
         position_id = import_jd(session, extraction_result, evidence_dict)
 """
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 from neo4j import Session
 
 from app.services.extraction.dictionary import normalize_position_name
 from app.services.extraction.schemas import JDExtractionResult
-from app.services.kg.id_generator import next_id
+from app.services.kg.id_generator import PREFIX_MAP, next_id
 
 
 def _now() -> str:
     """当前 UTC+8 ISO8601 时间戳。"""
     return datetime.now(timezone(timedelta(hours=8))).isoformat()
+
+
+def _stable_id(entity_type: str, name: str) -> str:
+    """基于实体名生成稳定 ID（`{prefix}_{sha1(name)[:8]}`）。
+
+    Education/Certification 按内容归并（同一学历/证书要求跨 JD 复用同一节点，
+    schema.cypher §5：REQUIRES 目标含 Education/Certification）：用 name 哈希
+    派生 ID，重复导入同名实体 ID 一致，MERGE 天然幂等、不产生 ID 漂移
+    （区别于 Position/Skill 的 Counter 自增，见 id_generator.PREFIX_MAP）。
+    """
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+    return f"{PREFIX_MAP[entity_type]}_{digest}"
 
 
 # ============================================================
@@ -44,9 +57,13 @@ def import_jd(
     - (Position {name: extraction.position_name})
     - (Evidence {source, source_url, crawled_at, raw_text})
     - (Skill {name: ...}) × N
+    - (Education {name: level·major}) / (Certification {name: ...})（学历/证书要求）
     - (Position)-[:REQUIRES {necessity, level}]->(Skill)
+    - (Position)-[:REQUIRES {necessity: 'must'}]->(Education|Certification)
     - (Position)-[:HAS_EVIDENCE]->(Evidence)
     - (Skill)-[:MENTIONED_IN]->(Evidence)
+    - (Position)-[:BELONGS_TO_OCCUPATION]->(Occupation)（规则优先 + 语义兜底对齐，
+      设计文档 §5.1；对齐未命中/模型不可用时无此边，不阻塞入图）
 
     参数：
         session: Neo4j Session
@@ -56,10 +73,31 @@ def import_jd(
     返回：
         Position 节点 ID（如 pos_0001）
     """
-    return session.execute_write(_import_jd_tx, extraction, evidence)
+    # 岗位名语义对齐（规则归并 + 图谱已有岗位匹配）在事务外执行，避免嵌套
+    # Neo4j 会话。幂等：batch_extract 已对齐时此处命中图谱直接返回原值；
+    # 直接调用本函数（rebuild_graph 等）也能得到对齐后的标准名。
+    from app.services.extraction.position_align import PositionAligner
+
+    extraction.position_name = PositionAligner.get().align(extraction.position_name)
+    # Occupation 对齐也在事务外执行（语义嵌入耗时，避免长事务）；
+    # 任何失败降级为无 occupation 边，不阻塞入图主链路。
+    occupation: tuple[str, float] | None = None
+    if extraction.position_name:
+        try:
+            from app.services.kg.occupation_align import OccupationAligner
+
+            occupation = OccupationAligner.get().align(extraction.position_name)
+        except Exception:
+            occupation = None
+    return session.execute_write(_import_jd_tx, extraction, evidence, occupation)
 
 
-def _import_jd_tx(tx, extraction: JDExtractionResult, evidence: dict) -> str:
+def _import_jd_tx(
+    tx,
+    extraction: JDExtractionResult,
+    evidence: dict,
+    occupation: tuple[str, float] | None = None,
+) -> str:
     now = _now()
     # 岗位名归一化：合并同义重复岗位（如"前端开发/前端工程师" → "前端开发工程师"）
     position_name = normalize_position_name(extraction.position_name)
@@ -110,6 +148,21 @@ def _import_jd_tx(tx, extraction: JDExtractionResult, evidence: dict) -> str:
             industry=extraction.industry or "",
             salary_range=extraction.salary_range or "",
             now=now,
+        )
+
+    # 1.5 Occupation 归属（设计文档 §5.1 (Position)-[:BELONGS_TO_OCCUPATION]->(Occupation)）。
+    # occupation 由 import_jd 事务外对齐（规则优先 + SBERT 语义兜底），未命中为 None 不入边。
+    if occupation is not None:
+        occ_code, occ_conf = occupation
+        tx.run(
+            """
+            MATCH (p:Position {id: $position_id})
+            SET p.occupation_code = $code
+            MERGE (p)-[:BELONGS_TO_OCCUPATION {confidence: $conf}]->(o:Occupation {code: $code})
+            """,
+            position_id=position_id,
+            code=occ_code,
+            conf=occ_conf,
         )
 
     # 2. Evidence：每次创建新节点（每个 JD 原文对应一个 Evidence）
@@ -226,6 +279,64 @@ def _import_jd_tx(tx, extraction: JDExtractionResult, evidence: dict) -> str:
             """,
             position_id=position_id,
             tool_name=tool_name,
+        )
+
+    # 5. Education（学历/专业要求节点，schema.cypher §5：REQUIRES 目标含 Education）。
+    # JD 侧抽取结果无 institution 字段（JDExtractionResult.education 仅 level/major），
+    # 故节点不含 institution；name 取 level·major 组合，同名要求跨 JD 归并到同一节点。
+    if extraction.education:
+        edu = extraction.education
+        edu_name = " · ".join(part for part in (edu.level or "", edu.major or "") if part)
+        if edu_name:
+            education_id = _stable_id("Education", edu_name)
+            tx.run(
+                """
+                MERGE (e:Education {id: $id})
+                ON CREATE SET e.created_at = $now
+                SET e.name = $name, e.level = $level, e.major = $major
+                """,
+                id=education_id,
+                name=edu_name,
+                level=edu.level or "",
+                major=edu.major or "",
+                now=now,
+            )
+            # Position → REQUIRES → Education（学历要求为 JD 必备项）
+            tx.run(
+                """
+                MATCH (p:Position {id: $position_id}), (e:Education {id: $education_id})
+                MERGE (p)-[:REQUIRES {necessity: 'must'}]->(e)
+                """,
+                position_id=position_id,
+                education_id=education_id,
+            )
+
+    # 6. Certifications（证书要求节点，schema.cypher §5：REQUIRES 目标含 Certification）。
+    # JD 侧抽取结果无 issuer 字段（JDExtractionResult.certifications 仅 name），
+    # 故节点不含 issuer；同名证书要求跨 JD 归并到同一节点。
+    for cert in extraction.certifications:
+        cert_name = cert.name.strip()
+        if not cert_name:
+            continue
+        certification_id = _stable_id("Certification", cert_name)
+        tx.run(
+            """
+            MERGE (c:Certification {id: $id})
+            ON CREATE SET c.created_at = $now
+            SET c.name = $name
+            """,
+            id=certification_id,
+            name=cert_name,
+            now=now,
+        )
+        # Position → REQUIRES → Certification（证书要求为 JD 必备项）
+        tx.run(
+            """
+            MATCH (p:Position {id: $position_id}), (c:Certification {id: $certification_id})
+            MERGE (p)-[:REQUIRES {necessity: 'must'}]->(c)
+            """,
+            position_id=position_id,
+            certification_id=certification_id,
         )
 
     return position_id

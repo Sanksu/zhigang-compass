@@ -38,10 +38,10 @@ def log(msg: str):
     print(msg, file=sys.stderr, flush=True)
 
 
-# 默认 CDP 端口（与 BOSS/Monster 共用，同一时刻只能一个爬虫用）
-DEFAULT_CDP_PORT = 9222
-# 默认 CDP 端点（可由环境变量 BOSS_CDP_URL 覆盖，支持局域网内容器浏览器）
-DEFAULT_CDP_URL = os.environ.get("BOSS_CDP_URL", f"http://127.0.0.1:{DEFAULT_CDP_PORT}")
+# 默认 CDP 端口（脉脉独立浏览器 9225，不与 BOSS 共享）
+DEFAULT_CDP_PORT = 9225
+# 默认 CDP 端点（可由环境变量 MAIMAI_CDP_URL 覆盖，支持局域网内容器浏览器）
+DEFAULT_CDP_URL = os.environ.get("MAIMAI_CDP_URL", f"http://127.0.0.1:{DEFAULT_CDP_PORT}")
 
 # 脉脉飞书招聘页 URL
 MAIMAI_JOBS_URL = "https://maimai.jobs.feishu.cn/index"
@@ -86,7 +86,8 @@ EXTRACT_JOBS_JS = """
             const afterCity = metaLine.slice(city.length);
             const typeIdx = afterCity.search(/全职|兼职|实习/);
             if (typeIdx >= 0) {
-                category = afterCity.slice(afterCity.indexOf('全职') + 2 || afterCity.indexOf('兼职') + 2 || afterCity.indexOf('实习') + 2).trim();
+                // 用 typeIdx 定位类型词后截取（旧的 indexOf||短路在"全职"缺失时会误截首字符）
+                category = afterCity.slice(typeIdx + 2).trim();
             }
         }
 
@@ -199,8 +200,6 @@ async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
             return 0
 
         log(f"提取到 {len(jobs)} 条岗位")
-        if jobs:
-            log(f"样本: {json.dumps(jobs[0], ensure_ascii=False)[:200]}")
 
         all_jobs_data.extend(jobs)
         await page.close()

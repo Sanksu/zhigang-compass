@@ -99,8 +99,8 @@ class EdxSpider(Spider):
         cards = response.xpath(EDX_CARD_LINK_XPATH)
 
         if not cards:
-            # 兜底：直接找含 shadow-product-card 的 div 的父级 a
-            cards = response.css('div[class*="shadow-product-card"]::parent')
+            # 兜底：找含 shadow-product-card 的 div 的父节点（parsel 不支持 ::parent，用 XPath）
+            cards = response.xpath('//div[contains(@class, "shadow-product-card")]/..')
             cards = [c for c in cards if c.root.tag == 'a'] if cards else []
 
         if not cards:
@@ -114,10 +114,14 @@ class EdxSpider(Spider):
             self.logger.debug(f"页面前 1000 字符: {response.text[:1000]}")
             return
 
+        item_count = 0
         for card in cards:
             item = self._card_to_item(card, response.meta)
             if item:
+                item_count += 1
                 yield item
+
+        self.logger.info(f"[edx] kw={response.meta['keyword']} 产出 {item_count} 条")
 
         # 无 URL 翻页：edX 搜索为 SPA 无限滚动，&page=N 会返回空结果，
         # 已通过 _make_playwright_request 在页面内滚动触发加载更多

@@ -42,6 +42,10 @@ export interface SessionUser {
   id: string
   username: string
   role: 'guest' | 'user' | 'admin'
+  email?: string
+  phone?: string
+  bio?: string
+  created_at?: string
 }
 
 /**
@@ -111,13 +115,15 @@ export function registerAuthFailedHandler(fn: () => void) {
 }
 
 async function refreshAccessToken(): Promise<string | null> {
-  if (!_refreshToken) return null
   if (_refreshing) return _refreshing
   _refreshing = (async () => {
     try {
+      // 内存有 refresh_token 走请求体；页面刷新后内存清空，退化为依赖
+      // httpOnly Cookie（withCredentials 自动携带）完成无感续期
+      const body = _refreshToken ? { refresh_token: _refreshToken } : {}
       const res = await axios.post<ApiResponse<{ access_token?: string }>>(
         `${BASE_URL}/auth/refresh`,
-        { refresh_token: _refreshToken },
+        body,
         { withCredentials: true },
       )
       if (res.data.code === 0 && res.data.data?.access_token) {

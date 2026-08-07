@@ -1,7 +1,7 @@
 """ARQ 异步任务定义。
 
 任务类型（对齐设计文档 §4.4 ETL 管线）：
-- ETL 编排：crawl_platform / run_etl_pipeline / validate_temporal / detect_inflation
+- ETL 编排：crawl_platform / run_etl_pipeline / validate_temporal / detect_inflation / snapshot_graph
 - 业务异步：resume_parse / batch_extract / evolution_compute
 
 设计要点：
@@ -11,14 +11,21 @@
 """
 
 import asyncio
+import json
+import os
 import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from arq.connections import RedisSettings
+from arq.cron import cron
 
 from app.core.config import settings
+
+# 子进程 stdout/stderr 强制 UTF-8（中文 Windows 默认 GBK 管道，按 UTF-8 解码会乱码）
+# 与 crawlers/spiders 下各 spider 调外部进程的模式一致
+_UTF8_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
 
 # ── 爬虫项目根（backend/data/crawlers）──
 _CRAWLERS_DIR = Path(__file__).resolve().parents[2] / "data" / "crawlers"
@@ -26,6 +33,56 @@ _OUTPUT_DIR = _CRAWLERS_DIR / "output"
 
 # 显式消费 -a max_results 参数的 spider（其余源由各自默认采集量控制）
 MAX_RESULTS_SUPPORTED = {"arxiv"}
+
+# CDP 爬虫：需连接真实 Chrome（9222）复用登录态，无登录态时会自动拉起浏览器
+# （ensure_cdp_chrome），本地手动触发 ETL 可 skip_cdp=True 跳过，避免干扰用户浏览器
+CDP_SPIDERS = {"boss", "monster", "glassdoor", "maimai"}
+
+# 爬虫日志队列 key 前缀（Redis LIST，SSE 端点按 offset 增量拉取）
+_CRAWL_LOG_PREFIX = "crawl:log:"
+_CRAWL_LOG_TTL_SECONDS = 3600
+
+
+async def _push_crawl_log(ctx: dict, task_id: str | None, line: str) -> None:
+    """把爬虫输出行写入 Redis 日志队列（供 SSE 实时推送）。
+
+    日志写入失败不阻断爬虫（仅丢失实时日志）；task_id 缺失（ETL 编排直接
+    调用场景）跳过。ctx["redis"] 为 ARQ 注入的连接，缺失时跳过。
+    """
+    if not task_id or not line:
+        return
+    try:
+        redis = ctx.get("redis")
+        if redis is None:
+            return
+        key = _CRAWL_LOG_PREFIX + task_id
+        await redis.rpush(key, line)
+        await redis.expire(key, _CRAWL_LOG_TTL_SECONDS)
+    except Exception:
+        pass
+
+
+async def _update_crawl_task(task_id: str | None, **fields) -> None:
+    """更新 crawl 任务状态（TaskStatus：running/success/failed + result/error）。
+
+    任务不存在或 DB 不可用时静默跳过，不阻断爬虫（状态追踪为增强能力）。
+    """
+    if not task_id:
+        return
+    from app.core.database import async_session_factory
+    from app.models.business import TaskStatus
+
+    async with async_session_factory() as s:
+        task = await s.get(TaskStatus, task_id)
+        if task is None:
+            return
+        for k, v in fields.items():
+            if k == "result" and isinstance(v, dict):
+                # 合并而非覆盖：保留触发时写入的 platform/keyword（历史查询依赖）
+                task.result = {**(task.result or {}), **v}
+            else:
+                setattr(task, k, v)
+        await s.commit()
 
 
 # ============================================================
@@ -38,12 +95,17 @@ async def crawl_platform(
     keywords: list[str] | None = None,
     cities: list[str] | None = None,
     max_results: int | None = None,
+    task_id: str | None = None,
 ) -> dict:
     """触发单个 Scrapy 爬虫。
 
     通过 subprocess 调用而非 in-process，原因：
     - Scrapy 基于 Twisted reactor，与 asyncio event loop 不兼容
     - subprocess 隔离崩溃，单爬虫失败不污染 worker
+
+    task_id 存在时（手动触发场景）：
+    - 输出逐行写入 Redis 日志队列（SSE 端点 /admin/crawl/task/{task_id}/stream 实时推送）
+    - 同步 TaskStatus 状态（running → success/failed），进度 0.1 → 1.0
 
     输出：output/{spider}_{YYYYMMDD_HHMMSS}.jsonl
     """
@@ -66,25 +128,73 @@ async def crawl_platform(
         else:
             print(f"[crawl_platform] spider={spider_name} 不支持 max_results，参数已忽略", flush=True)
 
-    # cwd 设到 crawlers/ 让 scrapy.cfg 生效
+    await _update_crawl_task(
+        task_id,
+        status="running",
+        progress=0.1,
+        result={"spider": spider_name, "output_file": str(output_file)},
+    )
+
+    # cwd 设到 crawlers/ 让 scrapy.cfg 生效；env 强制子进程 UTF-8 输出（防中文日志乱码）
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(_CRAWLERS_DIR),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=_UTF8_ENV,
     )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"爬虫 {spider_name} 退出码 {proc.returncode}: "
-            f"{stderr.decode('utf-8', errors='replace')[-2000:]}"
-        )
+
+    # 并发逐行读取 stdout/stderr：实时写入日志队列，stderr 尾部留存用于失败信息
+    stderr_tail: list[str] = []
+
+    async def _drain(stream, tail: list[str] | None = None):
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").rstrip()
+            await _push_crawl_log(ctx, task_id, text)
+            if tail is not None:
+                tail.append(text)
+                if len(tail) > 200:
+                    tail.pop(0)
+
+    await asyncio.gather(
+        _drain(proc.stdout),
+        _drain(proc.stderr, stderr_tail),
+    )
+    returncode = await proc.wait()
+
+    if returncode != 0:
+        detail = "\n".join(stderr_tail[-20:])[-2000:]
+        msg = f"爬虫 {spider_name} 退出码 {returncode}: {detail}"
+        await _update_crawl_task(task_id, status="failed", error=msg[:500])
+        raise RuntimeError(msg)
 
     # 统计产出条数（按行数）
     line_count = 0
     if output_file.exists():
         with output_file.open(encoding="utf-8") as f:
             line_count = sum(1 for _ in f)
+
+    # 退出码 0 但无产出视为失败：爬虫"跑通"但未拿到数据，不能显示成功
+    if line_count == 0:
+        detail = "\n".join(stderr_tail[-20:])[-2000:]
+        msg = f"爬虫 {spider_name} 产出 0 条数据: {detail}"
+        await _update_crawl_task(task_id, status="failed", error=msg[:500])
+        raise RuntimeError(msg)
+
+    await _update_crawl_task(
+        task_id,
+        status="success",
+        progress=1.0,
+        result={
+            "spider": spider_name,
+            "output_file": str(output_file.relative_to(_CRAWLERS_DIR.parent.parent)),
+            "items": line_count,
+            "crawled_at": timestamp,
+        },
+    )
 
     return {
         "spider": spider_name,
@@ -157,6 +267,21 @@ def _experience_years(snapshot: dict) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _history_skill_sets(group: list[tuple[int, date, list[str]]], jd_id: int) -> list[set[str]]:
+    """同岗位历史 JD 的技能集合（按发布时间升序），排除当前 JD 自身。
+
+    僵尸 JD 判定依赖"连续 N 期技能几乎不变"，与当前技能完全相同的历期
+    （Jaccard=1.0）是最强信号，必须保留参与相似度计数；仅排除当前 JD 自身
+    （原实现 `if gs != skills` 误排除了完全相同技能的历期，
+    导致 detect_zombie_jd 的连续周期永远数不足 4 期，僵尸检测失效）。
+    """
+    return [
+        set(gs)
+        for r_id, pdate, gs in sorted(group, key=lambda g: g[1])
+        if r_id != jd_id
+    ]
+
+
 async def validate_temporal(
     ctx: dict,
     jd_ids: list[int] | None = None,
@@ -184,7 +309,11 @@ async def validate_temporal(
 
     today = date.today()
     async with async_session_factory() as session:
-        stmt = select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
+        stmt = select(JDRaw).where(
+            JDRaw.snapshot["extraction"].astext.isnot(None),
+            # 游标：仅处理未做时滞检测的记录（幂等，重复执行不空转旧数据）
+            JDRaw.snapshot["validation"].astext.is_(None),
+        )
         if jd_ids:
             stmt = stmt.where(JDRaw.id.in_(jd_ids))
         rows = (await session.scalars(stmt.order_by(JDRaw.id.asc()).limit(limit))).all()
@@ -223,11 +352,7 @@ async def validate_temporal(
             ]
             sai = classify_sai(compute_sai(skill_ages, recent_ages))
 
-            history_skills = [
-                set(gs)
-                for _, pdate, gs in sorted(group, key=lambda g: g[1])
-                if gs != skills
-            ]
+            history_skills = _history_skill_sets(group, jd_id)
             zombie = detect_zombie_jd(history_skills, set(skills), sai.sai)
 
             oldest = min(group, key=lambda g: g[1])
@@ -282,7 +407,11 @@ async def detect_inflation(
     from app.services.data_quality.inflation_detector import compute_inflation_score
 
     async with async_session_factory() as session:
-        stmt = select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
+        stmt = select(JDRaw).where(
+            JDRaw.snapshot["extraction"].astext.isnot(None),
+            # 游标：仅处理未做通胀检测的记录（幂等，重复执行不空转旧数据）
+            JDRaw.snapshot["inflation"].astext.is_(None),
+        )
         if jd_ids:
             stmt = stmt.where(JDRaw.id.in_(jd_ids))
         rows = (await session.scalars(stmt.order_by(JDRaw.id.asc()).limit(limit))).all()
@@ -323,6 +452,51 @@ async def detect_inflation(
     return results
 
 
+async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
+    """SimHash 跨平台近似去重（设计文档 §4.2 消费方）。
+
+    扫描 jd_raw 已入库记录的 snapshot->_simhash（CleaningPipeline 采集时写入，
+    基于脱敏后文本），批量 find_similar_pairs（汉明距 ≤ 3）找出近似重复 JD，
+    将后入库记录标记 `snapshot["_duplicate_of"]` = 先入库记录 id。
+    聚合层（aggregation.build_aggregates）跳过被标记记录，避免重复 JD 虚高频次。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import JDRaw
+    from app.services.data_quality.simhash import find_similar_pairs
+
+    async with async_session_factory() as session:
+        stmt = select(JDRaw).order_by(JDRaw.id.asc())
+        rows = (await session.scalars(stmt)).all()
+        if limit:
+            rows = rows[:limit]
+
+        records: list[tuple[str, int]] = []
+        for r in rows:
+            sh = (r.snapshot or {}).get("_simhash")
+            if isinstance(sh, int) and sh:
+                records.append((str(r.id), sh))
+
+        pairs = find_similar_pairs(records)
+
+        # pairs 顺序即 records 输入顺序（id 升序），先入库者保留，后入库者标记
+        id_map = {str(r.id): r for r in rows}
+        marked = 0
+        for id_a, id_b in pairs:
+            dup = id_map.get(id_b)
+            if dup is None:
+                continue
+            snap = dict(dup.snapshot or {})
+            if snap.get("_duplicate_of") != id_a:
+                snap["_duplicate_of"] = id_a
+                dup.snapshot = snap
+                marked += 1
+        await session.commit()
+
+    return {"checked": len(records), "pairs": len(pairs), "marked": marked}
+
+
 async def load_courses(ctx: dict) -> dict:
     """课程数据入图（course_raw → Course/Skill 节点 + LEARNABLE_VIA 关系）。
 
@@ -349,6 +523,158 @@ async def load_courses(ctx: dict) -> dict:
             except Exception:
                 failed += 1
     return {"total": len(data), "imported": imported, "failed": failed}
+
+
+async def evaluate_courses(ctx: dict) -> dict:
+    """课程质量评估（DA-M4-01，设计文档 §4.6）。
+
+    遍历 course_raw 全量课程 → 六维加权质量评分 → 幂等写回
+    `snapshot["quality"]`（覆盖更新）。返回推荐池统计，供学习路径取 Top-3。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import CourseRaw
+    from app.services.data_quality.course_quality import (
+        RECOMMEND_MIN_SCORE,
+        evaluate_course,
+    )
+
+    async with async_session_factory() as session:
+        rows = (await session.scalars(select(CourseRaw).order_by(CourseRaw.id.asc()))).all()
+        results = []
+        for row in rows:
+            snap = dict(row.snapshot or {})
+            result = evaluate_course(snap)
+            snap["quality"] = result.model_dump()
+            row.snapshot = snap
+            results.append(result)
+        await session.commit()
+
+    recommended = [r for r in results if r.recommended]
+    return {
+        "total": len(results),
+        "recommended": len(recommended),
+        "recommend_min_score": RECOMMEND_MIN_SCORE,
+        "top3": [r.model_dump() for r in sorted(results, key=lambda r: r.quality_score, reverse=True)[:3]],
+    }
+
+
+async def diversity_report(ctx: dict, top_n: int = 10) -> dict:
+    """数据多样性报告（DA-M4-02）。
+
+    聚合四类 raw 表多样性指标，写入 reports/diversity_{date}.json（幂等覆盖）。
+    指标口径见 app/services/data_quality/diversity.py。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
+    from app.services.data_quality.diversity import (
+        course_diversity,
+        dedup_stats,
+        position_diversity,
+        source_distribution,
+    )
+
+    async def _jd_items(rows):
+        items = []
+        for r in rows:
+            ext = (r.snapshot or {}).get("extraction") or {}
+            name = (ext.get("position_name") or "").strip()
+            if not name:
+                continue
+            skills = [s.get("name") for s in (ext.get("skills") or []) if s.get("name")]
+            items.append({"position_name": name, "skills": skills})
+        return items
+
+    async def _course_items(rows):
+        items = []
+        for r in rows:
+            snap = r.snapshot or {}
+            skills = snap.get("skills") or []
+            if isinstance(skills, str):
+                skills = [s.strip() for s in skills.split(",") if s.strip()]
+            items.append({"platform": snap.get("platform", r.source), "skills": skills})
+        return items
+
+    async with async_session_factory() as session:
+        jd_rows = (await session.scalars(select(JDRaw))).all()
+        course_rows = (await session.scalars(select(CourseRaw))).all()
+        paper_rows = (await session.scalars(select(PaperRaw))).all()
+        community_rows = (await session.scalars(select(CommunityRaw))).all()
+
+    report = {
+        "generated_at": datetime.now(timezone(timedelta(hours=8))).isoformat(),
+        "jd": {
+            "total": len(jd_rows),
+            "sources": source_distribution([{"source": r.source} for r in jd_rows]),
+            "dedup": dedup_stats([{"fingerprint": r.fingerprint} for r in jd_rows]),
+            "positions": position_diversity(await _jd_items(jd_rows), top_n=top_n),
+        },
+        "course": {
+            **course_diversity(await _course_items(course_rows)),
+            "dedup": dedup_stats([{"fingerprint": r.fingerprint} for r in course_rows]),
+        },
+        "paper": {
+            "total": len(paper_rows),
+            "sources": source_distribution([{"source": r.source} for r in paper_rows]),
+        },
+        "community": {
+            "total": len(community_rows),
+            "sources": source_distribution([{"source": r.source} for r in community_rows]),
+        },
+    }
+
+    report_dir = Path(__file__).resolve().parents[2] / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"diversity_{datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d')}.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[diversity_report] 报告已写入: {report_path}", flush=True)
+    return {"report_path": str(report_path)}
+
+
+async def check_data_freshness(ctx: dict) -> dict:
+    """数据更新新鲜度检查（DA-M4-03，设计文档 T+1 承诺）。
+
+    按来源聚合四类 raw 表最新抓取时间，判定平台级新鲜度（≤1 天），
+    写入 reports/freshness_{date}.json。过期来源返回在结果中供告警。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
+    from app.services.data_quality.update_status import platform_freshness
+
+    async def _rows(model):
+        async with async_session_factory() as session:
+            return (await session.scalars(select(model))).all()
+
+    def _section(rows):
+        return platform_freshness(
+            [{"source": r.source, "crawled_at": r.crawled_at} for r in rows]
+        )
+
+    report = {
+        "generated_at": datetime.now(timezone(timedelta(hours=8))).isoformat(),
+        "jd": _section(await _rows(JDRaw)),
+        "course": _section(await _rows(CourseRaw)),
+        "paper": _section(await _rows(PaperRaw)),
+        "community": _section(await _rows(CommunityRaw)),
+    }
+
+    report_dir = Path(__file__).resolve().parents[2] / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"freshness_{datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d')}.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    stale = [
+        f"{name}:{source}"
+        for name in ("jd", "course", "paper", "community")
+        for source in report[name]["stale_sources"]
+    ]
+    print(f"[check_data_freshness] 报告已写入: {report_path} 过期来源: {stale}", flush=True)
+    return {"report_path": str(report_path), "stale_sources": stale}
 
 
 async def aggregate_positions(ctx: dict) -> dict:
@@ -428,7 +754,7 @@ async def cross_validate_jds(ctx: dict, limit: int | None = None) -> dict:
     }
 
 
-async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
+async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: bool = False) -> dict:
     """编排完整 ETL 管线（设计文档 §4.4）。
 
     管线顺序：
@@ -441,6 +767,8 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
 
     Args:
         run_date: 调度日期 YYYY-MM-DD，None 时取 UTC+8 当日
+        skip_cdp: True 时跳过 CDP 爬虫（boss/monster/glassdoor/maimai，需真实
+            Chrome 登录态），仅爬非 CDP 源——本地手动触发且无浏览器登录态时使用
     """
     if run_date is None:
         run_date = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
@@ -453,6 +781,10 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
     # 非招聘数据源（论文/社区/课程）
     trend_platforms = ["arxiv", "github", "stackoverflow"]
 
+    crawl_platforms = domestic_platforms + international_platforms + trend_platforms
+    if skip_cdp:
+        crawl_platforms = [p for p in crawl_platforms if p not in CDP_SPIDERS]
+
     results: dict = {
         "run_date": run_date,
         "stages": {},
@@ -460,7 +792,7 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
 
     # ── 阶段 1：爬虫（A 级国内主源）──
     crawl_results = []
-    for spider in domestic_platforms + international_platforms + trend_platforms:
+    for spider in crawl_platforms:
         try:
             r = await crawl_platform(ctx, spider)
             crawl_results.append(r)
@@ -470,12 +802,14 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
     results["stages"]["crawl"] = crawl_results
 
     # ── 阶段 2：清洗 + 去重 ──
-    # 已嵌入 Scrapy CleaningPipeline（SHA256 指纹 upsert 即去重）
-    # SimHash 去重为 DA-M3-08 遗留项
+    # 已嵌入 Scrapy CleaningPipeline（SHA256 指纹 upsert 即精确去重）
+    # SimHash 近似去重（跨平台）由阶段 2.5 执行
     results["stages"]["clean_dedup"] = {
         "status": "embedded_in_scrapy_pipeline",
-        "simhash_pending": "DA-M3-08",
     }
+
+    # ── 阶段 2.5：SimHash 跨平台近似去重（标记重复，聚合层跳过）──
+    results["stages"]["dedup_simhash"] = await dedup_simhash(ctx)
 
     # ── 阶段 3：时滞检测（M3 启用）──
     results["stages"]["validate_temporal"] = await validate_temporal(ctx, jd_ids=[])
@@ -489,11 +823,23 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None) -> dict:
     # ── 阶段 6：课程入图（course_raw → Course + LEARNABLE_VIA）──
     results["stages"]["load_courses"] = await load_courses(ctx)
 
-    # ── 阶段 7：岗位聚合（Position.freq + REQUIRES weight/source_count）──
+    # ── 阶段 7：课程质量评估（DA-M4-01，六维加权 → 推荐池写回 snapshot["quality"]）──
+    results["stages"]["evaluate_courses"] = await evaluate_courses(ctx)
+
+    # ── 阶段 8：岗位聚合（Position.freq + REQUIRES weight/source_count）──
     results["stages"]["aggregate_positions"] = await aggregate_positions(ctx)
 
-    # ── 阶段 8：多平台交叉验证（DA-M3-03，技能跨源印证/薪资异常/置信度）──
+    # ── 阶段 9：多平台交叉验证（DA-M3-03，技能跨源印证/薪资异常/置信度）──
     results["stages"]["cross_validate"] = await cross_validate_jds(ctx)
+
+    # ── 阶段 10：数据多样性报告（DA-M4-02，reports/diversity_{date}.json）──
+    results["stages"]["diversity_report"] = await diversity_report(ctx)
+
+    # ── 阶段 11：数据更新新鲜度检查（DA-M4-03，T+1 承诺审计）──
+    results["stages"]["check_data_freshness"] = await check_data_freshness(ctx)
+
+    # ── 阶段 12：发布图谱版本快照（§7.1 T+1 版本管理，05:00 前自动发布）──
+    results["stages"]["snapshot_graph"] = await snapshot_graph(ctx, triggered_by="scheduled")
 
     return results
 
@@ -516,7 +862,7 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
     from app.models.business import ResumeCache, TaskStatus
     from app.services.resume.extractor import ResumeExtractor
     from app.services.resume.file_parser import extract_text
-    from app.services.resume.pii_mask import mask_pii
+    from app.services.resume.pii_mask import mask_pii, restore_pii
 
     async with async_session_factory() as session:
         task = await session.get(TaskStatus, task_id) if task_id else None
@@ -540,15 +886,17 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
             text = extract_text(file_path)
 
             # 2. PII 脱敏（送入 LLM 前必须先脱敏，设计文档 §8.2）
-            masked, _mapping = mask_pii(text)
+            masked, pii_mapping = mask_pii(text)
 
             # 3. LLM 结构化抽取（无 api_key / 全 provider 失败降级规则抽取）
             task.progress = 0.6
             await session.commit()
             result = ResumeExtractor().extract(masked)
 
-            # 4. 画像落库（按 file_hash upsert，幂等可重跑）
-            parsed = result.model_dump()
+            # 4. 占位符回填为原始值（设计文档 §8.2：LLM 抽取完成后经映射表回填）。
+            #    映射仅当前任务内存存活，不外泄日志；回填后画像含真实联系方式，
+            #    受 resume/match 端点 user+ 认证保护
+            parsed = restore_pii(result.model_dump(), pii_mapping)
             cache = await session.scalar(
                 select(ResumeCache).where(ResumeCache.file_hash == result_info["file_hash"])
             )
@@ -613,11 +961,13 @@ async def batch_extract(
     """LLM 批量实体抽取 + JD 入图（M3 实现，依赖 AL-M3-01）。
 
     选取 jd_raw 中尚未抽取（snapshot 无 extraction 标记）的记录：
-    - 拼装 JD 正文 → JDExtractor.extract（instructor 强校验，失败单条降级规则抽取）
+    - 拼装 JD 正文 → JDExtractor.extract_batch（N 条/批一次 LLM 调用，设计文档 §6.5
+      批量抽取优化：批量输出 token 线性放大，走独立 batch_timeout；整批失败/条数
+      错位时该批降级逐条 extract，单条失败不阻塞整体）
     - 抽取结果写回 jd_raw.snapshot["extraction"]（可审计、可重跑）
     - kg_service.import_jd 入图（Neo4j MERGE 幂等，重复执行不产生重复节点）
 
-    单条失败不阻塞整体（批量语义）；全部失败时抛出，由 ARQ 重试机制兜底。
+    全部失败时抛出，由 ARQ 重试机制兜底。
     """
     from sqlalchemy import select
 
@@ -642,16 +992,52 @@ async def batch_extract(
                 .limit(limit)
             )).all()
 
+        # 过滤过短正文（<10 字符无法抽取），有效条目进入批量抽取
+        valid: list[JDRaw] = []
         results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": []}
         for row in rows:
-            await asyncio.sleep(_BATCH_REQUEST_INTERVAL)
-            text = _build_jd_text(row.snapshot or {}, row.raw_text or "")
-            if len(text.strip()) < 10:
+            if len((_build_jd_text(row.snapshot or {}, row.raw_text or "") or "").strip()) < 10:
                 results["failed"].append({"jd_id": row.id, "error": "JD 正文过短（<10 字符），跳过"})
-                continue
-            results["processed"] += 1
+            else:
+                valid.append(row)
+
+        # 批量抽取：一次调用处理全部有效 JD——组批（batch_size 条数 + max_batch_chars
+        # 文本总长双封顶）→ 每批一次 LLM 调用（独立 batch_timeout，设计文档 §6.5）→
+        # 拆条落库。返回顺序与 valid 一一对应（错位/失败批次已降级逐条）。
+        total = len(valid)
+        texts = [_build_jd_text(r.snapshot or {}, r.raw_text or "") for r in valid]
+        if texts:
+            extractions = extractor.extract_batch(
+                texts,
+                batch_size=5,
+                batch_timeout=90,  # 批量输出 token 放大，独立超时
+                max_batch_chars=8000,
+            )
+        else:
+            extractions = []
+
+        # 岗位名语义对齐（RAG 检索：与图谱已有岗位匹配，减少相近岗位被区分开）：
+        # LLM 抽取的岗位名先经规则归并（normalize_position_name），规则未归并的
+        # 再做图谱语义匹配（SBERT 余弦 ≥0.9 命中替换为已有岗位名）。对齐在抽取后、
+        # 写快照前统一进行，保证快照存储值与入图/聚合命名一致。
+        if extractions:
+            from app.services.extraction.position_align import PositionAligner
+
+            aligner = PositionAligner.get()
+            for extraction, aligned in zip(
+                extractions, aligner.align_many([e.position_name for e in extractions])
+            ):
+                if aligned and aligned != extraction.position_name:
+                    extraction.position_name = aligned
+
+        for i, (row, extraction) in enumerate(zip(valid, extractions), start=1):
+            # 逐条打印 jd_id + 进度百分比：batch_extract 只在循环结束 commit，
+            # 中间进度 DB 不可见，靠此日志实时确认推进（worker.err.log）
+            print(
+                f"[batch_extract] 处理 jd_id={row.id}（{i}/{total}，{i / total * 100:.0f}%）",
+                flush=True,
+            )
             try:
-                extraction = extractor.extract(text)
                 snap = dict(row.snapshot or {})
                 snap["extraction"] = extraction.model_dump()
                 row.snapshot = snap
@@ -659,10 +1045,11 @@ async def batch_extract(
                     "source": row.source,
                     "source_url": row.source_url,
                     "crawled_at": row.crawled_at,
-                    "raw_text": text,
+                    "raw_text": _build_jd_text(row.snapshot or {}, row.raw_text or ""),
                 }
                 with neo4j_driver.session() as neo4j_session:
                     position_id = import_jd(neo4j_session, extraction, evidence)
+                results["processed"] += 1
                 results["succeeded"] += 1
                 results["positions"].append({"jd_id": row.id, "position_id": position_id})
             except Exception as e:
@@ -679,9 +1066,453 @@ async def evolution_compute(ctx: dict, version: str) -> dict:
     raise NotImplementedError("evolution_compute 待 AL-M3 演化管线接入后实现")
 
 
+async def snapshot_graph(ctx: dict, triggered_by: str = "scheduled") -> dict:
+    """每日图谱版本快照（设计文档 §7.1 T+1 版本管理）。
+
+    流程：Neo4j 全量导出 {nodes, edges}（排除 Counter 内部标签）→
+    写入 PostgreSQL graph_versions（幂等：同日期版本覆盖更新）→
+    与上一版本 set 差集计算节点增减 → 90 天保留清理。
+
+    由外部 cron（scripts/cron/snapshot_daily.py）每日 05:00 前触发，
+    或作为 run_etl_pipeline 阶段 12 随 ETL 完成后自动发布。
+    """
+    from app.services.evolution.graph_version import GraphVersionManager
+
+    meta = await GraphVersionManager().create_snapshot(triggered_by=triggered_by)
+    return meta.model_dump()
+
+
+async def discovery_daily(ctx: dict) -> dict:
+    """每日新岗位发现（AL-M4-01，设计文档 7.2.3 节）。
+
+    流程：聚合 jd_raw 已抽取记录 → 计算候选特征（freq/源多样性/Z-score）
+    → 阶段一门控（detect_candidates）→ 阶段二 RAG 接地（权威库 + 种子）
+    → 幂等 upsert discovery_candidates 候选池 → 自动状态流转持久化。
+
+    幂等设计：按 position_name upsert，重复执行覆盖更新（同岗位不重复入池）。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import JDRaw
+    from app.services.discovery.detector import DiscoveryDetector, DiscoveryInput
+    from app.services.discovery.confidence import compute_confidence
+    from app.services.extraction.dictionary import normalize_position_name
+    from app.services.discovery.schemas import DiscoveryFeatures
+
+    # ── 1. 聚合 jd_raw 已抽取记录 → 岗位频次/源多样性 ──
+    async with async_session_factory() as session:
+        rows = (await session.scalars(
+            select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
+        )).all()
+
+    position_stats: dict[str, dict] = {}
+    for row in rows:
+        ext = (row.snapshot or {}).get("extraction") or {}
+        name = normalize_position_name(ext.get("position_name") or "")
+        if not name:
+            continue
+        stat = position_stats.setdefault(name, {"count": 0, "sources": set()})
+        stat["count"] += 1
+        stat["sources"].add(row.source)
+
+    if not position_stats:
+        return {"candidates": 0, "detail": "无已抽取岗位记录"}
+
+    # ── 2. 组装 DiscoveryInput（Z-score 门控 + 冷启动 Wilson 兜底）──
+    jd_total = sum(s["count"] for s in position_stats.values())
+
+    # 从 graph_versions 快照序列重建岗位频次窗口，计算真实 Z-score /
+    # 3 月移动平均 / 环比增长率，替代此前 history_days=1/z_score=None 硬编码
+    # （否则正常 Z-score 门控永不触发，只能走冷启动）
+    from app.models.business import GraphVersion
+    from app.services.discovery.state_machine import freq_z_scores, position_freq_windows
+
+    async with async_session_factory() as session:
+        snap_rows = (await session.scalars(
+            select(GraphVersion).order_by(GraphVersion.created_at.asc())
+        )).all()
+    snapshots = [s.snapshot_json or {} for s in snap_rows]
+    freq_windows = position_freq_windows(snapshots, set(position_stats))
+    window_days = 0
+    if len(snap_rows) >= 2:
+        span = (snap_rows[-1].created_at - snap_rows[0].created_at)
+        window_days = max(span.days, 0) if span else 0
+
+    inputs = []
+    # 岗位 → 快照环比增长率（置信度三维加权 §7.2.4 用，见下方 compute_confidence）
+    growth_by_position: dict[str, float] = {}
+    for name, stat in position_stats.items():
+        freq = float(stat["count"])
+        freqs = freq_windows.get(name, [])
+        # 快照窗口 ≥ 2 期时用真实 Z-score/MA3/环比；否则保持保守冷启动信号
+        z_score = None
+        growth_rate = 0.0
+        jd_freq_ma3 = freq
+        if len(freqs) >= 2:
+            zs = freq_z_scores(freqs)
+            z_score = float(zs[-1])
+            recent3 = freqs[-3:]
+            jd_freq_ma3 = sum(recent3) / len(recent3)
+            if freqs[-2] > 0:
+                growth_rate = (freqs[-1] - freqs[-2]) / freqs[-2]
+        growth_by_position[name] = growth_rate
+        inputs.append(
+            DiscoveryInput(
+                position_name=name,
+                features=DiscoveryFeatures(
+                    jd_freq_ma3=jd_freq_ma3,
+                    z_score=z_score,
+                    source_diversity=len(stat["sources"]),
+                ),
+                history_days=window_days or 1,
+                cold_successes=stat["count"],
+                cold_total=jd_total,
+            )
+        )
+
+    # ── 3. 阶段一门控 + 阶段二 RAG 接地 ──
+    detector = DiscoveryDetector()
+    candidates = detector.detect_candidates(_Provider(inputs))
+    grounded = []
+    # LLM 实例（定义草案中文生成）：未配置 api_key 时 LLMProviderChain 构造
+    # 即抛 LLMConfigurationError，fallback 到权威库原文，接地不阻塞。
+    from app.services.extraction.jd_extractor import JDExtractor
+
+    llm = None
+    try:
+        llm = JDExtractor()._llm
+    except Exception:
+        llm = None
+    async with async_session_factory() as session:
+        for cand in candidates:
+            c = await detector.ground_with_rag(cand, session, llm=llm)
+            # 置信度：jd_count/source_diversity 来自候选特征，
+            # growth_rate 用快照窗口重建的环比增长率（§7.2.4 三维加权公式）
+            conf = compute_confidence(
+                jd_count=int(cand.features.jd_freq_ma3),
+                source_count=cand.features.source_diversity,
+                growth_rate=growth_by_position.get(cand.position_name, 0.0),
+                # 学术/社区异常信号待 M4 数据管线接通：DiscoveryFeatures 的
+                # arxiv_paper_count/github_star_velocity 目前无上游填充
+                # （arxiv/github 爬虫数据仅入技术热点观察池，未关联 jd_raw），
+                # 不凭空造数据源，保持 False（对应 test_cases.md TC-PD-05）
+                arxiv_anomaly=False,
+                github_anomaly=False,
+            )
+            c = c.model_copy(update={"confidence": conf})
+            grounded.append(c)
+            await _upsert_candidate(session, c)
+        await session.commit()
+
+    # 注：自动态迁移（emerging→stable / declining 等）由 discovery_auto_transition
+    # 任务负责（依赖 graph_versions 快照序列的窗口频次）；本任务只负责
+    # candidate 入池与 RAG 接地。candidate→emerging/rejected 由 admin 审核端点
+    # 调用状态机评估。
+
+    return {
+        "candidates": len(grounded),
+        "seed_matched": sum(1 for c in grounded if c.seed_matched),
+        "rag_matched": sum(1 for c in grounded if c.rag_matched),
+    }
+
+
+async def discovery_auto_transition(ctx: dict) -> dict:
+    """自动状态流转（设计文档 7.2.1 状态机：emerging/stable/declining 自动迁移）。
+
+    从 graph_versions 快照序列重建岗位频次窗口（30 天粒度）→ 对
+    discovery_candidates 中 state ∈ {emerging, stable, declining} 的岗位调用
+    evaluate_auto_transition 判定 → 命中则 PositionStateMachine.persist
+    （Neo4j Position.status + 候选池状态）。
+
+    注意：自动流转 operator="system"，不写 AuditLog（audit_logs.user_id 为
+    users 外键，system 无对应用户）。人工流转记录见 /evolution/state-machine。
+
+    emerging → stable: confidence ≥ 0.8 AND 连续 2 窗口波动 < 25% AND 源 ≥ 2
+    emerging/stable → declining: 连续 3 窗口频次下降 > 40%
+    declining → stable: 连续 2 窗口 z_score > 0（回升）
+
+    幂等：persist 按 name MERGE，重复执行结果一致；无命中不产生副作用。
+
+    数据不足（快照 < 2 期或岗位无窗口序列）时跳过，不武断判定（冷启动）。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory, neo4j_driver
+    from app.models.business import DiscoveryCandidate, GraphVersion
+    from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
+    from app.services.discovery.state_machine import WindowFreq, evaluate_auto_transition, freq_z_scores, PositionStateMachine, position_freq_windows
+    from app.services.extraction.dictionary import normalize_position_name
+
+    # ── 1. 加载全部快照（按创建时间升序，即时间窗口序列）──
+    async with async_session_factory() as session:
+        snapshots = (await session.scalars(
+            select(GraphVersion).order_by(GraphVersion.created_at.asc())
+        )).all()
+
+    if len(snapshots) < 2:
+        return {"transitions": 0, "detail": "快照 < 2 期，无法计算窗口序列（冷启动）"}
+
+    # ── 2. 对候选池中自动可迁移状态的岗位执行判定 ──
+    machine = PositionStateMachine()
+    transitions: list[dict] = []
+    async with async_session_factory() as session:
+        rows = (await session.scalars(
+            select(DiscoveryCandidate).where(
+                DiscoveryCandidate.state.in_(
+                    [PositionState.EMERGING.value, PositionState.STABLE.value, PositionState.DECLINING.value]
+                )
+            )
+        )).all()
+
+        # 按岗位名重建窗口频次序列（同一批次一次构建）
+        names = {r.position_name for r in rows}
+        freq_windows = position_freq_windows(
+            [s.snapshot_json or {} for s in snapshots], names
+        )
+
+        for row in rows:
+            name = normalize_position_name(row.position_name)
+            if not name:
+                continue
+            freqs = freq_windows.get(name, [])
+            if len(freqs) < 2:
+                continue
+
+            features = DiscoveryFeatures(**row.features)
+            candidate = CandidatePosition(
+                candidate_id=row.id,
+                position_name=row.position_name,
+                state=PositionState(row.state),
+                features=features,
+                detected_at=row.detected_at,
+                evidence_refs=row.evidence_refs,
+                seed_matched=row.seed_matched,
+                rag_matched=row.rag_matched,
+                definition_draft=row.definition_draft,
+            )
+            conf = float((row.confidence or {}).get("final_confidence", 0.0))
+            # z_scores 由频次序列自身重建（freq_z_scores）：declining 岗位回升
+            # 时最近 2 窗口 z > 0，触发 declining → stable 自动回迁
+            windows = WindowFreq(freqs=freqs, z_scores=freq_z_scores(freqs))
+            target = evaluate_auto_transition(candidate, windows, confidence=conf)
+            if target is None:
+                continue
+
+            with neo4j_driver.session() as neo4j_session:
+                updated = machine.persist(
+                    neo4j_session, candidate, target, operator="system",
+                )
+            row.state = updated.state.value
+            transitions.append({
+                "position_name": row.position_name,
+                "from_state": candidate.state.value,
+                "to_state": updated.state.value,
+            })
+        await session.commit()
+
+    return {
+        "transitions": len(transitions),
+        "detail": transitions,
+    }
+
+
+class _Provider:
+    """适配 CandidateProvider Protocol 的内存数据源。"""
+
+    def __init__(self, inputs):
+        self._inputs = inputs
+
+    def iter_inputs(self):
+        return iter(self._inputs)
+
+
+async def _upsert_candidate(session, cand) -> None:
+    """按 position_name upsert 候选池（幂等：同岗位覆盖更新特征/状态）。"""
+    from app.models.business import DiscoveryCandidate
+    from sqlalchemy import select
+
+    row = await session.scalar(
+        select(DiscoveryCandidate).where(DiscoveryCandidate.position_name == cand.position_name)
+    )
+    payload = {
+        "state": cand.state.value,
+        "features": cand.features.model_dump() if hasattr(cand.features, "model_dump") else cand.features,
+        "confidence": cand.confidence.model_dump() if cand.confidence else {},
+        "evidence_refs": cand.evidence_refs,
+        "seed_matched": cand.seed_matched,
+        "rag_matched": cand.rag_matched,
+        "definition_draft": cand.definition_draft,
+        "detected_at": cand.detected_at,
+    }
+    if row is None:
+        session.add(DiscoveryCandidate(id=cand.candidate_id, position_name=cand.position_name, **payload))
+    else:
+        # 已晋升（emerging/stable/declining 等）的岗位不被 discovery_daily
+        # 打回 candidate；仅仍为 candidate 的行允许状态覆盖
+        if row.state != "candidate":
+            payload.pop("state", None)
+        for k, v in payload.items():
+            setattr(row, k, v)
+
+
+# ============================================================
+# 技术热点观察池（设计文档 7.2.5）
+# ============================================================
+
+async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
+    """每日技术热点信号监测（设计文档 7.2.5 观察池 + MLI 拐点）。
+
+    流程：聚合 4 源 raw 表（jd/course/paper/community）周频次 → 判定
+    命中阈值（JD 3 月移动平均环比 > 50%；学术/社区/课程 2σ）→ 幂等
+    upsert technology_watch → JD 源命中且该技能此前已在观察池的技能提升
+    candidate（写入 discovery_candidates，设计 §7.2.5 / 方案 §2）。
+
+    幂等：technology_watch 按 (skill, source, period) 唯一约束 upsert；
+    候选池提升仅对已有观察历史且未晋升的技能生效（不重复提升）。
+
+    Args:
+        run_date: 统计周期 YYYY-MM-DD（缺省用当天）
+    """
+    from datetime import date, timedelta
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.business import TechnologyWatch
+    from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
+    from app.services.discovery.watch_pool import aggregate_weekly_freqs, build_signals
+
+    period = run_date or date.today().isoformat()
+    # 观察窗口：过去 12 周（JD 3 月移动平均需 12 周以上历史）
+    since = (date.fromisoformat(period) - timedelta(weeks=12)).isoformat()
+
+    # ── 1. 读取 4 源 raw 行（crawled_at >= since）──
+    async with async_session_factory() as session:
+        jd_rows = (await session.scalars(
+            select(JDRaw).where(JDRaw.crawled_at >= since)
+        )).all()
+        course_rows = (await session.scalars(
+            select(CourseRaw).where(CourseRaw.crawled_at >= since)
+        )).all()
+        paper_rows = (await session.scalars(
+            select(PaperRaw).where(PaperRaw.crawled_at >= since)
+        )).all()
+        community_rows = (await session.scalars(
+            select(CommunityRaw).where(CommunityRaw.crawled_at >= since)
+        )).all()
+
+    all_rows = [*jd_rows, *course_rows, *paper_rows, *community_rows]
+    if not all_rows:
+        return {"signals": 0, "detail": f"{period} 无 raw 数据"}
+
+    freqs = aggregate_weekly_freqs(all_rows)
+    signals = build_signals(freqs, period)
+
+    # ── 2. 幂等 upsert technology_watch + 计算 MLI ──
+    promoted: list[str] = []
+    upserted = 0
+    async with async_session_factory() as session:
+        for sig in signals:
+            row = await session.scalar(
+                select(TechnologyWatch).where(
+                    TechnologyWatch.skill_name == sig.skill_name,
+                    TechnologyWatch.signal_source == sig.signal_source,
+                    TechnologyWatch.period == sig.period,
+                )
+            )
+            if row is None:
+                session.add(TechnologyWatch(
+                    skill_name=sig.skill_name,
+                    signal_source=sig.signal_source,
+                    signal_value=sig.signal_value,
+                    period=sig.period,
+                    status="watch",
+                ))
+            else:
+                row.signal_value = sig.signal_value
+                row.last_signal_at = datetime.now(timezone.utc)
+            upserted += 1
+        await session.commit()
+
+        # ── 3. 提升候选：JD 源命中且该技能此前已在观察池（设计 §7.2.5 / 方案 §2）──
+        from app.models.business import DiscoveryCandidate
+        from app.services.discovery.watch_pool import promotable_skills
+
+        prior_rows = (await session.scalars(
+            select(TechnologyWatch.skill_name).where(
+                TechnologyWatch.period < period,
+            )
+        )).all()
+        previously_watched = {name for name in prior_rows}
+
+        for skill in promotable_skills(signals, previously_watched):
+            existing = await session.scalar(
+                select(DiscoveryCandidate).where(
+                    DiscoveryCandidate.position_name == skill
+                )
+            )
+            if existing is not None:
+                continue  # 已在候选池/已晋升，不重复提升
+            jd_value = next(
+                (sig.signal_value for sig in signals
+                 if sig.skill_name == skill and sig.signal_source == "jd"),
+                0.0,
+            )
+            session.add(DiscoveryCandidate(
+                id=f"cand-{skill[:20]}",
+                position_name=skill,
+                state="candidate",
+                features={"jd_mom_growth": jd_value, "z_score": None, "source_diversity": 1},
+                confidence={"final_confidence": 0.0, "jd_signal": jd_value},
+                evidence_refs=[f"watch:{period}:{skill}"],
+                seed_matched=False,
+                rag_matched=False,
+                definition_draft="",
+                detected_at=period,
+            ))
+            promoted.append(skill)
+            # 状态流转：该技能本期 watch 行 → candidate_promoted
+            watch_rows = (await session.scalars(
+                select(TechnologyWatch).where(
+                    TechnologyWatch.skill_name == skill,
+                    TechnologyWatch.period == period,
+                    TechnologyWatch.status == "watch",
+                )
+            )).all()
+            for r in watch_rows:
+                r.status = "candidate_promoted"
+        await session.commit()
+
+    return {
+        "signals": upserted,
+        "promoted": len(promoted),
+        "detail": promoted,
+    }
+
+
 # ============================================================
 # ARQ Worker 注册
 # ============================================================
+
+async def check_llm_providers_health(ctx: dict) -> dict:
+    """LLM provider 健康检查（设计文档 §6.5：每 5min 调 /models 端点）。
+
+    遍历 enabled provider 探测 /models 可用性，结果写 Redis（llm:health:{name}），
+    供调用链展示/运维排查。配置缺失（无 yaml）时跳过并返回原因，不触发
+    ARQ 重试；单 provider 探测失败仅记 unhealthy，由熔断/退避机制在调用侧兜底。
+    """
+    from app.services.extraction.llm_provider import (
+        LLMConfigurationError,
+        health_check_all,
+    )
+
+    try:
+        checked = health_check_all()
+    except LLMConfigurationError as e:
+        return {"status": "skipped", "reason": str(e)}
+    print(f"[check_llm_providers_health] {checked}", flush=True)
+    return {"status": "ok", "healthy": checked}
+
 
 async def on_startup(ctx: dict) -> None:
     """Worker 启动钩子。"""
@@ -701,19 +1532,39 @@ class WorkerSettings:
     functions = [
         crawl_platform,
         run_etl_pipeline,
+        dedup_simhash,
         validate_temporal,
         detect_inflation,
         resume_parse,
         batch_extract,
         load_courses,
+        evaluate_courses,
+        diversity_report,
+        check_data_freshness,
         aggregate_positions,
         cross_validate_jds,
+        discovery_daily,
+        discovery_auto_transition,
+        watch_signal_daily,
+        snapshot_graph,
         evolution_compute,
+        check_llm_providers_health,
     ]
     on_startup = on_startup
     on_shutdown = on_shutdown
     redis_settings = RedisSettings.from_dsn(settings.arq_redis_url)
     concurrency = settings.arq_concurrency
-    task_timeout = settings.arq_task_timeout
+    job_timeout = settings.arq_job_timeout
     max_retries = 2
     retry_delay = 10
+    # 定时任务（设计文档 §6.5）：每 5min 探测 provider 健康并写 Redis；
+    # run_at_startup 让 worker 启动即跑一次，快速发现不可用 provider
+    cron_jobs = [
+        cron(
+            check_llm_providers_health,
+            minute=set(range(0, 60, 5)),
+            run_at_startup=True,
+        ),
+        # 设计文档 §7.2.5 观察池：每日 06:00 监测技术热点信号（ETL 之后）
+        cron(watch_signal_daily, hour=6, minute=0),
+    ]

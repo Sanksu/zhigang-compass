@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/table'
 import { ROLES, type Role } from '@/lib/constants'
 import { apiGet, apiPost, apiPut, ApiError } from '@/lib/api'
+import { useAuthStore } from '@/store/auth'
 
 type UserStatus = 'active' | 'disabled'
 
@@ -75,12 +76,16 @@ function toRow(u: BackendUser): UserRow {
 }
 
 export function AdminUsersPage() {
+  const { user: currentUser } = useAuthStore()
   const [users, setUsers] = useState<UserRow[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [form, setForm] = useState({ username: '', password: '', role: 'user' as Role })
+
+  // 自保护：当前登录管理员不可修改自己的角色/禁用自己（M6，后端同样拦截）
+  const isSelf = (id: string) => id === currentUser?.id
 
   async function load() {
     try {
@@ -117,6 +122,10 @@ export function AdminUsersPage() {
   }, [])
 
   async function setRole(id: string, role: Role) {
+    if (isSelf(id)) {
+      setError('不能修改当前登录账户的角色')
+      return
+    }
     try {
       await apiPut(`/admin/users/${id}`, { role })
       await load()
@@ -126,6 +135,10 @@ export function AdminUsersPage() {
   }
 
   async function toggleStatus(id: string) {
+    if (isSelf(id)) {
+      setError('不能禁用当前登录账户')
+      return
+    }
     const u = users.find((x) => x.id === id)
     if (!u) return
     try {
@@ -249,7 +262,7 @@ export function AdminUsersPage() {
                       <TableCell className="text-xs font-mono text-ink-muted">{u.createdAt}</TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-2">
-                          <Select value={u.role} onValueChange={(v) => setRole(u.id, v as Role)}>
+                          <Select value={u.role} onValueChange={(v) => setRole(u.id, v as Role)} disabled={isSelf(u.id)}>
                             <SelectTrigger className="h-8 w-24">
                               <SelectValue />
                             </SelectTrigger>
@@ -263,6 +276,8 @@ export function AdminUsersPage() {
                             size="sm"
                             variant={u.status === 'active' ? 'outline' : 'default'}
                             onClick={() => toggleStatus(u.id)}
+                            disabled={isSelf(u.id)}
+                            title={isSelf(u.id) ? '不能操作当前登录账户' : undefined}
                           >
                             {u.status === 'active' ? '禁用' : '启用'}
                           </Button>

@@ -1,21 +1,26 @@
-"""简历路由：上传、解析任务、任务状态轮询。
+"""简历路由：上传、解析任务、任务状态轮询、SSE 推送、编辑。
 
 上传链路：文件 → SHA256 去重（命中 resume_cache 直接复用）→ 落盘 uploads/
-→ 创建 TaskStatus → 入队 ARQ resume_parse 任务（PII 脱敏在任务内完成）。
+→ 原始文件字节落库 resume_files（仅上传者本人可下载）→ 创建 TaskStatus
+→ 入队 ARQ resume_parse 任务（PII 脱敏在任务内完成）。
 """
 
+import asyncio
 import hashlib
+import json
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
-from sqlalchemy import select
+from fastapi.responses import Response, StreamingResponse
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_role
 from app.core.config import settings
-from app.core.database import get_db
-from app.models.business import ResumeCache, TaskStatus
+from app.core.database import async_session_factory, get_db
+from app.models.business import AuditLog, ResumeCache, ResumeFile, TaskStatus
 from app.schemas.common import ok, error
 
 router = APIRouter()
@@ -23,9 +28,12 @@ router = APIRouter()
 # 上传目录（根 .gitignore 已忽略 uploads/，仅存运行时文件）
 _UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads"
 
-# 上传边界：大小上限 10MB，类型白名单（防内存耗尽与任意文件写入）
+# 上传边界：大小上限 10MB，类型白名单（防内存耗尽与任意文件写入）。
+# 白名单以解析器支持能力为单一事实源，避免上传通过后解析却失败的漂移（T-03）
+from app.services.resume.file_parser import SUPPORTED_EXTENSIONS
+
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
+ALLOWED_EXTENSIONS = SUPPORTED_EXTENSIONS
 
 
 async def _enqueue_resume_parse(file_path: str, task_id: str) -> None:
@@ -50,10 +58,38 @@ async def _enqueue_resume_parse(file_path: str, task_id: str) -> None:
         await pool.close()
 
 
+async def _persist_resume_file(
+    db: AsyncSession,
+    *,
+    resume_id: str,
+    user_id: str,
+    file_hash: str,
+    file_name: str,
+    content_type: str,
+    content: bytes,
+) -> None:
+    """简历原始文件落库（设计文档 §8.1：resume_files 留存，仅上传者本人可下载）。
+
+    上传时同步写行（命中解析缓存的分支不写），删除简历时联动删除。
+    """
+    db.add(
+        ResumeFile(
+            resume_id=resume_id,
+            user_id=user_id,
+            file_hash=file_hash,
+            file_name=file_name,
+            content_type=content_type,
+            content=content,
+            file_size=len(content),
+        )
+    )
+
+
 @router.get("/list")
 async def list_resumes(
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
 ):
     """已解析简历列表（最近 N 条，含候选人画像摘要）。
 
@@ -81,6 +117,7 @@ async def list_resumes(
 async def parse_resume(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
 ):
     """上传简历触发解析（异步任务，含 PII 脱敏预处理）。"""
     content = await file.read()
@@ -91,7 +128,9 @@ async def parse_resume(
 
     suffix = Path(file.filename or "resume").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        return error(415, "仅支持 pdf/doc/docx/txt 格式")
+        supported = "/".join(sorted(ext.lstrip(".") for ext in ALLOWED_EXTENSIONS))
+        hint = "，.doc 请转存为 .docx" if suffix == ".doc" else ""
+        return error(415, f"仅支持 {supported} 格式{hint}")
 
     file_hash = hashlib.sha256(content).hexdigest()
 
@@ -120,6 +159,18 @@ async def parse_resume(
         },
     )
     db.add(task)
+    await db.flush()  # 先落 task 拿 id，作为 resume_files.resume_id（前端 resume_id 即任务 id）
+
+    # 原始文件字节落库（§8.1：仅上传者本人可下载），与任务同事务提交保证原子性
+    await _persist_resume_file(
+        db,
+        resume_id=str(task.id),
+        user_id=user.get("sub", ""),
+        file_hash=file_hash,
+        file_name=file.filename or "",
+        content_type=file.content_type or "",
+        content=content,
+    )
     await db.commit()
     await db.refresh(task)
 
@@ -134,7 +185,7 @@ async def parse_resume(
 
 
 @router.get("/task/{task_id}")
-async def task_status(task_id: str, db: AsyncSession = Depends(get_db)):
+async def task_status(task_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("user"))):
     """轮询异步任务状态。"""
     try:
         task_uuid = str(uuid.UUID(task_id))
@@ -142,7 +193,7 @@ async def task_status(task_id: str, db: AsyncSession = Depends(get_db)):
         return error(400, "task_id 格式非法")
     task = await db.get(TaskStatus, task_uuid)
     if task is None:
-        return error(404, "任务不存在")
+        return error(4040, "任务不存在", http_status=404)
     return ok(data={
         "task_id": task.id,
         "task_type": task.task_type,
@@ -153,3 +204,221 @@ async def task_status(task_id: str, db: AsyncSession = Depends(get_db)):
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
     })
+
+
+def _parse_resume_id(resume_id: str) -> str | None:
+    """校验并规范化简历 UUID，非法返回 None。"""
+    try:
+        return str(uuid.UUID(resume_id))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _merge_fields(parsed: dict, fields: dict) -> dict:
+    """顶层字段覆盖合并（编辑简历画像的字段更新语义）。"""
+    merged = dict(parsed)
+    merged.update(fields)
+    return merged
+
+
+def _sse_payload(task: TaskStatus) -> dict:
+    """任务状态 → SSE data 载荷（TaskStatus ORM 对象不可直接 JSON 序列化）。"""
+    return {
+        "task_id": task.id,
+        "task_type": task.task_type,
+        "status": task.status,
+        "progress": task.progress,
+        "result": task.result,
+        "error": task.error,
+    }
+
+
+async def _task_stream_events(
+    task_uuid: str,
+    get_task,
+    *,
+    poll_interval: float = 1.0,
+    timeout: float = 300.0,
+):
+    """SSE 事件序列（可注入任务查询函数便于测试）。
+
+    get_task: async callable(task_uuid) -> dict | None（已序列化载荷，见 _sse_payload）。
+    事件流：progress 周期推送 → 终态 success/failed 推送 done/error 并结束；
+    任务不存在 / 超时推送 error 后结束。
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    while True:
+        task = await get_task(task_uuid)
+        if task is None:
+            yield f"event: error\ndata: {json.dumps({'message': '任务不存在'}, ensure_ascii=False)}\n\n"
+            return
+        if task["status"] == "success":
+            yield f"event: done\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
+            return
+        if task["status"] == "failed":
+            yield f"event: error\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
+            return
+        yield f"event: progress\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
+        if time.monotonic() >= deadline:
+            yield f"event: error\ndata: {json.dumps({'message': '推送超时'}, ensure_ascii=False)}\n\n"
+            return
+        await asyncio.sleep(poll_interval)
+
+
+@router.get("/{resume_id}")
+async def get_resume(resume_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("user"))):
+    """简历解析详情（FE-M4-04 个人中心"查看"：完整画像）。"""
+    rid = _parse_resume_id(resume_id)
+    if rid is None:
+        return error(400, "resume_id 格式非法")
+    resume = await db.get(ResumeCache, rid)
+    if resume is None:
+        return error(4040, "简历不存在", http_status=404)
+    return ok(data={
+        "id": resume.id,
+        "file_name": resume.file_name,
+        "parsed_data": resume.parsed_data if isinstance(resume.parsed_data, dict) else {},
+        "version": resume.version,
+        "created_at": resume.created_at.isoformat() if resume.created_at else None,
+        "updated_at": resume.updated_at.isoformat() if resume.updated_at else None,
+    })
+
+
+@router.put("/{resume_id}")
+async def update_resume(
+    resume_id: str,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
+):
+    """编辑简历画像（BE-M4-01，契约 PUT /resume/{resume_id}）。
+
+    LLM 抽取可能有误，允许用户手动修正。请求体 `{"fields": {...}}` 中的
+    字段按顶层覆盖合并进 parsed_data（设计文档 §2.4.3），version 递增，
+    写审计日志（登录用户）。端点要求 user+ 角色（设计文档 §2.4.3）。
+    """
+    rid = _parse_resume_id(resume_id)
+    if rid is None:
+        return error(400, "resume_id 格式非法")
+    resume = await db.get(ResumeCache, rid)
+    if resume is None:
+        return error(4040, "简历不存在", http_status=404)
+
+    fields = req.get("fields")
+    if not isinstance(fields, dict) or not fields:
+        return error(400, "fields 必须为非空对象")
+
+    resume.parsed_data = _merge_fields(resume.parsed_data or {}, fields)
+    resume.version += 1
+
+    db.add(AuditLog(
+        user_id=user.get("sub", ""),
+        action="resume.update",
+        resource="resume_cache",
+        resource_id=rid,
+        detail={"fields": list(fields.keys()), "version": resume.version},
+    ))
+    await db.commit()
+
+    return ok(data={
+        "id": resume.id,
+        "file_name": resume.file_name,
+        "parsed_data": resume.parsed_data,
+        "version": resume.version,
+        "updated_at": resume.updated_at.isoformat() if resume.updated_at else None,
+    })
+
+
+@router.get("/task/{task_id}/stream")
+async def task_stream(task_id: str, user: dict = Depends(require_role("user"))):
+    """SSE 推送任务进度（BE-M4-01，契约 GET /resume/task/{task_id}/stream）。
+
+    事件流：初始 status/progress → 周期推送 progress 事件 → 终态
+    （success/failed）推送 done/error 事件并关闭。任务不存在推送 error 后关闭。
+    轮询间隔 1s，上限 300s 兜底（防客户端挂起占用连接）。
+    """
+    try:
+        task_uuid = str(uuid.UUID(task_id))
+    except (ValueError, AttributeError):
+        return error(400, "task_id 格式非法")
+
+    async def _get_task(tid: str) -> dict | None:
+        async with async_session_factory() as session:
+            task = await session.get(TaskStatus, tid)
+        return _sse_payload(task) if task is not None else None
+
+    async def _event_gen():
+        async for event in _task_stream_events(task_uuid, _get_task):
+            yield event
+
+    return StreamingResponse(_event_gen(), media_type="text/event-stream")
+
+
+@router.delete("/{resume_id}", status_code=200)
+async def delete_resume(resume_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("user"))):
+    """删除简历记录及落盘文件（FE-M4-04 个人中心）。"""
+    rid = _parse_resume_id(resume_id)
+    if rid is None:
+        return error(400, "resume_id 格式非法")
+    resume = await db.get(ResumeCache, rid)
+    if resume is None:
+        return error(4040, "简历不存在", http_status=404)
+
+    # 删除落库原始文件（§8.1：resume_files 与简历记录联动删除）
+    await db.execute(delete(ResumeFile).where(ResumeFile.resume_id == rid))
+
+    # 删除落盘文件（uploads/{file_hash}{suffix}），文件缺失不阻塞删除
+    for f in _UPLOAD_DIR.glob(f"{resume.file_hash}.*"):
+        try:
+            f.unlink()
+        except OSError:
+            pass
+
+    await db.delete(resume)
+    await db.commit()
+    return ok(data={"deleted": True})
+
+
+async def _fetch_resume_file(db: AsyncSession, resume_id: str) -> ResumeFile | None:
+    """按 resume_id 查询原始文件行（resume_id 已校验为 UUID）。"""
+    return await db.scalar(select(ResumeFile).where(ResumeFile.resume_id == resume_id))
+
+
+def _download_disposition(filename: str) -> str:
+    """下载响应 Content-Disposition（与 starlette FileResponse 同格式）。
+
+    非 ASCII 文件名走 RFC 5987 filename*（引号内无法安全放中文/空格）。
+    """
+    quoted = quote(filename)
+    if quoted == filename:
+        return f'attachment; filename="{filename}"'
+    return f"attachment; filename*=utf-8''{quoted}"
+
+
+@router.get("/files/{resume_id}/download")
+async def download_resume_file(
+    resume_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
+):
+    """下载简历原始文件（设计文档 §8.1：仅上传者本人可下载，管理员无权访问原文）。
+
+    文件字节从 resume_files 表读取（DB 留存），不依赖 uploads/ 落盘文件。
+    注：starlette 1.3.1 的 FileResponse 仅支持真实文件路径，DB 字节下载用
+    Response + 同格式 Content-Disposition 实现同等语义。
+    """
+    rid = _parse_resume_id(resume_id)
+    if rid is None:
+        return error(400, "resume_id 格式非法")
+    row = await _fetch_resume_file(db, rid)
+    if row is None:
+        return error(4040, "简历文件不存在", http_status=404)
+    if row.user_id != user.get("sub", ""):
+        return error(4030, "无权下载该简历文件", http_status=403)
+    return Response(
+        content=row.content,
+        media_type=row.content_type or "application/octet-stream",
+        headers={"Content-Disposition": _download_disposition(row.file_name)},
+    )

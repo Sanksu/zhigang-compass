@@ -94,3 +94,8 @@ class MatchResult(BaseModel):
     missing_must: list[str] = Field(default_factory=list, description="缺失的必备技能名")
     summary: str = Field(default="", description="匹配摘要，供前端展示")
     unqualified: bool = Field(default=False, description="必备技能全缺失判零时为 True")
+    radar: dict = Field(
+        default_factory=dict,
+        description="人岗比对五维雷达（§9.5）：must/nice/experience/education/projects，"
+        "education/projects 无数据时为 None",
+    )

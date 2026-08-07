@@ -5,10 +5,7 @@ import {
   Database,
   RefreshCw,
   Shield,
-  Trash2,
-  Upload,
   Users,
-  Zap,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { apiGet } from '@/lib/api'
+import { apiGet, apiPost } from '@/lib/api'
 
 /* ------------------------------------------------------------------ */
 /*  类型定义（对应后端 /admin/* 返回）                                    */
@@ -56,7 +53,17 @@ interface CrawlPlatform {
   level: string
   files: number
   total_count: number
+  today_count: number
   last_run: string | null
+}
+
+interface CrawlStatusData {
+  metrics: {
+    today_count: number
+    output_total: number
+    raw: { jd: number; course: number; paper: number; community: number }
+  }
+  platforms: CrawlPlatform[]
 }
 
 interface SourceItem {
@@ -64,6 +71,11 @@ interface SourceItem {
   level: string
   levelVariant: 'default' | 'outline' | 'emerging' | 'stable' | 'declining' | 'archived'
   status: 'normal' | 'delayed' | 'failed' | 'archived'
+  /** /admin/crawl/status 返回的采集指标 */
+  files: number
+  totalCount: number
+  todayCount: number
+  lastRun: string | null
 }
 
 interface StatItem {
@@ -104,10 +116,7 @@ function actionType(action: string): AuditActionType {
 }
 
 const QUICK_ACTIONS = [
-  { id: 'crawl', label: '触发全量爬取', icon: RefreshCw, desc: '重新采集所有 13 个数据源' },
-  { id: 'etl', label: '执行 ETL 聚合', icon: Zap, desc: '清洗 → 去重 → 结构化 → 图谱同步' },
-  { id: 'cache', label: '清理缓存', icon: Trash2, desc: '清除查询缓存与临时计算结果' },
-  { id: 'report', label: '导出系统报告', icon: Upload, desc: '生成系统运营状态综合报告' },
+  { id: 'crawl', label: '触发全量爬取', icon: RefreshCw, desc: '重新采集所有数据源' },
 ]
 
 const LEVEL_VARIANT: Record<string, SourceItem['levelVariant']> = {
@@ -117,6 +126,14 @@ const LEVEL_VARIANT: Record<string, SourceItem['levelVariant']> = {
   信号: 'stable',
   论文: 'declining',
   课程: 'emerging',
+}
+
+/** ISO 时间 → 紧凑 MM-dd HH:mm（窄卡片避免长日期撑破布局） */
+function formatRunTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 /* ------------------------------------------------------------------ */
@@ -136,7 +153,7 @@ export function AdminDashboardPage() {
     let cancelled = false
     Promise.allSettled([
       apiGet<{ items: { id: string }[]; total: number }>('/admin/users?page=1&size=1'),
-      apiGet<{ platforms: CrawlPlatform[] }>('/admin/crawl/status'),
+      apiGet<CrawlStatusData>('/admin/crawl/status'),
       apiGet<{ items: BackendAuditLog[]; total: number }>('/admin/audit/logs?page=1&size=10'),
       apiGet<{ items: unknown[]; total: number }>('/admin/positions/pending'),
     ]).then(([usersRes, crawlRes, auditRes, pendingRes]) => {
@@ -144,7 +161,7 @@ export function AdminDashboardPage() {
 
       const userTotal = usersRes.status === 'fulfilled' ? usersRes.value.total : 0
       const platforms = crawlRes.status === 'fulfilled' ? crawlRes.value.platforms : []
-      const rawJd = 0
+      const rawJd = crawlRes.status === 'fulfilled' ? crawlRes.value.metrics.raw.jd : 0
       const logs = auditRes.status === 'fulfilled' ? auditRes.value.items : []
       const pending = pendingRes.status === 'fulfilled' ? pendingRes.value.total : 0
 
@@ -159,7 +176,12 @@ export function AdminDashboardPage() {
           name: p.name,
           level: p.level,
           levelVariant: LEVEL_VARIANT[p.level] ?? 'outline',
-          status: 'normal',
+          // 状态由真实采集数据派生：今日有产出→正常 / 有历史无今日→延迟 / 无记录→归档
+          status: p.today_count > 0 ? 'normal' : p.total_count > 0 ? 'delayed' : 'archived',
+          files: p.files,
+          totalCount: p.total_count,
+          todayCount: p.today_count,
+          lastRun: p.last_run,
         })),
       )
       setAuditLogs(
@@ -179,21 +201,34 @@ export function AdminDashboardPage() {
     }
   }, [])
 
-  function handleQuickAction(id: string) {
+  async function handleQuickAction(id: string) {
     if (runningActions.has(id)) return
+    console.log(`[quick-action] 开始: ${id}`)
     setRunningActions((prev) => new Set(prev).add(id))
     setActionMessages((prev) => {
       const next = new Map(prev)
       next.delete(id)
       return next
     })
-    setTimeout(() => {
+    try {
+      // 真实触发：对每个平台入队 crawl_platform 任务（POST /admin/crawl/trigger）
+      const res = await apiGet<CrawlStatusData>('/admin/crawl/status')
+      console.log(`[quick-action] 获取平台列表: ${res.platforms.length} 个`)
+      for (const p of res.platforms) {
+        await apiPost('/admin/crawl/trigger', { platform: p.id, keyword: '高级前端' })
+        console.log(`[quick-action] 已入队: ${p.id} -> ${p.name}`)
+      }
+      console.log(`[quick-action] 全部入队成功: ${res.platforms.length} 个平台`)
+      setActionMessages((prev) => new Map(prev).set(id, `已入队 ${res.platforms.length} 个平台`))
+    } catch (e) {
+      console.error(`[quick-action] 失败: ${id}`, e)
+      setActionMessages((prev) => new Map(prev).set(id, '触发失败'))
+    } finally {
       setRunningActions((prev) => {
         const next = new Set(prev)
         next.delete(id)
         return next
       })
-      setActionMessages((prev) => new Map(prev).set(id, '已触发'))
       setTimeout(() => {
         setActionMessages((prev) => {
           const next = new Map(prev)
@@ -201,7 +236,7 @@ export function AdminDashboardPage() {
           return next
         })
       }, 4000)
-    }, 2000)
+    }
   }
 
   return (
@@ -268,6 +303,17 @@ export function AdminDashboardPage() {
                     {src.name.charAt(0)}
                   </span>
                   <span className="text-ink truncate font-medium">{src.name}</span>
+                </div>
+                {/* 采集指标：累计 / 今日 / 文件数 / 最近运行 */}
+                <div className="mt-2 space-y-0.5 text-[10px] text-ink-faint tabular-nums">
+                  <div>
+                    累计 {src.totalCount.toLocaleString()}
+                    {src.todayCount > 0 && <span className="text-state-emerging"> · 今日 +{src.todayCount}</span>}
+                  </div>
+                  <div>
+                    文件 {src.files}
+                    <span className="ml-1">{src.lastRun ? `最近 ${formatRunTime(src.lastRun)}` : '· 未采集'}</span>
+                  </div>
                 </div>
               </div>
             ))}
