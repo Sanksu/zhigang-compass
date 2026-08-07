@@ -105,3 +105,16 @@ class TestGapSorting:
         )
         gaps = analyze_gaps(cand, pos)
         assert [g.skill for g in gaps] == ["B", "C", "A"]
+
+    def test_weight_takes_precedence_over_gap_type(self):
+        """设计文档 §9.5：weight DESC 优先，gap_type 仅作次级排序。"""
+        cand = _candidate([("Go", 3), ("Python", 1)])
+        pos = _position(
+            musts=[
+                _req("Go", weight=0.9),  # matched，但 weight 最高 → 排最前
+                _req("Java", weight=0.8),  # missing
+                _req("Python", weight=0.7, proficiency="专家"),  # weak
+            ]
+        )
+        gaps = analyze_gaps(cand, pos)
+        assert [g.skill for g in gaps] == ["Go", "Java", "Python"]

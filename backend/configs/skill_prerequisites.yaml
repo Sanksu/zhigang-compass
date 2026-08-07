@@ -43,7 +43,7 @@ skills:
     prerequisites: [HTML, CSS, JavaScript]
   React:
     prerequisites: [JavaScript, HTML, CSS]
-  Vue:
+  Vue.js:
     prerequisites: [JavaScript, HTML, CSS]
   小程序:
     prerequisites: [JavaScript]
@@ -69,7 +69,7 @@ skills:
     prerequisites: [计算机基础, 操作系统]
   消息队列:
     prerequisites: [分布式]
-  Kafka:
+  Apache Kafka:
     prerequisites: [Java, 分布式]
   RabbitMQ:
     prerequisites: [分布式]
@@ -101,11 +101,11 @@ skills:
   # ---- 大数据 / 算法 ----
   大数据:
     prerequisites: [计算机基础, SQL]
-  Spark:
+  Apache Spark:
     prerequisites: [Scala, 大数据]
   Scala:
     prerequisites: [Java]
-  Flink:
+  Apache Flink:
     prerequisites: [Java, 大数据]
   Hadoop:
     prerequisites: [计算机基础, Linux]

@@ -12,8 +12,9 @@
 """
 
 import sys
+from pathlib import Path
 
-sys.path.insert(0, "c:/Users/87088/Desktop/zglp/zhigang-compass/backend")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.database import neo4j_driver
 from app.services.extraction.normalization import SkillNormalizer

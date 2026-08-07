@@ -249,6 +249,51 @@ def _occ(code="15-1252.00", name="Software Developers", aliases=None):
     )
 
 
+class TestThreadingWrappers:
+    """ARQ 阻塞防护：同步阻塞调用（SBERT/Neo4j）必须经 asyncio.to_thread 执行。
+
+    若改回直接同步调用，事件循环会被阻塞导致 ARQ 心跳超时；
+    本测试通过记录 to_thread 被包进的函数守住该约束。
+    """
+
+    @staticmethod
+    def _spy_to_thread(monkeypatch):
+        from app.services.discovery import grounding
+
+        called: list = []
+
+        async def _wrapped(fn, *args, **kwargs):
+            called.append(fn)
+            return fn(*args, **kwargs)
+
+        monkeypatch.setattr(grounding.asyncio, "to_thread", _wrapped)
+        return called
+
+    def test_fulltext_query_runs_in_thread(self, monkeypatch):
+        """Neo4j 全文查询经 to_thread（_query_fulltext 被包入）。"""
+        from app.services.discovery import grounding
+
+        called = self._spy_to_thread(monkeypatch)
+        neo4j = _FakeNeo4j(_FakeNeo4jSession(rows=[{
+            "code": "15-1252.00", "name": "Software Developers",
+            "category": "x", "definition": "d", "aliases": [], "score": 1.0,
+        }]))
+        hits = asyncio.run(grounding._neo4j_fulltext(neo4j, "软件开发", 10))
+        assert hits
+        assert grounding._query_fulltext in called
+
+    def test_semantic_embedding_runs_in_thread(self, monkeypatch):
+        """SBERT embed 与 similarity 经 to_thread（防阻塞事件循环）。"""
+        from app.services.discovery import grounding
+
+        embedder = _FakeEmbedder()
+        called = self._spy_to_thread(monkeypatch)
+        db = _FakeDb(rows=[_occ()])
+        hits = asyncio.run(grounding._semantic_search(db, "软件开发", embedder, 10))
+        assert hits
+        assert embedder.embed in called  # qvec 计算经 to_thread
+
+
 class TestFulltextSanitize:
     def test_strips_lucene_specials(self):
         assert _sanitize_fulltext("C++ 工程师") == "C 工程师"

@@ -60,6 +60,7 @@ class JDExtractor:
         batch_size: int = 5,
         batch_timeout: Optional[int] = None,
         max_batch_chars: Optional[int] = None,
+        concurrency: int = 1,
     ) -> list[JDExtractionResult]:
         """批量抽取多条 JD（设计文档 §6.5 批量抽取优化）。
 
@@ -67,38 +68,61 @@ class JDExtractor:
         调用（省 N-1 次请求往返）→ 拆条返回；整批失败或返回条数错位时，该批
         降级为逐条 extract（含规则兜底）。顺序与输入严格一一对应。
 
+        concurrency > 1 时多个批次经线程池并行：LLM 生成时间由输出 token 总量
+        决定，单靠调大 batch_size 不线性提速（且受 max_tokens 截断约束），
+        并发才是吞吐瓶颈；但并发受 provider 限流约束（429 由 LLMProviderChain
+        指数退避兜底，退避期间整批失败会降级逐条，故并发不宜过高）。
+
         Args:
             jd_texts: 待抽取 JD 文本列表（已过滤过短文本）
             batch_size: 每批条数上限（建议 5~10）
             batch_timeout: 批量调用的独立超时（秒），缺省走 provider 异步默认
             max_batch_chars: 每批文本总长上限（字符），超限即切下一批
+            concurrency: 并发批次上限（1 = 串行；>1 并行，建议 ≤ 4 防 429）
         """
         if not jd_texts:
             return []
 
+        chunks = list(self._chunk_texts(jd_texts, batch_size, max_batch_chars))
+        if concurrency <= 1:
+            return [
+                r for chunk in chunks for r in self._extract_chunk(chunk, batch_timeout)
+            ]
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            nested = list(executor.map(
+                lambda c: self._extract_chunk(c, batch_timeout), chunks
+            ))
+        return [r for batch in nested for r in batch]
+
+    def _extract_chunk(
+        self, chunk: list[str], batch_timeout: Optional[int]
+    ) -> list[JDExtractionResult]:
+        """单批抽取：一次 LLM 调用；整批失败/错位降级逐条（含规则兜底）。
+
+        独立方法供串行/并发两种路径复用（并发时各线程各自调用）。
+        """
         system_prompt = SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES
-        results: list[JDExtractionResult] = []
-        for chunk in self._chunk_texts(jd_texts, batch_size, max_batch_chars):
-            try:
-                prompt = BATCH_TASK_TEMPLATE.format(
-                    jd_count=len(chunk),
-                    jd_texts="\n---\n".join(f"JD文本{i + 1}: {t}" for i, t in enumerate(chunk)),
+        try:
+            prompt = BATCH_TASK_TEMPLATE.format(
+                jd_count=len(chunk),
+                jd_texts="\n---\n".join(f"JD文本{i + 1}: {t}" for i, t in enumerate(chunk)),
+            )
+            batch = self._llm.extract_structured(
+                prompt, JDExtractionBatch,
+                system_prompt=system_prompt, timeout=batch_timeout,
+            )
+            # 错位防护：LLM 返回条数与输入不一致时不可直接拆条，降级逐条
+            if len(batch.results) != len(chunk):
+                raise LLMExtractionError(
+                    f"批量返回 {len(batch.results)} 条 ≠ 输入 {len(chunk)} 条，降级逐条"
                 )
-                batch = self._llm.extract_structured(
-                    prompt, JDExtractionBatch,
-                    system_prompt=system_prompt, timeout=batch_timeout,
-                )
-                # 错位防护：LLM 返回条数与输入不一致时不可直接拆条，降级逐条
-                if len(batch.results) != len(chunk):
-                    raise LLMExtractionError(
-                        f"批量返回 {len(batch.results)} 条 ≠ 输入 {len(chunk)} 条，降级逐条"
-                    )
-                results.extend(post_process(r) for r in batch.results)
-            except LLMExtractionError:
-                # 整批失败（超时/校验/provider 全挂）→ 该批逐条抽取（单条有规则兜底）
-                for text in chunk:
-                    results.append(self.extract(text))
-        return results
+            return [post_process(r) for r in batch.results]
+        except LLMExtractionError:
+            # 整批失败（超时/校验/provider 全挂）→ 该批逐条抽取（单条有规则兜底）
+            return [self.extract(text) for text in chunk]
 
     @staticmethod
     def _chunk_texts(

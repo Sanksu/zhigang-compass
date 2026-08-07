@@ -54,6 +54,10 @@ async def enqueue_etl_pipeline() -> None:
     client = await create_pool(redis_settings)
     try:
         run_date = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+        # 超时/重试由 WorkerSettings 中 func(run_etl_pipeline, timeout=10800,
+        # max_tries=1) 的 per-function 配置负责（arq enqueue 不接收 _timeout/
+        # _max_tries，传了会被当作任务参数导致 TypeError）。单源失败已在阶段内
+        # 捕获，整管线重跑会重复爬取/重复抽取（入图幂等但网络与算力浪费）。
         job = await client.enqueue_job(
             "run_etl_pipeline",
             run_date=run_date,

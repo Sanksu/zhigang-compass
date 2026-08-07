@@ -5,6 +5,7 @@
 → 输出甘特图格式 {skill, prerequisites[], courses[], estimated_hours, priority}。
 """
 
+import asyncio
 from typing import Awaitable, Callable
 
 from app.services.learning_path.courses import load_courses_for_skill
@@ -54,7 +55,8 @@ class LearningPathGenerator:
             semantic: Sentence-BERT 相似度器（与匹配引擎共用）
             sim_threshold: 语义命中阈值，None 时从 configs/match_weights.json 读取
         """
-        gaps = analyze_gaps(candidate, position, semantic, sim_threshold)
+        # 差距分析为同步函数，内部可能调用同步 SBERT similarity，放线程池避免阻塞事件循环
+        gaps = await asyncio.to_thread(analyze_gaps, candidate, position, semantic, sim_threshold)
         path_gaps = [
             g for g in gaps if g.gap_type in (GapType.MISSING, GapType.WEAK)
         ][:_MAX_PATH_ITEMS]

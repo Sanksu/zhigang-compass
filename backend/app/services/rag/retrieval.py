@@ -70,6 +70,7 @@ async def _verified_positions(db: AsyncSession, query: str) -> list[RetrievedChu
                 DiscoveryCandidate.position_name.ilike(f"%{q}%"),
             )
             .order_by(DiscoveryCandidate.position_name)
+            .limit(DEFAULT_TOP_K)
         )
     ).all()
     chunks = []

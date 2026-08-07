@@ -42,6 +42,11 @@ class JobItem(_BaseItem):
     post_date = Field()         # 发布日期
     tags = Field()              # 平台标签列表
 
+    # ---- 清洗管线输出（设计文档 §4.2）----
+    quality = Field()           # 质量评分（字段完整度+文本长度+核心词+格式规范）
+    needs_review = Field()      # 质量 < 0.6 入人工复核标记
+    decay_weight = Field()      # 时效加权（≤30 天 1.0，>30 天指数衰减）
+
 
 class CourseItem(_BaseItem):
     """课程信息（icourse163 / coursera / edx）。

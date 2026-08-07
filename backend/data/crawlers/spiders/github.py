@@ -8,7 +8,7 @@
 
 合规：
 - 仅采集公开 trending 页面元数据（仓库名/描述/star/fork/language）
-- 请求间隔 6-12s，避免触发 GitHub 反爬
+- 请求间隔 10-20s，避免触发 GitHub 反爬
 
 运行：
   scrapy crawl github -a languages=python,java,javascript -a since=daily -o output/github.jsonl
@@ -52,7 +52,7 @@ class GithubSpider(Spider):
         self.since = kwargs.get("since", DEFAULT_SINCE)
         # 请求间隔
         limit = RATE_LIMIT.get(self.platform, {})
-        delay_range = limit.get("delay_range", (6, 12))
+        delay_range = limit.get("delay_range", (10, 20))
         self.download_delay = sum(delay_range) / 2
 
     async def start(self):

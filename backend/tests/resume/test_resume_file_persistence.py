@@ -38,15 +38,20 @@ class _FakeDb:
     使 parse_resume 在写 ResumeFile 前能取到 task.id。
     """
 
-    def __init__(self, rows=None, stored=None):
+    def __init__(self, rows=None, stored=None, scalar_returns=None):
         self._rows = rows or []
         self._stored = stored or {}
+        # scalar_returns：按调用顺序逐个返回的 scalar 结果（如 delete 的
+        # 归属校验返回行、随后 other_owner 查询返回 None 的场景）
+        self._scalar_returns = list(scalar_returns or [])
         self.added = []
         self.deleted = []
         self.executed = []
         self.commits = 0
 
     async def scalar(self, stmt):
+        if self._scalar_returns:
+            return self._scalar_returns.pop(0)
         return self._rows[0] if self._rows else None
 
     async def get(self, model, pk):
@@ -226,7 +231,18 @@ class TestDeleteResume:
 
         async def _run():
             resume = ResumeCache(id=_RID, file_hash="h", file_name="a.pdf", parsed_data={})
-            db = _FakeDb(stored={_RID: resume})
+            # 归属校验需命中本人 ResumeFile 行；随后 other_owner 查询返回 None
+            # （无其他用户引用该缓存），流程走到删除缓存 + 落盘文件
+            db = _FakeDb(
+                stored={_RID: resume},
+                scalar_returns=[
+                    ResumeFile(
+                        resume_id=_RID, user_id="u1", file_hash="h", file_name="a.pdf",
+                        content_type="application/pdf", content=_BODY, file_size=len(_BODY),
+                    ),
+                    None,
+                ],
+            )
             monkeypatch.setattr(resume_mod, "_UPLOAD_DIR", tmp_path)
 
             resp = await delete_resume(_RID, db, {"sub": "u1"})

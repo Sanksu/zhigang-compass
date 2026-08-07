@@ -26,7 +26,7 @@ export interface BackendMatchResult {
   gaps?: BackendGapItem[]
   /** compare 专属：学习路径（missing/weak 技能的先修链 + 课程 Top-3） */
   learning_path?: BackendLearningPathItem[]
-  /** compare 专属：证据引用（技能 → 原始 JD，图谱 MENTIONED_IN 链路） */
+  /** compare 专属：证据引用（技能 → 原始 JD，图谱 EVIDENCED_BY 链路） */
   evidence_refs?: BackendEvidenceRef[]
 }
 

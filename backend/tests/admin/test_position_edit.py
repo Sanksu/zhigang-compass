@@ -286,7 +286,8 @@ class TestEditPositionTx:
             core_duties=["数据报表"],
             scenarios=["数据中台"],
         )
-        assert result == {"exists": True, "updated": False, "diff_summary": ""}
+        # id 供路由层失效岗位详情缓存（graph:position:{id}）
+        assert result == {"exists": True, "updated": False, "diff_summary": "", "id": "pos_0001"}
         assert not any("PositionEditLog" in q for q, _ in tx.queries)
         assert not any("MERGE (p)-[r:REQUIRES]" in q for q, _ in tx.queries)
         assert not any("SET p." in q for q, _ in tx.queries)

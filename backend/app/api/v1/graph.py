@@ -4,10 +4,13 @@ import json
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_role
-from app.core.database import neo4j_driver, redis_client
+from app.core.database import get_db, neo4j_driver, redis_client
+from app.models.business import SkillEmbedding
 from app.schemas.common import error, ok
+from app.services.kg.skill_relations import graph_prerequisite_chain
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
 from app.services.matching.semantic import SkillEmbedder, SemanticUnavailableError
@@ -37,9 +40,8 @@ async def panorama(
     limit: int = Query(default=100, ge=1, le=600),
     min_weight: float = Query(default=0.3, ge=0.0, le=1.0),
     focus: Optional[str] = Query(default=None),
-    user: dict = Depends(require_role("guest")),
 ):
-    """图谱全景视图（30s Redis TTL 缓存，见设计文档 10.3）。
+    """图谱全景视图（匿名可读，30s Redis TTL 缓存，见设计文档 10.3）。
 
     focus 缺省时返回 Top-N 高频岗位 + 关联技能；指定 focus 时以该岗位为中心展开。
     """
@@ -98,7 +100,7 @@ async def panorama(
 
 
 @router.get("/skill/{skill_id}/positions")
-async def skill_positions(skill_id: str, user: dict = Depends(require_role("guest"))):
+async def skill_positions(skill_id: str):
     """技能节点反向查询：返回关联的岗位列表 + necessity + weight + level。"""
     cache_key = f"graph:skill:{skill_id}:positions"
     cached = await _cache_get(cache_key)
@@ -135,9 +137,8 @@ async def fulltext_search(
     type_: str = Query(default="position", alias="type", enum=["position", "skill", "evidence"]),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
-    user: dict = Depends(require_role("guest")),
 ):
-    """Neo4j 全文检索（cjk 分词器，设计文档 5.4）。
+    """Neo4j 全文检索（匿名可读，cjk 分词器，设计文档 5.4）。
 
     position/skill 走全文索引；evidence 走 evidence_search 全文索引
     （M17 新增，索引缺失时降级 CONTAINS）。
@@ -223,17 +224,22 @@ def _load_skill(skill_id: str) -> dict | None:
 
 
 @router.get("/skill/{skill_id}/prerequisites")
-async def skill_prerequisites(skill_id: str, user: dict = Depends(require_role("guest"))):
+async def skill_prerequisites(skill_id: str):
     """技能先修技能链（AL-M4-03，设计文档 §9.5）。
 
-    先修链来自人工维护字典 configs/skill_prerequisites.yaml（图谱无
-    PREREQUISITE_OF 边），返回拓扑序（先修在前），并富化图谱技能 ID。
+    先修链优先走图谱 PREREQUISITE_OF 边（skill_relations 字典同步产物），
+    图谱未建边时回退人工维护字典 configs/skill_prerequisites.yaml；
+    返回拓扑序（先修在前），并富化图谱技能 ID。
     """
     skill = _load_skill(skill_id)
     if skill is None:
         return error(4040, "技能不存在", http_status=404)
 
-    chain = prerequisite_chain(skill["name"])
+    chain: list[str] = []
+    with neo4j_driver.session() as session:
+        chain = graph_prerequisite_chain(session, skill["name"])
+    if not chain:
+        chain = prerequisite_chain(skill["name"])
     id_by_name: dict[str, str] = {}
     if chain:
         with neo4j_driver.session() as session:
@@ -256,7 +262,7 @@ async def skill_prerequisites(skill_id: str, user: dict = Depends(require_role("
 
 
 @router.get("/skill/{skill_id}/courses")
-async def skill_courses(skill_id: str, user: dict = Depends(require_role("guest"))):
+async def skill_courses(skill_id: str):
     """技能学习课程列表（AL-M4-03，设计文档 §4.6）。
 
     图谱 LEARNABLE_VIA 课程按质量分降序返回（质量分来自 course_raw 评估产物），
@@ -292,7 +298,7 @@ def _load_position(id: str) -> dict | None:
 
 
 @router.get("/position/{id}")
-async def position_detail(id: str, user: dict = Depends(require_role("guest"))):
+async def position_detail(id: str):
     """[M4] 岗位节点详情：基础属性 + REQUIRES 技能聚合（must/nice）。"""
     cache_key = f"graph:position:{id}"
     cached = await _cache_get(cache_key)
@@ -343,7 +349,6 @@ async def position_detail(id: str, user: dict = Depends(require_role("guest"))):
 async def position_skills(
     id: str,
     necessity: Optional[Literal["must", "nice"]] = Query(default=None),
-    user: dict = Depends(require_role("guest")),
 ):
     """[M4] 岗位技能列表（可按 necessity 过滤）。"""
     if _load_position(id) is None:
@@ -375,8 +380,8 @@ async def position_skills(
 
 
 @router.get("/skill/{skill_id}/evidence")
-async def skill_evidence(skill_id: str, user: dict = Depends(require_role("guest"))):
-    """[M4] 技能证据列表：Skill-MENTIONED_IN->Evidence 原始 JD。"""
+async def skill_evidence(skill_id: str):
+    """[M4] 技能证据列表：Skill-EVIDENCED_BY->Evidence 原始 JD。"""
     cache_key = f"graph:skill:{skill_id}:evidence"
     cached = await _cache_get(cache_key)
     if cached is not None:
@@ -388,7 +393,7 @@ async def skill_evidence(skill_id: str, user: dict = Depends(require_role("guest
     with neo4j_driver.session() as session:
         rows = session.run(
             """
-            MATCH (s:Skill {id: $skill_id})-[:MENTIONED_IN]->(e:Evidence)
+            MATCH (s:Skill {id: $skill_id})-[:EVIDENCED_BY]->(e:Evidence)
             RETURN e.id AS id, e.source AS source, e.source_url AS source_url,
                    e.crawled_at AS crawled_at
             ORDER BY e.crawled_at DESC
@@ -419,12 +424,13 @@ async def skill_evidence(skill_id: str, user: dict = Depends(require_role("guest
 async def skill_similar(
     skill_id: str = Query(...),
     top_k: int = Query(default=10, ge=1, le=50),
-    user: dict = Depends(require_role("guest")),
+    db: AsyncSession = Depends(get_db),
 ):
-    """[M4] 相似技能检索（语义相似度，设计文档 5.3 预留 pgvector 演进）。
+    """[M4] 相似技能检索（语义相似度，设计文档 5.3 pgvector 演进落地）。
 
-    用 SkillEmbedder 对全部图谱技能名计算余弦相似度取 Top-K（阈值 0.5，
-    过低不返回）。SBERT 不可用时返回 503（语义能力缺失，不降级为猜）。
+    主路径：pgvector skill_embeddings 余弦距离 Top-K（§11.4.3，IVFFLAT）。
+    未回填或查询失败（表缺失/维度不匹配等）时回退内存 SBERT 全量扫描，口径一致。
+    阈值 0.5，过低不返回；SBERT 不可用时返回 503（语义能力缺失，不降级为猜）。
     """
     skill = _load_skill(skill_id)
     if skill is None:
@@ -435,6 +441,44 @@ async def skill_similar(
     if cached is not None:
         return ok(data=cached)
 
+    embedder = SkillEmbedder.get()
+
+    # pgvector 主路径：skill_embeddings 已回填则余弦距离 Top-K。
+    # 查询异常（表缺失/维度不匹配）降级回退内存扫描；语义模型不可用则 503。
+    try:
+        target_vec_row = await db.get(SkillEmbedding, skill_id)
+        if target_vec_row is not None:
+            qvec = embedder.embed(skill["name"])
+            rows = (
+                await db.scalars(
+                    select(SkillEmbedding)
+                    .where(SkillEmbedding.id != skill_id)
+                    .order_by(SkillEmbedding.embedding.cosine_distance(qvec))
+                    .limit(200)  # 多取后按阈值过滤，保证 Top-K 质量
+                )
+            ).all()
+            similar = [
+                (r.id, r.payload.get("name", r.id), 1.0 - float(r.embedding.cosine_distance(qvec)))
+                for r in rows
+            ]
+            similar = sorted((s for s in similar if s[2] >= 0.5), key=lambda x: x[2], reverse=True)[:top_k]
+            data = {
+                "skill_id": skill_id,
+                "skill_name": skill["name"],
+                "similar": [
+                    {"skill_id": sid, "skill_name": name, "similarity": round(score, 4)}
+                    for sid, name, score in similar
+                ],
+            }
+            await _cache_set(cache_key, data)
+            return ok(data=data)
+    except SemanticUnavailableError:
+        return error(503, "语义模型不可用，无法计算相似技能")
+    except Exception:
+        # skill_embeddings 表缺失 / 向量维度不匹配等 → 降级回退内存扫描
+        pass
+
+    # 回退路径：skill_embeddings 未回填（表空/缺该技能），内存 SBERT 全量扫描
     with neo4j_driver.session() as session:
         rows = session.run(
             "MATCH (s:Skill) RETURN s.id AS id, s.name AS name"
@@ -445,7 +489,6 @@ async def skill_similar(
         await _cache_set(cache_key, data)
         return ok(data=data)
 
-    embedder = SkillEmbedder.get()
     try:
         scores = [
             (sid, name, embedder.similarity(skill["name"], name))
@@ -473,7 +516,7 @@ async def skill_similar(
 
 
 @router.get("/skill/{skill_id}")
-async def skill_detail(skill_id: str, user: dict = Depends(require_role("guest"))):
+async def skill_detail(skill_id: str):
     """[M4] 技能节点详情：基础属性 + 关联计数（岗位/证据/课程）。
 
     定义在 /skill/similar 之后，避免静态段 similar 被 {skill_id} 参数路径截胡。
@@ -491,7 +534,7 @@ async def skill_detail(skill_id: str, user: dict = Depends(require_role("guest")
             """
             MATCH (s:Skill {id: $skill_id})
             OPTIONAL MATCH (p:Position)-[r:REQUIRES]->(s)
-            OPTIONAL MATCH (s)-[:MENTIONED_IN]->(e:Evidence)
+            OPTIONAL MATCH (s)-[:EVIDENCED_BY]->(e:Evidence)
             RETURN count(DISTINCT p) AS positions_count, count(DISTINCT e) AS evidence_count
             """,
             skill_id=skill_id,
@@ -514,7 +557,6 @@ async def skill_detail(skill_id: str, user: dict = Depends(require_role("guest")
 async def graph_pagerank(
     top_n: int = Query(default=20, ge=1, le=100),
     min_weight: float = Query(default=1.0, ge=1.0),
-    user: dict = Depends(require_role("guest")),
 ):
     """PageRank 技能重要性 Top-N（设计文档 7.1 图算法应用）。
 
@@ -529,10 +571,15 @@ async def graph_pagerank(
     if cached is not None:
         return ok(data=json.loads(cached))
 
-    with neo4j_driver.session() as session:
-        graph, name_map = load_skill_cooccurrence(session, min_weight=min_weight)
-    scores = pagerank(graph)
-    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+    def _compute():
+        # 同步 Neo4j 会话 + 幂迭代为 CPU/IO 密集，放线程池避免阻塞事件循环
+        with neo4j_driver.session() as session:
+            graph, name_map = load_skill_cooccurrence(session, min_weight=min_weight)
+        scores = pagerank(graph)
+        ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+        return name_map, ranked
+
+    name_map, ranked = await asyncio.to_thread(_compute)
     skills = [
         {"id": sid, "name": name_map.get(sid, sid), "score": round(score, 6)}
         for sid, score in ranked
@@ -545,7 +592,6 @@ async def graph_pagerank(
 @router.get("/algorithms/skill-clusters")
 async def graph_skill_clusters(
     min_size: int = Query(default=2, ge=1, le=100),
-    user: dict = Depends(require_role("guest")),
 ):
     """Louvain 技能簇（设计文档 7.1 图算法应用，技术栈视图支撑）。
 
@@ -560,22 +606,27 @@ async def graph_skill_clusters(
     if cached is not None:
         return ok(data=json.loads(cached))
 
-    with neo4j_driver.session() as session:
-        graph, name_map = load_skill_cooccurrence(session, min_weight=1.0)
-    clusters = louvain(graph)
-    by_cluster: dict[int, list[str]] = {}
-    for sid, cid in clusters.items():
-        by_cluster.setdefault(cid, []).append(sid)
-    items = []
-    for cid in sorted(by_cluster):
-        members = sorted(by_cluster[cid])
-        if len(members) < min_size:
-            continue
-        items.append({
-            "id": cid,
-            "size": len(members),
-            "skills": [{"id": sid, "name": name_map.get(sid, sid)} for sid in members],
-        })
+    def _compute():
+        # 同步 Neo4j 会话 + Louvain 为 CPU/IO 密集，放线程池避免阻塞事件循环
+        with neo4j_driver.session() as session:
+            graph, name_map = load_skill_cooccurrence(session, min_weight=1.0)
+        clusters = louvain(graph)
+        by_cluster: dict[int, list[str]] = {}
+        for sid, cid in clusters.items():
+            by_cluster.setdefault(cid, []).append(sid)
+        items = []
+        for cid in sorted(by_cluster):
+            members = sorted(by_cluster[cid])
+            if len(members) < min_size:
+                continue
+            items.append({
+                "id": cid,
+                "size": len(members),
+                "skills": [{"id": sid, "name": name_map.get(sid, sid)} for sid in members],
+            })
+        return items
+
+    items = await asyncio.to_thread(_compute)
     data = {"clusters": items, "cluster_count": len(items)}
     await redis_client.set(cache_key, json.dumps(data), ex=30)
     return ok(data=data)
@@ -585,7 +636,6 @@ async def graph_skill_clusters(
 async def graph_shortest_path(
     from_skill: str = Query(..., alias="from"),
     to_skill: str = Query(..., alias="to"),
-    user: dict = Depends(require_role("guest")),
 ):
     """技能最短路径（设计文档 7.1 图算法应用，学习路径先修排序）。
 
@@ -605,9 +655,8 @@ async def graph_shortest_path(
 async def graph_view(
     view_type: Literal["panorama", "techStack", "level", "positionCenter"],
     limit: int = Query(default=100, ge=1, le=600),
-    user: dict = Depends(require_role("guest")),
 ):
-    """[M4] 视图切换（后端过滤，同构于全景图）。
+    """[M4] 视图切换（匿名可读，后端过滤，同构于全景图）。
 
     四种视图统一返回 {view_type, nodes, edges, stats}：
     - panorama / positionCenter: 岗位中心展开（岗位→技能）

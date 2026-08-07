@@ -205,12 +205,13 @@ def _education_score(required: str | None, candidate_level: str | None) -> float
     return 0.0
 
 
-def _project_score(candidate, position: PositionProfile, semantic) -> float | None:
+def _project_score(candidate, position: PositionProfile, semantic, project_vectors=None) -> float | None:
     """雷达"项目"维度近似分（0.0-1.0）：候选人项目（名+描述）与岗位典型场景
     的语义相似度均值；无项目/岗位无典型场景/语义模型不可用 → None。
 
-    设计文档 §9.2 项目匹配为"项目 Embedding 与场景余弦均值"，本次复用
-    SkillEmbedder 文本相似度近似（待 M5 换 pgvector project_embeddings）。
+    设计文档 §9.2 项目匹配为"项目 Embedding 与场景余弦均值"。向量优先取
+    project_embeddings 回填产物（pgvector，project_vectors 入参），未回填时
+    回退 SkillEmbedder 文本相似度（同一模型，数值口径一致）。
     岗位侧场景取 PositionProfile.typical_scenarios（聚合层已按需填充，
     当前图谱加载未填时该维度自然返回 None，不阻断比对）。
     """
@@ -218,12 +219,18 @@ def _project_score(candidate, position: PositionProfile, semantic) -> float | No
     scenarios = [s for s in position.typical_scenarios if s]
     if not projects or not scenarios or semantic is None:
         return None
+    project_vectors = project_vectors or {}
     try:
         sims = []
         for project in projects:
             text = project.name + (f"：{project.description}" if project.description else "")
+            vec = project_vectors.get(text)
             for scenario in scenarios:
-                sims.append(semantic.similarity(text, scenario))
+                if vec is not None:
+                    # pgvector 回填向量 × 场景查询向量（§11.4.3 project_embeddings）
+                    sims.append(semantic.similarity_vec(vec, scenario))
+                else:
+                    sims.append(semantic.similarity(text, scenario))
         return sum(sims) / len(sims) if sims else None
     except Exception:
         # 语义模型不可用降级（与 _skill_similarity 口径一致），不阻断匹配
@@ -237,6 +244,7 @@ def build_radar(
     candidate,
     position: PositionProfile,
     semantic=None,
+    project_vectors=None,
 ) -> dict:
     """人岗比对五维雷达（设计文档 §9.5：完整五维雷达图）。
 
@@ -251,7 +259,7 @@ def build_radar(
         "nice": round(nice_score, 4),
         "experience": round(exp_score, 4),
         "education": _education_score(position.required_education, candidate.education_level),
-        "projects": _project_score(candidate, position, semantic),
+        "projects": _project_score(candidate, position, semantic, project_vectors),
     }
 
 
@@ -262,6 +270,7 @@ def score_position(
     today: date | None = None,
     semantic=None,
     sim_threshold: float | None = None,
+    project_vectors=None,
 ) -> MatchResult:
     """单岗位三维评分（设计文档 9.4 节）。
 
@@ -331,7 +340,9 @@ def score_position(
         missing_must=missing_must,
         summary=_build_summary(position.name, matched_must, missing_must, must_score, unqualified),
         unqualified=unqualified,
-        radar=build_radar(must_score, nice_score, exp_score, candidate, position, semantic),
+        radar=build_radar(
+            must_score, nice_score, exp_score, candidate, position, semantic, project_vectors
+        ),
     )
 
 
@@ -385,6 +396,7 @@ class RuleBasedMatcher(MatchEngine):
                         position,
                         semantic=self._semantic,
                         sim_threshold=self._sim_threshold,
+                        project_vectors=request.project_vectors,
                     )
                 ]
         raise ValueError(f"目标岗位不存在: {request.target_position_id}")
@@ -392,10 +404,13 @@ class RuleBasedMatcher(MatchEngine):
     def _match_auto(self, request: MatchRequest) -> list[MatchResult]:
         scored = [
             score_position(
-                request.candidate, p, semantic=self._semantic, sim_threshold=self._sim_threshold
+                request.candidate, p, semantic=self._semantic,
+                sim_threshold=self._sim_threshold, project_vectors=request.project_vectors,
             )
             for p in self._rough_select(request)
         ]
+        # 必备技能全缺失（unqualified）不纳入推荐排序（设计文档 §9.4）
+        scored = [r for r in scored if not r.unqualified]
         scored.sort(key=lambda r: r.total_score, reverse=True)
         return scored[: request.top_n]
 

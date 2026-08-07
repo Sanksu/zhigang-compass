@@ -86,7 +86,7 @@ export function DashboardPage() {
       apiGet<{ platforms: CrawlPlatform[] }>('/admin/crawl/status', { skipAuthRedirect: true }),
       // 简历/采集/审计统计均需认证：游客 401 时静默降级，不触发全局登出
       apiGet<{ items: unknown[]; total: number }>('/resume/list?limit=100', { skipAuthRedirect: true }),
-      apiGet<{ items: GraphVersion[]; total: number }>('/evolution/versions?page=1&size=10'),
+      apiGet<{ items: GraphVersion[]; total: number }>('/evolution/versions?page=1&size=10', { skipAuthRedirect: true }),
       apiGet<{ items: AuditLog[]; total: number }>('/admin/audit/logs?page=1&size=10', { skipAuthRedirect: true }),
     ]).then(([graphRes, crawlRes, resumeRes, versionRes, auditRes]) => {
       if (cancelled) return

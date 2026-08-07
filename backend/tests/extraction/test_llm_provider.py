@@ -207,6 +207,13 @@ class _FakeRedis:
         self.data.pop(key, None)
         return 1
 
+    def incr(self, key):
+        self.data[key] = str(int(self.data.get(key, 0)) + 1)
+        return int(self.data[key])
+
+    def expire(self, key, ttl):
+        return True
+
 
 @pytest.fixture(autouse=True)
 def _fake_store(monkeypatch):

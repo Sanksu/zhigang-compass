@@ -28,19 +28,35 @@ def test_diff_node_sets_without_previous():
 
 
 def test_diff_node_sets_with_growth():
-    """有上一版本：新增节点计入 added，共同节点计入 changed。"""
-    prev = _FakeGraphVersion({"nodes": [{"id": "pos_1"}, {"id": "sk_1"}]})
-    cur = [{"id": "pos_1"}, {"id": "sk_1"}, {"id": "sk_2"}]
+    """有上一版本：新增节点计入 added，共有且属性不变的节点不计入 changed。"""
+    prev = _FakeGraphVersion({"nodes": [{"id": "pos_1", "name": "后端开发工程师", "type": "position"},
+                                        {"id": "sk_1", "name": "Python", "type": "skill"}]})
+    cur = [{"id": "pos_1", "name": "后端开发工程师", "type": "position"},
+           {"id": "sk_1", "name": "Python", "type": "skill"},
+           {"id": "sk_2", "name": "Go", "type": "skill"}]
     added, removed, changed = GraphVersionManager._diff_node_sets(prev, cur)
-    assert (added, removed, changed) == (1, 0, 2)
+    assert (added, removed, changed) == (1, 0, 0)
 
 
 def test_diff_node_sets_with_shrink():
     """节点减少：消失节点计入 removed。"""
-    prev = _FakeGraphVersion({"nodes": [{"id": "pos_1"}, {"id": "sk_1"}, {"id": "sk_2"}]})
-    cur = [{"id": "pos_1"}, {"id": "sk_1"}]
+    prev = _FakeGraphVersion({"nodes": [{"id": "pos_1", "name": "后端开发工程师", "type": "position"},
+                                        {"id": "sk_1", "name": "Python", "type": "skill"},
+                                        {"id": "sk_2", "name": "Go", "type": "skill"}]})
+    cur = [{"id": "pos_1", "name": "后端开发工程师", "type": "position"},
+           {"id": "sk_1", "name": "Python", "type": "skill"}]
     added, removed, changed = GraphVersionManager._diff_node_sets(prev, cur)
-    assert (added, removed, changed) == (0, 1, 2)
+    assert (added, removed, changed) == (0, 1, 0)
+
+
+def test_diff_node_sets_counts_attribute_changes():
+    """共有节点中 name/type 变化的计入 changed（非共有数）。"""
+    prev = _FakeGraphVersion({"nodes": [{"id": "pos_1", "name": "后端开发工程师", "type": "position"},
+                                        {"id": "sk_1", "name": "Python", "type": "skill"}]})
+    cur = [{"id": "pos_1", "name": "后端开发工程师", "type": "position"},
+           {"id": "sk_1", "name": "TypeScript", "type": "skill"}]  # name 变化
+    added, removed, changed = GraphVersionManager._diff_node_sets(prev, cur)
+    assert (added, removed, changed) == (0, 0, 1)
 
 
 def test_label_type_mapping_covers_business_entities():

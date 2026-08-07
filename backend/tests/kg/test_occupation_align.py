@@ -167,6 +167,9 @@ class _FakeTx:
             entity_type = params["entity_type"]
             self._counters[entity_type] = self._counters.get(entity_type, 0) + 1
             return _Result(_Row({"seq": self._counters[entity_type]}))
+        # 模拟 Position MERGE ON CREATE 语义：返回分配（或已存在）的 id
+        if "MERGE (p:Position" in query:
+            return _Result(_Row({"id": params["id"]}))
         return _Result(None)
 
 

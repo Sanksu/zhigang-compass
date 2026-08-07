@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_role
 from app.core.database import get_db
 from app.models.business import GraphVersion
 from app.schemas.common import ok, error
@@ -57,6 +58,7 @@ async def list_versions(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
 ):
     """图谱版本列表（分页，按创建时间倒序）。"""
     total = await db.scalar(select(func.count()).select_from(GraphVersion))
@@ -86,6 +88,7 @@ async def version_diff(
     from_version: str = Query(..., alias="from"),
     to_version: str = Query(..., alias="to"),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
 ):
     """两个版本快照 Diff 对比。"""
     va = await db.get(GraphVersion, from_version)
@@ -99,6 +102,7 @@ async def version_diff(
 async def evolution_signals(
     top_n: int = Query(default=10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
 ):
     """新兴/衰退技能 Top-N（设计文档 §7.1 Z-score 信号）。
 
@@ -125,7 +129,11 @@ async def evolution_signals(
 
 
 @router.get("/versions/{version_id}")
-async def version_detail(version_id: str, db: AsyncSession = Depends(get_db)):
+async def version_detail(
+    version_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
+):
     """[M4] 获取版本详情：元信息 + 快照统计 + 节点列表（不含边，避免超载）。
 
     节点列表 [{id, name, type}]，与 Diff 端点同构，可直接展示。
@@ -159,7 +167,11 @@ async def version_detail(version_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/position/{id}/evolution")
-async def position_evolution(id: str, db: AsyncSession = Depends(get_db)):
+async def position_evolution(
+    id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
+):
     """[M4] 岗位演化历史：从版本快照序列重建该岗位节点存在性与引用边数变化。
 
     返回 points（时间升序，date/version/freq=该岗位被引用边数），
@@ -196,6 +208,7 @@ async def skill_trends(
     skill: str,
     window: int = Query(default=90, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
 ):
     """技能频次趋势：从图谱版本快照序列统计该技能关联边数。
 
@@ -210,7 +223,7 @@ async def skill_trends(
 
     points = []
     for v in rows:
-        edges = v.snapshot_json.get("edges", [])
+        edges = (v.snapshot_json or {}).get("edges", [])
         freq = sum(
             1 for e in edges if e.get("target") == skill
         )
@@ -224,7 +237,10 @@ async def skill_trends(
 
 
 @router.get("/state-machine")
-async def state_machine_overview(db: AsyncSession = Depends(get_db)):
+async def state_machine_overview(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
+):
     """[M4] 岗位状态机总览：六态分布 + 最近流转记录（登录用户可读）。
 
     - states: discovery_candidates 按 state 分组计数（candidate/emerging/
@@ -271,6 +287,7 @@ async def state_machine_overview(db: AsyncSession = Depends(get_db)):
 async def technology_watch_overview(
     db: AsyncSession = Depends(get_db),
     limit: int = Query(default=20, ge=1, le=100),
+    user: dict = Depends(require_role("guest")),
 ):
     """观察池公开摘要 + MLI 产业化拐点排名（设计文档 §7.2.5，前端看板）。
 

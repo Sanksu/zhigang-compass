@@ -121,13 +121,14 @@ class TestPositionFreqWindows:
     def test_empty_snapshots(self):
         assert position_freq_windows([], {"Java 开发工程师"}) == {}
 
-    def test_position_without_edges_has_empty_sequence(self):
+    def test_position_without_edges_padded_with_zeros(self):
+        """岗位某期无关联边 → 该期补 0，序列与快照窗口数等长对齐。"""
         snap = {
             "nodes": [{"id": "pos_x", "name": "孤岗", "type": "position"}],
             "edges": [],
         }
         out = position_freq_windows([snap, snap], {"孤岗"})
-        assert out["孤岗"] == []
+        assert out["孤岗"] == [0.0, 0.0]
 
 
 class TestAutoTransition:

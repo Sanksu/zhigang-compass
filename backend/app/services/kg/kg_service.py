@@ -1,10 +1,12 @@
 """图谱写入服务：将 raw 表数据写入 Neo4j。
 
 两个入口：
-- import_jd：JD 抽取结果 → Position/Skill/Evidence 节点 + REQUIRES/HAS_EVIDENCE 关系
+- import_jd：JD 抽取结果 → Position/Skill/Evidence 节点 + REQUIRES/EVIDENCED_BY 关系
 - import_course：课程数据 → Course/Skill 节点 + LEARNABLE_VIA 关系
 
 幂等设计：MERGE 语义，同源同 ID 的数据重复导入不会创建重复节点。
+例外：Evidence 节点按「每个 JD 原文对应一个证据」每次导入新建（CREATE），
+重复导入同一 JD 会产生新的证据节点与边——审计口径为每批导入留证，非幂等。
 
 用法：
     from app.services.kg.kg_service import import_jd, import_course
@@ -60,8 +62,9 @@ def import_jd(
     - (Education {name: level·major}) / (Certification {name: ...})（学历/证书要求）
     - (Position)-[:REQUIRES {necessity, level}]->(Skill)
     - (Position)-[:REQUIRES {necessity: 'must'}]->(Education|Certification)
-    - (Position)-[:HAS_EVIDENCE]->(Evidence)
-    - (Skill)-[:MENTIONED_IN]->(Evidence)
+    - (Position)-[:HAS_EVIDENCE]->(Evidence)（辅助维护边：岗位→原始 JD 证据，
+      供 cleanup_graph 岗位合并时证据重连；产品证据查询统一走 EVIDENCED_BY）
+    - (Skill)-[:EVIDENCED_BY]->(Evidence)（设计文档 §5.1：技能由证据支撑）
     - (Position)-[:BELONGS_TO_OCCUPATION]->(Occupation)（规则优先 + 语义兜底对齐，
       设计文档 §5.1；对齐未命中/模型不可用时无此边，不阻塞入图）
 
@@ -105,7 +108,9 @@ def _import_jd_tx(
         # 空抽取（正文质量差导致无岗位名）不入图，避免产生空岗位节点
         return ""
 
-    # 1. Position：按 name 合并，不存在时分配新 ID
+    # 1. Position：按 name 合并，不存在时分配新 ID。
+    #    先 MATCH 快查避免无谓消耗 Counter；并发下两个事务同时未命中时，
+    #    MERGE ON CREATE 兜底保证只产生一个节点（RETURN 拿回实际 id）。
     result = tx.run(
         "MATCH (p:Position {name: $name}) RETURN p.id AS id",
         name=position_name,
@@ -113,12 +118,14 @@ def _import_jd_tx(
     record = result.single()
     if record:
         position_id = record["id"]
+        # SET 非空保护：新抽取结果缺字段（空串）时不覆盖已有值，
+        # 避免低质量 JD 把已有岗位的 level/industry/salary 洗空
         tx.run(
             """
             MATCH (p:Position {id: $id})
-            SET p.level = $level,
-                p.industry = $industry,
-                p.salary_range = $salary_range,
+            SET p.level = CASE WHEN $level <> '' THEN $level ELSE p.level END,
+                p.industry = CASE WHEN $industry <> '' THEN $industry ELSE p.industry END,
+                p.salary_range = CASE WHEN $salary_range <> '' THEN $salary_range ELSE p.salary_range END,
                 p.updated_at = $now
             """,
             id=position_id,
@@ -129,18 +136,18 @@ def _import_jd_tx(
         )
     else:
         position_id = next_id(tx, "Position")
-        tx.run(
+        result = tx.run(
             """
-            CREATE (p:Position {
-                id: $id,
-                name: $name,
-                level: $level,
-                industry: $industry,
-                salary_range: $salary_range,
-                status: 'candidate',
-                created_at: $now,
-                updated_at: $now
-            })
+            MERGE (p:Position {name: $name})
+            ON CREATE SET p.id = $id,
+                p.name = $name,
+                p.level = $level,
+                p.industry = $industry,
+                p.salary_range = $salary_range,
+                p.status = 'candidate',
+                p.created_at = $now,
+                p.updated_at = $now
+            RETURN p.id AS id
             """,
             id=position_id,
             name=position_name,
@@ -149,6 +156,9 @@ def _import_jd_tx(
             salary_range=extraction.salary_range or "",
             now=now,
         )
+        record = result.single()
+        if record:
+            position_id = record["id"]
 
     # 1.5 Occupation 归属（设计文档 §5.1 (Position)-[:BELONGS_TO_OCCUPATION]->(Occupation)）。
     # occupation 由 import_jd 事务外对齐（规则优先 + SBERT 语义兜底），未命中为 None 不入边。
@@ -197,7 +207,7 @@ def _import_jd_tx(
         if not skill_name:
             continue
 
-        # Skill：按 name 合并
+        # Skill：按 name 合并（MERGE ON CREATE 兜底并发竞态，防重复建节点）
         result = tx.run(
             "MATCH (s:Skill {name: $name}) RETURN s.id AS id",
             name=skill_name,
@@ -207,11 +217,10 @@ def _import_jd_tx(
             skill_id = next_id(tx, "Skill")
             tx.run(
                 """
-                CREATE (s:Skill {
-                    id: $id,
-                    name: $name,
-                    created_at: $now
-                })
+                MERGE (s:Skill {name: $name})
+                ON CREATE SET s.id = $id,
+                    s.name = $name,
+                    s.created_at = $now
                 """,
                 id=skill_id,
                 name=skill_name,
@@ -232,11 +241,11 @@ def _import_jd_tx(
             level=req.level or "",
         )
 
-        # MENTIONED_IN 关系（Skill → Evidence）
+        # EVIDENCED_BY 关系（Skill → Evidence，设计文档 §5.1）
         tx.run(
             """
             MATCH (s:Skill {name: $skill_name}), (e:Evidence {id: $evidence_id})
-            MERGE (s)-[:MENTIONED_IN]->(e)
+            MERGE (s)-[:EVIDENCED_BY]->(e)
             """,
             skill_name=skill_name,
             evidence_id=evidence_id,
@@ -257,13 +266,12 @@ def _import_jd_tx(
             tool_id = next_id(tx, "Tool")
             tx.run(
                 """
-                CREATE (t:Tool {
-                    id: $id,
-                    name: $name,
-                    category: $category,
-                    vendor: $vendor,
-                    created_at: $now
-                })
+                MERGE (t:Tool {name: $name})
+                ON CREATE SET t.id = $id,
+                    t.name = $name,
+                    t.category = $category,
+                    t.vendor = $vendor,
+                    t.created_at = $now
                 """,
                 id=tool_id,
                 name=tool_name,
@@ -369,7 +377,8 @@ def _import_course_tx(tx, course_data: dict) -> str:
     source = course_data.get("source", "")
     source_id = course_data.get("source_id", "")
 
-    # 1. Course：按 source + source_id 合并
+    # 1. Course：按 source + source_id 合并。
+    #    先 MATCH 快查避免无谓消耗 Counter；并发下 MERGE ON CREATE 兜底防重复建节点。
     result = tx.run(
         """
         MATCH (c:Course {source: $source, source_id: $source_id})
@@ -382,18 +391,20 @@ def _import_course_tx(tx, course_data: dict) -> str:
 
     if record:
         course_id = record["id"]
+        # SET 非空保护：新数据缺字段（空串/0）时不覆盖已有值，
+        # 避免低质量快照把课程评分/时长等已有信息洗空
         tx.run(
             """
             MATCH (c:Course {id: $id})
-            SET c.name = $title,
-                c.institution = $institution,
-                c.platform = $platform,
-                c.category = $category,
-                c.description = $description,
-                c.rating = $rating,
-                c.enrollment = $enrollment,
-                c.duration = $duration,
-                c.source_url = $source_url,
+            SET c.name = CASE WHEN $title <> '' THEN $title ELSE c.name END,
+                c.institution = CASE WHEN $institution <> '' THEN $institution ELSE c.institution END,
+                c.platform = CASE WHEN $platform <> '' THEN $platform ELSE c.platform END,
+                c.category = CASE WHEN $category <> '' THEN $category ELSE c.category END,
+                c.description = CASE WHEN $description <> '' THEN $description ELSE c.description END,
+                c.rating = CASE WHEN $rating <> 0 THEN $rating ELSE c.rating END,
+                c.enrollment = CASE WHEN $enrollment <> 0 THEN $enrollment ELSE c.enrollment END,
+                c.duration = CASE WHEN $duration <> '' THEN $duration ELSE c.duration END,
+                c.source_url = CASE WHEN $source_url <> '' THEN $source_url ELSE c.source_url END,
                 c.updated_at = $now
             """,
             id=course_id,
@@ -410,24 +421,24 @@ def _import_course_tx(tx, course_data: dict) -> str:
         )
     else:
         course_id = next_id(tx, "Course")
-        tx.run(
+        result = tx.run(
             """
-            CREATE (c:Course {
-                id: $id,
-                source: $source,
-                source_id: $source_id,
-                name: $title,
-                institution: $institution,
-                platform: $platform,
-                category: $category,
-                description: $description,
-                rating: $rating,
-                enrollment: $enrollment,
-                duration: $duration,
-                source_url: $source_url,
-                created_at: $now,
-                updated_at: $now
-            })
+            MERGE (c:Course {source: $source, source_id: $source_id})
+            ON CREATE SET c.id = $id,
+                c.source = $source,
+                c.source_id = $source_id,
+                c.name = $title,
+                c.institution = $institution,
+                c.platform = $platform,
+                c.category = $category,
+                c.description = $description,
+                c.rating = $rating,
+                c.enrollment = $enrollment,
+                c.duration = $duration,
+                c.source_url = $source_url,
+                c.created_at = $now,
+                c.updated_at = $now
+            RETURN c.id AS id
             """,
             id=course_id,
             source=source,
@@ -443,6 +454,9 @@ def _import_course_tx(tx, course_data: dict) -> str:
             source_url=course_data.get("source_url", ""),
             now=now,
         )
+        record = result.single()
+        if record:
+            course_id = record["id"]
 
     # 2. Skills + LEARNABLE_VIA 关系
     skills = course_data.get("skills", [])
@@ -454,7 +468,7 @@ def _import_course_tx(tx, course_data: dict) -> str:
             continue
         skill_name = skill_name.strip()
 
-        # Skill：按 name 合并
+        # Skill：按 name 合并（MERGE ON CREATE 兜底并发竞态，防重复建节点）
         result = tx.run(
             "MATCH (s:Skill {name: $name}) RETURN s.id AS id",
             name=skill_name,
@@ -464,11 +478,10 @@ def _import_course_tx(tx, course_data: dict) -> str:
             skill_id = next_id(tx, "Skill")
             tx.run(
                 """
-                CREATE (s:Skill {
-                    id: $id,
-                    name: $name,
-                    created_at: $now
-                })
+                MERGE (s:Skill {name: $name})
+                ON CREATE SET s.id = $id,
+                    s.name = $name,
+                    s.created_at = $now
                 """,
                 id=skill_id,
                 name=skill_name,

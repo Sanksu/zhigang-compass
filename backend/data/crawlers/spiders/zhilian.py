@@ -3,7 +3,7 @@
 策略：
 - Playwright 渲染 JS 搜索页
 - 搜索列表页 → 详情页 → 提取结构化字段
-- 单 IP 直连，限速 20 req/min（delay_range 2-5s）
+- 单 IP 直连，限速 5 req/min（delay_range 8-15s，设计 §4 国内平台间隔）
 
 ⚠️ 合规提醒：仅采集公开搜索页。CSS 选择器需对照真实页面验证。
 运行：scrapy crawl zhilian -a keywords=Python -a cities=北京 -o output/zhilian.jsonl
