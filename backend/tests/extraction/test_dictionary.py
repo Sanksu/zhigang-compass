@@ -104,11 +104,11 @@ class TestNormalizePositionName:
         assert normalize_position_name("Snowflake Engineer") == "大数据开发工程师"
         assert normalize_position_name("Kafka Streaming Architect") == "大数据开发工程师"
         assert normalize_position_name("Inference Engineer, GPU Kernel Optimization") == "算法工程师"
-        # 安全岗翻译后含"网络"关键词，与现有 security engineer 一致归网络族
-        assert normalize_position_name("Threat Context Analyst") == "网络工程师"
+        # 安全岗翻译后命中 P1 新增安全族（不再并入网络族）
+        assert normalize_position_name("Threat Context Analyst") == "网络安全工程师"
         assert normalize_position_name(
             "Advanced Cyber Threat Response & Forensics Lead/Manager"
-        ) == "网络工程师"
+        ) == "网络安全工程师"
         assert normalize_position_name("Member of Technical Staff") == "软件开发工程师"
         assert normalize_position_name("Seismic Developer") == "软件开发工程师"
         assert normalize_position_name("Engineering Manager, Platform Engineering") == "运维工程师"
@@ -155,9 +155,54 @@ class TestNormalizePositionName:
         assert normalize_position_name("数据分析师") == "数据分析师"
 
     def test_trailing_level_word_stripped(self):
-        # 尾部级别词剥离（"DevOps高级" → "DevOps"），与 A 类合并口径一致
-        assert normalize_position_name("DevOps 高级") == "DevOps"
+        # 尾部级别词剥离；"DevOps 高级"命中 P1 新增 DevOps 族 → DevOps工程师
+        assert normalize_position_name("DevOps 高级") == "DevOps工程师"
         assert normalize_position_name("包裹洞察与定价高级") == "包裹洞察与定价"
+
+    def test_p0_fragment_words_filtered(self):
+        # P0-1 碎片词二次过滤：剥后缀残留的无信息量核心词不入图
+        assert normalize_position_name("产品") == ""
+        assert normalize_position_name("项目") == ""
+        assert normalize_position_name("数据") == ""
+        assert normalize_position_name("经理") == ""
+        assert normalize_position_name("董事总经理") == ""
+        assert normalize_position_name("研究") == ""
+        assert normalize_position_name("知识") == ""
+        assert normalize_position_name("系统") == ""
+
+    def test_p0_cjk_guard_and_short_keyword(self):
+        # P0-2 CJK 守卫 + P0-3/AI 短关键词修复：混合标题不再被英文子串劫持
+        assert normalize_position_name("网络 SRE 工程师") == "DevOps工程师"  # sre 归 DevOps 族
+        assert normalize_position_name("SailPoint 顾问") == "顾问"  # 不再被 "ai" 子串误归算法
+        # "web" 短关键词移除：英文自动化测试岗不再被前端族误吸
+        assert normalize_position_name("Web & Mobile Automation Test Engineer") == (
+            "Web & Mobile Automation Test Engineer"
+        )
+
+    def test_p1_new_families(self):
+        # P1 新增族：产品/项目/创始/安全/DevOps/数据科学家/数据库
+        assert normalize_position_name("产品经理") == "产品经理"
+        assert normalize_position_name("项目经理") == "项目经理"
+        assert normalize_position_name("Founding Engineer") == "创始工程师"
+        assert normalize_position_name("网络安全工程师") == "网络安全工程师"
+        assert normalize_position_name("Security Engineer") == "网络安全工程师"
+        assert normalize_position_name("DevOps 高级工程师") == "DevOps工程师"
+        assert normalize_position_name("站点可靠性工程师") == "DevOps工程师"
+        assert normalize_position_name("数据科学家") == "数据科学家"
+        assert normalize_position_name("研究数据科学家") == "数据科学家"
+        assert normalize_position_name("数据库管理员") == "数据库管理员"
+        assert normalize_position_name("PostgreSQL 负责人") == "数据库管理员"
+        # 配套：数据工程族（P0-1 stopwords 扩充后防真实岗位丢失）
+        assert normalize_position_name("数据工程师") == "大数据开发工程师"
+        assert normalize_position_name("数据工程负责人") == "大数据开发工程师"
+
+    def test_p1_skill_word_not_position(self):
+        # P1 技能词不入图：归一化结果命中技能白名单 → 空串
+        assert normalize_position_name("SQL") == ""
+        assert normalize_position_name("PyTorch") == ""
+        assert normalize_position_name("Agent") == ""
+        assert normalize_position_name("OpenShift") == ""
+        assert normalize_position_name("C") == ""
 
     def test_backend_family(self):
         assert normalize_position_name("后台") == "后端开发工程师"
@@ -166,7 +211,7 @@ class TestNormalizePositionName:
 
 class TestTranslateEnPosition:
     def test_exact(self):
-        assert _translate_en_position("data scientist") == "数据分析师"
+        assert _translate_en_position("data scientist") == "数据科学家"
 
     def test_comma_head(self):
         assert _translate_en_position("backend engineer, core platform") == "后端开发工程师"

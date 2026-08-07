@@ -154,16 +154,28 @@ SKILL_STOPWORDS: set[str] = {
 
 # 岗位名关键词 → 标准岗位名（合并同义重复岗位，设计文档 4.5 实体对齐的轻量实现）
 _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
+    # 细分族前置：优先于通用族/后缀剥离命中，防止真实岗位被剥成碎片
+    (("产品经理",), "产品经理"),
+    (("项目经理",), "项目经理"),
+    (("创始",), "创始工程师"),
+    # 安全族置于网络族前，避免"网络安全"被"网络"关键词吸走
+    (("安全", "攻防", "渗透", "威胁", "IAM", "SOC"), "网络安全工程师"),
+    (("数据科学家",), "数据科学家"),
+    (("数据库", "dba", "oracle", "mysql", "postgresql", "snowflake"), "数据库管理员"),
+    (("devops", "sre", "站点可靠性", "平台工程", "mlops"), "DevOps工程师"),
     (("架构",), "架构师"),
     (("测试",), "测试工程师"),
     (("运维",), "运维工程师"),
     (("网络",), "网络工程师"),
     (("嵌入式",), "嵌入式开发工程师"),
     (("算法", "推荐", "图像", "视觉", "语音", "NLP", "自然语言", "大模型",
-      "深度学习", "机器学习", "AI", "人工智能", "风控"), "算法工程师"),
-    (("数据开发", "大数据", "数仓", "ETL"), "大数据开发工程师"),
+      "深度学习", "机器学习", "人工智能", "风控",
+      "ai工程师", "ai 工程师", "ai 工程", "ai agent", "ai 应用"), "算法工程师"),
+    (("数据开发", "大数据", "数仓", "ETL", "数据工程"), "大数据开发工程师"),
     (("数据分析", "商业分析", "数据挖掘"), "数据分析师"),
-    (("前端", "web", "h5", "html", "css", "ui"), "前端开发工程师"),
+    # "web" 为英文短关键词，子串匹配会误吸 "Web & Mobile Automation Test Engineer"
+    # 等英文标题；中文 web 标题（web前端/web开发）已由 "前端" 关键词覆盖，故移除
+    (("前端", "h5", "html", "css", "ui"), "前端开发工程师"),
     (("后端", "后台", "服务端"), "后端开发工程师"),
     (("java",), "Java开发工程师"),
     (("python",), "Python开发工程师"),
@@ -232,7 +244,7 @@ _EN_POSITION_MAP: dict[str, str] = {
     "full-stack engineer": "全栈工程师",
     "fullstack engineer": "全栈工程师",
     "full stack developer": "全栈工程师",
-    "data scientist": "数据分析师",
+    "data scientist": "数据科学家",
     "data analyst": "数据分析师",
     "senior data analyst": "数据分析师",
     "business analyst": "数据分析师",
@@ -309,8 +321,17 @@ _EN_POSITION_MAP: dict[str, str] = {
     "rfic system engineer": "硬件工程师",
 }
 
-# 无信息量泛岗位词：归一化结果命中时视为空岗位（不入图）
-_POSITION_STOPWORDS: set[str] = {"技术", "开发", "工程师", "管理", "专员", "前台", "文员"}
+# 无信息量泛岗位词：归一化结果命中时视为空岗位（不入图）。
+# 后 4 行为评估报告 P0-1 新增：真实岗位被剥后缀后残留的无信息量核心词
+# （真实族由 _POSITION_KEYWORDS 前置拦截，不会命中这些词）
+_POSITION_STOPWORDS: set[str] = {
+    "技术", "开发", "工程师", "管理", "专员", "前台", "文员",
+    "产品", "项目", "数据", "客户", "研究", "知识", "系统", "工程",
+    "结构", "数字", "运营", "平台", "安全", "投资", "风险", "控制",
+    "计划", "需求", "精算", "销售", "客服", "招聘", "网页", "客户端",
+    "逆向", "集成", "空间", "机械", "电气", "现场", "部署", "工艺",
+    "定价", "服务器", "经理", "创始", "董事总", "分析",
+}
 
 # 岗位名前缀修饰词（级别/招聘形态），归一化时去除
 _POSITION_PREFIX_RE = re.compile(r"^(初级|中级|高级|资深|专家|助理|实习|见习|应届|研发|资深)")
@@ -345,7 +366,15 @@ def _normalize_base(name: str) -> str:
         if next_core == core or not next_core:
             break
         core = next_core
-    return core or name
+    # 剥后缀后残留核心词再校验一次（评估报告 P0-1）：防止"产品经理"剥成
+    # "产品"、"董事总经理"剥成"董事总"等碎片直接入图
+    result = core or name
+    return "" if result in _POSITION_STOPWORDS else result
+
+
+# CJK 检测：含中文的岗位名不执行英文子串翻译（评估报告 P0-2），
+# 防混合标题内嵌缩写（SRE/BI/EDC 等）被英文映射劫持
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 def _translate_en_position(name: str) -> str | None:
@@ -353,6 +382,8 @@ def _translate_en_position(name: str) -> str | None:
 
     匹配优先级：精确 → 逗号前主标题 → 最长子串（单词边界，容忍逗号/连字符）。
     """
+    if _CJK_RE.search(name):
+        return None
     low = name.strip().lower()
     if low in _EN_POSITION_MAP:
         return _EN_POSITION_MAP[low]
@@ -376,12 +407,15 @@ def normalize_position_name(name: str) -> str:
        React/Vue/小程序/鸿蒙等作为细分岗位保留，web/h5/html 视为通用归并
     4. 基础岗位名归一化（去级别前缀、循环去后缀、关键词族映射）；
        归一化结果为泛词（"技术"/"后台" 等无信息量）时返回空串，不入图
+    5. 技能词不入图：归一化结果命中技能白名单时视为"技能被抽成岗位"，
+       返回空串（评估报告 P1，防 SQL/C/FPGA/PyTorch 等技术名词污染岗位图）
 
     示例：
     - "Software Engineer" / "Senior Software Engineer" → "软件工程师"
     - "前端开发" / "web前端开发工程师" → "前端开发工程师"
     - "React前端开发工程师" / "前端开发工程师(React)" → "React前端开发工程师"
     - "技术" → ""（泛词不入图）
+    - "SQL" → ""（技能词不入图）
     """
     translated = _translate_en_position(name)
     # 实习类岗位不入图（招聘形态，非正式岗位族；含"实习"即过滤，含翻译结果）
@@ -392,32 +426,39 @@ def normalize_position_name(name: str) -> str:
         base = _normalize_base(translated)
         if not base or base in _POSITION_STOPWORDS:
             return ""
-        return base
+        result = base
+    else:
+        paren = re.search(r"[（(]([^()（）]*)[)）]", name)
+        paren_tech = paren.group(1).strip() if paren else ""
+        base = re.sub(r"[（(].*?[)）]", "", name).strip()
+        base = _POSITION_PREFIX_RE.sub("", base).strip()
 
-    paren = re.search(r"[（(]([^()（）]*)[)）]", name)
-    paren_tech = paren.group(1).strip() if paren else ""
-    base = re.sub(r"[（(].*?[)）]", "", name).strip()
-    base = _POSITION_PREFIX_RE.sub("", base).strip()
+        # 前缀技术栈提取（"React前端开发工程师" → tech=React, base=前端开发工程师）
+        tech = ""
+        low = base.lower()
+        for match, display in sorted(_TECH_STACKS, key=lambda t: len(t[0]), reverse=True):
+            if low.startswith(match):
+                tech = display
+                base = base[len(match):].strip()
+                break
 
-    # 前缀技术栈提取（"React前端开发工程师" → tech=React, base=前端开发工程师）
-    tech = ""
-    low = base.lower()
-    for match, display in sorted(_TECH_STACKS, key=lambda t: len(t[0]), reverse=True):
-        if low.startswith(match):
-            tech = display
-            base = base[len(match):].strip()
-            break
-
-    base = _normalize_base(base)
-    if not base or base in _POSITION_STOPWORDS:
+        base = _normalize_base(base)
+        if not base or base in _POSITION_STOPWORDS:
+            return ""
+        if tech:
+            result = tech + base
+        else:
+            result = base
+            if paren_tech:
+                # 括号内技术栈限定（"前端开发工程师(React)" → React前端开发工程师）
+                for match, display in _TECH_STACKS:
+                    if paren_tech.lower() == match:
+                        result = display + base
+                        break
+    # 技能词不入图：归一化结果命中技能白名单（大小写不敏感）→ 技能被抽成岗位
+    if _SKILL_WHITELIST_LOWER.get(result.lower()):
         return ""
-    if tech:
-        return tech + base
-    if paren_tech:
-        for match, display in _TECH_STACKS:
-            if paren_tech.lower() == match:
-                return display + base
-    return base
+    return result
 
 
 def normalize_skill(raw: str) -> str:
