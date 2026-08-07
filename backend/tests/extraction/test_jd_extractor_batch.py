@@ -6,14 +6,17 @@
 - 单条降级路径：整批失败 / 超时 / 返回条数错位 → 该批降级逐条 extract
 - 动态长度封顶：batch_size 与 max_batch_chars 双约束组批
 - 批量独立超时：batch_timeout 透传 LLM 链
+- LLM 未配置：__init__ 降级 self._llm=None，extract_batch 逐条规则兜底
 
 mock 的是 LLM 链（LLMProviderChain 的 extract_structured），编排逻辑为真实产品代码。
 """
 
+from unittest.mock import patch
+
 import pytest
 
 from app.services.extraction.jd_extractor import JDExtractor
-from app.services.extraction.llm_provider import LLMExtractionError
+from app.services.extraction.llm_provider import LLMConfigurationError, LLMExtractionError
 from app.services.extraction.schemas import (
     JDExtractionBatch,
     JDExtractionResult,
@@ -210,3 +213,35 @@ class TestDynamicBatching:
         batch_llm = _FakeBatchLLM(JDExtractionBatch(results=[_make_result("批量1")] * 3))
         JDExtractor(llm=batch_llm).extract_batch(self.LONG_TEXTS, batch_size=3)
         assert batch_llm.calls == 1
+
+
+class TestNoLlmConfigFallback:
+    """LLM 未配置（__init__ 捕获 LLMConfigurationError → self._llm=None）时批量抽取。"""
+
+    def test_batch_falls_back_to_per_item_rule(self):
+        """LLM 未配置 → extract_batch 逐条规则兜底，不触发 LLM 调用。"""
+        with patch(
+            "app.services.extraction.jd_extractor.LLMProviderChain",
+            side_effect=LLMConfigurationError("配置缺失"),
+        ):
+            extractor = JDExtractor()
+        assert extractor._llm is None
+
+        texts = [
+            "Python 后端开发\n熟悉 Python、MySQL、Docker 容器化部署",
+            "Java 开发工程师\n精通 Spring Boot、Redis、Kubernetes",
+        ]
+        out = extractor.extract_batch(texts, batch_size=5)
+        assert len(out) == 2
+        # 规则兜底按白名单扫描
+        assert {"Python", "MySQL", "Docker"}.issubset({s.name for s in out[0].skills})
+        assert out[0].position_name == "Python 后端开发"
+
+    def test_batch_empty_input_with_no_llm(self):
+        """LLM 未配置时空列表仍返回空。"""
+        with patch(
+            "app.services.extraction.jd_extractor.LLMProviderChain",
+            side_effect=LLMConfigurationError("配置缺失"),
+        ):
+            extractor = JDExtractor()
+        assert extractor.extract_batch([]) == []
