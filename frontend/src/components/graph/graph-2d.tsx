@@ -31,6 +31,17 @@ interface EChartsParam {
   name?: string
 } 
 
+/** zrender Group 最小类型（手动平移 graph 视图用，访问 ECharts 内部 _chartsViews） */
+interface GraphGroup {
+  x: number
+  y: number
+  transform: unknown
+  dirty(): void
+  getBoundingRect(): {
+    clone(): { applyTransform(t: unknown): void; contain(x: number, y: number): boolean }
+  }
+}
+
 // 按需注册 — 仅 graph 图表 + tooltip 组件 + canvas 渲染器
 // 相比 `import * as echarts from 'echarts'`，可减少约 70% bundle 体积
 echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
@@ -39,7 +50,11 @@ interface Graph2DProps {
   data: GraphData
   /** 当前选中节点 id（用于高亮） */
   selectedId?: string | null
+  /** 已展开的岗位 id 集合（画布已只含这些岗位的技能，用于样式标记） */
+  expandedPositions?: Set<string>
   onSelectNode: (node: NodeDetail | null) => void
+  /** 点击岗位 → 展开/收起其技能 */
+  onTogglePosition: (id: string) => void
   className?: string
 }
 
@@ -87,7 +102,7 @@ function isDarkMode(): boolean {
   return document.documentElement.classList.contains('dark')
 }
 
-export function Graph2D({ data, selectedId, onSelectNode, className }: Graph2DProps) {
+export function Graph2D({ data, selectedId, expandedPositions, onSelectNode, onTogglePosition, className }: Graph2DProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
   // 主题版本号：暗色切换时递增，触发数据 effect 完全重建确保颜色全量刷新
@@ -113,7 +128,7 @@ export function Graph2D({ data, selectedId, onSelectNode, className }: Graph2DPr
     )
     chartRef.current = chart
 
-    // 节点点击 → 上抛选中节点
+    // 节点点击 → 上抛选中节点；岗位节点同时切换技能展开/收起
     chart.on('click', (params) => {
       if (params.dataType === 'node' && params.data) {
         const d = params.data as GraphNode
@@ -127,6 +142,7 @@ export function Graph2D({ data, selectedId, onSelectNode, className }: Graph2DPr
           value: d.value,
           description: d.description,
         })
+        if (d.type === 'position') onTogglePosition(d.id)
       }
     })
 
@@ -138,6 +154,53 @@ export function Graph2D({ data, selectedId, onSelectNode, className }: Graph2DPr
       }
     })
 
+    // 外围空白拖拽平移：ECharts graph 原生 roam 限制起拖点须在节点包围盒内
+    // （包围盒外空白拖不动）。此处对包围盒外的空白按下直接平移 graph 视图
+    // group（与原生 updateViewOnPan 同机制），包围盒内/节点上不干预（避免双重处理）。
+    // graphRoam dispatchAction 不产生视觉平移（仅更新 View 状态），故直接操作 group。
+    const zr = chart.getZr()
+    let panning = false
+    let panLastX = 0
+    let panLastY = 0
+    const panGroup = () =>
+      (chart as unknown as { _chartsViews?: Array<{ group: GraphGroup }> })._chartsViews?.[0]?.group
+    const onPanDown = (e: { target?: unknown; offsetX: number; offsetY: number }) => {
+      if (e.target) return // 命中节点/边 → 原生节点拖拽
+      const group = panGroup()
+      if (group) {
+        // 起拖点在节点包围盒内 → 原生 roam 已接管平移，此处跳过防双重位移
+        const rect = group.getBoundingRect().clone()
+        rect.applyTransform(group.transform)
+        if (rect.contain(e.offsetX, e.offsetY)) return
+      }
+      panning = true
+      panLastX = e.offsetX
+      panLastY = e.offsetY
+    }
+    const onPanMove = (e: { offsetX: number; offsetY: number }) => {
+      if (!panning) return
+      const dx = e.offsetX - panLastX
+      const dy = e.offsetY - panLastY
+      if (dx !== 0 || dy !== 0) {
+        panLastX = e.offsetX
+        panLastY = e.offsetY
+        const group = panGroup()
+        if (group) {
+          group.x += dx
+          group.y += dy
+          group.dirty()
+          chart.getZr().refresh()
+        }
+      }
+    }
+    const onPanEnd = () => {
+      panning = false
+    }
+    zr.on('mousedown', onPanDown)
+    zr.on('mousemove', onPanMove)
+    zr.on('mouseup', onPanEnd)
+    zr.on('globalout', onPanEnd)
+
     // 布局完成后再 resize 一次，覆盖初始化时容器为 0 的情况
     requestAnimationFrame(() => {
       chartRef.current?.resize()
@@ -147,7 +210,7 @@ export function Graph2D({ data, selectedId, onSelectNode, className }: Graph2DPr
       chart.dispose()
       chartRef.current = null
     }
-  }, [onSelectNode])
+  }, [onSelectNode, onTogglePosition])
 
   // 容器尺寸变化 → resize
   useEffect(() => {
@@ -196,11 +259,13 @@ export function Graph2D({ data, selectedId, onSelectNode, className }: Graph2DPr
       itemStyle: {
         color: colorOf(n),
         borderColor,
-        borderWidth: 1,
+        // 展开的岗位加粗描边，提示其技能当前可见（可点击收起）
+        borderWidth: expandedPositions?.has(n.id) ? 3 : 1,
       },
       // 不在此处根据 selectedId 设置选中样式 — 选中高亮走 dispatchAction（②）
       label: {
-        show: n.type === 'position',
+        // 岗位恒显；展开揭示的技能节点显示名字（未展开时画布无技能节点）
+        show: n.type !== 'evidence',
         position: 'right',
         color: textColor,
         fontSize: 11,
@@ -291,8 +356,10 @@ export function Graph2D({ data, selectedId, onSelectNode, className }: Graph2DPr
       ],
     }
 
-    chart.setOption(option, { replaceMerge: ['series'] })
-  }, [data, themeVersion])
+    // 默认 merge（不 replaceMerge）：ECharts 按 name diff 保留已有节点坐标，
+    // 展开/收起时仅新增/移除技能节点，已有岗位节点位置不动（避免 force 全量重排抖动）
+    chart.setOption(option)
+  }, [data, themeVersion, expandedPositions])
 
   // ============================================================
   // ② 选中态高亮 effect — 仅 selectedId 变化时触发
