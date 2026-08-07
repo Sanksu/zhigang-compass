@@ -38,6 +38,51 @@ _EMPLOYMENT_INTERN_CN = "实习"    # 含"实习生"
 _EMPLOYMENT_PARTTIME_CN = "兼职"
 
 
+# ── 非正常岗位源头过滤（2026-08-07 补充）──
+# 批量聚合招聘帖：标题为技术栈列表（Java/C++/Python/前端/测试…）或招聘话术，
+# 无明确岗位名——不是单一岗位，LLM 抽取/聚合会产生污染岗位（如"系统""解决方案"）。
+# 判定：标题不含强岗位词（中英）+ （含 ≥2 个技术栈分隔符 或 批量招募话术）。
+# 强岗位词须含英文岗位词（Engineer/Developer/Analyst 等）：国际源标题为英文，
+# 否则 "Software Engineer, AI/ML" 会被"分隔符+无中文岗位词"误判为聚合帖。
+# "前端"不进表：聚合帖常列"前端"项，"前端"单独出现多为简写岗位名（靠
+# "全栈/工程师"等词保底正常岗，如"前端全栈工程师"）。
+_POS_NAME_STRONG_RE = re.compile(
+    r"工程师|开发|分析|设计|运营|经理|架构|研究|评测|技术|主管|顾问|讲师|教师|"
+    r"销售|助理|专家|咨询|运维|实施|产品|专员|管培|储备|总监|教练|审核|主播|护士|"
+    r"客服|财务|人事|市场|编辑|司机|厨师|保安|保洁|前台|全栈|算法|数据|后端"
+    r"|标注|训练|翻译|美工|剪辑|修图|撰写|美编|策划|摄影|摄像|主持|文员|秘书"
+    r"|软件测试|测试开发|测试工程师"  # "测试"单独是聚合帖列表项，不进表；带岗位前缀/后缀的组合词保正常岗
+    r"|Engineer|Developer|Analyst|Manager|Architect|Scientist|Researcher|Specialist|"
+    r"Consultant|Director|Officer|Operator|Designer|Editor|Nurse|Driver|Chef|Trainer|"
+    r"Coordinator|Administrator|Intern|Trainee|Tester|Lead|Principal|Staff"
+)
+# 技术栈分隔符（含中文顿号/斜杠/加号变体/半角逗号）
+_STACK_SEP_RE = re.compile(r"[/、＋＋+，,·]")
+# 批量招募话术（无岗位名时出现这些词 → 聚合帖）
+_RECRUIT_SPAM_RE = re.compile(
+    r"接受应届|无经验|不限语言|线上面试|可投|高薪|急招|双休|16薪|14薪|六险一金|"
+    r"拒绝内卷|月入过万|核心项目|年终奖|导师带教|长期项目"
+)
+
+
+def _invalid_job_reason(item) -> str | None:
+    """非正常岗位（批量聚合帖/话术帖）拦截原因；未命中返回 None。
+
+    与 _employment_reason 并列：实习/兼职在标题判定，聚合帖在标题+技术栈
+    分隔+话术判定。正常岗位（含岗位名强词，如"Java开发工程师（接受应届）"）
+    不拦截，避免误杀。
+    """
+    title = str(item.get("title") or "")
+    if not title:
+        return None
+    if _POS_NAME_STRONG_RE.search(title):
+        return None
+    seps = len(_STACK_SEP_RE.findall(title))
+    if seps >= 2 or _RECRUIT_SPAM_RE.search(title):
+        return "批量聚合帖（无岗位名）"
+    return None
+
+
 def _employment_reason(item) -> str | None:
     """实习/兼职岗位的拦截原因；未命中返回 None。
 
@@ -209,10 +254,10 @@ class CleaningPipeline:
         return self.crawler.spider if self.crawler is not None else None
 
     def process_item(self, item):
-        # 实习/兼职岗位源头拦截：在清洗阶段丢弃（不计算指纹、不落库），
+        # 实习/兼职 + 批量聚合帖源头拦截：在清洗阶段丢弃（不计算指纹、不落库），
         # 拦截日志保留 title/company 便于核对误杀
         if isinstance(item, JobItem):
-            reason = _employment_reason(item)
+            reason = _employment_reason(item) or _invalid_job_reason(item)
             if reason:
                 self._filtered_count += 1
                 spider = self._spider()
