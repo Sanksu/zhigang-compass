@@ -6,9 +6,14 @@
 """
 
 import asyncio
+from unittest.mock import AsyncMock, patch
 
 from app.api.v1.admin import _persist_rejected_change
-from app.api.v1.match import _persist_feedback, _persist_match_result_db
+from app.api.v1.match import (
+    _match_task_cache_owned,
+    _persist_feedback,
+    _persist_match_result_db,
+)
 from app.models.business import MatchFeedbackRecord, MatchResultRecord, RejectedChange
 
 
@@ -105,5 +110,41 @@ class TestPersistRejectedChange:
             assert row.position_name == "提示工程师"
             assert row.change_type == "discovery_reject"
             assert row.reason == "证据不足"
+
+        asyncio.run(_run())
+
+
+class TestMatchTaskCacheOwned:
+    """Redis match:task 回退分支归属校验（代码审查：越权防护缺失）。
+
+    该快照由 _persist_match_result（compare 同步路径）写入，内容无 user_id，
+    只能以其 match:result 快照归属校验——UUID 可猜度下防止横向越权。
+    """
+
+    def test_owner_passes(self):
+        async def _run():
+            with patch(
+                "app.api.v1.match._load_match_result",
+                new=AsyncMock(return_value={"match_id": "m1"}),
+            ):
+                assert await _match_task_cache_owned({"match_id": "m1"}, "u1") is True
+
+        asyncio.run(_run())
+
+    def test_other_user_rejected(self):
+        # 他人任务（match:result 归属校验失败返回 None）→ 拒绝
+        async def _run():
+            with patch(
+                "app.api.v1.match._load_match_result",
+                new=AsyncMock(return_value=None),
+            ):
+                assert await _match_task_cache_owned({"match_id": "m1"}, "u2") is False
+
+        asyncio.run(_run())
+
+    def test_missing_match_id_rejected(self):
+        # 无 match_id 的快照无法校验归属 → 拒绝（防伪造快照绕过校验）
+        async def _run():
+            assert await _match_task_cache_owned({}, "u1") is False
 
         asyncio.run(_run())

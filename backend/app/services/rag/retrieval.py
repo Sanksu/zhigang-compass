@@ -185,6 +185,26 @@ async def _diagnoses(db: AsyncSession, query: str) -> list[RetrievedChunk]:
     return chunks
 
 
+def allowed_evidence_ids(
+    rag_chunks: list[dict], evidence_refs: Optional[list[dict]] = None
+) -> set[str]:
+    """虚构引用拦截的允许集合（§6.4 生成约束）。
+
+    合法引用来源：
+    - RAG 上下文命中携带的 evidence_id（position:/occupation:/skill:/diagnosis:）
+    - 匹配快照证据（evidence_refs）的真实来源 source / url
+
+    generate_diagnosis 据此校验 LLM 生成的断言引用：不在集合内 → 虚构引用置空。
+    """
+    allowed = {c.get("evidence_id", "") for c in rag_chunks}
+    for e in evidence_refs or []:
+        if e.get("source"):
+            allowed.add(e["source"])
+        if e.get("url"):
+            allowed.add(e["url"])
+    return {x for x in allowed if x}
+
+
 async def retrieve_context(
     query: str,
     db: AsyncSession,

@@ -108,7 +108,7 @@ def position_freq_windows(
 
 def window_volatility(w: WindowFreq, n: int = 2) -> float:
     """最近 n 个窗口的频次波动（(max-min)/max，0 频次时取 0）。"""
-    recent = w.freqs[:n]
+    recent = w.freqs[-n:]
     if not recent or max(recent) == 0:
         return 0.0
     return (max(recent) - min(recent)) / max(recent)
@@ -116,7 +116,7 @@ def window_volatility(w: WindowFreq, n: int = 2) -> float:
 
 def decline_rate(w: WindowFreq, n: int = 3) -> float:
     """最近 n 个窗口的累计下降率（(首-末)/首，首频次为 0 时取 0）。"""
-    recent = w.freqs[:n]
+    recent = w.freqs[-n:]
     if len(recent) < 2 or recent[0] == 0:
         return 0.0
     return (recent[0] - recent[-1]) / recent[0]

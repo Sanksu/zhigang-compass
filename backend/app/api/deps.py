@@ -5,7 +5,8 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.core.security import decode_token, has_permission
+from app.core.errors import ERR_TOKEN_EXPIRED, business_error
+from app.core.security import TokenExpiredError, decode_token, has_permission
 
 security = HTTPBearer(auto_error=False)
 
@@ -20,7 +21,11 @@ async def get_current_user(
             detail="缺少认证凭证",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    payload = decode_token(credentials.credentials)
+    try:
+        payload = decode_token(credentials.credentials)
+    except TokenExpiredError:
+        # 契约 4011：过期 token 提示刷新（main.py 对 business_error 的 detail 透传）
+        raise business_error(ERR_TOKEN_EXPIRED, "Token 已过期，请刷新") from None
     if payload is None or payload.get("type") != "access":
         # 仅接受 access token：refresh token（7 天有效）不得直通受保护接口
         raise HTTPException(

@@ -9,6 +9,7 @@ LLM 调用走 LLMProviderChain（M3 参考实现）；未配置 api_key 时抛
 LLMConfigurationError（LLMExtractionError 子类），降级规则抽取兜底。
 """
 
+import time
 from typing import Optional
 
 from app.services.extraction.schemas import (
@@ -27,6 +28,11 @@ from app.services.extraction.prompts import (
     TASK_TEMPLATE,
 )
 from app.services.extraction.post_processor import post_process
+
+# 批间限流缓冲（秒）：串行逐批调用 LLM 时降低突发频率，防 provider 429。
+# 设计文档 §6.5：_BATCH_REQUEST_INTERVAL 移到批之间（0.3s/条 → 批间 0.3s）。
+# 常量定义在实际限流点 jd_extractor.py，tasks.py 侧不再重复定义。
+_BATCH_REQUEST_INTERVAL = 0.3
 
 
 class JDExtractor:
@@ -99,9 +105,14 @@ class JDExtractor:
 
         chunks = list(self._chunk_texts(jd_texts, batch_size, max_batch_chars))
         if concurrency <= 1:
-            return [
-                r for chunk in chunks for r in self._extract_chunk(chunk, batch_timeout)
-            ]
+            results = []
+            for i, chunk in enumerate(chunks):
+                # 批间限流缓冲（设计文档 §6.5：_BATCH_REQUEST_INTERVAL 移到批之间），
+                # 串行路径逐批调用 LLM 时降低突发频率，防 provider 429
+                if i > 0:
+                    time.sleep(_BATCH_REQUEST_INTERVAL)
+                results.extend(self._extract_chunk(chunk, batch_timeout))
+            return results
 
         from concurrent.futures import ThreadPoolExecutor
 

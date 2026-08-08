@@ -1271,10 +1271,6 @@ _JD_TEXT_FIELDS = (
     "education", "description", "requirements",
 )
 
-# 批量连续调用 LLM 易触发 provider 限流（429，实测 deepseek 批量 100 条大量失败、
-# 单条重跑全成功），每条请求间隔平滑突发；批量任务允许的额外耗时（100 条 ≈ 30s）
-_BATCH_REQUEST_INTERVAL = 0.3
-
 
 def _build_jd_text(snapshot: dict, raw_text: str) -> str:
     """拼装 JD 抽取正文。
@@ -1288,6 +1284,11 @@ def _build_jd_text(snapshot: dict, raw_text: str) -> str:
         return raw_text
     parts = [str(snapshot.get(f, "")).strip() for f in _JD_TEXT_FIELDS]
     return "\n".join(p for p in parts if p)
+
+
+def _is_jd_text_short(snapshot: dict, raw_text: str) -> bool:
+    """JD 正文是否过短（<10 字符，无法抽取）。"""
+    return len((_build_jd_text(snapshot, raw_text) or "").strip()) < 10
 
 
 async def batch_extract(
@@ -1329,11 +1330,15 @@ async def batch_extract(
                 .limit(limit)
             )).all()
 
-        # 过滤过短正文（<10 字符无法抽取），有效条目进入批量抽取
+        # 过滤过短正文（<10 字符无法抽取）：写 skipped 标记推进游标，
+        # 否则 `extraction IS NULL` 游标永不推进（短文本行堆积时正常 JD 饿死）
         valid: list[JDRaw] = []
         results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": []}
         for row in rows:
-            if len((_build_jd_text(row.snapshot or {}, row.raw_text or "") or "").strip()) < 10:
+            if _is_jd_text_short(row.snapshot or {}, row.raw_text or ""):
+                snap = dict(row.snapshot or {})
+                snap["extraction"] = {"skipped": True, "reason": "JD 正文过短（<10 字符）"}
+                row.snapshot = snap
                 results["failed"].append({"jd_id": row.id, "error": "JD 正文过短（<10 字符），跳过"})
             else:
                 valid.append(row)
