@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_role
 from app.core.config import settings
 from app.core.database import async_session_factory, get_db, neo4j_driver, redis_client
+from app.core.errors import ERR_LLM_TIMEOUT
 from app.models.business import (
     DiagnosisReportRecord,
     MatchFeedbackRecord,
@@ -33,7 +34,7 @@ from app.models.business import (
     TaskStatus,
 )
 from app.schemas.common import ok, error
-from app.services.embeddings.vector_store import load_project_vectors
+from app.services.embeddings.vector_store import PgvectorUnavailableError, load_project_vectors
 from app.services.matching.engine import RuleBasedMatcher
 from app.services.matching.loaders import build_candidate, load_positions_from_graph
 from app.services.matching.schemas import MatchMode, MatchRequest
@@ -300,8 +301,13 @@ async def compare(
     if not await _owns_resume(db, resume_id, user.get("sub", "")):
         return error(4030, "无权使用该简历发起比对", http_status=403)
 
-    # 项目向量（pgvector project_embeddings 回填产物）：未回填时为空 dict，评分回退文本相似度
-    project_vectors = await load_project_vectors(db, resume_id)
+    # 项目向量（pgvector project_embeddings 回填产物）：未回填/表不可用时为空 dict，
+    # 评分回退文本相似度（engine._project_score 对空 dict 即回退）
+    try:
+        project_vectors = await load_project_vectors(db, resume_id)
+    except PgvectorUnavailableError:
+        logger.warning("project_embeddings 查询失败，项目比对回退文本相似度")
+        project_vectors = {}
 
     def _compute():
         # 图谱加载 + SBERT 语义 + 规则匹配为 CPU/IO 密集，
@@ -354,6 +360,20 @@ async def compare(
     return ok(data=data)
 
 
+async def _match_task_cache_owned(cached: dict, user_id: str) -> bool:
+    """Redis match:task 回退分支归属校验（compare 同步结果无 user_id 字段）。
+
+    该快照由 _persist_match_result 写入（键 match:task:{match_id}，内容
+    {match_id, status, created_at}，不含 user_id），只能以其 match:result
+    快照归属校验（_load_match_result 含越权防护）——防 UUID 可猜度下横向越权，
+    与 TaskStatus 分支的归属校验口径一致；无 match_id 的快照按不属于任何人处理。
+    """
+    match_id = cached.get("match_id")
+    if not match_id:
+        return False
+    return await _load_match_result(match_id, user_id) is not None
+
+
 @router.get("/task/{task_id}")
 async def match_task_status(
     task_id: str,
@@ -388,7 +408,10 @@ async def match_task_status(
     cached = await redis_client.get(f"match:task:{task_id}")
     if cached is None:
         return error(4040, "匹配任务不存在或已过期", http_status=404)
-    return ok(data=json.loads(cached))
+    data = json.loads(cached)
+    if not await _match_task_cache_owned(data, user.get("sub", "")):
+        return error(4040, "匹配任务不存在或已过期", http_status=404)
+    return ok(data=data)
 
 
 @router.get("/result/{match_id}")
@@ -426,7 +449,7 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
     （§6.4 通用 RAG：岗位定义 + 技能 + 历史诊断报告）生成结构化报告
     （设计文档 §9.5：总体匹配度 + 雷达解读 + 关键差距 Top-5 + 路径解读 + 改进建议，
     每条差距断言附 evidence_id 可追溯）。仅人岗比对（compare）快照含 gaps，
-    AUTO 推荐快照返回 400；LLM 不可用/超时返回 503（诊断是增强功能，不阻断主流程）。
+    AUTO 推荐快照返回 400；LLM 超时返回 5003/504、配置不可用返回 503（诊断是增强功能，不阻断主流程）。
     """
     data = await _load_match_result(match_id, user.get("sub", ""))
     if data is None:
@@ -470,7 +493,11 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
         report = await asyncio.to_thread(
             generate_diagnosis, data, rag_chunks=rag_chunks
         )
-    except (LLMConfigurationError, LLMTimeoutError) as e:
+    except LLMTimeoutError as e:
+        # 契约 5003（§2.4.7）：LLM 调用超时 → 504，前端可据此触发降级链
+        return error(ERR_LLM_TIMEOUT, f"诊断报告生成失败：{e}", http_status=504)
+    except LLMConfigurationError as e:
+        # 配置不可用（无 api_key/全部禁用）→ 503，非超时语义
         return error(503, f"诊断报告生成失败：{e}")
 
     payload = {"match_id": match_id, **report.model_dump()}

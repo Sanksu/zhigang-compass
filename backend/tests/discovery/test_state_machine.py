@@ -37,7 +37,9 @@ def _candidate(state: PositionState, source_diversity: int = 2, confidence: floa
 
 class TestWindowHelpers:
     def test_volatility(self):
-        assert window_volatility(WindowFreq([10, 8, 9])) == pytest.approx(0.2)
+        # [10,8,9] 最近 2 窗口为 [8,9] 波动 0.111（原断言 0.2 依赖 freqs[:n]
+        # 取最早窗口的 bug，已随窗口方向修复更正）
+        assert window_volatility(WindowFreq([10, 8, 9])) == pytest.approx(0.1111, abs=1e-3)
         assert window_volatility(WindowFreq([0, 0])) == 0.0
 
     def test_decline_rate(self):
@@ -54,6 +56,23 @@ class TestWindowHelpers:
         """最近 2 窗口回升才算回迁；早期窗口为负不影响判定。"""
         assert has_recovery(WindowFreq([1, 2, 3], z_scores=[-1.5, 0.5, 0.8])) is True
         assert has_recovery(WindowFreq([1, 2, 3], z_scores=[0.5, 0.8, -0.2])) is False
+
+    def test_volatility_uses_recent_windows(self):
+        """波动率取最近 n 窗口（非最早 n 窗口）。
+
+        回归：原实现 freqs[:n] 取最早窗口，freqs=[10,8,9,1] n=2 时
+        [:2]=[10,8] 波动 0.2，[-2:]=[9,1] 波动 0.889——最近窗口剧烈波动
+        才应触发降级判定。
+        """
+        assert window_volatility(WindowFreq([10, 8, 9, 1])) == pytest.approx(0.8889, abs=1e-3)
+
+    def test_decline_rate_uses_recent_windows(self):
+        """下降率取最近 n 窗口：早期窗口上升、最近窗口骤降必须被捕捉。
+
+        回归：freqs=[10,12,10,4] n=3 时 [:3]=[10,12,10] 下降率 0，
+        [-3:]=[12,10,4] 下降率 0.667。
+        """
+        assert decline_rate(WindowFreq([10, 12, 10, 4])) == pytest.approx(0.6667, abs=1e-3)
 
 
 class TestFreqZScores:

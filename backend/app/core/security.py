@@ -61,10 +61,20 @@ def create_refresh_token(user_id: str, role: str = "guest") -> str:
     return jwt.encode(payload, private_key, algorithm="RS256")
 
 
+class TokenExpiredError(Exception):
+    """JWT 过期（区别于无效/伪造，契约错误码 4011）。
+
+    decode_token 对过期 token 抛此异常，让调用方能区分「过期→触发刷新」与
+    「非法→重新认证」两种 401 语义（设计文档 §2.4.7）。
+    """
+
+
 def decode_token(token: str) -> Optional[dict]:
     try:
         public_key = _load_rsa_key(settings.jwt_public_key_path)
         return jwt.decode(token, public_key, algorithms=["RS256"])
+    except jwt.ExpiredSignatureError:
+        raise TokenExpiredError("Token 已过期") from None
     except jwt.PyJWTError:
         return None
 

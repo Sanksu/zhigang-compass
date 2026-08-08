@@ -17,6 +17,7 @@ from app.services.diagnosis.prompts import (
 )
 from app.services.diagnosis.schemas import DiagnosisReport
 from app.services.extraction.llm_provider import LLMProviderChain
+from app.services.rag.retrieval import allowed_evidence_ids
 
 # 报告上下文裁剪上限：控制 prompt 长度，避免超出上下文窗口
 _TOP_GAPS = 5
@@ -97,6 +98,13 @@ def generate_diagnosis(
         evidence=_render_evidence(data.get("evidence_refs") or []),
         rag_context=_render_rag_context(rag_chunks or []),
     )
-    return chain.call_sync(
+    report = chain.call_sync(
         prompt, DiagnosisReport, system_prompt=DIAGNOSIS_SYSTEM_PROMPT
     )
+    # 虚构引用后置拦截（§6.4 生成约束）：断言引用的 evidence_id 必须能追溯
+    # 到 RAG 上下文或匹配快照证据，否则视为 LLM 编造，置空避免前端点击死链
+    allowed = allowed_evidence_ids(rag_chunks or [], data.get("evidence_refs") or [])
+    for gap in report.top_gaps:
+        if gap.evidence_id and gap.evidence_id not in allowed:
+            gap.evidence_id = ""
+    return report
