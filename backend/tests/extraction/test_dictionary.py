@@ -264,10 +264,12 @@ class TestNormalizePositionName:
         assert normalize_position_name("量化分析师") == "量化分析师"
         assert normalize_position_name("信贷政策与决策分析师") == "信贷分析师"
         assert normalize_position_name("数据建模分析师") == "数据分析师"
-        # 无细分核心词的通用"分析师"兜底保留（原统一族行为）
-        assert normalize_position_name("分析师") == "分析师"
-        # 细分仅对"分析师"结尾生效：非分析师岗位不被误吸
-        assert normalize_position_name("精算师") == "精算师"
+        # 无细分核心词的通用"分析师"兜底：2026-08-08 P0 归一化评估后改为停用词
+        # 拦截（国际源 Analyst 泛化，无细分信息量，不入图）
+        assert normalize_position_name("分析师") == ""
+        # 细分仅对"分析师"结尾生效：非分析师岗位不被误吸。
+        # "精算师"为金融岗（Actuary），2026-08-08 P0 停用词拦截，不入图
+        assert normalize_position_name("精算师") == ""
         assert normalize_position_name("量化研究员") == "研究员"
         # "商业智能"为业务词碎片（P2 清理）：剥后缀后命中停用词 → 空
         assert normalize_position_name("商业智能工程师") == ""
@@ -322,6 +324,33 @@ class TestNormalizePositionName:
         assert normalize_position_name("桥梁设计") == ""
         assert normalize_position_name("特效工具") == ""
         assert normalize_position_name("自动驾驶系统") == ""
+        # 2026-08-08 P0 归一化评估新增：泛词/非技术岗/招聘形态低质岗
+        assert normalize_position_name("分析师") == ""
+        assert normalize_position_name("程序员") == ""
+        assert normalize_position_name("行政管理") == ""
+        assert normalize_position_name("人力资源") == ""
+        assert normalize_position_name("业务分析") == ""
+        assert normalize_position_name("货代销售") == ""
+        assert normalize_position_name("商业水电维修工") == ""
+        assert normalize_position_name("一级建造师") == ""
+        assert normalize_position_name("研究助理") == ""
+        assert normalize_position_name("项目助理") == ""
+        # 派生形态（前缀修饰剥除后命中停用词）
+        assert normalize_position_name("行政管理主管") == ""
+        assert normalize_position_name("人力资源经理") == ""
+        assert normalize_position_name("综合行政高级专员") == ""
+        assert normalize_position_name("材料实验室行政专员") == ""
+        assert normalize_position_name("人事行政助理") == ""
+        assert normalize_position_name("副总裁，量化策略师") == ""
+        # 2026-08-08 P0 方案 2：非技术/金融/工具泛岗低频单例清理防复发
+        assert normalize_position_name("交易员") == ""
+        assert normalize_position_name("经济学家") == ""
+        assert normalize_position_name("流行病学家") == ""
+        assert normalize_position_name("精算师") == ""
+        assert normalize_position_name("量化策略师") == ""
+        assert normalize_position_name("Guidewire") == ""
+        assert normalize_position_name("可视化软件开发工程师") == ""
+        assert normalize_position_name("桌面") == ""
 
     def test_p0a_legit_positions_not_filtered(self):
         # P0-A 停用词只拦碎片：真实细分岗不受影响
@@ -333,13 +362,21 @@ class TestNormalizePositionName:
         assert normalize_position_name("AI Infra Engineer") == ""
         assert normalize_position_name("Manager, Logistics") == ""
         assert normalize_position_name("量化分析师") == "量化分析师"  # 细分族优先，不因"量化"停用词被拦
+        # 2026-08-08 P0 停用词扩充后，细分分析师岗不受"分析师"兜底拦截影响
+        assert normalize_position_name("市场分析师") == "市场分析师"
+        assert normalize_position_name("商业智能分析师") == "商业智能分析师"
+        assert normalize_position_name("业务分析师") == "业务分析师"
+        assert normalize_position_name("信贷分析师") == "信贷分析师"
+        assert normalize_position_name("财务分析师") == "财务分析师"
+        # 精算分析师为 _ANALYST_SUB_FAMILIES 细分岗：不受"精算师"停用词影响
+        assert normalize_position_name("精算分析师") == "精算分析师"
 
     def test_p0_cjk_guard_and_short_keyword(self):
         # P0-2 CJK 守卫 + P0-3/AI 短关键词修复：混合标题不再被英文子串劫持
         assert normalize_position_name("网络 SRE 工程师") == "DevOps工程师"  # sre 归 DevOps 族
         assert normalize_position_name("SailPoint 顾问") == "顾问"  # 不再被 "ai" 子串误归算法
-        # 英文自动化测试岗：P2 清理未翻译英文岗 → 空（此前保留，测试断言已更新）
-        assert normalize_position_name("Web & Mobile Automation Test Engineer") == ""
+        # 英文自动化测试岗：P0 方案 1 增加 test engineer 映射后归位测试工程师
+        assert normalize_position_name("Web & Mobile Automation Test Engineer") == "测试工程师"
 
     def test_p1_new_families(self):
         # P1 新增族：产品/项目/创始/安全/DevOps/数据科学家/数据库

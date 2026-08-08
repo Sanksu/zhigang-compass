@@ -420,6 +420,47 @@ _EN_POSITION_MAP: dict[str, str] = {
     "sensor test r&d mechatronics engineer": "嵌入式开发工程师",
     # 射频芯片 → 硬件工程师
     "rfic system engineer": "硬件工程师",
+    # P0 方案 1 补充（2026-08-08）：国际源纯英文抽取名正确归位。
+    # 注：金融/非技术泛岗（trader/actuary/economist/epidemiologist/quant strategist）
+    # 已由 _POSITION_STOPWORDS 拦截（方案 2），此处不映射，避免与停用词冲突。
+    "data scientist": "数据科学家",
+    "applied scientist": "算法工程师",
+    "research scientist": "研究员",
+    "senior applied scientist": "算法工程师",
+    "principal applied scientist": "算法工程师",
+    "staff applied scientist": "算法工程师",
+    "applied researcher": "研究员",
+    "research engineer": "研究员",
+    "biostatistician": "生物统计师",
+    "consultant": "顾问",
+    "solutions architect": "架构师",
+    "software architect": "架构师",
+    "technical architect": "架构师",
+    "solutions engineer": "软件开发工程师",
+    "ai/ml applied engineer": "算法工程师",
+    "genai engineer": "算法工程师",
+    "llm engineer": "算法工程师",
+    "ml platform engineer": "算法工程师",
+    "platform engineer": "运维工程师",
+    "site reliability": "运维工程师",
+    "security operations": "网络安全工程师",
+    "static timing engineer": "硬件工程师",
+    "thermal design engineer": "硬件工程师",
+    "mechanical engineer": "硬件工程师",
+    "control engineer": "硬件工程师",
+    "power engineer": "硬件工程师",
+    "firmware engineer": "嵌入式开发工程师",
+    "data governance": "大数据开发工程师",
+    "data engineering": "大数据开发工程师",
+    "backend engineer, ai": "后端开发工程师",
+    "fullstack engineer": "全栈工程师",
+    "full stack engineer": "全栈工程师",
+    "frontend engineer": "前端开发工程师",
+    "qa engineer": "测试工程师",
+    "test engineer": "测试工程师",
+    "database administrator": "数据库管理员",
+    "network sre engineer": "运维工程师",
+    "kafka streaming architect": "大数据开发工程师",
 }
 
 # 无信息量泛岗位词：归一化结果命中时视为空岗位（不入图）。
@@ -480,6 +521,18 @@ _POSITION_STOPWORDS: set[str] = {
     # 问题 1 修复：搜索短词改为复合词限定后，运营/SEO 类岗位不再被算法族吸走，
     # 加停用词使其不入图（P0-A 碎片岗位同类处理）
     "搜索运营", "搜索引擎优化",
+    # P0 图谱归一化评估新增（2026-08-08）：泛词/非技术岗/招聘形态低质岗，
+    # 归一化原样返回且低频，加停用词拦截。细分分析师岗（量化/业务/市场…）
+    # 由 _ANALYST_SUB_FAMILIES 前置拆分，不受"分析师"兜底拦截影响。
+    "分析师", "程序员", "行政管理", "人力资源", "业务分析",
+    "货代销售", "商业水电维修工", "一级建造师", "研究助理", "项目助理",
+    "副总裁，量化策略师", "人事行政助理", "材料实验室行政", "综合行政",
+    "行政管理主管", "人力资源经理",
+    # P0 方案 2 清理防复发（2026-08-08）：非技术/金融/工具泛岗，
+    # 图谱低频单例已删，停用词拦截防 rebuild 复发。
+    # 注：可持续发展分析师为 _ANALYST_SUB_FAMILIES 细分岗，不在拦截范围
+    "交易员", "经济学家", "流行病学家", "精算师", "量化策略师",
+    "Guidewire", "可视化软件开发工程师", "桌面",
 }
 
 # 岗位名前缀修饰词（级别/招聘形态），归一化时去除
