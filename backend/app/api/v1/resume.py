@@ -14,7 +14,7 @@ from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import Response, StreamingResponse
-from sqlalchemy import delete, select
+from sqlalchemy import String, cast, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
@@ -116,7 +116,7 @@ async def list_resumes(
     """
     rows = await db.scalars(
         select(ResumeCache)
-        .join(ResumeFile, ResumeFile.resume_id == ResumeCache.id)
+        .join(ResumeFile, ResumeFile.resume_id == cast(ResumeCache.id, String))
         .where(ResumeFile.user_id == user.get("sub", ""))
         .order_by(ResumeCache.updated_at.desc())
         .limit(limit)
