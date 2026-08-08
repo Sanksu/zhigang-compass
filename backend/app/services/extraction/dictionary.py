@@ -244,6 +244,9 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("产品经理",), "产品经理"),
     (("项目经理",), "项目经理"),
     (("创始",), "创始工程师"),
+    # UI设计师 独立族：置于前端族前，防 "ui" 关键词子串把 UI 岗吸进前端
+    # （"UI工程师" 不含 "ui设计师"，仍走前端族）
+    (("ui设计师",), "UI设计师"),
     # 安全族置于网络族前，避免"网络安全"被"网络"关键词吸走
     (("安全", "攻防", "渗透", "威胁", "IAM", "SOC"), "网络安全工程师"),
     (("数据科学家",), "数据科学家"),
@@ -261,7 +264,9 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("大模型", "大语言模型", "多模态大模型"), "大模型算法工程师"),
     (("自动驾驶算法", "泊车算法", "vla", "车辆控制", "飞控"), "自动驾驶算法工程师"),
     (("机器视觉", "计算机视觉", "视觉算法", "图像算法"), "机器视觉算法工程师"),
-    (("推荐算法", "搜索", "检索算法", "增长算法"), "推荐搜索算法工程师"),
+    # 细分族前置：方向词明确的算法岗归细分族。"搜索"为歧义短词（搜索运营/搜索引擎
+    # 优化等非算法岗会被子串误吸），改用复合词"搜索算法/搜索工程/搜索推荐"限定
+    (("推荐算法", "搜索算法", "搜索工程", "搜索推荐", "检索算法", "增长算法"), "推荐搜索算法工程师"),
     (("语音算法", "asr", "语音识别"), "语音算法工程师"),
     (("slam", "机械臂", "运动规划", "机器人算法"), "机器人算法工程师"),
     (("算法", "推荐", "图像", "视觉", "语音", "NLP", "自然语言", "大模型",
@@ -472,10 +477,13 @@ _POSITION_STOPWORDS: set[str] = {
     "AI/ML Applied Engineer",
     "AI 业务自动化", "机电一体化", "密码应用", "AR/VR 设计验证",
     "Gemini App 合作伙伴", "交通规划", "智能驾驶路测",
+    # 问题 1 修复：搜索短词改为复合词限定后，运营/SEO 类岗位不再被算法族吸走，
+    # 加停用词使其不入图（P0-A 碎片岗位同类处理）
+    "搜索运营", "搜索引擎优化",
 }
 
 # 岗位名前缀修饰词（级别/招聘形态），归一化时去除
-_POSITION_PREFIX_RE = re.compile(r"^(初级|中级|高级|资深|专家|助理|实习|见习|应届|研发|资深)")
+_POSITION_PREFIX_RE = re.compile(r"^(初级|中级|高级|资深|专家|助理|实习|见习|应届|研发)")
 # 岗位名后缀（含"开发/技术员/程序员"等变体），归一化时去除后按关键词重映射。
 # 科学家/研究员/专家/顾问 为低频同类岗的统一族后缀（由兜底关键词族承接，
 # 避免剥后缀后产生"财务/业务"等碎片）；"分析师"由细分族（_ANALYST_SUB_FAMILIES）
@@ -486,13 +494,26 @@ _POSITION_SUFFIX_RE = re.compile(
 )
 
 
+# 纯 ASCII 字母数字关键词（go/ui/java/dba 等短词）：子串匹配会误吸 google/goods/guidance
+# 等含词内子串的名，统一改词边界匹配（ASCII \w 边界）；含符号/空格的关键词保持子串匹配
+_ASCII_WORD_RE = re.compile(r"^[a-z0-9]+$")
+
+
+def _keyword_hit(low: str, kw: str) -> bool:
+    """关键词匹配：纯 ASCII 词用词边界，其余（中文/含符号）子串匹配。"""
+    k = kw.lower()
+    if _ASCII_WORD_RE.match(k):
+        return bool(re.search(r"(^|[^a-z0-9])" + re.escape(k) + r"($|[^a-z0-9])", low))
+    return k in low
+
+
 def _normalize_base(name: str) -> str:
     """基础岗位名归一化：循环去后缀至核心词，再按关键词族映射。"""
     core = name
     while core:
         low = core.lower()
         for keywords, standard in _POSITION_KEYWORDS:
-            if any(k.lower() in low for k in keywords):
+            if any(_keyword_hit(low, k) for k in keywords):
                 return standard
         # 分析师细分族：岗位名以"分析师"结尾 → 查细分映射（量化/财务/信贷…），
         # 命中返回细分标准名，否则兜底"分析师"。仅限"分析师"结尾（方案 C），
@@ -583,10 +604,15 @@ def normalize_position_name(name: str) -> str:
                 base = base[len(match):].strip()
                 break
 
+        base_raw = base  # 提取 tech 后、归一化前的原始 base（tech 细分保底用）
         base = _normalize_base(base)
         if not base or base in _POSITION_STOPWORDS:
-            return ""
-        if tech:
+            if not tech:
+                return ""
+            # 技术栈细分岗位（鸿蒙/桌面/移动…）：base 剥到泛词（开发/工程师）
+            # 不算失败，用 tech + 原始 base 保底，避免整个岗位被丢弃
+            result = tech + base_raw
+        elif tech:
             result = tech + base
         else:
             result = base
@@ -601,7 +627,23 @@ def normalize_position_name(name: str) -> str:
     # 拆成 tech=Angular + base=/NodeJS）需以组合结果整体拦截
     if result in _POSITION_STOPWORDS or _SKILL_WHITELIST_LOWER.get(result.lower()):
         return ""
+    if not translated and not _CJK_RE.search(name):
+        # 纯英文未翻译岗位（问题 2）：多词英文长标题未识别 → 不入图；
+        # 单英文词（RAG/SRE 等缩写或技术词）原样保留，discovery 等下游依赖其作为岗位名
+        if result.lower() == name.strip().lower() and " " in name.strip():
+            return ""
     return result
+
+
+# 技能名尾随修饰词（"MySQL 优化"→"MySQL"、"K8s 运维"→"K8s"）。未命中别名/白名单
+# 时先剥修饰词再重查，命中才采用，避免"技能+修饰词"组合分裂成独立图谱节点。
+# 与 post_processor.SUFFIXES 共用一套词表，保证抽取与消费链路口径一致。
+_SKILL_MODIFIERS = {
+    "中间件", "产品", "协议", "工具", "工程师", "平台", "应用", "开发", "引擎",
+    "技术", "接口", "方案", "架构", "标准", "框架", "算法", "管理", "系统",
+    "组件", "设计", "软件", "项目", "优化", "运维",
+}
+_SKILL_MODIFIERS_SORTED = sorted(_SKILL_MODIFIERS, key=len, reverse=True)
 
 
 def normalize_skill(raw: str) -> str:
@@ -611,6 +653,9 @@ def normalize_skill(raw: str) -> str:
     因此先精确查找，再按小写查找。白名单词的大小写变体（如 "GO"→"Go"、
     "matlab"→"MATLAB"、"Echarts"→"ECharts"）统一到白名单标准写法，
     避免同一技能因大小写不同建出多个图谱节点。
+
+    别名/白名单未命中时，剥离尾随修饰词后重查（"mybatis-plus框架"→"MyBatis"、
+    "MySQL 优化"→"MySQL"），命中才返回标准名；仍不命中则原样返回，不武断降级。
     """
     raw = raw.strip()
     if raw in SKILL_ALIAS:
@@ -621,6 +666,17 @@ def normalize_skill(raw: str) -> str:
     canonical = _SKILL_WHITELIST_LOWER.get(raw.lower())
     if canonical is not None:
         return canonical
+    for mod in _SKILL_MODIFIERS_SORTED:
+        if len(raw) > len(mod) and raw.endswith(mod):
+            stripped = raw[: -len(mod)].strip()
+            if stripped:
+                alias = SKILL_ALIAS.get(stripped.lower())
+                if alias is not None:
+                    return alias
+                canonical = _SKILL_WHITELIST_LOWER.get(stripped.lower())
+                if canonical is not None:
+                    return canonical
+            break  # 只剥一次，无论是否命中
     return raw
 
 

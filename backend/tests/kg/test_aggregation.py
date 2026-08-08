@@ -5,7 +5,12 @@
 
 from types import SimpleNamespace
 
+from app.services.extraction.dictionary import (
+    _ANALYST_SUB_FAMILIES,
+    _POSITION_KEYWORDS,
+)
 from app.services.kg.aggregation import (
+    _ALLOWED_SKILL_CATEGORIES,
     _is_must,
     _most_common_level,
     _position_skills,
@@ -59,6 +64,19 @@ class TestPositionSkills:
     def test_fallback_to_skills_without_level(self):
         ext = {"skills": [{"name": "Python"}, {"name": "Go"}]}
         assert _position_skills(ext) == [("Python", "nice", ""), ("Go", "nice", "")]
+
+    def test_skills_merged_into_requirements(self):
+        # P4：requirements 存在时 skills 中未进 requirements 的技能以 nice 并入
+        # （requirements 是 skills 子集，漏掉则技能频次被低估）；同技能去重保留
+        # requirements 的 must/level 语义
+        ext = {
+            "requirements": [{"skill_name": "Java", "necessity": "must", "level": "高级"}],
+            "skills": [{"name": "Java"}, {"name": "Vue3"}],
+        }
+        assert _position_skills(ext) == [
+            ("Java", "must", "高级"),
+            ("Vue.js", "nice", ""),
+        ]
 
 
 class TestPositionSkillsNormalization:
@@ -124,6 +142,25 @@ class TestBuildAggregatesLevel:
         assert pa.skills["Java"].levels == ["高级", "中级"]
         assert pa.skills["Java"].hit == 3
 
+    def test_skills_outside_requirements_counted(self):
+        # P4 聚合级：requirements 之外 skills 补入的技能计入 hit/来源，
+        # 且不因并入而虚高 must（skills 一律 nice）
+        row = SimpleNamespace(
+            snapshot={
+                "extraction": {
+                    "position_name": "Java开发工程师",
+                    "requirements": [{"skill_name": "Java", "necessity": "must", "level": None}],
+                    "skills": [{"name": "Java"}, {"name": "Vue3"}],
+                }
+            },
+            source="boss",
+        )
+        agg = build_aggregates([row])
+        sa = agg["Java开发工程师"].skills
+        assert sa["Java"].hit == 1
+        assert sa["Vue.js"].hit == 1
+        assert sa["Vue.js"].must_count == 0
+
 
 class _FakeSession:
     """write_aggregates 的会话桩：收集 run 调用参数。"""
@@ -173,9 +210,9 @@ class TestSoftSkillsAggregation:
 class TestP2CrossDomainAndLowFreq:
     """P2-C 跨域降权 + P2-D 低频边过滤（write_aggregates 生成 edges 阶段）。"""
 
-    def _row(self, requirements: list[dict], i: int):
+    def _row(self, requirements: list[dict], i: int, position: str = "Java开发工程师"):
         return SimpleNamespace(
-            snapshot={"extraction": {"position_name": "Java开发工程师", "requirements": list(requirements)}},
+            snapshot={"extraction": {"position_name": position, "requirements": list(requirements)}},
             source=f"src{i}",
         )
 
@@ -222,3 +259,20 @@ class TestP2CrossDomainAndLowFreq:
         edges = self._edges(rows)
         skills = {e["skill"] for e in edges}
         assert "Rust" in skills
+
+    def test_product_manager_cross_domain_downgraded(self):
+        # P5：产品经理此前未配置跨域白名单（Vue.js 全标 must 不降权）；
+        # 配置后前端类技能（Vue.js）强制 nice，期望类别（编程语言 SQL）保持 must
+        reqs = [
+            {"skill_name": "Vue.js", "necessity": "must", "level": ""},
+            {"skill_name": "SQL", "necessity": "must", "level": ""},
+        ]
+        edges = self._edges([self._row(reqs, i, "产品经理") for i in range(12)])
+        by_skill = {e["skill"]: e for e in edges}
+        assert by_skill["Vue.js"]["necessity"] == "nice"
+        assert by_skill["SQL"]["necessity"] == "must"
+
+    def test_all_families_have_cross_domain_whitelist(self):
+        # P5：所有岗位族都必须配置跨域白名单，防新增族漏配导致跨域技能不降权
+        families = {std for _, std in _POSITION_KEYWORDS} | {std for _, std in _ANALYST_SUB_FAMILIES}
+        assert families <= set(_ALLOWED_SKILL_CATEGORIES)

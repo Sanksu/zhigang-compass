@@ -63,6 +63,9 @@ class TestExtract:
         assert {"Python", "MySQL", "Redis", "Docker"}.issubset(names)
         # requirements 与 skills 一一对应（规则抽取双写）
         assert {r.skill_name for r in out.requirements} == names
+        # P6：兜底只做文本扫描、无语义判断，不能断言"必备"——全标 nice，
+        # 避免 LLM 不可用时 must_count 虚高把低频技能推成 must
+        assert all(r.necessity == "nice" for r in out.requirements)
         # 岗位名取首行短标题
         assert out.position_name == "Python 后端开发工程师"
 
