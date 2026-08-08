@@ -4,18 +4,56 @@
 - decode_token 对过期 token 抛 TokenExpiredError（区别于无效 → None）
 - get_current_user 对过期 access_token 抛 HTTPException 401，detail 携带 code=4011
 - 正常 token 不受影响（仍返回 payload）
+
+RSA 密钥：CI 环境无 keys/*.pem（gitignore 排除），测试用临时生成的密钥对
+注入 settings，避免依赖真实密钥文件。
 """
 
 import asyncio
 from unittest.mock import patch
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.security import TokenExpiredError, create_access_token, decode_token
+
+
+@pytest.fixture(scope="session")
+def tmp_rsa_keys(tmp_path_factory):
+    """生成临时 RSA 密钥对并返回 (私钥路径, 公钥路径)。"""
+    tmp = tmp_path_factory.mktemp("jwt-keys")
+    priv_path = tmp / "private.pem"
+    pub_path = tmp / "public.pem"
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    priv_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    pub_path.write_bytes(
+        key.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+    )
+    return str(priv_path), str(pub_path)
+
+
+@pytest.fixture(autouse=True)
+def _use_tmp_keys(tmp_rsa_keys):
+    """全局注入临时密钥路径（create/decode 均经 settings 读取）。"""
+    priv, pub = tmp_rsa_keys
+    with patch.object(settings, "jwt_private_key_path", priv), \
+         patch.object(settings, "jwt_public_key_path", pub):
+        yield
 
 
 def _expired_access_token(user_id: str = "u1", role: str = "user") -> str:
