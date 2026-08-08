@@ -22,7 +22,8 @@ from datetime import datetime, timedelta, timezone
 
 from neo4j import Session
 
-from app.services.extraction.dictionary import normalize_position_name, skill_category
+from app.services.extraction.dictionary import normalize_position_name, normalize_skill, skill_category
+from app.services.extraction.post_processor import _is_valid_skill_name, clean_skill_name
 from app.services.extraction.schemas import JDExtractionResult
 from app.services.kg.id_generator import PREFIX_MAP, next_id
 
@@ -202,9 +203,12 @@ def _import_jd_tx(
     )
 
     # 3. Skills + REQUIRES 关系
+    # 技能名与抽取链路一致归一化（normalize_skill → clean_skill_name → 黑名单过滤）：
+    # 重建时 jd_raw 快照可能是 P1-1/P1-2 扩充前的旧值（Vue3/reactjs、嵌入式/前端等
+    # 泛词），归一化后才能合并到规范节点，避免重建出旧名/泛词 Skill 使合并效果回退
     for req in extraction.requirements:
-        skill_name = req.skill_name.strip()
-        if not skill_name:
+        skill_name = clean_skill_name(normalize_skill(req.skill_name))
+        if not skill_name or not _is_valid_skill_name(skill_name):
             continue
 
         # Skill：按 name 合并（MERGE ON CREATE 兜底并发竞态，防重复建节点）

@@ -56,6 +56,33 @@ class TestPositionSkills:
         assert _position_skills(ext) == [("Python", "nice", ""), ("Go", "nice", "")]
 
 
+class TestPositionSkillsNormalization:
+    """聚合技能名归一化：旧快照异构名（P1-1 前抽取）对齐到规范节点，防聚合重建旧名。"""
+
+    def test_requirements_skill_name_normalized(self):
+        ext = {"requirements": [{"skill_name": "Vue3", "necessity": "must", "level": None}]}
+        assert _position_skills(ext) == [("Vue.js", "must", "")]
+
+    def test_fallback_skills_name_normalized(self):
+        ext = {"skills": [{"name": "reactjs"}]}
+        assert _position_skills(ext) == [("React", "nice", "")]
+
+    def test_whitelist_word_preserved(self):
+        # 白名单词整体保护，聚合不被剥成泛词碎片
+        ext = {"requirements": [{"skill_name": "操作系统", "necessity": "must", "level": None}]}
+        assert _position_skills(ext) == [("操作系统", "must", "")]
+
+    def test_stopword_dropped(self):
+        # 归一化后为空的旧泛词碎片（"系统"→""）不进聚合
+        ext = {"requirements": [{"skill_name": "系统", "necessity": "must", "level": None}]}
+        assert _position_skills(ext) == []
+
+    def test_stopword_preserved_after_clean_dropped(self):
+        # 剥后缀剥不掉的旧泛词（"嵌入式"在 P1-2 才入黑名单，旧快照残留）按黑名单剔除
+        ext = {"requirements": [{"skill_name": "嵌入式", "necessity": "must", "level": None}]}
+        assert _position_skills(ext) == []
+
+
 class TestMostCommonLevel:
     def test_empty_returns_empty(self):
         assert _most_common_level([]) == ""

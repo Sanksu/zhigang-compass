@@ -24,7 +24,8 @@ import re
 from collections import Counter, defaultdict
 from statistics import median
 
-from app.services.extraction.dictionary import SOFT_SKILL_WHITELIST
+from app.services.extraction.dictionary import SOFT_SKILL_WHITELIST, normalize_skill
+from app.services.extraction.post_processor import _is_valid_skill_name, clean_skill_name
 
 # 图谱 weight 两档约定
 _WEIGHT_MUST = 0.8
@@ -83,22 +84,28 @@ def _min_experience_years(snapshot: dict) -> float | None:
 
 
 def _position_skills(ext: dict) -> list[tuple[str, str, str]]:
-    """岗位技能列表 (skill_name, necessity, level)。requirements 优先，缺省 skills。"""
+    """岗位技能列表 (skill_name, necessity, level)。requirements 优先，缺省 skills。
+
+    技能名与抽取链路一致归一化（normalize_skill → clean_skill_name → 黑名单/单字符
+    过滤）：jd_raw 快照可能早于 P1-1/P1-2 扩充抽取（存 Vue3/reactjs、嵌入式/前端等
+    泛词），聚合时归一化才能命中已合并的规范节点，防止聚合把属性写回旧名节点、
+    重建旧名 Skill，或把泛词频次计入聚合。
+    """
+    def _norm(name: str) -> str:
+        n = clean_skill_name(normalize_skill(name.strip()))
+        return n if _is_valid_skill_name(n) else ""
+
     reqs = ext.get("requirements") or []
     if reqs:
         return [
-            (
-                r.get("skill_name", "").strip(),
-                r.get("necessity", "nice"),
-                r.get("level") or "",
-            )
+            (_norm(r.get("skill_name", "")), r.get("necessity", "nice"), r.get("level") or "")
             for r in reqs
-            if r.get("skill_name") and r["skill_name"].strip()
+            if _norm(r.get("skill_name", ""))
         ]
     return [
-        (s.get("name", "").strip(), "nice", "")
+        (_norm(s.get("name", "")), "nice", "")
         for s in (ext.get("skills") or [])
-        if s.get("name") and s["name"].strip()
+        if _norm(s.get("name", ""))
     ]
 
 
