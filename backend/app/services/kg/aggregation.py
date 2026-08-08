@@ -240,12 +240,33 @@ def _position_skills(ext: dict) -> list[tuple[str, str, str]]:
     return out
 
 
+def _jd_decay_weight(snap: dict) -> float:
+    """JD 级降权系数（设计文档 §4.7/§4.8 聚合消费）。
+
+    时滞（snapshot.validation）与通胀（snapshot.inflation）降权取更严格者，
+    与 temporal_detector.apply_temporal_decay 内部"取最严重"口径一致。
+    返回 0.0 表示该 JD 归档不入聚合（content_obsolete）；无检测记录返回 1.0，
+    保持对未跑时滞/通胀检测的历史数据行为不变。
+    """
+    weights = [1.0]
+    for key in ("validation", "inflation"):
+        decay = (snap.get(key) or {}).get("decay_weight")
+        if decay is not None:
+            weights.append(float(decay))
+    return min(weights)
+
+
 def build_aggregates(rows) -> dict[str, PositionAgg]:
     """从 jd_raw 已抽取记录聚合。
 
     rows 需为 JDRaw ORM 行（使用 row.snapshot / row.source）。
     岗位名经 normalize_position_name 归一化（与 import_jd 入图命名一致，
     否则聚合写回 MATCH {name} 匹配不上图谱节点）；空岗位名不参与聚合。
+
+    时滞/通胀降权（设计文档 §4.7/§4.8）：被降权 JD 的技能 hit/must_count
+    按系数加权（stale ×0.5 / 僵尸 ×0.3 / 抄袭 ×0.4 / 高通胀 ×0.4），归档
+    （×0）完全跳过；jd_count 仍计真实 JD 条数——Position.freq 是事实统计，
+    且演化/发现链路依赖整数频次，降权作用在技能边贡献上。
     """
     from app.services.extraction.dictionary import normalize_position_name
 
@@ -255,6 +276,10 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
         # SimHash 近似重复（设计文档 §4.2 消费方）：保留先入库版本，
         # 被标记 _duplicate_of 的后入库记录不参与聚合，避免重复 JD 虚高频次
         if snap.get("_duplicate_of"):
+            continue
+        # 时滞/通胀降权消费：归档 JD 不入聚合
+        jd_weight = _jd_decay_weight(snap)
+        if jd_weight == 0:
             continue
         ext = snap.get("extraction") or {}
         pos = normalize_position_name((ext.get("position_name") or "").strip())
@@ -268,12 +293,12 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
         source = row.source or ""
         for skill, necessity, level in _position_skills(ext):
             sa = pa.skills[skill]
-            sa.hit += 1
+            sa.hit += jd_weight
             sa.sources.add(source)
             if level:
                 sa.levels.append(level)
             if necessity == "must":
-                sa.must_count += 1
+                sa.must_count += jd_weight
         # 软技能：仅统计岗位本体白名单（JD 抽取已过滤，此处兜底再校验）
         for soft in ext.get("soft_skills") or []:
             soft = soft.strip()

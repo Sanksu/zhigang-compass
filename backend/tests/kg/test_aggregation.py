@@ -5,6 +5,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.extraction.dictionary import (
     _ANALYST_SUB_FAMILIES,
     _POSITION_KEYWORDS,
@@ -12,6 +14,7 @@ from app.services.extraction.dictionary import (
 from app.services.kg.aggregation import (
     _ALLOWED_SKILL_CATEGORIES,
     _is_must,
+    _jd_decay_weight,
     _most_common_level,
     _position_skills,
     build_aggregates,
@@ -276,3 +279,98 @@ class TestP2CrossDomainAndLowFreq:
         # P5：所有岗位族都必须配置跨域白名单，防新增族漏配导致跨域技能不降权
         families = {std for _, std in _POSITION_KEYWORDS} | {std for _, std in _ANALYST_SUB_FAMILIES}
         assert families <= set(_ALLOWED_SKILL_CATEGORIES)
+
+
+class TestJdDecayWeight:
+    """时滞/通胀降权系数读取与合并（设计文档 §4.7/§4.8 聚合消费）。"""
+
+    def test_no_detection_records_returns_one(self):
+        # 无检测记录（validation/inflation 缺失）不武断降权
+        assert _jd_decay_weight({}) == 1.0
+        assert _jd_decay_weight({"extraction": {}}) == 1.0
+
+    def test_temporal_decay_weight(self):
+        # 内容时滞 stale：降权 ×0.5
+        assert _jd_decay_weight({"validation": {"decay_weight": 0.5}}) == 0.5
+
+    def test_inflation_decay_weight(self):
+        # 高通胀 severe：降权 ×0.4
+        assert _jd_decay_weight({"inflation": {"decay_weight": 0.4}}) == 0.4
+
+    def test_strictest_wins(self):
+        # 时滞 stale ×0.5 + 通胀 severe ×0.4 并存 → 取更严格者 0.4
+        # （与 temporal_detector.apply_temporal_decay 内部取最严重者一致）
+        snap = {
+            "validation": {"decay_weight": 0.5},
+            "inflation": {"decay_weight": 0.4},
+        }
+        assert _jd_decay_weight(snap) == 0.4
+
+    def test_detection_record_without_decay_defaults_fresh(self):
+        # 检测记录存在但缺 decay_weight（异常数据）不武断降权
+        assert _jd_decay_weight({"validation": {"sai": {}}}) == 1.0
+
+
+class TestDecayConsumption:
+    """聚合层消费时滞/通胀降权：obsolete 归档跳过、非零系数加权技能贡献。"""
+
+    def _row(self, position: str, source: str, snap_extra: dict | None = None):
+        snap = {
+            "extraction": {
+                "position_name": position,
+                "requirements": [{"skill_name": "Java", "necessity": "must", "level": None}],
+            }
+        }
+        if snap_extra:
+            snap.update(snap_extra)
+        return SimpleNamespace(snapshot=snap, source=source)
+
+    def test_stale_jd_weighted_skill_contribution(self):
+        # stale ×0.5：技能 hit/must_count 贡献减半；jd_count 仍计真实 JD 条数
+        rows = [
+            self._row("Java开发工程师", "boss"),
+            self._row("Java开发工程师", "zhilian", {"validation": {"decay_weight": 0.5}}),
+        ]
+        agg = build_aggregates(rows)
+        pa = agg["Java开发工程师"]
+        sa = pa.skills["Java"]
+        assert pa.jd_count == 2
+        assert sa.hit == pytest.approx(1.5)
+        assert sa.must_count == pytest.approx(1.5)
+
+    def test_obsolete_jd_excluded_from_aggregation(self):
+        # obsolete ×0（归档不入聚合）：jd_count 与技能贡献都不计
+        rows = [
+            self._row("Java开发工程师", "boss"),
+            self._row("Java开发工程师", "zhilian", {"validation": {"decay_weight": 0.0}}),
+        ]
+        agg = build_aggregates(rows)
+        pa = agg["Java开发工程师"]
+        assert pa.jd_count == 1
+        assert pa.skills["Java"].hit == 1
+
+    def test_severe_inflation_weighted_skill_contribution(self):
+        # 高通胀 ×0.4：技能贡献降为 0.4
+        rows = [
+            self._row("Java开发工程师", "boss", {"inflation": {"decay_weight": 0.4}}),
+        ]
+        agg = build_aggregates(rows)
+        sa = agg["Java开发工程师"].skills["Java"]
+        assert sa.hit == pytest.approx(0.4)
+        assert sa.must_count == pytest.approx(0.4)
+
+    def test_decayed_jd_lowers_must_eligibility(self):
+        # 3 条 stale（×0.5）+ 1 条 fresh，Java 全标 must：
+        # 加权 hit=2.5 < 3 样本保护线 → 降权 JD 的贡献不足以让该技能判 must；
+        # 对照 4 条 fresh（hit=4）→ 满足三重条件判 must
+        stale = self._row("Java开发工程师", "boss", {"validation": {"decay_weight": 0.5}})
+        fresh = self._row("Java开发工程师", "boss")
+        agg = build_aggregates([stale] * 3 + [fresh])
+        pa = agg["Java开发工程师"]
+        sa = pa.skills["Java"]
+        assert sa.hit == pytest.approx(2.5)
+        assert _is_must(sa, jd_count=pa.jd_count) is False
+
+        agg2 = build_aggregates([fresh] * 4)
+        pa2 = agg2["Java开发工程师"]
+        assert _is_must(pa2.skills["Java"], jd_count=pa2.jd_count) is True
