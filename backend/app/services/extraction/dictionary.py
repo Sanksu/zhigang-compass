@@ -185,6 +185,29 @@ SKILL_ALIAS: dict[str, str] = {
     "ros2": "ROS",
     "敏捷": "敏捷开发",
     "大屏可视化": "数据可视化",
+    # P2-B 同义异构归一（岗位评估报告 4.1：AI 编码工具/Agent 生态表述碎片，
+    # 统一到白名单标准词，防同一技能建出多个图谱节点）
+    "ai coding": "AI辅助编程",
+    "ai-assisted coding": "AI辅助编程",
+    "ai assisted coding": "AI辅助编程",
+    "ai编程": "AI辅助编程",
+    "ai辅助编码": "AI辅助编程",
+    "ai辅助开发": "AI辅助编程",
+    "ai 辅助编程": "AI辅助编程",
+    "copilot": "GitHub Copilot",
+    "github copilot": "GitHub Copilot",
+    "claude code": "Claude Code",
+    "cursor": "Cursor",
+    "codex": "Codex",
+    "chatgpt": "ChatGPT",
+    "genai": "GenAI",
+    "milvus": "Milvus",
+    "dbt": "dbt",
+    "databricks": "Databricks",
+    "jvm": "JVM",
+    ".net core": ".NET",
+    "nodejs": "Node.js",
+    "postgres": "PostgreSQL",
 }
 
 # 软技能白名单（岗位本体维护，共 20 项，设计文档 9.2 节）。
@@ -231,6 +254,16 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("运维",), "运维工程师"),
     (("网络",), "网络工程师"),
     (("嵌入式",), "嵌入式开发工程师"),
+    # 算法细分族前置（评估报告 P1-A）：方向词明确的算法岗归细分族，
+    # 细分失败（纯"算法工程师"）才回退下方通用算法族，防多方向算法技能混聚。
+    # 关键词用"方向词+算法"复合词：裸"大模型/多模态/自动驾驶/搜索/视觉"会误吸
+    # 非算法岗（LLM应用/多模态理解/自动驾驶系统/搜索运营/视觉设计师），保持停用词判定生效
+    (("大模型", "大语言模型", "多模态大模型"), "大模型算法工程师"),
+    (("自动驾驶算法", "泊车算法", "vla", "车辆控制", "飞控"), "自动驾驶算法工程师"),
+    (("机器视觉", "计算机视觉", "视觉算法", "图像算法"), "机器视觉算法工程师"),
+    (("推荐算法", "搜索", "检索算法", "增长算法"), "推荐搜索算法工程师"),
+    (("语音算法", "asr", "语音识别"), "语音算法工程师"),
+    (("slam", "机械臂", "运动规划", "机器人算法"), "机器人算法工程师"),
     (("算法", "推荐", "图像", "视觉", "语音", "NLP", "自然语言", "大模型",
       "深度学习", "机器学习", "人工智能", "风控",
       "ai工程师", "ai 工程师", "ai 工程", "ai agent", "ai 应用"), "算法工程师"),
@@ -402,6 +435,43 @@ _POSITION_STOPWORDS: set[str] = {
     "设施合同与投标", "MEC运营", "OSINT 情报收集员", "Palantir 前向部署",
     "产品交付", "信贷支持", "数据生产", "零售运营分析", "多模态理解",
     "应用研究", "廉政审计", "报表分析", "桥梁设计", "特效工具", "自动驾驶系统",
+    # P2 图谱清理新增：存量脏岗位（rebuild_graph 后仍存在的低频边）。
+    # 工具/平台名误抽（LLM 把工具/平台/技术概念当岗位名）
+    "LLMOps平台", "IMS核心网", "AEM 解决方案", "CMDB 发现", "FAE现场应用",
+    "Palantir 管理员", "Kubernetes 服务", "Azure 云", "ML平台", "SCADA迁移与集成",
+    "Genesys CCaaS", "SAP BTP", "EDC", "WCS", "DFT", "Power Automate", "KDB",
+    "BI", "Angular/NodeJS", "智能体平台", "爬虫", "提示词", "物联网",
+    "GRC 自动化", "云系统管理员",
+    # 碎片/业务词误抽（工作内容/领域词被抽成岗位，非真实业务岗）
+    "应用程序", "商业智能", "安卓", "构建与发布", "工业", "技术支持", "自动化",
+    "智能化", "自动化集成", "商业智能与平台管理", "数据处理", "控制系统",
+    "设计验证", "物理验证", "数字信号处理", "模拟电路设计", "静态时序", "热设计",
+    "热流体仿真", "热工流体仿真", "显示技术", "显示电气设计", "载荷与动力学",
+    "机械设计", "天线系统", "相机控制系统标定", "仿真与渲染", "质量工程",
+    "成本管理", "收益管理", "站点运营", "现场服务", "指定支持", "技术客户",
+    "技术产品", "技术项目", "技术业务伙伴", "产品解决方案", "客户解决方案",
+    "客户策略分析", "数据验证风险", "包裹洞察与定价", "战略财务", "财务运营",
+    "私募市场二级数据", "制造与系统协同设计工作流", "全球品类采购", "品类采购",
+    "大客户", "市场通路TM", "增长运营", "产品运营", "独立站运营", "APP数据运营",
+    "社交媒体", "社区垂类运营", "销售支持", "资源管理岗", "组合管理岗",
+    "云服务解决方案中级助理", "数字渠道分析高级助理", "数据平台总监", "人力分析总监",
+    "客户数据科学总监", "临床情报总监", "神经病学分析副总监", "临床知识交付",
+    "空间组学", "生物信息学", "学习促进师", "编程教师", "STEM 讲师", "IT技术讲师",
+    "课程导师", "数学/统计学辅导讲师", "技术总监", "数据录入", "数据录入分析",
+    # 未翻译英文岗（抽取后未过英文映射，低频脏边，待 P0-B 映射扩充后再处理）
+    "Corporate Vice President - Head of Enterprise AI Platform",
+    "Director, Supply Chain Strategy & Analytics",
+    "Executive Director - North America Delta 1 Flow Swaps Trading",
+    "Measurement Science Partner, Global Accounts",
+    "Tenant Relocation Specialist",
+    "Web & Mobile Automation Test Engineer",
+    "Feature Lead - Technology",
+    "Manager, Logistics",
+    "Legal Technology & Contract Management Systems Administrator",
+    "AI Infra Engineer",
+    "AI/ML Applied Engineer",
+    "AI 业务自动化", "机电一体化", "密码应用", "AR/VR 设计验证",
+    "Gemini App 合作伙伴", "交通规划", "智能驾驶路测",
 }
 
 # 岗位名前缀修饰词（级别/招聘形态），归一化时去除
@@ -527,7 +597,9 @@ def normalize_position_name(name: str) -> str:
                         result = display + base
                         break
     # 技能词不入图：归一化结果命中技能白名单（大小写不敏感）→ 技能被抽成岗位
-    if _SKILL_WHITELIST_LOWER.get(result.lower()):
+    # 停用词再查最终 result：tech 前缀拆分后的完整岗位名（如 "Angular/NodeJS"
+    # 拆成 tech=Angular + base=/NodeJS）需以组合结果整体拦截
+    if result in _POSITION_STOPWORDS or _SKILL_WHITELIST_LOWER.get(result.lower()):
         return ""
     return result
 

@@ -596,6 +596,17 @@ skills:
   - {name: "视频生成", category: "AI/机器学习"}
   - {name: "3D重建", category: "AI/机器学习"}
   - {name: "点云处理", category: "AI/机器学习"}
+  # P2-A 高频未分类技能（岗位评估报告 4.1 白名单缺失：AI 编码工具 + Agent 生态）
+  - {name: "AI辅助编程", category: "AI/机器学习"}
+  - {name: "GitHub Copilot", category: "AI/机器学习"}
+  - {name: "Cursor", category: "AI/机器学习"}
+  - {name: "Claude Code", category: "AI/机器学习"}
+  - {name: "Codex", category: "AI/机器学习"}
+  - {name: "ChatGPT", category: "AI/机器学习"}
+  - {name: "GenAI", category: "AI/机器学习"}
+  - {name: "Milvus", category: "数据库"}
+  - {name: "dbt", category: "大数据"}
+  - {name: "Databricks", category: "大数据"}
 
   # ---- 车载 / 机器人扩展 ----
   - {name: "激光雷达", category: "智能驾驶/机器人"}

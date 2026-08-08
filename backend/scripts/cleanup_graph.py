@@ -1,11 +1,11 @@
 """图谱清理：删除幻觉技能 + 合并重复岗位（一次性历史数据清理）。
 
 清理口径（与抽取管线防复发逻辑一致）：
-1. 技能过滤：
-   - SKILL_STOPWORDS 黑名单技能直接删除（行业/业务领域词，如 保险/车联网）
-   - 白名单（SKILL_WHITELIST）外且 REQUIRES 边数 < 2 的技能删除（LLM 幻觉高发区）
+1. 技能过滤：SKILL_STOPWORDS 黑名单技能直接删除（行业/业务领域词，如 保险/车联网）
 2. 岗位合并：按 normalize_position_name 归一化，同标准名岗位重连关系后合并
-3. 重新聚合岗位（Position.freq / REQUIRES.weight 重算）
+3. 重新聚合岗位（P2 口径，复用 aggregation.py）并对齐图谱：清除聚合输出之外的
+   REQUIRES 边（SimHash 重复 JD 独有技能、大岗位 hit<2 一次性噪声）、清理白名单外
+   且无任何聚合输出边的孤立技能节点
 
 注意：删除不可逆，运行前建议确认。可重复执行（第二次无目标可删）。
 
@@ -36,40 +36,26 @@ def _count(session, cypher: str, **params) -> int:
 
 
 def filter_skills(session, dry_run: bool) -> dict:
-    """删除黑名单技能 + 白名单外低频技能。"""
+    """删除黑名单停用词技能节点。
+
+    白名单外低频技能（幻觉高发区）不再在此删除：其低频判定与聚合口径不一致
+    （此处按图内边数<2、聚合按 jd_count≥10 且 hit<2），会造成"聚合要输出的技能
+    节点被删、边无法落地"。低频边清理统一在 _reaggregate 中按聚合结果处理。
+    """
     stopword_hits = _count(
         session,
         "MATCH (sk:Skill) WHERE sk.name IN $names RETURN count(sk) AS c",
         names=list(SKILL_STOPWORDS),
     )
-    lowfreq_hits = _count(
-        session,
-        """
-        MATCH (sk:Skill)
-        WHERE NOT sk.name IN $whitelist
-          AND size([(sk)<-[:REQUIRES]-() | 1]) < 2
-        RETURN count(sk) AS c
-        """,
-        whitelist=list(SKILL_WHITELIST),
-    )
     if dry_run:
-        return {"stopword": stopword_hits, "lowfreq": lowfreq_hits}
+        return {"stopword": stopword_hits}
 
     with session.begin_transaction() as tx:
         tx.run(
             "MATCH (sk:Skill) WHERE sk.name IN $names DETACH DELETE sk",
             names=list(SKILL_STOPWORDS),
         )
-        tx.run(
-            """
-            MATCH (sk:Skill)
-            WHERE NOT sk.name IN $whitelist
-              AND size([(sk)<-[:REQUIRES]-() | 1]) < 2
-            DETACH DELETE sk
-            """,
-            whitelist=list(SKILL_WHITELIST),
-        )
-    return {"stopword": stopword_hits, "lowfreq": lowfreq_hits}
+    return {"stopword": stopword_hits}
 
 
 def merge_positions(session, dry_run: bool) -> dict:
@@ -141,19 +127,20 @@ def merge_positions(session, dry_run: bool) -> dict:
 
 
 def _reaggregate() -> dict:
-    """按归一化岗位名重新聚合（Position.freq + REQUIRES weight/source_count）。
+    """重新聚合岗位（Position.freq + REQUIRES weight/source_count）。
 
-    自包含实现：聚合口径与 app/services/kg/aggregation.py 一致（weight must=0.8/nice=0.4），
-    仅岗位名使用 normalize_position_name 以匹配清理后的图谱。
+    复用 app/services/kg/aggregation.py 的 P2 口径（must 三重条件：hit≥3 样本保护
+    + JD 覆盖率≥15% + must 标注占比>1/2；大岗位低频边过滤；跨域降权），与
+    rebuild_graph 重放后一致。历史坑：本脚本曾自实现聚合（must/hit≥0.5 且无低频
+    过滤），导致清理后低频边复活、口径与 aggregation.py 漂移。
     """
-    from collections import defaultdict
     from datetime import datetime, timedelta, timezone
-    from statistics import median
 
     from sqlalchemy import select
 
-    from app.core.database import async_session_factory
+    from app.core.database import async_session_factory, neo4j_driver
     from app.models.raw import JDRaw
+    from app.services.kg.aggregation import build_aggregates, build_edges, write_aggregates
 
     async def _load_rows():
         async with async_session_factory() as s:
@@ -161,76 +148,50 @@ def _reaggregate() -> dict:
                 select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
             )).all()
 
-    import re
-
     rows = asyncio.run(_load_rows())
-    stats: dict[str, dict] = defaultdict(lambda: {
-        "jd": 0, "years": [],
-        "skills": defaultdict(lambda: {"hit": 0, "must": 0, "src": set()}),
-    })
-    for r in rows:
-        snap = r.snapshot or {}
-        ext = snap.get("extraction") or {}
-        pos = normalize_position_name(ext.get("position_name") or "")
-        if not pos:
-            continue
-        st = stats[pos]
-        st["jd"] += 1
-        m = re.search(r"(\d+)", str(snap.get("experience") or ""))
-        if m:
-            st["years"].append(float(m.group(1)))
-        reqs = ext.get("requirements") or []
-        for q in reqs:
-            name = (q.get("skill_name") or "").strip()
-            if not name:
-                continue
-            sk = st["skills"][name]
-            sk["hit"] += 1
-            sk["src"].add(r.source or "")
-            if q.get("necessity") == "must":
-                sk["must"] += 1
-
     now = datetime.now(timezone(timedelta(hours=8))).isoformat()
-    positions, edges = [], []
-    for pos, st in stats.items():
-        positions.append({
-            "pos": pos,
-            "freq": st["jd"],
-            "req_years": median(st["years"]) if st["years"] else None,
-            "now": now,
-        })
-        for name, sk in st["skills"].items():
-            is_must = sk["must"] / sk["hit"] >= 0.5
-            edges.append({
-                "pos": pos, "skill": name,
-                "weight": 0.8 if is_must else 0.4,
-                "necessity": "must" if is_must else "nice",
-                "source_count": len(sk["src"]),
-            })
-
+    agg = build_aggregates(rows)
+    edges = build_edges(agg)
     with neo4j_driver.session() as session:
-        if positions:
-            session.run(
+        result = write_aggregates(session, agg, now)
+    # 图边=聚合输出 对齐清理（rebuild 后无手工边，可安全对齐）：
+    # import_jd 重放会把每条 JD 的技能边都建出来（含 SimHash 重复 JD 独有技能、
+    # 大岗位 hit<2 的一次性噪声），write_aggregates 只 MERGE 不删除，此处按聚合
+    # 过滤后的输出精确清除其外的边。kept 必须用 build_edges（与写边同口径）而非
+    # build_aggregates 全量技能，否则 hit<2 低频噪声边不会被清掉。
+    # write_aggregates 用 `with session:` 关闭了传入 session，故另开新 session。
+    kept_by_pos: dict[str, list[str]] = {}
+    for e in edges:
+        kept_by_pos.setdefault(e["pos"], []).append(e["skill"])
+    removed_edges = 0
+    with neo4j_driver.session() as session:
+        for pos, kept in kept_by_pos.items():
+            removed_edges += session.run(
                 """
-                UNWIND $items AS it
-                MATCH (p:Position {name: it.pos})
-                SET p.freq = it.freq, p.last_updated = it.now,
-                    p.required_years = coalesce(it.req_years, p.required_years)
+                MATCH (p:Position {name: $pos})-[r:REQUIRES]->(s:Skill)
+                WHERE NOT s.name IN $kept DELETE r RETURN count(r) AS c
                 """,
-                items=positions,
-            )
-        if edges:
-            session.run(
-                """
-                UNWIND $edges AS e
-                MATCH (p:Position {name: e.pos}), (s:Skill {name: e.skill})
-                MERGE (p)-[r:REQUIRES]->(s)
-                SET r.weight = e.weight, r.necessity = e.necessity,
-                    r.source_count = e.source_count
-                """,
-                edges=edges,
-            )
-    return {"positions": len(positions), "edges": len(edges)}
+                pos=pos,
+                kept=kept,
+            ).single()["c"]
+        # 清理孤立幻觉技能节点：白名单外、无任何聚合输出边、无 REQUIRES 入边。
+        # 白名单外但聚合输出的技能（高频真实技能）保留；白名单内节点即使无输出也
+        # 保留（可能被手工/后续复用），不武断删除。
+        all_output_skills = {e["skill"] for e in edges}
+        removed_nodes = session.run(
+            """
+            MATCH (sk:Skill)
+            WHERE NOT sk.name IN $whitelist
+              AND NOT sk.name IN $output
+              AND NOT exists((sk)<-[:REQUIRES]-())
+            DETACH DELETE sk RETURN count(sk) AS c
+            """,
+            whitelist=list(SKILL_WHITELIST),
+            output=list(all_output_skills),
+        ).single()["c"]
+    result["removed_untracked_edges"] = removed_edges
+    result["removed_orphan_skills"] = removed_nodes
+    return result
 
 
 def main() -> None:

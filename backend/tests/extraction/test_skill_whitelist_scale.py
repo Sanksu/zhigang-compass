@@ -44,6 +44,12 @@ class TestSkillWhitelistScale:
                 "Maven", "JUnit", "Hibernate", "Pandas", "Transformer",
                 "AI", "C", "MATLAB"}.issubset(SKILL_WHITELIST)
 
+    def test_p2a_high_freq_unclassified_covered(self):
+        # P2-A 高频未分类技能（评估报告 4.1：AI 编码工具 + Agent 生态）
+        assert {"AI辅助编程", "GitHub Copilot", "Cursor", "Claude Code",
+                "Codex", "ChatGPT", "GenAI", "Milvus", "dbt",
+                "Databricks"}.issubset(SKILL_WHITELIST)
+
     def test_no_duplicates(self):
         assert len(SKILL_WHITELIST) == len({w.lower() for w in SKILL_WHITELIST}), \
             "白名单存在大小写重复项（normalize_skill 依赖小写映射唯一）"
