@@ -205,6 +205,46 @@ class TestNormalizePositionName:
         assert normalize_position_name("知识") == ""
         assert normalize_position_name("系统") == ""
 
+    def test_p0a_noise_positions_filtered(self):
+        # 岗位评估报告 P0-A：LLM 误抽业务词/碎片岗位名（低频空岗）不入图
+        assert normalize_position_name("专利") == ""
+        assert normalize_position_name("传播") == ""
+        assert normalize_position_name("跟单员") == ""
+        assert normalize_position_name("量化") == ""
+        assert normalize_position_name("中训练") == ""
+        assert normalize_position_name("后训练") == ""
+        assert normalize_position_name("前向部署") == ""
+        assert normalize_position_name("大客户销售") == ""
+        assert normalize_position_name("定制服装导购") == ""
+        assert normalize_position_name("短视频编导") == ""
+        assert normalize_position_name("项目申报销售") == ""
+        assert normalize_position_name("电子发现协调员") == ""
+        assert normalize_position_name("设施合同与投标") == ""
+        assert normalize_position_name("MEC运营") == ""
+        assert normalize_position_name("OSINT 情报收集员") == ""
+        assert normalize_position_name("Palantir 前向部署") == ""
+        assert normalize_position_name("产品交付") == ""
+        assert normalize_position_name("信贷支持") == ""
+        assert normalize_position_name("数据生产") == ""
+        assert normalize_position_name("零售运营分析") == ""
+        assert normalize_position_name("多模态理解") == ""
+        assert normalize_position_name("应用研究") == ""
+        assert normalize_position_name("廉政审计") == ""
+        assert normalize_position_name("报表分析") == ""
+        assert normalize_position_name("桥梁设计") == ""
+        assert normalize_position_name("特效工具") == ""
+        assert normalize_position_name("自动驾驶系统") == ""
+
+    def test_p0a_legit_positions_not_filtered(self):
+        # P0-A 停用词只拦碎片：真实细分岗/英文岗不受影响（待 P0-B/归并处理）
+        assert normalize_position_name("保险分析师") == "保险分析师"
+        assert normalize_position_name("投资分析师") == "投资分析师"
+        assert normalize_position_name("策略分析师") == "策略分析师"
+        assert normalize_position_name("可持续发展分析师") == "可持续发展分析师"
+        assert normalize_position_name("AI Infra Engineer") == "AI Infra Engineer"
+        assert normalize_position_name("Manager, Logistics") == "Manager, Logistics"
+        assert normalize_position_name("量化分析师") == "量化分析师"  # 细分族优先，不因"量化"停用词被拦
+
     def test_p0_cjk_guard_and_short_keyword(self):
         # P0-2 CJK 守卫 + P0-3/AI 短关键词修复：混合标题不再被英文子串劫持
         assert normalize_position_name("网络 SRE 工程师") == "DevOps工程师"  # sre 归 DevOps 族
