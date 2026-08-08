@@ -1143,6 +1143,16 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
 _MATCH_RESULT_TTL = 24 * 60 * 60
 
 
+def _complete_recommend_result(prev: dict | None, match_id: str, top_n: int) -> dict:
+    """任务成功结果：合并入队时的归属字段（user_id/resume_id），追加 match_id/top_n。
+
+    不得整体覆盖 result——入队时 result 含 user_id，GET /match/task 的归属校验
+    （match.py match_task_status）依赖它；覆盖会导致任务成功后归属校验恒失败，
+    前端轮询报"匹配任务不存在或已过期"。
+    """
+    return {**(prev or {}), "match_id": match_id, "top_n": top_n}
+
+
 async def match_recommend(
     ctx: dict,
     resume_id: str,
@@ -1243,7 +1253,8 @@ async def match_recommend(
 
             task.status = "success"
             task.progress = 1.0
-            task.result = {"match_id": match_id, "top_n": len(results)}
+            # 合并而非覆盖：保留入队时的 user_id/resume_id（GET /match/task 归属校验依赖）
+            task.result = _complete_recommend_result(task.result, match_id, len(results))
         except Exception as e:
             task.status = "failed"
             task.error = str(e)[:500]
