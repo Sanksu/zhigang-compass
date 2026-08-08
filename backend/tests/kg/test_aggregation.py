@@ -374,3 +374,87 @@ class TestDecayConsumption:
         agg2 = build_aggregates([fresh] * 4)
         pa2 = agg2["Java开发工程师"]
         assert _is_must(pa2.skills["Java"], jd_count=pa2.jd_count) is True
+
+
+class TestInflationAggregationStrategy:
+    """岗位级通胀排除 + 平台级源降权（设计文档 §4.8 聚合消费）。
+
+    岗位级：岗位内通胀 JD 占比 ≥30% 时，通胀 JD 完全剔除（jd_count 与
+    技能贡献均不计）；平台级：源内通胀 JD 占比 >50% 时，该源全部 JD 额外
+    降权 ×0.5（normal JD 由 1.0 → 0.5，通胀 JD 取 min(decay, 0.5)）。
+    """
+
+    def _row(self, position: str, source: str, inflated: bool):
+        snap = {
+            "extraction": {
+                "position_name": position,
+                "requirements": [{"skill_name": "Java", "necessity": "must", "level": None}],
+            }
+        }
+        if inflated:
+            snap["inflation"] = {"label": "severe_inflation", "decay_weight": 0.4}
+        return SimpleNamespace(snapshot=snap, source=source)
+
+    def test_position_inflation_excluded_when_ratio_ge_30(self):
+        # 岗位内 3 normal + 2 通胀（40% ≥30%）→ 通胀 JD 完全剔除：
+        # jd_count 只计正常 3 条，技能贡献 3（通胀贡献为 0）；
+        # 源占比 40% <50% → 无源降权干扰
+        rows = (
+            [self._row("Java开发工程师", "boss", False) for _ in range(3)]
+            + [self._row("Java开发工程师", "boss", True) for _ in range(2)]
+        )
+        pa = build_aggregates(rows)["Java开发工程师"]
+        assert pa.jd_count == 3
+        assert pa.skills["Java"].hit == 3
+
+    def test_position_below_30_no_exclusion(self):
+        # 岗位内 3 normal + 1 通胀（25% <30%）→ 不排除，通胀 JD 按
+        # 自身 decay_weight 0.4 参与：jd_count=4，hit=3+0.4=3.4
+        rows = (
+            [self._row("Java开发工程师", "boss", False) for _ in range(3)]
+            + [self._row("Java开发工程师", "boss", True)]
+        )
+        pa = build_aggregates(rows)["Java开发工程师"]
+        assert pa.jd_count == 4
+        assert pa.skills["Java"].hit == pytest.approx(3.4)
+
+    def test_source_inflation_downgrades_all_jds(self):
+        # 源 boss 内通胀占比 6/11≈54.5% >50% → 该源全部 JD ×0.5。
+        # 岗位 A（5 normal，占比 0% 无岗位排除）：hit=5×0.5=2.5；
+        # 岗位 B（6 全通胀，占比 100% ≥30%）→ 通胀 JD 全剔除，岗位消失
+        rows = (
+            [self._row("Java开发工程师", "boss", False) for _ in range(5)]
+            + [self._row("数据开发工程师", "boss", True) for _ in range(6)]
+        )
+        agg = build_aggregates(rows)
+        assert "数据开发工程师" not in agg
+        pa = agg["Java开发工程师"]
+        assert pa.jd_count == 5
+        assert pa.skills["Java"].hit == pytest.approx(2.5)
+
+    def test_source_below_50_no_downgrade(self):
+        # 源 boss 内 5 normal + 2 通胀（28.6% <50%）→ 无源降权；
+        # 岗位占比 28.6% <30% → 无岗位排除；hit=5+2×0.4=5.8
+        rows = (
+            [self._row("Java开发工程师", "boss", False) for _ in range(5)]
+            + [self._row("Java开发工程师", "boss", True) for _ in range(2)]
+        )
+        pa = build_aggregates(rows)["Java开发工程师"]
+        assert pa.jd_count == 7
+        assert pa.skills["Java"].hit == pytest.approx(5.8)
+
+    def test_position_exclusion_does_not_affect_other_positions(self):
+        # 岗位 A 40% 通胀触发排除；岗位 B 全 normal 不受影响；
+        # 源占比 2/9≈22% <50% → 无源降权
+        rows = (
+            [self._row("Java开发工程师", "boss", False) for _ in range(3)]
+            + [self._row("Java开发工程师", "boss", True) for _ in range(2)]
+            + [self._row("Python开发工程师", "boss", False) for _ in range(4)]
+        )
+        agg = build_aggregates(rows)
+        pa_a = agg["Java开发工程师"]
+        assert pa_a.jd_count == 3
+        assert pa_a.skills["Java"].hit == 3
+        pa_b = agg["Python开发工程师"]
+        assert pa_b.jd_count == 4
+        assert pa_b.skills["Java"].hit == 4

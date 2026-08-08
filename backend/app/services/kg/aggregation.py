@@ -256,6 +256,52 @@ def _jd_decay_weight(snap: dict) -> float:
     return min(weights)
 
 
+# 设计文档 §4.8 岗位级/平台级通胀处置：
+# 岗位级：岗位内通胀 JD 占比 ≥30% 时，通胀 JD 完全剔除出聚合
+# （技能 hit/must_count/jd_count 均不贡献，等价 decay=0）
+_POSITION_INFLATION_EXCLUSION_RATIO = 0.30
+# 平台级：源内通胀 JD 占比 >50% 时，该源全部 JD 额外降权
+# 系数取 ×0.5（与内容时滞 stale 降权对齐，文档未定义该值）
+_SOURCE_INFLATION_THRESHOLD = 0.50
+_SOURCE_INFLATION_WEIGHT = 0.5
+
+
+def _is_inflated(snap: dict) -> bool:
+    """JD 是否被判定为通胀（inflation.label != normal，含 mild/severe）。"""
+    label = (snap.get("inflation") or {}).get("label")
+    return label is not None and label != "normal"
+
+
+def _inflation_stats(rows) -> tuple[dict[str, int], dict[str, int], dict[str, int], dict[str, int]]:
+    """岗位级/平台级通胀占比统计（设计文档 §4.8）。
+
+    返回 (pos_total, pos_inflated, src_total, src_inflated) 四组计数：
+    岗位/源 → JD 总数 / 通胀 JD 数。跳过 _duplicate_of 与空岗位名，
+    与 build_aggregates 主循环口径一致。
+    """
+    from app.services.extraction.dictionary import normalize_position_name
+
+    pos_total: Counter = Counter()
+    pos_inflated: Counter = Counter()
+    src_total: Counter = Counter()
+    src_inflated: Counter = Counter()
+    for row in rows:
+        snap = row.snapshot or {}
+        if snap.get("_duplicate_of"):
+            continue
+        ext = snap.get("extraction") or {}
+        pos = normalize_position_name((ext.get("position_name") or "").strip())
+        if not pos:
+            continue
+        source = row.source or ""
+        pos_total[pos] += 1
+        src_total[source] += 1
+        if _is_inflated(snap):
+            pos_inflated[pos] += 1
+            src_inflated[source] += 1
+    return pos_total, pos_inflated, src_total, src_inflated
+
+
 def build_aggregates(rows) -> dict[str, PositionAgg]:
     """从 jd_raw 已抽取记录聚合。
 
@@ -267,9 +313,15 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
     按系数加权（stale ×0.5 / 僵尸 ×0.3 / 抄袭 ×0.4 / 高通胀 ×0.4），归档
     （×0）完全跳过；jd_count 仍计真实 JD 条数——Position.freq 是事实统计，
     且演化/发现链路依赖整数频次，降权作用在技能边贡献上。
+
+    岗位级/平台级通胀（设计文档 §4.8）：
+    - 岗位级：岗位内通胀 JD 占比 ≥30% 时，通胀 JD 完全剔除（与归档同级，
+      jd_count 不计，避免虚高 JD 污染岗位频次与技能边）
+    - 平台级：源内通胀 JD 占比 >50% 时，该源全部 JD 额外降权 ×0.5
     """
     from app.services.extraction.dictionary import normalize_position_name
 
+    pos_total, pos_inflated, src_total, src_inflated = _inflation_stats(rows)
     agg: dict[str, PositionAgg] = defaultdict(PositionAgg)
     for row in rows:
         snap = row.snapshot or {}
@@ -277,14 +329,28 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
         # 被标记 _duplicate_of 的后入库记录不参与聚合，避免重复 JD 虚高频次
         if snap.get("_duplicate_of"):
             continue
-        # 时滞/通胀降权消费：归档 JD 不入聚合
-        jd_weight = _jd_decay_weight(snap)
-        if jd_weight == 0:
-            continue
         ext = snap.get("extraction") or {}
         pos = normalize_position_name((ext.get("position_name") or "").strip())
         if not pos:
             continue
+        source = row.source or ""
+        # 岗位级通胀排除（§4.8）：岗位内通胀占比 ≥30% 时，通胀 JD 完全剔除
+        if (
+            _is_inflated(snap)
+            and pos_total[pos] > 0
+            and pos_inflated[pos] / pos_total[pos] >= _POSITION_INFLATION_EXCLUSION_RATIO
+        ):
+            continue
+        # 时滞/通胀降权消费：归档 JD 不入聚合
+        jd_weight = _jd_decay_weight(snap)
+        if jd_weight == 0:
+            continue
+        # 平台级源降权（§4.8）：源内通胀占比 >50% 时，该源全部 JD ×0.5
+        if (
+            src_total[source] > 0
+            and src_inflated[source] / src_total[source] > _SOURCE_INFLATION_THRESHOLD
+        ):
+            jd_weight = min(jd_weight, _SOURCE_INFLATION_WEIGHT)
         pa = agg[pos]
         pa.jd_count += 1
         years = _min_experience_years(snap)

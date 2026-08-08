@@ -293,6 +293,18 @@ def _history_skill_sets(group: list[tuple[int, date, list[str]]], jd_id: int) ->
     ]
 
 
+def _snapshot_with_skip(snapshot: dict | None, key: str, reason: str) -> dict:
+    """复制 snapshot 并写入检测跳过标记（数据不足，游标收敛用，不做判定）。
+
+    时滞/通胀检测对数据不足的 JD 不做武断判定，但若不写标记，
+    `snapshot[key] is None` 游标会反复选中这些 JD，每次 ETL 空转。
+    skipped 标记不含 decay_weight，聚合层 `_jd_decay_weight` 视为 1.0。
+    """
+    snap = dict(snapshot or {})
+    snap[key] = {"skipped": True, "reason": reason}
+    return snap
+
+
 async def validate_temporal(
     ctx: dict,
     jd_ids: list[int] | None = None,
@@ -329,15 +341,19 @@ async def validate_temporal(
             stmt = stmt.where(JDRaw.id.in_(jd_ids))
         rows = (await session.scalars(stmt.order_by(JDRaw.id.asc()).limit(limit))).all()
 
+        results: dict = {"checked": 0, "skipped": 0, "flagged": []}
         # 已抽取记录视图：(jd_id, position, publish_date, skills)
         views = []
         for row in rows:
             ext = _extraction_of(row)
             if not ext:
+                results["skipped"] += 1
                 continue
             publish = _publish_date(row.snapshot or {}, row.crawled_at or "")
             skills = _skills_of(ext)
             if not skills or publish is None:
+                row.snapshot = _snapshot_with_skip(row.snapshot, "validation", "no_skills_or_publish_date")
+                results["skipped"] += 1
                 continue
             views.append((row, (row.id, ext.get("position_name") or "", publish, skills)))
 
@@ -364,12 +380,12 @@ async def validate_temporal(
                 pos = ext.get("position_name") or ""
                 hist_by_pos.setdefault(pos, []).append((row.id, publish, skills))
 
-        results: dict = {"checked": 0, "skipped": len(rows) - len(views), "flagged": []}
         for row, (jd_id, position, publish, skills) in views:
             # group 覆盖同岗位全部历史记录（含当前批次），按首见时长/抄袭比对口径
             group = hist_by_pos.get(position, [])
             skill_ages = _skill_first_seen_days(group, skills, today)
             if not skill_ages:
+                row.snapshot = _snapshot_with_skip(row.snapshot, "validation", "no_skill_first_seen_ages")
                 results["skipped"] += 1
                 continue
 
@@ -454,10 +470,12 @@ async def detect_inflation(
                 continue
             level = ext.get("level") or ""
             if level not in _QUALITY_LEVELS:
+                row.snapshot = _snapshot_with_skip(row.snapshot, "inflation", "no_level")
                 results["skipped"] += 1
                 continue
             min_years = _experience_years(row.snapshot or {})
             if min_years is None:
+                row.snapshot = _snapshot_with_skip(row.snapshot, "inflation", "no_experience")
                 results["skipped"] += 1
                 continue
 
