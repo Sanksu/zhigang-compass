@@ -168,3 +168,33 @@ class TestSoftSkillInference:
         extractor = ResumeExtractor(llm=_FailingLLM())
         out = extractor.extract("[NAME]\n5年经验，熟悉 Python，项目：团队协作完成推荐系统开发")
         assert out.soft_skills == []
+
+
+class TestRuleBasedProficiency:
+    """规则兜底路径的熟练度提取（方案 A：文本关键词 → 1 了解/2 熟悉/3 精通）。"""
+
+    def _prof_of(self, text: str) -> dict[str, int]:
+        out = ResumeExtractor(llm=_FailingLLM()).extract(text)
+        return {s.name: s.proficiency for s in out.skills}
+
+    def test_expert_keyword_maps_to_3(self):
+        prof = self._prof_of("[NAME]\n5年经验，精通 Python")
+        assert prof["Python"] == 3
+
+    def test_proficient_keyword_maps_to_2(self):
+        prof = self._prof_of("[NAME]\n5年经验，熟练掌握 Java")
+        assert prof["Java"] == 2
+
+    def test_beginner_keyword_maps_to_1(self):
+        prof = self._prof_of("[NAME]\n5年经验，了解 Docker")
+        assert prof["Docker"] == 1
+
+    def test_no_keyword_defaults_to_2(self):
+        prof = self._prof_of("[NAME]\n5年经验，使用 Python 开发")
+        assert prof["Python"] == 2
+
+    def test_adjacent_skills_not_misattributed(self):
+        """相邻技能熟练度互不误捕：精通 Python、熟悉 Java。"""
+        prof = self._prof_of("[NAME]\n5年经验，精通 Python，熟悉 Java")
+        assert prof["Python"] == 3
+        assert prof["Java"] == 2

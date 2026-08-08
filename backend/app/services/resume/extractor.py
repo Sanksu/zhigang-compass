@@ -27,6 +27,33 @@ _EXPERIENCE_RE = re.compile(
 )
 _YEARS_RE = re.compile(r"(?<!\d)(?!19\d{2}|20\d{2})(\d+(?:\.\d+)?)\s*年")
 
+# 简历文本熟练度关键词 → proficiency 三档（对齐 ResumeSkill enum：1 了解/2 熟悉/3 精通）。
+# 与 JD 侧 _PROFICIENCY_KEYWORDS 词表同源（精通/深入/专家/资深、掌握/熟练、了解/入门/基础），
+# 但档位语义不同（JD 档=岗位要求档次 初级/中级/高级，简历档=个人熟练度 1/2/3），
+# 故独立定义防语义错位；"熟悉"在简历侧即"熟悉"档（2），不被映射到 JD 初级档。
+_RESUME_PROFICIENCY_KEYWORDS: list[tuple[tuple[str, ...], int]] = [
+    (("精通", "深入", "专家", "资深"), 3),
+    (("掌握", "熟练", "熟悉", "独立"), 2),
+    (("了解", "入门", "基础"), 1),
+]
+
+
+def _skill_proficiency(resume_text: str, skill_name: str) -> int:
+    """从简历文本提取技能熟练度（无命中默认 2 熟悉，与 ResumeSkill 默认一致）。
+
+    取技能名之前、最近一个句读分隔符（，。；、,\\n）到技能名之间的片段匹配关键词，
+    避免相邻技能熟练度互相误捕（"精通 Python，熟悉 Java"中 Java 不应受"精通"影响）。
+    """
+    idx = resume_text.find(skill_name)
+    if idx < 0:
+        return 2
+    seg_start = max(resume_text.rfind(c, 0, idx) for c in "，。；、,\n")
+    window = resume_text[:idx] if seg_start < 0 else resume_text[seg_start + 1 : idx]
+    for keywords, level in _RESUME_PROFICIENCY_KEYWORDS:
+        if any(k in window for k in keywords):
+            return level
+    return 2
+
 
 class ResumeExtractor:
     """简历实体抽取器。"""
@@ -133,7 +160,10 @@ class ResumeExtractor:
         for alias, std in d.SKILL_ALIAS.items():
             if std not in found_names and alias.lower() in text_low:
                 found_names.add(std)
-        found = [ResumeSkill(name=name, proficiency=2) for name in found_names]
+        found = [
+            ResumeSkill(name=name, proficiency=_skill_proficiency(resume_text, name))
+            for name in found_names
+        ]
 
         education_level = next(
             (level for level in _EDUCATION_LEVELS if level in resume_text), ""

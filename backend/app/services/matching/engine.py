@@ -5,6 +5,7 @@ M2 规则基线：内容加权（must/nice 布尔匹配）+ 经验规则引擎�
 Sentence-BERT 语义增强与 Optuna 权重搜索为 M3 交付项（设计文档 9.3 节）。
 """
 
+import math
 from datetime import date, datetime
 
 from app.services.matching.schemas import (
@@ -39,6 +40,39 @@ SOFT_SKILL_DOWNWEIGHT = 0.5
 def _soft_multiplier(cs) -> float:
     """候选技能置信度乘数：LLM 推断软技能 ×0.5，显式技能 ×1.0。"""
     return SOFT_SKILL_DOWNWEIGHT if cs.low_confidence else 1.0
+
+
+# 熟练度满足度矩阵（方案 A，对齐设计文档 9.2"期望熟练度"匹配）：
+# 岗位期望熟练度（聚合层 REQUIRES.level：初级/中级/高级/专家）× 候选人熟练度
+# （1 了解 / 2 熟悉 / 3 精通）→ 系数。候选人熟练度 ≥ 岗位期望 → 1.0（不惩罚），
+# 低一档 ×0.6、低两档 ×0.3；"了解"对"初级"岗容忍基础接触 ×0.85，
+# "精通"对"专家"岗留 ×0.85 余量（避免要求堆到极值把分压到 0）。
+_PROFICIENCY_FACTORS: dict[str, dict[int, float]] = {
+    "初级": {1: 0.85, 2: 1.0, 3: 1.0},
+    "中级": {1: 0.60, 2: 1.0, 3: 1.0},
+    "高级": {1: 0.30, 2: 0.60, 3: 1.0},
+    "专家": {1: 0.30, 2: 0.60, 3: 0.85},
+}
+
+
+def _proficiency_factor(required: str | None, candidate: int | None) -> float:
+    """熟练度满足度系数：候选人熟练度 ≥ 岗位期望 → 1.0，低一档 0.6，低两档 0.3。
+
+    岗位期望缺失（聚合层未写 level / 黄金集构造未传）或候选人熟练度缺失 → 1.0，
+    不武断惩罚（黄金集评测零回归的关键默认）。
+    """
+    if not required or candidate is None:
+        return 1.0
+    return _PROFICIENCY_FACTORS.get(required, {}).get(candidate, 1.0)
+
+
+def _source_weight(source_count: int | None) -> float:
+    """技能重要性权重：log(source_count+1) 平滑（方案 B）。
+
+    跨源数多的核心必备技能权重更高；source_count 缺失/默认 1 时全技能等权
+    （log2），退化为优化前的等权平均（黄金集零回归）。
+    """
+    return math.log((source_count or 1) + 1)
 
 
 def apply_cii_correction(position: PositionProfile) -> PositionProfile:
@@ -118,10 +152,11 @@ def _skill_similarity(
     """
     req_canon = _canonical_name(req.skill_name)
     for cs in candidate_skills:
+        factor = _proficiency_factor(req.proficiency, cs.proficiency)
         if req.skill_id and cs.skill_id and req.skill_id.lower() == cs.skill_id.lower():
-            return _soft_multiplier(cs)
+            return factor * _soft_multiplier(cs)
         if req_canon and cs.skill_name and _canonical_name(cs.skill_name) == req_canon:
-            return _soft_multiplier(cs)
+            return factor * _soft_multiplier(cs)
 
     if semantic is None or not req.skill_name:
         return 0.0
@@ -141,7 +176,40 @@ def _skill_similarity(
     # 阈值基于原始相似度判断（与显式技能口径一致），降权只作用于最终贡献分
     if best_cs is None or best < threshold:
         return 0.0
-    return best * _soft_multiplier(best_cs)
+    return best * _proficiency_factor(req.proficiency, best_cs.proficiency) * _soft_multiplier(best_cs)
+
+
+def _proficiency_matched(req, candidate_skills) -> float:
+    """命中该岗位技能的候选人熟练度满足度（未命中返回 0.0）。
+
+    仅精确/别名命中判定（与 _skill_similarity 前两路一致），供雷达
+    skill_level 维度展示用；语义命中不在此重复计算。
+    """
+    req_canon = _canonical_name(req.skill_name)
+    for cs in candidate_skills:
+        if req.skill_id and cs.skill_id and req.skill_id.lower() == cs.skill_id.lower():
+            return _proficiency_factor(req.proficiency, cs.proficiency)
+        if req_canon and cs.skill_name and _canonical_name(cs.skill_name) == req_canon:
+            return _proficiency_factor(req.proficiency, cs.proficiency)
+    return 0.0
+
+
+def _skill_level_score(position: PositionProfile, candidate_skills) -> float | None:
+    """雷达"熟练度"维度：命中必备技能中、岗位有期望熟练度要求的满足度均值。
+
+    岗位必备技能均无期望熟练度，或无一命中 → None（无信息不展示，避免误导）。
+    仅展示维度，不参与总分。
+    """
+    factors = []
+    for req in position.must_skills:
+        if not req.proficiency:
+            continue
+        factor = _proficiency_matched(req, candidate_skills)
+        if factor > 0.0:
+            factors.append(factor)
+    if not factors:
+        return None
+    return sum(factors) / len(factors)
 
 
 def _build_summary(
@@ -245,20 +313,22 @@ def build_radar(
     semantic=None,
     project_vectors=None,
 ) -> dict:
-    """人岗比对五维雷达（设计文档 §9.5：完整五维雷达图）。
+    """人岗比对雷达图（设计文档 §9.5：五维 + 熟练度满足度）。
 
     五维构成（§9.2 六类特征中实现可达的五维）：must（必备技能）/ nice（加分技能）/
-    experience（经验）/ education（学历）/ projects（项目）。软技能已并入 must/nice
-    （low_confidence 降权 ×0.5），证书维度当前图谱侧 required_certs 数据稀疏
-    暂不入雷达，故为五维而非六维。
-    education/projects 为保守近似：无数据返回 None，公式标注待 M5 完善。
+    experience（经验）/ education（学历）/ projects（项目），另加 skill_level
+    （熟练度满足度，仅展示）。软技能已并入 must/nice（low_confidence 降权 ×0.5），
+    证书维度当前图谱侧 required_certs 数据稀疏暂不入雷达。
+    education/projects/skill_level 为保守近似：无数据返回 None，不参与总分。
     """
+    skill_level = _skill_level_score(position, candidate.skills)
     return {
         "must": round(must_score, 4),
         "nice": round(nice_score, 4),
         "experience": round(exp_score, 4),
         "education": _education_score(position.required_education, candidate.education_level),
         "projects": _project_score(candidate, position, semantic, project_vectors),
+        "skill_level": round(skill_level, 4) if skill_level is not None else None,
     }
 
 
@@ -291,6 +361,10 @@ def score_position(
     position = apply_cii_correction(position)
 
     must_total = len(position.must_skills)
+    # must 按 source_count 加权（log(source_count+1)）：跨源多的核心技能贡献/缺失
+    # 惩罚均更重；source_count 默认 1 时等权，退化为优化前行为（黄金集零回归）
+    must_weights = [_source_weight(req.source_count) for req in position.must_skills]
+    must_total_weight = sum(must_weights)
     must_sims = [
         _skill_similarity(req, candidate.skills, semantic, sim_threshold)
         for req in position.must_skills
@@ -301,7 +375,13 @@ def score_position(
     missing_must = [
         req.skill_name for req, sim in zip(position.must_skills, must_sims) if sim == 0
     ]
-    must_score = 1.0 if must_total == 0 else sum(must_sims) / must_total
+    must_score = (
+        1.0
+        if must_total_weight == 0
+        else sum(
+            w * sim for w, sim in zip(must_weights, must_sims)
+        ) / must_total_weight
+    )
 
     nice_total_weight = sum(req.weight for req in position.nice_skills)
     if nice_total_weight == 0:
