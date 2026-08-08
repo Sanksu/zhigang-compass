@@ -94,15 +94,14 @@ def staleness_penalty(last_updated: str | None, today: date | None = None) -> fl
 
 
 def _canonical_name(name: str) -> str:
-    """技能规范名：别名归一化 + 中文后缀清洗 + 小写。
+    """技能规范名：canonical_skill_name + 小写。
 
     与 JD 入库口径（post_process._clean）一致，保证候选人侧与图谱侧技能名可比。
     别名级同义词（"Golang"→"Go"、"Spring"→"Spring Boot"）由此统一。
     """
-    from app.services.extraction.dictionary import normalize_skill
-    from app.services.extraction.post_processor import clean_skill_name
+    from app.services.extraction.post_processor import canonical_skill_name
 
-    return clean_skill_name(normalize_skill(name)).strip().lower()
+    return canonical_skill_name(name).strip().lower()
 
 
 def _skill_similarity(

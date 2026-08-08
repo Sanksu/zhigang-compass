@@ -30,10 +30,9 @@ from statistics import median
 
 from app.services.extraction.dictionary import (
     SOFT_SKILL_WHITELIST,
-    normalize_skill,
     skill_category,
 )
-from app.services.extraction.post_processor import _is_valid_skill_name, clean_skill_name
+from app.services.extraction.post_processor import _is_valid_skill_name, canonical_skill_name
 
 # 图谱 weight 两档约定
 _WEIGHT_MUST = 0.8
@@ -223,7 +222,7 @@ def _position_skills(ext: dict) -> list[tuple[str, str, str]]:
     低频过滤线误裁——故以 requirements 为准、skills 未覆盖的以 nice 并入。
     """
     def _norm(name: str) -> str:
-        n = clean_skill_name(normalize_skill(name.strip()))
+        n = canonical_skill_name(name)
         return n if _is_valid_skill_name(n) else ""
 
     reqs = ext.get("requirements") or []
