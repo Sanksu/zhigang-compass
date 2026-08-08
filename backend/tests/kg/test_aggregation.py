@@ -15,27 +15,32 @@ from app.services.kg.aggregation import (
 
 
 class TestMustJudgment:
-    """must 判定（设计文档 §5.5）：jd_count≥3 按 must 标注覆盖率 >1/2；
-    样本不足回退 must 标注占比 ≥1/2。"""
+    """must 判定（P2-D 聚合口径）：hit≥3 样本保护 + JD 覆盖率≥15%
+    + must 标注占比>1/2 三重条件。"""
 
     def _sa(self, hit: int, must_count: int):
         return SimpleNamespace(hit=hit, must_count=must_count)
 
-    def test_coverage_over_half_is_must(self):
-        # jd_count=4，3 条 JD 标 must → 3/4 > 1/2 → must
-        assert _is_must(self._sa(hit=4, must_count=3), jd_count=4) is True
+    def test_high_coverage_is_must(self):
+        # hit=10/jd_count=20（覆盖率 50%），must 占 80% → must
+        assert _is_must(self._sa(hit=10, must_count=8), jd_count=20) is True
 
-    def test_coverage_exactly_half_is_nice(self):
-        # jd_count=4，2 条标 must → 2/4 = 1/2，严格不大于 → nice
-        assert _is_must(self._sa(hit=4, must_count=2), jd_count=4) is False
+    def test_low_coverage_is_nice(self):
+        # hit=3/jd_count=30（覆盖率 10% <15%），must 全标 → 覆盖率不足 → nice
+        assert _is_must(self._sa(hit=3, must_count=3), jd_count=30) is False
 
-    def test_small_sample_fallback_to_must_ratio(self):
-        # jd_count=2（样本不足）：must 标注占比 1/1 ≥ 1/2 → 按原逻辑 must
-        assert _is_must(self._sa(hit=1, must_count=1), jd_count=2) is True
+    def test_must_ratio_at_half_is_nice(self):
+        # 覆盖率达标但 must 标注恰 50%（须严格大于）→ nice
+        assert _is_must(self._sa(hit=6, must_count=3), jd_count=10) is False
 
-    def test_small_sample_under_half_is_nice(self):
-        # jd_count=2：1 条 JD 出现技能但未标 must → 0/1 < 1/2 → nice
-        assert _is_must(self._sa(hit=1, must_count=0), jd_count=2) is False
+    def test_low_hit_protection_is_nice(self):
+        # hit=1/2（样本不足），即使全标 must 也判 nice，防单条 JD 虚高
+        assert _is_must(self._sa(hit=1, must_count=1), jd_count=2) is False
+        assert _is_must(self._sa(hit=2, must_count=2), jd_count=3) is False
+
+    def test_zero_jd_count_is_nice(self):
+        # jd_count=0 防御：不判 must
+        assert _is_must(self._sa(hit=3, must_count=3), jd_count=0) is False
 
 
 class TestPositionSkills:
@@ -54,6 +59,33 @@ class TestPositionSkills:
     def test_fallback_to_skills_without_level(self):
         ext = {"skills": [{"name": "Python"}, {"name": "Go"}]}
         assert _position_skills(ext) == [("Python", "nice", ""), ("Go", "nice", "")]
+
+
+class TestPositionSkillsNormalization:
+    """聚合技能名归一化：旧快照异构名（P1-1 前抽取）对齐到规范节点，防聚合重建旧名。"""
+
+    def test_requirements_skill_name_normalized(self):
+        ext = {"requirements": [{"skill_name": "Vue3", "necessity": "must", "level": None}]}
+        assert _position_skills(ext) == [("Vue.js", "must", "")]
+
+    def test_fallback_skills_name_normalized(self):
+        ext = {"skills": [{"name": "reactjs"}]}
+        assert _position_skills(ext) == [("React", "nice", "")]
+
+    def test_whitelist_word_preserved(self):
+        # 白名单词整体保护，聚合不被剥成泛词碎片
+        ext = {"requirements": [{"skill_name": "操作系统", "necessity": "must", "level": None}]}
+        assert _position_skills(ext) == [("操作系统", "must", "")]
+
+    def test_stopword_dropped(self):
+        # 归一化后为空的旧泛词碎片（"系统"→""）不进聚合
+        ext = {"requirements": [{"skill_name": "系统", "necessity": "must", "level": None}]}
+        assert _position_skills(ext) == []
+
+    def test_stopword_preserved_after_clean_dropped(self):
+        # 剥后缀剥不掉的旧泛词（"嵌入式"在 P1-2 才入黑名单，旧快照残留）按黑名单剔除
+        ext = {"requirements": [{"skill_name": "嵌入式", "necessity": "must", "level": None}]}
+        assert _position_skills(ext) == []
 
 
 class TestMostCommonLevel:
@@ -136,3 +168,57 @@ class TestSoftSkillsAggregation:
         write_aggregates(fake, agg, now="2026-08-04T00:00:00")
         positions_items = fake.calls[0][1]["items"]
         assert positions_items[0]["soft_skills"] == ["团队协作"]
+
+
+class TestP2CrossDomainAndLowFreq:
+    """P2-C 跨域降权 + P2-D 低频边过滤（write_aggregates 生成 edges 阶段）。"""
+
+    def _row(self, requirements: list[dict], i: int):
+        return SimpleNamespace(
+            snapshot={"extraction": {"position_name": "Java开发工程师", "requirements": list(requirements)}},
+            source=f"src{i}",
+        )
+
+    def _edges(self, rows):
+        agg = build_aggregates(rows)
+        fake = _FakeSession()
+        write_aggregates(fake, agg, now="2026-08-08T00:00:00")
+        return fake.calls[1][1]["edges"]
+
+    def test_cross_domain_skill_downgraded_to_nice(self):
+        # Java开发工程师 12 条 JD 全标 Vue.js（前端类别）为 must：
+        # 命中率/标注率均满足 must 判定，但类别不在 Java 白名单 → 降权 nice；
+        # Java（编程语言）不受影响保持 must
+        reqs = [
+            {"skill_name": "Java", "necessity": "must", "level": "熟悉"},
+            {"skill_name": "Vue.js", "necessity": "must", "level": ""},
+        ]
+        edges = self._edges([self._row(reqs, i) for i in range(12)])
+        by_skill = {e["skill"]: e for e in edges}
+        assert by_skill["Java"]["necessity"] == "must"
+        assert by_skill["Java"]["weight"] == 0.8
+        assert by_skill["Vue.js"]["necessity"] == "nice"
+        assert by_skill["Vue.js"]["weight"] == 0.4
+
+    def test_low_freq_edge_filtered(self):
+        # 大岗位（jd_count≥10）：hit=1 的一次性技能边不生成；hit 达标的保留
+        reqs = [{"skill_name": "Java", "necessity": "must", "level": ""}]
+        rows = [self._row(reqs, i) for i in range(12)]
+        rows[0].snapshot["extraction"]["requirements"].append(
+            {"skill_name": "Rust", "necessity": "must", "level": ""}
+        )
+        edges = self._edges(rows)
+        skills = {e["skill"] for e in edges}
+        assert "Java" in skills
+        assert "Rust" not in skills  # hit=1 < _MIN_HIT_EDGE 被过滤
+
+    def test_small_position_keeps_low_freq_edge(self):
+        # 小岗位（jd_count<10）样本不足：hit=1 的边保留，不做低频过滤
+        reqs = [{"skill_name": "Java", "necessity": "must", "level": ""}]
+        rows = [self._row(reqs, i) for i in range(3)]
+        rows[0].snapshot["extraction"]["requirements"].append(
+            {"skill_name": "Rust", "necessity": "must", "level": ""}
+        )
+        edges = self._edges(rows)
+        skills = {e["skill"] for e in edges}
+        assert "Rust" in skills

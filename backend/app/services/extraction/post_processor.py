@@ -28,10 +28,11 @@ _SKILL_SUFFIX_RE = re.compile(
 def clean_skill_name(name: str) -> str:
     """清洗技能名称中的中文后缀。
 
-    软技能白名单整体跳过（"项目管理"不以"管理"为后缀退化），
+    软技能与白名单词整体跳过（"项目管理"不以"管理"为后缀退化，
+    "操作系统"不以"系统"为后缀退化——P1-2 起白名单词整体保护，防剥成泛词碎片），
     其余技能按后缀表剥除（"前端开发"→"前端"）。
     """
-    if name in SOFT_SKILL_WHITELIST:
+    if name in SKILL_WHITELIST:
         return name
     name = _SKILL_SUFFIX_RE.sub("", name).strip()
     return name

@@ -49,8 +49,15 @@ def main() -> None:
     # 2. 重放 import_jd
     pairs = asyncio.run(_load_extracted())
     print(f"重放 {len(pairs)} 条已抽取 JD ...")
+    skipped_dup = 0
     with neo4j_driver.session() as session:
         for i, (row, ext) in enumerate(pairs, 1):
+            # SimHash 重复记录（snapshot._duplicate_of）不重放：聚合同样跳过它们，
+            # 否则会重建出聚合不覆盖的 REQUIRES 边（无 source_count 的残留边）。
+            # 产品链路抽取后先入图、去重后补标记，故重复判定只能在重放层做。
+            if (row.snapshot or {}).get("_duplicate_of"):
+                skipped_dup += 1
+                continue
             try:
                 extraction = JDExtractionResult.model_validate(ext)
             except Exception as e:
@@ -68,7 +75,7 @@ def main() -> None:
                 print(f"  [{i}] 入图失败: {row.id} {str(e)[:150]}")
             if i % 100 == 0:
                 print(f"  已处理 {i} 条")
-    print("重建完成。请运行 cleanup_graph.py 做技能过滤与聚合。")
+    print(f"重建完成（跳过 SimHash 重复 {skipped_dup} 条）。请运行 cleanup_graph.py 做技能过滤与聚合。")
 
 
 if __name__ == "__main__":

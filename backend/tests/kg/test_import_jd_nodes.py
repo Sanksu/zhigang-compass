@@ -9,6 +9,7 @@ from app.services.extraction.schemas import (
     CertificationExtracted,
     EducationExtracted,
     JDExtractionResult,
+    REQUIRESRelation,
 )
 from app.services.kg.kg_service import import_jd
 
@@ -123,3 +124,46 @@ class TestImportJdEducationCertification:
         import_jd(_FakeSession(tx), ext, _evidence())
         assert not any("Education" in q for q, _ in tx.queries)
         assert not any("Certification" in q for q, _ in tx.queries)
+
+
+class TestImportJdSkillNormalization:
+    """import_jd 技能名归一化：旧快照异构名（P1-1 前抽取）合并到规范 Skill 节点。
+
+    重建（rebuild_graph）直接重放 jd_raw 快照，快照技能名可能是 Vue3/reactjs 等
+    别名；import_jd 归一化后才能命中规范节点，防止重建出旧名节点回退 P1-3 合并。
+    """
+
+    def _run(self, skill_names: list[str]) -> list[tuple[str, dict]]:
+        tx = _FakeTx()
+        ext = JDExtractionResult(
+            position_name="测试工程师",
+            requirements=[REQUIRESRelation(skill_name=n, necessity="must") for n in skill_names],
+        )
+        import_jd(_FakeSession(tx), ext, _evidence())
+        return [(q, p) for q, p in tx.queries if "MERGE (s:Skill" in q]
+
+    def test_alias_normalized_to_canonical_name(self):
+        skill_merges = self._run(["Vue3"])
+        assert len(skill_merges) == 1
+        assert skill_merges[0][1]["name"] == "Vue.js"
+
+    def test_no_orphan_alias_node(self):
+        # 别名（Vue3）不入图，只建规范节点（Vue.js）——重建不产生旧名节点
+        skill_merges = self._run(["Vue3", "Vue.js"])
+        names = {p["name"] for _, p in skill_merges}
+        assert names == {"Vue.js"}
+
+    def test_whitelist_word_preserved(self):
+        # 白名单词整体保护（clean_skill_name），不被剥成泛词碎片
+        skill_merges = self._run(["操作系统"])
+        assert skill_merges[0][1]["name"] == "操作系统"
+
+    def test_stopword_dropped(self):
+        # 归一化后为空（"系统"→""）直接跳过，不建节点
+        skill_merges = self._run(["系统"])
+        assert skill_merges == []
+
+    def test_stopword_preserved_after_clean_dropped(self):
+        # 剥后缀剥不掉的旧泛词（"嵌入式"）按黑名单剔除，不建节点
+        skill_merges = self._run(["嵌入式"])
+        assert skill_merges == []

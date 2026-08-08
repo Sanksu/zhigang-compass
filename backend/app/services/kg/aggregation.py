@@ -9,9 +9,13 @@
 - Position.last_updated   = 本次聚合时间
 - Position.soft_skills    = 软技能白名单（按 JD 命中数降序，设计文档 9.2 节）
 - REQUIRES.weight         = must=0.8 / nice=0.4（沿用图谱现有两档约定）
-- REQUIRES.necessity      = JD 数 ≥3 时 must 标注覆盖率（must_count/jd_count）> 1/2 判 must；
-                            样本不足（<3 条）回退 must 标注占比（must_count/hit）≥ 1/2
+- REQUIRES.necessity      = P2-D 三重条件判 must：hit≥3 样本保护 + JD 覆盖率
+                            （hit/jd_count）≥15% + must 标注占比（must_count/hit）>1/2；
+                            大岗位（jd_count≥10）hit<2 的一次性噪声边不生成
 - REQUIRES.source_count   = 命中该技能的独立招聘源数
+
+跨域降权（P2-C）：岗位族期望技能类别白名单 `_ALLOWED_SKILL_CATEGORIES`，
+已分类技能不在白名单内时保留边但强制 nice（weight=0.4，不删数据）。
 
 weight 取离散两档而非出现率连续值的原因：与匹配引擎 CII 降级（按 weight
 升序降级边缘必备项）和全景图 min_weight=0.3 过滤语义兼容，且与历史手工
@@ -24,14 +28,122 @@ import re
 from collections import Counter, defaultdict
 from statistics import median
 
-from app.services.extraction.dictionary import SOFT_SKILL_WHITELIST
+from app.services.extraction.dictionary import (
+    SOFT_SKILL_WHITELIST,
+    normalize_skill,
+    skill_category,
+)
+from app.services.extraction.post_processor import _is_valid_skill_name, clean_skill_name
 
 # 图谱 weight 两档约定
 _WEIGHT_MUST = 0.8
 _WEIGHT_NICE = 0.4
-# must 判定阈值：jd_count≥3 时要求 must 标注覆盖率 >1/2；
-# 样本不足（<3 条）回退 must 标注占比 ≥1/2（两处阈值一致，分母不同）
+# P2-D 必要性治理（岗位评估报告 4.3 must 失衡）：
+# must 判定三重条件——样本保护（hit≥3）+ JD 覆盖率（hit/jd_count≥15%）
+# + must 标注占比（must_count/hit>50%）。原实现分母用 jd_count 稀释大岗位，
+# 导致必须项全部判 nice；改用 hit 分母并加覆盖率门槛，恢复判别力
 _MUST_THRESHOLD = 0.5
+_COVERAGE_THRESHOLD = 0.15
+_MIN_HIT_FOR_MUST = 3
+# P2-D 低频边过滤：jd_count≥10 的岗位，hit<2 的边视为一次性噪声不生成
+# （jd_count<10 的小岗位样本不足，全量保留）
+_MIN_HIT_EDGE = 2
+_MIN_JD_FOR_FILTER = 10
+
+
+def _is_must(sa: SkillAgg, jd_count: int) -> bool:
+    """技能边是否判 must（P2-D 聚合口径）。
+
+    must 判定三重条件：
+    1. hit ≥ 3：样本保护，防 1-2 次出现的技能因单条 JD 标注虚高判 must
+    2. hit/jd_count ≥ 15%：技能须在该岗位足够比例的 JD 中出现（普适要求）
+    3. must_count/hit > 50%：出现该技能的 JD 中超半数标 must
+    """
+    if sa.hit < _MIN_HIT_FOR_MUST:
+        return False
+    coverage = sa.hit / jd_count if jd_count else 0
+    return coverage >= _COVERAGE_THRESHOLD and sa.must_count / sa.hit > _MUST_THRESHOLD
+
+
+def _is_cross_domain(pos: str, skill_name: str) -> bool:
+    """P2-C 跨域判定：岗位族有期望技能类别白名单时，已分类技能不在白名单内视为跨域。
+
+    降权策略（保留边、不删数据）：跨域技能强制 nice，避免污染匹配与图谱可视化。
+    未分类技能（category=未分类）不降权（白名单外待审核，不武断）。
+    """
+    allowed = _ALLOWED_SKILL_CATEGORIES.get(pos)
+    if not allowed:
+        return False
+    cat = skill_category(skill_name)
+    return cat != "未分类" and cat not in allowed
+
+
+# P2-C 岗位族 → 期望技能类别白名单（评估报告 4.2 跨域污染治理）。
+# 已分类技能不在对应岗位族白名单内 → 降权为 nice；未配置的岗位族不做跨域判定。
+_ALLOWED_SKILL_CATEGORIES: dict[str, set[str]] = {
+    "前端开发工程师": {"前端", "编程语言", "计算机基础", "网络/协议", "移动/桌面", "测试",
+                   "音视频", "游戏/数字孪生", "工程协作", "数据库", "云原生/DevOps", "AI/机器学习", "安全"},
+    "后端开发工程师": {"后端", "编程语言", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
+                   "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作", "安全", "移动/桌面"},
+    "Java开发工程师": {"后端", "编程语言", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
+                   "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作", "安全", "移动/桌面"},
+    "Go开发工程师": {"后端", "编程语言", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
+                 "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作"},
+    "Python开发工程师": {"后端", "编程语言", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
+                    "网络/协议", "测试", "大数据", "AI/机器学习", "数据分析/商业", "工程协作"},
+    "C++开发工程师": {"编程语言", "后端", "计算机基础", "硬件/芯片", "云原生/DevOps", "网络/协议",
+                  "消息/中间件", "AI/机器学习", "智能驾驶/机器人", "数据库"},
+    "算法工程师": {"AI/机器学习", "编程语言", "大数据", "计算机基础", "智能驾驶/机器人", "数据分析/商业",
+              "数据库", "网络/协议", "消息/中间件", "音视频", "工程协作", "云原生/DevOps", "后端", "测试"},
+    # P1-A 算法细分岗（评估报告 3.2 算法 28 合一）
+    "大模型算法工程师": {"AI/机器学习", "编程语言", "大数据", "计算机基础", "数据分析/商业", "数据库",
+                   "云原生/DevOps", "工程协作", "网络/协议"},
+    "自动驾驶算法工程师": {"AI/机器学习", "智能驾驶/机器人", "编程语言", "计算机基础", "硬件/芯片",
+                   "网络/协议", "音视频"},
+    "机器视觉算法工程师": {"AI/机器学习", "计算机基础", "编程语言", "智能驾驶/机器人", "音视频",
+                   "硬件/芯片"},
+    "推荐搜索算法工程师": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础", "数据库",
+                   "网络/协议"},
+    "语音算法工程师": {"AI/机器学习", "音视频", "编程语言", "计算机基础", "智能驾驶/机器人"},
+    "机器人算法工程师": {"AI/机器学习", "智能驾驶/机器人", "编程语言", "计算机基础", "硬件/芯片",
+                   "网络/协议"},
+    "测试工程师": {"测试", "编程语言", "计算机基础", "网络/协议", "云原生/DevOps", "工程协作",
+              "数据库", "后端", "AI/机器学习", "安全"},
+    "网络安全工程师": {"安全", "网络/协议", "编程语言", "云原生/DevOps", "计算机基础", "工程协作",
+                 "数据库", "后端", "AI/机器学习"},
+    "网络工程师": {"网络/协议", "云原生/DevOps", "计算机基础", "安全", "编程语言", "工程协作"},
+    "大数据开发工程师": {"大数据", "数据库", "编程语言", "云原生/DevOps", "消息/中间件", "计算机基础",
+                   "AI/机器学习", "数据分析/商业", "后端", "网络/协议", "工程协作"},
+    "数据分析师": {"数据分析/商业", "数据库", "编程语言", "大数据", "AI/机器学习", "计算机基础",
+              "工程协作", "网络/协议"},
+    "架构师": {"云原生/DevOps", "后端", "数据库", "消息/中间件", "大数据", "编程语言", "计算机基础",
+           "网络/协议", "AI/机器学习", "安全", "工程协作", "测试", "移动/桌面", "音视频", "前端"},
+    "运维工程师": {"云原生/DevOps", "网络/协议", "编程语言", "计算机基础", "数据库", "消息/中间件",
+              "安全", "测试", "大数据", "工程协作"},
+    "DevOps工程师": {"云原生/DevOps", "网络/协议", "编程语言", "计算机基础", "数据库", "消息/中间件",
+                "安全", "测试", "大数据", "工程协作", "AI/机器学习"},
+    "嵌入式开发工程师": {"硬件/芯片", "编程语言", "计算机基础", "智能驾驶/机器人", "网络/协议",
+                   "AI/机器学习", "测试", "移动/桌面", "音视频"},
+    "硬件工程师": {"硬件/芯片", "编程语言", "计算机基础", "网络/协议", "智能驾驶/机器人", "AI/机器学习"},
+    "数据库管理员": {"数据库", "编程语言", "云原生/DevOps", "计算机基础", "网络/协议", "安全"},
+    "软件开发工程师": {"编程语言", "后端", "前端", "数据库", "云原生/DevOps", "消息/中间件",
+                  "计算机基础", "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作", "安全",
+                  "移动/桌面", "音视频", "游戏/数字孪生", "数据分析/商业"},
+    "科学家": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础", "智能驾驶/机器人",
+           "数据库", "音视频", "工程协作", "网络/协议"},
+    "分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "AI/机器学习", "计算机基础",
+           "工程协作", "网络/协议"},
+    "顾问": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础", "数据库",
+         "云原生/DevOps", "后端", "工程协作", "网络/协议"},
+    "量化分析师": {"编程语言", "AI/机器学习", "大数据", "数据分析/商业", "计算机基础", "数据库"},
+    "研究员": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础", "数据库",
+           "音视频", "智能驾驶/机器人", "网络/协议"},
+    "创始工程师": {"编程语言", "后端", "前端", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
+             "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作", "移动/桌面", "安全"},
+    "全栈工程师": {"前端", "后端", "编程语言", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
+              "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作", "安全", "移动/桌面", "音视频",
+              "游戏/数字孪生", "数据分析/商业"},
+}
 
 
 def _most_common_level(levels: list[str]) -> str:
@@ -39,19 +151,6 @@ def _most_common_level(levels: list[str]) -> str:
     if not levels:
         return ""
     return Counter(levels).most_common(1)[0][0]
-
-
-def _is_must(sa: SkillAgg, jd_count: int) -> bool:
-    """技能边是否判 must（设计文档 §5.5 聚合口径）。
-
-    岗位 JD 数 ≥3 时按 must 标注覆盖率判定（must_count/jd_count > 1/2）：
-    技能须在该岗位过半数 JD 中被 LLM 标为 must 才算必须——原"must 标注占比
-    过半"口径下每条 JD 各自抽取的 must 技能差异大，导致 85% 边被判 must；
-    样本不足（<3 条）回退原逻辑（must 标注占比 ≥1/2），不因样本少武断降级。
-    """
-    if jd_count >= 3:
-        return sa.must_count / jd_count > _MUST_THRESHOLD
-    return sa.must_count / sa.hit >= _MUST_THRESHOLD
 
 
 class SkillAgg:
@@ -83,22 +182,28 @@ def _min_experience_years(snapshot: dict) -> float | None:
 
 
 def _position_skills(ext: dict) -> list[tuple[str, str, str]]:
-    """岗位技能列表 (skill_name, necessity, level)。requirements 优先，缺省 skills。"""
+    """岗位技能列表 (skill_name, necessity, level)。requirements 优先，缺省 skills。
+
+    技能名与抽取链路一致归一化（normalize_skill → clean_skill_name → 黑名单/单字符
+    过滤）：jd_raw 快照可能早于 P1-1/P1-2 扩充抽取（存 Vue3/reactjs、嵌入式/前端等
+    泛词），聚合时归一化才能命中已合并的规范节点，防止聚合把属性写回旧名节点、
+    重建旧名 Skill，或把泛词频次计入聚合。
+    """
+    def _norm(name: str) -> str:
+        n = clean_skill_name(normalize_skill(name.strip()))
+        return n if _is_valid_skill_name(n) else ""
+
     reqs = ext.get("requirements") or []
     if reqs:
         return [
-            (
-                r.get("skill_name", "").strip(),
-                r.get("necessity", "nice"),
-                r.get("level") or "",
-            )
+            (_norm(r.get("skill_name", "")), r.get("necessity", "nice"), r.get("level") or "")
             for r in reqs
-            if r.get("skill_name") and r["skill_name"].strip()
+            if _norm(r.get("skill_name", ""))
         ]
     return [
-        (s.get("name", "").strip(), "nice", "")
+        (_norm(s.get("name", "")), "nice", "")
         for s in (ext.get("skills") or [])
-        if s.get("name") and s["name"].strip()
+        if _norm(s.get("name", ""))
     ]
 
 
@@ -144,10 +249,38 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
     return agg
 
 
+def build_edges(agg: dict[str, PositionAgg]) -> list[dict]:
+    """构建写回图谱的 REQUIRES 边列表（P2 过滤+降权口径）。
+
+    与 write_aggregates 写边逻辑完全一致，独立成纯函数供 cleanup_graph 对齐清理
+    复用，避免"清理口径 ≠ 聚合写边口径"导致低频噪声边残留。
+    """
+    edges = []
+    for pos, pa in agg.items():
+        for skill, sa in pa.skills.items():
+            # P2-D 低频边过滤：大岗位（jd_count≥10）hit<2 的边是一次性噪声不生成；
+            # 小岗位样本不足，保留全部边避免信息缺失
+            if pa.jd_count >= _MIN_JD_FOR_FILTER and sa.hit < _MIN_HIT_EDGE:
+                continue
+            is_must = _is_must(sa, pa.jd_count)
+            # P2-C 跨域降权：跨域技能保留边但强制 nice（不删数据），
+            # 避免前端技能污染后端匹配/全景图
+            if is_must and _is_cross_domain(pos, skill):
+                is_must = False
+            edges.append({
+                "pos": pos,
+                "skill": skill,
+                "weight": _WEIGHT_MUST if is_must else _WEIGHT_NICE,
+                "necessity": "must" if is_must else "nice",
+                "source_count": len(sa.sources),
+                "level": _most_common_level(sa.levels),
+            })
+    return edges
+
+
 def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
     """全量写回 Neo4j（UNWIND 批量 + MERGE 幂等）。返回写入的岗位/边数。"""
     positions = []
-    edges = []
     for pos, pa in agg.items():
         positions.append({
             "pos": pos,
@@ -157,16 +290,7 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
             # 软技能按 JD 命中数降序（低频软技能不写入岗位本体）
             "soft_skills": [s for s, _ in pa.soft_skills.most_common()],
         })
-        for skill, sa in pa.skills.items():
-            is_must = _is_must(sa, pa.jd_count)
-            edges.append({
-                "pos": pos,
-                "skill": skill,
-                "weight": _WEIGHT_MUST if is_must else _WEIGHT_NICE,
-                "necessity": "must" if is_must else "nice",
-                "source_count": len(sa.sources),
-                "level": _most_common_level(sa.levels),
-            })
+    edges = build_edges(agg)
 
     with session:
         if positions:

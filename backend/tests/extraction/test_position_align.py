@@ -71,10 +71,20 @@ class TestSemanticMatch:
         assert aligner.align("LLM应用") == "算法工程师"
 
     def test_devops_aligned_to_operations(self):
-        """"DevOps" 未命中族 → 语义匹配图谱"运维工程师"（历史 B 类问题自动化）。"""
-        sim = {("DevOps", "运维工程师"): 0.95}
+        """规则未归并的运维相近岗位 → 语义匹配图谱"运维工程师"（历史 B 类问题自动化）。
+
+        原用例输入 "DevOps" 已被 P1 新增 DevOps 族规则拦截（→ DevOps工程师），
+        改用同样未命中族的 "系统管理员" 验证语义兜底链路。
+        """
+        sim = {("系统管理员", "运维工程师"): 0.95}
         aligner, _ = _make(known=["运维工程师"], sim=sim)
-        assert aligner.align("DevOps") == "运维工程师"
+        assert aligner.align("系统管理员") == "运维工程师"
+
+    def test_devops_family_merged_skips_semantic(self):
+        """P1 新增 DevOps 族后，"DevOps" 规则命中 → DevOps工程师，语义不参与。"""
+        aligner, embedder = _make(known=["运维工程师"], sim={("DevOps", "运维工程师"): 0.95})
+        assert aligner.align("DevOps") == "DevOps工程师"
+        assert embedder.warmed == []
 
     def test_hit_below_threshold_keeps(self):
         """语义相似度 < 阈值 → 保留规则归一化结果。"""
