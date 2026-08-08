@@ -9,6 +9,7 @@ import pytest
 from app.services.extraction.dictionary import (
     SKILL_WHITELIST,
     SOFT_SKILL_WHITELIST,
+    _POSITION_PREFIX_RE,
     _normalize_base,
     _translate_en_position,
     normalize_position_name,
@@ -176,6 +177,34 @@ class TestNormalizePositionName:
         assert normalize_position_name("自动驾驶系统") == ""
         # "智能体平台"是平台名误抽岗位（P2 清理），不入图
         assert normalize_position_name("智能体平台") == ""
+
+    def test_short_keyword_no_false_positive(self):
+        # 问题 1：短关键词子串误吸（go/ui/搜索 误吸非目标岗）
+        assert normalize_position_name("google工程师") != "Go开发工程师"
+        assert normalize_position_name("UI设计师") == "UI设计师"
+        assert normalize_position_name("UI工程师") == "前端开发工程师"  # 非设计师 UI 岗仍归前端
+        assert normalize_position_name("搜索运营") == ""
+        assert normalize_position_name("搜索引擎优化") == ""
+        # 正向：go/ui 关键词对目标岗仍命中
+        assert normalize_position_name("Go开发工程师") == "Go开发工程师"
+        assert normalize_position_name("golang开发") == "Go开发工程师"
+
+    def test_untranslated_pure_en_filtered(self):
+        # 问题 2：未翻译的纯英文岗位名直接拦截（不入图），不再靠停用词逐条点杀
+        assert normalize_position_name("VP of Engineering") == ""
+        assert normalize_position_name("Chief Operating Officer") == ""
+        assert normalize_position_name("Engineering Manager") == ""
+        # 含中文的未识别名不受拦截影响（仍走中文规则路径）
+        assert normalize_position_name("Google工程师") != ""
+
+    def test_tech_stack_subdivision_not_blocked_by_stopword(self):
+        # 问题 4：技术栈细分岗位 base 剥到泛词（开发/工程师）时不应整体丢弃
+        assert normalize_position_name("鸿蒙开发工程师") == "鸿蒙开发工程师"
+        assert normalize_position_name("桌面开发工程师") == "桌面开发工程师"
+
+    def test_prefix_regex_deduplicated(self):
+        # 问题 5：前缀正则中"资深"重复出现（同一候选去重）
+        assert _POSITION_PREFIX_RE.pattern.count("资深") == 1
 
 
     def test_en_translation_merged_with_chinese(self):

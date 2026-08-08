@@ -94,6 +94,82 @@ class TestDedupSkills:
         assert names == ["Python"]
 
 
+class TestNormalizeAfterClean:
+    """P1 归一化顺序：剥后缀后再查别名，快照存标准技能名（非中间碎片）。"""
+
+    def test_alias_applied_after_suffix_strip(self):
+        # "mybatis-plus框架" 剥"框架"后须再经别名归并，而不是停在 "mybatis-plus"
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="mybatis-plus框架")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["MyBatis"]
+
+    def test_vue3_framework_to_vue_js(self):
+        result = JDExtractionResult(
+            position_name="",
+            requirements=[REQUIRESRelation(skill_name="Vue3框架", necessity="must")],
+        )
+        out = post_process(result)
+        assert out.requirements[0].skill_name == "Vue.js"
+
+    def test_golang_dev_to_go(self):
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="Golang 开发")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["Go"]
+
+    def test_springboot_framework_to_spring_boot(self):
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="SpringBoot框架")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["Spring Boot"]
+
+
+class TestSkillModifierCompoundWords:
+    """P2 技能+修饰词组合（MySQL 优化/K8s 运维）：剥离修饰词后归并到标准技能。"""
+
+    def test_mysql_optimization_merged(self):
+        # 剥离"优化"后归并到 MySQL，不分裂成独立技能节点
+        result = JDExtractionResult(
+            position_name="",
+            requirements=[REQUIRESRelation(skill_name="MySQL 优化", necessity="must")],
+        )
+        out = post_process(result)
+        assert out.requirements[0].skill_name == "MySQL"
+
+    def test_k8s_ops_merged(self):
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="K8s 运维")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["Kubernetes"]
+
+    def test_alias_key_not_stripped(self):
+        # "性能优化" 本身是别名键：先命中别名，不能被剥成碎片
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="性能优化")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["性能调优"]
+
+    def test_whitelist_word_with_modifier_preserved(self):
+        # 白名单词带修饰词（系统运维）整体保护，不剥离
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="系统运维")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["系统运维"]
+
+
 class TestPostProcess:
     def test_normalize_clean_dedup_full_pipeline(self):
         result = JDExtractionResult(

@@ -1330,21 +1330,16 @@ async def batch_extract(
         else:
             extractions = []
 
-        # 岗位名语义对齐（RAG 检索：与图谱已有岗位匹配，减少相近岗位被区分开）：
-        # LLM 抽取的岗位名先经规则归并（normalize_position_name），规则未归并的
-        # 再做图谱语义匹配（SBERT 余弦 ≥0.9 命中替换为已有岗位名）。对齐在抽取后、
-        # 写快照前统一进行，保证快照存储值与入图/聚合命名一致。
+        # 岗位名归一化（纯规则）：与聚合链路共用 normalize_position_name，保证
+        # 快照、入图、聚合三处岗位名口径一致（修复：此前语义兜底对齐与聚合规则
+        # 不一致，导致聚合岗位名 MATCH 不上图节点）
         if extractions:
-            from app.services.extraction.position_align import PositionAligner
+            from app.services.extraction.dictionary import normalize_position_name
 
-            aligner = PositionAligner.get()
-            # SBERT 对齐为 CPU 密集，放线程池
-            aligned_names = await asyncio.to_thread(
-                aligner.align_many, [e.position_name for e in extractions]
-            )
-            for extraction, aligned in zip(extractions, aligned_names):
-                if aligned and aligned != extraction.position_name:
-                    extraction.position_name = aligned
+            for extraction in extractions:
+                normalized = normalize_position_name(extraction.position_name)
+                if normalized and normalized != extraction.position_name:
+                    extraction.position_name = normalized
 
         for i, (row, extraction) in enumerate(zip(valid, extractions), start=1):
             # 逐条打印 jd_id + 进度百分比：batch_extract 只在循环结束 commit，

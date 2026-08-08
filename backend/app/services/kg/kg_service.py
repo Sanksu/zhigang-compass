@@ -77,12 +77,12 @@ def import_jd(
     返回：
         Position 节点 ID（如 pos_0001）
     """
-    # 岗位名语义对齐（规则归并 + 图谱已有岗位匹配）在事务外执行，避免嵌套
-    # Neo4j 会话。幂等：batch_extract 已对齐时此处命中图谱直接返回原值；
-    # 直接调用本函数（rebuild_graph 等）也能得到对齐后的标准名。
-    from app.services.extraction.position_align import PositionAligner
+    # 岗位名归一化（纯规则）在事务外执行，避免嵌套 Neo4j 会话。与聚合链路共用
+    # normalize_position_name，保证入图/聚合岗位名口径一致（修复：语义兜底对齐
+    # 结果与聚合规则不一致，导致聚合写回 MATCH 不上图节点）。
+    from app.services.extraction.dictionary import normalize_position_name
 
-    extraction.position_name = PositionAligner.get().align(extraction.position_name)
+    extraction.position_name = normalize_position_name(extraction.position_name)
     # Occupation 对齐也在事务外执行（语义嵌入耗时，避免长事务）；
     # 任何失败降级为无 occupation 边，不阻塞入图主链路。
     occupation: tuple[str, float] | None = None

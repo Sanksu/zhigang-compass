@@ -143,6 +143,35 @@ _ALLOWED_SKILL_CATEGORIES: dict[str, set[str]] = {
     "全栈工程师": {"前端", "后端", "编程语言", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
               "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作", "安全", "移动/桌面", "音视频",
               "游戏/数字孪生", "数据分析/商业"},
+    # P5 补齐：业务/管理岗（此前未配置 → 跨域技能不降权）
+    "产品经理": {"工程协作", "数据分析/商业", "编程语言", "计算机基础", "数据库", "大数据",
+             "AI/机器学习", "网络/协议", "测试", "云原生/DevOps"},
+    "项目经理": {"工程协作", "数据分析/商业", "编程语言", "计算机基础", "数据库", "大数据",
+             "AI/机器学习", "网络/协议", "测试", "云原生/DevOps"},
+    "数据科学家": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础", "数据库",
+               "工程协作", "网络/协议", "云原生/DevOps", "音视频", "智能驾驶/机器人"},
+    "游戏开发工程师": {"游戏/数字孪生", "编程语言", "计算机基础", "音视频", "移动/桌面", "前端",
+                 "网络/协议", "AI/机器学习", "工程协作", "测试", "数据库", "云原生/DevOps", "硬件/芯片"},
+    "UI设计师": {"前端", "移动/桌面", "编程语言", "计算机基础", "网络/协议", "测试", "音视频",
+             "游戏/数字孪生", "工程协作"},
+    "专家": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础", "数据库",
+          "云原生/DevOps", "后端", "工程协作", "网络/协议"},
+    # P5 补齐：分析师细分族（核心分析技能：数据/编程/业务，不含纯开发/前端/运维类别）
+    "业务分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "AI/机器学习",
+               "工程协作", "网络/协议"},
+    "商业智能分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "AI/机器学习",
+                   "工程协作", "网络/协议", "云原生/DevOps"},
+    "市场分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "AI/机器学习",
+               "工程协作"},
+    "策略分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "AI/机器学习",
+               "工程协作", "网络/协议"},
+    "投资分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "AI/机器学习",
+               "工程协作", "网络/协议"},
+    "财务分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
+    "信贷分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
+    "保险分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
+    "精算分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
+    "可持续发展分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
 }
 
 
@@ -182,29 +211,34 @@ def _min_experience_years(snapshot: dict) -> float | None:
 
 
 def _position_skills(ext: dict) -> list[tuple[str, str, str]]:
-    """岗位技能列表 (skill_name, necessity, level)。requirements 优先，缺省 skills。
+    """岗位技能列表 (skill_name, necessity, level)。requirements 优先，skills 补充。
 
     技能名与抽取链路一致归一化（normalize_skill → clean_skill_name → 黑名单/单字符
     过滤）：jd_raw 快照可能早于 P1-1/P1-2 扩充抽取（存 Vue3/reactjs、嵌入式/前端等
     泛词），聚合时归一化才能命中已合并的规范节点，防止聚合把属性写回旧名节点、
     重建旧名 Skill，或把泛词频次计入聚合。
+
+    requirements 是 skills 的子集（LLM 只把"必备/加分"项移入 requirements），
+    漏掉 skills 中未进 requirements 的技能会导致其频次/来源数被低估，被 P2-D
+    低频过滤线误裁——故以 requirements 为准、skills 未覆盖的以 nice 并入。
     """
     def _norm(name: str) -> str:
         n = clean_skill_name(normalize_skill(name.strip()))
         return n if _is_valid_skill_name(n) else ""
 
     reqs = ext.get("requirements") or []
-    if reqs:
-        return [
-            (_norm(r.get("skill_name", "")), r.get("necessity", "nice"), r.get("level") or "")
-            for r in reqs
-            if _norm(r.get("skill_name", ""))
-        ]
-    return [
-        (_norm(s.get("name", "")), "nice", "")
-        for s in (ext.get("skills") or [])
-        if _norm(s.get("name", ""))
-    ]
+    out: list[tuple[str, str, str]] = []
+    req_names: set[str] = set()
+    for r in reqs:
+        n = _norm(r.get("skill_name", ""))
+        if n:
+            req_names.add(n)
+            out.append((n, r.get("necessity", "nice"), r.get("level") or ""))
+    for s in ext.get("skills") or []:
+        n = _norm(s.get("name", ""))
+        if n and n not in req_names:
+            out.append((n, "nice", ""))
+    return out
 
 
 def build_aggregates(rows) -> dict[str, PositionAgg]:

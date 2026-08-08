@@ -61,7 +61,7 @@ class _FakeSession:
 
 def _extraction() -> JDExtractionResult:
     return JDExtractionResult(
-        position_name="测试工程师",  # 标准岗位名族，PositionAligner 不触达 Neo4j
+        position_name="测试工程师",  # 标准岗位名族，归一化不触达 Neo4j
         education=EducationExtracted(level="本科", major="计算机科学"),
         certifications=[CertificationExtracted(name="AWS 数据类认证")],
     )

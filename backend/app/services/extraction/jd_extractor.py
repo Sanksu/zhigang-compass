@@ -188,8 +188,11 @@ class JDExtractor:
         return JDExtractionResult(
             position_name=pos_name,
             skills=[SkillExtracted(**s) for s in found_skills],
+            # P6：规则兜底仅文本扫描、无语义判断，不能断言"必备"——全标 nice，
+            # 避免 LLM 不可用时 must_count 虚高把低频技能推成 must（聚合 _is_must
+            # 依赖 must 标注占比，兜底数据不应污染判定）
             requirements=[
-                REQUIRESRelation(skill_name=s["name"], necessity="must")
+                REQUIRESRelation(skill_name=s["name"], necessity="nice")
                 for s in found_skills
             ],
         )

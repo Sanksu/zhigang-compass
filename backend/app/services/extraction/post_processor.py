@@ -9,16 +9,15 @@ from app.services.extraction.dictionary import (
     SKILL_STOPWORDS,
     SKILL_WHITELIST,
     SOFT_SKILL_WHITELIST,
+    _SKILL_MODIFIERS,
     normalize_skill,
 )
 
 # 需去除的中文后缀（按长度降序排列，优先匹配长后缀）。
+# 复用 dictionary._SKILL_MODIFIERS：normalize_skill 剥修饰词重查与 clean_skill_name
+# 后缀清洗用同一词表，保证抽取与消费链路口径一致。
 # 不含"服务"：剥除后产生碎片（"微服务"→"微"），且无合理剥除场景
-SUFFIXES = sorted([
-    "工程师", "技术", "系统", "框架", "平台", "工具", "软件", "开发",
-    "设计", "管理", "应用", "方案", "产品", "项目", "算法",
-    "架构", "引擎", "组件", "中间件", "协议", "标准", "接口",
-], key=len, reverse=True)
+SUFFIXES = sorted(_SKILL_MODIFIERS, key=len, reverse=True)
 
 _SKILL_SUFFIX_RE = re.compile(
     f"({'|'.join(re.escape(s) for s in SUFFIXES)})$"
