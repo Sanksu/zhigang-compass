@@ -30,7 +30,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { ROLES, type Role } from '@/lib/constants'
-import { apiGet, apiPost, apiPut, ApiError } from '@/lib/api'
+import { apiDelete, apiGet, apiPost, apiPut, ApiError } from '@/lib/api'
 import { useAuthStore } from '@/store/auth'
 
 type UserStatus = 'active' | 'disabled'
@@ -146,6 +146,23 @@ export function AdminUsersPage() {
       await load()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : '状态更新失败')
+    }
+  }
+
+  async function deleteUser(id: string) {
+    if (isSelf(id)) {
+      setError('不能删除当前登录账户')
+      return
+    }
+    const u = users.find((x) => x.id === id)
+    if (!u) return
+    if (!window.confirm(`确认删除用户「${u.username}」？将同时清除其简历原文，不可恢复`)) return
+    try {
+      await apiDelete(`/admin/users/${id}`)
+      await load()
+      setError(null)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : '删除失败')
     }
   }
 
@@ -280,6 +297,16 @@ export function AdminUsersPage() {
                             title={isSelf(u.id) ? '不能操作当前登录账户' : undefined}
                           >
                             {u.status === 'active' ? '禁用' : '启用'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-state-archived hover:text-state-archived"
+                            onClick={() => deleteUser(u.id)}
+                            disabled={isSelf(u.id)}
+                            title={isSelf(u.id) ? '不能操作当前登录账户' : undefined}
+                          >
+                            删除
                           </Button>
                         </div>
                       </TableCell>

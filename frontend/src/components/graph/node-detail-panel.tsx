@@ -6,9 +6,10 @@
  * - skill：级别、被多少岗位要求、关联证据、反向岗位列表、先修链、学习课程（真实 API）
  * - evidence：来源、描述
  */
-import { X, Network, Cpu, FileText, BookOpen, GitBranch, Briefcase, ExternalLink } from 'lucide-react'
+import { X, Network, Cpu, FileText, BookOpen, GitBranch, Briefcase, ExternalLink, UnfoldVertical } from 'lucide-react'
 import type { NodeDetail, PositionStatus } from './types'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 
 /** 技能反向查询岗位项（GET /graph/skill/{id}/positions） */
 export interface SkillPositionItem {
@@ -85,12 +86,17 @@ export interface SkillDetail {
 
 interface NodeDetailPanelProps {
   node: NodeDetail | null
-  /** 关联边统计（按类型计数） */
+  /** 关联边统计（按类型计数）+ 全图最大关联度（权重条归一化基准） */
   stats?: {
     positionCount?: number
     skillCount?: number
     evidenceCount?: number
+    maxValue?: number
   }
+  /** 岗位节点是否已在画布展开技能 */
+  positionExpanded?: boolean
+  /** 岗位节点展开/收起技能（画布） */
+  onTogglePosition?: (id: string) => void
   /** skill 节点专属：反向岗位/先修链/课程 */
   skillDetail?: SkillDetail | null
   /** 岗位节点专属：详情（GET /graph/position/{id}） */
@@ -139,6 +145,8 @@ export function NodeDetailPanel({
   positionDetail,
   skillEvidence,
   similarSkills,
+  positionExpanded,
+  onTogglePosition,
   onSelectSkill,
   onClose,
 }: NodeDetailPanelProps) {
@@ -166,7 +174,7 @@ export function NodeDetailPanel({
           </div>
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-ink truncate">{node.name}</h3>
-            <p className="text-xs text-ink-muted mt-0.5">{TYPE_LABEL[node.type]} · {node.id}</p>
+            <p className="text-xs text-ink-muted mt-0.5">{TYPE_LABEL[node.type]}</p>
           </div>
         </div>
         {onClose && (
@@ -200,19 +208,40 @@ export function NodeDetailPanel({
           </div>
         </section>
 
-        {/* 权重 */}
+        {/* 岗位专属：展开/收起画布技能（与双击岗位交互等价，双入口便于发现） */}
+        {node.type === 'position' && onTogglePosition && (
+          <Button
+            variant="outline"
+            className="w-full text-xs"
+            onClick={() => onTogglePosition(node.id)}
+          >
+            <UnfoldVertical className="size-3 mr-1.5" />
+            {positionExpanded ? '收起画布中的技能' : '在画布中展开技能'}
+          </Button>
+        )}
+
+        {/* 关联度：条宽按全图最大关联度归一化，避免高频节点全部满条失真 */}
         {typeof node.value === 'number' && (
           <section className="space-y-1.5">
-            <h4 className="text-xs font-medium text-ink-muted uppercase tracking-wide">权重</h4>
+            <h4 className="text-xs font-medium text-ink-muted uppercase tracking-wide">关联度</h4>
             <div className="flex items-center gap-2">
               <div className="flex-1 h-1.5 rounded-full bg-subtle overflow-hidden">
                 <div
                   className="h-full rounded-full bg-ink"
-                  style={{ width: `${Math.min(100, node.value)}%` }}
+                  style={{
+                    width: `${
+                      stats?.maxValue
+                        ? Math.max(4, Math.min(100, (node.value / stats.maxValue) * 100))
+                        : Math.min(100, node.value)
+                    }%`,
+                  }}
                 />
               </div>
               <span className="text-xs font-mono text-ink-secondary tabular-nums">{node.value}</span>
             </div>
+            {stats?.maxValue ? (
+              <p className="text-[10px] text-ink-faint">按全图最大关联度 {stats.maxValue} 归一化</p>
+            ) : null}
           </section>
         )}
 

@@ -676,7 +676,8 @@ async def graph_view(
                 WITH s, count(p) AS heat
                 ORDER BY heat DESC LIMIT $limit
                 MATCH (s)<-[r:REQUIRES]-(p:Position)
-                RETURN s.id AS sid, s.name AS sname, p.id AS pid, p.name AS pname, r
+                RETURN s.id AS sid, s.name AS sname, p.id AS pid, p.name AS pname,
+                       p.status AS pstatus, r
                 """,
                 limit=limit,
             ))
@@ -685,7 +686,12 @@ async def graph_view(
         for record in rows:
             s_id, p_id = record["sid"], record["pid"]
             nodes.setdefault(s_id, {"id": s_id, "name": record.get("sname", s_id), "type": "skill"})
-            nodes.setdefault(p_id, {"id": p_id, "name": record.get("pname", p_id), "type": "position"})
+            nodes.setdefault(p_id, {
+                "id": p_id,
+                "name": record.get("pname", p_id),
+                "type": "position",
+                "status": record.get("pstatus") or "candidate",
+            })
             edges.append({
                 "source": s_id,
                 "target": p_id,
@@ -715,7 +721,12 @@ async def graph_view(
         for record in rows:
             p, s, r = record["p"], record["s"], record["r"]
             p_id, s_id = p.get("id", ""), s.get("id", "")
-            nodes.setdefault(p_id, {"id": p_id, "name": p.get("name", p_id), "type": "position"})
+            nodes.setdefault(p_id, {
+                "id": p_id,
+                "name": p.get("name", p_id),
+                "type": "position",
+                "status": p.get("status", "candidate"),
+            })
             nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
             edges.append({
                 "source": p_id,

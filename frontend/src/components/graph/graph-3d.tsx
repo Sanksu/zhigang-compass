@@ -17,8 +17,6 @@ interface Graph3DProps {
   /** 已展开的岗位 id 集合（画布已只含这些岗位的技能，用于样式标记） */
   expandedPositions?: Set<string>
   onSelectNode: (node: NodeDetail | null) => void
-  /** 点击岗位 → 展开/收起其技能 */
-  onTogglePosition: (id: string) => void
   className?: string
 }
 
@@ -53,7 +51,7 @@ function isDark(): boolean {
   return document.documentElement.classList.contains('dark')
 }
 
-export function Graph3D({ data, expandedPositions, onSelectNode, onTogglePosition, className }: Graph3DProps) {
+export function Graph3D({ data, expandedPositions, onSelectNode, className }: Graph3DProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 640 })
   const [dark, setDark] = useState(isDark)
@@ -92,6 +90,7 @@ export function Graph3D({ data, expandedPositions, onSelectNode, onTogglePositio
   const bgColor = dark ? '#09090b' : '#ffffff'
   const linkColor = dark ? '#52525b' : '#a1a1aa'
 
+  // 单击 → 仅选中（展开/收起走详情面板按钮，与 2D 交互一致避免意图耦合）
   const handleClick = useCallback(
     (node: GraphNode | null) => {
       if (!node) {
@@ -108,10 +107,8 @@ export function Graph3D({ data, expandedPositions, onSelectNode, onTogglePositio
         value: node.value,
         description: node.description,
       })
-      // 岗位节点同时切换技能展开/收起（与 2D 交互一致）
-      if (node.type === 'position') onTogglePosition(node.id)
     },
-    [onSelectNode, onTogglePosition],
+    [onSelectNode],
   )
 
   // 点击空白区域清除选中
