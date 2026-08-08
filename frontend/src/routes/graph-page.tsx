@@ -1,11 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Box, Database, Network, Search } from 'lucide-react'
+import { Box, Database, Network, RotateCcw, Search } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Graph2D } from '@/components/graph/graph-2d'
+import { Graph2D, type Graph2DHandle } from '@/components/graph/graph-2d'
 import {
   NodeDetailPanel,
   type PositionDetail,
@@ -54,6 +54,7 @@ interface PanoramaNode {
   id: string
   name: string
   type: string // position | skill
+  status?: string
 }
 
 interface PanoramaEdge {
@@ -70,7 +71,24 @@ interface PanoramaData {
   stats: { nodes: number; edges: number }
 }
 
-/** 后端 panorama → 前端 GraphData（缺字段给默认值：岗位状态 stable、边关系 requires） */
+const POSITION_STATUSES: GraphNode['status'][] = [
+  'candidate',
+  'emerging',
+  'stable',
+  'declining',
+  'archived',
+]
+
+function isValidStatus(s?: string): s is NonNullable<GraphNode['status']> {
+  return !!s && POSITION_STATUSES.includes(s as NonNullable<GraphNode['status']>)
+}
+
+/** 岗位中心视图自动展开的 Top 岗位数（首屏即呈现岗位-技能关系） */
+const AUTO_EXPAND_COUNT = 6
+/** 单个岗位展开的技能数上限（防止高频岗位技能全量涌入画布造成重叠） */
+const MAX_SKILLS_PER_POSITION = 12
+
+/** 后端 panorama → 前端 GraphData（岗位状态取自后端，缺省 candidate；边关系 requires） */
 function toGraphData(raw: PanoramaData): GraphData {
   const degree = new Map<string, number>()
   raw.edges.forEach((e) => {
@@ -83,7 +101,7 @@ function toGraphData(raw: PanoramaData): GraphData {
     name: n.name,
     type: n.type === 'skill' ? 'skill' : 'position',
     value: degree.get(n.id) ?? 0,
-    status: n.type === 'position' ? 'stable' : undefined,
+    status: n.type === 'position' ? (isValidStatus(n.status) ? n.status : 'candidate') : undefined,
   }))
   const edges: GraphEdge[] = raw.edges.map((e) => ({
     source: e.source,
@@ -133,6 +151,13 @@ export function GraphPage() {
   const [positionDetail, setPositionDetail] = useState<PositionDetail | null>(null)
   // 展开的岗位 id 集合：点击岗位展开其技能（再点收起），多岗位独立展开
   const [expandedPositions, setExpandedPositions] = useState<Set<string>>(() => new Set())
+  // 定位请求：搜索/相似技能点击后聚焦画布节点（含时间戳，连续点击同一技能也生效）
+  const [focusRequest, setFocusRequest] = useState<{ id: string; ts: number } | null>(null)
+  // 2D 画布命令句柄（重置视角）
+  const graphRef = useRef<Graph2DHandle>(null)
+  // 视图数据即后端返回（四种视图均由 GET /graph/view/{view_type} 提供），
+  // 声明在 useCallback 依赖之前：focusSkill 等事件处理器需读取当前数据
+  const data = raw
 
   const togglePosition = useCallback((id: string) => {
     setExpandedPositions((prev) => {
@@ -151,8 +176,19 @@ export function GraphPage() {
     apiGet<PanoramaData>(`/graph/view/${view}?limit=200`)
       .then((res) => {
         if (cancelled) return
-        setRaw(toGraphData(res))
+        const g = toGraphData(res)
+        setRaw(g)
         setError(null)
+        // 非技术栈视图首屏自动展开 Top 高频岗位，让"岗位-技能关系"直接可见；
+        // 技术栈视图已全量展示技能，无需展开。数据到达时一并重建，避免 effect 内同步 setState。
+        if (view !== 'techStack') {
+          const top = g.nodes
+            .filter((n) => n.type === 'position')
+            .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+            .slice(0, AUTO_EXPAND_COUNT)
+            .map((n) => n.id)
+          setExpandedPositions(new Set(top))
+        }
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof ApiError ? e.message : '图谱数据加载失败')
@@ -250,41 +286,64 @@ export function GraphPage() {
       })
   }
 
-  // 点击搜索结果 / 相似技能 / 岗位必备技能 → 定位技能节点并选中
-  // （detailStats 由选中节点实时计算，选中变化会自动触发详情面板重新加载）
-  function focusSkill(id: string, name: string) {
-    setSelected({ id, name, type: 'skill' })
-  }
+  // 点击搜索结果 / 相似技能 / 岗位必备技能 → 选中技能节点 + 定位画布
+  // 岗位中心视图下技能需先展开其所属岗位（从全量数据边中找一个关联岗位展开），
+  // 再触发 Graph2D.focusNode 居中高亮；技术栈视图技能已全量展示，直接聚焦。
+  const focusSkill = useCallback(
+    (id: string, name: string) => {
+      setSelected({ id, name, type: 'skill' })
+      if (view !== 'techStack' && data) {
+        const edge = data.edges.find((e) => e.source === id || e.target === id)
+        const pid = edge ? (edge.source === id ? edge.target : edge.source) : undefined
+        if (pid) {
+          setExpandedPositions((prev) => {
+            if (prev.has(pid)) return prev
+            const next = new Set(prev)
+            next.add(pid)
+            return next
+          })
+        }
+      }
+      setFocusRequest((prev) => ({ id, ts: (prev?.ts ?? 0) + 1 }))
+    },
+    [view, data],
+  )
 
-  // 视图数据即后端返回（四种视图均由 GET /graph/view/{view_type} 提供）
-  const data = raw
-  // 画布可见数据：默认仅岗位节点；展开岗位后并入其关联技能与边（本地过滤，无网络往返）
+  // 画布可见数据：
+  // - techStack（技能为中心）：全量展示技能+边，不做岗位过滤
+  // - 岗位中心视图：展示岗位节点 + 已展开岗位的技能（单岗位技能数上限防重叠）
   const visibleData = useMemo<GraphData | null>(() => {
     if (!data) return null
-    if (expandedPositions.size === 0) {
-      return {
-        ...data,
-        nodes: data.nodes.filter((n) => n.type === 'position'),
-        edges: [],
+    if (view === 'techStack') return data
+
+    // 每个展开岗位：按边权重取 Top-N 技能（多岗位共享技能去重）
+    const perPositionSkills = new Map<string, string[]>()
+    for (const pid of expandedPositions) {
+      const ranked = data.edges
+        .filter((e) => e.source === pid || e.target === pid)
+        .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
+      const skills: string[] = []
+      for (const e of ranked) {
+        if (skills.length >= MAX_SKILLS_PER_POSITION) break
+        const sid = e.source === pid ? e.target : e.source
+        if (!skills.includes(sid)) skills.push(sid)
       }
+      perPositionSkills.set(pid, skills)
     }
-    const skillIds = new Set<string>()
-    data.edges.forEach((e) => {
-      if (expandedPositions.has(e.source)) skillIds.add(e.target)
-      if (expandedPositions.has(e.target)) skillIds.add(e.source)
+    const skillIds = new Set([...perPositionSkills.values()].flat())
+    const nodes = data.nodes.filter((n) => n.type === 'position' || skillIds.has(n.id))
+    // 只保留两端都可见的边（岗位-技能关系，且技能在展开上限内）
+    const edges = data.edges.filter((e) => {
+      const a = expandedPositions.has(e.source)
+      const b = expandedPositions.has(e.target)
+      return (a && skillIds.has(e.target)) || (b && skillIds.has(e.source))
     })
-    return {
-      ...data,
-      nodes: data.nodes.filter((n) => n.type === 'position' || skillIds.has(n.id)),
-      edges: data.edges.filter(
-        (e) => expandedPositions.has(e.source) || expandedPositions.has(e.target),
-      ),
-    }
-  }, [data, expandedPositions])
+    return { ...data, nodes, edges }
+  }, [data, view, expandedPositions])
   // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
   const webgl2Available = useMemo(() => isWebGL2Available(), [])
 
-  // 选中节点的关联统计（从当前视图数据中实时计算）
+  // 选中节点的关联统计（从当前视图数据中实时计算）+ 全图最大关联度（详情条归一化基准）
   const detailStats = useMemo(() => {
     if (!selected || !data) return undefined
     const linkedIds = new Set<string>()
@@ -293,10 +352,12 @@ export function GraphPage() {
       if (e.target === selected.id) linkedIds.add(e.source)
     })
     const linked = data.nodes.filter((n) => linkedIds.has(n.id))
+    const maxValue = Math.max(1, ...data.nodes.map((n) => n.value ?? 0))
     return {
       positionCount: linked.filter((n) => n.type === 'position').length,
       skillCount: linked.filter((n) => n.type === 'skill').length,
       evidenceCount: linked.filter((n) => n.type === 'evidence').length,
+      maxValue,
     }
   }, [selected, data])
 
@@ -323,7 +384,7 @@ export function GraphPage() {
   if (!data || data.nodes.length === 0) {
     return (
       <Card className="h-[640px] flex items-center justify-center text-sm text-ink-muted">
-        图谱暂无数据，请先通过数据管线导入 JD / 课程
+        图谱暂无数据，请稍后再试，或联系管理员导入数据
       </Card>
     )
   }
@@ -444,11 +505,24 @@ export function GraphPage() {
       {/* 画布 + 详情面板：画布占 70-75%，详情占 25-30% */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
         <Card className="relative overflow-hidden h-[640px]">
+          {/* 重置视角（roam 平移/缩放后一键回初始视角） */}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => graphRef.current?.resetView()}
+            className="absolute right-2 top-2 z-10 h-7 px-2 text-xs text-ink-muted hover:text-ink"
+            title="重置视角"
+          >
+            <RotateCcw className="size-3 mr-1" />
+            重置视角
+          </Button>
           {mode === '2d' ? (
             <Graph2D
+              ref={graphRef}
               data={visibleData!}
               expandedPositions={expandedPositions}
               selectedId={selected?.id ?? null}
+              focusRequest={focusRequest}
               onSelectNode={setSelected}
               onTogglePosition={togglePosition}
               className="h-full w-full"
@@ -459,7 +533,6 @@ export function GraphPage() {
                 data={visibleData!}
                 expandedPositions={expandedPositions}
                 onSelectNode={setSelected}
-                onTogglePosition={togglePosition}
                 className="h-full w-full"
               />
             </Suspense>
@@ -469,6 +542,11 @@ export function GraphPage() {
             <p className="text-[11px] text-ink-muted bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
               {VIEW_DESC[view]}
             </p>
+            {view !== 'techStack' && (
+              <p className="text-[11px] text-ink-muted bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
+                单击查看详情 · 双击岗位展开/收起技能
+              </p>
+            )}
             {!webgl2Available && (
               <p className="text-[10px] text-ink-faint bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
                 WebGL2 不可用，已降级 2D 模式
@@ -486,13 +564,15 @@ export function GraphPage() {
             positionDetail={selected?.type === 'position' && positionDetail && positionDetail.id === selected.id ? positionDetail : null}
             skillEvidence={selected && skillDetail && skillDetail.skill_id === selected.id ? skillEvidence : []}
             similarSkills={selected && skillDetail && skillDetail.skill_id === selected.id ? similarSkills : []}
+            positionExpanded={selected?.type === 'position' ? expandedPositions.has(selected.id) : false}
+            onTogglePosition={togglePosition}
             onSelectSkill={focusSkill}
             onClose={() => setSelected(null)}
           />
         </Card>
       </div>
 
-      {/* 图例 */}
+      {/* 图例：与画布实际渲染对齐（当前视图只含岗位/技能节点与 requires 关系） */}
       <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-muted">
         <span className="font-medium text-ink-secondary">图例：</span>
         <span className="flex items-center gap-1.5">
@@ -511,14 +591,11 @@ export function GraphPage() {
           <span className="size-2.5 rounded-full bg-state-archived" /> 归档岗位
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="size-2.5 rounded-full bg-ink" /> 技能
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="size-2.5 bg-ink-faint" style={{ transform: 'rotate(45deg)' }} /> 证据
+          <span className="size-2.5 bg-ink" /> 技能
         </span>
         <span className="flex items-center gap-1.5">
           <Database className="size-3" />
-          <span>实线=requires · 虚线=proves</span>
+          <span>实线=岗位要求技能(requires)</span>
         </span>
       </div>
     </>

@@ -15,7 +15,7 @@
  *   避免点击节点时 force 布局重算导致闪屏
  * - 主题切换通过递增 themeVersion 触发数据 effect 完全重建，确保节点/边颜色全部刷新
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import * as echarts from 'echarts/core'
 import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
@@ -42,6 +42,16 @@ interface GraphGroup {
   }
 }
 
+/** ECharts 内部 Model 最小类型（getModel 为私有方法，仅聚焦节点计算布局用） */
+interface EChartsModel {
+  getSeriesByIndex(index: number): {
+    getData(): {
+      getDataIndexByName(name: string): number
+      getItemLayout(idx: number): number[] | undefined
+    }
+  } | null
+}
+
 // 按需注册 — 仅 graph 图表 + tooltip 组件 + canvas 渲染器
 // 相比 `import * as echarts from 'echarts'`，可减少约 70% bundle 体积
 echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
@@ -52,17 +62,33 @@ interface Graph2DProps {
   selectedId?: string | null
   /** 已展开的岗位 id 集合（画布已只含这些岗位的技能，用于样式标记） */
   expandedPositions?: Set<string>
+  /** 定位请求：搜索/相似技能点击后聚焦画布上对应节点（含时间戳，重复聚焦同一节点也生效） */
+  focusRequest?: { id: string; ts: number } | null
   onSelectNode: (node: NodeDetail | null) => void
-  /** 点击岗位 → 展开/收起其技能 */
+  /** 双击岗位 → 展开/收起其技能 */
   onTogglePosition: (id: string) => void
   className?: string
 }
 
+/** 父组件可调用的图谱画布方法（聚焦节点 / 重置视角） */
+export interface Graph2DHandle {
+  focusNode: (id: string) => void
+  resetView: () => void
+}
+
 /** 节点类型 → 形状 */
-const SYMBOL_BY_TYPE: Record<NodeType, string> = {
-  position: 'circle',
+const SYMBOL_BY_TYPE: Record<Exclude<NodeType, 'position'>, string> = {
   skill: 'circle',
   evidence: 'diamond',
+}
+
+/** 岗位状态机 → 形状（色盲可读：衰退 rect、归档 roundRect 与正常态形状区分） */
+const SYMBOL_BY_STATUS: Record<PositionStatus, string> = {
+  candidate: 'circle',
+  emerging: 'triangle',
+  stable: 'circle',
+  declining: 'rect',
+  archived: 'roundRect',
 }
 
 /** 岗位状态机 → 颜色（与 globals.css 中状态色对齐） */
@@ -76,6 +102,11 @@ const COLOR_BY_STATUS: Record<PositionStatus, string> = {
 
 const COLOR_SKILL = '#09090b'
 const COLOR_EVIDENCE = '#a1a1aa'
+
+function symbolOf(node: GraphNode): string {
+  if (node.type === 'position') return SYMBOL_BY_STATUS[node.status ?? 'candidate']
+  return SYMBOL_BY_TYPE[node.type]
+}
 
 function colorOf(node: GraphNode): string {
   if (node.type === 'position') return COLOR_BY_STATUS[node.status ?? 'candidate']
@@ -102,11 +133,23 @@ function isDarkMode(): boolean {
   return document.documentElement.classList.contains('dark')
 }
 
-export function Graph2D({ data, selectedId, expandedPositions, onSelectNode, onTogglePosition, className }: Graph2DProps) {
+export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
+  { data, selectedId, expandedPositions, focusRequest, onSelectNode, onTogglePosition, className },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
   // 主题版本号：暗色切换时递增，触发数据 effect 完全重建确保颜色全量刷新
   const [themeVersion, setThemeVersion] = useState(0)
+  // 手动平移（空白拖拽）累计像素偏移：聚焦节点换算目标位移时扣除，避免与 roam 平移叠加
+  const panOffset = useRef({ x: 0, y: 0 })
+
+  // zrender Group（graph 视图的渲染分组），手动平移/聚焦直接改其位置
+  const panGroup = useCallback(() => {
+    const chart = chartRef.current
+    if (!chart) return undefined
+    return (chart as unknown as { _chartsViews?: Array<{ group: GraphGroup }> })._chartsViews?.[0]?.group
+  }, [])
 
   // 初始化 ECharts 实例（仅一次）
   useLayoutEffect(() => {
@@ -128,7 +171,7 @@ export function Graph2D({ data, selectedId, expandedPositions, onSelectNode, onT
     )
     chartRef.current = chart
 
-    // 节点点击 → 上抛选中节点；岗位节点同时切换技能展开/收起
+    // 节点点击 → 上抛选中节点（仅选中，展开/收起走双击或详情面板按钮，避免两种意图耦合）
     chart.on('click', (params) => {
       if (params.dataType === 'node' && params.data) {
         const d = params.data as GraphNode
@@ -142,6 +185,13 @@ export function Graph2D({ data, selectedId, expandedPositions, onSelectNode, onT
           value: d.value,
           description: d.description,
         })
+      }
+    })
+
+    // 节点双击 → 岗位展开/收起其技能
+    chart.on('dblclick', (params) => {
+      if (params.dataType === 'node' && params.data) {
+        const d = params.data as GraphNode
         if (d.type === 'position') onTogglePosition(d.id)
       }
     })
@@ -162,8 +212,6 @@ export function Graph2D({ data, selectedId, expandedPositions, onSelectNode, onT
     let panning = false
     let panLastX = 0
     let panLastY = 0
-    const panGroup = () =>
-      (chart as unknown as { _chartsViews?: Array<{ group: GraphGroup }> })._chartsViews?.[0]?.group
     const onPanDown = (e: { target?: unknown; offsetX: number; offsetY: number }) => {
       if (e.target) return // 命中节点/边 → 原生节点拖拽
       const group = panGroup()
@@ -186,6 +234,8 @@ export function Graph2D({ data, selectedId, expandedPositions, onSelectNode, onT
         panLastY = e.offsetY
         const group = panGroup()
         if (group) {
+          panOffset.current.x += dx
+          panOffset.current.y += dy
           group.x += dx
           group.y += dy
           group.dirty()
@@ -210,7 +260,8 @@ export function Graph2D({ data, selectedId, expandedPositions, onSelectNode, onT
       chart.dispose()
       chartRef.current = null
     }
-  }, [onSelectNode, onTogglePosition])
+    // panGroup 为 useCallback 稳定引用，列入依赖仅满足 exhaustive-deps，不影响仅执行一次
+  }, [onSelectNode, onTogglePosition, panGroup])
 
   // 容器尺寸变化 → resize
   useEffect(() => {
@@ -253,7 +304,7 @@ export function Graph2D({ data, selectedId, expandedPositions, onSelectNode, onT
     const nodes = data.nodes.map((n) => ({
       // 原始字段透传（含 id/name），供 ECharts 与 tooltip/click 回调使用
       ...n,
-      symbol: SYMBOL_BY_TYPE[n.type],
+      symbol: symbolOf(n),
       symbolSize: sizeOf(n),
       category: n.type,
       itemStyle: {
@@ -376,5 +427,70 @@ export function Graph2D({ data, selectedId, expandedPositions, onSelectNode, onT
     }
   }, [selectedId])
 
+  // ============================================================
+  // ③ 聚焦节点 / 重置视角（父组件经 ref 调用）
+  //    聚焦：把节点移动到画布中心并短暂高亮；重置：还原初始视角
+  // ============================================================
+  const focusNode = useCallback(
+    (id: string) => {
+      const chart = chartRef.current
+      if (!chart) return
+      // 按当前可见数据中的 name 反查 ECharts 数据项（data item 的 id 为节点 id）
+      const node = data.nodes.find((n) => n.id === id)
+      if (!node) return
+      // getModel 为 ECharts 私有方法，此处按最小模型断言访问（与 panGroup 访问 _chartsViews 同理）
+      const seriesModel = (chart as unknown as { getModel(): EChartsModel }).getModel().getSeriesByIndex(0)
+      const list = seriesModel?.getData()
+      if (!list) return
+      const idx = list.getDataIndexByName(node.name)
+      if (idx < 0) return
+      const layout = list.getItemLayout(idx)
+      if (!layout || layout.length < 2) return
+      // 节点当前画布像素位置（含 ECharts roam 缩放/平移；手动 group 偏移单独追踪）
+      const pixel = chart.convertToPixel({ seriesIndex: 0 }, [layout[0], layout[1]])
+      if (!pixel || pixel.length < 2) return
+      const dx = chart.getWidth() / 2 - (pixel[0] + panOffset.current.x)
+      const dy = chart.getHeight() / 2 - (pixel[1] + panOffset.current.y)
+      const group = panGroup()
+      if (group) {
+        group.x += dx
+        group.y += dy
+        group.dirty()
+      }
+      panOffset.current.x += dx
+      panOffset.current.y += dy
+      chart.getZr().refresh()
+      // 高亮目标节点约 1.5s，提示用户已定位
+      chart.dispatchAction({ type: 'highlight', seriesIndex: 0, name: node.name })
+      window.setTimeout(() => {
+        chart.dispatchAction({ type: 'downplay', seriesIndex: 0, name: node.name })
+      }, 1500)
+    },
+    [data, panGroup],
+  )
+
+  const resetView = useCallback(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    // 重置 ECharts roam 缩放/平移回初始视角
+    chart.dispatchAction({ type: 'restore' })
+    // 清掉手动平移累积的 group 偏移
+    const group = panGroup()
+    if (group) {
+      group.x -= panOffset.current.x
+      group.y -= panOffset.current.y
+      group.dirty()
+    }
+    panOffset.current = { x: 0, y: 0 }
+    chart.getZr().refresh()
+  }, [panGroup])
+
+  useImperativeHandle(ref, () => ({ focusNode, resetView }), [focusNode, resetView])
+
+  // 定位请求 → 聚焦画布（依赖 data：展开岗位后节点才入画布，数据到位后再聚焦）
+  useEffect(() => {
+    if (focusRequest) focusNode(focusRequest.id)
+  }, [focusRequest, data, focusNode])
+
   return <div ref={containerRef} className={className} />
-}
+})
