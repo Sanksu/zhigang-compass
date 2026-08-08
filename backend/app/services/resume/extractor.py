@@ -78,14 +78,13 @@ class ResumeExtractor:
         from app.services.extraction.dictionary import (
             SKILL_STOPWORDS,
             SKILL_WHITELIST,
-            normalize_skill,
         )
-        from app.services.extraction.post_processor import clean_skill_name
+        from app.services.extraction.post_processor import canonical_skill_name
 
         seen: set[str] = set()
         cleaned = []
         for s in result.skills:
-            name = clean_skill_name(normalize_skill(s.name)).strip()
+            name = canonical_skill_name(s.name).strip()
             key = name.lower()
             if not name or name in SKILL_STOPWORDS or key in seen:
                 continue
@@ -106,13 +105,12 @@ class ResumeExtractor:
         """
         from app.services.extraction.dictionary import (
             SOFT_SKILL_WHITELIST,
-            normalize_skill,
         )
-        from app.services.extraction.post_processor import clean_skill_name
+        from app.services.extraction.post_processor import canonical_skill_name
 
         existing = {s.name.lower() for s in result.skills}
         for name in result.soft_skills:
-            cleaned = clean_skill_name(normalize_skill(name)).strip()
+            cleaned = canonical_skill_name(name).strip()
             if not cleaned or cleaned not in SOFT_SKILL_WHITELIST:
                 continue
             if cleaned.lower() in existing:

@@ -4,6 +4,7 @@
 """
 
 from app.services.extraction.post_processor import (
+    canonical_skill_name,
     clean_skill_name,
     dedup_skills,
     post_process,
@@ -13,6 +14,38 @@ from app.services.extraction.schemas import (
     REQUIRESRelation,
     SkillExtracted,
 )
+
+
+class TestCanonicalSkillName:
+    """canonical_skill_name：别名归一 → 后缀清洗，各链路统一口径。"""
+
+    def test_alias_normalization(self):
+        # 别名命中（含大小写变体）→ 标准名
+        assert canonical_skill_name("Golang") == "Go"
+        assert canonical_skill_name("vue") == "Vue.js"
+        assert canonical_skill_name("spring") == "Spring Boot"
+
+    def test_suffix_clean(self):
+        assert canonical_skill_name("Docker 技术") == "Docker"
+        assert canonical_skill_name("数据平台") == "数据"
+
+    def test_strip_whitespace(self):
+        assert canonical_skill_name("  Redis  ") == "Redis"
+
+    def test_compound_strip_then_alias(self):
+        # 剥修饰词后再查别名（与抽取管线一致，不停在中间碎片）
+        assert canonical_skill_name("mybatis-plus框架") == "MyBatis"
+        assert canonical_skill_name("Vue3框架") == "Vue.js"
+
+    def test_whitelist_word_preserved(self):
+        # 白名单词整体保护，不被后缀剥成泛词碎片
+        assert canonical_skill_name("操作系统") == "操作系统"
+        assert canonical_skill_name("项目管理") == "项目管理"
+
+    def test_no_lowercase(self):
+        # canonical 不含大小写归一，保留白名单标准写法
+        assert canonical_skill_name("Redis") == "Redis"
+        assert canonical_skill_name("Echarts") == "ECharts"
 
 
 class TestCleanSkillName:

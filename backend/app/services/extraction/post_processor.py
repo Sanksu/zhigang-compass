@@ -37,6 +37,16 @@ def clean_skill_name(name: str) -> str:
     return name
 
 
+def canonical_skill_name(name: str) -> str:
+    """技能规范名：别名归一化 + 中文后缀清洗。
+
+    抽取/聚合/匹配/简历各链路的统一技能规范化入口（原 clean_skill_name(normalize_skill())
+    内联组合在 5+ 处重复），保证口径一致、防后续词表演化时各链路漂移。
+    不含大小写归一：调用方按需自行 .lower()（如匹配比较、评测对齐）。
+    """
+    return clean_skill_name(normalize_skill(name))
+
+
 def dedup_skills(skills: list[SkillExtracted]) -> list[SkillExtracted]:
     """按 name 去重（保留首次出现）。"""
     seen: set[str] = set()
@@ -71,7 +81,7 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     """
     # skills 与 requirements 共用同一清洗规则：别名 → 后缀清洗 → 黑名单剔除
     def _clean(name: str) -> str:
-        return clean_skill_name(normalize_skill(name))
+        return canonical_skill_name(name)
 
     result.skills = [
         SkillExtracted(name=_clean(s.name), category=s.category, description=s.description)
@@ -84,7 +94,7 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     seen_soft: set[str] = set()
     cleaned_soft: list[str] = []
     for s in result.soft_skills:
-        name = clean_skill_name(normalize_skill(s)).strip()
+        name = canonical_skill_name(s).strip()
         if not name or name in seen_soft or name not in SOFT_SKILL_WHITELIST:
             continue
         seen_soft.add(name)

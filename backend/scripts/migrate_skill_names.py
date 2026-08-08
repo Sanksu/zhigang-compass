@@ -27,8 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.database import async_session_factory
 from app.models.raw import JDRaw
-from app.services.extraction.dictionary import normalize_skill
-from app.services.extraction.post_processor import clean_skill_name
+from app.services.extraction.post_processor import canonical_skill_name
 
 # 历史碎片还原：技能名 == "微" 且 JD 原文含"微服务" → "微服务"
 _FRAGMENT_RESTORE = {
@@ -45,7 +44,7 @@ def _jd_text(snapshot: dict) -> str:
 
 def _remap(name: str, jd_text: str) -> str:
     """新规则清洗 + 历史碎片还原，返回（清洗后名, 是否变化）。"""
-    cleaned = clean_skill_name(normalize_skill(name))
+    cleaned = canonical_skill_name(name)
     if cleaned in _FRAGMENT_RESTORE and _FRAGMENT_RESTORE[cleaned] in jd_text:
         return _FRAGMENT_RESTORE[cleaned]
     return cleaned
