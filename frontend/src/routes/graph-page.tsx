@@ -171,9 +171,11 @@ export function GraphPage() {
   // 视图切换 → 真实后端过滤（GET /graph/view/{view_type}），初始 panorama 同样走后端视图端点。
   // 切换视图不清 loading，数据到达后原子替换，避免闪屏。
   // 展开状态在 Tabs 事件回调中同步清空（effect 内 setState 会触发 cascading renders）
+  // limit=120：techStack 全量渲染技能节点，节点数与 limit 线性相关（120→约 166 节点），
+  // 控制画布规模在 ECharts force 布局可承受范围，避免主线程长时间阻塞（2026-08-08）
   useEffect(() => {
     let cancelled = false
-    apiGet<PanoramaData>(`/graph/view/${view}?limit=200`)
+    apiGet<PanoramaData>(`/graph/view/${view}?limit=120`)
       .then((res) => {
         if (cancelled) return
         const g = toGraphData(res)

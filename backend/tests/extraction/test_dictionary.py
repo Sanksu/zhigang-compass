@@ -352,6 +352,26 @@ class TestNormalizePositionName:
         assert normalize_position_name("可视化软件开发工程师") == ""
         assert normalize_position_name("桌面") == ""
 
+    def test_p0_low_quality_position_governance(self):
+        # 2026-08-09 P0 图谱低质岗治理：英文复合岗名归位标准族，碎片词拦截
+        # 归位（完整岗位名）
+        assert normalize_position_name("BioChemical Engineer") == "生化工程师"
+        assert normalize_position_name("Bio-Optics Engineer") == "生物光学工程师"
+        assert normalize_position_name("Solution Engineer") == "解决方案工程师"
+        assert normalize_position_name("Assistant Estimator") == "成本估算师"
+        assert normalize_position_name("Verification Engineer III") == "测试工程师"
+        assert normalize_position_name("Quality Engineer") == "测试工程师"
+        assert normalize_position_name("Senior Firmware Engineer") == "嵌入式开发工程师"
+        assert normalize_position_name("Physical Design Engineer") == "硬件工程师"
+        assert normalize_position_name("Privacy Engineer") == "网络安全工程师"
+        # 无归属碎片拦截
+        assert normalize_position_name("验证") == ""
+        assert normalize_position_name("质量") == ""
+        assert normalize_position_name("隐私") == ""
+        assert normalize_position_name("性能工程") == ""
+        assert normalize_position_name("信息化") == ""
+        assert normalize_position_name("劳动力分析总监") == ""
+
     def test_p0a_legit_positions_not_filtered(self):
         # P0-A 停用词只拦碎片：真实细分岗不受影响
         assert normalize_position_name("保险分析师") == "保险分析师"

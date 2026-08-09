@@ -73,6 +73,14 @@ class TestPublishDate:
     def test_slash_format(self):
         assert _publish_date({"post_date": "2026/07/15"}, "") == date(2026, 7, 15)
 
+    def test_space_datetime_format(self):
+        # 回归：post_date 为 "YYYY-MM-DD HH:MM:SS"（智联等源，占库内 46%）
+        # 此前 _publish_date 缺此格式导致时滞检测被误标 no_skills_or_publish_date 跳过
+        assert _publish_date({"post_date": "2026-08-06 17:34:16"}, "") == date(2026, 8, 6)
+
+    def test_iso_t_format(self):
+        assert _publish_date({"post_date": "2026-08-06T14:29:08Z"}, "") == date(2026, 8, 6)
+
     def test_unparseable_returns_none(self):
         assert _publish_date({"post_date": "新鲜出炉"}, "not-a-date") is None
         assert _publish_date({}, "") is None

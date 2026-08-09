@@ -65,6 +65,23 @@ class TestAgglomerativeClusters:
         clusters = _agglomerative_clusters(["Python"], _python_sim_embedder().similarity)
         assert clusters == [["Python"]]
 
+    def test_order_independent(self):
+        # 跨簇桥场景：B-D 相似（A-D/B-C 不相似），不同输入顺序下"并入首个命中簇"
+        # 会产生不同划分（A 与 B 先遇 vs D 与 C 先遇）。排序后聚类结果应与输入顺序无关
+        # （Neo4j 读取无 ORDER BY，防止结果随行序漂移）。
+        embedder = _FakeEmbedder({
+            ("A", "B"): 0.9,
+            ("C", "D"): 0.9,
+            ("B", "D"): 0.9,  # 跨簇桥
+            ("A", "C"): 0.1,
+            ("A", "D"): 0.1,
+            ("B", "C"): 0.1,
+        })
+        c1 = _agglomerative_clusters(["A", "B", "C", "D"], embedder.similarity)
+        c2 = _agglomerative_clusters(["D", "C", "B", "A"], embedder.similarity)
+        norm = lambda cs: sorted(tuple(sorted(c)) for c in cs)
+        assert norm(c1) == norm(c2)
+
 
 # ============================================================
 # SkillNormalizer

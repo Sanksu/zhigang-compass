@@ -367,8 +367,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           layout: 'force',
           roam: true,
           draggable: true,
-          // 首次渲染启用力导向入场动画；数据变化（视图切换）时 layoutAnimation: true
-          // 让用户感知新布局的渐进收敛，比突变更自然
+          // 力导向布局动画开关：必须保持 true（异步逐帧），false 会让 ECharts 在
+          // setOption 时同步递归跑完 ~511 步布局（friction 0.6 每步 ×0.992 到 0.01），
+          // 主线程长时间阻塞 → 页面冻结（2026-08-08 实测 techStack 视图 10.8s）。
+          // 动画时长由收敛步数决定（固定约 8s），节点数量影响每步成本。
           force: {
             repulsion: 180,
             edgeLength: [60, 180],

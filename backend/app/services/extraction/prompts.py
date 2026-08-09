@@ -17,6 +17,12 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    例如 "Data Scientist" → "数据科学家"（而非"科学家"）、"Applied Scientist" → "应用科学家"、
    "Machine Learning Engineer" → "机器学习工程师"（而非"工程师"）；多词限定无法精确翻译时
    保留核心限定词，宁细勿泛。
+   英文 "Xxx Engineer / Xxx Scientist / Xxx Developer" 类岗位名：**必须完整翻译为
+   "Xxx工程师/科学家/开发"**，禁止只取名词丢掉工种后缀——如 "BioChemical Engineer" →
+   "生化工程师"（而非"生化"）、"Sr Systems Reliability Engineer" → "系统可靠性工程师"
+   （而非"系统可靠性"）、"Verification Engineer" → "验证工程师"（而非"验证"）。
+   输出必须是以"工程师/科学家/分析师/经理/设计师/架构师"等岗位词结尾的标准岗位名，
+   不得输出"生化"、"固件"、"验证"这类无岗位语义的名词碎片。
 2. 技能（skills）：仅列出技术技能（如"Python"、"Java"、"数据分析"）。禁止把行业、
    业务领域、招聘福利词列为技能（如保险/金融/银行/电商/医疗/教育/物流/车联网/
    五险一金/社保/公积金/双休/年终奖等）
@@ -57,6 +63,14 @@ JD 文本：招聘前端开发工程师，精通 React 与 TypeScript，掌握�
 示例 5：
 JD 文本：招聘网络安全工程师，负责渗透测试与安全运维，熟悉 Linux 与 Python，1-3 年经验，本科及以上学历，持有 CISP 或 OSCP 证书者优先
 输出：{{"position_name": "网络安全工程师", "skills": [{{"name": "Linux"}}, {{"name": "Python"}}, {{"name": "渗透测试"}}], "tools": [], "education": {{"level": "本科"}}, "certifications": [{{"name": "CISP"}}, {{"name": "OSCP"}}], "requirements": [{{"skill_name": "Linux", "necessity": "must", "level": "中级"}}, {{"skill_name": "Python", "necessity": "must", "level": "中级"}}, {{"skill_name": "渗透测试", "necessity": "must"}}]}}
+
+示例 6（英文复合岗名完整翻译）：
+JD 文本：BioChemical Engineer - Analog Devices, Wilmington MA. Design biochemical process solutions for semiconductor fabrication. Required: chemical engineering background, process design experience, Six Sigma certification.
+输出：{{"position_name": "生化工程师", "skills": [{{"name": "化学工程"}}, {{"name": "工艺设计"}}, {{"name": "Six Sigma"}}], "tools": [], "education": {{"level": "本科", "major": "化学工程"}}, "certifications": [{{"name": "Six Sigma"}}], "requirements": [{{"skill_name": "化学工程", "necessity": "must", "level": "中级"}}, {{"skill_name": "工艺设计", "necessity": "must"}}, {{"skill_name": "Six Sigma", "necessity": "nice"}}]}}
+
+示例 7（英文复合岗名完整翻译，禁止丢 Engineer）：
+JD 文本：Sr Systems Reliability Engineer - Responsible for system reliability engineering, automation of infrastructure, incident response. 5+ years experience, Linux, Python, Terraform required.
+输出：{{"position_name": "系统可靠性工程师", "skills": [{{"name": "Linux"}}, {{"name": "Python"}}, {{"name": "Terraform"}}, {{"name": "系统可靠性"}}], "tools": [{{"name": "Terraform"}}], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Linux", "necessity": "must", "level": "高级"}}, {{"skill_name": "Python", "necessity": "must"}}, {{"skill_name": "Terraform", "necessity": "must"}}, {{"skill_name": "系统可靠性", "necessity": "must"}}]}}
 """
 
 BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输出 JSON 数组（每条 JD 对应一个对象，数组第 i 个元素对应"JD文本 i"）。
@@ -69,6 +83,12 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    例如 "Data Scientist" → "数据科学家"（而非"科学家"）、"Applied Scientist" → "应用科学家"、
    "Machine Learning Engineer" → "机器学习工程师"（而非"工程师"）；多词限定无法精确翻译时
    保留核心限定词，宁细勿泛。
+   英文 "Xxx Engineer / Xxx Scientist / Xxx Developer" 类岗位名：**必须完整翻译为
+   "Xxx工程师/科学家/开发"**，禁止只取名词丢掉工种后缀——如 "BioChemical Engineer" →
+   "生化工程师"（而非"生化"）、"Sr Systems Reliability Engineer" → "系统可靠性工程师"
+   （而非"系统可靠性"）、"Verification Engineer" → "验证工程师"（而非"验证"）。
+   输出必须是以"工程师/科学家/分析师/经理/设计师/架构师"等岗位词结尾的标准岗位名，
+   不得输出"生化"、"固件"、"验证"这类无岗位语义的名词碎片。
 2. 技能（skills）：仅列出技术技能（如"Python"、"Java"、"数据分析"）。禁止把行业、
    业务领域、招聘福利词列为技能（如保险/金融/银行/电商/医疗/教育/物流/车联网/
    五险一金/社保/公积金/双休/年终奖等）

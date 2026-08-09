@@ -80,7 +80,15 @@ async def panorama(
             p, s, r = record["p"], record["s"], record["r"]
             p_id = p.get("id", "")
             s_id = s.get("id", "")
-            nodes.setdefault(p_id, {"id": p_id, "name": p.get("name", p_id), "type": "position"})
+            nodes.setdefault(p_id, {
+                "id": p_id,
+                "name": p.get("name", p_id),
+                "type": "position",
+                # 岗位状态机（candidate/emerging/stable/declining/archived）：
+                # 前端按 status 映射形状与颜色（2D 衰退为矩形/琥珀色），
+                # 漏取会让所有岗位兜底成 candidate，状态标记失效
+                "status": p.get("status", "candidate"),
+            })
             nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
             edges.append({
                 "source": p_id,
@@ -607,9 +615,11 @@ async def graph_skill_clusters(
         return ok(data=json.loads(cached))
 
     def _compute():
-        # 同步 Neo4j 会话 + Louvain 为 CPU/IO 密集，放线程池避免阻塞事件循环
+        # 同步 Neo4j 会话 + Louvain 为 CPU/IO 密集，放线程池避免阻塞事件循环。
+        # min_weight=2.0（默认）：P0 改造后权重=必要性组合因子×共现数，
+        # 过滤 must-nice 低频与 nice-nice 弱边，聚类簇内同质性最佳
         with neo4j_driver.session() as session:
-            graph, name_map = load_skill_cooccurrence(session, min_weight=1.0)
+            graph, name_map = load_skill_cooccurrence(session)
         clusters = louvain(graph)
         by_cluster: dict[int, list[str]] = {}
         for sid, cid in clusters.items():

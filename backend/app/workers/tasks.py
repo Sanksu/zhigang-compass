@@ -239,9 +239,9 @@ def _skills_of(ext: dict) -> list[str]:
 
 
 def _publish_date(snapshot: dict, crawled_at: str) -> date | None:
-    """解析发布日期：snapshot.post_date 优先，缺省用 crawled_at；无法解析返回 None。"""
+    """提取发布时间（snapshot.post_date 优先，缺失时用 crawled_at），无法解析返回 None。"""
     raw = str(snapshot.get("post_date") or crawled_at or "")[:19]
-    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S"):
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
         try:
             return datetime.strptime(raw, fmt).date()
         except ValueError:
@@ -1330,13 +1330,20 @@ async def batch_extract(
                 .limit(limit)
             )).all()
 
-        # 过滤过短正文（<10 字符无法抽取）：写 skipped 标记推进游标，
-        # 否则 `extraction IS NULL` 游标永不推进（短文本行堆积时正常 JD 饿死）
+        # 过滤过短正文（<10 字符无法抽取）与低质 JD（needs_review 人工复核标记）：
+        # 写 skipped 标记推进游标，否则 `extraction IS NULL` 游标永不推进
+        # （短文本行/低质行堆积时正常 JD 饿死）
         valid: list[JDRaw] = []
         results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": []}
         for row in rows:
-            if _is_jd_text_short(row.snapshot or {}, row.raw_text or ""):
-                snap = dict(row.snapshot or {})
+            snap = row.snapshot or {}
+            if snap.get("needs_review"):
+                snap = dict(snap)
+                snap["extraction"] = {"skipped": True, "reason": "质量评分 < 0.6，需人工复核"}
+                row.snapshot = snap
+                results["failed"].append({"jd_id": row.id, "error": "质量评分 < 0.6，跳过"})
+            elif _is_jd_text_short(snap, row.raw_text or ""):
+                snap = dict(snap)
                 snap["extraction"] = {"skipped": True, "reason": "JD 正文过短（<10 字符）"}
                 row.snapshot = snap
                 results["failed"].append({"jd_id": row.id, "error": "JD 正文过短（<10 字符），跳过"})
@@ -1382,25 +1389,32 @@ async def batch_extract(
                 f"[batch_extract] 处理 jd_id={row.id}（{i}/{total}，{i / total * 100:.0f}%）",
                 flush=True,
             )
+            evidence = {
+                "source": row.source,
+                "source_url": row.source_url,
+                "crawled_at": row.crawled_at,
+                "raw_text": _build_jd_text(row.snapshot or {}, row.raw_text or ""),
+            }
             try:
-                snap = dict(row.snapshot or {})
-                snap["extraction"] = extraction.model_dump()
-                row.snapshot = snap
-                evidence = {
-                    "source": row.source,
-                    "source_url": row.source_url,
-                    "crawled_at": row.crawled_at,
-                    "raw_text": _build_jd_text(row.snapshot or {}, row.raw_text or ""),
-                }
                 with neo4j_driver.session() as neo4j_session:
                     # 同步 Neo4j 写入放线程池，避免阻塞事件循环
                     position_id = await asyncio.to_thread(
                         import_jd, neo4j_session, extraction, evidence
                     )
+                # 入图成功后才写 extraction 标记：先标记后入图会让失败记录
+                # 被 `extraction IS NULL` 游标永久跳过，失去重试机会（P0-1）
+                snap = dict(row.snapshot or {})
+                snap["extraction"] = extraction.model_dump()
+                row.snapshot = snap
                 results["processed"] += 1
                 results["succeeded"] += 1
                 results["positions"].append({"jd_id": row.id, "position_id": position_id})
             except Exception as e:
+                # 入图失败：不写 extraction（保持 IS NULL 下次批跑重试），
+                # 错误写入 snapshot["extraction_error"] 落库审计（failed 可追溯）
+                snap = dict(row.snapshot or {})
+                snap["extraction_error"] = str(e)[:500]
+                row.snapshot = snap
                 results["failed"].append({"jd_id": row.id, "error": str(e)[:500]})
         await session.commit()
 
@@ -1824,7 +1838,11 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
 
         # ── 3. 提升候选：JD 源命中且该技能此前已在观察池（设计 §7.2.5 / 方案 §2）──
         from app.models.business import DiscoveryCandidate
-        from app.services.discovery.watch_pool import promotable_skills
+        from app.services.discovery.confidence import compute_confidence
+        from app.services.discovery.watch_pool import (
+            promotion_features,
+            promotable_skills,
+        )
 
         prior_rows = (await session.scalars(
             select(TechnologyWatch.skill_name).where(
@@ -1846,12 +1864,31 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
                  if sig.skill_name == skill and sig.signal_source == "jd"),
                 0.0,
             )
+            # P3：用真实周频次聚合特征与置信度，替代硬编码
+            # source_diversity=1 / final_confidence=0.0（否则提升候选永远过不了
+            # emerging 门槛：跨 ≥2 源 + 置信度 ≥ 0.6，见 state_machine
+            # can_promote_to_emerging）
+            feat = promotion_features(freqs, skill)
+            conf = compute_confidence(
+                jd_count=int(feat.get("jd_freq_ma3", 0) or 0),
+                source_count=feat.get("source_diversity", 0),
+                growth_rate=feat.get("growth", 0.0),
+            )
             session.add(DiscoveryCandidate(
                 id=f"cand-{skill[:20]}",
                 position_name=skill,
                 state="candidate",
-                features={"jd_mom_growth": jd_value, "z_score": None, "source_diversity": 1},
-                confidence={"final_confidence": 0.0, "jd_signal": jd_value},
+                features={
+                    "jd_mom_growth": jd_value,
+                    "z_score": feat.get("z_score"),
+                    "source_diversity": feat.get("source_diversity", 0),
+                    "jd_freq_ma3": feat.get("jd_freq_ma3", 0),
+                },
+                confidence={
+                    "final_confidence": conf.final_confidence,
+                    "base_confidence": conf.base_confidence,
+                    "jd_signal": jd_value,
+                },
                 evidence_refs=[f"watch:{period}:{skill}"],
                 seed_matched=False,
                 rag_matched=False,
