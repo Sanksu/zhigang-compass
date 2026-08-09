@@ -91,7 +91,10 @@ async def main(limit: int | None, write_back: bool) -> None:
                 ext = (row.snapshot or {}).get("extraction") or {}
                 from app.services.extraction.dictionary import normalize_position_name
 
-                pos = normalize_position_name(ext.get("position_name") or "")
+                pos = normalize_position_name(
+                    ext.get("position_name") or "",
+                    skills=[s.get("name", "") for s in (ext.get("skills") or []) if s.get("name")],
+                )
                 result = group_map.get(pos)
                 if result is None:
                     continue

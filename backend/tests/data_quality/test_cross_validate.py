@@ -52,7 +52,7 @@ class TestBuildPositionGroups:
         records = [
             _rec("boss", "高级前端开发工程师", ["React"]),
             _rec("zhilian", "前端开发", ["Vue"]),
-            _rec("boss", "算法工程师", ["Python"]),
+            _rec("boss", "算法工程师", ["机器学习"]),
         ]
         groups = build_position_groups(records)
         assert set(groups) == {"前端开发工程师", "算法工程师"}
