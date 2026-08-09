@@ -285,6 +285,12 @@ class TestNormalizePositionName:
         assert normalize_position_name("研究科学家", skills=["机器学习"]) == "算法工程师"
         assert normalize_position_name("架构师", skills=["Kubernetes"]) == "DevOps工程师"
         assert normalize_position_name("硬件工程师", skills=["FPGA"]) == "嵌入式开发工程师"
+        # 2026-08-09 增强：统计/计量技能优先归数据分析师，不被通用算法族抢走
+        assert normalize_position_name("算法工程师", skills=["因果推断", "Python"]) == "数据分析师"
+        assert normalize_position_name("算法工程师", skills=["统计学", "回归建模", "SAS"]) == "数据分析师"
+        assert normalize_position_name("算法工程师", skills=["双重差分", "BigQuery"]) == "数据分析师"
+        # 2026-08-09 增强：视频/动作识别方向归机器视觉
+        assert normalize_position_name("算法工程师", skills=["动作识别", "多目标跟踪", "视频处理"]) == "机器视觉算法工程师"
         # 技能未命中路由词（无技术方向）→ 不入图
         assert normalize_position_name("软件开发工程师", skills=["沟通能力"]) == ""
         # 无技能 → 不入图
