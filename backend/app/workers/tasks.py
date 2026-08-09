@@ -1112,7 +1112,12 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
                 select(ResumeCache).where(ResumeCache.file_hash == result_info["file_hash"])
             )
             if cache is None:
+                # id 复用任务 id（task.id）：上传端 resume_files.resume_id = task.id，
+                # 归属校验（match/recommend `_owns_resume` 查 resume_files）依赖
+                # cache.id == resume_files.resume_id 一致；否则新简历无法发起匹配，
+                # 报"无权使用该简历发起匹配"（2026-08-09 修复）。
                 cache = ResumeCache(
+                    id=task.id,
                     file_hash=result_info["file_hash"],
                     file_name=result_info.get("file_name") or Path(file_path).name,
                     parsed_data=parsed,
@@ -1903,8 +1908,25 @@ async def check_llm_providers_health(ctx: dict) -> dict:
 
 
 async def on_startup(ctx: dict) -> None:
-    """Worker 启动钩子。"""
+    """Worker 启动钩子。
+
+    预热 OCR 引擎（PaddleOCR 懒加载首次调用约 24s，2026-08-09 扫描件 OCR
+    速度评测）：异步预加载到全局单例，使首次 resume_parse 免于 24s 冷加载。
+    模型不可用（未下载/依赖缺失）时预热失败不阻塞 worker 启动，后续
+    resume_parse 仍会按需懒加载并抛 ResumeParseError 由任务层处理。
+    """
     print(f"[ARQ Worker] 启动，PID={ctx.get('worker_pid')}")
+
+    async def _warm_ocr():
+        try:
+            from app.services.resume import file_parser as _fp
+
+            _fp._ocr_engine()
+            print("[ARQ Worker] OCR 引擎预热完成")
+        except Exception as e:
+            print(f"[ARQ Worker] OCR 预热跳过（模型不可用）: {str(e)[:100]}")
+
+    asyncio.create_task(_warm_ocr())
 
 
 async def on_shutdown(ctx: dict) -> None:
