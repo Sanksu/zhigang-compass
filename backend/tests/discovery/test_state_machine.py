@@ -149,6 +149,35 @@ class TestPositionFreqWindows:
         out = position_freq_windows([snap, snap], {"孤岗"})
         assert out["孤岗"] == [0.0, 0.0]
 
+    def test_non_requires_edges_not_counted(self):
+        """P2 频次口径修复：仅 REQUIRES 出边计入岗位频次。
+        HAS_EVIDENCE/BELONGS_TO_OCCUPATION 等维护边不再虚增频次
+        （修复前计全部出边，岗位频次被证据/归属边污染）。"""
+        snap = {
+            "nodes": [{"id": "pos_x", "name": "Java 开发工程师", "type": "position"}],
+            "edges": [
+                {"source": "pos_x", "target": "sk_1", "relation": "REQUIRES"},
+                {"source": "pos_x", "target": "sk_2", "relation": "REQUIRES"},
+                {"source": "pos_x", "target": "ev_1", "relation": "HAS_EVIDENCE"},
+                {"source": "pos_x", "target": "occ_1", "relation": "BELONGS_TO_OCCUPATION"},
+            ],
+        }
+        out = position_freq_windows([snap], {"Java 开发工程师"})
+        assert out["Java 开发工程师"] == [2.0]
+
+    def test_legacy_edges_without_relation_still_counted(self):
+        """旧快照 edges 无 relation 字段（relation 导出前的版本）按 REQUIRES
+        处理，历史窗口序列不因字段缺失而整体清零。"""
+        snap = {
+            "nodes": [{"id": "pos_x", "name": "Java 开发工程师", "type": "position"}],
+            "edges": [
+                {"source": "pos_x", "target": "sk_1"},
+                {"source": "pos_x", "target": "sk_2"},
+            ],
+        }
+        out = position_freq_windows([snap], {"Java 开发工程师"})
+        assert out["Java 开发工程师"] == [2.0]
+
 
 class TestAutoTransition:
     def test_emerging_to_stable(self):

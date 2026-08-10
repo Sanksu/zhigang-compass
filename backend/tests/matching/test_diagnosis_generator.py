@@ -1,7 +1,7 @@
 """诊断报告生成器单元测试（设计文档 §9.5 节）。
 
 覆盖：prompt 渲染（分数/差距/路径/证据）、Top-5 裁剪、空数据兜底、
-LLM 异常向上传播（由 API 层转 503）。
+LLM 异常向上传播（由 API 层映射 504/503，§2.4.7）。
 """
 
 from app.services.diagnosis.generator import (
@@ -22,7 +22,9 @@ class _FakeLLM:
         self.prompt = ""
         self.system_prompt = ""
 
-    def call_sync(self, prompt, response_model, system_prompt=None):
+    def call_with_fallback(
+        self, prompt, response_model, max_retries=1, system_prompt=None, timeout=None
+    ):
         self.prompt = prompt
         self.system_prompt = system_prompt
         return self.report
@@ -121,7 +123,9 @@ class TestGenerateDiagnosis:
 
     def test_llm_configuration_error_propagates(self):
         class _BrokenLLM:
-            def call_sync(self, prompt, response_model, system_prompt=None):
+            def call_with_fallback(
+                self, prompt, response_model, max_retries=1, system_prompt=None, timeout=None
+            ):
                 raise LLMConfigurationError("未配置可用 provider")
 
         try:

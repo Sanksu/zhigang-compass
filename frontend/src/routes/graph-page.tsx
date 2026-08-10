@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Graph2D, type Graph2DHandle } from '@/components/graph/graph-2d'
+import { GraphAnalysisPanel } from '@/components/graph/graph-analysis-panel'
 import {
   NodeDetailPanel,
   type PositionDetail,
@@ -171,9 +172,11 @@ export function GraphPage() {
   // 视图切换 → 真实后端过滤（GET /graph/view/{view_type}），初始 panorama 同样走后端视图端点。
   // 切换视图不清 loading，数据到达后原子替换，避免闪屏。
   // 展开状态在 Tabs 事件回调中同步清空（effect 内 setState 会触发 cascading renders）
+  // limit=120：techStack 全量渲染技能节点，节点数与 limit 线性相关（120→约 166 节点），
+  // 控制画布规模在 ECharts force 布局可承受范围，避免主线程长时间阻塞（2026-08-08）
   useEffect(() => {
     let cancelled = false
-    apiGet<PanoramaData>(`/graph/view/${view}?limit=200`)
+    apiGet<PanoramaData>(`/graph/view/${view}?limit=120`)
       .then((res) => {
         if (cancelled) return
         const g = toGraphData(res)
@@ -555,8 +558,8 @@ export function GraphPage() {
           </div>
         </Card>
 
-        {/* 节点详情面板 */}
-        <Card className="h-[640px] overflow-hidden">
+        {/* 节点详情面板 + 图谱算法分析 */}
+        <Card className="h-[640px] overflow-y-auto">
           <NodeDetailPanel
             node={selected}
             stats={detailStats}
@@ -568,6 +571,12 @@ export function GraphPage() {
             onTogglePosition={togglePosition}
             onSelectSkill={focusSkill}
             onClose={() => setSelected(null)}
+          />
+          {/* 图谱算法分析：技能重要性 / 技能簇 / 最短路径（设计文档 §7.1） */}
+          <GraphAnalysisPanel
+            skills={data.nodes.filter((n) => n.type === 'skill').map((n) => ({ id: n.id, name: n.name }))}
+            onFocusSkill={focusSkill}
+            className="border-t border-border"
           />
         </Card>
       </div>

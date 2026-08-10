@@ -121,4 +121,22 @@ def test_match_diagnosis_llm_config_error_keeps_503():
             match_api.match_diagnosis(match_id="m1", user={"sub": "u1"})
         )
 
-    assert resp.code == 503
+    assert resp.status_code == 503
+
+
+def test_match_diagnosis_llm_all_providers_failed_emits_503():
+    """全部 provider 失败（父类 LLMExtractionError）→ 503（契约：LLM 不可用或超时），
+    而非 500。"""
+    from app.services.extraction.llm_provider import LLMExtractionError
+
+    snapshot = {"gaps": [{"skill": "Python"}], "position_name": ""}
+    with patch.object(match_api, "_load_match_result", new=AsyncMock(return_value=snapshot)), \
+         patch.object(match_api, "redis_client", new=AsyncMock()) as redis_mock, \
+         patch("app.services.diagnosis.generator.generate_diagnosis",
+               side_effect=LLMExtractionError("所有 provider 均失败")):
+        redis_mock.get.return_value = None
+        resp = asyncio.run(
+            match_api.match_diagnosis(match_id="m1", user={"sub": "u1"})
+        )
+
+    assert resp.status_code == 503

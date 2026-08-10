@@ -1,9 +1,10 @@
 """诊断报告生成器（设计文档 §9.5 / §6.4 节）。
 
 LLM 将匹配结果 + 差距 + 学习路径 + 图谱参考上下文作为 context 生成结构化诊断报告。
-实时路径（GET /match/result/{id}/diagnosis）使用 call_sync（单 provider 10s 上限）；
-LLM 不可用/超时抛 LLMConfigurationError / LLMTimeoutError，由 API 层转 503
-（诊断是增强功能，不阻断匹配主流程）。
+实时路径（GET /match/result/{id}/diagnosis）使用 call_with_fallback（按优先级降级，
+任一 provider 成功即返回）；全部失败抛 LLMConfigurationError / LLMTimeoutError /
+LLMExtractionError，由 API 层映射 503（配置/全部失败）或 504（超时，错误码 5003，
+§2.4.7）（诊断是增强功能，不阻断匹配主流程）。
 
 图谱参考上下文由通用 RAG 检索模块（services/rag/retrieval.py）在 API 层动态检索后
 注入（§6.4：岗位定义 + 技能描述 + 历史诊断报告，3000 token 截断，evidence_id 追溯）。
@@ -82,7 +83,8 @@ def generate_diagnosis(
             dict 形态：content + evidence_id），缺省空列表（上下文渲染为"无"）
 
     Raises:
-        LLMConfigurationError / LLMTimeoutError：LLM 不可用或超时
+        LLMConfigurationError / LLMTimeoutError / LLMExtractionError：LLM 不可用、
+        全部 provider 失败（诊断是增强功能，多 provider 降级后仍失败时向上传播）
     """
     chain = llm or LLMProviderChain()
     prompt = DIAGNOSIS_TASK_TEMPLATE.format(
@@ -98,7 +100,7 @@ def generate_diagnosis(
         evidence=_render_evidence(data.get("evidence_refs") or []),
         rag_context=_render_rag_context(rag_chunks or []),
     )
-    report = chain.call_sync(
+    report = chain.call_with_fallback(
         prompt, DiagnosisReport, system_prompt=DIAGNOSIS_SYSTEM_PROMPT
     )
     # 虚构引用后置拦截（§6.4 生成约束）：断言引用的 evidence_id 必须能追溯

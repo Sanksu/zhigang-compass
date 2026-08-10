@@ -17,12 +17,28 @@ import statistics
 from datetime import datetime
 from typing import Any, Protocol
 
+from app.services.extraction.dictionary import is_noise_skill
+
 
 # ---- 阈值常量（设计文档 §7.2.5 条件监测矩阵）----
 JD_MOM_THRESHOLD = 0.5   # JD 3 月移动平均环比 > 50%
 Z_SIGMA = 2.0            # 学术/社区/课程源 2σ
 HISTORY_WEEKS = 8        # 历史均值窗口（周）
 JD_MA_MONTHS = 3         # JD 移动平均窗口（月）
+
+# JD 招聘平台源（raw.source 存平台名而非字面量 "jd"，见 crawlers/spiders）
+JD_SOURCES = {
+    "boss", "zhilian", "maimai", "glassdoor",
+    "indeed", "monster", "linkedin_public",
+}
+
+
+def is_jd_source(source: str) -> bool:
+    """source 是否为 JD 招聘平台源。
+
+    兼容历史字面量 "jd"（早期版本直接落库的记录）。
+    """
+    return source in JD_SOURCES or source == "jd"
 
 
 class RawRowLike(Protocol):
@@ -66,10 +82,15 @@ def extract_skills(source: str, snapshot: dict) -> list[str]:
         if isinstance(tags, list):
             out.extend(t for t in tags if isinstance(t, str) and t)
         return out
-    # jd 源：LLM 抽取结果 skills（batch_extract 落 snapshot.extraction.skills）
+    # jd 源：LLM 抽取结果 skills（batch_extract 落 snapshot.extraction.skills）。
+    # LLM 误抽的岗位名碎片/经验描述（如"算法工程师""熟悉Redis"）在 STOPWORDS
+    # 之外可进 skills，入信号前用 is_noise_skill 剔除（白名单词整体保护）。
     ext = snap.get("extraction") or {}
     skills = ext.get("skills") or []
-    return [s["name"] for s in skills if isinstance(s, dict) and s.get("name")]
+    return [
+        s["name"] for s in skills
+        if isinstance(s, dict) and s.get("name") and not is_noise_skill(s["name"])
+    ]
 
 
 # ============================================================
@@ -184,9 +205,10 @@ def build_signals(
     """
     hits: list[WatchSignal] = []
     for (skill, source), weekly in freqs.items():
-        if source == "jd":
+        if is_jd_source(source):
             sig = detect_jd_mom_signal(weekly)
             if sig is not None and sig[1]:
+                # JD 源信号统一记 "jd"（原始 source 是平台名，如 boss/zhilian）
                 hits.append(WatchSignal(skill, "jd", sig[0], period))
             continue
         sig = detect_z_signal(weekly)
@@ -210,6 +232,50 @@ def promotable_skills(signals: list[WatchSignal], previously_watched: set[str]) 
                 seen.add(sig.skill_name)
                 out.append(sig.skill_name)
     return out
+
+
+def promotion_features(
+    freqs: dict[tuple[str, str], dict[str, int]],
+    skill_name: str,
+) -> dict:
+    """计算观察池提升候选的置信度输入特征（P3）。
+
+    从 (skill, JD 平台源) 周频次聚合真实特征，替代 watch_signal_daily 中
+    硬编码的 source_diversity=1 / final_confidence=0.0（否则提升候选
+    永远无法过 emerging 门槛：跨 ≥2 源 + 置信度 ≥ 0.6）：
+
+    - source_diversity: 命中的 JD 平台源数
+    - jd_freq_ma3: 最近 3 周 JD 频次均值（compute_confidence 的 jd_count 输入）
+    - growth: 最近周环比增长率
+    - z_score: JD 周频次相对历史的 z 偏离（无历史时 None）
+
+    非 JD 源（arxiv/github 等）不计入；技能无 JD 频次时返回空 dict。
+    """
+    combined: dict[str, int] = {}
+    sources: set[str] = set()
+    for (skill, source), weekly in freqs.items():
+        if skill != skill_name or not is_jd_source(source):
+            continue
+        sources.add(source)
+        for week, count in weekly.items():
+            combined[week] = combined.get(week, 0) + count
+
+    if not combined:
+        return {}
+
+    series = [float(combined[k]) for k in sorted(combined)]
+    recent3 = series[-3:]
+    jd_freq_ma3 = sum(recent3) / len(recent3)
+    growth = 0.0
+    if len(series) >= 2 and series[-2] > 0:
+        growth = (series[-1] - series[-2]) / series[-2]
+    z = detect_z_signal(combined)
+    return {
+        "source_diversity": len(sources),
+        "jd_freq_ma3": jd_freq_ma3,
+        "growth": growth,
+        "z_score": z[0] if z is not None else None,
+    }
 
 
 def anomaly_flags(

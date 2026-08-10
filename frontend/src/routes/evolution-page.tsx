@@ -219,6 +219,108 @@ function SignalsView() {
   )
 }
 
+// ===== TechnologyWatchView =====
+
+/** 技术热点观察池（真实 GET /evolution/watch，MLI 产业化拐点排名） */
+interface WatchItem {
+  skill_name: string
+  sources: string[]
+  mli: number
+  ready_to_industrialize: boolean
+  status: string
+  last_signal_at: string | null
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  jd: 'JD',
+  arxiv: '论文',
+  course: '课程',
+  github: 'GitHub',
+  community: '社区',
+  stackoverflow: 'SO',
+}
+
+function TechnologyWatchView() {
+  const [data, setData] = useState<WatchItem[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    apiGet<{ items: WatchItem[] }>('/evolution/watch?limit=20')
+      .then((r) => setData(r.items))
+      .catch((e) => setError(e instanceof ApiError ? e.message : '技术热点加载失败'))
+  }, [])
+
+  if (error) {
+    return (
+      <Card className="mb-4">
+        <CardContent className="py-8 text-center text-xs text-state-archived">{error}</CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card className="mb-4">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Eye className="size-4 text-ink" />
+          <span>技术热点观察池</span>
+          <span className="text-[10px] font-normal text-ink-faint">MLI 产业化拐点 · 设计文档 §7.2.5</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {data === null ? (
+          <p className="py-6 text-center text-xs text-ink-faint">加载观察池…</p>
+        ) : data.length === 0 ? (
+          <p className="py-6 text-center text-xs text-ink-faint">暂无技术热点信号（依赖每日观察池任务）</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>技能</TableHead>
+                <TableHead>MLI 指数</TableHead>
+                <TableHead>信号来源</TableHead>
+                <TableHead>产业化</TableHead>
+                <TableHead>状态</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.map((w) => (
+                <TableRow key={w.skill_name}>
+                  <TableCell className="font-medium text-ink">{w.skill_name}</TableCell>
+                  <TableCell className="font-mono tabular-nums text-ink-muted">
+                    {w.mli.toFixed(2)}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {w.sources.map((s) => (
+                        <Badge key={s} variant="outline" className="text-[10px] font-mono">
+                          {SOURCE_LABEL[s] ?? s}
+                        </Badge>
+                      ))}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {w.ready_to_industrialize ? (
+                      <Badge className="text-[10px] bg-state-emerging">可产业化</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px]">观察中</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={w.status === 'candidate_promoted' ? 'emerging' : 'outline'} className="text-[10px]">
+                      {w.status === 'candidate_promoted' ? '候选提升' : w.status === 'archived' ? '归档' : '观察'}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // ===== SkillTrendView =====
 
 /** 技能频次趋势（真实 GET /evolution/trends，按技能节点 ID 查询） */
@@ -935,6 +1037,9 @@ export function EvolutionPage() {
 
       {/* 新兴 / 衰退技能 Top-10（真实 /evolution/signals） */}
       <SignalsView />
+
+      {/* 技术热点观察池（真实 /evolution/watch，MLI 产业化拐点） */}
+      <TechnologyWatchView />
 
       {/* 版本快照对比（真实） */}
       <div className="mb-4">

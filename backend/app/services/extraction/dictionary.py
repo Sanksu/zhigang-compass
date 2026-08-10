@@ -221,6 +221,21 @@ SOFT_SKILL_WHITELIST: frozenset[str] = frozenset({
     "主动性", "文档撰写", "汇报能力", "数据分析思维", "执行力",
 })
 
+# 通用软素质噪声词（2026-08-09 新增）：LLM 常把"吃苦耐劳/有责任心/团队精神"等
+# 招聘软素质误抽到技术技能 skills 列表。与 SOFT_SKILL_WHITELIST（岗位本体 20 项
+# 软技能，保留入图谱）区分：本词表仅用于从 skills 中过滤，不入技能图谱。
+# 含子串匹配（"吃苦耐劳"、"责任心强"等变体统一拦截），但须避免误杀技术词——
+# 如"可靠性测试/可靠性工程师"是工程词，不在此表（"可靠性"单独列因这类词由
+# 上下文区分，故用完整词而非子串）。
+SOFT_SKILL_NOISE: frozenset[str] = frozenset({
+    "吃苦耐劳", "吃苦", "踏实肯干", "踏实", "肯干", "敬业", "爱岗敬业",
+    "有责任心", "责任心强", "工作认真", "认真负责", "严谨细致", "严谨",
+    "细心", "耐心", "诚信", "诚实守信", "积极向上", "积极乐观", "乐观",
+    "勤奋", "上进", "上进心", "好学", "好学上进", "抗压", "承压",
+    "团队精神", "团队合作", "职业素养", "品行端正", "态度端正", "细心负责",
+    "稳定性", "责任感", "奉献", "服从安排", "任劳任怨", "勤恳",
+})
+
 
 # 行业/业务领域/招聘福利词黑名单：LLM 在正文缺失的 JD 上常将这些词误抽为技能
 SKILL_STOPWORDS: set[str] = {
@@ -296,6 +311,16 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     # 海外源验证（2026-08-09）：LLM 对英文长标题抽取的中文碎片归位
     (("ai 研究", "ai研究"), "研究员"),
     (("icam",), "网络安全工程师"),
+    # P0 图谱低质岗治理（2026-08-09）：英文复合岗名翻译后的标准族，
+    # 前置拦截避免剥后缀成"生化/解决方案/生物光学"等碎片
+    (("生化",), "生化工程师"),
+    (("生物光学",), "生物光学工程师"),
+    (("解决方案",), "解决方案工程师"),
+    (("成本估算", "估算", "estimator"), "成本估算师"),
+    (("系统可靠性", "可靠性"), "系统可靠性工程师"),
+    (("开发者体验",), "开发者体验工程师"),
+    (("固件", "firmware"), "嵌入式开发工程师"),
+    (("物理设计",), "硬件工程师"),
 ]
 
 # 失真兜底岗位族（2026-08-09 图谱质量治理）："软件/科学家/架构/研究员/顾问/硬件/
@@ -528,6 +553,29 @@ _EN_POSITION_MAP: dict[str, str] = {
     "database administrator": "数据库管理员",
     "network sre engineer": "运维工程师",
     "kafka streaming architect": "大数据开发工程师",
+    # P0 图谱低质岗治理（2026-08-09）：英文复合岗名完整映射到标准族，
+    # 防止 LLM 抽取"生化/固件/验证"等名词碎片直接入图
+    "verification engineer": "测试工程师",
+    "verification engineer iii": "测试工程师",
+    "quality engineer": "测试工程师",
+    "quality assurance engineer": "测试工程师",
+    "systems reliability engineer": "运维工程师",
+    "reliability engineer": "运维工程师",
+    "developer experience engineer": "DevOps工程师",
+    "performance engineer": "运维工程师",
+    "solution engineer": "解决方案工程师",
+    "executive support engineer": "运维工程师",
+    "estimator": "成本估算师",
+    "physical design engineer": "硬件工程师",
+    "avionics engineer": "硬件工程师",
+    "aeronautical engineer": "硬件工程师",
+    "robotics systems engineer": "机器人算法工程师",
+    "bio-chemical engineer": "生化工程师",
+    "biochemical engineer": "生化工程师",
+    "bio-optics engineer": "生物光学工程师",
+    "privacy engineer": "网络安全工程师",
+    "web content platform developer": "前端开发工程师",
+    "collaboration cloud engineer": "DevOps工程师",
 }
 
 # 无信息量泛岗位词：归一化结果命中时视为空岗位（不入图）。
@@ -602,6 +650,28 @@ _POSITION_STOPWORDS: set[str] = {
     "Guidewire", "可视化软件开发工程师", "桌面",
     # 海外源验证（2026-08-09）：LLM 把 Application Developer 抽成"应用"碎片
     "应用",
+    # P0 图谱低质岗治理（2026-08-09）：LLM 抽取的英文复合岗名词碎片，
+    # 无标准岗位语义，拦截不入图（完整岗位名由 _EN_POSITION_MAP/_POSITION_KEYWORDS 承接）
+    "验证", "质量", "交付", "解决方案", "隐私", "估算师", "信息化",
+    "生化", "固件", "生物光学", "系统可靠性", "开发者体验", "性能工程",
+    "定价分析", "消费者洞察", "洞察与创新", "音乐洞察与版税", "核心投资组合",
+    "治疗领域分析与洞察", "商业抵押贷款组合管理总监", "抵押贷款组合管理总监",
+    "资本市场财务分析", "资金管理", "量化风险与投资组合分析", "材料与技术合规",
+    "供应链采购与履约", "战略收入管理", "规模化业务增长", "劳动力分析总监",
+    "Web 内容平台", "产品内容", "任务主管系统", "协作云", "前向部署分析",
+    "前向部署洞察", "航空", "航空电子飞行仪表", "蜂窝4G/5G系统性能",
+    "机器人系统", "电商小程序", "数据科学", "高管支持", "商业智能助理",
+    "Kotlin 质量保证", "物理设计", "Adobe转型高级助理",
+    # P0 图谱重建新增（2026-08-09）：回刷 title 归一化暴露的碎片/非技术岗/含地点/公司残留
+    "副总裁", "子系统", "人力资源经理/", "招聘专员", "大客户销售", "增长策略运营",
+    "全国重点客户", "应用开发岗", "政务AI应用", "激光高级工艺", "蜂窝系统性能",
+    "理工科课程导师", "社区用户", "商业化运营", "C开发工程师-南京",
+    "南京天虞科技有限公司-技术", "客户端开发-双休-快手", "wcs开发工程师会有出差",
+    "500强外资市场通路TM", "一级建造师市政+", "结构工程师", "高级社交媒体",
+    "短视频编导", "大客户销售-上海", "SAP业务技术平台", "DevSecOps",
+    "招聘专员-广州", "社区用户&商业化运营",
+    "结构工程师 / 遥控器结构设计工程师 / 高级结构",
+    "Senior Social Media Manager 高级社交媒体", "短视频编导-小红书方向",
 }
 
 # 岗位名前缀修饰词（级别/招聘形态），归一化时去除
@@ -828,6 +898,49 @@ def normalize_skill(raw: str) -> str:
                     return canonical
             break  # 只剥一次，无论是否命中
     return raw
+
+
+# 白名单外技能信号的噪音判定（观察池过滤 / 白名单扩充候选共用）。
+# 词表与判定规则原属 scripts/expand_skill_whitelist.py，提升到词典层供两处复用，
+# 保证观察池信号与白名单扩充对"什么不是技能"口径一致。
+_POSITION_NOISE = re.compile(
+    r"(工程师|技术员|开发工程师|开发$|专员|经理|主管|负责人|设计师|"
+    r"架构师|分析师|科学家|研究员|顾问|专家|实习生|助理|店长)$"
+)
+_EXPERIENCE_NOISE = re.compile(r"(经验|开发|部署|使用|掌握|熟悉|了解|能力|经验$|方向)")
+_GENERIC_NOISE = {
+    "前端", "后端", "测试", "运维", "算法", "数据库", "大数据", "云",
+    "安全", "网络", "搜索", "配置", "操作", "脚本", "报表", "开源",
+    "移动", "桌面", "嵌入式", "数据", "框架", "平台", "系统", "项目",
+    "团队", "业务", "产品", "架构", "开发", "技术", "管理", "设计",
+    "工具", "接口", "协议", "引擎", "服务", "组件", "方案", "功能",
+    "经验", "工作", "能力", "要求", "方向", "语言",
+}
+_COMPOUND_NOISE = re.compile(r"[\/()（）]|天/|月/|年/")
+# 别名映射的落点（标准名）是真实技能，永不判噪音
+_ALIAS_STANDARDS: set[str] = set(SKILL_ALIAS.values())
+
+
+def is_noise_skill(name: str) -> bool:
+    """启发式噪音判定：非技能标签 / 泛词 / 岗位名与经验描述碎片。
+
+    用于观察池 JD 信号过滤（LLM 误抽"算法工程师""熟悉Redis"等非技能词）与
+    白名单扩充候选挖掘。白名单词与别名标准名整体保护（如"嵌入式开发"不以
+    "开发"后缀退化判噪），其余按泛词/岗位名/经验碎片规则判定。
+    """
+    if name in SKILL_WHITELIST or name in _ALIAS_STANDARDS:
+        return False
+    if name in _GENERIC_NOISE or name in SKILL_STOPWORDS:
+        return True
+    if len(name) < 2 or name.isdigit():
+        return True
+    if _COMPOUND_NOISE.search(name):
+        return True
+    if _POSITION_NOISE.search(name):
+        return True
+    if _EXPERIENCE_NOISE.search(name):
+        return True
+    return False
 
 
 # 白名单词小写 → 标准写法映射（normalize_skill 用于大小写统一）

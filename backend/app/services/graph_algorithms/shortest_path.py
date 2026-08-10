@@ -22,6 +22,7 @@ def shortest_path(
     from_skill: str,
     to_skill: str,
     max_hops: int = 6,
+    position_statuses: Optional[list] = None,
 ) -> Optional[list[dict[str, Any]]]:
     """两技能间的最短路径（hop ≤ max_hops）。
 
@@ -30,20 +31,28 @@ def shortest_path(
         from_skill: 起点技能 ID
         to_skill: 终点技能 ID
         max_hops: 最大跳数（设计文档 *..6）
+        position_statuses: 可选岗位可见状态白名单。给定后路径上经过的
+            Position 节点仅限这些状态（匿名/guest 场景过滤 candidate 岗位）。
 
     Returns:
         节点序列 [{id, name, type}]（含两端技能）；不存在可达路径或查询
         异常返回 None。
     """
+    status_filter = (
+        "WHERE ALL(n IN nodes(p) WHERE NOT n:Position OR n.status IN $position_statuses)"
+        if position_statuses is not None
+        else ""
+    )
     try:
         rows = session.run(
-            """
-            MATCH p = shortestPath((a:Skill {id: $from})-[*..$max_hops]-(b:Skill {id: $to}))
-            RETURN [n IN nodes(p) | {id: n.id, name: n.name, type: labels(n)[0]}] AS path
+            f"""
+            MATCH p = shortestPath((a:Skill {{id: $from}})-[*..{max_hops}]-(b:Skill {{id: $to}}))
+            {status_filter}
+            RETURN [n IN nodes(p) | {{id: n.id, name: n.name, type: labels(n)[0]}}] AS path
             """,
             **{"from": from_skill},
             to=to_skill,
-            max_hops=max_hops,
+            position_statuses=position_statuses,
         )
     except Exception:
         # 查询异常（图谱不可达/无路径）统一视为不可达

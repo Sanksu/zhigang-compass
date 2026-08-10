@@ -171,6 +171,13 @@ _ALLOWED_SKILL_CATEGORIES: dict[str, set[str]] = {
     "保险分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
     "精算分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
     "可持续发展分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
+    # P0 图谱低质岗治理（2026-08-09）：英文复合岗名新族跨域白名单
+    "生化工程师": {"AI/机器学习", "硬件/芯片", "数据分析/商业", "计算机基础", "编程语言"},
+    "生物光学工程师": {"AI/机器学习", "硬件/芯片", "数据分析/商业", "计算机基础", "编程语言"},
+    "解决方案工程师": {"云原生/DevOps", "后端", "前端", "数据库", "网络/协议", "计算机基础", "编程语言", "工程协作"},
+    "成本估算师": {"数据分析/商业", "工程协作", "计算机基础", "编程语言"},
+    "系统可靠性工程师": {"云原生/DevOps", "安全", "数据库", "网络/协议", "计算机基础", "编程语言", "工程协作"},
+    "开发者体验工程师": {"云原生/DevOps", "后端", "前端", "工程协作", "数据库", "编程语言", "计算机基础"},
 }
 
 
@@ -417,7 +424,11 @@ def build_edges(agg: dict[str, PositionAgg]) -> list[dict]:
 
 
 def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
-    """全量写回 Neo4j（UNWIND 批量 + MERGE 幂等）。返回写入的岗位/边数。"""
+    """全量写回 Neo4j（UNWIND 批量 + MERGE 幂等 + 对齐删除）。
+
+    返回 {"positions", "edges", "removed_edges"}：positions/edges 为写入的
+    岗位/边数；removed_edges 为对齐删除的聚合输出之外 REQUIRES 边数。
+    """
     positions = []
     for pos, pa in agg.items():
         positions.append({
@@ -430,6 +441,7 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
         })
     edges = build_edges(agg)
 
+    removed_edges = 0
     with session:
         if positions:
             session.run(
@@ -456,4 +468,27 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
                 """,
                 edges=edges,
             )
-    return {"positions": len(positions), "edges": len(edges)}
+            # P1-1 衰退技能移除（设计文档 §7.1.1）：聚合为全量重算，仅 MERGE
+            # 会永久保留聚合输出之外的边（SimHash 重复 JD 独有技能、大岗位
+            # hit<2 一次性噪声、JD 已消失的衰退技能），按本次输出对齐删除。
+            # 人工编辑岗位（PositionEditLog）跳过——人工调整优先于自动聚合，
+            # 防止下次聚合把编辑结果打回。
+            edited = session.run(
+                "MATCH (l:PositionEditLog) "
+                "RETURN collect(DISTINCT l.position_name) AS names"
+            ).single()["names"]
+            kept_by_pos: dict[str, list[str]] = {}
+            for e in edges:
+                kept_by_pos.setdefault(e["pos"], []).append(e["skill"])
+            removed_edges = session.run(
+                """
+                UNWIND $kept_by_pos AS item
+                MATCH (p:Position {name: item.pos})-[r:REQUIRES]->(s:Skill)
+                WHERE NOT s.name IN item.kept AND NOT p.name IN $excluded
+                DELETE r RETURN count(r) AS c
+                """,
+                kept_by_pos=[{"pos": p, "kept": k} for p, k in kept_by_pos.items()],
+                excluded=edited,
+            ).single()["c"]
+    return {"positions": len(positions), "edges": len(edges),
+            "removed_edges": removed_edges}

@@ -34,6 +34,43 @@ class TestGraph:
         assert data["stats"]["nodes"] > 0
         assert data["stats"]["edges"] > 0
 
+    def test_panorama_guest_excludes_candidate(self, client: httpx.Client):
+        """方案一：匿名/guest 全景不含 candidate 岗位（user/admin 可见全量）。
+
+        构造验证：当前真实库岗位多为 candidate，guest 返回的 position 节点
+        status 必须全部 ∈ {emerging, stable, declining}。
+        """
+        r = client.get("/api/v1/graph/panorama", params={"limit": 600})
+        assert r.status_code == 200
+        data = r.json()["data"]
+        visible = {"emerging", "stable", "declining"}
+        for node in data["nodes"]:
+            if node["type"] == "position":
+                assert node.get("status", "candidate") in visible, (
+                    f"guest 图谱不应包含 candidate 岗位: {node['name']}"
+                )
+
+    def test_position_detail_guest_404_for_candidate(
+        self, client: httpx.Client, auth_headers
+    ):
+        """方案一：guest 查询 candidate 岗位详情应 404（不可见）。
+
+        通过 admin 全景拿到岗位 id（candidate 优先），匿名请求应 404。
+        """
+        import pytest
+
+        if not auth_headers:
+            pytest.skip("admin 登录失败（库已初始化且密码非默认），跳过认证用例")
+        pano = client.get("/api/v1/graph/panorama", params={"limit": 600}, headers=auth_headers).json()["data"]
+        candidate = next(
+            (n["id"] for n in pano["nodes"] if n["type"] == "position" and n.get("status") == "candidate"),
+            None,
+        )
+        if candidate is None:
+            pytest.skip("真实库无 candidate 岗位，跳过该用例")
+        r = client.get(f"/api/v1/graph/position/{candidate}")
+        assert r.status_code == 404
+
     def test_fulltext_search_position(self, client: httpx.Client, auth_headers):
         """全文检索：真实库 717 JD 入图，搜"算法"应有结果。"""
         import pytest

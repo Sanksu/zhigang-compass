@@ -71,3 +71,33 @@ def test_snapshot_graph_registered_as_arq_task():
     from app.workers import tasks as t
 
     assert t.snapshot_graph in t.WorkerSettings.functions
+
+
+def test_export_edges_include_relation_type():
+    """P2 快照导出含边类型 relation：position_freq_windows 据此区分 REQUIRES
+    与 HAS_EVIDENCE 等维护边，岗位频次口径不再虚增（见 test_state_machine
+    的 non_requires_edges_not_counted）。"""
+    from unittest.mock import MagicMock, patch
+
+    node_rows = [
+        {"id": "pos_1", "name": "后端开发工程师", "label": "Position"},
+        {"id": "sk_1", "name": "Python", "label": "Skill"},
+        {"id": "ev_1", "name": None, "label": "Evidence"},
+    ]
+    edge_rows = [
+        {"source": "pos_1", "target": "sk_1", "relation": "REQUIRES"},
+        {"source": "pos_1", "target": "ev_1", "relation": "HAS_EVIDENCE"},
+    ]
+
+    def fake_run(query, **params):
+        result = MagicMock()
+        result.data.return_value = node_rows if "n.id AS id" in query else edge_rows
+        return result
+
+    with patch("app.services.evolution.graph_version.neo4j_driver") as mock_driver:
+        session = MagicMock()
+        session.run.side_effect = fake_run
+        mock_driver.session.return_value.__enter__.return_value = session
+        _, edges = GraphVersionManager._export_neo4j()
+
+    assert {e["relation"] for e in edges} == {"REQUIRES", "HAS_EVIDENCE"}

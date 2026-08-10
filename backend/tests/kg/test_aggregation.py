@@ -165,11 +165,28 @@ class TestBuildAggregatesLevel:
         assert sa["Vue.js"].must_count == 0
 
 
+class _FakeResult:
+    """会话桩 run 的返回值：write_aggregates 需读取单行结果。"""
+
+    def __init__(self, single: dict):
+        self._single = single
+
+    def single(self):
+        return self._single
+
+    def data(self):
+        return [self._single] if self._single is not None else []
+
+
 class _FakeSession:
-    """write_aggregates 的会话桩：收集 run 调用参数。"""
+    """write_aggregates 的会话桩：收集 run 调用参数。
+
+    edited_positions 控制 PositionEditLog 查询返回的人工编辑岗位集合。
+    """
 
     def __init__(self):
         self.calls = []
+        self.edited_positions: list[str] = []
 
     def __enter__(self):
         return self
@@ -179,7 +196,9 @@ class _FakeSession:
 
     def run(self, query, **params):
         self.calls.append((query, params))
-        return []
+        if "PositionEditLog" in query:
+            return _FakeResult({"names": self.edited_positions})
+        return _FakeResult({"c": 0})
 
 
 class TestSoftSkillsAggregation:
@@ -458,3 +477,79 @@ class TestInflationAggregationStrategy:
         pa_b = agg["Python开发工程师"]
         assert pa_b.jd_count == 4
         assert pa_b.skills["Java"].hit == 4
+
+
+class TestAggregatesAlignedDeletion:
+    """P1-1 衰退技能移除（设计文档 §7.1.1）：write_aggregates 按聚合输出
+    对齐删除 REQUIRES 边，人工编辑岗位（PositionEditLog）跳过。
+
+    聚合输出之外的边来源：SimHash 重复 JD 独有技能、大岗位 hit<2 一次性
+    噪声、以及 JD 已消失的衰退技能。仅 MERGE 会永久保留这些边，导致
+    图谱技能集与聚合口径漂移。
+    """
+
+    def _rows(self, n: int, position: str, extra_req: dict | None = None):
+        rows = [
+            SimpleNamespace(
+                snapshot={
+                    "extraction": {
+                        "position_name": position,
+                        "requirements": [
+                            {"skill_name": "Java", "necessity": "must", "level": ""},
+                        ],
+                    }
+                },
+                source=f"src{i}",
+            )
+            for i in range(n)
+        ]
+        if extra_req:
+            rows[0].snapshot["extraction"]["requirements"].append(extra_req)
+        return rows
+
+    def _delete_params(self, fake):
+        query, params = fake.calls[-1]
+        assert "DELETE r" in query, "最后一个 run 应为对齐删除查询"
+        return params
+
+    def test_stale_edges_removed_via_aligned_deletion(self):
+        # 大岗位 12 条 JD：Rust 仅 1 条命中被低频过滤（不在聚合输出），
+        # 图谱残留的 REQUIRES-Rust 边应由对齐删除清除；excluded 无人工岗位
+        rows = self._rows(
+            12, "Java开发工程师",
+            {"skill_name": "Rust", "necessity": "must", "level": ""},
+        )
+        fake = _FakeSession()
+        write_aggregates(fake, build_aggregates(rows), now="2026-08-09T00:00:00")
+        params = self._delete_params(fake)
+        kept = {item["pos"]: item["kept"] for item in params["kept_by_pos"]}
+        assert kept == {"Java开发工程师": ["Java"]}  # Rust 不在 kept，将被删除
+        assert params["excluded"] == []
+
+    def test_manually_edited_position_excluded_from_deletion(self):
+        # 人工编辑岗位（有 PositionEditLog）跳过对齐删除，防聚合打回人工调整
+        rows = self._rows(
+            12, "Java开发工程师",
+            {"skill_name": "Rust", "necessity": "must", "level": ""},
+        )
+        fake = _FakeSession()
+        fake.edited_positions = ["Java开发工程师"]
+        write_aggregates(fake, build_aggregates(rows), now="2026-08-09T00:00:00")
+        params = self._delete_params(fake)
+        assert params["excluded"] == ["Java开发工程师"]
+
+    def test_multi_position_kept_groups(self):
+        # 多岗位时 kept_by_pos 按岗位分组；跨岗位技能互不干扰
+        rows = self._rows(3, "Python开发工程师")
+        fake = _FakeSession()
+        write_aggregates(fake, build_aggregates(rows), now="2026-08-09T00:00:00")
+        params = self._delete_params(fake)
+        assert params["kept_by_pos"] == [
+            {"pos": "Python开发工程师", "kept": ["Java"]}
+        ]
+
+    def test_result_includes_removed_count(self):
+        rows = self._rows(12, "Java开发工程师")
+        fake = _FakeSession()
+        result = write_aggregates(fake, build_aggregates(rows), now="2026-08-09T00:00:00")
+        assert result["removed_edges"] == 0

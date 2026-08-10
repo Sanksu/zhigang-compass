@@ -206,4 +206,6 @@ class JDExtractor:
                 REQUIRESRelation(skill_name=s["name"], necessity="nice")
                 for s in found_skills
             ],
+            # P1-2：标记规则兜底来源，供下游识别低置信抽取（LLM 不可用降级产物）
+            method="rule",
         )

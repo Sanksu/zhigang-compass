@@ -11,7 +11,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import * as echarts from 'echarts/core'
-import { GaugeChart, RadarChart as ERadar, HeatmapChart, BarChart } from 'echarts/charts'
+import { GaugeChart, RadarChart as ERadar, HeatmapChart, BarChart, LinesChart } from 'echarts/charts'
 import {
   TooltipComponent,
   GridComponent,
@@ -37,6 +37,7 @@ echarts.use([
   ERadar,
   HeatmapChart,
   BarChart,
+  LinesChart,
   TooltipComponent,
   GridComponent,
   LegendComponent,
@@ -347,13 +348,63 @@ export function GanttChart({ data, className }: GanttChartProps) {
   const textColor = dark ? '#fafafa' : '#09090b'
   const mutedColor = dark ? '#a1a1aa' : '#71717a'
 
-  // ECharts 无原生甘特图，用横向 bar + 自定义起止实现
-  const categories = data.map((d) => d.skill).reverse() // 反转让第一项在最上
-  const barData = data.map((d) => ({
-    name: d.skill,
-    value: [d.start_offset, d.start_offset + d.duration_days],
-    itemStyle: { color: PRIORITY_COLOR[d.priority] },
+  // 补足路径节点集 = gap 技能 + 先修链技能（先修非独立 gap，但须展示为前置节点并连线）。
+  // 先修节点时长用基础值（非 gap 无 estimated_hours，取最小 1 天）。
+  type Node = { skill: string; is_gap: boolean; start: number; duration: number; prerequisites: string[] }
+  const nodes: Node[] = []
+  const nodeBySkill = new Map<string, Node>()
+  data.forEach((d, i) => {
+    const start = data.slice(0, i).reduce((acc, p) => acc + Math.max(1, p.duration_days), 0)
+    const node: Node = { skill: d.skill, is_gap: true, start, duration: Math.max(1, d.duration_days), prerequisites: d.prerequisites ?? [] }
+    nodes.push(node)
+    nodeBySkill.set(d.skill, node)
+  })
+  // 先修链技能插入节点集（排在目标技能前，作为前置学习节点）
+  data.forEach((d) => {
+    ;(d.prerequisites ?? []).forEach((pre) => {
+      if (nodeBySkill.has(pre)) return
+      const target = nodeBySkill.get(d.skill)!
+      const node: Node = { skill: pre, is_gap: false, start: Math.max(0, target.start - 1), duration: 1, prerequisites: [] }
+      nodes.push(node)
+      nodeBySkill.set(pre, node)
+    })
+  })
+
+  // ECharts 无原生甘特图，用横向 bar + 自定义起止实现。
+  // 节点排序：先修优先在前（start 小），同 start 时 gap 技能排后。
+  const ordered = [...nodes].sort((a, b) => a.start - b.start || Number(a.is_gap) - Number(b.is_gap))
+  const categories = ordered.map((n) => n.skill)
+  const barData = ordered.map((n) => ({
+    name: n.skill,
+    value: [n.start, n.start + n.duration],
+    itemStyle: {
+      // 先修节点用浅灰（非 gap），gap 技能按优先级着色
+      color: n.is_gap ? PRIORITY_COLOR[data.find((d) => d.skill === n.skill)?.priority ?? 'medium'] : dark ? '#3f3f46' : '#d4d4d8',
+    },
   }))
+
+  // 补足路径连线：先修节点 → 目标技能节点（先修已全部在节点集中，可完整画箭头）
+  const linkLines: { coords: [number, number][]; skill: string; prereq: string }[] = []
+  ordered.forEach((n) => {
+    if (!n.is_gap) return
+    ;(n.prerequisites ?? []).forEach((pre) => {
+      const preNode = nodeBySkill.get(pre)
+      if (!preNode) return
+      const yPre = categories.indexOf(pre)
+      const yCur = categories.indexOf(n.skill)
+      if (yPre < 0 || yCur < 0) return
+      const xEnd = preNode.start + preNode.duration
+      const xStart = n.start
+      linkLines.push({
+        coords: [
+          [xEnd, yPre],
+          [Math.max(xStart, xEnd + 1), yCur],
+        ],
+        skill: n.skill,
+        prereq: pre,
+      })
+    })
+  })
 
   const ref = useEChart(
     () => ({
@@ -361,14 +412,19 @@ export function GanttChart({ data, className }: GanttChartProps) {
       tooltip: {
         formatter: (params: EChartsParam) => {
           const item = data.find((d) => d.skill === params.name)
-          if (!item) return ''
-          const lines = [`<b>${escapeHtml(item.skill)}</b>`, `时长: ${item.duration_days} 天`, `优先级: ${escapeHtml(item.priority)}`]
-          if (item.prerequisites.length) lines.push(`先修: ${item.prerequisites.map(escapeHtml).join(', ')}`)
-          if (item.courses.length) {
-            lines.push('<br/>推荐课程:')
-            item.courses.forEach((c) => lines.push(`• ${escapeHtml(c.title)} (${escapeHtml(c.platform)}, ${c.hours}h)`))
+          if (item) {
+            const lines = [`<b>${escapeHtml(item.skill)}</b>`, `时长: ${item.duration_days} 天`, `优先级: ${escapeHtml(item.priority)}`]
+            if (item.prerequisites.length) lines.push(`先修: ${item.prerequisites.map(escapeHtml).join(', ')}`)
+            if (item.courses.length) {
+              lines.push('<br/>推荐课程:')
+              item.courses.forEach((c) => lines.push(`• ${escapeHtml(c.title)} (${escapeHtml(c.platform)}, ${c.hours}h)`))
+            }
+            return lines.join('<br/>')
           }
-          return lines.join('<br/>')
+          // 先修链节点（非独立 gap）：显示为先修基础技能
+          const pre = nodeBySkill.get(String(params.name))
+          if (pre) return `<b>${escapeHtml(pre.skill)}</b><br/>先修基础技能（前置学习）`
+          return ''
         },
       },
       grid: { left: 100, right: 30, top: 20, bottom: 40 },
@@ -402,6 +458,37 @@ export function GanttChart({ data, className }: GanttChartProps) {
             fontSize: 10,
           },
         },
+        // 补足路径线条：先修技能 → 目标技能的箭头连线（lines + effect 流动线）
+        ...(linkLines.length
+          ? [
+              {
+                type: 'lines' as const,
+                coordinateSystem: 'cartesian2d',
+                data: linkLines.map((l) => ({
+                  coords: l.coords,
+                  lineStyle: { color: '#3b82f6' },
+                })),
+                effect: {
+                  show: true,
+                  period: 4,
+                  trailLength: 0.4,
+                  symbol: 'arrow',
+                  symbolSize: 6,
+                  color: '#3b82f6',
+                },
+                zlevel: 2,
+              },
+              {
+                type: 'lines' as const,
+                coordinateSystem: 'cartesian2d',
+                data: linkLines.map((l) => ({
+                  coords: l.coords,
+                  lineStyle: { color: '#3b82f6', width: 1.5, type: 'dashed' },
+                })),
+                zlevel: 1,
+              },
+            ]
+          : []),
       ],
     }),
     [data, dark],

@@ -378,23 +378,29 @@ class TestNormalizePositionName:
         assert normalize_position_name("桌面") == ""
 
     def test_p0_low_quality_position_governance(self):
-        # 2026-08-09 治理（develop #92 合并后）：develop 已移除 P0 英文复合岗名映射与
-        # 碎片停用词，这些英文标题无映射自然落入空串（不入图）；失真兜底族按技能路由/入空。
-        # 英文复合岗名无映射 → 不入图
-        assert normalize_position_name("BioChemical Engineer") == ""
-        assert normalize_position_name("Bio-Optics Engineer") == ""
-        assert normalize_position_name("Assistant Estimator") == ""
-        assert normalize_position_name("Verification Engineer III") == ""
-        assert normalize_position_name("Quality Engineer") == ""
-        assert normalize_position_name("Privacy Engineer") == ""
-        # 失真兜底族，无技能不入图
+        # 2026-08-09 P0 图谱低质岗治理（develop）：英文复合岗名归位标准族，碎片词拦截
+        # 归位（完整岗位名）
+        assert normalize_position_name("BioChemical Engineer") == "生化工程师"
+        assert normalize_position_name("Bio-Optics Engineer") == "生物光学工程师"
+        assert normalize_position_name("Assistant Estimator") == "成本估算师"
+        assert normalize_position_name("Verification Engineer III") == "测试工程师"
+        assert normalize_position_name("Quality Engineer") == "测试工程师"
+        assert normalize_position_name("Senior Firmware Engineer") == "嵌入式开发工程师"
+        assert normalize_position_name("Privacy Engineer") == "网络安全工程师"
+        # 失真兜底族治理（be-position-governance）：Solution/Physical Design 映射到
+        # 兜底族（解决方案工程师/硬件工程师）后按技能路由，无技能不入图
         assert normalize_position_name("Solution Engineer") == ""
         assert normalize_position_name("Physical Design Engineer") == ""
-        # 固件仍归位嵌入式（保留的关键词路径）
-        assert normalize_position_name("Senior Firmware Engineer") == "嵌入式开发工程师"
-        # 海外源验证（2026-08-09）：Application Developer 抽成"应用"碎片拦截
+        # 无归属碎片拦截
+        assert normalize_position_name("验证") == ""
+        assert normalize_position_name("质量") == ""
+        assert normalize_position_name("隐私") == ""
+        assert normalize_position_name("性能工程") == ""
+        assert normalize_position_name("信息化") == ""
+        assert normalize_position_name("劳动力分析总监") == ""
+        # 海外源验证（be-position-governance 2026-08-09）：Application Developer 抽成
+        # "应用"碎片拦截；AI 研究归位"研究员"兜底族无技能不入图；ICAM 归位网安
         assert normalize_position_name("应用") == ""
-        # AI 研究/ICAM 碎片归位标准族（AI 研究为失真兜底族"研究员"，无技能不入图）
         assert normalize_position_name("AI 研究") == ""
         assert normalize_position_name("ICAM") == "网络安全工程师"
         assert normalize_position_name("ICAM工程师") == "网络安全工程师"

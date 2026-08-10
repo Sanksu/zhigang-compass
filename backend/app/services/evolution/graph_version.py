@@ -128,7 +128,7 @@ class GraphVersionManager:
                 MATCH (a)-[r]->(b)
                 WHERE NONE(l IN labels(a) WHERE l IN $skip)
                   AND NONE(l IN labels(b) WHERE l IN $skip)
-                RETURN a.id AS source, b.id AS target
+                RETURN a.id AS source, b.id AS target, type(r) AS relation
                 """,
                 skip=list(_SKIP_LABELS),
             ).data()
@@ -143,7 +143,11 @@ class GraphVersionManager:
             if row["id"]
         ]
         edges = [
-            {"source": row["source"], "target": row["target"]}
+            {
+                "source": row["source"],
+                "target": row["target"],
+                "relation": row["relation"],
+            }
             for row in edge_rows
             if row["source"] and row["target"]
         ]

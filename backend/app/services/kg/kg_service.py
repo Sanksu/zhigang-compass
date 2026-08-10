@@ -102,6 +102,69 @@ def import_jd(
     return session.execute_write(_import_jd_tx, extraction, evidence, occupation)
 
 
+def _import_skill_edge(
+    tx,
+    position_id: str,
+    skill_name: str,
+    *,
+    necessity: str,
+    level: str,
+    evidence_id: str,
+    now: str,
+) -> None:
+    """建 Skill 节点 + Position-[:REQUIRES {necessity, level}]->Skill +
+    Skill-[:EVIDENCED_BY]->Evidence。
+
+    requirements 与 skills 两路共用：Skill 按 name 合并（MERGE ON CREATE 兜底
+    并发竞态），REQUIRES 属性覆盖写，EVIDENCED_BY 幂等。name 已由调用方归一化。
+    """
+    # Skill：按 name 合并（MERGE ON CREATE 兜底并发竞态，防重复建节点）
+    result = tx.run(
+        "MATCH (s:Skill {name: $name}) RETURN s.id AS id",
+        name=skill_name,
+    )
+    record = result.single()
+    if not record:
+        skill_id = next_id(tx, "Skill")
+        tx.run(
+            """
+            MERGE (s:Skill {name: $name})
+            ON CREATE SET s.id = $id,
+                s.name = $name,
+                s.category = $category,
+                s.created_at = $now
+            """,
+            id=skill_id,
+            name=skill_name,
+            category=skill_category(skill_name),
+            now=now,
+        )
+
+    # REQUIRES 关系（Position → Skill）
+    tx.run(
+        """
+        MATCH (p:Position {id: $position_id}), (s:Skill {name: $skill_name})
+        MERGE (p)-[r:REQUIRES]->(s)
+        SET r.necessity = $necessity,
+            r.level = $level
+        """,
+        position_id=position_id,
+        skill_name=skill_name,
+        necessity=necessity,
+        level=level,
+    )
+
+    # EVIDENCED_BY 关系（Skill → Evidence，设计文档 §5.1）
+    tx.run(
+        """
+        MATCH (s:Skill {name: $skill_name}), (e:Evidence {id: $evidence_id})
+        MERGE (s)-[:EVIDENCED_BY]->(e)
+        """,
+        skill_name=skill_name,
+        evidence_id=evidence_id,
+    )
+
+
 def _import_jd_tx(
     tx,
     extraction: JDExtractionResult,
@@ -216,56 +279,33 @@ def _import_jd_tx(
     # 3. Skills + REQUIRES 关系
     # 技能名与抽取链路一致归一化（normalize_skill → clean_skill_name → 黑名单过滤）：
     # 重建时 jd_raw 快照可能是 P1-1/P1-2 扩充前的旧值（Vue3/reactjs、嵌入式/前端等
-    # 泛词），归一化后才能合并到规范节点，避免重建出旧名/泛词 Skill 使合并效果回退
+    # 泛词），归一化后才能合并到规范节点，避免重建出旧名/泛词 Skill 使合并效果回退。
+    # requirements 与 skills 两路都入图（P1-2）：抽取可能只给技能列表未细分
+    # must/nice，聚合 _position_skills 会把未进 requirements 的技能以 nice 并入，
+    # 入图侧不同步会因无 Skill 节点导致聚合 nice 边静默丢失。
+    handled_skills: set[str] = set()
     for req in extraction.requirements:
         skill_name = canonical_skill_name(req.skill_name)
         if not skill_name or not _is_valid_skill_name(skill_name):
             continue
-
-        # Skill：按 name 合并（MERGE ON CREATE 兜底并发竞态，防重复建节点）
-        result = tx.run(
-            "MATCH (s:Skill {name: $name}) RETURN s.id AS id",
-            name=skill_name,
-        )
-        record = result.single()
-        if not record:
-            skill_id = next_id(tx, "Skill")
-            tx.run(
-                """
-                MERGE (s:Skill {name: $name})
-                ON CREATE SET s.id = $id,
-                    s.name = $name,
-                    s.category = $category,
-                    s.created_at = $now
-                """,
-                id=skill_id,
-                name=skill_name,
-                category=skill_category(skill_name),
-                now=now,
-            )
-
-        # REQUIRES 关系（Position → Skill）
-        tx.run(
-            """
-            MATCH (p:Position {id: $position_id}), (s:Skill {name: $skill_name})
-            MERGE (p)-[r:REQUIRES]->(s)
-            SET r.necessity = $necessity,
-                r.level = $level
-            """,
-            position_id=position_id,
-            skill_name=skill_name,
-            necessity=req.necessity,
-            level=req.level or "",
+        handled_skills.add(skill_name)
+        _import_skill_edge(
+            tx, position_id, skill_name,
+            necessity=req.necessity, level=req.level or "",
+            evidence_id=evidence_id, now=now,
         )
 
-        # EVIDENCED_BY 关系（Skill → Evidence，设计文档 §5.1）
-        tx.run(
-            """
-            MATCH (s:Skill {name: $skill_name}), (e:Evidence {id: $evidence_id})
-            MERGE (s)-[:EVIDENCED_BY]->(e)
-            """,
-            skill_name=skill_name,
-            evidence_id=evidence_id,
+    for skill in extraction.skills:
+        skill_name = canonical_skill_name(skill.name)
+        if not skill_name or not _is_valid_skill_name(skill_name):
+            continue
+        if skill_name in handled_skills:
+            continue
+        handled_skills.add(skill_name)
+        _import_skill_edge(
+            tx, position_id, skill_name,
+            necessity="nice", level="",
+            evidence_id=evidence_id, now=now,
         )
 
     # 4. Tools（如果有）
@@ -483,7 +523,13 @@ def _import_course_tx(tx, course_data: dict) -> str:
     for skill_name in skills:
         if not skill_name or not skill_name.strip():
             continue
-        skill_name = skill_name.strip()
+        # 技能名与 JD 入图侧一致归一化（canonical_skill_name → 黑名单过滤）：
+        # 课程源技能名可能是英文原始名（"Prompt Engineering"），不归一化会与
+        # JD 侧规范节点（"提示工程"）分裂成两个 Skill 节点，导致 LEARNABLE_VIA
+        # 与 REQUIRES 无法在同一节点汇聚（数据审查 major：课程入图技能名口径）。
+        skill_name = canonical_skill_name(skill_name.strip())
+        if not skill_name or not _is_valid_skill_name(skill_name):
+            continue
 
         # Skill：按 name 合并（MERGE ON CREATE 兜底并发竞态，防重复建节点）
         result = tx.run(
