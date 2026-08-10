@@ -118,7 +118,7 @@ class _FakeLLM:
         self.prompt = ""
         self.system_prompt = ""
 
-    def call_sync(self, prompt, response_model, system_prompt=None):
+    def call_with_fallback(self, prompt, response_model, system_prompt=None):
         self.prompt = prompt
         self.system_prompt = system_prompt
         return self.report
@@ -253,5 +253,62 @@ class TestDiagnosisGenerationE2E:
             # LLM 引用的证据必须真实存在于检索上下文（拦截虚构引用）
             assert out.top_gaps[0].evidence_id in available_ids
             assert out.top_gaps[0].evidence_id == "occupation:2-02-38-01"
+
+        asyncio.run(_run())
+
+    def test_fabricated_evidence_id_stripped(self):
+        """虚构引用后置拦截（§6.4）：evidence_id 不在允许集合 → 置空，真实引用保留。"""
+        async def _run():
+            db = _build_db()
+            chunks = await retrieve_context(
+                _POSITION, db, neo4j=None, embedder=_FakeEmbedder()
+            )
+            rag_chunks = [c.__dict__ for c in chunks]
+
+            report = DiagnosisReport(
+                overall_summary="总体匹配度中等",
+                radar_analysis="",
+                top_gaps=[
+                    GapAdvice(
+                        skill="大模型微调",
+                        advice="LLM 编造了一个不存在的引用",
+                        evidence_id="occupation:FAKE-999",
+                    ),
+                    GapAdvice(
+                        skill="RAG 工程化",
+                        advice="引用真实检索上下文",
+                        evidence_id="occupation:2-02-38-01",
+                    ),
+                ],
+                path_analysis="",
+                recommendations=[],
+            )
+            out = generate_diagnosis(_diagnosis_data(), llm=_FakeLLM(report), rag_chunks=rag_chunks)
+
+            assert out.top_gaps[0].evidence_id == ""  # 虚构引用被拦截
+            assert out.top_gaps[1].evidence_id == "occupation:2-02-38-01"  # 真实引用保留
+
+        asyncio.run(_run())
+
+    def test_evidence_refs_are_legit_references(self):
+        """匹配快照证据（source/url）作为合法引用集合，不被虚构拦截误伤。"""
+        async def _run():
+            report = DiagnosisReport(
+                overall_summary="总体匹配度中等",
+                radar_analysis="",
+                top_gaps=[
+                    GapAdvice(
+                        skill="大模型微调",
+                        advice="引用匹配快照证据",
+                        evidence_id="JD#12",
+                    ),
+                ],
+                path_analysis="",
+                recommendations=[],
+            )
+            out = generate_diagnosis(
+                _diagnosis_data(), llm=_FakeLLM(report), rag_chunks=[]
+            )
+            assert out.top_gaps[0].evidence_id == "JD#12"
 
         asyncio.run(_run())

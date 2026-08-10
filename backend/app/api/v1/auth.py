@@ -12,6 +12,7 @@ from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.database import get_db, get_redis
 from app.core.security import (
+    TokenExpiredError,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -148,7 +149,11 @@ async def refresh_token(
     refresh_token = _extract_refresh_token(request, req)
     if not refresh_token:
         return error(4010, "缺少 refresh_token", http_status=401)
-    payload = decode_token(refresh_token)
+    try:
+        payload = decode_token(refresh_token)
+    except TokenExpiredError:
+        # refresh 过期（7 天 TTL）无法续期，引导重新登录（4011 专指 access 过期触发刷新）
+        return error(4010, "refresh_token 已过期，请重新登录", http_status=401)
     if payload is None or payload.get("type") != "refresh":
         return error(4010, "无效的 refresh_token", http_status=401)
     jti = payload.get("jti")
@@ -315,7 +320,11 @@ async def logout(
     refresh_token 来源：body（旧客户端）或 httpOnly Cookie。
     """
     refresh_token = _extract_refresh_token(request, req)
-    payload = decode_token(refresh_token) if refresh_token else None
+    try:
+        payload = decode_token(refresh_token) if refresh_token else None
+    except TokenExpiredError:
+        # 过期 refresh 无法解析 jti 拉黑，但登出本身幂等：照常清 Cookie 即可
+        payload = None
     jti = (payload or {}).get("jti")
     if jti:
         await redis.set(

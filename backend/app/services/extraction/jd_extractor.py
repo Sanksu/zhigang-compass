@@ -9,6 +9,7 @@ LLM 调用走 LLMProviderChain（M3 参考实现）；未配置 api_key 时抛
 LLMConfigurationError（LLMExtractionError 子类），降级规则抽取兜底。
 """
 
+import time
 from typing import Optional
 
 from app.services.extraction.schemas import (
@@ -27,6 +28,11 @@ from app.services.extraction.prompts import (
     TASK_TEMPLATE,
 )
 from app.services.extraction.post_processor import post_process
+
+# 批间限流缓冲（秒）：串行逐批调用 LLM 时降低突发频率，防 provider 429。
+# 设计文档 §6.5：_BATCH_REQUEST_INTERVAL 移到批之间（0.3s/条 → 批间 0.3s）。
+# 常量定义在实际限流点 jd_extractor.py，tasks.py 侧不再重复定义。
+_BATCH_REQUEST_INTERVAL = 0.3
 
 
 class JDExtractor:
@@ -99,9 +105,14 @@ class JDExtractor:
 
         chunks = list(self._chunk_texts(jd_texts, batch_size, max_batch_chars))
         if concurrency <= 1:
-            return [
-                r for chunk in chunks for r in self._extract_chunk(chunk, batch_timeout)
-            ]
+            results = []
+            for i, chunk in enumerate(chunks):
+                # 批间限流缓冲（设计文档 §6.5：_BATCH_REQUEST_INTERVAL 移到批之间），
+                # 串行路径逐批调用 LLM 时降低突发频率，防 provider 429
+                if i > 0:
+                    time.sleep(_BATCH_REQUEST_INTERVAL)
+                results.extend(self._extract_chunk(chunk, batch_timeout))
+            return results
 
         from concurrent.futures import ThreadPoolExecutor
 
@@ -188,8 +199,13 @@ class JDExtractor:
         return JDExtractionResult(
             position_name=pos_name,
             skills=[SkillExtracted(**s) for s in found_skills],
+            # P6：规则兜底仅文本扫描、无语义判断，不能断言"必备"——全标 nice，
+            # 避免 LLM 不可用时 must_count 虚高把低频技能推成 must（聚合 _is_must
+            # 依赖 must 标注占比，兜底数据不应污染判定）
             requirements=[
-                REQUIRESRelation(skill_name=s["name"], necessity="must")
+                REQUIRESRelation(skill_name=s["name"], necessity="nice")
                 for s in found_skills
             ],
+            # P1-2：标记规则兜底来源，供下游识别低置信抽取（LLM 不可用降级产物）
+            method="rule",
         )

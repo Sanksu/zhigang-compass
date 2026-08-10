@@ -11,11 +11,20 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from neo4j.exceptions import GqlError
 
 from app.core.config import settings
-from app.core.errors import ERR_INTERNAL, ERR_VALIDATION, HTTP_STATUS_ERROR_CODE
+from app.core.errors import (
+    ERR_INTERNAL,
+    ERR_NEO4J,
+    ERR_PGVECTOR,
+    ERR_VALIDATION,
+    ERROR_HTTP_STATUS,
+    HTTP_STATUS_ERROR_CODE,
+)
 from app.core.middleware import setup_middleware, trace_id_var
 from app.schemas.common import APIResponse
+from app.services.embeddings.vector_store import PgvectorUnavailableError
 
 # 应用内 logger（auth/admin 等模块）输出到标准输出，便于运行排错；
 # root 默认 WARNING 会吞掉模块 INFO 日志，故启动时统一配置
@@ -105,7 +114,24 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    """未捕获异常 → 500 + code 5000；保留 traceback 便于排错。"""
+    """未捕获异常 → 5xx；Neo4j/pgvector 按契约发射 5001/5002，其余 5000。
+
+    保留 traceback 便于排错。图库与向量库异常单独映射（设计文档 §2.4.7），
+    让前端能区分「依赖服务故障」与「通用内部错误」。
+    """
+    if isinstance(exc, GqlError):
+        # GqlError 覆盖 Neo4jError 与 DriverError（ServiceUnavailable/SessionExpired 等）
+        logger.exception("Neo4j 查询失败: %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=ERROR_HTTP_STATUS[ERR_NEO4J],
+            content=_error_body(ERR_NEO4J, "图数据库查询失败"),
+        )
+    if isinstance(exc, PgvectorUnavailableError):
+        logger.exception("pgvector 查询失败: %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=ERROR_HTTP_STATUS[ERR_PGVECTOR],
+            content=_error_body(ERR_PGVECTOR, "向量检索异常"),
+        )
     logger.exception("未捕获异常: %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500, content=_error_body(ERR_INTERNAL, "服务器内部错误"))
 

@@ -7,15 +7,27 @@
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.business import JdEmbedding, ProjectEmbedding, SkillEmbedding
 from app.services.matching.semantic import cosine_similarity  # noqa: F401  （供调用方直接使用）
 
 
+class PgvectorUnavailableError(Exception):
+    """pgvector 向量查询失败（表缺失/维度不匹配/超时等，契约错误码 5002）。
+
+    消费点按需降级（skill/similar → 内存扫描、项目比对 → 文本相似度）；
+    未降级路径由 main.py 全局处理器兜底发射 5002。
+    """
+
+
 async def load_skill_embeddings(db: AsyncSession) -> dict[str, list[float]]:
     """skill_embeddings → {skill_id: vector}。"""
-    rows = (await db.scalars(select(SkillEmbedding))).all()
+    try:
+        rows = (await db.scalars(select(SkillEmbedding))).all()
+    except SQLAlchemyError as e:
+        raise PgvectorUnavailableError(f"skill_embeddings 查询失败: {e}") from e
     return {r.id: r.embedding for r in rows}
 
 
@@ -32,11 +44,17 @@ async def load_project_vectors(
         # 独立 resume_id 列（含 UniqueConstraint(resume_id, project_index) 索引），
         # 优于 JSONB 路径过滤 payload["resume_id"]
         stmt = stmt.where(ProjectEmbedding.resume_id == resume_id)
-    rows = (await db.scalars(stmt)).all()
+    try:
+        rows = (await db.scalars(stmt)).all()
+    except SQLAlchemyError as e:
+        raise PgvectorUnavailableError(f"project_embeddings 查询失败: {e}") from e
     return {r.payload.get("text", ""): r.embedding for r in rows if r.payload.get("text")}
 
 
 async def load_jd_vectors(db: AsyncSession) -> dict[str, list[float]]:
     """jd_embeddings → {jd_id: vector}。"""
-    rows = (await db.scalars(select(JdEmbedding))).all()
+    try:
+        rows = (await db.scalars(select(JdEmbedding))).all()
+    except SQLAlchemyError as e:
+        raise PgvectorUnavailableError(f"jd_embeddings 查询失败: {e}") from e
     return {r.payload.get("jd_id"): r.embedding for r in rows if r.payload.get("jd_id")}

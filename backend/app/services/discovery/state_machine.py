@@ -86,6 +86,12 @@ def position_freq_windows(
     for wi, snap in enumerate(snapshots):
         freq: dict[str, int] = {}
         for e in (snap or {}).get("edges", []):
+            # P2 频次口径：仅 REQUIRES 出边计入岗位频次（JD 需求边），
+            # HAS_EVIDENCE/BELONGS_TO_OCCUPATION 等维护边不计入，否则频次
+            # 被非需求边虚增（快照 edges 自 P2 起导出 relation 字段）。
+            # 缺 relation 的旧快照按 REQUIRES 处理，保持历史窗口序列连续。
+            if e.get("relation", "REQUIRES") != "REQUIRES":
+                continue
             src = e.get("source", "")
             if src in name_by_id:
                 freq[src] = freq.get(src, 0) + 1
@@ -108,7 +114,7 @@ def position_freq_windows(
 
 def window_volatility(w: WindowFreq, n: int = 2) -> float:
     """最近 n 个窗口的频次波动（(max-min)/max，0 频次时取 0）。"""
-    recent = w.freqs[:n]
+    recent = w.freqs[-n:]
     if not recent or max(recent) == 0:
         return 0.0
     return (max(recent) - min(recent)) / max(recent)
@@ -116,7 +122,7 @@ def window_volatility(w: WindowFreq, n: int = 2) -> float:
 
 def decline_rate(w: WindowFreq, n: int = 3) -> float:
     """最近 n 个窗口的累计下降率（(首-末)/首，首频次为 0 时取 0）。"""
-    recent = w.freqs[:n]
+    recent = w.freqs[-n:]
     if len(recent) < 2 or recent[0] == 0:
         return 0.0
     return (recent[0] - recent[-1]) / recent[0]

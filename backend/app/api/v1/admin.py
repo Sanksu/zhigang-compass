@@ -16,6 +16,7 @@ import uuid
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +24,7 @@ from app.api.deps import require_permission
 from app.core.config import settings
 from app.core.database import get_db, redis_client
 from app.core.security import hash_password
-from app.models.business import AuditLog, RejectedChange, TaskStatus, User
+from app.models.business import AuditLog, RejectedChange, ResumeFile, TaskStatus, User
 from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
 from app.schemas.common import ok, error
 from app.services.kg.id_generator import next_id
@@ -135,16 +136,22 @@ async def disable_user(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
 ):
-    """禁用用户（软删除，is_active=False；M6 自保护：不可禁用自己）。
+    """物理删除用户（GDPR/PIPL 删除权：删除用户时一并清理其简历文件归属）。
 
-    契约 204 无 body，自保护场景用 HTTPException 携带 400 语义。
+    与「禁用」（PUT /users/{id} 置 is_active=False）语义区分：本端点彻底移除
+    users 行，并删除该用户的 resume_files 归属（含简历原文字节，§8.1 上传者
+    本人数据）；resume_cache 按内容哈希全局共享，其他用户引用时保留不删。
+    audit_logs 无外键约束（索引仅加速查询），物理删除不阻塞历史审计保留。
+    返回 204 无 body，错误以 HTTPException 携带 400/404 语义。
     """
     if user_id == current_user.get("sub"):
-        raise HTTPException(status_code=400, detail="不能禁用当前登录账户")
+        raise HTTPException(status_code=400, detail="不能删除当前登录账户")
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="用户不存在")
-    user.is_active = False
+    # 清理该用户的简历原文归属（含文件字节）；resume_cache 共享缓存不连坐
+    await db.execute(sa_delete(ResumeFile).where(ResumeFile.user_id == user_id))
+    await db.delete(user)
     await db.commit()
     return None
 

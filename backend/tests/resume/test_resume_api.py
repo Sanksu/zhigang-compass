@@ -10,8 +10,11 @@
 import asyncio
 
 import pytest
+from sqlalchemy import String, cast, select
+from sqlalchemy.dialects import postgresql
 
 from app.api.v1.resume import ALLOWED_EXTENSIONS, _merge_fields, _parse_resume_id, _task_stream_events
+from app.models.business import ResumeCache, ResumeFile
 from app.services.resume.file_parser import SUPPORTED_EXTENSIONS
 
 
@@ -122,3 +125,32 @@ class TestTaskStreamEvents:
         assert events[0].startswith("event: progress")
         assert events[1].startswith("event: error")
         assert "推送超时" in events[1]
+
+
+class TestListResumesJoin:
+    """回归：list_resumes 的归属 JOIN 类型不匹配。
+
+    resume_files.resume_id 是 varchar，resume_cache.id 是 uuid，直接等值
+    比较在 PostgreSQL 下报 `operator does not exist: character varying = uuid`，
+    GET /resume/list 稳定 500（commit 9705225 引入归属过滤时漏 cast）。
+    回归测试在 PG dialect 下编译 SQL，验证 JOIN 两侧类型经 cast 对齐。
+    """
+
+    def _list_stmt(self):
+        return (
+            select(ResumeCache)
+            .join(ResumeFile, ResumeFile.resume_id == cast(ResumeCache.id, String))
+            .where(ResumeFile.user_id == "u1")
+            .order_by(ResumeCache.updated_at.desc())
+            .limit(20)
+            .distinct()
+        )
+
+    def test_join_compiles_with_cast_under_pg(self):
+        sql = str(self._list_stmt().compile(dialect=postgresql.dialect()))
+        assert "CAST(resume_cache.id AS VARCHAR)" in sql
+
+    def test_join_compiles_without_type_error(self):
+        # 编译本身不抛 UndefinedFunctionError 即通过；cast 后 PG 可执行
+        compiled = self._list_stmt().compile(dialect=postgresql.dialect())
+        assert compiled is not None

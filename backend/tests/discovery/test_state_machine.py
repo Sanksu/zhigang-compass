@@ -37,7 +37,9 @@ def _candidate(state: PositionState, source_diversity: int = 2, confidence: floa
 
 class TestWindowHelpers:
     def test_volatility(self):
-        assert window_volatility(WindowFreq([10, 8, 9])) == pytest.approx(0.2)
+        # [10,8,9] 最近 2 窗口为 [8,9] 波动 0.111（原断言 0.2 依赖 freqs[:n]
+        # 取最早窗口的 bug，已随窗口方向修复更正）
+        assert window_volatility(WindowFreq([10, 8, 9])) == pytest.approx(0.1111, abs=1e-3)
         assert window_volatility(WindowFreq([0, 0])) == 0.0
 
     def test_decline_rate(self):
@@ -54,6 +56,23 @@ class TestWindowHelpers:
         """最近 2 窗口回升才算回迁；早期窗口为负不影响判定。"""
         assert has_recovery(WindowFreq([1, 2, 3], z_scores=[-1.5, 0.5, 0.8])) is True
         assert has_recovery(WindowFreq([1, 2, 3], z_scores=[0.5, 0.8, -0.2])) is False
+
+    def test_volatility_uses_recent_windows(self):
+        """波动率取最近 n 窗口（非最早 n 窗口）。
+
+        回归：原实现 freqs[:n] 取最早窗口，freqs=[10,8,9,1] n=2 时
+        [:2]=[10,8] 波动 0.2，[-2:]=[9,1] 波动 0.889——最近窗口剧烈波动
+        才应触发降级判定。
+        """
+        assert window_volatility(WindowFreq([10, 8, 9, 1])) == pytest.approx(0.8889, abs=1e-3)
+
+    def test_decline_rate_uses_recent_windows(self):
+        """下降率取最近 n 窗口：早期窗口上升、最近窗口骤降必须被捕捉。
+
+        回归：freqs=[10,12,10,4] n=3 时 [:3]=[10,12,10] 下降率 0，
+        [-3:]=[12,10,4] 下降率 0.667。
+        """
+        assert decline_rate(WindowFreq([10, 12, 10, 4])) == pytest.approx(0.6667, abs=1e-3)
 
 
 class TestFreqZScores:
@@ -129,6 +148,35 @@ class TestPositionFreqWindows:
         }
         out = position_freq_windows([snap, snap], {"孤岗"})
         assert out["孤岗"] == [0.0, 0.0]
+
+    def test_non_requires_edges_not_counted(self):
+        """P2 频次口径修复：仅 REQUIRES 出边计入岗位频次。
+        HAS_EVIDENCE/BELONGS_TO_OCCUPATION 等维护边不再虚增频次
+        （修复前计全部出边，岗位频次被证据/归属边污染）。"""
+        snap = {
+            "nodes": [{"id": "pos_x", "name": "Java 开发工程师", "type": "position"}],
+            "edges": [
+                {"source": "pos_x", "target": "sk_1", "relation": "REQUIRES"},
+                {"source": "pos_x", "target": "sk_2", "relation": "REQUIRES"},
+                {"source": "pos_x", "target": "ev_1", "relation": "HAS_EVIDENCE"},
+                {"source": "pos_x", "target": "occ_1", "relation": "BELONGS_TO_OCCUPATION"},
+            ],
+        }
+        out = position_freq_windows([snap], {"Java 开发工程师"})
+        assert out["Java 开发工程师"] == [2.0]
+
+    def test_legacy_edges_without_relation_still_counted(self):
+        """旧快照 edges 无 relation 字段（relation 导出前的版本）按 REQUIRES
+        处理，历史窗口序列不因字段缺失而整体清零。"""
+        snap = {
+            "nodes": [{"id": "pos_x", "name": "Java 开发工程师", "type": "position"}],
+            "edges": [
+                {"source": "pos_x", "target": "sk_1"},
+                {"source": "pos_x", "target": "sk_2"},
+            ],
+        }
+        out = position_freq_windows([snap], {"Java 开发工程师"})
+        assert out["Java 开发工程师"] == [2.0]
 
 
 class TestAutoTransition:

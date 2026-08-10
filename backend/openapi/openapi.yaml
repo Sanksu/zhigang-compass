@@ -135,6 +135,58 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/User'
+    put:
+      tags: [auth]
+      security: [{ BearerAuth: [] }]
+      summary: 更新当前用户资料（email/phone/bio，None 字段保留原值）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string, maxLength: 255 }
+                phone: { type: string, maxLength: 50 }
+                bio: { type: string, maxLength: 2000 }
+      responses:
+        '200':
+          description: 更新后的用户信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+
+  /api/v1/auth/password:
+    post:
+      tags: [auth]
+      security: [{ BearerAuth: [] }]
+      summary: 修改当前用户密码（校验原密码，新密码不得与旧密码相同）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [old_password, new_password]
+              properties:
+                old_password: { type: string, format: password, minLength: 6, maxLength: 256 }
+                new_password: { type: string, format: password, minLength: 6, maxLength: 256 }
+      responses:
+        '200':
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      updated: { type: boolean }
 
   /api/v1/auth/register:
     post:
@@ -742,7 +794,9 @@ paths:
         '404':
           description: 匹配结果不存在或已过期
         '503':
-          description: 诊断报告生成失败（LLM 不可用或超时）
+          description: 诊断报告生成失败（LLM 未配置可用 provider 或全部 provider 调用失败，错误码 503）
+        '504':
+          description: LLM 调用超时（错误码 5003，前端可据此提示稍后重试）
 
   /api/v1/match/feedback:
     post:

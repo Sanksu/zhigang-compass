@@ -8,17 +8,17 @@ from app.services.extraction.schemas import JDExtractionResult, SkillExtracted
 from app.services.extraction.dictionary import (
     SKILL_STOPWORDS,
     SKILL_WHITELIST,
+    SOFT_SKILL_NOISE,
     SOFT_SKILL_WHITELIST,
+    _SKILL_MODIFIERS,
     normalize_skill,
 )
 
 # 需去除的中文后缀（按长度降序排列，优先匹配长后缀）。
+# 复用 dictionary._SKILL_MODIFIERS：normalize_skill 剥修饰词重查与 clean_skill_name
+# 后缀清洗用同一词表，保证抽取与消费链路口径一致。
 # 不含"服务"：剥除后产生碎片（"微服务"→"微"），且无合理剥除场景
-SUFFIXES = sorted([
-    "工程师", "技术", "系统", "框架", "平台", "工具", "软件", "开发",
-    "设计", "管理", "应用", "方案", "产品", "项目", "算法",
-    "架构", "引擎", "组件", "中间件", "协议", "标准", "接口",
-], key=len, reverse=True)
+SUFFIXES = sorted(_SKILL_MODIFIERS, key=len, reverse=True)
 
 _SKILL_SUFFIX_RE = re.compile(
     f"({'|'.join(re.escape(s) for s in SUFFIXES)})$"
@@ -28,13 +28,24 @@ _SKILL_SUFFIX_RE = re.compile(
 def clean_skill_name(name: str) -> str:
     """清洗技能名称中的中文后缀。
 
-    软技能白名单整体跳过（"项目管理"不以"管理"为后缀退化），
+    软技能与白名单词整体跳过（"项目管理"不以"管理"为后缀退化，
+    "操作系统"不以"系统"为后缀退化——P1-2 起白名单词整体保护，防剥成泛词碎片），
     其余技能按后缀表剥除（"前端开发"→"前端"）。
     """
-    if name in SOFT_SKILL_WHITELIST:
+    if name in SKILL_WHITELIST:
         return name
     name = _SKILL_SUFFIX_RE.sub("", name).strip()
     return name
+
+
+def canonical_skill_name(name: str) -> str:
+    """技能规范名：别名归一化 + 中文后缀清洗。
+
+    抽取/聚合/匹配/简历各链路的统一技能规范化入口（原 clean_skill_name(normalize_skill())
+    内联组合在 5+ 处重复），保证口径一致、防后续词表演化时各链路漂移。
+    不含大小写归一：调用方按需自行 .lower()（如匹配比较、评测对齐）。
+    """
+    return clean_skill_name(normalize_skill(name))
 
 
 def dedup_skills(skills: list[SkillExtracted]) -> list[SkillExtracted]:
@@ -69,14 +80,22 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     3. 黑名单剔除（行业/业务领域词，防 LLM 幻觉技能入图）
     4. 去重
     """
-    # skills 与 requirements 共用同一清洗规则：别名 → 后缀清洗 → 黑名单剔除
+    # skills 与 requirements 共用同一清洗规则：别名 → 后缀清洗 → 黑名单剔除。
+    # 额外剔除通用软素质词（吃苦耐劳/有责任心等，SOFT_SKILL_NOISE）：LLM 常把
+    # 招聘软素质误抽为技术技能，此类词不入技能图谱（区别于 SOFT_SKILL_WHITELIST
+    # 的 20 项岗位本体软技能，后者仍经 soft_skills 字段保留）。
+    def _is_soft_noise(name: str) -> bool:
+        return name in SOFT_SKILL_NOISE or any(
+            n in name for n in SOFT_SKILL_NOISE if len(n) >= 4
+        )
+
     def _clean(name: str) -> str:
-        return clean_skill_name(normalize_skill(name))
+        return canonical_skill_name(name)
 
     result.skills = [
         SkillExtracted(name=_clean(s.name), category=s.category, description=s.description)
         for s in result.skills
-        if _is_valid_skill_name(_clean(s.name))
+        if _is_valid_skill_name(_clean(s.name)) and not _is_soft_noise(_clean(s.name))
     ]
     result.skills = dedup_skills(result.skills)
 
@@ -84,7 +103,7 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     seen_soft: set[str] = set()
     cleaned_soft: list[str] = []
     for s in result.soft_skills:
-        name = clean_skill_name(normalize_skill(s)).strip()
+        name = canonical_skill_name(s).strip()
         if not name or name in seen_soft or name not in SOFT_SKILL_WHITELIST:
             continue
         seen_soft.add(name)
@@ -100,7 +119,7 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     seen: set[tuple[str, str]] = set()
     for req in result.requirements:
         name = _clean(req.skill_name)
-        if not _is_valid_skill_name(name):
+        if not _is_valid_skill_name(name) or _is_soft_noise(name):
             continue
         key = (name.lower(), req.necessity)
         if key in seen:

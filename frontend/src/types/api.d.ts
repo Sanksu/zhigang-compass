@@ -162,8 +162,81 @@ export interface paths {
                 };
             };
         };
-        put?: never;
+        /** 更新当前用户资料（email/phone/bio，None 字段保留原值） */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        email?: string;
+                        phone?: string;
+                        bio?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description 更新后的用户信息 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 修改当前用户密码（校验原密码，新密码不得与旧密码相同） */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: password */
+                        old_password: string;
+                        /** Format: password */
+                        new_password: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description 修改成功 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -221,7 +294,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 岗位节点详情" */
+        /** 岗位节点详情 */
         get: {
             parameters: {
                 query?: never;
@@ -260,7 +333,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 岗位技能列表" */
+        /** 岗位技能列表 */
         get: {
             parameters: {
                 query?: {
@@ -300,7 +373,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 技能节点详情" */
+        /** 技能节点详情 */
         get: {
             parameters: {
                 query?: never;
@@ -338,7 +411,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 技能证据列表" */
+        /** 技能证据列表 */
         get: {
             parameters: {
                 query?: never;
@@ -376,7 +449,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 技能先修技能链（先修字典，拓扑序） */
+        /** 技能先修技能链（图谱 PREREQUISITE_OF 优先，先修字典回退） */
         get: {
             parameters: {
                 query?: never;
@@ -388,7 +461,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description 先修链（data 含 skill_id/skill_name/prerequisites[{skill_id,name,depth}]） */
+                /** @description 先修链（图谱 PREREQUISITE_OF 边优先，未建边回退人工字典；data 含 skill_id/skill_name/prerequisites[{skill_id,name,depth}]） */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -490,7 +563,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 相似技能检索（pgvector）" */
+        /** 相似技能检索（pgvector） */
         get: {
             parameters: {
                 query: {
@@ -563,6 +636,132 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/graph/algorithms/pagerank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** PageRank 技能重要性 Top-N（纯 Python，Neo4j 社区版无 GDS） */
+        get: {
+            parameters: {
+                query?: {
+                    top_n?: number;
+                    /** @description 共现边权重下限（共现岗位数） */
+                    min_weight?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 技能重要性排名 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/graph/algorithms/skill-clusters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Louvain 技能簇识别（纯 Python） */
+        get: {
+            parameters: {
+                query?: {
+                    min_size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 技能簇列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/graph/algorithms/shortest-path": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 技能最短路径（shortestPath((:Skill)-[*..6]-(:Skill))） */
+        get: {
+            parameters: {
+                query: {
+                    /** @description 起点技能 ID */
+                    from: string;
+                    /** @description 终点技能 ID */
+                    to: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 最短路径节点序列 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 两技能间不存在 ≤6 跳可达路径 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/graph/view/{view_type}": {
         parameters: {
             query?: never;
@@ -570,7 +769,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 视图切换（后端过滤）" */
+        /** 视图切换（后端过滤） */
         get: {
             parameters: {
                 query?: never;
@@ -799,6 +998,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/resume/files/{resume_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 下载简历原始文件（仅上传者本人可下载，admin 无权访问原文） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    resume_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 原始文件字节流 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/octet-stream": string;
+                    };
+                };
+                /** @description resume_id 格式非法 */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 非本人无权下载 */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 简历文件不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/resume/{resume_id}": {
         parameters: {
             query?: never;
@@ -892,7 +1150,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 自动推荐 Top-N（同步返回，含 CII 通胀修正） */
+        /** 自动推荐 Top-N（异步，ARQ 队列 + 含 CII 通胀修正） */
         post: {
             parameters: {
                 query?: never;
@@ -910,8 +1168,8 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description 推荐结果列表 */
-                200: {
+                /** @description 任务已入队，返回 task_id（轮询 /match/task/{task_id} 获取进度与结果） */
+                202: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -980,7 +1238,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询推荐任务状态" */
+        /** 查询推荐任务状态 */
         get: {
             parameters: {
                 query?: never;
@@ -1018,7 +1276,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 获取匹配结果" */
+        /** 获取匹配结果 */
         get: {
             parameters: {
                 query?: never;
@@ -1056,7 +1314,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 获取差距分析" */
+        /** 获取差距分析 */
         get: {
             parameters: {
                 query?: never;
@@ -1094,7 +1352,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 获取学习路径" */
+        /** 获取学习路径 */
         get: {
             parameters: {
                 query?: never;
@@ -1133,7 +1391,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 获取人岗比对诊断报告"
+         * 获取人岗比对诊断报告
          * @description LLM 基于结果快照（分数/差距/学习路径/证据）生成结构化诊断报告，结果缓存 24h
          */
         get: {
@@ -1170,8 +1428,15 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description 诊断报告生成失败（LLM 不可用或超时） */
+                /** @description 诊断报告生成失败（LLM 未配置可用 provider 或全部 provider 调用失败，错误码 503） */
                 503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description LLM 调用超时（错误码 5003，前端可据此提示稍后重试） */
+                504: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1196,7 +1461,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 提交匹配反馈" */
+        /** 提交匹配反馈 */
         post: {
             parameters: {
                 query?: never;
@@ -1280,7 +1545,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 获取版本详情" */
+        /** 获取版本详情 */
         get: {
             parameters: {
                 query?: never;
@@ -1396,7 +1661,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 岗位演化历史" */
+        /** 岗位演化历史 */
         get: {
             parameters: {
                 query?: never;
@@ -1434,7 +1699,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 岗位状态机总览（六态分布 + 最近人工流转记录）" */
+        /** 岗位状态机总览（六态分布 + 最近人工流转记录） */
         get: {
             parameters: {
                 query?: never;
@@ -1483,6 +1748,44 @@ export interface paths {
             requestBody?: never;
             responses: {
                 /** @description 信号列表（data 含 window_count/emerging/declining） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/watch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 观察池公开摘要 + MLI 产业化拐点排名（前端看板） */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 观察池摘要（data 含 items/total，item 含 mli/ready_to_industrialize） */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1869,6 +2172,104 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/positions/{position_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 岗位详情（人工编辑前查看技能/学历/证书与文本定义） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    position_name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 岗位详情（skills 列表 + core_duties/scenarios + education/certifications） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 岗位不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        /** 人工编辑岗位定义（技能增删/necessity 切换/weight 调整/文本修改），变更写入 PositionEditLog 节点 */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    position_name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description 技能全量替换（缺省不变更），每项含 name/necessity/weight */
+                        skills?: {
+                            /** @description 技能名 */
+                            name: string;
+                            /** @enum {string} */
+                            necessity: "must" | "nice";
+                            weight: number;
+                        }[];
+                        /** @description 核心职责（字符串数组，全量替换） */
+                        core_duties?: string[];
+                        /** @description 典型场景（字符串数组，全量替换） */
+                        scenarios?: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description 保存结果（updated/diff_summary） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 参数不合法（weight 越界 / necessity 非法等） */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 岗位不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/positions/pending": {
         parameters: {
             query?: never;
@@ -1914,7 +2315,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 审核岗位（批准/驳回）" */
+        /** 审核岗位（批准/驳回） */
         post: {
             parameters: {
                 query?: never;
@@ -1980,7 +2381,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 待归档岗位列表（declining 状态）" */
+        /** 待归档岗位列表（declining 状态） */
         get: {
             parameters: {
                 query?: never;
@@ -2017,7 +2418,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 确认衰退归档（declining → archived 终态）" */
+        /** 确认衰退归档（declining → archived 终态） */
         put: {
             parameters: {
                 query?: never;
@@ -2061,7 +2462,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 待审核演化变更" */
+        /** 待审核演化变更 */
         get: {
             parameters: {
                 query?: never;
@@ -2090,6 +2491,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/discovery/watch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 技术热点观察池周报（§7.2.5，admin 可见，供运营周报/审核） */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 状态过滤 */
+                    status?: "watch" | "candidate_promoted" | "archived";
+                    /** @description 信号源过滤（jd/arxiv/course/github/stackoverflow） */
+                    source?: string;
+                    page?: number;
+                    size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 观察池信号分页列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/evolution/{id}/review": {
         parameters: {
             query?: never;
@@ -2098,7 +2542,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 审核演化变更" */
+        /** 审核演化变更 */
         put: {
             parameters: {
                 query?: never;

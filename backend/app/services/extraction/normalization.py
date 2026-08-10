@@ -46,7 +46,7 @@ def _agglomerative_clusters(
     """聚合链接层次聚类（自写，O(N³) 最坏/邻域启发收敛）。
 
     Args:
-        names: 技能名列表
+        names: 技能名列表（内部去重后按字典序排序再聚类，结果与输入顺序无关）
         sim_fn: (a, b) → 相似度 [0,1] 的可调用
         threshold: 距离阈值（相似度 ≥ 1 - threshold 的项合并）
 
@@ -54,8 +54,12 @@ def _agglomerative_clusters(
         簇列表（每簇一个技能名列表）。逐项贪心合并：与已有簇中任一成员
         相似度达阈值即并入该簇（按首个命中簇），否则自成一簇。
     """
+    # 先去重（同名项只参与一次合并），再排序固定簇种子与"首个命中簇"归属：
+    # 输入顺序漂移（Neo4j 读取无 ORDER BY）会导致跨簇桥节点归入不同簇，
+    # 排序保证同一名称集合的聚类结果唯一确定。
+    ordered = sorted(set(names))
     clusters: list[list[str]] = []
-    for name in names:
+    for name in ordered:
         merged = False
         for cluster in clusters:
             if any(sim_fn(name, member) >= 1 - threshold for member in cluster):

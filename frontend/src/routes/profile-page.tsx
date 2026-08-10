@@ -22,7 +22,7 @@ import {
   TableCell,
 } from '@/components/ui/table'
 import type { ResumeSummary } from '@/components/match/types'
-import { apiDelete, apiGet, apiPost, apiPut, ApiError } from '@/lib/api'
+import { apiDelete, apiGet, apiPost, apiPut, ApiError, getAccessToken } from '@/lib/api'
 
 /** /auth/me 返回的用户资料 */
 interface MeProfile {
@@ -185,6 +185,36 @@ export function ProfilePage() {
     }
   }
 
+  /* ── 简历原文下载（GET /resume/files/{id}/download，二进制非 ApiResponse） ── */
+  async function handleDownloadResume(r: ResumeSummary) {
+    setDeletingId(r.id)
+    try {
+      const token = getAccessToken()
+      const resp = await fetch(`/api/v1/resume/files/${r.id}/download`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => null)
+        throw new Error(body?.msg ?? `下载失败（HTTP ${resp.status}）`)
+      }
+      const blob = await resp.blob()
+      const disposition = resp.headers.get('Content-Disposition') ?? ''
+      // 后端 RFC 5987 filename*：取 filename* 或 filename 作为保存名
+      const match = disposition.match(/filename\*=utf-8''([^;]+)/i)
+      const filename = match ? decodeURIComponent(match[1]) : r.file_name
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '下载失败')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   /* ── 简历编辑：拉取当前 skills 并打开编辑框 ── */
   async function handleEditResume(r: ResumeSummary) {
     setEditId(r.id)
@@ -341,6 +371,14 @@ export function ProfilePage() {
                         <div className="flex justify-end gap-2">
                           <Button variant="ghost" size="sm" onClick={() => handleViewResume(r)}>
                             查看
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={deletingId === r.id}
+                            onClick={() => handleDownloadResume(r)}
+                          >
+                            {deletingId === r.id ? '下载中…' : '下载'}
                           </Button>
                           <Button variant="ghost" size="sm" onClick={() => handleEditResume(r)}>
                             编辑

@@ -17,7 +17,6 @@
 """
 
 import asyncio
-import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -28,51 +27,11 @@ from sqlalchemy import text
 
 from app.core.database import async_session_factory
 from app.services.extraction.dictionary import (
-    SKILL_ALIAS,
     SKILL_STOPWORDS,
     SKILL_WHITELIST,
+    is_noise_skill,
     normalize_skill,
 )
-
-# 岗位类后缀/前缀：技能抽取结果中出现的岗位名，非技能
-_POSITION_NOISE = re.compile(
-    r"(工程师|技术员|开发工程师|开发$|专员|经理|主管|负责人|设计师|"
-    r"架构师|分析师|科学家|研究员|顾问|专家|实习生|助理|店长)$"
-)
-# 经验/职责描述碎片
-_EXPERIENCE_NOISE = re.compile(r"(经验|开发|部署|使用|掌握|熟悉|了解|能力|经验$|方向)")
-# 明确非技能的通用碎片词（白名单语义覆盖不了的太泛词）
-_GENERIC_NOISE = {
-    "前端", "后端", "测试", "运维", "算法", "数据库", "大数据", "云",
-    "安全", "网络", "搜索", "配置", "操作", "脚本", "报表", "开源",
-    "移动", "桌面", "嵌入式", "数据", "框架", "平台", "系统", "项目",
-    "团队", "业务", "产品", "架构", "开发", "技术", "管理", "设计",
-    "工具", "接口", "协议", "引擎", "服务", "组件", "方案", "功能",
-    "经验", "工作", "能力", "要求", "方向", "语言",
-}
-
-# 含分隔符的复合标签（如 "MySQL/Redis/MongoDB"、"5天/周"）——技能名不应含分隔符
-_COMPOUND_NOISE = re.compile(r"[\/()（）]|天/|月/|年/")
-
-# 别名键（口语变体）本身是候选的标准名来源，非噪音
-_ALIAS_STANDARDS = set(SKILL_ALIAS.values())
-
-
-def _is_noise(name: str) -> bool:
-    """启发式噪音判定：非技能标签 / 泛词 / 描述碎片。"""
-    if name in _GENERIC_NOISE or name in SKILL_STOPWORDS:
-        return True
-    if name in _ALIAS_STANDARDS:
-        return False  # 别名对应的标准名是真实技能
-    if len(name) < 2 or name.isdigit():
-        return True
-    if _COMPOUND_NOISE.search(name):
-        return True
-    if _POSITION_NOISE.search(name):
-        return True
-    if _EXPERIENCE_NOISE.search(name):
-        return True
-    return False
 
 
 async def _load_outside_skills() -> Counter:
@@ -88,7 +47,8 @@ async def _load_outside_skills() -> Counter:
             if not name:
                 continue
             norm = normalize_skill(str(name))
-            if norm in SKILL_WHITELIST or norm in SKILL_ALIAS:
+            # normalize_skill 已把别名归一到标准名，白名单内即已覆盖
+            if norm in SKILL_WHITELIST:
                 continue
             key = norm.lower()
             if key in seen:
@@ -101,7 +61,7 @@ async def _load_outside_skills() -> Counter:
 async def main(top: int, output: Path | None) -> None:
     counter = await _load_outside_skills()
     # 噪音过滤后按出现岗位数降序
-    candidates = [(name, cnt) for name, cnt in counter.items() if not _is_noise(name)]
+    candidates = [(name, cnt) for name, cnt in counter.items() if not is_noise_skill(name)]
     candidates.sort(key=lambda x: (-x[1], x[0].lower()))
     print(f"白名单外原始技能: {len(counter)} | 噪音过滤后候选: {len(candidates)}")
 

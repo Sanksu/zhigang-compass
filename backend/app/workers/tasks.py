@@ -241,7 +241,9 @@ def _skills_of(ext: dict) -> list[str]:
 def _publish_date(snapshot: dict, crawled_at: str) -> date | None:
     """解析发布日期：snapshot.post_date 优先，缺省用 crawled_at；无法解析返回 None。"""
     raw = str(snapshot.get("post_date") or crawled_at or "")[:19]
-    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S"):
+    # 空格分隔时间格式（智联等源，占库内 46%）：缺此格式会导致时滞检测
+    # 把合法日期误标 no_skills_or_publish_date 跳过
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
         try:
             return datetime.strptime(raw, fmt).date()
         except ValueError:
@@ -293,6 +295,18 @@ def _history_skill_sets(group: list[tuple[int, date, list[str]]], jd_id: int) ->
     ]
 
 
+def _snapshot_with_skip(snapshot: dict | None, key: str, reason: str) -> dict:
+    """复制 snapshot 并写入检测跳过标记（数据不足，游标收敛用，不做判定）。
+
+    时滞/通胀检测对数据不足的 JD 不做武断判定，但若不写标记，
+    `snapshot[key] is None` 游标会反复选中这些 JD，每次 ETL 空转。
+    skipped 标记不含 decay_weight，聚合层 `_jd_decay_weight` 视为 1.0。
+    """
+    snap = dict(snapshot or {})
+    snap[key] = {"skipped": True, "reason": reason}
+    return snap
+
+
 async def validate_temporal(
     ctx: dict,
     jd_ids: list[int] | None = None,
@@ -329,15 +343,19 @@ async def validate_temporal(
             stmt = stmt.where(JDRaw.id.in_(jd_ids))
         rows = (await session.scalars(stmt.order_by(JDRaw.id.asc()).limit(limit))).all()
 
+        results: dict = {"checked": 0, "skipped": 0, "flagged": []}
         # 已抽取记录视图：(jd_id, position, publish_date, skills)
         views = []
         for row in rows:
             ext = _extraction_of(row)
             if not ext:
+                results["skipped"] += 1
                 continue
             publish = _publish_date(row.snapshot or {}, row.crawled_at or "")
             skills = _skills_of(ext)
             if not skills or publish is None:
+                row.snapshot = _snapshot_with_skip(row.snapshot, "validation", "no_skills_or_publish_date")
+                results["skipped"] += 1
                 continue
             views.append((row, (row.id, ext.get("position_name") or "", publish, skills)))
 
@@ -364,12 +382,12 @@ async def validate_temporal(
                 pos = ext.get("position_name") or ""
                 hist_by_pos.setdefault(pos, []).append((row.id, publish, skills))
 
-        results: dict = {"checked": 0, "skipped": len(rows) - len(views), "flagged": []}
         for row, (jd_id, position, publish, skills) in views:
             # group 覆盖同岗位全部历史记录（含当前批次），按首见时长/抄袭比对口径
             group = hist_by_pos.get(position, [])
             skill_ages = _skill_first_seen_days(group, skills, today)
             if not skill_ages:
+                row.snapshot = _snapshot_with_skip(row.snapshot, "validation", "no_skill_first_seen_ages")
                 results["skipped"] += 1
                 continue
 
@@ -454,10 +472,12 @@ async def detect_inflation(
                 continue
             level = ext.get("level") or ""
             if level not in _QUALITY_LEVELS:
+                row.snapshot = _snapshot_with_skip(row.snapshot, "inflation", "no_level")
                 results["skipped"] += 1
                 continue
             min_years = _experience_years(row.snapshot or {})
             if min_years is None:
+                row.snapshot = _snapshot_with_skip(row.snapshot, "inflation", "no_experience")
                 results["skipped"] += 1
                 continue
 
@@ -1094,7 +1114,12 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
                 select(ResumeCache).where(ResumeCache.file_hash == result_info["file_hash"])
             )
             if cache is None:
+                # id 复用任务 id（task.id）：上传端 resume_files.resume_id = task.id，
+                # 归属校验（match/recommend `_owns_resume` 查 resume_files）依赖
+                # cache.id == resume_files.resume_id 一致；否则新简历无法发起匹配，
+                # 报"无权使用该简历发起匹配"（2026-08-09 修复）。
                 cache = ResumeCache(
+                    id=task.id,
                     file_hash=result_info["file_hash"],
                     file_name=result_info.get("file_name") or Path(file_path).name,
                     parsed_data=parsed,
@@ -1123,6 +1148,16 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
 
 # 匹配结果 Redis 快照 TTL（与 match.py 对齐：24h，供 result/gap/path/feedback 查询）
 _MATCH_RESULT_TTL = 24 * 60 * 60
+
+
+def _complete_recommend_result(prev: dict | None, match_id: str, top_n: int) -> dict:
+    """任务成功结果：合并入队时的归属字段（user_id/resume_id），追加 match_id/top_n。
+
+    不得整体覆盖 result——入队时 result 含 user_id，GET /match/task 的归属校验
+    （match.py match_task_status）依赖它；覆盖会导致任务成功后归属校验恒失败，
+    前端轮询报"匹配任务不存在或已过期"。
+    """
+    return {**(prev or {}), "match_id": match_id, "top_n": top_n}
 
 
 async def match_recommend(
@@ -1225,7 +1260,8 @@ async def match_recommend(
 
             task.status = "success"
             task.progress = 1.0
-            task.result = {"match_id": match_id, "top_n": len(results)}
+            # 合并而非覆盖：保留入队时的 user_id/resume_id（GET /match/task 归属校验依赖）
+            task.result = _complete_recommend_result(task.result, match_id, len(results))
         except Exception as e:
             task.status = "failed"
             task.error = str(e)[:500]
@@ -1242,10 +1278,6 @@ _JD_TEXT_FIELDS = (
     "education", "description", "requirements",
 )
 
-# 批量连续调用 LLM 易触发 provider 限流（429，实测 deepseek 批量 100 条大量失败、
-# 单条重跑全成功），每条请求间隔平滑突发；批量任务允许的额外耗时（100 条 ≈ 30s）
-_BATCH_REQUEST_INTERVAL = 0.3
-
 
 def _build_jd_text(snapshot: dict, raw_text: str) -> str:
     """拼装 JD 抽取正文。
@@ -1259,6 +1291,11 @@ def _build_jd_text(snapshot: dict, raw_text: str) -> str:
         return raw_text
     parts = [str(snapshot.get(f, "")).strip() for f in _JD_TEXT_FIELDS]
     return "\n".join(p for p in parts if p)
+
+
+def _is_jd_text_short(snapshot: dict, raw_text: str) -> bool:
+    """JD 正文是否过短（<10 字符，无法抽取）。"""
+    return len((_build_jd_text(snapshot, raw_text) or "").strip()) < 10
 
 
 async def batch_extract(
@@ -1300,12 +1337,25 @@ async def batch_extract(
                 .limit(limit)
             )).all()
 
-        # 过滤过短正文（<10 字符无法抽取），有效条目进入批量抽取
+        # 过滤过短正文（<10 字符无法抽取）与低质 JD（needs_review 人工复核标记）：
+        # 写 skipped 标记推进游标，否则 `extraction IS NULL` 游标永不推进
+        # （短文本行/低质行堆积时正常 JD 饿死）
         valid: list[JDRaw] = []
         results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": []}
         for row in rows:
-            if len((_build_jd_text(row.snapshot or {}, row.raw_text or "") or "").strip()) < 10:
+            snap = row.snapshot or {}
+            if _is_jd_text_short(snap, row.raw_text or ""):
+                snap = dict(snap)
+                snap["extraction"] = {"skipped": True, "reason": "JD 正文过短（<10 字符）"}
+                row.snapshot = snap
                 results["failed"].append({"jd_id": row.id, "error": "JD 正文过短（<10 字符），跳过"})
+            elif snap.get("needs_review"):
+                # 低质 JD（爬虫端质量评分 < 0.6 标记）：跳过 LLM 抽取，
+                # 写 skipped 标记推进游标，否则 `extraction IS NULL` 游标不推进
+                snap = dict(snap)
+                snap["extraction"] = {"skipped": True, "reason": "质量评分 < 0.6，需人工复核"}
+                row.snapshot = snap
+                results["failed"].append({"jd_id": row.id, "error": "质量评分 < 0.6，跳过"})
             else:
                 valid.append(row)
 
@@ -1316,34 +1366,30 @@ async def batch_extract(
         texts = [_build_jd_text(r.snapshot or {}, r.raw_text or "") for r in valid]
         if texts:
             # 同步 LLM 批量调用放线程池，避免阻塞 ARQ 事件循环（Redis 心跳超时崩溃根因）。
-            # concurrency=3：LLM 生成时间由输出 token 总量决定，批大小不线性提速，
-            # 并发才提吞吐；≥4 易触发 provider 429（退避期整批降级逐条反而更慢）。
+            # concurrency=6 / batch_size=8：2026-08-07 用户确认提速（max_tokens 同步调至 4096）。
+            # LLM 生成时间由输出 token 总量决定，并发提吞吐；若触发 provider 429，退避期
+            # 整批降级逐条反而更慢，届时回调参数。
             extractions = await asyncio.to_thread(
                 extractor.extract_batch,
                 texts,
-                batch_size=5,
-                batch_timeout=90,  # 批量输出 token 放大，独立超时
+                batch_size=8,
+                batch_timeout=180,  # 批量输出 token 放大，独立超时
                 max_batch_chars=8000,
-                concurrency=3,
+                concurrency=6,
             )
         else:
             extractions = []
 
-        # 岗位名语义对齐（RAG 检索：与图谱已有岗位匹配，减少相近岗位被区分开）：
-        # LLM 抽取的岗位名先经规则归并（normalize_position_name），规则未归并的
-        # 再做图谱语义匹配（SBERT 余弦 ≥0.9 命中替换为已有岗位名）。对齐在抽取后、
-        # 写快照前统一进行，保证快照存储值与入图/聚合命名一致。
+        # 岗位名归一化（纯规则）：与聚合链路共用 normalize_position_name，保证
+        # 快照、入图、聚合三处岗位名口径一致（修复：此前语义兜底对齐与聚合规则
+        # 不一致，导致聚合岗位名 MATCH 不上图节点）
         if extractions:
-            from app.services.extraction.position_align import PositionAligner
+            from app.services.extraction.dictionary import normalize_position_name
 
-            aligner = PositionAligner.get()
-            # SBERT 对齐为 CPU 密集，放线程池
-            aligned_names = await asyncio.to_thread(
-                aligner.align_many, [e.position_name for e in extractions]
-            )
-            for extraction, aligned in zip(extractions, aligned_names):
-                if aligned and aligned != extraction.position_name:
-                    extraction.position_name = aligned
+            for extraction in extractions:
+                normalized = normalize_position_name(extraction.position_name)
+                if normalized and normalized != extraction.position_name:
+                    extraction.position_name = normalized
 
         for i, (row, extraction) in enumerate(zip(valid, extractions), start=1):
             # 逐条打印 jd_id + 进度百分比：batch_extract 只在循环结束 commit，
@@ -1353,9 +1399,6 @@ async def batch_extract(
                 flush=True,
             )
             try:
-                snap = dict(row.snapshot or {})
-                snap["extraction"] = extraction.model_dump()
-                row.snapshot = snap
                 evidence = {
                     "source": row.source,
                     "source_url": row.source_url,
@@ -1367,10 +1410,20 @@ async def batch_extract(
                     position_id = await asyncio.to_thread(
                         import_jd, neo4j_session, extraction, evidence
                     )
+                # 入图成功后才写 extraction 标记：先标记后入图会让失败记录
+                # extraction 落库，下次批跑 `extraction IS NULL` 不再选中，图数据永久缺失
+                snap = dict(row.snapshot or {})
+                snap["extraction"] = extraction.model_dump()
+                row.snapshot = snap
                 results["processed"] += 1
                 results["succeeded"] += 1
                 results["positions"].append({"jd_id": row.id, "position_id": position_id})
             except Exception as e:
+                # 入图失败：不写 extraction（保持 IS NULL 下次批跑重试），
+                # 错误写入 extraction_error 落库审计（failed 可追溯）
+                snap = dict(row.snapshot or {})
+                snap["extraction_error"] = str(e)[:500]
+                row.snapshot = snap
                 results["failed"].append({"jd_id": row.id, "error": str(e)[:500]})
         await session.commit()
 
@@ -1873,8 +1926,25 @@ async def check_llm_providers_health(ctx: dict) -> dict:
 
 
 async def on_startup(ctx: dict) -> None:
-    """Worker 启动钩子。"""
+    """Worker 启动钩子。
+
+    预热 OCR 引擎（PaddleOCR 懒加载首次调用约 24s，2026-08-09 扫描件 OCR
+    速度评测）：异步预加载到全局单例，使首次 resume_parse 免于 24s 冷加载。
+    模型不可用（未下载/依赖缺失）时预热失败不阻塞 worker 启动，后续
+    resume_parse 仍会按需懒加载并抛 ResumeParseError 由任务层处理。
+    """
     print(f"[ARQ Worker] 启动，PID={ctx.get('worker_pid')}")
+
+    async def _warm_ocr():
+        try:
+            from app.services.resume import file_parser as _fp
+
+            _fp._ocr_engine()
+            print("[ARQ Worker] OCR 引擎预热完成")
+        except Exception as e:
+            print(f"[ARQ Worker] OCR 预热跳过（模型不可用）: {str(e)[:100]}")
+
+    asyncio.create_task(_warm_ocr())
 
 
 async def on_shutdown(ctx: dict) -> None:

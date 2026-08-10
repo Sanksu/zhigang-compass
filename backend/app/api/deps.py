@@ -5,7 +5,8 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.core.security import decode_token, has_permission
+from app.core.errors import ERR_TOKEN_EXPIRED, business_error
+from app.core.security import TokenExpiredError, decode_token, has_permission
 
 security = HTTPBearer(auto_error=False)
 
@@ -20,7 +21,11 @@ async def get_current_user(
             detail="缺少认证凭证",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    payload = decode_token(credentials.credentials)
+    try:
+        payload = decode_token(credentials.credentials)
+    except TokenExpiredError:
+        # 契约 4011：过期 token 提示刷新（main.py 对 business_error 的 detail 透传）
+        raise business_error(ERR_TOKEN_EXPIRED, "Token 已过期，请刷新") from None
     if payload is None or payload.get("type") != "access":
         # 仅接受 access token：refresh token（7 天有效）不得直通受保护接口
         raise HTTPException(
@@ -28,6 +33,25 @@ async def get_current_user(
             detail="无效或过期的 Token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    return payload
+
+
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Optional[dict]:
+    """可选鉴权：匿名/guest 返回 None，有效 token 返回 payload。
+
+    供「匿名可读但登录用户获得更多数据」的接口使用（如图谱按角色
+    过滤 candidate 岗位）。无 token 或 token 无效均视为匿名，不抛 401。
+    """
+    if credentials is None:
+        return None
+    try:
+        payload = decode_token(credentials.credentials)
+    except Exception:
+        return None
+    if payload is None or payload.get("type") != "access":
+        return None
     return payload
 
 

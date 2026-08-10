@@ -1,7 +1,13 @@
 """准确率评测脚本测试（AL-M4-04，设计文档 §13.3）。
 
 使用仓库内真实黄金集验证脚本可运行且输出结构稳定（数据确定性，非 mock）。
+
+注意：TestEvalResume 会触发真实 LLM 调用（ResumeExtractor），打
+@pytest.mark.integration 标记，默认 pytest 运行排除；需显式 `pytest -m integration`
+执行（见 pyproject.toml）。
 """
+
+import pytest
 
 from scripts.evaluate import (
     _top3_accuracy,
@@ -33,11 +39,14 @@ class TestEvalJd:
 
 
 class TestEvalResume:
-    def test_returns_expected_schema(self):
-        """简历黄金集已交付（AL-M5-02）：resume 项真实评测并返回结构。
+    """简历黄金集已交付（AL-M5-02）：resume 项真实评测并返回结构。
 
-        无 LLM 配置环境（CI）走规则兜底，不崩溃、不伪造结果。
-        """
+    无 LLM 配置环境（CI）走规则兜底，不崩溃、不伪造结果。
+    """
+
+    pytestmark = pytest.mark.integration
+
+    def test_returns_expected_schema(self):
         r = eval_resume()
         assert r["task"] == "resume"
         assert r["skipped"] is False

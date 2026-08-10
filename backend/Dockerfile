@@ -14,7 +14,22 @@ RUN pip install --no-cache-dir uv
 
 WORKDIR /build
 COPY pyproject.toml .
+# 镜像瘦身（2026-08-09）：uv sync 装完依赖后清理字节码缓存与临时文件
+# （site-packages 体积由 torch/paddle 等重型依赖决定，见下方说明）。
 RUN uv lock && uv sync --no-dev --frozen
+# 清理构建产物：pip/uv 缓存、Python 字节码缓存（site-packages 瘦身，可省数百 MB）
+RUN find /usr/local/lib/python3.11/site-packages -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+RUN find /usr/local/lib/python3.11/site-packages -name "*.pyc" -delete 2>/dev/null || true
+RUN rm -rf /root/.cache /tmp/pip-* /tmp/uv-*
+
+# 注：torch 瘦身说明 —— 本项目 SBERT（技能相似度）/简历语义/OCR 均 CPU 推理，
+# 但 torch 是 sentence-transformers 的传递依赖，uv.lock 锁定 PyPI manylinux CUDA
+# wheel（~526MB，解压 ~2.5GB），Docker 镜像体积主要由此造成。
+# 若需进一步瘦身（省 ~2GB）：在 pyproject.toml 声明
+#   [[tool.uv.index]] name="pytorch-cpu" url="https://download.pytorch.org/whl/cpu"
+#   [tool.uv.sources] torch = { index = "pytorch-cpu" }
+# 并重新 uv lock（见 2026-08-09 尝试：直接 Dockerfile pip 预装 CPU torch 会与
+# uv sync --frozen 冲突，必须走 pyproject sources 声明式方案）。
 
 # ---------- Stage 2: 运行 ----------
 FROM python:3.11-slim

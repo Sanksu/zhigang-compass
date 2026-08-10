@@ -48,9 +48,15 @@ class TestPassesGate:
     def test_below_conservative_fails(self):
         assert passes_gate(_features(z_score=1.0, source_diversity=3), 90) is False
 
-    def test_cold_start_window_defers_to_wilson(self):
-        """历史 < 60 天不走 Z-score 门控（返回 False 由上层走 wilson 兜底）。"""
-        assert passes_gate(_features(z_score=3.0, source_diversity=3, jd_freq_ma3=12), 30) is False
+    def test_zscore_used_even_with_short_history(self):
+        """修复（2026-08-09）：z_score 非 None 时即用 Z-score 门控，与历史天数无关。
+
+        此前 history_days < 60 一律禁用 Z-score，导致快照跨度 <60 天时即使
+        z_score 已由多期快照算出也被强制走冷启动，candidate 发现失效。
+        """
+        assert passes_gate(_features(z_score=3.0, source_diversity=3, jd_freq_ma3=12), 30) is True
+        # 保守门控同样不受历史天数限制
+        assert passes_gate(_features(z_score=1.8, source_diversity=2, jd_freq_ma3=5), 10) is True
 
     def test_exactly_sixty_days_uses_normal_gate(self):
         assert passes_gate(_features(z_score=3.0, source_diversity=2, jd_freq_ma3=10), 60) is True

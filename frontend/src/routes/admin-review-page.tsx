@@ -103,7 +103,7 @@ interface DecliningItem {
  * reason 必填，Neo4j 状态同步 + 审计日志由后端完成）。
  */
 export function AdminReviewPage() {
-  const [tab, setTab] = useState<'candidate' | 'evolution' | 'edit'>('candidate')
+  const [tab, setTab] = useState<'candidate' | 'evolution' | 'edit' | 'watch'>('candidate')
   const [queue, setQueue] = useState<ReviewItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -152,11 +152,12 @@ export function AdminReviewPage() {
         title="岗位审核"
         description="六状态机全链路人工审核：候选晋升（candidate → emerging / rejected）· 演化晋级（emerging → stable / declining）· 衰退归档（declining → archived）"
       />
-      <Tabs value={tab} onValueChange={(v) => setTab(v as 'candidate' | 'evolution' | 'edit')}>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'candidate' | 'evolution' | 'edit' | 'watch')}>
         <TabsList>
           <TabsTrigger value="candidate" className="text-xs">候选晋升审核</TabsTrigger>
           <TabsTrigger value="evolution" className="text-xs">演化审核（emerging）</TabsTrigger>
           <TabsTrigger value="edit" className="text-xs">岗位人工编辑</TabsTrigger>
+          <TabsTrigger value="watch" className="text-xs">发现观察池</TabsTrigger>
         </TabsList>
         <TabsContent value="candidate">
       {/* 审核结果通知 */}
@@ -385,6 +386,9 @@ export function AdminReviewPage() {
         </TabsContent>
         <TabsContent value="edit">
           <PositionEditorTab />
+        </TabsContent>
+        <TabsContent value="watch">
+          <TechnologyWatchTab />
         </TabsContent>
       </Tabs>
     </>
@@ -1029,6 +1033,145 @@ function PositionEditorTab() {
             {diffSummary && <span className="text-xs text-ink-secondary break-all">{diffSummary}</span>}
           </div>
         </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 发现观察池 Tab — 设计文档 §7.2.5（admin 周报可见）
+ *
+ * 数据源：真实 GET /admin/discovery/watch（技术热点信号列表，支持按 status/source 筛选）。
+ * 展示技能信号周报：信号源 / 信号值 / 周期 / 状态（watch / candidate_promoted / archived）。
+ */
+interface WatchRow {
+  skill_name: string
+  signal_source: string
+  signal_value: number
+  period: string
+  status: string
+  first_seen_at: string | null
+  last_signal_at: string | null
+}
+
+const WATCH_SOURCE_LABEL: Record<string, string> = {
+  jd: 'JD',
+  arxiv: '论文',
+  course: '课程',
+  github: 'GitHub',
+  community: '社区',
+  stackoverflow: 'SO',
+}
+
+function TechnologyWatchTab() {
+  const [items, setItems] = useState<WatchRow[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [sourceFilter, setSourceFilter] = useState('')
+
+  const load = (status = '', source = '') => {
+    const params = new URLSearchParams({ size: '50' })
+    if (status) params.set('status', status)
+    if (source) params.set('source', source)
+    apiGet<{ items: WatchRow[]; total: number }>(`/admin/discovery/watch?${params}`)
+      .then((res) => {
+        setItems(res.items)
+        setTotal(res.total)
+      })
+      .catch(() => setError('观察池加载失败'))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    load()
+  }, [])
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); load(v, sourceFilter) }}>
+          <SelectTrigger className="w-36 h-8 text-xs">
+            <SelectValue placeholder="状态筛选" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">全部状态</SelectItem>
+            <SelectItem value="watch">观察中</SelectItem>
+            <SelectItem value="candidate_promoted">候选提升</SelectItem>
+            <SelectItem value="archived">已归档</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={sourceFilter} onValueChange={(v) => { setSourceFilter(v); load(statusFilter, v) }}>
+          <SelectTrigger className="w-32 h-8 text-xs">
+            <SelectValue placeholder="来源筛选" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">全部来源</SelectItem>
+            {Object.entries(WATCH_SOURCE_LABEL).map(([k, v]) => (
+              <SelectItem key={k} value={k}>{v}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="text-xs text-ink-muted">共 {total} 条信号（技术热点周报 · 设计文档 §7.2.5）</span>
+      </div>
+
+      {error ? (
+        <Card>
+          <CardContent className="py-8 text-center text-xs text-state-archived">{error}</CardContent>
+        </Card>
+      ) : loading ? (
+        <Card>
+          <CardContent className="py-8 text-center text-xs text-ink-faint">加载观察池…</CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            {items.length === 0 ? (
+              <p className="py-10 text-center text-xs text-ink-faint">暂无观察池信号（依赖每日观察池任务）</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>技能</TableHead>
+                    <TableHead>信号源</TableHead>
+                    <TableHead>信号值</TableHead>
+                    <TableHead>周期</TableHead>
+                    <TableHead>状态</TableHead>
+                    <TableHead>最近信号</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.map((w, i) => (
+                    <TableRow key={`${w.skill_name}-${w.signal_source}-${w.period}-${i}`}>
+                      <TableCell className="font-medium text-ink">{w.skill_name}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[10px] font-mono">
+                          {WATCH_SOURCE_LABEL[w.signal_source] ?? w.signal_source}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono tabular-nums text-ink-muted">
+                        {typeof w.signal_value === 'number' ? w.signal_value.toFixed(3) : w.signal_value}
+                      </TableCell>
+                      <TableCell className="text-xs text-ink-muted font-mono">{w.period}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={w.status === 'candidate_promoted' ? 'emerging' : w.status === 'archived' ? 'archived' : 'outline'}
+                          className="text-[10px]"
+                        >
+                          {w.status === 'candidate_promoted' ? '候选提升' : w.status === 'archived' ? '已归档' : '观察中'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-ink-faint font-mono">
+                        {w.last_signal_at ? w.last_signal_at.slice(0, 16).replace('T', ' ') : '—'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   )

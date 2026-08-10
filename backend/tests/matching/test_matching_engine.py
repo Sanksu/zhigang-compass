@@ -1,15 +1,19 @@
 """匹配引擎单元测试（设计文档 9.4 节）。
 
-覆盖三维评分、判零、CII 通胀修正、时效衰减、AUTO/COMPARE 模式。
+覆盖三维评分、判零、CII 通胀修正、时效衰减、AUTO/COMPARE 模式、
+熟练度折减（方案 A）、must 按 source_count 加权（方案 B）、雷达 skill_level 维度。
 评分效果示例对齐设计文档 9.4 节表格（默认权重 0.6/0.2/0.2）。
 """
 
+import math
 from datetime import date, timedelta
 
 import pytest
 
 from app.services.matching.engine import (
     RuleBasedMatcher,
+    _proficiency_factor,
+    _source_weight,
     apply_cii_correction,
     score_position,
     staleness_penalty,
@@ -249,6 +253,215 @@ class TestRadar:
         })
         result = score_position(cand, pos, weights=W, semantic=sem, sim_threshold=0.5)
         assert result.radar["projects"] == pytest.approx(0.6)
+
+
+def _candidate_with_prof(profs: dict[str, int], total_years: float = 5.0) -> CandidateProfile:
+    """构造带熟练度的候选人（技能名 → proficiency 1/2/3）。"""
+    return CandidateProfile(
+        user_id="u1",
+        skills=[
+            CandidateSkill(skill_id=s, skill_name=s, proficiency=p) for s, p in profs.items()
+        ],
+        total_years=total_years,
+    )
+
+
+class TestProficiencyFactor:
+    """熟练度满足度矩阵（方案 A：岗位期望 × 候选人 1/2/3）。"""
+
+    def test_matrix(self):
+        assert _proficiency_factor("初级", 1) == pytest.approx(0.85)
+        assert _proficiency_factor("初级", 2) == pytest.approx(1.0)
+        assert _proficiency_factor("初级", 3) == pytest.approx(1.0)
+        assert _proficiency_factor("中级", 1) == pytest.approx(0.60)
+        assert _proficiency_factor("中级", 2) == pytest.approx(1.0)
+        assert _proficiency_factor("中级", 3) == pytest.approx(1.0)
+        assert _proficiency_factor("高级", 1) == pytest.approx(0.30)
+        assert _proficiency_factor("高级", 2) == pytest.approx(0.60)
+        assert _proficiency_factor("高级", 3) == pytest.approx(1.0)
+        assert _proficiency_factor("专家", 1) == pytest.approx(0.30)
+        assert _proficiency_factor("专家", 2) == pytest.approx(0.60)
+        assert _proficiency_factor("专家", 3) == pytest.approx(0.85)
+
+    def test_missing_required_no_penalty(self):
+        """岗位无期望熟练度 → 1.0（黄金集零回归默认）。"""
+        assert _proficiency_factor(None, 2) == 1.0
+        assert _proficiency_factor("", 2) == 1.0
+
+    def test_missing_candidate_no_penalty(self):
+        assert _proficiency_factor("高级", None) == 1.0
+
+    def test_unknown_level_falls_back_no_penalty(self):
+        """未知档位（数据异常）不武断惩罚。"""
+        assert _proficiency_factor("未知", 1) == 1.0
+
+
+class TestSourceWeight:
+    """must 权重函数边界（方案 B：log(source_count+1)）。"""
+
+    def test_default_is_flat(self):
+        """source_count 缺失/1 → 全等权（退化为等权平均）。"""
+        assert _source_weight(None) == pytest.approx(math.log(2))
+        assert _source_weight(1) == pytest.approx(math.log(2))
+
+    def test_core_skill_weights_more(self):
+        assert _source_weight(50) > _source_weight(1) * 3  # 约 5.6 倍
+
+    def test_large_value_no_dominance(self):
+        """log 平滑：超大源数不线性放大。"""
+        assert _source_weight(1000) < _source_weight(1) * 10
+
+
+class TestProficiencyMatching:
+    """熟练度折减参与评分（方案 A）。"""
+
+    def test_sufficient_proficiency_full_credit(self):
+        """候选人熟练度 ≥ 岗位期望 → 满分。"""
+        cand = _candidate_with_prof({"Python": 3})
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST, proficiency="高级")])
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == 1.0
+
+    def test_one_level_low_discounts(self):
+        """低一档 → ×0.6（熟悉2 × 高级=0.6）。"""
+        cand = _candidate_with_prof({"Python": 2})
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST, proficiency="高级")])
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == pytest.approx(0.6)
+
+    def test_two_level_low_discounts(self):
+        """低两档 → ×0.3（了解1 × 高级=0.3）。"""
+        cand = _candidate_with_prof({"Python": 1})
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST, proficiency="高级")])
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == pytest.approx(0.3)
+
+    def test_expert_requirement_proficient_keeps_margin(self):
+        """专家岗 + 精通 → 0.85（留余量，不极端归零）。"""
+        cand = _candidate_with_prof({"Python": 3})
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST, proficiency="专家")])
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == pytest.approx(0.85)
+
+    def test_no_required_proficiency_no_penalty(self):
+        """岗位无期望熟练度 → 不折减（与优化前行为一致）。"""
+        cand = _candidate(["Python"])  # proficiency=2
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST)])
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == 1.0
+
+    def test_nice_skill_also_applies_factor(self):
+        cand = _candidate_with_prof({"Go": 1})
+        pos = _position("p1", musts=[], nices=[_req("Go", Necessity.NICE, proficiency="高级")])
+        result = score_position(cand, pos, weights=W)
+        assert result.nice_score == pytest.approx(0.3)
+
+    def test_semantic_hit_applies_proficiency_factor(self):
+        """语义命中（0.9）再乘熟练度系数 0.3。"""
+        cand = _candidate_with_prof({"机器学习": 1})
+        pos = _position("p1", musts=[_req("深度学习", Necessity.MUST, proficiency="高级")])
+        sem = _FakeSemantic({("深度学习", "机器学习"): 0.9})
+        result = score_position(cand, pos, weights=W, semantic=sem, sim_threshold=0.5)
+        assert result.must_score == pytest.approx(0.9 * 0.3)
+
+    def test_low_confidence_and_proficiency_compound(self):
+        """软技能推断（×0.5）与熟练度不足（×0.6）复合降权。"""
+        cand = CandidateProfile(
+            user_id="u1",
+            skills=[CandidateSkill(skill_id="Python", skill_name="Python", proficiency=2, low_confidence=True)],
+            total_years=5,
+        )
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST, proficiency="高级")])
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == pytest.approx(0.6 * 0.5)
+
+
+class TestMustWeightedScoring:
+    """must 按 source_count 加权（方案 B：log(source_count+1)）。"""
+
+    def test_missing_core_skill_penalizes_more(self):
+        """缺核心技能（source_count=50）比缺边缘技能（=1）扣分更多。"""
+        cand = _candidate(["Go"])
+        pos = _position(
+            "p1",
+            musts=[
+                _req("Python", Necessity.MUST, source_count=50),
+                _req("Go", Necessity.MUST, source_count=1),
+            ],
+        )
+        result = score_position(cand, pos, weights=W)
+        expected = math.log(2) / (math.log(51) + math.log(2))
+        # MatchResult 构造时 must_score 经 round(…, 4)，断言按 4 位精度
+        assert result.must_score == pytest.approx(expected, abs=1e-4)
+        assert result.must_score < 0.5  # 等权会是 0.5
+
+    def test_hit_core_skill_boosts_score(self):
+        cand = _candidate(["Python"])
+        pos = _position(
+            "p1",
+            musts=[
+                _req("Python", Necessity.MUST, source_count=50),
+                _req("Go", Necessity.MUST, source_count=1),
+            ],
+        )
+        result = score_position(cand, pos, weights=W)
+        expected = math.log(51) / (math.log(51) + math.log(2))
+        assert result.must_score == pytest.approx(expected, abs=1e-4)
+        assert result.must_score > 0.5
+
+    def test_equal_source_counts_flat(self):
+        cand = _candidate(["Go"])
+        pos = _position(
+            "p1",
+            musts=[
+                _req("Python", Necessity.MUST, source_count=5),
+                _req("Go", Necessity.MUST, source_count=5),
+            ],
+        )
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == pytest.approx(0.5)
+
+    def test_default_source_count_keeps_old_behavior(self):
+        """source_count 默认 1（黄金集/历史边）→ 等权，行为与优化前一致。"""
+        cand = _candidate(["sk1", "sk2", "sk3", "sk4"])
+        pos = _position("p1", musts=[_req(f"sk{i}", Necessity.MUST) for i in range(1, 6)])
+        result = score_position(cand, pos, weights=W)
+        assert result.must_score == pytest.approx(0.8)
+
+
+class TestSkillLevelRadar:
+    """雷达 skill_level 维度：命中必备技能的熟练度满足度均值（仅展示）。"""
+
+    def test_fully_satisfied_gives_one(self):
+        cand = _candidate_with_prof({"Python": 3})
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST, proficiency="高级")])
+        result = score_position(cand, pos, weights=W)
+        assert result.radar["skill_level"] == 1.0
+
+    def test_partial_satisfaction_averages(self):
+        cand = _candidate_with_prof({"Python": 2, "Go": 3})
+        pos = _position(
+            "p1",
+            musts=[
+                _req("Python", Necessity.MUST, proficiency="高级"),
+                _req("Go", Necessity.MUST, proficiency="高级"),
+            ],
+        )
+        result = score_position(cand, pos, weights=W)
+        assert result.radar["skill_level"] == pytest.approx((0.6 + 1.0) / 2)
+
+    def test_no_hits_returns_none(self):
+        cand = _candidate_with_prof({"Rust": 2})
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST, proficiency="高级")])
+        result = score_position(cand, pos, weights=W)
+        assert result.radar["skill_level"] is None
+
+    def test_no_required_proficiency_returns_none(self):
+        """岗位全部无期望熟练度 → 维度不展示。"""
+        cand = _candidate(["Python"])
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST)])
+        result = score_position(cand, pos, weights=W)
+        assert result.radar["skill_level"] is None
 
 
 class TestCII:
