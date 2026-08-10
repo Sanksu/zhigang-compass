@@ -8,6 +8,7 @@ from app.services.extraction.schemas import JDExtractionResult, SkillExtracted
 from app.services.extraction.dictionary import (
     SKILL_STOPWORDS,
     SKILL_WHITELIST,
+    SOFT_SKILL_NOISE,
     SOFT_SKILL_WHITELIST,
     _SKILL_MODIFIERS,
     normalize_skill,
@@ -79,14 +80,22 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     3. 黑名单剔除（行业/业务领域词，防 LLM 幻觉技能入图）
     4. 去重
     """
-    # skills 与 requirements 共用同一清洗规则：别名 → 后缀清洗 → 黑名单剔除
+    # skills 与 requirements 共用同一清洗规则：别名 → 后缀清洗 → 黑名单剔除。
+    # 额外剔除通用软素质词（吃苦耐劳/有责任心等，SOFT_SKILL_NOISE）：LLM 常把
+    # 招聘软素质误抽为技术技能，此类词不入技能图谱（区别于 SOFT_SKILL_WHITELIST
+    # 的 20 项岗位本体软技能，后者仍经 soft_skills 字段保留）。
+    def _is_soft_noise(name: str) -> bool:
+        return name in SOFT_SKILL_NOISE or any(
+            n in name for n in SOFT_SKILL_NOISE if len(n) >= 4
+        )
+
     def _clean(name: str) -> str:
         return canonical_skill_name(name)
 
     result.skills = [
         SkillExtracted(name=_clean(s.name), category=s.category, description=s.description)
         for s in result.skills
-        if _is_valid_skill_name(_clean(s.name))
+        if _is_valid_skill_name(_clean(s.name)) and not _is_soft_noise(_clean(s.name))
     ]
     result.skills = dedup_skills(result.skills)
 
@@ -110,7 +119,7 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     seen: set[tuple[str, str]] = set()
     for req in result.requirements:
         name = _clean(req.skill_name)
-        if not _is_valid_skill_name(name):
+        if not _is_valid_skill_name(name) or _is_soft_noise(name):
             continue
         key = (name.lower(), req.necessity)
         if key in seen:
