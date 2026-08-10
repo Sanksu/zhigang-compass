@@ -12,7 +12,8 @@ from pathlib import Path
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 
-# PDF 渲染 DPI：150 足够 OCR 识别，兼顾速度
+# PDF 渲染 DPI：150 实测与 300 识别质量相当（2026-08-09 扫描件 OCR 速度评测），
+# 且 300 会把文本行拆得更碎（4→8 行）、渲染耗时翻倍，故用 150 兼顾速度。
 _OCR_RENDER_DPI = 150
 
 
@@ -45,16 +46,21 @@ def extract_text(file_path: str | Path) -> str:
 
 
 def _extract_pdf(path: Path) -> str:
-    from pypdf import PdfReader
+    """PDF 文本提取：PyMuPDF 主提取 + reflow 双栏重组 + OCR 兜底。
+
+    用 PyMuPDF（fitz）而非 pypdf 作主提取：pypdf 对部分真实简历 PDF 的中文
+    （非 Unicode 自定义字体编码）解码为乱码，而 fitz 解码更强（实测同一 PDF
+    pypdf 830 字乱码 vs fitz 1331 字正确，见 2026-08-09 P0 真实简历验证）。
+    """
+    import fitz  # PyMuPDF
 
     from app.services.resume.reflow import reflow_pdf
 
-    reader = PdfReader(str(path))
-    parts = [page.extract_text() or "" for page in reader.pages]
-    text = "\n".join(parts).strip()
+    with fitz.open(str(path)) as doc:
+        text = "\n".join(page.get_text() or "" for page in doc).strip()
     if text:
         # 双栏版式（设计文档 §8.1）：pdfplumber 检测并按阅读顺序重组；
-        # 重组为空串（单栏页）时保留 pypdf 提取结果
+        # 重组为空串（单栏页）时保留 fitz 提取结果
         reflowed = reflow_pdf(path)
         return reflowed or text
     # 文本型提取为空 → 扫描件，走 OCR（pymupdf 渲染每页）

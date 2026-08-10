@@ -1,7 +1,7 @@
 """通用 RAG 检索模块（设计文档 §6.4 RAG 检索增强）。
 
 供诊断报告等生成链路动态检索图谱上下文，检索源：
-- 图谱已验证岗位定义（discovery_candidates 中 emerging/stable 的 definition_draft
+- 图谱岗位定义（discovery_candidates 中 candidate/emerging/stable 的 definition_draft
   + occupations 三源权威定义：O*NET / 人社部大典 / LinkedIn）
 - 技能描述（Neo4j Skill 节点全文，skill_search 索引）
 - 历史诊断报告（diagnosis_reports 表）
@@ -22,8 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.business import DiagnosisReportRecord, DiscoveryCandidate
 
-# 图谱中"已验证岗位"状态（设计文档 7.2.3 状态机：emerging/stable 已确认入图谱）
-_VERIFIED_STATES = ("emerging", "stable")
+# 图谱岗位定义检索状态。candidate 定义草案一并纳入（RAG 是增强，多一份上下文比
+# 空上下文好）；candidate 定义质量低于人工确认的 emerging/stable，靠 score 排序兜底。
+_VERIFIED_STATES = ("candidate", "emerging", "stable")
 
 DEFAULT_TOP_K = 10
 DEFAULT_MAX_TOKENS = 3000
@@ -55,7 +56,7 @@ class RetrievedChunk:
 
 
 async def _verified_positions(db: AsyncSession, query: str) -> list[RetrievedChunk]:
-    """图谱已验证岗位定义（discovery_candidates：emerging/stable 且定义非空）。
+    """图谱岗位定义（discovery_candidates：candidate/emerging/stable 且定义非空）。
 
     关键词路：岗位名 ILIKE 子串匹配（图谱岗位为人工审核确认的中文名）。
     """
@@ -221,12 +222,12 @@ async def retrieve_context(
         db: PostgreSQL 会话
         neo4j: Neo4j 驱动（默认 None → 跳过全文路；诊断端点注入全局 driver）
         embedder: SkillEmbedder（默认 None → 权威库语义路跳过，仅关键词路）
-        top_k: 返回条数上限（默认 10，对齐 §6.4 top-10 口径）
+        top_k: 单检索源返回条数上限（默认 10，对齐 §6.4"各检索路 top-k"）
         max_tokens: 上下文窗口 token 上限（默认 3000，§6.4 原文，超出丢弃）
 
     Returns:
-        按 score 降序、evidence_id 去重、token 截断后的 RetrievedChunk 列表。
-        任一检索源失败自动跳过（RAG 是增强，不阻塞生成链路）。
+        每源 top_k 合并、按 score 降序、evidence_id 去重、token 截断后的
+        RetrievedChunk 列表。任一检索源失败自动跳过（RAG 是增强，不阻塞生成链路）。
     """
     query = (query or "").strip()
     if not query:
@@ -238,9 +239,20 @@ async def retrieve_context(
     results += await _skills(neo4j, query)
     results += await _diagnoses(db, query)
 
+    # 各源各自按 score 取 top_k（对齐 §6.4"各检索路 top-k 合并去重"）。
+    # 不跨源混排：skill 全文分数（5-8）与 occupation 余弦（0-1）/position 固定分
+    # 量纲不同，混排会让高分源垄断上下文。
+    per_source: dict[str, list[RetrievedChunk]] = {}
+    for c in results:
+        per_source.setdefault(c.source, []).append(c)
+    pooled: list[RetrievedChunk] = []
+    for chunks in per_source.values():
+        chunks.sort(key=lambda c: c.score, reverse=True)
+        pooled.extend(chunks[:top_k])
+
     # 按 evidence_id 合并去重（保留高分），score 降序
     best: dict[str, RetrievedChunk] = {}
-    for c in results:
+    for c in pooled:
         cur = best.get(c.evidence_id)
         if cur is None or c.score > cur.score:
             best[c.evidence_id] = c
@@ -255,6 +267,4 @@ async def retrieve_context(
             continue
         used += cost
         kept.append(c)
-        if len(kept) >= top_k:
-            break
     return kept

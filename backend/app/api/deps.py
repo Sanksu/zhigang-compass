@@ -36,6 +36,25 @@ async def get_current_user(
     return payload
 
 
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Optional[dict]:
+    """可选鉴权：匿名/guest 返回 None，有效 token 返回 payload。
+
+    供「匿名可读但登录用户获得更多数据」的接口使用（如图谱按角色
+    过滤 candidate 岗位）。无 token 或 token 无效均视为匿名，不抛 401。
+    """
+    if credentials is None:
+        return None
+    try:
+        payload = decode_token(credentials.credentials)
+    except Exception:
+        return None
+    if payload is None or payload.get("type") != "access":
+        return None
+    return payload
+
+
 def require_permission(permission: str):
     """RBAC 权限检查依赖。
 

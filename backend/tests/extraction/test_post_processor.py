@@ -271,3 +271,46 @@ class TestPostProcess:
         )
         out = post_process(result)
         assert out.requirements == []
+
+    def test_soft_quality_noise_filtered_from_skills(self):
+        """LLM 误抽的通用软素质词（吃苦耐劳/有责任心等）从技术技能剔除。
+
+        SOFT_SKILL_NOISE：招聘软素质词不入技能图谱（区别于 SOFT_SKILL_WHITELIST
+        的 20 项岗位本体软技能，后者仍经 soft_skills 保留）。
+        """
+        result = JDExtractionResult(
+            position_name="",
+            skills=[
+                SkillExtracted(name="Python"),
+                SkillExtracted(name="吃苦耐劳"),
+                SkillExtracted(name="有责任心"),
+                SkillExtracted(name="团队精神"),
+                SkillExtracted(name="MySQL"),
+            ],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["Python", "MySQL"]
+
+    def test_soft_quality_noise_filtered_from_requirements(self):
+        """requirements 同样剔除软素质词（软素质不作技能要求）。"""
+        result = JDExtractionResult(
+            position_name="",
+            requirements=[
+                REQUIRESRelation(skill_name="责任心强", necessity="must"),
+                REQUIRESRelation(skill_name="Python", necessity="must"),
+            ],
+        )
+        out = post_process(result)
+        assert [(r.skill_name, r.necessity) for r in out.requirements] == [("Python", "must")]
+
+    def test_tech_reliability_word_not_filtered(self):
+        """可靠性工程技术词（可靠性测试/可靠性工程师）是技术技能，不应被软素质词表误杀。"""
+        result = JDExtractionResult(
+            position_name="",
+            skills=[
+                SkillExtracted(name="可靠性测试"),
+                SkillExtracted(name="Python"),
+            ],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["可靠性测试", "Python"]

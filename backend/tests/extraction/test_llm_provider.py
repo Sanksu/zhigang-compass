@@ -146,6 +146,32 @@ class TestCallWithFallback:
         assert "primary 挂了" in msg
         assert "backup 挂了" in msg
 
+    def test_all_timeout_raises_timeout_error(self, tmp_path, monkeypatch):
+        """全部 provider 均超时 → LLMTimeoutError（上层映射 504/5003，§2.4.7）。"""
+        chain, _ = _make_chain(tmp_path)
+
+        def fake_call(provider, prompt, response_model, max_retries, timeout, system_prompt=None):
+            raise LLMTimeoutError(f"{provider['name']} 超时")
+
+        monkeypatch.setattr(chain, "_call_provider", fake_call)
+        with pytest.raises(LLMTimeoutError) as exc_info:
+            chain.call_with_fallback("prompt", _DemoModel)
+        assert "所有 provider 均超时/不可用" in str(exc_info.value)
+
+    def test_mixed_failure_keeps_parent_error(self, tmp_path, monkeypatch):
+        """一个超时 + 一个连接失败（混合）→ 维持父类 LLMExtractionError（503 语义）。"""
+        chain, _ = _make_chain(tmp_path)
+
+        def fake_call(provider, prompt, response_model, max_retries, timeout, system_prompt=None):
+            if provider["name"] == "primary":
+                raise LLMTimeoutError("主 provider 超时")
+            raise LLMExtractionError("备 provider 连接失败")
+
+        monkeypatch.setattr(chain, "_call_provider", fake_call)
+        with pytest.raises(LLMExtractionError) as exc_info:
+            chain.call_with_fallback("prompt", _DemoModel)
+        assert type(exc_info.value) is LLMExtractionError
+
 
 class TestStructuredOutputParams:
     """设计文档 §6.2 参数：max_tokens=2048 / top_p=0.9，yaml 可覆盖。"""
@@ -352,7 +378,7 @@ class TestCircuitBreaker:
 
 
 class TestCallSyncDowngrade:
-    """熔断/退避对同步路由同样生效：命中窗口或 429/5xx 均按 503（LLMTimeoutError）。"""
+    """熔断/退避对同步路由同样生效：命中窗口或 429/5xx 均抛 LLMTimeoutError（上层映射 504）。"""
 
     def test_sync_skips_backed_off_provider(self, tmp_path, _fake_store, clock):
         chain, _ = _make_chain(tmp_path)

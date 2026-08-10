@@ -64,9 +64,20 @@ class CandidateProvider(Protocol):
 def passes_gate(features: DiscoveryFeatures, history_days: int) -> bool:
     """判定特征是否通过 candidate 门控。
 
+    Z-score 门控为主判定（设计文档 §7.2.3）：z_score 可计算（≥2 个快照窗口，
+    §7.2.1 时间窗口演化的 Z-score 基线）即使用 Z-score 门控，与历史窗口天数
+    无关。修复：此前 history_days < COLD_START_DAYS 一律返回 False，导致
+    快照跨度 <60 天时即使 z_score 已算出的岗位也被强制走冷启动 Wilson，而
+    Wilson 下界在 JD 占比下极低（实测 0.005-0.185）永不达 0.3 阈值，
+    candidate 发现功能整体失效。
+
+    z_score 为 None（快照窗口不足，无法计算 Z-score）时才走冷启动
+    Wilson 兜底（passes_cold_start_gate，由上层 DiscoveryInput 提供二项样本）。
+
     Args:
         features: 4 核心特征
-        history_days: 历史窗口天数（< COLD_START_DAYS 走冷启动 Wilson score 兜底）
+        history_days: 历史窗口天数（仅 z_score 为 None 时用于判断是否走
+            冷启动；本函数内部不再以天数禁用 Z-score 门控）
 
     Returns:
         True 表示进入 candidate 池
@@ -74,11 +85,7 @@ def passes_gate(features: DiscoveryFeatures, history_days: int) -> bool:
     if features.z_score is None:
         return False
 
-    # 冷启动：历史不足 60 天，改用 Wilson score 兜底（passes_cold_start_gate）
-    if history_days < COLD_START_DAYS:
-        return False
-
-    # 正常判定：Z-score 门控
+    # Z-score 门控（主判定，与历史天数无关）
     if features.z_score > Z_SCORE_STRICT:
         return (
             features.source_diversity >= MIN_SOURCE_DIVERSITY
@@ -123,11 +130,18 @@ class DiscoveryDetector:
         return candidates
 
     def _passes(self, inp: DiscoveryInput) -> bool:
-        """阶段一门控：正常 Z-score 门控或冷启动 Wilson 兜底。"""
+        """阶段一门控：Z-score 门控为主，z_score 不可算时冷启动 Wilson 兜底。
+
+        Z-score 门控（z_score 非 None）优先（§7.2.3 主判定）；仅当 z_score 为
+        None（快照窗口不足无法计算）才走冷启动 Wilson（需二项样本 successes/total）。
+        冷启动不再以 history_days 天数判定——天数 <60 但 z_score 已由多期快照
+        算出时，应直接使用 Z-score（修复：此前 history_days<60 强制禁用 Z-score
+        导致 candidate 发现失效）。
+        """
         if passes_gate(inp.features, inp.history_days):
             return True
         if (
-            inp.history_days < COLD_START_DAYS
+            inp.features.z_score is None
             and inp.cold_successes is not None
             and inp.cold_total is not None
         ):

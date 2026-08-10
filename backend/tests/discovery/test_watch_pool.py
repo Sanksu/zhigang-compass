@@ -8,6 +8,7 @@
 
 import pytest
 
+from app.services.discovery.confidence import compute_confidence
 from app.services.discovery.mli import MLI_WEIGHTS, compute_mli
 from app.services.discovery.watch_pool import (
     WatchSignal,
@@ -17,7 +18,9 @@ from app.services.discovery.watch_pool import (
     detect_jd_mom_signal,
     detect_z_signal,
     extract_skills,
+    is_jd_source,
     promotable_skills,
+    promotion_features,
 )
 
 
@@ -138,6 +141,22 @@ class TestAggregation:
         assert signals[0].signal_source == "jd"
         assert signals[0].skill_name == "PyTorch"
 
+    def test_build_signals_jd_platform_source_hit(self):
+        # P3 回归：真实 JD 源是平台名（boss/zhilian 等），非字面量 "jd"
+        weekly = {f"W{i:02d}": 2 for i in range(1, 12)} | {"W12": 100, "W13": 100}
+        freqs = {("PyTorch", "boss"): weekly}
+        signals = build_signals(freqs, "2026-08-05")
+        assert len(signals) == 1
+        assert signals[0].signal_source == "jd"
+        assert signals[0].skill_name == "PyTorch"
+
+    def test_build_signals_jd_platform_source_not_promotable_without_history(self):
+        # 平台名源命中但无观察历史 → 不提升（回归：promotable 判定只看信号源）
+        weekly = {f"W{i:02d}": 2 for i in range(1, 12)} | {"W12": 100, "W13": 100}
+        signals = build_signals({("PyTorch", "zhilian"): weekly}, "2026-08-05")
+        assert promotable_skills(signals, set()) == []
+        assert promotable_skills(signals, {"PyTorch"}) == ["PyTorch"]
+
     def test_build_signals_z_source(self):
         weekly = {"W1": 5, "W2": 6, "W3": 5, "W4": 30}
         signals = build_signals({("Rust", "arxiv"): weekly}, "2026-08-05")
@@ -229,3 +248,95 @@ class TestAnomalyFlags:
         freqs = aggregate_weekly_freqs(rows)
         flags = anomaly_flags(freqs, {"cs.LG", "Python"})
         assert flags == {"arxiv": True, "github": True}
+
+
+# ============================================================
+# P3：JD 平台源判定（真实 JD source 为 boss/zhilian 等平台名）
+# ============================================================
+
+class TestIsJdSource:
+    def test_jd_platform_sources(self):
+        for src in ("boss", "zhilian", "maimai", "glassdoor",
+                    "indeed", "monster", "linkedin_public", "jd"):
+            assert is_jd_source(src), src
+
+    def test_non_jd_sources(self):
+        for src in ("arxiv", "github", "stackoverflow",
+                    "icourse163", "coursera", "edx"):
+            assert not is_jd_source(src), src
+
+
+# ============================================================
+# P3：提升候选真实特征（source_diversity / MA3 / Z / 环比）
+# ============================================================
+
+class TestPromotionFeatures:
+    def test_real_metrics_from_multiple_jd_sources(self):
+        # 技能在两个 JD 平台源命中、末 2 周暴增 → 真实特征；
+        # 非 JD 源（arxiv）不参与 source_diversity 与频次统计
+        weekly = {f"W{i:02d}": 2 for i in range(1, 12)} | {"W12": 50, "W13": 100}
+        freqs = {
+            ("PyTorch", "boss"): weekly,
+            ("PyTorch", "zhilian"): weekly,
+            ("PyTorch", "arxiv"): {"W1": 5, "W2": 6, "W3": 5, "W4": 30},
+        }
+        feat = promotion_features(freqs, "PyTorch")
+        assert feat["source_diversity"] == 2
+        assert feat["jd_freq_ma3"] > 0
+        assert feat["growth"] > 0.5
+        assert feat["z_score"] is not None
+
+    def test_unknown_skill_returns_empty(self):
+        assert promotion_features({("PyTorch", "boss"): {"W1": 1}}, "Go") == {}
+
+    def test_promoted_candidate_confidence_passes_emerging_threshold(self):
+        # 3 个 JD 源 + 高频次暴增 → compute_confidence ≥ 0.6（emerging 门槛
+        # 设计 §7.2.1：跨 ≥2 源验证 + 置信度 ≥ 0.6），且不依赖学术加分
+        weekly = {f"W{i:02d}": 2 for i in range(1, 12)} | {"W12": 50, "W13": 100}
+        freqs = {
+            ("PyTorch", "boss"): weekly,
+            ("PyTorch", "zhilian"): weekly,
+            ("PyTorch", "glassdoor"): weekly,
+        }
+        feat = promotion_features(freqs, "PyTorch")
+        conf = compute_confidence(
+            jd_count=int(feat["jd_freq_ma3"]),
+            source_count=feat["source_diversity"],
+            growth_rate=feat["growth"],
+        )
+        assert conf.base_confidence >= 0.6
+        assert conf.final_confidence >= 0.6
+
+
+# ============================================================
+# 观察池 JD 信号噪音过滤（LLM 误抽岗位名/经验碎片剔除）
+# ============================================================
+
+class TestJdNoiseFilter:
+    def test_extract_skills_jd_filters_noise(self):
+        # LLM 误抽的岗位名碎片（算法工程师）/经验描述（熟悉Redis）在信号前剔除；
+        # 白名单词（嵌入式开发）与白名单外合法技能（WebGPU）保留
+        snap = {"extraction": {"skills": [
+            {"name": "Python"},
+            {"name": "WebGPU"},
+            {"name": "嵌入式开发"},   # 白名单词带"开发"后缀 → 保护
+            {"name": "算法工程师"},    # 岗位名碎片 → 剔除
+            {"name": "熟悉Redis"},     # 经验描述碎片 → 剔除
+        ]}}
+        got = extract_skills("boss", snap)
+        assert set(got) == {"Python", "WebGPU", "嵌入式开发"}
+
+    def test_extract_skills_jd_normal_skills_kept(self):
+        # 普通技能（含白名单外）不被误伤
+        snap = {"extraction": {"skills": [{"name": "PyTorch"}, {"name": "WebGPU"}]}}
+        assert extract_skills("boss", snap) == ["PyTorch", "WebGPU"]
+
+    def test_aggregate_ignores_noise_skills(self):
+        # 噪音技能不参与周频次聚合（不产生假信号）
+        rows = [
+            _Row("boss", {"extraction": {"skills": [{"name": "算法工程师"}]}}, "2026-07-01"),
+            _Row("boss", {"extraction": {"skills": [{"name": "WebGPU"}]}}, "2026-07-01"),
+        ]
+        freqs = aggregate_weekly_freqs(rows)
+        assert ("算法工程师", "boss") not in freqs
+        assert ("WebGPU", "boss") in freqs

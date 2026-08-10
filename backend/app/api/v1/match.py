@@ -464,6 +464,7 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
     from app.services.diagnosis.generator import generate_diagnosis
     from app.services.extraction.llm_provider import (
         LLMConfigurationError,
+        LLMExtractionError,
         LLMTimeoutError,
     )
 
@@ -497,8 +498,11 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
         # 契约 5003（§2.4.7）：LLM 调用超时 → 504，前端可据此触发降级链
         return error(ERR_LLM_TIMEOUT, f"诊断报告生成失败：{e}", http_status=504)
     except LLMConfigurationError as e:
-        # 配置不可用（无 api_key/全部禁用）→ 503，非超时语义
-        return error(503, f"诊断报告生成失败：{e}")
+        # 配置不可用（无 api_key/全部禁用）→ 503（契约：LLM 不可用或超时）
+        return error(503, f"诊断报告生成失败：{e}", http_status=503)
+    except LLMExtractionError as e:
+        # 全部 provider 失败（超时/连接/校验）→ 503，避免裸 500 且与契约一致
+        return error(503, f"诊断报告生成失败：{e}", http_status=503)
 
     payload = {"match_id": match_id, **report.model_dump()}
     await redis_client.set(

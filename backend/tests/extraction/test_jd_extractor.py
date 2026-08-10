@@ -50,6 +50,8 @@ class TestExtract:
         assert [s.name for s in out.skills] == ["Docker"]
         assert out.requirements[0].skill_name == "Docker"
         assert out.position_name == "Python 开发工程师"
+        # P1-2：LLM 路径 method=llm（默认）
+        assert out.method == "llm"
 
     def test_llm_failure_falls_back_to_rule_based(self):
         extractor = JDExtractor(llm=_FailingLLM())
@@ -68,6 +70,8 @@ class TestExtract:
         assert all(r.necessity == "nice" for r in out.requirements)
         # 岗位名取首行短标题
         assert out.position_name == "Python 后端开发工程师"
+        # P1-2：规则兜底标记 method=rule，供下游识别低置信数据
+        assert out.method == "rule"
 
     def test_short_text_returns_empty(self):
         extractor = JDExtractor(llm=_FakeLLM(JDExtractionResult(position_name="")))

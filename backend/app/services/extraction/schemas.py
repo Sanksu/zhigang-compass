@@ -55,6 +55,9 @@ class JDExtractionResult(BaseModel):
         default_factory=list,
         description="软技能要求列表（仅限岗位本体维护的 20 项白名单，见 dictionary.SOFT_SKILL_WHITELIST）",
     )
+    # 抽取方式标记：llm / rule（规则兜底）。P1-2：LLM 不可用时规则抽取结果
+    # 质量低于 LLM，标记 method=rule 供下游识别低置信数据（不入 must 判定等）
+    method: str = Field(default="llm", description="抽取方式：llm（LLM）或 rule（规则兜底）")
 
 
 class JDExtractionBatch(BaseModel):

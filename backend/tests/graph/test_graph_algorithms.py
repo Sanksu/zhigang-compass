@@ -193,24 +193,52 @@ class _CoSession:
 
 
 class TestCooccurrenceNetwork:
-    def test_builds_undirected_graph(self):
+    def test_builds_undirected_weighted_graph(self):
+        # P0 改造：权重 = 必要性组合因子 × 共现岗位数
         rows = [
-            _CoRow({"source": "sk_a", "source_name": "Python", "target": "sk_b", "target_name": "Django", "weight": 3}),
-            _CoRow({"source": "sk_b", "source_name": "Django", "target": "sk_c", "target_name": "PostgreSQL", "weight": 1}),
+            _CoRow({"source": "sk_a", "source_name": "Python", "target": "sk_b", "target_name": "Django", "n1": "must", "n2": "must", "co_occur_count": 3}),
+            _CoRow({"source": "sk_b", "source_name": "Django", "target": "sk_c", "target_name": "PostgreSQL", "n1": "must", "n2": "nice", "co_occur_count": 4}),
+            _CoRow({"source": "sk_c", "source_name": "PostgreSQL", "target": "sk_d", "target_name": "React", "n1": "nice", "n2": "nice", "co_occur_count": 10}),
         ]
-        graph, names = load_skill_cooccurrence(_CoSession(rows))
-        assert graph["sk_a"]["sk_b"] == 3.0  # 双向登记
+        graph, names = load_skill_cooccurrence(_CoSession(rows), min_weight=0.1)
+        # must-must: 1.0 × 3 = 3.0
+        assert graph["sk_a"]["sk_b"] == 3.0
         assert graph["sk_b"]["sk_a"] == 3.0
-        assert graph["sk_b"]["sk_c"] == 1.0
+        # must-nice: 0.5 × 4 = 2.0
+        assert graph["sk_b"]["sk_c"] == 2.0
+        # nice-nice: 0.2 × 10 = 2.0
+        assert graph["sk_c"]["sk_d"] == 2.0
         assert names["sk_a"] == "Python"
+
+    def test_default_min_weight_filters_weak_edges(self):
+        # 默认 min_weight=2.0：nice-nice 弱边（0.2×count）被过滤
+        rows = [
+            _CoRow({"source": "sk_a", "source_name": "A", "target": "sk_b", "target_name": "B", "n1": "nice", "n2": "nice", "co_occur_count": 9}),
+            _CoRow({"source": "sk_b", "source_name": "B", "target": "sk_c", "target_name": "C", "n1": "must", "n2": "must", "co_occur_count": 2}),
+        ]
+        graph, _ = load_skill_cooccurrence(_CoSession(rows))
+        # nice-nice: 0.2×9=1.8 < 2.0 → 过滤
+        assert "sk_a" not in graph or "sk_b" not in graph.get("sk_a", {})
+        # must-must: 1.0×2=2.0 ≥ 2.0 → 保留
+        assert graph["sk_b"]["sk_c"] == 2.0
+
+    def test_missing_necessity_treated_as_nice(self):
+        # necessity 缺失按 nice 处理：must-missing → 0.5×count
+        rows = [
+            _CoRow({"source": "sk_a", "source_name": "A", "target": "sk_b", "target_name": "B", "n1": "must", "n2": None, "co_occur_count": 4}),
+        ]
+        graph, _ = load_skill_cooccurrence(_CoSession(rows))
+        assert graph["sk_a"]["sk_b"] == 2.0  # 0.5 × 4
 
     def test_min_weight_filters(self):
         rows = [
-            _CoRow({"source": "sk_a", "source_name": "A", "target": "sk_b", "target_name": "B", "weight": 1}),
-            _CoRow({"source": "sk_b", "source_name": "B", "target": "sk_c", "target_name": "C", "weight": 5}),
+            _CoRow({"source": "sk_a", "source_name": "A", "target": "sk_b", "target_name": "B", "n1": "must", "n2": "must", "co_occur_count": 1}),
+            _CoRow({"source": "sk_b", "source_name": "B", "target": "sk_c", "target_name": "C", "n1": "must", "n2": "must", "co_occur_count": 5}),
         ]
         graph, _ = load_skill_cooccurrence(_CoSession(rows), min_weight=3.0)
+        # must-must×1 = 1.0 < 3.0 → 过滤
         assert "sk_a" not in graph or "sk_b" not in graph.get("sk_a", {})
+        # must-must×5 = 5.0 ≥ 3.0 → 保留
         assert graph["sk_b"]["sk_c"] == 5.0
 
     def test_graph_unavailable_returns_empty(self):

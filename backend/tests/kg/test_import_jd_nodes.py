@@ -10,8 +10,9 @@ from app.services.extraction.schemas import (
     EducationExtracted,
     JDExtractionResult,
     REQUIRESRelation,
+    SkillExtracted,
 )
-from app.services.kg.kg_service import import_jd
+from app.services.kg.kg_service import import_jd, _import_course_tx
 
 
 class _Result:
@@ -167,3 +168,94 @@ class TestImportJdSkillNormalization:
         # 剥后缀剥不掉的旧泛词（"嵌入式"）按黑名单剔除，不建节点
         skill_merges = self._run(["嵌入式"])
         assert skill_merges == []
+
+
+class TestImportJdSkillsOnlyEdges:
+    """P1-2 技能边静默丢失修复：extraction.skills 中未进 requirements 的技能
+    （LLM 只给技能列表未细分 must/nice 的旧快照）也建 Skill 节点 +
+    REQUIRES{nice} 边，与聚合 _position_skills 的「requirements 优先、skills
+    未覆盖以 nice 并入」口径对齐；否则聚合输出 nice 边因无 Skill 节点
+    MATCH 不上而静默丢失。
+    """
+
+    def _tx(self, ext: JDExtractionResult) -> _FakeTx:
+        tx = _FakeTx()
+        import_jd(_FakeSession(tx), ext, _evidence())
+        return tx
+
+    def _requires(self, tx):
+        # 技能边查询为 MERGE (p)-[r:REQUIRES]；学历/证书边为 [:REQUIRES] 形式，不匹配
+        return [p for q, p in tx.queries if "MERGE (p)-[r:REQUIRES]" in q]
+
+    def _evidenced_by(self, tx):
+        return [p for q, p in tx.queries if "MERGE (s)-[:EVIDENCED_BY]" in q]
+
+    def test_skills_only_skill_gets_nice_requires_edge(self):
+        # 无 requirements 的旧快照：skills=[Vue3] → 建 Vue.js 节点 + REQUIRES{nice}
+        ext = JDExtractionResult(
+            position_name="测试工程师",
+            skills=[SkillExtracted(name="Vue3")],
+        )
+        tx = self._tx(ext)
+        merges = [p for q, p in tx.queries if "MERGE (s:Skill" in q]
+        assert len(merges) == 1
+        assert merges[0]["name"] == "Vue.js"
+        rels = self._requires(tx)
+        assert len(rels) == 1
+        assert rels[0]["necessity"] == "nice"
+        assert rels[0]["level"] == ""
+        # skills-only 技能同样有证据支撑边
+        assert self._evidenced_by(tx)[0]["skill_name"] == "Vue.js"
+
+    def test_skill_in_requirements_not_duplicated(self):
+        # requirements 已含 Vue.js(must)，skills 重复出现 → 不重复建 nice 边
+        ext = JDExtractionResult(
+            position_name="测试工程师",
+            requirements=[REQUIRESRelation(skill_name="Vue.js", necessity="must")],
+            skills=[SkillExtracted(name="Vue.js")],
+        )
+        tx = self._tx(ext)
+        assert len([q for q, _ in tx.queries if "MERGE (s:Skill" in q]) == 1
+        assert len(self._requires(tx)) == 1
+        assert self._requires(tx)[0]["necessity"] == "must"
+        assert len(self._evidenced_by(tx)) == 1
+
+    def test_skills_extra_beyond_requirements_merged(self):
+        # requirements=[Java must] + skills=[Java, Vue3] → Java must + Vue.js nice
+        ext = JDExtractionResult(
+            position_name="测试工程师",
+            requirements=[REQUIRESRelation(skill_name="Java", necessity="must")],
+            skills=[SkillExtracted(name="Java"), SkillExtracted(name="Vue3")],
+        )
+        tx = self._tx(ext)
+        assert len([q for q, _ in tx.queries if "MERGE (s:Skill" in q]) == 2
+        by_name = {p["skill_name"]: p for p in self._requires(tx)}
+        assert by_name["Java"]["necessity"] == "must"
+        assert by_name["Vue.js"]["necessity"] == "nice"
+        assert len(self._evidenced_by(tx)) == 2
+
+
+class TestImportCourseSkillNormalization:
+    """回归：课程入图技能名须与 JD 侧一致归一化（canonical_skill_name）。
+
+    数据审查发现：课程源技能名是英文原始名（"Prompt Engineering"），此前
+    _import_course_tx 仅 strip 不归一化，导致与 JD 侧规范节点（"提示工程"）
+    分裂成两个 Skill 节点，LEARNABLE_VIA 与 REQUIRES 无法在同一节点汇聚。
+    """
+
+    def test_course_skill_canonicalized(self):
+        tx = _FakeTx()
+        course_data = {
+            "course_id": "course-1",
+            "title": "Prompt Engineering 课程",
+            "source": "coursera",
+            "skills": ["Prompt Engineering", "  Vue3  ", "人工智能"],
+        }
+        _import_course_tx(tx, course_data)
+        merges = [p for q, p in tx.queries if "MERGE (s:Skill" in q]
+        names = {m["name"] for m in merges}
+        # "Prompt Engineering" 归一化为 "提示工程"，Vue3 归一化为 "Vue.js"
+        assert "提示工程" in names
+        assert "Vue.js" in names
+        assert "Prompt Engineering" not in names
+        assert "Vue3" not in names
