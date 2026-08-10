@@ -108,7 +108,7 @@
 | TC-SI-02 | FastAPI 托管前端 | 前端已构建 | 访问 http://localhost:8000 | 返回前端页面，API 路由 /api/v1/* 优先匹配 | P0 |
 | TC-SI-03 | 安全中间件 | FastAPI 已启动 | 验证响应头 | CORS/CSP/HSTS/gzip 中间件生效 | P0 |
 | TC-SI-04 | 基准压测（M3 初） | M2 末数据已入库 | Locust 100 并发压测 4 类端点 | P95 按分档预案处理，报告写入 docs/perf_baseline_{date}.md | P0 |
-| TC-SI-05 | 多 provider 同步重试链 | 3 个 provider 配置就绪 | 模拟主 API 超时 | 同步路由 10s 返回 503；异步任务切备 provider | P0 |
+| TC-SI-05 | 多 provider 同步重试链 | 3 个 provider 配置就绪 | 模拟主 API 超时 | 同步路由 10s 返回 504（错误码 5003）；异步任务切备 provider | P0 |
 
 ---
 
@@ -135,7 +135,7 @@
 |------|------|---------|------|---------|--------|
 | TC-GRILL-01 | panorama 30s TTL 缓存一致性 | Neo4j 有数据 | 1. 首次请求 panorama 回源 Neo4j 2. 30s 内第 2 次请求命中缓存 | 第 2 次响应 < 100ms；30s 后缓存过期回源 | P0 |
 | TC-GRILL-02 | T+1 30s 一致性窗口 | 05:00 版本发布时刻 | 04:59:59 与 05:00:30 分别请求 | 05:00:30 后请求返回新版本数据 | P1 |
-| TC-GRILL-03 | 多 provider 同步路由超时 | 主 API 故障 | 同步路由请求 LLM | 10s 超时返回 503，不重试 | P0 |
+| TC-GRILL-03 | 多 provider 同步路由超时 | 主 API 故障 | 同步路由请求 LLM | 10s 超时返回 504（错误码 5003），不重试 | P0 |
 | TC-GRILL-04 | 多 provider 异步任务重试 | 主 API 故障 | 异步任务请求 LLM | 主 30s → 备 30s → 三 30s，90s 上限 | P0 |
 | TC-GRILL-05 | 分层源-JD 单道触发 | JD z_score > 2.0 | 验证 candidate 触发 | JD 信号触发，arxiv/github 不独立触发 | P0 |
 | TC-GRILL-06 | 双案例演示交付 | M5 第 3 天 | 验证 17.3 交付 | 预置案例 emerging + 真实案例（emerging 或 candidate + 声明） | P0 |

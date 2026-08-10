@@ -334,10 +334,11 @@ class LLMProviderChain:
     def call_sync(self, prompt: str, response_model: Type[T], system_prompt: Optional[str] = None) -> T:
         """同步路由：仅尝试优先级最高的 provider，超时即抛，不重试、不切换。
 
-        供图谱查询/诊断报告等实时路径使用，调用方捕获 `LLMTimeoutError` 返回 503。
+        供图谱查询/诊断报告等实时路径使用，调用方捕获 `LLMTimeoutError` 映射为
+        504（错误码 5003，§2.4.7）；`LLMConfigurationError` 映射为 503。
 
         熔断/退避对同步路由同样生效：主 provider 处于窗口内时直接抛
-        `LLMTimeoutError`（与"超时即 503"契约一致）；实际调用命中 429/5xx
+        `LLMTimeoutError`（与"超时即 504"契约一致）；实际调用命中 429/5xx
         时记录状态后同样转 `LLMTimeoutError`，状态供后续异步路径退避/熔断。
         """
         if not self._providers:
@@ -345,7 +346,7 @@ class LLMProviderChain:
         provider = self._providers[0]
         name = provider.get("name", "?")
         if _is_skipped(name) is not None:
-            # 同步路由不重试不切换：直接按"LLM 暂时不可用"返回 503（§6.5）
+            # 同步路由不重试不切换：直接按"LLM 暂时不可用"抛超时（上层映射 504，§6.5）
             raise LLMTimeoutError(f"主 provider '{name}' 处于熔断/退避窗口，跳过")
         try:
             result = self._call_provider(
@@ -380,12 +381,18 @@ class LLMProviderChain:
         if not self._providers:
             raise LLMConfigurationError("未配置可用 provider（无 api_key 或全部禁用）")
         effective_timeout = timeout or ASYNC_TIMEOUT_SECONDS
-        failures = []
+        failures: list[str] = []
+        # 失败类别统计：区分"超时/不可用"（上层映射 504）与其余失败（503 语义）。
+        # 全部 provider 均因超时/熔断/退避失败 → 抛 LLMTimeoutError，使同步/异步
+        # 路径对"LLM 超时"映射 504（错误码 5003，§2.4.7）一致；连接/校验失败、
+        # 限流、5xx 不算超时，维持父类 LLMExtractionError（上层映射 503）。
+        timeout_like = 0
         for provider in self._providers:
             name = provider.get("name", "?")
             # 熔断/退避窗口内跳过该 provider，不发起调用（§6.5 运维机制）
             if _is_skipped(name) is not None:
                 failures.append(f"{name} 处于熔断/退避窗口，跳过")
+                timeout_like += 1
                 continue
             try:
                 result = self._call_provider(
@@ -402,11 +409,16 @@ class LLMProviderChain:
                 _record_5xx(name)
                 failures.append(str(e))
                 continue
+            except LLMTimeoutError:
+                failures.append(f"{name} 超时")
+                timeout_like += 1
+                continue
             except LLMExtractionError as e:
-                # 捕获父类：超时/连接错误/校验失败等统一切下一个 provider
-                # （LLMRateLimitError/LLMServerError 也是其子类，已在上面单独处理）
+                # 连接/校验等其余抽取错误：非超时语义，交给上层按 503 处理
                 failures.append(str(e))
                 continue
+        if timeout_like == len(self._providers):
+            raise LLMTimeoutError("所有 provider 均超时/不可用: " + " | ".join(failures))
         raise LLMExtractionError("所有 provider 均失败: " + " | ".join(failures))
 
     # ---- 内部 ----

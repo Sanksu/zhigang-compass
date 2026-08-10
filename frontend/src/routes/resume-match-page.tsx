@@ -401,13 +401,18 @@ export function ResumeMatchPage() {
     }
   }
 
-  // 生成/刷新 AI 诊断报告（GET /match/result/{id}/diagnosis，LLM 不可用返回 503 不阻断主流程）
+  // 生成/刷新 AI 诊断报告（GET /match/result/{id}/diagnosis，LLM 配置不可用返回 503、超时返回 504，不阻断主流程）
   async function loadDiagnosis() {
     if (!matchId || diagnosisLoading) return
     setDiagnosisLoading(true)
     setNotice(null)
     try {
-      const report = await apiGet<BackendDiagnosisReport>(`/match/result/${matchId}/diagnosis`)
+      // 诊断是 LLM 长时生成（多 provider 降级，可能 30s+），超时放宽到 120s，
+      // 覆盖默认 axios 30s 上限，避免"生成中"被误中断
+      const report = await apiGet<BackendDiagnosisReport>(
+        `/match/result/${matchId}/diagnosis`,
+        { timeout: 120_000 },
+      )
       setDiagnosis(report)
     } catch (e) {
       setDiagnosis(null)
@@ -881,7 +886,7 @@ export function ResumeMatchPage() {
                   {diagnosisLoading ? (
                     <div className="flex flex-col items-center justify-center py-10 text-center">
                       <div className="size-6 rounded-full border-2 border-ink border-t-transparent animate-spin mb-3" />
-                      <p className="text-xs text-ink-muted">诊断报告生成中（LLM 推理约需数秒）…</p>
+                      <p className="text-xs text-ink-muted">诊断报告生成中（LLM 推理约需 1 分钟，多通道自动切换）…</p>
                     </div>
                   ) : diagnosis ? (
                     <div className="space-y-4">

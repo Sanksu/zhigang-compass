@@ -118,7 +118,7 @@ class _FakeLLM:
         self.prompt = ""
         self.system_prompt = ""
 
-    def call_sync(self, prompt, response_model, system_prompt=None):
+    def call_with_fallback(self, prompt, response_model, system_prompt=None):
         self.prompt = prompt
         self.system_prompt = system_prompt
         return self.report

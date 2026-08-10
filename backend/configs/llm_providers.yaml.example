@@ -46,11 +46,11 @@ providers:
 
 # ---------- 路由策略 ----------
 routing:
-  # 同步路由（图谱查询、诊断报告等）：单次尝试，超时即返回 503
+  # 同步路由（图谱查询、诊断报告等）：单次尝试，超时即返回 504（错误码 5003）
   sync:
     timeout_seconds: 10
     retry: false
-    on_failure: return_503
+    on_failure: return_504
 
   # 异步任务（ARQ：简历解析、批量抽取、演化计算）：按优先级依次尝试
   async:
@@ -64,7 +64,7 @@ failover:
   timeout:
     sync_threshold_seconds: 10
     async_threshold_seconds: 30
-    sync_action: return_503
+    sync_action: return_504
     async_action: switch_to_next_provider
 
   # 主 API 限流（429）：指数退避后切备 provider

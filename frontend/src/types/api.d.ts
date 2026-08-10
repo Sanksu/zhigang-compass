@@ -1428,8 +1428,15 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description 诊断报告生成失败（LLM 不可用或超时） */
+                /** @description 诊断报告生成失败（LLM 未配置可用 provider 或全部 provider 调用失败，错误码 503） */
                 503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description LLM 调用超时（错误码 5003，前端可据此提示稍后重试） */
+                504: {
                     headers: {
                         [name: string]: unknown;
                     };

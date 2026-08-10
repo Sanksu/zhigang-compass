@@ -794,7 +794,9 @@ paths:
         '404':
           description: 匹配结果不存在或已过期
         '503':
-          description: 诊断报告生成失败（LLM 不可用或超时）
+          description: 诊断报告生成失败（LLM 未配置可用 provider 或全部 provider 调用失败，错误码 503）
+        '504':
+          description: LLM 调用超时（错误码 5003，前端可据此提示稍后重试）
 
   /api/v1/match/feedback:
     post:
