@@ -23,6 +23,7 @@ from arq.cron import cron
 from arq.worker import func
 
 from app.core.config import settings
+from app.services.alerting import send_alert
 
 # 子进程 stdout/stderr 强制 UTF-8（中文 Windows 默认 GBK 管道，按 UTF-8 解码会乱码）
 # 与 crawlers/spiders 下各 spider 调外部进程的模式一致
@@ -180,6 +181,7 @@ async def crawl_platform(
         detail = "\n".join(stderr_tail[-20:])[-2000:]
         msg = f"爬虫 {spider_name} 退出码 {returncode}: {detail}"
         await _update_crawl_task(task_id, status="failed", error=msg[:500])
+        await send_alert("crawl_failed", msg, spider=spider_name, exit_code=returncode)
         raise RuntimeError(msg)
 
     # 统计产出条数（按行数）
@@ -193,6 +195,7 @@ async def crawl_platform(
         detail = "\n".join(stderr_tail[-20:])[-2000:]
         msg = f"爬虫 {spider_name} 产出 0 条数据: {detail}"
         await _update_crawl_task(task_id, status="failed", error=msg[:500])
+        await send_alert("crawl_failed", msg, spider=spider_name, items=0)
         raise RuntimeError(msg)
 
     await _update_crawl_task(
@@ -756,6 +759,14 @@ async def check_data_freshness(ctx: dict) -> dict:
         for name in ("jd", "course", "paper", "community")
         for source in report[name]["stale_sources"]
     ]
+    if stale:
+        # T+1 承诺被破坏时告警，避免数据过期无人感知（§4.4 / DA-M4-03）
+        await send_alert(
+            "data_stale",
+            f"数据过期来源（超过 T+1）: {', '.join(stale)}",
+            stale_sources=stale,
+            report_path=str(report_path),
+        )
     print(f"[check_data_freshness] 报告已写入: {report_path} 过期来源: {stale}", flush=True)
     return {"report_path": str(report_path), "stale_sources": stale}
 
@@ -1803,7 +1814,12 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
     from app.core.database import async_session_factory
     from app.models.business import TechnologyWatch
     from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
-    from app.services.discovery.watch_pool import aggregate_weekly_freqs, build_signals
+    from app.services.discovery.watch_pool import (
+        aggregate_weekly_freqs,
+        anomaly_flags,
+        build_signals,
+        promotion_features,
+    )
 
     period = run_date or date.today().isoformat()
     # 观察窗口：过去 12 周（JD 3 月移动平均需 12 周以上历史）
@@ -1830,6 +1846,8 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
 
     freqs = aggregate_weekly_freqs(all_rows)
     signals = build_signals(freqs, period)
+    # 学术/社区源周频次（§7.2.2 辅助加分特征，提升候选置信度加分用）
+    academic_freqs = aggregate_weekly_freqs([*paper_rows, *community_rows])
 
     # ── 2. 幂等 upsert technology_watch + 计算 MLI ──
     promoted: list[str] = []
@@ -1859,6 +1877,7 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
 
         # ── 3. 提升候选：JD 源命中且该技能此前已在观察池（设计 §7.2.5 / 方案 §2）──
         from app.models.business import DiscoveryCandidate
+        from app.services.discovery.confidence import compute_confidence
         from app.services.discovery.watch_pool import promotable_skills
 
         prior_rows = (await session.scalars(
@@ -1876,17 +1895,23 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
             )
             if existing is not None:
                 continue  # 已在候选池/已晋升，不重复提升
-            jd_value = next(
-                (sig.signal_value for sig in signals
-                 if sig.skill_name == skill and sig.signal_source == "jd"),
-                0.0,
+            # 真实特征与置信度（替代硬编码 source_diversity=1/final_confidence=0.0：
+            # 否则提升候选永远无法过 emerging 门槛——跨 ≥2 源 + 置信度 ≥ 0.6）
+            feat = promotion_features(freqs, skill)
+            flags = anomaly_flags(academic_freqs, {skill})
+            conf = compute_confidence(
+                jd_count=int(feat["jd_freq_ma3"]),
+                source_count=feat["source_diversity"],
+                growth_rate=feat["growth"],
+                arxiv_anomaly=flags["arxiv"],
+                github_anomaly=flags["github"],
             )
             session.add(DiscoveryCandidate(
                 id=f"cand-{skill[:20]}",
                 position_name=skill,
                 state="candidate",
-                features={"jd_mom_growth": jd_value, "z_score": None, "source_diversity": 1},
-                confidence={"final_confidence": 0.0, "jd_signal": jd_value},
+                features=feat,  # 键与 DiscoveryFeatures schema 兼容
+                confidence=conf.model_dump(),
                 evidence_refs=[f"watch:{period}:{skill}"],
                 seed_matched=False,
                 rag_matched=False,
