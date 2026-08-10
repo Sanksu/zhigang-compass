@@ -301,13 +301,16 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("游戏",), "游戏开发工程师"),
     (("硬件",), "硬件工程师"),
     (("软件",), "软件开发工程师"),
-    # 后缀类兜底族：统一低频同类岗，防止剥后缀后产生"财务/业务/研究"等碎片。
-    # 已有细分族（数据分析等）位于其前，优先命中不受影响。
+    # 失真兜底族：命中后由 _GENERIC_ROUTED_FAMILIES 拦截，按技能路由到细分族
+    # （不再作为聚合目的地）；已有细分族（数据分析等）位于其前，优先命中不受影响。
     # "分析师"已拆为细分族（_ANALYST_SUB_FAMILIES），不再走统一兜底族
     (("科学家",), "科学家"),
     (("研究员",), "研究员"),
     (("专家",), "专家"),
     (("顾问",), "顾问"),
+    # 海外源验证（2026-08-09）：LLM 对英文长标题抽取的中文碎片归位
+    (("ai 研究", "ai研究"), "研究员"),
+    (("icam",), "网络安全工程师"),
     # P0 图谱低质岗治理（2026-08-09）：英文复合岗名翻译后的标准族，
     # 前置拦截避免剥后缀成"生化/解决方案/生物光学"等碎片
     (("生化",), "生化工程师"),
@@ -319,6 +322,70 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("固件", "firmware"), "嵌入式开发工程师"),
     (("物理设计",), "硬件工程师"),
 ]
+
+# 失真兜底岗位族（2026-08-09 图谱质量治理）："软件/科学家/架构/研究员/顾问/硬件/
+# 解决方案/专家/算法"等标题级兜底词把方向各异的 JD 聚合进单一节点，技能集合混聚失真
+# （如软件开发工程师 213 技能混 HR/AI/移动/后端；算法工程师 2139 技能混大模型/视觉/
+# 机器人/后端基建）。
+# 这些族名不再作为聚合目的地：_POSITION_KEYWORDS 中的兜底词仅用于"命中检测"
+# （细分族仍在其前优先命中，如"嵌入式软件工程师"→嵌入式开发工程师），命中后由
+# normalize_position_name 按 JD 技能路由到 _POSITION_SKILL_ROUTING 的细分族；
+# 无技能或未命中路由 → 返回空串不入图（与停用词口径一致）。
+_GENERIC_ROUTED_FAMILIES: frozenset[str] = frozenset({
+    "软件开发工程师", "科学家", "架构师", "研究员", "顾问",
+    "硬件工程师", "解决方案工程师", "专家",
+    # 算法工程师（2026-08-09 追加）：通用算法兜底族混聚大模型/视觉/机器人等方向，
+    # 纳入技能路由后仅纯通用算法技能（机器学习/深度学习/pytorch 等）仍归本族
+    "算法工程师",
+})
+
+# 失真兜底岗位族的技能路由表（优先级从细到泛）：核心技能关键词 → 细分岗位族。
+# 视觉/自动驾驶/大模型等方向词先于通用算法，避免 "python/机器学习" 把方向明确的
+# JD 吸进错误族；语言族放最后（泛语言不抢占 AI/数据/后端）。
+# 依据 2026-08-09 真实 JD 模拟（3606 条已抽取：64% 可按技能归位）。
+_POSITION_SKILL_ROUTING: tuple[tuple[tuple[str, ...], str], ...] = (
+    # 视觉/图像算法（2026-08-09 增强：吸收被通用算法族误收的目标检测/图像处理方向；
+    # 再增强：视频/动作/行为识别方向，抽样发现被算法工程师兜底误收）
+    (("机器视觉", "计算机视觉", "视觉算法", "图像算法", "opencv", "slam", "目标检测", "图像分割", "图像处理", "ocr",
+      "视频分析", "视频处理", "视频识别", "动作识别", "行为识别", "多目标跟踪"), "机器视觉算法工程师"),
+    # 自动驾驶（不含通用控制理论词：状态估计/MPC 方向不明确，避免把控制类科学家误吸）
+    (("自动驾驶", "泊车", "vla", "车辆控制", "飞控"), "自动驾驶算法工程师"),
+    # 大模型（2026-08-09 增强：吸收 NLP/transformer 等被通用算法族误收的方向）
+    (("大语言模型", "大模型", "llm", "langchain", "langgraph", "agentic ai", "智能体", "检索增强生成", "llmops", "自然语言处理", "nlp", "transformer", "生成式ai", "aigc"), "大模型算法工程师"),
+    # 语音
+    (("语音识别", "asr"), "语音算法工程师"),
+    # 机器人（2026-08-09 增强：吸收 ROS 技能）
+    (("机器人", "模仿学习", "机械臂", "运动规划", "ros"), "机器人算法工程师"),
+    # 数据分析/统计（2026-08-09 增强：置于通用算法前，防止"因果推断/双重差分"等统计
+    # 建模技能被通用算法族抢走；抽样发现 563 条算法工程师 JD 中 33 条为统计/计量方向）
+    (("因果推断", "双重差分", "统计学", "统计建模", "回归建模", "回归分析",
+      "ab测试", "a/b测试", "实验设计", "假设检验", "倾向得分", "面板数据", "合成对照"), "数据分析师"),
+    # 通用算法
+    (("机器学习", "深度学习", "pytorch", "tensorflow", "强化学习", "推荐算法", "搜索算法", "数据挖掘"), "算法工程师"),
+    # 大数据
+    (("apache spark", "spark", "flink", "kafka", "hadoop", "hive", "hbase", "数仓", "etl", "数据管道", "数据治理", "snowflake", "paimon"), "大数据开发工程师"),
+    # 数据分析
+    (("数据分析", "tableau", "power bi", "alteryx", "统计学", "统计分析", "a/b测试"), "数据分析师"),
+    # 前端
+    (("react", "vue", "angular", "css", "html", "html5", "typescript", "webpack"), "前端开发工程师"),
+    # 后端
+    (("spring boot", "spring cloud", "spring", "node.js", "express", "django", "flask", "fastapi", "微服务", "分布式"), "后端开发工程师"),
+    # DevOps
+    (("docker", "kubernetes", "k8s", "devops", "ci/cd", "terraform", "jenkins", "ansible"), "DevOps工程师"),
+    # 网络安全
+    (("网络安全", "渗透", "cybersecurity", "devsecops"), "网络安全工程师"),
+    # 测试
+    (("测试", "junit", "selenium", "质量保证"), "测试工程师"),
+    # 嵌入式
+    (("嵌入式", "固件", "firmware", "fpga", "dsp", "rtos", "单片机"), "嵌入式开发工程师"),
+    # 数据库
+    (("oracle", "mysql", "postgresql", "mongodb", "redis", "elasticsearch"), "数据库管理员"),
+    # 语言族（泛语言放最后，避免 python/java 把 AI/数据/后端 JD 吸走）
+    (("golang", "go语言"), "Go开发工程师"),
+    (("python",), "Python开发工程师"),
+    (("c++", "c语言"), "C++开发工程师"),
+    (("java",), "Java开发工程师"),
+)
 
 
 # 分析师细分族（方案 C 拆分）：核心词 → 细分岗位名。
@@ -581,6 +648,8 @@ _POSITION_STOPWORDS: set[str] = {
     # 注：可持续发展分析师为 _ANALYST_SUB_FAMILIES 细分岗，不在拦截范围
     "交易员", "经济学家", "流行病学家", "精算师", "量化策略师",
     "Guidewire", "可视化软件开发工程师", "桌面",
+    # 海外源验证（2026-08-09）：LLM 把 Application Developer 抽成"应用"碎片
+    "应用",
     # P0 图谱低质岗治理（2026-08-09）：LLM 抽取的英文复合岗名词碎片，
     # 无标准岗位语义，拦截不入图（完整岗位名由 _EN_POSITION_MAP/_POSITION_KEYWORDS 承接）
     "验证", "质量", "交付", "解决方案", "隐私", "估算师", "信息化",
@@ -681,8 +750,26 @@ def _translate_en_position(name: str) -> str | None:
     return None
 
 
-def normalize_position_name(name: str) -> str:
+def _route_position_by_skills(skills: list[str] | None) -> str:
+    """失真兜底岗位按技能路由到细分族；无技能或未命中返回空串（不入图）。
+
+    技能名先经 normalize_skill 归一（别名/白名单统一），再小写匹配路由关键词，
+    与抽取/聚合链路的技能口径一致。
+    """
+    if not skills:
+        return ""
+    norm = [normalize_skill(s).lower() for s in skills if isinstance(s, str) and s]
+    for keywords, family in _POSITION_SKILL_ROUTING:
+        for kw in keywords:
+            if any(_keyword_hit(s, kw) for s in norm):
+                return family
+    return ""
+
+
+def normalize_position_name(name: str, skills: list[str] | None = None) -> str:
     """岗位名归一化：英文翻译中文 + 合并同义重复岗位，保留技术栈细分维度。
+
+    skills 为 JD 已抽取技能名列表，仅对失真兜底族生效（见步骤 5）。
 
     步骤：
     1. 英文岗位名翻译为中文（"Software Engineer" → "软件工程师"），与中文岗位合并去重
@@ -692,13 +779,17 @@ def normalize_position_name(name: str) -> str:
        React/Vue/小程序/鸿蒙等作为细分岗位保留，web/h5/html 视为通用归并
     4. 基础岗位名归一化（去级别前缀、循环去后缀、关键词族映射）；
        归一化结果为泛词（"技术"/"后台" 等无信息量）时返回空串，不入图
-    5. 技能词不入图：归一化结果命中技能白名单时视为"技能被抽成岗位"，
+    5. 失真兜底族（软件开发工程师/科学家/架构师/研究员/顾问/硬件工程师/
+       解决方案工程师/专家/算法工程师）不再作为聚合目的地：按 skills 技能内容路由到
+       细分族，无技能或未命中路由返回空串，不入图（2026-08-09 图谱质量治理）
+    6. 技能词不入图：归一化结果命中技能白名单时视为"技能被抽成岗位"，
        返回空串（评估报告 P1，防 SQL/C/FPGA/PyTorch 等技术名词污染岗位图）
 
     示例：
-    - "Software Engineer" / "Senior Software Engineer" → "软件工程师"
+    - "Software Engineer" / "Senior Software Engineer" → ""（失真兜底族，无技能不入图）
     - "前端开发" / "web前端开发工程师" → "前端开发工程师"
     - "React前端开发工程师" / "前端开发工程师(React)" → "React前端开发工程师"
+    - "软件开发工程师"(skills=["Python", "Django"]) → "后端开发工程师"
     - "技术" → ""（泛词不入图）
     - "SQL" → ""（技能词不入图）
     """
@@ -709,6 +800,9 @@ def normalize_position_name(name: str) -> str:
     if translated:
         # 翻译结果再过中文归一化，确保与中文路径岗位名统一（如"软件工程师"→"软件开发工程师"）
         base = _normalize_base(translated)
+        # 失真兜底族不再作为聚合目的地：按技能路由，无技能/未命中 → 不入图
+        if base in _GENERIC_ROUTED_FAMILIES:
+            return _route_position_by_skills(skills)
         if not base or base in _POSITION_STOPWORDS:
             return ""
         result = base
@@ -729,6 +823,9 @@ def normalize_position_name(name: str) -> str:
 
         base_raw = base  # 提取 tech 后、归一化前的原始 base（tech 细分保底用）
         base = _normalize_base(base)
+        # 失真兜底族不再作为聚合目的地：按技能路由，无技能/未命中 → 不入图
+        if base in _GENERIC_ROUTED_FAMILIES:
+            return _route_position_by_skills(skills)
         if not base or base in _POSITION_STOPWORDS:
             if not tech:
                 return ""

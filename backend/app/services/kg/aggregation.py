@@ -297,7 +297,14 @@ def _inflation_stats(rows) -> tuple[dict[str, int], dict[str, int], dict[str, in
         if snap.get("_duplicate_of"):
             continue
         ext = snap.get("extraction") or {}
-        pos = normalize_position_name((ext.get("position_name") or "").strip())
+        pos = normalize_position_name(
+            (ext.get("position_name") or "").strip(),
+            skills=[
+                s.get("name", "")
+                for s in (ext.get("skills") or [])
+                if isinstance(s, dict) and s.get("name")
+            ],
+        )
         if not pos:
             continue
         source = row.source or ""
@@ -337,7 +344,14 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
         if snap.get("_duplicate_of"):
             continue
         ext = snap.get("extraction") or {}
-        pos = normalize_position_name((ext.get("position_name") or "").strip())
+        pos = normalize_position_name(
+            (ext.get("position_name") or "").strip(),
+            skills=[
+                s.get("name", "")
+                for s in (ext.get("skills") or [])
+                if isinstance(s, dict) and s.get("name")
+            ],
+        )
         if not pos:
             continue
         source = row.source or ""

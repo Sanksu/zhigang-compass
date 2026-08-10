@@ -145,7 +145,10 @@ def build_position_groups(records: list[dict]) -> dict[str, list[dict]]:
     groups: dict[str, list[dict]] = {}
     for rec in records:
         ext = (rec.get("snapshot") or {}).get("extraction") or {}
-        pos = normalize_position_name(ext.get("position_name") or "")
+        pos = normalize_position_name(
+            ext.get("position_name") or "",
+            skills=[s.get("name", "") for s in (ext.get("skills") or []) if s.get("name")],
+        )
         if not pos:
             continue
         groups.setdefault(pos, []).append(rec)

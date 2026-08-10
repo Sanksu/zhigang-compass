@@ -830,7 +830,12 @@ async def cross_validate_jds(ctx: dict, limit: int | None = None) -> dict:
         written = 0
         for row in rows:
             ext = (row.snapshot or {}).get("extraction") or {}
-            result = group_map.get(normalize_position_name(ext.get("position_name") or ""))
+            # 失真兜底族按 JD 技能路由，写回口径与 build_position_groups 保持一致
+            result = group_map.get(normalize_position_name(
+                ext.get("position_name") or "",
+                skills=[s["name"] for s in (ext.get("skills") or [])
+                        if isinstance(s, dict) and s.get("name")],
+            ))
             if result is None:
                 continue
             snap = dict(row.snapshot or {})
@@ -1387,7 +1392,10 @@ async def batch_extract(
             from app.services.extraction.dictionary import normalize_position_name
 
             for extraction in extractions:
-                normalized = normalize_position_name(extraction.position_name)
+                normalized = normalize_position_name(
+                    extraction.position_name,
+                    skills=[s.name for s in (extraction.skills or [])],
+                )
                 if normalized and normalized != extraction.position_name:
                     extraction.position_name = normalized
 
@@ -1492,7 +1500,11 @@ async def discovery_daily(ctx: dict) -> dict:
                 break
             for row in batch:
                 ext = (row.snapshot or {}).get("extraction") or {}
-                name = normalize_position_name(ext.get("position_name") or "")
+                name = normalize_position_name(
+                    ext.get("position_name") or "",
+                    skills=[s["name"] for s in (ext.get("skills") or [])
+                            if isinstance(s, dict) and s.get("name")],
+                )
                 if not name:
                     continue
                 stat = position_stats.setdefault(name, {"count": 0, "sources": set()})
