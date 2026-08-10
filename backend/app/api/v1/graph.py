@@ -1,5 +1,6 @@
 """图谱路由：全景、技能反向查询、全文检索、先修链、学习课程。"""
 
+import asyncio
 import json
 from typing import Literal, Optional
 

@@ -46,13 +46,12 @@ def shortest_path(
     try:
         rows = session.run(
             f"""
-            MATCH p = shortestPath((a:Skill {{id: $from}})-[*..$max_hops]-(b:Skill {{id: $to}}))
+            MATCH p = shortestPath((a:Skill {{id: $from}})-[*..{max_hops}]-(b:Skill {{id: $to}}))
             {status_filter}
             RETURN [n IN nodes(p) | {{id: n.id, name: n.name, type: labels(n)[0]}}] AS path
             """,
             **{"from": from_skill},
             to=to_skill,
-            max_hops=max_hops,
             position_statuses=position_statuses,
         )
     except Exception:

@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Graph2D, type Graph2DHandle } from '@/components/graph/graph-2d'
+import { GraphAnalysisPanel } from '@/components/graph/graph-analysis-panel'
 import {
   NodeDetailPanel,
   type PositionDetail,
@@ -557,8 +558,8 @@ export function GraphPage() {
           </div>
         </Card>
 
-        {/* 节点详情面板 */}
-        <Card className="h-[640px] overflow-hidden">
+        {/* 节点详情面板 + 图谱算法分析 */}
+        <Card className="h-[640px] overflow-y-auto">
           <NodeDetailPanel
             node={selected}
             stats={detailStats}
@@ -570,6 +571,12 @@ export function GraphPage() {
             onTogglePosition={togglePosition}
             onSelectSkill={focusSkill}
             onClose={() => setSelected(null)}
+          />
+          {/* 图谱算法分析：技能重要性 / 技能簇 / 最短路径（设计文档 §7.1） */}
+          <GraphAnalysisPanel
+            skills={data.nodes.filter((n) => n.type === 'skill').map((n) => ({ id: n.id, name: n.name }))}
+            onFocusSkill={focusSkill}
+            className="border-t border-border"
           />
         </Card>
       </div>
