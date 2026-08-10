@@ -2,9 +2,14 @@
 
 验证 run_real_eval.py 各函数返回结构稳定且与 evaluate.py 兼容。
 使用仓库内真实黄金集（数据确定性，非 mock）。
+
+注意：本模块测试会触发真实 LLM 调用（产生费用），打 @pytest.mark.integration
+标记，默认 pytest 运行排除；需显式 `pytest -m integration` 执行（见 pyproject.toml）。
 """
 
 from pathlib import Path
+
+import pytest
 
 from scripts.evaluate import generate_html_report
 
@@ -17,6 +22,8 @@ from tests.evaluate.run_real_eval import (
     evaluate_matching,
     evaluate_resume_extraction,
 )
+
+pytestmark = pytest.mark.integration
 
 
 class TestEvaluateJdExtraction:
