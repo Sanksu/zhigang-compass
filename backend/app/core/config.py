@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     arq_concurrency: int = 10
     arq_job_timeout: int = 1800  # 30 分钟；须大于爬虫 subprocess 上限 900s（BOSS 多任务翻页）
 
+    # ---------- 告警 ----------
+    alert_webhook_url: str = ""  # 爬虫失败/数据过期 webhook（§4.4），未配置时跳过
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
