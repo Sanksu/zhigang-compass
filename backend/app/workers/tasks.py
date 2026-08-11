@@ -13,6 +13,7 @@
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -1491,6 +1492,24 @@ async def snapshot_graph(ctx: dict, triggered_by: str = "scheduled") -> dict:
     return meta.model_dump()
 
 
+# 项目统一时区 UTC+8（与 services 层常量一致，first_seen/观测起点均按东八区取日期）
+_TZ_CN = timezone(timedelta(hours=8))
+
+
+def _first_seen_date_of(row) -> str:
+    """岗位单条 JD 的观测日期（ISO）：post_date 解析日优先，入库日兜底。
+
+    回爬 90 天历史后，存量老岗位的入库日（created_at）是回爬当天，会掩盖其
+    真实出现时间，靠发布日（post_date）才能识别为存量；缺失时回退入库日。
+    清洗层已把 post_date 归一化（相对时间转绝对 ISO），此处仅截取日期前缀。
+    """
+    raw = str((row.snapshot or {}).get("post_date") or "").strip()
+    m = re.match(r"(\d{4}-\d{2}-\d{2})", raw)
+    if m:
+        return m.group(1)
+    return row.created_at.astimezone(_TZ_CN).date().isoformat()
+
+
 async def discovery_daily(ctx: dict) -> dict:
     """每日新岗位发现（AL-M4-01，设计文档 7.2.3 节）。
 
@@ -1509,7 +1528,7 @@ async def discovery_daily(ctx: dict) -> dict:
     from app.services.extraction.dictionary import normalize_position_name
     from app.services.discovery.schemas import DiscoveryFeatures
 
-    # ── 1. 聚合 jd_raw 已抽取记录 → 岗位频次/源多样性 ──
+    # ── 1. 聚合 jd_raw 已抽取记录 → 岗位频次/源多样性/首次观测日 ──
     # keyset 游标分批加载，避免全表拉取（与 dedup_simhash 修复一致）
     position_stats: dict[str, dict] = {}
     position_skills: dict[str, set[str]] = {}
@@ -1540,6 +1559,11 @@ async def discovery_daily(ctx: dict) -> dict:
                 stat = position_stats.setdefault(name, {"count": 0, "sources": set()})
                 stat["count"] += 1
                 stat["sources"].add(row.source)
+                # 首次观测日：post_date 解析日优先（回爬老岗位靠发布日识别存量，
+                # 避免入库日被回爬当天掩盖），入库日兜底
+                fd = _first_seen_date_of(row)
+                if stat.get("first_seen") is None or fd < stat["first_seen"]:
+                    stat["first_seen"] = fd
                 # 收集岗位关联技能（供 §7.2.2 辅助加分特征关联 arxiv/github 信号）
                 skills = position_skills.setdefault(name, set())
                 for s in ext.get("skills") or []:
@@ -1551,8 +1575,6 @@ async def discovery_daily(ctx: dict) -> dict:
         return {"candidates": 0, "detail": "无已抽取岗位记录"}
 
     # ── 2. 组装 DiscoveryInput（Z-score 门控 + 冷启动 Wilson 兜底）──
-    jd_total = sum(s["count"] for s in position_stats.values())
-
     # 从 graph_versions 快照序列重建岗位频次窗口，计算真实 Z-score /
     # 3 月移动平均 / 环比增长率，替代此前 history_days=1/z_score=None 硬编码
     # （否则正常 Z-score 门控永不触发，只能走冷启动）
@@ -1566,6 +1588,11 @@ async def discovery_daily(ctx: dict) -> dict:
     snapshots = [s.snapshot_json or {} for s in snap_rows]
     freq_windows = position_freq_windows(snapshots, set(position_stats))
     window_days = 0
+    observation_start = None
+    if snap_rows:
+        # 观测窗口起点：首个快照日期（东八区）。成熟岗位排除以此为准——
+        # 早于此日期的岗位是系统开始观测前就存在的市场存量
+        observation_start = snap_rows[0].created_at.astimezone(_TZ_CN).date().isoformat()
     if len(snap_rows) >= 2:
         span = (snap_rows[-1].created_at - snap_rows[0].created_at)
         window_days = max(span.days, 0) if span else 0
@@ -1580,6 +1607,11 @@ async def discovery_daily(ctx: dict) -> dict:
         z_score = None
         growth_rate = 0.0
         jd_freq_ma3 = freq
+        # 冷启动二项样本：岗位在快照窗口中的出现密度（默认 0/0 = 快照未出现，
+        # 无法冷启动）。口径为"首现后窗口出现率"（successes=出现窗口数，
+        # total=首现之后窗口数）而非全量 JD 占比——后者在 JD 占比下 Wilson
+        # 下界极低（实测 0.005-0.185），任何阈值都无法通过
+        cold_successes, cold_total = 0, 0
         if len(freqs) >= 2:
             zs = freq_z_scores(freqs)
             z_score = float(zs[-1])
@@ -1587,6 +1619,11 @@ async def discovery_daily(ctx: dict) -> dict:
             jd_freq_ma3 = sum(recent3) / len(recent3)
             if freqs[-2] > 0:
                 growth_rate = (freqs[-1] - freqs[-2]) / freqs[-2]
+        if freqs:
+            active = sum(1 for f in freqs if f > 0)
+            first_active = next((i for i, f in enumerate(freqs) if f > 0), None)
+            if first_active is not None:
+                cold_successes, cold_total = active, len(freqs) - first_active
         growth_by_position[name] = growth_rate
         inputs.append(
             DiscoveryInput(
@@ -1595,10 +1632,13 @@ async def discovery_daily(ctx: dict) -> dict:
                     jd_freq_ma3=jd_freq_ma3,
                     z_score=z_score,
                     source_diversity=len(stat["sources"]),
+                    first_seen_date=stat.get("first_seen"),
                 ),
                 history_days=window_days or 1,
-                cold_successes=stat["count"],
-                cold_total=jd_total,
+                cold_successes=cold_successes,
+                cold_total=cold_total,
+                first_seen_date=stat.get("first_seen"),
+                observation_start=observation_start,
             )
         )
 
