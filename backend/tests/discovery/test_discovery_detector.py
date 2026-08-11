@@ -246,3 +246,84 @@ class TestMaturePositionExclusion:
         )
         candidates = detector.detect_candidates(provider)
         assert [c.position_name for c in candidates] == ["新出现低频岗位"]
+
+
+class TestPostDateMissingFallback:
+    """post_date 缺失兜底排除（2026-08-11）：post_date 缺失岗位首次观测日靠
+    入库日兜底，若入库日 == 采集首日，视为起步期存量排除。"""
+
+    def test_missing_post_date_collection_day_excluded(self):
+        # post_date 全缺失（如 boss 源）+ 入库日 == 采集首日 → 起步期存量排除
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "BOSS 存量岗位",
+                    _features(z_score=3.0, source_diversity=2, jd_freq_ma3=10),
+                    90,
+                    first_seen_date="2026-08-01",
+                    observation_start="2026-08-02",
+                    collection_start="2026-08-01",
+                    post_date_missing=True,
+                )
+            ]
+        )
+        assert detector.detect_candidates(provider) == []
+
+    def test_missing_post_date_after_collection_day_not_excluded(self):
+        # post_date 缺失但入库日晚于采集首日 → 兜底不触发，正常走门控入池
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "新采集岗位",
+                    _features(z_score=3.0, source_diversity=2, jd_freq_ma3=10),
+                    90,
+                    first_seen_date="2026-08-10",
+                    observation_start="2026-08-02",
+                    collection_start="2026-08-01",
+                    post_date_missing=True,
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert [c.position_name for c in candidates] == ["新采集岗位"]
+
+    def test_real_post_date_collection_day_not_excluded(self):
+        # 有真实 post_date、发布日 == 采集首日 → 可能是真当天发布的新岗位，
+        # 兜底不触发（避免误伤）
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "首日新发布岗位",
+                    _features(z_score=3.0, source_diversity=2, jd_freq_ma3=10),
+                    90,
+                    first_seen_date="2026-08-01",
+                    observation_start="2026-08-01",
+                    collection_start="2026-08-01",
+                    post_date_missing=False,
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert [c.position_name for c in candidates] == ["首日新发布岗位"]
+
+    def test_missing_post_date_no_collection_start_not_excluded(self):
+        # 采集首日未知（无 jd_raw 记录）→ 兜底不触发，避免误伤
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "未知采集起点岗位",
+                    _features(z_score=3.0, source_diversity=2, jd_freq_ma3=10),
+                    90,
+                    first_seen_date="2026-08-01",
+                    observation_start="2026-08-01",
+                    collection_start=None,
+                    post_date_missing=True,
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert [c.position_name for c in candidates] == ["未知采集起点岗位"]

@@ -1532,6 +1532,9 @@ async def discovery_daily(ctx: dict) -> dict:
     # keyset 游标分批加载，避免全表拉取（与 dedup_simhash 修复一致）
     position_stats: dict[str, dict] = {}
     position_skills: dict[str, set[str]] = {}
+    # 系统采集首日（jd_raw 最早入库日，东八区）：post_date 缺失兜底用——
+    # 入库日 == 采集首日的岗位视为起步期存量（首日即被采到）
+    collection_start = None
     _PAGE = 2000
     last_id = 0
     async with async_session_factory() as session:
@@ -1556,14 +1559,24 @@ async def discovery_daily(ctx: dict) -> dict:
                 )
                 if not name:
                     continue
-                stat = position_stats.setdefault(name, {"count": 0, "sources": set()})
+                stat = position_stats.setdefault(
+                    name, {"count": 0, "sources": set(), "has_post_date": False}
+                )
                 stat["count"] += 1
                 stat["sources"].add(row.source)
+                # post_date 缺失标记：任一记录有真实 post_date 即不算缺失
+                # （存量排除兜底见 _is_mature_position）
+                if str((row.snapshot or {}).get("post_date") or "").strip():
+                    stat["has_post_date"] = True
                 # 首次观测日：post_date 解析日优先（回爬老岗位靠发布日识别存量，
                 # 避免入库日被回爬当天掩盖），入库日兜底
                 fd = _first_seen_date_of(row)
                 if stat.get("first_seen") is None or fd < stat["first_seen"]:
                     stat["first_seen"] = fd
+                # 采集首日：jd_raw 最早入库日（东八区日期）
+                cd = row.created_at.astimezone(_TZ_CN).date().isoformat()
+                if collection_start is None or cd < collection_start:
+                    collection_start = cd
                 # 收集岗位关联技能（供 §7.2.2 辅助加分特征关联 arxiv/github 信号）
                 skills = position_skills.setdefault(name, set())
                 for s in ext.get("skills") or []:
@@ -1639,6 +1652,8 @@ async def discovery_daily(ctx: dict) -> dict:
                 cold_total=cold_total,
                 first_seen_date=stat.get("first_seen"),
                 observation_start=observation_start,
+                collection_start=collection_start,
+                post_date_missing=not stat.get("has_post_date"),
             )
         )
 
@@ -1709,10 +1724,15 @@ async def discovery_daily(ctx: dict) -> dict:
 async def discovery_auto_transition(ctx: dict) -> dict:
     """自动状态流转（设计文档 7.2.1 状态机：emerging/stable/declining 自动迁移）。
 
-    从 graph_versions 快照序列重建岗位频次窗口（30 天粒度）→ 对
-    discovery_candidates 中 state ∈ {emerging, stable, declining} 的岗位调用
-    evaluate_auto_transition 判定 → 命中则 PositionStateMachine.persist
+    从 jd_raw 已抽取记录按 post_date 聚合岗位 30 天窗口 JD 发布频次（declining
+    信号源）→ 对 discovery_candidates 中 state ∈ {emerging, stable, declining}
+    的岗位调用 evaluate_auto_transition 判定 → 命中则 PositionStateMachine.persist
     （Neo4j Position.status + 候选池状态）。
+
+    信号源说明（2026-08-11）：declining 信号从"图谱快照 REQUIRES 边数"改为真实
+    JD 发布数——快照边数随图谱清理/重建/改名剧烈波动（08-11 重建致"算法工程师"
+    1348→56 伪降），而发布数语义 = 设计文档"JD 需求下降"。post_date 缺失按入库
+    日兜底（_first_seen_date_of）。
 
     注意：自动流转 operator="system"，不写 AuditLog（audit_logs.user_id 为
     users 外键，system 无对应用户）。人工流转记录见 /evolution/state-machine。
@@ -1723,24 +1743,44 @@ async def discovery_auto_transition(ctx: dict) -> dict:
 
     幂等：persist 按 name MERGE，重复执行结果一致；无命中不产生副作用。
 
-    数据不足（快照 < 2 期或岗位无窗口序列）时跳过，不武断判定（冷启动）。
+    数据不足（jd_raw 无已抽取记录或岗位窗口序列 < 2）时跳过，不武断判定（冷启动）。
     """
     from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
-    from app.models.business import DiscoveryCandidate, GraphVersion
+    from app.models.business import DiscoveryCandidate
+    from app.models.raw import JDRaw
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
-    from app.services.discovery.state_machine import WindowFreq, evaluate_auto_transition, freq_z_scores, PositionStateMachine, position_freq_windows
+    from app.services.discovery.state_machine import (
+        WindowFreq, decline_rate, evaluate_auto_transition, freq_z_scores,
+        PositionStateMachine, jd_publish_windows, window_volatility,
+    )
     from app.services.extraction.dictionary import normalize_position_name
 
-    # ── 1. 加载全部快照（按创建时间升序，即时间窗口序列）──
+    import logging
+    _logger = logging.getLogger(__name__)
+
+    # ── 1. 聚合 jd_raw 已抽取记录 → 岗位按天 JD 发布数（declining 信号源）──
+    # 一次加载已抽取记录（万级），按 _first_seen_date_of（post_date 解析日优先、
+    # 入库日兜底）统计每岗位每日发布数，再切 30 天窗口
     async with async_session_factory() as session:
-        snapshots = (await session.scalars(
-            select(GraphVersion).order_by(GraphVersion.created_at.asc())
+        jd_rows = (await session.scalars(
+            select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
         )).all()
 
-    if len(snapshots) < 2:
-        return {"transitions": 0, "detail": "快照 < 2 期，无法计算窗口序列（冷启动）"}
+    daily_freqs: dict[str, dict[str, int]] = {}
+    for row in jd_rows:
+        ext = (row.snapshot or {}).get("extraction") or {}
+        name = normalize_position_name(ext.get("position_name") or "")
+        if not name:
+            continue
+        day = _first_seen_date_of(row)
+        day_counts = daily_freqs.setdefault(name, {})
+        day_counts[day] = day_counts.get(day, 0) + 1
+
+    freq_windows = jd_publish_windows(daily_freqs)
+    if not freq_windows:
+        return {"transitions": 0, "detail": "jd_raw 无已抽取记录，无法计算窗口序列（冷启动）"}
 
     # ── 2. 对候选池中自动可迁移状态的岗位执行判定 ──
     machine = PositionStateMachine()
@@ -1754,18 +1794,16 @@ async def discovery_auto_transition(ctx: dict) -> dict:
             )
         )).all()
 
-        # 按岗位名重建窗口频次序列（同一批次一次构建）
-        names = {r.position_name for r in rows}
-        freq_windows = position_freq_windows(
-            [s.snapshot_json or {} for s in snapshots], names
-        )
-
         for row in rows:
             name = normalize_position_name(row.position_name)
             if not name:
                 continue
             freqs = freq_windows.get(name, [])
             if len(freqs) < 2:
+                _logger.info(
+                    "auto_transition 跳过: %s 窗口序列 %s（<2 期，冷启动不武断判定）",
+                    row.position_name, freqs,
+                )
                 continue
 
             features = DiscoveryFeatures(**row.features)
@@ -1785,6 +1823,14 @@ async def discovery_auto_transition(ctx: dict) -> dict:
             # 时最近 2 窗口 z > 0，触发 declining → stable 自动回迁
             windows = WindowFreq(freqs=freqs, z_scores=freq_z_scores(freqs))
             target = evaluate_auto_transition(candidate, windows, confidence=conf)
+            _logger.info(
+                "auto_transition: %s state=%s 30天窗口序列=%s z_scores=%s "
+                "volatility=%.3f decline_rate=%.3f → %s",
+                row.position_name, row.state, freqs,
+                [round(z, 3) for z in windows.z_scores],
+                window_volatility(windows), decline_rate(windows),
+                target.value if target else "不迁移",
+            )
             if target is None:
                 continue
 
