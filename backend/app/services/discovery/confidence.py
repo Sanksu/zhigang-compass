@@ -19,8 +19,10 @@ NORM_JD_COUNT_MAX = 10     # 10 条 JD 即满分
 NORM_GROWTH_RATE_MAX = 0.5  # 50% 增长率即满分
 NORM_SOURCE_MAX = 4         # 4 个独立源即满分
 
-# 冷启动判定阈值
-WILSON_COLD_START_THRESHOLD = 0.3
+# 冷启动判定阈值（2026-08-11 调降 0.3→0.2：样本口径已改为"首现后窗口出现率"，
+# 0.3 阈值下首现即出现 1 个窗口的岗位 Wilson 下界 ≈0.206 不过，低频新岗位
+# 需等第 2 个窗口才被检测；0.2 允许首窗口确认后即入池）
+WILSON_COLD_START_THRESHOLD = 0.2
 
 _CONFIG_PATH = Path(__file__).resolve().parents[3] / "configs" / "discovery_weights.json"
 

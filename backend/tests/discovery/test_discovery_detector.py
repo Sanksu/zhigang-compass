@@ -64,32 +64,46 @@ class TestPassesGate:
 
 class TestColdStartGate:
     def test_high_wilson_lower_passes(self):
-        # wilson_lower(40, 50) ≈ 0.67 > 0.3
-        assert wilson_lower(40, 50) > 0.3
+        # wilson_lower(40, 50) ≈ 0.67 > 0.2（2026-08-11 阈值 0.3→0.2）
+        assert wilson_lower(40, 50) > 0.2
         assert passes_cold_start_gate(40, 50, source_diversity=3) is True
 
     def test_low_success_ratio_fails(self):
-        # wilson_lower(2, 50) ≈ 0.02 < 0.3
-        assert passes_cold_start_gate(2, 50, source_diversity=3) is False
+        # wilson_lower(2, 50) ≈ 0.02 < 0.2
+        assert passes_cold_start_gate(2, 50, source_diversity=2) is False
 
     def test_insufficient_diversity_fails(self):
-        assert passes_cold_start_gate(40, 50, source_diversity=2) is False
+        # 2026-08-11 源多样性阈值 3→2，1 源仍不过
+        assert passes_cold_start_gate(40, 50, source_diversity=1) is False
 
     def test_zero_total_fails(self):
         assert passes_cold_start_gate(0, 0, source_diversity=3) is False
 
+    def test_first_window_appearance_passes(self):
+        # 首现即出现 1 个窗口：wilson_lower(1, 1) ≈ 0.206 > 0.2
+        # 原 0.3 阈值下不过（≈0.206 < 0.3），低频新岗位需等第 2 个窗口；
+        # 调降后允许首窗口确认即入池
+        assert passes_cold_start_gate(1, 1, source_diversity=2) is True
+
+    def test_low_appearance_ratio_fails(self):
+        # 首现后 2 窗口仅出现 1：wilson_lower(1, 2) ≈ 0.011 < 0.2
+        assert passes_cold_start_gate(1, 2, source_diversity=2) is False
+
+
+class _FakeProvider(CandidateProvider):
+    """测试用候选数据源。"""
+
+    def __init__(self, inputs: list[DiscoveryInput]):
+        self._inputs = inputs
+
+    def iter_inputs(self):
+        return iter(self._inputs)
+
 
 class TestDetectCandidates:
-    class _FakeProvider(CandidateProvider):
-        def __init__(self, inputs: list[DiscoveryInput]):
-            self._inputs = inputs
-
-        def iter_inputs(self):
-            return iter(self._inputs)
-
     def test_only_gate_passing_inputs_become_candidates(self):
         detector = DiscoveryDetector()
-        provider = self._FakeProvider(
+        provider = _FakeProvider(
             [
                 DiscoveryInput("AIGC 工程师", _features(z_score=3.0, source_diversity=3, jd_freq_ma3=12), 90),
                 DiscoveryInput("稳定岗位", _features(z_score=0.5, source_diversity=3), 90),
@@ -100,7 +114,7 @@ class TestDetectCandidates:
 
     def test_candidate_fields_are_populated(self):
         detector = DiscoveryDetector()
-        provider = self._FakeProvider(
+        provider = _FakeProvider(
             [DiscoveryInput("RAG 工程师", _features(z_score=2.5, source_diversity=2, jd_freq_ma3=15), 90)]
         )
         candidates = detector.detect_candidates(provider)
@@ -115,7 +129,7 @@ class TestDetectCandidates:
 
     def test_cold_start_route_promotes_via_wilson(self):
         detector = DiscoveryDetector()
-        provider = self._FakeProvider(
+        provider = _FakeProvider(
             [
                 DiscoveryInput(
                     "向量数据库工程师",
@@ -131,7 +145,7 @@ class TestDetectCandidates:
 
     def test_cold_start_without_stats_not_promoted(self):
         detector = DiscoveryDetector()
-        provider = self._FakeProvider(
+        provider = _FakeProvider(
             [DiscoveryInput("未知岗位", _features(z_score=None, source_diversity=3), 30)]
         )
         candidates = detector.detect_candidates(provider)
@@ -139,5 +153,177 @@ class TestDetectCandidates:
 
     def test_empty_provider_returns_empty(self):
         detector = DiscoveryDetector()
-        candidates = detector.detect_candidates(self._FakeProvider([]))
+        candidates = detector.detect_candidates(_FakeProvider([]))
         assert candidates == []
+
+
+class TestMaturePositionExclusion:
+    """成熟岗位排除（2026-08-11）：岗位首见早于观测起点视为存量，两条门控路径都拦截。"""
+
+    def test_high_zscore_but_mature_is_excluded(self):
+        # Z-score 再高，采集存量（首见早于观测起点）也不进入候选池
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "算法工程师",
+                    _features(z_score=3.0, source_diversity=3, jd_freq_ma3=50),
+                    90,
+                    first_seen_date="2026-08-01",
+                    observation_start="2026-08-02",
+                )
+            ]
+        )
+        assert detector.detect_candidates(provider) == []
+
+    def test_mature_excluded_via_cold_start_path(self):
+        # 冷启动路径同样被成熟排除拦截
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "后端开发工程师",
+                    _features(z_score=None, source_diversity=2, jd_freq_ma3=3),
+                    30,
+                    cold_successes=2,
+                    cold_total=2,
+                    first_seen_date="2026-08-01",
+                    observation_start="2026-08-02",
+                )
+            ]
+        )
+        assert detector.detect_candidates(provider) == []
+
+    def test_new_position_not_excluded(self):
+        # 观测窗口内首次出现的岗位正常走门控
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "新出现岗位",
+                    _features(z_score=3.0, source_diversity=2, jd_freq_ma3=10),
+                    90,
+                    first_seen_date="2026-08-10",
+                    observation_start="2026-08-02",
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert [c.position_name for c in candidates] == ["新出现岗位"]
+
+    def test_missing_observation_start_not_excluded(self):
+        # 无快照（无观测起点）时不做成熟排除，避免误伤
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "历史岗位",
+                    _features(z_score=3.0, source_diversity=2, jd_freq_ma3=10),
+                    90,
+                    first_seen_date="2026-01-01",
+                    observation_start=None,
+                )
+            ]
+        )
+        assert len(detector.detect_candidates(provider)) == 1
+
+    def test_cold_start_first_window_new_position_promotes(self):
+        # 新岗位首现 1 个窗口 + 双源 → 冷启动通过（原 0.3 阈值下
+        # wilson_lower(1, 1) ≈ 0.206 不过，调降 0.2 后首窗口确认即入池）
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "新出现低频岗位",
+                    _features(z_score=None, source_diversity=2, jd_freq_ma3=3),
+                    30,
+                    cold_successes=1,
+                    cold_total=1,
+                    first_seen_date="2026-08-10",
+                    observation_start="2026-08-02",
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert [c.position_name for c in candidates] == ["新出现低频岗位"]
+
+
+class TestPostDateMissingFallback:
+    """post_date 缺失兜底排除（2026-08-11）：post_date 缺失岗位首次观测日靠
+    入库日兜底，若入库日 == 采集首日，视为起步期存量排除。"""
+
+    def test_missing_post_date_collection_day_excluded(self):
+        # post_date 全缺失（如 boss 源）+ 入库日 == 采集首日 → 起步期存量排除
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "BOSS 存量岗位",
+                    _features(z_score=3.0, source_diversity=2, jd_freq_ma3=10),
+                    90,
+                    first_seen_date="2026-08-01",
+                    observation_start="2026-08-02",
+                    collection_start="2026-08-01",
+                    post_date_missing=True,
+                )
+            ]
+        )
+        assert detector.detect_candidates(provider) == []
+
+    def test_missing_post_date_after_collection_day_not_excluded(self):
+        # post_date 缺失但入库日晚于采集首日 → 兜底不触发，正常走门控入池
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "新采集岗位",
+                    _features(z_score=3.0, source_diversity=2, jd_freq_ma3=10),
+                    90,
+                    first_seen_date="2026-08-10",
+                    observation_start="2026-08-02",
+                    collection_start="2026-08-01",
+                    post_date_missing=True,
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert [c.position_name for c in candidates] == ["新采集岗位"]
+
+    def test_real_post_date_collection_day_not_excluded(self):
+        # 有真实 post_date、发布日 == 采集首日 → 可能是真当天发布的新岗位，
+        # 兜底不触发（避免误伤）
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "首日新发布岗位",
+                    _features(z_score=3.0, source_diversity=2, jd_freq_ma3=10),
+                    90,
+                    first_seen_date="2026-08-01",
+                    observation_start="2026-08-01",
+                    collection_start="2026-08-01",
+                    post_date_missing=False,
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert [c.position_name for c in candidates] == ["首日新发布岗位"]
+
+    def test_missing_post_date_no_collection_start_not_excluded(self):
+        # 采集首日未知（无 jd_raw 记录）→ 兜底不触发，避免误伤
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "未知采集起点岗位",
+                    _features(z_score=3.0, source_diversity=2, jd_freq_ma3=10),
+                    90,
+                    first_seen_date="2026-08-01",
+                    observation_start="2026-08-01",
+                    collection_start=None,
+                    post_date_missing=True,
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert [c.position_name for c in candidates] == ["未知采集起点岗位"]

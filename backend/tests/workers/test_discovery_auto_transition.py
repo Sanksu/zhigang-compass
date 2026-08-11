@@ -1,29 +1,51 @@
 """discovery_auto_transition ARQ 任务端到端测试（设计文档 7.2.1/7.2.4）。
 
 通过 mock 数据库层（PostgreSQL async_session_factory + Neo4j driver），
-用 3 期以上 graph_versions 快照重建岗位频次窗口，验证 emerging → stable
-自动升级链路在真实任务函数内完整生效：
+用 jd_raw 已抽取记录的 post_date 聚合岗位 30 天窗口发布频次，验证
+emerging → stable 自动升级链路在真实任务函数内完整生效：
 
-    graph_versions 快照序列 → position_freq_windows → evaluate_auto_transition
+    jd_raw post_date → jd_publish_windows → evaluate_auto_transition
     → PositionStateMachine.persist（Neo4j MERGE）→ 候选池状态落库
 
+信号源说明（2026-08-11）：declining 判定信号从图谱快照边数改为真实 JD
+发布数（快照边数随图谱清理/重建波动伪降，发布数语义 = "JD 需求下降"）。
 不依赖真实基础设施，全部 DB 交互由 fake 捕获断言。
 """
 
 import asyncio
 import unittest.mock as mock
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from app.workers.tasks import discovery_auto_transition
 
+_TZ_CN = timezone(timedelta(hours=8))
+# 窗口终点基准（jd_publish_windows 以数据最晚日为 end）
+_END = datetime(2026, 8, 11, tzinfo=_TZ_CN)
 
-def _snapshot_json(name: str, edge_count: int) -> dict:
-    """构造一期 graph_versions.snapshot_json（岗位节点 + 技能边）。"""
-    pos_id = "pos_rag"
-    return {
-        "nodes": [{"id": pos_id, "name": name, "type": "position"}],
-        "edges": [{"source": pos_id, "target": f"sk_{i}"} for i in range(edge_count)],
-    }
+
+def _jd_row(name: str, post_date: str) -> SimpleNamespace:
+    """构造一条已抽取 JDRaw：post_date 用于窗口聚合，extraction 含岗位名。"""
+    return SimpleNamespace(
+        id=1,
+        snapshot={"post_date": post_date, "extraction": {"position_name": name}},
+        created_at=_END,
+    )
+
+
+def _jd_rows_by_window(name: str, window_counts: list[int]) -> list:
+    """按窗口频次构造 jd_raw 记录。
+
+    window_counts[i] = 窗口 i 的发布数（窗口 0 为最近窗口）。基准日：
+    窗口 0→2026-08-10、窗口1→2026-06-20、窗口2→2026-05-20、窗口3→2026-04-20
+    （对应 30 天窗口：距 end 0/52/83/113 天 → idx 0/1/2/3）。
+    """
+    days = {0: "2026-08-10", 1: "2026-06-20", 2: "2026-05-20", 3: "2026-04-20"}
+    rows = []
+    for i, count in enumerate(window_counts):
+        for _ in range(count):
+            rows.append(_jd_row(name, days[i]))
+    return rows
 
 
 class _FakeResult:
@@ -35,7 +57,7 @@ class _FakeResult:
 
 
 class _FakeSession:
-    """AsyncSession fake：可先后被两个 async with 复用，scalars 按顺序返回。"""
+    """AsyncSession fake：先后被两个 async with 复用，scalars 按顺序返回。"""
 
     def __init__(self, *results):
         self._results = list(results)
@@ -99,14 +121,10 @@ def _candidate_row(name: str = "RAG", state: str = "emerging", confidence: float
     )
 
 
-def _snapshot_row(snapshot: dict, created_at: str):
-    return SimpleNamespace(snapshot_json=snapshot, created_at=created_at)
-
-
 def _run_task(sessions, driver) -> dict:
     """在 patch 数据库层后以 asyncio.run 执行任务（项目无 pytest-asyncio auto 模式）。
 
-    任务内两次 `async with async_session_factory()`（先查快照、再查候选），
+    任务内两次 `async with async_session_factory()`（先查 jd_raw、再查候选），
     故 sessions 需按调用顺序提供两个 fake session。
     """
 
@@ -121,25 +139,19 @@ def _run_task(sessions, driver) -> dict:
 
 
 class TestAutoTransitionTask:
-    def test_promotes_emerging_to_stable_across_four_snapshots(self):
-        """4 期快照频次平稳 + 高置信 → 任务将 emerging 升级为 stable。
+    def test_promotes_emerging_to_stable_across_four_windows(self):
+        """4 个 30 天窗口发布频次平稳 + 高置信 → 任务将 emerging 升级为 stable。
 
         验证：Neo4j 收到 MERGE 且 state=stable；候选池落库为 stable；
         返回 transitions=1 与明细。
         """
         name = "RAG"
-        snaps = [
-            _snapshot_row(_snapshot_json(name, 10), "2026-07-01T00:00:00+08:00"),
-            _snapshot_row(_snapshot_json(name, 11), "2026-07-11T00:00:00+08:00"),
-            _snapshot_row(_snapshot_json(name, 10), "2026-07-21T00:00:00+08:00"),
-            _snapshot_row(_snapshot_json(name, 11), "2026-08-01T00:00:00+08:00"),
-        ]
+        jd_session = _FakeSession(_jd_rows_by_window(name, [11, 10, 11, 10]))
         row = _candidate_row(name)
-        snap_session = _FakeSession(snaps)
         cand_session = _FakeSession([row])
         driver = _FakeDriver()
 
-        result = _run_task([snap_session, cand_session], driver)
+        result = _run_task([jd_session, cand_session], driver)
 
         assert result["transitions"] == 1
         assert result["detail"] == [{
@@ -157,16 +169,14 @@ class TestAutoTransitionTask:
         assert params["name"] == name
         assert params["state"] == "stable"
 
-    def test_cold_start_skips_when_fewer_than_two_snapshots(self):
-        """快照 < 2 期（冷启动）→ 直接返回，不查询候选池、不产生副作用。"""
-        name = "RAG"
-        snaps = [_snapshot_row(_snapshot_json(name, 10), "2026-07-01T00:00:00+08:00")]
+    def test_cold_start_skips_without_jd_records(self):
+        """jd_raw 无已抽取记录（冷启动）→ 直接返回，不查询候选池、不产生副作用。"""
+        jd_session = _FakeSession([])
         # 候选查询不应被触发：第二次 factory 调用若发生则 pop 空列表出错
-        snap_session = _FakeSession(snaps)
         cand_session = _FakeSession([])
         driver = _FakeDriver()
 
-        result = _run_task([snap_session, cand_session], driver)
+        result = _run_task([jd_session, cand_session], driver)
 
         assert result["transitions"] == 0
         assert "冷启动" in result["detail"]
@@ -174,19 +184,14 @@ class TestAutoTransitionTask:
         assert cand_session.committed is False
 
     def test_volatile_windows_not_promoted(self):
-        """3 期快照波动大（> 25%）→ 判定不升级，transitions=0。"""
+        """3 窗口发布频次波动大（> 25%）→ 判定不升级，transitions=0。"""
         name = "RAG"
-        snaps = [
-            _snapshot_row(_snapshot_json(name, 10), "2026-07-01T00:00:00+08:00"),
-            _snapshot_row(_snapshot_json(name, 6), "2026-07-11T00:00:00+08:00"),
-            _snapshot_row(_snapshot_json(name, 10), "2026-07-21T00:00:00+08:00"),
-        ]
+        jd_session = _FakeSession(_jd_rows_by_window(name, [10, 6, 10]))
         row = _candidate_row(name)
-        snap_session = _FakeSession(snaps)
         cand_session = _FakeSession([row])
         driver = _FakeDriver()
 
-        result = _run_task([snap_session, cand_session], driver)
+        result = _run_task([jd_session, cand_session], driver)
 
         assert result["transitions"] == 0
         assert result["detail"] == []
@@ -194,24 +199,14 @@ class TestAutoTransitionTask:
         assert driver.queries == []
 
     def test_recovery_from_declining_to_stable(self):
-        """频次先降后升（最近 2 窗口 z > 0）→ declining 自动回迁 stable。
-
-        覆盖 T-01 修复：z_scores 由频次序列重建并传入判定，
-        declining → stable 回迁不再永久失效。
-        """
+        """发布频次先降后升（最近 2 窗口 z > 0）→ declining 自动回迁 stable。"""
         name = "RAG"
-        snaps = [
-            _snapshot_row(_snapshot_json(name, 10), "2026-07-01T00:00:00+08:00"),
-            _snapshot_row(_snapshot_json(name, 4), "2026-07-11T00:00:00+08:00"),
-            _snapshot_row(_snapshot_json(name, 8), "2026-07-21T00:00:00+08:00"),
-            _snapshot_row(_snapshot_json(name, 8), "2026-08-01T00:00:00+08:00"),
-        ]
+        jd_session = _FakeSession(_jd_rows_by_window(name, [8, 8, 4, 10]))
         row = _candidate_row(name, state="declining")
-        snap_session = _FakeSession(snaps)
         cand_session = _FakeSession([row])
         driver = _FakeDriver()
 
-        result = _run_task([snap_session, cand_session], driver)
+        result = _run_task([jd_session, cand_session], driver)
 
         assert result["transitions"] == 1
         assert result["detail"] == [{
@@ -229,17 +224,12 @@ class TestAutoTransitionTask:
     def test_non_migratable_state_ignored(self):
         """候选池仅含 candidate（非自动可迁移状态）→ 不处理。"""
         name = "RAG"
-        snaps = [
-            _snapshot_row(_snapshot_json(name, 10), "2026-07-01T00:00:00+08:00"),
-            _snapshot_row(_snapshot_json(name, 11), "2026-07-11T00:00:00+08:00"),
-            _snapshot_row(_snapshot_json(name, 10), "2026-07-21T00:00:00+08:00"),
-        ]
+        jd_session = _FakeSession(_jd_rows_by_window(name, [10, 10, 10]))
         # 任务只查询 emerging/stable/declining，candidate 不会被选中
-        snap_session = _FakeSession(snaps)
         cand_session = _FakeSession([])
         driver = _FakeDriver()
 
-        result = _run_task([snap_session, cand_session], driver)
+        result = _run_task([jd_session, cand_session], driver)
 
         assert result["transitions"] == 0
         assert driver.queries == []

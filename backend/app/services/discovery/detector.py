@@ -29,7 +29,9 @@ Z_SCORE_STRICT = 2.0       # 严格门控
 Z_SCORE_CONSERVATIVE = 1.5  # 保守观察
 MIN_SOURCE_DIVERSITY = 2
 MIN_JD_FREQ_MA3 = 10
-MIN_SOURCE_COLD_START = 3
+# 冷启动源多样性（2026-08-11 调降 3→2：低频新岗位通常仅 1-2 个源先出现，
+# 3 源门槛会永久拦截"单源或双源新出现"的岗位，与成熟岗位排除机制配合后安全）
+MIN_SOURCE_COLD_START = 2
 
 # 冷启动窗口阈值（设计文档 7.2.3 节）
 COLD_START_DAYS = 60
@@ -42,8 +44,11 @@ _TZ_CN = timezone(timedelta(hours=8))
 class DiscoveryInput:
     """单个技能的发现判定输入。
 
-    cold_successes/cold_total 仅冷启动（history_days < COLD_START_DAYS）时使用，
-    为 Wilson score 兜底提供二项分布样本；正常窗口无需提供。
+    cold_successes/cold_total 仅冷启动（z_score 不可算）时使用，为 Wilson score
+    兜底提供二项分布样本；正常窗口无需提供。
+
+    first_seen_date/observation_start 用于成熟岗位排除：岗位首次观测日期早于
+    观测窗口起点即视为存量成熟岗位，不参与发现判定（防候选池被采集存量霸占）。
     """
 
     position_name: str
@@ -51,6 +56,12 @@ class DiscoveryInput:
     history_days: int
     cold_successes: Optional[int] = None
     cold_total: Optional[int] = None
+    first_seen_date: Optional[str] = None
+    observation_start: Optional[str] = None
+    # post_date 缺失兜底（2026-08-11）：该岗位全部记录 post_date 缺失（首次观测
+    # 日靠入库日兜底）时置 True，配合 collection_start（系统采集首日）识别起步期存量
+    collection_start: Optional[str] = None
+    post_date_missing: bool = False
 
 
 class CandidateProvider(Protocol):
@@ -107,6 +118,26 @@ def passes_cold_start_gate(
     return wilson_lower(successes, total) > WILSON_COLD_START_THRESHOLD
 
 
+def _is_mature_position(inp: DiscoveryInput) -> bool:
+    """存量成熟岗位排除：岗位首次观测日早于观测窗口起点即为存量。
+
+    post_date 缺失兜底（2026-08-11）：post_date 缺失的岗位首次观测日靠入库日
+    兜底（_first_seen_date_of），若该入库日 == 系统采集首日（collection_start），
+    岗位是采集起步期就存在的存量（首日即被采到）——boss 等全量缺失 post_date
+    的源会把这类岗位混进候选池，须同样排除。有真实 post_date 的岗位不受此
+    兜底影响（发布日 == 采集首日可能是真当天发布的新岗位，不误伤）。
+
+    仅当日期信息齐备才判定（缺任一视为非成熟，不误伤）；ISO 字符串直接字典序
+    比较（YYYY-MM-DD 长度固定可比较）。
+    """
+    if inp.post_date_missing and inp.collection_start:
+        if inp.first_seen_date == inp.collection_start:
+            return True
+    if not inp.first_seen_date or not inp.observation_start:
+        return False
+    return inp.first_seen_date < inp.observation_start
+
+
 class DiscoveryDetector:
     """新岗位发现检测器。
 
@@ -130,7 +161,13 @@ class DiscoveryDetector:
         return candidates
 
     def _passes(self, inp: DiscoveryInput) -> bool:
-        """阶段一门控：Z-score 门控为主，z_score 不可算时冷启动 Wilson 兜底。
+        """阶段一门控：先排除存量成熟岗位，再 Z-score 门控为主，z_score 不可算时冷启动兜底。
+
+        成熟岗位排除（2026-08-11）：岗位首次观测日期（first_seen_date）早于观测
+        窗口起点（observation_start）即视为存量成熟岗位——系统开始观测前就已
+        存在的市场存量，是采集起步期候选池被"算法/后端/全栈"等热门岗位霸占的
+        根因（量化：27 个候选 25 个采集首日即在）。此类岗位即使近期 JD 增长也
+        不是"新出现的岗位"，两条门控路径（Z-score/Wilson）一律拦截。
 
         Z-score 门控（z_score 非 None）优先（§7.2.3 主判定）；仅当 z_score 为
         None（快照窗口不足无法计算）才走冷启动 Wilson（需二项样本 successes/total）。
@@ -138,6 +175,8 @@ class DiscoveryDetector:
         算出时，应直接使用 Z-score（修复：此前 history_days<60 强制禁用 Z-score
         导致 candidate 发现失效）。
         """
+        if _is_mature_position(inp):
+            return False
         if passes_gate(inp.features, inp.history_days):
             return True
         if (
