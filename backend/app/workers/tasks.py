@@ -124,6 +124,11 @@ async def crawl_platform(
     timestamp = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S")
     output_file = _OUTPUT_DIR / f"{spider_name}_{timestamp}.jsonl"
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(
+        f"[crawl_platform] 任务开始: task_id={task_id} spider={spider_name} "
+        f"keywords={keywords} cities={cities or '(默认)'} output={output_file}",
+        flush=True,
+    )
 
     cmd = [
         sys.executable, "-m", "scrapy", "crawl", spider_name,
@@ -139,6 +144,7 @@ async def crawl_platform(
             cmd.extend(["-a", f"max_results={max_results}"])
         else:
             print(f"[crawl_platform] spider={spider_name} 不支持 max_results，参数已忽略", flush=True)
+    print(f"[crawl_platform] 完整命令: {' '.join(cmd)}", flush=True)
 
     await _update_crawl_task(
         task_id,
@@ -148,13 +154,21 @@ async def crawl_platform(
     )
 
     # cwd 设到 crawlers/ 让 scrapy.cfg 生效；env 强制 UTF-8 + PYTHONPATH（见 _CRAWL_ENV）
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=str(_CRAWLERS_DIR),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=_CRAWL_ENV,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(_CRAWLERS_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=_CRAWL_ENV,
+        )
+    except Exception as e:
+        msg = f"启动爬虫子进程失败: {e}"
+        print(f"[crawl_platform] {msg}", flush=True)
+        await _update_crawl_task(task_id, status="failed", error=msg[:500])
+        await send_alert("crawl_failed", msg, spider=spider_name)
+        raise RuntimeError(msg) from e
+    print(f"[crawl_platform] 子进程已启动: task_id={task_id} pid={getattr(proc, 'pid', '?')}", flush=True)
 
     # 并发逐行读取 stdout/stderr：实时写入日志队列，stderr 尾部留存用于失败信息
     stderr_tail: list[str] = []
@@ -176,10 +190,12 @@ async def crawl_platform(
         _drain(proc.stderr, stderr_tail),
     )
     returncode = await proc.wait()
+    print(f"[crawl_platform] 子进程退出: task_id={task_id} returncode={returncode}", flush=True)
 
     if returncode != 0:
         detail = "\n".join(stderr_tail[-20:])[-2000:]
         msg = f"爬虫 {spider_name} 退出码 {returncode}: {detail}"
+        print(f"[crawl_platform] 任务失败: task_id={task_id} {msg[:300]}", flush=True)
         await _update_crawl_task(task_id, status="failed", error=msg[:500])
         await send_alert("crawl_failed", msg, spider=spider_name, exit_code=returncode)
         raise RuntimeError(msg)
@@ -194,9 +210,12 @@ async def crawl_platform(
     if line_count == 0:
         detail = "\n".join(stderr_tail[-20:])[-2000:]
         msg = f"爬虫 {spider_name} 产出 0 条数据: {detail}"
+        print(f"[crawl_platform] 任务失败（无产出）: task_id={task_id} {msg[:300]}", flush=True)
         await _update_crawl_task(task_id, status="failed", error=msg[:500])
         await send_alert("crawl_failed", msg, spider=spider_name, items=0)
         raise RuntimeError(msg)
+
+    print(f"[crawl_platform] 任务成功: task_id={task_id} spider={spider_name} items={line_count}", flush=True)
 
     await _update_crawl_task(
         task_id,
