@@ -152,8 +152,13 @@ class ZhilianSpider(BaseSpider):
             detail_href = card.css(".jobinfo__name::attr(href)").get()
             if not detail_href or not title:
                 continue
-            detail_url = response.urljoin(detail_href)
-            source_id = detail_href.rstrip("/").split("/")[-1].split(".")[0].split("?")[0]
+            # 详情 URL 剥离追踪参数（refcode/srccode/preactionid）：
+            # 智联 robots.txt 用 `Disallow: /*?*` 拒绝一切带 query 的请求
+            # （Protego 匹配 path+query），scrapy ROBOTSTXT_OBEY 会直接丢弃，
+            # 导致详情页全部走 errback 降级为列表页摘要、正文缺失。
+            clean_href = detail_href.split("?")[0]
+            detail_url = response.urljoin(clean_href)
+            source_id = clean_href.rstrip("/").split("/")[-1].split(".")[0]
 
             # 发布日期：从 SSR __INITIAL_STATE__ 提取（DOM 不渲染）
             post_date = publish_time_map.get(source_id, "")
