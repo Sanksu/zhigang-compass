@@ -222,9 +222,15 @@ def check_provider_health(provider: dict, timeout: Optional[int] = None) -> bool
     api_key = (provider.get("api_key") or "").strip()
     healthy = False
     if base_url:
+        # 部分网关（如 opencode.ai）对无 UA 的 urllib 请求返回 403，需带浏览器 UA 探测
         req = urllib.request.Request(
             f"{base_url}/models",
-            headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "zhigang-compass/1.0",
+            }
+            if api_key
+            else {"User-Agent": "zhigang-compass/1.0"},
         )
         try:
             with urllib.request.urlopen(

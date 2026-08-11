@@ -23,6 +23,10 @@ _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 sys.path.insert(0, str(_BACKEND_DIR / "data"))  # crawlers 包
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("cleanup_invalid_jobs")
+
 from sqlalchemy import delete, select  # noqa: E402
 
 from app.core.database import async_session_factory, neo4j_driver  # noqa: E402
@@ -95,32 +99,32 @@ async def main() -> None:
             by_reason[reason] = by_reason.get(reason, 0) + 1
 
     urls = sorted({r.source_url for r in targets if r.source_url})
-    print(f"jd_raw 总数: {len(rows)}  待清理: {len(targets)} 条（{by_reason}）")
-    print(f"涉及 source_url: {len(urls)} 个")
+    logger.info("jd_raw 总数: %s  待清理: %s 条（%s）", len(rows), len(targets), by_reason)
+    logger.info("涉及 source_url: %s 个", len(urls))
 
     with neo4j_driver.session() as session:
         ev_count = session.run(
             "MATCH (e:Evidence) WHERE e.source_url IN $urls RETURN count(e) AS c", urls=urls
         ).single()["c"]
-    print(f"图谱将删除 Evidence: {ev_count} 个")
+    logger.info("图谱将删除 Evidence: %s 个", ev_count)
 
     # 抽样展示待清理记录（供误杀核对）
     for r in targets[:15]:
-        print(f"  [{r.source}] id={r.id} title={r.snapshot.get('title', '')!r}")
+        logger.info("  [%s] id=%s title=%r", r.source, r.id, r.snapshot.get("title", ""))
 
     if args.dry_run:
-        print("\n[dry-run] 未执行任何删除")
+        logger.info("[dry-run] 未执行任何删除")
         return
 
     deleted = _delete_evidence(urls)
-    print(f"[1/3] 已删除图谱 Evidence: {deleted} 个")
+    logger.info("[1/3] 已删除图谱 Evidence: %s 个", deleted)
 
     ids = [r.id for r in targets]
     await _delete_jd_rows(ids)
-    print(f"[2/3] 已删除 jd_raw: {len(ids)} 条")
+    logger.info("[2/3] 已删除 jd_raw: %s 条", len(ids))
 
     result = await _reaggregate()
-    print(f"[3/3] 岗位聚合重算完成: {result}")
+    logger.info("[3/3] 岗位聚合重算完成: %s", result)
 
 
 if __name__ == "__main__":

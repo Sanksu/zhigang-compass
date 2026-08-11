@@ -33,6 +33,9 @@ class DiscoveryFeatures(BaseModel):
     arxiv_paper_count: Optional[int] = Field(default=None, description="arXiv 周论文数（M4）")
     github_star_velocity: Optional[float] = Field(default=None, description="GitHub Star 增速标准分（M4）")
 
+    # ── 成熟岗位排除（2026-08-11）──
+    first_seen_date: Optional[str] = Field(default=None, description="岗位首次观测日期（ISO，早于观测起点视为存量成熟岗位）")
+
 
 class ConfidenceScore(BaseModel):
     """综合置信度（设计文档 7.2.4 节）。"""

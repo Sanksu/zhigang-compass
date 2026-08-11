@@ -54,8 +54,11 @@ class Icourse163Spider(Spider):
         # -a keywords=Python,机器学习 覆盖默认关键词
         kws = kwargs.get("keywords")
         self.keywords = kws.split(",") if kws else DEFAULT_KEYWORDS
-        # -a max_pages=3 控制单关键词翻页数
-        self.max_pages = int(kwargs.get("max_pages", "3"))
+        # -a max_pages=3 控制单关键词翻页数；非法输入（-a max_pages=abc）回退默认 3
+        try:
+            self.max_pages = int(kwargs.get("max_pages", "3"))
+        except (TypeError, ValueError):
+            self.max_pages = 3
         # 请求间隔（仅用于日志展示，实际延迟在脚本内）
         limit = RATE_LIMIT.get(self.platform, {})
         delay_range = limit.get("delay_range", (8, 15))

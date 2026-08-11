@@ -11,9 +11,16 @@
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_BACKEND_DIR))
+
+from app.core.logging import setup_logging
+
+logger = setup_logging("build_inflation_golden")
+
 _OUTPUT = _BACKEND_DIR / "data" / "golden_set" / "golden_set_inflation.jsonl"
 
 # 场景字段：(id, job_level, min_years, skill_count, expert_count, education, gold_label, scenario)
@@ -113,7 +120,7 @@ def main() -> None:
 
     pos = sum(1 for r in records if r["is_inflation"])
     neg = len(records) - pos
-    print(f"通胀标注集: 共 {len(records)} 条（正样本 {pos} / 负样本 {neg}）")
+    logger.info(f"通胀标注集: 共 {len(records)} 条（正样本 {pos} / 负样本 {neg}）")
 
     if args.dry_run:
         return
@@ -122,7 +129,7 @@ def main() -> None:
         "\n".join(json.dumps(r, ensure_ascii=False) for r in records) + "\n",
         encoding="utf-8",
     )
-    print(f"已写入 {_OUTPUT.relative_to(_BACKEND_DIR)}")
+    logger.info(f"已写入 {_OUTPUT.relative_to(_BACKEND_DIR)}")
 
 
 if __name__ == "__main__":

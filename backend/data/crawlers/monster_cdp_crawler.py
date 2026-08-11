@@ -18,12 +18,13 @@ import json
 import os
 import sys
 import traceback
+from pathlib import Path
 from urllib.parse import urlencode
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app.core.logging import setup_logging
 
-def log(msg: str):
-    """日志输出到 stderr，不污染 stdout 的 JSONL。"""
-    print(msg, file=sys.stderr, flush=True)
+logger = setup_logging("monster_cdp_crawler", stream=sys.stderr)
 
 
 # Monster 内部 API 端点（前端公开 key，非私密）
@@ -61,10 +62,10 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
         # CDP 连接已启动的浏览器（绕过 DataDome 的 headless 检测）
         try:
             browser = await p.chromium.connect_over_cdp(cdp_url)
-            log(f"✅ CDP 连接成功: {cdp_url}（浏览器版本: {browser.version}）")
+            logger.info(f"✅ CDP 连接成功: {cdp_url}（浏览器版本: {browser.version}）")
         except Exception as e:
-            log(f"❌ CDP 连接失败（{cdp_url}）: {e}")
-            log(f"   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
+            logger.error(f"❌ CDP 连接失败（{cdp_url}）: {e}")
+            logger.info(f"   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
             return 0
 
         # 隔离：新建独立 context 并复制主 context 的 cookies（保留 DataDome 验证），
@@ -75,11 +76,11 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                 _cookies = await browser.contexts[0].cookies()
                 if _cookies:
                     await context.add_cookies(_cookies)
-                    log(f"ℹ️ 已复制 {len(_cookies)} 个 cookies 到隔离 context")
+                    logger.info(f"ℹ️ 已复制 {len(_cookies)} 个 cookies 到隔离 context")
                 else:
-                    log(f"⚠️ 主 context 无 cookies（DataDome 验证可能未完成）")
+                    logger.warning(f"⚠️ 主 context 无 cookies（DataDome 验证可能未完成）")
             except Exception as e:
-                log(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
+                logger.warning(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
         page = await context.new_page()
 
         # 监听所有响应，拦截 Monster 内部 API
@@ -94,14 +95,14 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                         # Monster API 实际字段：jobResults（不是 jobAds.jobAds）
                         jobs = body.get("jobResults", [])
                         captured_api_responses.append(body)
-                        log(f"  ✅ 拦截到搜索 API 响应: {len(jobs)} 条岗位 (totalSize={body.get('totalSize')})")
+                        logger.info(f"  ✅ 拦截到搜索 API 响应: {len(jobs)} 条岗位 (totalSize={body.get('totalSize')})")
                 except Exception as e:
-                    log(f"  ⚠️ 拦截响应解析失败: {e}")
+                    logger.warning(f"  ⚠️ 拦截响应解析失败: {e}")
 
         page.on("response", handle_response)
 
         for page_num in range(1, max_pages + 1):
-            log(f"=== 采集第 {page_num}/{max_pages} 页 ===")
+            logger.info(f"=== 采集第 {page_num}/{max_pages} 页 ===")
 
             url = f"https://www.monster.com/jobs/search?{urlencode({'q': keyword, 'where': city, 'page': page_num})}"
 
@@ -110,32 +111,32 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                 # 改用 domcontentloaded + 等待 SPA 渲染，再靠下方的 API 响应轮询兜底
                 await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 await page.wait_for_timeout(5000)
-                log(f"  页面已加载 | 当前 URL: {page.url} | 标题: {await page.title()}")
+                logger.info(f"  页面已加载 | 当前 URL: {page.url} | 标题: {await page.title()}")
             except Exception as e:
-                log(f"  导航失败: {e}")
+                logger.error(f"  导航失败: {e}")
                 try:
-                    log(f"  当前 URL: {page.url} | 标题: {await page.title()}")
+                    logger.info(f"  当前 URL: {page.url} | 标题: {await page.title()}")
                 except Exception:
                     pass
                 if captured_api_responses:
-                    log(f"  导航超时但已有 API 响应，继续处理")
+                    logger.warning(f"  导航超时但已有 API 响应，继续处理")
                 else:
                     continue
 
-            log("  等待 API 响应...")
+            logger.info("  等待 API 响应...")
             loop = asyncio.get_running_loop()
             deadline = loop.time() + 20
             while not captured_api_responses and loop.time() < deadline:
                 await asyncio.sleep(0.5)
 
             if not captured_api_responses:
-                log(f"  ⚠️ 第 {page_num} 页未拦截到 API 响应")
+                logger.warning(f"  ⚠️ 第 {page_num} 页未拦截到 API 响应")
                 try:
                     title = await page.title()
-                    log(f"  页面标题: {title}")
+                    logger.info(f"  页面标题: {title}")
                     # 检查是否在 DataDome challenge 页
                     if "blocked" in title.lower() or "access" in title.lower():
-                        log(f"  ❌ 被 DataDome 拦截")
+                        logger.error(f"  ❌ 被 DataDome 拦截")
                         break
                 except Exception:
                     pass
@@ -146,17 +147,17 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
 
             # Monster API 实际字段：jobResults
             job_ads = api_data.get("jobResults", [])
-            log(f"  第 {page_num} 页岗位数: {len(job_ads)}")
+            logger.info(f"  第 {page_num} 页岗位数: {len(job_ads)}")
 
             if not job_ads:
-                log(f"  第 {page_num} 页无岗位，结束采集")
-                log(f"  API 响应顶层 keys: {list(api_data.keys())}")
+                logger.warning(f"  第 {page_num} 页无岗位，结束采集")
+                logger.info(f"  API 响应顶层 keys: {list(api_data.keys())}")
                 break
 
             all_jobs_data.extend(job_ads)
 
             if page_num < max_pages:
-                log("  翻页间隔 5 秒...")
+                logger.info("  翻页间隔 5 秒...")
                 await asyncio.sleep(5)
 
         # CDP 模式下不关闭 browser（避免关闭用户的浏览器）
@@ -169,7 +170,7 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
             print(json.dumps(item, ensure_ascii=False), flush=True)
             items.append(item)
 
-    log(f"✅ 采集完成: kw={keyword} city={city} count={len(items)}")
+    logger.info(f"✅ 采集完成: kw={keyword} city={city} count={len(items)}")
     return len(items)
 
 
@@ -305,7 +306,7 @@ def _map_job_to_item(job: dict) -> dict:
             "raw": job,
         }
     except Exception as e:
-        log(f"⚠️ 字段映射失败: {e}, job keys: {list(job.keys())[:10]}")
+        logger.warning(f"⚠️ 字段映射失败: {e}, job keys: {list(job.keys())[:10]}")
         return None
 
 
@@ -318,7 +319,7 @@ def main():
                         help="CDP 调试端点（默认 http://127.0.0.1:9222，支持局域网内容器浏览器）")
     args = parser.parse_args()
 
-    log(f"CDP 端点: {args.cdp_url}")
+    logger.info(f"CDP 端点: {args.cdp_url}")
     count = asyncio.run(crawl(args.keyword, args.city, args.max_pages, args.cdp_url))
     sys.exit(0 if count > 0 else 1)
 

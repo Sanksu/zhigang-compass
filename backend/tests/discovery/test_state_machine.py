@@ -14,6 +14,7 @@ from app.services.discovery.state_machine import (
     evaluate_auto_transition,
     freq_z_scores,
     has_recovery,
+    jd_publish_windows,
     position_freq_windows,
     window_volatility,
     PositionStateMachine,
@@ -73,6 +74,39 @@ class TestWindowHelpers:
         [-3:]=[12,10,4] 下降率 0.667。
         """
         assert decline_rate(WindowFreq([10, 12, 10, 4])) == pytest.approx(0.6667, abs=1e-3)
+
+
+class TestJdPublishWindows:
+    """从 jd_raw 按发布日聚合的岗位频次窗口序列（declining 信号源，30 天窗口）。
+
+    窗口以全部日期最晚日为终点对齐（end 由数据推断），序列时间升序；
+    岗位窗口未覆盖处补 0（近期无发布 → 序列尾部 0，即下降信号）。
+    """
+
+    def test_windows_aligned_to_latest_date(self):
+        # end=2026-08-11（数据最晚日），窗口 0=(07-13..08-11]、
+        # 窗口1=(06-13..07-12]、窗口2=(05-14..06-12]；各日落入其窗口，升序输出
+        daily = {"岗位A": {"2026-08-11": 5, "2026-07-12": 3, "2026-06-12": 2}}
+        assert jd_publish_windows(daily) == {"岗位A": [2.0, 3.0, 5.0]}
+
+    def test_empty_returns_empty(self):
+        assert jd_publish_windows({}) == {}
+
+    def test_gap_padded_with_zeros(self):
+        # 窗口 0 与窗口 3 有发布（窗口 1/2 无记录补 0）：序列尾部 0 即
+        # "近期无发布"的下降信号（declining 判定依赖此补 0 语义）
+        daily = {"岗位A": {"2026-08-11": 5, "2026-05-12": 2}}
+        assert jd_publish_windows(daily) == {"岗位A": [2.0, 0.0, 0.0, 5.0]}
+
+    def test_daily_counts_aggregated_into_window(self):
+        # 同一窗口内多日发布数求和
+        daily = {"岗位A": {"2026-08-11": 3, "2026-08-10": 2, "2026-07-12": 4}}
+        assert jd_publish_windows(daily) == {"岗位A": [4.0, 5.0]}
+
+    def test_custom_window_size(self):
+        # 7 天窗口：08-11 与 08-10 同窗口（间隔 1 天），08-04 落在上一窗口
+        daily = {"岗位A": {"2026-08-11": 3, "2026-08-10": 1, "2026-08-04": 2}}
+        assert jd_publish_windows(daily, window_days=7) == {"岗位A": [2.0, 4.0]}
 
 
 class TestFreqZScores:

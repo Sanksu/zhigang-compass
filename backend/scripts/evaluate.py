@@ -32,6 +32,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("evaluate")
+
 from scripts.tune_match_weights import evaluate_pairs, load_pairs  # noqa: E402
 from tests.evaluate.run_baseline import (  # noqa: E402
     _norm_skill,
@@ -437,27 +441,27 @@ def main() -> None:
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     html_path.write_text(generate_html_report(report), encoding="utf-8")
 
-    print("=" * 56)
-    print("准确率评测报告（AL-M4-04）")
-    print("=" * 56)
+    logger.info("=" * 56)
+    logger.info("准确率评测报告（AL-M4-04）")
+    logger.info("=" * 56)
     for r in results:
         if r.get("skipped"):
-            print(f"[SKIP] {r['task']}: {r['reason']}")
+            logger.warning(f"[SKIP] {r['task']}: {r['reason']}")
             continue
         if r["task"] == "jd":
-            print(f"JD 解析   P={r['precision']:.4f} R={r['recall']:.4f} F1={r['f1']:.4f} "
-                  f"({r['samples']} 条, {r['method']})")
-            print(f"         目标 F1≥{r['target_f1']:.2f} -> {'达标' if r['target_met'] else '未达标'}")
+            logger.info(f"JD 解析   P={r['precision']:.4f} R={r['recall']:.4f} F1={r['f1']:.4f} "
+                        f"({r['samples']} 条, {r['method']})")
+            logger.info(f"         目标 F1≥{r['target_f1']:.2f} -> {'达标' if r['target_met'] else '未达标'}")
         elif r["task"] == "resume":
-            print(f"简历提取  P={r['precision']:.4f} R={r['recall']:.4f} F1={r['f1']:.4f} "
-                  f"({r['samples']} 条, {r['method']})")
-            print(f"         目标 F1≥{r['target_f1']:.2f} -> {'达标' if r['target_met'] else '未达标'}")
+            logger.info(f"简历提取  P={r['precision']:.4f} R={r['recall']:.4f} F1={r['f1']:.4f} "
+                        f"({r['samples']} 条, {r['method']})")
+            logger.info(f"         目标 F1≥{r['target_f1']:.2f} -> {'达标' if r['target_met'] else '未达标'}")
         else:
             top3_str = f" Top-3={r['top3_accuracy']:.4f}" if r.get("top3_accuracy") is not None else ""
-            print(f"人岗匹配  Spearman={r['spearman']:.4f} Accuracy={r['accuracy']:.4f}{top3_str} ({r['method']})")
-            print(f"         目标 Acc≥{r['target_accuracy']:.2f} -> {'达标' if r['target_met'] else '未达标'}")
-    print(f"JSON 报告: {json_path.relative_to(_BACKEND_DIR)}")
-    print(f"HTML 报告: {html_path.relative_to(_BACKEND_DIR)}")
+            logger.info(f"人岗匹配  Spearman={r['spearman']:.4f} Accuracy={r['accuracy']:.4f}{top3_str} ({r['method']})")
+            logger.info(f"         目标 Acc≥{r['target_accuracy']:.2f} -> {'达标' if r['target_met'] else '未达标'}")
+    logger.info(f"JSON 报告: {json_path.relative_to(_BACKEND_DIR)}")
+    logger.info(f"HTML 报告: {html_path.relative_to(_BACKEND_DIR)}")
 
 
 if __name__ == "__main__":

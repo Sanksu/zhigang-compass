@@ -16,6 +16,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("sync_skill_normalization")
+
 from app.core.database import neo4j_driver
 from app.services.extraction.normalization import SkillNormalizer
 
@@ -53,17 +57,17 @@ def write_back(standard: str, name: str, confidence: float, dry_run: bool) -> No
 def main(dry_run: bool = False) -> None:
     names = load_skill_names()
     if not names:
-        print("图谱无 Skill 节点，跳过")
+        logger.warning("图谱无 Skill 节点，跳过")
         return
 
     normalizer = SkillNormalizer()
     normalized = normalizer.normalize_many(names)
     if not normalized:
-        print("归一化无输出（可能是模型不可用且无词典命中），跳过")
+        logger.warning("归一化无输出（可能是模型不可用且无词典命中），跳过")
         return
 
     changed = sum(1 for n, r in normalized.items() if r.standard != n)
-    print(f"技能总数: {len(names)}，归一化后变更: {changed}")
+    logger.info("技能总数: %s，归一化后变更: %s", len(names), changed)
 
     # 回写 normalized_name（含自指 SET，幂等）
     for name, res in normalized.items():
@@ -71,14 +75,14 @@ def main(dry_run: bool = False) -> None:
 
     # SIMILAR_TO 关系（同簇相似度 ≥ 0.85，非自指）
     pairs = normalizer.similar_pairs(normalized)
-    print(f"SIMILAR_TO 关系候选: {len(pairs)}")
+    logger.info("SIMILAR_TO 关系候选: %s", len(pairs))
     for standard, member, sim in pairs:
         write_back(standard, member, sim, dry_run)
 
     if dry_run:
-        print("dry-run 完成，未写图谱")
+        logger.info("dry-run 完成，未写图谱")
     else:
-        print("完成：normalized_name 与 SIMILAR_TO 已回写")
+        logger.info("完成：normalized_name 与 SIMILAR_TO 已回写")
 
 
 if __name__ == "__main__":

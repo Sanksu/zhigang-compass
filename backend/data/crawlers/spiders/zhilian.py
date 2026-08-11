@@ -11,6 +11,7 @@
 
 import json
 import re
+from datetime import datetime, timedelta, timezone
 
 from scrapy.http import Response
 from scrapy_playwright.page import PageMethod
@@ -25,12 +26,43 @@ ZHILIAN_CITY_CODES = {
     "南京": "635", "武汉": "736",
 }
 
+# 增量采集翻页上限（默认）；历史回爬放宽（G-01，由发布时间截断提前停页）
+INCREMENTAL_MAX_PAGES = 5
+BACKFILL_MAX_PAGES = 50
+
+# 东八区
+_CST = timezone(timedelta(hours=8))
+
+
+def _is_older_than_days(post_date: str, days: int) -> bool:
+    """发布时间是否早于 days 天前。无法解析返回 False（不误截断）。"""
+    try:
+        dt = datetime.fromisoformat(post_date)
+    except (ValueError, TypeError):
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_CST)
+    cutoff = datetime.now(_CST) - timedelta(days=days)
+    return dt < cutoff
+
 
 class ZhilianSpider(BaseSpider):
     name = "zhilian"
     platform = "zhilian"
 
     SEARCH_URL = "https://sou.zhaopin.com/"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 历史回爬（G-01）：-a history_days=90 放宽翻页上限并逐页按发布时间截断
+        self.history_days = int(kwargs.get("history_days") or 0)
+        self._max_pages = BACKFILL_MAX_PAGES if self.history_days else INCREMENTAL_MAX_PAGES
+
+    def _cutoff_reached(self, publish_time_map: dict) -> bool:
+        """本页出现早于 history_days 天的岗位时停止翻页（列表按发布时间倒序）。"""
+        if not self.history_days:
+            return False
+        return any(_is_older_than_days(v, self.history_days) for v in publish_time_map.values())
 
     def start_requests(self):
         for keyword in self.keywords:
@@ -120,8 +152,13 @@ class ZhilianSpider(BaseSpider):
             detail_href = card.css(".jobinfo__name::attr(href)").get()
             if not detail_href or not title:
                 continue
-            detail_url = response.urljoin(detail_href)
-            source_id = detail_href.rstrip("/").split("/")[-1].split(".")[0].split("?")[0]
+            # 详情 URL 剥离追踪参数（refcode/srccode/preactionid）：
+            # 智联 robots.txt 用 `Disallow: /*?*` 拒绝一切带 query 的请求
+            # （Protego 匹配 path+query），scrapy ROBOTSTXT_OBEY 会直接丢弃，
+            # 导致详情页全部走 errback 降级为列表页摘要、正文缺失。
+            clean_href = detail_href.split("?")[0]
+            detail_url = response.urljoin(clean_href)
+            source_id = clean_href.rstrip("/").split("/")[-1].split(".")[0]
 
             # 发布日期：从 SSR __INITIAL_STATE__ 提取（DOM 不渲染）
             post_date = publish_time_map.get(source_id, "")
@@ -152,13 +189,13 @@ class ZhilianSpider(BaseSpider):
                 "raw_text": raw_text,
             })
 
-        # 翻页（最多 5 页，避免过度采集触发反爬）
+        # 翻页（默认最多 5 页；历史回爬放宽并由发布时间截断提前停页）
         current_page = response.meta.get("page", 1)
         self.logger.info(
             f"[zhilian] kw={response.meta.get('keyword')} city={response.meta.get('city')} "
             f"页={current_page} 产出 {yield_count} 条详情请求"
         )
-        if current_page < 5:
+        if current_page < self._max_pages and not self._cutoff_reached(publish_time_map):
             next_href = response.css(".next-page::attr(href), a.pageset[rel=next]::attr(href)").get()
             if next_href:
                 next_url = response.urljoin(next_href)

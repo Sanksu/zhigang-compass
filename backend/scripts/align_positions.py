@@ -17,6 +17,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("align_positions")
+
 from app.core.database import neo4j_driver
 from app.services.kg.occupation_align import OccupationAligner
 
@@ -28,7 +32,7 @@ def main(dry_run: bool) -> None:
             "RETURN p.id AS id, p.name AS name"
         ).data()
     positions = [(r["id"], r["name"]) for r in rows]
-    print(f"待回填岗位 {len(positions)} 个")
+    logger.info("待回填岗位 %s 个", len(positions))
 
     aligner = OccupationAligner.get()
     matched = 0
@@ -50,7 +54,7 @@ def main(dry_run: bool) -> None:
                 conf=conf,
             )
     suffix = "[dry-run] " if dry_run else ""
-    print(f"{suffix}对齐命中 {matched}/{len(positions)} 个，其余未命中不入边")
+    logger.info(f"{suffix}对齐命中 {matched}/{len(positions)} 个，其余未命中不入边")
 
 
 if __name__ == "__main__":

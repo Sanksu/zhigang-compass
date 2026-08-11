@@ -43,8 +43,8 @@ CDP_PORT_BY_PLATFORM = {"boss": 9222, "monster": 9223, "glassdoor": 9224, "maima
 DEFAULT_CDP_PORT = 9222
 
 
-def find_chrome() -> str:
-    """查找 Chromium 内核浏览器（Chrome 优先，Edge 次之）。"""
+def find_chrome() -> str | None:
+    """查找 Chromium 内核浏览器（Chrome 优先，Edge 次之）；未找到返回 None。"""
     if sys.platform == "win32":
         candidates = []
         # Chrome
@@ -66,7 +66,7 @@ def find_chrome() -> str:
         for c in candidates:
             if c.exists():
                 return str(c)
-        return str(candidates[0]) if candidates else "chrome.exe"
+        return None
     # macOS / Linux
     candidates = [
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -82,7 +82,7 @@ def find_chrome() -> str:
     for c in candidates:
         if Path(c).exists():
             return c
-    return candidates[0]
+    return None
 
 
 def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, cdp_address: str = "127.0.0.1",
@@ -97,6 +97,9 @@ def start_chrome(cdp_port: int = DEFAULT_CDP_PORT, cdp_address: str = "127.0.0.1
         profile_dir: 该平台的隔离 profile 目录（None 时用 BOSS 默认）
     """
     chrome_path = find_chrome()
+    if not chrome_path:
+        print("❌ 未找到 Chrome/Edge/Chromium 浏览器，请先安装浏览器后重试")
+        sys.exit(1)
     profile_dir = profile_dir or BOSS_CHROME_PROFILE_DIR
     profile_dir.mkdir(parents=True, exist_ok=True)
 
@@ -200,7 +203,12 @@ def ensure_cdp_chrome(cdp_url: str | None = None, wait_seconds: int = 20,
 
 
 def check_login(cdp_url: str) -> bool:
-    """通过 API 调用检查登录态是否有效。"""
+    """通过 API 调用检查登录态是否有效。
+
+    注意：内部使用 asyncio.run()，仅可在脚本级（无运行中事件循环）调用；
+    在 worker/已有事件循环的上下文调用会抛 RuntimeError，须改用
+    playwright 的 async API 直接集成。
+    """
     if not check_cdp(cdp_url):
         return False
 

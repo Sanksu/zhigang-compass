@@ -49,7 +49,11 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    把握不准时倾向 "nice"，避免全部标 "must" 失去区分度。
    以及熟练度 level — "初级"/"中级"/"高级" 三档：文本含"了解/熟悉"→"初级"、
    "掌握/熟练"→"中级"、"精通/深入"→"高级"；JD 无明确熟练度表述时省略 level 字段
-7. 仅抽取文本中明确出现的内容，不要自行推断
+7. 薪资（salary_range）：提取文本中的薪资表述，保留原始写法，币种与单位
+   （K/万/年/月/时/$/USD 等）必须保留，如 "20-40K"、"1-1.4万"、
+   "USD 100000-150000/年"、"US$178K - US$241K (Employer provided)"、"面议"；
+   仅薪资高低类表述计入，招聘福利（如"年终奖 14 薪"）不计；未提及薪资时省略该字段
+8. 仅抽取文本中明确出现的内容，不要自行推断
 
 JD 文本：
 {jd_text}
@@ -79,12 +83,16 @@ JD 文本：招聘网络安全工程师，负责渗透测试与安全运维，�
 输出：{{"position_name": "网络安全工程师", "skills": [{{"name": "Linux"}}, {{"name": "Python"}}, {{"name": "渗透测试"}}], "tools": [], "education": {{"level": "本科"}}, "certifications": [{{"name": "CISP"}}, {{"name": "OSCP"}}], "requirements": [{{"skill_name": "Linux", "necessity": "must", "level": "中级"}}, {{"skill_name": "Python", "necessity": "must", "level": "中级"}}, {{"skill_name": "渗透测试", "necessity": "must"}}]}}
 
 示例 6（英文复合岗名完整翻译）：
-JD 文本：BioChemical Engineer - Analog Devices, Wilmington MA. Design biochemical process solutions for semiconductor fabrication. Required: chemical engineering background, process design experience, Six Sigma certification.
-输出：{{"position_name": "生化工程师", "skills": [{{"name": "化学工程"}}, {{"name": "工艺设计"}}, {{"name": "Six Sigma"}}], "tools": [], "education": {{"level": "本科", "major": "化学工程"}}, "certifications": [{{"name": "Six Sigma"}}], "requirements": [{{"skill_name": "化学工程", "necessity": "must", "level": "中级"}}, {{"skill_name": "工艺设计", "necessity": "must"}}, {{"skill_name": "Six Sigma", "necessity": "nice"}}]}}
+JD 文本：BioChemical Engineer - Analog Devices, Wilmington MA. Design biochemical process solutions for semiconductor fabrication. Required: chemical engineering background, process design experience, Six Sigma certification. Salary: $120K-$150K/yr.
+输出：{{"position_name": "生化工程师", "salary_range": "$120K-$150K/yr", "skills": [{{"name": "化学工程"}}, {{"name": "工艺设计"}}, {{"name": "Six Sigma"}}], "tools": [], "education": {{"level": "本科", "major": "化学工程"}}, "certifications": [{{"name": "Six Sigma"}}], "requirements": [{{"skill_name": "化学工程", "necessity": "must", "level": "中级"}}, {{"skill_name": "工艺设计", "necessity": "must"}}, {{"skill_name": "Six Sigma", "necessity": "nice"}}]}}
 
 示例 7（英文复合岗名完整翻译，禁止丢 Engineer）：
-JD 文本：Sr Systems Reliability Engineer - Responsible for system reliability engineering, automation of infrastructure, incident response. 5+ years experience, Linux, Python, Terraform required.
-输出：{{"position_name": "系统可靠性工程师", "skills": [{{"name": "Linux"}}, {{"name": "Python"}}, {{"name": "Terraform"}}, {{"name": "系统可靠性"}}], "tools": [{{"name": "Terraform"}}], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Linux", "necessity": "must", "level": "高级"}}, {{"skill_name": "Python", "necessity": "must"}}, {{"skill_name": "Terraform", "necessity": "must"}}, {{"skill_name": "系统可靠性", "necessity": "must"}}]}}
+JD 文本：Sr Systems Reliability Engineer - Responsible for system reliability engineering, automation of infrastructure, incident response. 5+ years experience, Linux, Python, Terraform required. Salary: USD 130000-160000/年.
+输出：{{"position_name": "系统可靠性工程师", "salary_range": "USD 130000-160000/年", "skills": [{{"name": "Linux"}}, {{"name": "Python"}}, {{"name": "Terraform"}}, {{"name": "系统可靠性"}}], "tools": [{{"name": "Terraform"}}], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Linux", "necessity": "must", "level": "高级"}}, {{"skill_name": "Python", "necessity": "must"}}, {{"skill_name": "Terraform", "necessity": "must"}}, {{"skill_name": "系统可靠性", "necessity": "must"}}]}}
+
+示例 8（indeed 英文源，US$K 区间 + 雇主提供标注）：
+JD 文本：Backend Software Engineer - Remote, US. Build distributed services with Go and PostgreSQL. 3+ years backend experience required. Salary: US$178K - US$241K (Employer provided).
+输出：{{"position_name": "后端软件工程师", "salary_range": "US$178K - US$241K (Employer provided)", "skills": [{{"name": "Go"}}, {{"name": "PostgreSQL"}}, {{"name": "分布式系统"}}], "tools": [], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Go", "necessity": "must", "level": "中级"}}, {{"skill_name": "PostgreSQL", "necessity": "must"}}, {{"skill_name": "分布式系统", "necessity": "nice"}}]}}
 """
 
 BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输出 JSON 数组（每条 JD 对应一个对象，数组第 i 个元素对应"JD文本 i"）。
@@ -129,7 +137,11 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    把握不准时倾向 "nice"，避免全部标 "must" 失去区分度。
    以及熟练度 level — "初级"/"中级"/"高级" 三档：文本含"了解/熟悉"→"初级"、
    "掌握/熟练"→"中级"、"精通/深入"→"高级"；JD 无明确熟练度表述时省略 level 字段
-7. 仅抽取文本中明确出现的内容，不要自行推断
+7. 薪资（salary_range）：提取文本中的薪资表述，保留原始写法，币种与单位
+   （K/万/年/月/时/$/USD 等）必须保留，如 "20-40K"、"1-1.4万"、
+   "USD 100000-150000/年"、"US$178K - US$241K (Employer provided)"、"面议"；
+   仅薪资高低类表述计入，招聘福利（如"年终奖 14 薪"）不计；未提及薪资时省略该字段
+8. 仅抽取文本中明确出现的内容，不要自行推断
 
 JD 文本：
 {jd_texts}

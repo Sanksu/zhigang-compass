@@ -23,6 +23,10 @@ sys.path.insert(0, str(_BACKEND_DIR))
 
 from sqlalchemy import select
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("check_data_freshness")
+
 from app.core.database import async_session_factory
 from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
 from app.services.data_quality.update_status import platform_freshness
@@ -47,20 +51,20 @@ async def collect() -> dict:
 
 
 def _print_section(name: str, section: dict) -> None:
-    print(f"\n[{name}] T+1 合规: {'✅' if section['t1_compliant'] else '⚠️ 有过期来源'}")
+    logger.info(f"[{name}] T+1 合规: {'✅' if section['t1_compliant'] else '⚠️ 有过期来源'}")
     for p in section["platforms"]:
         mark = "✅" if p["fresh"] else "⚠️"
         crawl = p["last_crawl"] or "无法解析"
         days = f"{p['days_since']} 天" if p["days_since"] is not None else "?"
-        print(f"  {mark} {p['source']:<14} 最新抓取 {crawl} 距今 {days}")
+        logger.info(f"  {mark} {p['source']:<14} 最新抓取 {crawl} 距今 {days}")
 
 
 def main() -> int:
     report = asyncio.run(collect())
 
-    print("=" * 56)
-    print("智岗罗盘 — 数据更新新鲜度检查（DA-M4-03，T+1 承诺）")
-    print("=" * 56)
+    logger.info("=" * 56)
+    logger.info("智岗罗盘 — 数据更新新鲜度检查（DA-M4-03，T+1 承诺）")
+    logger.info("=" * 56)
     for name in ("jd", "course", "paper", "community"):
         _print_section(name, report[name])
 
@@ -68,13 +72,13 @@ def main() -> int:
     report_dir.mkdir(parents=True, exist_ok=True)
     path = report_dir / f"freshness_{datetime.now(_TZ_CN).strftime('%Y%m%d')}.json"
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\n报告已写入: {path.relative_to(_BACKEND_DIR)}")
+    logger.info(f"报告已写入: {path.relative_to(_BACKEND_DIR)}")
 
     all_compliant = all(report[name]["t1_compliant"] for name in ("jd", "course", "paper", "community"))
     if not all_compliant:
-        print("[WARN] 存在过期数据来源（>1 天未更新），请检查 ETL 调度")
+        logger.warning("[WARN] 存在过期数据来源（>1 天未更新），请检查 ETL 调度")
         return 1
-    print("[OK] 全部来源在 T+1 窗口内更新")
+    logger.info("[OK] 全部来源在 T+1 窗口内更新")
     return 0
 
 

@@ -31,6 +31,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("cleanup_position_names")
+
 from sqlalchemy import select  # noqa: E402
 
 from app.core.database import async_session_factory, neo4j_driver  # noqa: E402
@@ -71,22 +75,22 @@ def main() -> None:
     existing = {p["name"] for p in positions}
     conflicts = [t for t in rename if t["std"] in existing]
 
-    print(f"含'高级'节点: {len(rename) + len(delete) + len(skip)} 个")
-    print(f"  改名: {len(rename)} 个")
+    logger.info("含'高级'节点: %s 个", len(rename) + len(delete) + len(skip))
+    logger.info("  改名: %s 个", len(rename))
     for t in rename:
-        print(f"    {t['name']} → {t['std']}")
-    print(f"  删除: {len(delete)} 个")
+        logger.info("    %s → %s", t["name"], t["std"])
+    logger.info("  删除: %s 个", len(delete))
     for t in delete:
-        print(f"    {t['name']} (freq={t['freq']})")
-    print(f"  跳过(规则无法清理): {len(skip)} 个")
+        logger.info("    %s (freq=%s)", t["name"], t["freq"])
+    logger.info("  跳过(规则无法清理): %s 个", len(skip))
     for t in skip:
-        print(f"    {t['name']}")
+        logger.info("    %s", t["name"])
     if conflicts:
-        print(f"\n!! 冲突（目标名已存在，需人工处理）: {[t['name'] + '→' + t['std'] for t in conflicts]}")
+        logger.warning("!! 冲突（目标名已存在，需人工处理）: %s", [t["name"] + "→" + t["std"] for t in conflicts])
         return
 
     if args.dry_run:
-        print("\n[dry-run] 未执行任何修改")
+        logger.info("[dry-run] 未执行任何修改")
         return
 
     with neo4j_driver.session() as session:
@@ -94,20 +98,20 @@ def main() -> None:
             session.run("MATCH (p:Position {id: $id}) SET p.name = $std", id=t["id"], std=t["std"])
         for t in delete:
             session.run("MATCH (p:Position {id: $id}) DETACH DELETE p", id=t["id"])
-        print(f"[1/2] 已改名 {len(rename)} 个、删除 {len(delete)} 个节点")
+        logger.info("[1/2] 已改名 %s 个、删除 %s 个节点", len(rename), len(delete))
 
         rows = asyncio.run(_load_jd_rows())
         agg = build_aggregates(rows)
         now = datetime.now(timezone.utc).isoformat()
         result = write_aggregates(session, agg, now)
-        print(f"[2/2] 重新聚合完成: 写入岗位 {result['positions']} 个、边 {result['edges']} 条")
+        logger.info("[2/2] 重新聚合完成: 写入岗位 %s 个、边 %s 条", result["positions"], result["edges"])
 
     with neo4j_driver.session() as session:
         leftover = session.run(
             "MATCH (p:Position) WHERE p.name CONTAINS '高级' RETURN p.name AS name"
         ).data()
         total = session.run("MATCH (p:Position) RETURN count(p) AS c").single()["c"]
-    print(f"清理后岗位总数: {total}  仍含'高级': {[r['name'] for r in leftover]}")
+    logger.info(f"清理后岗位总数: {total}  仍含'高级': {[r['name'] for r in leftover]}")
 
 
 if __name__ == "__main__":

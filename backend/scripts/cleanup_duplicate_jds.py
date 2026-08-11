@@ -20,6 +20,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("cleanup_duplicate_jds")
+
 from sqlalchemy import delete, select  # noqa: E402
 
 from app.core.database import async_session_factory, neo4j_driver  # noqa: E402
@@ -73,27 +77,27 @@ async def main() -> None:
 
     rows = await _duplicate_rows()
     urls = sorted({r.source_url for r in rows if r.source_url})
-    print(f"zhilian 重复记录: {len(rows)} 条（涉及 source_url {len(urls)} 个）")
+    logger.info("zhilian 重复记录: %s 条（涉及 source_url %s 个）", len(rows), len(urls))
 
     with neo4j_driver.session() as session:
         ev_count = session.run(
             "MATCH (e:Evidence) WHERE e.source_url IN $urls RETURN count(e) AS c", urls=urls
         ).single()["c"]
-    print(f"图谱将删除 Evidence: {ev_count} 个")
+    logger.info("图谱将删除 Evidence: %s 个", ev_count)
 
     if args.dry_run:
-        print("\n[dry-run] 未执行任何删除")
+        logger.info("[dry-run] 未执行任何删除")
         return
 
     deleted = _delete_evidence(urls)
-    print(f"[1/3] 已删除图谱 Evidence: {deleted} 个")
+    logger.info("[1/3] 已删除图谱 Evidence: %s 个", deleted)
 
     ids = [r.id for r in rows]
     await _delete_jd_rows(ids)
-    print(f"[2/3] 已删除 jd_raw: {len(ids)} 条")
+    logger.info("[2/3] 已删除 jd_raw: %s 条", len(ids))
 
     result = await _reaggregate()
-    print(f"[3/3] 岗位聚合重算完成: {result}")
+    logger.info("[3/3] 岗位聚合重算完成: %s", result)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,21 @@ class JobSpyBaseSpider(BaseSpider):
         self.crawler_script = str(
             Path(__file__).resolve().parent.parent / "jobspy_crawler.py"
         )
+        # 历史回爬（G-01）：-a history_days=90 透传 --days-old 到 jobspy_crawler
+        self.history_days = int(kwargs.get("history_days") or 0)
+
+    def _build_cmd(self, keyword: str, city: str) -> list[str]:
+        """构造 jobspy_crawler 采集命令（含历史回爬 --days-old 参数）。"""
+        cmd = [
+            sys.executable, self.crawler_script,
+            "--site", self.site_name,
+            "--keyword", keyword,
+            "--city", city,
+            "--results-wanted", str(self.results_wanted),
+        ]
+        if self.history_days:
+            cmd.extend(["--days-old", str(self.history_days)])
+        return cmd
 
     def start_requests(self):
         """通过 subprocess 调用 JobSpy 采集脚本，解析 JSONL 输出并 yield Item。"""
@@ -45,8 +60,6 @@ class JobSpyBaseSpider(BaseSpider):
             self.logger.error("无采集任务，请通过 -a keywords= -a cities= 指定")
             return
 
-        python_exe = sys.executable
-
         task_total = len(tasks)
         _started = time.monotonic()
         for task_idx, task in enumerate(tasks):
@@ -54,13 +67,7 @@ class JobSpyBaseSpider(BaseSpider):
             city = task["city"]
             self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword} city={city}")
 
-            cmd = [
-                python_exe, self.crawler_script,
-                "--site", self.site_name,
-                "--keyword", keyword,
-                "--city", city,
-                "--results-wanted", str(self.results_wanted),
-            ]
+            cmd = self._build_cmd(keyword, city)
 
             try:
                 proc = subprocess.Popen(

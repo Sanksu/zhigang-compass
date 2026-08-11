@@ -19,6 +19,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("backfill_ingest")
+
 from sqlalchemy import func, select
 
 from app.core.database import async_session_factory, neo4j_driver
@@ -51,9 +55,9 @@ async def backfill_jd() -> dict:
         rounds += 1
         r = await batch_extract({}, limit=_BATCH_SIZE)
         succeeded += r["succeeded"]
-        print(
-            f"[round {rounds}] processed={r['processed']} "
-            f"succeeded={r['succeeded']} failed={len(r['failed'])}"
+        logger.info(
+            "[round %s] processed=%s succeeded=%s failed=%s",
+            rounds, r["processed"], r["succeeded"], len(r["failed"]),
         )
         if r["processed"] == 0:
             break
@@ -80,15 +84,16 @@ async def backfill_courses() -> tuple[int, list[str]]:
 
 
 async def main() -> None:
-    print("=== 阶段 1：JD 剩余抽取入图 ===")
+    logger.info("=== 阶段 1：JD 剩余抽取入图 ===")
     jd = await backfill_jd()
-    print(f"JD 回填完成: rounds={jd['rounds']} 新增成功={jd['succeeded_total']} 剩余未抽取={jd['remaining']}")
+    logger.info("JD 回填完成: rounds=%s 新增成功=%s 剩余未抽取=%s",
+                jd["rounds"], jd["succeeded_total"], jd["remaining"])
 
-    print("=== 阶段 2：课程入图 ===")
+    logger.info("=== 阶段 2：课程入图 ===")
     imported, errors = await backfill_courses()
-    print(f"课程入图 {imported} 条，失败 {len(errors)} 条")
+    logger.info("课程入图 %s 条，失败 %s 条", imported, len(errors))
     for e in errors[:10]:
-        print("COURSE FAIL:", e)
+        logger.warning("COURSE FAIL: %s", e)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -23,6 +24,7 @@ from arq.cron import cron
 from arq.worker import func
 
 from app.core.config import settings
+from app.services.alerting import send_alert
 
 # 子进程 stdout/stderr 强制 UTF-8（中文 Windows 默认 GBK 管道，按 UTF-8 解码会乱码）
 # 与 crawlers/spiders 下各 spider 调外部进程的模式一致
@@ -123,6 +125,11 @@ async def crawl_platform(
     timestamp = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S")
     output_file = _OUTPUT_DIR / f"{spider_name}_{timestamp}.jsonl"
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(
+        f"[crawl_platform] 任务开始: task_id={task_id} spider={spider_name} "
+        f"keywords={keywords} cities={cities or '(默认)'} output={output_file}",
+        flush=True,
+    )
 
     cmd = [
         sys.executable, "-m", "scrapy", "crawl", spider_name,
@@ -138,6 +145,7 @@ async def crawl_platform(
             cmd.extend(["-a", f"max_results={max_results}"])
         else:
             print(f"[crawl_platform] spider={spider_name} 不支持 max_results，参数已忽略", flush=True)
+    print(f"[crawl_platform] 完整命令: {' '.join(cmd)}", flush=True)
 
     await _update_crawl_task(
         task_id,
@@ -147,13 +155,21 @@ async def crawl_platform(
     )
 
     # cwd 设到 crawlers/ 让 scrapy.cfg 生效；env 强制 UTF-8 + PYTHONPATH（见 _CRAWL_ENV）
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=str(_CRAWLERS_DIR),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=_CRAWL_ENV,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(_CRAWLERS_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=_CRAWL_ENV,
+        )
+    except Exception as e:
+        msg = f"启动爬虫子进程失败: {e}"
+        print(f"[crawl_platform] {msg}", flush=True)
+        await _update_crawl_task(task_id, status="failed", error=msg[:500])
+        await send_alert("crawl_failed", msg, spider=spider_name)
+        raise RuntimeError(msg) from e
+    print(f"[crawl_platform] 子进程已启动: task_id={task_id} pid={getattr(proc, 'pid', '?')}", flush=True)
 
     # 并发逐行读取 stdout/stderr：实时写入日志队列，stderr 尾部留存用于失败信息
     stderr_tail: list[str] = []
@@ -175,11 +191,14 @@ async def crawl_platform(
         _drain(proc.stderr, stderr_tail),
     )
     returncode = await proc.wait()
+    print(f"[crawl_platform] 子进程退出: task_id={task_id} returncode={returncode}", flush=True)
 
     if returncode != 0:
         detail = "\n".join(stderr_tail[-20:])[-2000:]
         msg = f"爬虫 {spider_name} 退出码 {returncode}: {detail}"
+        print(f"[crawl_platform] 任务失败: task_id={task_id} {msg[:300]}", flush=True)
         await _update_crawl_task(task_id, status="failed", error=msg[:500])
+        await send_alert("crawl_failed", msg, spider=spider_name, exit_code=returncode)
         raise RuntimeError(msg)
 
     # 统计产出条数（按行数）
@@ -192,8 +211,12 @@ async def crawl_platform(
     if line_count == 0:
         detail = "\n".join(stderr_tail[-20:])[-2000:]
         msg = f"爬虫 {spider_name} 产出 0 条数据: {detail}"
+        print(f"[crawl_platform] 任务失败（无产出）: task_id={task_id} {msg[:300]}", flush=True)
         await _update_crawl_task(task_id, status="failed", error=msg[:500])
+        await send_alert("crawl_failed", msg, spider=spider_name, items=0)
         raise RuntimeError(msg)
+
+    print(f"[crawl_platform] 任务成功: task_id={task_id} spider={spider_name} items={line_count}", flush=True)
 
     await _update_crawl_task(
         task_id,
@@ -756,6 +779,14 @@ async def check_data_freshness(ctx: dict) -> dict:
         for name in ("jd", "course", "paper", "community")
         for source in report[name]["stale_sources"]
     ]
+    if stale:
+        # T+1 承诺被破坏时告警，避免数据过期无人感知（§4.4 / DA-M4-03）
+        await send_alert(
+            "data_stale",
+            f"数据过期来源（超过 T+1）: {', '.join(stale)}",
+            stale_sources=stale,
+            report_path=str(report_path),
+        )
     print(f"[check_data_freshness] 报告已写入: {report_path} 过期来源: {stale}", flush=True)
     return {"report_path": str(report_path), "stale_sources": stale}
 
@@ -1461,6 +1492,24 @@ async def snapshot_graph(ctx: dict, triggered_by: str = "scheduled") -> dict:
     return meta.model_dump()
 
 
+# 项目统一时区 UTC+8（与 services 层常量一致，first_seen/观测起点均按东八区取日期）
+_TZ_CN = timezone(timedelta(hours=8))
+
+
+def _first_seen_date_of(row) -> str:
+    """岗位单条 JD 的观测日期（ISO）：post_date 解析日优先，入库日兜底。
+
+    回爬 90 天历史后，存量老岗位的入库日（created_at）是回爬当天，会掩盖其
+    真实出现时间，靠发布日（post_date）才能识别为存量；缺失时回退入库日。
+    清洗层已把 post_date 归一化（相对时间转绝对 ISO），此处仅截取日期前缀。
+    """
+    raw = str((row.snapshot or {}).get("post_date") or "").strip()
+    m = re.match(r"(\d{4}-\d{2}-\d{2})", raw)
+    if m:
+        return m.group(1)
+    return row.created_at.astimezone(_TZ_CN).date().isoformat()
+
+
 async def discovery_daily(ctx: dict) -> dict:
     """每日新岗位发现（AL-M4-01，设计文档 7.2.3 节）。
 
@@ -1479,10 +1528,13 @@ async def discovery_daily(ctx: dict) -> dict:
     from app.services.extraction.dictionary import normalize_position_name
     from app.services.discovery.schemas import DiscoveryFeatures
 
-    # ── 1. 聚合 jd_raw 已抽取记录 → 岗位频次/源多样性 ──
+    # ── 1. 聚合 jd_raw 已抽取记录 → 岗位频次/源多样性/首次观测日 ──
     # keyset 游标分批加载，避免全表拉取（与 dedup_simhash 修复一致）
     position_stats: dict[str, dict] = {}
     position_skills: dict[str, set[str]] = {}
+    # 系统采集首日（jd_raw 最早入库日，东八区）：post_date 缺失兜底用——
+    # 入库日 == 采集首日的岗位视为起步期存量（首日即被采到）
+    collection_start = None
     _PAGE = 2000
     last_id = 0
     async with async_session_factory() as session:
@@ -1507,9 +1559,24 @@ async def discovery_daily(ctx: dict) -> dict:
                 )
                 if not name:
                     continue
-                stat = position_stats.setdefault(name, {"count": 0, "sources": set()})
+                stat = position_stats.setdefault(
+                    name, {"count": 0, "sources": set(), "has_post_date": False}
+                )
                 stat["count"] += 1
                 stat["sources"].add(row.source)
+                # post_date 缺失标记：任一记录有真实 post_date 即不算缺失
+                # （存量排除兜底见 _is_mature_position）
+                if str((row.snapshot or {}).get("post_date") or "").strip():
+                    stat["has_post_date"] = True
+                # 首次观测日：post_date 解析日优先（回爬老岗位靠发布日识别存量，
+                # 避免入库日被回爬当天掩盖），入库日兜底
+                fd = _first_seen_date_of(row)
+                if stat.get("first_seen") is None or fd < stat["first_seen"]:
+                    stat["first_seen"] = fd
+                # 采集首日：jd_raw 最早入库日（东八区日期）
+                cd = row.created_at.astimezone(_TZ_CN).date().isoformat()
+                if collection_start is None or cd < collection_start:
+                    collection_start = cd
                 # 收集岗位关联技能（供 §7.2.2 辅助加分特征关联 arxiv/github 信号）
                 skills = position_skills.setdefault(name, set())
                 for s in ext.get("skills") or []:
@@ -1521,8 +1588,6 @@ async def discovery_daily(ctx: dict) -> dict:
         return {"candidates": 0, "detail": "无已抽取岗位记录"}
 
     # ── 2. 组装 DiscoveryInput（Z-score 门控 + 冷启动 Wilson 兜底）──
-    jd_total = sum(s["count"] for s in position_stats.values())
-
     # 从 graph_versions 快照序列重建岗位频次窗口，计算真实 Z-score /
     # 3 月移动平均 / 环比增长率，替代此前 history_days=1/z_score=None 硬编码
     # （否则正常 Z-score 门控永不触发，只能走冷启动）
@@ -1536,6 +1601,11 @@ async def discovery_daily(ctx: dict) -> dict:
     snapshots = [s.snapshot_json or {} for s in snap_rows]
     freq_windows = position_freq_windows(snapshots, set(position_stats))
     window_days = 0
+    observation_start = None
+    if snap_rows:
+        # 观测窗口起点：首个快照日期（东八区）。成熟岗位排除以此为准——
+        # 早于此日期的岗位是系统开始观测前就存在的市场存量
+        observation_start = snap_rows[0].created_at.astimezone(_TZ_CN).date().isoformat()
     if len(snap_rows) >= 2:
         span = (snap_rows[-1].created_at - snap_rows[0].created_at)
         window_days = max(span.days, 0) if span else 0
@@ -1550,6 +1620,11 @@ async def discovery_daily(ctx: dict) -> dict:
         z_score = None
         growth_rate = 0.0
         jd_freq_ma3 = freq
+        # 冷启动二项样本：岗位在快照窗口中的出现密度（默认 0/0 = 快照未出现，
+        # 无法冷启动）。口径为"首现后窗口出现率"（successes=出现窗口数，
+        # total=首现之后窗口数）而非全量 JD 占比——后者在 JD 占比下 Wilson
+        # 下界极低（实测 0.005-0.185），任何阈值都无法通过
+        cold_successes, cold_total = 0, 0
         if len(freqs) >= 2:
             zs = freq_z_scores(freqs)
             z_score = float(zs[-1])
@@ -1557,6 +1632,11 @@ async def discovery_daily(ctx: dict) -> dict:
             jd_freq_ma3 = sum(recent3) / len(recent3)
             if freqs[-2] > 0:
                 growth_rate = (freqs[-1] - freqs[-2]) / freqs[-2]
+        if freqs:
+            active = sum(1 for f in freqs if f > 0)
+            first_active = next((i for i, f in enumerate(freqs) if f > 0), None)
+            if first_active is not None:
+                cold_successes, cold_total = active, len(freqs) - first_active
         growth_by_position[name] = growth_rate
         inputs.append(
             DiscoveryInput(
@@ -1565,10 +1645,15 @@ async def discovery_daily(ctx: dict) -> dict:
                     jd_freq_ma3=jd_freq_ma3,
                     z_score=z_score,
                     source_diversity=len(stat["sources"]),
+                    first_seen_date=stat.get("first_seen"),
                 ),
                 history_days=window_days or 1,
-                cold_successes=stat["count"],
-                cold_total=jd_total,
+                cold_successes=cold_successes,
+                cold_total=cold_total,
+                first_seen_date=stat.get("first_seen"),
+                observation_start=observation_start,
+                collection_start=collection_start,
+                post_date_missing=not stat.get("has_post_date"),
             )
         )
 
@@ -1639,10 +1724,15 @@ async def discovery_daily(ctx: dict) -> dict:
 async def discovery_auto_transition(ctx: dict) -> dict:
     """自动状态流转（设计文档 7.2.1 状态机：emerging/stable/declining 自动迁移）。
 
-    从 graph_versions 快照序列重建岗位频次窗口（30 天粒度）→ 对
-    discovery_candidates 中 state ∈ {emerging, stable, declining} 的岗位调用
-    evaluate_auto_transition 判定 → 命中则 PositionStateMachine.persist
+    从 jd_raw 已抽取记录按 post_date 聚合岗位 30 天窗口 JD 发布频次（declining
+    信号源）→ 对 discovery_candidates 中 state ∈ {emerging, stable, declining}
+    的岗位调用 evaluate_auto_transition 判定 → 命中则 PositionStateMachine.persist
     （Neo4j Position.status + 候选池状态）。
+
+    信号源说明（2026-08-11）：declining 信号从"图谱快照 REQUIRES 边数"改为真实
+    JD 发布数——快照边数随图谱清理/重建/改名剧烈波动（08-11 重建致"算法工程师"
+    1348→56 伪降），而发布数语义 = 设计文档"JD 需求下降"。post_date 缺失按入库
+    日兜底（_first_seen_date_of）。
 
     注意：自动流转 operator="system"，不写 AuditLog（audit_logs.user_id 为
     users 外键，system 无对应用户）。人工流转记录见 /evolution/state-machine。
@@ -1653,24 +1743,44 @@ async def discovery_auto_transition(ctx: dict) -> dict:
 
     幂等：persist 按 name MERGE，重复执行结果一致；无命中不产生副作用。
 
-    数据不足（快照 < 2 期或岗位无窗口序列）时跳过，不武断判定（冷启动）。
+    数据不足（jd_raw 无已抽取记录或岗位窗口序列 < 2）时跳过，不武断判定（冷启动）。
     """
     from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
-    from app.models.business import DiscoveryCandidate, GraphVersion
+    from app.models.business import DiscoveryCandidate
+    from app.models.raw import JDRaw
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
-    from app.services.discovery.state_machine import WindowFreq, evaluate_auto_transition, freq_z_scores, PositionStateMachine, position_freq_windows
+    from app.services.discovery.state_machine import (
+        WindowFreq, decline_rate, evaluate_auto_transition, freq_z_scores,
+        PositionStateMachine, jd_publish_windows, window_volatility,
+    )
     from app.services.extraction.dictionary import normalize_position_name
 
-    # ── 1. 加载全部快照（按创建时间升序，即时间窗口序列）──
+    import logging
+    _logger = logging.getLogger(__name__)
+
+    # ── 1. 聚合 jd_raw 已抽取记录 → 岗位按天 JD 发布数（declining 信号源）──
+    # 一次加载已抽取记录（万级），按 _first_seen_date_of（post_date 解析日优先、
+    # 入库日兜底）统计每岗位每日发布数，再切 30 天窗口
     async with async_session_factory() as session:
-        snapshots = (await session.scalars(
-            select(GraphVersion).order_by(GraphVersion.created_at.asc())
+        jd_rows = (await session.scalars(
+            select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
         )).all()
 
-    if len(snapshots) < 2:
-        return {"transitions": 0, "detail": "快照 < 2 期，无法计算窗口序列（冷启动）"}
+    daily_freqs: dict[str, dict[str, int]] = {}
+    for row in jd_rows:
+        ext = (row.snapshot or {}).get("extraction") or {}
+        name = normalize_position_name(ext.get("position_name") or "")
+        if not name:
+            continue
+        day = _first_seen_date_of(row)
+        day_counts = daily_freqs.setdefault(name, {})
+        day_counts[day] = day_counts.get(day, 0) + 1
+
+    freq_windows = jd_publish_windows(daily_freqs)
+    if not freq_windows:
+        return {"transitions": 0, "detail": "jd_raw 无已抽取记录，无法计算窗口序列（冷启动）"}
 
     # ── 2. 对候选池中自动可迁移状态的岗位执行判定 ──
     machine = PositionStateMachine()
@@ -1684,18 +1794,16 @@ async def discovery_auto_transition(ctx: dict) -> dict:
             )
         )).all()
 
-        # 按岗位名重建窗口频次序列（同一批次一次构建）
-        names = {r.position_name for r in rows}
-        freq_windows = position_freq_windows(
-            [s.snapshot_json or {} for s in snapshots], names
-        )
-
         for row in rows:
             name = normalize_position_name(row.position_name)
             if not name:
                 continue
             freqs = freq_windows.get(name, [])
             if len(freqs) < 2:
+                _logger.info(
+                    "auto_transition 跳过: %s 窗口序列 %s（<2 期，冷启动不武断判定）",
+                    row.position_name, freqs,
+                )
                 continue
 
             features = DiscoveryFeatures(**row.features)
@@ -1715,6 +1823,14 @@ async def discovery_auto_transition(ctx: dict) -> dict:
             # 时最近 2 窗口 z > 0，触发 declining → stable 自动回迁
             windows = WindowFreq(freqs=freqs, z_scores=freq_z_scores(freqs))
             target = evaluate_auto_transition(candidate, windows, confidence=conf)
+            _logger.info(
+                "auto_transition: %s state=%s 30天窗口序列=%s z_scores=%s "
+                "volatility=%.3f decline_rate=%.3f → %s",
+                row.position_name, row.state, freqs,
+                [round(z, 3) for z in windows.z_scores],
+                window_volatility(windows), decline_rate(windows),
+                target.value if target else "不迁移",
+            )
             if target is None:
                 continue
 
@@ -1803,7 +1919,12 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
     from app.core.database import async_session_factory
     from app.models.business import TechnologyWatch
     from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
-    from app.services.discovery.watch_pool import aggregate_weekly_freqs, build_signals
+    from app.services.discovery.watch_pool import (
+        aggregate_weekly_freqs,
+        anomaly_flags,
+        build_signals,
+        promotion_features,
+    )
 
     period = run_date or date.today().isoformat()
     # 观察窗口：过去 12 周（JD 3 月移动平均需 12 周以上历史）
@@ -1830,6 +1951,8 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
 
     freqs = aggregate_weekly_freqs(all_rows)
     signals = build_signals(freqs, period)
+    # 学术/社区源周频次（§7.2.2 辅助加分特征，提升候选置信度加分用）
+    academic_freqs = aggregate_weekly_freqs([*paper_rows, *community_rows])
 
     # ── 2. 幂等 upsert technology_watch + 计算 MLI ──
     promoted: list[str] = []
@@ -1859,6 +1982,7 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
 
         # ── 3. 提升候选：JD 源命中且该技能此前已在观察池（设计 §7.2.5 / 方案 §2）──
         from app.models.business import DiscoveryCandidate
+        from app.services.discovery.confidence import compute_confidence
         from app.services.discovery.watch_pool import promotable_skills
 
         prior_rows = (await session.scalars(
@@ -1876,17 +2000,23 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
             )
             if existing is not None:
                 continue  # 已在候选池/已晋升，不重复提升
-            jd_value = next(
-                (sig.signal_value for sig in signals
-                 if sig.skill_name == skill and sig.signal_source == "jd"),
-                0.0,
+            # 真实特征与置信度（替代硬编码 source_diversity=1/final_confidence=0.0：
+            # 否则提升候选永远无法过 emerging 门槛——跨 ≥2 源 + 置信度 ≥ 0.6）
+            feat = promotion_features(freqs, skill)
+            flags = anomaly_flags(academic_freqs, {skill})
+            conf = compute_confidence(
+                jd_count=int(feat["jd_freq_ma3"]),
+                source_count=feat["source_diversity"],
+                growth_rate=feat["growth"],
+                arxiv_anomaly=flags["arxiv"],
+                github_anomaly=flags["github"],
             )
             session.add(DiscoveryCandidate(
                 id=f"cand-{skill[:20]}",
                 position_name=skill,
                 state="candidate",
-                features={"jd_mom_growth": jd_value, "z_score": None, "source_diversity": 1},
-                confidence={"final_confidence": 0.0, "jd_signal": jd_value},
+                features=feat,  # 键与 DiscoveryFeatures schema 兼容
+                confidence=conf.model_dump(),
                 evidence_refs=[f"watch:{period}:{skill}"],
                 seed_matched=False,
                 rag_matched=False,

@@ -27,6 +27,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("cron.etl_daily")
+
 
 async def enqueue_etl_pipeline() -> None:
     """将 ETL 主管线任务入队到 ARQ。
@@ -62,7 +66,7 @@ async def enqueue_etl_pipeline() -> None:
             "run_etl_pipeline",
             run_date=run_date,
         )
-        print(f"[etl_daily] 已入队 run_etl_pipeline，run_date={run_date}, job_id={job.job_id}")
+        logger.info("已入队 run_etl_pipeline，run_date=%s, job_id=%s", run_date, job.job_id)
     finally:
         await client.close()
 
@@ -72,13 +76,13 @@ def main() -> int:
 
     返回 0 表示入队成功，非 0 表示失败（cron 可据此告警）。
     """
-    print(f"[etl_daily] 启动调度，CST={datetime.now(timezone(timedelta(hours=8))).isoformat()}")
+    logger.info("启动调度，CST=%s", datetime.now(timezone(timedelta(hours=8))).isoformat())
     try:
         asyncio.run(enqueue_etl_pipeline())
-        print("[etl_daily] 调度完成")
+        logger.info("调度完成")
         return 0
-    except Exception as e:
-        print(f"[etl_daily] 调度失败: {e}", file=sys.stderr)
+    except Exception:
+        logger.exception("调度失败")
         return 1
 
 

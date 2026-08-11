@@ -16,11 +16,14 @@
    + 人工审核写 AuditLog（operator=admin 用户名，reason 必填）
 """
 
+import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from app.services.discovery.schemas import CandidatePosition, PositionState
+
+logger = logging.getLogger(__name__)
 
 # 状态转换合法性表（非法转换抛 ValueError）
 VALID_TRANSITIONS: dict[PositionState, set[PositionState]] = {
@@ -112,6 +115,41 @@ def position_freq_windows(
     return merged
 
 
+def jd_publish_windows(
+    daily_freqs: dict[str, dict[str, int]],
+    window_days: int = 30,
+) -> dict[str, list[float]]:
+    """按 JD 发布日聚合岗位频次窗口序列（时间升序）。
+
+    信号源说明（2026-08-11）：declining 判定信号源从"图谱快照 REQUIRES 边数"
+    改为"jd_raw 按 post_date 的真实 JD 发布数"——快照边数随图谱清理/重建/改名
+    剧烈波动（08-11 重建致"算法工程师"1348→56 伪降），而发布数语义 = 设计文档
+    "JD 需求下降"（decline_rate = (prev - curr)/prev，30 天窗口）。
+
+    Args:
+        daily_freqs: {岗位名: {ISO 日期: 当日 JD 发布数}}（post_date 缺失按入库日兜底）
+        window_days: 窗口天数（默认 30，设计文档 7.2.1）
+
+    Returns:
+        {岗位名: [各窗口频次]}（时间升序，以全部日期最晚日为终点对齐；
+        岗位窗口未覆盖处补 0——某岗位近期无发布会在末尾出现 0，即下降信号）
+    """
+    all_days = [d for days in daily_freqs.values() for d in days]
+    if not all_days:
+        return {}
+    end = max(date.fromisoformat(d) for d in all_days)
+    out: dict[str, list[float]] = {}
+    for name, day_counts in daily_freqs.items():
+        buckets: dict[int, int] = {}
+        for d, count in day_counts.items():
+            idx = (end - date.fromisoformat(d)).days // window_days
+            buckets[idx] = buckets.get(idx, 0) + count
+        out[name] = [
+            float(buckets.get(i, 0)) for i in range(max(buckets), -1, -1)
+        ]
+    return out
+
+
 def window_volatility(w: WindowFreq, n: int = 2) -> float:
     """最近 n 个窗口的频次波动（(max-min)/max，0 频次时取 0）。"""
     recent = w.freqs[-n:]
@@ -188,21 +226,33 @@ def evaluate_auto_transition(
         )
 
     state = candidate.state
+    logger.debug(
+        "auto_transition 判定: position=%s state=%s confidence=%.3f "
+        "windows=%s z_scores=%s volatility=%.3f decline_rate=%.3f",
+        candidate.position_name, state.value, confidence,
+        windows.freqs, windows.z_scores,
+        window_volatility(windows), decline_rate(windows, DECLINE_WINDOW_COUNT),
+    )
     if state == PositionState.EMERGING:
         if (
             confidence >= STABLE_MIN_CONFIDENCE
             and window_volatility(windows) < STABLE_MAX_WINDOW_VOLATILITY
             and candidate.features.source_diversity >= EMERGING_MIN_SOURCES
         ):
+            logger.debug("  → stable（置信度/波动/源多样性均达标）")
             return PositionState.STABLE
         if decline_rate(windows, DECLINE_WINDOW_COUNT) > DECLINE_WINDOW_DROP:
+            logger.debug("  → declining（最近3窗口下降率 > %s）", DECLINE_WINDOW_DROP)
             return PositionState.DECLINING
     elif state == PositionState.STABLE:
         if decline_rate(windows, DECLINE_WINDOW_COUNT) > DECLINE_WINDOW_DROP:
+            logger.debug("  → declining（最近3窗口下降率 > %s）", DECLINE_WINDOW_DROP)
             return PositionState.DECLINING
     elif state == PositionState.DECLINING:
         if has_recovery(windows):
+            logger.debug("  → stable（最近%d窗口 z>0 回升）", RECOVERY_WINDOW_COUNT)
             return PositionState.STABLE
+    logger.debug("  → 不迁移")
     return None
 
 

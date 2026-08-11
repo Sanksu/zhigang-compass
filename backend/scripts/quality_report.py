@@ -20,6 +20,10 @@ from collections import Counter
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("quality_report")
+
 from sqlalchemy import select
 
 from app.core.database import async_session_factory
@@ -80,18 +84,18 @@ async def collect(top_n: int) -> dict:
 
 
 def print_report(r: dict, top_n: int) -> None:
-    print("=" * 52)
-    print("智岗罗盘 — 数据质量报告（DA-M3-07）")
-    print("=" * 52)
-    print(f"数据规模: jd_raw {r['total']} 条")
-    print(f"LLM 抽取: {r['extracted']} 条（覆盖率 {r['extracted'] / max(r['total'], 1):.1%}）"
-          f"，其中空抽取 {r['empty_extract']} 条")
-    print(f"独立技能: {r['skill_count']} 个")
-    print(f"时滞检测: {r['validated']} 条 | 标记分布 {r['validation_labels']}")
-    print(f"通胀检测: {r['inflated']} 条 | 标记分布 {r['inflation_labels']}")
-    print(f"Top-{top_n} 技能:")
+    logger.info("=" * 52)
+    logger.info("智岗罗盘 — 数据质量报告（DA-M3-07）")
+    logger.info("=" * 52)
+    logger.info(f"数据规模: jd_raw {r['total']} 条")
+    logger.info(f"LLM 抽取: {r['extracted']} 条（覆盖率 {r['extracted'] / max(r['total'], 1):.1%}）"
+                f"，其中空抽取 {r['empty_extract']} 条")
+    logger.info(f"独立技能: {r['skill_count']} 个")
+    logger.info(f"时滞检测: {r['validated']} 条 | 标记分布 {r['validation_labels']}")
+    logger.info(f"通胀检测: {r['inflated']} 条 | 标记分布 {r['inflation_labels']}")
+    logger.info(f"Top-{top_n} 技能:")
     for name, cnt in r["top_skills"]:
-        print(f"  {name:<24} {cnt}")
+        logger.info(f"  {name:<24} {cnt}")
 
 
 async def main(top_n: int) -> None:

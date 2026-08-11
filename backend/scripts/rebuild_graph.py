@@ -22,6 +22,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("rebuild_graph")
+
 from sqlalchemy import select
 
 from app.core.database import async_session_factory, neo4j_driver
@@ -44,11 +48,11 @@ def main() -> None:
         cleared = session.run(
             "MATCH (n) WHERE NOT n:Counter DETACH DELETE n RETURN count(n) AS c"
         ).single()["c"]
-        print(f"清空图谱节点 {cleared} 个（保留 Counter）")
+        logger.info(f"清空图谱节点 {cleared} 个（保留 Counter）")
 
     # 2. 重放 import_jd
     pairs = asyncio.run(_load_extracted())
-    print(f"重放 {len(pairs)} 条已抽取 JD ...")
+    logger.info(f"重放 {len(pairs)} 条已抽取 JD ...")
     skipped_dup = 0
     with neo4j_driver.session() as session:
         for i, (row, ext) in enumerate(pairs, 1):
@@ -61,7 +65,7 @@ def main() -> None:
             try:
                 extraction = JDExtractionResult.model_validate(ext)
             except Exception as e:
-                print(f"  [{i}] 跳过（抽取结果非法）: {row.id} {str(e)[:100]}")
+                logger.exception("  [%s] 跳过（抽取结果非法）: %s %s", i, row.id, str(e)[:100])
                 continue
             evidence = {
                 "source": row.source,
@@ -72,10 +76,10 @@ def main() -> None:
             try:
                 import_jd(session, extraction, evidence)
             except Exception as e:
-                print(f"  [{i}] 入图失败: {row.id} {str(e)[:150]}")
+                logger.exception("  [%s] 入图失败: %s %s", i, row.id, str(e)[:150])
             if i % 100 == 0:
-                print(f"  已处理 {i} 条")
-    print(f"重建完成（跳过 SimHash 重复 {skipped_dup} 条）。请运行 cleanup_graph.py 做技能过滤与聚合。")
+                logger.info("  已处理 %s 条", i)
+    logger.info("重建完成（跳过 SimHash 重复 %s 条）。请运行 cleanup_graph.py 做技能过滤与聚合。", skipped_dup)
 
 
 if __name__ == "__main__":

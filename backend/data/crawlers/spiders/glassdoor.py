@@ -41,11 +41,15 @@ class GlassdoorSpider(BaseSpider):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # 允许通过 -a max_pages=3 覆盖页数（非法输入回退默认 2，避免实例化崩溃）
+        # 历史回爬（G-01）：-a history_days=90 放宽翻页上限（SSR 按发布倒序，
+        # 由增量默认 2 页放宽到 50 页以覆盖更久时间窗）
+        history_days = int(kwargs.get("history_days") or 0)
+        default_pages = 50 if history_days else 2
+        # 允许通过 -a max_pages=3 覆盖页数（非法输入回退默认，避免实例化崩溃）
         try:
-            self.max_pages = int(kwargs.get("max_pages", "2"))
+            self.max_pages = int(kwargs.get("max_pages", str(default_pages)))
         except ValueError:
-            self.max_pages = 2
+            self.max_pages = default_pages
 
     def start_requests(self):
         """构建采集任务，用占位 Request 触发 parse。"""

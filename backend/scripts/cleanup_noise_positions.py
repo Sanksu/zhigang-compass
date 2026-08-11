@@ -20,6 +20,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("cleanup_noise_positions")
+
 from app.core.database import neo4j_driver
 from app.services.extraction.dictionary import normalize_position_name
 
@@ -51,9 +55,9 @@ def main() -> None:
 
     with neo4j_driver.session() as session:
         noise = collect_noise_positions(session)
-        print(f"命中碎片/业务词空岗 {len(noise)} 个:")
+        logger.info("命中碎片/业务词空岗 %s 个:", len(noise))
         for r in sorted(noise, key=lambda x: x["name"]):
-            print(f"  {r['name']}")
+            logger.info("  %s", r["name"])
 
         if not args.dry_run and noise:
             ids = [r["id"] for r in noise]
@@ -62,12 +66,12 @@ def main() -> None:
                     "MATCH (p:Position) WHERE p.id IN $ids DETACH DELETE p",
                     ids=ids,
                 )
-            print(f"\n已删除 {len(noise)} 个碎片空岗节点")
+            logger.info("已删除 %s 个碎片空岗节点", len(noise))
         elif args.dry_run:
-            print(f"\n[dry-run] 未删除（共 {len(noise)} 个待清理）")
+            logger.info("[dry-run] 未删除（共 %s 个待清理）", len(noise))
 
         total = session.run("MATCH (p:Position) RETURN count(p) AS c").single()["c"]
-        print(f"当前 Position 节点总数: {total}")
+        logger.info("当前 Position 节点总数: %s", total)
         neo4j_driver.close()
 
 

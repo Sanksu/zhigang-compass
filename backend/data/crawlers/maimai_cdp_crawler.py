@@ -39,10 +39,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from crawlers.settings import MAIMAI_COMPLIANCE
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app.core.logging import setup_logging
 
-def log(msg: str):
-    """日志输出到 stderr，不污染 stdout 的 JSONL。"""
-    print(msg, file=sys.stderr, flush=True)
+logger = setup_logging("maimai_cdp_crawler", stream=sys.stderr)
 
 
 # 默认 CDP 端口（脉脉独立浏览器 9225，不与 BOSS 共享）
@@ -140,8 +140,8 @@ async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
         try:
             browser = await p.chromium.connect_over_cdp(cdp_url)
         except Exception as e:
-            log(f"❌ CDP 连接失败（{cdp_url}）: {e}")
-            log(f"   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
+            logger.error(f"❌ CDP 连接失败（{cdp_url}）: {e}")
+            logger.info(f"   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
             return 0
 
         # 隔离：新建独立 context 并复制主 context 的 cookies，
@@ -157,24 +157,24 @@ async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
                 if _cookies:
                     await context.add_cookies(_cookies)
             except Exception as e:
-                log(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
+                logger.warning(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
         page = await context.new_page()
 
-        log(f"导航到: {MAIMAI_JOBS_URL}")
+        logger.info(f"导航到: {MAIMAI_JOBS_URL}")
         try:
             await page.goto(MAIMAI_JOBS_URL, wait_until="domcontentloaded", timeout=30000)
         except Exception as e:
-            log(f"❌ 导航失败: {e}")
+            logger.error(f"❌ 导航失败: {e}")
             return 0
 
         # 等待岗位卡片渲染
         try:
             await page.wait_for_selector('a[href*="/position/"]', timeout=15000)
         except Exception as e:
-            log(f"⚠️ 等待岗位卡片超时: {e}")
+            logger.warning(f"⚠️ 等待岗位卡片超时: {e}")
             try:
                 title = await page.title()
-                log(f"  页面标题: {title}")
+                logger.info(f"  页面标题: {title}")
             except Exception:
                 pass
             await page.close()
@@ -198,7 +198,7 @@ async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
                     # 岗位数不再增长，停止滚动
                     break
                 prev_count = current_count
-                log(f"  滚动 {scroll_idx+1}: 当前 {current_count} 个岗位卡片")
+                logger.info(f"  滚动 {scroll_idx+1}: 当前 {current_count} 个岗位卡片")
             except Exception:
                 break
 
@@ -206,11 +206,11 @@ async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
         try:
             jobs = await page.evaluate(EXTRACT_JOBS_JS)
         except Exception as e:
-            log(f"❌ DOM 提取失败: {e}")
+            logger.error(f"❌ DOM 提取失败: {e}")
             await page.close()
             return 0
 
-        log(f"提取到 {len(jobs)} 条岗位")
+        logger.info(f"提取到 {len(jobs)} 条岗位")
 
         all_jobs_data.extend(jobs)
         await page.close()
@@ -223,7 +223,7 @@ async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
             print(json.dumps(item, ensure_ascii=False), flush=True)
             count += 1
 
-    log(f"✅ 采集完成: kw={keyword} count={count}")
+    logger.info(f"✅ 采集完成: kw={keyword} count={count}")
     return count
 
 
@@ -253,7 +253,7 @@ def _map_job_to_item(job: dict, keyword: str) -> dict | None:
             "raw": job,
         }
     except Exception as e:
-        log(f"⚠️ 字段映射失败: {e}")
+        logger.warning(f"⚠️ 字段映射失败: {e}")
         return None
 
 
@@ -264,7 +264,7 @@ def main():
                         help="CDP 调试端点（默认 http://127.0.0.1:9222，支持局域网内容器浏览器）")
     args = parser.parse_args()
 
-    log(f"CDP 端点: {args.cdp_url}")
+    logger.info(f"CDP 端点: {args.cdp_url}")
     count = asyncio.run(crawl(args.keyword, args.cdp_url))
     sys.exit(0 if count > 0 else 1)
 

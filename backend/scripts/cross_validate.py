@@ -20,6 +20,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("cross_validate")
+
 from sqlalchemy import select
 
 from app.core.database import async_session_factory
@@ -39,18 +43,18 @@ def _group_summary(groups: dict[str, list[dict]], limit: int | None) -> list[dic
 
 
 def _print_report(results: list[dict], stats: dict) -> None:
-    print("=" * 60)
-    print("多平台数据交叉验证报告（DA-M3-03）")
-    print("=" * 60)
-    print(f"岗位组总数: {stats['total_groups']}（覆盖 JD {stats['jd_count']} 条）")
-    print(f"跨源组: {stats['multi_source_groups']} | 单源组: {stats['single_source_groups']}")
-    print(f"验证通过（≥2 源印证）: {stats['verified_groups']}")
-    print(f"薪资异常组: {stats['salary_outlier_groups']}")
-    print(f"置信度 < 0.6（不入图谱候选）: {stats['below_confidence']}")
-    print(f"单源技能总数（待人工审核）: {stats['unverified_skills']}")
-    print("\nTop 跨源岗位组:")
+    logger.info("=" * 60)
+    logger.info("多平台数据交叉验证报告（DA-M3-03）")
+    logger.info("=" * 60)
+    logger.info(f"岗位组总数: {stats['total_groups']}（覆盖 JD {stats['jd_count']} 条）")
+    logger.info(f"跨源组: {stats['multi_source_groups']} | 单源组: {stats['single_source_groups']}")
+    logger.info(f"验证通过（≥2 源印证）: {stats['verified_groups']}")
+    logger.info(f"薪资异常组: {stats['salary_outlier_groups']}")
+    logger.info(f"置信度 < 0.6（不入图谱候选）: {stats['below_confidence']}")
+    logger.info(f"单源技能总数（待人工审核）: {stats['unverified_skills']}")
+    logger.info("\nTop 跨源岗位组:")
     for r in results[:10]:
-        print(
+        logger.info(
             f"  {r['position_name']:<28} 源={r['source_count']} JD={r['jd_count']} "
             f"verified={'Y' if r['verified'] else 'N'} conf={r['confidence']} "
             f"薪资={r['salary_median']} 异常={'Y' if r['salary_outlier'] else 'N'}"
@@ -103,7 +107,7 @@ async def main(limit: int | None, write_back: bool) -> None:
                 row.snapshot = snap
                 written += 1
             await session.commit()
-            print(f"\n已写回 snapshot['cross_validation']: {written} 条")
+            logger.info("已写回 snapshot['cross_validation']: %s 条", written)
 
         _REPORT_DIR.mkdir(parents=True, exist_ok=True)
         date_str = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d")
@@ -116,7 +120,7 @@ async def main(limit: int | None, write_back: bool) -> None:
             ),
             encoding="utf-8",
         )
-        print(f"报告输出: {report_path.relative_to(_BACKEND_DIR)}")
+        logger.info(f"报告输出: {report_path.relative_to(_BACKEND_DIR)}")
 
 
 if __name__ == "__main__":

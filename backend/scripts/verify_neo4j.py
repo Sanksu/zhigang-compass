@@ -4,6 +4,10 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("verify_neo4j")
+
 from neo4j import GraphDatabase
 from app.core.config import settings
 
@@ -14,17 +18,17 @@ with driver.session() as session:
     indexes = session.run("SHOW INDEXES").data()
     counters = session.run("MATCH (c:Counter) RETURN c.type, c.value ORDER BY c.type").data()
 
-print(f"约束: {len(constraints)} 个")
+logger.info(f"约束: {len(constraints)} 个")
 for c in constraints:
-    print(f"  {c['name']} ({c['type']})")
+    logger.info(f"  {c['name']} ({c['type']})")
 
-print(f"\n索引: {len(indexes)} 个")
+logger.info(f"\n索引: {len(indexes)} 个")
 for i in indexes:
-    print(f"  {i['name']} ({i['type']})")
+    logger.info(f"  {i['name']} ({i['type']})")
 
-print(f"\nCounter 节点: {len(counters)} 个")
+logger.info(f"\nCounter 节点: {len(counters)} 个")
 for c in counters:
-    print(f"  {c['c.type']}: {c['c.value']}")
+    logger.info(f"  {c['c.type']}: {c['c.value']}")
 
 driver.close()
-print("\n✓ Neo4j 配置验证通过")
+logger.info("\n✓ Neo4j 配置验证通过")

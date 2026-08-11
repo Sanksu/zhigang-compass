@@ -17,7 +17,6 @@ requirements 为空，raw_text 仅为元数据摘要（平均 117 字），LLM �
 
 import argparse
 import asyncio
-import logging
 import random
 import sys
 import time
@@ -26,6 +25,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 sys.path.insert(0, str(_BACKEND_DIR / "data"))  # crawlers 包
+
+from app.core.logging import setup_logging
+
+logger = setup_logging("backfill_jd_detail")
 
 import httpx
 from sqlalchemy import select, update
@@ -43,9 +46,6 @@ _DELAY_RANGE = (7, 10)
 _DETAIL_TIMEOUT = 20
 # 每 N 条打印一行进度（百分比 + 已用/预计剩余，日志友好无控制字符）
 _PROGRESS_EVERY = 20
-
-# 抑制 SQLAlchemy echo（settings.debug 开启时全量打印 SQL，会淹没进度日志）
-logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 
 async def _pending_rows(limit: int) -> list[tuple[int, str, str, dict]]:
@@ -89,7 +89,7 @@ async def _fetch_zhilian_detail(client: httpx.AsyncClient, source_id: str) -> di
 
 async def backfill_zhilian(limit: int, dry_run: bool, keep_extraction: bool) -> dict:
     rows = await _pending_rows(limit)
-    print(f"待回填 {len(rows)} 条（limit={limit or '全量'} dry_run={dry_run}）")
+    logger.info("待回填 %s 条（limit=%s dry_run=%s）", len(rows), limit or "全量", dry_run)
     if dry_run:
         return {"updated": 0, "failed": [], "pending": len(rows)}
 
@@ -104,12 +104,12 @@ async def backfill_zhilian(limit: int, dry_run: bool, keep_extraction: bool) -> 
                 detail = await _fetch_zhilian_detail(client, source_id)
             except Exception as e:
                 failed.append({"id": row_id, "error": str(e)[:200]})
-                print(f"[{idx}/{len(rows)}] id={row_id} 详情抓取失败: {e}")
+                logger.error("[%s/%s] id=%s 详情抓取失败: %s", idx, len(rows), row_id, e)
                 continue
 
             if not (detail["description"] or detail["requirements"]):
                 failed.append({"id": row_id, "error": "详情页无正文（SSR 缺失）"})
-                print(f"[{idx}/{len(rows)}] id={row_id} 详情页无正文，跳过")
+                logger.warning("[%s/%s] id=%s 详情页无正文，跳过", idx, len(rows), row_id)
                 continue
 
             # 正文回填：description/requirements 更新，raw_text 追加正文（兜底备份）
@@ -124,24 +124,24 @@ async def backfill_zhilian(limit: int, dry_run: bool, keep_extraction: bool) -> 
                 "\n".join([raw_text, detail["description"], detail["requirements"]]).strip("\n"),
             )
             updated += 1
-            print(
-                f"[{idx}/{len(rows)}] id={row_id} 回填成功 "
-                f"(desc={len(detail['description'])} req={len(detail['requirements'])})"
+            logger.info(
+                "[%s/%s] id=%s 回填成功 (desc=%s req=%s)",
+                idx, len(rows), row_id, len(detail["description"]), len(detail["requirements"]),
             )
 
             # 周期进度：百分比 + 已用/预计剩余时间（便于日志文件实时查看）
             if idx % _PROGRESS_EVERY == 0 or idx == len(rows):
                 elapsed = time.monotonic() - _started
                 eta = elapsed / idx * (len(rows) - idx)
-                print(
-                    f"[进度 {idx}/{len(rows)} {idx / len(rows):.1%} | "
-                    f"已用 {elapsed / 60:.1f}min | 预计剩余 {eta / 60:.0f}min "
-                    f"| 成功 {updated} 失败 {len(failed)}]"
+                logger.info(
+                    "[进度 %s/%s %.1f%% | 已用 %.1fmin | 预计剩余 %.0fmin | 成功 %s 失败 %s]",
+                    idx, len(rows), idx / len(rows) * 100, elapsed / 60, eta / 60,
+                    updated, len(failed),
                 )
 
             await asyncio.sleep(random.uniform(*_DELAY_RANGE))
 
-    print(f"完成：更新 {updated} 条，失败 {len(failed)} 条")
+    logger.info("完成：更新 %s 条，失败 %s 条", updated, len(failed))
     return {"updated": updated, "failed": failed, "pending": len(rows)}
 
 

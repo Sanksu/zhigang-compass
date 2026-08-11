@@ -25,6 +25,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("cron.crawl_spider")
+
 
 async def enqueue_crawl(spider_name: str, max_results: int | None = None) -> None:
     """将单个爬虫任务入队到 ARQ。"""
@@ -48,27 +52,33 @@ async def enqueue_crawl(spider_name: str, max_results: int | None = None) -> Non
         if max_results:
             kwargs["max_results"] = max_results
         job = await client.enqueue_job("crawl_platform", **kwargs)
-        print(f"[crawl_spider] 已入队 crawl_platform spider={spider_name} job_id={job.job_id}")
+        logger.info(f"[crawl_spider] 已入队 crawl_platform spider={spider_name} job_id={job.job_id}")
     finally:
         await client.close()
 
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("用法: python crawl_spider.py <spider_name> [max_results]", file=sys.stderr)
-        print("可用 spider: boss / zhilian / monster / indeed / glassdoor / "
-              "maimai / linkedin_public / arxiv / github / stackoverflow / "
-              "coursera / edx / icourse163", file=sys.stderr)
+        logger.error("用法: python crawl_spider.py <spider_name> [max_results]")
+        logger.error("可用 spider: boss / zhilian / monster / indeed / glassdoor / "
+                     "maimai / linkedin_public / arxiv / github / stackoverflow / "
+                     "coursera / edx / icourse163")
         return 2
 
     spider_name = sys.argv[1]
-    max_results = int(sys.argv[2]) if len(sys.argv) > 2 else None
+    max_results = None
+    if len(sys.argv) > 2:
+        try:
+            max_results = int(sys.argv[2])
+        except ValueError:
+            logger.error("[crawl_spider] max_results 参数非数字: %s", sys.argv[2])
+            return 2
 
     try:
         asyncio.run(enqueue_crawl(spider_name, max_results))
         return 0
     except Exception as e:
-        print(f"[crawl_spider] 调度失败: {e}", file=sys.stderr)
+        logger.exception(f"[crawl_spider] 调度失败: {e}")
         return 1
 
 

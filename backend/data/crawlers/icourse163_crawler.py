@@ -23,7 +23,13 @@ import json
 import random
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlencode
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app.core.logging import setup_logging
+
+logger = setup_logging("icourse163_crawler", stream=sys.stderr)
 
 
 # icourse163 搜索课程 RPC API
@@ -73,11 +79,6 @@ async (params) => {
     return JSON.stringify({status: r.status, body: t});
 }
 """
-
-
-def log(msg: str) -> None:
-    """输出日志到 stderr（不干扰 stdout 的 JSONL）。"""
-    print(msg, file=sys.stderr, flush=True)
 
 
 def build_query(keyword: str, page_index: int, page_size: int = 20) -> str:
@@ -131,7 +132,7 @@ def parse_course_list(api_data: dict, keyword: str) -> list:
 
         # 培训/应试类课程（专升本/期末冲刺等）与技能学习路径无关，跳过
         if any(black in course_name for black in TITLE_BLACKLIST):
-            log(f"  跳过培训/应试类课程: {course_name[:50]}")
+            logger.warning(f"  跳过培训/应试类课程: {course_name[:50]}")
             continue
 
         source_url = f"https://www.icourse163.org/course/{course_id}"
@@ -212,11 +213,11 @@ async def crawl(keyword: str, max_pages: int = 3, page_size: int = 20) -> list:
 
         # 1. 导航到搜索页（建立会话，页面 JS 会自动调用一次 searchCourse 拿到 csrfKey）
         search_url = f"https://www.icourse163.org/search.htm?search={keyword}"
-        log(f"导航到 {search_url}")
+        logger.info(f"导航到 {search_url}")
         try:
             await page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
         except Exception as e:
-            log(f"导航失败: {e}")
+            logger.error(f"导航失败: {e}")
             await browser.close()
             return items
 
@@ -228,7 +229,7 @@ async def crawl(keyword: str, max_pages: int = 3, page_size: int = 20) -> list:
                 timeout=20000,
             )
         except Exception as e:
-            log(f"等待 csrfKey 出现超时: {e}")
+            logger.warning(f"等待 csrfKey 出现超时: {e}")
 
         # 2. 翻页调用 API
         for page_index in range(1, max_pages + 1):
@@ -238,37 +239,37 @@ async def crawl(keyword: str, max_pages: int = 3, page_size: int = 20) -> list:
             try:
                 raw = await page.evaluate(FETCH_API_JS, params)
             except Exception as e:
-                log(f"page.evaluate 失败 (page={page_index}): {e}")
+                logger.error(f"page.evaluate 失败 (page={page_index}): {e}")
                 break
 
             if not raw:
-                log(f"[page={page_index}] 返回空")
+                logger.warning(f"[page={page_index}] 返回空")
                 break
 
             try:
                 fetch_result = json.loads(raw)
             except json.JSONDecodeError as e:
-                log(f"fetch 结果 JSON 解析失败: {e}")
+                logger.error(f"fetch 结果 JSON 解析失败: {e}")
                 break
 
             if fetch_result.get("error"):
-                log(f"[page={page_index}] {fetch_result['error']}")
+                logger.error(f"[page={page_index}] {fetch_result['error']}")
                 break
 
             if fetch_result.get("status") != 200:
-                log(f"[page={page_index}] HTTP {fetch_result.get('status')}")
+                logger.error(f"[page={page_index}] HTTP {fetch_result.get('status')}")
                 break
 
             body_text = fetch_result.get("body", "")
             try:
                 api_data = json.loads(body_text)
             except json.JSONDecodeError as e:
-                log(f"[page={page_index}] body JSON 解析失败: {e}")
+                logger.error(f"[page={page_index}] body JSON 解析失败: {e}")
                 break
 
             code = api_data.get("code")
             if code not in (0, None):
-                log(f"[page={page_index}] API code={code} message={api_data.get('message', '')}")
+                logger.error(f"[page={page_index}] API code={code} message={api_data.get('message', '')}")
                 break
 
             result = api_data.get("result") or {}
@@ -278,7 +279,7 @@ async def crawl(keyword: str, max_pages: int = 3, page_size: int = 20) -> list:
             lst = result.get("list") or []
 
             page_items = parse_course_list(api_data, keyword)
-            log(
+            logger.info(
                 f"[kw={keyword} page={page_index}] 获取 {len(page_items)} 条课程"
                 f"（API 返回 {len(lst)} 条，总 {total_count} 条 / {total_pages} 页）"
             )
@@ -289,7 +290,7 @@ async def crawl(keyword: str, max_pages: int = 3, page_size: int = 20) -> list:
 
             # 翻页间隔 6-12 秒
             delay = random.uniform(6, 12)
-            log(f"翻页等待 {delay:.1f}s...")
+            logger.info(f"翻页等待 {delay:.1f}s...")
             await asyncio.sleep(delay)
 
         await browser.close()
@@ -297,7 +298,7 @@ async def crawl(keyword: str, max_pages: int = 3, page_size: int = 20) -> list:
     return items
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description="中国大学MOOC (icourse163) 采集脚本")
     parser.add_argument("--keyword", required=True, help="搜索关键词")
     parser.add_argument("--max-pages", type=int, default=3, help="最大页数（默认 3）")
@@ -311,8 +312,10 @@ def main() -> None:
     for item in items:
         print(json.dumps(item, ensure_ascii=False), flush=True)
 
-    log(f"采集完成，共 {len(items)} 条")
+    logger.info(f"采集完成，共 {len(items)} 条")
+    # 0 条产出视为失败，返回非 0 退出码供上游 spider/调度器识别
+    return 0 if items else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
