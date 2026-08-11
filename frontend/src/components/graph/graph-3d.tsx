@@ -4,19 +4,27 @@
  * 基于 react-force-graph-3d（Three.js WebGL 渲染）。
  *
  * 设计决策：
- * - 节点配色与 2D 完全一致（position 五状态机 / skill 墨色 / evidence 灰色）
- * - 暗色模式自动跟随（MutationObserver 监听 .dark 类）
+ * - 节点配色与 2D 完全一致（position 五状态机 / skill 浅色或墨色 / evidence 灰色），暗色自动跟随
+ * - 节点常显文字标签（nodeThreeObject 自绘 Sprite）：3D 无 hover 空间定位，全量标签保证可读性；
+ *   选中节点放大 + 白色光环高亮
+ * - 双击岗位节点 → 展开/收起其技能（与 2D 交互一致）
  * - 容器尺寸由 ResizeObserver 自动追踪
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ForceGraph3D from 'react-force-graph-3d'
+import * as THREE from 'three'
 import type { GraphData, GraphNode, NodeDetail, PositionStatus } from './types'
+import { nodeRadius } from './graph-utils'
 
 interface Graph3DProps {
   data: GraphData
   /** 已展开的岗位 id 集合（画布已只含这些岗位的技能，用于样式标记） */
   expandedPositions?: Set<string>
+  /** 当前选中节点 id（放大 + 光环高亮） */
+  selectedId?: string | null
   onSelectNode: (node: NodeDetail | null) => void
+  /** 双击岗位 → 展开/收起其技能（与 2D 交互一致） */
+  onTogglePosition?: (id: string) => void
   className?: string
 }
 
@@ -41,17 +49,98 @@ function nodeColor(node: GraphNode, dark: boolean): string {
   return COLOR_EVIDENCE
 }
 
+/** 节点布局质量（影响力导向布局，与视觉尺寸无关——视觉尺寸由 buildNodeObject 控制） */
 function nodeVal(node: GraphNode): number {
   const v = node.value ?? 30
   const base = node.type === 'position' ? 8 : node.type === 'skill' ? 5 : 3
   return base + (v / 100) * 8
 }
 
+/** 常显文字标签 Sprite：半透明圆角底 + 主题色文字，任意背景可读 */
+function makeTextSprite(text: string, dark: boolean, fontSize = 14): THREE.Sprite {
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return new THREE.Sprite()
+  const font = `600 ${fontSize}px Inter, system-ui, sans-serif`
+  ctx.font = font
+  const textW = ctx.measureText(text).width
+  const pad = 7
+  const w = Math.ceil(textW + pad * 2)
+  const h = fontSize + 10
+  canvas.width = w
+  canvas.height = h
+  ctx.beginPath()
+  ctx.roundRect(0, 0, w, h, 5)
+  ctx.fillStyle = dark ? 'rgba(9,9,11,0.72)' : 'rgba(255,255,255,0.82)'
+  ctx.fill()
+  ctx.fillStyle = dark ? '#fafafa' : '#09090b'
+  ctx.font = font
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, pad, h / 2)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.needsUpdate = true
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }),
+  )
+  // 按 canvas 像素比例缩放（texture 高 w/h，保持 2D 字号观感）
+  sprite.scale.set(w / 24, h / 24, 1)
+  return sprite
+}
+
+/** 单节点三维对象：球体 + （选中光环）+ 常显文字标签 */
+function buildNodeObject(
+  node: GraphNode,
+  dark: boolean,
+  selected: boolean,
+  expanded: boolean,
+): THREE.Object3D {
+  const r = nodeRadius(node, selected, expanded)
+  const group = new THREE.Group()
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(r, 20, 20),
+    new THREE.MeshBasicMaterial({
+      color: nodeColor(node, dark),
+      transparent: true,
+      opacity: selected ? 1 : 0.95,
+    }),
+  )
+  group.add(sphere)
+
+  // 选中光环：贴合球面的扁平圆环
+  if (selected) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(r * 1.15, r * 1.5, 32),
+      new THREE.MeshBasicMaterial({
+        color: '#ffffff',
+        transparent: true,
+        opacity: 0.65,
+        side: THREE.DoubleSide,
+      }),
+    )
+    ring.rotation.x = Math.PI / 2
+    group.add(ring)
+  }
+
+  // 岗位标签字号更大（主节点），技能/证据小字号
+  const fontSize = node.type === 'position' ? 14 : 11
+  const label = makeTextSprite(node.name, dark, fontSize)
+  label.position.set(0, r + (fontSize + 6) / 24, 0)
+  group.add(label)
+  return group
+}
+
 function isDark(): boolean {
   return document.documentElement.classList.contains('dark')
 }
 
-export function Graph3D({ data, expandedPositions, onSelectNode, className }: Graph3DProps) {
+export function Graph3D({
+  data,
+  expandedPositions,
+  selectedId,
+  onSelectNode,
+  onTogglePosition,
+  className,
+}: Graph3DProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 640 })
   const [dark, setDark] = useState(isDark)
@@ -90,13 +179,18 @@ export function Graph3D({ data, expandedPositions, onSelectNode, className }: Gr
   const bgColor = dark ? '#09090b' : '#ffffff'
   const linkColor = dark ? '#52525b' : '#a1a1aa'
 
-  // 单击 → 仅选中（展开/收起走详情面板按钮，与 2D 交互一致避免意图耦合）
-  const handleClick = useCallback(
-    (node: GraphNode | null) => {
-      if (!node) {
-        onSelectNode(null)
+  // 单击 → 选中；双击岗位 → 展开/收起其技能（ForceGraph3D 无原生双击，用点击间隔检测）
+  const lastClickRef = useRef<{ id: string; ts: number }>({ id: '', ts: 0 })
+  const handleNodeClick = useCallback(
+    (node: GraphNode) => {
+      const now = Date.now()
+      if (node.id === lastClickRef.current.id && now - lastClickRef.current.ts < 300) {
+        // 双击：岗位展开/收起；非岗位不处理
+        lastClickRef.current = { id: '', ts: 0 }
+        if (node.type === 'position') onTogglePosition?.(node.id)
         return
       }
+      lastClickRef.current = { id: node.id, ts: now }
       onSelectNode({
         id: node.id,
         name: node.name,
@@ -108,7 +202,7 @@ export function Graph3D({ data, expandedPositions, onSelectNode, className }: Gr
         description: node.description,
       })
     },
-    [onSelectNode],
+    [onSelectNode, onTogglePosition],
   )
 
   // 点击空白区域清除选中
@@ -124,29 +218,22 @@ export function Graph3D({ data, expandedPositions, onSelectNode, className }: Gr
           height={dimensions.height}
           graphData={fgData}
           backgroundColor={bgColor}
-          nodeColor={(node: unknown) => nodeColor(node as GraphNode, dark)}
-          nodeVal={(node: unknown) => {
-            const n = node as GraphNode
-            // 展开的岗位放大，提示其技能当前可见（可点击收起）
-            const v = nodeVal(n)
-            return expandedPositions?.has(n.id) ? v * 1.3 : v
-          }}
-          nodeLabel={(node: unknown) => {
-            const n = node as GraphNode
-            const lines = [n.name]
-            if (n.type === 'position' && n.status) lines.push(`状态: ${n.status}`)
-            if (n.type === 'skill' && n.level) lines.push(`级别: ${n.level}`)
-            if (typeof n.value === 'number') lines.push(`权重: ${n.value}`)
-            return lines.join(' · ')
-          }}
+          nodeVal={(node: unknown) => nodeVal(node as GraphNode)}
+          nodeThreeObject={(node: unknown) =>
+            buildNodeObject(
+              node as GraphNode,
+              dark,
+              selectedId === (node as GraphNode).id,
+              expandedPositions?.has((node as GraphNode).id) ?? false,
+            )
+          }
           linkColor={() => linkColor}
           linkWidth={0.5}
           linkDirectionalParticles={2}
           linkDirectionalParticleWidth={2}
           linkDirectionalParticleSpeed={0.005}
-          onNodeClick={handleClick}
+          onNodeClick={handleNodeClick}
           onBackgroundClick={handleBackgroundClick}
-          nodeThreeObject={undefined}
         />
       )}
     </div>

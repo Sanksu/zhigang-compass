@@ -220,7 +220,7 @@ export function NodeDetailPanel({
           </Button>
         )}
 
-        {/* 关联度：条宽按全图最大关联度归一化，避免高频节点全部满条失真 */}
+        {/* 关联度：条宽按全图最大关联度归一化；无最大关联度时以 max(100, 当前值) 兜底，保证宽度始终 ≤100% */}
         {typeof node.value === 'number' && (
           <section className="space-y-1.5">
             <h4 className="text-xs font-medium text-ink-muted uppercase tracking-wide">关联度</h4>
@@ -229,11 +229,10 @@ export function NodeDetailPanel({
                 <div
                   className="h-full rounded-full bg-ink"
                   style={{
-                    width: `${
-                      stats?.maxValue
-                        ? Math.max(4, Math.min(100, (node.value / stats.maxValue) * 100))
-                        : Math.min(100, node.value)
-                    }%`,
+                    width: `${Math.max(
+                      4,
+                      Math.min(100, (node.value / (stats?.maxValue ?? Math.max(100, node.value))) * 100),
+                    )}%`,
                   }}
                 />
               </div>
