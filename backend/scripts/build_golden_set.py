@@ -23,6 +23,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("build_golden_set")
+
 from app.services.extraction.dictionary import SKILL_ALIAS, normalize_skill
 
 # ── 路径 ──
@@ -440,9 +444,9 @@ def main() -> int:
         for it in boss_items:
             it["source"] = "boss"
         items.extend(boss_items)
-        print(f"[build_golden_set] Boss 数据 {len(boss_items)} 条")
+        logger.info(f"[build_golden_set] Boss 数据 {len(boss_items)} 条")
     else:
-        print(f"[警告] Boss 数据文件不存在 {_BOSS_INPUT}", file=sys.stderr)
+        logger.error(f"[警告] Boss 数据文件不存在 {_BOSS_INPUT}")
 
     # 智联数据（补足）
     if _ZHILIAN_INPUT.exists():
@@ -451,15 +455,15 @@ def main() -> int:
         for it in zhilian_items:
             it["source"] = "zhilian"
         items.extend(zhilian_items)
-        print(f"[build_golden_set] 智联数据 {len(zhilian_items)} 条")
+        logger.info(f"[build_golden_set] 智联数据 {len(zhilian_items)} 条")
     else:
-        print(f"[警告] 智联数据文件不存在 {_ZHILIAN_INPUT}", file=sys.stderr)
+        logger.error(f"[警告] 智联数据文件不存在 {_ZHILIAN_INPUT}")
 
     if not items:
-        print("错误：无可用数据源", file=sys.stderr)
+        logger.error("错误：无可用数据源")
         return 1
 
-    print(f"[build_golden_set] 合计 {len(items)} 条")
+    logger.info(f"[build_golden_set] 合计 {len(items)} 条")
 
     # 过滤无效数据：title 非空且 normalize_skills 后至少有 1 个真实技能
     def has_real_skill(it: dict) -> bool:
@@ -474,17 +478,17 @@ def main() -> int:
         return len(normalize_skills(raw_skills)) > 0
 
     valid_items = [it for it in items if has_real_skill(it)]
-    print(f"[build_golden_set] 有效数据 {len(valid_items)} 条（至少 1 个真实技能）")
-    print(f"[build_golden_set] 丢弃 {len(items) - len(valid_items)} 条无技能数据")
+    logger.info(f"[build_golden_set] 有效数据 {len(valid_items)} 条（至少 1 个真实技能）")
+    logger.info(f"[build_golden_set] 丢弃 {len(items) - len(valid_items)} 条无技能数据")
 
     # 按数据源统计有效条数
     from collections import Counter
     source_dist = Counter(it["source"] for it in valid_items)
-    print(f"[build_golden_set] 有效数据源分布: {dict(source_dist)}")
+    logger.info(f"[build_golden_set] 有效数据源分布: {dict(source_dist)}")
 
     # 分层抽样
     selected = stratified_sample(valid_items)
-    print(f"[build_golden_set] 抽样 {len(selected)} 条")
+    logger.info(f"[build_golden_set] 抽样 {len(selected)} 条")
 
     # 构造黄金集
     golden_entries = [build_golden_entry(i + 1, item) for i, item in enumerate(selected)]
@@ -496,8 +500,8 @@ def main() -> int:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # 统计输出
-    print(f"[build_golden_set] 已写入 {_OUTPUT_FILE}")
-    print(f"[build_golden_set] 总条数: {len(golden_entries)}")
+    logger.info(f"[build_golden_set] 已写入 {_OUTPUT_FILE}")
+    logger.info(f"[build_golden_set] 总条数: {len(golden_entries)}")
 
     # 多样性统计
     import collections
@@ -505,16 +509,16 @@ def main() -> int:
     exp_dist = collections.Counter(e["gold_experience"]["min_years"] for e in golden_entries)
     edu_dist = collections.Counter(e["gold_education"] for e in golden_entries)
     cat_dist = collections.Counter(classify_position(e["gold_title"]) for e in golden_entries)
-    print(f"  数据源分布: {dict(source_dist)}")
-    print(f"  经验分布(min_years): {dict(exp_dist)}")
-    print(f"  学历分布: {dict(edu_dist)}")
-    print(f"  岗位类型分布: {dict(cat_dist)}")
+    logger.info(f"  数据源分布: {dict(source_dist)}")
+    logger.info(f"  经验分布(min_years): {dict(exp_dist)}")
+    logger.info(f"  学历分布: {dict(edu_dist)}")
+    logger.info(f"  岗位类型分布: {dict(cat_dist)}")
 
     # 技能覆盖统计
     all_skills = set()
     for e in golden_entries:
         all_skills.update(e["gold_skills"])
-    print(f"  覆盖技能数: {len(all_skills)}")
+    logger.info(f"  覆盖技能数: {len(all_skills)}")
 
     return 0
 

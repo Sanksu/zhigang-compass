@@ -21,6 +21,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("cron.snapshot_daily")
+
 
 async def enqueue_snapshot() -> None:
     """将图谱版本快照任务入队到 ARQ。"""
@@ -45,7 +49,7 @@ async def enqueue_snapshot() -> None:
             "snapshot_graph",
             triggered_by="scheduled",
         )
-        print(f"[snapshot_daily] 已入队 snapshot_graph, job_id={job.job_id}")
+        logger.info(f"[snapshot_daily] 已入队 snapshot_graph, job_id={job.job_id}")
     finally:
         await client.close()
 
@@ -56,13 +60,13 @@ def main() -> int:
     返回 0 表示入队成功，非 0 表示失败（cron 可据此告警）。
     """
     cst = datetime.now(timezone(timedelta(hours=8)))
-    print(f"[snapshot_daily] 启动调度，CST={cst.isoformat()}")
+    logger.info("启动调度，CST=%s", cst.isoformat())
     try:
         asyncio.run(enqueue_snapshot())
-        print("[snapshot_daily] 调度完成")
+        logger.info("调度完成")
         return 0
-    except Exception as e:
-        print(f"[snapshot_daily] 调度失败: {e}", file=sys.stderr)
+    except Exception:
+        logger.exception("调度失败")
         return 1
 
 

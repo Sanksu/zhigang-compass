@@ -13,9 +13,16 @@
 
 import json
 import random
+import sys
 from pathlib import Path
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_BACKEND_DIR))
+
+from app.core.logging import setup_logging
+
+logger = setup_logging("build_match_golden")
+
 _GOLDEN_JD = _BACKEND_DIR / "data" / "golden_set" / "jd_golden_100.jsonl"
 _OUTPUT = _BACKEND_DIR / "data" / "golden_set" / "golden_set_match.jsonl"
 
@@ -30,7 +37,7 @@ def _skills(item: dict) -> list[str]:
 
 def main() -> None:
     if not _GOLDEN_JD.exists():
-        print(f"[SKIP] JD 黄金集不存在: {_GOLDEN_JD}")
+        logger.warning(f"[SKIP] JD 黄金集不存在: {_GOLDEN_JD}")
         return
 
     items = [
@@ -40,7 +47,7 @@ def main() -> None:
     ]
     records = [(it["id"], _skills(it)) for it in items if _skills(it)]
     if not records:
-        print("[SKIP] 无有效技能记录的 JD")
+        logger.warning("[SKIP] 无有效技能记录的 JD")
         return
 
     rng = random.Random(SEED)
@@ -74,7 +81,7 @@ def main() -> None:
             f.write(json.dumps(p, ensure_ascii=False) + "\n")
     pos = sum(1 for p in pairs if p["label"] == 1)
     neg = len(pairs) - pos
-    print(f"生成 {len(pairs)} 对（正 {pos} / 负 {neg}）→ {_OUTPUT.name}")
+    logger.info(f"生成 {len(pairs)} 对（正 {pos} / 负 {neg}）→ {_OUTPUT.name}")
 
 
 if __name__ == "__main__":

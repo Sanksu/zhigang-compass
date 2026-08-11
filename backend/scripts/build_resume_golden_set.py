@@ -39,6 +39,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("build_resume_golden_set")
+
 from app.services.extraction.dictionary import normalize_skill  # noqa: E402
 from tests.evaluate.run_baseline import _norm_skill, rule_predict  # noqa: E402
 
@@ -337,9 +341,9 @@ def main() -> int:
             fn = sorted(gold - pred)
             errors.append(f"{e['id']}: FP={fp} FN={fn}")
     if errors:
-        print("自检失败：以下条目规则抽取与 gold_skills 不一致", file=sys.stderr)
+        logger.error("自检失败：以下条目规则抽取与 gold_skills 不一致")
         for err in errors:
-            print(f"  {err}", file=sys.stderr)
+            logger.error(f"  {err}")
         return 1
 
     # ── 自检 2：标注字段完整性（annotation_guideline §2.1）──
@@ -347,10 +351,10 @@ def main() -> int:
         for field in ("raw_text", "gold_skills", "name", "phone", "email",
                       "education", "work_experience", "skills", "projects"):
             if not e.get(field):
-                print(f"自检失败：{e['id']} 缺字段 {field}", file=sys.stderr)
+                logger.error(f"自检失败：{e['id']} 缺字段 {field}")
                 return 1
         if len(e["gold_skills"]) < _MIN_GOLD_SKILLS:
-            print(f"自检失败：{e['id']} gold_skills 少于 {_MIN_GOLD_SKILLS} 项", file=sys.stderr)
+            logger.error(f"自检失败：{e['id']} gold_skills 少于 {_MIN_GOLD_SKILLS} 项")
             return 1
 
     # ── 写入 ──
@@ -360,16 +364,16 @@ def main() -> int:
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
 
     # ── 统计 ──
-    print(f"[build_resume_golden_set] 已写入 {_OUTPUT_FILE}")
-    print(f"  总条数: {len(entries)}")
-    print(f"  方向分布: {dict(Counter(e['target_direction'] for e in entries))}")
-    print(f"  学历分布: {dict(Counter(e['education'][0]['degree'] for e in entries))}")
-    print(f"  年限分布: {dict(sorted(Counter(e['total_years'] for e in entries).items()))}")
+    logger.info(f"[build_resume_golden_set] 已写入 {_OUTPUT_FILE}")
+    logger.info(f"  总条数: {len(entries)}")
+    logger.info(f"  方向分布: {dict(Counter(e['target_direction'] for e in entries))}")
+    logger.info(f"  学历分布: {dict(Counter(e['education'][0]['degree'] for e in entries))}")
+    logger.info(f"  年限分布: {dict(sorted(Counter(e['total_years'] for e in entries).items()))}")
     all_skills = set()
     for e in entries:
         all_skills.update(e["gold_skills"])
-    print(f"  覆盖技能数: {len(all_skills)}")
-    print(f"  自检通过：规则抽取与 gold_skills 完全一致（评测基线 F1=1.0）")
+    logger.info(f"  覆盖技能数: {len(all_skills)}")
+    logger.info(f"  自检通过：规则抽取与 gold_skills 完全一致（评测基线 F1=1.0）")
     return 0
 
 

@@ -304,8 +304,17 @@ _PLATFORM_TO_SPIDER = {
 }
 
 
-async def _enqueue_crawl(spider: str, keywords: list[str], task_id: str | None = None) -> None:
+async def _enqueue_crawl(
+    spider: str,
+    keywords: list[str],
+    cities: list[str] | None = None,
+    task_id: str | None = None,
+) -> None:
     """入队 ARQ crawl_platform 任务；队列不可用抛异常由调用方标记 failed。"""
+    logger.info(
+        f"[_enqueue_crawl] 准备入队: task_id={task_id} spider={spider} "
+        f"keywords={keywords} cities={cities or '(默认)'}"
+    )
     from arq import create_pool
     from arq.connections import RedisSettings
     from urllib.parse import urlparse
@@ -317,10 +326,26 @@ async def _enqueue_crawl(spider: str, keywords: list[str], task_id: str | None =
         database=int(parsed.path.lstrip("/") or "1"),
         password=parsed.password,
     )
-    pool = await create_pool(redis_settings)
+    # 打印 host/port/db 便于定位队列连接问题（不打印密码）
+    logger.info(
+        f"[_enqueue_crawl] ARQ 队列地址: {parsed.hostname or 'localhost'}:"
+        f"{parsed.port or 6379}/{int(parsed.path.lstrip('/') or '1')}"
+    )
+    try:
+        pool = await create_pool(redis_settings)
+    except Exception as e:
+        logger.exception(f"[_enqueue_crawl] ARQ 连接失败: task_id={task_id} err={e}")
+        raise
     try:
         # task_id 供 crawl_platform 实时写日志队列 + 更新任务状态（SSE 端点消费）
-        await pool.enqueue_job("crawl_platform", spider_name=spider, keywords=keywords, task_id=task_id)
+        kwargs = {"spider_name": spider, "keywords": keywords, "task_id": task_id}
+        if cities:
+            kwargs["cities"] = cities
+        await pool.enqueue_job("crawl_platform", **kwargs)
+        logger.info(f"[_enqueue_crawl] 入队成功: task_id={task_id} job=crawl_platform kwargs={kwargs}")
+    except Exception as e:
+        logger.exception(f"[_enqueue_crawl] 入队失败: task_id={task_id} err={e}")
+        raise
     finally:
         await pool.close()
 
@@ -334,7 +359,8 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
     """
     platform = (req.get("platform") or "").strip()
     keyword = (req.get("keyword") or "").strip()
-    logger.info(f"[crawl/trigger] 收到触发请求: platform={platform} keyword={keyword}")
+    city = (req.get("city") or "").strip()
+    logger.info(f"[crawl/trigger] 收到触发请求: platform={platform} keyword={keyword} city={city or '(默认)'}")
     if platform not in _PLATFORM_TO_SPIDER:
         logger.warning(f"[crawl/trigger] 未知平台: {platform}")
         return error(400, f"未知平台: {platform}（可选: {', '.join(sorted(PLATFORM_META))}）")
@@ -342,18 +368,29 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
         logger.warning("[crawl/trigger] keyword 为空")
         return error(400, "keyword 不能为空")
 
-    task = TaskStatus(
-        task_type="crawl",
-        status="pending",
-        result={"platform": platform, "keyword": keyword},
-    )
-    db.add(task)
-    await db.commit()
-    await db.refresh(task)
-    logger.info(f"[crawl/trigger] 任务已建: task_id={task.id} platform={platform} keyword={keyword}")
+    try:
+        task = TaskStatus(
+            task_type="crawl",
+            status="pending",
+            result={"platform": platform, "keyword": keyword, "city": city or None},
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+    except Exception as e:
+        logger.exception(
+            f"[crawl/trigger] 任务落库失败: platform={platform} keyword={keyword} city={city or '(默认)'} err={e}"
+        )
+        return error(500, f"爬取任务落库失败: {e}")
+    logger.info(f"[crawl/trigger] 任务已建: task_id={task.id} platform={platform} keyword={keyword} city={city or '(默认)'}")
 
     try:
-        await _enqueue_crawl(_PLATFORM_TO_SPIDER[platform], [keyword], task_id=str(task.id))
+        await _enqueue_crawl(
+            _PLATFORM_TO_SPIDER[platform],
+            [keyword],
+            cities=[city] if city else None,
+            task_id=str(task.id),
+        )
         logger.info(f"[crawl/trigger] 任务入队成功: task_id={task.id} spider={_PLATFORM_TO_SPIDER[platform]}")
     except Exception as e:
         task.status = "failed"

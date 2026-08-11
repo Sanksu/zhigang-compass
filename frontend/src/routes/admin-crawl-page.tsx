@@ -114,6 +114,17 @@ interface MetricCardItem {
   hint: string
 }
 
+/** 平台切换时的默认搜索参数：海外源默认英文城市/英文关键词，国内源默认中文 */
+const PLATFORM_DEFAULTS: Record<string, { keyword: string; city: string }> = {
+  boss: { keyword: '高级前端', city: '北京' },
+  zhilian: { keyword: '高级前端', city: '北京' },
+  maimai: { keyword: '高级前端', city: '北京' },
+  monster: { keyword: 'Python', city: 'New York' },
+  indeed: { keyword: 'Python', city: 'New York' },
+  glassdoor: { keyword: 'Python', city: 'New York' },
+  linkedin: { keyword: 'Python', city: 'New York' },
+}
+
 const STATUS_META: Record<CrawlStatus, { variant: 'stable' | 'candidate' | 'archived'; label: string }> = {
   running: { variant: 'stable', label: '运行中' },
   idle: { variant: 'candidate', label: '空闲' },
@@ -368,7 +379,8 @@ export function AdminCrawlPage() {
   // 触发爬取 → 真实 POST /admin/crawl/trigger（ARQ 入队，202 返回 task_id）
   async function triggerCrawl(platform: string) {
     if (isBusy) return
-    const keyword = form.keyword?.trim() || '高级前端'
+    const def = PLATFORM_DEFAULTS[platform]
+    const keyword = form.keyword?.trim() || def?.keyword || '高级前端'
     if (!platform || !keyword) {
       setNotice('请选择平台并填写关键词')
       return
@@ -376,7 +388,7 @@ export function AdminCrawlPage() {
     setCurrentTask({
       platform: platforms.find((p) => p.id === platform)?.name ?? platform,
       keyword,
-      city: form.city || '北京',
+      city: form.city || def?.city || '北京',
       maxPages: form.maxPages || 30,
       status: 'queued',
       progress: 0,
@@ -389,6 +401,7 @@ export function AdminCrawlPage() {
       const res = await apiPost<{ task_id: string; platform: string; status: string }>('/admin/crawl/trigger', {
         platform,
         keyword,
+        city: form.city?.trim() || '',
       })
       setCurrentTask((t) => (t ? { ...t, taskId: res.task_id, status: 'running', progress: 10 } : t))
       setNotice(`爬取任务已入队（task_id: ${res.task_id.slice(0, 8)}…），等待 worker 执行`)
@@ -536,7 +549,21 @@ export function AdminCrawlPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>平台</Label>
-                <Select value={form.platform} onValueChange={(v) => setForm((f) => ({ ...f, platform: v }))}>
+                <Select
+                  value={form.platform}
+                  onValueChange={(v) =>
+                    setForm((f) => {
+                      const def = PLATFORM_DEFAULTS[v]
+                      const prevDef = PLATFORM_DEFAULTS[f.platform]
+                      // 关键词/城市未手动输入（为空或仍为上一平台默认值）时，跟随新平台默认
+                      const keyword =
+                        def && (!f.keyword.trim() || f.keyword === prevDef?.keyword) ? def.keyword : f.keyword
+                      const city =
+                        def && (!f.city.trim() || f.city === prevDef?.city) ? def.city : f.city
+                      return { ...f, platform: v, keyword, city }
+                    })
+                  }
+                >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {platforms.filter((p) => p.status !== 'archived').map((p) => (
@@ -550,7 +577,7 @@ export function AdminCrawlPage() {
                 <Input
                   value={form.keyword}
                   onChange={(e) => setForm((f) => ({ ...f, keyword: e.target.value }))}
-                  placeholder="高级前端"
+                  placeholder={PLATFORM_DEFAULTS[form.platform]?.keyword ?? '高级前端'}
                 />
               </div>
               <div className="space-y-1.5">
@@ -558,6 +585,7 @@ export function AdminCrawlPage() {
                 <Input
                   value={form.city}
                   onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
+                  placeholder={PLATFORM_DEFAULTS[form.platform]?.city ?? '北京'}
                 />
               </div>
               <div className="space-y-1.5">

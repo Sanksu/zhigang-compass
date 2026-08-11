@@ -14,6 +14,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("sync_skill_relations")
+
 from app.core.database import neo4j_driver
 from app.services.kg.skill_relations import sync_skill_relations
 
@@ -22,7 +26,7 @@ def main(dry_run: bool = False) -> None:
     with neo4j_driver.session() as session:
         stats = sync_skill_relations(session, dry_run=dry_run)
     suffix = "（dry-run，未写图谱）" if dry_run else ""
-    print(
+    logger.info(
         f"技能关系同步{suffix}: PREREQUISITE_OF={stats['prerequisite']} 条, "
         f"BELONGS_TO={stats['belongs_to']} 条, "
         f"ALTERNATIVE_OF={stats['alternative_of']} 条, "

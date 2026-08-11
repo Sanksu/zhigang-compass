@@ -14,11 +14,17 @@
 
 import argparse
 import json
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_BACKEND_DIR))
 _GOLDEN = _BACKEND_DIR / "data" / "golden_set" / "golden_set_temporal.jsonl"
+
+from app.core.logging import setup_logging
+
+logger = setup_logging("tune_temporal")
 
 RECALL_TARGET = 0.80
 FPR_MAX = 0.15
@@ -144,19 +150,19 @@ def main() -> None:
     args = parser.parse_args()
 
     if not _GOLDEN.exists():
-        print(f"[SKIP] 时滞标注集不存在: {_GOLDEN}（先运行 scripts/build_temporal_golden.py）")
+        logger.warning(f"[SKIP] 时滞标注集不存在: {_GOLDEN}（先运行 scripts/build_temporal_golden.py）")
         return
     records = load_golden(_GOLDEN)
     kinds = {}
     for r in records:
         kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
-    print(f"标注集: {len(records)} 条 {kinds}")
+    logger.info(f"标注集: {len(records)} 条 {kinds}")
 
     if args.eval_only:
         metrics = evaluate(records, DEFAULT_THRESHOLDS)
         report("评估设计文档默认阈值", metrics, DEFAULT_THRESHOLDS)
         if metrics["recall"] >= RECALL_TARGET and metrics["false_positive_rate"] <= FPR_MAX:
-            print("默认阈值达标，无需调优（设计文档 §4.7 阈值直接采用）")
+            logger.info("默认阈值达标，无需调优（设计文档 §4.7 阈值直接采用）")
         return
 
     result = tune(records, n_trials=args.trials)

@@ -25,6 +25,10 @@ from sqlalchemy.orm.attributes import flag_modified
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("migrate_skill_names")
+
 from app.core.database import async_session_factory
 from app.models.raw import JDRaw
 from app.services.extraction.post_processor import canonical_skill_name
@@ -83,10 +87,10 @@ async def migrate(dry_run: bool) -> None:
         if not dry_run:
             await s.commit()
 
-    print(f"涉及变更的 JD 数: {changed_jds}")
-    print(f"技能名变更种类: {len(name_changes)}")
+    logger.info(f"涉及变更的 JD 数: {changed_jds}")
+    logger.info(f"技能名变更种类: {len(name_changes)}")
     for (old, new), cnt in sorted(name_changes.items(), key=lambda x: -x[1]):
-        print(f"  {old!r} -> {new!r} (x{cnt})")
+        logger.info(f"  {old!r} -> {new!r} (x{cnt})")
 
 
 if __name__ == "__main__":

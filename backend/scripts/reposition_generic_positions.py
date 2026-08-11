@@ -22,6 +22,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("reposition_generic_positions")
+
 from sqlalchemy import select
 
 from app.core.database import async_session_factory
@@ -69,7 +73,7 @@ def main() -> int:
     args = parser.parse_args()
 
     jds = asyncio.run(collect_jds())
-    print(f"已抽取 JD 总数: {len(jds)}")
+    logger.info("已抽取 JD 总数: %s", len(jds))
 
     gaps = []
     for jd in jds:
@@ -83,15 +87,15 @@ def main() -> int:
         gaps.append(jd)
 
     if not gaps:
-        print("未发现受影响兜底岗位的 JD（兜底族已全部按技能路由或入空，符合治理预期）")
+        logger.info("未发现受影响兜底岗位的 JD（兜底族已全部按技能路由或入空，符合治理预期）")
         return 0
 
-    print("\n" + "=" * 76)
-    print(f"发现 {len(gaps)} 条 JD 仍归一化为兜底族（路由缺口，需补充技能路由规则）")
-    print("=" * 76)
+    logger.info("\n" + "=" * 76)
+    logger.info(f"发现 {len(gaps)} 条 JD 仍归一化为兜底族（路由缺口，需补充技能路由规则）")
+    logger.info("=" * 76)
     for jd in gaps[: args.sample]:
-        print(f"    jd={jd['jd_id']} src={jd['source']} "
-              f"岗位='{jd['raw_position']}' 技能=[{', '.join(jd['skills'][:12])}]")
+        logger.info(f"    jd={jd['jd_id']} src={jd['source']} "
+                    f"岗位='{jd['raw_position']}' 技能=[{', '.join(jd['skills'][:12])}]")
 
     return 1
 

@@ -12,6 +12,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("init_neo4j")
+
 from neo4j import GraphDatabase
 from app.core.config import settings
 
@@ -37,7 +41,7 @@ def _parse_statements(text: str) -> list[str]:
 def run() -> int:
     """执行 schema 初始化，返回退出码（0=全部成功，1=存在失败语句）。"""
     if not SCHEMA_PATH.exists():
-        print(f"✗ schema.cypher 未找到: {SCHEMA_PATH}")
+        logger.error("✗ schema.cypher 未找到: %s", SCHEMA_PATH)
         return 1
 
     cypher_text = SCHEMA_PATH.read_text(encoding="utf-8")
@@ -53,7 +57,7 @@ def run() -> int:
     errors = []
 
     try:
-        print(f"加载 schema.cypher — 共 {total} 条语句\n")
+        logger.info("加载 schema.cypher — 共 %s 条语句", total)
         with driver.session() as session:
             for i, cql in enumerate(statements, 1):
                 try:
@@ -61,15 +65,15 @@ def run() -> int:
                     ok += 1
                     label = cql.split()[1] if cql.split()[0].upper() in (
                         "CREATE", "MERGE") else cql[:40]
-                    print(f"  [{i:2d}/{total}] ✓ {label}...")
+                    logger.info("  [%2d/%d] ✓ %s...", i, total, label)
                 except Exception as e:
                     errors.append((i, cql[:80], str(e)))
-                    print(f"  [{i:2d}/{total}] ✗ {cql[:60]}… → {e}")
+                    logger.error("  [%2d/%d] ✗ %s… → %s", i, total, cql[:60], e)
 
-        print(f"\n完成: {ok}/{total} 成功, {len(errors)} 失败.")
+        logger.info(f"\n完成: {ok}/{total} 成功, {len(errors)} 失败.")
         if errors:
             for idx, snippet, reason in errors:
-                print(f"  [{idx}] {snippet} → {reason}")
+                logger.error(f"  [{idx}] {snippet} → {reason}")
 
     finally:
         driver.close()

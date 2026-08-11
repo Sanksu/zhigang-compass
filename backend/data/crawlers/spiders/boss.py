@@ -55,6 +55,10 @@ BOSS_CITY_CODES = {
     "武汉": "101200100",
 }
 
+# 增量采集翻页上限（默认）；历史回爬放宽（G-01，由 --since-days 时间截断提前停页）
+INCREMENTAL_MAX_PAGES = 5
+BACKFILL_MAX_PAGES = 50
+
 
 class BossSpider(BaseSpider):
     name = "boss"
@@ -68,6 +72,9 @@ class BossSpider(BaseSpider):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # 历史回爬（G-01）：-a history_days=90 放宽翻页上限并透传 --since-days，
+        # 由 boss_cdp_crawler 按发布时间截断；未指定时保持默认增量采集
+        self.history_days = int(kwargs.get("history_days") or 0)
         # CDP 调试端点：本地默认 http://127.0.0.1:9222，支持局域网内容器浏览器
         self.cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
         # cookies 文件模式：容器等无 CDP 浏览器环境复用导出的登录态文件
@@ -88,6 +95,22 @@ class BossSpider(BaseSpider):
                 f"BOSS CDP 模式: {self.cdp_url}。"
                 f"如未启动专用 Chrome，请先运行: python -m crawlers.setup_boss_chrome"
             )
+
+    def _build_cmd(self, task: dict) -> list[str]:
+        """构造 boss_cdp_crawler 采集命令（含历史回爬参数）。"""
+        max_pages = BACKFILL_MAX_PAGES if self.history_days else INCREMENTAL_MAX_PAGES
+        cmd = [
+            sys.executable, self.crawler_script,
+            "--keyword", task["keyword"],
+            "--city-code", task["city_code"],
+            "--cdp-url", self.cdp_url,
+            "--max-pages", str(max_pages),
+        ]
+        if self.history_days:
+            cmd.extend(["--since-days", str(self.history_days)])
+        if self.cookies_file:
+            cmd.extend(["--cookies-file", self.cookies_file])
+        return cmd
 
     def start_requests(self):
         # cookies 文件模式无需 CDP 浏览器（容器无真实 Chrome，登录态从文件读）：
@@ -132,9 +155,7 @@ class BossSpider(BaseSpider):
             self.logger.error("无采集任务，请通过 -a keywords= -a cities= 指定")
             return
 
-        # Python 解释器路径（与当前进程相同）
-        python_exe = sys.executable
-
+        # Python 解释器路径（与当前进程相同，_build_cmd 内部使用）
         task_total = len(tasks)
         _started = time.monotonic()
         for task_idx, task in enumerate(tasks):
@@ -145,16 +166,7 @@ class BossSpider(BaseSpider):
             self.logger.info(f"[boss] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword} city={city} ({city_code})")
 
             # 调用独立采集脚本
-            cmd = [
-                python_exe, self.crawler_script,
-                "--keyword", keyword,
-                "--city-code", city_code,
-                "--cdp-url", self.cdp_url,
-                "--max-pages", "5",
-            ]
-            if self.cookies_file:
-                cmd.append("--cookies-file")
-                cmd.append(self.cookies_file)
+            cmd = self._build_cmd(task)
 
             try:
                 # 用 subprocess.Popen 实时读取 stdout
@@ -205,6 +217,7 @@ class BossSpider(BaseSpider):
                     description=item_data.get("description", ""),
                     requirements=item_data.get("requirements", ""),
                     raw_text=item_data.get("raw_text", ""),
+                    post_date=item_data.get("post_date", ""),
                 )
 
             if proc.returncode != 0:

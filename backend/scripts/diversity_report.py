@@ -24,6 +24,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("diversity_report")
+
 from sqlalchemy import select
 
 from app.core.database import async_session_factory
@@ -97,22 +101,22 @@ async def collect(top_n: int) -> dict:
 
 
 def print_report(r: dict) -> None:
-    print("=" * 56)
-    print("智岗罗盘 — 数据多样性报告（DA-M4-02）")
-    print("=" * 56)
+    logger.info("=" * 56)
+    logger.info("智岗罗盘 — 数据多样性报告（DA-M4-02）")
+    logger.info("=" * 56)
     jd = r["jd"]
     pos = jd["positions"]
-    print(f"JD: {jd['total']} 条 | 去重率 {jd['dedup']['duplicate_rate']:.1%} | 源 {len(jd['sources'])} 个")
-    print(f"    源分布: " + ", ".join(f"{s['source']}={s['count']}" for s in jd["sources"]))
-    print(f"岗位: 唯一 {pos['unique_positions']} / 总 {pos['total_positions']} | "
-          f"每岗位均技能 {pos['avg_skills_per_position']} | 技能 CR10 集中度 {pos['cr10']:.1%}")
-    print(f"     Top-{len(pos['top_positions'])}: " + ", ".join(
+    logger.info(f"JD: {jd['total']} 条 | 去重率 {jd['dedup']['duplicate_rate']:.1%} | 源 {len(jd['sources'])} 个")
+    logger.info(f"    源分布: " + ", ".join(f"{s['source']}={s['count']}" for s in jd["sources"]))
+    logger.info(f"岗位: 唯一 {pos['unique_positions']} / 总 {pos['total_positions']} | "
+                f"每岗位均技能 {pos['avg_skills_per_position']} | 技能 CR10 集中度 {pos['cr10']:.1%}")
+    logger.info(f"     Top-{len(pos['top_positions'])}: " + ", ".join(
         f"{p['name']}({p['count']})" for p in pos["top_positions"][:5]
     ))
     course = r["course"]
-    print(f"课程: {course['total_courses']} 门 | 平台 {len(course['platforms'])} 个 | "
-          f"唯一技能标签 {course['unique_skill_tags']} | 去重率 {course['dedup']['duplicate_rate']:.1%}")
-    print(f"论文: {r['paper']['total']} 条 | 社区: {r['community']['total']} 条")
+    logger.info(f"课程: {course['total_courses']} 门 | 平台 {len(course['platforms'])} 个 | "
+                f"唯一技能标签 {course['unique_skill_tags']} | 去重率 {course['dedup']['duplicate_rate']:.1%}")
+    logger.info(f"论文: {r['paper']['total']} 条 | 社区: {r['community']['total']} 条")
 
 
 async def main(top_n: int, write: bool) -> None:
@@ -123,9 +127,9 @@ async def main(top_n: int, write: bool) -> None:
         report_dir.mkdir(parents=True, exist_ok=True)
         path = report_dir / f"diversity_{datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d')}.json"
         path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"报告已写入: {path.relative_to(_BACKEND_DIR)}")
+        logger.info(f"报告已写入: {path.relative_to(_BACKEND_DIR)}")
     else:
-        print("预览模式（--no-write）：未写库")
+        logger.info("预览模式（--no-write）：未写库")
 
 
 if __name__ == "__main__":

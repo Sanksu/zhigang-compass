@@ -24,6 +24,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("cleanup_intern_parttime")
+
 from sqlalchemy import delete, select  # noqa: E402
 
 from app.core.database import async_session_factory, neo4j_driver  # noqa: E402
@@ -103,39 +107,39 @@ async def main() -> None:
     by_reason: dict[str, int] = {}
     for _, _, _, reason, _ in targets:
         by_reason[reason] = by_reason.get(reason, 0) + 1
-    print(f"jd_raw 总数: {len(rows)}  待清理: {len(targets)} 条（{by_reason}）")
+    logger.info("jd_raw 总数: %s  待清理: %s 条（%s）", len(rows), len(targets), by_reason)
 
     urls = sorted({u for _, _, _, _, u in targets if u})
-    print(f"涉及 source_url: {len(urls)} 个")
+    logger.info("涉及 source_url: %s 个", len(urls))
 
     with neo4j_driver.session() as session:
         ev_count = session.run(
             "MATCH (e:Evidence) WHERE e.source_url IN $urls RETURN count(e) AS c", urls=urls
         ).single()["c"]
-    print(f"图谱将删除 Evidence 节点: {ev_count} 个")
+    logger.info("图谱将删除 Evidence 节点: %s 个", ev_count)
 
     if args.dry_run:
-        print("\n[dry-run] 未执行任何删除")
+        logger.info("[dry-run] 未执行任何删除")
         return
 
     # 2. 删除图谱 Evidence（先删，保留 jd_raw 期间可追溯 source_url）
     deleted = _delete_evidence(urls)
-    print(f"[1/3] 已删除图谱 Evidence: {deleted} 个")
+    logger.info("[1/3] 已删除图谱 Evidence: %s 个", deleted)
 
     # 3. 删除 jd_raw 行
     ids = [t[0] for t in targets if t[0] is not None]
     await _delete_jd_rows(ids)
-    print(f"[2/3] 已删除 jd_raw: {len(ids)} 条")
+    logger.info("[2/3] 已删除 jd_raw: %s 条", len(ids))
 
     # 4. 重聚合岗位（freq / REQUIRES 重算）
     result = await _reaggregate()
-    print(f"[3/3] 岗位聚合重算完成: {result}")
+    logger.info("[3/3] 岗位聚合重算完成: %s", result)
 
     # 5. 终态
     rows_after = await _load_jd_rows()
     with neo4j_driver.session() as session:
         ev_after = session.run("MATCH (e:Evidence) RETURN count(e) AS c").single()["c"]
-    print(f"清理后 jd_raw: {len(rows_after)} 条  Evidence: {ev_after} 个")
+    logger.info("清理后 jd_raw: %s 条  Evidence: %s 个", len(rows_after), ev_after)
 
 
 if __name__ == "__main__":

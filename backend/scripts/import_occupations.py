@@ -36,6 +36,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("import_occupations")
+
 from sqlalchemy import select
 
 from app.core.database import async_session_factory
@@ -259,7 +263,7 @@ async def _fill_embeddings(session) -> int:
         embedder.warm(texts)  # 一次 batch encode 填缓存，避免逐条前向推理
         vecs = [embedder.embed(t) for t in texts]
     except SemanticUnavailableError as e:
-        print(f"  ! 语义模型不可用，跳过向量生成: {e}")
+        logger.warning(f"  ! 语义模型不可用，跳过向量生成: {e}")
         return 0
     for occ, vec in zip(rows, vecs):
         occ.embedding = vec
@@ -298,7 +302,7 @@ async def _sync_neo4j(session) -> int:
                 rows=payload,
             )
     except Exception as e:
-        print(f"  ! Neo4j 同步失败（接地将降级为 ILIKE）: {e}")
+        logger.warning("  ! Neo4j 同步失败（接地将降级为 ILIKE）: %s", e)
         return 0
     return len(rows)
 
@@ -306,7 +310,7 @@ async def _sync_neo4j(session) -> int:
 async def main(write: bool, csv_dir: Path | None, source: str) -> None:
     rows = _load_source_rows(source, csv_dir)
     alias_total = sum(len(aliases) for _, _, _, _, aliases in rows)
-    print(f"来源 {source}: 岗位 {len(rows)} 条 | 别名 {alias_total} 条")
+    logger.info("来源 %s: 岗位 %s 条 | 别名 %s 条", source, len(rows), alias_total)
 
     created = updated = 0
     async with async_session_factory() as session:
@@ -320,20 +324,20 @@ async def main(write: bool, csv_dir: Path | None, source: str) -> None:
             await session.commit()
 
     if not write:
-        print("冒烟模式（--no-write）：解析校验通过，未写库")
+        logger.info("冒烟模式（--no-write）：解析校验通过，未写库")
         return
-    print(f"导入完成: 新建 {created} / 更新 {updated} | 总量 {created + updated}")
+    logger.info(f"导入完成: 新建 {created} / 更新 {updated} | 总量 {created + updated}")
 
     # 双路检索索引同步（T-06）：向量（语义路）+ Neo4j 全文（关键词路）
     # 全量刷新（occupations 表整体重算向量/重写节点，覆盖三源）
     async with async_session_factory() as session:
         vec_count = await _fill_embeddings(session)
         neo4j_count = await _sync_neo4j(session)
-    print(f"索引同步: pgvector 向量 {vec_count} 条 | Neo4j Occupation 节点 {neo4j_count} 个")
+    logger.info(f"索引同步: pgvector 向量 {vec_count} 条 | Neo4j Occupation 节点 {neo4j_count} 个")
 
     # 抽样展示本次导入数据，便于人工核验
     for code, name, *_ in rows[:5]:
-        print(f"  {code} | {name}")
+        logger.info(f"  {code} | {name}")
 
 
 if __name__ == "__main__":

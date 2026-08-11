@@ -19,6 +19,12 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app.core.logging import setup_logging
+
+logger = setup_logging("generate_keys")
+
 KEYS_DIR = Path(__file__).resolve().parent.parent / "keys"
 PRIVATE_PATH = KEYS_DIR / "private.pem"
 PUBLIC_PATH = KEYS_DIR / "public.pem"
@@ -30,10 +36,10 @@ def main() -> int:
     args = parser.parse_args()
 
     if (PRIVATE_PATH.exists() or PUBLIC_PATH.exists()) and not args.force:
-        print(
-            f"✗ 密钥已存在（{KEYS_DIR}），拒绝覆盖。"
+        logger.error(
+            "密钥已存在（%s），拒绝覆盖。"
             "覆盖会使已签发 token 全部失效；确需轮换请加 --force。",
-            file=sys.stderr,
+            KEYS_DIR,
         )
         return 1
 
@@ -59,7 +65,7 @@ def main() -> int:
     )
     PUBLIC_PATH.write_bytes(public_pem)
 
-    print(f"✅ RSA 密钥对已生成：{KEYS_DIR}")
+    logger.info("RSA 密钥对已生成：%s", KEYS_DIR)
     return 0
 
 

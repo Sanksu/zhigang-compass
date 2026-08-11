@@ -25,6 +25,10 @@ sys.path.insert(0, str(_BACKEND_DIR))
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("after_backfill_reingest")
+
 from app.workers.tasks import aggregate_positions, batch_extract
 import app.core.database  # 显式触发 create_async_engine(echo=settings.debug)（tasks 内为惰性导入）
 
@@ -55,13 +59,17 @@ _POLL_SECONDS = 60
 
 
 def _backfill_finished() -> bool:
-    """回填完成判定：日志末尾出现"完成："（backfill_jd_detail 结束时打印）。"""
+    """回填完成判定：日志末尾含"完成："（backfill_jd_detail 结束时打印）。
+
+    日志经统一格式输出（`%(asctime)s %(levelname)s [%(name)s] %(message)s`），
+    行首为时间戳，须用 `in` 而非 `startswith` 匹配。
+    """
     if not _BACKFILL_LOG.exists():
         return False
     text = _BACKFILL_LOG.read_text(encoding="utf-8", errors="ignore").strip()
     if not text:
         return False
-    return text.splitlines()[-1].startswith("完成：")
+    return "完成：" in text.splitlines()[-1]
 
 
 async def wait_backfill() -> None:
@@ -73,11 +81,11 @@ async def wait_backfill() -> None:
             size1 = _BACKFILL_LOG.stat().st_size
             await asyncio.sleep(_POLL_SECONDS)
             if _backfill_finished() and _BACKFILL_LOG.stat().st_size == size1:
-                print("[wait] 检测到回填完成，开始重抽")
+                logger.info("[wait] 检测到回填完成，开始重抽")
                 return
             continue
         await asyncio.sleep(_POLL_SECONDS)
-    print(f"[wait] 等待回填完成超时（{_WAIT_TIMEOUT_SECONDS}s），继续重抽")
+    logger.warning("[wait] 等待回填完成超时（%ss），继续重抽", _WAIT_TIMEOUT_SECONDS)
 
 
 def _progress_bar(done: int, total: int, width: int = 30) -> str:
@@ -112,7 +120,7 @@ async def reingest() -> dict:
     total = remaining
     total_rounds = max(1, (total + _BATCH_SIZE - 1) // _BATCH_SIZE)
     started = time.monotonic()
-    print(f"[reingest] 待抽取 {total} 条，预计 {total_rounds} 轮")
+    logger.info("[reingest] 待抽取 %s 条，预计 %s 轮", total, total_rounds)
     while rounds < _MAX_ROUNDS:
         rounds += 1
         r = await batch_extract({}, limit=_BATCH_SIZE)
@@ -120,25 +128,25 @@ async def reingest() -> dict:
         remaining = await _count_no_ext()
         elapsed = time.monotonic() - started
         eta_min = elapsed / rounds * (total_rounds - rounds) / 60 if rounds else 0
-        print(
-            f"[reingest round {rounds}/{total_rounds}] {_progress_bar(rounds, total_rounds)} | "
-            f"已抽 {succeeded} 条 | 剩余 {remaining} 条 | "
-            f"本轮 成功 {r['succeeded']} 失败 {len(r['failed'])} | "
-            f"用时 {elapsed / 60:.1f}min 预计剩余 {eta_min:.1f}min"
+        logger.info(
+            "[reingest round %s/%s] %s | 已抽 %s 条 | 剩余 %s 条 | "
+            "本轮 成功 %s 失败 %s | 用时 %.1fmin 预计剩余 %.1fmin",
+            rounds, total_rounds, _progress_bar(rounds, total_rounds), succeeded,
+            remaining, r["succeeded"], len(r["failed"]), elapsed / 60, eta_min,
         )
         if r["processed"] == 0:
             break
     agg = await aggregate_positions({})
-    print(f"[reingest] 抽取轮数={rounds} 新增成功={succeeded} 聚合结果={agg}")
+    logger.info("[reingest] 抽取轮数=%s 新增成功=%s 聚合结果=%s", rounds, succeeded, agg)
     return {"rounds": rounds, "succeeded": succeeded, "aggregate": agg}
 
 
 async def main() -> None:
-    print("[after_backfill_reingest] 启动，等待回填完成…")
+    logger.info("[after_backfill_reingest] 启动，等待回填完成…")
     await wait_backfill()
-    print("=== 阶段：重抽（batch_extract + aggregate_positions）===")
+    logger.info("=== 阶段：重抽（batch_extract + aggregate_positions）===")
     result = await reingest()
-    print(f"[after_backfill_reingest] 全部完成: {result}")
+    logger.info("[after_backfill_reingest] 全部完成: %s", result)
 
 
 if __name__ == "__main__":
