@@ -15,6 +15,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("backfill_embeddings")
+
 from app.core.database import async_session_factory
 from app.services.embeddings.backfill import run_backfill
 from app.services.matching.semantic import SemanticUnavailableError
@@ -29,6 +33,7 @@ async def main() -> int:
     parser.add_argument("--no-projects", action="store_true", help="跳过 project_embeddings")
     args = parser.parse_args()
 
+    logger.info("开始 pgvector 三表向量回填")
     try:
         async with async_session_factory() as db:
             result = await run_backfill(
@@ -38,11 +43,11 @@ async def main() -> int:
                 projects=not args.no_projects,
             )
     except SemanticUnavailableError:
-        print("语义模型不可用，回填跳过（SkillEmbedder 未加载）")
+        logger.exception("语义模型不可用，回填跳过（SkillEmbedder 未加载）")
         return 1
 
     for table, stats in result.items():
-        print(f"{table}: {stats}")
+        logger.info(f"{table}: {stats}")
     return 0
 
 

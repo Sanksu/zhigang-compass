@@ -14,11 +14,17 @@
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_BACKEND_DIR))
 _GOLDEN = _BACKEND_DIR / "data" / "golden_set" / "golden_set_inflation.jsonl"
 _WEIGHTS_PATH = _BACKEND_DIR / "configs" / "inflation_weights.json"
+
+from app.core.logging import setup_logging
+
+logger = setup_logging("tune_inflation")
 
 # 设计文档 §4.8 控制目标
 RECALL_TARGET = 0.80
@@ -140,10 +146,10 @@ def main() -> None:
     args = parser.parse_args()
 
     if not _GOLDEN.exists():
-        print(f"[SKIP] 通胀标注集不存在: {_GOLDEN}（先运行 scripts/build_inflation_golden.py）")
+        logger.warning(f"[SKIP] 通胀标注集不存在: {_GOLDEN}（先运行 scripts/build_inflation_golden.py）")
         return
     records = load_golden(_GOLDEN)
-    print(f"标注集: {len(records)} 条（正 {sum(1 for r in records if r['is_inflation'])} / 负 {sum(1 for r in records if not r['is_inflation'])}）")
+    logger.info(f"标注集: {len(records)} 条（正 {sum(1 for r in records if r['is_inflation'])} / 负 {sum(1 for r in records if not r['is_inflation'])}）")
 
     if args.eval_only:
         from app.services.data_quality.inflation_detector import load_weights

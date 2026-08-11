@@ -13,6 +13,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("migrate_evidence_relations")
+
 from app.core.database import neo4j_driver
 
 
@@ -33,5 +37,5 @@ def migrate() -> dict:
 
 if __name__ == "__main__":
     result = migrate()
-    print(f"迁移完成: 旧 MENTIONED_IN {result['renamed_from_old']} 条 → "
-          f"剩余 {result['old_remaining']} 条，EVIDENCED_BY 现 {result['evidence_by_count']} 条")
+    logger.info(f"迁移完成: 旧 MENTIONED_IN {result['renamed_from_old']} 条 → "
+                f"剩余 {result['old_remaining']} 条，EVIDENCED_BY 现 {result['evidence_by_count']} 条")

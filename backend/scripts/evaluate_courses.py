@@ -17,6 +17,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("evaluate_courses")
+
 from sqlalchemy import select
 
 from app.core.database import async_session_factory
@@ -43,17 +47,17 @@ async def main(write: bool, top: int) -> None:
             await session.commit()
 
     recommended = [r for _, r in results if r.recommended]
-    print("=" * 64)
-    print("课程质量评估报告（DA-M4-01）")
-    print("=" * 64)
-    print(f"课程总数: {len(results)} | 推荐池（≥{RECOMMEND_MIN_SCORE}）: {len(recommended)}")
+    logger.info("=" * 64)
+    logger.info("课程质量评估报告（DA-M4-01）")
+    logger.info("=" * 64)
+    logger.info(f"课程总数: {len(results)} | 推荐池（≥{RECOMMEND_MIN_SCORE}）: {len(recommended)}")
     if not write:
-        print("预览模式（--no-write）：未写库")
+        logger.info("预览模式（--no-write）：未写库")
     if top:
-        print(f"\n质量分 Top-{min(top, len(results))}:")
+        logger.info(f"\n质量分 Top-{min(top, len(results))}:")
         for _, r in sorted(results, key=lambda x: x[1].quality_score, reverse=True)[:top]:
             flag = "★推荐" if r.recommended else "   "
-            print(
+            logger.info(
                 f"  {flag} {r.quality_score:.3f} | {r.platform:<10} | "
                 f"{(r.title or '')[:24]}"
             )

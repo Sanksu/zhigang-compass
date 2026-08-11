@@ -30,6 +30,11 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.database import engine
+from app.core.logging import setup_logging
+
+logger = setup_logging("bootstrap")
+
 # 阶段定义：(名称, 说明, 调用方式)
 # subprocess 用 `python -m scripts.xxx`（cwd=backend，sys.path[0] 即 backend，可导入 app）
 _STEPS: list[tuple[str, str, dict]] = [
@@ -65,7 +70,7 @@ _STEPS: list[tuple[str, str, dict]] = [
 def _run_subprocess(step_name: str, cmd: list[str]) -> None:
     """以子进程运行 `python -m scripts.xxx`（cwd=backend）。"""
     full_cmd = [sys.executable, "-m", "scripts." + cmd[0]] + cmd[1:]
-    print(f"\n▶ [{step_name}] $ {full_cmd[-1]}")
+    logger.info("▶ [%s] $ %s", step_name, full_cmd[-1])
     subprocess.run(
         full_cmd,
         cwd=str(_BACKEND_DIR),
@@ -76,7 +81,7 @@ def _run_subprocess(step_name: str, cmd: list[str]) -> None:
 
 async def _run_async(step_name: str, target: str) -> None:
     """内联运行无独立 CLI 的异步阶段（load_courses / snapshot / evolved_from / backfill_embeddings）。"""
-    print(f"\n▶ [{step_name}] 异步任务 {target}")
+    logger.info("▶ [%s] 异步任务 %s", step_name, target)
     if target == "load_courses":
         from app.workers.tasks import load_courses
 
@@ -97,7 +102,10 @@ async def _run_async(step_name: str, target: str) -> None:
         result = await backfill_embeddings({})
     else:
         raise ValueError(f"未知异步阶段: {target}")
-    print(f"  → {result}")
+    logger.info("  → %s", result)
+    # Windows 下 asyncpg 连接绑定创建时的事件循环；每个异步阶段独立 asyncio.run()（新 loop），
+    # 若不释放连接池，下一阶段会复用上一 loop 的连接导致 `_proactor` 为 None 崩溃（ProactorEventLoop 坑）
+    await engine.dispose()
 
 
 def main() -> int:
@@ -120,26 +128,26 @@ def main() -> int:
 
     skip = {s.strip() for s in (args.skip or "").split(",") if s.strip()}
 
-    print("智岗罗盘数据冷启动开始")
+    logger.info("智岗罗盘数据冷启动开始")
     for name, desc, spec in _STEPS:
         if args.only and name != args.only:
             continue
         if name in skip:
-            print(f"⏭  跳过阶段 {name}（--skip）")
+            logger.info("⏭ 跳过阶段 %s（--skip）", name)
             continue
-        print(f"== [{name}] {desc} ==")
+        logger.info("== [%s] %s ==", name, desc)
         try:
             if "cmd" in spec:
                 _run_subprocess(name, spec["cmd"])
             else:
                 asyncio.run(_run_async(name, spec["async"]))
         except subprocess.CalledProcessError as e:
-            print(f"✗ 阶段 {name} 失败（退出码 {e.returncode}），已停止。修复后重跑（幂等）。")
+            logger.error("✗ 阶段 %s 失败（退出码 %s），已停止。修复后重跑（幂等）。", name, e.returncode)
             return e.returncode
         except Exception as e:
-            print(f"✗ 阶段 {name} 失败: {e}")
+            logger.exception("✗ 阶段 %s 失败", name)
             return 1
-    print("\n冷启动全部完成。")
+    logger.info("冷启动全部完成。")
     return 0
 
 

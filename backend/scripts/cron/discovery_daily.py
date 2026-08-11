@@ -26,6 +26,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("cron.discovery_daily")
+
 
 async def enqueue_discovery() -> None:
     """将新岗位发现与自动状态流转任务依次入队到 ARQ。"""
@@ -47,11 +51,11 @@ async def enqueue_discovery() -> None:
     client = await create_pool(redis_settings)
     try:
         job1 = await client.enqueue_job("discovery_daily")
-        print(f"[discovery_daily] 已入队 discovery_daily, job_id={job1.job_id}")
+        logger.info(f"[discovery_daily] 已入队 discovery_daily, job_id={job1.job_id}")
         # ARQ 多 worker 并发下 FIFO 不保证消费顺序，给 discovery_daily 5min
         # 领先时间再入队自动流转（避免 auto_transition 读到空候选池）
         job2 = await client.enqueue_job("discovery_auto_transition", _defer_by=300)
-        print(f"[discovery_daily] 已入队 discovery_auto_transition（延迟 5min）, job_id={job2.job_id}")
+        logger.info(f"[discovery_daily] 已入队 discovery_auto_transition（延迟 5min）, job_id={job2.job_id}")
     finally:
         await client.close()
 
@@ -62,13 +66,13 @@ def main() -> int:
     返回 0 表示入队成功，非 0 表示失败（cron 可据此告警）。
     """
     cst = datetime.now(timezone(timedelta(hours=8)))
-    print(f"[discovery_daily] 启动调度，CST={cst.isoformat()}")
+    logger.info("启动调度，CST=%s", cst.isoformat())
     try:
         asyncio.run(enqueue_discovery())
-        print("[discovery_daily] 调度完成")
+        logger.info("调度完成")
         return 0
-    except Exception as e:
-        print(f"[discovery_daily] 调度失败: {e}", file=sys.stderr)
+    except Exception:
+        logger.exception("调度失败")
         return 1
 
 

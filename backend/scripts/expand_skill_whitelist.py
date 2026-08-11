@@ -23,6 +23,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("expand_skill_whitelist")
+
 from sqlalchemy import text
 
 from app.core.database import async_session_factory
@@ -63,16 +67,16 @@ async def main(top: int, output: Path | None) -> None:
     # 噪音过滤后按出现岗位数降序
     candidates = [(name, cnt) for name, cnt in counter.items() if not is_noise_skill(name)]
     candidates.sort(key=lambda x: (-x[1], x[0].lower()))
-    print(f"白名单外原始技能: {len(counter)} | 噪音过滤后候选: {len(candidates)}")
+    logger.info("白名单外原始技能: %s | 噪音过滤后候选: %s", len(counter), len(candidates))
 
     lines = []
     for name, cnt in candidates[:top]:
         lines.append(f"{cnt:5d}  {name}")
-        print(f"{cnt:5d}  {name}")
+        logger.info(f"{cnt:5d}  {name}")
 
     if output:
         output.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print(f"候选已写入: {output}")
+        logger.info(f"候选已写入: {output}")
 
 
 if __name__ == "__main__":

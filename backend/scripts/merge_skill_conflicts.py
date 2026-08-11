@@ -21,6 +21,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("merge_skill_conflicts")
+
 from app.core.database import neo4j_driver
 from app.services.extraction.dictionary import (
     SKILL_STOPWORDS,
@@ -149,9 +153,9 @@ def main() -> None:
 
         # ---- P1-2 泛词碎片清理 ----
         stopword_names = [s["name"] for s in skills if s["name"] in SKILL_STOPWORDS]
-        print(f"\n[1/3] P1-2 泛词碎片清理（SKILL_STOPWORDS 命中存量节点 {len(stopword_names)} 个）")
+        logger.info("[1/3] P1-2 泛词碎片清理（SKILL_STOPWORDS 命中存量节点 %s 个）", len(stopword_names))
         for n in sorted(set(stopword_names)):
-            print(f"  - {n!r}")
+            logger.info("  - %r", n)
         if not args.dry_run and stopword_names:
             _delete_stopword_nodes(session, stopword_names)
         skills = [s for s in skills if s["name"] not in SKILL_STOPWORDS]
@@ -174,16 +178,16 @@ def main() -> None:
                 "renames": primary["name"] != canonical,
             })
 
-        print(f"\n[2/3] P1-3 大小写/别名冲突合并（{len(plans)} 组，冗余节点 "
-              f"{sum(len(p['dups']) for p in plans)} 个）")
+        logger.info("[2/3] P1-3 大小写/别名冲突合并（%s 组，冗余节点 %s 个）",
+                     len(plans), sum(len(p["dups"]) for p in plans))
         for p in plans[:30]:
-            detail = f" ← 主节点改名" if p["renames"] else ""
-            print(f"  {p['canonical']!r}（{len(p['dups'])+1} 个节点，REQUIRES {p['primary']['req_deg']}）"
-                  f"{detail}")
+            detail = " ← 主节点改名" if p["renames"] else ""
+            logger.info("  %r（%s 个节点，REQUIRES %s）%s",
+                        p["canonical"], len(p["dups"]) + 1, p["primary"]["req_deg"], detail)
             for m in [p["primary"]] + p["dups"]:
-                print(f"      {m['name']!r} req_deg={m['req_deg']}")
+                logger.info("      %r req_deg=%s", m["name"], m["req_deg"])
         if len(plans) > 30:
-            print(f"  ... 其余 {len(plans)-30} 组略")
+            logger.info("  ... 其余 %s 组略", len(plans) - 30)
 
         if not args.dry_run and plans:
             _merge_groups(session, plans)
@@ -191,10 +195,10 @@ def main() -> None:
         # ---- P0-1 category 补写 ----
         # 合并后主节点名已更新，重新加载当前节点（删除/改名后按当前名补写）
         current = _load_skills(session)
-        print(f"\n[3/3] P0-1 category 补写（当前 Skill 节点 {len(current)} 个）")
+        logger.info("[3/3] P0-1 category 补写（当前 Skill 节点 %s 个）", len(current))
         if not args.dry_run:
             filled = _backfill_category(session, current)
-            print(f"  回填 {filled} 个节点")
+            logger.info("  回填 %s 个节点", filled)
 
         # ---- 验证 ----
         after_skills = _load_skills(session)
@@ -206,10 +210,10 @@ def main() -> None:
             "MATCH (sk:Skill) RETURN count(sk) AS total, "
             "count(CASE WHEN sk.category IS NOT NULL AND sk.category <> '' THEN 1 END) AS with_cat"
         ).single()
-        print(f"\n验证（{'dry-run 预估' if args.dry_run else '执行后'}）:")
-        print(f"  Skill 节点: {before['Skill']} → {len(after_skills)}")
-        print(f"  冲突组: {len(plans)} → {len(conflicts_after)}")
-        print(f"  category 落地率: {cat_rows['with_cat']}/{cat_rows['total']}")
+        logger.info(f"\n验证（{'dry-run 预估' if args.dry_run else '执行后'}）:")
+        logger.info(f"  Skill 节点: {before['Skill']} → {len(after_skills)}")
+        logger.info(f"  冲突组: {len(plans)} → {len(conflicts_after)}")
+        logger.info(f"  category 落地率: {cat_rows['with_cat']}/{cat_rows['total']}")
 
 
 if __name__ == "__main__":

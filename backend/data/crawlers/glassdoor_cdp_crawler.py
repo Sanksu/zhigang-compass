@@ -31,13 +31,13 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 from urllib.parse import urlencode, urljoin
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app.core.logging import setup_logging
 
-def log(msg: str):
-    """日志输出到 stderr，不污染 stdout 的 JSONL。"""
-    print(msg, file=sys.stderr, flush=True)
-
+logger = setup_logging("glassdoor_cdp_crawler", stream=sys.stderr)
 
 # 默认 CDP 端口（Glassdoor 独立浏览器 9224，不与 BOSS 共享）
 DEFAULT_CDP_PORT = 9224
@@ -190,8 +190,8 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
         try:
             browser = await p.chromium.connect_over_cdp(cdp_url)
         except Exception as e:
-            log(f"❌ CDP 连接失败（{cdp_url}）: {e}")
-            log(f"   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
+            logger.error(f"❌ CDP 连接失败（{cdp_url}）: {e}")
+            logger.info(f"   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
             return 0
 
         # 隔离：新建独立 context 并复制主 context 的 cookies（保留 Cloudflare 验证），
@@ -205,7 +205,7 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                     if _cookies:
                         await context.add_cookies(_cookies)
                 except Exception as e:
-                    log(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
+                    logger.warning(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
             return context, await context.new_page()
 
         # 城市解析：headless 下 Cloudflare 仅放行每个 context 的首次导航（实测同 context
@@ -234,15 +234,15 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
             finally:
                 await resolve_ctx.close()
         except Exception as e:
-            log(f"城市解析失败（将按全国范围搜索）: {e}")
+            logger.error(f"城市解析失败（将按全国范围搜索）: {e}")
 
         if loc_params and loc_params.get("id"):
-            log(f"城市 '{city}' → locId={loc_params['id']} type={loc_params.get('type')}")
+            logger.info(f"城市 '{city}' → locId={loc_params['id']} type={loc_params.get('type')}")
         else:
-            log(f"⚠️ 未解析到城市 '{city}' 的 locId，将按全国范围搜索")
+            logger.warning(f"⚠️ 未解析到城市 '{city}' 的 locId，将按全国范围搜索")
 
         for page_num in range(1, max_pages + 1):
-            log(f"=== 采集第 {page_num}/{max_pages} 页 ===")
+            logger.info(f"=== 采集第 {page_num}/{max_pages} 页 ===")
 
             # Glassdoor 搜索 URL；未解析到 locId 时不带位置参数（全国搜索）
             params = {
@@ -261,19 +261,19 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                 try:
                     await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                 except Exception as e:
-                    log(f"  导航失败: {e}")
+                    logger.error(f"  导航失败: {e}")
                     continue
 
                 # 等待岗位卡片渲染
                 try:
                     await page.wait_for_selector('li[data-jobid][data-test="jobListing"]', timeout=15000)
                 except Exception as e:
-                    log(f"  ⚠️ 等待岗位卡片超时: {e}")
+                    logger.warning(f"  ⚠️ 等待岗位卡片超时: {e}")
                     try:
                         title = await page.title()
-                        log(f"  页面标题: {title}")
+                        logger.info(f"  页面标题: {title}")
                         if "blocked" in title.lower() or "access" in title.lower():
-                            log(f"  ❌ 疑似被 Cloudflare 拦截，请在浏览器中先访问 glassdoor.com 完成验证")
+                            logger.error(f"  ❌ 疑似被 Cloudflare 拦截，请在浏览器中先访问 glassdoor.com 完成验证")
                             break
                     except Exception:
                         pass
@@ -286,13 +286,13 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                 try:
                     jobs = await page.evaluate(EXTRACT_JOBS_JS)
                 except Exception as e:
-                    log(f"  ❌ DOM 提取失败: {e}")
+                    logger.error(f"  ❌ DOM 提取失败: {e}")
                     continue
 
-                log(f"  第 {page_num} 页提取 {len(jobs)} 条岗位")
+                logger.info(f"  第 {page_num} 页提取 {len(jobs)} 条岗位")
 
                 if not jobs:
-                    log(f"  第 {page_num} 页无岗位，结束采集")
+                    logger.warning(f"  第 {page_num} 页无岗位，结束采集")
                     break
 
                 all_jobs_data.extend(jobs)
@@ -300,7 +300,7 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
                 await ctx.close()
 
             if page_num < max_pages:
-                log("  翻页间隔 5 秒...")
+                logger.info("  翻页间隔 5 秒...")
                 await asyncio.sleep(5)
 
     # 输出 JSONL
@@ -311,7 +311,7 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
             print(json.dumps(item, ensure_ascii=False), flush=True)
             count += 1
 
-    log(f"✅ 采集完成: kw={keyword} city={city} count={count}")
+    logger.info(f"✅ 采集完成: kw={keyword} city={city} count={count}")
     return count
 
 
@@ -371,7 +371,7 @@ def _map_job_to_item(job: dict) -> dict | None:
             "raw": job,
         }
     except Exception as e:
-        log(f"⚠️ 字段映射失败: {e}")
+        logger.warning(f"⚠️ 字段映射失败: {e}")
         return None
 
 
@@ -384,7 +384,7 @@ def main():
                         help="CDP 调试端点（默认 http://127.0.0.1:9222，支持局域网内容器浏览器）")
     args = parser.parse_args()
 
-    log(f"CDP 端点: {args.cdp_url}")
+    logger.info(f"CDP 端点: {args.cdp_url}")
     count = asyncio.run(crawl(args.keyword, args.city, args.max_pages, args.cdp_url))
     sys.exit(0 if count > 0 else 1)
 

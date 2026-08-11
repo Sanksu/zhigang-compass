@@ -21,6 +21,10 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from app.core.logging import setup_logging
+
+logger = setup_logging("cleanup_graph")
+
 from app.core.database import neo4j_driver
 from app.services.extraction.dictionary import (
     SKILL_STOPWORDS,
@@ -233,47 +237,47 @@ def main() -> None:
             "Skill": _count(session, "MATCH (sk:Skill) RETURN count(sk) AS c"),
             "REQUIRES": _count(session, "MATCH ()-[r:REQUIRES]->() RETURN count(r) AS c"),
         }
-        print(f"清理前: {before}")
+        logger.info(f"清理前: {before}")
 
-        print("\n[1/5] 技能过滤")
+        logger.info("[1/5] 技能过滤")
         skills = filter_skills(session, args.dry_run)
-        print(f"  {skills}")
+        logger.info("  %s", skills)
 
-        print("\n[2/5] 删除空岗位")
+        logger.info("[2/5] 删除空岗位")
         if args.dry_run:
             empty_count = _count(
                 session, "MATCH (p:Position) WHERE p.name IS NULL OR p.name = '' RETURN count(p) AS c"
             )
-            print(f"  空岗位 {empty_count} 个")
+            logger.info("  空岗位 %s 个", empty_count)
         else:
             with session.begin_transaction() as tx:
                 result = tx.run(
                     "MATCH (p:Position) WHERE p.name IS NULL OR p.name = '' "
                     "DETACH DELETE p RETURN count(p) AS c"
                 )
-                print(f"  删除空岗位 {result.single()['c']} 个")
+                logger.info("  删除空岗位 %s 个", result.single()["c"])
 
-        print("\n[3/5] 岗位合并")
+        logger.info("[3/5] 岗位合并")
         pos = merge_positions(session, args.dry_run)
-        print(f"  groups={pos['duplicate_groups']} nodes={pos['duplicate_nodes']}")
+        logger.info("  groups=%s nodes=%s", pos["duplicate_groups"], pos["duplicate_nodes"])
         for s in (pos.get("samples") or [])[:5]:
-            print(f"    {s['std']} ← {len(s['dups'])+1} 个节点: 主={s['primary']} 副={s['dups']}")
+            logger.info("    %s ← %s 个节点: 主=%s 副=%s", s["std"], len(s["dups"]) + 1, s["primary"], s["dups"])
 
         if not args.dry_run:
-            print("\n[4/5] 重新聚合岗位（归一化岗位名）")
+            logger.info("[4/5] 重新聚合岗位（归一化岗位名）")
             result = _reaggregate()
-            print(f"  {result}")
+            logger.info("  %s", result)
 
-        print("\n[5/5] 重复 Evidence 清理（同源 URL 保留最新一份）")
+        logger.info("[5/5] 重复 Evidence 清理（同源 URL 保留最新一份）")
         ev = dedup_evidences(session, args.dry_run)
-        print(f"  groups={ev['groups']} duplicate_nodes={ev['duplicate_nodes']}")
+        logger.info("  groups=%s duplicate_nodes=%s", ev["groups"], ev["duplicate_nodes"])
 
         after = {
             "Position": _count(session, "MATCH (p:Position) RETURN count(p) AS c"),
             "Skill": _count(session, "MATCH (sk:Skill) RETURN count(sk) AS c"),
             "REQUIRES": _count(session, "MATCH ()-[r:REQUIRES]->() RETURN count(r) AS c"),
         }
-        print(f"\n清理后: {after}")
+        logger.info(f"清理后: {after}")
 
 
 if __name__ == "__main__":

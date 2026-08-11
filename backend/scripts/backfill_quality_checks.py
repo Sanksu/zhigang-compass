@@ -10,8 +10,16 @@ validate_temporal / detect_inflation 的游标为 `snapshot["validation"]/["infl
 
 import argparse
 import asyncio
+import sys
+from pathlib import Path
 
 from sqlalchemy import select
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.core.logging import setup_logging
+
+logger = setup_logging("backfill_quality_checks")
 
 from app.core.database import async_session_factory
 from app.models.raw import JDRaw
@@ -40,7 +48,7 @@ async def _pending_ids(key: str) -> list[int]:
 async def main(batch_size: int) -> None:
     for key, task in (("validation", validate_temporal), ("inflation", detect_inflation)):
         ids = await _pending_ids(key)
-        print(f"[{key}] 待补全 JD: {len(ids)}")
+        logger.info(f"[{key}] 待补全 JD: {len(ids)}")
         checked = skipped = flagged = 0
         for i, batch in enumerate(_chunks(ids, batch_size), 1):
             # 任务内部 limit 默认 200，显式传 len(batch) 确保整批处理，
@@ -49,12 +57,12 @@ async def main(batch_size: int) -> None:
             checked += result["checked"]
             skipped += result["skipped"]
             flagged += len(result["flagged"])
-            print(
+            logger.info(
                 f"  批次 {i}/{max(1, (len(ids) + batch_size - 1) // batch_size)}: "
                 f"checked={result['checked']} skipped={result['skipped']} "
                 f"flagged={len(result['flagged'])}"
             )
-        print(f"[{key}] 完成: checked={checked} skipped={skipped} flagged={flagged}")
+        logger.info(f"[{key}] 完成: checked={checked} skipped={skipped} flagged={flagged}")
 
 
 if __name__ == "__main__":

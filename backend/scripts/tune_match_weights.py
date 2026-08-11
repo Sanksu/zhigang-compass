@@ -14,9 +14,16 @@
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_BACKEND_DIR))
+
+from app.core.logging import setup_logging
+
+logger = setup_logging("tune_match_weights")
+
 _GOLDEN_MATCH = _BACKEND_DIR / "data" / "golden_set" / "golden_set_match.jsonl"
 _WEIGHTS_PATH = _BACKEND_DIR / "configs" / "match_weights.json"
 
@@ -137,7 +144,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if not _GOLDEN_MATCH.exists():
-        print(f"[SKIP] 匹配黄金集不存在: {_GOLDEN_MATCH}（先运行 scripts/build_match_golden.py）")
+        logger.warning("匹配黄金集不存在: %s（先运行 scripts/build_match_golden.py）", _GOLDEN_MATCH)
         return
 
     pairs = load_pairs(_GOLDEN_MATCH)
@@ -145,7 +152,7 @@ def main() -> None:
     if not args.no_semantic and not args.eval_only:
         from app.services.matching.semantic import SkillEmbedder
         semantic = SkillEmbedder.get()
-        print("语义增强已启用（SBERT），首次加载模型需数秒...")
+        logger.info("语义增强已启用（SBERT），首次加载模型需数秒...")
 
     if args.eval_only:
         from app.services.matching.weights import load_sim_threshold, load_weights
@@ -156,15 +163,15 @@ def main() -> None:
             from app.services.matching.semantic import SkillEmbedder
             semantic = SkillEmbedder.get()
         result = evaluate_pairs(pairs, weights, semantic, threshold)
-        print(f"[评估] 当前权重 {weights} sim_threshold={threshold}")
-        print(f"       Spearman={result['spearman']:.4f}  Accuracy={result['accuracy']:.4f}")
+        logger.info("[评估] 当前权重 %s sim_threshold=%s", weights, threshold)
+        logger.info("       Spearman=%.4f  Accuracy=%.4f", result["spearman"], result["accuracy"])
         return
 
     best = tune(pairs, semantic, n_trials=args.trials)
     spearman = best.pop("_spearman")
     write_weights(best)
-    print(f"[调优完成] Spearman={spearman:.4f}")
-    print(f"          权重写入 {_WEIGHTS_PATH.relative_to(_BACKEND_DIR)}")
+    logger.info("[调优完成] Spearman=%.4f", spearman)
+    logger.info("          权重写入 %s", _WEIGHTS_PATH.relative_to(_BACKEND_DIR))
 
 
 if __name__ == "__main__":
