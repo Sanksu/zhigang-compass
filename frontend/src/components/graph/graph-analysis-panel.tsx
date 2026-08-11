@@ -53,8 +53,9 @@ const PATH_TYPE_LABEL: Record<string, string> = {
 
 export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAnalysisPanelProps) {
   const [pagerank, setPagerank] = useState<PagerankSkill[] | null>(null)
+  const [pagerankLoading, setPagerankLoading] = useState(true)
   const [clusters, setClusters] = useState<SkillCluster[] | null>(null)
-  const [clusterLoading, setClusterLoading] = useState(false)
+  const [clusterLoading, setClusterLoading] = useState(true)
   const [expandedCluster, setExpandedCluster] = useState<number | null>(null)
 
   // 最短路径状态
@@ -65,6 +66,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
   const [pathError, setPathError] = useState<string | null>(null)
 
   // 加载 PageRank（30s TTL 缓存，懒加载一次）
+  // 注意：pagerankLoading 初始 true，无需在 effect 内再次 set，避免 react-hooks/set-state-in-effect
   useEffect(() => {
     let cancelled = false
     apiGet<{ skills: PagerankSkill[] }>('/graph/algorithms/pagerank?top_n=20')
@@ -74,26 +76,26 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
       .catch(() => {
         /* 算法端点不可用时面板降级为空态，不阻塞图谱主功能 */
       })
+      .finally(() => {
+        if (!cancelled) setPagerankLoading(false)
+      })
     return () => {
       cancelled = true
     }
   }, [])
 
   // 加载技能簇（懒加载一次）
+  // 注意：clusterLoading 初始 true，无需在 effect 内再次 set，避免 react-hooks/set-state-in-effect
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
         const r = await apiGet<{ clusters: SkillCluster[] }>('/graph/algorithms/skill-clusters?min_size=2')
-        if (!cancelled) {
-          setClusters(r.clusters)
-          setClusterLoading(false)
-        }
+        if (!cancelled) setClusters(r.clusters)
       } catch {
-        if (!cancelled) {
-          setClusters([])
-          setClusterLoading(false)
-        }
+        /* 算法端点不可用时面板降级为空态，不阻塞图谱主功能 */
+      } finally {
+        if (!cancelled) setClusterLoading(false)
       }
     })()
     return () => {
@@ -138,11 +140,13 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
             <GitBranch className="size-3 text-ink-faint" />
             技能重要性 Top-20
           </h4>
-          {pagerank === null ? (
+          {pagerankLoading ? (
             <div className="flex items-center gap-2 py-3 text-xs text-ink-muted">
               <Loader2 className="size-3 animate-spin" />
               加载中…
             </div>
+          ) : !pagerank || pagerank.length === 0 ? (
+            <p className="py-2 text-xs text-ink-faint">暂无 PageRank 数据</p>
           ) : (
             <ol className="space-y-1 max-h-48 overflow-y-auto pr-1">
               {pagerank.map((s, i) => (
@@ -167,7 +171,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
             <Boxes className="size-3 text-ink-faint" />
             技能簇（技术栈聚类）
           </h4>
-          {clusterLoading && clusters === null ? (
+          {clusterLoading ? (
             <div className="flex items-center gap-2 py-3 text-xs text-ink-muted">
               <Loader2 className="size-3 animate-spin" />
               聚类中…
