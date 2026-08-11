@@ -8,7 +8,7 @@
 import hashlib
 import math
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from scrapy.exceptions import DropItem
@@ -221,6 +221,46 @@ def jd_decay_weight(publish_time, today: Optional[date] = None) -> float:
     return jd_decay_breakdown(publish_time, today)["decay_weight"]
 
 
+# ── post_date 归一化 ──
+# 各平台 post_date 格式不一：zhilian "2026-08-09 00:27:24"（空格分隔 datetime）、
+# indeed/linkedin "2026-08-06"（ISO date）、glassdoor "3d"/"30d+"/"2w"（相对天数）。
+# 相对时间若不转绝对日期，下游 _publish_date（tasks.py）与 SQL 解析均失败，
+# 导致时滞检测/新鲜度审计把合法数据误判为无发布日期。故清洗层统一归一化。
+_RELATIVE_DATE_RE = re.compile(r"(\d+)\s*([dw])\+?", re.IGNORECASE)
+
+
+def normalize_post_date(value, today: Optional[date] = None) -> str:
+    """post_date 归一化：相对时间（glassdoor 等）转绝对日期，其余保留。
+
+    相对时间格式：`3d`/`30d+`（N 天前）、`2w`（N 周前）、Today/Yesterday/中文。
+    已是可解析日期（YYYY-MM-DD / 空格分隔 datetime / ISO8601）原样返回；
+    无法解析时原样返回（不强行改写，避免写入错误日期）。
+    """
+    if not value:
+        return ""
+    raw = str(value).strip()
+    today = today or date.today()
+
+    # 已是可解析日期（_parse_date 兼容 zhilian 空格分隔格式）→ 保留
+    if _parse_date(raw) is not None:
+        return raw
+
+    low = raw.lower()
+    if low in ("today", "今天"):
+        return today.isoformat()
+    if low in ("yesterday", "昨天"):
+        return (today - timedelta(days=1)).isoformat()
+
+    m = _RELATIVE_DATE_RE.match(low)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2).lower()
+        days = n if unit == "d" else n * 7
+        return (today - timedelta(days=days)).isoformat()
+
+    return raw
+
+
 class CleaningPipeline:
     """基础清洗：长度过滤 + 去重指纹 + 文本标准化 + 脱敏标记 + 实习/兼职岗位源头过滤。
 
@@ -315,6 +355,9 @@ class CleaningPipeline:
 
             # 质量评分 + 时效加权（设计文档 §4.2）：写入 snapshot 供下游与人工复核。
             # 核心词检测为评分维度之一；< 0.6 标 needs_review（不丢弃，进人工复核队列）
+            # post_date 先归一化（glassdoor 相对时间 → 绝对日期），保证 decay 计算与
+            # 下游 _publish_date/SQL 解析一致（§4.2 时效维度）
+            item["post_date"] = normalize_post_date(item.get("post_date"))
             q = jd_quality_breakdown(
                 title=str(item.get("title") or ""),
                 description=str(item.get("description") or ""),

@@ -3,6 +3,7 @@
 验证 _employment_reason 判断与 process_item 拦截行为（含词边界防误伤）。
 """
 
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,7 @@ from crawlers.pipelines import (
     _employment_reason,
     jd_decay_weight,
     jd_quality_score,
+    normalize_post_date,
 )
 
 
@@ -207,6 +209,64 @@ def test_decay_weight_math():
     assert jd_decay_weight("2026-06-01", today=date(2026, 7, 31)) == pytest.approx(
         math.exp(-0.3), rel=1e-3
     )
+
+
+# ── post_date 归一化（多源格式 → 统一可解析）──
+
+
+def test_normalize_post_date_keeps_iso_dates():
+    """ISO date / 空格分隔 datetime / ISO8601 原样保留。"""
+    assert normalize_post_date("2026-08-06") == "2026-08-06"
+    assert normalize_post_date("2026-08-09 00:27:24") == "2026-08-09 00:27:24"
+    assert normalize_post_date("2026-08-09T00:27:24+08:00") == "2026-08-09T00:27:24+08:00"
+
+
+def test_normalize_post_date_relative_days():
+    """glassdoor 相对天数 → 绝对日期。"""
+    today = date(2026, 8, 11)
+    assert normalize_post_date("3d", today=today) == "2026-08-08"
+    assert normalize_post_date("30d+", today=today) == "2026-07-12"
+
+
+def test_normalize_post_date_relative_weeks():
+    """相对周 → 绝对日期。"""
+    today = date(2026, 8, 11)
+    assert normalize_post_date("2w", today=today) == "2026-07-28"
+
+
+def test_normalize_post_date_today_yesterday():
+    today = date(2026, 8, 11)
+    assert normalize_post_date("Today", today=today) == "2026-08-11"
+    assert normalize_post_date("today", today=today) == "2026-08-11"
+    assert normalize_post_date("Yesterday", today=today) == "2026-08-10"
+    assert normalize_post_date("今天", today=today) == "2026-08-11"
+    assert normalize_post_date("昨天", today=today) == "2026-08-10"
+
+
+def test_normalize_post_date_unparseable_kept():
+    """无法解析的值原样保留，不强行改写。"""
+    assert normalize_post_date("") == ""
+    assert normalize_post_date(None) == ""
+    assert normalize_post_date("随时") == "随时"
+
+
+def test_process_item_normalizes_post_date():
+    """process_item 将相对时间 post_date 归一化后落 snapshot，decay 随之可算。"""
+    pipe = CleaningPipeline()
+    pipe.crawler = SimpleNamespace(
+        spider=SimpleNamespace(logger=SimpleNamespace(info=lambda *a, **k: None))
+    )
+    item = _job(
+        title="Python 后端开发工程师", source="glassdoor", source_id="gd-1",
+        company="XX", location="NY", salary="$100K",
+        description="负责后端服务开发与接口设计，维护系统稳定运行，熟悉云服务。",
+        requirements="熟悉 Python，掌握数据库，3 年以上经验优先。",
+        post_date="5d",
+    )
+    result = pipe.process_item(item)
+    assert result["post_date"] == normalize_post_date("5d")
+    # 相对时间归一化后 decay 不再恒为 1.0（5 天内 → 1.0，但可被正确解析）
+    assert result["decay_weight"] == 1.0
 
 
 def test_process_item_marks_needs_review():
