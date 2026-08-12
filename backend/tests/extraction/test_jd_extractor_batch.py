@@ -13,7 +13,6 @@ mock 的是 LLM 链（LLMProviderChain 的 extract_structured），编排逻辑�
 
 from unittest.mock import patch
 
-import pytest
 
 from app.services.extraction.jd_extractor import JDExtractor
 from app.services.extraction.llm_provider import LLMConfigurationError, LLMExtractionError

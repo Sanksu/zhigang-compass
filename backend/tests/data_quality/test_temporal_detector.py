@@ -15,8 +15,6 @@ from app.services.data_quality.temporal_detector import (
     STALE_DECAY_WEIGHT,
     ZOMBIE_CONSECUTIVE_PERIODS,
     ZOMBIE_DECAY_WEIGHT,
-    ZOMBIE_JACCARD_THRESHOLD,
-    ZOMBIE_SAI_THRESHOLD,
     _count_consecutive_similar,
     apply_temporal_decay,
     classify_sai,

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import neo4j_driver
 from app.models.business import JdEmbedding, ProjectEmbedding, ResumeCache, SkillEmbedding
 from app.models.raw import JDRaw
-from app.services.matching.semantic import SkillEmbedder, SemanticUnavailableError
+from app.services.matching.semantic import SkillEmbedder
 
 
 def _fetch_skill_rows() -> list[tuple[str, str]]:

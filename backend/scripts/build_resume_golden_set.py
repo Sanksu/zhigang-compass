@@ -169,7 +169,7 @@ def build_raw_text(spec: dict) -> str:
     （描述文本由 build_entry 经 _render_descriptions 一次渲染后回填）。
     """
     lines = [
-        f"姓名：[NAME]    电话：[PHONE]    邮箱：[EMAIL]",
+        "姓名：[NAME]    电话：[PHONE]    邮箱：[EMAIL]",
         f"求职意向：{spec['target_position']}",
         "教育背景",
         f"{spec['edu_start']}-{spec['edu_end']}    {spec['school']}    {spec['major']}    {spec['degree']}",
@@ -373,7 +373,7 @@ def main() -> int:
     for e in entries:
         all_skills.update(e["gold_skills"])
     logger.info(f"  覆盖技能数: {len(all_skills)}")
-    logger.info(f"  自检通过：规则抽取与 gold_skills 完全一致（评测基线 F1=1.0）")
+    logger.info("  自检通过：规则抽取与 gold_skills 完全一致（评测基线 F1=1.0）")
     return 0
 
 

@@ -10,7 +10,6 @@
 import sys
 from pathlib import Path
 
-import pytest
 
 # 回退白名单路径（与 dictionary.py 的 parents[3] 口径一致）
 _BACKEND_DIR = Path(__file__).resolve().parents[3]
@@ -110,7 +109,6 @@ class TestSkillWhitelistYaml:
 
     def test_fallback_when_yaml_empty(self, monkeypatch):
         # yaml 内容为空时回退内置集
-        import yaml
 
         from app.services.extraction.dictionary import _FALLBACK_SKILL_WHITELIST
 

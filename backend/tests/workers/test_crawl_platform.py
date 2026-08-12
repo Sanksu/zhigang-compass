@@ -110,5 +110,5 @@ def test_cities_passed_to_scrapy_cmd(monkeypatch, tmp_path):
     assert cmd_calls, "应至少发起一次 scrapy 子进程"
     cmd = cmd_calls[0]
     assert "-a" in cmd
-    assert f"cities=New York" in cmd
-    assert f"keywords=Python" in cmd
+    assert "cities=New York" in cmd
+    assert "keywords=Python" in cmd

@@ -70,7 +70,6 @@ class TestSearchAuthoritative:
     def test_sql_builds_with_invalid_chars(self):
         """含 %/_ 通配符的岗位名不抛 SQL 异常（参数化，非注入）。"""
         async def _run():
-            from sqlalchemy.ext.asyncio import AsyncSession
 
             class _FakeDb:
                 async def scalars(self, stmt):

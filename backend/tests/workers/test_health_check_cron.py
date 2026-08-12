@@ -8,7 +8,6 @@
 import pytest
 from arq.cron import CronJob
 
-from app.workers import tasks
 from app.workers.tasks import WorkerSettings, check_llm_providers_health
 
 

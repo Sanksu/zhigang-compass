@@ -3,7 +3,6 @@
 覆盖纯函数逻辑：节点 diff 计算与导出过滤（真实 Neo4j/DB 写库由集成测试覆盖）。
 """
 
-import pytest
 
 from app.services.evolution.graph_version import (
     GraphVersionManager,
