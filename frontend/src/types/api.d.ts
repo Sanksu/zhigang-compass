@@ -1963,6 +1963,8 @@ export interface paths {
                         /** @description 平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx */
                         platform: string;
                         keyword: string;
+                        /** @description 城市（可选，海外源默认英文城市） */
+                        city?: string;
                     };
                 };
             };
@@ -2592,8 +2594,8 @@ export interface paths {
             parameters: {
                 query?: {
                     category?: "AUTH" | "GRAPH" | "DATA" | "ADMIN";
-                    start?: string;
-                    end?: string;
+                    page?: number;
+                    size?: number;
                 };
                 header?: never;
                 path?: never;
@@ -2638,7 +2640,14 @@ export interface components {
             username?: string;
             /** @enum {string} */
             role?: "admin" | "user" | "guest";
-            permissions?: string[];
+            /** @description 邮箱（可能为空） */
+            email?: string | null;
+            /** @description 手机号（可能为空） */
+            phone?: string | null;
+            /** @description 个人简介 */
+            bio?: string | null;
+            /** @description 注册时间 ISO8601 */
+            created_at?: string | null;
         };
         /** @description 技能差距项（设计文档 §9.5 三态） */
         GapSkill: {

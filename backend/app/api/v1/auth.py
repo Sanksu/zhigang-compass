@@ -134,9 +134,9 @@ async def login(
 
 @router.post("/refresh")
 async def refresh_token(
+    request: Request,
+    response: Response,
     req: RefreshRequest = Body(default=None),
-    request: Request = None,
-    response: Response = None,
     redis: Redis = Depends(get_redis),
     db: AsyncSession = Depends(get_db),
 ):

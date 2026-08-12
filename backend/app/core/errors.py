@@ -6,7 +6,7 @@
 
 from fastapi import HTTPException, status
 
-from app.schemas.common import error as build_error_body
+from app.schemas.common import error_body
 
 # 业务错误码（设计文档 §2.4.7）
 ERR_VALIDATION = 4000
@@ -54,5 +54,5 @@ def business_error(code: int, msg: str, http_status: int | None = None) -> HTTPE
     status_code = http_status or ERROR_HTTP_STATUS.get(code, status.HTTP_200_OK)
     return HTTPException(
         status_code=status_code,
-        detail=build_error_body(code, msg).model_dump(),
+        detail=error_body(code, msg),
     )

@@ -220,7 +220,8 @@ class TestDownloadResumeFile:
         async def _run():
             db = _FakeDb()
             resp = await download_resume_file("not-a-uuid", db, {"sub": "u1"})
-            assert resp.code == 400
+            assert resp.status_code == 400
+            assert json.loads(resp.body)["code"] == 400
 
         asyncio.run(_run())
 
@@ -247,7 +248,8 @@ class TestDeleteResume:
 
             resp = await delete_resume(_RID, db, {"sub": "u1"})
 
-            assert resp.data == {"deleted": True}
+            # 契约 DELETE /resume/{id} 为 204 无响应体，前端仅据状态码判断成功
+            assert resp.status_code == 204
             assert db.deleted == [resume]
             assert db.commits == 1
             assert len(db.executed) == 1

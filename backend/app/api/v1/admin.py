@@ -1,7 +1,7 @@
 """管理后台路由：用户管理 / 审计日志 / 爬虫状态 / 岗位审核（RBAC admin only）。
 
-对齐契约 /api/v1/admin/*。岗位审核（positions/pending）依赖 LLM 抽取信号，
-当前返回空列表（M3/M4 交付后接入真实数据）。
+对齐契约 /api/v1/admin/*。岗位审核（positions/pending）读取 DiscoveryCandidate 表
+（默认过滤 state=candidate），review 走状态机校验 + 图谱 status 同步 + 审计日志。
 """
 
 from datetime import datetime, timedelta, timezone
@@ -334,7 +334,7 @@ async def _enqueue_crawl(
     try:
         pool = await create_pool(redis_settings)
     except Exception as e:
-        logger.exception(f"[_enqueue_crawl] ARQ 连接失败: task_id={task_id} err={e}")
+        logger.exception("[_enqueue_crawl] ARQ 连接失败: task_id=%s err=%s", task_id, e)
         raise
     try:
         # task_id 供 crawl_platform 实时写日志队列 + 更新任务状态（SSE 端点消费）
@@ -344,7 +344,7 @@ async def _enqueue_crawl(
         await pool.enqueue_job("crawl_platform", **kwargs)
         logger.info(f"[_enqueue_crawl] 入队成功: task_id={task_id} job=crawl_platform kwargs={kwargs}")
     except Exception as e:
-        logger.exception(f"[_enqueue_crawl] 入队失败: task_id={task_id} err={e}")
+        logger.exception("[_enqueue_crawl] 入队失败: task_id=%s err=%s", task_id, e)
         raise
     finally:
         await pool.close()
@@ -1153,9 +1153,11 @@ async def update_position_definition(
         )
     if not result["exists"]:
         return error(4040, f"岗位不存在: {position_name}", http_status=404)
-    # 编辑已生效：失效岗位详情缓存（graph:position:{id}），避免用户读到 5min 旧数据
+    # 编辑已生效：失效岗位详情缓存（graph.py key 为 graph:position:{id}:{scope}，
+    # all=全量可见，public=公开态），避免用户读到 5min 旧数据
     if result["id"]:
-        await redis_client.delete(f"graph:position:{result['id']}")
+        await redis_client.delete(f"graph:position:{result['id']}:all")
+        await redis_client.delete(f"graph:position:{result['id']}:public")
     return ok(
         data={
             "position_name": position_name,

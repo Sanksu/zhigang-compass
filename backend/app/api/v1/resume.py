@@ -22,6 +22,7 @@ from app.core.config import settings
 from app.core.database import async_session_factory, get_db
 from app.models.business import AuditLog, ResumeCache, ResumeFile, TaskStatus
 from app.schemas.common import ok, error
+from app.services.resume.file_parser import SUPPORTED_EXTENSIONS
 
 router = APIRouter()
 
@@ -30,8 +31,6 @@ _UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads"
 
 # 上传边界：大小上限 10MB，类型白名单（防内存耗尽与任意文件写入）。
 # 白名单以解析器支持能力为单一事实源，避免上传通过后解析却失败的漂移（T-03）
-from app.services.resume.file_parser import SUPPORTED_EXTENSIONS
-
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 ALLOWED_EXTENSIONS = SUPPORTED_EXTENSIONS
 
@@ -409,7 +408,7 @@ async def task_stream(task_id: str, user: dict = Depends(require_role("user"))):
     return StreamingResponse(_event_gen(), media_type="text/event-stream")
 
 
-@router.delete("/{resume_id}", status_code=200)
+@router.delete("/{resume_id}", status_code=204)
 async def delete_resume(resume_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("user"))):
     """删除简历记录及落盘文件（FE-M4-04 个人中心）。"""
     rid = _parse_resume_id(resume_id)
@@ -441,7 +440,8 @@ async def delete_resume(resume_id: str, db: AsyncSession = Depends(get_db), user
                 pass
         await db.delete(resume)
     await db.commit()
-    return ok(data={"deleted": True})
+    # 契约 DELETE /resume/{id} 为 204：无响应体，前端仅据状态码判断成功
+    return Response(status_code=204)
 
 
 async def _fetch_resume_file(db: AsyncSession, resume_id: str) -> ResumeFile | None:
