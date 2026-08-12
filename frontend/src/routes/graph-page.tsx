@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Graph2D, type Graph2DHandle } from '@/components/graph/graph-2d'
 import type { Graph3DHandle } from '@/components/graph/graph-3d'
 import { GraphAnalysisPanel } from '@/components/graph/graph-analysis-panel'
+import { GraphCommunityTree } from '@/components/graph/graph-community-tree'
 import {
   NodeDetailPanel,
   type PositionDetail,
@@ -672,6 +673,7 @@ export function GraphPage() {
                 skills={data.nodes.filter((n) => n.type === 'skill').map((n) => ({ id: n.id, name: n.name }))}
                 onFocusSkill={focusSkill}
               />
+              <GraphCommunityTree className="mt-3" />
             </TabsContent>
           </Card>
         </Tabs>

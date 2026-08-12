@@ -259,7 +259,7 @@ zhigang-compass/
 | 子路由 | 前缀 | 端点 | 职责 |
 |--------|------|------|------|
 | [auth.py](../../backend/app/api/v1/auth.py) | `/auth` | POST `/login` `/logout` `/refresh` `/register` `/password`；GET+PUT `/me` | 认证闭环（双 Token + bcrypt + RBAC） |
-| [graph.py](../../backend/app/api/v1/graph.py) | `/graph` | GET `/panorama`（30s Redis 缓存）`/search`（全文检索）`/view/{view_type}` `/position/{id}` `/position/{id}/skills` `/skill/{id}` `/skill/{id}/positions` `/skill/{id}/evidence` `/skill/{id}/courses` `/skill/{id}/prerequisites` `/skill/similar` `/algorithms/pagerank` `/algorithms/shortest-path` `/algorithms/skill-clusters` | 图谱全景/技能反向查询/证据/学习路径/图算法（PageRank、最短路径、技能簇） |
+| [graph.py](../../backend/app/api/v1/graph.py) | `/graph` | GET `/panorama`（30s Redis 缓存）`/search`（全文检索）`/view/{view_type}` `/position/{id}` `/position/{id}/skills` `/skill/{id}` `/skill/{id}/positions` `/skill/{id}/evidence` `/skill/{id}/courses` `/skill/{id}/prerequisites` `/skill/similar` `/algorithms/pagerank` `/algorithms/shortest-path` `/algorithms/skill-clusters`（**level 参数 + levels 元数据**）`/algorithms/community-tree`（阶段三层级树） | 图谱全景/技能反向查询/证据/学习路径/图算法（PageRank、最短路径、技能簇、社区层级树） |
 | [match.py](../../backend/app/api/v1/match.py) | `/match` | POST `/recommend`（ARQ 异步）`/compare` `/feedback`；GET `/task/{task_id}` `/result/{match_id}` `/result/{match_id}/diagnosis` `/result/{match_id}/gap` `/result/{match_id}/path` | 自动推荐 Top-N / 人岗比对 / LLM 诊断报告 / 差距与学习路径 |
 | [resume.py](../../backend/app/api/v1/resume.py) | `/resume` | POST `/parse`；GET `/list` `/task/{task_id}`（轮询）`/task/{task_id}/stream`（SSE 进度）`/files/{resume_id}/download`；GET+PUT+DELETE `/{resume_id}` | 简历解析（异步任务）+ 列表/编辑/删除/原文下载 |
 | [evolution.py](../../backend/app/api/v1/evolution.py) | `/evolution` | GET `/versions` `/versions/{version_id}` `/diff` `/trends` `/signals` `/state-machine` `/position/{id}/evolution` `/watch` | 图谱版本/对比/趋势/信号/状态机/岗位演化/观察池 |
@@ -329,7 +329,7 @@ ID 格式 `{prefix}_{seq:04d}`（如 `sk_0042`），通过 Neo4j Counter 节点�
 | 文件 | 关键导出 | 状态 |
 |------|---------|------|
 | [pagerank.py](../../backend/app/services/graph_algorithms/pagerank.py) | PageRank 技能重要性排序：幂迭代收敛（阻尼 0.85，MAX_ITER 50，TOL 1e-6），无向共现边按双有向边聚合；纯计算不依赖 Neo4j | ✅ 完整 |
-| [louvain.py](../../backend/app/services/graph_algorithms/louvain.py) | Louvain 技能簇识别：标准两阶段（模块度增量 ΔQ 最大化 + 社区聚合重跑）。**阶段一（G-04）γ 分辨率参数化**：`louvain(graph, resolution=1.0)` 增益/模块度 resolution 化（γ>1 细簇 / γ<1 粗簇 / 1.0 等价标准 Louvain 向后兼容）；新增 `homogeneity()` 加权簇内同质性（Optuna objective 0.3 权重项） | ✅ 完整 |
+| [louvain.py](../../backend/app/services/graph_algorithms/louvain.py) | Louvain 技能簇识别：标准两阶段（模块度增量 ΔQ 最大化 + 社区聚合重跑）。**阶段一（G-04）γ 分辨率参数化**：`louvain(graph, resolution=1.0)` 增益/模块度 resolution 化（γ>1 细簇 / γ<1 粗簇 / 1.0 等价标准 Louvain 向后兼容）；新增 `homogeneity()` 加权簇内同质性（Optuna objective 0.3 权重项）；**阶段三层次化提取**：`louvain_hierarchical()` 收集全部层级（{levels, best_level, membership}，level 0 最细，best 与 louvain() 一致） | ✅ 完整 |
 | [config.py](../../backend/app/services/graph_algorithms/config.py) | 图算法运行时配置加载（`configs/graph_algo.yaml`：algorithm/resolution/min_weight/min_size，缺失回退默认；Optuna 最优参数随配置生效） | ✅ 完整 |
 | [leiden.py](../../backend/app/services/graph_algorithms/leiden.py) | **阶段二 Leiden 条件替换**：同签名 `leiden(graph, resolution=1.0)`（igraph 1.0 + leidenalg 0.12，seed=0 确定性）；验收未达标（Q 落后 0.037），默认保持 louvain，双实现并存配置一行切换；API 依赖缺失自动回退 | ✅ 完整（未启用） |
 | [shortest_path.py](../../backend/app/services/graph_algorithms/shortest_path.py) | 技能最短路径：Neo4j 核心 `shortestPath((:Skill)-[*..6]-)`，沿岗位共现 + REQUIRES 边走，返回节点序列由前端按 type 区分展示 | ✅ 完整 |
