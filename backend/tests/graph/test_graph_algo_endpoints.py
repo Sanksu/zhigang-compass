@@ -76,9 +76,9 @@ class TestSkillClusters:
         resp = _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.0, level=2))
         assert resp.code == 0
         assert calls["clustering"][0]["resolution"] == 1.0
-        # 层级元数据（fake 返回 1 层）
+        # 层级元数据（fake 返回 1 层；modularity 为标准 Q 口径——单簇划分 Q=0）
         assert resp.data["levels"] == [
-            {"level": 0, "cluster_count": 1, "modularity": 0.1},
+            {"level": 0, "cluster_count": 1, "modularity": 0.0},
         ]
 
     def test_cache_key_contains_resolution(self, monkeypatch):
@@ -90,7 +90,7 @@ class TestSkillClusters:
             louvain_impl={"s1": 0, "s2": 0},
         )
         monkeypatch.setattr(
-            "app.services.graph_algorithms.config.load_graph_algo_config",
+            graph_api, "load_graph_algo_config",  # graph.py 顶部绑定（from-import 后 patch 此处生效）
             lambda: {"algorithm": "louvain", "resolution": 1.0, "min_weight": 2.0, "min_size": 2},
         )
         _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.0, level=None))
@@ -120,7 +120,7 @@ class TestSkillClusters:
 
         monkeypatch.setattr("app.services.graph_algorithms.leiden.leiden", fake_leiden)
         monkeypatch.setattr(
-            "app.services.graph_algorithms.config.load_graph_algo_config",
+            graph_api, "load_graph_algo_config",  # graph.py 顶部绑定（from-import 后 patch 此处生效）
             lambda: {"algorithm": "leiden", "resolution": 1.0, "min_weight": 2.0, "min_size": 2},
         )
         resp = _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.0))
@@ -138,7 +138,7 @@ class TestSkillClusters:
             louvain_impl={"s1": 0, "s2": 0},
         )
         monkeypatch.setattr(
-            "app.services.graph_algorithms.config.load_graph_algo_config",
+            graph_api, "load_graph_algo_config",  # graph.py 顶部绑定（from-import 后 patch 此处生效）
             lambda: {"algorithm": "leiden", "resolution": 1.0, "min_weight": 2.0, "min_size": 2},
         )
         def boom(g, resolution=1.0):
@@ -190,11 +190,16 @@ class TestSkillClusters:
 
 
 class TestPageRank:
-    def test_default_min_weight_aligned_to_2(self):
-        """pagerank 默认 min_weight=2.0（与 skill-clusters 取数口径统一）。"""
-        params = inspect.signature(graph_api.graph_pagerank).parameters
-        assert params["min_weight"].default.default == 2.0
-        assert params["top_n"].default.default == 20
+    def test_default_params_follow_config(self):
+        """pagerank/skill-clusters 默认参数随 configs/graph_algo.yaml（调优值接入 API）。"""
+        from app.services.graph_algorithms.config import load_graph_algo_config
+
+        cfg = load_graph_algo_config()
+        pr = inspect.signature(graph_api.graph_pagerank).parameters
+        assert pr["min_weight"].default.default == cfg["min_weight"]
+        assert pr["top_n"].default.default == 20
+        sc = inspect.signature(graph_api.graph_skill_clusters).parameters
+        assert sc["resolution"].default.default == cfg["resolution"]
 
     def test_min_weight_forwarded_to_network(self, monkeypatch):
         """min_weight 透传到共现网络加载。"""

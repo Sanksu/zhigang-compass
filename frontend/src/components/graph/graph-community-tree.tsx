@@ -4,12 +4,13 @@
  * 数据源：GET /graph/algorithms/community-tree（Neo4j Community 节点，
  * scripts/sync_communities.py 同步；未同步时提示先运行同步脚本）。
  * ECharts tree 系列渲染：顶层为最粗社区，沿 NESTED_IN 递归展开至最细层，
- * 节点可折叠（expandAndCollapse）。暗色模式跟随 documentElement .dark 类。
+ * 节点可折叠（expandAndCollapse）。暗色模式跟随 store theme 切换刷新。
  */
 import { useEffect, useRef, useState } from 'react'
 import * as echarts from 'echarts'
 import { GitFork, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { useUIStore } from '@/store/ui'
 import { apiGet } from '@/lib/api'
 
 interface CommunityNode {
@@ -36,6 +37,8 @@ export function GraphCommunityTree({ className }: GraphCommunityTreeProps) {
   const [tree, setTree] = useState<CommunityNode[] | null>(null)
   const [levels, setLevels] = useState<number[]>([])
   const [loading, setLoading] = useState(true)
+  // 主题跟随：theme 变化时重建图表配色（依赖数组含 theme）
+  const theme = useUIStore((s) => s.theme)
 
   // 加载社区层级树（懒加载一次，30s TTL 缓存）
   useEffect(() => {
@@ -60,7 +63,7 @@ export function GraphCommunityTree({ className }: GraphCommunityTreeProps) {
     }
   }, [])
 
-  // ECharts tree 渲染（依赖 tree + 暗色状态；themeVersion 通过重新挂载触发）
+  // ECharts tree 渲染（依赖 tree + theme，主题切换时重建配色）
   useEffect(() => {
     if (!chartRef.current || !tree || tree.length === 0) return
     const dark = isDark()
@@ -111,7 +114,7 @@ export function GraphCommunityTree({ className }: GraphCommunityTreeProps) {
       observer.disconnect()
       chart.dispose()
     }
-  }, [tree])
+  }, [tree, theme])
 
   return (
     <Card className={className}>

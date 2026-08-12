@@ -17,16 +17,7 @@ app.services.graph_algorithms.louvain 的公开指标函数统一计算（同口
 import igraph as ig
 import leidenalg as la
 
-
-def _reindex(partition: dict[str, int]) -> dict[str, int]:
-    """簇 ID 重新编号为 0..k-1，保持确定性输出（与 louvain._reindex 同语义）。"""
-    mapping: dict[int, int] = {}
-    result: dict[str, int] = {}
-    for nd, cid in partition.items():
-        if cid not in mapping:
-            mapping[cid] = len(mapping)
-        result[nd] = mapping[cid]
-    return result
+from .louvain import _reindex  # 复用 louvain 的确定性簇 ID 重编号（同包共享）
 
 
 def leiden(graph: dict[str, dict[str, float]], resolution: float = 1.0) -> dict[str, int]:

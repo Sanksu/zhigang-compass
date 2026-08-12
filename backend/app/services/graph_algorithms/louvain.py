@@ -39,6 +39,15 @@ def _modularity(graph: dict[str, dict[str, float]], partition: dict[str, int], r
     return q
 
 
+def modularity(graph: dict[str, dict[str, float]], partition: dict[str, int], resolution: float = 1.0) -> float:
+    """公开模块度计算（标准 Q 默认，γ=1.0），供调优/展示/验收统一口径。
+
+    阶段一调优后约定：γ 只负责生成划分，质量评估统一用标准 Q
+    （graph_algo_tune.py objective 同口径）。
+    """
+    return _modularity(graph, partition, resolution)
+
+
 def homogeneity(graph: dict[str, dict[str, float]], partition: dict[str, int]) -> float:
     """加权簇内同质性：Σ_c 簇内边权重 / Σ_c (簇内 + 簇间) 边权重。
 
