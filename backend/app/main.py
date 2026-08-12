@@ -25,6 +25,7 @@ from app.core.errors import (
 from app.core.middleware import setup_middleware, trace_id_var
 from app.schemas.common import APIResponse
 from app.services.embeddings.vector_store import PgvectorUnavailableError
+from app.api.v1 import router as v1_router
 
 # 应用内 logger（auth/admin 等模块）输出到标准输出，便于运行排错；
 # root 默认 WARNING 会吞掉模块 INFO 日志，故启动时统一配置
@@ -72,9 +73,6 @@ app = FastAPI(
 )
 
 setup_middleware(app)
-
-# ---------- API 路由 ----------
-from app.api.v1 import router as v1_router
 
 app.include_router(v1_router, prefix="/api/v1")
 

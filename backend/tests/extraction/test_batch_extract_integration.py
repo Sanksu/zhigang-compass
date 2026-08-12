@@ -21,7 +21,7 @@ import instructor
 
 from app.services.extraction.jd_extractor import JDExtractor
 from app.services.extraction.llm_provider import LLMExtractionError
-from app.services.extraction.schemas import JDExtractionBatch, JDExtractionResult
+from app.services.extraction.schemas import JDExtractionBatch
 
 
 # ============================================================

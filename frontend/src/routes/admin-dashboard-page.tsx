@@ -203,7 +203,6 @@ export function AdminDashboardPage() {
 
   async function handleQuickAction(id: string) {
     if (runningActions.has(id)) return
-    console.log(`[quick-action] 开始: ${id}`)
     setRunningActions((prev) => new Set(prev).add(id))
     setActionMessages((prev) => {
       const next = new Map(prev)
@@ -213,12 +212,9 @@ export function AdminDashboardPage() {
     try {
       // 真实触发：对每个平台入队 crawl_platform 任务（POST /admin/crawl/trigger）
       const res = await apiGet<CrawlStatusData>('/admin/crawl/status')
-      console.log(`[quick-action] 获取平台列表: ${res.platforms.length} 个`)
       for (const p of res.platforms) {
         await apiPost('/admin/crawl/trigger', { platform: p.id, keyword: '高级前端' })
-        console.log(`[quick-action] 已入队: ${p.id} -> ${p.name}`)
       }
-      console.log(`[quick-action] 全部入队成功: ${res.platforms.length} 个平台`)
       setActionMessages((prev) => new Map(prev).set(id, `已入队 ${res.platforms.length} 个平台`))
     } catch (e) {
       console.error(`[quick-action] 失败: ${id}`, e)

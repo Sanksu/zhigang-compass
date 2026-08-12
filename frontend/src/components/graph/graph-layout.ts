@@ -65,7 +65,6 @@ export function enforceSpread(chart: echarts.ECharts, options: SpreadOptions = {
 
   // 重叠节点对：间距 < 半径和 + 间隙 → 沿连线双向推开（每轮迭代收敛）
   let moved = true
-  let resolvedPairs = 0
   for (let iter = 0; iter < maxIterations && moved; iter++) {
     moved = false
     for (let i = 0; i < count; i++) {
@@ -88,7 +87,6 @@ export function enforceSpread(chart: echarts.ECharts, options: SpreadOptions = {
           pj[0] += nx * push
           pj[1] += ny * push
           moved = true
-          resolvedPairs++
         }
       }
     }
@@ -100,6 +98,4 @@ export function enforceSpread(chart: echarts.ECharts, options: SpreadOptions = {
     if (p) list.setItemLayout(i, [p[0], p[1]])
   }
   chart.getZr().refresh()
-  // 诊断日志：确认 enforceSpread 是否执行、检测到多少重叠对
-  console.log(`[graph-2d] enforceSpread count=${count} resolvedPairs=${resolvedPairs}`)
 }

@@ -10,8 +10,6 @@
 import pytest
 
 from app.services.extraction.normalization import (
-    DISTANCE_THRESHOLD,
-    SIMILAR_TO_THRESHOLD,
     SkillNormalizer,
     SkillNormResult,
     _agglomerative_clusters,

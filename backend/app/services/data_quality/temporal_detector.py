@@ -11,7 +11,7 @@
 """
 
 from statistics import median
-from datetime import date, timedelta
+from datetime import date
 
 from app.services.data_quality.schemas import (
     JDSkillSet,

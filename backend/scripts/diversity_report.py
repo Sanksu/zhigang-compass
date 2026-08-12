@@ -107,7 +107,7 @@ def print_report(r: dict) -> None:
     jd = r["jd"]
     pos = jd["positions"]
     logger.info(f"JD: {jd['total']} 条 | 去重率 {jd['dedup']['duplicate_rate']:.1%} | 源 {len(jd['sources'])} 个")
-    logger.info(f"    源分布: " + ", ".join(f"{s['source']}={s['count']}" for s in jd["sources"]))
+    logger.info("    源分布: " + ", ".join(f"{s['source']}={s['count']}" for s in jd["sources"]))
     logger.info(f"岗位: 唯一 {pos['unique_positions']} / 总 {pos['total_positions']} | "
                 f"每岗位均技能 {pos['avg_skills_per_position']} | 技能 CR10 集中度 {pos['cr10']:.1%}")
     logger.info(f"     Top-{len(pos['top_positions'])}: " + ", ".join(

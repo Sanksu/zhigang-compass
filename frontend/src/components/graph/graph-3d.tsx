@@ -10,8 +10,8 @@
  * - 双击岗位节点 → 展开/收起其技能（与 2D 交互一致）
  * - 容器尺寸由 ResizeObserver 自动追踪
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import ForceGraph3D from 'react-force-graph-3d'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import ForceGraph3D, { type ForceGraphMethods, type NodeObject } from 'react-force-graph-3d'
 import * as THREE from 'three'
 import type { GraphData, GraphNode, NodeDetail, PositionStatus } from './types'
 import { nodeRadius } from './graph-utils'
@@ -22,10 +22,18 @@ interface Graph3DProps {
   expandedPositions?: Set<string>
   /** 当前选中节点 id（放大 + 光环高亮） */
   selectedId?: string | null
+  /** 定位请求：搜索/相似技能点击后把相机聚焦到对应节点（含时间戳，重复聚焦同一节点也生效） */
+  focusRequest?: { id: string; ts: number } | null
   onSelectNode: (node: NodeDetail | null) => void
   /** 双击岗位 → 展开/收起其技能（与 2D 交互一致） */
   onTogglePosition?: (id: string) => void
   className?: string
+}
+
+/** 父组件可调用的 3D 画布方法（聚焦节点 / 重置视角） */
+export interface Graph3DHandle {
+  focusNode: (id: string) => void
+  resetView: () => void
 }
 
 /** 岗位状态机 → 颜色（与 Graph2D 一致） */
@@ -133,17 +141,16 @@ function isDark(): boolean {
   return document.documentElement.classList.contains('dark')
 }
 
-export function Graph3D({
-  data,
-  expandedPositions,
-  selectedId,
-  onSelectNode,
-  onTogglePosition,
-  className,
-}: Graph3DProps) {
+export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
+  { data, expandedPositions, selectedId, focusRequest, onSelectNode, onTogglePosition, className },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 640 })
   const [dark, setDark] = useState(isDark)
+  // react-force-graph-3d 实例句柄（cameraPosition / zoomToFit 控制相机）。
+  // 显式指定 NodeType=GraphNode，保证组件回调参数（onNodeClick 等）与本地类型兼容
+  const fgRef = useRef<ForceGraphMethods<NodeObject<GraphNode>> | undefined>(undefined)
 
   // 容器尺寸追踪
   useEffect(() => {
@@ -210,10 +217,41 @@ export function Graph3D({
     onSelectNode(null)
   }, [onSelectNode])
 
+  // 聚焦节点：相机移动到节点斜上方，看向节点（node 位置为 force 引擎在 fgData 节点上写入的实时坐标）
+  const focusNode = useCallback(
+    (id: string) => {
+      const fg = fgRef.current
+      if (!fg) return
+      const node = fgData.nodes.find((n) => n.id === id) as NodeObject<GraphNode> | undefined
+      if (!node || typeof node.x !== 'number' || typeof node.y !== 'number' || typeof node.z !== 'number') return
+      // 取景距离：节点视觉半径最大约 10，28 单位距离可完整框住节点 + 文字标签
+      const dist = 28
+      fg.cameraPosition(
+        { x: node.x + dist, y: node.y + dist * 0.35, z: node.z + dist * 0.6 },
+        { x: node.x, y: node.y, z: node.z },
+        600,
+      )
+    },
+    [fgData],
+  )
+
+  // 重置视角：缩放到全图可见（zoomToFit 以原点为取景中心，图被 center 力约束在原点附近）
+  const resetView = useCallback(() => {
+    fgRef.current?.zoomToFit(600, 40)
+  }, [])
+
+  useImperativeHandle(ref, () => ({ focusNode, resetView }), [focusNode, resetView])
+
+  // 定位请求 → 聚焦相机（依赖 data：展开岗位后节点才入画布，数据到位后再聚焦）
+  useEffect(() => {
+    if (focusRequest) focusNode(focusRequest.id)
+  }, [focusRequest, data, focusNode])
+
   return (
     <div ref={containerRef} className={className ?? 'h-full w-full'}>
       {dimensions.width > 0 && dimensions.height > 0 && (
         <ForceGraph3D
+          ref={fgRef}
           width={dimensions.width}
           height={dimensions.height}
           graphData={fgData}
@@ -238,4 +276,4 @@ export function Graph3D({
       )}
     </div>
   )
-}
+})

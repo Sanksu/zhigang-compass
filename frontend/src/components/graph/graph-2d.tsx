@@ -32,7 +32,7 @@ interface EChartsParam {
   data?: Record<string, unknown>
   value?: unknown
   name?: string
-} 
+}
 
 // 按需注册 — 仅 graph 图表 + tooltip 组件 + canvas 渲染器
 // 相比 `import * as echarts from 'echarts'`，可减少约 70% bundle 体积
@@ -189,7 +189,6 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     // 只用 forceLayoutEnd：finished 会在渲染动画期间多次触发，导致展开时强制分散被反复
     // 执行、节点抖动；forceLayoutEnd 在力导向算法收敛后只触发一次，此时再推开重叠对。
     const onForceLayoutEnd = () => {
-      console.log('[graph-2d] forceLayoutEnd')
       enforceSpread(chart, { minGap: 32, maxIterations: 5 })
     }
     chart.on('forceLayoutEnd', onForceLayoutEnd)

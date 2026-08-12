@@ -6,7 +6,6 @@ evidence_id 追溯、token 截断、空查询兜底。
 
 import asyncio
 
-import pytest
 
 from app.models.business import DiagnosisReportRecord, DiscoveryCandidate, Occupation
 from app.services.rag.retrieval import (

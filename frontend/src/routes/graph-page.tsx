@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Graph2D, type Graph2DHandle } from '@/components/graph/graph-2d'
+import type { Graph3DHandle } from '@/components/graph/graph-3d'
 import { GraphAnalysisPanel } from '@/components/graph/graph-analysis-panel'
 import {
   NodeDetailPanel,
@@ -158,6 +159,8 @@ export function GraphPage() {
   const [focusRequest, setFocusRequest] = useState<{ id: string; ts: number } | null>(null)
   // 2D 画布命令句柄（重置视角）
   const graphRef = useRef<Graph2DHandle>(null)
+  // 3D 画布命令句柄（聚焦/重置视角，与 2D 交互对齐）
+  const graph3dRef = useRef<Graph3DHandle>(null)
   // 画布操作提示：首次访问显示，可手动关闭
   const [showOperationHint, setShowOperationHint] = useState(true)
   // 右侧面板 Tab：节点详情 / 算法分析
@@ -552,11 +555,11 @@ export function GraphPage() {
       {/* 画布 + 详情面板：画布占 70-75%，详情占 25-30% */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
         <Card className="relative overflow-hidden h-[640px]">
-          {/* 重置视角（roam 平移/缩放后一键回初始视角） */}
+          {/* 重置视角（roam 平移/缩放后一键回初始视角；3D 模式对应缩放到全图） */}
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => graphRef.current?.resetView()}
+            onClick={() => (mode === '3d' ? graph3dRef.current?.resetView() : graphRef.current?.resetView())}
             className="absolute right-2 top-2 z-10 h-7 px-2 text-xs text-ink-muted hover:text-ink"
             title="重置视角"
           >
@@ -577,9 +580,11 @@ export function GraphPage() {
           ) : (
             <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-sm text-ink-muted">加载 3D 渲染引擎…</div>}>
               <Graph3D
+                ref={graph3dRef}
                 data={visibleData!}
                 expandedPositions={expandedPositions}
                 selectedId={selected?.id ?? null}
+                focusRequest={focusRequest}
                 onSelectNode={setSelected}
                 onTogglePosition={togglePosition}
                 className="h-full w-full"
@@ -600,10 +605,21 @@ export function GraphPage() {
                 </button>
               </div>
               <ul className="mt-1.5 space-y-0.5 text-[10px] text-ink-muted">
-                <li>滚轮缩放 · 拖拽空白平移</li>
-                <li>拖拽节点调整位置</li>
-                <li>单击节点查看详情</li>
-                <li>双击岗位展开/收起技能</li>
+                {mode === '3d' ? (
+                  <>
+                    <li>滚轮缩放 · 拖拽空白旋转视角</li>
+                    <li>拖拽节点调整位置</li>
+                    <li>单击节点查看详情</li>
+                    <li>双击岗位展开/收起技能</li>
+                  </>
+                ) : (
+                  <>
+                    <li>滚轮缩放 · 拖拽空白平移</li>
+                    <li>拖拽节点调整位置</li>
+                    <li>单击节点查看详情</li>
+                    <li>双击岗位展开/收起技能</li>
+                  </>
+                )}
               </ul>
             </div>
           )}

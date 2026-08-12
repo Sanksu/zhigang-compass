@@ -21,7 +21,6 @@ from app.workers.tasks import (
     discovery_daily,
     diversity_report,
     evaluate_courses,
-    evolution_compute,
     load_courses,
     match_recommend,
     resume_parse,
@@ -53,7 +52,6 @@ EXPECTED_FUNCTIONS = [
     discovery_auto_transition,
     watch_signal_daily,
     snapshot_graph,
-    evolution_compute,
     check_llm_providers_health,
 ]
 

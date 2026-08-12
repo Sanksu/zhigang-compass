@@ -5,8 +5,8 @@
   IF z_score > 2.0 AND source_diversity ≥ 2 AND jd_freq_ma3 ≥ 10 → candidate
   ELIF z_score > 1.5 AND source_diversity ≥ 2 → candidate（保守观察）
   ELSE → 继续监测
-冷启动（历史 < 60 天）：wilson_lower > 0.3 AND source_diversity ≥ 3 → candidate
-阶段二（RAG 接地 + 种子列表，M4 开放自动 emerging 判定，M3 影子模式人工触发）
+冷启动（z_score 不可算，快照窗口不足）：wilson_lower > 0.2 AND source_diversity ≥ 2 → candidate
+阶段二（RAG 接地 + 种子列表）：M4 起自动 emerging 判定，由 discovery_daily 生产任务调用。
 """
 
 from dataclasses import dataclass
@@ -32,9 +32,6 @@ MIN_JD_FREQ_MA3 = 10
 # 冷启动源多样性（2026-08-11 调降 3→2：低频新岗位通常仅 1-2 个源先出现，
 # 3 源门槛会永久拦截"单源或双源新出现"的岗位，与成熟岗位排除机制配合后安全）
 MIN_SOURCE_COLD_START = 2
-
-# 冷启动窗口阈值（设计文档 7.2.3 节）
-COLD_START_DAYS = 60
 
 # 项目统一时区 UTC+8
 _TZ_CN = timezone(timedelta(hours=8))
@@ -77,7 +74,7 @@ def passes_gate(features: DiscoveryFeatures, history_days: int) -> bool:
 
     Z-score 门控为主判定（设计文档 §7.2.3）：z_score 可计算（≥2 个快照窗口，
     §7.2.1 时间窗口演化的 Z-score 基线）即使用 Z-score 门控，与历史窗口天数
-    无关。修复：此前 history_days < COLD_START_DAYS 一律返回 False，导致
+    无关。修复：此前 history_days < 60 一律返回 False，导致
     快照跨度 <60 天时即使 z_score 已算出的岗位也被强制走冷启动 Wilson，而
     Wilson 下界在 JD 占比下极低（实测 0.005-0.185）永不达 0.3 阈值，
     candidate 发现功能整体失效。
@@ -142,7 +139,8 @@ class DiscoveryDetector:
     """新岗位发现检测器。
 
     阶段一已实现（Z-score/Wilson 门控 + candidate 组装）；
-    阶段二 RAG 接地为 M4 交付项，M3 影子模式仅人工触发（ground_with_rag 保持 stub）。
+    阶段二 RAG 接地已实现（ground_with_rag 委托 grounding 模块，
+    由 discovery_daily 生产任务调用，LLM 失败降级为规则种子匹配）。
     """
 
     def detect_candidates(self, provider: CandidateProvider) -> list[CandidatePosition]:

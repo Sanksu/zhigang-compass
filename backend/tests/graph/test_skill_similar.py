@@ -247,8 +247,9 @@ def test_semantic_unavailable_on_main_path_returns_503():
                       return_value=_FakeEmbedder(raise_embed=True)):
         resp = asyncio.run(graph_api.skill_similar(skill_id="s1", top_k=10, db=db))
 
-    # error(503, ...) 未显式传 http_status → 默认 200，body code=503（既有契约）
-    assert resp.code == 503
+    # error(503, ...) 未显式传 http_status → 按 code 推导 HTTP 503，body code=503
+    assert resp.status_code == 503
+    assert json.loads(resp.body)["code"] == 503
 
 
 def test_semantic_unavailable_on_fallback_returns_503():
@@ -262,7 +263,9 @@ def test_semantic_unavailable_on_fallback_returns_503():
                       _fake_neo4j([{"id": "s2", "name": "Java"}])):
         resp = asyncio.run(graph_api.skill_similar(skill_id="s1", top_k=10, db=db))
 
-    assert resp.code == 503
+    # 与主路径一致：HTTP 503 + body code=503
+    assert resp.status_code == 503
+    assert json.loads(resp.body)["code"] == 503
 
 
 def test_fallback_graph_empty_returns_empty():

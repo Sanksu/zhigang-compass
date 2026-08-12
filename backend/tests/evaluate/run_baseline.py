@@ -9,7 +9,6 @@
 import json
 import sys
 from pathlib import Path
-from collections import Counter
 
 # 后端根目录（tests/evaluate/ → backend/）
 _BACKEND_DIR = Path(__file__).resolve().parents[2]

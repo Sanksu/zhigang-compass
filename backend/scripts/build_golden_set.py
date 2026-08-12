@@ -27,7 +27,7 @@ from app.core.logging import setup_logging
 
 logger = setup_logging("build_golden_set")
 
-from app.services.extraction.dictionary import SKILL_ALIAS, normalize_skill
+from app.services.extraction.dictionary import normalize_skill
 
 # ── 路径 ──
 _BOSS_INPUT = _BACKEND_DIR / "data" / "crawlers" / "output" / "boss_golden.jsonl"
@@ -149,7 +149,6 @@ def infer_core_duties(title: str, tags: list[str]) -> list[str]:
     M3 真实详情页采集后可替换为 JD 原文中的职责描述。
     """
     duties = []
-    title_lower = title.lower()
 
     if any(kw in title for kw in ["算法", "机器学习", "深度学习", "AI", "大模型"]):
         duties.append("负责机器学习算法的设计、训练与优化")

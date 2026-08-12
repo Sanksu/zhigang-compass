@@ -2,7 +2,6 @@
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
 
 from app.services.data_quality.update_status import parse_crawled_at, platform_freshness
 

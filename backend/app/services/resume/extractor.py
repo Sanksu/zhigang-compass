@@ -5,6 +5,7 @@
 （与 JD 抽取 SKILL_STOPWORDS 同口径，防行业/业务词误入画像）。
 """
 
+import logging
 import re
 from typing import Optional
 
@@ -15,6 +16,8 @@ from app.services.extraction.llm_provider import (
 )
 from app.services.resume.prompts import RESUME_SYSTEM_PROMPT, RESUME_TASK_TEMPLATE
 from app.services.resume.schemas import ResumeExtractionResult, ResumeSkill
+
+logger = logging.getLogger(__name__)
 
 # 学历关键词按从高到低排列，规则兜底时取首个命中（即最高学历）
 _EDUCATION_LEVELS = ("博士", "硕士", "本科", "大专")
@@ -91,7 +94,47 @@ class ResumeExtractor:
                 result = self._rule_based_extract(resume_text)
 
         result = self._filter_skills(result)
-        return self._merge_soft_skills(result)
+        result = self._merge_soft_skills(result)
+        return self._fill_cert_issuers(result)
+
+    @staticmethod
+    def _fill_cert_issuers(result: ResumeExtractionResult) -> ResumeExtractionResult:
+        """证书 issuer 补全与规范化。
+
+        1. LLM 已给出 issuer：查简写映射规范化为全称（如"软考"→全称），
+           未收录则保留 LLM 原值（避免词表误配覆盖含上下文的 issuer）。
+        2. LLM 未给出 issuer：用证书名映射表补全（issuer_for）。
+        """
+        from app.services.resume.cert_issuers import canonical_issuer, issuer_for
+
+        total = len(result.certifications)
+        if total == 0:
+            return result
+        filled = 0
+        canonicalized = 0
+        unmatched: list[str] = []
+        for cert in result.certifications:
+            if cert.issuer:
+                canonical = canonical_issuer(cert.issuer)
+                if canonical != cert.issuer:
+                    cert.issuer = canonical
+                    canonicalized += 1
+            else:
+                issuer = issuer_for(cert.name)
+                if issuer:
+                    cert.issuer = issuer
+                    filled += 1
+                else:
+                    unmatched.append(cert.name)
+        logger.info(
+            "证书 issuer 处理：共 %d 个，词表补全 %d 个，简写规范化 %d 个，未命中 %d 个（%s）",
+            total,
+            filled,
+            canonicalized,
+            len(unmatched),
+            ", ".join(unmatched[:10]) + ("…" if len(unmatched) > 10 else ""),
+        )
+        return result
 
     @staticmethod
     def _filter_skills(result: ResumeExtractionResult) -> ResumeExtractionResult:

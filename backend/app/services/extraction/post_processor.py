@@ -6,12 +6,13 @@
 import re
 from app.services.extraction.schemas import JDExtractionResult, SkillExtracted
 from app.services.extraction.dictionary import (
-    SKILL_STOPWORDS,
     SKILL_WHITELIST,
     SOFT_SKILL_NOISE,
     SOFT_SKILL_WHITELIST,
     _SKILL_MODIFIERS,
+    is_noise_skill,
     normalize_skill,
+    normalize_tool_name,
 )
 
 # 需去除的中文后缀（按长度降序排列，优先匹配长后缀）。
@@ -61,16 +62,14 @@ def dedup_skills(skills: list[SkillExtracted]) -> list[SkillExtracted]:
 
 
 def _is_valid_skill_name(name: str) -> bool:
-    """技能名校验：黑名单剔除 + 单字符碎片过滤。
+    """技能名校验：白名单/别名标准名保护 + 泛词/碎片拦截。
 
-    清洗剥后缀可能产生单字碎片（如"微服务"→"微"），此类碎片无技能语义；
-    白名单单字语言（C/R/Go/SQL 等）是合法技能，保留。
+    除 SKILL_STOPWORDS 黑名单与单字符碎片外，复用 is_noise_skill 的泛词判定
+    （模糊词、岗位名碎片、经验描述短语等白名单外无技能语义的噪音），拦截
+    "实验/评估/移动/报表"这类 LLM 误抽泛词，降低技能图语义噪音（图谱快照审查
+    报告问题 3）。白名单词与别名标准名整体保护，不误杀真实技能。
     """
-    if name in SKILL_STOPWORDS:
-        return False
-    if len(name) < 2 and name not in SKILL_WHITELIST:
-        return False
-    return True
+    return not is_noise_skill(name)
 
 
 def post_process(result: JDExtractionResult) -> JDExtractionResult:
@@ -111,7 +110,9 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     result.soft_skills = cleaned_soft
 
     for tool in result.tools:
-        tool.name = normalize_skill(tool.name)
+        # 工具名归一化：别名/大小写统一（防同工具分裂成多个图谱节点，
+        # 如 Ansys/ANSYS、DeepSeek/Deepseek），与技能 normalize_skill 口径分离
+        tool.name = normalize_tool_name(tool.name)
 
     # requirements 与 skills 使用同一清洗规则（避免非标准技能名入图），
     # 并按 (技能, 必要性) 去重，与 skills 去重口径一致

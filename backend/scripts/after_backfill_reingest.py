@@ -30,7 +30,6 @@ from app.core.logging import setup_logging
 logger = setup_logging("after_backfill_reingest")
 
 from app.workers.tasks import aggregate_positions, batch_extract
-import app.core.database  # 显式触发 create_async_engine(echo=settings.debug)（tasks 内为惰性导入）
 
 # ── 噪音抑制（须在引擎创建之后）──
 # echo 会为 sqlalchemy.engine.Engine 追加 StreamHandler 并绕过 logger 级别检查直接驱动输出，

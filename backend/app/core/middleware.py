@@ -3,7 +3,6 @@
 import contextvars
 import ipaddress
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

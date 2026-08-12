@@ -9,7 +9,7 @@
 
 import pytest
 
-from app.services.graph_algorithms.louvain import louvain, _modularity
+from app.services.graph_algorithms.louvain import louvain
 from app.services.graph_algorithms.network import load_skill_cooccurrence
 from app.services.graph_algorithms.pagerank import pagerank
 from app.services.graph_algorithms.shortest_path import shortest_path

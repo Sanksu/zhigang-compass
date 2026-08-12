@@ -17,7 +17,6 @@
 结果口径一致。
 """
 
-from typing import Any
 
 from sqlalchemy import select
 

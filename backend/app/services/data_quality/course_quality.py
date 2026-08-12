@@ -14,7 +14,6 @@
 无技能标签、无简介）取 0。每月重跑评估管线，学习路径按质量分取 Top-3。
 """
 
-import re
 from datetime import date, datetime, timedelta, timezone
 from math import log10
 
