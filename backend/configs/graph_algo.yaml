@@ -1,0 +1,9 @@
+# 图算法运行时配置（图算法优化方案阶段一产物）
+# 来源：docs/design/图算法参数评估报告.md（Optuna 调优结论，scripts/graph_algo_tune.py 扫描）
+# 加载：app/services/graph_algorithms/config.py（缺失/解析失败回退默认值，不阻断 API）
+# 修改：scripts/graph_algo_tune.py --apply 可将最优参数写回本文件
+
+algorithm: louvain        # louvain | leiden（阶段二预留开关，默认 louvain 一行回滚）
+resolution: 1.0           # Louvain 分辨率参数 γ：>1 细簇 / <1 粗簇 / 1.0 等价标准 Louvain
+min_weight: 2.0           # 共现边权重下限（必要性组合因子 × 共现岗位数），过滤 must-nice 低频与 nice-nice 弱边
+min_size: 2               # 技能簇最小规模（与 postprocess.MIN_CLUSTER_SIZE 对齐，过滤过小簇）

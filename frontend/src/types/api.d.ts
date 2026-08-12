@@ -648,7 +648,7 @@ export interface paths {
             parameters: {
                 query?: {
                     top_n?: number;
-                    /** @description 共现边权重下限（共现岗位数） */
+                    /** @description 共现边权重下限（权重 = 必要性组合因子 × 共现岗位数：must-must=1.0/must-nice=0.5/nice-nice=0.2 再 × 共现数）；默认 2.0 过滤 must-nice 低频与 nice-nice 弱边，与 skill-clusters 取数口径一致 */
                     min_weight?: number;
                 };
                 header?: never;
@@ -683,11 +683,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Louvain 技能簇识别（纯 Python） */
+        /** Louvain 技能簇识别（纯 Python，γ 分辨率参数化） */
         get: {
             parameters: {
                 query?: {
+                    /** @description 过滤过小簇（size < min_size 不返回） */
                     min_size?: number;
+                    /** @description Louvain 分辨率参数 γ（图算法优化方案阶段一）：>1 细簇 / <1 粗簇 / 1.0 等价标准 Louvain。默认值取 configs/graph_algo.yaml */
+                    resolution?: number;
                 };
                 header?: never;
                 path?: never;
@@ -695,7 +698,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description 技能簇列表 */
+                /** @description 技能簇列表（规则后处理 + LLM 兜底命名） */
                 200: {
                     headers: {
                         [name: string]: unknown;
