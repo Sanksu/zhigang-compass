@@ -171,7 +171,7 @@ class TestClusterLLM:
         from app.services.extraction.llm_provider import LLMExtractionError
 
         class _FailingLLM:
-            def extract_structured(self, prompt, model, **kw):
+            def call_sync(self, prompt, model, **kw):
                 raise LLMExtractionError("provider 调用失败")
 
         classifier = ClusterLLMClassifier(llm=_FailingLLM())
@@ -180,10 +180,23 @@ class TestClusterLLM:
         assert dec.coherent is True
         assert dec.cluster_name == "Python"
 
+    def test_llm_timeout_falls_back_to_rule_label(self):
+        """同步路由超时（LLMTimeoutError，G-04）→ 降级规则标签不阻塞。"""
+        from app.services.extraction.llm_provider import LLMTimeoutError
+
+        class _TimeoutLLM:
+            def call_sync(self, prompt, model, **kw):
+                raise LLMTimeoutError("10s 超时")
+
+        classifier = ClusterLLMClassifier(llm=_TimeoutLLM())
+        dec = classifier.classify(["Python"], ["empty_label"], rule_label="Python")
+        assert dec.coherent is True
+        assert dec.cluster_name == "Python"
+
     def test_non_llm_error_propagates(self):
         # 非 LLMExtractionError 的异常应向上抛（fail-fast，不吞非预期错误）
         class _BrokenLLM:
-            def extract_structured(self, prompt, model, **kw):
+            def call_sync(self, prompt, model, **kw):
                 raise RuntimeError("unexpected")
 
         classifier = ClusterLLMClassifier(llm=_BrokenLLM())
