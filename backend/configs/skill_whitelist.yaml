@@ -675,3 +675,10 @@ skills:
   - {name: "BI报表", category: "数据分析/商业"}
   - {name: "Superset", category: "数据分析/商业"}
   - {name: "FineReport", category: "数据分析/商业"}
+
+  # ---- JD 基线决策支持 ③（2026-08-12）：黄金集"X经验"归并所需基础技能 ----
+  - {name: "算法工程化", category: "算法"}
+  - {name: "爬虫", category: "数据处理"}
+  - {name: "NLU测试", category: "测试"}
+  - {name: "全栈", category: "工程"}
+  - {name: "Web开发", category: "前端"}
