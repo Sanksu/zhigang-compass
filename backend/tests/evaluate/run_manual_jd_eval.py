@@ -209,6 +209,41 @@ def _compare_set(gold: list[str], predicted: list[str]) -> dict[str, Any]:
     return {"tp": sorted(g & p), "fp": sorted(p - g), "fn": sorted(g - p), "f1": _metric(len(g & p), len(p - g), len(g - p))["f1"]}
 
 
+def load_gold_revisions(path: Path | None = None) -> dict[str, dict[str, Any]]:
+    """读取盲审 gold 口径修订（人工确认的可审计修订，不直接改 xlsx）。
+
+    修订文件：data/golden_set/review/evaluation/gold_revisions.json
+    - move_skills_to_bonus: 从必备移入加分（如 OR 条件结构技能）
+    - remove_skills: 从必备删除（如岗位名组成部分被误标技能）
+    文件缺失/损坏时返回空（不阻断评测，维持原标注口径）。
+    """
+    path = path or (ROOT / "data" / "golden_set" / "review" / "evaluation" / "gold_revisions.json")
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {r["sample_id"]: r for r in data.get("revisions", [])}
+    except (json.JSONDecodeError, OSError, TypeError):
+        return {}
+
+
+def apply_gold_revisions(
+    revisions: dict[str, dict[str, Any]],
+    sample_id: str,
+    gold_skills: list[str],
+    gold_bonus: list[str],
+) -> tuple[list[str], list[str]]:
+    """应用单条 gold 修订：移出必备 → 删除 / 移入加分。未命中修订时原样返回。"""
+    rev = revisions.get(sample_id)
+    if not rev:
+        return gold_skills, gold_bonus
+    move = set(rev.get("move_skills_to_bonus", []))
+    remove = set(rev.get("remove_skills", []))
+    out_skills = [s for s in gold_skills if s not in move and s not in remove]
+    out_bonus = list(gold_bonus) + [s for s in gold_skills if s in move]
+    return out_skills, out_bonus
+
+
 def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any]:
     """Run the current extractor and reject all records that fall back to rules."""
     sys.path.insert(0, str(ROOT))
@@ -223,6 +258,7 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         raise RuntimeError(f"LLMProviderChain 不可用：{type(exc).__name__}: {exc}") from exc
 
     predictions: list[dict[str, Any]] = []
+    revisions = load_gold_revisions()
     title_hits = 0
     title_raw_hits = 0
     education_hits = 0
@@ -260,6 +296,8 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         gold_skills, _ = _json_array(row["review_gold_skills"])
         gold_bonus, _ = _json_array(row["review_gold_bonus_skills"])
         assert gold_skills is not None and gold_bonus is not None
+        # gold 口径修订（人工确认，见 load_gold_revisions）：移出必备/移入加分
+        gold_skills, gold_bonus = apply_gold_revisions(revisions, row["sample_id"], gold_skills, gold_bonus)
         normalized_gold_skills = [clean_skill_name(normalize_skill(x)) for x in gold_skills]
         normalized_gold_bonus = [clean_skill_name(normalize_skill(x)) for x in gold_bonus]
         predicted_skills = [skill.name for skill in result.skills]
@@ -285,6 +323,7 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
             "sample_id": row["sample_id"], "source": row["source"], "source_id": row["source_id"],
             "source_url": row["source_url"], "job_title_raw": row["job_title_raw"],
             "human_gold": {key: row.get(key, "") for key in LABEL_COLUMNS},
+            "gold_revision_applied": row["sample_id"] in revisions,
             "execution_status": "real_llm_success",
             "model_raw_output_pre_postprocess": _to_jsonable(tracker.model_output),
             "model_normalized_output": _to_jsonable(result),
