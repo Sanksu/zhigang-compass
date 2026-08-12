@@ -222,8 +222,11 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
           </h4>
           {levels && levels.length > 1 && (
             <div className="mb-1.5">
-              <Label className="text-[10px] text-ink-faint">层级（dendrogram 粗→细）</Label>
+              <Label htmlFor="cluster-level-select" className="text-[10px] text-ink-faint">
+                层级（dendrogram 粗→细）
+              </Label>
               <select
+                id="cluster-level-select"
                 value={selectedLevel ?? ''}
                 onChange={(e) => changeLevel(e.target.value)}
                 className="w-full h-7 rounded border border-border bg-canvas px-2 text-xs outline-none focus:border-ink"

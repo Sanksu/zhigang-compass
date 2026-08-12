@@ -13,6 +13,7 @@ from app.api.deps import get_optional_user, role_rank
 from app.core.database import get_db, neo4j_driver, redis_client
 from app.models.business import SkillEmbedding
 from app.schemas.common import error, ok
+from app.services.graph_algorithms.config import load_graph_algo_config
 from app.services.kg.skill_relations import graph_prerequisite_chain
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
@@ -636,16 +637,21 @@ async def skill_detail(
     return ok(data=data)
 
 
+# 图算法默认参数（import 时从 configs/graph_algo.yaml 读取——Optuna 最优 γ/min_weight
+# 接入 API 运行时路径，与 sync_communities 索引同口径；修改配置后重启生效）
+_GRAPH_ALGO_DEFAULTS = load_graph_algo_config()
+
+
 @router.get("/algorithms/pagerank")
 async def graph_pagerank(
     top_n: int = Query(default=20, ge=1, le=100),
-    min_weight: float = Query(default=2.0, ge=1.0),
+    min_weight: float = Query(default=_GRAPH_ALGO_DEFAULTS["min_weight"], ge=1.0),
 ):
     """PageRank 技能重要性 Top-N（设计文档 7.1 图算法应用）。
 
     技能网络 = 岗位共现（两技能被同一岗位 REQUIRES 即连边），纯 Python
-    幂迭代（Neo4j 社区版无 GDS 插件）。min_weight 默认 2.0，与 skill-clusters
-    端点取数口径一致（configs/graph_algo.yaml 可覆盖）。30s Redis TTL 缓存。
+    幂迭代（Neo4j 社区版无 GDS 插件）。min_weight 默认取 configs/graph_algo.yaml
+    （调优值 2.5021，与 skill-clusters 端点取数口径一致）。30s Redis TTL 缓存。
     """
     from app.services.graph_algorithms.network import load_skill_cooccurrence
     from app.services.graph_algorithms.pagerank import pagerank
@@ -676,7 +682,7 @@ async def graph_pagerank(
 @router.get("/algorithms/skill-clusters")
 async def graph_skill_clusters(
     min_size: int = Query(default=2, ge=1, le=100),
-    resolution: float = Query(default=1.0, ge=0.1, le=5.0),
+    resolution: float = Query(default=_GRAPH_ALGO_DEFAULTS["resolution"], ge=0.1, le=5.0),
     level: Optional[int] = Query(default=None, ge=0, le=31),
 ):
     """Louvain/Leiden 技能簇（设计文档 7.1 图算法应用，技术栈视图支撑）。
@@ -700,7 +706,6 @@ async def graph_skill_clusters(
     """
     from app.services.extraction.dictionary import skill_category
     from app.services.graph_algorithms.cluster_llm import ClusterLLMClassifier
-    from app.services.graph_algorithms.config import load_graph_algo_config
     from app.services.graph_algorithms.network import load_skill_cooccurrence
     from app.services.graph_algorithms.postprocess import ClusterPostProcessor
 
@@ -737,7 +742,7 @@ async def graph_skill_clusters(
         # min_weight=2.0（默认）：P0 改造后权重=必要性组合因子×共现数，
         # 过滤 must-nice 低频与 nice-nice 弱边，聚类簇内同质性最佳
         with neo4j_driver.session() as session:
-            graph, name_map = load_skill_cooccurrence(session)
+            graph, name_map = load_skill_cooccurrence(session, min_weight=_GRAPH_ALGO_DEFAULTS["min_weight"])
         clusters, hier = _run_clustering(graph)
 
         # 规则优先后处理 + LLM 兜底触发标记（图算法优化方案 §4.1-4.2）
@@ -774,9 +779,12 @@ async def graph_skill_clusters(
                 "skills": [{"id": sid, "name": name_map.get(sid, sid)} for sid in c["skills"]],
             })
         # 层级元数据：每层经后处理（无 LLM）+ min_size 过滤后的实际簇数，
-        # 与对应 level 请求的结果同口径（细层单点簇会被过小簇合并，须如实反映）
+        # 与对应 level 请求的结果同口径（细层单点簇会被过小簇合并，须如实反映）；
+        # modularity 统一用标准 Q（γ=1.0），与评估报告/验收口径一致
         level_counts = None
         if hier is not None:
+            from app.services.graph_algorithms.louvain import modularity
+
             level_counts = []
             for lv in hier["levels"]:
                 lv_processed = ClusterPostProcessor().process(lv["membership"], graph, name_map, categories)
@@ -787,7 +795,7 @@ async def graph_skill_clusters(
                 level_counts.append({
                     "level": lv["level"],
                     "cluster_count": n,
-                    "modularity": round(lv["modularity"], 6),
+                    "modularity": round(modularity(graph, lv["membership"], 1.0), 6),
                 })
         return items, level_counts
 

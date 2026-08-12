@@ -20,6 +20,7 @@ import argparse
 import json
 import sys
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -215,7 +216,7 @@ def export_snapshot(path: Path) -> None:
     with neo4j_driver.session() as session:
         graph, name_map = load_skill_cooccurrence(session, min_weight=1.0)
     payload = {
-        "exported_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        "exported_at": datetime.now().isoformat(timespec="seconds"),
         "node_count": len(graph),
         "edge_count": sum(len(nbs) for nbs in graph.values()) // 2,
         "graph": graph,
@@ -312,6 +313,7 @@ def main() -> None:
     result = tune(graph, n_trials=args.trials, n_runs=args.runs, algorithm=args.algorithm)
     report(f"Optuna 最优（{args.trials} trial, {args.algorithm}）", result["metrics"], result)
     print(f"  objective={result['objective']:.4f} 稳定性 mean={result['stability_mean']:.4f} std={result['stability_std']:.4f}")
+    print("  （Louvain/Leiden 均为确定性算法：稳定性验证为多轮运行口径复核，std=0 属预期；扰动鲁棒性可抽 80% 边子集复验）")
 
     if args.apply:
         apply_config(result["resolution"], result["min_weight"])

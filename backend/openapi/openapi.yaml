@@ -386,8 +386,8 @@ paths:
           schema: { type: integer, default: 20, maximum: 100 }
         - name: min_weight
           in: query
-          schema: { type: number, default: 2.0, minimum: 1.0 }
-          description: 共现边权重下限（权重 = 必要性组合因子 × 共现岗位数：must-must=1.0/must-nice=0.5/nice-nice=0.2 再 × 共现数）；默认 2.0 过滤 must-nice 低频与 nice-nice 弱边，与 skill-clusters 取数口径一致
+          schema: { type: number, minimum: 1.0 }
+          description: 共现边权重下限（权重 = 必要性组合因子 × 共现岗位数：must-must=1.0/must-nice=0.5/nice-nice=0.2 再 × 共现数）。省略时取 configs/graph_algo.yaml 的调优值（当前 2.5021），与 skill-clusters 取数口径一致
       responses:
         '200':
           description: 技能重要性排名
@@ -420,8 +420,8 @@ paths:
           description: 过滤过小簇（size < min_size 不返回）
         - name: resolution
           in: query
-          schema: { type: number, default: 1.0, minimum: 0.1, maximum: 5.0 }
-          description: Louvain 分辨率参数 γ（图算法优化方案阶段一）：>1 细簇 / <1 粗簇 / 1.0 等价标准 Louvain。默认值取 configs/graph_algo.yaml
+          schema: { type: number, minimum: 0.1, maximum: 5.0 }
+          description: Louvain 分辨率参数 γ（图算法优化方案阶段一）：>1 细簇 / <1 粗簇 / 1.0 等价标准 Louvain。省略时取 configs/graph_algo.yaml 的调优值（当前 1.2564，随配置生效）
         - name: level
           in: query
           schema: { type: integer, default: null, minimum: 0, maximum: 31, nullable: true }
