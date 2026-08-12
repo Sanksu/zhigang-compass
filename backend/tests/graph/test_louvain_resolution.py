@@ -120,12 +120,42 @@ class TestTuneHelpers:
         assert 0.0 <= m["small_ratio"] <= 1.0
         assert m["cluster_count"] >= 2
 
+    def test_degenerate_penalty(self):
+        """退化解防护：单簇/两簇/近单簇划分被判退化，objective 罚 0。
+
+        2026-08-12 实跑发现：γ<1 时"全部合并"是分辨率化 Q 的退化最优
+        （Q=1−γ 虚高 + 同质性恒 1.0），objective 必须屏蔽该解。
+        """
+        single = {nd: 0 for nd in _GRAPH}
+        assert tune._is_degenerate(single) is True
+        assert tune.score_partition(_GRAPH, single) == 0.0
+        two_clusters = {"a": 0, "b": 0, "c": 0, "d": 1, "e": 1}
+        assert tune._is_degenerate(two_clusters) is True
+        # 近单簇（占比 > 0.5）也判退化
+        near_single = {"a": 0, "b": 0, "c": 0, "d": 0, "e": 1}
+        assert tune._is_degenerate(near_single) is True
+
+    def test_score_uses_standard_modularity(self):
+        """评分 Q 用标准模块度（γ 只生成划分、不参与评分）。"""
+        from app.services.graph_algorithms.louvain import _modularity, homogeneity, louvain
+
+        g = tune.filter_graph(_GRAPH, 1.0)
+        partition = louvain(g)
+        expected = (
+            0.5 * _modularity(g, partition, 1.0)
+            + 0.3 * homogeneity(g, partition)
+            + 0.2 * (1.0 - tune.small_cluster_ratio(partition))
+        )
+        assert tune.score_partition(g, partition) == pytest.approx(expected)
+
     def test_tune_smoke_small_trials(self):
-        """Optuna 小规模冒烟：5 trial 收敛并给出合法参数。"""
-        result = tune.tune(_GRAPH, n_trials=5, n_runs=3)
+        """Optuna 小规模冒烟：8 trial 在 4 社区演示图上收敛（含退化解防护）。"""
+        result = tune.tune(tune._DEMO_GRAPH, n_trials=8, n_runs=3)
         assert tune.GAMMA_MIN <= result["resolution"] <= tune.GAMMA_MAX
         assert tune.MIN_WEIGHT_MIN <= result["min_weight"] <= tune.MIN_WEIGHT_MAX
         assert result["stability_std"] == pytest.approx(0.0, abs=1e-9)  # 确定性算法
+        # 最优解不允许是退化解（簇数 ≤ 2 或最大簇占比 > 0.5 会被罚 0）
+        assert not result["metrics"]["degenerate"]
         assert result["objective"] > 0
 
     def test_export_roundtrip(self, tmp_path):

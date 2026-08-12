@@ -38,19 +38,18 @@ W_Q, W_HOM, W_SMALL = 0.5, 0.3, 0.2
 # 过小簇口径（与 postprocess.MIN_CLUSTER_SIZE 对齐）
 SMALL_CLUSTER_SIZE = 2
 
-# 内置演示图（--dry-run 无快照时冒烟用，3 个稠密子图 + 1 个桥节点）
-_DEMO_GRAPH = {
-    "s1": {"s2": 3.0, "s3": 3.0, "s4": 2.0, "s9": 1.0},
-    "s2": {"s1": 3.0, "s3": 3.0, "s4": 2.0},
-    "s3": {"s1": 3.0, "s2": 3.0, "s4": 2.0},
-    "s4": {"s1": 2.0, "s2": 2.0, "s3": 2.0, "s5": 2.0},
-    "s5": {"s4": 2.0, "s6": 3.0, "s7": 3.0},
-    "s6": {"s5": 3.0, "s7": 3.0},
-    "s7": {"s5": 3.0, "s6": 3.0},
-    "s8": {"s9": 2.0, "s10": 2.0},
-    "s9": {"s1": 1.0, "s8": 2.0, "s10": 2.0},
-    "s10": {"s8": 2.0, "s9": 2.0},
-}
+# 内置演示图（--dry-run 无快照时冒烟用）：4 个稠密社区（各 4 节点，内部权重 3.0）
+# + 社区间弱桥边（权重 1.0，min_weight=2.0 时被过滤，社区结构清晰）
+_DEMO_GRAPH: dict[str, dict[str, float]] = {}
+for _c in "abcd":
+    _nodes = [f"{_c}{i}" for i in range(1, 5)]
+    for _i, _u in enumerate(_nodes):
+        for _v in _nodes[_i + 1:]:
+            _DEMO_GRAPH.setdefault(_u, {})[_v] = 3.0
+            _DEMO_GRAPH.setdefault(_v, {})[_u] = 3.0
+for _u, _v in [("a4", "b1"), ("b4", "c1"), ("c4", "d1")]:
+    _DEMO_GRAPH.setdefault(_u, {})[_v] = 1.0
+    _DEMO_GRAPH.setdefault(_v, {})[_u] = 1.0
 _DEMO_NAMES = {k: f"技能{k}" for k in _DEMO_GRAPH}
 
 
@@ -81,8 +80,38 @@ def small_cluster_ratio(partition: dict[str, int]) -> float:
     return sum(1 for s in sizes.values() if s <= SMALL_CLUSTER_SIZE) / len(sizes)
 
 
+def _is_degenerate(partition: dict[str, int]) -> bool:
+    """退化解判定：簇数 ≤ 2 或最大簇占比 > 0.5（单簇/近单簇无聚类价值）。
+
+    分辨率化模块度在 γ<1 时单簇 Q=1−γ 虚高、同质性恒 1.0，会主导
+    objective 使 Optuna 收敛到"全部合并"的退化最优（2026-08-12 实跑发现）。
+    """
+    if not partition:
+        return True
+    sizes = Counter(partition.values())
+    if len(sizes) <= 2:
+        return True
+    return max(sizes.values()) / len(partition) > 0.5
+
+
+def score_partition(g: dict[str, dict[str, float]], partition: dict[str, int]) -> float:
+    """聚类质量综合分（objective 口径）：0.5·Q + 0.3·同质性 + 0.2·(1−过小簇)。
+
+    Q 统一用标准模块度（γ=1.0）评分——γ 只负责生成划分，不参与评分，
+    避免 γ<1 时分辨率化 Q 虚高引导退化解；退化解直接罚 0。
+    """
+    from app.services.graph_algorithms.louvain import _modularity, homogeneity
+
+    if _is_degenerate(partition):
+        return 0.0
+    q = _modularity(g, partition, 1.0)
+    h = homogeneity(g, partition)
+    s = small_cluster_ratio(partition)
+    return W_Q * q + W_HOM * h + W_SMALL * (1.0 - s)
+
+
 def evaluate(graph: dict[str, dict[str, float]], resolution: float, min_weight: float) -> dict:
-    """给定 (resolution, min_weight) 的聚类质量指标（Q / 同质性 / 过小簇占比）。"""
+    """给定 (resolution, min_weight) 的聚类质量指标（标准 Q / 同质性 / 过小簇占比）。"""
     from app.services.graph_algorithms.louvain import _modularity, homogeneity, louvain
 
     g = filter_graph(graph, min_weight)
@@ -90,19 +119,27 @@ def evaluate(graph: dict[str, dict[str, float]], resolution: float, min_weight: 
     if not partition:
         return {"modularity": 0.0, "homogeneity": 0.0, "small_ratio": 0.0, "cluster_count": 0}
     return {
-        "modularity": _modularity(g, partition, resolution),
+        "modularity": _modularity(g, partition, 1.0),
         "homogeneity": homogeneity(g, partition),
         "small_ratio": small_cluster_ratio(partition),
         "cluster_count": len(set(partition.values())),
+        "degenerate": _is_degenerate(partition),
     }
 
 
 def objective(graph: dict[str, dict[str, float]], trial) -> float:
-    """Optuna 目标：0.5·Q + 0.3·同质性 + 0.2·(1−过小簇占比)，最大化。"""
+    """Optuna 目标：0.5·Q + 0.3·同质性 + 0.2·(1−过小簇占比)，最大化。
+
+    Q 用标准模块度（γ 不参与评分）；退化解（簇数 ≤ 2 或最大簇占比 > 0.5）
+    直接罚 0，防止收敛到"全部合并"的退化最优。
+    """
     resolution = trial.suggest_float("resolution", GAMMA_MIN, GAMMA_MAX)
     min_weight = trial.suggest_float("min_weight", MIN_WEIGHT_MIN, MIN_WEIGHT_MAX)
-    m = evaluate(graph, resolution, min_weight)
-    return W_Q * m["modularity"] + W_HOM * m["homogeneity"] + W_SMALL * (1.0 - m["small_ratio"])
+    from app.services.graph_algorithms.louvain import louvain
+
+    g = filter_graph(graph, min_weight)
+    partition = louvain(g, resolution=resolution)
+    return score_partition(g, partition)
 
 
 def tune(graph: dict[str, dict[str, float]], n_trials: int, seed: int = 42, n_runs: int = 10) -> dict:
@@ -116,10 +153,11 @@ def tune(graph: dict[str, dict[str, float]], n_trials: int, seed: int = 42, n_ru
 
     # 稳定性验证：最优参数独立重跑 n_runs 次（Louvain 为确定性算法，
     # 验证口径为最优参数在多轮运行中指标无退化）
+    from app.services.graph_algorithms.louvain import louvain
+
+    g_best = filter_graph(graph, best["min_weight"])
     scores = [
-        W_Q * evaluate(graph, best["resolution"], best["min_weight"])["modularity"]
-        + W_HOM * evaluate(graph, best["resolution"], best["min_weight"])["homogeneity"]
-        + W_SMALL * (1.0 - evaluate(graph, best["resolution"], best["min_weight"])["small_ratio"])
+        score_partition(g_best, louvain(g_best, resolution=best["resolution"]))
         for _ in range(n_runs)
     ]
     mean = sum(scores) / len(scores)
@@ -182,9 +220,10 @@ def apply_config(resolution: float, min_weight: float) -> None:
 def report(tag: str, m: dict, params: dict) -> None:
     """打印指标报告。"""
     print(f"[{tag}] γ={params['resolution']:.3f} min_weight={params['min_weight']:.3f}")
+    deg = " [退化]" if m.get("degenerate") else ""
     print(
         f"  Q={m['modularity']:.4f} 同质性={m['homogeneity']:.4f} "
-        f"过小簇占比={m['small_ratio']:.4f} 簇数={m['cluster_count']}"
+        f"过小簇占比={m['small_ratio']:.4f} 簇数={m['cluster_count']}{deg}"
     )
 
 
