@@ -201,6 +201,72 @@ class _FakeSession:
         return _FakeResult({"c": 0})
 
 
+class TestTypicalScenariosAggregation:
+    """典型项目场景聚合（写回 Position.typical_scenarios，设计文档 §9.2 项目维度）。"""
+
+    def _row(self, position: str, source: str, scenarios: list[dict]):
+        return SimpleNamespace(
+            snapshot={"extraction": {"position_name": position, "typical_scenarios": scenarios}},
+            source=source,
+        )
+
+    def test_scenarios_collected_with_name_desc_join(self):
+        rows = [
+            self._row("Java开发工程师", "boss", [
+                {"name": "实时数仓建设", "description": "Flink 实时计算"},
+            ]),
+            self._row("Java开发工程师", "zhilian", [
+                {"name": "实时数仓建设", "description": "Flink 实时计算"},
+            ]),
+            self._row("Java开发工程师", "lagou", [
+                {"name": "离线数仓建模", "description": ""},
+            ]),
+        ]
+        agg = build_aggregates(rows)
+        pa = agg["Java开发工程师"]
+        assert dict(pa.typical_scenarios) == {
+            "实时数仓建设：Flink 实时计算": 2,
+            "离线数仓建模": 1,  # 无 description 时仅 name
+        }
+
+    def test_invalid_scenario_entries_skipped(self):
+        rows = [
+            self._row("Java开发工程师", "boss", [
+                {"name": "实时数仓建设", "description": "Flink"},
+                {"name": "  "},          # 空 name 跳过
+                "不是dict",               # 非 dict 跳过
+                {"description": "无name"}, # 缺 name 跳过
+            ]),
+        ]
+        agg = build_aggregates(rows)
+        assert dict(agg["Java开发工程师"].typical_scenarios) == {
+            "实时数仓建设：Flink": 1,
+        }
+
+    def test_write_aggregates_embeds_scenarios_sorted_top20(self):
+        # 21 个场景：写回时按频次降序截断前 20（最热的被保留，最少被裁掉）
+        scenarios = [{"name": f"场景{i:02d}", "description": ""} for i in range(1, 22)]
+        rows = []
+        for i, sc in enumerate(scenarios, start=1):
+            # 每个场景出现 (22 - i) 次：场景01 最热（21 次），场景21 最冷（1 次）
+            rows.extend([self._row("Java开发工程师", f"src{i}", [sc])] * (22 - i))
+        agg = build_aggregates(rows)
+        fake = _FakeSession()
+        write_aggregates(fake, agg, now="2026-08-12T00:00:00")
+        positions_items = fake.calls[0][1]["items"]
+        written = positions_items[0]["typical_scenarios"]
+        assert len(written) == 20
+        assert written[0] == "场景01"
+        assert "场景21" not in written  # 频次最低被 20 条上限截断
+
+    def test_empty_scenarios_not_written(self):
+        rows = [self._row("Java开发工程师", "boss", [])]
+        agg = build_aggregates(rows)
+        fake = _FakeSession()
+        write_aggregates(fake, agg, now="2026-08-12T00:00:00")
+        assert fake.calls[0][1]["items"][0]["typical_scenarios"] == []
+
+
 class TestSoftSkillsAggregation:
     """岗位侧软技能聚合（设计文档 9.2 节：soft_skills 白名单按 JD 命中计数）。"""
 

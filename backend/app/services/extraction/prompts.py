@@ -23,6 +23,10 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    （而非"系统可靠性"）、"Verification Engineer" → "验证工程师"（而非"验证"）。
    输出必须是以"工程师/科学家/分析师/经理/设计师/架构师"等岗位词结尾的标准岗位名，
    不得输出"生化"、"固件"、"验证"这类无岗位语义的名词碎片。
+   兜底规则（重要）：当文本首部出现 "岗位名称：xxx"（如 "岗位名称：Python爬虫工程师"）
+   或首行即为明确标题（如智联 "文员（数据分析）" 首行）时，**必须直接取冒号后内容
+   /首行标题作为岗位名**，并按上述规则翻译/规范化后输出，禁止留空——即使正文其余
+   部分缺失或不完整，只要标题存在就不得返回空岗位名。
 2. 技能（skills）：仅列出技术技能（如"Python"、"Java"、"数据分析"）。禁止把行业、
    业务领域、招聘福利词列为技能（如保险/金融/银行/电商/医疗/教育/物流/车联网/
    五险一金/社保/公积金/双休/年终奖等）。
@@ -53,7 +57,11 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    （K/万/年/月/时/$/USD 等）必须保留，如 "20-40K"、"1-1.4万"、
    "USD 100000-150000/年"、"US$178K - US$241K (Employer provided)"、"面议"；
    仅薪资高低类表述计入，招聘福利（如"年终奖 14 薪"）不计；未提及薪资时省略该字段
-8. 仅抽取文本中明确出现的内容，不要自行推断
+8. 典型场景（typical_scenarios）：提取 JD 中明确描述的岗位核心工作场景/典型任务，
+   每条为"名称 + 补充描述"：名称是 4-20 字的短短语（如"分布式缓存改造"、"信贷风控建模"、
+   "车联网数据接入"），补充描述可含技术关键词与业务对象（如"Flink 实时计算，支撑业务报表"）。
+   仅提取文本中明确出现的场景，禁止从技能名反向杜撰；JD 未描述具体场景时省略该字段
+9. 仅抽取文本中明确出现的内容，不要自行推断
 
 JD 文本：
 {jd_text}
@@ -93,6 +101,10 @@ JD 文本：Sr Systems Reliability Engineer - Responsible for system reliability
 示例 8（indeed 英文源，US$K 区间 + 雇主提供标注）：
 JD 文本：Backend Software Engineer - Remote, US. Build distributed services with Go and PostgreSQL. 3+ years backend experience required. Salary: US$178K - US$241K (Employer provided).
 输出：{{"position_name": "后端软件工程师", "salary_range": "US$178K - US$241K (Employer provided)", "skills": [{{"name": "Go"}}, {{"name": "PostgreSQL"}}, {{"name": "分布式系统"}}], "tools": [], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Go", "necessity": "must", "level": "中级"}}, {{"skill_name": "PostgreSQL", "necessity": "must"}}, {{"skill_name": "分布式系统", "necessity": "nice"}}]}}
+
+示例 9（典型场景抽取）：
+JD 文本：招聘资深数据平台工程师，负责搭建实时数仓与离线数仓，参与 Flink 实时计算任务开发，支撑业务报表与推荐场景，要求熟悉大数据生态，本科及以上学历
+输出：{{"position_name": "数据平台工程师", "level": "资深", "skills": [{{"name": "Flink"}}, {{"name": "数据仓库"}}, {{"name": "大数据"}}], "typical_scenarios": [{{"name": "实时数仓建设", "description": "Flink 实时计算，支撑业务报表"}}, {{"name": "离线数仓建模", "description": "分层建模，支撑推荐场景"}}], "tools": [], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Flink", "necessity": "must", "level": "高级"}}, {{"skill_name": "数据仓库", "necessity": "must"}}]}}
 """
 
 BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输出 JSON 数组（每条 JD 对应一个对象，数组第 i 个元素对应"JD文本 i"）。
@@ -111,6 +123,10 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    （而非"系统可靠性"）、"Verification Engineer" → "验证工程师"（而非"验证"）。
    输出必须是以"工程师/科学家/分析师/经理/设计师/架构师"等岗位词结尾的标准岗位名，
    不得输出"生化"、"固件"、"验证"这类无岗位语义的名词碎片。
+   兜底规则（重要）：当文本首部出现 "岗位名称：xxx"（如 "岗位名称：Python爬虫工程师"）
+   或首行即为明确标题（如智联 "文员（数据分析）" 首行）时，**必须直接取冒号后内容
+   /首行标题作为岗位名**，并按上述规则翻译/规范化后输出，禁止留空——即使正文其余
+   部分缺失或不完整，只要标题存在就不得返回空岗位名。
 2. 技能（skills）：仅列出技术技能（如"Python"、"Java"、"数据分析"）。禁止把行业、
    业务领域、招聘福利词列为技能（如保险/金融/银行/电商/医疗/教育/物流/车联网/
    五险一金/社保/公积金/双休/年终奖等）。
@@ -141,7 +157,11 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    （K/万/年/月/时/$/USD 等）必须保留，如 "20-40K"、"1-1.4万"、
    "USD 100000-150000/年"、"US$178K - US$241K (Employer provided)"、"面议"；
    仅薪资高低类表述计入，招聘福利（如"年终奖 14 薪"）不计；未提及薪资时省略该字段
-8. 仅抽取文本中明确出现的内容，不要自行推断
+8. 典型场景（typical_scenarios）：提取 JD 中明确描述的岗位核心工作场景/典型任务，
+   每条为"名称 + 补充描述"：名称是 4-20 字的短短语（如"分布式缓存改造"、"信贷风控建模"、
+   "车联网数据接入"），补充描述可含技术关键词与业务对象（如"Flink 实时计算，支撑业务报表"）。
+   仅提取文本中明确出现的场景，禁止从技能名反向杜撰；JD 未描述具体场景时省略该字段
+9. 仅抽取文本中明确出现的内容，不要自行推断
 
 JD 文本：
 {jd_texts}
