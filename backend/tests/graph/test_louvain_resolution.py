@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from app.services.graph_algorithms.louvain import _modularity, homogeneity, louvain
+from app.services.graph_algorithms.louvain import _modularity, homogeneity, louvain, louvain_hierarchical
 from scripts import graph_algo_tune as tune
 
 
@@ -91,6 +91,45 @@ class TestHomogeneity:
     def test_isolated_nodes_zero(self):
         graph = {"x": {}, "y": {}}
         assert homogeneity(graph, {"x": 0, "y": 1}) == 0.0
+
+
+class TestHierarchical:
+    """阶段三：louvain_hierarchical 层次化提取。"""
+
+    def test_levels_monotonically_coarser(self):
+        """层级簇数单调不增（level 0 最细 → 逐层变粗），level 0 为每节点一簇。"""
+        hier = louvain_hierarchical(_GRAPH)
+        assert hier["levels"][0]["cluster_count"] == len(_GRAPH)
+        counts = [lv["cluster_count"] for lv in hier["levels"]]
+        assert counts == sorted(counts, reverse=True)
+
+    def test_best_level_matches_louvain(self):
+        """best_level 划分与 louvain() 输出一致（同口径模块度选择）。"""
+        hier = louvain_hierarchical(_GRAPH)
+        assert hier["membership"] == louvain(_GRAPH)
+        best = next(lv for lv in hier["levels"] if lv["level"] == hier["best_level"])
+        assert best["membership"] == louvain(_GRAPH)
+
+    def test_levels_memberships_reindexed(self):
+        """各层 membership 均 reindex（0..k-1 连续）。"""
+        hier = louvain_hierarchical(_GRAPH)
+        for lv in hier["levels"]:
+            cids = sorted(set(lv["membership"].values()))
+            assert cids == list(range(len(cids)))
+
+    def test_empty_and_single(self):
+        assert louvain_hierarchical({}) == {"levels": [], "best_level": None, "membership": {}}
+        hier = louvain_hierarchical({"s1": {}})
+        assert hier["best_level"] == 0
+        assert hier["membership"] == {"s1": 0}
+        assert hier["levels"][0]["cluster_count"] == 1
+
+    def test_resolution_parameter_propagates(self):
+        """resolution 传递到各层（γ 影响层级数量/模块度）。"""
+        hier_fine = louvain_hierarchical(_GRAPH, resolution=2.0)
+        hier_coarse = louvain_hierarchical(_GRAPH, resolution=0.5)
+        # 细 γ 层级数不少于粗 γ（细 γ 下拆分更多轮）
+        assert len(hier_fine["levels"]) >= len(hier_coarse["levels"])
 
 
 class TestTuneHelpers:

@@ -26,18 +26,24 @@ def _call(coro):
 
 def _patch_network_and_louvain(monkeypatch, graph, name_map, louvain_impl):
     """patch 共现网络与聚类实现，返回记录调用参数的容器。"""
-    calls = {"louvain": []}
+    calls = {"clustering": []}
 
     def fake_load(session, min_weight=2.0):
         calls["min_weight"] = min_weight
         return graph, name_map
 
-    def fake_louvain(g, resolution=1.0):
-        calls["louvain"].append({"graph": g, "resolution": resolution})
-        return louvain_impl
+    def fake_hierarchical(g, resolution=1.0):
+        calls["clustering"].append({"graph": g, "resolution": resolution})
+        return {
+            "levels": [
+                {"level": 0, "membership": louvain_impl, "modularity": 0.1, "cluster_count": len(set(louvain_impl.values())) or 0},
+            ],
+            "best_level": 0,
+            "membership": louvain_impl,
+        }
 
     monkeypatch.setattr("app.services.graph_algorithms.network.load_skill_cooccurrence", fake_load)
-    monkeypatch.setattr("app.services.graph_algorithms.louvain.louvain", fake_louvain)
+    monkeypatch.setattr("app.services.graph_algorithms.louvain.louvain_hierarchical", fake_hierarchical)
     redis = MagicMock()
     redis.get = AsyncMock(return_value=None)  # redis_client.get/set 均为 async
     redis.set = AsyncMock(return_value=None)
@@ -48,7 +54,7 @@ def _patch_network_and_louvain(monkeypatch, graph, name_map, louvain_impl):
 
 class TestSkillClusters:
     def test_resolution_passed_to_louvain(self, monkeypatch):
-        """resolution 参数透传到 louvain(graph, resolution)。"""
+        """resolution 参数透传到 louvain_hierarchical。"""
         calls = _patch_network_and_louvain(
             monkeypatch,
             graph={"s1": {"s2": 1.0}, "s2": {"s1": 1.0}},
@@ -57,10 +63,26 @@ class TestSkillClusters:
         )
         resp = _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.5))
         assert resp.code == 0
-        assert calls["louvain"][0]["resolution"] == 1.5
+        assert calls["clustering"][0]["resolution"] == 1.5
+
+    def test_level_passed_to_clustering(self, monkeypatch):
+        """level 参数透传；levels 元数据随响应返回（阶段三层次化提取）。"""
+        calls = _patch_network_and_louvain(
+            monkeypatch,
+            graph={"s1": {"s2": 1.0}, "s2": {"s1": 1.0}},
+            name_map={"s1": "Python", "s2": "Django"},
+            louvain_impl={"s1": 0, "s2": 0},
+        )
+        resp = _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.0, level=2))
+        assert resp.code == 0
+        assert calls["clustering"][0]["resolution"] == 1.0
+        # 层级元数据（fake 返回 1 层）
+        assert resp.data["levels"] == [
+            {"level": 0, "cluster_count": 1, "modularity": 0.1},
+        ]
 
     def test_cache_key_contains_resolution(self, monkeypatch):
-        """缓存键含 algorithm + resolution：γ/算法不同不串缓存。"""
+        """缓存键含 algorithm + resolution + level：参数不同不串缓存。"""
         _patch_network_and_louvain(
             monkeypatch,
             graph={"s1": {"s2": 1.0}, "s2": {"s1": 1.0}},
@@ -71,13 +93,15 @@ class TestSkillClusters:
             "app.services.graph_algorithms.config.load_graph_algo_config",
             lambda: {"algorithm": "louvain", "resolution": 1.0, "min_weight": 2.0, "min_size": 2},
         )
-        _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.0))
-        _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.5))
+        _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.0, level=None))
+        _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.5, level=None))
+        _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.0, level=1))
 
         keys = [c.args[0] for c in graph_api.redis_client.set.call_args_list]
         assert keys == [
-            "graph:algo:clusters:louvain:2:1.0",
-            "graph:algo:clusters:louvain:2:1.5",
+            "graph:algo:clusters:louvain:2:1.0:None",
+            "graph:algo:clusters:louvain:2:1.5:None",
+            "graph:algo:clusters:louvain:2:1.0:1",
         ]
 
     def test_algorithm_leiden_uses_leiden(self, monkeypatch):
@@ -106,7 +130,7 @@ class TestSkillClusters:
         assert "leiden" in graph_api.redis_client.set.call_args.args[0]
 
     def test_leiden_import_error_falls_back_to_louvain(self, monkeypatch):
-        """leiden 依赖缺失（ImportError）自动回退 louvain 并告警，不阻塞 API。"""
+        """leiden 依赖缺失（ImportError）自动回退 louvain_hierarchical 并告警，不阻塞 API。"""
         calls = _patch_network_and_louvain(
             monkeypatch,
             graph={"s1": {"s2": 1.0}, "s2": {"s1": 1.0}},
@@ -117,14 +141,13 @@ class TestSkillClusters:
             "app.services.graph_algorithms.config.load_graph_algo_config",
             lambda: {"algorithm": "leiden", "resolution": 1.0, "min_weight": 2.0, "min_size": 2},
         )
-
         def boom(g, resolution=1.0):
             raise ImportError("igraph 未安装")
 
         monkeypatch.setattr("app.services.graph_algorithms.leiden.leiden", boom)
         resp = _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.0))
         assert resp.code == 0  # 回退 louvain 正常响应
-        assert len(calls["louvain"]) == 1  # louvain 被调用（回退路径）
+        assert len(calls["clustering"]) == 1  # louvain_hierarchical 被调用（回退路径）
 
     def test_response_includes_label_and_llm_fields(self, monkeypatch):
         """响应契约：clusters 项含 label/needs_llm/triggers/llm（契约对齐缺口）。"""
@@ -220,3 +243,54 @@ class TestPageRank:
         assert resp.data == {"skills": [], "top_n": 0}
         # 缓存命中路径不进入 _compute，load 的 min_weight 记录保持 None
         assert "min_weight" not in calls or calls.get("min_weight") is None
+
+
+class TestCommunityTree:
+    """阶段三：community-tree 端点（Neo4j Community 节点 → 树结构）。"""
+
+    def _patch_neo4j_tree(self, monkeypatch, node_rows, edge_rows):
+        session = MagicMock()
+        session.__enter__.return_value = session  # with session as s 绑定同一实例
+        session.run.side_effect = [node_rows, edge_rows]
+        driver = MagicMock()
+        driver.session.return_value = session
+        monkeypatch.setattr(graph_api, "neo4j_driver", driver)
+        redis = MagicMock()
+        redis.get = AsyncMock(return_value=None)
+        redis.set = AsyncMock(return_value=None)
+        monkeypatch.setattr(graph_api, "redis_client", redis)
+
+    def test_builds_tree_with_nested_children(self, monkeypatch):
+        """NESTED_IN 边组装树：根 = 无父的最高层社区，children 递归展开。"""
+        node_rows = [
+            {"cid": "comm_0_0", "level": 0, "name": "Python·Django", "cluster_count": 2, "modularity": 0.1, "top_skills": ["Python", "Django"]},
+            {"cid": "comm_0_1", "level": 0, "name": "K8s·Docker", "cluster_count": 2, "modularity": 0.1, "top_skills": ["Kubernetes"]},
+            {"cid": "comm_1_0", "level": 1, "name": "Python·Django·K8s", "cluster_count": 1, "modularity": 0.25, "top_skills": ["Python"]},
+        ]
+        edge_rows = [
+            {"child": "comm_0_0", "parent": "comm_1_0"},
+            {"child": "comm_0_1", "parent": "comm_1_0"},
+        ]
+        self._patch_neo4j_tree(monkeypatch, node_rows, edge_rows)
+        resp = _call(graph_api.graph_community_tree())
+        assert resp.code == 0
+        assert resp.data["levels"] == [0, 1]
+        assert len(resp.data["tree"]) == 1
+        root = resp.data["tree"][0]
+        assert root["id"] == "comm_1_0"
+        assert root["name"] == "Python·Django·K8s"
+        assert sorted(c["id"] for c in root["children"]) == ["comm_0_0", "comm_0_1"]
+
+    def test_empty_tree_when_not_synced(self, monkeypatch):
+        """未同步（无 Community 节点）返回空树（前端提示先运行 sync 脚本）。"""
+        self._patch_neo4j_tree(monkeypatch, node_rows=[], edge_rows=[])
+        resp = _call(graph_api.graph_community_tree())
+        assert resp.code == 0
+        assert resp.data == {"tree": [], "levels": []}
+
+    def test_cache_key_stable(self, monkeypatch):
+        """community-tree 使用固定缓存键（30s TTL）。"""
+        self._patch_neo4j_tree(monkeypatch, node_rows=[], edge_rows=[])
+        _call(graph_api.graph_community_tree())
+        key = graph_api.redis_client.set.call_args.args[0]
+        assert key == "graph:algo:community-tree"

@@ -190,6 +190,83 @@ def louvain(graph: dict[str, dict[str, float]], resolution: float = 1.0) -> dict
     return _reindex(best_flat)
 
 
+def louvain_hierarchical(graph: dict[str, dict[str, float]], resolution: float = 1.0) -> dict:
+    """Louvain 层次化社区划分（图算法优化方案阶段三：层次化提取）。
+
+    Louvain 迭代循环每轮 `_phase1 → _aggregate` 即 dendrogram 一层（聚合前
+    的划分为该层社区），本函数收集全部层级而非只保留最优扁平层。
+
+    Args:
+        graph: skill_id → {相邻 skill_id: 共现权重}（无向，双向登记）
+        resolution: 分辨率参数 γ（与 louvain 一致）
+
+    Returns:
+        {
+          "levels": [{level, membership, modularity, cluster_count}]  # level 0 最细（初始每节点一簇），逐层变粗
+          "best_level": int,          # 模块度最高层（与 louvain() 输出一致的层）
+          "membership": dict,         # best_level 的划分（skill_id → cluster_id，reindex）
+        }
+        空图返回 levels=[]、best_level=None、membership={}。
+    """
+    nodes = list(graph)
+    if not nodes:
+        return {"levels": [], "best_level": None, "membership": {}}
+    if len(nodes) == 1:
+        single = {nodes[0]: 0}
+        return {
+            "levels": [{"level": 0, "membership": single, "modularity": 0.0, "cluster_count": 1}],
+            "best_level": 0,
+            "membership": single,
+        }
+
+    current: dict[str, dict[str, float]] = graph
+    members: dict[str, list[str]] = {nd: [nd] for nd in nodes}
+    partition = {nd: i for i, nd in enumerate(nodes)}
+
+    levels: list[dict] = []
+    for _ in range(32):
+        # 记录当前层（聚合前的划分，扁平化为原图节点簇映射）
+        flat: dict[str, int] = {}
+        for nd, cid in partition.items():
+            for orig in members[nd]:
+                flat[orig] = cid
+        q = _modularity(graph, flat, resolution)
+        # 去重：与上一层划分相同（无结构变化）则不重复记录
+        if not levels or set(flat.items()) != set(levels[-1]["membership"].items()):
+            levels.append({
+                "level": len(levels),
+                "membership": flat,
+                "modularity": q,
+                "cluster_count": len(set(flat.values())),
+            })
+
+        moved = _phase1(current, partition, resolution)
+        if not moved:
+            break
+        agg, agg_members = _aggregate(current, partition, members)
+        if len(agg) <= 1:
+            break  # 聚合后单簇层无社区结构价值，不记录
+        current, members = agg, agg_members
+        partition = {nd: i for i, nd in enumerate(current)}
+
+    # best_level = 模块度最高层（与 louvain() 的 best_flat 选择口径一致）
+    best_idx = max(range(len(levels)), key=lambda i: levels[i]["modularity"])
+    membership = levels[best_idx]["membership"]
+    return {
+        "levels": [
+            {
+                "level": lv["level"],
+                "membership": _reindex(lv["membership"]),
+                "modularity": lv["modularity"],
+                "cluster_count": lv["cluster_count"],
+            }
+            for lv in levels
+        ],
+        "best_level": levels[best_idx]["level"],
+        "membership": _reindex(membership),
+    }
+
+
 def _reindex(partition: dict[str, int]) -> dict[str, int]:
     """簇 ID 重新编号为 0..k-1，保持确定性输出。"""
     mapping: dict[int, int] = {}
