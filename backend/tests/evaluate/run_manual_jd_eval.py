@@ -261,6 +261,7 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
     revisions = load_gold_revisions()
     title_hits = 0
     title_raw_hits = 0
+    title_count = 0
     education_hits = 0
     skills_total: Counter[str] = Counter()
     bonus_total: Counter[str] = Counter()
@@ -309,11 +310,15 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         for key in ("tp", "fp", "fn"):
             skills_total[key] += len(skills_cmp[key])
             bonus_total[key] += len(bonus_cmp[key])
-        normalized_gold_title = normalize_position_name(row["review_gold_title"])
+        gold_title_raw = row["review_gold_title"] or ""
+        has_gold_title = bool(gold_title_raw.strip())
+        # gold 缺失（盲审标注未填 title）不计入 title 准确率——非模型错误
+        normalized_gold_title = normalize_position_name(gold_title_raw)
         normalized_pred_title = normalize_position_name(result.position_name)
-        title_match = normalized_gold_title == normalized_pred_title
+        title_match = has_gold_title and normalized_gold_title == normalized_pred_title
         title_hits += int(title_match)
-        title_raw_exact = row["review_gold_title"] == result.position_name
+        title_count += int(has_gold_title)
+        title_raw_exact = has_gold_title and gold_title_raw == result.position_name
         title_raw_hits += int(title_raw_exact)
         gold_education = row.get("review_gold_education", "").strip() or None
         predicted_education = (result.education.level if result.education else None) or None
@@ -386,8 +391,8 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         "real_llm_success_samples": success_count,
         "fallback_samples": fallback_samples,
         "failed_samples": failed_samples,
-        "title_raw_exact_accuracy": title_raw_hits / success_count,
-        "title_normalized_accuracy": title_hits / success_count,
+        "title_raw_exact_accuracy": (title_raw_hits / title_count) if title_count else None,
+        "title_normalized_accuracy": (title_hits / title_count) if title_count else None,
         "skills_micro": _metric(**skills_total),
         "skills_average_sample_f1": sum(sample_skill_f1) / success_count,
         "bonus_skills_micro": _metric(**bonus_total),
