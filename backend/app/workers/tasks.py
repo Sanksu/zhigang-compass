@@ -2,7 +2,7 @@
 
 任务类型（对齐设计文档 §4.4 ETL 管线）：
 - ETL 编排：crawl_platform / run_etl_pipeline / validate_temporal / detect_inflation / snapshot_graph
-- 业务异步：resume_parse / batch_extract / evolution_compute
+- 业务异步：resume_parse / batch_extract
 
 设计要点：
 - 爬虫通过 subprocess 调用 `scrapy crawl`，避免 Twisted reactor 与 asyncio loop 冲突
@@ -12,12 +12,14 @@
 
 import asyncio
 import json
+import logging
 import os
 import re
 import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterable
 
 from arq.connections import RedisSettings
 from arq.cron import cron
@@ -25,6 +27,8 @@ from arq.worker import func
 
 from app.core.config import settings
 from app.services.alerting import send_alert
+
+logger = logging.getLogger(__name__)
 
 # 子进程 stdout/stderr 强制 UTF-8（中文 Windows 默认 GBK 管道，按 UTF-8 解码会乱码）
 # 与 crawlers/spiders 下各 spider 调外部进程的模式一致
@@ -278,21 +282,90 @@ def _skill_first_seen_days(
     group: list[tuple[int, date, list[str]]],
     skills: list[str],
     today: date,
+    graph_first_seen: dict[str, date] | None = None,
 ) -> list[int]:
-    """技能首见时长（天）：同岗位 JD 中该技能最早出现日期到 today 的间隔。
+    """技能首见时长（天）。
 
-    group: 同岗位已抽取记录 (jd_id, publish_date, skills)，含当前 JD。
-    某技能在同岗位无任何记录时不计入（数据不足不武断判定）。
+    优先读图谱 Skill.first_seen（全局首次入图时间，G-02 主口径）；图谱无
+    该技能首见记录（存量节点无属性/未入图）时回退同岗位 jd_raw 最早出现
+    日期近似。group: 同岗位已抽取记录 (jd_id, publish_date, skills)。
+    某技能两种来源均无记录时不计入（数据不足不武断判定）。
     """
+    from app.services.extraction.post_processor import canonical_skill_name
+
     ages = []
     for skill in skills:
         first = None
-        for _, pdate, group_skills in group:
-            if skill in group_skills and (first is None or pdate < first):
-                first = pdate
+        if graph_first_seen:
+            first = graph_first_seen.get(canonical_skill_name(skill))
+        if first is None:
+            for _, pdate, group_skills in group:
+                if skill in group_skills and (first is None or pdate < first):
+                    first = pdate
         if first is not None:
             ages.append(max(0, (today - first).days))
     return ages
+
+
+def _graph_skill_first_seen(skills: Iterable[str]) -> dict[str, date]:
+    """从图谱读 Skill.first_seen（首次入图时间，G-02）→ 归一化技能名 → 日期。
+
+    技能节点按归一化名存储（canonical_skill_name），未归一化的原始名查询
+    会 miss，故先归一化再匹配；无 first_seen 的存量节点跳过（回退 jd_raw）。
+    图谱不可达时返回空 dict（回退 jd_raw 推算）：validate_temporal 原本为
+    纯 PG 依赖，不因本次加读图而引入 Neo4j 强依赖（backfill 脚本可独立运行）。
+    """
+    import logging
+
+    from app.core.database import neo4j_driver
+    from app.services.extraction.post_processor import canonical_skill_name
+
+    logger = logging.getLogger(__name__)
+    names = {canonical_skill_name(s) for s in skills if canonical_skill_name(s)}
+    if not names:
+        logger.info("_graph_skill_first_seen: 无有效技能名，跳过读图（空映射，回退 jd_raw）")
+        return {}
+    logger.info(
+        "_graph_skill_first_seen: 技能请求=%d 归一化去重后=%d",
+        len(skills), len(names),
+    )
+    try:
+        with neo4j_driver.session() as session:
+            rows = session.run(
+                "MATCH (s:Skill) WHERE s.name IN $names "
+                "RETURN s.name AS name, s.first_seen AS first_seen",
+                names=list(names),
+            ).data()
+    except Exception as exc:
+        # 图谱不可达（懒连接失败/服务停止）不阻断时滞检测，回退 jd_raw 推算
+        logger.warning(
+            "_graph_skill_first_seen: 图谱不可达，回退 jd_raw 推算: %s: %s",
+            type(exc).__name__, exc,
+        )
+        return {}
+    out: dict[str, date] = {}
+    parse_failed: list[str] = []
+    for r in rows:
+        raw = r.get("first_seen")
+        if not raw:
+            continue
+        try:
+            out[r["name"]] = datetime.fromisoformat(str(raw)).date()
+        except ValueError:
+            parse_failed.append(r["name"])
+    missing = sorted(names - set(out))
+    logger.info(
+        "_graph_skill_first_seen: 图谱命中=%d/%d%s",
+        len(out), len(names),
+        "" if not missing else f"，缺失 {len(missing)} 个将回退 jd_raw: {missing[:10]}"
+        + ("" if len(missing) <= 10 else f" 等共 {len(missing)} 个"),
+    )
+    if parse_failed:
+        logger.warning(
+            "_graph_skill_first_seen: %d 个技能 first_seen 解析失败被跳过（回退 jd_raw）: %s",
+            len(parse_failed), parse_failed[:10],
+        )
+    return out
 
 
 def _experience_years(snapshot: dict) -> int | None:
@@ -337,7 +410,8 @@ async def validate_temporal(
 ) -> dict:
     """时滞检测（设计文档 §4.7）：jd_raw 已抽取记录接入 SAI/僵尸/抄袭检测。
 
-    技能首见时长无图谱 `first_seen_at` 时，用同岗位 jd_raw 历史最早出现日期近似。
+    技能首见时长优先读图谱 Skill.first_seen（G-02，全局首次入图时间），
+    图谱缺失时回退同岗位 jd_raw 历史最早出现日期近似。
     检测结果写回 `snapshot["validation"]`（含三类结果 + 叠加降权系数）；
     数据不足（无技能/无发布日期）的 JD 跳过，不做武断判定。
     """
@@ -405,10 +479,20 @@ async def validate_temporal(
                 pos = ext.get("position_name") or ""
                 hist_by_pos.setdefault(pos, []).append((row.id, publish, skills))
 
+        # 图谱 Skill.first_seen 一次性读取（G-02 主口径）：当前批次 + 历史组
+        # 全部技能名批量查询，避免逐技能 N+1 查询
+        all_skills: set[str] = set()
+        for _, (_, _, _, v_skills) in views:
+            all_skills.update(v_skills)
+        for grp in hist_by_pos.values():
+            for _, _, gs in grp:
+                all_skills.update(gs)
+        graph_first_seen = _graph_skill_first_seen(all_skills) if all_skills else {}
+
         for row, (jd_id, position, publish, skills) in views:
             # group 覆盖同岗位全部历史记录（含当前批次），按首见时长/抄袭比对口径
             group = hist_by_pos.get(position, [])
-            skill_ages = _skill_first_seen_days(group, skills, today)
+            skill_ages = _skill_first_seen_days(group, skills, today, graph_first_seen)
             if not skill_ages:
                 row.snapshot = _snapshot_with_skip(row.snapshot, "validation", "no_skill_first_seen_ages")
                 results["skipped"] += 1
@@ -419,7 +503,7 @@ async def validate_temporal(
                 age
                 for _, pdate, gs in group
                 if (today - pdate).days <= RECENT_WINDOW_DAYS
-                for age in _skill_first_seen_days(group, gs, today)
+                for age in _skill_first_seen_days(group, gs, today, graph_first_seen)
             ]
             sai = classify_sai(compute_sai(skill_ages, recent_ages))
 
@@ -975,9 +1059,6 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
         → validate_temporal → detect_inflation → structure → load_to_db
         → load_to_neo4j（含课程入图 + 岗位聚合）
 
-    M2 阶段：仅执行 crawl_jds + 框架占位任务（structure/load 依赖 M3 LLM 抽取）
-    M3 阶段：完整管线启用
-
     Args:
         run_date: 调度日期 YYYY-MM-DD，None 时取 UTC+8 当日
         skip_cdp: True 时跳过 CDP 爬虫（boss/monster/glassdoor/maimai，需真实
@@ -1168,6 +1249,14 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
 
             task.status = "success"
             task.progress = 1.0
+            certs = [c for c in parsed.get("certifications", []) if c.get("name")]
+            logger.info(
+                "resume_parse 完成：resume_id=%s 技能=%d 证书=%d 证书明细=%s",
+                str(cache.id),
+                len(parsed.get("skills", [])),
+                len(certs),
+                [{ "name": c.get("name"), "issuer": c.get("issuer", "") } for c in certs[:10]],
+            )
             task.result = {
                 "resume_id": str(cache.id),
                 "skills": [s.get("name") for s in parsed.get("skills", []) if s.get("name")],
@@ -1469,11 +1558,6 @@ async def batch_extract(
     if results["processed"] > 0 and results["succeeded"] == 0:
         raise RuntimeError(f"批量抽取全部失败: {results['failed'][:5]}")
     return results
-
-
-async def evolution_compute(ctx: dict, version: str) -> dict:
-    """每日演化计算异步任务（M3 实现，当前未交付）。"""
-    raise NotImplementedError("evolution_compute 待 AL-M3 演化管线接入后实现")
 
 
 async def snapshot_graph(ctx: dict, triggered_by: str = "scheduled") -> dict:
@@ -2122,7 +2206,6 @@ class WorkerSettings:
         discovery_auto_transition,
         watch_signal_daily,
         snapshot_graph,
-        evolution_compute,
         check_llm_providers_health,
     ]
     on_startup = on_startup

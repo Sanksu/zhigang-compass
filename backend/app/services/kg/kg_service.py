@@ -132,7 +132,8 @@ def _import_skill_edge(
             ON CREATE SET s.id = $id,
                 s.name = $name,
                 s.category = $category,
-                s.created_at = $now
+                s.created_at = $now,
+                s.first_seen = $now
             """,
             id=skill_id,
             name=skill_name,
@@ -545,7 +546,8 @@ def _import_course_tx(tx, course_data: dict) -> str:
                 ON CREATE SET s.id = $id,
                     s.name = $name,
                     s.category = $category,
-                    s.created_at = $now
+                    s.created_at = $now,
+                    s.first_seen = $now
                 """,
                 id=skill_id,
                 name=skill_name,
