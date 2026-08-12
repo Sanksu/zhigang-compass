@@ -35,6 +35,7 @@ dependencies = [
     "paddleocr>=2.8",
     "pillow>=10.0",
     "pymupdf>=1.24",
+    "psycopg2-binary>=2.9.12",
 ]
 
 [tool.uv]
@@ -45,7 +46,20 @@ dev-dependencies = [
     "httpx>=0.27",
     "locust>=2.0",
     "optuna>=4.0",
+    "ruff>=0.9",
 ]
+
+# ── 代码质量（CI 门禁：uv run ruff check）──
+[tool.ruff]
+line-length = 120
+# 仅启用正确性类规则（pyflakes F + pycodestyle 子集 + 未使用变量），
+# 不含风格类（E501 行宽）与自动格式化，避免与既有代码风格冲突
+lint.select = ["F", "E401", "E402"]
+
+[tool.ruff.lint.per-file-ignores]
+# 测试/脚本允许部分导入顺序问题
+"tests/**" = ["E402"]
+"scripts/**" = ["E402"]
 
 # ── 单元测试框架（TE-M3-01）──
 # 验收：后端单元测试覆盖 ≥ 60%（核心 ≥ 80%），见设计文档。

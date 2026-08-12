@@ -93,6 +93,10 @@ services:
       dockerfile: Dockerfile
     container_name: zhigang-worker
     entrypoint: ["sh", "-c", "exec arq app.workers.tasks.WorkerSettings"]
+    # 与 api 同源注入 backend/.env（SECRET_KEY / LLM_API_KEY 等），
+    # environment 内联项会覆盖 env_file 同名变量
+    env_file:
+      - ./backend/.env
     # 覆盖 Dockerfile 中 API 的 healthcheck（worker 无 HTTP 端口，且
     # slim 镜像无 pgrep），改为检查容器主进程（exec 后的 arq worker）存活
     healthcheck:
