@@ -60,18 +60,71 @@ class TestSkillClusters:
         assert calls["louvain"][0]["resolution"] == 1.5
 
     def test_cache_key_contains_resolution(self, monkeypatch):
-        """缓存键含 resolution：γ 不同不串缓存。"""
+        """缓存键含 algorithm + resolution：γ/算法不同不串缓存。"""
         _patch_network_and_louvain(
             monkeypatch,
             graph={"s1": {"s2": 1.0}, "s2": {"s1": 1.0}},
             name_map={"s1": "Python", "s2": "Django"},
             louvain_impl={"s1": 0, "s2": 0},
         )
+        monkeypatch.setattr(
+            "app.services.graph_algorithms.config.load_graph_algo_config",
+            lambda: {"algorithm": "louvain", "resolution": 1.0, "min_weight": 2.0, "min_size": 2},
+        )
         _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.0))
         _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.5))
 
         keys = [c.args[0] for c in graph_api.redis_client.set.call_args_list]
-        assert keys == ["graph:algo:clusters:2:1.0", "graph:algo:clusters:2:1.5"]
+        assert keys == [
+            "graph:algo:clusters:louvain:2:1.0",
+            "graph:algo:clusters:louvain:2:1.5",
+        ]
+
+    def test_algorithm_leiden_uses_leiden(self, monkeypatch):
+        """algorithm=leiden 时调用 leiden（同签名），缓存键含 leiden。"""
+        _patch_network_and_louvain(
+            monkeypatch,
+            graph={"s1": {"s2": 1.0}, "s2": {"s1": 1.0}},
+            name_map={"s1": "Python", "s2": "Django"},
+            louvain_impl={"s1": 0, "s2": 0},
+        )
+        calls = {"leiden": []}
+
+        def fake_leiden(g, resolution=1.0):
+            calls["leiden"].append({"graph": g, "resolution": resolution})
+            return {"s1": 0, "s2": 0}
+
+        monkeypatch.setattr("app.services.graph_algorithms.leiden.leiden", fake_leiden)
+        monkeypatch.setattr(
+            "app.services.graph_algorithms.config.load_graph_algo_config",
+            lambda: {"algorithm": "leiden", "resolution": 1.0, "min_weight": 2.0, "min_size": 2},
+        )
+        resp = _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.0))
+        assert resp.code == 0
+        assert len(calls["leiden"]) == 1
+        assert calls["leiden"][0]["resolution"] == 1.0
+        assert "leiden" in graph_api.redis_client.set.call_args.args[0]
+
+    def test_leiden_import_error_falls_back_to_louvain(self, monkeypatch):
+        """leiden 依赖缺失（ImportError）自动回退 louvain 并告警，不阻塞 API。"""
+        calls = _patch_network_and_louvain(
+            monkeypatch,
+            graph={"s1": {"s2": 1.0}, "s2": {"s1": 1.0}},
+            name_map={"s1": "Python", "s2": "Django"},
+            louvain_impl={"s1": 0, "s2": 0},
+        )
+        monkeypatch.setattr(
+            "app.services.graph_algorithms.config.load_graph_algo_config",
+            lambda: {"algorithm": "leiden", "resolution": 1.0, "min_weight": 2.0, "min_size": 2},
+        )
+
+        def boom(g, resolution=1.0):
+            raise ImportError("igraph 未安装")
+
+        monkeypatch.setattr("app.services.graph_algorithms.leiden.leiden", boom)
+        resp = _call(graph_api.graph_skill_clusters(min_size=2, resolution=1.0))
+        assert resp.code == 0  # 回退 louvain 正常响应
+        assert len(calls["louvain"]) == 1  # louvain 被调用（回退路径）
 
     def test_response_includes_label_and_llm_fields(self, monkeypatch):
         """响应契约：clusters 项含 label/needs_llm/triggers/llm（契约对齐缺口）。"""

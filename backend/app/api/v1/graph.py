@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -16,6 +17,8 @@ from app.services.kg.skill_relations import graph_prerequisite_chain
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
 from app.services.matching.semantic import SkillEmbedder, SemanticUnavailableError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -675,37 +678,55 @@ async def graph_skill_clusters(
     min_size: int = Query(default=2, ge=1, le=100),
     resolution: float = Query(default=1.0, ge=0.1, le=5.0),
 ):
-    """Louvain 技能簇（设计文档 7.1 图算法应用，技术栈视图支撑）。
+    """Louvain/Leiden 技能簇（设计文档 7.1 图算法应用，技术栈视图支撑）。
 
-    同一簇内技能常共现于同一批岗位（如大数据栈 / AI 栈），纯 Python
-    两阶段 Louvain。min_size 过滤过小簇；resolution 为分辨率参数 γ
+    同一簇内技能常共现于同一批岗位（如大数据栈 / AI 栈）。聚类算法由
+    configs/graph_algo.yaml 的 algorithm 字段决定（louvain 默认，阶段二
+    Leiden 条件替换：同签名 leiden()，seed=0 确定性；依赖缺失自动回退
+    louvain 并告警）。min_size 过滤过小簇；resolution 为分辨率参数 γ
     （图算法优化方案阶段一：>1 细簇 / <1 粗簇 / 1.0 等价标准 Louvain，
     默认值取 configs/graph_algo.yaml）。
 
     图算法优化方案 §4：输出经规则优先后处理（孤立簇剔除/过小簇合并/
     规则标签）+ LLM 兜底（仅 needs_llm 簇调用，失败降级规则标签），
-    响应附 needs_llm/triggers/llm 字段。30s Redis TTL 缓存（键含 resolution，
-    防新旧参数串缓存）。
+    响应附 needs_llm/triggers/llm 字段。30s Redis TTL 缓存（键含
+    algorithm + resolution，防新旧参数/算法串缓存）。
     """
     from app.services.extraction.dictionary import skill_category
     from app.services.graph_algorithms.cluster_llm import ClusterLLMClassifier
-    from app.services.graph_algorithms.louvain import louvain
+    from app.services.graph_algorithms.config import load_graph_algo_config
     from app.services.graph_algorithms.network import load_skill_cooccurrence
     from app.services.graph_algorithms.postprocess import ClusterPostProcessor
 
-    cache_key = f"graph:algo:clusters:{min_size}:{resolution}"
+    algorithm = load_graph_algo_config()["algorithm"]
+    cache_key = f"graph:algo:clusters:{algorithm}:{min_size}:{resolution}"
     cached = await redis_client.get(cache_key)
     if cached is not None:
         return ok(data=json.loads(cached))
 
+    def _run_clustering(graph):
+        """按配置选择聚类算法：leiden 优先（依赖缺失回退 louvain 并告警）。"""
+        if algorithm == "leiden":
+            try:
+                from app.services.graph_algorithms.leiden import leiden
+
+                return leiden(graph, resolution=resolution)
+            except ImportError:
+                logger.warning(
+                    "leiden 依赖（igraph/leidenalg）不可用，回退 louvain（algorithm=%s）", algorithm
+                )
+        from app.services.graph_algorithms.louvain import louvain
+
+        return louvain(graph, resolution=resolution)
+
     def _compute():
-        # 同步 Neo4j 会话 + Louvain + 后处理 + LLM 兜底为 CPU/IO 密集，
+        # 同步 Neo4j 会话 + 聚类 + 后处理 + LLM 兜底为 CPU/IO 密集，
         # 放线程池避免阻塞事件循环。
         # min_weight=2.0（默认）：P0 改造后权重=必要性组合因子×共现数，
         # 过滤 must-nice 低频与 nice-nice 弱边，聚类簇内同质性最佳
         with neo4j_driver.session() as session:
             graph, name_map = load_skill_cooccurrence(session)
-        clusters = louvain(graph, resolution=resolution)
+        clusters = _run_clustering(graph)
 
         # 规则优先后处理 + LLM 兜底触发标记（图算法优化方案 §4.1-4.2）
         categories = {sid: skill_category(name) for sid, name in name_map.items()}

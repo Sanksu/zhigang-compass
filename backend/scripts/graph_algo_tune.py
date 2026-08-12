@@ -110,14 +110,12 @@ def score_partition(g: dict[str, dict[str, float]], partition: dict[str, int]) -
     return W_Q * q + W_HOM * h + W_SMALL * (1.0 - s)
 
 
-def evaluate(graph: dict[str, dict[str, float]], resolution: float, min_weight: float) -> dict:
-    """给定 (resolution, min_weight) 的聚类质量指标（标准 Q / 同质性 / 过小簇占比）。"""
-    from app.services.graph_algorithms.louvain import _modularity, homogeneity, louvain
+def _metrics(g: dict[str, dict[str, float]], partition: dict[str, int]) -> dict:
+    """划分质量指标（标准 Q / 同质性 / 过小簇占比 / 簇数 / 退化标记）。"""
+    from app.services.graph_algorithms.louvain import _modularity, homogeneity
 
-    g = filter_graph(graph, min_weight)
-    partition = louvain(g, resolution=resolution)
     if not partition:
-        return {"modularity": 0.0, "homogeneity": 0.0, "small_ratio": 0.0, "cluster_count": 0}
+        return {"modularity": 0.0, "homogeneity": 0.0, "small_ratio": 0.0, "cluster_count": 0, "degenerate": True}
     return {
         "modularity": _modularity(g, partition, 1.0),
         "homogeneity": homogeneity(g, partition),
@@ -127,7 +125,42 @@ def evaluate(graph: dict[str, dict[str, float]], resolution: float, min_weight: 
     }
 
 
-def objective(graph: dict[str, dict[str, float]], trial) -> float:
+def evaluate(graph: dict[str, dict[str, float]], resolution: float, min_weight: float) -> dict:
+    """给定 (resolution, min_weight) 的 Louvain 聚类质量指标（标准 Q 口径）。"""
+    from app.services.graph_algorithms.louvain import louvain
+
+    g = filter_graph(graph, min_weight)
+    return _metrics(g, louvain(g, resolution=resolution))
+
+
+def compare_algorithms(graph: dict[str, dict[str, float]], resolution: float, min_weight: float) -> dict:
+    """阶段二验收对比：Leiden vs Louvain（同参数，标准 Q/同质性口径）。
+
+    验收标准（图算法优化方案 §1.2）：Leiden 的 Q ≥ Louvain + 0.01 且
+    同质性 ≥ Louvain + 0.05 才允许切换 algorithm=leiden。
+    """
+    from app.services.graph_algorithms.leiden import leiden
+    from app.services.graph_algorithms.louvain import louvain
+
+    g = filter_graph(graph, min_weight)
+    return {
+        "louvain": _metrics(g, louvain(g, resolution=resolution)),
+        "leiden": _metrics(g, leiden(g, resolution=resolution)),
+    }
+
+
+def _cluster(graph: dict[str, dict[str, float]], resolution: float, algorithm: str = "louvain") -> dict[str, int]:
+    """按算法名聚类（louvain 纯 Python / leiden igraph+leidenalg，阶段二双实现并存）。"""
+    if algorithm == "leiden":
+        from app.services.graph_algorithms.leiden import leiden
+
+        return leiden(graph, resolution=resolution)
+    from app.services.graph_algorithms.louvain import louvain
+
+    return louvain(graph, resolution=resolution)
+
+
+def objective(graph: dict[str, dict[str, float]], trial, algorithm: str = "louvain") -> float:
     """Optuna 目标：0.5·Q + 0.3·同质性 + 0.2·(1−过小簇占比)，最大化。
 
     Q 用标准模块度（γ 不参与评分）；退化解（簇数 ≤ 2 或最大簇占比 > 0.5）
@@ -135,34 +168,35 @@ def objective(graph: dict[str, dict[str, float]], trial) -> float:
     """
     resolution = trial.suggest_float("resolution", GAMMA_MIN, GAMMA_MAX)
     min_weight = trial.suggest_float("min_weight", MIN_WEIGHT_MIN, MIN_WEIGHT_MAX)
-    from app.services.graph_algorithms.louvain import louvain
-
     g = filter_graph(graph, min_weight)
-    partition = louvain(g, resolution=resolution)
+    partition = _cluster(g, resolution, algorithm)
     return score_partition(g, partition)
 
 
-def tune(graph: dict[str, dict[str, float]], n_trials: int, seed: int = 42, n_runs: int = 10) -> dict:
-    """Optuna 扫描 + 最优参数稳定性验证（10 次独立运行报告均值/标准差）。"""
+def tune(graph: dict[str, dict[str, float]], n_trials: int, seed: int = 42, n_runs: int = 10, algorithm: str = "louvain") -> dict:
+    """Optuna 扫描 + 最优参数稳定性验证（10 次独立运行报告均值/标准差）。
+
+    Args:
+        algorithm: louvain | leiden（阶段二：Leiden 需在自身参数空间重新调优，
+            不能沿用 Louvain 最优参数——2026-08-12 验收实测两者最优参数不互通）
+    """
     import optuna
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=seed))
-    study.optimize(lambda t: objective(graph, t), n_trials=n_trials)
+    study.optimize(lambda t: objective(graph, t, algorithm), n_trials=n_trials)
     best = study.best_params
 
-    # 稳定性验证：最优参数独立重跑 n_runs 次（Louvain 为确定性算法，
+    # 稳定性验证：最优参数独立重跑 n_runs 次（Louvain/Leiden 均确定性算法，
     # 验证口径为最优参数在多轮运行中指标无退化）
-    from app.services.graph_algorithms.louvain import louvain
-
     g_best = filter_graph(graph, best["min_weight"])
     scores = [
-        score_partition(g_best, louvain(g_best, resolution=best["resolution"]))
+        score_partition(g_best, _cluster(g_best, best["resolution"], algorithm))
         for _ in range(n_runs)
     ]
     mean = sum(scores) / len(scores)
     std = (sum((s - mean) ** 2 for s in scores) / len(scores)) ** 0.5
-    metrics = evaluate(graph, best["resolution"], best["min_weight"])
+    metrics = _metrics(g_best, _cluster(g_best, best["resolution"], algorithm))
     return {
         "resolution": best["resolution"],
         "min_weight": best["min_weight"],
@@ -228,13 +262,15 @@ def report(tag: str, m: dict, params: dict) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="图算法参数 Optuna 调优（阶段一：γ + min_weight）")
+    parser = argparse.ArgumentParser(description="图算法参数 Optuna 调优（阶段一：γ + min_weight；阶段二：Leiden 验收对比）")
     parser.add_argument("--export", type=Path, help="从 Neo4j 导出共现图快照 JSON 到指定路径")
     parser.add_argument("--snapshot", type=Path, help="共现图快照 JSON（固定数据集，避免每轮重查）")
     parser.add_argument("--trials", type=int, default=50, help="Optuna trial 数（默认 50）")
     parser.add_argument("--runs", type=int, default=10, help="最优参数稳定性验证次数（默认 10）")
     parser.add_argument("--apply", action="store_true", help="将最优参数写回 configs/graph_algo.yaml")
     parser.add_argument("--dry-run", action="store_true", help="不跑 Optuna，仅打印当前配置指标")
+    parser.add_argument("--compare", action="store_true", help="阶段二验收：Leiden vs Louvain 同参数对比（不调优）")
+    parser.add_argument("--algorithm", choices=["louvain", "leiden"], default="louvain", help="调优目标算法（阶段二 Leiden 需自身参数空间调优）")
     args = parser.parse_args()
 
     if args.export:
@@ -252,14 +288,29 @@ def main() -> None:
     from app.services.graph_algorithms.config import load_graph_algo_config
 
     cfg = load_graph_algo_config()
+
+    if args.compare:
+        # 阶段二验收：Leiden vs Louvain（当前配置参数，标准 Q/同质性口径）
+        comp = compare_algorithms(graph, cfg["resolution"], cfg["min_weight"])
+        m_l, m_g = comp["louvain"], comp["leiden"]
+        print(f"[Leiden 验收对比] γ={cfg['resolution']:.3f} min_weight={cfg['min_weight']:.3f}")
+        print(f"  Louvain: Q={m_l['modularity']:.4f} 同质性={m_l['homogeneity']:.4f} 过小簇={m_l['small_ratio']:.4f} 簇数={m_l['cluster_count']}")
+        print(f"  Leiden : Q={m_g['modularity']:.4f} 同质性={m_g['homogeneity']:.4f} 过小簇={m_g['small_ratio']:.4f} 簇数={m_g['cluster_count']}")
+        dq = m_g["modularity"] - m_l["modularity"]
+        dh = m_g["homogeneity"] - m_l["homogeneity"]
+        ok = dq >= 0.01 and dh >= 0.05
+        print(f"  ΔQ={dq:+.4f}（≥ +0.01）Δ同质性={dh:+.4f}（≥ +0.05）")
+        print(f"  → {'✅ 验收达标，可切换 configs/graph_algo.yaml algorithm=leiden' if ok else '❌ 验收未达标，保持 algorithm=louvain'}")
+        return
+
     m = evaluate(graph, cfg["resolution"], cfg["min_weight"])
     report("当前配置（configs/graph_algo.yaml）", m, cfg)
 
     if args.dry_run:
         return
 
-    result = tune(graph, n_trials=args.trials, n_runs=args.runs)
-    report(f"Optuna 最优（{args.trials} trial）", result["metrics"], result)
+    result = tune(graph, n_trials=args.trials, n_runs=args.runs, algorithm=args.algorithm)
+    report(f"Optuna 最优（{args.trials} trial, {args.algorithm}）", result["metrics"], result)
     print(f"  objective={result['objective']:.4f} 稳定性 mean={result['stability_mean']:.4f} std={result['stability_std']:.4f}")
 
     if args.apply:
