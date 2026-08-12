@@ -691,6 +691,8 @@ export interface paths {
                     min_size?: number;
                     /** @description Louvain 分辨率参数 γ（图算法优化方案阶段一）：>1 细簇 / <1 粗簇 / 1.0 等价标准 Louvain。默认值取 configs/graph_algo.yaml */
                     resolution?: number;
+                    /** @description 层级（阶段三层次化提取）：0 = 最细，逐层变粗；默认 null = 最优层（与 louvain() 输出一致）；Leiden 算法不支持层级（忽略） */
+                    level?: number | null;
                 };
                 header?: never;
                 path?: never;
@@ -698,7 +700,46 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description 技能簇列表（规则后处理 + LLM 兜底命名） */
+                /** @description 技能簇列表（规则后处理 + LLM 兜底命名 + 层级元数据） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/graph/algorithms/community-tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 社区层级树（dendrogram 可视化，阶段三层次化提取）
+         * @description 读取 scripts/sync_communities.py 同步的 Neo4j Community 节点（BELONGS_TO_COMMUNITY + NESTED_IN），返回树结构供 ECharts tree 系列渲染；未同步时返回空树
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 社区层级树 */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2637,6 +2678,19 @@ export interface components {
             data?: unknown;
             /** @description 链路追踪 ID（uuid4 hex 截断 16 位） */
             trace_id: string;
+        };
+        /** @description 社区层级树节点（阶段三层次化提取，dendrogram 可视化） */
+        CommunityNode: {
+            id?: string;
+            /** @description 社区名称（簇内 Top-3 技能拼接） */
+            name?: string;
+            level?: number;
+            cluster_count?: number;
+            modularity?: number;
+            /** @description 簇内代表性技能（≤5 个） */
+            top_skills?: string[];
+            /** @description NESTED_IN 嵌套子社区（递归） */
+            children?: components["schemas"]["CommunityNode"][];
         };
         User: {
             id?: string;

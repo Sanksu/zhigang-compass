@@ -422,9 +422,13 @@ paths:
           in: query
           schema: { type: number, default: 1.0, minimum: 0.1, maximum: 5.0 }
           description: Louvain 分辨率参数 γ（图算法优化方案阶段一）：>1 细簇 / <1 粗簇 / 1.0 等价标准 Louvain。默认值取 configs/graph_algo.yaml
+        - name: level
+          in: query
+          schema: { type: integer, default: null, minimum: 0, maximum: 31, nullable: true }
+          description: 层级（阶段三层次化提取）：0 = 最细，逐层变粗；默认 null = 最优层（与 louvain() 输出一致）；Leiden 算法不支持层级（忽略）
       responses:
         '200':
-          description: 技能簇列表（规则后处理 + LLM 兜底命名）
+          description: 技能簇列表（规则后处理 + LLM 兜底命名 + 层级元数据）
           content:
             application/json:
               schema:
@@ -475,6 +479,56 @@ paths:
                                   id: { type: string }
                                   name: { type: string }
                       cluster_count: { type: integer }
+                      levels:
+                        type: array
+                        nullable: true
+                        description: 层级元数据（Leiden 算法为 null）；每项 {level, cluster_count, modularity}
+                        items:
+                          type: object
+                          properties:
+                            level: { type: integer }
+                            cluster_count: { type: integer }
+                            modularity: { type: number }
+
+  /api/v1/graph/algorithms/community-tree:
+    get:
+      tags: [graph]
+      security: []
+      summary: 社区层级树（dendrogram 可视化，阶段三层次化提取）
+      description: 读取 scripts/sync_communities.py 同步的 Neo4j Community 节点（BELONGS_TO_COMMUNITY + NESTED_IN），返回树结构供 ECharts tree 系列渲染；未同步时返回空树
+      responses:
+        '200':
+          description: 社区层级树
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      tree:
+                        type: array
+                        description: 根节点列表（最高层社区，children 按 NESTED_IN 递归展开）
+                        items:
+                          type: object
+                          properties:
+                            id: { type: string }
+                            name: { type: string }
+                            level: { type: integer }
+                            cluster_count: { type: integer }
+                            modularity: { type: number }
+                            top_skills:
+                              type: array
+                              items: { type: string }
+                              description: 簇内代表性技能（≤5 个）
+                            children:
+                              type: array
+                              items:
+                                $ref: '#/components/schemas/CommunityNode'
+                      levels:
+                        type: array
+                        items: { type: integer }
+                        description: 已同步层级列表
 
   /api/v1/graph/algorithms/shortest-path:
     get:
@@ -1475,6 +1529,27 @@ components:
         trace_id:
           type: string
           description: 链路追踪 ID（uuid4 hex 截断 16 位）
+
+    CommunityNode:
+      type: object
+      description: 社区层级树节点（阶段三层次化提取，dendrogram 可视化）
+      properties:
+        id: { type: string }
+        name:
+          type: string
+          description: 社区名称（簇内 Top-3 技能拼接）
+        level: { type: integer }
+        cluster_count: { type: integer }
+        modularity: { type: number }
+        top_skills:
+          type: array
+          items: { type: string }
+          description: 簇内代表性技能（≤5 个）
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommunityNode'
+          description: NESTED_IN 嵌套子社区（递归）
 
     User:
       type: object

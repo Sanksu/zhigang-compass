@@ -156,6 +156,44 @@ describe('GraphAnalysisPanel', () => {
     expect(screen.getByText('技能簇16')).toBeInTheDocument()
   })
 
+  it('层级元数据渲染选择器，切换后带 level 重新请求', async () => {
+    mockApiGet.mockImplementation((url: string) => {
+      if (String(url).includes('/graph/algorithms/pagerank')) {
+        return Promise.resolve({ skills: [] })
+      }
+      if (String(url).includes('level=1')) {
+        // 切换到 L1：返回更粗层簇
+        return Promise.resolve({
+          clusters: [{ id: 9, size: 3, label: '粗层簇', needs_llm: false, triggers: [], llm: null, skills: [{ id: 'sk_9', name: '粗层技能' }] }],
+          cluster_count: 1,
+          levels: [
+            { level: 0, cluster_count: 4, modularity: 0.1 },
+            { level: 1, cluster_count: 2, modularity: 0.2 },
+          ],
+        })
+      }
+      return Promise.resolve({
+        clusters: [
+          { id: 1, size: 2, label: 'Python·Django', needs_llm: false, triggers: [], llm: null, skills: [{ id: 'sk_1', name: 'Python' }] },
+        ],
+        cluster_count: 1,
+        levels: [
+          { level: 0, cluster_count: 4, modularity: 0.1 },
+          { level: 1, cluster_count: 2, modularity: 0.2 },
+        ],
+      })
+    })
+    render(<GraphAnalysisPanel skills={[]} onFocusSkill={vi.fn()} />)
+    // 层级选择器渲染（最优层 + L0 + L1）；DOM 顺序为 [层级, 起点, 终点]，层级为第 1 个
+    await waitFor(() => expect(screen.getAllByRole('combobox')).toHaveLength(3))
+    const selects = screen.getAllByRole('combobox')
+    expect(screen.getByText('层级（dendrogram 粗→细）')).toBeInTheDocument()
+    // 切到 L1 → 请求带 level=1 且簇列表刷新
+    fireEvent.change(selects[0], { target: { value: '1' } })
+    expect(await screen.findByText('粗层簇')).toBeInTheDocument()
+    expect(mockApiGet).toHaveBeenCalledWith(expect.stringContaining('level=1'))
+  })
+
   it('PageRank 排行渲染并触发 onFocusSkill', async () => {
     mockClusters([])
     mockApiGet.mockImplementation((url: string) => {

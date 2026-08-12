@@ -26,6 +26,7 @@ CREATE CONSTRAINT IF NOT EXISTS FOR (n:Course) REQUIRE n.id IS UNIQUE;
 CREATE CONSTRAINT IF NOT EXISTS FOR (n:Evidence) REQUIRE n.id IS UNIQUE;
 CREATE CONSTRAINT IF NOT EXISTS FOR (n:Occupation) REQUIRE n.id IS UNIQUE;
 CREATE CONSTRAINT IF NOT EXISTS FOR (n:PositionEditLog) REQUIRE n.id IS UNIQUE;
+CREATE CONSTRAINT IF NOT EXISTS FOR (n:Community) REQUIRE n.id IS UNIQUE;
 
 // ============================================================
 // 2. 属性索引（常用查询字段）

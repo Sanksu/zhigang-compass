@@ -47,6 +47,13 @@ interface SkillCluster {
   skills: ClusterSkill[]
 }
 
+/** 层级元数据（阶段三层次化提取：0 = 最细，逐层变粗） */
+interface ClusterLevel {
+  level: number
+  cluster_count: number
+  modularity: number
+}
+
 interface PathNode {
   id: string
   name: string
@@ -82,6 +89,9 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
   const [clusterLoading, setClusterLoading] = useState(true)
   const [expandedCluster, setExpandedCluster] = useState<number | null>(null)
   const [showAllClusters, setShowAllClusters] = useState(false)
+  // 阶段三：层级元数据 + 当前选中层级（null = 最优层）
+  const [levels, setLevels] = useState<ClusterLevel[] | null>(null)
+  const [selectedLevel, setSelectedLevel] = useState<number | null>(null)
 
   // 最短路径状态
   const [fromSkill, setFromSkill] = useState('')
@@ -109,14 +119,20 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
     }
   }, [])
 
-  // 加载技能簇（懒加载一次）
+  // 加载技能簇（随选中层级变化重新请求；null = 最优层）
   // 注意：clusterLoading 初始 true，无需在 effect 内再次 set，避免 react-hooks/set-state-in-effect
   useEffect(() => {
     let cancelled = false
+    const levelQuery = selectedLevel === null ? '' : `&level=${selectedLevel}`
     ;(async () => {
       try {
-        const r = await apiGet<{ clusters: SkillCluster[] }>('/graph/algorithms/skill-clusters?min_size=2')
-        if (!cancelled) setClusters(r.clusters)
+        const r = await apiGet<{ clusters: SkillCluster[]; levels: ClusterLevel[] | null }>(
+          `/graph/algorithms/skill-clusters?min_size=2${levelQuery}`,
+        )
+        if (!cancelled) {
+          setClusters(r.clusters)
+          if (r.levels && r.levels.length > 0) setLevels(r.levels)
+        }
       } catch {
         /* 算法端点不可用时面板降级为空态，不阻塞图谱主功能 */
       } finally {
@@ -126,7 +142,15 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [selectedLevel])
+
+  /** 切换 dendrogram 层级（null = 最优层） */
+  function changeLevel(value: string) {
+    setSelectedLevel(value === '' ? null : Number(value))
+    setClusterLoading(true)
+    setExpandedCluster(null)
+    setShowAllClusters(false)
+  }
 
   // 查询最短路径
   async function runShortestPath() {
@@ -196,6 +220,23 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
             <Boxes className="size-3 text-ink-faint" />
             技能簇（技术栈聚类）
           </h4>
+          {levels && levels.length > 1 && (
+            <div className="mb-1.5">
+              <Label className="text-[10px] text-ink-faint">层级（dendrogram 粗→细）</Label>
+              <select
+                value={selectedLevel ?? ''}
+                onChange={(e) => changeLevel(e.target.value)}
+                className="w-full h-7 rounded border border-border bg-canvas px-2 text-xs outline-none focus:border-ink"
+              >
+                <option value="">最优层</option>
+                {levels.map((l) => (
+                  <option key={l.level} value={l.level}>
+                    L{l.level} · {l.cluster_count} 簇 · Q={l.modularity.toFixed(3)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {clusterLoading ? (
             <div className="flex items-center gap-2 py-3 text-xs text-ink-muted">
               <Loader2 className="size-3 animate-spin" />
