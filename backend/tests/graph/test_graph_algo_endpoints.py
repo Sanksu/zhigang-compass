@@ -44,6 +44,12 @@ def _patch_network_and_louvain(monkeypatch, graph, name_map, louvain_impl):
 
     monkeypatch.setattr("app.services.graph_algorithms.network.load_skill_cooccurrence", fake_load)
     monkeypatch.setattr("app.services.graph_algorithms.louvain.louvain_hierarchical", fake_hierarchical)
+    # 默认算法固定为 louvain（configs/graph_algo.yaml 可被调优切换为 leiden；
+    # 显式测 leiden 分支的用例在其后覆盖此 patch）
+    monkeypatch.setattr(
+        graph_api, "load_graph_algo_config",
+        lambda: {"algorithm": "louvain", "resolution": 1.0, "min_weight": 2.0, "min_size": 2},
+    )
     redis = MagicMock()
     redis.get = AsyncMock(return_value=None)  # redis_client.get/set 均为 async
     redis.set = AsyncMock(return_value=None)
