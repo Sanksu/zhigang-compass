@@ -14,9 +14,10 @@ Position.occupation_code 也未写入。本模块在岗位入图（import_jd）�
 降级：occupations 不可加载 / SBERT 模型不可用 → 返回 None，不阻塞入图
 （语义嵌入耗时且依赖模型，故对齐在入图事务外执行，失败只丢 occupation 边）。
 
-数据源：occupations 默认从 Neo4j 同步加载（PG occupations 表的图谱副本，字段
-code/name/aliases 与 import_occupations.py 同步口径一致）。取 Neo4j 而非 PG 是
-避免在已运行的异步事件循环内 asyncio.run 绑定 async engine 的 loop 冲突；
+数据源：occupations 默认从 PostgreSQL occupations 表同步加载（权威源，字段
+code/name/aliases 与 import_occupations.py 落库口径一致），用 sqlalchemy 同步
+engine（psycopg2 驱动）读取，避免 asyncpg 异步 engine 绑定运行中事件循环的
+loop 冲突；PG 不可达时回退 Neo4j Occupation 节点（离线部署兼容）。
 occupations_source 可注入（测试替身），进程级 TTL 缓存。
 """
 
@@ -58,37 +59,84 @@ class OccupationAligner:
 
     # ---- occupations 加载（进程级 TTL 缓存） ----
 
+    def _load_from_pg(self) -> list[dict] | None:
+        """PG occupations 表（权威源）→ dict 列表；连接异常返回 None。
+
+        用 sqlalchemy 同步 engine（psycopg2）读取：asyncpg engine 一旦被绑定到
+        运行中的事件循环，在同步上下文（import_jd 事务外、align_positions）无法
+        再 asyncio.run，故对齐走独立同步连接。
+        """
+        try:
+            from sqlalchemy import create_engine, text
+
+            from app.core.config import settings
+
+            dsn = settings.postgres_dsn.replace(
+                "postgresql+asyncpg://", "postgresql+psycopg2://"
+            )
+            engine = create_engine(dsn, pool_pre_ping=True)
+            try:
+                with engine.connect() as conn:
+                    rows = conn.execute(
+                        text("SELECT code, name, aliases FROM occupations")
+                    ).mappings().all()
+            finally:
+                engine.dispose()
+            return [
+                {
+                    "code": r["code"],
+                    "name": r["name"],
+                    "aliases": list(r["aliases"] or []),
+                }
+                for r in rows
+                if r["code"] and r["name"]
+            ]
+        except Exception:
+            return None
+
+    def _load_from_neo4j(self) -> list[dict]:
+        """Neo4j Occupation 节点（离线回退源）；不可达返回空列表。"""
+        try:
+            from app.core.database import neo4j_driver
+
+            with neo4j_driver.session() as session:
+                records = session.run(
+                    "MATCH (o:Occupation) "
+                    "RETURN o.code AS code, o.name AS name, o.aliases AS aliases"
+                )
+                return [
+                    {
+                        "code": r["code"],
+                        "name": r["name"],
+                        "aliases": list(r["aliases"] or []),
+                    }
+                    for r in records
+                    if r["code"] and r["name"]
+                ]
+        except Exception:
+            return []
+
     def _load_occupations(self) -> list[dict]:
         now = time.monotonic()
         with self._lock:
             if self._occupations and now - self._ts < _OCCUPATIONS_TTL:
                 return self._occupations
-            try:
-                if self._occupations_source is not None:
+            if self._occupations_source is not None:
+                try:
                     rows = self._occupations_source()
-                else:
-                    from app.core.database import neo4j_driver
-
-                    with neo4j_driver.session() as session:
-                        records = session.run(
-                            "MATCH (o:Occupation) "
-                            "RETURN o.code AS code, o.name AS name, o.aliases AS aliases"
-                        )
-                        rows = [
-                            {
-                                "code": r["code"],
-                                "name": r["name"],
-                                "aliases": list(r["aliases"] or []),
-                            }
-                            for r in records
-                            if r["code"] and r["name"]
-                        ]
-            except Exception:
-                # 图谱不可达：返回已缓存（若有），否则空列表 → 规则/语义均无命中
-                rows = self._occupations
-            self._occupations = rows
+                except Exception:
+                    # 注入源异常：与 PG/Neo4j 源同口径降级——返回已缓存（若有），否则空
+                    rows = self._occupations
+            else:
+                rows = self._load_from_pg()
+                if rows is None:
+                    rows = self._load_from_neo4j()
+                if not rows:
+                    # 数据源均不可达/为空：返回已缓存（若有），否则空 → 无命中
+                    rows = self._occupations
+            self._occupations = rows or []
             self._ts = now
-            return rows
+            return self._occupations
 
     # ---- 规则匹配 ----
 
