@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field
 class JDSkillSet(BaseModel):
     """单条 JD 的技能集合视图。
 
-    用于时滞/通胀检测的输入。技能 age（天）来自图谱层 `Skill.first_seen_at`，
-    M2 阶段未接入图谱，调用方需以 mock 数据填充。
+    用于时滞/通胀检测的输入。技能 age（天）来自图谱层 `Skill.first_seen_at`
+    （validate_temporal 经 `_graph_skill_first_seen` 读取，图谱不可达时回退 jd_raw 推算）。
     """
 
     jd_id: str = Field(description="JD 唯一标识（source + source_id）")
