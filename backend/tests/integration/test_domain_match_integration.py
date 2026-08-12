@@ -80,8 +80,12 @@ class TestEcommerceDomainMatch:
         assert len(related) >= 1, "电商候选人领域维度全 0.0，优化未生效"
 
     def test_cloud_candidate_hits_more(self, matcher):
-        """云计算候选人为对照：词面命中（行业=云计算）应多于语义兜底，且含 1.0 满分。"""
-        hits = _match_domains(matcher, _candidate(["云计算"]))
+        """云计算候选人为对照：词面命中（行业=云计算）应多于语义兜底，且含 1.0 满分。
+
+        top_n=50：领域分仅为六维之一，行业匹配岗位总分未必进 Top-10
+        （数据演化后实测 Top-10 无 1.0、Top-50 命中"开发者体验工程师/云计算"）。
+        """
+        hits = _match_domains(matcher, _candidate(["云计算"]), top_n=50)
         assert any(d == 1.0 for _, _, _, d in hits), "云计算词面命中应产生 1.0"
 
     def test_no_domain_experience_yields_none(self, matcher):
