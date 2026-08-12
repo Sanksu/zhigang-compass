@@ -22,7 +22,7 @@ _SKILL_WHITELIST_PATH = Path(__file__).resolve().parents[3] / "configs" / "skill
 # 内容与原硬编码 SKILL_WHITELIST 一致，仅在配置文件缺失时生效。
 _FALLBACK_SKILL_WHITELIST: set[str] = {
     "Python", "Java", "JavaScript", "TypeScript", "Go", "Rust", "C++", "C#",
-    "Ruby", "PHP", "Swift", "Kotlin", "Scala", "R", "MATLAB", "Shell",
+    "Ruby", "PHP", "Swift", "Kotlin", "Scala", "MATLAB", "Shell",
     "C", "SQL", "React", "Vue.js", "Angular", "HTML", "HTML5", "CSS",
     "Webpack", "Vite", "Tailwind CSS", "Next.js", "Nuxt.js", "Bootstrap",
     "ECharts", "Three.js", "数据可视化", "UI设计", "前端工程化",
@@ -170,7 +170,8 @@ SKILL_ALIAS: dict[str, str] = {
     # 计算机基础
     "面向对象编程": "面向对象",
     "面向对象设计": "面向对象",
-    "算法设计": "算法",
+    # "算法设计" 别名已移除（JD 基线决策支持 ② 2026-08-12）：指向宽泛词"算法"，
+    # 白名单已排除，保留该别名会使基线 alias 扫描仍命中"算法"误报
     "计算机网络基础": "计算机网络",
     # 测试
     "单元测试编写": "单元测试",

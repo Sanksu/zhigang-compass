@@ -30,7 +30,9 @@ skills:
   - {name: "Swift", category: "编程语言"}
   - {name: "Kotlin", category: "编程语言"}
   - {name: "Scala", category: "编程语言"}
-  - {name: "R", category: "编程语言"}
+  # R 已移除（JD 基线决策支持 ② 2026-08-12）：单字符白名单词 + 子串匹配导致
+  # 一切含 r 的英文单词被误报为技能（黄金集 45 次 FP）；R 语言作为技能由
+  # LLM 路径保留，仅降级/基线路径不再子串命中
   - {name: "MATLAB", category: "编程语言"}
   - {name: "Shell", category: "编程语言"}
   - {name: "SQL", category: "编程语言"}
@@ -423,7 +425,8 @@ skills:
   - {name: "操作系统", category: "计算机基础"}
   - {name: "计算机网络", category: "计算机基础"}
   - {name: "数据结构", category: "计算机基础"}
-  - {name: "算法", category: "计算机基础"}
+  # 算法 已移除（JD 基线决策支持 ② 2026-08-12）：宽泛词，黄金集 24 次 FP，
+  # 且已在 SKILL_STOPWORDS 停用词表——白名单移除后与停用词口径一致
   - {name: "数据库", category: "计算机基础"}
   - {name: "大数据", category: "计算机基础"}
   - {name: "面向对象", category: "计算机基础"}
