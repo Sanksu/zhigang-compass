@@ -19,7 +19,9 @@ RESUME_TASK_TEMPLATE = """从以下简历文本中提取候选人信息，以 JS
 4. 教育背景（education）：学校、专业、学历、起止时间；education_level 取最高学历（大专/本科/硕士/博士）
 5. 工作经历（work_experience）：公司、职位、起止时间、职责描述
 6. 项目经验（projects）：名称、担任角色、技术栈 stack、描述
-7. 证书（certifications）：证书名称列表
+7. 证书（certifications）：数组，每个元素为对象，含 name（证书名称）与 issuer（颁发机构）
+   两个字段；issuer 仅在文本明确给出颁发机构（如"PMP（PMI 认证）"表示颁发机构为 PMI）时
+   填写，未写明填空字符串
 8. 领域经验（domain_experience）：候选人所在行业/业务领域（如金融/电商/自动驾驶）
 9. 软技能（soft_skills）：仅提取文本中明确写出的软技能词语（如技能清单、自我评价中直接出现的
    "团队协作""责任心"），禁止从职责描述、工作内容、项目经历中自行推断（推断会导致过度抽取）；
