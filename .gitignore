@@ -57,7 +57,7 @@ ENV/
 
 # 测试与覆盖率
 .pytest_cache/
-.pytest_tmp/
+.pytest-tmp
 .tox/
 .nox/
 .coverage
@@ -154,7 +154,10 @@ uploads/
 backups/
 dumps/
 *.dump
-*.cypher
+# 仅忽略数据导出脚本（如 cypher-shell 导出的 dump），
+# 不误伤图谱 schema 定义（backend/app/services/kg/schema.cypher 需入库）
+backups/*.cypher
+dumps/*.cypher
 
 # 模型权重与缓存
 backend/models/

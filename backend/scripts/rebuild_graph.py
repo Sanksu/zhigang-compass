@@ -12,9 +12,11 @@
 重建耗时取决于 JD 数量。请确认后执行。
 
 用法：
-    python scripts/rebuild_graph.py
+    python scripts/rebuild_graph.py            # 交互确认后执行
+    python scripts/rebuild_graph.py --yes      # 跳过确认直接执行
 """
 
+import argparse
 import asyncio
 import sys
 from pathlib import Path
@@ -43,6 +45,18 @@ async def _load_extracted() -> list[tuple[JDRaw, dict]]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="重建图谱（全库级破坏操作）")
+    parser.add_argument("--yes", action="store_true", help="跳过交互确认")
+    args = parser.parse_args()
+
+    if not args.yes:
+        confirm = input(
+            "警告：将清空现有图谱全部节点（保留 Counter）并重建。输入 YES 继续: "
+        )
+        if confirm.strip() != "YES":
+            logger.info("已取消，未做任何修改")
+            return
+
     # 1. 清空图谱（保留 Counter）
     with neo4j_driver.session() as session:
         cleared = session.run(

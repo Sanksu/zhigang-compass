@@ -45,7 +45,7 @@ _STEPS: list[tuple[str, str, dict]] = [
     ("backfill", "jd_raw 剩余 LLM 抽取 + course_raw 入图",
      {"cmd": ["backfill_ingest"]}),
     ("rebuild", "清空图谱并按新归一化规则重放已抽取 JD（保留 Counter）",
-     {"cmd": ["rebuild_graph"]}),
+     {"cmd": ["rebuild_graph", "--yes"]}),
     ("load_courses", "课程重新入图（rebuild 清空后恢复 Course/LEARNABLE_VIA）",
      {"async": "load_courses"}),
     ("cleanup", "技能过滤 + 岗位合并 + 重新聚合（防幻觉技能）",
@@ -144,7 +144,7 @@ def main() -> int:
         except subprocess.CalledProcessError as e:
             logger.error("✗ 阶段 %s 失败（退出码 %s），已停止。修复后重跑（幂等）。", name, e.returncode)
             return e.returncode
-        except Exception as e:
+        except Exception:
             logger.exception("✗ 阶段 %s 失败", name)
             return 1
     logger.info("冷启动全部完成。")
