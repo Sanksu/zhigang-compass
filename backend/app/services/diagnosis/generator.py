@@ -100,7 +100,9 @@ def generate_diagnosis(
         evidence=_render_evidence(data.get("evidence_refs") or []),
         rag_context=_render_rag_context(rag_chunks or []),
     )
-    report = chain.call_with_fallback(
+    # 同步路由契约（设计文档 §6.5，G-04）：诊断实时路径单 provider 10s 单次，
+    # 不重试不切换；失败（LLMTimeoutError 等）向上传播由 API 层映射 504(5003)
+    report = chain.call_sync(
         prompt, DiagnosisReport, system_prompt=DIAGNOSIS_SYSTEM_PROMPT
     )
     # 虚构引用后置拦截（§6.4 生成约束）：断言引用的 evidence_id 必须能追溯

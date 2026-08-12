@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from app.services.extraction.llm_provider import (
     LLMConfigurationError,
     LLMExtractionError,
+    LLMTimeoutError,
     LLMProviderChain,
 )
 
@@ -109,7 +110,9 @@ class ClusterLLMClassifier:
 
         prompt = build_cluster_prompt(skills, triggers)
         try:
-            return self._llm.extract_structured(prompt, ClusterLLMDecision)
-        except LLMExtractionError:
-            # LLM 调用失败（超时/校验/provider 全失败）：降级规则标签，不阻塞 API
+            # 同步路由契约（设计文档 §6.5，G-04）：单 provider 10s 超时单次尝试，
+            # 不重试不切换（技能簇接口在 API 请求路径上，避免同步阻塞）
+            return self._llm.call_sync(prompt, ClusterLLMDecision)
+        except (LLMExtractionError, LLMTimeoutError, LLMConfigurationError):
+            # LLM 调用失败（超时/熔断/校验/未配置）：降级规则标签，不阻塞 API
             return ClusterLLMDecision(coherent=True, cluster_name=rule_label or None)
