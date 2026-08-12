@@ -2,21 +2,24 @@
 
 统一评测命令：`python scripts/evaluate.py --task all`，输出 reports/eval_{date}.json + reports/eval_{date}.html。
 
-当前覆盖（离线可复现，无需 LLM API）：
-- jd    JD 解析：白名单关键词基线，字段级 F1（黄金集 data/golden_set/jd_golden_100.jsonl）
-- match 人岗匹配：total_score 与人工标注的 Spearman 秩相关 + 分类准确率 + Top-3 推荐准确率
-        （黄金集 data/golden_set/golden_set_match.jsonl，权重来自 configs/match_weights.json）
-- resume 简历提取：真实抽取（LLM + 规则兜底）vs 简历黄金集 F1
-        （黄金集 data/golden_set/golden_set_resume.jsonl；未交付时跳过并注明）
+当前覆盖：
+- jd      JD 解析：白名单关键词基线，字段级 F1（黄金集 data/golden_set/jd_golden_100.jsonl）
+- jd_llm  JD 解析：真实 LLM 盲审评测（读取 tests/evaluate/run_manual_jd_eval.py --run 的
+          最近归档 reports/eval_jd_llm_*.json；只读不重跑，避免重复消耗 LLM 额度）
+- match   人岗匹配：total_score 与人工标注的 Spearman 秩相关 + 分类准确率 + Top-3 推荐准确率
+          （黄金集 data/golden_set/golden_set_match.jsonl，权重来自 configs/match_weights.json）
+- resume  简历提取：真实抽取（LLM + 规则兜底）vs 简历黄金集 F1
+          （黄金集 data/golden_set/golden_set_resume.jsonl；未交付时跳过并注明）
 
-LLM 抽取/简历提取的在线评测需配置 provider（configs/llm_providers.yaml）与对应黄金集，
-本脚本对缺失项跳过并注明，不伪造结果。
+除 jd_llm（读归档）外均离线可复现；LLM 在线评测（盲审）由
+`tests/evaluate/run_manual_jd_eval.py --run` 单独执行并归档。缺失项跳过并注明，不伪造结果。
 
 报告输出（设计文档 §13.3）：JSON（机器可读）+ HTML（含分项得分+错误分析+混淆矩阵）。
 
 用法：
     uv run python scripts/evaluate.py --task all        # 全部（缺黄金集项自动跳过）
     uv run python scripts/evaluate.py --task jd
+    uv run python scripts/evaluate.py --task jd_llm     # 读最近 LLM 盲审归档
     uv run python scripts/evaluate.py --task resume
     uv run python scripts/evaluate.py --task match --semantic   # 匹配项注入 SBERT 语义增强
 """
@@ -110,6 +113,34 @@ def eval_jd() -> dict:
         "confusion": {"tp": total_tp, "fp": total_fp, "fn": total_fn},
         "error_cases": error_cases,
     }
+
+
+def eval_jd_llm() -> dict:
+    """JD 解析评测（LLM 盲审归档）：读取最近一次 run_manual_jd_eval.py --run 的归档。
+
+    不重跑真实 LLM（保持离线可复现 + 不重复消耗 LLM 额度）；指标口径与盲审脚本
+    一致：仅 real_llm_success 样本计入。无归档/归档损坏时跳过并注明生成方式。
+    """
+    archives = sorted(_REPORT_DIR.glob("eval_jd_llm_*.json"))
+    if not archives:
+        return {
+            "task": "jd_llm",
+            "skipped": True,
+            "reason": "无 LLM 盲审归档。先执行: uv run python tests/evaluate/run_manual_jd_eval.py --run",
+        }
+    latest = archives[-1]
+    try:
+        report = json.loads(latest.read_text(encoding="utf-8"))
+        r = report["results"][0]
+        # 校验归档结构完整性（防损坏归档误报）
+        for key in ("task", "method", "samples", "precision", "recall", "f1", "target_f1", "target_met"):
+            assert key in r, f"归档缺少字段: {key}"
+    except (json.JSONDecodeError, KeyError, IndexError, AssertionError) as exc:
+        return {"task": "jd_llm", "skipped": True, "reason": f"归档损坏: {latest.name}（{exc}）"}
+    r = dict(r)
+    r["skipped"] = False
+    r["archive"] = latest.name
+    return r
 
 
 def eval_resume() -> dict:
@@ -262,7 +293,12 @@ def generate_html_report(report: dict) -> str:
 
     # --- 总览 ---
     overview_rows: list[str] = []
-    for task_name, task_label in [("jd", "JD 解析"), ("resume", "简历提取"), ("match", "人岗匹配")]:
+    for task_name, task_label in [
+        ("jd", "JD 解析（关键词基线）"),
+        ("jd_llm", "JD 解析（LLM 盲审）"),
+        ("resume", "简历提取"),
+        ("match", "人岗匹配"),
+    ]:
         r = results.get(task_name)
         if r is None:
             continue
@@ -315,6 +351,48 @@ def generate_html_report(report: dict) -> str:
                 <tr><th>Source ID</th><th>误抽（FP）</th><th>漏抽（FN）</th></tr>
                 {err_rows}
             </table>
+        </div>"""
+
+    # --- JD LLM 盲审详情（读取最近归档，不重跑） ---
+    jd_llm_section = ""
+    jd_llm = results.get("jd_llm")
+    if jd_llm and not jd_llm.get("skipped"):
+        c = jd_llm.get("confusion", {})
+        bonus = jd_llm.get("bonus", {})
+        err_rows = "".join(
+            f"<tr><td>{esc(name)}</td><td>{count}</td></tr>"
+            for name, count in jd_llm.get("error_types", [])
+        ) or "<tr><td colspan='2'>无自动可分类错误</td></tr>"
+        lowest_f1 = sorted(jd_llm.get("per_sample_skills_f1", []))[:3]
+        lowest_html = "、".join(f"{x:.4f}" for x in lowest_f1) or "—"
+        jd_llm_section = f"""
+        <div class="card">
+            <h2>JD 解析评测详情 · LLM 盲审（归档 {esc(jd_llm.get('archive', '?'))}）</h2>
+            <table>
+                <tr><th>Precision</th><th>Recall</th><th>F1（必备技能微平均）</th><th>样本数（LLM 成功）</th><th>目标</th><th>状态</th></tr>
+                <tr><td>{jd_llm['precision']:.4f}</td><td>{jd_llm['recall']:.4f}</td><td>{jd_llm['f1']:.4f}</td>
+                <td>{jd_llm['samples']}</td><td>F1≥{jd_llm['target_f1']:.2f}</td><td>{_badge(jd_llm['target_met'])}</td></tr>
+            </table>
+            <h3>分维度</h3>
+            <table>
+                <tr><th>岗位名（原文对齐）</th><th>岗位名（归一化后）</th><th>学历</th><th>加分技能 F1</th><th>样本平均技能 F1</th></tr>
+                <tr><td>{jd_llm.get('title_raw_exact_accuracy', 0):.4f}</td><td>{jd_llm.get('title_normalized_accuracy', 0):.4f}</td>
+                <td>{jd_llm.get('education_raw_exact_accuracy', 0):.4f}</td><td>{bonus.get('f1', 0):.4f}</td>
+                <td>{jd_llm.get('skills_average_sample_f1', 0):.4f}</td></tr>
+            </table>
+            <h3>混淆矩阵（必备技能多标签：TP / FP / FN）</h3>
+            <table>
+                <tr><th>True Positive</th><th>False Positive</th><th>False Negative</th></tr>
+                <tr><td>{c.get('tp', 0)}</td><td>{c.get('fp', 0)}</td><td>{c.get('fn', 0)}</td></tr>
+            </table>
+            <h3>最低技能 F1 样本（前 3）</h3>
+            <p>{lowest_html}</p>
+            <h3>自动可分类错误类型</h3>
+            <table>
+                <tr><th>错误类型</th><th>条数</th></tr>
+                {err_rows}
+            </table>
+            <p class="note">Schema 缺口（未评测维度）：{esc(jd_llm.get('experience_gap', ''))}；{esc(jd_llm.get('core_duties_gap', ''))}</p>
         </div>"""
 
     # --- 简历详情 ---
@@ -395,6 +473,7 @@ def generate_html_report(report: dict) -> str:
         .pass {{ background: #dcfce7; color: #16a34a; }}
         .fail {{ background: #fee2e2; color: #dc2626; }}
         .skip {{ background: #f3f4f6; color: #6b7280; }}
+        .note {{ color: #6b7280; font-size: 13px; }}
     </style>
 </head>
 <body>
@@ -408,6 +487,7 @@ def generate_html_report(report: dict) -> str:
         </table>
     </div>
     {jd_section}
+    {jd_llm_section}
     {resume_section}
     {match_section}
 </body>
@@ -416,13 +496,15 @@ def generate_html_report(report: dict) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="准确率评测统一入口（设计文档 §13.3）")
-    parser.add_argument("--task", choices=["jd", "resume", "match", "all"], default="all")
+    parser.add_argument("--task", choices=["jd", "jd_llm", "resume", "match", "all"], default="all")
     parser.add_argument("--semantic", action="store_true", help="匹配评测注入 SBERT 语义增强")
     args = parser.parse_args()
 
     results = []
     if args.task in ("jd", "all"):
         results.append(eval_jd())
+    if args.task in ("jd_llm", "all"):
+        results.append(eval_jd_llm())
     if args.task in ("resume", "all"):
         results.append(eval_resume())
     if args.task in ("match", "all"):
@@ -452,6 +534,13 @@ def main() -> None:
             logger.info(f"JD 解析   P={r['precision']:.4f} R={r['recall']:.4f} F1={r['f1']:.4f} "
                         f"({r['samples']} 条, {r['method']})")
             logger.info(f"         目标 F1≥{r['target_f1']:.2f} -> {'达标' if r['target_met'] else '未达标'}")
+        elif r["task"] == "jd_llm":
+            logger.info(f"JD LLM    P={r['precision']:.4f} R={r['recall']:.4f} F1={r['f1']:.4f} "
+                        f"({r['samples']} 条, {r['method']})")
+            logger.info(f"         标题对齐 raw={r.get('title_raw_exact_accuracy', 0):.4f} "
+                        f"norm={r.get('title_normalized_accuracy', 0):.4f} 学历={r.get('education_raw_exact_accuracy', 0):.4f}")
+            logger.info(f"         目标 F1≥{r['target_f1']:.2f} -> {'达标' if r['target_met'] else '未达标'} "
+                        f"(归档 {r.get('archive', '?')})")
         elif r["task"] == "resume":
             logger.info(f"简历提取  P={r['precision']:.4f} R={r['recall']:.4f} F1={r['f1']:.4f} "
                         f"({r['samples']} 条, {r['method']})")
