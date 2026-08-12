@@ -25,9 +25,25 @@ interface ClusterSkill {
   name: string
 }
 
+/** LLM 兜底命名结果（后端 skill-clusters 响应，契约 openapi.yaml 已声明） */
+interface ClusterLLM {
+  coherent: boolean
+  cluster_name: string | null
+  rationale: string | null
+  splits: string[]
+}
+
 interface SkillCluster {
   id: number
   size: number
+  /** 规则标签（簇内共现权重 Top-3 技能，· 拼接） */
+  label?: string
+  /** 是否命中 LLM 兜底触发条件（无主导技能/跨类别复合栈/规则标签为空） */
+  needs_llm?: boolean
+  /** 触发原因（no_dominant_skill / cross_category / empty_label） */
+  triggers?: string[]
+  /** LLM 兜底结果（未触发或 LLM 降级时为 null） */
+  llm?: ClusterLLM | null
   skills: ClusterSkill[]
 }
 
@@ -51,12 +67,21 @@ const PATH_TYPE_LABEL: Record<string, string> = {
   Evidence: '证据',
 }
 
+/** 技能簇标题：LLM 语义命名优先 → 规则标签 → 簇内首技能 → 兜底 */
+function clusterTitle(c: SkillCluster): string {
+  return c.llm?.cluster_name || c.label || c.skills[0]?.name || `簇${c.id}`
+}
+
+/** 簇列表默认展示条数（超出显示「展开更多」） */
+const CLUSTER_PREVIEW_COUNT = 12
+
 export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAnalysisPanelProps) {
   const [pagerank, setPagerank] = useState<PagerankSkill[] | null>(null)
   const [pagerankLoading, setPagerankLoading] = useState(true)
   const [clusters, setClusters] = useState<SkillCluster[] | null>(null)
   const [clusterLoading, setClusterLoading] = useState(true)
   const [expandedCluster, setExpandedCluster] = useState<number | null>(null)
+  const [showAllClusters, setShowAllClusters] = useState(false)
 
   // 最短路径状态
   const [fromSkill, setFromSkill] = useState('')
@@ -178,33 +203,59 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
             </div>
           ) : clusters && clusters.length > 0 ? (
             <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
-              {clusters.slice(0, 12).map((c) => (
+              {(showAllClusters ? clusters : clusters.slice(0, CLUSTER_PREVIEW_COUNT)).map((c) => (
                 <div key={c.id} className="rounded border border-border overflow-hidden">
                   <button
                     onClick={() => setExpandedCluster(expandedCluster === c.id ? null : c.id)}
-                    className="flex w-full items-center justify-between px-2 py-1.5 text-left text-xs hover:bg-subtle"
+                    className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs hover:bg-subtle"
                   >
-                    <span className="truncate font-medium text-ink">{c.skills[0]?.name ?? `簇${c.id}`}</span>
-                    <span className="flex items-center gap-1.5">
+                    <span className="truncate font-medium text-ink">{clusterTitle(c)}</span>
+                    <span className="flex items-center gap-1.5 shrink-0">
+                      {c.needs_llm && (
+                        <span
+                          className="rounded bg-ink/10 px-1 py-0.5 text-[9px] font-medium text-ink-secondary"
+                          title={`LLM 兜底命名（触发：${c.triggers?.join('、') ?? '未知'}）`}
+                        >
+                          LLM
+                        </span>
+                      )}
                       <span className="rounded bg-subtle px-1 py-0.5 font-mono text-[10px] text-ink-muted">{c.size}</span>
                       <span className="text-ink-faint">▾</span>
                     </span>
                   </button>
                   {expandedCluster === c.id && (
-                    <div className="flex flex-wrap gap-1 px-2 pb-2">
-                      {c.skills.map((s) => (
-                        <button
-                          key={s.id}
-                          onClick={() => onFocusSkill(s.id, s.name)}
-                          className="rounded bg-subtle px-1.5 py-0.5 text-[10px] text-ink-secondary hover:bg-ink/10"
-                        >
-                          {s.name}
-                        </button>
-                      ))}
+                    <div className="px-2 pb-2">
+                      <div className="flex flex-wrap gap-1">
+                        {c.skills.map((s) => (
+                          <button
+                            key={s.id}
+                            onClick={() => onFocusSkill(s.id, s.name)}
+                            className="rounded bg-subtle px-1.5 py-0.5 text-[10px] text-ink-secondary hover:bg-ink/10"
+                          >
+                            {s.name}
+                          </button>
+                        ))}
+                      </div>
+                      {c.llm?.rationale && (
+                        <p className="mt-1.5 text-[10px] text-ink-faint italic">{c.llm.rationale}</p>
+                      )}
+                      {c.llm?.splits && c.llm.splits.length > 0 && (
+                        <p className="mt-1 text-[10px] text-ink-faint">
+                          建议拆分：{c.llm.splits.join('、')}
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
               ))}
+              {!showAllClusters && clusters.length > CLUSTER_PREVIEW_COUNT && (
+                <button
+                  onClick={() => setShowAllClusters(true)}
+                  className="w-full rounded border border-border px-2 py-1 text-[10px] text-ink-muted hover:bg-subtle"
+                >
+                  展开更多（{clusters.length - CLUSTER_PREVIEW_COUNT}）
+                </button>
+              )}
             </div>
           ) : (
             <p className="py-2 text-xs text-ink-faint">暂无技能簇数据</p>
