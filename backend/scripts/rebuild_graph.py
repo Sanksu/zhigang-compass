@@ -37,9 +37,13 @@ from app.services.kg.kg_service import import_jd
 
 
 async def _load_extracted() -> list[tuple[JDRaw, dict]]:
+    """读取已抽取记录（排除 skipped：低质/过短标记的 extraction 不是有效结果）。"""
     async with async_session_factory() as s:
         rows = (await s.scalars(
-            select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
+            select(JDRaw).where(
+                JDRaw.snapshot["extraction"].astext.isnot(None),
+                JDRaw.snapshot["extraction"]["skipped"].astext.is_(None),
+            )
         )).all()
     return [(r, (r.snapshot or {}).get("extraction") or {}) for r in rows]
 
