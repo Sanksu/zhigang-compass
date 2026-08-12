@@ -70,11 +70,15 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    （K/万/年/月/时/$/USD 等）必须保留，如 "20-40K"、"1-1.4万"、
    "USD 100000-150000/年"、"US$178K - US$241K (Employer provided)"、"面议"；
    仅薪资高低类表述计入，招聘福利（如"年终奖 14 薪"）不计；未提及薪资时省略该字段
-8. 典型场景（typical_scenarios）：提取 JD 中明确描述的岗位核心工作场景/典型任务，
+8. 行业（industry）：提取岗位所属行业（如"电商"、"医疗健康"、"金融"、"互联网"、
+   "制造业"、"教育"、"车联网"），以 JD 文本中明确出现的行业表述为准（公司业务
+   介绍、产品/服务领域、行业经验要求等）；未提及行业时输出空字符串，
+   禁止从岗位名或技能名反向推断行业。
+9. 典型场景（typical_scenarios）：提取 JD 中明确描述的岗位核心工作场景/典型任务，
    每条为"名称 + 补充描述"：名称是 4-20 字的短短语（如"分布式缓存改造"、"信贷风控建模"、
    "车联网数据接入"），补充描述可含技术关键词与业务对象（如"Flink 实时计算，支撑业务报表"）。
    仅提取文本中明确出现的场景，禁止从技能名反向杜撰；JD 未描述具体场景时省略该字段
-9. 仅抽取文本中明确出现的内容，不要自行推断："支持/涉及/面向 XX"等上下文性、
+10. 仅抽取文本中明确出现的内容，不要自行推断："支持/涉及/面向 XX"等上下文性、
    平台性宽泛表述不得推断为技能；模型名/产品名（如 DeepSeek、Qwen、GPT）仅当作为
    明确技能要求出现时才收录，上下文提及不算技能。
    **宁缺毋滥**：宁可漏抽，不可多抽——误抽会污染技能图谱与岗位匹配。
@@ -88,7 +92,7 @@ FEW_SHOT_EXAMPLES = """以下是几个示例：
 
 示例 1：
 JD 文本：招聘高级 Java 开发工程师，精通 Java、Spring Boot、MySQL，具备分布式系统经验，本科及以上学历
-输出：{{"position_name": "Java 开发工程师", "level": "高级", "skills": [{{"name": "Java"}}, {{"name": "Spring Boot"}}, {{"name": "MySQL"}}, {{"name": "分布式系统"}}], "tools": [], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Java", "necessity": "must", "level": "高级"}}, {{"skill_name": "Spring Boot", "necessity": "must"}}, {{"skill_name": "MySQL", "necessity": "must"}}]}}
+输出：{{"position_name": "Java 开发工程师", "level": "高级", "industry": "互联网", "skills": [{{"name": "Java"}}, {{"name": "Spring Boot"}}, {{"name": "MySQL"}}, {{"name": "分布式系统"}}], "tools": [], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Java", "necessity": "must", "level": "高级"}}, {{"skill_name": "Spring Boot", "necessity": "must"}}, {{"skill_name": "MySQL", "necessity": "must"}}]}}
 
 示例 2：
 JD 文本：招聘 AI 产品经理，负责 AI 产品规划与设计，熟悉大模型应用者优先，硕士及以上学历，有 TOEFL 成绩优先
@@ -96,7 +100,7 @@ JD 文本：招聘 AI 产品经理，负责 AI 产品规划与设计，熟悉大
 
 示例 3：
 JD 文本：招聘资深数据仓库工程师，精通 SQL 与 Hive，熟练使用 Spark、Airflow 调度任务，熟悉数据建模方法论，计算机相关专业本科及以上学历，持有 AWS 数据类认证者优先
-输出：{{"position_name": "数据仓库工程师", "level": "资深", "skills": [{{"name": "SQL"}}, {{"name": "Hive"}}, {{"name": "Spark"}}, {{"name": "Airflow"}}, {{"name": "数据建模"}}], "tools": [], "education": {{"level": "本科", "major": "计算机"}}, "certifications": [{{"name": "AWS 数据类认证"}}], "requirements": [{{"skill_name": "SQL", "necessity": "must", "level": "高级"}}, {{"skill_name": "Hive", "necessity": "must", "level": "高级"}}, {{"skill_name": "Spark", "necessity": "must", "level": "中级"}}, {{"skill_name": "Airflow", "necessity": "must"}}, {{"skill_name": "数据建模", "necessity": "must"}}]}}
+输出：{{"position_name": "数据仓库工程师", "level": "资深", "industry": "互联网", "skills": [{{"name": "SQL"}}, {{"name": "Hive"}}, {{"name": "Spark"}}, {{"name": "Airflow"}}, {{"name": "数据建模"}}], "tools": [], "education": {{"level": "本科", "major": "计算机"}}, "certifications": [{{"name": "AWS 数据类认证"}}], "requirements": [{{"skill_name": "SQL", "necessity": "must", "level": "高级"}}, {{"skill_name": "Hive", "necessity": "must", "level": "高级"}}, {{"skill_name": "Spark", "necessity": "must", "level": "中级"}}, {{"skill_name": "Airflow", "necessity": "must"}}, {{"skill_name": "数据建模", "necessity": "must"}}]}}
 
 示例 4：
 JD 文本：招聘前端开发工程师，精通 React 与 TypeScript，掌握前端工程化，熟练使用 ECharts 做数据可视化，大专以上学历，具备良好的团队协作与沟通能力
@@ -108,7 +112,7 @@ JD 文本：招聘网络安全工程师，负责渗透测试与安全运维，�
 
 示例 6（英文复合岗名完整翻译）：
 JD 文本：BioChemical Engineer - Analog Devices, Wilmington MA. Design biochemical process solutions for semiconductor fabrication. Required: chemical engineering background, process design experience, Six Sigma certification. Salary: $120K-$150K/yr.
-输出：{{"position_name": "生化工程师", "salary_range": "$120K-$150K/yr", "skills": [{{"name": "化学工程"}}, {{"name": "工艺设计"}}, {{"name": "Six Sigma"}}], "tools": [], "education": {{"level": "本科", "major": "化学工程"}}, "certifications": [{{"name": "Six Sigma"}}], "requirements": [{{"skill_name": "化学工程", "necessity": "must", "level": "中级"}}, {{"skill_name": "工艺设计", "necessity": "must"}}, {{"skill_name": "Six Sigma", "necessity": "nice"}}]}}
+输出：{{"position_name": "生化工程师", "salary_range": "$120K-$150K/yr", "industry": "半导体制造", "skills": [{{"name": "化学工程"}}, {{"name": "工艺设计"}}, {{"name": "Six Sigma"}}], "tools": [], "education": {{"level": "本科", "major": "化学工程"}}, "certifications": [{{"name": "Six Sigma"}}], "requirements": [{{"skill_name": "化学工程", "necessity": "must", "level": "中级"}}, {{"skill_name": "工艺设计", "necessity": "must"}}, {{"skill_name": "Six Sigma", "necessity": "nice"}}]}}
 
 示例 7（英文复合岗名完整翻译，禁止丢 Engineer）：
 JD 文本：Sr Systems Reliability Engineer - Responsible for system reliability engineering, automation of infrastructure, incident response. 5+ years experience, Linux, Python, Terraform required. Salary: USD 130000-160000/年.
@@ -190,11 +194,15 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    （K/万/年/月/时/$/USD 等）必须保留，如 "20-40K"、"1-1.4万"、
    "USD 100000-150000/年"、"US$178K - US$241K (Employer provided)"、"面议"；
    仅薪资高低类表述计入，招聘福利（如"年终奖 14 薪"）不计；未提及薪资时省略该字段
-8. 典型场景（typical_scenarios）：提取 JD 中明确描述的岗位核心工作场景/典型任务，
+8. 行业（industry）：提取岗位所属行业（如"电商"、"医疗健康"、"金融"、"互联网"、
+   "制造业"、"教育"、"车联网"），以 JD 文本中明确出现的行业表述为准（公司业务
+   介绍、产品/服务领域、行业经验要求等）；未提及行业时输出空字符串，
+   禁止从岗位名或技能名反向推断行业。
+9. 典型场景（typical_scenarios）：提取 JD 中明确描述的岗位核心工作场景/典型任务，
    每条为"名称 + 补充描述"：名称是 4-20 字的短短语（如"分布式缓存改造"、"信贷风控建模"、
    "车联网数据接入"），补充描述可含技术关键词与业务对象（如"Flink 实时计算，支撑业务报表"）。
    仅提取文本中明确出现的场景，禁止从技能名反向杜撰；JD 未描述具体场景时省略该字段
-9. 仅抽取文本中明确出现的内容，不要自行推断："支持/涉及/面向 XX"等上下文性、
+10. 仅抽取文本中明确出现的内容，不要自行推断："支持/涉及/面向 XX"等上下文性、
    平台性宽泛表述不得推断为技能；模型名/产品名（如 DeepSeek、Qwen、GPT）仅当作为
    明确技能要求出现时才收录，上下文提及不算技能。
    **宁缺毋滥**：宁可漏抽，不可多抽——误抽会污染技能图谱与岗位匹配。
