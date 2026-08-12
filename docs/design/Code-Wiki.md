@@ -331,6 +331,7 @@ ID 格式 `{prefix}_{seq:04d}`（如 `sk_0042`），通过 Neo4j Counter 节点�
 | [pagerank.py](../../backend/app/services/graph_algorithms/pagerank.py) | PageRank 技能重要性排序：幂迭代收敛（阻尼 0.85，MAX_ITER 50，TOL 1e-6），无向共现边按双有向边聚合；纯计算不依赖 Neo4j | ✅ 完整 |
 | [louvain.py](../../backend/app/services/graph_algorithms/louvain.py) | Louvain 技能簇识别：标准两阶段（模块度增量 ΔQ 最大化 + 社区聚合重跑）。**阶段一（G-04）γ 分辨率参数化**：`louvain(graph, resolution=1.0)` 增益/模块度 resolution 化（γ>1 细簇 / γ<1 粗簇 / 1.0 等价标准 Louvain 向后兼容）；新增 `homogeneity()` 加权簇内同质性（Optuna objective 0.3 权重项） | ✅ 完整 |
 | [config.py](../../backend/app/services/graph_algorithms/config.py) | 图算法运行时配置加载（`configs/graph_algo.yaml`：algorithm/resolution/min_weight/min_size，缺失回退默认；Optuna 最优参数随配置生效） | ✅ 完整 |
+| [leiden.py](../../backend/app/services/graph_algorithms/leiden.py) | **阶段二 Leiden 条件替换**：同签名 `leiden(graph, resolution=1.0)`（igraph 1.0 + leidenalg 0.12，seed=0 确定性）；验收未达标（Q 落后 0.037），默认保持 louvain，双实现并存配置一行切换；API 依赖缺失自动回退 | ✅ 完整（未启用） |
 | [shortest_path.py](../../backend/app/services/graph_algorithms/shortest_path.py) | 技能最短路径：Neo4j 核心 `shortestPath((:Skill)-[*..6]-)`，沿岗位共现 + REQUIRES 边走，返回节点序列由前端按 type 区分展示 | ✅ 完整 |
 | [cluster_llm.py](../../backend/app/services/graph_algorithms/cluster_llm.py) | 技能簇 LLM 兜底：`ClusterLLMDecision`（JSON Schema 强校验）+ `build_cluster_prompt` + `classify_cluster`（失败降级规则标签不阻塞） | ✅ 完整 |
 | [postprocess.py](../../backend/app/services/graph_algorithms/postprocess.py) | 技能簇后处理：规则优先后处理 + LLM 兜底触发判断纯函数化（是否调 LLM 由 API 层决定，本模块只输出触发标记，保持可单测/可缓存） | ✅ 完整 |
@@ -500,8 +501,11 @@ Louvain 技能簇：两阶段模块度优化（节点移动 ΔQ 最大化 → �
 #### `load_graph_algo_config()` — [graph_algorithms/config.py](../../backend/app/services/graph_algorithms/config.py)
 加载 `configs/graph_algo.yaml`（algorithm/resolution/min_weight/min_size），缺失/解析失败回退默认值（不抛错）。**API 默认参数随配置生效**；skill-clusters 缓存键含 resolution（γ 变更不串缓存）。
 
+#### `leiden(graph, resolution=1.0)` — [graph_algorithms/leiden.py](../../backend/app/services/graph_algorithms/leiden.py)
+阶段二 Leiden 条件替换：同签名（igraph 1.0 + leidenalg 0.12，RBConfigurationVertexPartition + resolution_parameter，seed=0 确定性），输出与 louvain 同格式（reindex 0..k-1）。**2026-08-12 验收未达标**（同质性 +0.21 领先但 Q −0.037 落后，两项需同时达标），默认 `algorithm=louvain` 不切换；configs 一行切换 + API 依赖缺失自动回退 louvain。
+
 #### 参数调优 — [scripts/graph_algo_tune.py](../../backend/scripts/graph_algo_tune.py)
-图算法阶段一 Optuna 扫描：γ∈[0.5,2.0] × min_weight∈[1.0,3.0]，objective = 0.5·Q + 0.3·同质性 + 0.2·(1−过小簇占比)。Q 用标准模块度评分（γ 只生成划分），**退化解（簇数 ≤2 或最大簇占比 >0.5）罚 0**（2026-08-12 实跑修复 γ<1 单簇退化最优）。2026-08-12 真实快照（386 节点/3901 边）50 trial 最优 γ=1.256 / min_weight=2.502（同质性 0.37→0.56，详见 [图算法参数评估报告.md](./图算法参数评估报告.md)）。模式：--export（Neo4j 快照导出）/ --snapshot（固定数据集扫描）/ --dry-run（当前配置指标）/ --apply（写回 configs）。
+图算法阶段一 Optuna 扫描：γ∈[0.5,2.0] × min_weight∈[1.0,3.0]，objective = 0.5·Q + 0.3·同质性 + 0.2·(1−过小簇占比)。Q 用标准模块度评分（γ 只生成划分），**退化解（簇数 ≤2 或最大簇占比 >0.5）罚 0**（2026-08-12 实跑修复 γ<1 单簇退化最优）。2026-08-12 真实快照（386 节点/3901 边）50 trial 最优 γ=1.256 / min_weight=2.502（同质性 0.37→0.56，详见 [图算法参数评估报告.md](./图算法参数评估报告.md)）。模式：--export（Neo4j 快照导出）/ --snapshot（固定数据集扫描）/ --dry-run（当前配置指标）/ --apply（写回 configs）/ **--compare（阶段二 Leiden 验收对比）**/ **--algorithm {louvain,leiden}（Leiden 专属调优——参数不可互通，须自身空间扫描）**。
 
 #### `shortest_path(session, from_skill, to_skill)` — [graph_algorithms/shortest_path.py](../../backend/app/services/graph_algorithms/shortest_path.py)
 Neo4j 核心 `shortestPath`（深度 ≤6，沿「岗位共现 + REQUIRES」边，可经 Position 节点），失败返回 None。
