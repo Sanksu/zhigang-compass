@@ -480,3 +480,56 @@ class TestJdLlmArchive:
         assert r["per_sample_skills_f1"] == [0.9, 0.8, 0.7]
         assert r["error_types"][0][0] == "model-added skills not in human gold"
         assert "experience_gap" in r and "core_duties_gap" in r
+
+
+class TestGoldRevisions:
+    """盲审 gold 口径修订（load_gold_revisions / apply_gold_revisions，纯函数）。"""
+
+    def _revisions(self):
+        return {
+            "public_003": {"sample_id": "public_003", "move_skills_to_bonus": ["数据挖掘", "自然语言处理"]},
+            "jd_030": {"sample_id": "jd_030", "remove_skills": ["大模型评测"]},
+        }
+
+    def test_apply_move_skills_to_bonus(self):
+        from tests.evaluate.run_manual_jd_eval import apply_gold_revisions
+
+        skills, bonus = apply_gold_revisions(
+            self._revisions(), "public_003",
+            ["Linux", "图计算", "数据挖掘", "机器学习", "自然语言处理"],
+            ["Hive", "PyTorch"],
+        )
+        assert "数据挖掘" not in skills and "自然语言处理" not in skills
+        assert skills == ["Linux", "图计算", "机器学习"]
+        assert set(bonus) == {"Hive", "PyTorch", "数据挖掘", "自然语言处理"}
+
+    def test_apply_remove_skills(self):
+        from tests.evaluate.run_manual_jd_eval import apply_gold_revisions
+
+        skills, bonus = apply_gold_revisions(
+            self._revisions(), "jd_030",
+            ["AIGC", "数据分析", "大模型评测"],
+            ["Python", "SQL"],
+        )
+        assert skills == ["AIGC", "数据分析"]
+        assert bonus == ["Python", "SQL"]  # 删除不进入 bonus
+
+    def test_apply_noop_for_unknown_sample(self):
+        from tests.evaluate.run_manual_jd_eval import apply_gold_revisions
+
+        skills, bonus = apply_gold_revisions(self._revisions(), "public_999", ["A"], ["B"])
+        assert skills == ["A"] and bonus == ["B"]
+
+    def test_load_revisions_from_file(self):
+        """修订文件缺失/损坏时不阻断（返回空）。"""
+        from pathlib import Path
+
+        from tests.evaluate.run_manual_jd_eval import load_gold_revisions
+
+        assert load_gold_revisions(Path("nonexistent_dir/never.json")) == {}
+        assert load_gold_revisions(Path(__file__)) == {}  # 非 JSON 文件
+
+    def test_load_revisions_missing_file_ok(self, tmp_path):
+        from tests.evaluate.run_manual_jd_eval import load_gold_revisions
+
+        assert load_gold_revisions(tmp_path / "no.json") == {}

@@ -15,82 +15,28 @@
   "fallback_samples": 0,
   "failed_samples": 0,
   "title_raw_exact_accuracy": 0.3333333333333333,
-  "title_normalized_accuracy": 0.5,
+  "title_normalized_accuracy": 0.6666666666666666,
   "skills_micro": {
     "tp": 82,
-    "fp": 67,
+    "fp": 23,
     "fn": 12,
-    "precision": 0.5503355704697986,
+    "precision": 0.780952380952381,
     "recall": 0.8723404255319149,
-    "f1": 0.6748971193415638
+    "f1": 0.8241206030150755
   },
-  "skills_average_sample_f1": 0.6835241512873091,
+  "skills_average_sample_f1": 0.782933732933733,
   "bonus_skills_micro": {
-    "tp": 12,
-    "fp": 20,
-    "fn": 16,
-    "precision": 0.375,
-    "recall": 0.42857142857142855,
-    "f1": 0.39999999999999997
+    "tp": 21,
+    "fp": 21,
+    "fn": 7,
+    "precision": 0.5,
+    "recall": 0.75,
+    "f1": 0.6
   },
-  "bonus_skills_average_sample_f1": 0.22564102564102564,
-  "education_raw_exact_accuracy": 0.9166666666666666,
+  "bonus_skills_average_sample_f1": 0.37752525252525254,
+  "education_raw_exact_accuracy": 1.0,
   "experience": "Schema coverage gap: current JDExtractionResult schema has no experience_range field",
-  "core_duties": "Schema coverage gap: current JDExtractionResult schema has no core_duties field",
-  "per_sample_skills_f1": [
-    0.75,
-    0.25,
-    1.0,
-    0.6667,
-    0.5714,
-    0.8333,
-    0.9091,
-    0.5263,
-    0.75,
-    0.5455,
-    0.9714,
-    0.4286
-  ],
-  "per_sample_bonus_f1": [
-    0.0,
-    0.3077,
-    0.0,
-    1.0,
-    0.5,
-    0.4,
-    0.0,
-    0.0,
-    0.0,
-    0.5,
-    0.0,
-    0.0
-  ],
-  "error_types": [
-    [
-      "possible priority/OR-condition interpretation issue (text marker + set difference)",
-      11
-    ],
-    [
-      "model-added skills not in human gold",
-      10
-    ],
-    [
-      "human-gold skills missed",
-      7
-    ],
-    [
-      "required/bonus skill mixing",
-      7
-    ],
-    [
-      "skills have both additions and omissions",
-      6
-    ],
-    [
-      "title normalization masks a raw-title difference (manual over-normalization check needed)",
-      2
-    ]
-  ]
+  "core_duties": "Schema coverage gap: current JDExtractionResult schema has no core_duties field"
 }
 ```
 
@@ -98,32 +44,32 @@
 
 ## Per-JD results
 
-- jd_012: title raw=False, normalized=False; skills TP/FP/FN=['Go', 'Java', 'Python']/['计算机基础', '软件工程']/[], F1=0.7500; bonus TP/FP/FN=[]/[]/[], F1=0.0000; education=True
-- jd_030: title raw=False, normalized=False; skills TP/FP/FN=['AIGC', '数据分析']/['Prompt', 'Python', 'SQL', '可视化分析', '多模态大模型', '数据标注', '竞品调研', '自动化评测脚本', '视频生成', '评测方案', '音视频质量评估']/['大模型评测'], F1=0.2500; bonus TP/FP/FN=['Python', 'SQL']/['可视化分析', '多模态大模型', '竞品调研', '自动化评测脚本', '视频生成']/['多模态模型', '数据可视化', '数据标注', '自动化评测'], F1=0.3077; education=True
+- jd_012: title raw=False, normalized=False; skills TP/FP/FN=['Go', 'Java', 'Python']/['计算机基础', '软件工程']/[], F1=0.7500; bonus TP/FP/FN=[]/['ERP']/[], F1=0.0000; education=True
+- jd_030: title raw=False, normalized=True; skills TP/FP/FN=['数据分析']/['AIGC创作', '评测方案', '音视频质量评估']/['AIGC', '大模型评测'], F1=0.2857; bonus TP/FP/FN=['Python', 'SQL', '多模态模型', '数据可视化', '数据标注', '自动化评测']/['AI算法测试', '文生图', '文生视频', '竞品评测', '评测体系建设', '音频生成']/[], F1=0.6667; education=True
 - public_001: title raw=False, normalized=False; skills TP/FP/FN=['Odoo', 'Python']/[]/[], F1=1.0000; bonus TP/FP/FN=[]/[]/[], F1=0.0000; education=True
-- public_002: title raw=False, normalized=True; skills TP/FP/FN=['Java', 'JavaScript', 'Python', 'Shell', '软件测试']/['大数据测试', '性能测试', '自动化测试']/['JIRA', 'QC'], F1=0.6667; bonus TP/FP/FN=['大数据测试', '性能测试', '自动化测试']/[]/[], F1=1.0000; education=True
-- public_003: title raw=True, normalized=True; skills TP/FP/FN=['Linux', '图计算', '数据挖掘', '机器学习', '深度学习', '自然语言处理']/['Hive', 'PyTorch', 'TensorFlow', '大语言模型', '推荐', '搜索引擎', '数据结构', '用户增长', '计算广告']/[], F1=0.5714; bonus TP/FP/FN=['Hive', 'PyTorch', 'TensorFlow', '大语言模型']/['推荐', '搜索引擎', '用户增长', '计算广告']/['广告算法', '推荐算法', '计算机视觉', '风控算法'], F1=0.5000; education=True
-- public_004: title raw=True, normalized=True; skills TP/FP/FN=['Ansible', 'ELK', 'Git', 'Grafana', 'Jenkins', 'Kubernetes', 'Linux', 'Prometheus', 'Python', 'Shell']/['可观测性', '告警', '微服务', '日志']/[], F1=0.8333; bonus TP/FP/FN=['微服务']/[]/['AWS', 'Azure', 'GCP'], F1=0.4000; education=True
-- public_005: title raw=False, normalized=False; skills TP/FP/FN=['Office', 'Windows', 'macOS', '故障诊断', '服务器维护']/[]/['网络'], F1=0.9091; bonus TP/FP/FN=[]/[]/[], F1=0.0000; education=True
-- public_006: title raw=True, normalized=True; skills TP/FP/FN=['数据分析', '数据可视化', '机器学习', '统计学', '项目管理']/['报表制作', '数据挖掘', '数据收集', '数据模型构建', '数据清洗', '数据监测', '用户画像', '预测模型']/['数据建模'], F1=0.5263; bonus TP/FP/FN=[]/['CDA', 'CPDA', '项目管理']/[], F1=0.0000; education=True
-- public_007: title raw=False, normalized=False; skills TP/FP/FN=['Apache Spark', 'Elasticsearch', 'Pandas', 'PyTorch', 'Python', 'SQL', 'TensorFlow', '大语言模型', '机器学习', '模型评估', '深度学习', '特征工程']/['AB测试', '强化学习', '数学建模', '模型微调', '模型架构', '模型融合']/['A/B测试', '多模态模型'], F1=0.7500; bonus TP/FP/FN=[]/['大语言模型', '强化学习', '模型微调', '模型架构', '模型融合']/['国产算力研发'], F1=0.0000; education=True
-- public_008: title raw=False, normalized=False; skills TP/FP/FN=['C++', 'DeepSpeed', 'Megatron', 'PyTorch', 'Python', 'TensorRT-LLM', 'vLLM', '增量预训练', '大语言模型', '模型对齐', '模型部署', '模型量化']/['AGENT', 'ChatBI', 'DeepSeek', 'Qwen', '图表理解', '多智能体', '多模态大模型', '大模型微调', '报告生成', '数据联动', '检索增强生成', '模型封装', '模型推理', '模型调优', '深度学习', '知识问答', '自然语言处理', '计算机视觉', '语音交互']/['LoRA'], F1=0.5455; bonus TP/FP/FN=['ChatBI', '检索增强生成']/['AGENT', '多模态大模型']/['Agentic AI', '多模态模型'], F1=0.5000; education=True
-- public_009: title raw=True, normalized=True; skills TP/FP/FN=['AngularJS', 'Apache Flink', 'Apache Kafka', 'Apache Spark', 'CSS', 'Flume', 'HBase', 'HTML', 'Hadoop', 'Hive', 'JavaScript', 'Linux', 'Perl', 'Python', 'Scala', 'Shell', 'jQuery']/['数据分析']/[], F1=0.9714; bonus TP/FP/FN=[]/[]/[], F1=0.0000; education=False
-- public_010: title raw=False, normalized=True; skills TP/FP/FN=['性能调优', '系统运维', '问题分析']/['故障处置', '数据库', '数据采集', '电网业务']/['故障处理', '电网业务知识', '监控', '系统部署'], F1=0.4286; bonus TP/FP/FN=[]/['电网业务']/['南方数据中心', '南方电网项目实施'], F1=0.0000; education=True
+- public_002: title raw=False, normalized=True; skills TP/FP/FN=['JIRA', 'Java', 'JavaScript', 'Python', 'QC', 'Shell']/['测试流程', '测试理论', '需求分析']/['软件测试'], F1=0.7500; bonus TP/FP/FN=['大数据测试', '性能测试', '自动化测试']/[]/[], F1=1.0000; education=True
+- public_003: title raw=True, normalized=True; skills TP/FP/FN=['图计算', '机器学习', '深度学习']/['数据结构']/['Linux', '数据挖掘', '自然语言处理'], F1=0.6000; bonus TP/FP/FN=['Hive', 'PyTorch', 'TensorFlow', '大语言模型']/['互联网风控', '图像', '平台治理', '推荐', '搜索引擎', '数据挖掘', '智能客服', '用户增长', '自然语言处理', '计算广告']/['广告算法', '推荐算法', '计算机视觉', '风控算法'], F1=0.3636; education=True
+- public_004: title raw=True, normalized=True; skills TP/FP/FN=['Ansible', 'Git', 'Grafana', 'Jenkins', 'Kubernetes', 'Linux', 'Prometheus', 'Python', 'Shell']/['可观测性', '日志']/['ELK'], F1=0.8571; bonus TP/FP/FN=['AWS', 'Azure', 'GCP', '微服务']/[]/[], F1=1.0000; education=True
+- public_005: title raw=False, normalized=True; skills TP/FP/FN=['Windows', 'macOS', '故障诊断', '服务器维护']/['office办公']/['Office', '网络'], F1=0.7273; bonus TP/FP/FN=[]/[]/[], F1=0.0000; education=True
+- public_006: title raw=True, normalized=True; skills TP/FP/FN=['数据分析', '数据可视化', '数据建模', '机器学习', '统计学']/['数学', '数据清洗']/['项目管理'], F1=0.7692; bonus TP/FP/FN=[]/['项目管理']/[], F1=0.0000; education=True
+- public_007: title raw=False, normalized=False; skills TP/FP/FN=['A/B测试', 'Apache Spark', 'Elasticsearch', 'Pandas', 'PyTorch', 'Python', 'SQL', 'TensorFlow', '大语言模型', '机器学习', '模型评估', '深度学习', '特征工程']/['数学建模']/['多模态模型'], F1=0.9286; bonus TP/FP/FN=[]/['大语言模型']/['国产算力研发'], F1=0.0000; education=True
+- public_008: title raw=False, normalized=False; skills TP/FP/FN=['C++', 'DeepSpeed', 'Megatron', 'PyTorch', 'Python', 'TensorRT-LLM', 'vLLM', '增量预训练', '大语言模型', '模型对齐', '模型部署', '模型量化']/['大模型微调', '模型封装', '模型推理', '模型调优', '深度学习', '自然语言处理', '计算机视觉', '语音交互']/['LoRA'], F1=0.7273; bonus TP/FP/FN=['ChatBI', '检索增强生成']/['AGENT', '多模态大模型训练']/['Agentic AI', '多模态模型'], F1=0.5000; education=True
+- public_009: title raw=True, normalized=True; skills TP/FP/FN=['AngularJS', 'Apache Flink', 'Apache Kafka', 'Apache Spark', 'CSS', 'Flume', 'HBase', 'HTML', 'Hadoop', 'Hive', 'JavaScript', 'Linux', 'Perl', 'Python', 'Scala', 'Shell', 'jQuery']/[]/[], F1=1.0000; bonus TP/FP/FN=[]/[]/[], F1=0.0000; education=True
+- public_010: title raw=False, normalized=True; skills TP/FP/FN=['性能调优', '故障处理', '电网业务知识', '监控', '系统运维', '系统部署', '问题分析']/[]/[], F1=1.0000; bonus TP/FP/FN=['南方数据中心', '南方电网项目实施']/[]/[], F1=1.0000; education=True
 
 ## Lowest three skill-F1 cases
 
-- jd_030: skills F1=0.2500; FP=['Prompt', 'Python', 'SQL', '可视化分析', '多模态大模型', '数据标注', '竞品调研', '自动化评测脚本', '视频生成', '评测方案', '音视频质量评估']; FN=['大模型评测']
-- public_010: skills F1=0.4286; FP=['故障处置', '数据库', '数据采集', '电网业务']; FN=['故障处理', '电网业务知识', '监控', '系统部署']
-- public_006: skills F1=0.5263; FP=['报表制作', '数据挖掘', '数据收集', '数据模型构建', '数据清洗', '数据监测', '用户画像', '预测模型']; FN=['数据建模']
+- jd_030: skills F1=0.2857; FP=['AIGC创作', '评测方案', '音视频质量评估']; FN=['AIGC', '大模型评测']
+- public_003: skills F1=0.6000; FP=['数据结构']; FN=['Linux', '数据挖掘', '自然语言处理']
+- public_005: skills F1=0.7273; FP=['office办公']; FN=['Office', '网络']
 
 ## Main automatically classifiable error types
 
-- possible priority/OR-condition interpretation issue (text marker + set difference): 11
-- model-added skills not in human gold: 10
-- human-gold skills missed: 7
-- required/bonus skill mixing: 7
-- skills have both additions and omissions: 6
-- title normalization masks a raw-title difference (manual over-normalization check needed): 2
+- model-added skills not in human gold: 9
+- possible priority/OR-condition interpretation issue (text marker + set difference): 9
+- human-gold skills missed: 8
+- skills have both additions and omissions: 8
+- title normalization masks a raw-title difference (manual over-normalization check needed): 4
+- required/bonus skill mixing: 3
 
 Priority/OR conditions are only flagged when a deterministic text marker co-occurs with a set difference; the current schema does not encode condition logic, so these are review candidates rather than conclusive errors.
