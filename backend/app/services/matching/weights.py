@@ -14,6 +14,8 @@ SIM_THRESHOLD_DEFAULT = 0.85
 
 # 配置文件路径（相对 backend 根目录）
 _CONFIG_PATH = Path(__file__).resolve().parents[3] / "configs" / "match_weights.json"
+# 领域跨簇语义黑名单配置（独立文件便于动态调整，修改即时生效）
+_BLOCKLIST_PATH = Path(__file__).resolve().parents[3] / "configs" / "domain_sem_blocklist.json"
 
 
 def _load_config() -> dict:
@@ -59,3 +61,39 @@ def load_sim_threshold() -> float:
         return float(data.get("sim_threshold", SIM_THRESHOLD_DEFAULT))
     except (TypeError, ValueError):
         return SIM_THRESHOLD_DEFAULT
+
+
+# 领域跨簇语义黑名单默认（与 configs/domain_sem_blocklist.json 缺失时保持一致）
+DOMAIN_BLOCKLIST_DEFAULT = (("制造业", "电商"),)
+
+
+def _load_blocklist_config() -> dict:
+    """读取领域黑名单配置文件，解析失败返回空 dict（缺失不阻断匹配）。"""
+    if not _BLOCKLIST_PATH.exists():
+        return {}
+    try:
+        data = json.loads(_BLOCKLIST_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {}
+
+
+def load_domain_sem_blocklist() -> frozenset:
+    """加载领域跨簇语义黑名单为无序对集合（frozenset 成员双向等价）。
+
+    配置格式：{"pairs": [["制造业", "电商"], ...]}。缺失/损坏/空回退默认
+    （制造业×电商）。每次调用重新读文件，修改配置即时生效（引擎每次匹配
+    调用本函数，不缓存）。
+    """
+    data = _load_blocklist_config()
+    try:
+        pairs = data.get("pairs")
+        if not isinstance(pairs, list) or not pairs:
+            return frozenset(frozenset(p) for p in DOMAIN_BLOCKLIST_DEFAULT)
+        pairs_set = set()
+        for pair in pairs:
+            if isinstance(pair, (list, tuple)) and len(pair) == 2 and all(isinstance(x, str) and x for x in pair):
+                pairs_set.add(frozenset(x.lower() for x in pair))
+        return frozenset(pairs_set) if pairs_set else frozenset(frozenset(p) for p in DOMAIN_BLOCKLIST_DEFAULT)
+    except (TypeError, ValueError):
+        return frozenset(frozenset(p) for p in DOMAIN_BLOCKLIST_DEFAULT)

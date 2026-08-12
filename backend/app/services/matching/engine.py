@@ -5,6 +5,7 @@ M2 规则基线：内容加权（must/nice 布尔匹配）+ 经验规则引擎�
 Sentence-BERT 语义增强与 Optuna 权重搜索为 M3 交付项（设计文档 9.3 节）。
 """
 
+import logging
 import math
 from datetime import date, datetime
 
@@ -15,7 +16,9 @@ from app.services.matching.schemas import (
     Necessity,
     PositionProfile,
 )
-from app.services.matching.weights import load_sim_threshold, load_weights
+from app.services.matching.weights import load_domain_sem_blocklist, load_sim_threshold, load_weights
+
+logger = logging.getLogger(__name__)
 
 # CII 通胀修正阈值与比例（设计文档 9.4 节）
 CII_MUST_THRESHOLD = 7          # 必备技能数超过该值才触发降级
@@ -304,6 +307,118 @@ def _project_score(candidate, position: PositionProfile, semantic, project_vecto
         return None
 
 
+# 领域维度语义阈值：行业词粒度粗（JD 抽取自由文本），远低于技能 sim_threshold(0.85)。
+# 实测"电商↔互联网=0.52 / 电商↔金融科技=0.56"，取 0.5 保留合理语义关联而隔离弱噪音。
+DOMAIN_SEM_THRESHOLD = 0.5
+
+# 行业词归一化词库：图谱 Position.industry 常见斜杠复合词/别名 → 标准领域词集。
+# 词面命中含子串，但"SaaS/云技术"这类复合词拆开后才与候选"云计算"子串命中，
+# 此表在子串判定前把复合词拆为原子领域词（词库维度归一化，不改图谱数据）。
+_DOMAIN_ALIASES = {
+    "saas/云技术": ("云计算", "saas"),
+    "银行/金融服务": ("银行", "金融服务"),
+    "激光雷达/自动驾驶": ("自动驾驶", "激光雷达"),
+    "医疗保健/保险": ("医疗保健", "保险"),
+    "国防/航空航天": ("国防", "航空航天"),
+    "航天/卫星": ("航天", "卫星"),
+    "水利/堤坝巡检": ("水利", "堤坝巡检"),
+    "ai agent marketplace": ("人工智能", "ai agent"),
+    # 实测图谱值为"电子商务"（电子+商务），候选常写"电商"，字面无子串关系需词库桥接
+    "电子商务": ("电商", "电子商务"),
+}
+
+
+def _domain_terms(industry: str) -> list[str]:
+    """行业词 → 原子领域词集（归一化 + 斜杠拆分）。
+
+    已收录复合词返回"别名 ∪ 原始拆分段"的并集：别名用于桥接无字面关系的
+    同义写法（如"电子商务"→"电商"），原始拆分段保留"云技术"这类候选对
+    原始词的子串命中能力。未收录词直接按斜杠拆分。
+    """
+    key = industry.lower()
+    segments = [seg.strip().lower() for seg in industry.split("/") if seg.strip()]
+    if key in _DOMAIN_ALIASES:
+        return list(dict.fromkeys([*_DOMAIN_ALIASES[key], *segments]))
+    return segments
+
+
+def _domain_score(candidate, position: PositionProfile, semantic=None) -> float | None:
+    """雷达"领域"维度近似分（0.0-1.0）：岗位行业 × 候选人领域经验。
+
+    三级判定：
+    1. 词面命中：候选领域词与岗位行业（归一化原子词）相等/子串 → 1.0；
+    2. 语义兜底：语义余弦 ≥ DOMAIN_SEM_THRESHOLD（0.5，独立于技能阈值）→ 计相似度值；
+    3. 未命中 → 0.0。岗位无行业或候选人无领域经验 → None（无信息不参与）。
+
+    设计文档 §9.2 六类特征中的领域匹配：行业词粒度粗、来源多样（JD 抽取
+    industry 与简历 domain_experience 均为自由文本），词面 + 语义双路近似，
+    不做严格层级映射。本函数每个岗位×候选调用一次，日志记录命中路径便于排查。
+    """
+    industry = (position.industry or "").strip()
+    domains = [d.strip() for d in (candidate.domain_experience or []) if d and d.strip()]
+    if not industry or not domains:
+        logger.debug(
+            "领域匹配跳过 pid=%s industry=%r 候选领域=%r（缺数据）",
+            position.position_id, industry, domains,
+        )
+        return None
+    ind_terms = _domain_terms(industry)
+    dom_lower = [d.lower() for d in domains]
+    # 词面：归一化原子词 vs 候选领域词，相等/子串双向
+    for term in ind_terms:
+        for d in dom_lower:
+            if d == term or d in term or term in d:
+                logger.info(
+                    "领域词面命中 pid=%s industry=%r 候选=%r term=%r → 1.0",
+                    position.position_id, industry, domains, term,
+                )
+                return 1.0
+    if semantic is None:
+        logger.debug(
+            "领域未命中 pid=%s industry=%r 候选=%r（无语义模型）→ 0.0",
+            position.position_id, industry, domains,
+        )
+        return 0.0
+    try:
+        # 逐 pair 语义判定：命中黑名单的跨簇对跳过，取剩余最高分
+        ind_lower = industry.lower()
+        blocklist = load_domain_sem_blocklist()
+        best, blocked = 0.0, False
+        for d in domains:
+            dl = d.lower()
+            if frozenset({ind_lower, dl}) in blocklist:
+                logger.info(
+                    "领域语义黑名单拦截 pid=%s industry=%r × 候选=%r（跨簇假阳性）→ 跳过",
+                    position.position_id, industry, d,
+                )
+                blocked = True
+                continue
+            sim = semantic.similarity(industry, d)
+            if sim > best:
+                best = sim
+    except Exception:
+        # 语义模型不可用降级（与 _skill_similarity 口径一致），不阻断匹配
+        logger.warning("领域语义计算失败 pid=%s industry=%r → 0.0", position.position_id, industry)
+        return 0.0
+    if best >= DOMAIN_SEM_THRESHOLD:
+        logger.info(
+            "领域语义命中 pid=%s industry=%r 候选=%r best=%.3f ≥阈值%.3f → %.3f",
+            position.position_id, industry, domains, best, DOMAIN_SEM_THRESHOLD, best,
+        )
+        return best
+    if blocked:
+        logger.info(
+            "领域语义未命中（黑名单拦截）pid=%s industry=%r 候选=%r → 0.0",
+            position.position_id, industry, domains,
+        )
+        return 0.0
+    logger.debug(
+        "领域语义未命中 pid=%s industry=%r 候选=%r best=%.3f <阈值%.3f → 0.0",
+        position.position_id, industry, domains, best, DOMAIN_SEM_THRESHOLD,
+    )
+    return 0.0
+
+
 def build_radar(
     must_score: float,
     nice_score: float,
@@ -317,9 +432,10 @@ def build_radar(
 
     五维构成（§9.2 六类特征中实现可达的五维）：must（必备技能）/ nice（加分技能）/
     experience（经验）/ education（学历）/ projects（项目），另加 skill_level
-    （熟练度满足度，仅展示）。软技能已并入 must/nice（low_confidence 降权 ×0.5），
-    证书维度当前图谱侧 required_certs 数据稀疏暂不入雷达。
-    education/projects/skill_level 为保守近似：无数据返回 None，不参与总分。
+    （熟练度满足度，仅展示）与 domain（领域匹配，仅展示）。软技能已并入
+    must/nice（low_confidence 降权 ×0.5），证书维度当前图谱侧 required_certs
+    数据稀疏暂不入雷达。
+    education/projects/domain/skill_level 为保守近似：无数据返回 None，不参与总分。
     """
     skill_level = _skill_level_score(position, candidate.skills)
     return {
@@ -328,6 +444,7 @@ def build_radar(
         "experience": round(exp_score, 4),
         "education": _education_score(position.required_education, candidate.education_level),
         "projects": _project_score(candidate, position, semantic, project_vectors),
+        "domain": _domain_score(candidate, position, semantic),
         "skill_level": round(skill_level, 4) if skill_level is not None else None,
     }
 
@@ -343,8 +460,9 @@ def score_position(
 ) -> MatchResult:
     """单岗位三维评分（设计文档 9.4 节）。
 
-    - must_score = Σ(sim) / total（别名级 sim=1.0，语义级 sim∈[threshold,1)，
-      matched/total 天然惩罚缺失；未注入语义时退化为布尔匹配）
+    - must_score = Σ(w×sim) / Σ(w)（w = log(source_count+1)，别名级 sim=1.0，
+      语义级 sim∈[threshold,1)；Σ(w×sim)/Σ(w) 天然惩罚缺失，未注入语义时退化为
+      布尔匹配；source_count 默认 1 时等权退化）
     - nice_score = Σ(sim×weight) / Σ(weight)，岗位无 nice 时取 1.0 不扣分
     - exp_score = min(total_years / required_years, 1.0)，无年限要求时满分
     必备技能全缺失判零（unqualified=True），不纳入推荐排序。

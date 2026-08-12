@@ -255,6 +255,116 @@ class TestRadar:
         assert result.radar["projects"] == pytest.approx(0.6)
 
 
+class TestDomainDimension:
+    """雷达"领域"维度：岗位行业 × 候选人领域经验（仅展示，不参与总分）。"""
+
+    def _pos(self, industry: str | None) -> PositionProfile:
+        return PositionProfile(
+            position_id="p1", name="p1", must_skills=[], industry=industry
+        )
+
+    def _cand(self, domains: list[str]) -> CandidateProfile:
+        return CandidateProfile(
+            user_id="u1", skills=[], total_years=1, domain_experience=domains
+        )
+
+    def test_exact_match_scores_one(self):
+        result = score_position(self._cand(["金融"]), self._pos("金融"), weights=W)
+        assert result.radar["domain"] == 1.0
+
+    def test_substring_match_scores_one(self):
+        # 岗位"金融科技" × 候选"金融"（子串双向）→ 1.0
+        assert score_position(
+            self._cand(["金融"]), self._pos("金融科技"), weights=W
+        ).radar["domain"] == 1.0
+        assert score_position(
+            self._cand(["金融科技"]), self._pos("金融"), weights=W
+        ).radar["domain"] == 1.0
+
+    def test_no_match_without_semantic_returns_zero(self):
+        # 未命中且无语义模型 → 0.0（有数据但不匹配）
+        result = score_position(self._cand(["电商"]), self._pos("金融"), weights=W)
+        assert result.radar["domain"] == 0.0
+
+    def test_missing_side_returns_none(self):
+        # 岗位无行业 / 候选人无领域经验 → None（无信息不参与）
+        assert score_position(
+            self._cand(["金融"]), self._pos(None), weights=W
+        ).radar["domain"] is None
+        assert score_position(
+            self._cand([]), self._pos("金融"), weights=W
+        ).radar["domain"] is None
+
+    def test_alias_slash_composite_normalized(self):
+        # 斜杠复合行业词（SaaS/云技术）拆原子词后与候选"云计算"子串命中
+        result = score_position(
+            self._cand(["云计算"]), self._pos("SaaS/云技术"), weights=W
+        )
+        assert result.radar["domain"] == 1.0
+        # 反向：候选"云技术"命中岗位"SaaS/云技术"（子串）
+        assert score_position(
+            self._cand(["云技术"]), self._pos("SaaS/云技术"), weights=W
+        ).radar["domain"] == 1.0
+
+    def test_domain_sem_threshold_independent_of_skill_threshold(self):
+        # 领域阈值 0.5 独立于技能 sim_threshold：技能阈值很严时领域语义仍可命中
+        sem = _FakeSemantic({("金融", "电商"): 0.56})
+        result = score_position(
+            self._cand(["电商"]), self._pos("金融"), weights=W,
+            semantic=sem, sim_threshold=0.9,
+        )
+        assert result.radar["domain"] == pytest.approx(0.56)
+
+    def test_blocklist_blocks_cross_cluster_semantic_hit(self):
+        # 黑名单：电商×制造业语义 0.646 是跨簇假阳性 → 拦截返回 0.0（双向）
+        sem = _FakeSemantic({("制造业", "电商"): 0.646})
+        assert score_position(
+            self._cand(["电商"]), self._pos("制造业"), weights=W,
+            semantic=sem, sim_threshold=0.9,
+        ).radar["domain"] == 0.0
+        assert score_position(
+            self._cand(["制造业"]), self._pos("电商"), weights=W,
+            semantic=sem, sim_threshold=0.9,
+        ).radar["domain"] == 0.0
+
+    def test_blocklist_does_not_block_lexical_hit(self):
+        # 黑名单仅拦语义兜底：词面命中（候选"制造"×岗位"制造业"）仍满分
+        sem = _FakeSemantic({("制造业", "电商"): 0.646})
+        result = score_position(
+            self._cand(["制造"]), self._pos("制造业"), weights=W,
+            semantic=sem, sim_threshold=0.9,
+        )
+        assert result.radar["domain"] == 1.0
+
+    def test_blocklist_ignores_other_semantic_hits(self):
+        # 黑名单只拦指定 pair：电商×金融科技仍可语义命中
+        sem = _FakeSemantic({("金融科技", "电商"): 0.56, ("制造业", "电商"): 0.646})
+        result = score_position(
+            self._cand(["电商"]), self._pos("金融科技"), weights=W,
+            semantic=sem, sim_threshold=0.9,
+        )
+        assert result.radar["domain"] == pytest.approx(0.56)
+
+    def test_semantic_fallback(self):
+        # 词面未命中 → 语义相似度 ≥ 领域阈值(0.5)计值，否则 0.0
+        sem = _FakeSemantic({("金融", "电商"): 0.9, ("金融", "医疗"): 0.3})
+        pos = self._pos("金融")
+        assert score_position(
+            self._cand(["电商"]), pos, weights=W, semantic=sem, sim_threshold=0.5
+        ).radar["domain"] == pytest.approx(0.9)
+        assert score_position(
+            self._cand(["医疗"]), pos, weights=W, semantic=sem, sim_threshold=0.5
+        ).radar["domain"] == 0.0
+
+    def test_domain_not_in_total_score(self):
+        # 领域仅展示维度：命中/未命中不影响 total_score
+        pos = self._pos("金融")
+        hit = score_position(self._cand(["金融"]), pos, weights=W)
+        miss = score_position(self._cand(["电商"]), pos, weights=W)
+        assert hit.total_score == miss.total_score
+        assert hit.total_score == 1.0  # 无 must/nice/exp 要求 → 满分
+
+
 def _candidate_with_prof(profs: dict[str, int], total_years: float = 5.0) -> CandidateProfile:
     """构造带熟练度的候选人（技能名 → proficiency 1/2/3）。"""
     return CandidateProfile(
