@@ -28,14 +28,12 @@ _BATCH = 250  # 每批 jd_ids 数（batch_extract 内部再组 8 条/批 LLM 调
 
 
 async def _run(limit: int | None) -> None:
-    from sqlalchemy import func, select
+    from sqlalchemy import select
 
     from app.core.database import async_session_factory
     from app.models.raw import JDRaw
     from app.workers.tasks import batch_extract
 
-    async with async_session_factory() as session:
-        total = (await session.execute(select(func.count()).select_from(JDRaw))).scalar_one()
     ids = []
     async with async_session_factory() as session:
         rows = (await session.scalars(select(JDRaw.id).order_by(JDRaw.id.asc()))).all()
