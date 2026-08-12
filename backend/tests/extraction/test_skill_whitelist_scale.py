@@ -98,7 +98,7 @@ class TestSkillWhitelistYaml:
 
     def test_fallback_when_yaml_missing(self, monkeypatch):
         # yaml 缺失时回退内置集，启动不失败（第三道防线降级不阻塞抽取）。
-        # 回退集为原硬编码 170 项（降级路径规模不达 500 是预期，500+ 依赖 yaml）
+        # 回退集为内置 169 项（降级路径规模不达 500 是预期，500+ 依赖 yaml）
         from app.services.extraction.dictionary import _FALLBACK_SKILL_WHITELIST
 
         monkeypatch.setattr(_SKILL_WHITELIST_PATH.__class__, "read_text",
@@ -126,7 +126,8 @@ class TestFallbackWhitelist:
     def test_fallback_scale(self):
         from app.services.extraction.dictionary import _FALLBACK_SKILL_WHITELIST
 
-        assert len(_FALLBACK_SKILL_WHITELIST) == 170
+        # 169 = 170（原）− R（JD 基线决策支持 ②：单字符子串误报，2026-08-12）
+        assert len(_FALLBACK_SKILL_WHITELIST) == 169
 
     def test_fallback_soft_subset(self):
         from app.services.extraction.dictionary import _FALLBACK_SKILL_WHITELIST

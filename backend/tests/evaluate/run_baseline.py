@@ -7,6 +7,7 @@
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -42,19 +43,34 @@ def load_golden_set(path: str) -> list[dict]:
     return items
 
 
+def _contains(text_lower: str, word: str) -> bool:
+    """词典命中判定（JD 基线词边界修复，2026-08-12）。
+
+    英文/数字词（含 +/#/. 等）用非字母数字前后断言做整词匹配——修复
+    白名单短词（c/go/ai/sql/js 等）与长词（go→docker、c→cloud）的子串误报
+    （此前 'c' 命中任意含 c 的英文词，'go' 命中 'docker'/'golang' 等，误报
+    130+ 次占基线误报大头）；中文/混合词保持子串匹配（无词边界概念）。
+    """
+    w = word.lower()
+    if re.fullmatch(r"[a-z0-9+#.\-]+", w):
+        return re.search(rf"(?<![a-z0-9]){re.escape(w)}(?![a-z0-9])", text_lower) is not None
+    return w in text_lower
+
+
 def rule_predict(text: str) -> list[str]:
     """词典关键词扫描（无 LLM 基线预测）。
 
     扫描白名单标准名 + SKILL_ALIAS 口语变体（大小写不敏感），
     命中后统一归一化为标准名，覆盖 JD 中 "Spring"/"Vue"/"Spark" 等口语写法。
+    英文词整词匹配（_contains），中文子串匹配。
     """
     tl = text.lower()
     hits = set()
     for s in SKILL_WHITELIST:
-        if s.lower() in tl:
+        if _contains(tl, s):
             hits.add(s)
     for alias, std in SKILL_ALIAS.items():
-        if alias.lower() in tl:
+        if _contains(tl, alias):
             hits.add(std)
     return sorted(hits)
 
