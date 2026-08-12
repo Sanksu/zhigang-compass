@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import _ROLE_RANK, get_optional_user
+from app.api.deps import get_optional_user, role_rank
 from app.core.database import get_db, neo4j_driver, redis_client
 from app.models.business import SkillEmbedding
 from app.schemas.common import error, ok
@@ -31,9 +31,7 @@ _PUBLIC_POSITION_STATUSES = ("emerging", "stable", "declining")
 
 def _can_view_all_positions(user: Optional[dict]) -> bool:
     """user/admin 可见全部岗位；匿名/guest 只见 emerging/stable/declining。"""
-    if user is None:
-        return False
-    return _ROLE_RANK.get(user.get("role", "guest"), 0) >= _ROLE_RANK["user"]
+    return user is not None and role_rank(user) >= role_rank({"role": "user"})
 
 
 def _position_scope(user: Optional[dict]) -> str:
@@ -678,10 +676,17 @@ async def graph_skill_clusters(
     """Louvain 技能簇（设计文档 7.1 图算法应用，技术栈视图支撑）。
 
     同一簇内技能常共现于同一批岗位（如大数据栈 / AI 栈），纯 Python
-    两阶段 Louvain。min_size 过滤过小簇。30s Redis TTL 缓存。
+    两阶段 Louvain。min_size 过滤过小簇。
+
+    图算法优化方案 §4：输出经规则优先后处理（孤立簇剔除/过小簇合并/
+    规则标签）+ LLM 兜底（仅 needs_llm 簇调用，失败降级规则标签），
+    响应附 needs_llm/triggers/llm 字段。30s Redis TTL 缓存。
     """
+    from app.services.extraction.dictionary import skill_category
+    from app.services.graph_algorithms.cluster_llm import ClusterLLMClassifier
     from app.services.graph_algorithms.louvain import louvain
     from app.services.graph_algorithms.network import load_skill_cooccurrence
+    from app.services.graph_algorithms.postprocess import ClusterPostProcessor
 
     cache_key = f"graph:algo:clusters:{min_size}"
     cached = await redis_client.get(cache_key)
@@ -689,24 +694,46 @@ async def graph_skill_clusters(
         return ok(data=json.loads(cached))
 
     def _compute():
-        # 同步 Neo4j 会话 + Louvain 为 CPU/IO 密集，放线程池避免阻塞事件循环。
+        # 同步 Neo4j 会话 + Louvain + 后处理 + LLM 兜底为 CPU/IO 密集，
+        # 放线程池避免阻塞事件循环。
         # min_weight=2.0（默认）：P0 改造后权重=必要性组合因子×共现数，
         # 过滤 must-nice 低频与 nice-nice 弱边，聚类簇内同质性最佳
         with neo4j_driver.session() as session:
             graph, name_map = load_skill_cooccurrence(session)
         clusters = louvain(graph)
-        by_cluster: dict[int, list[str]] = {}
-        for sid, cid in clusters.items():
-            by_cluster.setdefault(cid, []).append(sid)
+
+        # 规则优先后处理 + LLM 兜底触发标记（图算法优化方案 §4.1-4.2）
+        categories = {sid: skill_category(name) for sid, name in name_map.items()}
+        processed = ClusterPostProcessor().process(clusters, graph, name_map, categories)
+
+        # LLM 兜底（§4.3-4.4）：仅对 needs_llm 且非孤立的簇调用，失败降级规则标签
+        # （ClusterLLMClassifier.classify 内部已捕获 LLM 异常，不阻塞 API）
+        classifier = ClusterLLMClassifier()
+        for c in processed["clusters"]:
+            if c["needs_llm"] and not c["orphan"]:
+                skills = [name_map.get(sid, sid) for sid in c["skills"]]
+                decision = classifier.classify(skills, c["triggers"], c["label"])
+                c["llm"] = {
+                    "coherent": decision.coherent,
+                    "cluster_name": decision.cluster_name,
+                    "rationale": decision.rationale,
+                    "splits": decision.splits,
+                }
+
         items = []
-        for cid in sorted(by_cluster):
-            members = sorted(by_cluster[cid])
-            if len(members) < min_size:
+        for c in processed["clusters"]:
+            if c["orphan"]:
+                continue
+            if len(c["skills"]) < min_size:
                 continue
             items.append({
-                "id": cid,
-                "size": len(members),
-                "skills": [{"id": sid, "name": name_map.get(sid, sid)} for sid in members],
+                "id": c["cluster_id"],
+                "size": len(c["skills"]),
+                "label": c["label"],
+                "needs_llm": c["needs_llm"],
+                "triggers": c["triggers"],
+                "llm": c.get("llm"),
+                "skills": [{"id": sid, "name": name_map.get(sid, sid)} for sid in c["skills"]],
             })
         return items
 
