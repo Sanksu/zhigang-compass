@@ -5,10 +5,12 @@
    的邻居社区，直至无正增益移动；
 2. 阶段二：将社区聚合为超节点，在新图上重跑阶段一，迭代至模块度不再增长。
 
-模块度增量公式（无向有权图）：
-    ΔQ(C) = k_i,in / m - (Σ_tot(C) · k_i) / (2m²)
+模块度增量公式（无向有权图，resolution 化）：
+    ΔQ(C) = k_i,in / m - γ · (Σ_tot(C) · k_i) / (2m²)
 其中 k_i,in 为节点 i 到社区 C 的连边权重和，Σ_tot(C) 为社区 C 节点连边
-权重和，k_i 为节点 i 连边权重和，m 为全图权重和。
+权重和，k_i 为节点 i 连边权重和，m 为全图权重和，γ 为分辨率参数
+（图算法优化方案阶段一：γ > 1 产更细簇，γ < 1 产更粗簇，γ = 1.0 等价标准
+Louvain，默认值保持向后兼容）。
 
 纯标准库实现，零第三方依赖。
 """
@@ -19,8 +21,8 @@ def _total_weight(graph: dict[str, dict[str, float]]) -> float:
     return sum(w for nbs in graph.values() for w in nbs.values()) / 2
 
 
-def _modularity(graph: dict[str, dict[str, float]], partition: dict[str, int]) -> float:
-    """划分的模块度 Q = Σ_c [ Σ_in/(2m) - (Σ_tot/(2m))² ]。"""
+def _modularity(graph: dict[str, dict[str, float]], partition: dict[str, int], resolution: float = 1.0) -> float:
+    """划分的模块度 Q = Σ_c [ Σ_in/(2m) - γ·(Σ_tot/(2m))² ]。"""
     m = _total_weight(graph)
     if m == 0:
         return 0.0
@@ -33,11 +35,38 @@ def _modularity(graph: dict[str, dict[str, float]], partition: dict[str, int]) -
             w for nd in members for nb, w in graph[nd].items() if nb in members
         )
         sum_tot = sum(sum(graph[nd].values()) for nd in members)
-        q += sum_in / (2 * m) - (sum_tot / (2 * m)) ** 2
+        q += sum_in / (2 * m) - resolution * (sum_tot / (2 * m)) ** 2
     return q
 
 
-def _phase1(graph, partition) -> bool:
+def homogeneity(graph: dict[str, dict[str, float]], partition: dict[str, int]) -> float:
+    """加权簇内同质性：Σ_c 簇内边权重 / Σ_c (簇内 + 簇间) 边权重。
+
+    无向图双向登记下 intra/inter 均双倍累计，比值不变。值域 [0, 1]，
+    1.0 表示簇内完全无外部连边（理想聚类）。图算法优化方案阶段一
+    Optuna objective 的 0.3 权重项。
+    """
+    if not graph or not partition:
+        return 0.0
+    communities: dict[int, set[str]] = {}
+    for nd, cid in partition.items():
+        communities.setdefault(cid, set()).add(nd)
+    intra = 0.0
+    inter = 0.0
+    for members in communities.values():
+        for nd in members:
+            for nb, w in graph[nd].items():
+                if nb in members:
+                    intra += w
+                else:
+                    inter += w
+    total = intra + inter
+    if total == 0:
+        return 0.0
+    return intra / total
+
+
+def _phase1(graph, partition, resolution: float) -> bool:
     """局部移动：遍历节点，有正增益邻居社区则移动，返回是否发生移动。
 
     社区统计（Σ_tot / Σ_in）随移动实时维护，单轮内按出现顺序串行更新。
@@ -74,7 +103,7 @@ def _phase1(graph, partition) -> bool:
         for cid, w_in in ki_in.items():
             if cid == cid0:
                 continue  # 移回原社区为无操作
-            gain = w_in / m - (comm_tot[cid] * k[nd]) / (2 * m * m)
+            gain = w_in / m - resolution * (comm_tot[cid] * k[nd]) / (2 * m * m)
             if gain > best_gain:
                 best_cid, best_gain = cid, gain
 
@@ -116,11 +145,13 @@ def _aggregate(graph, partition, members) -> tuple[dict, dict]:
     return agg, agg_members
 
 
-def louvain(graph: dict[str, dict[str, float]]) -> dict[str, int]:
+def louvain(graph: dict[str, dict[str, float]], resolution: float = 1.0) -> dict[str, int]:
     """技能共现图的社区划分（skill_id → cluster_id，0 起始）。
 
     Args:
         graph: skill_id → {相邻 skill_id: 共现权重}（无向，双向登记）
+        resolution: 分辨率参数 γ（图算法优化方案阶段一）。γ > 1 产更细簇，
+            γ < 1 产更粗簇，默认 1.0 等价标准 Louvain（向后兼容）
 
     Returns:
         skill_id → cluster_id。空图返回空 dict，单节点自成一簇。
@@ -136,16 +167,16 @@ def louvain(graph: dict[str, dict[str, float]]) -> dict[str, int]:
     partition = {nd: i for i, nd in enumerate(nodes)}
 
     best_flat = dict(partition)
-    best_q = _modularity(graph, partition)
+    best_q = _modularity(graph, partition, resolution)
 
     for _ in range(32):  # 迭代上限（正常 2-5 轮收敛）
-        moved = _phase1(current, partition)
+        moved = _phase1(current, partition, resolution)
         # 扁平化：聚合节点成员 → 原图节点簇映射，用原图算模块度
         flat: dict[str, int] = {}
         for nd, cid in partition.items():
             for orig in members[nd]:
                 flat[orig] = cid
-        q = _modularity(graph, flat)
+        q = _modularity(graph, flat, resolution)
         if q > best_q + 1e-9:
             best_flat, best_q = flat, q
         if not moved:

@@ -636,12 +636,13 @@ async def skill_detail(
 @router.get("/algorithms/pagerank")
 async def graph_pagerank(
     top_n: int = Query(default=20, ge=1, le=100),
-    min_weight: float = Query(default=1.0, ge=1.0),
+    min_weight: float = Query(default=2.0, ge=1.0),
 ):
     """PageRank 技能重要性 Top-N（设计文档 7.1 图算法应用）。
 
     技能网络 = 岗位共现（两技能被同一岗位 REQUIRES 即连边），纯 Python
-    幂迭代（Neo4j 社区版无 GDS 插件）。30s Redis TTL 缓存。
+    幂迭代（Neo4j 社区版无 GDS 插件）。min_weight 默认 2.0，与 skill-clusters
+    端点取数口径一致（configs/graph_algo.yaml 可覆盖）。30s Redis TTL 缓存。
     """
     from app.services.graph_algorithms.network import load_skill_cooccurrence
     from app.services.graph_algorithms.pagerank import pagerank
@@ -672,15 +673,19 @@ async def graph_pagerank(
 @router.get("/algorithms/skill-clusters")
 async def graph_skill_clusters(
     min_size: int = Query(default=2, ge=1, le=100),
+    resolution: float = Query(default=1.0, ge=0.1, le=5.0),
 ):
     """Louvain 技能簇（设计文档 7.1 图算法应用，技术栈视图支撑）。
 
     同一簇内技能常共现于同一批岗位（如大数据栈 / AI 栈），纯 Python
-    两阶段 Louvain。min_size 过滤过小簇。
+    两阶段 Louvain。min_size 过滤过小簇；resolution 为分辨率参数 γ
+    （图算法优化方案阶段一：>1 细簇 / <1 粗簇 / 1.0 等价标准 Louvain，
+    默认值取 configs/graph_algo.yaml）。
 
     图算法优化方案 §4：输出经规则优先后处理（孤立簇剔除/过小簇合并/
     规则标签）+ LLM 兜底（仅 needs_llm 簇调用，失败降级规则标签），
-    响应附 needs_llm/triggers/llm 字段。30s Redis TTL 缓存。
+    响应附 needs_llm/triggers/llm 字段。30s Redis TTL 缓存（键含 resolution，
+    防新旧参数串缓存）。
     """
     from app.services.extraction.dictionary import skill_category
     from app.services.graph_algorithms.cluster_llm import ClusterLLMClassifier
@@ -688,7 +693,7 @@ async def graph_skill_clusters(
     from app.services.graph_algorithms.network import load_skill_cooccurrence
     from app.services.graph_algorithms.postprocess import ClusterPostProcessor
 
-    cache_key = f"graph:algo:clusters:{min_size}"
+    cache_key = f"graph:algo:clusters:{min_size}:{resolution}"
     cached = await redis_client.get(cache_key)
     if cached is not None:
         return ok(data=json.loads(cached))
@@ -700,7 +705,7 @@ async def graph_skill_clusters(
         # 过滤 must-nice 低频与 nice-nice 弱边，聚类簇内同质性最佳
         with neo4j_driver.session() as session:
             graph, name_map = load_skill_cooccurrence(session)
-        clusters = louvain(graph)
+        clusters = louvain(graph, resolution=resolution)
 
         # 规则优先后处理 + LLM 兜底触发标记（图算法优化方案 §4.1-4.2）
         categories = {sid: skill_category(name) for sid, name in name_map.items()}

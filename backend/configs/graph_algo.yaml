@@ -1,0 +1,4 @@
+algorithm: louvain
+resolution: 1.2564436070615108
+min_weight: 2.5021449703321417
+min_size: 2
