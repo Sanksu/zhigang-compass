@@ -15,7 +15,7 @@
 
 import statistics
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Protocol
 
 from app.services.extraction.dictionary import is_noise_skill
 
@@ -120,8 +120,9 @@ def _z_score(series: list[float]) -> float | None:
     历史 σ 为 0 时：历史均值为 0 返回 None（无历史基线，不判定）；
     历史全相同且非零时，完全平稳（recent == mean）返回 0.0，突变更大
     返回 Z_SIGMA / 更小返回 -Z_SIGMA（无法计算有限 z，按超阈值处理）。
+    历史少于 2 周（总序列 < 3 周）无足够基线，不判定。
     """
-    if len(series) < 2:
+    if len(series) < 3:
         return None
     recent = series[-1]
     history = series[:-1]
@@ -140,7 +141,7 @@ def _z_score(series: list[float]) -> float | None:
 
 
 def detect_z_signal(weekly: dict[str, int]) -> tuple[float, bool] | None:
-    """周序列 → (z 偏离, 是否命中 2σ)。不足 2 周返回 None。
+    """周序列 → (z 偏离, 是否命中 2σ)。不足 3 周（无 2 周历史基线）返回 None。
 
     用 z >= Z_SIGMA 而非 >：历史 σ=0 且突变时 z 取 Z_SIGMA（阈值本身），
     > 会把该退化分支判为未命中（死分支）。
