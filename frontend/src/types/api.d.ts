@@ -648,7 +648,7 @@ export interface paths {
             parameters: {
                 query?: {
                     top_n?: number;
-                    /** @description 共现边权重下限（权重 = 必要性组合因子 × 共现岗位数：must-must=1.0/must-nice=0.5/nice-nice=0.2 再 × 共现数）；默认 2.0 过滤 must-nice 低频与 nice-nice 弱边，与 skill-clusters 取数口径一致 */
+                    /** @description 共现边权重下限（权重 = 必要性组合因子 × 共现岗位数：must-must=1.0/must-nice=0.5/nice-nice=0.2 再 × 共现数）。省略时取 configs/graph_algo.yaml 的调优值（当前 2.5021），与 skill-clusters 取数口径一致 */
                     min_weight?: number;
                 };
                 header?: never;
@@ -689,7 +689,7 @@ export interface paths {
                 query?: {
                     /** @description 过滤过小簇（size < min_size 不返回） */
                     min_size?: number;
-                    /** @description Louvain 分辨率参数 γ（图算法优化方案阶段一）：>1 细簇 / <1 粗簇 / 1.0 等价标准 Louvain。默认值取 configs/graph_algo.yaml */
+                    /** @description Louvain 分辨率参数 γ（图算法优化方案阶段一）：>1 细簇 / <1 粗簇 / 1.0 等价标准 Louvain。省略时取 configs/graph_algo.yaml 的调优值（当前 1.2564，随配置生效） */
                     resolution?: number;
                     /** @description 层级（阶段三层次化提取）：0 = 最细，逐层变粗；默认 null = 最优层（与 louvain() 输出一致）；Leiden 算法不支持层级（忽略） */
                     level?: number | null;
@@ -2678,6 +2678,48 @@ export interface components {
             data?: unknown;
             /** @description 链路追踪 ID（uuid4 hex 截断 16 位） */
             trace_id: string;
+        };
+        /**
+         * @description 图谱视图类型（服务端过滤）
+         * @enum {string}
+         */
+        GraphViewType: "panorama" | "techStack" | "level" | "positionCenter";
+        /** @description 图谱节点（Position/Skill，匿名视角候选岗位不外宣） */
+        GraphNode: {
+            id: string;
+            name: string;
+            /** @enum {string} */
+            type: "position" | "skill" | "evidence";
+            /**
+             * @description 岗位状态机（仅 position 节点）
+             * @enum {string}
+             */
+            status?: "candidate" | "emerging" | "stable" | "declining" | "archived";
+        };
+        /** @description 图谱边（REQUIRES 关系） */
+        GraphEdge: {
+            /** @description 源节点 id（岗位） */
+            source: string;
+            /** @description 目标节点 id（技能） */
+            target: string;
+            /** @description 边权重（聚合口径 must=0.8/nice=0.4） */
+            weight?: number;
+            /** @enum {string} */
+            necessity?: "must" | "nice";
+            /** @description 熟练度级别（初级/中级/高级/专家） */
+            level?: string;
+        };
+        /** @description 视图统计（本次返回的节点/边数，非全图） */
+        GraphViewStats: {
+            nodes?: number;
+            edges?: number;
+        };
+        /** @description 图谱视图响应（四种视图同构） */
+        GraphViewData: {
+            view_type: components["schemas"]["GraphViewType"];
+            nodes: components["schemas"]["GraphNode"][];
+            edges: components["schemas"]["GraphEdge"][];
+            stats: components["schemas"]["GraphViewStats"];
         };
         /** @description 社区层级树节点（阶段三层次化提取，dendrogram 可视化） */
         CommunityNode: {

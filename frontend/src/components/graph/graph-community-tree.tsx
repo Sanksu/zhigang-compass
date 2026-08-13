@@ -12,16 +12,10 @@ import { GitFork, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useUIStore } from '@/store/ui'
 import { apiGet } from '@/lib/api'
+import type { components } from '@/types/api'
 
-interface CommunityNode {
-  id: string
-  name: string
-  level: number
-  cluster_count: number
-  modularity: number
-  top_skills: string[]
-  children?: CommunityNode[]
-}
+/** 契约 CommunityNode（社区层级树，backend/openapi/openapi.yaml 阶段三层次化提取 schema） */
+type CommunityNode = components['schemas']['CommunityNode']
 
 interface GraphCommunityTreeProps {
   className?: string
