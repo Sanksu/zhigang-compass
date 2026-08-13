@@ -80,6 +80,20 @@ class TestAgglomerativeClusters:
         norm = lambda cs: sorted(tuple(sorted(c)) for c in cs)
         assert norm(c1) == norm(c2)
 
+    def test_representative_link_breaks_chaining(self):
+        # 链式漂移回归（08-13 实测：单链接把 1185 个无关技能并入"2D可视化"簇）：
+        # A-B / B-C 逐对相似 ≥ 阈值，但 A-C 不相似（跨 1 跳链）。单链接（any
+        # member）会让 C 经 B 链入 A 簇；代表链接（与簇种子 A 比较）切断链。
+        embedder = _FakeEmbedder({
+            ("A", "B"): 0.9,
+            ("B", "C"): 0.9,
+            ("A", "C"): 0.2,
+        })
+        clusters = _agglomerative_clusters(["A", "B", "C"], embedder.similarity)
+        flat = sorted(tuple(sorted(c)) for c in clusters)
+        assert ("A", "B") in flat  # A 与 B 相似 ≥ 阈值 → 同簇
+        assert ("C",) in flat      # C 与种子 A 不相似 → 自成一簇（链被切断）
+
 
 # ============================================================
 # SkillNormalizer
