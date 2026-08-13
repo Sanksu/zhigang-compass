@@ -168,7 +168,9 @@ async def amain() -> int:
         s_complete = score_path(len(items), gap_total)
         s_prereq = [1.0 if it.prerequisites else 0.5 for it in items]
         s_course = [1.0 if it.courses else 0.3 for it in items]
-        s_hours = [score_hours(it.estimated_hours, len(items)) for it in items]
+        # 该项平均学时 = 总学时 / (技能自身 + 先修链项数)；分母用 items 总数会
+        # 系统性低估（08-13 评审修复：items 数 ≠ 该项链长）
+        s_hours = [score_hours(it.estimated_hours, len(it.prerequisites) + 1) for it in items]
 
         avg = lambda xs: sum(xs) / len(xs) if xs else 0.0
         dims = {

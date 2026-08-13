@@ -12,6 +12,37 @@ import yaml
 _CONFIG_PATH = Path(__file__).resolve().parents[3] / "configs" / "skill_prerequisites.yaml"
 _DEFAULT_HOURS_PER_SKILL = 30.0
 
+# P1-2 学时分层（08-13 学习路径评审：默认 30h 一刀切系统性低估，hours 维度 0.42）。
+# 未收录先修字典的技能按白名单类别给合理基准学时（单技能掌握普遍 40-100h 现实基准）。
+_HOURS_BY_CATEGORY = {
+    # 高复杂度：算法/模型/硬件/机器人需长时投入
+    "AI/机器学习": 70.0, "算法": 70.0, "大数据": 70.0,
+    "硬件/芯片": 70.0, "智能驾驶/机器人": 70.0, "音视频": 70.0,
+    # 中：语言/框架/平台/安全/数据库/测试等
+    "编程语言": 55.0, "前端": 55.0, "后端": 55.0, "云原生/DevOps": 55.0,
+    "安全": 55.0, "数据库": 55.0, "测试": 55.0, "网络/协议": 55.0,
+    "消息/中间件": 55.0, "游戏/数字孪生": 55.0, "移动/桌面": 55.0,
+    # 低：数据/商业/软技能/基础
+    "数据分析/商业": 40.0, "软技能": 40.0, "计算机基础": 40.0,
+    "工程协作": 40.0, "数据处理": 40.0, "工程": 40.0,
+}
+
+
+@lru_cache(maxsize=1)
+def _load_whitelist_categories() -> dict[str, str]:
+    """白名单技能类别（skill_whitelist.yaml 单一事实源）：name → category。"""
+    path = Path(__file__).resolve().parents[3] / "configs" / "skill_whitelist.yaml"
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except OSError:
+        return {}
+    return {
+        x.get("name"): x.get("category")
+        for x in (data.get("skills") or [])
+        if x.get("name")
+    }
+
 
 @lru_cache(maxsize=1)
 def load_prerequisite_config() -> dict:
@@ -22,11 +53,20 @@ def load_prerequisite_config() -> dict:
 
 
 def base_hours(skill_name: str) -> float:
-    """技能基础学时（小时）：字典内可逐技能覆盖，未收录用默认值。"""
+    """技能基础学时（小时）：字典逐技能覆盖 > 白名单类别分层 > 配置默认值。
+
+    分层动机（08-13 评审）：默认 30h 一刀切使学时维度系统性低估（hours 0.42）；
+    未收录技能按白名单类别给合理基准（AI/算法 70h、语言/框架 55h、数据/软技能 40h）。
+    """
     cfg = load_prerequisite_config()
     default = float(cfg.get("default_hours_per_skill", _DEFAULT_HOURS_PER_SKILL))
     entry = (cfg.get("skills") or {}).get(skill_name) or {}
-    return float(entry.get("hours", default))
+    if "hours" in entry:
+        return float(entry["hours"])
+    category = _load_whitelist_categories().get(skill_name)
+    if category:
+        return _HOURS_BY_CATEGORY.get(category, default)
+    return default
 
 
 def prerequisite_chain(skill_name: str) -> list[str]:

@@ -33,6 +33,13 @@ _cache_lock = threading.Lock()
 # 语义相关即可推荐；匹配则是"是否同一技能"须严格。0.7 可覆盖 "Conversational AI"→"Generative AI"(0.707)
 _COURSE_MATCH_THRESHOLD = 0.7
 
+# P1-3 课程名语义门控阈值：课程名与技能名的相关性下限（08-13 实证）。
+# 误配课程相似度 0.01-0.25（Genomic Data Science/期末冲刺/Node.js 等，图谱脏边），
+# 合理课程 0.6+（Python for Everybody 0.796、机器学习↔Machine Learning 0.939）；
+# 0.5 过滤全部实证误配、保留合理课程（统计分析→DS Fundamentals 0.304 等偏案例同滤，
+# 宁可无课不可误导）。注意同语言短词虚高（语音合成↔KK音标 0.665）为已知残余。
+_COURSE_TITLE_SIM_THRESHOLD = 0.5
+
 # 时长单位 → 小时换算（周/月按每周 40h / 每月 160h 折算）
 _UNIT_HOURS = {
     "小时": 1.0, "hour": 1.0, "hours": 1.0, "h": 1.0,
@@ -123,6 +130,33 @@ def _semantic_match_skill(
     return best_name if best_sim > sim_threshold else None
 
 
+def _filter_by_title_similarity(
+    rows: list[dict], skill_name: str, semantic, title_threshold: float
+) -> list[dict]:
+    """课程名校验（P1-3）：课程名与技能名语义相关才保留。
+
+    背景：图谱存在脏 LEARNABLE_VIA 边（Unix Shell→Genomic Data Science、
+    Servers→Node.js 等）与脏技能节点（发音纠正打卡/期末突击），fallback 或
+    精确边都可能返回与技能无关的课程。课程名↔技能名相似度实证（08-13）：
+    误配 0.01-0.25、合理 0.6+，阈值 0.5 可过滤误配、保留合理。语义模型不可用
+    时不过滤（保持纯规则链路）。
+    """
+    if not rows or semantic is None:
+        return rows
+    kept = []
+    for r in rows:
+        title = r.get("name") or r.get("id") or ""
+        if not title:
+            continue
+        try:
+            sim = semantic.similarity(skill_name, title)
+        except Exception:
+            continue
+        if sim >= title_threshold:
+            kept.append(r)
+    return kept
+
+
 def _query_courses_sync(skill_id: str, skill_name: str) -> list[dict]:
     """图谱精确查询技能课程（skill_id 优先，name 兜底）。同步 Neo4j，由线程池调用。"""
     with neo4j_driver.session() as session:
@@ -173,6 +207,15 @@ async def load_courses_for_skill(
             rows = await _query_courses("", matched)
     if not rows:
         return []
+
+    # P1-3：课程名语义门控（精确边与 fallback 统一校验，防图谱脏边/脏技能误配）
+    if semantic is not None:
+        rows = await asyncio.to_thread(
+            _filter_by_title_similarity, rows, skill_name, semantic,
+            _COURSE_TITLE_SIM_THRESHOLD,
+        )
+        if not rows:
+            return []
 
     quality = await _load_quality_map([(r["source"], r["source_id"]) for r in rows])
     items = [
