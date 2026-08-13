@@ -138,6 +138,9 @@ async def amain() -> int:
     parser.add_argument("--limit", type=int, default=_CASE_COUNT, help="案例数（冒烟用）")
     parser.add_argument("--out", type=Path,
                         default=ROOT / "data" / "golden_set" / "review" / "learning_path_eval_30.json")
+    parser.add_argument("--re-score", type=Path, default=None,
+                        help="人工评分覆盖文件（{case_id: {prerequisite/course/hours: 分, note: 备注}}），"
+                             "读入后重算 mean/reasonable/summary 并覆盖输出（completeness 为客观计算不覆盖）")
     args = parser.parse_args()
 
     candidates = load_resume_candidates()
@@ -207,6 +210,36 @@ async def amain() -> int:
         },
         "note": "预评分（规则化 AI 评审），专家复核后重跑 --re-score 定稿",
     }
+    if args.re_score:
+        human = json.loads(args.re_score.read_text(encoding="utf-8"))
+        applied = 0
+        for c in cases:
+            h = human.get(c["case_id"])
+            if not h:
+                continue
+            for dim in ("prerequisite", "course", "hours"):
+                if dim in h:
+                    c["scores"][dim] = round(float(h[dim]), 2)
+                    applied += 1
+            c["scores"]["mean"] = round(
+                sum(c["scores"][d] for d in ("completeness", "prerequisite", "course", "hours")) / 4, 2)
+            c["reasonable"] = c["scores"]["mean"] >= 0.8
+            if h.get("note"):
+                c["review_note"] = h["note"]
+        reasonable = sum(1 for c in cases if c["reasonable"])
+        summary = {
+            "case_count": n,
+            "reasonable_count": reasonable,
+            "reasonable_ratio": round(reasonable / n, 4) if n else 0,
+            "target_ratio": 0.8,
+            "target_met": (reasonable / n >= 0.8) if n else False,
+            "avg_dims": {
+                k: round(sum(c["scores"][k] for c in cases) / n, 3)
+                for k in ("completeness", "prerequisite", "course", "hours", "mean")
+            },
+            "note": f"人工定稿（{args.re_score.name}，覆盖 {applied} 项评分）",
+        }
+        print(f"人工评分覆盖: {applied} 项")
     payload = {"summary": summary, "cases": cases}
     args.out.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"\n合理性: {reasonable}/{n} = {summary['reasonable_ratio']:.1%} "
