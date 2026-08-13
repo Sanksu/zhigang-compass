@@ -75,6 +75,19 @@ def _normalize(record: dict) -> dict:
     }
 
 
+def is_leaf_code(code: str) -> bool:
+    """细类职业判定：10 位编码（如 1-01-00-00，三段连字符）。
+
+    层级：大类 1 位 / 中类 4 位（1-01）/ 小类 7 位（1-01-00）/ 细类 10 位。
+    """
+    return code.count("-") == 3
+
+
+def is_root_code(code: str) -> bool:
+    """大类根判定：1 位编码（如 1，无连字符），共 8 个。"""
+    return code.count("-") == 0
+
+
 def _walk_tree(node: dict, collected: dict[str, dict], depth: int = 0) -> None:
     """递归遍历职业树（body → children 嵌套），叶子与中间层均收录。"""
     norm = _normalize(node)
@@ -144,14 +157,15 @@ async def _fetch_detail(request, code: str, version_id: int = 2) -> dict | None:
 async def _enrich_details(request, collected: dict[str, dict], interval: float) -> tuple[int, int]:
     """对细类职业（10 位编码，如 1-01-00-00）逐个补 detail 定义。
 
-    目录采集 2213 条中细类为 1639 个——逐个 GET career/detail 补
-    definition/aliases/category，字段级"有值才更新"（detail 权威但不
-    清空目录已有值）。串行 + 间隔限速（默认 0.3s/请求，1639 条约 8 分钟）。
+    目录采集 2213 条中细类为 1676 个（08-13 实测，code 三段连字符）——
+    逐个 GET career/detail 补 definition/aliases/category，字段级"有值才
+    更新"（detail 权威但不覆盖目录已有值）。串行 + 间隔限速（默认 0.3s/
+    请求，1676 条约 8 分钟）。
 
     Returns:
         (成功数, 细类总数)
     """
-    leaves = sorted(c for c in collected if c.count("-") == 3)
+    leaves = sorted(c for c in collected if is_leaf_code(c))
     if not leaves:
         logger.warning("无可补 detail 的细类职业（code 均非 10 位细类格式）")
         return 0, 0
@@ -254,7 +268,7 @@ async def run(cdp_url: str, timeout_sec: int, skip_detail: bool = False, detail_
         # 已就绪：树已捕获（8 大类/79 中类/450 小类）——递归 subordinate/data
         # 补全细类（1639 职业，树 API 不含）——用 context.request 继承会话直查
         logger.info("开始递归补全细类职业（subordinate/data 逐级）…")
-        roots = sorted(k for k in collected if k.count("-") == 0)  # 8 个大类根
+        roots = sorted(k for k in collected if is_root_code(k))  # 8 个大类根
         for root_code in roots:
             await _fetch_children(context.request, root_code, 2, collected)
         logger.info(f"递归完成 → 累计 {len(collected)} 条")
