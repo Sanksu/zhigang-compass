@@ -1025,7 +1025,7 @@ async def sync_skill_normalization(ctx: dict) -> dict:
         # 门禁拦截同类异常：巨型簇 / 映射率越界 → 不写库 + 告警 + 返回 blocked
         # （单阶段失败不阻塞 ETL 主线，与 run_etl_pipeline 其余阶段同语义）。
         try:
-            guard = guard_cluster_distribution(normalized)
+            guard_cluster_distribution(normalized)  # 门禁校验：异常直接抛 ValueError 拦截
         except ValueError as e:
             msg = f"技能归一化门禁拦截：{e}"
             print(f"[sync_skill_normalization] {msg}", flush=True)

@@ -10,7 +10,6 @@
 用法：.venv/Scripts/python.exe scripts/cron/wait_etl_then_tune.py
 """
 
-import json
 import subprocess
 import sys
 import time
@@ -77,7 +76,6 @@ def main() -> int:
     # ── 参数落地前全量图验证（P1）：调参快照按旧 min_weight 过滤导出，新参数
     # 应用到全量图可能二次过滤过度（08-13 实测 mw=2.325 在真实图只留 75/1245
     # 节点，sync_communities 门禁拦截）。验证失败回滚旧参数并保留旧索引。 ──
-    import json as _json
 
     cfg_path = BACKEND / "configs" / "graph_algo.yaml"
     _cfg_before = cfg_path.read_text(encoding="utf-8")
