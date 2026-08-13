@@ -78,6 +78,74 @@ def _agglomerative_clusters(
     return clusters
 
 
+# ============================================================
+# 写回前门禁（P0：防聚类异常污染图谱）
+# ============================================================
+
+# 巨型簇判定：任一标准名下成员数超过该值即视为链式漂移/聚类异常。
+# 正常语义簇（AI/Python/深度学习）成员数不超过几十（08-13 修复后全量
+# 6593 技能最大簇 AI=106）；漂移簇可达上千（2D可视化 1185 / 3A 1169）。
+# 取 max(绝对下限, 总数×2%) 自适应图规模：小图 ≥50、大图按比例放宽。
+_MEGA_CLUSTER_ABS_MIN = 50
+_MEGA_CLUSTER_RATIO = 0.02
+# 映射率边界：standard ≠ 原名 的比例。全自指（< 下限，聚类失效）与
+# 过度合并（> 上限，漂移）均为异常信号。
+_MAPPED_RATIO_MIN = 0.05
+_MAPPED_RATIO_MAX = 0.90
+
+
+def guard_cluster_distribution(normalized: dict[str, SkillNormResult]) -> dict:
+    """归一化结果写回前门禁：簇分布异常直接拒绝（防污染入库）。
+
+    08-13 事故：单链接链式漂移把 1185 个无关技能并入"2D可视化"簇，
+    4610/6593 技能被错误归一化后直接写库。门禁在写回前拦截同类异常：
+
+    1. **巨型簇检测**（主信号）：任一标准名成员数 > max(50, 总数×2%)
+       判定异常——正常语义簇不会超过几十成员，漂移簇可达上千
+    2. **映射率边界**（辅助信号）：映射比例 < 5%（聚类完全失效）或
+       > 90%（过度合并）均判定异常
+
+    Args:
+        normalized: normalize_many 的输出 {原名: SkillNormResult}
+
+    Returns:
+        统计摘要（供日志/告警）：{total, mapped_ratio, max_cluster,
+        max_standard}
+
+    Raises:
+        ValueError: 分布异常（调用方必须拒绝写库）
+    """
+    from collections import Counter
+
+    total = len(normalized)
+    if total == 0:
+        return {"total": 0, "mapped_ratio": 0.0, "max_cluster": 0, "max_standard": ""}
+
+    cnt = Counter(r.standard for r in normalized.values())
+    max_cluster = max(cnt.values())
+    max_standard = max(cnt, key=cnt.get)
+    mapped = sum(1 for n, r in normalized.items() if r.standard != n)
+    mapped_ratio = mapped / total
+
+    cluster_limit = max(_MEGA_CLUSTER_ABS_MIN, int(total * _MEGA_CLUSTER_RATIO))
+    if max_cluster > cluster_limit:
+        raise ValueError(
+            f"巨型簇异常：{max_cluster} 个技能并入标准名 {max_standard!r} "
+            f"（上限 {cluster_limit}，疑似聚类链式漂移），拒绝写回"
+        )
+    if not (_MAPPED_RATIO_MIN <= mapped_ratio <= _MAPPED_RATIO_MAX):
+        raise ValueError(
+            f"归一化映射率异常：{mapped_ratio:.1%}（{mapped}/{total}）"
+            f"超出 [{_MAPPED_RATIO_MIN:.0%}, {_MAPPED_RATIO_MAX:.0%}]，拒绝写回"
+        )
+    return {
+        "total": total,
+        "mapped_ratio": round(mapped_ratio, 4),
+        "max_cluster": max_cluster,
+        "max_standard": max_standard,
+    }
+
+
 class SkillNormalizer:
     """SBERT 层次聚类 + 词典兜底的技能归一化器。
 
