@@ -338,10 +338,13 @@ def _import_jd_tx(
                 now=now,
             )
 
+        # JD 中出现的工具均视为必备要求，显式写 necessity='must'
+        # （与 Education/Certification 口径一致，避免消费方依赖兜底默认值）
         tx.run(
             """
             MATCH (p:Position {id: $position_id}), (t:Tool {name: $tool_name})
             MERGE (p)-[:REQUIRES]->(t)
+            SET r.necessity = 'must'
             """,
             position_id=position_id,
             tool_name=tool_name,
