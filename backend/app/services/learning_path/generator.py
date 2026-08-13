@@ -68,6 +68,9 @@ class LearningPathGenerator:
                 gap.skill_id or "", gap.skill, _TOP_COURSES, semantic, sim_threshold
             )
             hours = sum(base_hours(s) for s in [gap.skill, *chain])
+            # P1-2：weak 技能已具备部分基础，学时减半（评审排期：weak 与 missing 学时同价为低估根因）
+            if gap.gap_type == GapType.WEAK:
+                hours *= 0.5
             items.append(
                 LearningPathItem(
                     skill=gap.skill,
