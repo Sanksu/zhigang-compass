@@ -51,8 +51,14 @@ def _agglomerative_clusters(
         threshold: 距离阈值（相似度 ≥ 1 - threshold 的项合并）
 
     Returns:
-        簇列表（每簇一个技能名列表）。逐项贪心合并：与已有簇中任一成员
-        相似度达阈值即并入该簇（按首个命中簇），否则自成一簇。
+        簇列表（每簇一个技能名列表）。逐项贪心合并：与已有簇**种子**（簇内
+        首个成员，即字典序最小者）相似度达阈值即并入该簇（按首个命中簇），
+        否则自成一簇。
+
+    注意：使用**代表链接（与种子比较）而非单链接（与任一成员比较）**——
+    单链接会沿相似度链漂移（2D可视化→3D→3D建模→建模→…→文心一言），
+    把语义无关技能并入同一簇（08-13 实测 1185 个技能被并进"2D可视化"簇）。
+    与种子比较切断链式传播：新名字必须与簇代表足够相似才并入。
     """
     # 先去重（同名项只参与一次合并），再排序固定簇种子与"首个命中簇"归属：
     # 输入顺序漂移（Neo4j 读取无 ORDER BY）会导致跨簇桥节点归入不同簇，
@@ -62,7 +68,8 @@ def _agglomerative_clusters(
     for name in ordered:
         merged = False
         for cluster in clusters:
-            if any(sim_fn(name, member) >= 1 - threshold for member in cluster):
+            # 代表链接：仅与簇种子比较（单链接 any() 会链式漂移，见 docstring）
+            if sim_fn(name, cluster[0]) >= 1 - threshold:
                 cluster.append(name)
                 merged = True
                 break
