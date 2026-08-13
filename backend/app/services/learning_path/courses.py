@@ -40,6 +40,18 @@ _COURSE_MATCH_THRESHOLD = 0.7
 # 宁可无课不可误导）。注意同语言短词虚高（语音合成↔KK音标 0.665）为已知残余。
 _COURSE_TITLE_SIM_THRESHOLD = 0.5
 
+# P1-1 课程级语义兜底阈值：无课技能直接对课程池标题匹配（08-13 实证）。
+# 可救案例：PostgreSQL→MySQL 课 0.601、服务器运维→网络技术 0.554、React→Advanced React 0.863；
+# 课程池缺课案例（Spark→0.469 高级英语、Docker→0.475 物流学、Gin→0.361 世界史）宁缺毋滥。
+# 0.55 介于门控 0.5 与技能级 fallback 0.7 之间。
+_COURSE_POOL_MATCH_THRESHOLD = 0.55
+
+# P1-1 低质课程过滤：icourse163 期末突击/复习资料类课程（标题特征，噪声不入推荐池）
+_LOW_QUALITY_TITLE_MARKERS = ("期末冲刺", "不挂科", "学霸笔记", "期末复习", "考前突击")
+
+# 课程池标题缓存（TTL 5min，课程级兜底全池扫描用）
+_course_pool_cache: dict = {"ts": 0.0, "courses": []}
+
 # 时长单位 → 小时换算（周/月按每周 40h / 每月 160h 折算）
 _UNIT_HOURS = {
     "小时": 1.0, "hour": 1.0, "hours": 1.0, "h": 1.0,
@@ -157,6 +169,59 @@ def _filter_by_title_similarity(
     return kept
 
 
+def _course_pool() -> list[dict]:
+    """全课程池（TTL 缓存，课程级语义兜底扫描用）。"""
+    now = time.time()
+    with _cache_lock:
+        if now - _course_pool_cache["ts"] <= _CACHE_TTL and _course_pool_cache["courses"]:
+            return _course_pool_cache["courses"]
+    with neo4j_driver.session() as session:
+        recs = session.run(
+            "MATCH (c:Course) RETURN c.id AS id, c.name AS name, c.source AS source, "
+            "c.source_id AS source_id, c.platform AS platform, c.duration AS duration, "
+            "c.source_url AS source_url"
+        ).data()
+    courses = [dict(r) for r in recs]
+    with _cache_lock:
+        _course_pool_cache["ts"] = now
+        _course_pool_cache["courses"] = courses
+    return courses
+
+
+def _semantic_match_course(
+    skill_name: str, semantic, sim_threshold: float
+) -> list[dict]:
+    """课程级语义兜底（P1-1）：无课技能直接对课程池标题匹配（> threshold 才接受）。
+
+    技能级 fallback（_semantic_match_skill）在"有课程的技能名"池里间接匹配，
+    链路窄；课程级直接匹配技能↔课程标题，可覆盖 PostgreSQL→MySQL 课等偏相关
+    场景。低质课程（期末冲刺/不挂科等）剔除。课程池缺课的技能（Spark/AWS 等）
+    返回空——宁缺毋滥。
+    """
+    courses = _course_pool()
+    if not courses or not skill_name or semantic is None:
+        return []
+    titles = [c.get("name") or c.get("id") or "" for c in courses]
+    try:
+        semantic.warm(titles)
+    except Exception:
+        return []
+    hits: list[tuple[float, dict]] = []
+    for c, title in zip(courses, titles):
+        if not title:
+            continue
+        if any(m in title for m in _LOW_QUALITY_TITLE_MARKERS):
+            continue
+        try:
+            sim = semantic.similarity(skill_name, title)
+        except Exception:
+            continue
+        if sim > sim_threshold:
+            hits.append((sim, c))
+    hits.sort(key=lambda x: -x[0])
+    return [c for _, c in hits[:_TOP_COURSES]]
+
+
 def _query_courses_sync(skill_id: str, skill_name: str) -> list[dict]:
     """图谱精确查询技能课程（skill_id 优先，name 兜底）。同步 Neo4j，由线程池调用。"""
     with neo4j_driver.session() as session:
@@ -205,6 +270,10 @@ async def load_courses_for_skill(
         matched = await asyncio.to_thread(_semantic_match_skill, skill_name, semantic, threshold)
         if matched:
             rows = await _query_courses("", matched)
+    if not rows and semantic is not None:
+        # P1-1 课程级语义兜底：技能级间接匹配落空后，直接对课程池标题匹配
+        rows = await asyncio.to_thread(
+            _semantic_match_course, skill_name, semantic, _COURSE_POOL_MATCH_THRESHOLD)
     if not rows:
         return []
 

@@ -8,11 +8,11 @@
   "avg_dims": {
    "completeness": 1.0,
    "prerequisite": 0.663,
-   "course": 0.455,
+   "course": 0.534,
    "hours": 0.692,
-   "mean": 0.703
+   "mean": 0.724
   },
-  "note": "P1-3 门控 + P1-2 分层 + hours 评分修复后定稿"
+  "note": "P1-1 课程级兜底后定稿"
  },
  "cases": [
   {
@@ -171,14 +171,19 @@
     {
      "skill": "审批",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级会计学@icourse163(q=0.5539)",
+      "会计学@icourse163(q=0.5518)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
     {
      "skill": "工作流",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级物流学@icourse163(q=0.5327)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -208,9 +213,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.72,
+    "course": 0.88,
     "hours": 0.52,
-    "mean": 0.73
+    "mean": 0.78
    },
    "reasonable": false
   },
@@ -258,7 +263,11 @@
       "计算机基础",
       "SQL"
      ],
-     "courses": [],
+     "courses": [
+      "新编数据库技术—MySQL@icourse163(q=0.635)",
+      "Introduction to SQL@edx(q=0.45)",
+      "Introduction to SQL@edx(q=0.45)"
+     ],
      "estimated_hours": 150.0,
      "priority": "high"
     },
@@ -273,9 +282,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.9,
-    "course": 0.38,
+    "course": 0.46,
     "hours": 1.0,
-    "mean": 0.82
+    "mean": 0.84
    },
    "reasonable": true
   },
@@ -348,7 +357,11 @@
     {
      "skill": "嵌入向量",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "互换性与测量技术@icourse163(q=0.5635)",
+      "数学建模@icourse163(q=0.5581)",
+      "测量学@icourse163(q=0.5388)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -373,7 +386,11 @@
     {
      "skill": "基础设施即代码",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Programming Fundamentals@coursera(q=0.6534)",
+      "Web编程技术@icourse163(q=0.5998)",
+      "网络应用编程@icourse163(q=0.5531)"
+     ],
      "estimated_hours": 55.0,
      "priority": "medium"
     }
@@ -381,9 +398,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.44,
+    "course": 0.66,
     "hours": 0.64,
-    "mean": 0.67
+    "mean": 0.73
    },
    "reasonable": false
   },
@@ -433,7 +450,11 @@
     {
      "skill": "物流分析",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级物流学@icourse163(q=0.5327)",
+      "Supply Chain Management@edx(q=0.45)",
+      "Data Analysis for Management@edx(q=0.45)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     }
@@ -441,9 +462,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.58,
+    "course": 0.72,
     "hours": 0.76,
-    "mean": 0.74
+    "mean": 0.77
    },
    "reasonable": false
   },
@@ -484,7 +505,11 @@
       "计算机基础",
       "SQL"
      ],
-     "courses": [],
+     "courses": [
+      "新编数据库技术—MySQL@icourse163(q=0.635)",
+      "Introduction to SQL@edx(q=0.45)",
+      "Introduction to SQL@edx(q=0.45)"
+     ],
      "estimated_hours": 150.0,
      "priority": "high"
     },
@@ -506,9 +531,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.8,
-    "course": 0.3,
+    "course": 0.38,
     "hours": 0.88,
-    "mean": 0.74
+    "mean": 0.77
    },
    "reasonable": false
   },
@@ -707,21 +732,33 @@
     {
      "skill": "物联网",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "网络与人工智能法@icourse163(q=0.5716)",
+      "网络技术与应用@icourse163(q=0.5688)",
+      "网络应用编程@icourse163(q=0.5531)"
+     ],
      "estimated_hours": 30.0,
      "priority": "high"
     },
     {
      "skill": "边缘计算",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Algorithms, Part I@coursera(q=0.6795)",
+      "数学实验@icourse163(q=0.6306)",
+      "数学建模@icourse163(q=0.5581)"
+     ],
      "estimated_hours": 30.0,
      "priority": "high"
     },
     {
      "skill": "多线程",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级英语（1）@icourse163(q=0.5651)",
+      "简明世界史（一）@icourse163(q=0.5127)",
+      "简明世界史（二）@icourse163(q=0.5074)"
+     ],
      "estimated_hours": 40.0,
      "priority": "high"
     },
@@ -736,9 +773,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.38,
+    "course": 0.68,
     "hours": 0.52,
-    "mean": 0.6
+    "mean": 0.68
    },
    "reasonable": false
   },
@@ -820,7 +857,9 @@
     {
      "skill": "Windsurf",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "轮滑高级教程@icourse163(q=0.5202)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -851,9 +890,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.44,
+    "course": 0.52,
     "hours": 0.76,
-    "mean": 0.68
+    "mean": 0.7
    },
    "reasonable": false
   },
@@ -923,7 +962,9 @@
     {
      "skill": "费用",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级计量经济学@icourse163(q=0.5985)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -951,7 +992,11 @@
     {
      "skill": "英语",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级英语@icourse163(q=0.5526)",
+      "高级英语@icourse163(q=0.5508)",
+      "高级英语@icourse163(q=0.5103)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     }
@@ -959,9 +1004,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.3,
+    "course": 0.52,
     "hours": 0.64,
-    "mean": 0.66
+    "mean": 0.71
    },
    "reasonable": false
   },
@@ -1053,7 +1098,11 @@
       "Docker",
       "Kubernetes"
      ],
-     "courses": [],
+     "courses": [
+      "高级英语（1）@icourse163(q=0.5651)",
+      "简明世界史（一）@icourse163(q=0.5127)",
+      "简明世界史（二）@icourse163(q=0.5074)"
+     ],
      "estimated_hours": 260.0,
      "priority": "medium"
     },
@@ -1092,9 +1141,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.3,
+    "course": 0.44,
     "hours": 0.76,
-    "mean": 0.69
+    "mean": 0.73
    },
    "reasonable": false
   },
@@ -1242,7 +1291,11 @@
     {
      "skill": "日志",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级英语写作@icourse163(q=0.514)",
+      "大学英文写作（一）@icourse163(q=0.5113)",
+      "大学英文写作（二）@icourse163(q=0.4991)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1267,9 +1320,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.38,
+    "course": 0.46,
     "hours": 0.76,
-    "mean": 0.71
+    "mean": 0.73
    },
    "reasonable": false
   },
@@ -1304,14 +1357,20 @@
     {
      "skill": "MATLAB",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "实用大众线性代数(MATLAB版)@icourse163(q=0.57)"
+     ],
      "estimated_hours": 55.0,
      "priority": "medium"
     },
     {
      "skill": "Code V",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Programming Fundamentals@coursera(q=0.6534)",
+      "Coding for Everyone: C and C++@coursera(q=0.6495)",
+      "Programming in C@coursera(q=0.59)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     }
@@ -1319,9 +1378,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.3,
+    "course": 0.46,
     "hours": 0.52,
-    "mean": 0.58
+    "mean": 0.62
    },
    "reasonable": false
   },
@@ -1379,7 +1438,11 @@
     {
      "skill": "数值方法",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "数学实验@icourse163(q=0.6306)",
+      "线性代数@icourse163(q=0.5609)",
+      "数学建模@icourse163(q=0.5581)"
+     ],
      "estimated_hours": 30.0,
      "priority": "high"
     }
@@ -1387,9 +1450,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.8,
-    "course": 0.66,
+    "course": 0.8,
     "hours": 0.76,
-    "mean": 0.8
+    "mean": 0.84
    },
    "reasonable": true
   },
@@ -1424,7 +1487,10 @@
     {
      "skill": "WSUS",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "简明世界史（一）@icourse163(q=0.5127)",
+      "简明世界史（二）@icourse163(q=0.5074)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1439,9 +1505,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.3,
+    "course": 0.38,
     "hours": 0.4,
-    "mean": 0.58
+    "mean": 0.59
    },
    "reasonable": false
   },
@@ -1552,7 +1618,11 @@
       "计算机基础",
       "SQL"
      ],
-     "courses": [],
+     "courses": [
+      "新编数据库技术—MySQL@icourse163(q=0.635)",
+      "Introduction to SQL@edx(q=0.45)",
+      "Introduction to SQL@edx(q=0.45)"
+     ],
      "estimated_hours": 150.0,
      "priority": "high"
     },
@@ -1575,9 +1645,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 1.0,
-    "course": 0.72,
+    "course": 0.8,
     "hours": 1.0,
-    "mean": 0.93
+    "mean": 0.95
    },
    "reasonable": true
   },
@@ -1591,14 +1661,20 @@
     {
      "skill": "贷款发起",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "金融工程学-衍生工具@icourse163(q=0.5586)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
     {
      "skill": "风险分层",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级计量经济学@icourse163(q=0.5985)",
+      "投资学@icourse163(q=0.5628)",
+      "金融学（二）@icourse163(q=0.525)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1623,7 +1699,11 @@
     {
      "skill": "信贷政策",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "会计学@icourse163(q=0.5518)",
+      "金融学（二）@icourse163(q=0.525)",
+      "高级财务管理@icourse163(q=0.4799)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     }
@@ -1631,9 +1711,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.44,
+    "course": 0.68,
     "hours": 0.4,
-    "mean": 0.58
+    "mean": 0.65
    },
    "reasonable": false
   },
@@ -1720,7 +1800,10 @@
     {
      "skill": "定价分析",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级计量经济学@icourse163(q=0.5985)",
+      "金融学（二）@icourse163(q=0.525)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1742,9 +1825,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.38,
+    "course": 0.46,
     "hours": 0.64,
-    "mean": 0.68
+    "mean": 0.7
    },
    "reasonable": false
   },
@@ -1787,7 +1870,9 @@
     {
      "skill": "eClinicalWorks",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "工程图基础及数字化构型@icourse163(q=0.5272)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1802,9 +1887,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.52,
+    "course": 0.6,
     "hours": 0.52,
-    "mean": 0.66
+    "mean": 0.68
    },
    "reasonable": false
   }
