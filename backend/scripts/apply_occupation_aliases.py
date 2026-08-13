@@ -10,7 +10,6 @@ JD 岗位名 → 大典职业的检索层映射（aliases 写入 occupations.hrs
 """
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -52,7 +51,7 @@ ALIAS_MAP = {
 
 
 async def main() -> int:
-    from sqlalchemy import select, text
+    from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
     from app.models.business import Occupation

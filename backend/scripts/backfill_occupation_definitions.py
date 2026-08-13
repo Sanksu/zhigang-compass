@@ -16,7 +16,6 @@ occupations.definition（hrss 源），随后重算 embedding + 同步 Neo4j
 
 import argparse
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -55,7 +54,6 @@ _DEFINITION_PROMPT = """你是职业分类专家。根据职业名称与别名�
 
 
 async def backfill(target_codes: list[str] | None, all_empty: bool) -> int:
-    import json as _json
 
     from sqlalchemy import select
 
