@@ -1,49 +1,37 @@
 /**
- * 图谱数据类型 — 设计文档 §10.3 + openapi.yaml /api/v1/graph/panorama
+ * 图谱展示层类型 — 单一事实源：backend/openapi/openapi.yaml
+ * （GraphNode/GraphEdge/GraphViewType/GraphViewData schema），经
+ * openapi-typescript 生成至 src/types/api.d.ts（npm run gen:api）。
  *
- * 节点三类：position（岗位）/ skill（技能）/ evidence（证据）
- * 岗位五状态机：candidate/emerging/stable/declining/archived
+ * AGENTS.md 铁律一：前端不得直接定义与后端不一致的类型。本文件仅
+ * 承载两类内容：
+ * 1. 契约类型的再导出（GraphNode/GraphEdge/GraphViewType/PositionStatus）
+ * 2. 前端自算展示字段的派生（度数 value——toGraphData 由 edges 统计，
+ *    非后端返回）
+ *
+ * NodeDetail/GraphData/GraphStats 为前端组件状态/统计容器（非 API 响应
+ * 形状），元素类型一律取自契约。
  */
 
-export type NodeType = 'position' | 'skill' | 'evidence'
+import type { components } from '@/types/api'
 
-export type PositionStatus =
-  | 'candidate'
-  | 'emerging'
-  | 'stable'
-  | 'declining'
-  | 'archived'
+/** 契约 GraphNode.type（position/skill/evidence） */
+export type NodeType = NonNullable<components['schemas']['GraphNode']['type']>
+/** 契约 GraphNode.status（岗位五状态机） */
+export type PositionStatus = NonNullable<components['schemas']['GraphNode']['status']>
+/** 契约 GraphViewType（四种视图枚举） */
+export type GraphViewType = components['schemas']['GraphViewType']
 
-export type GraphViewType = 'panorama' | 'techStack' | 'level' | 'positionCenter'
-
-export interface GraphNode {
-  id: string
-  name: string
-  /** 节点类型，决定形状与基础色 */
-  type: NodeType
-  /** 节点权重（度数或后端计算的 score），影响节点大小 */
+/** 契约 GraphNode + 前端自算度数 value（布局权重，非后端返回字段） */
+export type GraphNode = components['schemas']['GraphNode'] & {
+  /** 节点度数（toGraphData 由 edges 统计，驱动布局斥力/大小） */
   value?: number
-  /** 岗位状态机（仅 position 节点有效） */
-  status?: PositionStatus
-  /** 技能级别（仅 skill 节点有效，初级/中级/高级/专家） */
-  level?: string
-  /** 证据来源（仅 evidence 节点有效） */
-  source?: string
-  /** 额外描述 */
-  description?: string
 }
 
-export interface GraphEdge {
-  source: string
-  target: string
-  /** 关系类型：岗位-技能 / 技能-证据 */
-  relation?: 'requires' | 'proves'
-  /** 必要性（仅 requires 关系） */
-  necessity?: 'must' | 'nice'
-  /** 边权重（0-1），影响粗细 */
-  weight?: number
-}
+/** 契约 GraphEdge（source/target/weight/necessity/level） */
+export type GraphEdge = components['schemas']['GraphEdge']
 
+/** 前端图统计容器（toGraphData 由返回 nodes/edges 自算，非后端字段） */
 export interface GraphStats {
   totalPositions: number
   totalSkills: number
@@ -54,19 +42,22 @@ export interface GraphStats {
   totalNodesInGraph: number
 }
 
+/** 前端图数据容器（由契约 GraphViewData 映射而来） */
 export interface GraphData {
   nodes: GraphNode[]
   edges: GraphEdge[]
   stats: GraphStats
 }
 
-/** 节点详情面板所需的最小信息 */
+/** 节点详情面板所需的最小信息（前端组件状态，非 API 类型） */
 export interface NodeDetail {
   id: string
   name: string
   type: NodeType
   status?: PositionStatus
+  /** 技能级别（后端 view 端点未返回，面板预留展示） */
   level?: string
+  /** 证据来源（后端 view 端点未返回，面板预留展示） */
   source?: string
   value?: number
   description?: string

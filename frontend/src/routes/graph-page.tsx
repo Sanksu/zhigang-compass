@@ -21,6 +21,7 @@ import {
 } from '@/components/graph/node-detail-panel'
 import type { GraphData, GraphEdge, GraphNode, GraphViewType, NodeDetail } from '@/components/graph/types'
 import { apiGet, ApiError } from '@/lib/api'
+import type { components } from '@/types/api'
 
 /** 3D 图谱懒加载 — Three.js 约 1.4MB，仅在用户点击"3D"时按需加载 */
 const Graph3D = lazy(() => import('@/components/graph/graph-3d').then((m) => ({ default: m.Graph3D })))
@@ -53,26 +54,11 @@ function isWebGL2Available(): boolean {
 // 真实 API 数据适配：后端 /graph/panorama → GraphData
 // ============================================================
 
-interface PanoramaNode {
-  id: string
-  name: string
-  type: string // position | skill
-  status?: string
-}
-
-interface PanoramaEdge {
-  source: string
-  target: string
-  weight: number
-  necessity: string
-  level: string
-}
-
-interface PanoramaData {
-  nodes: PanoramaNode[]
-  edges: PanoramaEdge[]
-  stats: { nodes: number; edges: number }
-}
+/**
+ * 后端 /graph/view/{view_type} 响应 data —— 契约 GraphViewData
+ * （铁律一：单一事实源 backend/openapi/openapi.yaml）
+ */
+type PanoramaData = components['schemas']['GraphViewData']
 
 const POSITION_STATUSES: GraphNode['status'][] = [
   'candidate',
@@ -109,7 +95,6 @@ function toGraphData(raw: PanoramaData): GraphData {
   const edges: GraphEdge[] = raw.edges.map((e) => ({
     source: e.source,
     target: e.target,
-    relation: 'requires',
     necessity: e.necessity === 'nice' ? 'nice' : 'must',
     weight: e.weight,
   }))
@@ -368,6 +353,10 @@ export function GraphPage() {
   }, [data, view, expandedPositions])
   // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
   const webgl2Available = useMemo(() => isWebGL2Available(), [])
+  // 触控设备（移动/平板，粗指针）固定 2D 模式（设计文档 §6.3：平板/移动端固定 2D）
+  const isCoarsePointer = useMemo(() => window.matchMedia('(pointer: coarse)').matches, [])
+  /** 3D 模式是否被锁定（WebGL2 不可用或触控设备） */
+  const mode3dLocked = !webgl2Available || isCoarsePointer
 
   // 选中节点的关联统计（从当前视图数据中实时计算）+ 全图最大关联度（详情条归一化基准）
   const detailStats = useMemo(() => {
@@ -463,8 +452,8 @@ export function GraphPage() {
                 size="sm"
                 variant={mode === '3d' ? 'default' : 'ghost'}
                 onClick={() => setMode('3d')}
-                disabled={!webgl2Available}
-                title={!webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : '3D 沉浸式浏览（节点带空间纵深，适合展示整体结构）'}
+                disabled={mode3dLocked}
+                title={isCoarsePointer ? '触控设备固定 2D 模式（设计文档 §6.3）' : !webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : '3D 沉浸式浏览（节点带空间纵深，适合展示整体结构）'}
                 className="h-7 px-2.5 text-xs"
               >
                 3D
@@ -635,9 +624,9 @@ export function GraphPage() {
                 已展开 {expandedPositions.size} 个岗位
               </p>
             )}
-            {!webgl2Available && (
+            {mode3dLocked && (
               <p className="text-[10px] text-ink-faint bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
-                WebGL2 不可用，已降级 2D 模式
+                {isCoarsePointer ? '触控设备固定 2D 模式' : 'WebGL2 不可用，已降级 2D 模式'}
               </p>
             )}
           </div>

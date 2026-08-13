@@ -69,7 +69,7 @@ function makeTextSprite(text: string, dark: boolean, fontSize = 14): THREE.Sprit
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')
   if (!ctx) return new THREE.Sprite()
-  const font = `600 ${fontSize}px Inter, system-ui, sans-serif`
+  const font = `600 ${fontSize}px Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif`
   ctx.font = font
   const textW = ctx.measureText(text).width
   const pad = 7
@@ -203,10 +203,7 @@ export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
         name: node.name,
         type: node.type,
         status: node.status,
-        level: node.level,
-        source: node.source,
         value: node.value,
-        description: node.description,
       })
     },
     [onSelectNode, onTogglePosition],
