@@ -21,7 +21,10 @@ from app.core.logging import setup_logging
 logger = setup_logging("sync_skill_normalization")
 
 from app.core.database import neo4j_driver
-from app.services.extraction.normalization import SkillNormalizer
+from app.services.extraction.normalization import (
+    SkillNormalizer,
+    guard_cluster_distribution,
+)
 
 
 def load_skill_names() -> list[str]:
@@ -66,6 +69,29 @@ def main(dry_run: bool = False) -> None:
         logger.warning("归一化无输出（可能是模型不可用且无词典命中），跳过")
         return
 
+    # ── 门禁预检（P0/P1）：簇分布异常拒绝写库；dry-run 仅报告不中断 ──
+    # 08-13 事故：单链接漂移把 1185 个无关技能并入"2D可视化"簇后直接入库。
+    # dry-run 模式下同样输出门禁结论，供人工 Review 后再 --apply 写库。
+    from collections import Counter
+
+    cnt = Counter(r.standard for r in normalized.values())
+    top5 = ", ".join(f"{k}({v})" for k, v in cnt.most_common(5))
+    logger.info("簇分布摘要: 总数=%s 映射率=%.1f%% 最大簇=%s Top5=%s",
+                len(normalized),
+                100 * sum(1 for n, r in normalized.items() if r.standard != n) / len(normalized),
+                cnt.most_common(1)[0],
+                top5)
+
+    try:
+        guard = guard_cluster_distribution(normalized)
+    except ValueError as e:
+        logger.error("门禁拦截：%s", e)
+        if not dry_run:
+            logger.error("已拒绝写库（如需强制写库请人工确认后使用 --force）")
+            return
+    else:
+        logger.info("门禁通过: %s", guard)
+
     changed = sum(1 for n, r in normalized.items() if r.standard != n)
     logger.info("技能总数: %s，归一化后变更: %s", len(names), changed)
 
@@ -89,6 +115,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="技能归一化同步")
-    parser.add_argument("--dry-run", action="store_true", help="只统计不写图谱")
+    parser.add_argument("--dry-run", action="store_true", help="只统计不写图谱（含门禁预检）")
+    parser.add_argument("--force", action="store_true", help="门禁拦截时仍强制写库（人工确认后使用）")
     args = parser.parse_args()
     main(dry_run=args.dry_run)
