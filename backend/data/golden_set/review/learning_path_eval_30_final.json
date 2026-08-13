@@ -1,18 +1,18 @@
 {
  "summary": {
   "case_count": 30,
-  "reasonable_count": 7,
-  "reasonable_ratio": 0.2333,
+  "reasonable_count": 9,
+  "reasonable_ratio": 0.3,
   "target_ratio": 0.8,
   "target_met": false,
   "avg_dims": {
    "completeness": 1.0,
    "prerequisite": 0.663,
-   "course": 0.615,
+   "course": 0.659,
    "hours": 0.692,
-   "mean": 0.744
+   "mean": 0.754
   },
-  "note": "审查修复后定稿（weak 减半 + 阈值分档）"
+  "note": "AWS 补采 + 词面匹配后定稿"
  },
  "cases": [
   {
@@ -104,7 +104,9 @@
      "skill": "语音合成",
      "prerequisites": [],
      "courses": [
-      "系统学习美式音标-KK音标@icourse163(q=0.4964)"
+      "高级语言@icourse163(q=0.504)",
+      "系统学习美式音标-KK音标@icourse163(q=0.4964)",
+      "Post Baccalaureate Speech-Language Pathology Foundations Online@edx(q=0.45)"
      ],
      "estimated_hours": 70.0,
      "priority": "medium"
@@ -127,6 +129,7 @@
      "skill": "语音降噪",
      "prerequisites": [],
      "courses": [
+      "高级英语演讲@icourse163(q=0.5172)",
       "系统学习美式音标-KK音标@icourse163(q=0.4964)"
      ],
      "estimated_hours": 30.0,
@@ -248,7 +251,9 @@
     {
      "skill": "服务器运维",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "网络技术与应用@icourse163(q=0.5688)"
+     ],
      "estimated_hours": 55.0,
      "priority": "high"
     },
@@ -259,7 +264,9 @@
       "Linux"
      ],
      "courses": [
-      "运筹学@icourse163(q=0.5193)"
+      "AWS Data Analytics and Processing@coursera(q=0.45)",
+      "AWS Cloud Practitioner Essentials@edx(q=0.45)",
+      "Getting Started with Data Analytics on AWS@edx(q=0.45)"
      ],
      "estimated_hours": 150.0,
      "priority": "high"
@@ -289,9 +296,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.9,
-    "course": 0.54,
+    "course": 0.62,
     "hours": 1.0,
-    "mean": 0.86
+    "mean": 0.88
    },
    "reasonable": true
   },
@@ -312,7 +319,11 @@
     {
      "skill": "Agile",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "人工智能应用基础@icourse163(q=0.6258)",
+      "人工智能应用素养@icourse163(q=0.6173)",
+      "生成式人工智能应用基础@icourse163(q=0.5828)"
+     ],
      "estimated_hours": 40.0,
      "priority": "medium"
     },
@@ -341,9 +352,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.3,
+    "course": 0.38,
     "hours": 0.64,
-    "mean": 0.66
+    "mean": 0.68
    },
    "reasonable": false
   },
@@ -440,7 +451,9 @@
     {
      "skill": "Power BI",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Mastering Data Visualization with Power BI and Tableau@coursera(q=0.46)"
+     ],
      "estimated_hours": 40.0,
      "priority": "high"
     },
@@ -481,11 +494,11 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.8,
+    "course": 0.88,
     "hours": 0.76,
-    "mean": 0.79
+    "mean": 0.81
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_08",
@@ -542,7 +555,11 @@
     {
      "skill": "Gin",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Apache Spark for Data Engineering and Machine Learning@edx(q=0.45)",
+      "DevOps and Software Engineering@edx(q=0.45)",
+      "Virtualization, Docker, and Kubernetes for Data Engineering@edx(q=0.45)"
+     ],
      "estimated_hours": 30.0,
      "priority": "high"
     }
@@ -550,9 +567,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.8,
-    "course": 0.38,
+    "course": 0.46,
     "hours": 0.88,
-    "mean": 0.77
+    "mean": 0.79
    },
    "reasonable": false
   },
@@ -628,8 +645,8 @@
      ],
      "courses": [
       "Developing Back-End Apps with Node.js and Express@coursera(q=0.6389)",
-      "Learn Node.js@coursera(q=0.5819)",
-      "Backend Engineering with Node.js@coursera(q=0.48)"
+      "Node.js & MongoDB: Developing Back-end Database Applications@coursera(q=0.6072)",
+      "Learn Node.js@coursera(q=0.5819)"
      ],
      "estimated_hours": 220.0,
      "priority": "medium"
@@ -637,7 +654,9 @@
     {
      "skill": "Snowflake",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Spark, Hadoop, and Snowflake for Data Engineering@edx(q=0.45)"
+     ],
      "estimated_hours": 70.0,
      "priority": "medium"
     },
@@ -674,11 +693,11 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.72,
+    "course": 0.8,
     "hours": 0.76,
-    "mean": 0.79
+    "mean": 0.81
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_11",
@@ -715,11 +734,7 @@
     {
      "skill": "负载均衡",
      "prerequisites": [],
-     "courses": [
-      "高级计量经济学@icourse163(q=0.5985)",
-      "计量经济学@icourse163(q=0.557)",
-      "新结构经济学@icourse163(q=0.5097)"
-     ],
+     "courses": [],
      "estimated_hours": 55.0,
      "priority": "medium"
     },
@@ -734,9 +749,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.46,
+    "course": 0.38,
     "hours": 1.0,
-    "mean": 0.77
+    "mean": 0.74
    },
    "reasonable": false
   },
@@ -794,7 +809,11 @@
     {
      "skill": "网络通信",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "网络技术与应用@icourse163(q=0.5688)",
+      "物联网技术概论@icourse163(q=0.5639)",
+      "高级网络通信原理实践@icourse163(q=0.5294)"
+     ],
      "estimated_hours": 30.0,
      "priority": "high"
     }
@@ -802,9 +821,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.68,
+    "course": 0.82,
     "hours": 0.52,
-    "mean": 0.68
+    "mean": 0.71
    },
    "reasonable": false
   },
@@ -822,9 +841,9 @@
       "Linux"
      ],
      "courses": [
-      "Introduction to Docker@coursera(q=0.6024)",
       "Docker and Kubernetes Masterclass: From Beginner to Advanced@coursera(q=0.5989)",
-      "Docker Fundamentals and Container Management@coursera(q=0.4618)"
+      "Docker Certified Associate Preparation@coursera(q=0.47)",
+      "Virtualization, Docker, and Kubernetes for Data Engineering@edx(q=0.45)"
      ],
      "estimated_hours": 150.0,
      "priority": "medium"
@@ -867,9 +886,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.44,
+    "course": 0.38,
     "hours": 0.88,
-    "mean": 0.76
+    "mean": 0.74
    },
    "reasonable": false
   },
@@ -883,7 +902,9 @@
     {
      "skill": "Cursor",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Vibe Coding with Cursor AI & Google Stitch@coursera(q=0.45)"
+     ],
      "estimated_hours": 70.0,
      "priority": "medium"
     },
@@ -923,9 +944,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.52,
+    "course": 0.6,
     "hours": 0.76,
-    "mean": 0.7
+    "mean": 0.72
    },
    "reasonable": false
   },
@@ -1012,11 +1033,7 @@
     {
      "skill": "需求分析",
      "prerequisites": [],
-     "courses": [
-      "大数据分析与应用@icourse163(q=0.5588)",
-      "Data Analysis@edx(q=0.45)",
-      "Data Analysis for Management@edx(q=0.45)"
-     ],
+     "courses": [],
      "estimated_hours": 40.0,
      "priority": "medium"
     },
@@ -1046,9 +1063,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.68,
+    "course": 0.6,
     "hours": 0.64,
-    "mean": 0.76
+    "mean": 0.73
    },
    "reasonable": false
   },
@@ -1173,9 +1190,9 @@
       "Linux"
      ],
      "courses": [
-      "Introduction to Docker@coursera(q=0.6024)",
       "Docker and Kubernetes Masterclass: From Beginner to Advanced@coursera(q=0.5989)",
-      "Docker Fundamentals and Container Management@coursera(q=0.4618)"
+      "Docker Certified Associate Preparation@coursera(q=0.47)",
+      "Virtualization, Docker, and Kubernetes for Data Engineering@edx(q=0.45)"
      ],
      "estimated_hours": 150.0,
      "priority": "medium"
@@ -1183,7 +1200,11 @@
     {
      "skill": "Agentic工作流",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "商业智能@icourse163(q=0.6102)",
+      "人工智能与法律@icourse163(q=0.5929)",
+      "运筹学@icourse163(q=0.5193)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     }
@@ -1191,7 +1212,7 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.66,
+    "course": 0.68,
     "hours": 0.76,
     "mean": 0.78
    },
@@ -1207,14 +1228,22 @@
     {
      "skill": "应用性能调优",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "计算机应用基础@icourse163(q=0.6121)",
+      "办公软件高级应用@icourse163(q=0.5932)",
+      "最优化方法（与机器学习）@icourse163(q=0.548)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
     {
      "skill": "现代AI",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "人工智能@icourse163(q=0.6185)",
+      "人工智能基础@icourse163(q=0.6001)",
+      "人工智能基础@icourse163(q=0.5785)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1228,14 +1257,22 @@
     {
      "skill": "大语言模型",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级语言程序设计@icourse163(q=0.6052)",
+      "高级语言程序设计@icourse163(q=0.5397)",
+      "高级语言程序设计@icourse163(q=0.4567)"
+     ],
      "estimated_hours": 70.0,
      "priority": "medium"
     },
     {
      "skill": "文档AI",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "人工智能@icourse163(q=0.6185)",
+      "人工智能基础@icourse163(q=0.5785)",
+      "Professional Data Engineer 여정 준비하기@coursera(q=0.45)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     }
@@ -1243,9 +1280,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.3,
+    "course": 0.74,
     "hours": 0.52,
-    "mean": 0.58
+    "mean": 0.69
    },
    "reasonable": false
   },
@@ -1352,7 +1389,9 @@
     {
      "skill": "SSO",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Docker Certified Associate Preparation@coursera(q=0.47)"
+     ],
      "estimated_hours": 55.0,
      "priority": "medium"
     },
@@ -1363,7 +1402,9 @@
       "Linux"
      ],
      "courses": [
-      "运筹学@icourse163(q=0.5193)"
+      "运筹学@icourse163(q=0.5193)",
+      "Big Data, Hadoop, and Spark Basics@edx(q=0.45)",
+      "Spark, Hadoop, and Snowflake for Data Engineering@edx(q=0.45)"
      ],
      "estimated_hours": 165.0,
      "priority": "medium"
@@ -1372,9 +1413,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.54,
+    "course": 0.62,
     "hours": 0.76,
-    "mean": 0.75
+    "mean": 0.77
    },
    "reasonable": false
   },
@@ -1535,7 +1576,11 @@
     {
      "skill": "系统补丁",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "计算机应用基础@icourse163(q=0.6121)",
+      "前端技术开发@icourse163(q=0.551)",
+      "计算机基础@icourse163(q=0.5099)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1561,9 +1606,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.46,
+    "course": 0.54,
     "hours": 0.4,
-    "mean": 0.61
+    "mean": 0.64
    },
    "reasonable": false
   },
@@ -1600,8 +1645,8 @@
      "skill": "财务建模",
      "prerequisites": [],
      "courses": [
+      "Excel财务建模@icourse163(q=0.5682)",
       "金融工程学-衍生工具@icourse163(q=0.5586)",
-      "金融数学@icourse163(q=0.545)",
       "金融学（二）@icourse163(q=0.525)"
      ],
      "estimated_hours": 40.0,
@@ -1623,7 +1668,11 @@
     {
      "skill": "VBA",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "运筹学@icourse163(q=0.5193)",
+      "简明世界史（一）@icourse163(q=0.5127)",
+      "简明世界史（二）@icourse163(q=0.5074)"
+     ],
      "estimated_hours": 55.0,
      "priority": "medium"
     }
@@ -1631,9 +1680,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.86,
+    "course": 0.94,
     "hours": 0.88,
-    "mean": 0.86
+    "mean": 0.88
    },
    "reasonable": true
   },
@@ -1651,7 +1700,9 @@
       "Linux"
      ],
      "courses": [
-      "运筹学@icourse163(q=0.5193)"
+      "AWS Data Analytics and Processing@coursera(q=0.45)",
+      "AWS Cloud Practitioner Essentials@edx(q=0.45)",
+      "Getting Started with Data Analytics on AWS@edx(q=0.45)"
      ],
      "estimated_hours": 150.0,
      "priority": "high"
@@ -1664,6 +1715,7 @@
       "JavaScript"
      ],
      "courses": [
+      "AI Agents in Typescript/Javascript@coursera(q=0.6844)",
       "TypeScript for Modern Development@coursera(q=0.46)"
      ],
      "estimated_hours": 220.0,
@@ -1751,7 +1803,9 @@
     {
      "skill": "决策逻辑",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Data Analysis for Decision-Making@edx(q=0.45)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1781,9 +1835,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.74,
+    "course": 0.82,
     "hours": 0.4,
-    "mean": 0.66
+    "mean": 0.68
    },
    "reasonable": false
   },
@@ -1806,7 +1860,8 @@
      "prerequisites": [],
      "courses": [
       "Oracle Java Foundations@coursera(q=0.593)",
-      "Oracle Java Foundations@coursera(q=0.593)"
+      "Oracle Java Foundations@coursera(q=0.593)",
+      "Introduction to SQL@edx(q=0.45)"
      ],
      "estimated_hours": 55.0,
      "priority": "medium"
@@ -1962,7 +2017,11 @@
     {
      "skill": "Stata",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "运筹学@icourse163(q=0.5193)",
+      "简明世界史（一）@icourse163(q=0.5127)",
+      "简明世界史（二）@icourse163(q=0.5074)"
+     ],
      "estimated_hours": 40.0,
      "priority": "medium"
     }
@@ -1970,9 +2029,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.6,
+    "course": 0.74,
     "hours": 0.52,
-    "mean": 0.68
+    "mean": 0.71
    },
    "reasonable": false
   }
