@@ -254,9 +254,14 @@ async def _upsert(
     return False
 
 
-def _embed_text(name: str, category: str) -> str:
-    """向量化文本：岗位名为主（跨语言语义匹配），叠加大类名增强上下文。"""
-    return f"{name} {category}".strip()
+def _embed_text(name: str, category: str, aliases: list | None = None) -> str:
+    """向量化文本：岗位名为主（跨语言语义匹配），叠加大类名与别名增强命中。
+
+    08-13 扩充：aliases（JD 岗位名桥接）参与向量化——内置别名恢复后语义路
+    可直接命中 JD 岗位名（如"大模型算法工程师"→ 人工智能工程技术人员）。
+    """
+    parts = [name, category, *((aliases or []) if isinstance(aliases, list) else [])]
+    return " ".join(str(x) for x in parts if x).strip()
 
 
 async def _fill_embeddings(session) -> int:
@@ -272,7 +277,7 @@ async def _fill_embeddings(session) -> int:
         return 0
     try:
         embedder = SkillEmbedder.get()
-        texts = [_embed_text(r.name, r.category) for r in rows]
+        texts = [_embed_text(r.name, r.category, r.aliases) for r in rows]
         embedder.warm(texts)  # 一次 batch encode 填缓存，避免逐条前向推理
         vecs = [embedder.embed(t) for t in texts]
     except SemanticUnavailableError as e:
