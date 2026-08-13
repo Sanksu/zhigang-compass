@@ -22,7 +22,9 @@ import os
 
 from locust import HttpUser, between, task
 
-GENERAL_LIMIT_CODE = 4290  # 限流命中（设计预期，不算失败）
+# 限流命中：HTTP 429（业务码 4290 在响应体 code 字段）——设计预期，不计失败。
+# 命中率 = 请求总数 − 成功数（429 被 success 吸收后不显示为失败）
+GENERAL_LIMIT_CODE = 429
 
 # 搜索关键词池（真实图谱岗位名，cjk 全文索引命中面广）
 _SEARCH_QUERIES = [
