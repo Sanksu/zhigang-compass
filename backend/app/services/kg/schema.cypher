@@ -64,7 +64,7 @@ FOR (n:Course) ON EACH [n.name, n.description, n.category]
 OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } };
 
 CREATE FULLTEXT INDEX occupation_search IF NOT EXISTS
-FOR (n:Occupation) ON EACH [n.name, n.category, n.definition]
+FOR (n:Occupation) ON EACH [n.name, n.category, n.definition, n.aliases]
 OPTIONS { indexConfig: { `fulltext.analyzer`: 'cjk' } };
 
 CREATE FULLTEXT INDEX evidence_search IF NOT EXISTS
