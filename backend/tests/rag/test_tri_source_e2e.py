@@ -14,10 +14,20 @@
 
 import asyncio
 
+import pytest
+
 from app.models.business import DiagnosisReportRecord, DiscoveryCandidate, Occupation
 from app.services.diagnosis.generator import generate_diagnosis
 from app.services.diagnosis.schemas import DiagnosisReport, GapAdvice
 from app.services.rag.retrieval import retrieve_context
+
+
+@pytest.fixture(autouse=True)
+def _disable_grounding_cache(monkeypatch):
+    """单测不依赖 Redis：关闭 grounding 检索缓存，避免命中/写入真实缓存污染批次消费。"""
+    from app.services.discovery import grounding
+
+    monkeypatch.setattr(grounding, "_CACHE_ENABLED", False)
 
 # 端到端用例的职业名称：人社部大典「人工智能工程技术人员」的常见招聘称谓
 _POSITION = "人工智能工程师"
@@ -86,13 +96,18 @@ def _diagnosis_data() -> dict:
 
 
 class _FakeDb:
-    """按调用次序返回批次的假 AsyncSession（scalars → all 消费一批）。"""
+    """按调用次序返回批次的假 AsyncSession（scalars/execute → all 消费一批）。"""
 
     def __init__(self, *batches):
         self._batches = list(batches)
         self._cur = []
 
     async def scalars(self, stmt):
+        self._cur = self._batches.pop(0) if self._batches else []
+        return self
+
+    async def execute(self, stmt):
+        # pgvector 语义路走 execute（返回 (occ, sim) 元组行）
         self._cur = self._batches.pop(0) if self._batches else []
         return self
 
@@ -143,7 +158,7 @@ def _build_db() -> _FakeDb:
                 definition_draft="负责大模型应用、智能体与 RAG 系统的设计、开发与落地。",
             ),
         ],
-        occupations,  # pgvector 语义路
+        [(occ, 0.9) for occ in occupations],  # pgvector 语义路（(occ, sim) 元组行）
         occupations,  # 关键词路（ILIKE）
         [  # 历史诊断报告
             DiagnosisReportRecord(
