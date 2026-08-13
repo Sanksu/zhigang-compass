@@ -13,6 +13,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 
+from scrapy.exceptions import CloseSpider
 from scrapy.http import Response
 from scrapy_playwright.page import PageMethod
 
@@ -57,6 +58,17 @@ class ZhilianSpider(BaseSpider):
         # 历史回爬（G-01）：-a history_days=90 放宽翻页上限并逐页按发布时间截断
         self.history_days = int(kwargs.get("history_days") or 0)
         self._max_pages = BACKFILL_MAX_PAGES if self.history_days else INCREMENTAL_MAX_PAGES
+        # JD 采集条数上限（-a max_results=200，默认 200）：按产出条数截断，
+        # 防列表页全量遍历超长运行（08-13 实测 zhilian 挂死 8h，900s 超时后
+        # 孤儿爬虫仍残留；条数上限在源头截断，与页数上限/900s 超时三重保险）
+        self._max_results = int(kwargs.get("max_results") or 200)
+        self._items_collected = 0
+
+    def _bump_items(self):
+        """产出计数：达到 max_results 上限即关闭爬虫（CloseSpider 停止新调度）。"""
+        self._items_collected += 1
+        if self._items_collected >= self._max_results:
+            raise CloseSpider(f"达到 JD 采集上限 {self._max_results} 条")
 
     def _cutoff_reached(self, publish_time_map: dict) -> bool:
         """本页出现早于 history_days 天的岗位时停止翻页（列表按发布时间倒序）。"""
@@ -230,6 +242,7 @@ class ZhilianSpider(BaseSpider):
         if description or requirements:
             raw_text = "\n".join([raw_text, description, requirements])
 
+        self._bump_items()  # 条数上限（默认 200）截断，防超长运行
         yield self.make_item(
             source_id=job["source_id"],
             source_url=job["source_url"],
@@ -252,6 +265,7 @@ class ZhilianSpider(BaseSpider):
         self.logger.warning(
             f"[zhilian] 详情页获取失败，降级列表页摘要: {failure.value}"
         )
+        self._bump_items()  # 条数上限同样约束降级路径
         yield self.make_item(
             source_id=job["source_id"],
             source_url=job["source_url"],

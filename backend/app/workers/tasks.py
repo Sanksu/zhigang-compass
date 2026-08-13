@@ -49,7 +49,8 @@ _CRAWL_ENV = {
 }
 
 # 显式消费 -a max_results 参数的 spider（其余源由各自默认采集量控制）
-MAX_RESULTS_SUPPORTED = {"arxiv"}
+# zhilian：08-13 新增条数上限（默认 200，spider 层 CloseSpider 截断）
+MAX_RESULTS_SUPPORTED = {"arxiv", "zhilian"}
 
 # CDP 爬虫：需连接真实 Chrome（9222）复用登录态，无登录态时会自动拉起浏览器
 # （ensure_cdp_chrome），本地手动触发 ETL 可 skip_cdp=True 跳过，避免干扰用户浏览器
