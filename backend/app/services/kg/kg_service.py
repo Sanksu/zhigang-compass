@@ -343,7 +343,7 @@ def _import_jd_tx(
         tx.run(
             """
             MATCH (p:Position {id: $position_id}), (t:Tool {name: $tool_name})
-            MERGE (p)-[:REQUIRES]->(t)
+            MERGE (p)-[r:REQUIRES]->(t)
             SET r.necessity = 'must'
             """,
             position_id=position_id,
