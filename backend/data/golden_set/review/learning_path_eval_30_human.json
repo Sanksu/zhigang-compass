@@ -26,7 +26,7 @@
    "note": "Agile/Service Mapping/Discovery 语义多误配或空；Shell→Genomic 误配；VMware→Google IT 偏；Agile 为方法无先修合理"
   },
   "lp_06": {
-   "course": 0.8,
+   "course": 0.94,
    "prerequisite": 0.6,
    "note": "营销→VFX 课无关；嵌入向量/IaC 无课；容器/生成式AI 课偏；先修多空（生成式AI 应有 ML 先修）"
   },
@@ -46,17 +46,17 @@
    "note": "OpenSearch→IBM 全栈无关；推荐算法→DS 课偏；GCP/Qdrant/XGBoost 无课；先修全空（推荐算法应有 ML/数学先修）"
   },
   "lp_10": {
-   "course": 0.58,
+   "course": 0.72,
    "prerequisite": 0.7,
    "note": "Node.js 课相关；营销→VFX 无关；Dataiku→DS 偏；Snowflake 无课"
   },
   "lp_11": {
-   "course": 0.38,
+   "course": 0.46,
    "prerequisite": 0.6,
    "note": "Go 无课；模型部署课混杂（Intro DS 偏 + Java 无关）；负载均衡→.NET 偏；提示工程课相关"
   },
   "lp_12": {
-   "course": 0.54,
+   "course": 0.68,
    "prerequisite": 0.5,
    "note": "物联网/边缘计算/多线程无课；编译调试→Python 入门偏；网络通信→Arduino 偏；先修全空"
   },
@@ -76,7 +76,7 @@
    "note": "严重误配：Perturb-seq→数据结构/计网/C++期末冲刺（考前突击课）；CRISPR/单细胞/Squidpy 无课；数据可视化课相关"
   },
   "lp_16": {
-   "course": 0.6,
+   "course": 0.68,
    "prerequisite": 0.7,
    "note": "费用/英语为业务词误当技能且无课；研究→DSA 无关；需求分析→Amazon Junior 偏；Tableau 无课"
   },
@@ -86,7 +86,7 @@
    "note": "课程质量高（Web/编程/ML 课均相关）；人工智能→IBM AI 偏；数字素养→What is DS 偏；技术教师岗位路径整体最健康"
   },
   "lp_18": {
-   "course": 0.58,
+   "course": 0.66,
    "prerequisite": 0.7,
    "note": "云原生/Docker 无课但先修链全；C→Data Science Math 无关；API集成→JS 偏；Agentic→AI 偏"
   },
@@ -101,7 +101,7 @@
    "note": "数据可视化课相关；JCAM/Archer 无课；AI辅助工作流→AI 课偏；工作流自动化→Cybersecurity 偏"
   },
   "lp_21": {
-   "course": 0.46,
+   "course": 0.54,
    "prerequisite": 0.7,
    "note": "Palantir Gotham/日志/SSO 无课；SQL→Python for Everybody 偏；Hadoop 无课但先修链全；图谱含『日志』脏技能"
   },
@@ -116,12 +116,12 @@
    "note": "统计学课相关；SQL→Python 偏；C++→Arduino 偏；蒙特卡洛→C 入门偏（需概率统计先修 0.5）；数值方法无课；先修链较好"
   },
   "lp_24": {
-   "course": 0.38,
+   "course": 0.46,
    "prerequisite": 0.6,
    "note": "Windows OS→Node.js 无关；系统补丁→Java 无关；NISPOM/WSUS/DHCP 无课；IT 运维领域课程池缺失"
   },
   "lp_25": {
-   "course": 0.58,
+   "course": 0.86,
    "prerequisite": 0.7,
    "note": "财务规划/建模→Data Science Master 偏；VBA→AI Agents 无关；Excel 无课；Python 课相关"
   },
@@ -136,12 +136,12 @@
    "note": "贷款发起/风险分层/信贷政策无课；决策逻辑→Amazon Junior 无关；征信数据→DS 偏；信贷业务技能课程池缺失"
   },
   "lp_28": {
-   "course": 0.38,
+   "course": 0.46,
    "prerequisite": 0.5,
    "note": "LDAP/IIQ API/BeanShell 无课；Oracle→Oracle Java 偏；Apache→Big Data 无关；先修全空（IIQ 应有 LDAP/Java 先修）"
   },
   "lp_29": {
-   "course": 0.68,
+   "course": 0.76,
    "prerequisite": 0.7,
    "note": "数据建模课相关；客户分析→Meta React 无关；DAX/定价分析/Excel 无课"
   },

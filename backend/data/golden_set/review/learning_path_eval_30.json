@@ -1,16 +1,16 @@
 {
  "summary": {
   "case_count": 30,
-  "reasonable_count": 4,
-  "reasonable_ratio": 0.1333,
+  "reasonable_count": 6,
+  "reasonable_ratio": 0.2,
   "target_ratio": 0.8,
   "target_met": false,
   "avg_dims": {
    "completeness": 1.0,
    "prerequisite": 0.587,
-   "course": 0.645,
+   "course": 0.701,
    "hours": 0.692,
-   "mean": 0.731
+   "mean": 0.745
   },
   "note": "预评分（规则化 AI 评审），专家复核后重跑 --re-score 定稿"
  },
@@ -357,7 +357,11 @@
     {
      "skill": "营销",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "商业智能@icourse163(q=0.6102)",
+      "电子商务概论@icourse163(q=0.5706)",
+      "Digital Marketing@edx(q=0.45)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -409,9 +413,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.86,
+    "course": 1.0,
     "hours": 0.64,
-    "mean": 0.75
+    "mean": 0.79
    },
    "reasonable": false
   },
@@ -640,7 +644,11 @@
     {
      "skill": "营销",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "商业智能@icourse163(q=0.6102)",
+      "电子商务概论@icourse163(q=0.5706)",
+      "Digital Marketing@edx(q=0.45)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -666,9 +674,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.58,
+    "course": 0.72,
     "hours": 0.76,
-    "mean": 0.74
+    "mean": 0.77
    },
    "reasonable": false
   },
@@ -707,7 +715,11 @@
     {
      "skill": "负载均衡",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级计量经济学@icourse163(q=0.5985)",
+      "计量经济学@icourse163(q=0.557)",
+      "新结构经济学@icourse163(q=0.5097)"
+     ],
      "estimated_hours": 55.0,
      "priority": "medium"
     },
@@ -722,11 +734,11 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.44,
+    "course": 0.58,
     "hours": 1.0,
-    "mean": 0.76
+    "mean": 0.8
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_12",
@@ -749,7 +761,11 @@
     {
      "skill": "物联网",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "网络技术与应用@icourse163(q=0.5688)",
+      "物联网技术概论@icourse163(q=0.5639)",
+      "物联网原理及应用@icourse163(q=0.5158)"
+     ],
      "estimated_hours": 30.0,
      "priority": "high"
     },
@@ -786,9 +802,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.72,
+    "course": 0.86,
     "hours": 0.52,
-    "mean": 0.68
+    "mean": 0.72
    },
    "reasonable": false
   },
@@ -996,7 +1012,11 @@
     {
      "skill": "需求分析",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "大数据分析与应用@icourse163(q=0.5588)",
+      "Data Analysis@edx(q=0.45)",
+      "Data Analysis for Management@edx(q=0.45)"
+     ],
      "estimated_hours": 40.0,
      "priority": "medium"
     },
@@ -1026,9 +1046,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.72,
+    "course": 0.86,
     "hours": 0.64,
-    "mean": 0.71
+    "mean": 0.75
    },
    "reasonable": false
   },
@@ -1138,7 +1158,11 @@
     {
      "skill": "C",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Programming in C@coursera(q=0.59)",
+      "Programming with C@coursera(q=0.5783)",
+      "小白玩转C语言@icourse163(q=0.5103)"
+     ],
      "estimated_hours": 55.0,
      "priority": "medium"
     },
@@ -1167,9 +1191,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.58,
+    "course": 0.72,
     "hours": 0.76,
-    "mean": 0.76
+    "mean": 0.79
    },
    "reasonable": false
   },
@@ -1317,7 +1341,11 @@
     {
      "skill": "日志",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "财务报表编制@icourse163(q=0.5389)",
+      "运筹学@icourse163(q=0.5193)",
+      "大学英文写作（一）@icourse163(q=0.5113)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1344,9 +1372,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.58,
+    "course": 0.72,
     "hours": 0.76,
-    "mean": 0.76
+    "mean": 0.79
    },
    "reasonable": false
   },
@@ -1491,7 +1519,9 @@
     {
      "skill": "Windows OS",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Linux操作系统@icourse163(q=0.5645)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1531,9 +1561,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.44,
+    "course": 0.58,
     "hours": 0.4,
-    "mean": 0.58
+    "mean": 0.62
    },
    "reasonable": false
   },
@@ -1558,14 +1588,22 @@
     {
      "skill": "财务规划与分析",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级财务管理@icourse163(q=0.5943)",
+      "财务报表编制@icourse163(q=0.5389)",
+      "高级财务管理@icourse163(q=0.4799)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
     {
      "skill": "财务建模",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "金融工程学-衍生工具@icourse163(q=0.5586)",
+      "金融数学@icourse163(q=0.545)",
+      "金融学（二）@icourse163(q=0.525)"
+     ],
      "estimated_hours": 40.0,
      "priority": "medium"
     },
@@ -1593,11 +1631,11 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.58,
+    "course": 0.86,
     "hours": 0.88,
-    "mean": 0.77
+    "mean": 0.83
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_26",
@@ -1790,7 +1828,9 @@
     {
      "skill": "Apache",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Apache Spark for Data Engineering and Machine Learning@edx(q=0.45)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     }
@@ -1798,9 +1838,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.44,
+    "course": 0.58,
     "hours": 0.52,
-    "mean": 0.61
+    "mean": 0.65
    },
    "reasonable": false
   },
@@ -1845,7 +1885,11 @@
     {
      "skill": "客户分析",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "运营管理与分析@icourse163(q=0.5806)",
+      "大数据分析与应用@icourse163(q=0.5588)",
+      "Data Analysis for Management@edx(q=0.45)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1864,9 +1908,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.86,
+    "course": 1.0,
     "hours": 0.64,
-    "mean": 0.75
+    "mean": 0.79
    },
    "reasonable": false
   },
