@@ -11,6 +11,7 @@ from app.services.extraction.schemas import (
     JDExtractionResult,
     REQUIRESRelation,
     SkillExtracted,
+    ToolExtracted,
 )
 from app.services.kg.kg_service import import_jd, _import_course_tx
 
@@ -259,3 +260,34 @@ class TestImportCourseSkillNormalization:
         assert "Vue.js" in names
         assert "Prompt Engineering" not in names
         assert "Vue3" not in names
+
+
+class TestImportJdToolRequires:
+    """JD 侧工具（tools）入图：Position-[:REQUIRES {necessity:'must'}]->Tool。
+
+    回归 2026-08-13 修复：Tool 边显式 SET necessity='must'（与 Education/
+    Certification 口径一致），且关系必须绑定变量（MERGE (p)-[r:REQUIRES]->(t)
+    而非 [:REQUIRES]——后者 SET r.necessity 会抛 Variable 'r' not defined）。
+    """
+
+    def test_tool_requires_necessity_must(self):
+        tx = _FakeTx()
+        extraction = _extraction()
+        extraction.tools = [ToolExtracted(name="Docker")]
+        import_jd(_FakeSession(tx), extraction, _evidence())
+
+        tool_rels = [q for q, _ in tx.queries if "MERGE (p)-[r:REQUIRES]->(t)" in q]
+        assert len(tool_rels) == 1
+        assert "SET r.necessity = 'must'" in tool_rels[0]
+        # 关系绑定变量（防止回归为无变量内联写法导致 r 未定义）
+        assert "[r:REQUIRES]" in tool_rels[0]
+
+    def test_tool_node_merged(self):
+        tx = _FakeTx()
+        extraction = _extraction()
+        extraction.tools = [ToolExtracted(name="Docker")]
+        import_jd(_FakeSession(tx), extraction, _evidence())
+
+        tool_nodes = [p for q, p in tx.queries if "MERGE (t:Tool" in q]
+        assert len(tool_nodes) == 1
+        assert tool_nodes[0]["name"] == "Docker"
