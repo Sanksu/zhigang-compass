@@ -30,13 +30,16 @@ _HOURS_BY_CATEGORY = {
 
 @lru_cache(maxsize=1)
 def _load_whitelist_categories() -> dict[str, str]:
-    """白名单技能类别（skill_whitelist.yaml 单一事实源）：name → category。"""
+    """白名单技能类别（skill_whitelist.yaml 单一事实源）：name → category。
+
+    配置缺失/损坏为环境错误，fail-fast（学时分层依赖该配置，静默降级会
+    使分层失效回退一刀切默认值）。
+    """
     path = Path(__file__).resolve().parents[3] / "configs" / "skill_whitelist.yaml"
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-    except OSError:
-        return {}
+    with open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if not isinstance(data, dict):
+        raise RuntimeError(f"skill_whitelist.yaml 顶层结构异常: {path}")
     return {
         x.get("name"): x.get("category")
         for x in (data.get("skills") or [])

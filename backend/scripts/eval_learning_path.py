@@ -1,14 +1,15 @@
 """学习路径 30 案例专家评审（设计文档 §1.4「学习路径合理性 ≥ 80% / 30 案例专家评审」）。
 
 案例构造：简历黄金集 50 份（gold_skills → 候选人画像，熟练度默认熟悉）× 图谱真实
-Position（REQUIRES 边，must/nice/weight/proficiency 全量）轮转组合 30 对。
+Position（REQUIRES 边，must/nice/weight/proficiency 全量）按下标对齐组合 30 对。
 
 每案例跑 LearningPathGenerator（真实课程加载：Neo4j LEARNABLE_VIA + PG quality），
 输出结构化评审表 + 四维预评分（供专家复核定稿）：
   1. 路径完整性   missing 技能被 Top-5 路径项覆盖的比例（客观计算）
   2. 先修正确性   先修链存在且语义成立（YAML 字典收录 = 1.0；空链 = 0.5）
   3. 课程匹配性   推荐课程与技能相关性（有相关课程 = 1.0；课程为空 = 0.3）
-  4. 学时合理性   estimated_hours 与现实投入偏差（≤200h = 1.0；200-500h = 0.7；>500h = 0.4）
+  4. 学时合理性   每项平均学时（含先修链）：35-80h = 1.0；<35h = 0.4（默认 30h 低估）；
+                  80-150h = 0.7；>150h = 0.5
 
 案例合理 = 四维平均 ≥ 0.8；整体达标 = 30 案例中 ≥ 80% 合理。
 预评分供专家复核，非终审结论；专家修改后重跑统计（--re-score 读人工评分覆盖）。
@@ -40,7 +41,6 @@ from app.services.matching.schemas import (
 )
 
 _CASE_COUNT = 30
-_HOURS_REAL = [(200, 1.0), (500, 0.7), (float("inf"), 0.4)]
 
 
 def load_resume_candidates() -> list[CandidateProfile]:

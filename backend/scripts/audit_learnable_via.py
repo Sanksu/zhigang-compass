@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,13 +47,19 @@ def load_edges() -> list[dict]:
 
 
 def audit(edges: list[dict], semantic) -> dict:
-    """全量语义审计，返回分档统计与清单。"""
-    severe, suspicious, normal = [], [], []
+    """全量语义审计，返回分档统计与清单。
+
+    相似度计算异常（模型中途不可用等）记 error 档——不落入严重档，
+    避免 --apply 误删。
+    """
+    severe, suspicious, normal, errors = [], [], [], []
     for e in edges:
         try:
             sim = semantic.similarity(e["skill"], e["course"])
         except Exception:
-            sim = 0.0
+            e["sim"] = None
+            errors.append(e)
+            continue
         e["sim"] = round(sim, 3)
         if sim < SEVERE:
             severe.append(e)
@@ -66,7 +71,8 @@ def audit(edges: list[dict], semantic) -> dict:
     # 脏技能节点：skill 侧全部边 < SUSPICIOUS（该技能所有课程均语义无关）
     skill_sims: dict[str, list[float]] = {}
     for e in edges:
-        skill_sims.setdefault(e["skill"], []).append(e["sim"])
+        if e.get("sim") is not None:
+            skill_sims.setdefault(e["skill"], []).append(e["sim"])
     dirty_skills = {
         s: sims for s, sims in skill_sims.items()
         if sims and all(v < SUSPICIOUS for v in sims)
@@ -77,26 +83,38 @@ def audit(edges: list[dict], semantic) -> dict:
         "severe_count": len(severe),
         "suspicious_count": len(suspicious),
         "normal_count": len(normal),
+        "error_count": len(errors),
         "severe_ratio": round(len(severe) / len(edges), 4) if edges else 0,
         "dirty_skill_count": len(dirty_skills),
         "severe_edges": sorted(severe, key=lambda e: e["sim"])[:60],
         "suspicious_edges": sorted(suspicious, key=lambda e: e["sim"])[:30],
         "dirty_skills": dict(sorted(dirty_skills.items(), key=lambda kv: min(kv[1]))[:30]),
+        "errors": errors[:20],
     }
 
 
 def delete_severe(edges: list[dict], threshold: float) -> int:
-    """删除 sim < threshold 的边（--apply）。"""
+    """删除 sim < threshold 的边（--apply），按 elementId 精确删除防同名多删。
+
+    删除前导出全量待删清单备份（reports/learnable_via_deleted_*.jsonl）。
+    """
+    targets = [e for e in edges if e.get("sim") is not None and e["sim"] < threshold]
+    backup = ROOT / "reports" / f"learnable_via_deleted_{__import__('time').strftime('%Y%m%d_%H%M%S')}.jsonl"
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    with open(backup, "w", encoding="utf-8") as f:
+        for e in targets:
+            f.write(json.dumps({"skill": e["skill"], "course": e["course"],
+                                "sim": e["sim"], "rel_id": e["rel_id"]}, ensure_ascii=False) + "\n")
+    print(f"待删 {len(targets)} 条已备份至 {backup}")
+
     with neo4j_driver.session() as session:
         deleted = 0
-        for e in edges:
-            if e["sim"] < threshold:
-                session.run(
-                    "MATCH (s:Skill {name: $s}), (c:Course {name: $c}) "
-                    "MATCH (s)-[r:LEARNABLE_VIA]->(c) DELETE r",
-                    s=e["skill"], c=e["course"],
-                )
-                deleted += 1
+        for e in targets:
+            session.run(
+                "MATCH ()-[r]->() WHERE elementId(r) = $rid DELETE r",
+                rid=e["rel_id"],
+            )
+            deleted += 1
     return deleted
 
 
@@ -134,7 +152,7 @@ def main() -> int:
         n = delete_severe(edges, args.threshold)
         print(f"已删除 {n} 条 sim < {args.threshold} 的脏边")
     else:
-        print(f"dry-run：未删除（--apply 才执行清理）")
+        print("dry-run：未删除（--apply 才执行清理）")
     return 0
 
 
