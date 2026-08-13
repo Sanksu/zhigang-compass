@@ -40,6 +40,7 @@ def test_cdp_port_by_platform_distinct():
         "monster": 9223,
         "glassdoor": 9224,
         "maimai": 9225,
+        "osta": 9226,
     }
     assert len(set(CDP_PORT_BY_PLATFORM.values())) == len(CDP_PORT_BY_PLATFORM)
 

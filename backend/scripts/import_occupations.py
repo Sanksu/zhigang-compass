@@ -264,6 +264,8 @@ def _embed_text(name: str, category: str, aliases: list | None = None, definitio
     语义区分度修复：此前仅 name+category，大典条目定义文本通用词密集导致
     余弦区分度差（实测对"前端开发工程师"给"铸造工程技术人员"0.824）；
     岗位名重复 2 次强调主语、definition 参与（补全后）提供职责内容信号。
+    aliases（JD 岗位名桥接）参与向量化——内置别名恢复后语义路可直接命中
+    JD 岗位名（如"大模型算法工程师"→ 人工智能工程技术人员）。
     """
     name_part = f"{name} {name}"
     parts = [name_part, category, *((aliases or []) if isinstance(aliases, list) else []), definition]
