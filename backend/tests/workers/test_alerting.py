@@ -83,6 +83,11 @@ class TestCrawlFailureAlert:
             async def gather(self, *aws):
                 await asyncio.gather(*aws)
 
+            async def wait_for(self, aw, timeout):
+                return await aw
+
+            TimeoutError = asyncio.TimeoutError
+
         monkeypatch.setattr(tasks, "send_alert", _fake_alert)
         monkeypatch.setattr(tasks, "asyncio", _FakeAsyncio())
         monkeypatch.setattr(tasks, "_OUTPUT_DIR", tmp_path)

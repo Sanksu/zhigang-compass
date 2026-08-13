@@ -106,6 +106,13 @@ async def _update_crawl_task(task_id: str | None, **fields) -> None:
 # ETL 阶段任务
 # ============================================================
 
+# 单源爬虫超时上限（秒）：Playwright 渲染慢源（zhilian 8kw×5city 全量）正常
+# 需 20-40min，但挂死（网络黑洞/风控验证码循环）会无限阻塞 ETL 阶段 1
+# （08-13 实测 zhilian 挂死 8h，job 超时 kill 后 subprocess 成孤儿继续跑）。
+# 900s 对齐 run_etl_pipeline 注释声明的单源上限；超时 kill 后已写入 jsonl
+# 保留（Scrapy 逐行落盘），后续 load 仍消费已产出数据。
+_CRAWL_TIMEOUT_SEC = 900
+
 async def crawl_platform(
     ctx: dict,
     spider_name: str,
@@ -119,6 +126,10 @@ async def crawl_platform(
     通过 subprocess 调用而非 in-process，原因：
     - Scrapy 基于 Twisted reactor，与 asyncio event loop 不兼容
     - subprocess 隔离崩溃，单爬虫失败不污染 worker
+
+    单源超时：_CRAWL_TIMEOUT_SEC（900s）内未退出则 kill 子进程并报错——
+    避免爬虫挂死无限阻塞 ETL 阶段 1（ARQ job 超时不会终止 subprocess，
+    会残留孤儿爬虫继续打源站）。
 
     task_id 存在时（手动触发场景）：
     - 输出逐行写入 Redis 日志队列（SSE 端点 /admin/crawl/task/{task_id}/stream 实时推送）
@@ -194,7 +205,18 @@ async def crawl_platform(
         _drain(proc.stdout),
         _drain(proc.stderr, stderr_tail),
     )
-    returncode = await proc.wait()
+    # 单源超时保护（P0-1）：爬虫挂死时 kill 子进程，避免 ETL 阶段 1 无限阻塞；
+    # 已写入 jsonl 保留（Scrapy 逐行落盘），后续 load 消费已产出数据
+    try:
+        returncode = await asyncio.wait_for(proc.wait(), timeout=_CRAWL_TIMEOUT_SEC)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        msg = f"爬虫 {spider_name} 超时（>{_CRAWL_TIMEOUT_SEC}s），已强制终止"
+        print(f"[crawl_platform] 任务超时: task_id={task_id} {msg}", flush=True)
+        await _update_crawl_task(task_id, status="failed", error=msg[:500])
+        await send_alert("crawl_timeout", msg, spider=spider_name)
+        raise RuntimeError(msg)
     print(f"[crawl_platform] 子进程退出: task_id={task_id} returncode={returncode}", flush=True)
 
     if returncode != 0:
