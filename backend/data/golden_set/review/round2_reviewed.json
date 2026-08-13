@@ -21,22 +21,22 @@
       "review_note": "草稿 skills 9→8（AI 工具属『附加项』移 bonus）；数据结构与算法为通用基础不单列；3-5 年经验"
     },
     "r2_003": {
-      "review_gold_title": "算法工程师",
+      "review_gold_title": "大模型应用工程师",
       "review_gold_skills": "[\"Python\",\"FastAPI\",\"LangChain\",\"LlamaIndex\",\"RAG\",\"Agent\",\"Transformer\",\"Qwen\",\"DeepSeek\",\"GLM\",\"Milvus\",\"Chroma\",\"Elasticsearch\",\"Redis\",\"Kafka\",\"PyTorch\",\"vLLM\",\"TGI\",\"模型量化\",\"Docker\",\"Kubernetes\"]",
       "review_gold_bonus_skills": "[\"昇腾CANN\",\"MindIE\",\"VLM\",\"OCR\",\"CUDA\",\"Triton\"]",
       "review_gold_experience": "{\"min_years\":3,\"max_years\":null}",
       "review_gold_education": "",
       "review_gold_core_duties": "[\"RAG 链路全流程开发\",\"Agent 架构设计与 Prompt 范式\",\"FastAPI 高并发接口开发\",\"模型量化与推理加速部署\"]",
-      "review_note": "⚠️ title 按 round1 先例归并（public_007/008 大模型算法工程师→算法工程师）；skills 21 项；无学历条款（仅年限）；3 年+"
+      "review_note": "title 按正文判断（终审口径）：正文为 LLM 工程化落地与 Agent 应用（RAG/部署为主，非算法研究）→ 大模型应用工程师，不做 round1『大模型算法→算法工程师』归并；skills 21 项；无学历条款（仅年限）；3 年+"
     },
     "r2_004": {
       "review_gold_title": "数字后端工程师",
-      "review_gold_skills": "[\"布局布线\",\"时序分析\",\"物理验证\",\"电源分析\",\"Perl\",\"TCL\",\"Cadence\",\"Innovus\",\"ICC2\",\"数字后端设计\"]",
+      "review_gold_skills": "[\"物理设计\",\"布局布线\",\"时序分析\",\"物理验证\",\"电源分析\",\"Perl\",\"TCL\",\"Cadence\",\"Innovus\",\"ICC2\",\"数字后端设计\"]",
       "review_gold_bonus_skills": "[\"DDR设计\",\"PCIE设计\",\"PHY设计\"]",
       "review_gold_experience": "{\"min_years\":7,\"max_years\":null}",
       "review_gold_education": "本科",
       "review_gold_core_duties": "[\"顶层/块级物理设计（网表到 GDS）\",\"时序收敛与物理验证\",\"设计流程优化与客户技术沟通\"]",
-      "review_note": "⚠️ title 修正：草稿『物理设计工程师』为职责描述，按标题为数字后端工程师；中英双语正文（中文为主）；7 年+；本科（机电工程硕士亦可）"
+      "review_note": "title 按标题为数字后端工程师（芯片物理设计岗，终审确认保留芯片物理设计语义）；skills 补『物理设计』（正文任职条件『熟悉亚微米物理设计方法』）；中英双语正文（中文为主）；7 年+；本科（机电工程硕士亦可）"
     },
     "r2_005": {
       "review_gold_title": "图像算法工程师",
@@ -111,13 +111,13 @@
       "review_note": "⚠️ title 修正：草稿少『算法』二字，按标题保留；无学历条款（仅专业要求）；3 年+"
     },
     "r2_013": {
-      "review_gold_title": "摄影测量高级算法工程师",
+      "review_gold_title": "摄影测量算法工程师",
       "review_gold_skills": "[\"多视几何\",\"摄影测量\",\"三维重建\",\"SFM\",\"密集匹配\",\"光束平差\",\"特征提取与匹配\",\"畸变校正\",\"多传感器融合\",\"相机标定\",\"LiDAR\",\"C++\",\"Python\",\"OpenCV\",\"OpenMVS\",\"GPU加速\",\"PyTorch\",\"CNN\",\"Transformer\"]",
       "review_gold_bonus_skills": "[]",
       "review_gold_experience": "",
       "review_gold_education": "本科",
       "review_gold_core_duties": "[\"多视几何与摄影测量算法实现\",\"多传感器融合与联合标定\",\"AI 与传统方法结合优化处理流程\"]",
-      "review_note": "⚠️ title 修正：草稿『机器视觉算法工程师』按标题为摄影测量高级算法工程师（级别保留）；SIFT/SURF/ORB 并入特征提取与匹配；无年限；本科（硕士优先）"
+      "review_note": "title 按标题为摄影测量算法工程师（终审口径：级别不保留，去『高级』）；SIFT/SURF/ORB 并入特征提取与匹配；无年限；本科（硕士优先）"
     },
     "r2_014": {
       "review_gold_title": "React前端开发工程师",
@@ -129,13 +129,13 @@
       "review_note": "⚠️ title 修正：草稿丢『React』前缀，按标题保留；3 年+；本科"
     },
     "r2_015": {
-      "review_gold_title": "高级前端工程师",
+      "review_gold_title": "前端工程师",
       "review_gold_skills": "[\"Android开发\",\"Vue\",\"uni-app\",\"HTML5\",\"CSS3\",\"JavaScript\"]",
       "review_gold_bonus_skills": "[\"iOS开发\",\"微信小程序开发\",\"混合开发\",\"UI设计\"]",
       "review_gold_experience": "",
       "review_gold_education": "",
       "review_gold_core_duties": "[\"移动端与 Web 前端开发维护\",\"前端架构设计与组件化开发\",\"页面实现与接口联调\"]",
-      "review_note": "⚠️ title：草稿去『高级』，按标题保留级别；skills 6 项；无学历/年限条款"
+      "review_note": "title 按标题去级别（终审口径：级别不保留）→ 前端工程师；skills 6 项；无学历/年限条款"
     },
     "r2_016": {
       "review_gold_title": "全栈开发工程师",
