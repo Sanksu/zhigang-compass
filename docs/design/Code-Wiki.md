@@ -514,7 +514,7 @@ Louvain 技能簇：两阶段模块度优化（节点移动 ΔQ 最大化 → �
 阶段二 Leiden 条件替换：同签名（igraph 1.0 + leidenalg 0.12，RBConfigurationVertexPartition + resolution_parameter，seed=0 确定性），输出与 louvain 同格式（reindex 0..k-1）。**2026-08-12 验收未达标**（同质性 +0.21 领先但 Q −0.037 落后，两项需同时达标），默认 `algorithm=louvain` 不切换；configs 一行切换 + API 依赖缺失自动回退 louvain。
 
 #### 参数调优 — [scripts/graph_algo_tune.py](../../backend/scripts/graph_algo_tune.py)
-图算法阶段一 Optuna 扫描：γ∈[0.5,2.0] × min_weight∈[1.0,3.0]，objective = 0.5·Q + 0.3·同质性 + 0.2·(1−过小簇占比)。Q 用标准模块度评分（γ 只生成划分），**退化解（簇数 ≤2 或最大簇占比 >0.5）罚 0**（2026-08-12 实跑修复 γ<1 单簇退化最优）。2026-08-12 真实快照（386 节点/3901 边）50 trial 最优 γ=1.256 / min_weight=2.502（同质性 0.37→0.56，详见 [图算法参数评估报告.md](./图算法参数评估报告.md)）。模式：--export（Neo4j 快照导出）/ --snapshot（固定数据集扫描）/ --dry-run（当前配置指标）/ --apply（写回 configs）/ **--compare（阶段二 Leiden 验收对比）**/ **--algorithm {louvain,leiden}（Leiden 专属调优——参数不可互通，须自身空间扫描）**。
+图算法阶段一 Optuna 扫描：γ∈[0.5,2.0] × min_weight∈[1.0,3.0]，objective = 0.5·Q + 0.3·同质性 + 0.2·(1−过小簇占比)。Q 用标准模块度评分（γ 只生成划分），**退化解（簇数 ≤2 或最大簇占比 >0.5）罚 0**（2026-08-12 实跑修复 γ<1 单簇退化最优）。2026-08-12 真实快照（386 节点/3901 边）50 trial 最优 γ=1.256 / min_weight=2.502（同质性 0.37→0.56，详见 [图算法评估与链路审查综合报告.md](./图算法评估与链路审查综合报告.md)）。模式：--export（Neo4j 快照导出）/ --snapshot（固定数据集扫描）/ --dry-run（当前配置指标）/ --apply（写回 configs）/ **--compare（阶段二 Leiden 验收对比）**/ **--algorithm {louvain,leiden}（Leiden 专属调优——参数不可互通，须自身空间扫描）**。
 
 **调参口径警示（2026-08-13 实测）**：`--export` 快照按**当前配置的 min_weight** 过滤导出（351 节点），与全量图（1245 节点）口径不一致——快照上调出的 min_weight 应用到全量图会二次过滤过度（mw=2.325 只剩 75 节点）。**自动调参链（wait_etl_then_tune.py）已在 apply 后增加全量图门禁验证，失败自动回滚旧参数**；手动调参须在 apply 前用 `guard_community_distribution` 验证全量图。
 
