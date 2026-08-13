@@ -12,7 +12,7 @@
    "hours": 0.692,
    "mean": 0.754
   },
-  "note": "AWS 补采 + 词面匹配后定稿"
+  "note": "先修字典扩充后定稿"
  },
  "cases": [
   {
@@ -719,9 +719,11 @@
     },
     {
      "skill": "RESTful API",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础"
+     ],
      "courses": [],
-     "estimated_hours": 55.0,
+     "estimated_hours": 95.0,
      "priority": "medium"
     },
     {
@@ -740,9 +742,16 @@
     },
     {
      "skill": "提示工程",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "大语言模型"
+     ],
      "courses": [],
-     "estimated_hours": 70.0,
+     "estimated_hours": 370.0,
      "priority": "medium"
     }
    ],
@@ -877,9 +886,11 @@
     },
     {
      "skill": "RESTful API",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础"
+     ],
      "courses": [],
-     "estimated_hours": 55.0,
+     "estimated_hours": 95.0,
      "priority": "medium"
     }
    ],
@@ -1174,13 +1185,15 @@
     },
     {
      "skill": "C",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础"
+     ],
      "courses": [
       "Programming in C@coursera(q=0.59)",
       "Programming with C@coursera(q=0.5783)",
       "小白玩转C语言@icourse163(q=0.5103)"
      ],
-     "estimated_hours": 55.0,
+     "estimated_hours": 95.0,
      "priority": "medium"
     },
     {
@@ -1256,13 +1269,19 @@
     },
     {
      "skill": "大语言模型",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习"
+     ],
      "courses": [
       "高级语言程序设计@icourse163(q=0.6052)",
       "高级语言程序设计@icourse163(q=0.5397)",
       "高级语言程序设计@icourse163(q=0.4567)"
      ],
-     "estimated_hours": 70.0,
+     "estimated_hours": 300.0,
      "priority": "medium"
     },
     {
@@ -1449,12 +1468,15 @@
     },
     {
      "skill": "MATLAB",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "线性代数"
+     ],
      "courses": [
       "实用大众线性代数(MATLAB版)@icourse163(q=0.57)",
       "科学计算与MATLAB语言@icourse163(q=0.5627)"
      ],
-     "estimated_hours": 55.0,
+     "estimated_hours": 135.0,
      "priority": "medium"
     },
     {
@@ -1857,13 +1879,16 @@
     },
     {
      "skill": "Oracle",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "SQL"
+     ],
      "courses": [
       "Oracle Java Foundations@coursera(q=0.593)",
       "Oracle Java Foundations@coursera(q=0.593)",
       "Introduction to SQL@edx(q=0.45)"
      ],
-     "estimated_hours": 55.0,
+     "estimated_hours": 150.0,
      "priority": "medium"
     },
     {
@@ -1908,13 +1933,19 @@
    "path_items": [
     {
      "skill": "数据建模",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "Python",
+      "统计学",
+      "数据分析"
+     ],
      "courses": [
       "SQL for Data Science@coursera(q=0.6681)",
       "SQL for Data Science@coursera(q=0.6681)",
       "Advanced Statistics for Data Science@coursera(q=0.6131)"
      ],
-     "estimated_hours": 70.0,
+     "estimated_hours": 295.0,
      "priority": "medium"
     },
     {

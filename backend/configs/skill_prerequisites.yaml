@@ -1,181 +1,253 @@
-# 技能先修字典（AL-M4-03 学习路径先修链单一事实源）
-#
-# 图谱当前无 PREREQUISITE_OF 先修关系边，先修链以人工维护字典兜底
-# （与设计文档 §5.3 "层次聚类 + 人工词典兜底" 哲学一致）。
-#
-# 结构：
-#   default_hours_per_skill: 技能基础学时（小时），估算 estimated_hours 用
-#   skills:
-#     技能名:
-#       prerequisites: [先修技能名, ...]   # 先修链递归展开，先修在前（拓扑序）
-#       hours: 80                          # 可选：覆盖基础学时
-#
-# 约定：
-# - 技能名采用图谱归一化后的规范名（与 SKILL_WHITELIST / normalize_skill 口径一致）
-# - 先修链深度 ≤ 3，避免链条过深导致路径失真
-# - 未知技能的 estimated_hours 使用 default_hours_per_skill
-
 default_hours_per_skill: 30
-
 skills:
-  # ---- 语言基础 ----
   Java:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
     hours: 60
   Python:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
     hours: 50
   Go:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
   C++:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
   C语言:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
   JavaScript:
-    prerequisites: [HTML, CSS]
+    prerequisites:
+    - HTML
+    - CSS
   TypeScript:
-    prerequisites: [JavaScript]
+    prerequisites:
+    - JavaScript
   Rust:
-    prerequisites: [计算机基础]
-
-  # ---- 前端 ----
+    prerequisites:
+    - 计算机基础
   前端开发:
-    prerequisites: [HTML, CSS, JavaScript]
+    prerequisites:
+    - HTML
+    - CSS
+    - JavaScript
   React:
-    prerequisites: [JavaScript, HTML, CSS]
+    prerequisites:
+    - JavaScript
+    - HTML
+    - CSS
   Vue.js:
-    prerequisites: [JavaScript, HTML, CSS]
+    prerequisites:
+    - JavaScript
+    - HTML
+    - CSS
   小程序:
-    prerequisites: [JavaScript]
+    prerequisites:
+    - JavaScript
   鸿蒙:
-    prerequisites: [Java, JavaScript]
+    prerequisites:
+    - Java
+    - JavaScript
   Node.js:
-    prerequisites: [JavaScript]
+    prerequisites:
+    - JavaScript
   Webpack:
-    prerequisites: [JavaScript, Node.js]
+    prerequisites:
+    - JavaScript
+    - Node.js
   Next.js:
-    prerequisites: [React, Node.js]
-
-  # ---- 后端 ----
+    prerequisites:
+    - React
+    - Node.js
   Spring Boot:
-    prerequisites: [Java]
+    prerequisites:
+    - Java
   Spring:
-    prerequisites: [Java]
+    prerequisites:
+    - Java
   MyBatis:
-    prerequisites: [Java, SQL]
+    prerequisites:
+    - Java
+    - SQL
   微服务:
-    prerequisites: [Java, Spring Boot, 分布式]
+    prerequisites:
+    - Java
+    - Spring Boot
+    - 分布式
   分布式:
-    prerequisites: [计算机基础, 操作系统]
+    prerequisites:
+    - 计算机基础
+    - 操作系统
   消息队列:
-    prerequisites: [分布式]
+    prerequisites:
+    - 分布式
   Apache Kafka:
-    prerequisites: [Java, 分布式]
+    prerequisites:
+    - Java
+    - 分布式
   RabbitMQ:
-    prerequisites: [分布式]
+    prerequisites:
+    - 分布式
   Redis:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
   Elasticsearch:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
   搜索引擎:
-    prerequisites: [Elasticsearch]
-
-  # ---- 数据库 ----
+    prerequisites:
+    - Elasticsearch
   SQL:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
   MySQL:
-    prerequisites: [SQL]
+    prerequisites:
+    - SQL
   PostgreSQL:
-    prerequisites: [SQL]
+    prerequisites:
+    - SQL
   MongoDB:
-    prerequisites: [数据库基础]
+    prerequisites:
+    - SQL
   数据库:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
   数据仓库:
-    prerequisites: [SQL, 数据库]
+    prerequisites:
+    - SQL
+    - 数据库
   Hive:
-    prerequisites: [SQL, 大数据]
+    prerequisites:
+    - SQL
+    - 大数据
   HBase:
-    prerequisites: [大数据]
-
-  # ---- 大数据 / 算法 ----
+    prerequisites:
+    - 大数据
   大数据:
-    prerequisites: [计算机基础, SQL]
+    prerequisites:
+    - 计算机基础
+    - SQL
   Apache Spark:
-    prerequisites: [Scala, 大数据]
+    prerequisites:
+    - Scala
+    - 大数据
   Scala:
-    prerequisites: [Java]
+    prerequisites:
+    - Java
   Apache Flink:
-    prerequisites: [Java, 大数据]
+    prerequisites:
+    - Java
+    - 大数据
   Hadoop:
-    prerequisites: [计算机基础, Linux]
+    prerequisites:
+    - 计算机基础
+    - Linux
   机器学习:
-    prerequisites: [Python, 线性代数, 统计学]
+    prerequisites:
+    - Python
+    - 线性代数
+    - 统计学
     hours: 60
   深度学习:
-    prerequisites: [机器学习, Python]
+    prerequisites:
+    - 机器学习
+    - Python
     hours: 80
   NLP:
-    prerequisites: [Python, 机器学习]
+    prerequisites:
+    - Python
+    - 机器学习
   大模型:
-    prerequisites: [深度学习, 机器学习, Python]
+    prerequisites:
+    - 深度学习
+    - 机器学习
+    - Python
     hours: 100
   数据分析:
-    prerequisites: [Python, SQL, 统计学]
+    prerequisites:
+    - Python
+    - SQL
+    - 统计学
   数据挖掘:
-    prerequisites: [机器学习, SQL]
+    prerequisites:
+    - 机器学习
+    - SQL
   AI算法:
-    prerequisites: [机器学习, Python]
+    prerequisites:
+    - 机器学习
+    - Python
   算法:
-    prerequisites: [数据结构, 计算机基础]
+    prerequisites:
+    - 数据结构
+    - 计算机基础
   数据结构:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
   计算机基础:
     prerequisites: []
   操作系统:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
   计算机网络:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
   线性代数:
     prerequisites: []
   统计学:
     prerequisites: []
   概率论:
-    prerequisites: [线性代数]
-
-  # ---- 运维 / 云 ----
+    prerequisites:
+    - 线性代数
   Linux:
-    prerequisites: [计算机基础]
+    prerequisites:
+    - 计算机基础
   Docker:
-    prerequisites: [Linux]
+    prerequisites:
+    - Linux
   Kubernetes:
-    prerequisites: [Docker, Linux]
+    prerequisites:
+    - Docker
+    - Linux
   云原生:
-    prerequisites: [Docker, Kubernetes]
+    prerequisites:
+    - Docker
+    - Kubernetes
   AWS:
-    prerequisites: [计算机基础, Linux]
+    prerequisites:
+    - 计算机基础
+    - Linux
   阿里云:
-    prerequisites: [计算机基础, Linux]
+    prerequisites:
+    - 计算机基础
+    - Linux
   DevOps:
-    prerequisites: [Linux, Docker, CI/CD]
+    prerequisites:
+    - Linux
+    - Docker
+    - CI/CD
   CI/CD:
-    prerequisites: [Git]
+    prerequisites:
+    - Git
   Git:
     prerequisites: []
   网络工程:
-    prerequisites: [计算机网络]
-
-  # ---- 测试 / 工程 ----
+    prerequisites:
+    - 计算机网络
   软件测试:
-    prerequisites: [计算机基础, SQL]
+    prerequisites:
+    - 计算机基础
+    - SQL
   自动化测试:
-    prerequisites: [软件测试, Python]
+    prerequisites:
+    - 软件测试
+    - Python
   性能测试:
-    prerequisites: [软件测试]
+    prerequisites:
+    - 软件测试
   单元测试:
-    prerequisites: [计算机基础]
-
-  # ---- 软技能 / 其他 ----
+    prerequisites:
+    - 计算机基础
   项目管理:
     prerequisites: []
   产品设计:
@@ -183,6 +255,74 @@ skills:
   UI设计:
     prerequisites: []
   敏捷开发:
-    prerequisites: [项目管理]
+    prerequisites:
+    - 项目管理
   架构设计:
-    prerequisites: [微服务, 分布式]
+    prerequisites:
+    - 微服务
+    - 分布式
+  大语言模型:
+    prerequisites:
+    - 机器学习
+    - Python
+    - 线性代数
+  系统设计:
+    prerequisites:
+    - 分布式系统
+    - 数据结构
+  Azure:
+    prerequisites:
+    - 计算机基础
+    - Linux
+  C#:
+    prerequisites:
+    - 计算机基础
+    - 面向对象
+  C:
+    prerequisites:
+    - 计算机基础
+  性能调优:
+    prerequisites:
+    - 数据结构
+    - 计算机基础
+  分布式系统:
+    prerequisites:
+    - 计算机基础
+  RESTful API:
+    prerequisites:
+    - 计算机基础
+  数据建模:
+    prerequisites:
+    - SQL
+    - 数据分析
+  AI:
+    prerequisites:
+    - 机器学习
+    - Python
+    - 线性代数
+    - 统计学
+  NoSQL:
+    prerequisites:
+    - SQL
+  检索增强生成:
+    prerequisites:
+    - 大语言模型
+    - 机器学习
+    - Python
+  MATLAB:
+    prerequisites:
+    - 计算机基础
+    - 线性代数
+  CSS:
+    prerequisites:
+    - HTML
+  Oracle:
+    prerequisites:
+    - SQL
+  面向对象:
+    prerequisites:
+    - 计算机基础
+  提示工程:
+    prerequisites:
+    - 大语言模型
+    - Python
