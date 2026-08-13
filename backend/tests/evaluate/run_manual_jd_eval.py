@@ -93,7 +93,10 @@ def _load_round1_blind_rows(path: Path, sheet_name: str) -> list[dict[str, str]]
                 elif kind == "s" and value:
                     result[col] = shared[int(value)]
                 elif kind == "inlineStr":
-                    result[col] = "".join(cell.find("m:is", NS).itertext())  # type: ignore[union-attr]
+                    # openpyxl 对空串写 <c t="inlineStr"/> 无 m:is 子元素，
+                    # 按空单元格处理（round1 Artifact-tool 产物为无 t 空单元格）
+                    is_el = cell.find("m:is", NS)
+                    result[col] = "".join(is_el.itertext()) if is_el is not None else ""
                 else:
                     result[col] = value
             rows.append(result)
@@ -165,7 +168,7 @@ def validate_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
         "rows_with_source_url": sum(bool(r.get("source_url", "").strip()) for r in rows),
         "fully_valid_rows": valid_rows,
         "issues": issues,
-        "ready_for_real_run": len(rows) == 12 and valid_rows == 12 and provenance_ok,
+        "ready_for_real_run": valid_rows == len(rows) and provenance_ok and len(rows) > 0,
     }
 
 
@@ -354,7 +357,7 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
     success_count = len([p for p in predictions if p["execution_status"] == "real_llm_success"])
     if not success_count:
         reasons = [p.get("fallback_reason") or p.get("failure_reason") for p in predictions]
-        raise RuntimeError("12 条均未取得真实 LLM 输出；" + " | ".join(str(x) for x in reasons if x))
+        raise RuntimeError(f"{len(predictions)} 条均未取得真实 LLM 输出；" + " | ".join(str(x) for x in reasons if x))
     # 错误类型统计须在 metrics 构造前完成（error_types 写入归档展示）
     success_predictions = [p for p in predictions if p["execution_status"] == "real_llm_success"]
     error_counts: Counter[str] = Counter()
@@ -516,10 +519,10 @@ def write_blocker_report(output_dir: Path, validation: dict[str, Any], xlsx: Pat
         "## 预检结果",
         "",
         f"- 工作簿：`{xlsx}`",
-        f"- `Round1盲标` 数据行数：{validation['row_count']}/12",
-        f"- 非空正文：{validation['rows_with_nonempty_detail']}/12；可追溯 URL：{validation['rows_with_source_url']}/12",
-        f"- annotator：{', '.join(repr(x) for x in validation['observed_annotators']) or '空'}；要求为 12 条非空且一致",
-        f"- 全字段格式合格且可纳入真实评测的行数：{validation['fully_valid_rows']}/12",
+        f"- 盲标数据行数：{validation['row_count']}/{validation['row_count']}",
+        f"- 非空正文：{validation['rows_with_nonempty_detail']}/{validation['row_count']}；可追溯 URL：{validation['rows_with_source_url']}/{validation['row_count']}",
+        f"- annotator：{', '.join(repr(x) for x in validation['observed_annotators']) or '空'}；要求为非空且一致",
+        f"- 全字段格式合格且可纳入真实评测的行数：{validation['fully_valid_rows']}/{validation['row_count']}",
         f"- total_samples = {validation['row_count']}",
         "- real_llm_success_samples = 0；fallback_samples = 0；failed_samples = 0（未进入逐条抽取）",
         "",

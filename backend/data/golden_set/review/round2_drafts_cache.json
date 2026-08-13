@@ -1,0 +1,162 @@
+{
+ "r2_001": {
+  "review_gold_title": "前端开发工程师",
+  "review_gold_skills": "[\"HTML5\", \"CSS3\", \"JavaScript\", \"DOM\", \"BOM\", \"AJAX\", \"跨域\", \"浏览器渲染机制\", \"事件机制\", \"Android原生\", \"iOS原生\", \"React Native\", \"Vue.js\", \"Vue Router\", \"Pinia\", \"Vuex\", \"Axios\", \"组件封装\", \"状态\", \"路由配置\", \"Vite\", \"Webpack\", \"Git\", \"ESLint\", \"Prettier\", \"响应式布局\", \"Flex\", \"Grid\", \"RESTful API\", \"表单校验\", \"权限控制\", \"性能调优\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "",
+  "review_gold_core_duties": "[\"后台管理系统开发：Web端、H5页面、微信小程序开发与迭代\", \"多端适配与兼容：PC端、移动端响应式布局，浏览器与手机机型适配\", \"移动端打包上架：微信小程序调试发布、安卓iOS打包、适配测试、上架提交\"]"
+ },
+ "r2_002": {
+  "review_gold_title": "后端开发工程师",
+  "review_gold_skills": "[\"Go\", \"Python\", \"Linux\", \"Docker\", \"PostgreSQL\", \"MongoDB\", \"Redis\", \"微服务\", \"数据结构\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"微服务架构设计：技术选型、迭代和核心代码开发\", \"大数据中间件研发：大数据中间件产品研发\", \"系统维护与优化：维护和优化现有项目，确保系统稳定性和高效性\"]"
+ },
+ "r2_003": {
+  "review_gold_title": "大模型应用工程师",
+  "review_gold_skills": "[\"Python\", \"Transformer\", \"检索增强生成\", \"Embedding\", \"向量数据库\", \"LangChain\", \"LlamaIndex\", \"FastAPI\", \"模型量化\", \"推理加速\", \"PyTorch\", \"Redis\", \"Apache Kafka\", \"Docker\", \"Kubernetes\", \"高并发\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "",
+  "review_gold_core_duties": "[\"RAG链路开发：文档切片策略优化、Embedding模型微调、向量数据库选型与调优、Hybrid Search实现\", \"Agent架构设计：Tool Calling、Function Calling、Multi-Agent协作、ReAct/Reflexion Prompt范式\", \"工程化接口开发：FastAPI开发RESTful API，高并发处理，SSE/WebSocket流式输出\", \"模型部署与优化：LLM/VLM模型量化、推理加速、服务化部署，昇腾/寒武纪国产硬件适配\", \"容器化交付：Docker和K8s弹性伸缩推理集群，KV Cache监控、显存管理及日志追踪\"]"
+ },
+ "r2_004": {
+  "review_gold_title": "物理设计工程师",
+  "review_gold_skills": "[\"物理\", \"平面规划\", \"布局布线\", \"电源分析\", \"时序收敛\", \"物理验证\", \"时序分析\", \"Perl\", \"Tcl\", \"脚本语言\", \"数字后端\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"顶层/块级物理设计：从后DFT网表到GDS，完成实施与签核检查\", \"数字后端P&R：placement/CTS/route，16nm及以下工艺tapeout经验\", \"关键模块P&R：DDR/PCIE/PHY等特殊关键模块布局布线\", \"顶层STA/电源/物理验证：顶层时序分析、电源分析、物理验证\"]"
+ },
+ "r2_005": {
+  "review_gold_title": "图像识别算法工程师",
+  "review_gold_skills": "[\"目标检测\", \"目标跟踪\", \"图像分割\", \"特征提取\", \"图像增强\", \"障碍物识别\", \"Python\", \"C++\", \"YOLO\", \"ByteTrack\", \"DeepSORT\", \"OpenCV\", \"PyTorch\", \"模型量化\", \"模型剪枝\", \"ONNX\", \"TensorRT\", \"NCNN\", \"计算机视觉\", \"深度学习\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"无人机图像识别算法研发：目标检测、目标跟踪、图像分割、特征提取、图像增强、障碍物识别等核心算法研发，室内/室外场景\", \"算法嵌入式平台部署：配合嵌入式、飞控、硬件团队，完成算法在无人机嵌入式平台的部署与优化\", \"算法测试平台搭建：设计测试用例，开展算法性能测试、兼容性测试，分析测试数据，排查算法缺陷\"]"
+ },
+ "r2_006": {
+  "review_gold_title": "全栈开发工程师",
+  "review_gold_skills": "[\"Java\", \"Spring Boot\", \"Spring Cloud\", \"HTML\", \"CSS\", \"JavaScript\", \"Vue.js\", \"React\", \"Element UI\", \"MySQL\", \"SQL\", \"Redis\", \"消息队列\", \"MES\", \"WMS\", \"ERP\", \"OPC UA\", \"Modbus\", \"PLM\", \"数据集成\", \"性能调优\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"制造业数字化软件开发：MES、WMS生产管理系统后端核心功能开发与前端页面设计，支撑工厂生产流程数字化、智能化升级\", \"前后端交互与数据可视化：Java后端接口开发，配合前端实现数据可视化、生产看板等制造业特色功能\", \"第三方系统集成：对接ERP、PLM、自动化产线设备等第三方系统，完成接口开发与数据集成，解决跨系统数据流转问题\", \"系统高可用保障：代码编写、单元测试、性能优化及线上问题排查，保障系统高可用、高稳定性\"]"
+ },
+ "r2_007": {
+  "review_gold_title": "数据分析师",
+  "review_gold_skills": "[\"SQL\", \"Excel\", \"PPT\", \"数据清洗\", \"数据建模\", \"指标体系搭建\", \"统计学\", \"数据分析\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "",
+  "review_gold_core_duties": "[\"数据需求调研与管理：承接业务端数据需求调研，梳理核心业务逻辑，明确数据口径、分析目标及输出标准\", \"数据质量管理：数据质量监控，数据缺失、异常、重复等问题治理\", \"数据分析与洞察：日常业务数据采集、整理、校验、统计、专项分析，输出数据洞察报告\", \"数据建模应用：搭建基础分析模型、趋势预测模型，参与数据仓库建模与底层数据建设\", \"数据报表与指标体系设计：核心数据报表、可视化看板设计开发维护，核心指标体系搭建\"]"
+ },
+ "r2_008": {
+  "review_gold_title": "大模型应用开发工程师",
+  "review_gold_skills": "[\"检索增强生成\", \"大语言模型\", \"自然语言处理\", \"OCR\", \"PyTorch\", \"TensorFlow\", \"LangChain\", \"LlamaIndex\", \"Milvus\", \"pgvector\", \"提示工程\", \"LoRA\", \"QLoRA\", \"Python\", \"FastAPI\", \"Docker\", \"MySQL\", \"Redis\", \"向量检索\", \"重排序\", \"模型微调\", \"模型推理\", \"Agent开发\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"企业级大模型文档智能应用开发：基于大模型搭建私有知识库、智能文档处理体系，实现OCR识别、文本解析、智能生成、精准检索、内容合规校验\", \"统一大模型服务中台搭建：模型接口封装、调用监控、成本管控、流量熔断与异常告警，满足企业内网私有化部署\", \"大模型平台迭代优化：搭建专属向量库、提示词模板库与业务语料库，优化向量检索精度、多轮对话体验与接口响应速度\", \"RAG知识库开发：文档切片、向量检索、重排序全流程，模型轻量化微调\"]"
+ },
+ "r2_009": {
+  "review_gold_title": "大模型测试工程师",
+  "review_gold_skills": "[\"大模型测试\", \"功能测试\", \"性能测试\", \"安全性测试\", \"自动化测试\", \"Python\", \"Java\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"大模型全生命周期测试：功能测试、性能测试、安全性测试及多模态场景验证\", \"模型专项测试用例设计：针对模型推理逻辑、输出一致性、边界条件的专项测试\", \"自动化测试框架构建：提升大模型迭代过程中的测试效率与覆盖度\", \"测试数据分析与质量改进：分析测试数据与模型输出结果，支撑模型性能调优\"]"
+ },
+ "r2_010": {
+  "review_gold_title": "机器人控制算法工程师",
+  "review_gold_skills": "[\"机器人运动学\", \"机器人动力学\", \"运动控制\", \"轨迹规划\", \"路径规划\", \"力控\", \"阻抗控制\", \"导纳控制\", \"C++\", \"Python\", \"Linux\", \"ROS\", \"X86\", \"ARM\", \"Twincat\", \"EtherCAT\", \"姿态控制\", \"人工智能\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"多关节机器人控制系统架构设计：运控、力控系统架构设计与算法开发\", \"运动控制与轨迹规划算法开发：运动控制、轨迹规划、路径规划算法开发\", \"力控功能开发：力/位混合控制、阻抗控制、导纳控制\", \"控制系统仿真与实机测试：仿真测试、实机测试、系统优化\", \"人工智能与机器人技术结合：基于人工智能的运动控制训练、遥操作\"]"
+ },
+ "r2_011": {
+  "review_gold_title": "机器人系统工程师",
+  "review_gold_skills": "[\"C++\", \"Python\", \"Linux\", \"ROS\", \"MAVROS\", \"Navigation2\", \"PCL\", \"OpenCV\", \"SLAM\", \"多传感器数据融合\", \"路径规划\", \"运动控制\", \"Jetson\", \"PX4\", \"DDS\", \"Git\", \"CI/CD\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"ROS系统架构设计：节点划分与通信策略制定，基于DDS优化低延迟高可靠通信，适配室内巡检场景\", \"SLAM与定位导航：激光雷达+IMU融合SLAM，室内高精度定位，路径规划与动态避障\", \"飞控通信对接：基于MAVROS完成ROS与PX4飞控通信对接，姿态/位置控制与遥测回传\", \"传感器与硬件集成：激光雷达、IMU、相机等传感器ROS驱动开发，CAN/UART/Ethernet接口通信\", \"嵌入式计算平台适配：Jetson平台ROS系统裁剪、编译构建与量产级部署\", \"仿真环境搭建：Gazebo/Isaac Sim仿真环境，算法验证与性能测试\", \"自动化测试：rostest/gtest自动化测试用例，性能指标制定与测试报告\"]"
+ },
+ "r2_012": {
+  "review_gold_title": "计算机视觉工程师",
+  "review_gold_skills": "[\"Python\", \"C++\", \"Java\", \"OpenCV\", \"CNN\", \"Transformer\", \"预训练模型\", \"CLIP\", \"SAM\", \"扩散模型\", \"GAN\", \"图像生成\", \"模型训练\", \"模型调优\", \"模型部署\", \"模型轻量化\", \"图像分类\", \"目标检测\", \"图像分割\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"视觉模型训练与调优：选择智能模型，训练调优以满足任务目标\", \"模型轻量化与部署：配合运行环境完成模型轻量化并部署\", \"模型持续更新：收集运行数据，持续更新模型\", \"算法开发与演示系统：配合算法开发，研发演示系统，支撑指标测试\"]"
+ },
+ "r2_013": {
+  "review_gold_title": "机器视觉算法工程师",
+  "review_gold_skills": "[\"多视几何\", \"摄影测量\", \"特征提取\", \"特征匹配\", \"光束平差法\", \"三维重建\", \"畸变校准\", \"传感器融合\", \"C++\", \"Python\", \"多线程\", \"OpenCV\", \"OpenMVS\", \"性能调优\", \"深度学习\", \"PyTorch\", \"CNN\", \"Transformer\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"多视几何与三维重建：特征提取与匹配、光束平差法、三维重建、畸变校准\", \"多传感器融合：相机与 LiDAR 联合标定、多模态数据配准\", \"AI 影像解译：基于 CNN 的影像解译，优化数据处理流程\"]"
+ },
+ "r2_014": {
+  "review_gold_title": "前端开发工程师",
+  "review_gold_skills": "[\"React\", \"HTML5\", \"CSS3\", \"JavaScript\", \"Webpack\", \"Babel\", \"前端性能\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"前端开发与实现：使用React及相关技术栈进行高质量前端开发\", \"跨平台适配：保证应用在各种浏览器、移动设备上的兼容性\", \"性能体验优化：页面加载优化、首屏渲染优化，确保流畅用户体验\", \"前后端协作开发：与后端团队紧密合作，确保接口正确对接\"]"
+ },
+ "r2_015": {
+  "review_gold_title": "前端开发工程师",
+  "review_gold_skills": "[\"Android\", \"Vue.js\", \"uni-app\", \"HTML5\", \"CSS3\", \"JavaScript\", \"小程序\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "",
+  "review_gold_core_duties": "[\"前端架构设计：参与产品前端架构设计、性能优化及组件化开发\", \"页面实现与接口联调：根据产品需求独立完成页面实现、交互逻辑及接口联调\"]"
+ },
+ "r2_016": {
+  "review_gold_title": "全栈开发工程师",
+  "review_gold_skills": "[\"JavaScript\", \"Java\", \"Vue.js\", \"Spring Boot\", \"Spring Cloud\", \"MySQL\", \"PostgreSQL\", \"SQL\", \"Redis\", \"MongoDB\", \"缓存\", \"消息队列\", \"RabbitMQ\", \"Apache Kafka\", \"RocketMQ\", \"Maven\", \"Gradle\", \"Git\", \"Linux\", \"系统设计\", \"性能调优\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"核心产品需求分析与系统设计：参与需求分析、系统设计、编码实现与模块测试\", \"高可用高性能系统开发：确保系统高可用、高性能和高扩展性\", \"系统架构规划与性能优化：解决技术难点和性能瓶颈\"]"
+ },
+ "r2_017": {
+  "review_gold_title": "客户端开发工程师",
+  "review_gold_skills": "[\"大语言模型\", \"VLM\", \"Python\", \"Java\", \"Go\", \"检索增强生成\", \"AGENT\", \"CI/CD\", \"性能监控\", \"UI设计\", \"组件化UI\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "",
+  "review_gold_core_duties": "[\"端侧AI模型工程化落地：LLM/VLM模型端上部署及前后处理逻辑开发，实现低延时高并发AI服务\", \"客户端CI/CD流程建设：自动化构建、测试与多渠道打包发布\", \"客户端性能监控与稳定性治理：内存、卡顿监控，提升多终端用户体验\", \"多端UI设计与实现：大屏/多端界面高还原度实现，建立组件化UI库\", \"AI智能体云端服务开发：RAG架构、知识库构建、Agent框架后端工程化落地\", \"服务端部署与运维：部署、监控、日志分析与故障排查，保障高可用\"]"
+ },
+ "r2_018": {
+  "review_gold_title": "计算金融软件工程师",
+  "review_gold_skills": "[\"Python\", \"多线程\", \"并发编程\", \"异步编程\", \"MySQL\", \"PostgreSQL\", \"Git\", \"高性能计算\", \"并行计算\", \"性能调优\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"计算金融应用开发：开发计算金融应用，关注性能、可扩展性和准确性\", \"高性能并行计算优化：实现高性能和并行计算方案，优化计算密集型任务\", \"金融模型集成：与精算团队协作，将金融模型和模拟集成到可扩展软件系统\", \"性能分析与调优：性能分析、剖析和优化，提升系统吞吐量和延迟\"]"
+ },
+ "r2_019": {
+  "review_gold_title": "Java 后端开发工程师",
+  "review_gold_skills": "[\"Java\", \"计算机网络\", \"数据结构\", \"操作系统\", \"数据库\", \"Spring Boot\", \"Dubbo\", \"Thrift\", \"RPC\", \"ORM\", \"Redis\", \"本地缓存\", \"分布式缓存\", \"RabbitMQ\", \"Apache Kafka\", \"RocketMQ\", \"消息队列\", \"Web 容器\", \"达梦数据库\", \"SQL\", \"性能调优\", \"RESTful API\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "本科",
+  "review_gold_core_duties": "[\"后端功能开发：信息化产品后端功能开发、接口设计与版本迭代\", \"数据库设计：数据库设计、SQL 编写、存储过程开发，数据层方案落地\", \"接口联调：配合前端开展接口联调，定位并解决业务问题\", \"系统优化：优化信息化系统，保障系统稳定运行\"]"
+ },
+ "r2_020": {
+  "review_gold_title": "机器视觉算法工程师",
+  "review_gold_skills": "[\"OpenCV\", \"C++\", \"Python\", \"深度学习\", \"视频动作检测\", \"目标检测\", \"目标跟踪\", \"目标分割\", \"人脸识别\", \"表情分析\", \"人体姿态估计\", \"OCR\", \"多模态模型\", \"少样本学习\", \"度量学习\", \"迁移学习\", \"自监督学习\", \"模型部署\", \"模型量化\", \"Linux\", \"多线程\", \"内存\", \"缓存\"]",
+  "review_gold_bonus_skills": "[]",
+  "review_gold_experience": "",
+  "review_gold_education": "硕士",
+  "review_gold_core_duties": "[\"仿生机器人视觉算法研发：视频与图像理解，覆盖动作检测、目标检测跟踪、分割、人脸识别、表情分析、姿态估计、OCR\", \"嵌入式部署与性能优化：视觉算法在机器人本体上的迁移、裁剪、部署、验证与性能优化\", \"图像处理链路设计：相机采集后图像格式转换、畸变校正、增强、ROI、检测结果输出\", \"算法工程化：算法接口封装、服务调用、内存管理、缓存优化和多线程调度\"]"
+ }
+}
