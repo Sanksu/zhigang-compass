@@ -248,19 +248,25 @@ async def _upsert(
         return True
     existing.name = name
     existing.category = category
-    existing.definition = definition
-    existing.aliases = aliases
+    # 非空保护（08-13 评审修复）：原始数据 CSV 的 aliases/definition 常为空，
+    # 直接覆盖会清掉运营层数据（别名桥接/LLM 补全定义）——空值保留库中已有值
+    if definition:
+        existing.definition = definition
+    if aliases:
+        existing.aliases = aliases
     existing.source = source
     return False
 
 
-def _embed_text(name: str, category: str, aliases: list | None = None) -> str:
-    """向量化文本：岗位名为主（跨语言语义匹配），叠加大类名与别名增强命中。
+def _embed_text(name: str, category: str, aliases: list | None = None, definition: str = "") -> str:
+    """向量化文本：岗位名重复强调 + 大类名 + 别名 + 定义（08-13 评审 P1-1）。
 
-    08-13 扩充：aliases（JD 岗位名桥接）参与向量化——内置别名恢复后语义路
-    可直接命中 JD 岗位名（如"大模型算法工程师"→ 人工智能工程技术人员）。
+    语义区分度修复：此前仅 name+category，大典条目定义文本通用词密集导致
+    余弦区分度差（实测对"前端开发工程师"给"铸造工程技术人员"0.824）；
+    岗位名重复 2 次强调主语、definition 参与（补全后）提供职责内容信号。
     """
-    parts = [name, category, *((aliases or []) if isinstance(aliases, list) else [])]
+    name_part = f"{name} {name}"
+    parts = [name_part, category, *((aliases or []) if isinstance(aliases, list) else []), definition]
     return " ".join(str(x) for x in parts if x).strip()
 
 
@@ -277,7 +283,7 @@ async def _fill_embeddings(session) -> int:
         return 0
     try:
         embedder = SkillEmbedder.get()
-        texts = [_embed_text(r.name, r.category, r.aliases) for r in rows]
+        texts = [_embed_text(r.name, r.category, r.aliases, r.definition) for r in rows]
         embedder.warm(texts)  # 一次 batch encode 填缓存，避免逐条前向推理
         vecs = [embedder.embed(t) for t in texts]
     except SemanticUnavailableError as e:
