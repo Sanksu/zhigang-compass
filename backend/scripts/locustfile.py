@@ -6,9 +6,12 @@
 - `POST /api/v1/match/compare`（单点比对，语义引擎 + 三维评分）
 
 限流注意：普通接口 100 req/min/IP/path（middleware.RateLimitMiddleware，
-错误码 4290）——单机压测 100 并发必触发限流。脚本将 4290 计为"限流命中"
-（不算失败、不污染 P95），真实性能口径须在分布模式（--master/--worker
-多 IP）或关闭限流的环境下解读；4290 命中率本身也是限流设计生效的验证。
+HTTP 429 + 响应体业务码 4290）——单机压测 100 并发必触发限流。脚本将
+429 计为"限流命中"（不算失败），但 429 仍计入响应时间百分位（快速拒绝，
+方向乐观）——真实性能口径须在分布模式（--master/--worker 多 IP）或
+关闭限流的环境下解读；429 命中率可从 `--csv` 报告按请求名的
+"请求总数 − 成功数（429 已吸收）"差值观察，或用 `--statistics-history`
+对 429 状态码单独过滤。
 
 用法：
     cd backend
@@ -19,11 +22,13 @@
 """
 
 import os
+import random
 
 from locust import HttpUser, between, task
 
 # 限流命中：HTTP 429（业务码 4290 在响应体 code 字段）——设计预期，不计失败。
-# 命中率 = 请求总数 − 成功数（429 被 success 吸收后不显示为失败）
+# 注意：429 仍计入响应时间百分位（快速拒绝，拉低 P95，方向乐观），
+# 且被 success() 吸收后不出现在失败数——命中率需按请求名差值/状态码过滤观察
 GENERAL_LIMIT_CODE = 429
 
 # 搜索关键词池（真实图谱岗位名，cjk 全文索引命中面广）
@@ -38,6 +43,16 @@ _RESUME_ID = os.environ.get("LOCUST_RESUME_ID", "")
 _POSITION_ID = os.environ.get("LOCUST_POSITION_ID", "")
 
 
+def judge_status(resp) -> None:
+    """响应判定：429 限流命中（设计预期）不计失败；5xx/4xx 分别归类。"""
+    if resp.status_code == GENERAL_LIMIT_CODE:
+        resp.success()  # 限流命中为预期设计，不计失败
+    elif resp.status_code >= 500:
+        resp.failure(f"server error {resp.status_code}")
+    elif resp.status_code >= 400:
+        resp.failure(f"client error {resp.status_code}")
+
+
 class GraphUser(HttpUser):
     """图谱读链路用户：panorama + 全文检索（匿名可测，限流按 IP）。"""
 
@@ -49,27 +64,16 @@ class GraphUser(HttpUser):
         with self.client.get(
             "/api/v1/graph/panorama", name="panorama", catch_response=True
         ) as resp:
-            self._judge(resp)
+            judge_status(resp)
 
     @task(2)
     def search(self):
-        import random
-
         q = random.choice(_SEARCH_QUERIES)
         with self.client.get(
             "/api/v1/graph/search", params={"q": q, "size": 10},
             name="search", catch_response=True,
         ) as resp:
-            self._judge(resp)
-
-    @staticmethod
-    def _judge(resp) -> None:
-        if resp.status_code == GENERAL_LIMIT_CODE:
-            resp.success()  # 限流命中为预期设计，不计失败
-        elif resp.status_code >= 500:
-            resp.failure(f"server error {resp.status_code}")
-        elif resp.status_code >= 400:
-            resp.failure(f"client error {resp.status_code}")
+            judge_status(resp)
 
 
 class MatchUser(HttpUser):
@@ -104,9 +108,4 @@ class MatchUser(HttpUser):
             headers={"Authorization": f"Bearer {self.token}"},
             name="compare", catch_response=True,
         ) as resp:
-            if resp.status_code == GENERAL_LIMIT_CODE:
-                resp.success()
-            elif resp.status_code >= 500:
-                resp.failure(f"server error {resp.status_code}")
-            elif resp.status_code >= 400:
-                resp.failure(f"client error {resp.status_code}")
+            judge_status(resp)
