@@ -8,9 +8,9 @@
   "avg_dims": {
    "completeness": 1.0,
    "prerequisite": 0.587,
-   "course": 0.594,
+   "course": 0.645,
    "hours": 0.692,
-   "mean": 0.717
+   "mean": 0.731
   },
   "note": "预评分（规则化 AI 评审），专家复核后重跑 --re-score 定稿"
  },
@@ -42,7 +42,10 @@
       "SQL",
       "大数据"
      ],
-     "courses": [],
+     "courses": [
+      "Spark编程基础@icourse163(q=0.522)",
+      "Apache Spark for Data Engineering and Machine Learning@edx(q=0.45)"
+     ],
      "estimated_hours": 320.0,
      "priority": "high"
     },
@@ -84,9 +87,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.72,
+    "course": 0.86,
     "hours": 0.88,
-    "mean": 0.82
+    "mean": 0.86
    },
    "reasonable": true
   },
@@ -172,8 +175,9 @@
      "skill": "审批",
      "prerequisites": [],
      "courses": [
-      "高级会计学@icourse163(q=0.5539)",
-      "会计学@icourse163(q=0.5518)"
+      "管理会计@icourse163(q=0.5888)",
+      "会计学@icourse163(q=0.5518)",
+      "运筹学@icourse163(q=0.5193)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -182,7 +186,8 @@
      "skill": "工作流",
      "prerequisites": [],
      "courses": [
-      "高级物流学@icourse163(q=0.5327)"
+      "高级物流学@icourse163(q=0.5327)",
+      "运筹学@icourse163(q=0.5193)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -253,7 +258,9 @@
       "计算机基础",
       "Linux"
      ],
-     "courses": [],
+     "courses": [
+      "运筹学@icourse163(q=0.5193)"
+     ],
      "estimated_hours": 150.0,
      "priority": "high"
     },
@@ -282,9 +289,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.8,
-    "course": 0.58,
+    "course": 0.72,
     "hours": 1.0,
-    "mean": 0.84
+    "mean": 0.88
    },
    "reasonable": true
   },
@@ -359,8 +366,8 @@
      "prerequisites": [],
      "courses": [
       "互换性与测量技术@icourse163(q=0.5635)",
-      "数学建模@icourse163(q=0.5581)",
-      "测量学@icourse163(q=0.5388)"
+      "测量学@icourse163(q=0.5388)",
+      "运筹学@icourse163(q=0.5193)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -368,7 +375,11 @@
     {
      "skill": "容器",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Introduction to Containers w/ Docker, Kubernetes & OpenShift@coursera(q=0.6408)",
+      "Introduction to Docker@coursera(q=0.6024)",
+      "Docker Fundamentals and Container Management@coursera(q=0.4618)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -387,8 +398,8 @@
      "skill": "基础设施即代码",
      "prerequisites": [],
      "courses": [
-      "Programming Fundamentals@coursera(q=0.6534)",
       "Web编程技术@icourse163(q=0.5998)",
+      "物联网技术概论@icourse163(q=0.5639)",
       "网络应用编程@icourse163(q=0.5531)"
      ],
      "estimated_hours": 55.0,
@@ -398,9 +409,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.72,
+    "course": 0.86,
     "hours": 0.64,
-    "mean": 0.71
+    "mean": 0.75
    },
    "reasonable": false
   },
@@ -414,7 +425,11 @@
     {
      "skill": "Tableau",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Data Visualization with Tableau@coursera(q=0.6477)",
+      "Fundamentals of Visualization with Tableau@coursera(q=0.645)",
+      "Tableau Business Intelligence Analyst@coursera(q=0.6304)"
+     ],
      "estimated_hours": 40.0,
      "priority": "high"
     },
@@ -451,9 +466,9 @@
      "skill": "物流分析",
      "prerequisites": [],
      "courses": [
+      "物流大数据分析与挖掘@icourse163(q=0.5904)",
       "高级物流学@icourse163(q=0.5327)",
-      "Supply Chain Management@edx(q=0.45)",
-      "Data Analysis for Management@edx(q=0.45)"
+      "Supply Chain Management@edx(q=0.45)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -462,9 +477,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.72,
+    "course": 0.86,
     "hours": 0.76,
-    "mean": 0.74
+    "mean": 0.78
    },
    "reasonable": false
   },
@@ -669,7 +684,9 @@
      "prerequisites": [
       "计算机基础"
      ],
-     "courses": [],
+     "courses": [
+      "运筹学@icourse163(q=0.5193)"
+     ],
      "estimated_hours": 95.0,
      "priority": "medium"
     },
@@ -705,9 +722,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.3,
+    "course": 0.44,
     "hours": 1.0,
-    "mean": 0.73
+    "mean": 0.76
    },
    "reasonable": false
   },
@@ -732,11 +749,7 @@
     {
      "skill": "物联网",
      "prerequisites": [],
-     "courses": [
-      "网络与人工智能法@icourse163(q=0.5716)",
-      "网络技术与应用@icourse163(q=0.5688)",
-      "网络应用编程@icourse163(q=0.5531)"
-     ],
+     "courses": [],
      "estimated_hours": 30.0,
      "priority": "high"
     },
@@ -756,7 +769,7 @@
      "prerequisites": [],
      "courses": [
       "高级英语（1）@icourse163(q=0.5651)",
-      "简明世界史（一）@icourse163(q=0.5127)",
+      "运筹学@icourse163(q=0.5193)",
       "简明世界史（二）@icourse163(q=0.5074)"
      ],
      "estimated_hours": 40.0,
@@ -773,9 +786,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.86,
+    "course": 0.72,
     "hours": 0.52,
-    "mean": 0.72
+    "mean": 0.68
    },
    "reasonable": false
   },
@@ -792,7 +805,11 @@
       "计算机基础",
       "Linux"
      ],
-     "courses": [],
+     "courses": [
+      "Introduction to Docker@coursera(q=0.6024)",
+      "Docker and Kubernetes Masterclass: From Beginner to Advanced@coursera(q=0.5989)",
+      "Docker Fundamentals and Container Management@coursera(q=0.4618)"
+     ],
      "estimated_hours": 150.0,
      "priority": "medium"
     },
@@ -834,9 +851,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.3,
+    "course": 0.44,
     "hours": 0.88,
-    "mean": 0.72
+    "mean": 0.76
    },
    "reasonable": false
   },
@@ -914,9 +931,9 @@
      "skill": "数据可视化",
      "prerequisites": [],
      "courses": [
+      "Google Data Analytics@coursera(q=0.692)",
       "IBM Data Science@coursera(q=0.689)",
-      "Data Science: Foundations using R@coursera(q=0.6794)",
-      "Data Science@coursera(q=0.6762)"
+      "Data Science: Foundations using R@coursera(q=0.6794)"
      ],
      "estimated_hours": 55.0,
      "priority": "medium"
@@ -963,7 +980,8 @@
      "skill": "费用",
      "prerequisites": [],
      "courses": [
-      "高级计量经济学@icourse163(q=0.5985)"
+      "高级计量经济学@icourse163(q=0.5985)",
+      "计量经济学@icourse163(q=0.557)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -985,7 +1003,11 @@
     {
      "skill": "Tableau",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Data Visualization with Tableau@coursera(q=0.6477)",
+      "Fundamentals of Visualization with Tableau@coursera(q=0.645)",
+      "Tableau Business Intelligence Analyst@coursera(q=0.6304)"
+     ],
      "estimated_hours": 40.0,
      "priority": "medium"
     },
@@ -1004,9 +1026,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.58,
+    "course": 0.72,
     "hours": 0.64,
-    "mean": 0.68
+    "mean": 0.71
    },
    "reasonable": false
   },
@@ -1099,7 +1121,7 @@
       "Kubernetes"
      ],
      "courses": [
-      "高级英语（1）@icourse163(q=0.5651)",
+      "运筹学@icourse163(q=0.5193)",
       "简明世界史（一）@icourse163(q=0.5127)",
       "简明世界史（二）@icourse163(q=0.5074)"
      ],
@@ -1126,7 +1148,11 @@
       "计算机基础",
       "Linux"
      ],
-     "courses": [],
+     "courses": [
+      "Introduction to Docker@coursera(q=0.6024)",
+      "Docker and Kubernetes Masterclass: From Beginner to Advanced@coursera(q=0.5989)",
+      "Docker Fundamentals and Container Management@coursera(q=0.4618)"
+     ],
      "estimated_hours": 150.0,
      "priority": "medium"
     },
@@ -1141,9 +1167,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.44,
+    "course": 0.58,
     "hours": 0.76,
-    "mean": 0.73
+    "mean": 0.76
    },
    "reasonable": false
   },
@@ -1210,9 +1236,9 @@
      "skill": "数据可视化",
      "prerequisites": [],
      "courses": [
+      "Google Data Analytics@coursera(q=0.692)",
       "IBM Data Science@coursera(q=0.689)",
-      "Data Science: Foundations using R@coursera(q=0.6794)",
-      "Data Science@coursera(q=0.6762)"
+      "Data Science: Foundations using R@coursera(q=0.6794)"
      ],
      "estimated_hours": 55.0,
      "priority": "medium"
@@ -1291,11 +1317,7 @@
     {
      "skill": "日志",
      "prerequisites": [],
-     "courses": [
-      "高级英语写作@icourse163(q=0.514)",
-      "大学英文写作（一）@icourse163(q=0.5113)",
-      "大学英文写作（二）@icourse163(q=0.4991)"
-     ],
+     "courses": [],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1312,7 +1334,9 @@
       "计算机基础",
       "Linux"
      ],
-     "courses": [],
+     "courses": [
+      "运筹学@icourse163(q=0.5193)"
+     ],
      "estimated_hours": 165.0,
      "priority": "medium"
     }
@@ -1358,7 +1382,8 @@
      "skill": "MATLAB",
      "prerequisites": [],
      "courses": [
-      "实用大众线性代数(MATLAB版)@icourse163(q=0.57)"
+      "实用大众线性代数(MATLAB版)@icourse163(q=0.57)",
+      "科学计算与MATLAB语言@icourse163(q=0.5627)"
      ],
      "estimated_hours": 55.0,
      "priority": "medium"
@@ -1440,8 +1465,8 @@
      "prerequisites": [],
      "courses": [
       "数学实验@icourse163(q=0.6306)",
-      "线性代数@icourse163(q=0.5609)",
-      "数学建模@icourse163(q=0.5581)"
+      "数学建模@icourse163(q=0.5581)",
+      "大数据计算技术@icourse163(q=0.5056)"
      ],
      "estimated_hours": 30.0,
      "priority": "high"
@@ -1488,6 +1513,7 @@
      "skill": "WSUS",
      "prerequisites": [],
      "courses": [
+      "运筹学@icourse163(q=0.5193)",
       "简明世界史（一）@icourse163(q=0.5127)",
       "简明世界史（二）@icourse163(q=0.5074)"
      ],
@@ -1521,7 +1547,11 @@
     {
      "skill": "Excel",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Excel Skills for Business@coursera(q=0.6902)",
+      "Excel Skills for Business: Essentials@coursera(q=0.6872)",
+      "Microsoft Excel: Learn with Projects@coursera(q=0.6704)"
+     ],
      "estimated_hours": 40.0,
      "priority": "high"
     },
@@ -1563,9 +1593,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.44,
+    "course": 0.58,
     "hours": 0.88,
-    "mean": 0.73
+    "mean": 0.77
    },
    "reasonable": false
   },
@@ -1582,7 +1612,9 @@
       "计算机基础",
       "Linux"
      ],
-     "courses": [],
+     "courses": [
+      "运筹学@icourse163(q=0.5193)"
+     ],
      "estimated_hours": 150.0,
      "priority": "high"
     },
@@ -1645,9 +1677,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 1.0,
-    "course": 0.86,
+    "course": 1.0,
     "hours": 1.0,
-    "mean": 0.96
+    "mean": 1.0
    },
    "reasonable": true
   },
@@ -1671,9 +1703,9 @@
      "skill": "风险分层",
      "prerequisites": [],
      "courses": [
-      "高级计量经济学@icourse163(q=0.5985)",
-      "投资学@icourse163(q=0.5628)",
-      "金融学（二）@icourse163(q=0.525)"
+      "投资学@icourse163(q=0.5791)",
+      "金融风险管理@icourse163(q=0.574)",
+      "概率论与数理统计@icourse163(q=0.555)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1700,9 +1732,9 @@
      "skill": "信贷政策",
      "prerequisites": [],
      "courses": [
+      "金融风险管理@icourse163(q=0.574)",
       "会计学@icourse163(q=0.5518)",
-      "金融学（二）@icourse163(q=0.525)",
-      "高级财务管理@icourse163(q=0.4799)"
+      "金融学（二）@icourse163(q=0.525)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1793,7 +1825,9 @@
     {
      "skill": "DAX",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "运筹学@icourse163(q=0.5193)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1802,6 +1836,7 @@
      "prerequisites": [],
      "courses": [
       "高级计量经济学@icourse163(q=0.5985)",
+      "计量经济学@icourse163(q=0.557)",
       "金融学（二）@icourse163(q=0.525)"
      ],
      "estimated_hours": 30.0,
@@ -1817,7 +1852,11 @@
     {
      "skill": "Excel",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Excel Skills for Business@coursera(q=0.6902)",
+      "Excel Skills for Business: Essentials@coursera(q=0.6872)",
+      "Microsoft Excel: Learn with Projects@coursera(q=0.6704)"
+     ],
      "estimated_hours": 40.0,
      "priority": "medium"
     }
@@ -1825,9 +1864,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.58,
+    "course": 0.86,
     "hours": 0.64,
-    "mean": 0.68
+    "mean": 0.75
    },
    "reasonable": false
   },
@@ -1842,8 +1881,8 @@
      "skill": "纵向数据分析",
      "prerequisites": [],
      "courses": [
+      "Google Data Analytics@coursera(q=0.692)",
       "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
-      "Python for Data Science, AI & Development@coursera(q=0.69)",
       "Python for Data Science, AI & Development@coursera(q=0.69)"
      ],
      "estimated_hours": 30.0,
