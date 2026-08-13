@@ -136,18 +136,18 @@
    "note": "贷款发起/风险分层/信贷政策无课；决策逻辑→Amazon Junior 无关；征信数据→DS 偏；信贷业务技能课程池缺失"
   },
   "lp_28": {
-   "course": 0.46,
-   "prerequisite": 0.5,
+   "course": 0.7,
+   "prerequisite": 0.7,
    "note": "LDAP/IIQ API/BeanShell 无课；Oracle→Oracle Java 偏；Apache→Big Data 无关；先修全空（IIQ 应有 LDAP/Java 先修）"
   },
   "lp_29": {
-   "course": 0.76,
-   "prerequisite": 0.7,
+   "course": 0.74,
+   "prerequisite": 0.6,
    "note": "数据建模课相关；客户分析→Meta React 无关；DAX/定价分析/Excel 无课"
   },
   "lp_30": {
-   "course": 0.74,
-   "prerequisite": 0.6,
+   "course": 0.8,
+   "prerequisite": 0.7,
    "note": "统计推断课相关；Stata→AI Agents 无关；纵向数据→Python DS 偏；RxNorm/eClinicalWorks 无课；生物统计课程池缺失"
   }
  }

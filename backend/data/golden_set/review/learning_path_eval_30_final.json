@@ -1,18 +1,18 @@
 {
  "summary": {
   "case_count": 30,
-  "reasonable_count": 9,
-  "reasonable_ratio": 0.3,
+  "reasonable_count": 10,
+  "reasonable_ratio": 0.3333,
   "target_ratio": 0.8,
   "target_met": false,
   "avg_dims": {
    "completeness": 1.0,
-   "prerequisite": 0.663,
-   "course": 0.659,
-   "hours": 0.692,
-   "mean": 0.754
+   "prerequisite": 0.67,
+   "course": 0.669,
+   "hours": 0.7,
+   "mean": 0.759
   },
-  "note": "先修字典扩充后定稿"
+  "note": "Position 清理后重跑定稿（案例 lp_28-30 换岗）"
  },
  "cases": [
   {
@@ -1866,69 +1866,8 @@
   {
    "case_id": "lp_28",
    "candidate_id": "resume_028",
-   "position": "SailPoint (pos_3124)",
-   "missing_skills": 14,
-   "gap_count": 14,
-   "path_items": [
-    {
-     "skill": "LDAP",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 30.0,
-     "priority": "medium"
-    },
-    {
-     "skill": "Oracle",
-     "prerequisites": [
-      "计算机基础",
-      "SQL"
-     ],
-     "courses": [
-      "Oracle Java Foundations@coursera(q=0.593)",
-      "Oracle Java Foundations@coursera(q=0.593)",
-      "Introduction to SQL@edx(q=0.45)"
-     ],
-     "estimated_hours": 150.0,
-     "priority": "medium"
-    },
-    {
-     "skill": "IIQ API",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 30.0,
-     "priority": "medium"
-    },
-    {
-     "skill": "BeanShell",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 30.0,
-     "priority": "medium"
-    },
-    {
-     "skill": "Apache",
-     "prerequisites": [],
-     "courses": [
-      "Apache Spark for Data Engineering and Machine Learning@edx(q=0.45)"
-     ],
-     "estimated_hours": 30.0,
-     "priority": "medium"
-    }
-   ],
-   "scores": {
-    "completeness": 1.0,
-    "prerequisite": 0.5,
-    "course": 0.46,
-    "hours": 0.52,
-    "mean": 0.62
-   },
-   "reasonable": false
-  },
-  {
-   "case_id": "lp_29",
-   "candidate_id": "resume_029",
    "position": "市场分析师 (pos_3053)",
-   "missing_skills": 10,
+   "missing_skills": 12,
    "gap_count": 13,
    "path_items": [
     {
@@ -1958,6 +1897,22 @@
      "priority": "medium"
     },
     {
+     "skill": "数据分析",
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "SQL",
+      "统计学"
+     ],
+     "courses": [
+      "Google Data Analytics@coursera(q=0.692)",
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "Python for Data Science, AI & Development@coursera(q=0.69)"
+     ],
+     "estimated_hours": 225.0,
+     "priority": "medium"
+    },
+    {
      "skill": "定价分析",
      "prerequisites": [],
      "courses": [
@@ -1978,31 +1933,20 @@
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
-    },
-    {
-     "skill": "Excel",
-     "prerequisites": [],
-     "courses": [
-      "Excel Skills for Business@coursera(q=0.6902)",
-      "Excel Skills for Business: Essentials@coursera(q=0.6872)",
-      "Microsoft Excel: Learn with Projects@coursera(q=0.6704)"
-     ],
-     "estimated_hours": 40.0,
-     "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.76,
+    "course": 0.7,
     "hours": 0.64,
-    "mean": 0.78
+    "mean": 0.76
    },
    "reasonable": false
   },
   {
-   "case_id": "lp_30",
-   "candidate_id": "resume_030",
+   "case_id": "lp_29",
+   "candidate_id": "resume_029",
    "position": "生物统计师 (pos_3075)",
    "missing_skills": 11,
    "gap_count": 13,
@@ -2065,6 +2009,77 @@
     "mean": 0.71
    },
    "reasonable": false
+  },
+  {
+   "case_id": "lp_30",
+   "candidate_id": "resume_030",
+   "position": "移动前端开发工程师 (pos_3095)",
+   "missing_skills": 13,
+   "gap_count": 13,
+   "path_items": [
+    {
+     "skill": "JavaScript",
+     "prerequisites": [
+      "HTML",
+      "CSS"
+     ],
+     "courses": [
+      "IBM Full-Stack JavaScript Developer@coursera(q=0.6935)",
+      "IBM JavaScript Backend Developer@coursera(q=0.6881)",
+      "HTML, CSS, and Javascript for Web Developers@coursera(q=0.676)"
+     ],
+     "estimated_hours": 165.0,
+     "priority": "high"
+    },
+    {
+     "skill": "移动Web前端",
+     "prerequisites": [],
+     "courses": [
+      "Web前端技术基础@icourse163(q=0.5892)",
+      "Web前端技术@icourse163(q=0.5633)",
+      "Web前端设计@icourse163(q=0.537)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "响应式布局",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 55.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "浏览器渲染机制",
+     "prerequisites": [],
+     "courses": [
+      "网页制作基础及HTML@icourse163(q=0.6023)",
+      "网页设计@icourse163(q=0.5739)",
+      "网页设计基础@icourse163(q=0.5578)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "HTML5",
+     "prerequisites": [],
+     "courses": [
+      "HTML5移动应用开发@icourse163(q=0.5796)",
+      "网页制作（HTML5+CSS3）@icourse163(q=0.5691)",
+      "Html5动画与游戏可视化编程@icourse163(q=0.4867)"
+     ],
+     "estimated_hours": 55.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.7,
+    "course": 0.8,
+    "hours": 0.76,
+    "mean": 0.81
+   },
+   "reasonable": true
   }
  ]
 }
