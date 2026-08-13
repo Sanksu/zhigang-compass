@@ -2686,10 +2686,10 @@ export interface components {
         GraphViewType: "panorama" | "techStack" | "level" | "positionCenter";
         /** @description 图谱节点（Position/Skill，匿名视角候选岗位不外宣） */
         GraphNode: {
-            id?: string;
-            name?: string;
+            id: string;
+            name: string;
             /** @enum {string} */
-            type?: "position" | "skill" | "evidence";
+            type: "position" | "skill" | "evidence";
             /**
              * @description 岗位状态机（仅 position 节点）
              * @enum {string}
@@ -2699,9 +2699,9 @@ export interface components {
         /** @description 图谱边（REQUIRES 关系） */
         GraphEdge: {
             /** @description 源节点 id（岗位） */
-            source?: string;
+            source: string;
             /** @description 目标节点 id（技能） */
-            target?: string;
+            target: string;
             /** @description 边权重（聚合口径 must=0.8/nice=0.4） */
             weight?: number;
             /** @enum {string} */
