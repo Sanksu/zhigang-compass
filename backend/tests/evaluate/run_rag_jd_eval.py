@@ -30,7 +30,6 @@ logger = setup_logging("run_rag_jd_eval")
 # 复用盲审加载/对比逻辑（不复制粘贴）
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run_manual_jd_eval import (  # noqa: E402
-    LABEL_COLUMNS,
     _compare_set,
     _load_round1_blind_rows,
     _metric,
@@ -95,7 +94,6 @@ async def _retrieve_rag(query: str) -> str:
         ).data()
         for r in rows:
             name = r.get("name") or ""
-            skills = r.get("skills") or []
             if name:
                 lines.append(name)  # 第 4 轮：仅岗位名（技能列表会干扰 LLM 技能抽取，jd_012 实测 -0.25）
 
