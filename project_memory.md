@@ -59,3 +59,10 @@
 - **僵尸节点清理（2026-08-09 晚）**：8 个无数据支撑的兜底族节点（软件开发工程师 319/架构师 35/科学家 32/研究员 15/硬件工程师 7/解决方案工程师 6/顾问 20，专家节点不在图中）DETACH DELETE 删除，Position 59→52。**注意**：cleanup_graph.py 的 merge_positions 会用 normalize_position_name(name) 无 skills 归一化，兜底族名返回空串全删（含合法算法工程师节点），勿直接跑它删兜底族——需精准指定节点删除。
 - **孤立技能清理（2026-08-09 晚）**：审计 408 个无 REQUIRES 入边的孤立技能，全部有 EVIDENCED_BY 证据（从真实 JD 抽取，因僵尸节点删除失去唯一岗位引用，非幻觉）。其中 132 个在 SKILL_WHITELIST（人工重点技能库，保留），276 个白名单外已删除（连带 281 个 EVIDENCED_BY 关联边），Skill 1504→1228，孤立残留 0。5 个有 LEARNABLE_VIA 课程引用（OpenAI API/Web Services/Cybersecurity/Unreal Engine/OpenShift）其中 4 个在白名单内保留。删后孤立 Evidence 180 个（无入边，历史审计留档未动）。**教训**：孤立技能 ≠ 可删，必须先查白名单与证据/课程关联。
 - **孤立 Evidence 清理（2026-08-09 晚）**：删除 180 个完全孤立 Evidence 节点（无入边无出边），Evidence 2837→2657，孤立残留 0。删除依据：①完全孤立不被任何 Skill/Position 引用（产品证据查询走 Skill-EVIDENCED_BY，命中不到）；②其 source_url 180/180 在 jd_raw 表有原始记录，图内 Evidence 仅是原文冗余副本，删除不影响审计链。**教训**：Evidence 是 jd_raw 的图内冗余副本，判断可删性只需确认 source_url 在 jd_raw 仍有记录即可。
+
+## 2026-08-13 确认记录（用户确认，AGENTS.md §7 落点）
+
+- **算法核心变更已确认（用户 2026-08-13）**：JD prompt 标题优先迭代（feat/algo-jd-title-priority，prompts.py 规则 1「标题优先」「技术栈前缀保留」+ few-shot 示例 11，skills F1 0.762 基线持平、Odoo 实证修复）；学习路径全套变更（feat/algo-learning-path-eval：评审定稿口径、课程名语义门控 ≥0.5、课程级兜底 0.55、学时分层类别基准 + weak 减半、脏边清理 1854 条、审查修复）——合并前仍建议张恺天过目（红线流程），但用户已确认变更方向。
+- **openpyxl>=3.1 dev 依赖已确认**（评测链盲标工作簿生成用，pyproject.toml dev-dependencies）。
+- **图谱脏边清理已确认**：删 1854 条严重脏边（sim<0.3，LEARNABLE_VIA 4415→2561），备份 reports/learnable_via_deleted_*.jsonl；**可疑档（0.3-0.45，1232 条）抽审 30 条结论：约 2/3 为合理弱相关（Supervised Learning→ML with Python 0.446 等），删除会大量误删——保留，不清理**。
+- **盲审 gold 口径补充**：r2_001 采集元数据明示 5-10年/大专但正文未声明 → 按 round1 口径留空（终审可再定是否参考元数据）。

@@ -33,6 +33,25 @@ _cache_lock = threading.Lock()
 # 语义相关即可推荐；匹配则是"是否同一技能"须严格。0.7 可覆盖 "Conversational AI"→"Generative AI"(0.707)
 _COURSE_MATCH_THRESHOLD = 0.7
 
+# P1-3 课程名语义门控阈值：课程名与技能名的相关性下限（08-13 实证）。
+# 误配课程相似度 0.01-0.25（Genomic Data Science/期末冲刺/Node.js 等，图谱脏边），
+# 合理课程 0.6+（Python for Everybody 0.796、机器学习↔Machine Learning 0.939）；
+# 0.5 过滤全部实证误配、保留合理课程（统计分析→DS Fundamentals 0.304 等偏案例同滤，
+# 宁可无课不可误导）。注意同语言短词虚高（语音合成↔KK音标 0.665）为已知残余。
+_COURSE_TITLE_SIM_THRESHOLD = 0.5
+
+# P1-1 课程级语义兜底阈值：无课技能直接对课程池标题匹配（08-13 实证）。
+# 可救案例：PostgreSQL→MySQL 课 0.601、服务器运维→网络技术 0.554、React→Advanced React 0.863；
+# 课程池缺课案例（Spark→0.469 高级英语、Docker→0.475 物流学、Gin→0.361 世界史）宁缺毋滥。
+# 0.55 介于门控 0.5 与技能级 fallback 0.7 之间。
+_COURSE_POOL_MATCH_THRESHOLD = 0.55
+
+# P1-1 低质课程过滤：icourse163 期末突击/复习资料类课程（标题特征，噪声不入推荐池）
+_LOW_QUALITY_TITLE_MARKERS = ("期末冲刺", "不挂科", "学霸笔记", "期末复习", "考前突击")
+
+# 课程池标题缓存（TTL 5min，课程级兜底全池扫描用）
+_course_pool_cache: dict = {"ts": 0.0, "courses": []}
+
 # 时长单位 → 小时换算（周/月按每周 40h / 每月 160h 折算）
 _UNIT_HOURS = {
     "小时": 1.0, "hour": 1.0, "hours": 1.0, "h": 1.0,
@@ -123,6 +142,109 @@ def _semantic_match_skill(
     return best_name if best_sim > sim_threshold else None
 
 
+def _lexical_hit(skill_name: str, title: str) -> bool:
+    """词面命中：长度 ≥3 的技能名包含在课程名中（缩写/短技能名校验）。
+
+    背景（08-13 AWS 补采实证）：SBERT 对 "AWS" vs "AWS Cloud Technical
+    Essentials" 相似度仅 0.472——缩写技能名与长课程名语义相似度虚低，
+    纯语义匹配会漏掉词面明确相关的课程。词面命中视为相关（课程名含
+    技能名即说明课程围绕该技能）；"Go"/"C" 等短词词面会误配，豁免。
+    """
+    return len(skill_name) >= 3 and skill_name.lower() in title.lower()
+
+
+def _filter_by_title_similarity(
+    rows: list[dict], skill_name: str, semantic, title_threshold: float
+) -> list[dict]:
+    """课程名校验（P1-3）：课程名与技能名语义相关才保留。
+
+    背景：图谱存在脏 LEARNABLE_VIA 边（Unix Shell→Genomic Data Science、
+    Servers→Node.js 等）与脏技能节点（发音纠正打卡/期末突击），fallback 或
+    精确边都可能返回与技能无关的课程。课程名↔技能名相似度实证（08-13）：
+    误配 0.01-0.25、合理 0.6+，阈值 0.5 可过滤误配、保留合理。语义模型不可用
+    时不过滤（保持纯规则链路）。词面命中（_lexical_hit）豁免——缩写技能名
+    场景语义相似度虚低但词面明确相关（如 AWS 课程）。
+    """
+    if not rows or semantic is None:
+        return rows
+    kept = []
+    for r in rows:
+        title = r.get("name") or r.get("id") or ""
+        if not title:
+            continue
+        if _lexical_hit(skill_name, title):
+            kept.append(r)
+            continue
+        try:
+            sim = semantic.similarity(skill_name, title)
+        except Exception:
+            continue
+        if sim >= title_threshold:
+            kept.append(r)
+    return kept
+
+
+def _course_pool() -> list[dict]:
+    """全课程池（TTL 缓存，课程级语义兜底扫描用）。"""
+    now = time.time()
+    with _cache_lock:
+        if now - _course_pool_cache["ts"] <= _CACHE_TTL and _course_pool_cache["courses"]:
+            return _course_pool_cache["courses"]
+    with neo4j_driver.session() as session:
+        recs = session.run(
+            "MATCH (c:Course) RETURN c.id AS id, c.name AS name, c.source AS source, "
+            "c.source_id AS source_id, c.platform AS platform, c.duration AS duration, "
+            "c.source_url AS source_url"
+        ).data()
+    courses = [dict(r) for r in recs]
+    with _cache_lock:
+        _course_pool_cache["ts"] = now
+        _course_pool_cache["courses"] = courses
+    return courses
+
+
+def _semantic_match_course(
+    skill_name: str, semantic, sim_threshold: float
+) -> list[dict]:
+    """课程级语义兜底（P1-1）：无课技能直接对课程池标题匹配（> threshold 才接受）。
+
+    技能级 fallback（_semantic_match_skill）在"有课程的技能名"池里间接匹配，
+    链路窄；课程级直接匹配技能↔课程标题，可覆盖 PostgreSQL→MySQL 课等偏相关
+    场景。低质课程（期末冲刺/不挂科等）剔除。课程池缺课的技能（Spark/AWS 等）
+    返回空——宁缺毋滥。
+
+    匹配双路（与匹配引擎领域维度一致）：词面（课程名包含技能名，缩写/短技能名
+    场景——SBERT 对 "AWS" vs "AWS Cloud Technical Essentials" 相似度仅 0.472，
+    词面命中修正）+ 语义（sim > threshold）。
+    """
+    courses = _course_pool()
+    if not courses or not skill_name or semantic is None:
+        return []
+    titles = [c.get("name") or c.get("id") or "" for c in courses]
+    try:
+        semantic.warm(titles)
+    except Exception:
+        return []
+    hits: list[tuple[float, dict]] = []
+    for c, title in zip(courses, titles):
+        if not title:
+            continue
+        if any(m in title for m in _LOW_QUALITY_TITLE_MARKERS):
+            continue
+        if _lexical_hit(skill_name, title):
+            # 词面命中：课程名直接包含技能名（如 "AWS" ∈ "AWS Cloud Technical Essentials"）
+            hits.append((1.0, c))
+            continue
+        try:
+            sim = semantic.similarity(skill_name, title)
+        except Exception:
+            continue
+        if sim > sim_threshold:
+            hits.append((sim, c))
+    hits.sort(key=lambda x: -x[0])
+    return [c for _, c in hits[:_TOP_COURSES]]
+
+
 def _query_courses_sync(skill_id: str, skill_name: str) -> list[dict]:
     """图谱精确查询技能课程（skill_id 优先，name 兜底）。同步 Neo4j，由线程池调用。"""
     with neo4j_driver.session() as session:
@@ -171,8 +293,25 @@ async def load_courses_for_skill(
         matched = await asyncio.to_thread(_semantic_match_skill, skill_name, semantic, threshold)
         if matched:
             rows = await _query_courses("", matched)
+    if semantic is not None and (not rows or len(rows) < (top_k or _TOP_COURSES)):
+        # P1-1 课程级语义兜底：技能级间接匹配落空或结果不足时，直接对课程池标题
+        # 匹配（词面 + 语义双路）并合并去重——AWS 案例：技能级 fallback 命中
+        # Cloud Computing 仅返回 1 门，词面命中（课程名含 AWS）的 17 门需补充
+        pool_rows = await asyncio.to_thread(
+            _semantic_match_course, skill_name, semantic, _COURSE_POOL_MATCH_THRESHOLD)
+        seen = {r.get("id") or r.get("source_id") for r in rows}
+        rows = rows + [r for r in pool_rows if (r.get("id") or r.get("source_id")) not in seen]
     if not rows:
         return []
+
+    # P1-3：课程名语义门控（精确边与 fallback 统一校验，防图谱脏边/脏技能误配）
+    if semantic is not None:
+        rows = await asyncio.to_thread(
+            _filter_by_title_similarity, rows, skill_name, semantic,
+            _COURSE_TITLE_SIM_THRESHOLD,
+        )
+        if not rows:
+            return []
 
     quality = await _load_quality_map([(r["source"], r["source_id"]) for r in rows])
     items = [

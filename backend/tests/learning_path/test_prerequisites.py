@@ -104,4 +104,7 @@ class TestBaseHours:
             lambda: _config({"深度学习": {"hours": 80.0}}),
         )
         assert mod.base_hours("深度学习") == 80.0
-        assert mod.base_hours("机器学习") == 30.0
+        # 未收录字典的技能按白名单类别分层（机器学习 → AI/机器学习 70h）
+        assert mod.base_hours("机器学习") == 70.0
+        # 白名单外技能回落配置默认值
+        assert mod.base_hours("任意不存在技能XYZ") == 30.0

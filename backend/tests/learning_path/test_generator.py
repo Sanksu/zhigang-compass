@@ -92,8 +92,9 @@ async def test_generate_missing_skill_with_chain_and_courses(monkeypatch):
     assert item.prerequisites.index("机器学习") > item.prerequisites.index("线性代数")
     # 只取质量 Top-3（剔除低分课程）
     assert [c.course_id for c in item.courses] == ["c1", "c2", "c3"]
-    # 学时 = 目标 + 先修链各技能基础学时（深度学习 30 + 机器学习 30 + Python 30 + 线性代数 30）
-    assert item.estimated_hours == 120.0
+    # 学时 = 目标 + 先修链各技能基础学时（P1-2 分层：深度学习 70 + 机器学习 70
+    # + Python 55 + 线性代数 40，白名单类别基准）
+    assert item.estimated_hours == 235.0
     assert item.priority == "high"
 
 
