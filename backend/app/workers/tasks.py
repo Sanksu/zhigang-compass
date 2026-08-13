@@ -1004,7 +1004,10 @@ async def sync_skill_normalization(ctx: dict) -> dict:
     def _run():
         # 同步 Neo4j 全量读取 + SBERT 聚类 + 关系回写为 CPU/IO 密集，整体放线程池
         from app.core.database import neo4j_driver
-        from app.services.extraction.normalization import SkillNormalizer
+        from app.services.extraction.normalization import (
+            SkillNormalizer,
+            guard_cluster_distribution,
+        )
 
         with neo4j_driver.session() as session:
             rows = session.run("MATCH (s:Skill) RETURN s.name AS name").data()
@@ -1016,6 +1019,26 @@ async def sync_skill_normalization(ctx: dict) -> dict:
         normalized = normalizer.normalize_many(names)
         if not normalized:
             return {"skills": len(names), "normalized": 0, "similar_pairs": 0, "detail": "归一化无输出"}
+
+        # ── 写回前门禁（P0）：簇分布异常拒绝写库，防链式漂移污染图谱 ──
+        # 08-13 事故：单链接漂移把 1185 个技能并入"2D可视化"簇后直接入库。
+        # 门禁拦截同类异常：巨型簇 / 映射率越界 → 不写库 + 告警 + 返回 blocked
+        # （单阶段失败不阻塞 ETL 主线，与 run_etl_pipeline 其余阶段同语义）。
+        try:
+            guard_cluster_distribution(normalized)  # 门禁校验：异常直接抛 ValueError 拦截
+        except ValueError as e:
+            msg = f"技能归一化门禁拦截：{e}"
+            print(f"[sync_skill_normalization] {msg}", flush=True)
+            from app.services.alerting import send_alert
+
+            send_alert("normalization_blocked", msg)
+            return {
+                "skills": len(names),
+                "normalized": 0,
+                "similar_pairs": 0,
+                "detail": msg,
+                "blocked": True,
+            }
 
         changed = sum(1 for n, r in normalized.items() if r.standard != n)
         written = 0

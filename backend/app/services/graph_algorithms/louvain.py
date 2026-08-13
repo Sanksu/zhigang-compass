@@ -199,6 +199,71 @@ def louvain(graph: dict[str, dict[str, float]], resolution: float = 1.0) -> dict
     return _reindex(best_flat)
 
 
+# 社区门禁阈值（P1：与 Optuna 退化罚口径一致，见 graph_algo_tune.py）
+# - best_level 层社区数 < 3 视为分辨率过低（全并一簇，层级无区分度）
+# - best_level 层最大社区占比 > 50% 视为单簇吞并（退化解）
+_COMMUNITY_MIN_CLUSTERS = 3
+_COMMUNITY_MAX_DOMINANT_RATIO = 0.5
+
+
+def guard_community_distribution(levels: list[dict], best_level: int | None = None) -> dict:
+    """社区层级写库前门禁：退化分布拒绝重建（防参数异常污染 Community 索引）。
+
+    sync_communities 是全量重建（先 DETACH DELETE 旧索引再写入），若
+    resolution/min_weight 参数退化（过低全并一簇 / 过高碎片化），会直接
+    破坏线上社区索引。本门禁在清库前对 best_level 层做分布合理性检查：
+
+    1. **社区数下限**：best_level 层社区数 < 3 判定退化（无区分度）
+    2. **单簇吞并**：best_level 层最大社区占比 > 50% 判定退化（与
+       graph_algo_tune.py Optuna 目标函数退化罚同口径）
+
+    Args:
+        levels: louvain_hierarchical 输出层级（每层含 level/membership）
+        best_level: 最优层号（缺省取中间层，兼容无 best_level 的调用）
+
+    Returns:
+        统计摘要 {levels, best_level, cluster_count, dominant_ratio}
+
+    Raises:
+        ValueError: 分布退化（调用方必须拒绝重建）
+    """
+    if not levels:
+        return {"levels": 0, "best_level": 0, "cluster_count": 0, "dominant_ratio": 0.0}
+
+    if best_level is None:
+        best_level = levels[len(levels) // 2]["level"]
+
+    target = next((lv for lv in levels if lv["level"] == best_level), levels[-1])
+    membership = target["membership"]
+    if not membership:
+        return {"levels": len(levels), "best_level": best_level,
+                "cluster_count": 0, "dominant_ratio": 0.0}
+
+    from collections import Counter
+
+    cnt = Counter(membership.values())
+    cluster_count = len(cnt)
+    dominant_ratio = max(cnt.values()) / len(membership)
+
+    if cluster_count < _COMMUNITY_MIN_CLUSTERS:
+        raise ValueError(
+            f"社区层级退化：best_level={best_level} 层仅 {cluster_count} 个社区"
+            f"（< {_COMMUNITY_MIN_CLUSTERS}），分辨率过低全并一簇，拒绝重建"
+        )
+    if dominant_ratio > _COMMUNITY_MAX_DOMINANT_RATIO:
+        raise ValueError(
+            f"社区层级退化：best_level={best_level} 层最大社区占比 "
+            f"{dominant_ratio:.1%}（> {_COMMUNITY_MAX_DOMINANT_RATIO:.0%}），"
+            f"单簇吞并，拒绝重建"
+        )
+    return {
+        "levels": len(levels),
+        "best_level": best_level,
+        "cluster_count": cluster_count,
+        "dominant_ratio": round(dominant_ratio, 4),
+    }
+
+
 def louvain_hierarchical(graph: dict[str, dict[str, float]], resolution: float = 1.0) -> dict:
     """Louvain 层次化社区划分（图算法优化方案阶段三：层次化提取）。
 
