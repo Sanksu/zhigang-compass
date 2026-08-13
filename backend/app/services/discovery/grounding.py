@@ -90,9 +90,19 @@ def _normalize_hit(code, name, category, definition, aliases, pos, score, source
 
 
 def _merge_hits(hits: list[dict], limit: int) -> list[dict]:
-    """按 code 合并去重（保留高分），按 score 降序，取前 limit 条。"""
+    """按 code 合并去重（保留高分），按 score 降序，取前 limit 条。
+
+    精确命中加权（08-13）：name/aliases 完整包含岗位名的命中大幅加权
+    （+1000）——cjk 全文分词下"工程技术人员"等泛词噪声分可达 20+，
+    而别名精确匹配（如"前端开发工程师"→ 前端开发工程技术人员 别名）
+    无加权优势会被挤出；加权确保权威库别名桥接排前（JD 岗位名 → 大典职业）。
+    """
+    # 精确命中加权（cjk 分词噪声抑制）
+    EXACT_HIT_BONUS = 1000.0
     best: dict[str, dict] = {}
     for h in hits:
+        if h.get("name_hit") or h.get("alias_hits"):
+            h["score"] = h["score"] + EXACT_HIT_BONUS
         cur = best.get(h["code"])
         if cur is None or h["score"] > cur["score"]:
             best[h["code"]] = h
@@ -149,7 +159,9 @@ async def _neo4j_fulltext(neo4j, pos: str, limit: int) -> list[dict]:
         return []
     try:
         # 同步 Neo4j 查询放线程池，避免阻塞事件循环
-        rows = await asyncio.to_thread(_query_fulltext, neo4j, q, limit)
+        # 查询范围扩大（limit×3，至少 30）：cjk 分词下精确别名命中可能不在
+        # 全文高分前列，扩大候选集供 _merge_hits 的精确加权拣出
+        rows = await asyncio.to_thread(_query_fulltext, neo4j, q, max(limit * 3, 30))
     except Exception:
         # Neo4j 未同步/不可达：降级 ILIKE，不阻塞接地
         return []
