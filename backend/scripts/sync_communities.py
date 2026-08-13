@@ -67,7 +67,10 @@ def _nested_edges(levels: list[dict]) -> list[tuple[int, int, int]]:
 def sync_communities(resolution: float, min_weight: float) -> dict:
     """全量重建 Neo4j Community 层级索引，返回层级统计。"""
     from app.core.database import neo4j_driver
-    from app.services.graph_algorithms.louvain import louvain_hierarchical
+    from app.services.graph_algorithms.louvain import (
+        guard_community_distribution,
+        louvain_hierarchical,
+    )
     from app.services.graph_algorithms.network import load_skill_cooccurrence
 
     with neo4j_driver.session() as session:
@@ -78,6 +81,13 @@ def sync_communities(resolution: float, min_weight: float) -> dict:
     if not levels:
         logger.warning("空图，无社区层级可写入")
         return {"levels": 0, "communities": 0, "nested_edges": 0}
+
+    # ── 写库前门禁（P1）：层级分布异常拒绝重建，防参数退化污染索引 ──
+    # 与技能归一化门禁同模式：先验证再破坏（清库）。参数退化形态：
+    # - best_level 层仅 1-2 个社区（分辨率过低全并一簇）→ 层级无区分度
+    # - best_level 层最大社区占比 > 50%（单簇吞并）→ 与 Optuna 退化罚一致
+    guard = guard_community_distribution(levels, hier.get("best_level"))
+    logger.info("社区门禁通过: %s", guard)
 
     # 1. 清空旧索引（连带 BELONGS_TO_COMMUNITY / NESTED_IN 边）
     with neo4j_driver.session() as session:
