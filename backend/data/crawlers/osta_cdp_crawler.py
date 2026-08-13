@@ -55,12 +55,14 @@ def _normalize(record: dict) -> dict:
     """API 原始记录 → occupations 表字段（code/name/category/definition/aliases）。
 
     OSTA career API 字段：careerCode / careerName / parentCode / children（递归树），
-    definition 由 detail API 补充（tree 无该字段）。
+    definition 由 detail API 补充（tree 无该字段）。detail body 实测字段（08-13）：
+    text（职业定义）/ bigName / centreName / smallName（类别层级）/ works / task；
+    无别名字段。
     """
     code = str(record.get("careerCode") or record.get("code") or record.get("id") or "")
     name = str(record.get("careerName") or record.get("name") or record.get("title") or "")
-    category = str(record.get("categoryName") or record.get("category") or "")
-    definition = str(record.get("careerDesc") or record.get("definition") or record.get("workContent") or "")
+    category = str(record.get("categoryName") or record.get("category") or record.get("bigName") or "")
+    definition = str(record.get("careerDesc") or record.get("definition") or record.get("workContent") or record.get("text") or "")
     aliases = record.get("alias") or record.get("aliases") or ""
     if isinstance(aliases, list):
         aliases = ";".join(str(a) for a in aliases)
@@ -279,14 +281,65 @@ async def run(cdp_url: str, timeout_sec: int, skip_detail: bool = False, detail_
     return len(collected)
 
 
+async def run_input(input_path: str, cdp_url: str, detail_interval: float) -> int:
+    """复用已有目录 JSONL：仅补 detail 阶段（跳过目录采集/拦截）。
+
+    目录重采成本高（CDP 窗口 + 人工验证），detail 补全失败重跑时用
+    --input 加载已有目录，直接逐个 career/detail 补全并输出新文件。
+    """
+    from playwright.async_api import async_playwright
+
+    collected: dict[str, dict] = {}
+    for line in Path(input_path).read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        rec = json.loads(line)
+        if rec.get("code") and rec.get("name"):
+            collected[rec["code"]] = rec
+    logger.info(f"已加载目录 {len(collected)} 条 ← {input_path}")
+
+    async with async_playwright() as p:
+        try:
+            browser = await p.chromium.connect_over_cdp(cdp_url)
+        except Exception as e:
+            logger.error(f"❌ CDP 连接失败（{cdp_url}）: {e}")
+            return 0
+        context = await browser.new_context()
+        await context.set_extra_http_headers({"X-Collection-Purpose": _COMPLIANCE["annotation"]})
+        try:
+            cookies = await browser.contexts[0].cookies()
+            if cookies:
+                await context.add_cookies(cookies)
+        except Exception as e:
+            logger.warning(f"cookies 复制失败: {e}")
+        ok, total = await _enrich_details(context.request, collected, detail_interval)
+        await context.close()
+        if ok == 0:
+            logger.warning(f"detail 补全 0/{total}——接口可能不同或会话失效，见诊断说明")
+            return 0
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out = OUTPUT_DIR / f"osta_occupations_{ts}.jsonl"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8") as f:
+        for rec in collected.values():
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    logger.info(f"采集完成: {len(collected)} 条 → {out}")
+    return len(collected)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="OSTA 职业目录 CDP 采集器")
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL, help="CDP 端点（默认 9226）")
     parser.add_argument("--timeout", type=int, default=180, help="采集窗口秒数（默认 180，人工验证后调大）")
     parser.add_argument("--skip-detail", action="store_true", help="跳过细类定义补全（仅目录）")
     parser.add_argument("--detail-interval", type=float, default=0.3, help="detail 请求间隔秒数（默认 0.3，调大更稳）")
+    parser.add_argument("--input", help="已有目录 JSONL（跳过目录采集，仅补 detail 阶段）")
     args = parser.parse_args()
-    n = asyncio.run(run(args.cdp_url, args.timeout, args.skip_detail, args.detail_interval))
+    if args.input:
+        n = asyncio.run(run_input(args.input, args.cdp_url, args.detail_interval))
+    else:
+        n = asyncio.run(run(args.cdp_url, args.timeout, args.skip_detail, args.detail_interval))
     print(f"\n采集 {n} 条。CSV 转换：python -c \"...\" 或直接 --csv-dir 导入")
 
 
