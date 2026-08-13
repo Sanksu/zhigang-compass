@@ -1,0 +1,114 @@
+# 智岗罗盘部署说明（DEPLOY.md）
+
+> 状态：**草稿**（2026-08-13）——基于首次容器部署演练实测（api/worker 镜像首次构建 + 5 服务全链路 12 项冒烟全通），待文档岗核验后定稿（DO-M5-03）
+> 对应任务：执行计划 2.2 后端 M5「部署文档完善」+ 2.6 文档 M5「DEPLOY.md 部署说明」
+
+---
+
+## 1. 前置要求
+
+| 项 | 要求 | 说明 |
+|----|------|------|
+| Docker | 24+ / Compose v2 | `docker compose version` 验证 |
+| 磁盘 | **≥ 30G 空闲** | api 镜像 site-packages 约 6.65GB（torch/paddle 主导），构建缓存另计 |
+| 网络 | Docker Hub 可达 | 基础镜像直连可拉；偶发 auth token 抖动重试即可 |
+
+## 2. 配置准备
+
+```bash
+# 1. 复制模板并填写
+cp backend/.env.example backend/.env
+```
+
+**必改项**（production 下 fail-fast 强校验，不满足则 api 拒绝启动）：
+
+| 键 | 要求 | 缺省后果 |
+|----|------|---------|
+| `SECRET_KEY` | 非 `change-me-in-production` | 启动报错退出 |
+| `ADMIN_PASSWORD` | 非 `admin123`，**必须存在** | 启动报错退出（弱口令门禁） |
+| `POSTGRES_DSN` / `NEO4J_URI` / `REDIS_URL` | 指向实际服务 | 容器内由 compose environment 覆盖，本地开发才需改 |
+
+其余可选项（LLM provider、CDP、代理等）见 `.env.example` 注释。
+
+**前端产物**（api 容器以只读卷挂载托管）：
+
+```bash
+cd frontend && pnpm install && pnpm build   # 生成 frontend/dist
+```
+
+## 3. 一键启动
+
+```bash
+docker compose up -d          # 5 服务：api / postgres / redis / neo4j / worker
+docker compose ps             # 全部 healthy 即就绪
+```
+
+- api 容器 ENTRYPOINT **自动执行 `alembic upgrade head`**（无需手动迁移）
+- 首次启动约 40–60s（镜像构建另计；healthcheck start-period 10s）
+
+## 4. 初始化
+
+- **数据库迁移**：自动（见上）
+- **管理员账号**：users 表为空时，首次登录用 `ADMIN_PASSWORD` 自动 bootstrap 创建（仅非 production 路径）；**production 下 bootstrap 禁用**，若库中已有 admin 用户需手动重置密码哈希（见 §7.2）
+
+## 5. 验证（冒烟清单）
+
+| # | 验证项 | 命令 |
+|---|--------|------|
+| 1 | 健康端点 | `curl http://localhost:8000/health` → `{"status":"healthy"}` |
+| 2 | 前端静态托管 | `curl http://localhost:8000/` → 智岗罗盘 index.html |
+| 3 | 图谱 panorama | `curl http://localhost:8000/api/v1/graph/panorama`（匿名，Redis 30s 缓存） |
+| 4 | 认证链路 | `POST /api/v1/auth/login`（admin）→ `/api/v1/auth/me` |
+| 5 | 全文检索 | `GET /api/v1/graph/search?q=Python`（cjk 全文索引） |
+| 6 | worker | `docker logs zhigang-worker` → ARQ 启动 + cron 实跑 |
+
+首次完整演练（2026-08-13）12 项冒烟全通过，详见进度跟踪 §6.0.3。
+
+## 6. 运维
+
+| 操作 | 命令 |
+|------|------|
+| 停止（保留数据） | `docker compose down`（数据卷不删；`-v` 才删卷） |
+| 查看日志 | `docker compose logs -f api` / `-f worker` |
+| 重启单服务 | `docker compose restart api` |
+| 更新代码 | 重新 `docker compose up -d --build api worker` |
+| 数据备份 | `pg_dump`（PostgreSQL）+ `neo4j-admin dump`（Neo4j）；数据卷：`pg_data` / `neo4j_data` / `neo4j_logs` / `redis_data` |
+
+## 7. 常见问题
+
+### 7.1 api 容器 Exited（fail-fast 门禁）
+`docker logs zhigang-api` 提示 `SECRET_KEY 未修改` / `ADMIN_PASSWORD 仍为默认弱口令` → 修正 `backend/.env` 后 `docker compose up -d api`。
+
+### 7.2 已有 admin 用户时登录 4010
+production 下 bootstrap 路径禁用（auth.py 直接 4010），且 `.env` 的 `ADMIN_PASSWORD` 只作用于 bootstrap——需在容器内重置哈希（与 `.env` 保持一致）：
+
+```bash
+docker exec zhigang-api python -c "
+import asyncio
+from sqlalchemy import update
+from app.core.security import hash_password
+from app.core.database import engine
+from app.models.business import User
+
+async def main():
+    async with engine.begin() as conn:
+        await conn.execute(update(User).where(User.username == 'admin').values(password_hash=hash_password('你的密码')))
+asyncio.run(main())
+"
+```
+
+### 7.3 简历解析后 compare 返回 4040「简历不存在」
+`POST /api/v1/resume/parse` 为异步任务（返回 `task_id = resume_id`），LLM 抽取完成前调用 compare 会 4040——等待任务完成（约 10–30s）后再调用。
+
+### 7.4 磁盘不足
+`docker system prune` 清理悬空镜像/缓存；如需大幅瘦身：torch 换 CPU wheel（见 backend/Dockerfile 顶部说明，需重新 uv lock）。
+
+### 7.5 Neo4j 未启动时接地降级
+grounding 双路检索中 Neo4j 不可达自动降级 ILIKE（设计内，不阻塞）；启动 neo4j 后重跑 `scripts/import_occupations.py --source hrss --csv-dir data/hrss`（幂等）即可同步 Occupation 节点。
+
+### 7.6 Docker Hub 偶发 token 失败
+`failed to fetch anonymous token` 为瞬时网络抖动，重试 `docker compose up -d --build` 即可；基础镜像拉取直连可用。
+
+---
+
+> 补充：环境变量完整清单与本地开发配置见 `docs/guides/团队启动指南.md`；架构与部署设计见 `docs/design/设计文档.md` §11。
