@@ -5,10 +5,12 @@
    的邻居社区，直至无正增益移动；
 2. 阶段二：将社区聚合为超节点，在新图上重跑阶段一，迭代至模块度不再增长。
 
-模块度增量公式（无向有权图）：
-    ΔQ(C) = k_i,in / m - (Σ_tot(C) · k_i) / (2m²)
+模块度增量公式（无向有权图，resolution 化）：
+    ΔQ(C) = k_i,in / m - γ · (Σ_tot(C) · k_i) / (2m²)
 其中 k_i,in 为节点 i 到社区 C 的连边权重和，Σ_tot(C) 为社区 C 节点连边
-权重和，k_i 为节点 i 连边权重和，m 为全图权重和。
+权重和，k_i 为节点 i 连边权重和，m 为全图权重和，γ 为分辨率参数
+（图算法优化方案阶段一：γ > 1 产更细簇，γ < 1 产更粗簇，γ = 1.0 等价标准
+Louvain，默认值保持向后兼容）。
 
 纯标准库实现，零第三方依赖。
 """
@@ -19,8 +21,8 @@ def _total_weight(graph: dict[str, dict[str, float]]) -> float:
     return sum(w for nbs in graph.values() for w in nbs.values()) / 2
 
 
-def _modularity(graph: dict[str, dict[str, float]], partition: dict[str, int]) -> float:
-    """划分的模块度 Q = Σ_c [ Σ_in/(2m) - (Σ_tot/(2m))² ]。"""
+def _modularity(graph: dict[str, dict[str, float]], partition: dict[str, int], resolution: float = 1.0) -> float:
+    """划分的模块度 Q = Σ_c [ Σ_in/(2m) - γ·(Σ_tot/(2m))² ]。"""
     m = _total_weight(graph)
     if m == 0:
         return 0.0
@@ -33,11 +35,47 @@ def _modularity(graph: dict[str, dict[str, float]], partition: dict[str, int]) -
             w for nd in members for nb, w in graph[nd].items() if nb in members
         )
         sum_tot = sum(sum(graph[nd].values()) for nd in members)
-        q += sum_in / (2 * m) - (sum_tot / (2 * m)) ** 2
+        q += sum_in / (2 * m) - resolution * (sum_tot / (2 * m)) ** 2
     return q
 
 
-def _phase1(graph, partition) -> bool:
+def modularity(graph: dict[str, dict[str, float]], partition: dict[str, int], resolution: float = 1.0) -> float:
+    """公开模块度计算（标准 Q 默认，γ=1.0），供调优/展示/验收统一口径。
+
+    阶段一调优后约定：γ 只负责生成划分，质量评估统一用标准 Q
+    （graph_algo_tune.py objective 同口径）。
+    """
+    return _modularity(graph, partition, resolution)
+
+
+def homogeneity(graph: dict[str, dict[str, float]], partition: dict[str, int]) -> float:
+    """加权簇内同质性：Σ_c 簇内边权重 / Σ_c (簇内 + 簇间) 边权重。
+
+    无向图双向登记下 intra/inter 均双倍累计，比值不变。值域 [0, 1]，
+    1.0 表示簇内完全无外部连边（理想聚类）。图算法优化方案阶段一
+    Optuna objective 的 0.3 权重项。
+    """
+    if not graph or not partition:
+        return 0.0
+    communities: dict[int, set[str]] = {}
+    for nd, cid in partition.items():
+        communities.setdefault(cid, set()).add(nd)
+    intra = 0.0
+    inter = 0.0
+    for members in communities.values():
+        for nd in members:
+            for nb, w in graph[nd].items():
+                if nb in members:
+                    intra += w
+                else:
+                    inter += w
+    total = intra + inter
+    if total == 0:
+        return 0.0
+    return intra / total
+
+
+def _phase1(graph, partition, resolution: float) -> bool:
     """局部移动：遍历节点，有正增益邻居社区则移动，返回是否发生移动。
 
     社区统计（Σ_tot / Σ_in）随移动实时维护，单轮内按出现顺序串行更新。
@@ -74,7 +112,7 @@ def _phase1(graph, partition) -> bool:
         for cid, w_in in ki_in.items():
             if cid == cid0:
                 continue  # 移回原社区为无操作
-            gain = w_in / m - (comm_tot[cid] * k[nd]) / (2 * m * m)
+            gain = w_in / m - resolution * (comm_tot[cid] * k[nd]) / (2 * m * m)
             if gain > best_gain:
                 best_cid, best_gain = cid, gain
 
@@ -116,11 +154,13 @@ def _aggregate(graph, partition, members) -> tuple[dict, dict]:
     return agg, agg_members
 
 
-def louvain(graph: dict[str, dict[str, float]]) -> dict[str, int]:
+def louvain(graph: dict[str, dict[str, float]], resolution: float = 1.0) -> dict[str, int]:
     """技能共现图的社区划分（skill_id → cluster_id，0 起始）。
 
     Args:
         graph: skill_id → {相邻 skill_id: 共现权重}（无向，双向登记）
+        resolution: 分辨率参数 γ（图算法优化方案阶段一）。γ > 1 产更细簇，
+            γ < 1 产更粗簇，默认 1.0 等价标准 Louvain（向后兼容）
 
     Returns:
         skill_id → cluster_id。空图返回空 dict，单节点自成一簇。
@@ -136,16 +176,16 @@ def louvain(graph: dict[str, dict[str, float]]) -> dict[str, int]:
     partition = {nd: i for i, nd in enumerate(nodes)}
 
     best_flat = dict(partition)
-    best_q = _modularity(graph, partition)
+    best_q = _modularity(graph, partition, resolution)
 
     for _ in range(32):  # 迭代上限（正常 2-5 轮收敛）
-        moved = _phase1(current, partition)
+        moved = _phase1(current, partition, resolution)
         # 扁平化：聚合节点成员 → 原图节点簇映射，用原图算模块度
         flat: dict[str, int] = {}
         for nd, cid in partition.items():
             for orig in members[nd]:
                 flat[orig] = cid
-        q = _modularity(graph, flat)
+        q = _modularity(graph, flat, resolution)
         if q > best_q + 1e-9:
             best_flat, best_q = flat, q
         if not moved:
@@ -157,6 +197,148 @@ def louvain(graph: dict[str, dict[str, float]]) -> dict[str, int]:
         partition = {nd: i for i, nd in enumerate(current)}
 
     return _reindex(best_flat)
+
+
+# 社区门禁阈值（P1：与 Optuna 退化罚口径一致，见 graph_algo_tune.py）
+# - best_level 层社区数 < 3 视为分辨率过低（全并一簇，层级无区分度）
+# - best_level 层最大社区占比 > 50% 视为单簇吞并（退化解）
+_COMMUNITY_MIN_CLUSTERS = 3
+_COMMUNITY_MAX_DOMINANT_RATIO = 0.5
+
+
+def guard_community_distribution(levels: list[dict], best_level: int | None = None) -> dict:
+    """社区层级写库前门禁：退化分布拒绝重建（防参数异常污染 Community 索引）。
+
+    sync_communities 是全量重建（先 DETACH DELETE 旧索引再写入），若
+    resolution/min_weight 参数退化（过低全并一簇 / 过高碎片化），会直接
+    破坏线上社区索引。本门禁在清库前对 best_level 层做分布合理性检查：
+
+    1. **社区数下限**：best_level 层社区数 < 3 判定退化（无区分度）
+    2. **单簇吞并**：best_level 层最大社区占比 > 50% 判定退化（与
+       graph_algo_tune.py Optuna 目标函数退化罚同口径）
+
+    Args:
+        levels: louvain_hierarchical 输出层级（每层含 level/membership）
+        best_level: 最优层号（缺省取中间层，兼容无 best_level 的调用）
+
+    Returns:
+        统计摘要 {levels, best_level, cluster_count, dominant_ratio}
+
+    Raises:
+        ValueError: 分布退化（调用方必须拒绝重建）
+    """
+    if not levels:
+        return {"levels": 0, "best_level": 0, "cluster_count": 0, "dominant_ratio": 0.0}
+
+    if best_level is None:
+        best_level = levels[len(levels) // 2]["level"]
+
+    target = next((lv for lv in levels if lv["level"] == best_level), levels[-1])
+    membership = target["membership"]
+    if not membership:
+        return {"levels": len(levels), "best_level": best_level,
+                "cluster_count": 0, "dominant_ratio": 0.0}
+
+    from collections import Counter
+
+    cnt = Counter(membership.values())
+    cluster_count = len(cnt)
+    dominant_ratio = max(cnt.values()) / len(membership)
+
+    if cluster_count < _COMMUNITY_MIN_CLUSTERS:
+        raise ValueError(
+            f"社区层级退化：best_level={best_level} 层仅 {cluster_count} 个社区"
+            f"（< {_COMMUNITY_MIN_CLUSTERS}），分辨率过低全并一簇，拒绝重建"
+        )
+    if dominant_ratio > _COMMUNITY_MAX_DOMINANT_RATIO:
+        raise ValueError(
+            f"社区层级退化：best_level={best_level} 层最大社区占比 "
+            f"{dominant_ratio:.1%}（> {_COMMUNITY_MAX_DOMINANT_RATIO:.0%}），"
+            f"单簇吞并，拒绝重建"
+        )
+    return {
+        "levels": len(levels),
+        "best_level": best_level,
+        "cluster_count": cluster_count,
+        "dominant_ratio": round(dominant_ratio, 4),
+    }
+
+
+def louvain_hierarchical(graph: dict[str, dict[str, float]], resolution: float = 1.0) -> dict:
+    """Louvain 层次化社区划分（图算法优化方案阶段三：层次化提取）。
+
+    Louvain 迭代循环每轮 `_phase1 → _aggregate` 即 dendrogram 一层（聚合前
+    的划分为该层社区），本函数收集全部层级而非只保留最优扁平层。
+
+    Args:
+        graph: skill_id → {相邻 skill_id: 共现权重}（无向，双向登记）
+        resolution: 分辨率参数 γ（与 louvain 一致）
+
+    Returns:
+        {
+          "levels": [{level, membership, modularity, cluster_count}]  # level 0 最细（初始每节点一簇），逐层变粗
+          "best_level": int,          # 模块度最高层（与 louvain() 输出一致的层）
+          "membership": dict,         # best_level 的划分（skill_id → cluster_id，reindex）
+        }
+        空图返回 levels=[]、best_level=None、membership={}。
+    """
+    nodes = list(graph)
+    if not nodes:
+        return {"levels": [], "best_level": None, "membership": {}}
+    if len(nodes) == 1:
+        single = {nodes[0]: 0}
+        return {
+            "levels": [{"level": 0, "membership": single, "modularity": 0.0, "cluster_count": 1}],
+            "best_level": 0,
+            "membership": single,
+        }
+
+    current: dict[str, dict[str, float]] = graph
+    members: dict[str, list[str]] = {nd: [nd] for nd in nodes}
+    partition = {nd: i for i, nd in enumerate(nodes)}
+
+    levels: list[dict] = []
+    for _ in range(32):
+        # 记录当前层（聚合前的划分，扁平化为原图节点簇映射）
+        flat: dict[str, int] = {}
+        for nd, cid in partition.items():
+            for orig in members[nd]:
+                flat[orig] = cid
+        q = _modularity(graph, flat, resolution)
+        # 去重：与上一层划分相同（无结构变化）则不重复记录
+        if not levels or set(flat.items()) != set(levels[-1]["membership"].items()):
+            levels.append({
+                "level": len(levels),
+                "membership": flat,
+                "modularity": q,
+                "cluster_count": len(set(flat.values())),
+            })
+
+        moved = _phase1(current, partition, resolution)
+        if not moved:
+            break
+        agg, agg_members = _aggregate(current, partition, members)
+        if len(agg) <= 1:
+            break  # 聚合后单簇层无社区结构价值，不记录
+        current, members = agg, agg_members
+        partition = {nd: i for i, nd in enumerate(current)}
+
+    # best_level = 模块度最高层（与 louvain() 的 best_flat 选择口径一致）
+    best_idx = max(range(len(levels)), key=lambda i: levels[i]["modularity"])
+    membership = levels[best_idx]["membership"]
+    return {
+        "levels": [
+            {
+                "level": lv["level"],
+                "membership": _reindex(lv["membership"]),
+                "modularity": lv["modularity"],
+                "cluster_count": lv["cluster_count"],
+            }
+            for lv in levels
+        ],
+        "best_level": levels[best_idx]["level"],
+        "membership": _reindex(membership),
+    }
 
 
 def _reindex(partition: dict[str, int]) -> dict[str, int]:

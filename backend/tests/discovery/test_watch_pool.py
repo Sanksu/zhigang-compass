@@ -78,6 +78,14 @@ class TestSignalDetection:
     def test_z_insufficient_data(self):
         assert detect_z_signal({"W1": 5}) is None
 
+    def test_z_small_history_no_signal(self):
+        # 仅 1 周历史基线（总 2 周）无足够 σ 依据，即使暴增也不判定（防误报）
+        assert detect_z_signal({"W1": 5, "W2": 30}) is None
+
+    def test_z_stable_small_history_no_signal(self):
+        # 总 2 周但无突变：同样不足基线，不判定
+        assert detect_z_signal({"W1": 5, "W2": 5}) is None
+
     def test_jd_mom_hit(self):
         # 13 周（12 周窗口 + 1 个移动平均点），末 2 周暴增 → 环比 > 50%。
         # 周键用固定宽度 W01..W13（与真实 ISO 周键 YYYY-Www 同构，字典序=时间序）

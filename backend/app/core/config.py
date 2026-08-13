@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     admin_password: str = "admin123"
 
     # ---------- 缓存 ----------
-    panorama_cache_ttl: int = 30  # 秒
+    # 全景缓存 TTL 在 graph.py 以 PANORAMA_CACHE_TTL 常量定义（与 cluster 缓存同生命周期），不再配置化
 
     # ---------- 前端 ----------
     frontend_dist_dir: str = "../frontend/dist"

@@ -7,7 +7,6 @@
 - 上传白名单与解析器能力一致性（T-03）
 """
 
-import asyncio
 
 import pytest
 from sqlalchemy import String, cast, select

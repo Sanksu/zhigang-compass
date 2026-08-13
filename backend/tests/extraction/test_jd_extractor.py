@@ -7,10 +7,12 @@ from unittest.mock import patch
 
 from app.services.extraction.jd_extractor import JDExtractor
 from app.services.extraction.llm_provider import LLMConfigurationError, LLMExtractionError
+from app.services.extraction.prompts import BATCH_TASK_TEMPLATE, TASK_TEMPLATE
 from app.services.extraction.schemas import (
     JDExtractionResult,
     REQUIRESRelation,
     SkillExtracted,
+    TypicalScenario,
 )
 
 
@@ -117,3 +119,42 @@ class TestExtract:
         out = extractor.extract("太短")
         assert out.position_name == ""
         assert out.skills == []
+
+
+class TestTypicalScenarios:
+    def test_schema_defaults_to_empty_list(self):
+        """既有抽取数据缺 typical_scenarios 字段时兼容为默认空列表（无需迁移）。"""
+        assert JDExtractionResult(position_name="x").typical_scenarios == []
+        assert JDExtractionResult(position_name="x").model_dump()["typical_scenarios"] == []
+
+    def test_schema_accepts_explicit_scenarios(self):
+        r = JDExtractionResult(
+            position_name="数据平台工程师",
+            typical_scenarios=[
+                TypicalScenario(name="实时数仓建设", description="Flink 实时计算"),
+            ],
+        )
+        assert r.typical_scenarios[0].name == "实时数仓建设"
+        assert r.typical_scenarios[0].description == "Flink 实时计算"
+
+    def test_prompt_templates_render_and_contain_scenario_rule(self):
+        """提示词模板可 format（花括号双写不崩）且含典型场景规则。"""
+        p1 = TASK_TEMPLATE.format(jd_text="测试 JD 文本")
+        assert "typical_scenarios" in p1 and "典型场景" in p1
+        p2 = BATCH_TASK_TEMPLATE.format(jd_count=2, jd_texts="jd1\njd2")
+        assert "typical_scenarios" in p2 and "典型场景" in p2
+
+    def test_llm_path_preserves_scenarios(self):
+        """LLM 返回场景时，抽取结果透传场景字段。"""
+        raw = JDExtractionResult(
+            position_name="数据平台工程师",
+            skills=[SkillExtracted(name="Flink")],
+            typical_scenarios=[
+                TypicalScenario(name="实时数仓建设", description="Flink 实时计算，支撑业务报表"),
+            ],
+        )
+        with patch.object(_FakeLLM, "extract_structured", return_value=raw):
+            extractor = JDExtractor(_FakeLLM(raw))
+        out = extractor.extract("这是一个足够长的 JD 文本，用于验证典型场景抽取流程")
+        assert out.typical_scenarios == raw.typical_scenarios
+        assert out.typical_scenarios[0].name == "实时数仓建设"

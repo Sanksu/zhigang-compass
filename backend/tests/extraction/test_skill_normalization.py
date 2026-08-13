@@ -10,11 +10,10 @@
 import pytest
 
 from app.services.extraction.normalization import (
-    DISTANCE_THRESHOLD,
-    SIMILAR_TO_THRESHOLD,
     SkillNormalizer,
     SkillNormResult,
     _agglomerative_clusters,
+    guard_cluster_distribution,
 )
 
 
@@ -81,6 +80,84 @@ class TestAgglomerativeClusters:
         c2 = _agglomerative_clusters(["D", "C", "B", "A"], embedder.similarity)
         norm = lambda cs: sorted(tuple(sorted(c)) for c in cs)
         assert norm(c1) == norm(c2)
+
+    def test_representative_link_breaks_chaining(self):
+        # 链式漂移回归（08-13 实测：单链接把 1185 个无关技能并入"2D可视化"簇）：
+        # A-B / B-C 逐对相似 ≥ 阈值，但 A-C 不相似（跨 1 跳链）。单链接（any
+        # member）会让 C 经 B 链入 A 簇；代表链接（与簇种子 A 比较）切断链。
+        embedder = _FakeEmbedder({
+            ("A", "B"): 0.9,
+            ("B", "C"): 0.9,
+            ("A", "C"): 0.2,
+        })
+        clusters = _agglomerative_clusters(["A", "B", "C"], embedder.similarity)
+        flat = sorted(tuple(sorted(c)) for c in clusters)
+        assert ("A", "B") in flat  # A 与 B 相似 ≥ 阈值 → 同簇
+        assert ("C",) in flat      # C 与种子 A 不相似 → 自成一簇（链被切断）
+
+
+# ============================================================
+# 写回前门禁（P0：防聚类异常污染图谱）
+# ============================================================
+
+class TestGuardClusterDistribution:
+    """guard_cluster_distribution 写回前门禁：巨型簇/映射率异常拒绝写库。"""
+
+    @staticmethod
+    def _norm(total: int, mega: int) -> dict:
+        """构造归一化结果：mega 个名字并入 'MEGA'，其余自指。"""
+        res = {}
+        for i in range(mega):
+            res[f"n{i}"] = SkillNormResult(standard="MEGA", confidence=0.8)
+        for i in range(mega, total):
+            res[f"m{i}"] = SkillNormResult(standard=f"m{i}", confidence=1.0)
+        return res
+
+    def test_mega_cluster_rejected(self):
+        # 巨型簇（08-13 事故形态：1185 技能并入单簇）→ 拒绝写回
+        normalized = self._norm(total=1000, mega=600)
+        with pytest.raises(ValueError, match="巨型簇"):
+            guard_cluster_distribution(normalized)
+
+    def test_healthy_distribution_passed(self):
+        # 正常分布：映射率合理（>5%）、最大簇低于阈值 → 通过并返回摘要
+        # total=1130 → 簇上限 max(50, 1130×2%=22.6)=50
+        normalized = self._norm(total=1000, mega=30)
+        # 补充 5 个合法小簇各 20 成员（映射率 (30+100)/1130 ≈ 11.5% ≥ 5%），
+        # 每簇 20 < 50 上限，均不触发巨型簇
+        for j in range(5):
+            for i in range(20):
+                normalized[f"o{j}_{i}"] = SkillNormResult(
+                    standard=f"OTHER{j}", confidence=0.8
+                )
+        guard = guard_cluster_distribution(normalized)
+        assert guard["max_cluster"] == 30
+        assert guard["max_standard"] == "MEGA"
+        assert 0.05 <= guard["mapped_ratio"] <= 0.9
+
+    def test_all_self_mapped_rejected(self):
+        # 全自指（聚类完全失效）→ 映射率 < 下限 → 拒绝写回
+        normalized = {f"s{i}": SkillNormResult(standard=f"s{i}", confidence=1.0)
+                      for i in range(100)}
+        with pytest.raises(ValueError, match="映射率"):
+            guard_cluster_distribution(normalized)
+
+    def test_over_merged_rejected(self):
+        # 过度合并（映射率 > 90% 上限，但簇规模不触发巨型簇）→ 拒绝写回
+        # total=100 → 簇上限 max(50, 2)=50；98 个成员分两簇各 49 不触发巨型簇，
+        # 映射率 98% > 90% → 命中映射率规则
+        normalized = {
+            **{f"a{i}": SkillNormResult(standard="MEGA_A", confidence=0.8) for i in range(49)},
+            **{f"b{i}": SkillNormResult(standard="MEGA_B", confidence=0.8) for i in range(49)},
+            **{f"c{i}": SkillNormResult(standard=f"c{i}", confidence=1.0) for i in range(2)},
+        }
+        with pytest.raises(ValueError, match="映射率"):
+            guard_cluster_distribution(normalized)
+
+    def test_empty_passed(self):
+        # 空输入不误报（上游已处理空图，门禁幂等）
+        guard = guard_cluster_distribution({})
+        assert guard["total"] == 0
 
 
 # ============================================================

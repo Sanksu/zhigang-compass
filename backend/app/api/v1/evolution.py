@@ -4,7 +4,7 @@
 T+1 全量快照（设计文档 7.1）。
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -214,7 +214,8 @@ async def skill_trends(
 
     skill 参数为技能节点 ID（sk_xxxx），由图谱 ID 生成器产出。
     """
-    since = datetime.utcnow() - timedelta(days=window)
+    # created_at 为 DateTime(timezone=True)，须用带时区的东八区 now 比较，否则偏移 8h
+    since = datetime.now(timezone(timedelta(hours=8))) - timedelta(days=window)
     rows = await db.scalars(
         select(GraphVersion)
         .where(GraphVersion.created_at >= since)

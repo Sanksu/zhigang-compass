@@ -4,7 +4,7 @@
 DB 交互（validate_temporal / detect_inflation 任务本体）在真实环境验证。
 """
 
-from datetime import date, timedelta
+from datetime import date
 from types import SimpleNamespace
 
 from app.workers.tasks import (
@@ -113,6 +113,20 @@ class TestSkillFirstSeenDays:
         today = date(2026, 8, 1)
         group = [(1, date(2026, 8, 10), ["Python"])]  # 未来日期（脏数据）
         assert _skill_first_seen_days(group, ["Python"], today) == [0]
+
+    def test_graph_first_seen_priority(self):
+        today = date(2026, 8, 1)
+        group = [(1, date(2026, 7, 30), ["Python"])]  # jd_raw 首见 2 天前
+        # 图谱 first_seen 更早（全局首入图）→ 优先图谱，不取 jd_raw
+        graph = {"Python": date(2026, 6, 1)}
+        assert _skill_first_seen_days(group, ["Python"], today, graph) == [61]
+
+    def test_graph_missing_falls_back_to_jd_raw(self):
+        today = date(2026, 8, 1)
+        group = [(1, date(2026, 7, 1), ["Python"])]
+        # 图谱无该技能（存量节点无 first_seen）→ 回退同岗位 jd_raw 推算
+        graph = {"MySQL": date(2026, 7, 20)}
+        assert _skill_first_seen_days(group, ["Python", "MySQL"], today, graph) == [31, 12]
 
 
 class TestExperienceYears:

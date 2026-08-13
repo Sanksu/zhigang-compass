@@ -132,7 +132,8 @@ def _import_skill_edge(
             ON CREATE SET s.id = $id,
                 s.name = $name,
                 s.category = $category,
-                s.created_at = $now
+                s.created_at = $now,
+                s.first_seen = $now
             """,
             id=skill_id,
             name=skill_name,
@@ -337,10 +338,13 @@ def _import_jd_tx(
                 now=now,
             )
 
+        # JD 中出现的工具均视为必备要求，显式写 necessity='must'
+        # （与 Education/Certification 口径一致，避免消费方依赖兜底默认值）
         tx.run(
             """
             MATCH (p:Position {id: $position_id}), (t:Tool {name: $tool_name})
-            MERGE (p)-[:REQUIRES]->(t)
+            MERGE (p)-[r:REQUIRES]->(t)
+            SET r.necessity = 'must'
             """,
             position_id=position_id,
             tool_name=tool_name,
@@ -545,7 +549,8 @@ def _import_course_tx(tx, course_data: dict) -> str:
                 ON CREATE SET s.id = $id,
                     s.name = $name,
                     s.category = $category,
-                    s.created_at = $now
+                    s.created_at = $now,
+                    s.first_seen = $now
                 """,
                 id=skill_id,
                 name=skill_name,

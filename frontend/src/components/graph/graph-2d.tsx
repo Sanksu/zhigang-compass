@@ -21,6 +21,9 @@ import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
+import { skillLabelThreshold } from './graph-utils'
+import { enforceSpread, type EChartsModel } from './graph-layout'
+import { useGraphPan } from './use-graph-pan'
 import { escapeHtml } from '@/lib/utils'
 
 /** ECharts 回调参数最小类型 — 覆盖本组件使用的 tooltip/label/select 回调字段 */
@@ -29,27 +32,6 @@ interface EChartsParam {
   data?: Record<string, unknown>
   value?: unknown
   name?: string
-} 
-
-/** zrender Group 最小类型（手动平移 graph 视图用，访问 ECharts 内部 _chartsViews） */
-interface GraphGroup {
-  x: number
-  y: number
-  transform: unknown
-  dirty(): void
-  getBoundingRect(): {
-    clone(): { applyTransform(t: unknown): void; contain(x: number, y: number): boolean }
-  }
-}
-
-/** ECharts 内部 Model 最小类型（getModel 为私有方法，仅聚焦节点计算布局用） */
-interface EChartsModel {
-  getSeriesByIndex(index: number): {
-    getData(): {
-      getDataIndexByName(name: string): number
-      getItemLayout(idx: number): number[] | undefined
-    }
-  } | null
 }
 
 // 按需注册 — 仅 graph 图表 + tooltip 组件 + canvas 渲染器
@@ -100,7 +82,8 @@ const COLOR_BY_STATUS: Record<PositionStatus, string> = {
   archived: '#ef4444',
 }
 
-const COLOR_SKILL = '#09090b'
+const COLOR_SKILL_LIGHT = '#09090b'
+const COLOR_SKILL_DARK = '#fafafa'
 const COLOR_EVIDENCE = '#a1a1aa'
 
 function symbolOf(node: GraphNode): string {
@@ -108,17 +91,18 @@ function symbolOf(node: GraphNode): string {
   return SYMBOL_BY_TYPE[node.type]
 }
 
-function colorOf(node: GraphNode): string {
+/** 技能节点颜色跟随主题：暗色下用浅色，避免技能节点与深色背景融为一体 */
+function colorOf(node: GraphNode, dark: boolean): string {
   if (node.type === 'position') return COLOR_BY_STATUS[node.status ?? 'candidate']
-  if (node.type === 'skill') return COLOR_SKILL
+  if (node.type === 'skill') return dark ? COLOR_SKILL_DARK : COLOR_SKILL_LIGHT
   return COLOR_EVIDENCE
 }
 
-/** value 映射到 symbolSize，范围 [18, 56] */
+/** value 映射到 symbolSize，范围 [16, 56]；技能/证据节点整体缩小，减少与岗位节点的视觉干扰 */
 function sizeOf(node: GraphNode): number {
   const v = node.value ?? 30
   // 岗位 > 技能 > 证据，基础大小不同
-  const base = node.type === 'position' ? 36 : node.type === 'skill' ? 24 : 18
+  const base = node.type === 'position' ? 36 : node.type === 'skill' ? 20 : 15
   const scaled = base + (v / 100) * 20
   return Math.min(56, Math.max(16, scaled))
 }
@@ -141,15 +125,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   const chartRef = useRef<echarts.ECharts | null>(null)
   // 主题版本号：暗色切换时递增，触发数据 effect 完全重建确保颜色全量刷新
   const [themeVersion, setThemeVersion] = useState(0)
-  // 手动平移（空白拖拽）累计像素偏移：聚焦节点换算目标位移时扣除，避免与 roam 平移叠加
-  const panOffset = useRef({ x: 0, y: 0 })
-
-  // zrender Group（graph 视图的渲染分组），手动平移/聚焦直接改其位置
-  const panGroup = useCallback(() => {
-    const chart = chartRef.current
-    if (!chart) return undefined
-    return (chart as unknown as { _chartsViews?: Array<{ group: GraphGroup }> })._chartsViews?.[0]?.group
-  }, [])
+  // 空白拖拽平移 hook：提供 group 访问、累计偏移、事件绑定
+  const { panGroup, panOffset, bindPanEvents } = useGraphPan(chartRef)
 
   // 初始化 ECharts 实例（仅一次）
   useLayoutEffect(() => {
@@ -174,16 +151,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     // 节点点击 → 上抛选中节点（仅选中，展开/收起走双击或详情面板按钮，避免两种意图耦合）
     chart.on('click', (params) => {
       if (params.dataType === 'node' && params.data) {
-        const d = params.data as GraphNode
+        const d = params.data as GraphNode & { displayValue?: number }
         onSelectNode({
           id: d.id,
           name: d.name,
           type: d.type,
           status: d.status,
-          level: d.level,
-          source: d.source,
-          value: d.value,
-          description: d.description,
+          // 布局质量已把岗位 value 放大 3 倍，展示侧还原为原始 value（displayValue 兜底）
+          value: d.displayValue ?? d.value,
         })
       }
     })
@@ -204,52 +179,16 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       }
     })
 
-    // 外围空白拖拽平移：ECharts graph 原生 roam 限制起拖点须在节点包围盒内
-    // （包围盒外空白拖不动）。此处对包围盒外的空白按下直接平移 graph 视图
-    // group（与原生 updateViewOnPan 同机制），包围盒内/节点上不干预（避免双重处理）。
-    // graphRoam dispatchAction 不产生视觉平移（仅更新 View 状态），故直接操作 group。
-    const zr = chart.getZr()
-    let panning = false
-    let panLastX = 0
-    let panLastY = 0
-    const onPanDown = (e: { target?: unknown; offsetX: number; offsetY: number }) => {
-      if (e.target) return // 命中节点/边 → 原生节点拖拽
-      const group = panGroup()
-      if (group) {
-        // 起拖点在节点包围盒内 → 原生 roam 已接管平移，此处跳过防双重位移
-        const rect = group.getBoundingRect().clone()
-        rect.applyTransform(group.transform)
-        if (rect.contain(e.offsetX, e.offsetY)) return
-      }
-      panning = true
-      panLastX = e.offsetX
-      panLastY = e.offsetY
+    // 外围空白拖拽平移（实现见 useGraphPan hook）
+    const unbindPan = bindPanEvents(chart)
+
+    // 布局收敛 → 强制分散重叠的岗位节点。
+    // 只用 forceLayoutEnd：finished 会在渲染动画期间多次触发，导致展开时强制分散被反复
+    // 执行、节点抖动；forceLayoutEnd 在力导向算法收敛后只触发一次，此时再推开重叠对。
+    const onForceLayoutEnd = () => {
+      enforceSpread(chart, { minGap: 32, maxIterations: 5 })
     }
-    const onPanMove = (e: { offsetX: number; offsetY: number }) => {
-      if (!panning) return
-      const dx = e.offsetX - panLastX
-      const dy = e.offsetY - panLastY
-      if (dx !== 0 || dy !== 0) {
-        panLastX = e.offsetX
-        panLastY = e.offsetY
-        const group = panGroup()
-        if (group) {
-          panOffset.current.x += dx
-          panOffset.current.y += dy
-          group.x += dx
-          group.y += dy
-          group.dirty()
-          chart.getZr().refresh()
-        }
-      }
-    }
-    const onPanEnd = () => {
-      panning = false
-    }
-    zr.on('mousedown', onPanDown)
-    zr.on('mousemove', onPanMove)
-    zr.on('mouseup', onPanEnd)
-    zr.on('globalout', onPanEnd)
+    chart.on('forceLayoutEnd', onForceLayoutEnd)
 
     // 布局完成后再 resize 一次，覆盖初始化时容器为 0 的情况
     requestAnimationFrame(() => {
@@ -257,11 +196,13 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     })
 
     return () => {
+      unbindPan()
+      chart.off('forceLayoutEnd', onForceLayoutEnd)
       chart.dispose()
       chartRef.current = null
     }
-    // panGroup 为 useCallback 稳定引用，列入依赖仅满足 exhaustive-deps，不影响仅执行一次
-  }, [onSelectNode, onTogglePosition, panGroup])
+    // bindPanEvents 为 useCallback 稳定引用；enforceSpread 为顶层工具函数
+  }, [onSelectNode, onTogglePosition, bindPanEvents])
 
   // 容器尺寸变化 → resize
   useEffect(() => {
@@ -300,23 +241,33 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const textColor = dark ? '#fafafa' : '#09090b'
     const mutedColor = dark ? '#a1a1aa' : '#71717a'
     const borderColor = dark ? '#27272a' : '#e4e4e7'
+    // 技能标签密度阈值（低于中位数不常显，悬停时经 emphasis 显示）
+    const labelThreshold = skillLabelThreshold(data.nodes)
 
     const nodes = data.nodes.map((n) => ({
       // 原始字段透传（含 id/name），供 ECharts 与 tooltip/click 回调使用
       ...n,
+      // 力导向布局质量（value 参与斥力计算，越大排斥越强）：岗位 ×3 放大布局权重，
+      // 让高频大岗位主动排斥远离，避免斥力不足时互相重叠（2026-08-11）。
+      // 注意此 value 会覆盖透传的原始 value，tooltip/label 显示改用 displayValue 兜底。
+      value: n.type === 'position' ? (n.value ?? 0) * 3 : (n.value ?? 0),
+      displayValue: n.value,
       symbol: symbolOf(n),
       symbolSize: sizeOf(n),
       category: n.type,
       itemStyle: {
-        color: colorOf(n),
+        color: colorOf(n, dark),
         borderColor,
         // 展开的岗位加粗描边，提示其技能当前可见（可点击收起）
         borderWidth: expandedPositions?.has(n.id) ? 3 : 1,
       },
       // 不在此处根据 selectedId 设置选中样式 — 选中高亮走 dispatchAction（②）
       label: {
-        // 岗位恒显；展开揭示的技能节点显示名字（未展开时画布无技能节点）
-        show: n.type !== 'evidence',
+        // 岗位恒显；技能节点仅高关联度常显（低关联悬停/选中时经 emphasis 显示）；
+        // evidence 节点无标签
+        show:
+          n.type === 'position' ||
+          (n.type === 'skill' && (n.value ?? 0) >= labelThreshold),
         position: 'right',
         color: textColor,
         fontSize: 11,
@@ -332,10 +283,12 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       target: e.target,
       lineStyle: {
         width: weightToWidth(e.weight),
-        color: e.relation === 'proves' ? mutedColor : borderColor,
-        opacity: e.relation === 'proves' ? 0.5 : 0.7,
-        type: e.relation === 'proves' ? 'dashed' : 'solid',
-        curveness: 0.15,
+        color: borderColor,
+        opacity: 0.7,
+        // 后端仅返回 REQUIRES 边（契约 GraphEdge 无 relation），一律实线
+        type: 'solid',
+        // 二部图单重边，无需弧线区分 → 直线更清晰
+        curveness: 0,
       },
     }))
 
@@ -349,15 +302,17 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         textStyle: { color: textColor, fontSize: 12 },
         formatter: (params: EChartsParam) => {
           if (params.dataType !== 'node' || !params.data) return ''
-          const d = params.data as unknown as GraphNode
-          // tooltip 经 innerHTML 渲染，外部可控的 name/description 等必须先转义（防 XSS）
+          const d = params.data as unknown as GraphNode & { displayValue?: number }
+          // tooltip 经 innerHTML 渲染，外部可控的 name 等必须先转义（防 XSS）
           const lines: string[] = [`<b>${escapeHtml(d.name)}</b>`]
           lines.push(`类型: ${escapeHtml(d.type)}`)
           if (d.type === 'position' && d.status) lines.push(`状态: ${escapeHtml(d.status)}`)
-          if (d.type === 'skill' && d.level) lines.push(`级别: ${escapeHtml(d.level)}`)
-          if (d.type === 'evidence' && d.source) lines.push(`来源: ${escapeHtml(d.source)}`)
-          if (typeof d.value === 'number') lines.push(`权重: ${d.value}`)
-          if (d.description) lines.push(`<span style="color:${mutedColor}">${escapeHtml(d.description)}</span>`)
+          // 权重显示原始 value（布局质量放大值不展示给用户）
+          const displayValue = d.displayValue ?? d.value
+          if (typeof displayValue === 'number') lines.push(`权重: ${displayValue}`)
+          // 操作提示：降低新用户学习成本
+          const hint = d.type === 'position' ? '单击查看详情 · 双击展开/收起技能' : '单击查看详情'
+          lines.push(`<span style="color:${mutedColor};font-size:11px">${hint}</span>`)
           return lines.join('<br/>')
         },
       },
@@ -372,9 +327,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           // 主线程长时间阻塞 → 页面冻结（2026-08-08 实测 techStack 视图 10.8s）。
           // 动画时长由收敛步数决定（固定约 8s），节点数量影响每步成本。
           force: {
-            repulsion: 180,
-            edgeLength: [60, 180],
-            gravity: 0.08,
+            // 斥力/边长/重力调参（2026-08-11）：
+            // - repulsion 必须是数组 [low, high]：ECharts 用 linearMap(value, extent, [low,high])
+            //   按节点 value 线性映射斥力（固定值 350 对所有节点常数，岗位 value×3 布局放大无效）。
+            //   岗位 value×3 后分布在高端 → 斥力接近 high，技能在低端 → 接近 low。
+            // - gravity 调小，减弱向中心聚拢，避免高频大岗位堆在中央重叠。
+            repulsion: [150, 600],
+            edgeLength: [80, 240],
+            gravity: 0.04,
             friction: 0.6,
             layoutAnimation: true,
           },
@@ -390,7 +350,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
               borderColor: textColor,
               borderWidth: 3,
               shadowBlur: 12,
-              shadowColor: (params: EChartsParam) => colorOf(params.data as unknown as GraphNode),
+              shadowColor: (params: EChartsParam) => colorOf(params.data as unknown as GraphNode, dark),
             },
             label: {
               show: true,
@@ -444,7 +404,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       const seriesModel = (chart as unknown as { getModel(): EChartsModel }).getModel().getSeriesByIndex(0)
       const list = seriesModel?.getData()
       if (!list) return
-      const idx = list.getDataIndexByName(node.name)
+      const idx = list.indexOfName(node.name)
       if (idx < 0) return
       const layout = list.getItemLayout(idx)
       if (!layout || layout.length < 2) return
@@ -468,7 +428,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         chart.dispatchAction({ type: 'downplay', seriesIndex: 0, name: node.name })
       }, 1500)
     },
-    [data, panGroup],
+    [data, panGroup, panOffset],
   )
 
   const resetView = useCallback(() => {
@@ -485,7 +445,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     }
     panOffset.current = { x: 0, y: 0 }
     chart.getZr().refresh()
-  }, [panGroup])
+  }, [panGroup, panOffset])
 
   useImperativeHandle(ref, () => ({ focusNode, resetView }), [focusNode, resetView])
 

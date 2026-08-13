@@ -37,7 +37,7 @@ def platform_profile_dir(platform: str) -> Path:
 BOSS_CHROME_PROFILE_DIR = platform_profile_dir("boss")
 
 # 各 CDP 平台独立浏览器端口（与 spider/crawler 默认值对齐，互不共享）
-CDP_PORT_BY_PLATFORM = {"boss": 9222, "monster": 9223, "glassdoor": 9224, "maimai": 9225}
+CDP_PORT_BY_PLATFORM = {"boss": 9222, "monster": 9223, "glassdoor": 9224, "maimai": 9225, "osta": 9226}
 
 # CDP 默认端口
 DEFAULT_CDP_PORT = 9222

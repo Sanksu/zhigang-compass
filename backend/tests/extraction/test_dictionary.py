@@ -4,7 +4,6 @@
 核心模块覆盖率目标 ≥ 80%（设计文档 §15.3）。
 """
 
-import pytest
 
 from app.services.extraction.dictionary import (
     SOFT_SKILL_WHITELIST,
@@ -320,6 +319,28 @@ class TestNormalizePositionName:
         assert normalize_position_name("知识") == ""
         assert normalize_position_name("系统") == ""
 
+    def test_whitelist_residual_positions_kept(self):
+        # 白名单改造（2026-08-12）：审计确认的合法低频岗位登记为精确族后保留入图
+        assert normalize_position_name("IT系统管理员") == "IT系统管理员"
+        assert normalize_position_name("产品助理") == "产品助理"
+        assert normalize_position_name("技术教师") == "技术教师"
+        assert normalize_position_name("投诉处理助理") == "投诉处理助理"
+        assert normalize_position_name("计算生物学家") == "计算生物学家"
+        assert normalize_position_name("首席统计师") == "首席统计师"
+
+    def test_whitelist_blocks_new_chinese_fragments(self):
+        # 白名单改造：纯中文剥壳残留核心词不在白名单 → 不入图（防新碎片）
+        # 区别于既有停用词：这些是未登记停用词的未知碎片，靠白名单兜底拦截
+        assert normalize_position_name("智能") == ""
+        assert normalize_position_name("人事") == ""
+        assert normalize_position_name("激光工艺") == ""
+
+    def test_whitelist_keeps_mixed_cn_en_residual(self):
+        # 白名单改造：含非中文的残留（公司名+岗位词、技术缩写）维持原语义保留，
+        # 不因白名单收紧被误拦（"Google工程师"剥壳残留"Google"为设计允许）
+        assert normalize_position_name("LLM应用") == "LLM应用"
+        assert normalize_position_name("Google工程师") != ""
+
     def test_p0a_noise_positions_filtered(self):
         # 岗位评估报告 P0-A：LLM 误抽业务词/碎片岗位名（低频空岗）不入图
         assert normalize_position_name("专利") == ""
@@ -391,6 +412,43 @@ class TestNormalizePositionName:
         # 兜底族（解决方案工程师/硬件工程师）后按技能路由，无技能不入图
         assert normalize_position_name("Solution Engineer") == ""
         assert normalize_position_name("Physical Design Engineer") == ""
+
+    def test_p0b_en_position_map_expansion(self):
+        # P0-B 英文岗位映射扩充（2026-08-12）：审计发现 526 个纯英文技术岗
+        # 未映射（654 条记录）不入图。补齐常见技术岗映射到标准族。
+        # 明确技术岗 → 归位标准族
+        assert normalize_position_name("Java Developer") == "Java开发工程师"
+        assert normalize_position_name("Senior Java Developer") == "Java开发工程师"
+        assert normalize_position_name("Python Developer") == "Python开发工程师"
+        assert normalize_position_name("Staff Python Engineer") == "Python开发工程师"
+        assert normalize_position_name("Test Automation Engineer") == "测试工程师"
+        assert normalize_position_name("UI Developer") == "前端开发工程师"
+        assert normalize_position_name("Front End Engineer") == "前端开发工程师"
+        assert normalize_position_name("Business Intelligence Engineer") == "大数据开发工程师"
+        assert normalize_position_name("Server Engineer") == "运维工程师"
+        assert normalize_position_name("Cloud Engineer") == "运维工程师"
+        assert normalize_position_name("Robotics Engineer") == "机器人算法工程师"
+        # Software Development Engineer → 失真兜底族：无技能不入图，带技能路由细分族
+        assert normalize_position_name("Software Development Engineer") == ""
+        assert normalize_position_name(
+            "Software Development Engineer", skills=["Java", "Spring"]
+        ) == "后端开发工程师"  # Spring 框架族优先于 Java 语言族（设计意图）
+        # Algorithm Engineer → 失真兜底族：无技能不入图，带通用算法技能归算法族
+        assert normalize_position_name("Algorithm Engineer") == ""
+        assert normalize_position_name(
+            "Algorithm Engineer", skills=["Python", "PyTorch"]
+        ) == "算法工程师"
+        # 最长子串匹配：长标题内嵌已知岗位名可命中（逗号后主标题）
+        assert normalize_position_name("Knowledge Engineer - Back End") == ""
+        assert normalize_position_name(
+            "Knowledge Engineer - Back End", skills=["Python", "NLP"]
+        ) == "大模型算法工程师"  # NLP 命中大模型路由族
+        # 停用词冲突已解：AI/ML Applied Engineer 从停用词表移除，走映射
+        assert normalize_position_name(
+            "AI/ML Applied Engineer", skills=["Python"]
+        ) == "Python开发工程师"
+        # 无映射的英文复合头衔仍拦截（不入图）
+        assert normalize_position_name("SCADA Migration & Integration Lead") == ""
         # 无归属碎片拦截
         assert normalize_position_name("验证") == ""
         assert normalize_position_name("质量") == ""

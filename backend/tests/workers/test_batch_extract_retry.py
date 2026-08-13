@@ -132,8 +132,6 @@ class TestImportFailureRetryable:
         rows = [_jd_row(1), _jd_row(2)]
 
         def _flaky(*args, **kwargs):
-            row = args[1] if len(args) > 1 else None
-            jd_id = (args[0] if row is None else None)
             # 按 evidence raw_text 无法区分，改按调用次数：第一次抛、第二次成功
             _flaky.calls = getattr(_flaky, "calls", 0) + 1
             if _flaky.calls == 1:

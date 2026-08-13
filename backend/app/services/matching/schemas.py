@@ -38,6 +38,7 @@ class PositionProfile(BaseModel):
     required_certs: list[str] = Field(default_factory=list, description="证书要求")
     soft_skills: list[str] = Field(default_factory=list, description="软技能白名单")
     typical_scenarios: list[str] = Field(default_factory=list, description="典型项目场景，用于项目 Embedding 比对")
+    industry: Optional[str] = Field(default=None, description="行业（JD 抽取 industry，图谱 Position.industry）")
     last_updated: Optional[str] = Field(default=None, description="岗位聚合最近更新时间 ISO8601，用于时效衰减")
 
 

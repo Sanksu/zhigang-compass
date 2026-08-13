@@ -3,10 +3,10 @@
 对应设计文档 §4.7（数据时滞专项处理）与 §4.8（技能通胀专项处理）。
 作为 ETL 管线中 `validate_temporal` 与 `detect_inflation` 两个步骤的实现。
 
-M2 阶段交付框架骨架与纯函数算法：
 - 阈值/降权系数严格对齐设计文档
-- 输入参数以数据类形式声明，M3 LLM 抽取上线与图谱 first_seen_at 就位后仅需接入数据源
-- 不依赖数据库 / Neo4j / Redis，便于单元测试
+- 输入参数以数据类形式声明，数据源由 ETL 层接入（validate_temporal 消费图谱
+  first_seen_at + jd_raw 抽取结果，detect_inflation 消费 snapshot.extraction）
+- 核心算法不依赖数据库 / Neo4j / Redis，便于单元测试
 """
 
 from app.services.data_quality.inflation_detector import (

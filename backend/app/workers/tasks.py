@@ -2,7 +2,7 @@
 
 任务类型（对齐设计文档 §4.4 ETL 管线）：
 - ETL 编排：crawl_platform / run_etl_pipeline / validate_temporal / detect_inflation / snapshot_graph
-- 业务异步：resume_parse / batch_extract / evolution_compute
+- 业务异步：resume_parse / batch_extract
 
 设计要点：
 - 爬虫通过 subprocess 调用 `scrapy crawl`，避免 Twisted reactor 与 asyncio loop 冲突
@@ -12,12 +12,14 @@
 
 import asyncio
 import json
+import logging
 import os
 import re
 import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterable
 
 from arq.connections import RedisSettings
 from arq.cron import cron
@@ -25,6 +27,8 @@ from arq.worker import func
 
 from app.core.config import settings
 from app.services.alerting import send_alert
+
+logger = logging.getLogger(__name__)
 
 # 子进程 stdout/stderr 强制 UTF-8（中文 Windows 默认 GBK 管道，按 UTF-8 解码会乱码）
 # 与 crawlers/spiders 下各 spider 调外部进程的模式一致
@@ -45,7 +49,8 @@ _CRAWL_ENV = {
 }
 
 # 显式消费 -a max_results 参数的 spider（其余源由各自默认采集量控制）
-MAX_RESULTS_SUPPORTED = {"arxiv"}
+# zhilian：08-13 新增条数上限（默认 200，spider 层 CloseSpider 截断）
+MAX_RESULTS_SUPPORTED = {"arxiv", "zhilian"}
 
 # CDP 爬虫：需连接真实 Chrome（9222）复用登录态，无登录态时会自动拉起浏览器
 # （ensure_cdp_chrome），本地手动触发 ETL 可 skip_cdp=True 跳过，避免干扰用户浏览器
@@ -102,6 +107,13 @@ async def _update_crawl_task(task_id: str | None, **fields) -> None:
 # ETL 阶段任务
 # ============================================================
 
+# 单源爬虫超时上限（秒）：Playwright 渲染慢源（zhilian 8kw×5city 全量）正常
+# 需 20-40min，但挂死（网络黑洞/风控验证码循环）会无限阻塞 ETL 阶段 1
+# （08-13 实测 zhilian 挂死 8h，job 超时 kill 后 subprocess 成孤儿继续跑）。
+# 900s 对齐 run_etl_pipeline 注释声明的单源上限；超时 kill 后已写入 jsonl
+# 保留（Scrapy 逐行落盘），后续 load 仍消费已产出数据。
+_CRAWL_TIMEOUT_SEC = 900
+
 async def crawl_platform(
     ctx: dict,
     spider_name: str,
@@ -115,6 +127,10 @@ async def crawl_platform(
     通过 subprocess 调用而非 in-process，原因：
     - Scrapy 基于 Twisted reactor，与 asyncio event loop 不兼容
     - subprocess 隔离崩溃，单爬虫失败不污染 worker
+
+    单源超时：_CRAWL_TIMEOUT_SEC（900s）内未退出则 kill 子进程并报错——
+    避免爬虫挂死无限阻塞 ETL 阶段 1（ARQ job 超时不会终止 subprocess，
+    会残留孤儿爬虫继续打源站）。
 
     task_id 存在时（手动触发场景）：
     - 输出逐行写入 Redis 日志队列（SSE 端点 /admin/crawl/task/{task_id}/stream 实时推送）
@@ -190,7 +206,18 @@ async def crawl_platform(
         _drain(proc.stdout),
         _drain(proc.stderr, stderr_tail),
     )
-    returncode = await proc.wait()
+    # 单源超时保护（P0-1）：爬虫挂死时 kill 子进程，避免 ETL 阶段 1 无限阻塞；
+    # 已写入 jsonl 保留（Scrapy 逐行落盘），后续 load 消费已产出数据
+    try:
+        returncode = await asyncio.wait_for(proc.wait(), timeout=_CRAWL_TIMEOUT_SEC)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        msg = f"爬虫 {spider_name} 超时（>{_CRAWL_TIMEOUT_SEC}s），已强制终止"
+        print(f"[crawl_platform] 任务超时: task_id={task_id} {msg}", flush=True)
+        await _update_crawl_task(task_id, status="failed", error=msg[:500])
+        await send_alert("crawl_timeout", msg, spider=spider_name)
+        raise RuntimeError(msg)
     print(f"[crawl_platform] 子进程退出: task_id={task_id} returncode={returncode}", flush=True)
 
     if returncode != 0:
@@ -278,21 +305,90 @@ def _skill_first_seen_days(
     group: list[tuple[int, date, list[str]]],
     skills: list[str],
     today: date,
+    graph_first_seen: dict[str, date] | None = None,
 ) -> list[int]:
-    """技能首见时长（天）：同岗位 JD 中该技能最早出现日期到 today 的间隔。
+    """技能首见时长（天）。
 
-    group: 同岗位已抽取记录 (jd_id, publish_date, skills)，含当前 JD。
-    某技能在同岗位无任何记录时不计入（数据不足不武断判定）。
+    优先读图谱 Skill.first_seen（全局首次入图时间，G-02 主口径）；图谱无
+    该技能首见记录（存量节点无属性/未入图）时回退同岗位 jd_raw 最早出现
+    日期近似。group: 同岗位已抽取记录 (jd_id, publish_date, skills)。
+    某技能两种来源均无记录时不计入（数据不足不武断判定）。
     """
+    from app.services.extraction.post_processor import canonical_skill_name
+
     ages = []
     for skill in skills:
         first = None
-        for _, pdate, group_skills in group:
-            if skill in group_skills and (first is None or pdate < first):
-                first = pdate
+        if graph_first_seen:
+            first = graph_first_seen.get(canonical_skill_name(skill))
+        if first is None:
+            for _, pdate, group_skills in group:
+                if skill in group_skills and (first is None or pdate < first):
+                    first = pdate
         if first is not None:
             ages.append(max(0, (today - first).days))
     return ages
+
+
+def _graph_skill_first_seen(skills: Iterable[str]) -> dict[str, date]:
+    """从图谱读 Skill.first_seen（首次入图时间，G-02）→ 归一化技能名 → 日期。
+
+    技能节点按归一化名存储（canonical_skill_name），未归一化的原始名查询
+    会 miss，故先归一化再匹配；无 first_seen 的存量节点跳过（回退 jd_raw）。
+    图谱不可达时返回空 dict（回退 jd_raw 推算）：validate_temporal 原本为
+    纯 PG 依赖，不因本次加读图而引入 Neo4j 强依赖（backfill 脚本可独立运行）。
+    """
+    import logging
+
+    from app.core.database import neo4j_driver
+    from app.services.extraction.post_processor import canonical_skill_name
+
+    logger = logging.getLogger(__name__)
+    names = {canonical_skill_name(s) for s in skills if canonical_skill_name(s)}
+    if not names:
+        logger.info("_graph_skill_first_seen: 无有效技能名，跳过读图（空映射，回退 jd_raw）")
+        return {}
+    logger.info(
+        "_graph_skill_first_seen: 技能请求=%d 归一化去重后=%d",
+        len(skills), len(names),
+    )
+    try:
+        with neo4j_driver.session() as session:
+            rows = session.run(
+                "MATCH (s:Skill) WHERE s.name IN $names "
+                "RETURN s.name AS name, s.first_seen AS first_seen",
+                names=list(names),
+            ).data()
+    except Exception as exc:
+        # 图谱不可达（懒连接失败/服务停止）不阻断时滞检测，回退 jd_raw 推算
+        logger.warning(
+            "_graph_skill_first_seen: 图谱不可达，回退 jd_raw 推算: %s: %s",
+            type(exc).__name__, exc,
+        )
+        return {}
+    out: dict[str, date] = {}
+    parse_failed: list[str] = []
+    for r in rows:
+        raw = r.get("first_seen")
+        if not raw:
+            continue
+        try:
+            out[r["name"]] = datetime.fromisoformat(str(raw)).date()
+        except ValueError:
+            parse_failed.append(r["name"])
+    missing = sorted(names - set(out))
+    logger.info(
+        "_graph_skill_first_seen: 图谱命中=%d/%d%s",
+        len(out), len(names),
+        "" if not missing else f"，缺失 {len(missing)} 个将回退 jd_raw: {missing[:10]}"
+        + ("" if len(missing) <= 10 else f" 等共 {len(missing)} 个"),
+    )
+    if parse_failed:
+        logger.warning(
+            "_graph_skill_first_seen: %d 个技能 first_seen 解析失败被跳过（回退 jd_raw）: %s",
+            len(parse_failed), parse_failed[:10],
+        )
+    return out
 
 
 def _experience_years(snapshot: dict) -> int | None:
@@ -337,7 +433,8 @@ async def validate_temporal(
 ) -> dict:
     """时滞检测（设计文档 §4.7）：jd_raw 已抽取记录接入 SAI/僵尸/抄袭检测。
 
-    技能首见时长无图谱 `first_seen_at` 时，用同岗位 jd_raw 历史最早出现日期近似。
+    技能首见时长优先读图谱 Skill.first_seen（G-02，全局首次入图时间），
+    图谱缺失时回退同岗位 jd_raw 历史最早出现日期近似。
     检测结果写回 `snapshot["validation"]`（含三类结果 + 叠加降权系数）；
     数据不足（无技能/无发布日期）的 JD 跳过，不做武断判定。
     """
@@ -405,10 +502,20 @@ async def validate_temporal(
                 pos = ext.get("position_name") or ""
                 hist_by_pos.setdefault(pos, []).append((row.id, publish, skills))
 
+        # 图谱 Skill.first_seen 一次性读取（G-02 主口径）：当前批次 + 历史组
+        # 全部技能名批量查询，避免逐技能 N+1 查询
+        all_skills: set[str] = set()
+        for _, (_, _, _, v_skills) in views:
+            all_skills.update(v_skills)
+        for grp in hist_by_pos.values():
+            for _, _, gs in grp:
+                all_skills.update(gs)
+        graph_first_seen = _graph_skill_first_seen(all_skills) if all_skills else {}
+
         for row, (jd_id, position, publish, skills) in views:
             # group 覆盖同岗位全部历史记录（含当前批次），按首见时长/抄袭比对口径
             group = hist_by_pos.get(position, [])
-            skill_ages = _skill_first_seen_days(group, skills, today)
+            skill_ages = _skill_first_seen_days(group, skills, today, graph_first_seen)
             if not skill_ages:
                 row.snapshot = _snapshot_with_skip(row.snapshot, "validation", "no_skill_first_seen_ages")
                 results["skipped"] += 1
@@ -419,7 +526,7 @@ async def validate_temporal(
                 age
                 for _, pdate, gs in group
                 if (today - pdate).days <= RECENT_WINDOW_DAYS
-                for age in _skill_first_seen_days(group, gs, today)
+                for age in _skill_first_seen_days(group, gs, today, graph_first_seen)
             ]
             sai = classify_sai(compute_sai(skill_ages, recent_ages))
 
@@ -897,7 +1004,10 @@ async def sync_skill_normalization(ctx: dict) -> dict:
     def _run():
         # 同步 Neo4j 全量读取 + SBERT 聚类 + 关系回写为 CPU/IO 密集，整体放线程池
         from app.core.database import neo4j_driver
-        from app.services.extraction.normalization import SkillNormalizer
+        from app.services.extraction.normalization import (
+            SkillNormalizer,
+            guard_cluster_distribution,
+        )
 
         with neo4j_driver.session() as session:
             rows = session.run("MATCH (s:Skill) RETURN s.name AS name").data()
@@ -909,6 +1019,26 @@ async def sync_skill_normalization(ctx: dict) -> dict:
         normalized = normalizer.normalize_many(names)
         if not normalized:
             return {"skills": len(names), "normalized": 0, "similar_pairs": 0, "detail": "归一化无输出"}
+
+        # ── 写回前门禁（P0）：簇分布异常拒绝写库，防链式漂移污染图谱 ──
+        # 08-13 事故：单链接漂移把 1185 个技能并入"2D可视化"簇后直接入库。
+        # 门禁拦截同类异常：巨型簇 / 映射率越界 → 不写库 + 告警 + 返回 blocked
+        # （单阶段失败不阻塞 ETL 主线，与 run_etl_pipeline 其余阶段同语义）。
+        try:
+            guard_cluster_distribution(normalized)  # 门禁校验：异常直接抛 ValueError 拦截
+        except ValueError as e:
+            msg = f"技能归一化门禁拦截：{e}"
+            print(f"[sync_skill_normalization] {msg}", flush=True)
+            from app.services.alerting import send_alert
+
+            send_alert("normalization_blocked", msg)
+            return {
+                "skills": len(names),
+                "normalized": 0,
+                "similar_pairs": 0,
+                "detail": msg,
+                "blocked": True,
+            }
 
         changed = sum(1 for n, r in normalized.items() if r.standard != n)
         written = 0
@@ -974,9 +1104,6 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
         crawl_jds → clean_jds(已在 Scrapy Pipeline 内嵌) → dedup
         → validate_temporal → detect_inflation → structure → load_to_db
         → load_to_neo4j（含课程入图 + 岗位聚合）
-
-    M2 阶段：仅执行 crawl_jds + 框架占位任务（structure/load 依赖 M3 LLM 抽取）
-    M3 阶段：完整管线启用
 
     Args:
         run_date: 调度日期 YYYY-MM-DD，None 时取 UTC+8 当日
@@ -1168,6 +1295,14 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
 
             task.status = "success"
             task.progress = 1.0
+            certs = [c for c in parsed.get("certifications", []) if c.get("name")]
+            logger.info(
+                "resume_parse 完成：resume_id=%s 技能=%d 证书=%d 证书明细=%s",
+                str(cache.id),
+                len(parsed.get("skills", [])),
+                len(certs),
+                [{ "name": c.get("name"), "issuer": c.get("issuer", "") } for c in certs[:10]],
+            )
             task.result = {
                 "resume_id": str(cache.id),
                 "skills": [s.get("name") for s in parsed.get("skills", []) if s.get("name")],
@@ -1469,11 +1604,6 @@ async def batch_extract(
     if results["processed"] > 0 and results["succeeded"] == 0:
         raise RuntimeError(f"批量抽取全部失败: {results['failed'][:5]}")
     return results
-
-
-async def evolution_compute(ctx: dict, version: str) -> dict:
-    """每日演化计算异步任务（M3 实现，当前未交付）。"""
-    raise NotImplementedError("evolution_compute 待 AL-M3 演化管线接入后实现")
 
 
 async def snapshot_graph(ctx: dict, triggered_by: str = "scheduled") -> dict:
@@ -2122,7 +2252,6 @@ class WorkerSettings:
         discovery_auto_transition,
         watch_signal_daily,
         snapshot_graph,
-        evolution_compute,
         check_llm_providers_health,
     ]
     on_startup = on_startup

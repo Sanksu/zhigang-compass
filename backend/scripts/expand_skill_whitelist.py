@@ -31,7 +31,6 @@ from sqlalchemy import text
 
 from app.core.database import async_session_factory
 from app.services.extraction.dictionary import (
-    SKILL_STOPWORDS,
     SKILL_WHITELIST,
     is_noise_skill,
     normalize_skill,

@@ -15,16 +15,17 @@ from app.services.extraction.llm_provider import LLMConfigurationError
 
 
 class _FakeLLM:
-    """固定返回诊断报告的假 LLM 链，记录最近一次 prompt 供断言。"""
+    """固定返回诊断报告的假 LLM 链，记录最近一次 prompt 供断言。
+
+    call_sync：同步路由契约（设计文档 §6.5，G-04）——诊断实时路径单次 10s。
+    """
 
     def __init__(self, report: DiagnosisReport):
         self.report = report
         self.prompt = ""
         self.system_prompt = ""
 
-    def call_with_fallback(
-        self, prompt, response_model, max_retries=1, system_prompt=None, timeout=None
-    ):
+    def call_sync(self, prompt, response_model, system_prompt=None):
         self.prompt = prompt
         self.system_prompt = system_prompt
         return self.report
@@ -123,9 +124,7 @@ class TestGenerateDiagnosis:
 
     def test_llm_configuration_error_propagates(self):
         class _BrokenLLM:
-            def call_with_fallback(
-                self, prompt, response_model, max_retries=1, system_prompt=None, timeout=None
-            ):
+            def call_sync(self, prompt, response_model, system_prompt=None):
                 raise LLMConfigurationError("未配置可用 provider")
 
         try:

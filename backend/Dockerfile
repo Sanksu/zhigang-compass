@@ -13,10 +13,11 @@ ENV UV_PROJECT_ENVIRONMENT=/usr/local
 RUN pip install --no-cache-dir uv
 
 WORKDIR /build
-COPY pyproject.toml .
+COPY pyproject.toml uv.lock .
 # 镜像瘦身（2026-08-09）：uv sync 装完依赖后清理字节码缓存与临时文件
 # （site-packages 体积由 torch/paddle 等重型依赖决定，见下方说明）。
-RUN uv lock && uv sync --no-dev --frozen
+# --frozen 按仓库 uv.lock 精确安装，不在构建时重新 lock（保证可复现）
+RUN uv sync --no-dev --frozen
 # 清理构建产物：pip/uv 缓存、Python 字节码缓存（site-packages 瘦身，可省数百 MB）
 RUN find /usr/local/lib/python3.11/site-packages -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 RUN find /usr/local/lib/python3.11/site-packages -name "*.pyc" -delete 2>/dev/null || true

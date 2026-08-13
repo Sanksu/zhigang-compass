@@ -5,6 +5,11 @@ occupation_code / BELONGS_TO_OCCUPATION 边。本脚本全量回填：
 `MATCH (p:Position) WHERE p.occupation_code IS NULL`，对齐规则与
 occupation_align.py 一致（规则优先 + SBERT 语义兜底）。
 
+前置步骤：按 PG occupations 权威源同步 Neo4j Occupation 节点（MERGE by code
+幂等）。回填会 MERGE 边指向的 Occupation 节点，若 Neo4j 节点缺失（依赖
+import_occupations 手动同步，可能未跑/失败）会建出只有 code 的空节点，
+故先补齐节点属性（occupation_align 数据源已改 PG，同步口径一致）。
+
 用法：
     python scripts/align_positions.py            # 全量回填未对齐岗位
     python scripts/align_positions.py --dry-run  # 仅统计命中，不写入
@@ -25,7 +30,44 @@ from app.core.database import neo4j_driver
 from app.services.kg.occupation_align import OccupationAligner
 
 
+def _sync_occupation_nodes() -> int:
+    """把 PG occupations 全量同步为 Neo4j Occupation 节点（MERGE by code 幂等）。"""
+    from sqlalchemy import create_engine, text
+
+    from app.core.config import settings
+
+    dsn = settings.postgres_dsn.replace(
+        "postgresql+asyncpg://", "postgresql+psycopg2://"
+    )
+    engine = create_engine(dsn, pool_pre_ping=True)
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT code, name, category, definition, aliases FROM occupations")
+            ).mappings().all()
+    finally:
+        engine.dispose()
+    if not rows:
+        return 0
+    payload = [dict(r) for r in rows]
+    with neo4j_driver.session() as ns:
+        ns.run(
+            "UNWIND $rows AS r "
+            "MERGE (o:Occupation {code: r.code}) "
+            "SET o.name = r.name, o.category = r.category, "
+            "o.definition = r.definition, o.aliases = r.aliases",
+            rows=payload,
+        )
+    return len(payload)
+
+
 def main(dry_run: bool) -> None:
+    try:
+        n = _sync_occupation_nodes()
+        logger.info("Occupation 节点就绪: %s 个", n)
+    except Exception as e:
+        logger.warning("Occupation 节点同步失败（对齐继续，回填边可能指向空节点）: %s", e)
+
     with neo4j_driver.session() as session:
         rows = session.run(
             "MATCH (p:Position) WHERE p.occupation_code IS NULL "

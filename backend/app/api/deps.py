@@ -79,6 +79,11 @@ def require_permission(permission: str):
 _ROLE_RANK = {"guest": 0, "user": 1, "admin": 2}
 
 
+def role_rank(user: dict | None) -> int:
+    """用户的角色等级数值（匿名按 guest=0），供跨模块角色门槛判断。"""
+    return _ROLE_RANK.get((user or {}).get("role", "guest"), 0)
+
+
 def require_role(min_role: str = "user"):
     """角色门槛依赖：登录用户角色须达到 min_role 及以上。
 
@@ -92,7 +97,7 @@ def require_role(min_role: str = "user"):
     """
 
     async def _check(user: dict = Depends(get_current_user)) -> dict:
-        if _ROLE_RANK.get(user.get("role", "guest"), 0) < _ROLE_RANK.get(min_role, 1):
+        if role_rank(user) < role_rank({"role": min_role}):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"需要 {min_role} 及以上角色",

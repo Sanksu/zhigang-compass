@@ -1,12 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Box, Database, Network, RotateCcw, Search } from 'lucide-react'
+import { Box, Loader2, Network, RotateCcw, Search, X } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Graph2D, type Graph2DHandle } from '@/components/graph/graph-2d'
+import type { Graph3DHandle } from '@/components/graph/graph-3d'
 import { GraphAnalysisPanel } from '@/components/graph/graph-analysis-panel'
+import { GraphCommunityTree } from '@/components/graph/graph-community-tree'
 import {
   NodeDetailPanel,
   type PositionDetail,
@@ -19,6 +21,7 @@ import {
 } from '@/components/graph/node-detail-panel'
 import type { GraphData, GraphEdge, GraphNode, GraphViewType, NodeDetail } from '@/components/graph/types'
 import { apiGet, ApiError } from '@/lib/api'
+import type { components } from '@/types/api'
 
 /** 3D 图谱懒加载 — Three.js 约 1.4MB，仅在用户点击"3D"时按需加载 */
 const Graph3D = lazy(() => import('@/components/graph/graph-3d').then((m) => ({ default: m.Graph3D })))
@@ -51,26 +54,11 @@ function isWebGL2Available(): boolean {
 // 真实 API 数据适配：后端 /graph/panorama → GraphData
 // ============================================================
 
-interface PanoramaNode {
-  id: string
-  name: string
-  type: string // position | skill
-  status?: string
-}
-
-interface PanoramaEdge {
-  source: string
-  target: string
-  weight: number
-  necessity: string
-  level: string
-}
-
-interface PanoramaData {
-  nodes: PanoramaNode[]
-  edges: PanoramaEdge[]
-  stats: { nodes: number; edges: number }
-}
+/**
+ * 后端 /graph/view/{view_type} 响应 data —— 契约 GraphViewData
+ * （铁律一：单一事实源 backend/openapi/openapi.yaml）
+ */
+type PanoramaData = components['schemas']['GraphViewData']
 
 const POSITION_STATUSES: GraphNode['status'][] = [
   'candidate',
@@ -107,7 +95,6 @@ function toGraphData(raw: PanoramaData): GraphData {
   const edges: GraphEdge[] = raw.edges.map((e) => ({
     source: e.source,
     target: e.target,
-    relation: 'requires',
     necessity: e.necessity === 'nice' ? 'nice' : 'must',
     weight: e.weight,
   }))
@@ -144,6 +131,8 @@ export function GraphPage() {
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<{ id: string; name: string; type: string; score: number }[]>([])
   const [searching, setSearching] = useState(false)
+  const [searchDone, setSearchDone] = useState(false)
+  const searchBoxRef = useRef<HTMLDivElement>(null)
   // 技能节点详情（反向岗位 / 先修链 / 课程 / 证据 / 相似）
   const [skillDetail, setSkillDetail] = useState<SkillDetail | null>(null)
   const [skillEvidence, setSkillEvidence] = useState<SkillEvidenceItem[]>([])
@@ -156,6 +145,12 @@ export function GraphPage() {
   const [focusRequest, setFocusRequest] = useState<{ id: string; ts: number } | null>(null)
   // 2D 画布命令句柄（重置视角）
   const graphRef = useRef<Graph2DHandle>(null)
+  // 3D 画布命令句柄（聚焦/重置视角，与 2D 交互对齐）
+  const graph3dRef = useRef<Graph3DHandle>(null)
+  // 画布操作提示：首次访问显示，可手动关闭
+  const [showOperationHint, setShowOperationHint] = useState(true)
+  // 右侧面板 Tab：节点详情 / 算法分析
+  const [rightTab, setRightTab] = useState<'detail' | 'analysis'>('detail')
   // 视图数据即后端返回（四种视图均由 GET /graph/view/{view_type} 提供），
   // 声明在 useCallback 依赖之前：focusSkill 等事件处理器需读取当前数据
   const data = raw
@@ -271,8 +266,10 @@ export function GraphPage() {
     const term = q.trim()
     if (!term) {
       setSearchResults([])
+      setSearchDone(false)
       return
     }
+    setSearchDone(true)
     const seq = ++searchSeqRef.current
     setSearching(true)
     apiGet<{ items: { id: string; name: string; type: string; score: number }[]; total: number }>(
@@ -288,6 +285,17 @@ export function GraphPage() {
         if (searchSeqRef.current === seq) setSearching(false)
       })
   }
+
+  // 搜索下拉：点击外部关闭
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
+        setSearchResults([])
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // 点击搜索结果 / 相似技能 / 岗位必备技能 → 选中技能节点 + 定位画布
   // 岗位中心视图下技能需先展开其所属岗位（从全量数据边中找一个关联岗位展开），
@@ -345,6 +353,10 @@ export function GraphPage() {
   }, [data, view, expandedPositions])
   // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
   const webgl2Available = useMemo(() => isWebGL2Available(), [])
+  // 触控设备（移动/平板，粗指针）固定 2D 模式（设计文档 §6.3：平板/移动端固定 2D）
+  const isCoarsePointer = useMemo(() => window.matchMedia('(pointer: coarse)').matches, [])
+  /** 3D 模式是否被锁定（WebGL2 不可用或触控设备） */
+  const mode3dLocked = !webgl2Available || isCoarsePointer
 
   // 选中节点的关联统计（从当前视图数据中实时计算）+ 全图最大关联度（详情条归一化基准）
   const detailStats = useMemo(() => {
@@ -396,15 +408,21 @@ export function GraphPage() {
     <>
       <PageHeader
         title="能力图谱"
-        description="岗位-技能-证据关系可视化 · 2D 力导向图为主，3D 模式可选"
+        description="岗位-技能关系可视化 · 默认 2D 力导向图便于分析，3D 模式用于沉浸式浏览"
         actions={
           <div className="flex items-center gap-2">
             {/* 技能全文检索（真实 /graph/search） */}
-            <div className="relative w-64">
+            <div ref={searchBoxRef} className="relative w-64">
               <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
               <Input
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => {
+                  setQuery(e.target.value)
+                  if (!e.target.value.trim()) {
+                    setSearchResults([])
+                    setSearchDone(false)
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') doSearch(query)
                 }}
@@ -418,7 +436,7 @@ export function GraphPage() {
                 onClick={() => doSearch(query)}
                 disabled={searching}
               >
-                搜索
+                {searching ? <Loader2 className="size-3 animate-spin" /> : '搜索'}
               </Button>
             </div>
             <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
@@ -434,8 +452,8 @@ export function GraphPage() {
                 size="sm"
                 variant={mode === '3d' ? 'default' : 'ghost'}
                 onClick={() => setMode('3d')}
-                disabled={!webgl2Available}
-                title={!webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : undefined}
+                disabled={mode3dLocked}
+                title={isCoarsePointer ? '触控设备固定 2D 模式（设计文档 §6.3）' : !webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : '3D 沉浸式浏览（节点带空间纵深，适合展示整体结构）'}
                 className="h-7 px-2.5 text-xs"
               >
                 3D
@@ -446,25 +464,29 @@ export function GraphPage() {
       />
 
       {/* 搜索结果下拉 */}
-      {searchResults.length > 0 && (
+      {(searchResults.length > 0 || (searchDone && !searching && query.trim())) && (
         <Card className="mb-3">
           <CardContent className="p-2">
-            <ul className="divide-y divide-border">
-              {searchResults.map((r) => (
-                <li key={r.id}>
-                  <button
-                    onClick={() => focusSkill(r.id, r.name)}
-                    className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-subtle"
-                  >
-                    <span className="font-medium text-ink">{r.name}</span>
-                    <span className="flex items-center gap-2 text-[10px] text-ink-faint">
-                      <span className="rounded bg-subtle px-1 py-0.5 font-mono">技能</span>
-                      <span className="font-mono">{(r.score * 100).toFixed(0)}</span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            {searchResults.length > 0 ? (
+              <ul className="divide-y divide-border">
+                {searchResults.map((r) => (
+                  <li key={r.id}>
+                    <button
+                      onClick={() => focusSkill(r.id, r.name)}
+                      className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-subtle"
+                    >
+                      <span className="font-medium text-ink">{r.name}</span>
+                      <span className="flex items-center gap-2 text-[10px] text-ink-faint">
+                        <span className="rounded bg-subtle px-1 py-0.5 font-mono">技能</span>
+                        <span className="font-mono">{(r.score * 100).toFixed(0)}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="px-2 py-2 text-xs text-ink-muted">未找到与“{query.trim()}”相关的技能</p>
+            )}
           </CardContent>
         </Card>
       )}
@@ -481,7 +503,7 @@ export function GraphPage() {
         <div className="flex items-center justify-between gap-4 mb-3">
           <TabsList>
             {(Object.keys(VIEW_LABEL) as GraphViewType[]).map((v) => (
-              <TabsTrigger key={v} value={v} className="text-xs">
+              <TabsTrigger key={v} value={v} className="text-xs" title={VIEW_DESC[v]}>
                 {VIEW_LABEL[v]}
               </TabsTrigger>
             ))}
@@ -489,18 +511,33 @@ export function GraphPage() {
 
           {/* 数据规模指示 */}
           <div className="flex items-center gap-3 text-xs text-ink-muted">
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1" title="当前视图节点数 / 图谱总节点数">
               <Network className="size-3" />
               <span className="font-mono tabular-nums">{data.stats.returnedNodes}</span>
               <span className="text-ink-faint">/ {data.stats.totalNodesInGraph}</span>
               <span className="text-ink-faint">节点</span>
             </span>
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1" title="当前视图边数">
               <Box className="size-3" />
               <span className="font-mono tabular-nums">{data.stats.totalEdges}</span>
               <span className="text-ink-faint">边</span>
             </span>
-            <span className="text-ink-faint text-[10px]">≤ 600 / 1500 上限</span>
+            {visibleData && (
+              <span className="hidden sm:flex items-center gap-1" title="当前视图节点构成">
+                <span className="font-mono tabular-nums">
+                  {visibleData.nodes.filter((n) => n.type === 'position').length}
+                </span>
+                <span className="text-ink-faint">岗位</span>
+                <span className="text-ink-faint">·</span>
+                <span className="font-mono tabular-nums">
+                  {visibleData.nodes.filter((n) => n.type === 'skill').length}
+                </span>
+                <span className="text-ink-faint">技能</span>
+              </span>
+            )}
+            {data.stats.returnedNodes < data.stats.totalNodesInGraph && (
+              <span className="text-ink-faint text-[10px]">已截断采样</span>
+            )}
           </div>
         </div>
       </Tabs>
@@ -508,11 +545,11 @@ export function GraphPage() {
       {/* 画布 + 详情面板：画布占 70-75%，详情占 25-30% */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
         <Card className="relative overflow-hidden h-[640px]">
-          {/* 重置视角（roam 平移/缩放后一键回初始视角） */}
+          {/* 重置视角（roam 平移/缩放后一键回初始视角；3D 模式对应缩放到全图） */}
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => graphRef.current?.resetView()}
+            onClick={() => (mode === '3d' ? graph3dRef.current?.resetView() : graphRef.current?.resetView())}
             className="absolute right-2 top-2 z-10 h-7 px-2 text-xs text-ink-muted hover:text-ink"
             title="重置视角"
           >
@@ -533,13 +570,50 @@ export function GraphPage() {
           ) : (
             <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-sm text-ink-muted">加载 3D 渲染引擎…</div>}>
               <Graph3D
+                ref={graph3dRef}
                 data={visibleData!}
                 expandedPositions={expandedPositions}
+                selectedId={selected?.id ?? null}
+                focusRequest={focusRequest}
                 onSelectNode={setSelected}
+                onTogglePosition={togglePosition}
                 className="h-full w-full"
               />
             </Suspense>
           )}
+          {/* 画布操作提示（可关闭） */}
+          {showOperationHint && (
+            <div className="absolute top-14 right-2 z-10 max-w-[180px] rounded-md border border-border bg-canvas/90 backdrop-blur px-2.5 py-2 shadow-sm">
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-[11px] font-medium text-ink-secondary">操作提示</span>
+                <button
+                  onClick={() => setShowOperationHint(false)}
+                  className="rounded-sm text-ink-faint hover:text-ink hover:bg-subtle"
+                  aria-label="关闭操作提示"
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
+              <ul className="mt-1.5 space-y-0.5 text-[10px] text-ink-muted">
+                {mode === '3d' ? (
+                  <>
+                    <li>滚轮缩放 · 拖拽空白旋转视角</li>
+                    <li>拖拽节点调整位置</li>
+                    <li>单击节点查看详情</li>
+                    <li>双击岗位展开/收起技能</li>
+                  </>
+                ) : (
+                  <>
+                    <li>滚轮缩放 · 拖拽空白平移</li>
+                    <li>拖拽节点调整位置</li>
+                    <li>单击节点查看详情</li>
+                    <li>双击岗位展开/收起技能</li>
+                  </>
+                )}
+              </ul>
+            </div>
+          )}
+
           {/* 视图说明 */}
           <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-3 pointer-events-none">
             <p className="text-[11px] text-ink-muted bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
@@ -547,64 +621,86 @@ export function GraphPage() {
             </p>
             {view !== 'techStack' && (
               <p className="text-[11px] text-ink-muted bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
-                单击查看详情 · 双击岗位展开/收起技能
+                已展开 {expandedPositions.size} 个岗位
               </p>
             )}
-            {!webgl2Available && (
+            {mode3dLocked && (
               <p className="text-[10px] text-ink-faint bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
-                WebGL2 不可用，已降级 2D 模式
+                {isCoarsePointer ? '触控设备固定 2D 模式' : 'WebGL2 不可用，已降级 2D 模式'}
               </p>
             )}
           </div>
         </Card>
 
-        {/* 节点详情面板 + 图谱算法分析 */}
-        <Card className="h-[640px] overflow-y-auto">
-          <NodeDetailPanel
-            node={selected}
-            stats={detailStats}
-            skillDetail={skillDetailView}
-            positionDetail={selected?.type === 'position' && positionDetail && positionDetail.id === selected.id ? positionDetail : null}
-            skillEvidence={selected && skillDetail && skillDetail.skill_id === selected.id ? skillEvidence : []}
-            similarSkills={selected && skillDetail && skillDetail.skill_id === selected.id ? similarSkills : []}
-            positionExpanded={selected?.type === 'position' ? expandedPositions.has(selected.id) : false}
-            onTogglePosition={togglePosition}
-            onSelectSkill={focusSkill}
-            onClose={() => setSelected(null)}
-          />
-          {/* 图谱算法分析：技能重要性 / 技能簇 / 最短路径（设计文档 §7.1） */}
-          <GraphAnalysisPanel
-            skills={data.nodes.filter((n) => n.type === 'skill').map((n) => ({ id: n.id, name: n.name }))}
-            onFocusSkill={focusSkill}
-            className="border-t border-border"
-          />
-        </Card>
+        {/* 节点详情面板 + 图谱算法分析：用 Tab 分隔，避免信息过载 */}
+        <Tabs value={rightTab} onValueChange={(v) => setRightTab(v as 'detail' | 'analysis')} className="flex flex-col h-[640px]">
+          <Card className="flex flex-col h-full overflow-hidden">
+            <TabsList className="mx-3 mt-3 grid w-auto grid-cols-2">
+              <TabsTrigger value="detail" className="text-xs">
+                节点详情
+              </TabsTrigger>
+              <TabsTrigger value="analysis" className="text-xs">
+                算法分析
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="detail" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
+              <NodeDetailPanel
+                node={selected}
+                stats={detailStats}
+                skillDetail={skillDetailView}
+                positionDetail={selected?.type === 'position' && positionDetail && positionDetail.id === selected.id ? positionDetail : null}
+                skillEvidence={selected && skillDetail && skillDetail.skill_id === selected.id ? skillEvidence : []}
+                similarSkills={selected && skillDetail && skillDetail.skill_id === selected.id ? similarSkills : []}
+                positionExpanded={selected?.type === 'position' ? expandedPositions.has(selected.id) : false}
+                onTogglePosition={togglePosition}
+                onSelectSkill={focusSkill}
+                onClose={() => setSelected(null)}
+              />
+            </TabsContent>
+            <TabsContent value="analysis" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
+              <GraphAnalysisPanel
+                skills={data.nodes.filter((n) => n.type === 'skill').map((n) => ({ id: n.id, name: n.name }))}
+                onFocusSkill={focusSkill}
+              />
+              <GraphCommunityTree className="mt-3" />
+            </TabsContent>
+          </Card>
+        </Tabs>
       </div>
 
-      {/* 图例：与画布实际渲染对齐（当前视图只含岗位/技能节点与 requires 关系） */}
-      <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-muted">
+      {/* 图例：与画布实际渲染对齐（形状+颜色，支持色盲识别） */}
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-muted" role="list" aria-label="图谱图例">
         <span className="font-medium text-ink-secondary">图例：</span>
-        <span className="flex items-center gap-1.5">
-          <span className="size-2.5 rounded-full bg-state-stable" /> 稳定岗位
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span className="size-2.5 rounded-full bg-state-stable" role="img" aria-label="稳定岗位：蓝色圆形" /> 稳定
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className="size-2.5 rounded-full bg-state-emerging" /> 新兴岗位
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span
+            className="size-2.5 bg-state-emerging"
+            style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
+            role="img"
+            aria-label="新兴岗位：绿色三角形"
+          /> 新兴
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className="size-2.5 rounded-full bg-state-candidate" /> 候选岗位
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span className="size-2.5 rounded-full bg-state-candidate" role="img" aria-label="候选岗位：灰色圆形" /> 候选
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className="size-2.5 rounded-full bg-state-declining" /> 衰退岗位
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span className="size-2.5 bg-state-declining" role="img" aria-label="衰退岗位：橙色矩形" /> 衰退
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className="size-2.5 rounded-full bg-state-archived" /> 归档岗位
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span className="size-2.5 rounded-md bg-state-archived" role="img" aria-label="归档岗位：红色圆角矩形" /> 归档
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className="size-2.5 bg-ink" /> 技能
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span className="size-2.5 rounded-full bg-[#09090b] dark:bg-[#fafafa]" role="img" aria-label="技能节点" /> 技能
         </span>
-        <span className="flex items-center gap-1.5">
-          <Database className="size-3" />
-          <span>实线=岗位要求技能(requires)</span>
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span className="w-4 h-0.5 bg-ink/60" aria-hidden="true" />
+          岗位-技能
+        </span>
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span className="w-4 h-1 bg-ink/60" aria-hidden="true" />
+          关联强度
         </span>
       </div>
     </>

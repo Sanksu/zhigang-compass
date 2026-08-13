@@ -55,6 +55,13 @@ def build_candidate(parsed: dict) -> CandidateProfile:
                 description=pr.get("description", ""),
             ))
 
+    certifications: list[str] = []
+    for c in parsed.get("certifications", []):
+        if isinstance(c, str):
+            certifications.append(c)
+        elif isinstance(c, dict) and c.get("name"):
+            certifications.append(c["name"])
+
     return CandidateProfile(
         user_id=parsed.get("user_id", ""),
         skills=skills,
@@ -62,7 +69,7 @@ def build_candidate(parsed: dict) -> CandidateProfile:
         education_level=parsed.get("education_level"),
         domain_experience=parsed.get("domain_experience", []),
         projects=projects,
-        certifications=parsed.get("certifications", []),
+        certifications=certifications,
     )
 
 
@@ -84,6 +91,7 @@ def load_positions_from_graph() -> list[PositionProfile]:
             MATCH (p:Position)-[r:REQUIRES]->(s:Skill)
             RETURN p.id AS pid, p.name AS pname,
                    p.required_years AS req_years, p.last_updated AS last_updated,
+                   p.industry AS industry,
                    s.id AS sid, s.name AS sname,
                    r.necessity AS necessity, r.weight AS weight,
                    r.level AS level, r.source_count AS source_count
@@ -98,6 +106,7 @@ def load_positions_from_graph() -> list[PositionProfile]:
                     name=rec.get("pname") or pid,
                     required_years=rec.get("req_years"),
                     last_updated=rec.get("last_updated"),
+                    industry=rec.get("industry") or None,
                 )
                 positions[pid] = pos
 

@@ -386,8 +386,8 @@ paths:
           schema: { type: integer, default: 20, maximum: 100 }
         - name: min_weight
           in: query
-          schema: { type: number, default: 1.0, minimum: 1.0 }
-          description: 共现边权重下限（共现岗位数）
+          schema: { type: number, minimum: 1.0 }
+          description: 共现边权重下限（权重 = 必要性组合因子 × 共现岗位数：must-must=1.0/must-nice=0.5/nice-nice=0.2 再 × 共现数）。省略时取 configs/graph_algo.yaml 的调优值（当前 2.5021），与 skill-clusters 取数口径一致
       responses:
         '200':
           description: 技能重要性排名
@@ -412,14 +412,23 @@ paths:
     get:
       tags: [graph]
       security: []
-      summary: Louvain 技能簇识别（纯 Python）
+      summary: Louvain 技能簇识别（纯 Python，γ 分辨率参数化）
       parameters:
         - name: min_size
           in: query
           schema: { type: integer, default: 2, minimum: 1, maximum: 100 }
+          description: 过滤过小簇（size < min_size 不返回）
+        - name: resolution
+          in: query
+          schema: { type: number, minimum: 0.1, maximum: 5.0 }
+          description: Louvain 分辨率参数 γ（图算法优化方案阶段一）：>1 细簇 / <1 粗簇 / 1.0 等价标准 Louvain。省略时取 configs/graph_algo.yaml 的调优值（当前 1.2564，随配置生效）
+        - name: level
+          in: query
+          schema: { type: integer, default: null, minimum: 0, maximum: 31, nullable: true }
+          description: 层级（阶段三层次化提取）：0 = 最细，逐层变粗；默认 null = 最优层（与 louvain() 输出一致）；Leiden 算法不支持层级（忽略）
       responses:
         '200':
-          description: 技能簇列表
+          description: 技能簇列表（规则后处理 + LLM 兜底命名 + 层级元数据）
           content:
             application/json:
               schema:
@@ -434,6 +443,34 @@ paths:
                           properties:
                             id: { type: integer }
                             size: { type: integer }
+                            label:
+                              type: string
+                              description: 规则标签（簇内共现权重 Top-3 技能，· 拼接）
+                            needs_llm:
+                              type: boolean
+                              description: 是否命中 LLM 兜底触发条件（无主导技能/跨类别复合栈/规则标签为空）
+                            triggers:
+                              type: array
+                              items: { type: string }
+                              description: 触发原因（no_dominant_skill / cross_category / empty_label）
+                            llm:
+                              type: object
+                              nullable: true
+                              description: LLM 兜底结果（未触发或 LLM 降级时为 null）
+                              properties:
+                                coherent: { type: boolean }
+                                cluster_name:
+                                  type: string
+                                  nullable: true
+                                  description: LLM 语义凝练命名（≤8 字）
+                                rationale:
+                                  type: string
+                                  nullable: true
+                                  description: 命名理由（≤3 句）
+                                splits:
+                                  type: array
+                                  items: { type: string }
+                                  description: 不连贯时建议拆分的子技术栈（≤3 个）
                             skills:
                               type: array
                               items:
@@ -442,6 +479,56 @@ paths:
                                   id: { type: string }
                                   name: { type: string }
                       cluster_count: { type: integer }
+                      levels:
+                        type: array
+                        nullable: true
+                        description: 层级元数据（Leiden 算法为 null）；每项 {level, cluster_count, modularity}
+                        items:
+                          type: object
+                          properties:
+                            level: { type: integer }
+                            cluster_count: { type: integer }
+                            modularity: { type: number }
+
+  /api/v1/graph/algorithms/community-tree:
+    get:
+      tags: [graph]
+      security: []
+      summary: 社区层级树（dendrogram 可视化，阶段三层次化提取）
+      description: 读取 scripts/sync_communities.py 同步的 Neo4j Community 节点（BELONGS_TO_COMMUNITY + NESTED_IN），返回树结构供 ECharts tree 系列渲染；未同步时返回空树
+      responses:
+        '200':
+          description: 社区层级树
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+                properties:
+                  data:
+                    properties:
+                      tree:
+                        type: array
+                        description: 根节点列表（最高层社区，children 按 NESTED_IN 递归展开）
+                        items:
+                          type: object
+                          properties:
+                            id: { type: string }
+                            name: { type: string }
+                            level: { type: integer }
+                            cluster_count: { type: integer }
+                            modularity: { type: number }
+                            top_skills:
+                              type: array
+                              items: { type: string }
+                              description: 簇内代表性技能（≤5 个）
+                            children:
+                              type: array
+                              items:
+                                $ref: '#/components/schemas/CommunityNode'
+                      levels:
+                        type: array
+                        items: { type: integer }
+                        description: 已同步层级列表
 
   /api/v1/graph/algorithms/shortest-path:
     get:
@@ -1035,6 +1122,7 @@ paths:
               properties:
                 platform: { type: string, description: "平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx" }
                 keyword: { type: string }
+                city: { type: string, description: "城市（可选，海外源默认英文城市）" }
       responses:
         '202':
           description: 任务已触发（data 含 task_id/status=pending）
@@ -1360,12 +1448,12 @@ paths:
         - name: category
           in: query
           schema: { type: string, enum: [AUTH, GRAPH, DATA, ADMIN] }
-        - name: start
+        - name: page
           in: query
-          schema: { type: string, format: date-time }
-        - name: end
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: size
           in: query
-          schema: { type: string, format: date-time }
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
       responses:
         '200':
           description: 日志列表
@@ -1442,13 +1530,87 @@ components:
           type: string
           description: 链路追踪 ID（uuid4 hex 截断 16 位）
 
+    GraphViewType:
+      type: string
+      enum: [panorama, techStack, level, positionCenter]
+      description: 图谱视图类型（服务端过滤）
+
+    GraphNode:
+      type: object
+      description: 图谱节点（Position/Skill，匿名视角候选岗位不外宣）
+      required: [id, name, type]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [position, skill, evidence] }
+        status:
+          type: string
+          enum: [candidate, emerging, stable, declining, archived]
+          description: 岗位状态机（仅 position 节点）
+
+    GraphEdge:
+      type: object
+      description: 图谱边（REQUIRES 关系）
+      required: [source, target]
+      properties:
+        source: { type: string, description: 源节点 id（岗位） }
+        target: { type: string, description: 目标节点 id（技能） }
+        weight: { type: number, description: 边权重（聚合口径 must=0.8/nice=0.4） }
+        necessity: { type: string, enum: [must, nice] }
+        level: { type: string, description: 熟练度级别（初级/中级/高级/专家） }
+
+    GraphViewStats:
+      type: object
+      description: 视图统计（本次返回的节点/边数，非全图）
+      properties:
+        nodes: { type: integer }
+        edges: { type: integer }
+
+    GraphViewData:
+      type: object
+      description: 图谱视图响应（四种视图同构）
+      required: [view_type, nodes, edges, stats]
+      properties:
+        view_type: { $ref: '#/components/schemas/GraphViewType' }
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/GraphNode' }
+        edges:
+          type: array
+          items: { $ref: '#/components/schemas/GraphEdge' }
+        stats: { $ref: '#/components/schemas/GraphViewStats' }
+
+    CommunityNode:
+      type: object
+      description: 社区层级树节点（阶段三层次化提取，dendrogram 可视化）
+      properties:
+        id: { type: string }
+        name:
+          type: string
+          description: 社区名称（簇内 Top-3 技能拼接）
+        level: { type: integer }
+        cluster_count: { type: integer }
+        modularity: { type: number }
+        top_skills:
+          type: array
+          items: { type: string }
+          description: 簇内代表性技能（≤5 个）
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommunityNode'
+          description: NESTED_IN 嵌套子社区（递归）
+
     User:
       type: object
       properties:
         id: { type: string }
         username: { type: string }
         role: { type: string, enum: [admin, user, guest] }
-        permissions: { type: array, items: { type: string } }
+        email: { type: string, nullable: true, description: 邮箱（可能为空） }
+        phone: { type: string, nullable: true, description: 手机号（可能为空） }
+        bio: { type: string, nullable: true, description: 个人简介 }
+        created_at: { type: string, nullable: true, description: 注册时间 ISO8601 }
 
     GapSkill:
       type: object

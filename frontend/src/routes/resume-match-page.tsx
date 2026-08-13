@@ -185,7 +185,7 @@ export function ResumeMatchPage() {
 
   // 载入已解析简历列表（后端 /resume/list）
   function loadResumeList() {
-    apiGet<{ items: ResumeSummary[]; total: number }>('/resume/list')
+    return apiGet<{ items: ResumeSummary[]; total: number }>('/resume/list')
       .then((res) => setResumeList(res.items))
       .catch(() => {
         /* 列表加载失败不阻塞页面 */
@@ -203,10 +203,11 @@ export function ResumeMatchPage() {
     try {
       const form = new FormData()
       form.append('file', file)
+      // 不手动设 Content-Type：axios 对 FormData 自动生成含 boundary 的 multipart 头，
+      // 手动覆盖会丢失 boundary 导致后端解析失败
       const res = await apiPost<{ task_id: string; resume_id: string; cached: boolean }>(
         '/resume/parse',
         form,
-        { headers: { 'Content-Type': 'multipart/form-data' } },
       )
       if (res.cached) {
         await loadRecommend(res.resume_id)
@@ -256,7 +257,9 @@ export function ResumeMatchPage() {
               /* SSE data 非 JSON，退化为仅提示 */
             }
             if (resumeId) {
-              loadResumeList()
+              // 先等简历列表刷新完成，再触发推荐——否则 loadRecommend 里
+              // resumeList.find 取不到刚解析的简历，候选摘要缺失
+              await loadResumeList()
               await loadRecommend(resumeId)
               return
             }

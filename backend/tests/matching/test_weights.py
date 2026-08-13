@@ -1,13 +1,25 @@
 """匹配权重加载回退测试。"""
 
 from app.services.matching import weights
-from app.services.matching.weights import DEFAULT_WEIGHTS, load_weights, load_sim_threshold
+from app.services.matching.weights import (
+    DOMAIN_BLOCKLIST_DEFAULT,
+    DEFAULT_WEIGHTS,
+    load_domain_sem_blocklist,
+    load_sim_threshold,
+    load_weights,
+)
 
 
 def _write_config(tmp_path, monkeypatch, content: str) -> None:
     cfg = tmp_path / "match_weights.json"
     cfg.write_text(content, encoding="utf-8")
     monkeypatch.setattr("app.services.matching.weights._CONFIG_PATH", cfg)
+
+
+def _write_blocklist(tmp_path, monkeypatch, content: str) -> None:
+    cfg = tmp_path / "domain_sem_blocklist.json"
+    cfg.write_text(content, encoding="utf-8")
+    monkeypatch.setattr("app.services.matching.weights._BLOCKLIST_PATH", cfg)
 
 
 class TestLoadWeights:
@@ -63,3 +75,47 @@ class TestLoadSimThreshold:
     def test_valid_value_loads(self, tmp_path, monkeypatch):
         _write_config(tmp_path, monkeypatch, '{"sim_threshold": 0.9}')
         assert load_sim_threshold() == 0.9
+
+
+class TestLoadDomainBlocklist:
+    def test_missing_falls_back_to_default(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.matching.weights._BLOCKLIST_PATH",
+            tmp_path / "not_exist.json",
+        )
+        assert load_domain_sem_blocklist() == frozenset(frozenset(p) for p in DOMAIN_BLOCKLIST_DEFAULT)
+
+    def test_corrupted_falls_back_to_default(self, tmp_path, monkeypatch):
+        _write_blocklist(tmp_path, monkeypatch, "{invalid json")
+        assert load_domain_sem_blocklist() == frozenset(frozenset(p) for p in DOMAIN_BLOCKLIST_DEFAULT)
+
+        _write_blocklist(tmp_path, monkeypatch, '{"pairs": "not-list"}')
+        assert load_domain_sem_blocklist() == frozenset(frozenset(p) for p in DOMAIN_BLOCKLIST_DEFAULT)
+
+    def test_empty_falls_back_to_default(self, tmp_path, monkeypatch):
+        _write_blocklist(tmp_path, monkeypatch, '{"pairs": []}')
+        assert load_domain_sem_blocklist() == frozenset(frozenset(p) for p in DOMAIN_BLOCKLIST_DEFAULT)
+
+    def test_valid_pairs_loads_and_lowercases(self, tmp_path, monkeypatch):
+        _write_blocklist(
+            tmp_path, monkeypatch,
+            '{"pairs": [["制造业", "电商"], ["金融", "IT"]]}',
+        )
+        assert load_domain_sem_blocklist() == frozenset({
+            frozenset({"制造业", "电商"}),
+            frozenset({"金融", "it"}),
+        })
+
+    def test_dynamic_reload(self, tmp_path, monkeypatch):
+        """修改配置文件后再次加载生效（每次调用重新读文件，不缓存）。"""
+        _write_blocklist(tmp_path, monkeypatch, '{"pairs": [["制造业", "电商"]]}')
+        assert load_domain_sem_blocklist() == frozenset({frozenset({"制造业", "电商"})})
+        _write_blocklist(tmp_path, monkeypatch, '{"pairs": [["金融", "IT"]]}')
+        assert load_domain_sem_blocklist() == frozenset({frozenset({"金融", "it"})})
+
+    def test_invalid_pair_skipped_others_kept(self, tmp_path, monkeypatch):
+        _write_blocklist(
+            tmp_path, monkeypatch,
+            '{"pairs": [["制造业", "电商"], ["只有一项"], 123, ["a", "b", "c"]]}',
+        )
+        assert load_domain_sem_blocklist() == frozenset({frozenset({"制造业", "电商"})})

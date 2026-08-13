@@ -47,6 +47,12 @@ def _patch_env(monkeypatch, tmp_path) -> list[tuple[str, dict]]:
         async def gather(self, *aws):
             await asyncio.gather(*aws)
 
+        async def wait_for(self, aw, timeout):
+            # 透传：FakeProc.wait 立即返回，测试不触发超时分支
+            return await aw
+
+        TimeoutError = asyncio.TimeoutError
+
     async def _noop_log(ctx, task_id, line):
         return None
 
@@ -110,5 +116,58 @@ def test_cities_passed_to_scrapy_cmd(monkeypatch, tmp_path):
     assert cmd_calls, "应至少发起一次 scrapy 子进程"
     cmd = cmd_calls[0]
     assert "-a" in cmd
-    assert f"cities=New York" in cmd
-    assert f"keywords=Python" in cmd
+    assert "cities=New York" in cmd
+    assert "keywords=Python" in cmd
+
+
+def test_timeout_kills_subprocess_and_marks_failed(monkeypatch, tmp_path):
+    """爬虫超过 _CRAWL_TIMEOUT_SEC 未退出 → kill + 标记 failed + 抛 RuntimeError。"""
+    killed = []
+
+    class _SlowProc(_FakeProc):
+        async def wait(self):
+            return 0
+
+        def kill(self):
+            killed.append(True)
+
+    class _SlowAsyncio:
+        async def create_subprocess_exec(self, *args, **kwargs):
+            return _SlowProc()
+
+        async def gather(self, *aws):
+            await asyncio.gather(*aws)
+
+        async def wait_for(self, aw, timeout):
+            raise asyncio.TimeoutError()
+
+        TimeoutError = asyncio.TimeoutError
+
+    updates = []
+    async def _noop_log(ctx, task_id, line):
+        return None
+
+    async def _fake_update(task_id, **fields):
+        updates.append((task_id, fields))
+
+    async def _fake_alert(kind, msg, **kwargs):
+        alerts.append(kind)
+
+    alerts = []
+    monkeypatch.setattr(tasks, "asyncio", _SlowAsyncio())
+    monkeypatch.setattr(tasks, "datetime", _FrozenDateTime)
+    monkeypatch.setattr(tasks, "_OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(tasks, "_CRAWLERS_DIR", tmp_path.parent.parent)
+    monkeypatch.setattr(tasks, "_push_crawl_log", _noop_log)
+    monkeypatch.setattr(tasks, "_update_crawl_task", _fake_update)
+    monkeypatch.setattr(tasks, "send_alert", _fake_alert)
+
+    async def run():
+        with pytest.raises(RuntimeError, match="超时"):
+            await tasks.crawl_platform({}, "zhilian", task_id="t-timeout")
+
+    asyncio.run(run())
+    assert killed, "超时必须 kill 子进程"
+    assert updates[-1][0] == "t-timeout"
+    assert updates[-1][1]["status"] == "failed"
+    assert alerts == ["crawl_timeout"]

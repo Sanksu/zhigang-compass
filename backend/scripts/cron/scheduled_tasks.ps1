@@ -1,4 +1,4 @@
-# 智岗罗盘 ETL 调度 Windows 计划任务示例（开发环境）
+﻿# 智岗罗盘 ETL 调度 Windows 计划任务示例（开发环境）
 #
 # 部署（管理员 PowerShell）：
 #   cd backend
@@ -63,12 +63,13 @@ foreach ($task in $Tasks) {
     $scriptPath = Join-Path $BackendDir "scripts\cron\$($task.Script)"
     $logFile = Join-Path $LogDir "$($task.Name)_$(Get-Date -Format 'yyyyMMdd').log"
 
-    # 构造命令
-    $argString = ($task.Args | ForEach-Object { '"' + $_ + '"' }) -join ' '
-    $cmd = "cd '$BackendDir'; uv run python '$scriptPath' $argString >> '$logFile' 2>&1"
+    # 构造命令（cmd 语法：路径无空格前提下不用引号；单引号为 PowerShell 语法
+    # cmd 不识别——2026-08-13 实测 05:00 ETLDaily 退出码 1 根因之一）
+    $argString = ($task.Args | ForEach-Object { $_ }) -join ' '
+    $cmd = "cd /d $BackendDir && uv run python scripts\cron\$($task.Script) $argString >> $LogDir\$($task.Name)_$(Get-Date -Format 'yyyyMMdd').log 2>&1"
 
     if ($task.Proxy) {
-        $cmd = '$env:HTTPS_PROXY="http://127.0.0.1:7890"; ' + $cmd
+        $cmd = "set HTTPS_PROXY=http://127.0.0.1:7890 && $cmd"
     }
 
     # 解析时间（HH:mm）；指定 DaysOfWeek 的任务为每周触发（课程平台），否则每日
@@ -83,7 +84,10 @@ foreach ($task in $Tasks) {
     # 以当前用户登录时运行
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -Command `"$cmd`""
+    # 用 cmd /c 包装：PS5.1 将 native 命令 stderr（uv warning 等）误判为
+    # NativeCommandError 导致退出码 1（2026-08-13 ETLDaily 实测）；cmd 的
+    # 2>&1 重定向不产生该错误，任务退出码 = 实际命令退出码
+    $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$cmd`""
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 
     # 已存在则先注销

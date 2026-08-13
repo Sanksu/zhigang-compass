@@ -15,6 +15,14 @@ from app.services.discovery.grounding import (
     search_authoritative,
 )
 
+
+@pytest.fixture(autouse=True)
+def _disable_grounding_cache(monkeypatch):
+    """单测不依赖 Redis：关闭 grounding 检索缓存，避免命中真实缓存污染断言。"""
+    from app.services.discovery import grounding
+
+    monkeypatch.setattr(grounding, "_CACHE_ENABLED", False)
+
 _SEEDS = [
     {
         "name": "RAG 工程师",
@@ -70,7 +78,6 @@ class TestSearchAuthoritative:
     def test_sql_builds_with_invalid_chars(self):
         """含 %/_ 通配符的岗位名不抛 SQL 异常（参数化，非注入）。"""
         async def _run():
-            from sqlalchemy.ext.asyncio import AsyncSession
 
             class _FakeDb:
                 async def scalars(self, stmt):
@@ -173,34 +180,49 @@ class _FakeEmbedder:
 
 
 class _FakeDb:
-    """假 AsyncSession：记录 stmt，返回预设 Occupation 行。fail=True 时恒抛。"""
+    """假 AsyncSession：记录 stmt，返回预设行。fail=True 时恒抛。
 
-    def __init__(self, rows=None, fail: bool = False):
+    execute（语义路）返回 (occ, sim) 元组行，scalars（关键词路）返回
+    Occupation 行——与真实 pgvector 查询返回形态对齐。
+    """
+
+    def __init__(self, rows=None, sem_rows=None, fail: bool = False):
         self._rows = rows or []
+        self._sem_rows = sem_rows or []
         self._fail = fail
         self.stmts = []
+        self._last = "scalars"
 
     async def scalars(self, stmt):
         self.stmts.append(stmt)
         if self._fail:
             raise RuntimeError("db down")
+        self._last = "scalars"
+        return self
+
+    async def execute(self, stmt):
+        self.stmts.append(stmt)
+        if self._fail:
+            raise RuntimeError("db down")
+        self._last = "execute"
         return self
 
     def all(self):
-        return self._rows
+        return self._sem_rows if self._last == "execute" else self._rows
 
 
 class _FailingOnceDb:
-    """第一次调用（语义路）抛错、后续（关键词路）正常的假 db。"""
+    """execute（语义路）抛错、scalars（关键词路）正常的假 db。"""
 
     def __init__(self, rows):
         self._rows = rows
         self._calls = 0
 
-    async def scalars(self, stmt):
+    async def execute(self, stmt):
         self._calls += 1
-        if self._calls == 1:
-            raise RuntimeError("vector 列缺失")
+        raise RuntimeError("vector 列缺失")
+
+    async def scalars(self, stmt):
         return self
 
     def all(self):
@@ -283,12 +305,12 @@ class TestThreadingWrappers:
         assert grounding._query_fulltext in called
 
     def test_semantic_embedding_runs_in_thread(self, monkeypatch):
-        """SBERT embed 与 similarity 经 to_thread（防阻塞事件循环）。"""
+        """SBERT embed 经 to_thread（防阻塞事件循环）。"""
         from app.services.discovery import grounding
 
         embedder = _FakeEmbedder()
         called = self._spy_to_thread(monkeypatch)
-        db = _FakeDb(rows=[_occ()])
+        db = _FakeDb(sem_rows=[(_occ(), 0.9)])
         hits = asyncio.run(grounding._semantic_search(db, "软件开发", embedder, 10))
         assert hits
         assert embedder.embed in called  # qvec 计算经 to_thread
@@ -323,8 +345,9 @@ class TestDualPathRetrieval:
     """双路检索（设计 7.2.3）：pgvector 语义 + Neo4j 全文，降级 ILIKE。"""
 
     def test_semantic_path_scores_and_normalizes(self):
+        """语义路 score 与 pgvector 排序同源（1 - cosine_distance）。"""
         async def _run():
-            db = _FakeDb(rows=[_occ()])
+            db = _FakeDb(sem_rows=[(_occ(), 0.8)])
             hits = await search_authoritative("大模型应用工程师", db, embedder=_FakeEmbedder(0.8))
             assert len(hits) == 1
             assert hits[0]["code"] == "15-1252.00"
@@ -382,9 +405,9 @@ class TestDualPathRetrieval:
         asyncio.run(_run())
 
     def test_merge_dedup_semantic_and_keyword(self):
-        """同一 code 两路命中 → 合并去重保留高分。"""
+        """同一 code 两路命中 → 合并去重保留高分（融合分并列时按原始分决胜）。"""
         async def _run():
-            db = _FakeDb(rows=[_occ()])
+            db = _FakeDb(sem_rows=[(_occ(), 0.8)])
             key_rows = [
                 {
                     "code": "15-1252.00",

@@ -33,6 +33,15 @@ class CertificationExtracted(BaseModel):
     name: str = Field(description="证书/认证名称")
 
 
+class TypicalScenario(BaseModel):
+    """JD 文本中的典型项目场景/工作任务（岗位侧项目比对素材）。"""
+    name: str = Field(description="场景名称，4-20 字短短语，如'分布式缓存改造'")
+    description: Optional[str] = Field(
+        default=None,
+        description="场景补充描述/技术关键词，用于语义比对",
+    )
+
+
 class REQUIRESRelation(BaseModel):
     """岗位-技能关系。"""
     skill_name: str = Field(description="技能名称")
@@ -50,6 +59,10 @@ class JDExtractionResult(BaseModel):
     tools: list[ToolExtracted] = Field(default_factory=list, description="工具列表")
     education: Optional[EducationExtracted] = Field(default=None, description="教育要求")
     certifications: list[CertificationExtracted] = Field(default_factory=list, description="证书要求")
+    typical_scenarios: list[TypicalScenario] = Field(
+        default_factory=list,
+        description="典型项目场景列表（JD 描述的岗位核心工作场景）",
+    )
     requirements: list[REQUIRESRelation] = Field(default_factory=list, description="岗位→技能要求关系")
     soft_skills: list[str] = Field(
         default_factory=list,

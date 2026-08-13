@@ -15,6 +15,7 @@ import re
 import sys
 import zipfile
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -23,6 +24,9 @@ from xml.etree import ElementTree as ET
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_XLSX = ROOT / "data" / "golden_set" / "review" / "jd_manual_review_round1.xlsx"
 DEFAULT_OUTPUT = ROOT / "data" / "golden_set" / "review" / "evaluation"
+DEFAULT_REPORT_DIR = ROOT / "reports"
+# 与 scripts/evaluate.py 目标阈值一致（设计文档 §13.3：JD 解析 ≥ 90%）
+JD_LLM_TARGET_F1 = 0.90
 NS = {
     "m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
     "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -205,6 +209,41 @@ def _compare_set(gold: list[str], predicted: list[str]) -> dict[str, Any]:
     return {"tp": sorted(g & p), "fp": sorted(p - g), "fn": sorted(g - p), "f1": _metric(len(g & p), len(p - g), len(g - p))["f1"]}
 
 
+def load_gold_revisions(path: Path | None = None) -> dict[str, dict[str, Any]]:
+    """读取盲审 gold 口径修订（人工确认的可审计修订，不直接改 xlsx）。
+
+    修订文件：data/golden_set/review/evaluation/gold_revisions.json
+    - move_skills_to_bonus: 从必备移入加分（如 OR 条件结构技能）
+    - remove_skills: 从必备删除（如岗位名组成部分被误标技能）
+    文件缺失/损坏时返回空（不阻断评测，维持原标注口径）。
+    """
+    path = path or (ROOT / "data" / "golden_set" / "review" / "evaluation" / "gold_revisions.json")
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {r["sample_id"]: r for r in data.get("revisions", [])}
+    except (json.JSONDecodeError, OSError, TypeError):
+        return {}
+
+
+def apply_gold_revisions(
+    revisions: dict[str, dict[str, Any]],
+    sample_id: str,
+    gold_skills: list[str],
+    gold_bonus: list[str],
+) -> tuple[list[str], list[str]]:
+    """应用单条 gold 修订：移出必备 → 删除 / 移入加分。未命中修订时原样返回。"""
+    rev = revisions.get(sample_id)
+    if not rev:
+        return gold_skills, gold_bonus
+    move = set(rev.get("move_skills_to_bonus", []))
+    remove = set(rev.get("remove_skills", []))
+    out_skills = [s for s in gold_skills if s not in move and s not in remove]
+    out_bonus = list(gold_bonus) + [s for s in gold_skills if s in move]
+    return out_skills, out_bonus
+
+
 def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any]:
     """Run the current extractor and reject all records that fall back to rules."""
     sys.path.insert(0, str(ROOT))
@@ -219,8 +258,10 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         raise RuntimeError(f"LLMProviderChain 不可用：{type(exc).__name__}: {exc}") from exc
 
     predictions: list[dict[str, Any]] = []
+    revisions = load_gold_revisions()
     title_hits = 0
     title_raw_hits = 0
+    title_count = 0
     education_hits = 0
     skills_total: Counter[str] = Counter()
     bonus_total: Counter[str] = Counter()
@@ -256,6 +297,8 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         gold_skills, _ = _json_array(row["review_gold_skills"])
         gold_bonus, _ = _json_array(row["review_gold_bonus_skills"])
         assert gold_skills is not None and gold_bonus is not None
+        # gold 口径修订（人工确认，见 load_gold_revisions）：移出必备/移入加分
+        gold_skills, gold_bonus = apply_gold_revisions(revisions, row["sample_id"], gold_skills, gold_bonus)
         normalized_gold_skills = [clean_skill_name(normalize_skill(x)) for x in gold_skills]
         normalized_gold_bonus = [clean_skill_name(normalize_skill(x)) for x in gold_bonus]
         predicted_skills = [skill.name for skill in result.skills]
@@ -267,11 +310,15 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         for key in ("tp", "fp", "fn"):
             skills_total[key] += len(skills_cmp[key])
             bonus_total[key] += len(bonus_cmp[key])
-        normalized_gold_title = normalize_position_name(row["review_gold_title"])
+        gold_title_raw = row["review_gold_title"] or ""
+        has_gold_title = bool(gold_title_raw.strip())
+        # gold 缺失（盲审标注未填 title）不计入 title 准确率——非模型错误
+        normalized_gold_title = normalize_position_name(gold_title_raw)
         normalized_pred_title = normalize_position_name(result.position_name)
-        title_match = normalized_gold_title == normalized_pred_title
+        title_match = has_gold_title and normalized_gold_title == normalized_pred_title
         title_hits += int(title_match)
-        title_raw_exact = row["review_gold_title"] == result.position_name
+        title_count += int(has_gold_title)
+        title_raw_exact = has_gold_title and gold_title_raw == result.position_name
         title_raw_hits += int(title_raw_exact)
         gold_education = row.get("review_gold_education", "").strip() or None
         predicted_education = (result.education.level if result.education else None) or None
@@ -281,6 +328,7 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
             "sample_id": row["sample_id"], "source": row["source"], "source_id": row["source_id"],
             "source_url": row["source_url"], "job_title_raw": row["job_title_raw"],
             "human_gold": {key: row.get(key, "") for key in LABEL_COLUMNS},
+            "gold_revision_applied": row["sample_id"] in revisions,
             "execution_status": "real_llm_success",
             "model_raw_output_pre_postprocess": _to_jsonable(tracker.model_output),
             "model_normalized_output": _to_jsonable(result),
@@ -307,41 +355,7 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
     if not success_count:
         reasons = [p.get("fallback_reason") or p.get("failure_reason") for p in predictions]
         raise RuntimeError("12 条均未取得真实 LLM 输出；" + " | ".join(str(x) for x in reasons if x))
-    metrics = {
-        "total_samples": len(rows),
-        "real_llm_success_samples": success_count,
-        "fallback_samples": fallback_samples,
-        "failed_samples": failed_samples,
-        "title_raw_exact_accuracy": title_raw_hits / success_count,
-        "title_normalized_accuracy": title_hits / success_count,
-        "skills_micro": _metric(**skills_total),
-        "skills_average_sample_f1": sum(sample_skill_f1) / success_count,
-        "bonus_skills_micro": _metric(**bonus_total),
-        "bonus_skills_average_sample_f1": sum(sample_bonus_f1) / success_count,
-        "education_raw_exact_accuracy": education_hits / success_count,
-        "experience": "Schema coverage gap: current JDExtractionResult schema has no experience_range field",
-        "core_duties": "Schema coverage gap: current JDExtractionResult schema has no core_duties field",
-    }
-    (output_dir / "manual_jd_eval_predictions.jsonl").write_text(
-        "\n".join(json.dumps(item, ensure_ascii=False) for item in predictions) + "\n", encoding="utf-8"
-    )
-    with (output_dir / "manual_jd_eval_cases.csv").open("w", newline="", encoding="utf-8-sig") as fh:
-        writer = csv.DictWriter(fh, fieldnames=["sample_id", "execution_status", "job_title_raw", "gold_title", "predicted_title", "title_raw_exact", "title_normalized_match", "skills_tp", "skills_fp", "skills_fn", "skills_f1", "bonus_tp", "bonus_fp", "bonus_fn", "bonus_f1", "education_gold", "education_prediction", "education_raw_exact", "fallback_or_failure_reason", "experience_note", "core_duties_note"])
-        writer.writeheader()
-        for item in predictions:
-            if item["execution_status"] != "real_llm_success":
-                writer.writerow({"sample_id": item["sample_id"], "execution_status": item["execution_status"], "job_title_raw": item["job_title_raw"], "fallback_or_failure_reason": item.get("fallback_reason") or item.get("failure_reason", "")})
-                continue
-            cmp = item["comparison"]
-            writer.writerow({"sample_id": item["sample_id"], "execution_status": item["execution_status"], "job_title_raw": item["job_title_raw"], "gold_title": item["human_gold"]["review_gold_title"], "predicted_title": item["model_normalized_output"]["position_name"], "title_raw_exact": cmp["title_raw_exact"], "title_normalized_match": cmp["title_normalized_match"], "skills_tp": "|".join(cmp["skills"]["tp"]), "skills_fp": "|".join(cmp["skills"]["fp"]), "skills_fn": "|".join(cmp["skills"]["fn"]), "skills_f1": cmp["skills"]["f1"], "bonus_tp": "|".join(cmp["bonus_skills"]["tp"]), "bonus_fp": "|".join(cmp["bonus_skills"]["fp"]), "bonus_fn": "|".join(cmp["bonus_skills"]["fn"]), "bonus_f1": cmp["bonus_skills"]["f1"], "education_gold": cmp["education_gold"], "education_prediction": cmp["education_prediction"], "education_raw_exact": cmp["education_raw_exact"], "experience_note": cmp["experience"], "core_duties_note": cmp["core_duties"]})
-    (output_dir / "manual_jd_eval_report.md").write_text(
-        "# A01 人工 JD 集端到端评测报告\n\n"
-        "本报告只把 `real_llm_success` 行计入指标；`fallback` 和 `failed` 行保留在逐条结果中，但绝不计入指标。\n\n"
-        "## 当前真实链路\n\n`JDExtractor.extract` → `LLMProviderChain.extract_structured` → `post_process`。岗位名归一化只用于评测侧的 `normalize_position_name` 对照；`PositionAligner`（Neo4j/SBERT）不在 `JDExtractor.extract` 内。\n\n"
-        f"## 指标\n\n```json\n{json.dumps(metrics, ensure_ascii=False, indent=2)}\n```\n\n"
-        "空学历 gold 以 `null / No explicit education requirement` 参与 raw exact 对比：模型同样未输出学历即为正确，凭空输出学历即为错误。经验与核心职责没有对应的 `JDExtractionResult` 字段，属于 Schema coverage gap，不会伪造预测或准确率。`skills` 与 `requirements[nice]` 分别作为必备技能和加分技能的可观测输出；该映射应在后续算法评审中确认。历史 0.6112 未参与本报告。\n",
-        encoding="utf-8",
-    )
+    # 错误类型统计须在 metrics 构造前完成（error_types 写入归档展示）
     success_predictions = [p for p in predictions if p["execution_status"] == "real_llm_success"]
     error_counts: Counter[str] = Counter()
     case_lines: list[str] = []
@@ -372,6 +386,45 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
             f"bonus TP/FP/FN={bonus['tp']}/{bonus['fp']}/{bonus['fn']}, F1={bonus['f1']:.4f}; "
             f"education={cmp['education_raw_exact']}"
         )
+    metrics = {
+        "total_samples": len(rows),
+        "real_llm_success_samples": success_count,
+        "fallback_samples": fallback_samples,
+        "failed_samples": failed_samples,
+        "title_raw_exact_accuracy": (title_raw_hits / title_count) if title_count else None,
+        "title_normalized_accuracy": (title_hits / title_count) if title_count else None,
+        "skills_micro": _metric(**skills_total),
+        "skills_average_sample_f1": sum(sample_skill_f1) / success_count,
+        "bonus_skills_micro": _metric(**bonus_total),
+        "bonus_skills_average_sample_f1": sum(sample_bonus_f1) / success_count,
+        "education_raw_exact_accuracy": education_hits / success_count,
+        "experience": "Schema coverage gap: current JDExtractionResult schema has no experience_range field",
+        "core_duties": "Schema coverage gap: current JDExtractionResult schema has no core_duties field",
+        # 归档展示用（写入 reports/eval_jd_llm_*.json，不影响 report.md 既有字段）
+        "per_sample_skills_f1": [round(x, 4) for x in sample_skill_f1],
+        "per_sample_bonus_f1": [round(x, 4) for x in sample_bonus_f1],
+        "error_types": [[name, count] for name, count in error_counts.most_common()],
+    }
+    (output_dir / "manual_jd_eval_predictions.jsonl").write_text(
+        "\n".join(json.dumps(item, ensure_ascii=False) for item in predictions) + "\n", encoding="utf-8"
+    )
+    with (output_dir / "manual_jd_eval_cases.csv").open("w", newline="", encoding="utf-8-sig") as fh:
+        writer = csv.DictWriter(fh, fieldnames=["sample_id", "execution_status", "job_title_raw", "gold_title", "predicted_title", "title_raw_exact", "title_normalized_match", "skills_tp", "skills_fp", "skills_fn", "skills_f1", "bonus_tp", "bonus_fp", "bonus_fn", "bonus_f1", "education_gold", "education_prediction", "education_raw_exact", "fallback_or_failure_reason", "experience_note", "core_duties_note"])
+        writer.writeheader()
+        for item in predictions:
+            if item["execution_status"] != "real_llm_success":
+                writer.writerow({"sample_id": item["sample_id"], "execution_status": item["execution_status"], "job_title_raw": item["job_title_raw"], "fallback_or_failure_reason": item.get("fallback_reason") or item.get("failure_reason", "")})
+                continue
+            cmp = item["comparison"]
+            writer.writerow({"sample_id": item["sample_id"], "execution_status": item["execution_status"], "job_title_raw": item["job_title_raw"], "gold_title": item["human_gold"]["review_gold_title"], "predicted_title": item["model_normalized_output"]["position_name"], "title_raw_exact": cmp["title_raw_exact"], "title_normalized_match": cmp["title_normalized_match"], "skills_tp": "|".join(cmp["skills"]["tp"]), "skills_fp": "|".join(cmp["skills"]["fp"]), "skills_fn": "|".join(cmp["skills"]["fn"]), "skills_f1": cmp["skills"]["f1"], "bonus_tp": "|".join(cmp["bonus_skills"]["tp"]), "bonus_fp": "|".join(cmp["bonus_skills"]["fp"]), "bonus_fn": "|".join(cmp["bonus_skills"]["fn"]), "bonus_f1": cmp["bonus_skills"]["f1"], "education_gold": cmp["education_gold"], "education_prediction": cmp["education_prediction"], "education_raw_exact": cmp["education_raw_exact"], "experience_note": cmp["experience"], "core_duties_note": cmp["core_duties"]})
+    (output_dir / "manual_jd_eval_report.md").write_text(
+        "# A01 人工 JD 集端到端评测报告\n\n"
+        "本报告只把 `real_llm_success` 行计入指标；`fallback` 和 `failed` 行保留在逐条结果中，但绝不计入指标。\n\n"
+        "## 当前真实链路\n\n`JDExtractor.extract` → `LLMProviderChain.extract_structured` → `post_process`。岗位名归一化只用于评测侧的 `normalize_position_name` 对照；`PositionAligner`（Neo4j/SBERT）不在 `JDExtractor.extract` 内。\n\n"
+        f"## 指标\n\n```json\n{json.dumps(metrics, ensure_ascii=False, indent=2)}\n```\n\n"
+        "空学历 gold 以 `null / No explicit education requirement` 参与 raw exact 对比：模型同样未输出学历即为正确，凭空输出学历即为错误。经验与核心职责没有对应的 `JDExtractionResult` 字段，属于 Schema coverage gap，不会伪造预测或准确率。`skills` 与 `requirements[nice]` 分别作为必备技能和加分技能的可观测输出；该映射应在后续算法评审中确认。历史 0.6112 未参与本报告。\n",
+        encoding="utf-8",
+    )
     lowest = sorted(success_predictions, key=lambda p: p["comparison"]["skills"]["f1"])[:3]
     lowest_lines = [
         f"- {p['sample_id']}: skills F1={p['comparison']['skills']['f1']:.4f}; "
@@ -388,6 +441,56 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
             "the current schema does not encode condition logic, so these are review candidates rather than conclusive errors.\n"
         )
     return metrics
+
+
+def _archive_result(metrics: dict[str, Any]) -> dict[str, Any]:
+    """把盲审 metrics 归一为 reports/eval_*.json 标准结果结构（与 evaluate.py 同构）。"""
+    skills = metrics["skills_micro"]
+    bonus = metrics["bonus_skills_micro"]
+    return {
+        "task": "jd_llm",
+        "method": f"真实抽取（LLM + 规则兜底，{metrics['total_samples']} 条人工盲审）",
+        "samples": metrics["real_llm_success_samples"],
+        "fallback_samples": metrics["fallback_samples"],
+        "failed_samples": metrics["failed_samples"],
+        "precision": round(skills["precision"], 4),
+        "recall": round(skills["recall"], 4),
+        "f1": round(skills["f1"], 4),
+        "target_f1": JD_LLM_TARGET_F1,
+        "target_met": skills["f1"] >= JD_LLM_TARGET_F1,
+        "confusion": {"tp": skills["tp"], "fp": skills["fp"], "fn": skills["fn"]},
+        "bonus": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in bonus.items()},
+        "title_raw_exact_accuracy": round(metrics["title_raw_exact_accuracy"], 4),
+        "title_normalized_accuracy": round(metrics["title_normalized_accuracy"], 4),
+        "education_raw_exact_accuracy": round(metrics["education_raw_exact_accuracy"], 4),
+        "skills_average_sample_f1": round(metrics["skills_average_sample_f1"], 4),
+        "per_sample_skills_f1": metrics.get("per_sample_skills_f1", []),
+        "per_sample_bonus_f1": metrics.get("per_sample_bonus_f1", []),
+        "error_types": metrics.get("error_types", []),
+        "experience_gap": metrics["experience"],
+        "core_duties_gap": metrics["core_duties"],
+    }
+
+
+def archive_metrics(metrics: dict[str, Any], report_dir: Path | None = None) -> Path:
+    """把盲审 LLM 评测指标归档为 `reports/eval_jd_llm_{ts}.json`。
+
+    归档结构与 `scripts/evaluate.py` 报告同构（generated_at/target/results），
+    供 `uv run python scripts/evaluate.py --task all` 汇总展示——JD 双行：
+    关键词基线（离线）+ LLM 盲审（最近归档）。evaluate.py 只读归档不重跑，
+    避免重复消耗 LLM 额度；仅 real_llm_success 样本计入指标。
+    """
+    report_dir = report_dir or DEFAULT_REPORT_DIR
+    report_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M")
+    report = {
+        "generated_at": ts,
+        "target": f"JD 解析（LLM 盲审评测）F1 ≥ {JD_LLM_TARGET_F1:.0%}（设计文档 §13.3）",
+        "results": [_archive_result(metrics)],
+    }
+    path = report_dir / f"eval_jd_llm_{ts}.json"
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
 
 
 def write_blocker_report(output_dir: Path, validation: dict[str, Any], xlsx: Path) -> None:
@@ -521,7 +624,7 @@ def main() -> int:
         print("READY: preflight passed. Re-run with --run to call the real LLM chain.")
         return 0
     try:
-        run_real_eval(rows, args.output_dir)
+        metrics = run_real_eval(rows, args.output_dir)
     except Exception as exc:
         validation["runtime_blocker"] = _safe_exception_summary(exc)
         validation_write_warning = write_validation(args.output_dir, validation)
@@ -537,6 +640,8 @@ def main() -> int:
                 print(f"WARNING: could not write runtime blocker fallback: {type(fallback_exc).__name__}: {fallback_exc}")
         print(f"BLOCKED: {_safe_exception_summary(exc)}")
         return 3
+    archive_path = archive_metrics(metrics)
+    print(f"ARCHIVED: {archive_path.relative_to(ROOT)}")
     print("SUCCESS: real LLM predictions and metrics were written.")
     return 0
 

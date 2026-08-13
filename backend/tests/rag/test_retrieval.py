@@ -17,6 +17,14 @@ from app.services.rag.retrieval import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _disable_grounding_cache(monkeypatch):
+    """单测不依赖 Redis：关闭 grounding 检索缓存，避免命中真实缓存污染批次消费。"""
+    from app.services.discovery import grounding
+
+    monkeypatch.setattr(grounding, "_CACHE_ENABLED", False)
+
+
 def _candidate(name, state="emerging", definition="负责岗位定义。", **kw):
     return DiscoveryCandidate(
         position_name=name, state=state, definition_draft=definition, **kw

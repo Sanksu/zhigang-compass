@@ -22,7 +22,7 @@ _SKILL_WHITELIST_PATH = Path(__file__).resolve().parents[3] / "configs" / "skill
 # 内容与原硬编码 SKILL_WHITELIST 一致，仅在配置文件缺失时生效。
 _FALLBACK_SKILL_WHITELIST: set[str] = {
     "Python", "Java", "JavaScript", "TypeScript", "Go", "Rust", "C++", "C#",
-    "Ruby", "PHP", "Swift", "Kotlin", "Scala", "R", "MATLAB", "Shell",
+    "Ruby", "PHP", "Swift", "Kotlin", "Scala", "MATLAB", "Shell",
     "C", "SQL", "React", "Vue.js", "Angular", "HTML", "HTML5", "CSS",
     "Webpack", "Vite", "Tailwind CSS", "Next.js", "Nuxt.js", "Bootstrap",
     "ECharts", "Three.js", "数据可视化", "UI设计", "前端工程化",
@@ -170,7 +170,8 @@ SKILL_ALIAS: dict[str, str] = {
     # 计算机基础
     "面向对象编程": "面向对象",
     "面向对象设计": "面向对象",
-    "算法设计": "算法",
+    # "算法设计" 别名已移除（JD 基线决策支持 ② 2026-08-12）：指向宽泛词"算法"，
+    # 白名单已排除，保留该别名会使基线 alias 扫描仍命中"算法"误报
     "计算机网络基础": "计算机网络",
     # 测试
     "单元测试编写": "单元测试",
@@ -185,6 +186,22 @@ SKILL_ALIAS: dict[str, str] = {
     "ros2": "ROS",
     "敏捷": "敏捷开发",
     "大屏可视化": "数据可视化",
+    # P3 盲审评测词形变体（2026-08-12：故障处置/多模态大模型 等词形差异 FN，
+    # 归一化到白名单标准词，与 gold 标注对齐）
+    "故障处置": "故障处理",
+    "故障排查": "故障处理",
+    "多模态大模型": "多模态模型",
+    "自动化评测脚本": "自动化评测",
+    "AB测试": "A/B测试",
+    "ab测试": "A/B测试",
+    "可视化分析": "数据可视化",
+    # P3b 盲审二轮：标注抽象/词形差异（统一部署→系统部署、电网业务→电网业务知识）
+    # 注：不做 "监控管理"→"监控"——"监控"在 SKILL_STOPWORDS（职责词拦截），
+    # alias 值会触发 is_noise_skill 别名标准名保护导致停用词失效（TestStopwordInterception）
+    "统一部署": "系统部署",
+    "电网业务": "电网业务知识",
+    "office办公": "Office",
+    "office 办公": "Office",
     # P2-B 同义异构归一（岗位评估报告 4.1：AI 编码工具/Agent 生态表述碎片，
     # 统一到白名单标准词，防同一技能建出多个图谱节点）
     "ai coding": "AI辅助编程",
@@ -208,6 +225,91 @@ SKILL_ALIAS: dict[str, str] = {
     ".net core": ".NET",
     "nodejs": "Node.js",
     "postgres": "PostgreSQL",
+}
+
+# 工具名别名映射：大小写/拼写变体 → 规范名（P1 Tool 节点碎片治理）。
+# 图谱 Tool 节点由 LLM 抽取工具名直接建节点（post_process 仅过 normalize_skill，
+# 白名单外工具不统一大小写），同工具因写法不同建出多个节点（如 Ansys/ANSYS、
+# DeepSeek/Deepseek）。本表以工具官方名称为准，配合 normalize_tool_name 在
+# 抽取侧归一化防复发，cleanup_tools.py 用同一口径清洗存量节点。
+# 键统一小写；白名单中的工具词（GitHub/Node.js 等）由 _SKILL_WHITELIST_LOWER 承接。
+TOOL_ALIAS: dict[str, str] = {
+    # 工业/EDA 工具
+    "ansys": "ANSYS",
+    "apollo": "Apollo",
+    "autoware": "Autoware",
+    "calibre": "Calibre",
+    "innovus": "Innovus",
+    "redhawk": "RedHawk",
+    "solidworks": "SolidWorks",
+    "nx": "Nx",
+    # 云平台/ML 平台
+    "aws sagemaker": "AWS SageMaker",
+    "sagemaker": "SageMaker",
+    "openai": "OpenAI",
+    "opencode": "OpenCode",
+    "coze": "Coze",
+    "harness": "Harness",
+    "langfuse": "Langfuse",
+    # AI 框架/模型
+    "fsdp": "FSDP",
+    "deepspeed": "DeepSpeed",
+    "megatron": "Megatron",
+    "mindspore": "MindSpore",
+    "paddlepaddle": "PaddlePaddle",
+    "mxnet": "MXNet",
+    "mujoco": "MuJoCo",
+    "llama": "LLaMA",
+    "gtest": "GoogleTest",
+    "sglang": "SGLang",
+    "pytest": "pytest",
+    "intellij idea": "IntelliJ IDEA",
+    "idea": "IntelliJ IDEA",
+    # 数据/中间件/开发工具
+    "datadog": "Datadog",
+    "bitbucket": "Bitbucket",
+    "docker compose": "Docker Compose",
+    "docker-compose": "Docker Compose",
+    "geoserver": "GeoServer",
+    "ghidra": "Ghidra",
+    "go-zero": "go-zero",
+    "gorm": "GORM",
+    "jboss": "JBoss",
+    "kratos": "Kratos",
+    "labview": "LabVIEW",
+    "loadrunner": "LoadRunner",
+    "memcached": "Memcached",
+    "n8n": "n8n",
+    "npm": "npm",
+    "yarn": "yarn",
+    "soapui": "SoapUI",
+    "sqlalchemy": "SQLAlchemy",
+    "tcpdump": "tcpdump",
+    "tdengine": "TDengine",
+    "thinkphp": "ThinkPHP",
+    "weblogic": "WebLogic",
+    "websphere": "WebSphere",
+    "word": "Word",
+    "ragflow": "RAGFlow",
+    "rdkit": "RDKit",
+    "rviz": "RViz",
+    # 开发框架/可视化
+    "gazebo": "Gazebo",
+    "isaac sim": "Isaac Sim",
+    "vue 3": "Vue 3",
+    "vue devtools": "Vue DevTools",
+    "microsoft copilot": "Microsoft Copilot",
+    "neon": "NEON",
+    "deepseek": "DeepSeek",
+    "dify": "Dify",
+    # 防误合并：以下词在 SKILL_ALIAS 被归并（ROS2→ROS、MyBatis-Plus→MyBatis、
+    # Element Plus→ElementUI），但工具层面是不同产品/版本，用工具别名优先拦截，
+    # 避免 Tool 节点被错误归并
+    "ros2": "ROS2",
+    "mybatis-plus": "MyBatis-Plus",
+    "mybatis plus": "MyBatis-Plus",
+    "element plus": "Element Plus",
+    "elementui": "ElementUI",
 }
 
 # 软技能白名单（岗位本体维护，共 20 项，设计文档 9.2 节）。
@@ -321,6 +423,15 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("开发者体验",), "开发者体验工程师"),
     (("固件", "firmware"), "嵌入式开发工程师"),
     (("物理设计",), "硬件工程师"),
+    # 低频合法岗位白名单（2026-08-12 白名单改造）：剥壳残留必须命中白名单族才入图，
+    # 防 LLM 对复杂格式解析不稳产生碎片。以下为审计确认的合法低频岗位，
+    # 精确匹配整词（不含子串歧义），避免与既有族冲突
+    (("IT系统管理员",), "IT系统管理员"),
+    (("产品助理",), "产品助理"),
+    (("技术教师",), "技术教师"),
+    (("投诉处理助理",), "投诉处理助理"),
+    (("计算生物学家",), "计算生物学家"),
+    (("首席统计师",), "首席统计师"),
 ]
 
 # 失真兜底岗位族（2026-08-09 图谱质量治理）："软件/科学家/架构/研究员/顾问/硬件/
@@ -515,8 +626,6 @@ _EN_POSITION_MAP: dict[str, str] = {
     # P0 方案 1 补充（2026-08-08）：国际源纯英文抽取名正确归位。
     # 注：金融/非技术泛岗（trader/actuary/economist/epidemiologist/quant strategist）
     # 已由 _POSITION_STOPWORDS 拦截（方案 2），此处不映射，避免与停用词冲突。
-    "data scientist": "数据科学家",
-    "applied scientist": "算法工程师",
     "research scientist": "研究员",
     "senior applied scientist": "算法工程师",
     "principal applied scientist": "算法工程师",
@@ -545,14 +654,9 @@ _EN_POSITION_MAP: dict[str, str] = {
     "data governance": "大数据开发工程师",
     "data engineering": "大数据开发工程师",
     "backend engineer, ai": "后端开发工程师",
-    "fullstack engineer": "全栈工程师",
-    "full stack engineer": "全栈工程师",
-    "frontend engineer": "前端开发工程师",
-    "qa engineer": "测试工程师",
     "test engineer": "测试工程师",
     "database administrator": "数据库管理员",
     "network sre engineer": "运维工程师",
-    "kafka streaming architect": "大数据开发工程师",
     # P0 图谱低质岗治理（2026-08-09）：英文复合岗名完整映射到标准族，
     # 防止 LLM 抽取"生化/固件/验证"等名词碎片直接入图
     "verification engineer": "测试工程师",
@@ -576,11 +680,93 @@ _EN_POSITION_MAP: dict[str, str] = {
     "privacy engineer": "网络安全工程师",
     "web content platform developer": "前端开发工程师",
     "collaboration cloud engineer": "DevOps工程师",
+    # P0-B 英文岗位映射扩充（2026-08-12）：审计发现 526 个纯英文技术岗
+    # 未映射（654 条记录），归一化后不入图。补齐常见技术岗映射到标准族。
+    # 仅收录既有键之外的**新增**键（重复键不写，dict 后值覆盖前值）。
+    # 注意最长匹配优先（_translate_en_position 按键长降序匹配），
+    # 过短键（如 software engineering）会误匹配 D 级头衔，不收录。
+    "software development engineer": "软件开发工程师",
+    "software dev engineer": "软件开发工程师",
+    "software dev eng": "软件开发工程师",
+    "software engineering manager": "软件开发工程师",
+    "principal software development engineer": "软件开发工程师",
+    "senior software development engineer": "软件开发工程师",
+    "software engineering & development": "软件开发工程师",
+    "lead director - software development engineering": "软件开发工程师",
+    "director of software engineering": "软件开发工程师",
+    "engineering manager, software": "软件开发工程师",
+    "knowledge engineer manager": "软件开发工程师",
+    "knowledge engineer": "软件开发工程师",
+    "python developer": "Python开发工程师",
+    "senior python developer": "Python开发工程师",
+    "staff python engineer": "Python开发工程师",
+    "java developer": "Java开发工程师",
+    "senior java developer": "Java开发工程师",
+    "java software engineer": "Java开发工程师",
+    "test automation engineer": "测试工程师",
+    "ui developer": "前端开发工程师",
+    "ui/ux developer": "前端开发工程师",
+    "front end engineer": "前端开发工程师",
+    "backend software development engineer": "后端开发工程师",
+    "backend development engineer": "后端开发工程师",
+    "algorithm engineer": "算法工程师",
+    "senior algorithm engineer": "算法工程师",
+    "algo developer": "算法工程师",
+    "algorithm developer": "算法工程师",
+    "business intelligence engineer": "大数据开发工程师",
+    "business intelligence developer": "大数据开发工程师",
+    "bi developer": "大数据开发工程师",
+    "deep learning engineer": "算法工程师",
+    "machine learning software engineer": "机器学习工程师",
+    "robotics engineer": "机器人算法工程师",
+    "robotics/ai motor control scientist": "机器人算法工程师",
+    "ai application engineer": "算法工程师",
+    "ai applied engineer": "算法工程师",
+    "ai automation engineer": "算法工程师",
+    "ai inference engineer": "算法工程师",
+    "ai systems engineer": "算法工程师",
+    "applied ai engineer": "算法工程师",
+    "server engineer": "运维工程师",
+    "server administrator": "运维工程师",
+    "cloud engineer": "运维工程师",
+    "cloud system administrator": "运维工程师",
+    "cyber security": "网络安全工程师",
+    "hardware engineer": "硬件工程师",
+    "mechanical design engineer": "硬件工程师",
+    "electrical engineer": "硬件工程师",
+    "dsp engineer": "硬件工程师",
+    "digital signal processing engineer": "硬件工程师",
+    "big data engineer": "大数据开发工程师",
+    "data platform engineer": "大数据开发工程师",
+    "full stack software engineer": "全栈工程师",
+    "fullstack developer": "全栈工程师",
 }
+
+# 合法岗位白名单（2026-08-12 白名单改造）：剥壳残留核心词必须命中本集合才返回，
+# 否则返回空串不入图。覆盖所有关键词族 standard + 技能路由细分族 + 分析师细分族 +
+# 英文翻译结果（"软件工程师"等翻译中间态也合法，走后续关键词族映射）。
+# 刻意排除 _GENERIC_ROUTED_FAMILIES（失真兜底族不作为残留返回，只按技能路由）。
+_POSITION_WHITELIST: frozenset[str] = frozenset(
+    {standard for _, standard in _POSITION_KEYWORDS}
+    | {family for _, family in _POSITION_SKILL_ROUTING}
+    | {standard for _, standard in _ANALYST_SUB_FAMILIES}
+    | set(_EN_POSITION_MAP.values())
+)
 
 # 无信息量泛岗位词：归一化结果命中时视为空岗位（不入图）。
 # 后 4 行为评估报告 P0-1 新增：真实岗位被剥后缀后残留的无信息量核心词
 # （真实族由 _POSITION_KEYWORDS 前置拦截，不会命中这些词）。
+# 公司名停用词（审查报告 P0-1：LLM 把公司名当岗位名）。
+# 单独列出：仅在"整个岗位名就是公司名"时拦截（_is_stopword_blocked），
+# 避免误伤 "Google工程师" 这类 公司名+岗位词 的合法岗位——归一化剥掉后缀后
+# 核心词为公司名时不应拦截（2026-08-11 回归修复）。
+_COMPANY_NAME_STOPWORDS: frozenset[str] = frozenset({
+    "Amazon", "Amazon.com", "Apple", "Avantor", "Binance", "Deloitte",
+    "Google", "JPMorganChase", "Microsoft", "NVIDIA", "Nex", "Nomura",
+    "Novartis", "Point72", "Raytheon", "Ripple", "Starbucks", "TYCHON", "Verse",
+})
+
+
 # 末组为岗位评估报告 P0-A 新增：碎片/业务词岗位（LLM 误抽业务词/碎片岗位名，
 # 全部为低频空岗，归一化原样返回），加停用词使其不再入图
 _POSITION_STOPWORDS: set[str] = {
@@ -630,7 +816,8 @@ _POSITION_STOPWORDS: set[str] = {
     "Manager, Logistics",
     "Legal Technology & Contract Management Systems Administrator",
     "AI Infra Engineer",
-    "AI/ML Applied Engineer",
+    # P0-B 移除（2026-08-12）：该岗位已入 _EN_POSITION_MAP（→算法工程师），
+    # 停用词会抢先拦截使映射失效
     "AI 业务自动化", "机电一体化", "密码应用", "AR/VR 设计验证",
     "Gemini App 合作伙伴", "交通规划", "智能驾驶路测",
     # 问题 1 修复：搜索短词改为复合词限定后，运营/SEO 类岗位不再被算法族吸走，
@@ -672,7 +859,33 @@ _POSITION_STOPWORDS: set[str] = {
     "招聘专员-广州", "社区用户&商业化运营",
     "结构工程师 / 遥控器结构设计工程师 / 高级结构",
     "Senior Social Media Manager 高级社交媒体", "短视频编导-小红书方向",
-}
+    # 审查报告 P0-1 清理防复发（2026-08-11）：公司名当岗位名由
+    # _COMPANY_NAME_STOPWORDS 承接（见上，此处 union 注入，保持整体拦截语义）
+    # 审查报告 P0-1 清理防复发（2026-08-11）：LLM 把岗位名剥壳成碎片词，
+    # 全部为低频单例且无标准关键词族承接（"税务"拦"税务经理"、"通信系统"
+    # 拦"通信系统工程师"——这些变体也不命中任何关键词族，本就是非标准碎片）
+    "AI 智能体", "AS400 应用", "Palantir前向部署", "Station Operations Specialist 站点运营",
+    "仪器设计", "任务评估研究", "创客教育", "大型机应用", "生物工艺应用",
+    "税务", "通信系统", "分析工程", "人力资源技术与人才分析副总裁助理",
+    # zhilian 回填重抽副作用（2026-08-12）：提示词兜底规则让空岗位名恢复的同时，
+    # LLM 对复杂格式解析不稳定，产出剥壳碎片/公司名当岗位名。全部低频单例且
+    # 无标准关键词族承接，拦截不入图（"人事"拦"人事经理"剥壳、"公司：外企德科"
+    # 是公司名、"智能"拦"智能开发工程师AI"剥壳）
+    "人事", "智能", "激光工艺", "重点客户", "AI平台", "AI总监", "公司：外企德科", "行政",
+} | set(_COMPANY_NAME_STOPWORDS)
+
+
+def _is_stopword_blocked(word: str, original: str) -> bool:
+    """停用词拦截判断：中文/业务词碎片剥后缀后仍拦截；纯英文公司名仅在
+    「整个岗位名就是公司名」时拦截（公司名+岗位词如 "Google工程师" 剥后缀
+    残留公司名不算，仍走中文规则路径）。
+    """
+    if word not in _POSITION_STOPWORDS:
+        return False
+    if word in _COMPANY_NAME_STOPWORDS:
+        return word == original
+    return True
+
 
 # 岗位名前缀修饰词（级别/招聘形态），归一化时去除
 _POSITION_PREFIX_RE = re.compile(r"^(初级|中级|高级|资深|专家|助理|实习|见习|应届|研发)")
@@ -720,10 +933,18 @@ def _normalize_base(name: str) -> str:
         if next_core == core or not next_core:
             break
         core = next_core
-    # 剥后缀后残留核心词再校验一次（评估报告 P0-1）：防止"产品经理"剥成
-    # "产品"、"董事总经理"剥成"董事总"等碎片直接入图
+    # 剥后缀后残留核心词再校验（评估报告 P0-1）：防止"产品经理"剥成
+    # "产品"、"董事总经理"剥成"董事总"等碎片直接入图；
+    # 白名单改造（2026-08-12）：纯中文残留核心词必须命中合法岗位白名单才返回，
+    # 否则视为剥壳碎片返回空串（防 LLM 解析不稳产生新碎片，如"人事"/"智能"）。
+    # 含非中文的残留（如"Google工程师"剥壳残留"Google"、"LLM应用"）维持原语义
+    # 保留——公司名+岗位词、技术缩写+岗位词组合是设计允许的合法岗位
     result = core or name
-    return "" if result in _POSITION_STOPWORDS else result
+    if _is_stopword_blocked(result, name):
+        return ""
+    if not re.search(r"[A-Za-z0-9]", result) and result not in _POSITION_WHITELIST:
+        return ""
+    return result
 
 
 # CJK 检测：含中文的岗位名不执行英文子串翻译（评估报告 P0-2），
@@ -803,7 +1024,7 @@ def normalize_position_name(name: str, skills: list[str] | None = None) -> str:
         # 失真兜底族不再作为聚合目的地：按技能路由，无技能/未命中 → 不入图
         if base in _GENERIC_ROUTED_FAMILIES:
             return _route_position_by_skills(skills)
-        if not base or base in _POSITION_STOPWORDS:
+        if not base or _is_stopword_blocked(base, translated):
             return ""
         result = base
     else:
@@ -826,7 +1047,7 @@ def normalize_position_name(name: str, skills: list[str] | None = None) -> str:
         # 失真兜底族不再作为聚合目的地：按技能路由，无技能/未命中 → 不入图
         if base in _GENERIC_ROUTED_FAMILIES:
             return _route_position_by_skills(skills)
-        if not base or base in _POSITION_STOPWORDS:
+        if not base or _is_stopword_blocked(base, name):
             if not tech:
                 return ""
             # 技术栈细分岗位（鸿蒙/桌面/移动…）：base 剥到泛词（开发/工程师）
@@ -845,7 +1066,7 @@ def normalize_position_name(name: str, skills: list[str] | None = None) -> str:
     # 技能词不入图：归一化结果命中技能白名单（大小写不敏感）→ 技能被抽成岗位
     # 停用词再查最终 result：tech 前缀拆分后的完整岗位名（如 "Angular/NodeJS"
     # 拆成 tech=Angular + base=/NodeJS）需以组合结果整体拦截
-    if result in _POSITION_STOPWORDS or _SKILL_WHITELIST_LOWER.get(result.lower()):
+    if _is_stopword_blocked(result, name) or _SKILL_WHITELIST_LOWER.get(result.lower()):
         return ""
     if not translated and not _CJK_RE.search(name):
         # 纯英文未翻译岗位（问题 2）：多词英文长标题未识别 → 不入图；
@@ -897,6 +1118,29 @@ def normalize_skill(raw: str) -> str:
                 if canonical is not None:
                     return canonical
             break  # 只剥一次，无论是否命中
+    return raw
+
+
+def normalize_tool_name(raw: str) -> str:
+    """工具名归一化：工具别名（大小写不敏感）→ 白名单/技能别名统一 → 原样返回。
+
+    图谱 Tool 节点按 name 建节点（kg_service._import_jd_tx），工具名不归一化会
+    因大小写/拼写变体分裂（Ansys/ANSYS、DeepSeek/Deepseek）。别名键统一小写，
+    输入任意大小写；白名单工具词（GitHub、Node.js）复用 _SKILL_WHITELIST_LOWER
+    与 SKILL_ALIAS 的统一写法，与技能归一化口径一致。
+    """
+    raw = raw.strip()
+    if not raw:
+        return raw
+    alias = TOOL_ALIAS.get(raw.lower())
+    if alias is not None:
+        return alias
+    canonical = _SKILL_WHITELIST_LOWER.get(raw.lower())
+    if canonical is not None:
+        return canonical
+    skill_alias = SKILL_ALIAS.get(raw.lower())
+    if skill_alias is not None:
+        return skill_alias
     return raw
 
 

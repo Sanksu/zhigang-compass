@@ -23,9 +23,31 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    （而非"系统可靠性"）、"Verification Engineer" → "验证工程师"（而非"验证"）。
    输出必须是以"工程师/科学家/分析师/经理/设计师/架构师"等岗位词结尾的标准岗位名，
    不得输出"生化"、"固件"、"验证"这类无岗位语义的名词碎片。
-2. 技能（skills）：仅列出技术技能（如"Python"、"Java"、"数据分析"）。禁止把行业、
-   业务领域、招聘福利词列为技能（如保险/金融/银行/电商/医疗/教育/物流/车联网/
-   五险一金/社保/公积金/双休/年终奖等）。
+   兜底规则（重要）：当文本首部出现 "岗位名称：xxx"（如 "岗位名称：Python爬虫工程师"）
+   或首行即为明确标题（如智联 "文员（数据分析）" 首行）时，**必须直接取冒号后内容
+   /首行标题作为岗位名**，并按上述规则翻译/规范化后输出，禁止留空——即使正文其余
+   部分缺失或不完整，只要标题存在就不得返回空岗位名。
+   **括号标题拆分**：岗位标题含括号技能列表（如 "全栈工程师（java，go，python，js）"、
+   "大模型评测工程师（音视频/AIGC/多模态）"）时，岗位名取**括号前主体**
+   （"全栈工程师"、"大模型评测工程师"），括号内为技能/方向列表，不得并入岗位名。
+   **岗位名必须是岗位语义词**：不得取自产品名/公司名/人名（如 "Odoo"、"Gemini"），
+   也不得输出空字符串——正文存在岗位标题时必须输出岗位名。
+2. 技能（skills）：仅列出**必备**技术技能（如"Python"、"Java"、"数据分析"）。
+   **技能名使用标准简短名称**：不要加"系统/维护/开发/技术"等冗余后缀
+   （"Windows系统维护"→"Windows"、"Python开发"→"Python"、"Linux运维"→"Linux"），
+   以可独立学习/匹配的技术点为准。
+   **基础理论词不作为独立技能**："计算机基础"、"软件工程"、"数据结构"、"测试理论"
+   等泛化基础词仅在 JD 明确作为岗位核心技能要求时收录，一般性提及不收录。
+   **岗位方向词不作为技能**：岗位名/标题括号中的方向限定词（"音视频"、"AIGC"、
+   "多模态"、"大模型"、"机器人"等）是岗位方向而非可独立匹配的技能，
+   不得进入 skills 或 requirements——除非该词在正文中作为独立技能要求出现。
+   **"有 XX 经验者优先/熟悉 XX 更佳/了解 XX 加分"等加分项技能不得进入 skills**，
+   只能进入 requirements 并标 "nice"（见规则 6）。禁止把行业、业务领域、招聘福利词
+   列为技能（如保险/金融/银行/电商/医疗/教育/物流/车联网/五险一金/社保/公积金/
+   双休/年终奖等）。
+   **禁止把职责动词短语列为技能**："负责/参与/支持 XX 工作"中的动作短语
+   （如"报表制作"、"报告生成"、"模型推理"、"数据清洗"）不是可独立匹配的技术技能，
+   不得收录——仅名词化的独立技术点（如"数据建模"、"性能调优"）可收录。
    **必须细粒度拆分**：
    - 中文连接词（"与/及/和/或/、"）连接的两个不同技术概念**必须拆成独立技能**——
      "算法与数据结构" → "算法" + "数据结构"、"并行与分布式计算" → "并行计算" +
@@ -47,13 +69,35 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    判定标准：JD 明确要求/硬性必备（如"精通/熟练掌握 XX"、任职要求清单中的技能）→ "must"；
    加分项/优先项（如"有 XX 经验者优先"、"熟悉 XX 更佳"、"了解 XX 加分"、辅助性技能）→ "nice"。
    把握不准时倾向 "nice"，避免全部标 "must" 失去区分度。
+   **条件结构显式规则**：仅当出现**显式加分标记**（"优先/更佳/加分/一项或多项/任一/任选"）
+   时，该结构内的技能标 "nice" 且**不得出现在 skills 字段**（skills 仅收录必备技能）。
+   示例："熟悉 Python、SQL 者优先" → skills 不含 Python/SQL，requirements 中 Python/SQL
+   均标 "nice"。
+   **反向保护**：以下语境中的技能必须保留为必备（must）并进入 skills，不得因附近出现
+   "如/等/或"就降级或漏抽："任职要求/岗位要求"清单中的技能、"精通/熟练掌握/熟悉/具备 XX"
+   明确要求的技能（如"熟悉常用测试管理工具，如 Jira、QC 等"→ Jira、QC 均为 must 进 skills；
+   "具备系统日常运维、统一部署、监控管理能力"→ 运维/部署/监控均为 must 进 skills）。
+   **列举式必备判定**：职责/任职要求中以并列列举出现的技能（"负责 XX、XX、XX 工作"、
+   "需要 XX、XX 能力"）默认均为 must 进 skills——并列列举是岗位职责描述，
+   不是加分项；仅当出现显式加分标记（规则 6 上文）才降级为 nice。
    以及熟练度 level — "初级"/"中级"/"高级" 三档：文本含"了解/熟悉"→"初级"、
    "掌握/熟练"→"中级"、"精通/深入"→"高级"；JD 无明确熟练度表述时省略 level 字段
 7. 薪资（salary_range）：提取文本中的薪资表述，保留原始写法，币种与单位
    （K/万/年/月/时/$/USD 等）必须保留，如 "20-40K"、"1-1.4万"、
    "USD 100000-150000/年"、"US$178K - US$241K (Employer provided)"、"面议"；
    仅薪资高低类表述计入，招聘福利（如"年终奖 14 薪"）不计；未提及薪资时省略该字段
-8. 仅抽取文本中明确出现的内容，不要自行推断
+8. 行业（industry）：提取岗位所属行业（如"电商"、"医疗健康"、"金融"、"互联网"、
+   "制造业"、"教育"、"车联网"），以 JD 文本中明确出现的行业表述为准（公司业务
+   介绍、产品/服务领域、行业经验要求等）；未提及行业时输出空字符串，
+   禁止从岗位名或技能名反向推断行业。
+9. 典型场景（typical_scenarios）：提取 JD 中明确描述的岗位核心工作场景/典型任务，
+   每条为"名称 + 补充描述"：名称是 4-20 字的短短语（如"分布式缓存改造"、"信贷风控建模"、
+   "车联网数据接入"），补充描述可含技术关键词与业务对象（如"Flink 实时计算，支撑业务报表"）。
+   仅提取文本中明确出现的场景，禁止从技能名反向杜撰；JD 未描述具体场景时省略该字段
+10. 仅抽取文本中明确出现的内容，不要自行推断："支持/涉及/面向 XX"等上下文性、
+   平台性宽泛表述不得推断为技能；模型名/产品名（如 DeepSeek、Qwen、GPT）仅当作为
+   明确技能要求出现时才收录，上下文提及不算技能。
+   **宁缺毋滥**：宁可漏抽，不可多抽——误抽会污染技能图谱与岗位匹配。
 
 JD 文本：
 {jd_text}
@@ -64,7 +108,7 @@ FEW_SHOT_EXAMPLES = """以下是几个示例：
 
 示例 1：
 JD 文本：招聘高级 Java 开发工程师，精通 Java、Spring Boot、MySQL，具备分布式系统经验，本科及以上学历
-输出：{{"position_name": "Java 开发工程师", "level": "高级", "skills": [{{"name": "Java"}}, {{"name": "Spring Boot"}}, {{"name": "MySQL"}}, {{"name": "分布式系统"}}], "tools": [], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Java", "necessity": "must", "level": "高级"}}, {{"skill_name": "Spring Boot", "necessity": "must"}}, {{"skill_name": "MySQL", "necessity": "must"}}]}}
+输出：{{"position_name": "Java 开发工程师", "level": "高级", "industry": "互联网", "skills": [{{"name": "Java"}}, {{"name": "Spring Boot"}}, {{"name": "MySQL"}}, {{"name": "分布式系统"}}], "tools": [], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Java", "necessity": "must", "level": "高级"}}, {{"skill_name": "Spring Boot", "necessity": "must"}}, {{"skill_name": "MySQL", "necessity": "must"}}]}}
 
 示例 2：
 JD 文本：招聘 AI 产品经理，负责 AI 产品规划与设计，熟悉大模型应用者优先，硕士及以上学历，有 TOEFL 成绩优先
@@ -72,7 +116,7 @@ JD 文本：招聘 AI 产品经理，负责 AI 产品规划与设计，熟悉大
 
 示例 3：
 JD 文本：招聘资深数据仓库工程师，精通 SQL 与 Hive，熟练使用 Spark、Airflow 调度任务，熟悉数据建模方法论，计算机相关专业本科及以上学历，持有 AWS 数据类认证者优先
-输出：{{"position_name": "数据仓库工程师", "level": "资深", "skills": [{{"name": "SQL"}}, {{"name": "Hive"}}, {{"name": "Spark"}}, {{"name": "Airflow"}}, {{"name": "数据建模"}}], "tools": [], "education": {{"level": "本科", "major": "计算机"}}, "certifications": [{{"name": "AWS 数据类认证"}}], "requirements": [{{"skill_name": "SQL", "necessity": "must", "level": "高级"}}, {{"skill_name": "Hive", "necessity": "must", "level": "高级"}}, {{"skill_name": "Spark", "necessity": "must", "level": "中级"}}, {{"skill_name": "Airflow", "necessity": "must"}}, {{"skill_name": "数据建模", "necessity": "must"}}]}}
+输出：{{"position_name": "数据仓库工程师", "level": "资深", "industry": "互联网", "skills": [{{"name": "SQL"}}, {{"name": "Hive"}}, {{"name": "Spark"}}, {{"name": "Airflow"}}, {{"name": "数据建模"}}], "tools": [], "education": {{"level": "本科", "major": "计算机"}}, "certifications": [{{"name": "AWS 数据类认证"}}], "requirements": [{{"skill_name": "SQL", "necessity": "must", "level": "高级"}}, {{"skill_name": "Hive", "necessity": "must", "level": "高级"}}, {{"skill_name": "Spark", "necessity": "must", "level": "中级"}}, {{"skill_name": "Airflow", "necessity": "must"}}, {{"skill_name": "数据建模", "necessity": "must"}}]}}
 
 示例 4：
 JD 文本：招聘前端开发工程师，精通 React 与 TypeScript，掌握前端工程化，熟练使用 ECharts 做数据可视化，大专以上学历，具备良好的团队协作与沟通能力
@@ -84,7 +128,7 @@ JD 文本：招聘网络安全工程师，负责渗透测试与安全运维，�
 
 示例 6（英文复合岗名完整翻译）：
 JD 文本：BioChemical Engineer - Analog Devices, Wilmington MA. Design biochemical process solutions for semiconductor fabrication. Required: chemical engineering background, process design experience, Six Sigma certification. Salary: $120K-$150K/yr.
-输出：{{"position_name": "生化工程师", "salary_range": "$120K-$150K/yr", "skills": [{{"name": "化学工程"}}, {{"name": "工艺设计"}}, {{"name": "Six Sigma"}}], "tools": [], "education": {{"level": "本科", "major": "化学工程"}}, "certifications": [{{"name": "Six Sigma"}}], "requirements": [{{"skill_name": "化学工程", "necessity": "must", "level": "中级"}}, {{"skill_name": "工艺设计", "necessity": "must"}}, {{"skill_name": "Six Sigma", "necessity": "nice"}}]}}
+输出：{{"position_name": "生化工程师", "salary_range": "$120K-$150K/yr", "industry": "半导体制造", "skills": [{{"name": "化学工程"}}, {{"name": "工艺设计"}}, {{"name": "Six Sigma"}}], "tools": [], "education": {{"level": "本科", "major": "化学工程"}}, "certifications": [{{"name": "Six Sigma"}}], "requirements": [{{"skill_name": "化学工程", "necessity": "must", "level": "中级"}}, {{"skill_name": "工艺设计", "necessity": "must"}}, {{"skill_name": "Six Sigma", "necessity": "nice"}}]}}
 
 示例 7（英文复合岗名完整翻译，禁止丢 Engineer）：
 JD 文本：Sr Systems Reliability Engineer - Responsible for system reliability engineering, automation of infrastructure, incident response. 5+ years experience, Linux, Python, Terraform required. Salary: USD 130000-160000/年.
@@ -93,6 +137,14 @@ JD 文本：Sr Systems Reliability Engineer - Responsible for system reliability
 示例 8（indeed 英文源，US$K 区间 + 雇主提供标注）：
 JD 文本：Backend Software Engineer - Remote, US. Build distributed services with Go and PostgreSQL. 3+ years backend experience required. Salary: US$178K - US$241K (Employer provided).
 输出：{{"position_name": "后端软件工程师", "salary_range": "US$178K - US$241K (Employer provided)", "skills": [{{"name": "Go"}}, {{"name": "PostgreSQL"}}, {{"name": "分布式系统"}}], "tools": [], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Go", "necessity": "must", "level": "中级"}}, {{"skill_name": "PostgreSQL", "necessity": "must"}}, {{"skill_name": "分布式系统", "necessity": "nice"}}]}}
+
+示例 9（典型场景抽取）：
+JD 文本：招聘资深数据平台工程师，负责搭建实时数仓与离线数仓，参与 Flink 实时计算任务开发，支撑业务报表与推荐场景，要求熟悉大数据生态，本科及以上学历
+输出：{{"position_name": "数据平台工程师", "level": "资深", "skills": [{{"name": "Flink"}}, {{"name": "数据仓库"}}, {{"name": "大数据"}}], "typical_scenarios": [{{"name": "实时数仓建设", "description": "Flink 实时计算，支撑业务报表"}}, {{"name": "离线数仓建模", "description": "分层建模，支撑推荐场景"}}], "tools": [], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Flink", "necessity": "must", "level": "高级"}}, {{"skill_name": "数据仓库", "necessity": "must"}}]}}
+
+示例 10（优先/加分条件正确示范——加分技能不进 skills）：
+JD 文本：招聘数据分析师，精通 SQL 与 Python，熟悉 Tableau、Power BI 者优先，具备统计学基础，本科及以上学历，有电商行业经验更佳
+输出：{{"position_name": "数据分析师", "skills": [{{"name": "SQL"}}, {{"name": "Python"}}, {{"name": "统计学"}}], "tools": [], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "SQL", "necessity": "must", "level": "高级"}}, {{"skill_name": "Python", "necessity": "must", "level": "高级"}}, {{"skill_name": "统计学", "necessity": "must"}}, {{"skill_name": "Tableau", "necessity": "nice"}}, {{"skill_name": "Power BI", "necessity": "nice"}}]}}
 """
 
 BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输出 JSON 数组（每条 JD 对应一个对象，数组第 i 个元素对应"JD文本 i"）。
@@ -111,9 +163,31 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    （而非"系统可靠性"）、"Verification Engineer" → "验证工程师"（而非"验证"）。
    输出必须是以"工程师/科学家/分析师/经理/设计师/架构师"等岗位词结尾的标准岗位名，
    不得输出"生化"、"固件"、"验证"这类无岗位语义的名词碎片。
-2. 技能（skills）：仅列出技术技能（如"Python"、"Java"、"数据分析"）。禁止把行业、
-   业务领域、招聘福利词列为技能（如保险/金融/银行/电商/医疗/教育/物流/车联网/
-   五险一金/社保/公积金/双休/年终奖等）。
+   兜底规则（重要）：当文本首部出现 "岗位名称：xxx"（如 "岗位名称：Python爬虫工程师"）
+   或首行即为明确标题（如智联 "文员（数据分析）" 首行）时，**必须直接取冒号后内容
+   /首行标题作为岗位名**，并按上述规则翻译/规范化后输出，禁止留空——即使正文其余
+   部分缺失或不完整，只要标题存在就不得返回空岗位名。
+   **括号标题拆分**：岗位标题含括号技能列表（如 "全栈工程师（java，go，python，js）"、
+   "大模型评测工程师（音视频/AIGC/多模态）"）时，岗位名取**括号前主体**
+   （"全栈工程师"、"大模型评测工程师"），括号内为技能/方向列表，不得并入岗位名。
+   **岗位名必须是岗位语义词**：不得取自产品名/公司名/人名（如 "Odoo"、"Gemini"），
+   也不得输出空字符串——正文存在岗位标题时必须输出岗位名。
+2. 技能（skills）：仅列出**必备**技术技能（如"Python"、"Java"、"数据分析"）。
+   **技能名使用标准简短名称**：不要加"系统/维护/开发/技术"等冗余后缀
+   （"Windows系统维护"→"Windows"、"Python开发"→"Python"、"Linux运维"→"Linux"），
+   以可独立学习/匹配的技术点为准。
+   **基础理论词不作为独立技能**："计算机基础"、"软件工程"、"数据结构"、"测试理论"
+   等泛化基础词仅在 JD 明确作为岗位核心技能要求时收录，一般性提及不收录。
+   **岗位方向词不作为技能**：岗位名/标题括号中的方向限定词（"音视频"、"AIGC"、
+   "多模态"、"大模型"、"机器人"等）是岗位方向而非可独立匹配的技能，
+   不得进入 skills 或 requirements——除非该词在正文中作为独立技能要求出现。
+   **"有 XX 经验者优先/熟悉 XX 更佳/了解 XX 加分"等加分项技能不得进入 skills**，
+   只能进入 requirements 并标 "nice"（见规则 6）。禁止把行业、业务领域、招聘福利词
+   列为技能（如保险/金融/银行/电商/医疗/教育/物流/车联网/五险一金/社保/公积金/
+   双休/年终奖等）。
+   **禁止把职责动词短语列为技能**："负责/参与/支持 XX 工作"中的动作短语
+   （如"报表制作"、"报告生成"、"模型推理"、"数据清洗"）不是可独立匹配的技术技能，
+   不得收录——仅名词化的独立技术点（如"数据建模"、"性能调优"）可收录。
    **必须细粒度拆分**：
    - 中文连接词（"与/及/和/或/、"）连接的两个不同技术概念**必须拆成独立技能**——
      "算法与数据结构" → "算法" + "数据结构"、"并行与分布式计算" → "并行计算" +
@@ -135,13 +209,35 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    判定标准：JD 明确要求/硬性必备（如"精通/熟练掌握 XX"、任职要求清单中的技能）→ "must"；
    加分项/优先项（如"有 XX 经验者优先"、"熟悉 XX 更佳"、"了解 XX 加分"、辅助性技能）→ "nice"。
    把握不准时倾向 "nice"，避免全部标 "must" 失去区分度。
+   **条件结构显式规则**：仅当出现**显式加分标记**（"优先/更佳/加分/一项或多项/任一/任选"）
+   时，该结构内的技能标 "nice" 且**不得出现在 skills 字段**（skills 仅收录必备技能）。
+   示例："熟悉 Python、SQL 者优先" → skills 不含 Python/SQL，requirements 中 Python/SQL
+   均标 "nice"。
+   **反向保护**：以下语境中的技能必须保留为必备（must）并进入 skills，不得因附近出现
+   "如/等/或"就降级或漏抽："任职要求/岗位要求"清单中的技能、"精通/熟练掌握/熟悉/具备 XX"
+   明确要求的技能（如"熟悉常用测试管理工具，如 Jira、QC 等"→ Jira、QC 均为 must 进 skills；
+   "具备系统日常运维、统一部署、监控管理能力"→ 运维/部署/监控均为 must 进 skills）。
+   **列举式必备判定**：职责/任职要求中以并列列举出现的技能（"负责 XX、XX、XX 工作"、
+   "需要 XX、XX 能力"）默认均为 must 进 skills——并列列举是岗位职责描述，
+   不是加分项；仅当出现显式加分标记（规则 6 上文）才降级为 nice。
    以及熟练度 level — "初级"/"中级"/"高级" 三档：文本含"了解/熟悉"→"初级"、
    "掌握/熟练"→"中级"、"精通/深入"→"高级"；JD 无明确熟练度表述时省略 level 字段
 7. 薪资（salary_range）：提取文本中的薪资表述，保留原始写法，币种与单位
    （K/万/年/月/时/$/USD 等）必须保留，如 "20-40K"、"1-1.4万"、
    "USD 100000-150000/年"、"US$178K - US$241K (Employer provided)"、"面议"；
    仅薪资高低类表述计入，招聘福利（如"年终奖 14 薪"）不计；未提及薪资时省略该字段
-8. 仅抽取文本中明确出现的内容，不要自行推断
+8. 行业（industry）：提取岗位所属行业（如"电商"、"医疗健康"、"金融"、"互联网"、
+   "制造业"、"教育"、"车联网"），以 JD 文本中明确出现的行业表述为准（公司业务
+   介绍、产品/服务领域、行业经验要求等）；未提及行业时输出空字符串，
+   禁止从岗位名或技能名反向推断行业。
+9. 典型场景（typical_scenarios）：提取 JD 中明确描述的岗位核心工作场景/典型任务，
+   每条为"名称 + 补充描述"：名称是 4-20 字的短短语（如"分布式缓存改造"、"信贷风控建模"、
+   "车联网数据接入"），补充描述可含技术关键词与业务对象（如"Flink 实时计算，支撑业务报表"）。
+   仅提取文本中明确出现的场景，禁止从技能名反向杜撰；JD 未描述具体场景时省略该字段
+10. 仅抽取文本中明确出现的内容，不要自行推断："支持/涉及/面向 XX"等上下文性、
+   平台性宽泛表述不得推断为技能；模型名/产品名（如 DeepSeek、Qwen、GPT）仅当作为
+   明确技能要求出现时才收录，上下文提及不算技能。
+   **宁缺毋滥**：宁可漏抽，不可多抽——误抽会污染技能图谱与岗位匹配。
 
 JD 文本：
 {jd_texts}

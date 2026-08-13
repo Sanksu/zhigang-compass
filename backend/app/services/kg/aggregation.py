@@ -178,6 +178,13 @@ _ALLOWED_SKILL_CATEGORIES: dict[str, set[str]] = {
     "成本估算师": {"数据分析/商业", "工程协作", "计算机基础", "编程语言"},
     "系统可靠性工程师": {"云原生/DevOps", "安全", "数据库", "网络/协议", "计算机基础", "编程语言", "工程协作"},
     "开发者体验工程师": {"云原生/DevOps", "后端", "前端", "工程协作", "数据库", "编程语言", "计算机基础"},
+    # 白名单改造新增族（2026-08-12）：低频合法岗位按业务域配置期望技能类别
+    "IT系统管理员": {"云原生/DevOps", "网络/协议", "计算机基础", "数据库", "安全", "工程协作"},
+    "产品助理": {"工程协作", "数据分析/商业", "计算机基础"},
+    "技术教师": {"编程语言", "计算机基础", "工程协作"},
+    "投诉处理助理": {"工程协作", "数据分析/商业"},
+    "计算生物学家": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础"},
+    "首席统计师": {"数据分析/商业", "数据库", "大数据", "计算机基础", "AI/机器学习"},
 }
 
 
@@ -200,7 +207,7 @@ class SkillAgg:
 
 
 class PositionAgg:
-    __slots__ = ("jd_count", "skills", "exp_years", "soft_skills")
+    __slots__ = ("jd_count", "skills", "exp_years", "soft_skills", "typical_scenarios")
 
     def __init__(self) -> None:
         self.jd_count = 0
@@ -208,6 +215,8 @@ class PositionAgg:
         self.exp_years: list[float] = []
         # 软技能白名单命中的 JD 数（写回 Position.soft_skills，设计文档 9.2 节）
         self.soft_skills: Counter = Counter()
+        # 典型项目场景文本计数（写回 Position.typical_scenarios，按频次降序截断）
+        self.typical_scenarios: Counter = Counter()
 
 
 def _min_experience_years(snapshot: dict) -> float | None:
@@ -391,6 +400,16 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
             soft = soft.strip()
             if soft in SOFT_SKILL_WHITELIST:
                 pa.soft_skills[soft] += 1
+        # 典型场景：name + description 拼合为比对文本（与候选项目文本口径一致，
+        # loaders.build_candidate 的 CandidateProject 同为 "name：description"）
+        for sc in ext.get("typical_scenarios") or []:
+            if not isinstance(sc, dict):
+                continue
+            name = (sc.get("name") or "").strip()
+            if not name:
+                continue
+            desc = (sc.get("description") or "").strip()
+            pa.typical_scenarios[f"{name}：{desc}" if desc else name] += 1
     return agg
 
 
@@ -438,6 +457,8 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
             "now": now,
             # 软技能按 JD 命中数降序（低频软技能不写入岗位本体）
             "soft_skills": [s for s, _ in pa.soft_skills.most_common()],
+            # 典型场景按 JD 命中数降序，上限 20 条防属性膨胀（仅非空时 SET）
+            "typical_scenarios": [s for s, _ in pa.typical_scenarios.most_common(20)],
         })
     edges = build_edges(agg)
 
@@ -451,7 +472,12 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
                 SET p.freq = it.freq,
                     p.last_updated = it.now,
                     p.required_years = coalesce(it.req_years, p.required_years),
-                    p.soft_skills = it.soft_skills
+                    p.soft_skills = it.soft_skills,
+                    p.typical_scenarios = coalesce(
+                        CASE WHEN size(it.typical_scenarios) > 0
+                             THEN it.typical_scenarios ELSE null END,
+                        p.typical_scenarios
+                    )
                 """,
                 items=positions,
             )

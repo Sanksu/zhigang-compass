@@ -33,7 +33,6 @@ _COOCCUR_NICE_NICE = 0.2
 def _combo_weight(n1: str | None, n2: str | None) -> float:
     """两技能边必要性组合 → 共现权重因子。necessity 缺失按 nice 处理（保守降权）。"""
     must = {"must"}
-    nice = {"nice", None}
     s1 = "must" if n1 in must else "nice"
     s2 = "must" if n2 in must else "nice"
     if s1 == "must" and s2 == "must":

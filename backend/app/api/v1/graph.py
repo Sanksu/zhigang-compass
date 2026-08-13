@@ -2,20 +2,24 @@
 
 import asyncio
 import json
+import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import _ROLE_RANK, get_optional_user
+from app.api.deps import get_optional_user, role_rank
 from app.core.database import get_db, neo4j_driver, redis_client
 from app.models.business import SkillEmbedding
 from app.schemas.common import error, ok
+from app.services.graph_algorithms.config import load_graph_algo_config
 from app.services.kg.skill_relations import graph_prerequisite_chain
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
 from app.services.matching.semantic import SkillEmbedder, SemanticUnavailableError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -31,9 +35,7 @@ _PUBLIC_POSITION_STATUSES = ("emerging", "stable", "declining")
 
 def _can_view_all_positions(user: Optional[dict]) -> bool:
     """user/admin 可见全部岗位；匿名/guest 只见 emerging/stable/declining。"""
-    if user is None:
-        return False
-    return _ROLE_RANK.get(user.get("role", "guest"), 0) >= _ROLE_RANK["user"]
+    return user is not None and role_rank(user) >= role_rank({"role": "user"})
 
 
 def _position_scope(user: Optional[dict]) -> str:
@@ -635,15 +637,21 @@ async def skill_detail(
     return ok(data=data)
 
 
+# 图算法默认参数（import 时从 configs/graph_algo.yaml 读取——Optuna 最优 γ/min_weight
+# 接入 API 运行时路径，与 sync_communities 索引同口径；修改配置后重启生效）
+_GRAPH_ALGO_DEFAULTS = load_graph_algo_config()
+
+
 @router.get("/algorithms/pagerank")
 async def graph_pagerank(
     top_n: int = Query(default=20, ge=1, le=100),
-    min_weight: float = Query(default=1.0, ge=1.0),
+    min_weight: float = Query(default=_GRAPH_ALGO_DEFAULTS["min_weight"], ge=1.0),
 ):
     """PageRank 技能重要性 Top-N（设计文档 7.1 图算法应用）。
 
     技能网络 = 岗位共现（两技能被同一岗位 REQUIRES 即连边），纯 Python
-    幂迭代（Neo4j 社区版无 GDS 插件）。30s Redis TTL 缓存。
+    幂迭代（Neo4j 社区版无 GDS 插件）。min_weight 默认取 configs/graph_algo.yaml
+    （调优值 2.5021，与 skill-clusters 端点取数口径一致）。30s Redis TTL 缓存。
     """
     from app.services.graph_algorithms.network import load_skill_cooccurrence
     from app.services.graph_algorithms.pagerank import pagerank
@@ -674,44 +682,187 @@ async def graph_pagerank(
 @router.get("/algorithms/skill-clusters")
 async def graph_skill_clusters(
     min_size: int = Query(default=2, ge=1, le=100),
+    resolution: float = Query(default=_GRAPH_ALGO_DEFAULTS["resolution"], ge=0.1, le=5.0),
+    level: Optional[int] = Query(default=None, ge=0, le=31),
 ):
-    """Louvain 技能簇（设计文档 7.1 图算法应用，技术栈视图支撑）。
+    """Louvain/Leiden 技能簇（设计文档 7.1 图算法应用，技术栈视图支撑）。
 
-    同一簇内技能常共现于同一批岗位（如大数据栈 / AI 栈），纯 Python
-    两阶段 Louvain。min_size 过滤过小簇。30s Redis TTL 缓存。
+    同一簇内技能常共现于同一批岗位（如大数据栈 / AI 栈）。聚类算法由
+    configs/graph_algo.yaml 的 algorithm 字段决定（louvain 默认，阶段二
+    Leiden 条件替换：同签名 leiden()，seed=0 确定性；依赖缺失自动回退
+    louvain 并告警）。min_size 过滤过小簇；resolution 为分辨率参数 γ
+    （图算法优化方案阶段一：>1 细簇 / <1 粗簇 / 1.0 等价标准 Louvain，
+    默认值取 configs/graph_algo.yaml）。
+
+    阶段三层次化提取：level 指定 dendrogram 层级（0 = 最细，逐层变粗，
+    默认 None = 最优层，与 louvain() 输出一致）；响应附 levels 元数据
+    （level/cluster_count/modularity，供前端层级导航；Leiden 算法不支持
+    层级，level 参数忽略且 levels 为 null）。
+
+    图算法优化方案 §4：输出经规则优先后处理（孤立簇剔除/过小簇合并/
+    规则标签）+ LLM 兜底（仅 needs_llm 簇调用，失败降级规则标签），
+    响应附 needs_llm/triggers/llm 字段。30s Redis TTL 缓存（键含
+    algorithm + resolution + level，防新旧参数/算法/层级串缓存）。
     """
-    from app.services.graph_algorithms.louvain import louvain
+    from app.services.extraction.dictionary import skill_category
+    from app.services.graph_algorithms.cluster_llm import ClusterLLMClassifier
     from app.services.graph_algorithms.network import load_skill_cooccurrence
+    from app.services.graph_algorithms.postprocess import ClusterPostProcessor
 
-    cache_key = f"graph:algo:clusters:{min_size}"
+    algorithm = load_graph_algo_config()["algorithm"]
+    cache_key = f"graph:algo:clusters:{algorithm}:{min_size}:{resolution}:{level}"
+    cached = await redis_client.get(cache_key)
+    if cached is not None:
+        return ok(data=json.loads(cached))
+
+    def _run_clustering(graph):
+        """按配置选择聚类算法：leiden 优先（依赖缺失回退 louvain 并告警）。"""
+        if algorithm == "leiden":
+            try:
+                from app.services.graph_algorithms.leiden import leiden
+
+                return leiden(graph, resolution=resolution), None
+            except ImportError:
+                logger.warning(
+                    "leiden 依赖（igraph/leidenalg）不可用，回退 louvain（algorithm=%s）", algorithm
+                )
+        from app.services.graph_algorithms.louvain import louvain_hierarchical
+
+        hier = louvain_hierarchical(graph, resolution=resolution)
+        if level is None:
+            return hier["membership"], hier
+        # 指定层级：不存在（越界）时回退最粗层
+        by_level = {lv["level"]: lv["membership"] for lv in hier["levels"]}
+        membership = by_level.get(level, hier["levels"][-1]["membership"])
+        return membership, hier
+
+    def _compute():
+        # 同步 Neo4j 会话 + 聚类 + 后处理 + LLM 兜底为 CPU/IO 密集，
+        # 放线程池避免阻塞事件循环。
+        # min_weight=2.0（默认）：P0 改造后权重=必要性组合因子×共现数，
+        # 过滤 must-nice 低频与 nice-nice 弱边，聚类簇内同质性最佳
+        with neo4j_driver.session() as session:
+            graph, name_map = load_skill_cooccurrence(session, min_weight=_GRAPH_ALGO_DEFAULTS["min_weight"])
+        clusters, hier = _run_clustering(graph)
+
+        # 规则优先后处理 + LLM 兜底触发标记（图算法优化方案 §4.1-4.2）
+        categories = {sid: skill_category(name) for sid, name in name_map.items()}
+        processed = ClusterPostProcessor().process(clusters, graph, name_map, categories)
+
+        # LLM 兜底（§4.3-4.4）：仅对 needs_llm 且非孤立的簇调用，失败降级规则标签
+        # （ClusterLLMClassifier.classify 内部已捕获 LLM 异常，不阻塞 API）
+        classifier = ClusterLLMClassifier()
+        for c in processed["clusters"]:
+            if c["needs_llm"] and not c["orphan"]:
+                skills = [name_map.get(sid, sid) for sid in c["skills"]]
+                decision = classifier.classify(skills, c["triggers"], c["label"])
+                c["llm"] = {
+                    "coherent": decision.coherent,
+                    "cluster_name": decision.cluster_name,
+                    "rationale": decision.rationale,
+                    "splits": decision.splits,
+                }
+
+        items = []
+        for c in processed["clusters"]:
+            if c["orphan"]:
+                continue
+            if len(c["skills"]) < min_size:
+                continue
+            items.append({
+                "id": c["cluster_id"],
+                "size": len(c["skills"]),
+                "label": c["label"],
+                "needs_llm": c["needs_llm"],
+                "triggers": c["triggers"],
+                "llm": c.get("llm"),
+                "skills": [{"id": sid, "name": name_map.get(sid, sid)} for sid in c["skills"]],
+            })
+        # 层级元数据：每层经后处理（无 LLM）+ min_size 过滤后的实际簇数，
+        # 与对应 level 请求的结果同口径（细层单点簇会被过小簇合并，须如实反映）；
+        # modularity 统一用标准 Q（γ=1.0），与评估报告/验收口径一致
+        level_counts = None
+        if hier is not None:
+            from app.services.graph_algorithms.louvain import modularity
+
+            level_counts = []
+            for lv in hier["levels"]:
+                lv_processed = ClusterPostProcessor().process(lv["membership"], graph, name_map, categories)
+                n = sum(
+                    1 for c in lv_processed["clusters"]
+                    if not c["orphan"] and len(c["skills"]) >= min_size
+                )
+                level_counts.append({
+                    "level": lv["level"],
+                    "cluster_count": n,
+                    "modularity": round(modularity(graph, lv["membership"], 1.0), 6),
+                })
+        return items, level_counts
+
+    items, level_counts = await asyncio.to_thread(_compute)
+    data = {"clusters": items, "cluster_count": len(items)}
+    # 阶段三层级元数据（Leiden 不支持层级时为 null，前端隐藏层级导航）
+    data["levels"] = level_counts
+    await redis_client.set(cache_key, json.dumps(data), ex=30)
+    return ok(data=data)
+
+
+@router.get("/algorithms/community-tree")
+async def graph_community_tree():
+    """社区层级树（图算法优化方案阶段三：层次化提取，dendrogram 可视化）。
+
+    读取 scripts/sync_communities.py 写入的 Neo4j Community 节点：
+    - 节点：`(:Community {id: comm_{level}_{cluster}, name, level, modularity, cluster_count})`
+    - 边：`(:Skill)-[:BELONGS_TO_COMMUNITY]->(:Community)` + `(:Community)-[:NESTED_IN]->(:Community)`
+
+    响应为树结构（顶层 = 最高层社区，children 按 NESTED_IN 展开），
+    供 ECharts tree 系列 dendrogram 渲染。未同步（无 Community 节点）时
+    返回空树（前端提示先运行 scripts/sync_communities.py）。
+    30s Redis TTL 缓存。
+    """
+    cache_key = "graph:algo:community-tree"
     cached = await redis_client.get(cache_key)
     if cached is not None:
         return ok(data=json.loads(cached))
 
     def _compute():
-        # 同步 Neo4j 会话 + Louvain 为 CPU/IO 密集，放线程池避免阻塞事件循环。
-        # min_weight=2.0（默认）：P0 改造后权重=必要性组合因子×共现数，
-        # 过滤 must-nice 低频与 nice-nice 弱边，聚类簇内同质性最佳
         with neo4j_driver.session() as session:
-            graph, name_map = load_skill_cooccurrence(session)
-        clusters = louvain(graph)
-        by_cluster: dict[int, list[str]] = {}
-        for sid, cid in clusters.items():
-            by_cluster.setdefault(cid, []).append(sid)
-        items = []
-        for cid in sorted(by_cluster):
-            members = sorted(by_cluster[cid])
-            if len(members) < min_size:
-                continue
-            items.append({
-                "id": cid,
-                "size": len(members),
-                "skills": [{"id": sid, "name": name_map.get(sid, sid)} for sid in members],
-            })
-        return items
+            rows = session.run(
+                """
+                MATCH (s:Skill)-[r:BELONGS_TO_COMMUNITY]->(c:Community)
+                RETURN c.id AS cid, c.level AS level, c.name AS name,
+                       c.cluster_count AS cluster_count, c.modularity AS modularity,
+                       collect(s.name)[..5] AS top_skills
+                """
+            )
+            nodes: dict[str, dict] = {}
+            for rec in rows:
+                cid = rec["cid"]
+                nodes[cid] = {
+                    "id": cid,
+                    "name": rec.get("name") or cid,
+                    "level": rec["level"],
+                    "cluster_count": rec["cluster_count"] or 0,
+                    "modularity": rec["modularity"] or 0.0,
+                    "top_skills": rec.get("top_skills") or [],
+                    "children": [],
+                }
+            parent_rows = session.run(
+                "MATCH (c1:Community)-[:NESTED_IN]->(c2:Community) RETURN c1.id AS child, c2.id AS parent"
+            )
+            children_of: dict[str, list[str]] = {}
+            for rec in parent_rows:
+                children_of.setdefault(rec["parent"], []).append(rec["child"])
+        # 组装树：children 按 NESTED_IN 展开；根 = 无父节点（最高层社区）
+        for cid, child_ids in children_of.items():
+            if cid in nodes:
+                nodes[cid]["children"] = [nodes[c] for c in child_ids if c in nodes]
+        child_set = {c for children in children_of.values() for c in children}
+        roots = [n for n in nodes.values() if n["id"] not in child_set]
+        levels = sorted({n["level"] for n in nodes.values()})
+        return {"tree": roots, "levels": levels}
 
-    items = await asyncio.to_thread(_compute)
-    data = {"clusters": items, "cluster_count": len(items)}
+    data = await asyncio.to_thread(_compute)
     await redis_client.set(cache_key, json.dumps(data), ex=30)
     return ok(data=data)
 

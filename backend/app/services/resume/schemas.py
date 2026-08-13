@@ -49,6 +49,12 @@ class ResumeSkill(BaseModel):
     )
 
 
+class ResumeCertification(BaseModel):
+    """证书/认证。"""
+    name: str = Field(description="证书名称")
+    issuer: str = Field(default="", description="颁发机构（未写明确认机构时为空）")
+
+
 class ResumeExtractionResult(BaseModel):
     """简历抽取的完整结果。"""
     name: str = Field(default="", description="姓名（脱敏占位符 [NAME]）")
@@ -66,5 +72,8 @@ class ResumeExtractionResult(BaseModel):
         "并入 skills 时标记 low_confidence，匹配降权 ×0.5，设计文档 9.2 节）",
     )
     projects: list[ResumeProject] = Field(default_factory=list, description="项目经验")
-    certifications: list[str] = Field(default_factory=list, description="证书")
+    certifications: list[ResumeCertification] = Field(
+        default_factory=list,
+        description="证书（含颁发机构 issuer，文本未写明确认机构时为空）",
+    )
     domain_experience: list[str] = Field(default_factory=list, description="领域经验（如金融/电商/自动驾驶）")

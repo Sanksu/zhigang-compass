@@ -7,7 +7,6 @@
 标记，默认 pytest 运行排除；需显式 `pytest -m integration` 执行（见 pyproject.toml）。
 """
 
-from pathlib import Path
 
 import pytest
 
