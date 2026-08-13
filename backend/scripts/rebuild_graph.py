@@ -6,7 +6,13 @@
 流程：
 1. 清空图谱（保留 Counter 计数器节点，保证 ID 不重置）
 2. 遍历 jd_raw 已抽取记录，import_jd 重放（岗位名经新归一化，空岗位跳过）
-3. 之后请运行 scripts/cleanup_graph.py 做技能过滤 + 岗位合并 + 重新聚合
+3. 重建后自动补跑与 ETL 一致的收尾阶段（幂等，可安全重跑）：
+   - 课程入图（course_raw → Course + LEARNABLE_VIA）
+   - 岗位聚合（Position.freq + REQUIRES weight/source_count）
+   - 技能归一化 + SIMILAR_TO 建边（SBERT，模型不可用自动降级）
+   - 技能关系建边（PREREQUISITE_OF / BELONGS_TO / ALTERNATIVE_OF）
+   - 演化关系推导（EVOLVED_FROM，基于最近两版快照）
+   - 发布当日图谱版本快照（graph_versions，幂等覆盖）
 
 注意：本脚本会清空现有图谱数据（Evidence/Skill/Position 全部重建），
 重建耗时取决于 JD 数量。请确认后执行。
@@ -97,7 +103,41 @@ def main() -> None:
                 logger.exception("  [%s] 入图失败: %s %s", i, row.id, str(e)[:150])
             if i % 100 == 0:
                 logger.info("  已处理 %s 条", i)
-    logger.info("重建完成（跳过 SimHash 重复 %s 条）。请运行 cleanup_graph.py 做技能过滤与聚合。", skipped_dup)
+    logger.info("JD 重放完成（跳过 SimHash 重复 %s 条）", skipped_dup)
+
+    # 3. 收尾阶段（与 ETL 阶段 6/8/9.5/12.5/12.6/14 一致，幂等可重跑）：
+    #    重建只重放 import_jd，若不补跑这些阶段，课程/关系边/归一化/快照
+    #    在重建后全部缺失（08-12 重建丢失 Course 与五类关系的根因）。
+    async def _post_rebuild() -> dict:
+        from app.workers.tasks import (
+            aggregate_positions,
+            derive_evolved_from,
+            load_courses,
+            snapshot_graph,
+            sync_skill_normalization,
+        )
+        from app.core.database import neo4j_driver as _neo4j_driver
+        from app.services.kg.skill_relations import sync_skill_relations
+
+        results = {}
+        results["courses"] = await load_courses({})
+        results["aggregate"] = await aggregate_positions({})
+        results["normalization"] = await sync_skill_normalization({})
+
+        def _relations() -> dict:
+            with _neo4j_driver.session() as ns:
+                return sync_skill_relations(ns)
+
+        results["relations"] = await asyncio.to_thread(_relations)
+        results["evolved"] = await derive_evolved_from()
+        results["snapshot"] = await snapshot_graph({}, triggered_by="manual-rebuild")
+        return results
+
+    logger.info("补跑收尾阶段（课程/聚合/归一化/关系/演化/快照）...")
+    summary = asyncio.run(_post_rebuild())
+    for stage, detail in summary.items():
+        logger.info("  [%s] %s", stage, detail)
+    logger.info("重建全部完成（含收尾阶段），图谱可用")
 
 
 if __name__ == "__main__":
