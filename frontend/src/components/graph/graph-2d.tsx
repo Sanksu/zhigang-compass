@@ -157,11 +157,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           name: d.name,
           type: d.type,
           status: d.status,
-          level: d.level,
-          source: d.source,
           // 布局质量已把岗位 value 放大 3 倍，展示侧还原为原始 value（displayValue 兜底）
           value: d.displayValue ?? d.value,
-          description: d.description,
         })
       }
     })
@@ -286,9 +283,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       target: e.target,
       lineStyle: {
         width: weightToWidth(e.weight),
-        color: e.relation === 'proves' ? mutedColor : borderColor,
-        opacity: e.relation === 'proves' ? 0.5 : 0.7,
-        type: e.relation === 'proves' ? 'dashed' : 'solid',
+        color: borderColor,
+        opacity: 0.7,
+        // 后端仅返回 REQUIRES 边（契约 GraphEdge 无 relation），一律实线
+        type: 'solid',
         // 二部图单重边，无需弧线区分 → 直线更清晰
         curveness: 0,
       },
@@ -305,16 +303,13 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         formatter: (params: EChartsParam) => {
           if (params.dataType !== 'node' || !params.data) return ''
           const d = params.data as unknown as GraphNode & { displayValue?: number }
-          // tooltip 经 innerHTML 渲染，外部可控的 name/description 等必须先转义（防 XSS）
+          // tooltip 经 innerHTML 渲染，外部可控的 name 等必须先转义（防 XSS）
           const lines: string[] = [`<b>${escapeHtml(d.name)}</b>`]
           lines.push(`类型: ${escapeHtml(d.type)}`)
           if (d.type === 'position' && d.status) lines.push(`状态: ${escapeHtml(d.status)}`)
-          if (d.type === 'skill' && d.level) lines.push(`级别: ${escapeHtml(d.level)}`)
-          if (d.type === 'evidence' && d.source) lines.push(`来源: ${escapeHtml(d.source)}`)
           // 权重显示原始 value（布局质量放大值不展示给用户）
           const displayValue = d.displayValue ?? d.value
           if (typeof displayValue === 'number') lines.push(`权重: ${displayValue}`)
-          if (d.description) lines.push(`<span style="color:${mutedColor}">${escapeHtml(d.description)}</span>`)
           // 操作提示：降低新用户学习成本
           const hint = d.type === 'position' ? '单击查看详情 · 双击展开/收起技能' : '单击查看详情'
           lines.push(`<span style="color:${mutedColor};font-size:11px">${hint}</span>`)

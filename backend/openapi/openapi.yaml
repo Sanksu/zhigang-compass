@@ -1530,6 +1530,54 @@ components:
           type: string
           description: 链路追踪 ID（uuid4 hex 截断 16 位）
 
+    GraphViewType:
+      type: string
+      enum: [panorama, techStack, level, positionCenter]
+      description: 图谱视图类型（服务端过滤）
+
+    GraphNode:
+      type: object
+      description: 图谱节点（Position/Skill，匿名视角候选岗位不外宣）
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [position, skill, evidence] }
+        status:
+          type: string
+          enum: [candidate, emerging, stable, declining, archived]
+          description: 岗位状态机（仅 position 节点）
+
+    GraphEdge:
+      type: object
+      description: 图谱边（REQUIRES 关系）
+      properties:
+        source: { type: string, description: 源节点 id（岗位） }
+        target: { type: string, description: 目标节点 id（技能） }
+        weight: { type: number, description: 边权重（聚合口径 must=0.8/nice=0.4） }
+        necessity: { type: string, enum: [must, nice] }
+        level: { type: string, description: 熟练度级别（初级/中级/高级/专家） }
+
+    GraphViewStats:
+      type: object
+      description: 视图统计（本次返回的节点/边数，非全图）
+      properties:
+        nodes: { type: integer }
+        edges: { type: integer }
+
+    GraphViewData:
+      type: object
+      description: 图谱视图响应（四种视图同构）
+      required: [view_type, nodes, edges, stats]
+      properties:
+        view_type: { $ref: '#/components/schemas/GraphViewType' }
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/GraphNode' }
+        edges:
+          type: array
+          items: { $ref: '#/components/schemas/GraphEdge' }
+        stats: { $ref: '#/components/schemas/GraphViewStats' }
+
     CommunityNode:
       type: object
       description: 社区层级树节点（阶段三层次化提取，dendrogram 可视化）
