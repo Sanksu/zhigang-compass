@@ -1,0 +1,1968 @@
+{
+ "summary": {
+  "case_count": 30,
+  "reasonable_count": 1,
+  "reasonable_ratio": 0.0333,
+  "target_ratio": 0.8,
+  "target_met": false,
+  "avg_dims": {
+   "completeness": 1.0,
+   "prerequisite": 0.587,
+   "course": 0.711,
+   "hours": 0.42,
+   "mean": 0.677
+  },
+  "note": "预评分（规则化 AI 评审），专家复核后重跑 --re-score 定稿"
+ },
+ "cases": [
+  {
+   "case_id": "lp_01",
+   "candidate_id": "resume_001",
+   "position": "数据科学家 (pos_3054)",
+   "missing_skills": 36,
+   "gap_count": 39,
+   "path_items": [
+    {
+     "skill": "统计学",
+     "prerequisites": [],
+     "courses": [
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "Mathematics for Machine Learning@coursera(q=0.6643)",
+      "Mathematics for Machine Learning and Data Science@coursera(q=0.6392)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "Apache Spark",
+     "prerequisites": [
+      "计算机基础",
+      "Java",
+      "Scala",
+      "SQL",
+      "大数据"
+     ],
+     "courses": [],
+     "estimated_hours": 210.0,
+     "priority": "high"
+    },
+    {
+     "skill": "统计分析",
+     "prerequisites": [],
+     "courses": [
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "Data Science: Foundations using R@coursera(q=0.6794)",
+      "Data Science@coursera(q=0.6762)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "机器学习",
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学"
+     ],
+     "courses": [
+      "IBM AI Developer@coursera(q=0.6956)",
+      "Machine Learning@coursera(q=0.6937)",
+      "Data Science Foundations@coursera(q=0.689)"
+     ],
+     "estimated_hours": 200.0,
+     "priority": "high"
+    },
+    {
+     "skill": "回归分析",
+     "prerequisites": [],
+     "courses": [
+      "Data Structures and Algorithms@coursera(q=0.6709)",
+      "Computational Thinking with Beginning C Programming@coursera(q=0.6131)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.7,
+    "course": 0.86,
+    "hours": 0.64,
+    "mean": 0.8
+   },
+   "reasonable": true
+  },
+  {
+   "case_id": "lp_02",
+   "candidate_id": "resume_002",
+   "position": "语音算法工程师 (pos_3093)",
+   "missing_skills": 33,
+   "gap_count": 35,
+   "path_items": [
+    {
+     "skill": "语音合成",
+     "prerequisites": [],
+     "courses": [
+      "系统学习美式音标-KK音标@icourse163(q=0.4964)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "模型调优",
+     "prerequisites": [],
+     "courses": [
+      "Supervised Machine Learning: Regression and Classification@coursera(q=0.6868)",
+      "Supervised Machine Learning: Regression and Classification@coursera(q=0.6868)",
+      "Machine Learning with Python@coursera(q=0.6657)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "自然语言处理",
+     "prerequisites": [],
+     "courses": [
+      "Applied Data Science with Python@coursera(q=0.6759)",
+      "Introduction to Machine Learning@coursera(q=0.6454)",
+      "Microsoft Azure AI Fundamentals AI-900 Exam Prep@coursera(q=0.6261)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "语音降噪",
+     "prerequisites": [],
+     "courses": [
+      "系统学习美式音标-KK音标@icourse163(q=0.4964)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "PyTorch",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.86,
+    "hours": 0.4,
+    "mean": 0.69
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_03",
+   "candidate_id": "resume_003",
+   "position": "Vue前端开发工程师 (pos_3074)",
+   "missing_skills": 33,
+   "gap_count": 34,
+   "path_items": [
+    {
+     "skill": "Vue.js",
+     "prerequisites": [
+      "HTML",
+      "CSS",
+      "JavaScript"
+     ],
+     "courses": [
+      "JavaScript Deep Dive@coursera(q=0.5942)",
+      "Crea una aplicación web con Vue.js@coursera(q=0.5852)",
+      "Introduction to VueJS Framework@coursera(q=0.5843)"
+     ],
+     "estimated_hours": 120.0,
+     "priority": "high"
+    },
+    {
+     "skill": "审批",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "工作流",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "CSS样式",
+     "prerequisites": [],
+     "courses": [
+      "IBM Full Stack Software Developer@coursera(q=0.6976)",
+      "IBM Full Stack Software Developer@coursera(q=0.6976)",
+      "Meta Full Stack Developer: Front-End & Back-End from Scratch@coursera(q=0.6849)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "函数式编程",
+     "prerequisites": [],
+     "courses": [
+      "Python for Everybody@coursera(q=0.712)",
+      "Programming for Everybody (Getting Started with Python)@coursera(q=0.692)",
+      "Python 3 Programming@coursera(q=0.6829)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.6,
+    "course": 0.72,
+    "hours": 0.4,
+    "mean": 0.68
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_04",
+   "candidate_id": "resume_004",
+   "position": "运维工程师 (pos_3073)",
+   "missing_skills": 28,
+   "gap_count": 33,
+   "path_items": [
+    {
+     "skill": "JavaScript",
+     "prerequisites": [
+      "HTML",
+      "CSS"
+     ],
+     "courses": [
+      "IBM Full-Stack JavaScript Developer@coursera(q=0.6935)",
+      "IBM JavaScript Backend Developer@coursera(q=0.6881)",
+      "Meta React Native@coursera(q=0.6852)"
+     ],
+     "estimated_hours": 90.0,
+     "priority": "high"
+    },
+    {
+     "skill": "服务器运维",
+     "prerequisites": [],
+     "courses": [
+      "Learn Node.js@coursera(q=0.5819)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "AWS",
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
+     "courses": [],
+     "estimated_hours": 90.0,
+     "priority": "high"
+    },
+    {
+     "skill": "PostgreSQL",
+     "prerequisites": [
+      "计算机基础",
+      "SQL"
+     ],
+     "courses": [],
+     "estimated_hours": 90.0,
+     "priority": "high"
+    },
+    {
+     "skill": "Shell",
+     "prerequisites": [],
+     "courses": [
+      "Genomic Data Science@coursera(q=0.645)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.8,
+    "course": 0.72,
+    "hours": 0.4,
+    "mean": 0.73
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_05",
+   "candidate_id": "resume_005",
+   "position": "CMDB发现 (pos_3120)",
+   "missing_skills": 27,
+   "gap_count": 30,
+   "path_items": [
+    {
+     "skill": "VMware",
+     "prerequisites": [],
+     "courses": [
+      "Google IT Automation with Python@coursera(q=0.6892)",
+      "Core Java@coursera(q=0.6474)",
+      "Microsoft Azure Fundamentals AZ-900 Exam Prep@coursera(q=0.6068)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Agile",
+     "prerequisites": [],
+     "courses": [
+      "IBM Front-End Developer@coursera(q=0.677)",
+      "Microsoft Python Development@coursera(q=0.6221)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Service Mapping",
+     "prerequisites": [],
+     "courses": [
+      "Building Scalable Java Microservices with Spring Boot and Spring Cloud@coursera(q=0.6331)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Discovery",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Shell",
+     "prerequisites": [],
+     "courses": [
+      "Genomic Data Science@coursera(q=0.645)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.86,
+    "hours": 0.4,
+    "mean": 0.69
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_06",
+   "candidate_id": "resume_006",
+   "position": "AI自动化 (pos_3130)",
+   "missing_skills": 30,
+   "gap_count": 30,
+   "path_items": [
+    {
+     "skill": "营销",
+     "prerequisites": [],
+     "courses": [
+      "Learn Motion Graphics and VFX@coursera(q=0.45)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "嵌入向量",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "容器",
+     "prerequisites": [],
+     "courses": [
+      "Google IT Automation with Python@coursera(q=0.6892)",
+      "IBM JavaScript Backend Developer@coursera(q=0.6881)",
+      "IBM Java Developer@coursera(q=0.6658)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "生成式AI",
+     "prerequisites": [],
+     "courses": [
+      "IBM AI Developer@coursera(q=0.6956)",
+      "IBM Data Science@coursera(q=0.689)",
+      "AI Agents in Typescript/Javascript@coursera(q=0.6844)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "基础设施即代码",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.72,
+    "hours": 0.4,
+    "mean": 0.65
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_07",
+   "candidate_id": "resume_007",
+   "position": "商业智能分析师 (pos_3078)",
+   "missing_skills": 27,
+   "gap_count": 29,
+   "path_items": [
+    {
+     "skill": "Tableau",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "Power BI",
+     "prerequisites": [],
+     "courses": [
+      "Microsoft Azure Data Fundamentals DP-900 Exam Prep@coursera(q=0.648)",
+      "Applied Data Science with SQL, R, and Python@coursera(q=0.465)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "元数据",
+     "prerequisites": [],
+     "courses": [
+      "IBM AI Developer@coursera(q=0.6956)",
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "Data Science Foundations@coursera(q=0.689)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "统计分析",
+     "prerequisites": [],
+     "courses": [
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "Data Science: Foundations using R@coursera(q=0.6794)",
+      "Data Science@coursera(q=0.6762)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "物流分析",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.72,
+    "hours": 0.4,
+    "mean": 0.65
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_08",
+   "candidate_id": "resume_008",
+   "position": "Go开发工程师 (pos_3065)",
+   "missing_skills": 25,
+   "gap_count": 28,
+   "path_items": [
+    {
+     "skill": "微服务",
+     "prerequisites": [
+      "计算机基础",
+      "Java",
+      "Spring Boot",
+      "操作系统",
+      "分布式"
+     ],
+     "courses": [
+      "Building Scalable Java Microservices with Spring Boot and Spring Cloud@coursera(q=0.6331)",
+      "ASP.NET for Experienced Developers@coursera(q=0.6267)",
+      ".NET Core Mastery: Advanced Techniques for Exp Developers@coursera(q=0.6247)"
+     ],
+     "estimated_hours": 210.0,
+     "priority": "high"
+    },
+    {
+     "skill": "RabbitMQ",
+     "prerequisites": [
+      "计算机基础",
+      "操作系统",
+      "分布式"
+     ],
+     "courses": [],
+     "estimated_hours": 120.0,
+     "priority": "high"
+    },
+    {
+     "skill": "PostgreSQL",
+     "prerequisites": [
+      "计算机基础",
+      "SQL"
+     ],
+     "courses": [],
+     "estimated_hours": 90.0,
+     "priority": "high"
+    },
+    {
+     "skill": "gRPC",
+     "prerequisites": [],
+     "courses": [
+      "Genomic Data Science@coursera(q=0.645)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "Gin",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.8,
+    "course": 0.58,
+    "hours": 0.52,
+    "mean": 0.72
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_09",
+   "candidate_id": "resume_009",
+   "position": "推荐搜索算法工程师 (pos_3061)",
+   "missing_skills": 25,
+   "gap_count": 27,
+   "path_items": [
+    {
+     "skill": "推荐算法",
+     "prerequisites": [],
+     "courses": [
+      "Data Science Foundations@coursera(q=0.689)",
+      "Supervised Machine Learning: Regression and Classification@coursera(q=0.6868)",
+      "Supervised Machine Learning: Regression and Classification@coursera(q=0.6868)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "GCP",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "OpenSearch",
+     "prerequisites": [],
+     "courses": [
+      "IBM Full Stack Software Developer@coursera(q=0.6976)",
+      "IBM Full Stack Software Developer@coursera(q=0.6976)",
+      "IBM Full-Stack JavaScript Developer@coursera(q=0.6935)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Qdrant",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "XGBoost",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.58,
+    "hours": 0.4,
+    "mean": 0.62
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_10",
+   "candidate_id": "resume_010",
+   "position": "AI 自动化 (pos_3145)",
+   "missing_skills": 25,
+   "gap_count": 26,
+   "path_items": [
+    {
+     "skill": "Node.js",
+     "prerequisites": [
+      "HTML",
+      "CSS",
+      "JavaScript"
+     ],
+     "courses": [
+      "IBM Full Stack Software Developer@coursera(q=0.6976)",
+      "IBM Full Stack Software Developer@coursera(q=0.6976)",
+      "IBM Full-Stack JavaScript Developer@coursera(q=0.6935)"
+     ],
+     "estimated_hours": 120.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Snowflake",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "营销",
+     "prerequisites": [],
+     "courses": [
+      "Learn Motion Graphics and VFX@coursera(q=0.45)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Dataiku",
+     "prerequisites": [],
+     "courses": [
+      "IBM AI Developer@coursera(q=0.6956)",
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "Data Science Foundations@coursera(q=0.689)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "API",
+     "prerequisites": [],
+     "courses": [
+      "JavaScript Programming with React, Node & MongoDB@coursera(q=0.6513)",
+      "Developing Back-End Apps with Node.js and Express@coursera(q=0.6389)",
+      "ASP.NET for Experienced Developers@coursera(q=0.6267)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.6,
+    "course": 0.86,
+    "hours": 0.4,
+    "mean": 0.71
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_11",
+   "candidate_id": "resume_011",
+   "position": "AI应用 (pos_3134)",
+   "missing_skills": 23,
+   "gap_count": 24,
+   "path_items": [
+    {
+     "skill": "Go",
+     "prerequisites": [
+      "计算机基础"
+     ],
+     "courses": [],
+     "estimated_hours": 60.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "RESTful API",
+     "prerequisites": [],
+     "courses": [
+      "Python for Everybody@coursera(q=0.712)",
+      "IBM Full-Stack JavaScript Developer@coursera(q=0.6935)",
+      "IBM JavaScript Backend Developer@coursera(q=0.6881)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "模型部署",
+     "prerequisites": [],
+     "courses": [
+      "Introduction to Data Science@coursera(q=0.689)",
+      "Generative AI for Java and Spring Developers@coursera(q=0.6754)",
+      "IBM Java Developer@coursera(q=0.6658)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "负载均衡",
+     "prerequisites": [],
+     "courses": [
+      ".NET Core Mastery: Advanced Techniques for Exp Developers@coursera(q=0.6247)",
+      "Microsoft Azure Fundamentals AZ-900 Exam Prep@coursera(q=0.6068)",
+      "Scalable Node.js: Advanced Patterns & Integration@coursera(q=0.475)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "提示工程",
+     "prerequisites": [],
+     "courses": [
+      "IBM AI Developer@coursera(q=0.6956)",
+      "AI Agents in Typescript/Javascript@coursera(q=0.6844)",
+      "Generative AI for Java and Spring Developers@coursera(q=0.6754)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.6,
+    "course": 0.86,
+    "hours": 0.4,
+    "mean": 0.71
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_12",
+   "candidate_id": "resume_012",
+   "position": "AIoT (pos_3091)",
+   "missing_skills": 19,
+   "gap_count": 21,
+   "path_items": [
+    {
+     "skill": "编译调试",
+     "prerequisites": [],
+     "courses": [
+      "Programming for Everybody (Getting Started with Python)@coursera(q=0.692)",
+      "Python 3 Programming@coursera(q=0.6829)",
+      "Crash Course on Python@coursera(q=0.6804)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "物联网",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "边缘计算",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "多线程",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "网络通信",
+     "prerequisites": [],
+     "courses": [
+      "The Arduino Platform and C Programming@coursera(q=0.6537)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.58,
+    "hours": 0.4,
+    "mean": 0.62
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_13",
+   "candidate_id": "resume_013",
+   "position": "Node.js全栈工程师 (pos_3150)",
+   "missing_skills": 18,
+   "gap_count": 21,
+   "path_items": [
+    {
+     "skill": "Docker",
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
+     "courses": [],
+     "estimated_hours": 90.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "微服务",
+     "prerequisites": [
+      "计算机基础",
+      "Java",
+      "Spring Boot",
+      "操作系统",
+      "分布式"
+     ],
+     "courses": [
+      "Building Scalable Java Microservices with Spring Boot and Spring Cloud@coursera(q=0.6331)",
+      "ASP.NET for Experienced Developers@coursera(q=0.6267)",
+      ".NET Core Mastery: Advanced Techniques for Exp Developers@coursera(q=0.6247)"
+     ],
+     "estimated_hours": 210.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Express.js",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "性能监控",
+     "prerequisites": [],
+     "courses": [
+      "Algorithms, Part I@coursera(q=0.6795)",
+      ".NET Core Mastery: Advanced Techniques for Exp Developers@coursera(q=0.6247)",
+      "Learn Python@coursera(q=0.5897)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "RESTful API",
+     "prerequisites": [],
+     "courses": [
+      "Python for Everybody@coursera(q=0.712)",
+      "IBM Full-Stack JavaScript Developer@coursera(q=0.6935)",
+      "IBM JavaScript Backend Developer@coursera(q=0.6881)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.7,
+    "course": 0.72,
+    "hours": 0.52,
+    "mean": 0.73
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_14",
+   "candidate_id": "resume_014",
+   "position": "企业AI平台 (pos_3083)",
+   "missing_skills": 20,
+   "gap_count": 20,
+   "path_items": [
+    {
+     "skill": "Cursor",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Windsurf",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "GitHub Copilot",
+     "prerequisites": [],
+     "courses": [
+      "SQL Foundations@coursera(q=0.6168)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Claude Code",
+     "prerequisites": [],
+     "courses": [
+      "AI Agents in Typescript/Javascript@coursera(q=0.6844)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "AI治理",
+     "prerequisites": [],
+     "courses": [
+      "IBM AI Developer@coursera(q=0.6956)",
+      "Machine Learning@coursera(q=0.6937)",
+      "Machine Learning for All@coursera(q=0.6443)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.72,
+    "hours": 0.4,
+    "mean": 0.65
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_15",
+   "candidate_id": "resume_015",
+   "position": "计算生物学家 (pos_3086)",
+   "missing_skills": 20,
+   "gap_count": 20,
+   "path_items": [
+    {
+     "skill": "CRISPR筛选",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "数据可视化",
+     "prerequisites": [],
+     "courses": [
+      "Python for Everybody@coursera(q=0.712)",
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "IBM Data Science@coursera(q=0.689)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Perturb-seq",
+     "prerequisites": [],
+     "courses": [
+      "数据结构与算法期末冲刺-5小时突击数据结构与算法@icourse163(q=0.6078)",
+      "计算机网络期末冲刺-4小时突击计算机网络@icourse163(q=0.6032)",
+      "6小时C++期末冲刺-6小时突击 C++面向对象编程@icourse163(q=0.5986)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Squidpy",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "单细胞RNA-seq",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.58,
+    "hours": 0.4,
+    "mean": 0.62
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_16",
+   "candidate_id": "resume_016",
+   "position": "业务分析师 (pos_3096)",
+   "missing_skills": 20,
+   "gap_count": 20,
+   "path_items": [
+    {
+     "skill": "费用",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "研究",
+     "prerequisites": [],
+     "courses": [
+      "Data Structures and Algorithms@coursera(q=0.6709)",
+      "Computational Thinking with Beginning C Programming@coursera(q=0.6131)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "需求分析",
+     "prerequisites": [],
+     "courses": [
+      "Amazon Junior Software Developer@coursera(q=0.6207)",
+      "C# .NET Practical Business & Utility Application Development@coursera(q=0.46)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Tableau",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "英语",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.58,
+    "hours": 0.4,
+    "mean": 0.62
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_17",
+   "candidate_id": "resume_017",
+   "position": "技术教师 (pos_3080)",
+   "missing_skills": 18,
+   "gap_count": 19,
+   "path_items": [
+    {
+     "skill": "Web开发",
+     "prerequisites": [],
+     "courses": [
+      "Web Design for Everybody: Basics of Web Development & Coding@coursera(q=0.6793)",
+      "Introduction to HTML5@coursera(q=0.6777)",
+      "HTML, CSS, and Javascript for Web Developers@coursera(q=0.676)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "编程",
+     "prerequisites": [],
+     "courses": [
+      "Programming for Everybody (Getting Started with Python)@coursera(q=0.692)",
+      "Python 3 Programming@coursera(q=0.6829)",
+      "Crash Course on Python@coursera(q=0.6804)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "机器学习",
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学"
+     ],
+     "courses": [
+      "IBM AI Developer@coursera(q=0.6956)",
+      "Machine Learning@coursera(q=0.6937)",
+      "Data Science Foundations@coursera(q=0.689)"
+     ],
+     "estimated_hours": 200.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "人工智能",
+     "prerequisites": [],
+     "courses": [
+      "IBM AI Developer@coursera(q=0.6956)",
+      "IBM Data Science@coursera(q=0.689)",
+      "AI Agents in Typescript/Javascript@coursera(q=0.6844)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "数字素养",
+     "prerequisites": [],
+     "courses": [
+      "What is Data Science?@coursera(q=0.6848)",
+      "What is Data Science?@coursera(q=0.6848)",
+      "Fundamentals of Machine Learning and Artificial Intelligence@coursera(q=0.6414)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.6,
+    "course": 1.0,
+    "hours": 0.52,
+    "mean": 0.78
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_18",
+   "candidate_id": "resume_018",
+   "position": "系统可靠性工程师 (pos_3132)",
+   "missing_skills": 19,
+   "gap_count": 19,
+   "path_items": [
+    {
+     "skill": "云原生",
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Docker",
+      "Kubernetes"
+     ],
+     "courses": [],
+     "estimated_hours": 150.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "API集成",
+     "prerequisites": [],
+     "courses": [
+      "JavaScript Programming with React, Node & MongoDB@coursera(q=0.6513)",
+      "Developing Back-End Apps with Node.js and Express@coursera(q=0.6389)",
+      "ASP.NET for Experienced Developers@coursera(q=0.6267)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "C",
+     "prerequisites": [],
+     "courses": [
+      "Data Science Math Skills@coursera(q=0.6534)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Docker",
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
+     "courses": [],
+     "estimated_hours": 90.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Agentic工作流",
+     "prerequisites": [],
+     "courses": [
+      "AI Agents in Typescript/Javascript@coursera(q=0.6844)",
+      "AI and Machine Learning Essentials with Python@coursera(q=0.5827)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.7,
+    "course": 0.72,
+    "hours": 0.4,
+    "mean": 0.7
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_19",
+   "candidate_id": "resume_019",
+   "position": "应用AI客户 (pos_3071)",
+   "missing_skills": 18,
+   "gap_count": 18,
+   "path_items": [
+    {
+     "skill": "应用性能调优",
+     "prerequisites": [],
+     "courses": [
+      "Building Scalable Java Microservices with Spring Boot and Spring Cloud@coursera(q=0.6331)",
+      "Mastering Backend Development with Node.js@coursera(q=0.465)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "现代AI",
+     "prerequisites": [],
+     "courses": [
+      "AI Agents in Typescript/Javascript@coursera(q=0.6844)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "图像AI",
+     "prerequisites": [],
+     "courses": [
+      "Python 3 Programming@coursera(q=0.6829)",
+      "Introduction to Machine Learning@coursera(q=0.6454)",
+      "Linear Algebra for Machine Learning and Data Science@coursera(q=0.6354)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "大语言模型",
+     "prerequisites": [],
+     "courses": [
+      "IBM AI Developer@coursera(q=0.6956)",
+      "AI Python for Beginners@coursera(q=0.6194)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "文档AI",
+     "prerequisites": [],
+     "courses": [
+      "Microsoft Introduction to C++ Programming@coursera(q=0.5793)",
+      "Advanced C++ Programming and Modern Practices@coursera(q=0.5714)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 1.0,
+    "hours": 0.4,
+    "mean": 0.72
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_20",
+   "candidate_id": "resume_020",
+   "position": "GRC自动化 (pos_3113)",
+   "missing_skills": 16,
+   "gap_count": 17,
+   "path_items": [
+    {
+     "skill": "数据可视化",
+     "prerequisites": [],
+     "courses": [
+      "Python for Everybody@coursera(q=0.712)",
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "IBM Data Science@coursera(q=0.689)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "JCAM",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "AI辅助工作流自动化",
+     "prerequisites": [],
+     "courses": [
+      "IBM AI Developer@coursera(q=0.6956)",
+      "AI Agents in Typescript/Javascript@coursera(q=0.6844)",
+      "Microsoft Azure AI Fundamentals AI-900 Exam Prep@coursera(q=0.6261)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "工作流自动化",
+     "prerequisites": [],
+     "courses": [
+      "Automate Cybersecurity Tasks with Python@coursera(q=0.6487)",
+      "Developing a Google SRE Culture@coursera(q=0.6341)",
+      "Microsoft Python Development@coursera(q=0.6221)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Archer",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.72,
+    "hours": 0.4,
+    "mean": 0.65
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_21",
+   "candidate_id": "resume_021",
+   "position": "Palantir管理员 (pos_3118)",
+   "missing_skills": 16,
+   "gap_count": 17,
+   "path_items": [
+    {
+     "skill": "SQL",
+     "prerequisites": [
+      "计算机基础"
+     ],
+     "courses": [
+      "Python for Everybody@coursera(q=0.712)",
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "IBM Data Science@coursera(q=0.689)"
+     ],
+     "estimated_hours": 60.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Palantir Gotham",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "日志",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "SSO",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Hadoop",
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
+     "courses": [],
+     "estimated_hours": 90.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.7,
+    "course": 0.44,
+    "hours": 0.4,
+    "mean": 0.64
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_22",
+   "candidate_id": "resume_022",
+   "position": "AR/VR设计验证 (pos_3141)",
+   "missing_skills": 16,
+   "gap_count": 17,
+   "path_items": [
+    {
+     "skill": "FDTD",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "显示",
+     "prerequisites": [],
+     "courses": [
+      "IBM AI Developer@coursera(q=0.6956)",
+      "AI Agents in Typescript/Javascript@coursera(q=0.6844)",
+      "Generative AI for Java and Spring Developers@coursera(q=0.6754)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "纳米制造",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "MATLAB",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Code V",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.44,
+    "hours": 0.4,
+    "mean": 0.58
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_23",
+   "candidate_id": "resume_023",
+   "position": "量化分析师 (pos_3048)",
+   "missing_skills": 14,
+   "gap_count": 16,
+   "path_items": [
+    {
+     "skill": "统计学",
+     "prerequisites": [],
+     "courses": [
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "Mathematics for Machine Learning@coursera(q=0.6643)",
+      "Mathematics for Machine Learning and Data Science@coursera(q=0.6392)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "SQL",
+     "prerequisites": [
+      "计算机基础"
+     ],
+     "courses": [
+      "Python for Everybody@coursera(q=0.712)",
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "IBM Data Science@coursera(q=0.689)"
+     ],
+     "estimated_hours": 60.0,
+     "priority": "high"
+    },
+    {
+     "skill": "C++",
+     "prerequisites": [
+      "计算机基础"
+     ],
+     "courses": [
+      "Data Structures and Algorithms@coursera(q=0.6709)",
+      "The Arduino Platform and C Programming@coursera(q=0.6537)",
+      "Introductory C Programming@coursera(q=0.6503)"
+     ],
+     "estimated_hours": 60.0,
+     "priority": "high"
+    },
+    {
+     "skill": "蒙特卡洛模拟",
+     "prerequisites": [],
+     "courses": [
+      "Introductory C Programming@coursera(q=0.6503)",
+      "Coding for Everyone: C and C++@coursera(q=0.6495)",
+      "Computational Thinking with Beginning C Programming@coursera(q=0.6131)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "数值方法",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.7,
+    "course": 0.86,
+    "hours": 0.4,
+    "mean": 0.74
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_24",
+   "candidate_id": "resume_024",
+   "position": "IT系统管理员 (pos_3079)",
+   "missing_skills": 15,
+   "gap_count": 16,
+   "path_items": [
+    {
+     "skill": "Windows OS",
+     "prerequisites": [],
+     "courses": [
+      "Getting Started with Node.js@coursera(q=0.465)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "NISPOM",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "系统补丁",
+     "prerequisites": [],
+     "courses": [
+      "Introduction to Java and Object-Oriented Programming@coursera(q=0.612)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "WSUS",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "DHCP",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.58,
+    "hours": 0.4,
+    "mean": 0.62
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_25",
+   "candidate_id": "resume_025",
+   "position": "财务分析师 (pos_3089)",
+   "missing_skills": 16,
+   "gap_count": 16,
+   "path_items": [
+    {
+     "skill": "Excel",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "high"
+    },
+    {
+     "skill": "财务规划与分析",
+     "prerequisites": [],
+     "courses": [
+      "Master of Science in Data Science@coursera(q=0.455)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "财务建模",
+     "prerequisites": [],
+     "courses": [
+      "Master of Science in Data Science@coursera(q=0.455)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Python",
+     "prerequisites": [
+      "计算机基础"
+     ],
+     "courses": [
+      "Python for Everybody@coursera(q=0.712)",
+      "IBM AI Developer@coursera(q=0.6956)",
+      "Python Data Structures@coursera(q=0.6956)"
+     ],
+     "estimated_hours": 80.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "VBA",
+     "prerequisites": [],
+     "courses": [
+      "AI Agents in Typescript/Javascript@coursera(q=0.6844)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.6,
+    "course": 0.86,
+    "hours": 0.4,
+    "mean": 0.71
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_26",
+   "candidate_id": "resume_026",
+   "position": "创始工程师 (pos_3068)",
+   "missing_skills": 14,
+   "gap_count": 15,
+   "path_items": [
+    {
+     "skill": "AWS",
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
+     "courses": [],
+     "estimated_hours": 90.0,
+     "priority": "high"
+    },
+    {
+     "skill": "TypeScript",
+     "prerequisites": [
+      "HTML",
+      "CSS",
+      "JavaScript"
+     ],
+     "courses": [
+      "AI Agents in Typescript/Javascript@coursera(q=0.6844)",
+      "Learn Next.js@coursera(q=0.5725)",
+      "Backend Engineering with Node.js@coursera(q=0.48)"
+     ],
+     "estimated_hours": 120.0,
+     "priority": "high"
+    },
+    {
+     "skill": "Python",
+     "prerequisites": [
+      "计算机基础"
+     ],
+     "courses": [
+      "Python for Everybody@coursera(q=0.712)",
+      "IBM AI Developer@coursera(q=0.6956)",
+      "Python Data Structures@coursera(q=0.6956)"
+     ],
+     "estimated_hours": 80.0,
+     "priority": "high"
+    },
+    {
+     "skill": "PostgreSQL",
+     "prerequisites": [
+      "计算机基础",
+      "SQL"
+     ],
+     "courses": [],
+     "estimated_hours": 90.0,
+     "priority": "high"
+    },
+    {
+     "skill": "React",
+     "prerequisites": [
+      "HTML",
+      "CSS",
+      "JavaScript"
+     ],
+     "courses": [
+      "Meta React Native@coursera(q=0.6852)",
+      "Meta Full Stack Developer: Front-End & Back-End from Scratch@coursera(q=0.6849)",
+      "Introduction to Front-End Development@coursera(q=0.6723)"
+     ],
+     "estimated_hours": 120.0,
+     "priority": "high"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 1.0,
+    "course": 0.72,
+    "hours": 0.4,
+    "mean": 0.78
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_27",
+   "candidate_id": "resume_027",
+   "position": "信贷分析师 (pos_3115)",
+   "missing_skills": 13,
+   "gap_count": 14,
+   "path_items": [
+    {
+     "skill": "贷款发起",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "风险分层",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "决策逻辑",
+     "prerequisites": [],
+     "courses": [
+      "Amazon Junior Software Developer@coursera(q=0.6207)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "征信数据",
+     "prerequisites": [],
+     "courses": [
+      "IBM AI Developer@coursera(q=0.6956)",
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "Data Science Foundations@coursera(q=0.689)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "信贷政策",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.58,
+    "hours": 0.4,
+    "mean": 0.62
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_28",
+   "candidate_id": "resume_028",
+   "position": "SailPoint (pos_3124)",
+   "missing_skills": 14,
+   "gap_count": 14,
+   "path_items": [
+    {
+     "skill": "LDAP",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Oracle",
+     "prerequisites": [],
+     "courses": [
+      "Oracle Java Foundations@coursera(q=0.593)",
+      "Oracle Java Foundations@coursera(q=0.593)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "IIQ API",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "BeanShell",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Apache",
+     "prerequisites": [],
+     "courses": [
+      "Introduction to Big Data@coursera(q=0.6552)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.58,
+    "hours": 0.4,
+    "mean": 0.62
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_29",
+   "candidate_id": "resume_029",
+   "position": "市场分析师 (pos_3053)",
+   "missing_skills": 10,
+   "gap_count": 13,
+   "path_items": [
+    {
+     "skill": "数据建模",
+     "prerequisites": [],
+     "courses": [
+      "SQL for Data Science@coursera(q=0.6681)",
+      "SQL for Data Science@coursera(q=0.6681)",
+      "Introduction to Structured Query Language (SQL)@coursera(q=0.6656)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "DAX",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "定价分析",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "客户分析",
+     "prerequisites": [],
+     "courses": [
+      "Meta React Native@coursera(q=0.6852)",
+      "Meta Front-End Developer@coursera(q=0.6794)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Excel",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.58,
+    "hours": 0.4,
+    "mean": 0.62
+   },
+   "reasonable": false
+  },
+  {
+   "case_id": "lp_30",
+   "candidate_id": "resume_030",
+   "position": "生物统计师 (pos_3075)",
+   "missing_skills": 11,
+   "gap_count": 13,
+   "path_items": [
+    {
+     "skill": "纵向数据分析",
+     "prerequisites": [],
+     "courses": [
+      "Python Data Structures@coursera(q=0.6956)",
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "Python for Data Science, AI & Development@coursera(q=0.69)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "RxNorm",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "统计推断",
+     "prerequisites": [],
+     "courses": [
+      "Data Science Fundamentals with Python and SQL@coursera(q=0.6903)",
+      "Mathematics for Machine Learning@coursera(q=0.6643)",
+      "Mathematics for Machine Learning and Data Science@coursera(q=0.6392)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "eClinicalWorks",
+     "prerequisites": [],
+     "courses": [],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Stata",
+     "prerequisites": [],
+     "courses": [
+      "AI Agents in Typescript/Javascript@coursera(q=0.6844)"
+     ],
+     "estimated_hours": 30.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 0.5,
+    "course": 0.72,
+    "hours": 0.4,
+    "mean": 0.65
+   },
+   "reasonable": false
+  }
+ ]
+}
