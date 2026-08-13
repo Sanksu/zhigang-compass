@@ -449,6 +449,12 @@ JD 抽取主入口。文本 < 10 字符返回空结果；否则 LLM 抽取（Ins
 #### `canonical_skill_name(raw)` — [extraction/dictionary.py](../../backend/app/services/extraction/dictionary.py)
 岗位/技能归一化统一入口（08.08 治理收敛），全链路经此规范化。
 
+#### `_agglomerative_clusters(names, sim_fn, threshold)` — [extraction/normalization.py](../../backend/app/services/extraction/normalization.py)
+SBERT 层次聚类（ETL 阶段 9.5 用）。**2026-08-13 修复为代表链接**（新名字只与簇种子比较）——原单链接（与簇内任一成员相似即并入）会沿相似度链漂移（2D可视化→3D→3D建模→…→文心一言），实测把 1185 个无关技能并入"2D可视化"簇、70% 技能被污染。
+
+#### `guard_cluster_distribution(normalized)` — [extraction/normalization.py](../../backend/app/services/extraction/normalization.py)
+归一化写回前门禁（P0，2026-08-13 新增）：巨型簇（任何标准名成员数 > max(50, 总数×2%)）或映射率越界（<5% 聚类失效 / >90% 过度合并）→ `ValueError` 拒绝写库。`sync_skill_normalization`（tasks.py ETL 阶段 9.5）与独立脚本均在写库前调用；异常返回 blocked + `normalization_blocked` 告警，不阻塞 ETL 主线。独立脚本 `--dry-run` 输出簇分布摘要供人工 Review。
+
 ### 6.3 匹配引擎
 
 #### `load_weights()` — [matching/weights.py](../../backend/app/services/matching/weights.py)
@@ -495,6 +501,9 @@ PageRank 技能重要性：幂迭代（阻尼 0.85），无向共现边按双有
 #### `louvain(graph, resolution=1.0)` — [graph_algorithms/louvain.py](../../backend/app/services/graph_algorithms/louvain.py)
 Louvain 技能簇：两阶段模块度优化（节点移动 ΔQ 最大化 → 社区聚合迭代）。**γ 分辨率参数化（阶段一）**：增益 `ΔQ = k_in/m − γ·(Σ_tot·k_i)/(2m²)`；γ>1 细簇 / γ<1 粗簇 / 1.0 等价标准 Louvain（默认向后兼容）。
 
+#### `guard_community_distribution(levels, best_level)` — [graph_algorithms/louvain.py](../../backend/app/services/graph_algorithms/louvain.py)
+社区层级写库前门禁（2026-08-13 新增，P1）：best_level 层社区数 <3（分辨率过低全并一簇）或最大占比 >50%（单簇吞并）→ `ValueError` 拒绝重建。`sync_communities.py` 在清库前调用（先验证再破坏）。**08-13 实测拦截 Optuna 参数退化**（mw=2.325 应用到全量图仅剩 75/1245 节点，社区分布退化）；阈值与 Optuna 退化罚口径一致（graph_algo_tune.py objective）。
+
 #### `homogeneity(graph, partition)` — [graph_algorithms/louvain.py](../../backend/app/services/graph_algorithms/louvain.py)
 加权簇内同质性：Σ_c 簇内边权重 / Σ_c (簇内+簇间) 边权重，值域 [0,1]。Optuna objective 0.3 权重项。
 
@@ -505,7 +514,9 @@ Louvain 技能簇：两阶段模块度优化（节点移动 ΔQ 最大化 → �
 阶段二 Leiden 条件替换：同签名（igraph 1.0 + leidenalg 0.12，RBConfigurationVertexPartition + resolution_parameter，seed=0 确定性），输出与 louvain 同格式（reindex 0..k-1）。**2026-08-12 验收未达标**（同质性 +0.21 领先但 Q −0.037 落后，两项需同时达标），默认 `algorithm=louvain` 不切换；configs 一行切换 + API 依赖缺失自动回退 louvain。
 
 #### 参数调优 — [scripts/graph_algo_tune.py](../../backend/scripts/graph_algo_tune.py)
-图算法阶段一 Optuna 扫描：γ∈[0.5,2.0] × min_weight∈[1.0,3.0]，objective = 0.5·Q + 0.3·同质性 + 0.2·(1−过小簇占比)。Q 用标准模块度评分（γ 只生成划分），**退化解（簇数 ≤2 或最大簇占比 >0.5）罚 0**（2026-08-12 实跑修复 γ<1 单簇退化最优）。2026-08-12 真实快照（386 节点/3901 边）50 trial 最优 γ=1.256 / min_weight=2.502（同质性 0.37→0.56，详见 [图算法参数评估报告.md](./图算法参数评估报告.md)）。模式：--export（Neo4j 快照导出）/ --snapshot（固定数据集扫描）/ --dry-run（当前配置指标）/ --apply（写回 configs）/ **--compare（阶段二 Leiden 验收对比）**/ **--algorithm {louvain,leiden}（Leiden 专属调优——参数不可互通，须自身空间扫描）**。
+图算法阶段一 Optuna 扫描：γ∈[0.5,2.0] × min_weight∈[1.0,3.0]，objective = 0.5·Q + 0.3·同质性 + 0.2·(1−过小簇占比)。Q 用标准模块度评分（γ 只生成划分），**退化解（簇数 ≤2 或最大簇占比 >0.5）罚 0**（2026-08-12 实跑修复 γ<1 单簇退化最优）。2026-08-12 真实快照（386 节点/3901 边）50 trial 最优 γ=1.256 / min_weight=2.502（同质性 0.37→0.56，详见 [图算法评估与链路审查综合报告.md](./图算法评估与链路审查综合报告.md)）。模式：--export（Neo4j 快照导出）/ --snapshot（固定数据集扫描）/ --dry-run（当前配置指标）/ --apply（写回 configs）/ **--compare（阶段二 Leiden 验收对比）**/ **--algorithm {louvain,leiden}（Leiden 专属调优——参数不可互通，须自身空间扫描）**。
+
+**调参口径警示（2026-08-13 实测）**：`--export` 快照按**当前配置的 min_weight** 过滤导出（351 节点），与全量图（1245 节点）口径不一致——快照上调出的 min_weight 应用到全量图会二次过滤过度（mw=2.325 只剩 75 节点）。**自动调参链（wait_etl_then_tune.py）已在 apply 后增加全量图门禁验证，失败自动回滚旧参数**；手动调参须在 apply 前用 `guard_community_distribution` 验证全量图。
 
 #### `shortest_path(session, from_skill, to_skill)` — [graph_algorithms/shortest_path.py](../../backend/app/services/graph_algorithms/shortest_path.py)
 Neo4j 核心 `shortestPath`（深度 ≤6，沿「岗位共现 + REQUIRES」边，可经 Position 节点），失败返回 None。
