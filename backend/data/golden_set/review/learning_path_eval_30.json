@@ -1,16 +1,16 @@
 {
  "summary": {
   "case_count": 30,
-  "reasonable_count": 10,
-  "reasonable_ratio": 0.3333,
+  "reasonable_count": 12,
+  "reasonable_ratio": 0.4,
   "target_ratio": 0.8,
   "target_met": false,
   "avg_dims": {
    "completeness": 1.0,
-   "prerequisite": 0.587,
+   "prerequisite": 0.613,
    "course": 0.771,
    "hours": 0.692,
-   "mean": 0.762
+   "mean": 0.769
   },
   "note": "预评分（规则化 AI 评审），专家复核后重跑 --re-score 定稿"
  },
@@ -719,9 +719,11 @@
     },
     {
      "skill": "RESTful API",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础"
+     ],
      "courses": [],
-     "estimated_hours": 55.0,
+     "estimated_hours": 95.0,
      "priority": "medium"
     },
     {
@@ -740,20 +742,27 @@
     },
     {
      "skill": "提示工程",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "大语言模型"
+     ],
      "courses": [],
-     "estimated_hours": 70.0,
+     "estimated_hours": 370.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.6,
+    "prerequisite": 0.8,
     "course": 0.44,
     "hours": 1.0,
-    "mean": 0.76
+    "mean": 0.81
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_12",
@@ -877,18 +886,20 @@
     },
     {
      "skill": "RESTful API",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础"
+     ],
      "courses": [],
-     "estimated_hours": 55.0,
+     "estimated_hours": 95.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
+    "prerequisite": 0.8,
     "course": 0.44,
     "hours": 0.88,
-    "mean": 0.76
+    "mean": 0.78
    },
    "reasonable": false
   },
@@ -1174,13 +1185,15 @@
     },
     {
      "skill": "C",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础"
+     ],
      "courses": [
       "Programming in C@coursera(q=0.59)",
       "Programming with C@coursera(q=0.5783)",
       "小白玩转C语言@icourse163(q=0.5103)"
      ],
-     "estimated_hours": 55.0,
+     "estimated_hours": 95.0,
      "priority": "medium"
     },
     {
@@ -1211,10 +1224,10 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
+    "prerequisite": 0.8,
     "course": 0.86,
     "hours": 0.76,
-    "mean": 0.83
+    "mean": 0.85
    },
    "reasonable": true
   },
@@ -1256,13 +1269,19 @@
     },
     {
      "skill": "大语言模型",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习"
+     ],
      "courses": [
       "高级语言程序设计@icourse163(q=0.6052)",
       "高级语言程序设计@icourse163(q=0.5397)",
       "高级语言程序设计@icourse163(q=0.4567)"
      ],
-     "estimated_hours": 70.0,
+     "estimated_hours": 300.0,
      "priority": "medium"
     },
     {
@@ -1279,10 +1298,10 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
+    "prerequisite": 0.6,
     "course": 0.86,
     "hours": 0.52,
-    "mean": 0.72
+    "mean": 0.74
    },
    "reasonable": false
   },
@@ -1449,12 +1468,15 @@
     },
     {
      "skill": "MATLAB",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "线性代数"
+     ],
      "courses": [
       "实用大众线性代数(MATLAB版)@icourse163(q=0.57)",
       "科学计算与MATLAB语言@icourse163(q=0.5627)"
      ],
-     "estimated_hours": 55.0,
+     "estimated_hours": 135.0,
      "priority": "medium"
     },
     {
@@ -1471,10 +1493,10 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
+    "prerequisite": 0.6,
     "course": 0.58,
     "hours": 0.52,
-    "mean": 0.65
+    "mean": 0.68
    },
    "reasonable": false
   },
@@ -1857,13 +1879,16 @@
     },
     {
      "skill": "Oracle",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "SQL"
+     ],
      "courses": [
       "Oracle Java Foundations@coursera(q=0.593)",
       "Oracle Java Foundations@coursera(q=0.593)",
       "Introduction to SQL@edx(q=0.45)"
      ],
-     "estimated_hours": 55.0,
+     "estimated_hours": 150.0,
      "priority": "medium"
     },
     {
@@ -1892,10 +1917,10 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
+    "prerequisite": 0.6,
     "course": 0.58,
     "hours": 0.52,
-    "mean": 0.65
+    "mean": 0.68
    },
    "reasonable": false
   },
@@ -1908,13 +1933,19 @@
    "path_items": [
     {
      "skill": "数据建模",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "Python",
+      "统计学",
+      "数据分析"
+     ],
      "courses": [
       "SQL for Data Science@coursera(q=0.6681)",
       "SQL for Data Science@coursera(q=0.6681)",
       "Advanced Statistics for Data Science@coursera(q=0.6131)"
      ],
-     "estimated_hours": 70.0,
+     "estimated_hours": 295.0,
      "priority": "medium"
     },
     {
@@ -1962,12 +1993,12 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
+    "prerequisite": 0.6,
     "course": 1.0,
     "hours": 0.64,
-    "mean": 0.79
+    "mean": 0.81
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_30",
