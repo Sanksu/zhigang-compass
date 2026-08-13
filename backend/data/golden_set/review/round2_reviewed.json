@@ -1,0 +1,186 @@
+{
+  "description": "盲审 round2 复核修订（2026-08-13，AI 逐条精读正文独立判定）",
+  "rationale": "gold 口径对齐 round1：title 按招聘标题主体（去括号修饰、大小写规范；round1 先例『大模型算法工程师→算法工程师』保持一致性；细分算法岗保留细分名——round1 无归并先例，最小干预）；skills 收录必备技能（语言/框架/工具/领域能力，粒度对齐 round1），『优先/加分』条款入 bonus；experience 为 JD 明文年限，未声明留空；education 为 JD 明文学历，未声明留空；core_duties 为职责要点短语。修订独立于抽取器草稿，待张恺天终审（annotator 暂标 AI）。",
+  "samples": {
+    "r2_001": {
+      "review_gold_title": "前端开发工程师",
+      "review_gold_skills": "[\"HTML5\",\"CSS3\",\"JavaScript\",\"Vue\",\"React Native\",\"Vue Router\",\"Pinia\",\"Vuex\",\"Axios\",\"Vite\",\"Webpack\",\"Git\",\"ESLint\",\"Prettier\",\"RESTful API\",\"Flex\",\"Grid\",\"Android开发\",\"iOS开发\"]",
+      "review_gold_bonus_skills": "[\"微信小程序开发\",\"Uni-app\",\"Taro\",\"数据可视化\",\"Jest\",\"微前端\",\"PWA\",\"Web性能优化\",\"Web安全\"]",
+      "review_gold_experience": "",
+      "review_gold_education": "",
+      "review_gold_core_duties": "[\"Web/H5/微信小程序开发与多端适配\",\"前端性能优化与兼容性排查\",\"组件封装与代码规范制定\",\"安卓/iOS 打包与上架\"]",
+      "review_note": "title 与草稿一致；skills 草稿 32→19（DOM/BOM/AJAX 等 JS 子能力不单列，对齐 round1 粒度）；无学历/年限条款"
+    },
+    "r2_002": {
+      "review_gold_title": "后端开发工程师",
+      "review_gold_skills": "[\"Golang\",\"Python\",\"Linux\",\"Docker\",\"PostgreSQL\",\"MongoDB\",\"Redis\",\"微服务\"]",
+      "review_gold_bonus_skills": "[\"AI工具\"]",
+      "review_gold_experience": "{\"min_years\":3,\"max_years\":5}",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"业务后端开发与微服务架构设计\",\"大数据中间件产品研发\",\"技术文档编写与系统优化\"]",
+      "review_note": "草稿 skills 9→8（AI 工具属『附加项』移 bonus）；数据结构与算法为通用基础不单列；3-5 年经验"
+    },
+    "r2_003": {
+      "review_gold_title": "算法工程师",
+      "review_gold_skills": "[\"Python\",\"FastAPI\",\"LangChain\",\"LlamaIndex\",\"RAG\",\"Agent\",\"Transformer\",\"Qwen\",\"DeepSeek\",\"GLM\",\"Milvus\",\"Chroma\",\"Elasticsearch\",\"Redis\",\"Kafka\",\"PyTorch\",\"vLLM\",\"TGI\",\"模型量化\",\"Docker\",\"Kubernetes\"]",
+      "review_gold_bonus_skills": "[\"昇腾CANN\",\"MindIE\",\"VLM\",\"OCR\",\"CUDA\",\"Triton\"]",
+      "review_gold_experience": "{\"min_years\":3,\"max_years\":null}",
+      "review_gold_education": "",
+      "review_gold_core_duties": "[\"RAG 链路全流程开发\",\"Agent 架构设计与 Prompt 范式\",\"FastAPI 高并发接口开发\",\"模型量化与推理加速部署\"]",
+      "review_note": "⚠️ title 按 round1 先例归并（public_007/008 大模型算法工程师→算法工程师）；skills 21 项；无学历条款（仅年限）；3 年+"
+    },
+    "r2_004": {
+      "review_gold_title": "数字后端工程师",
+      "review_gold_skills": "[\"布局布线\",\"时序分析\",\"物理验证\",\"电源分析\",\"Perl\",\"TCL\",\"Cadence\",\"Innovus\",\"ICC2\",\"数字后端设计\"]",
+      "review_gold_bonus_skills": "[\"DDR设计\",\"PCIE设计\",\"PHY设计\"]",
+      "review_gold_experience": "{\"min_years\":7,\"max_years\":null}",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"顶层/块级物理设计（网表到 GDS）\",\"时序收敛与物理验证\",\"设计流程优化与客户技术沟通\"]",
+      "review_note": "⚠️ title 修正：草稿『物理设计工程师』为职责描述，按标题为数字后端工程师；中英双语正文（中文为主）；7 年+；本科（机电工程硕士亦可）"
+    },
+    "r2_005": {
+      "review_gold_title": "图像算法工程师",
+      "review_gold_skills": "[\"目标检测\",\"目标跟踪\",\"图像分割\",\"特征提取\",\"图像增强\",\"障碍物识别\",\"YOLO\",\"ByteTrack\",\"DeepSORT\",\"OpenCV\",\"PyTorch\",\"ONNX\",\"TensorRT\",\"NCNN\",\"模型量化\",\"Python\",\"C/C++\"]",
+      "review_gold_bonus_skills": "[\"SLAM\",\"视觉定位\",\"语义分割\"]",
+      "review_gold_experience": "{\"min_years\":2,\"max_years\":4}",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"无人机场景图像识别算法研发与落地\",\"算法实时性与鲁棒性优化\",\"嵌入式平台部署与性能优化\",\"算法测试平台搭建\"]",
+      "review_note": "title 保留细分（round1 无归并先例）；模型剪枝并入量化；2-4 年 CV 经验；本科"
+    },
+    "r2_006": {
+      "review_gold_title": "Java开发工程师",
+      "review_gold_skills": "[\"Java\",\"Spring Boot\",\"Spring Cloud\",\"HTML\",\"CSS\",\"JavaScript\",\"Vue\",\"React\",\"Element UI\",\"MySQL\",\"SQL\"]",
+      "review_gold_bonus_skills": "[\"Redis\",\"消息队列\",\"MES\",\"WMS\",\"ERP\",\"OPC UA\",\"Modbus\"]",
+      "review_gold_experience": "{\"min_years\":3,\"max_years\":5}",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"制造业数字化软件（MES/WMS）后端开发与前端实现\",\"Java 接口开发与第三方系统数据集成\",\"单元测试与性能优化\"]",
+      "review_note": "⚠️ title 修正：草稿『全栈开发工程师』——职责含前端但岗位为 Java 开发，按标题 Java开发工程师；Redis/MQ『了解优先』入 bonus；3-5 年"
+    },
+    "r2_007": {
+      "review_gold_title": "数据分析工程师",
+      "review_gold_skills": "[\"Excel\",\"PPT\",\"SQL\",\"Python\",\"Pandas\",\"Numpy\",\"数据可视化\",\"数据分析\",\"数据建模\",\"数据清洗\",\"数仓建模\"]",
+      "review_gold_bonus_skills": "[\"BI\",\"数据挖掘\",\"指标体系\"]",
+      "review_gold_experience": "",
+      "review_gold_education": "",
+      "review_gold_core_duties": "[\"数据需求调研与管理\",\"数据质量监控与治理\",\"业务数据分析与洞察报告\",\"数仓建模与报表指标体系\"]",
+      "review_note": "⚠️ title：保留『数据分析工程师』（round1 数据分析师为另一岗位，未归一）；无学历/年限条款（实习优先非年限）"
+    },
+    "r2_008": {
+      "review_gold_title": "大模型应用开发工程师",
+      "review_gold_skills": "[\"大模型\",\"RAG\",\"NLP\",\"OCR\",\"OpenAI API\",\"LangChain\",\"LlamaIndex\",\"Milvus\",\"PGVector\",\"PyTorch\",\"TensorFlow\",\"LoRA\",\"QLoRA\",\"Python\",\"FastAPI\",\"Docker\",\"MySQL\",\"Redis\",\"Agent\",\"Prompt工程\",\"向量检索\"]",
+      "review_gold_bonus_skills": "[\"模型量化\",\"显存优化\",\"SFT微调\",\"医药行业大模型\"]",
+      "review_gold_experience": "{\"min_years\":5,\"max_years\":null}",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"大模型文档智能应用开发与落地\",\"RAG 知识库与私有化部署\",\"模型服务中台建设\",\"Prompt 优化与轻量化微调\"]",
+      "review_note": "title 与草稿一致；模型实例名（Qwen/DeepSeek/Llama/文心/通义）并入『大模型』不单列；5 年+；本科（硕士加分）"
+    },
+    "r2_009": {
+      "review_gold_title": "大模型测试工程师",
+      "review_gold_skills": "[\"软件测试\",\"自动化测试\",\"Python\",\"Java\",\"大模型\"]",
+      "review_gold_bonus_skills": "[\"Transformer\",\"Prompt工程\",\"LLM测试\"]",
+      "review_gold_experience": "",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"大模型全生命周期测试策略制定\",\"专项测试用例设计与缺陷定位\",\"自动化测试框架构建\",\"测试数据分析与质量改进\"]",
+      "review_note": "⚠️ Transformer/Prompt/LLM 测试为『优先』条款→bonus（草稿误入 skills）；无年限；本科"
+    },
+    "r2_010": {
+      "review_gold_title": "机器人算法工程师",
+      "review_gold_skills": "[\"运动控制\",\"轨迹规划\",\"路径规划\",\"力控\",\"阻抗控制\",\"导纳控制\",\"机器人运动学\",\"机器人动力学\",\"C/C++\",\"Python\",\"Linux\",\"ROS\"]",
+      "review_gold_bonus_skills": "[\"TwinCAT\",\"EtherCAT\",\"医疗机器人\",\"协作机器人\",\"手术机器人\"]",
+      "review_gold_experience": "",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"多关节机器人运控/力控架构与算法开发\",\"运动/轨迹/路径规划算法\",\"力位混合与阻抗导纳控制\",\"仿真与实机测试\"]",
+      "review_note": "⚠️ title 修正：草稿『机器人控制算法工程师』按标题为机器人算法工程师；X86/ARM 硬件平台不单列；无年限"
+    },
+    "r2_011": {
+      "review_gold_title": "SLAM算法工程师",
+      "review_gold_skills": "[\"SLAM\",\"C++\",\"Python\",\"Linux\",\"ROS\",\"MAVROS\",\"Navigation2\",\"PCL\",\"OpenCV\",\"多传感器融合\",\"卡尔曼滤波\",\"路径规划\",\"运动控制\",\"Jetson\",\"PX4\",\"激光雷达\"]",
+      "review_gold_bonus_skills": "[]",
+      "review_gold_experience": "",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"ROS 系统架构与 SLAM 功能包开发\",\"激光雷达+IMU 融合建图与定位\",\"路径规划与动态避障\",\"MAVROS 飞控对接与嵌入式部署\"]",
+      "review_note": "⚠️ title 修正：草稿『机器人系统工程师』过泛，按标题为 SLAM算法工程师；A*/RRT* 并入路径规划；无年限"
+    },
+    "r2_012": {
+      "review_gold_title": "计算机视觉算法工程师",
+      "review_gold_skills": "[\"Python\",\"C/C++\",\"Java\",\"OpenCV\",\"图像分类\",\"目标检测\",\"图像分割\",\"CNN\",\"Transformer\",\"CLIP\",\"SAM\",\"大语言模型\",\"扩散模型\",\"GAN\",\"模型轻量化\"]",
+      "review_gold_bonus_skills": "[]",
+      "review_gold_experience": "{\"min_years\":3,\"max_years\":null}",
+      "review_gold_education": "",
+      "review_gold_core_duties": "[\"计算机视觉智能模型选型与训练调优\",\"模型轻量化与部署\",\"运行数据收集与模型迭代\"]",
+      "review_note": "⚠️ title 修正：草稿少『算法』二字，按标题保留；无学历条款（仅专业要求）；3 年+"
+    },
+    "r2_013": {
+      "review_gold_title": "摄影测量高级算法工程师",
+      "review_gold_skills": "[\"多视几何\",\"摄影测量\",\"三维重建\",\"SFM\",\"密集匹配\",\"光束平差\",\"特征提取与匹配\",\"畸变校正\",\"多传感器融合\",\"相机标定\",\"LiDAR\",\"C++\",\"Python\",\"OpenCV\",\"OpenMVS\",\"GPU加速\",\"PyTorch\",\"CNN\",\"Transformer\"]",
+      "review_gold_bonus_skills": "[]",
+      "review_gold_experience": "",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"多视几何与摄影测量算法实现\",\"多传感器融合与联合标定\",\"AI 与传统方法结合优化处理流程\"]",
+      "review_note": "⚠️ title 修正：草稿『机器视觉算法工程师』按标题为摄影测量高级算法工程师（级别保留）；SIFT/SURF/ORB 并入特征提取与匹配；无年限；本科（硕士优先）"
+    },
+    "r2_014": {
+      "review_gold_title": "React前端开发工程师",
+      "review_gold_skills": "[\"React\",\"HTML5\",\"CSS3\",\"JavaScript\",\"Webpack\",\"Babel\",\"前端性能优化\"]",
+      "review_gold_bonus_skills": "[]",
+      "review_gold_experience": "{\"min_years\":3,\"max_years\":null}",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"React 前端开发与跨平台适配\",\"性能与体验优化\",\"前后端接口对接与代码维护\"]",
+      "review_note": "⚠️ title 修正：草稿丢『React』前缀，按标题保留；3 年+；本科"
+    },
+    "r2_015": {
+      "review_gold_title": "高级前端工程师",
+      "review_gold_skills": "[\"Android开发\",\"Vue\",\"uni-app\",\"HTML5\",\"CSS3\",\"JavaScript\"]",
+      "review_gold_bonus_skills": "[\"iOS开发\",\"微信小程序开发\",\"混合开发\",\"UI设计\"]",
+      "review_gold_experience": "",
+      "review_gold_education": "",
+      "review_gold_core_duties": "[\"移动端与 Web 前端开发维护\",\"前端架构设计与组件化开发\",\"页面实现与接口联调\"]",
+      "review_note": "⚠️ title：草稿去『高级』，按标题保留级别；skills 6 项；无学历/年限条款"
+    },
+    "r2_016": {
+      "review_gold_title": "全栈开发工程师",
+      "review_gold_skills": "[\"JavaScript\",\"Java\",\"Vue\",\"Spring Boot\",\"Spring Cloud\",\"MySQL\",\"PostgreSQL\",\"Redis\",\"MongoDB\",\"RabbitMQ\",\"Kafka\",\"RocketMQ\",\"Maven\",\"Gradle\",\"Git\",\"Linux\",\"SQL\"]",
+      "review_gold_bonus_skills": "[\"Dubbo\",\"gRPC\",\"微服务\",\"Docker\",\"Kubernetes\",\"分布式事务\",\"分库分表\",\"阿里云\",\"腾讯云\",\"AWS\"]",
+      "review_gold_experience": "{\"min_years\":1,\"max_years\":null}",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"核心产品需求分析与系统设计\",\"全栈编码实现与模块测试\",\"系统架构讨论与性能优化\"]",
+      "review_note": "title 与草稿一致；skills 17 项；1 年+；本科"
+    },
+    "r2_017": {
+      "review_gold_title": "AI全栈工程师",
+      "review_gold_skills": "[\"LLM\",\"VLM\",\"客户端开发\",\"RAG\",\"Agent\",\"知识库构建\",\"Python\",\"Java\",\"Go\",\"CI/CD\",\"UI设计\",\"Figma\"]",
+      "review_gold_bonus_skills": "[]",
+      "review_gold_experience": "",
+      "review_gold_education": "",
+      "review_gold_core_duties": "[\"AI 智能体客户端开发与端侧 LLM/VLM 落地\",\"客户端 CI/CD 与稳定性治理\",\"UI/UX 设计实现\",\"RAG/Agent 后端工程化\"]",
+      "review_note": "⚠️ title 修正：草稿『客户端开发工程师』按标题为 AI全栈工程师（职责为客户端+UI+后端三方向）；正文无任职要求节，skills 按职责推导，学历/年限留空"
+    },
+    "r2_018": {
+      "review_gold_title": "Python工程师",
+      "review_gold_skills": "[\"Python\",\"高性能计算\",\"并行计算\",\"多线程\",\"并发编程\",\"异步编程\",\"MySQL\",\"PostgreSQL\",\"Git\"]",
+      "review_gold_bonus_skills": "[\"AWS\",\"GCP\",\"Azure\",\"Django\",\"Flask\",\"FastAPI\",\"单元测试\"]",
+      "review_gold_experience": "{\"min_years\":2,\"max_years\":null}",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"计算金融应用开发\",\"高性能并行计算优化\",\"金融模型与仿真集成\",\"API 与库实现\"]",
+      "review_note": "⚠️ title：草稿『计算金融软件工程师』为正文语义，按招聘标题为 Python工程师（英文 JD）；2 年+；本科/硕士"
+    },
+    "r2_019": {
+      "review_gold_title": "Java后端工程师",
+      "review_gold_skills": "[\"Java\",\"Spring Boot\",\"Dubbo\",\"Thrift\",\"Redis\",\"RabbitMQ\",\"Kafka\",\"RocketMQ\",\"达梦数据库\",\"SQL\",\"存储过程\",\"ORM\",\"RESTful API\"]",
+      "review_gold_bonus_skills": "[]",
+      "review_gold_experience": "{\"min_years\":1,\"max_years\":2}",
+      "review_gold_education": "本科",
+      "review_gold_core_duties": "[\"信息化产品后端开发与接口设计\",\"数据库设计与 SQL 优化\",\"接口联调与系统优化\"]",
+      "review_note": "⚠️ title：草稿加『开发』二字，按标题为 Java后端工程师（大小写规范）；1-2 年；本科；前端基础『优先』过泛不入 bonus"
+    },
+    "r2_020": {
+      "review_gold_title": "视觉算法工程师",
+      "review_gold_skills": "[\"目标检测\",\"目标跟踪\",\"图像分割\",\"人脸识别\",\"表情分析\",\"人体姿态估计\",\"OCR\",\"视频动作检测\",\"视频行为理解\",\"多模态大模型\",\"少样本学习\",\"度量学习\",\"迁移学习\",\"自监督学习\",\"OpenCV\",\"C/C++\",\"Python\",\"Linux\",\"ONNX\",\"RKNN\",\"模型量化\",\"嵌入式部署\"]",
+      "review_gold_bonus_skills": "[\"TensorRT\",\"NCNN\",\"MNN\",\"OpenVINO\",\"LLM\",\"VLM\",\"强化学习\",\"ISP\"]",
+      "review_gold_experience": "{\"min_years\":3,\"max_years\":null}",
+      "review_gold_education": "硕士",
+      "review_gold_core_duties": "[\"仿生机器人视觉算法研发\",\"多模态大模型算法设计与落地\",\"嵌入式部署与性能优化\",\"图像处理链路设计\"]",
+      "review_note": "⚠️ title：草稿『机器视觉算法工程师』，正文自述亦为机器视觉——按招聘标题为视觉算法工程师（终审可改）；22 项 skills；3 年+；硕士"
+    }
+  }
+}

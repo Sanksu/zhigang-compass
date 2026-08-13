@@ -9,7 +9,7 @@
 - 工作簿：`data\golden_set\review\jd_manual_review_round2.xlsx`
 - `Round1盲标` 数据行数：20/12
 - 非空正文：20/12；可追溯 URL：20/12
-- annotator：''；要求为 12 条非空且一致
+- annotator：'AI'；要求为 12 条非空且一致
 - 全字段格式合格且可纳入真实评测的行数：20/12
 - total_samples = 20
 - real_llm_success_samples = 0；fallback_samples = 0；failed_samples = 0（未进入逐条抽取）

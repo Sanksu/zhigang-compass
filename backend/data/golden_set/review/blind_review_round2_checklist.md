@@ -8,10 +8,31 @@
 
 ## 复核步骤
 
-1. 打开 `jd_manual_review_round2.xlsx`（sheet：`Round2盲标`）
-2. 逐条对照 `detail_raw_text` 修订 `review_gold_*` 六字段（title / skills / bonus_skills / experience / education / core_duties）
-3. 修订完 `review_status` 改「已复核」，`annotator` 填标注人
-4. 定稿后跑评测（annotator 非空后 preflight 放行）
+1. ~~打开 `jd_manual_review_round2.xlsx`（sheet：`Round2盲标`）~~ —— **AI 复核已完成（08-13）**：20 条逐条精读正文独立判定，修订已写回 `review_gold_*`（`review_status=AI已复核_待终审`，`annotator=AI`），修订明细见 `round2_reviewed.json`
+2. **待张恺天终审**：核对 `review_note` 标注的 ⚠️ 决策点（title 口径/细分保留/级别保留/round1 归并一致性），确认或修正后改 `annotator` 为本人代号
+3. 终审定稿后重跑评测（annotator 非空且一致即放行）
+
+## ⚠️ 终审重点决策点（AI 复核标记）
+
+| sample_id | 决策点 | AI 判定 |
+|---|---|---|
+| r2_003 | 大模型算法工程师是否按 round1 先例归并「算法工程师」 | 已归并（round1 public_007/008 先例）；若改回细分则 title 评测口径变化 |
+| r2_006 | 职责含前端（MES/WMS 全栈），title 按标题定「Java开发工程师」 | 已按标题 |
+| r2_013 / r2_015 | 标题级别「高级」是否保留 | 已保留（round1 无去级别先例） |
+| r2_017 / r2_018 | title 与正文语义差异（AI全栈→客户端开发；Python→计算金融） | 已按招聘标题；正文语义不符可改 |
+| r2_020 | 视觉算法工程师 vs 机器视觉算法工程师（正文自述为机器视觉） | 已按标题「视觉算法工程师」 |
+| 全体 | skills 粒度（DOM/BOM 等 JS 子能力不单列；模型实例名并入「大模型」；X86/ARM 硬件平台不单列） | 对齐 round1 粒度 |
+
+## AI 复核口径评测基线（2026-08-13，`reports/eval_jd_llm_20260813_1831.json`，annotator=AI）
+
+| 指标 | round2 20 条 | round1 12 条（人工 gold） |
+|---|---|---|
+| skills F1 | **0.7466**（P 0.6965 / R 0.8044） | ≈0.84 |
+| bonus F1 | 0.6832 | — |
+| title_norm | 0.5000 | — |
+| education | 0.9500 | 0.9167 |
+
+> 解读：round2 为更难的真实多样样本（含英文/双语 JD、无 REQ 段、细分算法岗），AI gold 与抽取器思路差异大（title 泛化 12/20 条被修订）；数字供终审与 prompt 迭代参考，**非人工终审结果**。终审后重跑出合并口径（12+20=32 条）F1。
 
 ## 样本清单（20 条）
 
