@@ -32,6 +32,13 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    （"全栈工程师"、"大模型评测工程师"），括号内为技能/方向列表，不得并入岗位名。
    **岗位名必须是岗位语义词**：不得取自产品名/公司名/人名（如 "Odoo"、"Gemini"），
    也不得输出空字符串——正文存在岗位标题时必须输出岗位名。
+   **标题优先**：岗位名以招聘标题（首行标题/"岗位名称：xxx"/输入标题）为准，
+   正文职责或高频技术栈不得改写标题岗位名——标题"Python工程师"而正文是量化金融
+   仍输出"Python工程师"；标题"python开发工程师"而正文高频 Odoo 仍输出
+   "Python开发工程师"（Odoo 是平台产品名，不得作岗位名）。
+   **技术栈前缀保留**：标题中的技术栈前缀（React、Vue、Golang、SLAM、Java 等）
+   必须保留在岗位名中，不得删除或泛化——"React前端工程师"不得输出"前端开发工程师"；
+   标题无前缀的泛化岗位（"前端工程师"）保持泛化。
 2. 技能（skills）：仅列出**必备**技术技能（如"Python"、"Java"、"数据分析"）。
    **技能名使用标准简短名称**：不要加"系统/维护/开发/技术"等冗余后缀
    （"Windows系统维护"→"Windows"、"Python开发"→"Python"、"Linux运维"→"Linux"），
@@ -145,6 +152,12 @@ JD 文本：招聘资深数据平台工程师，负责搭建实时数仓与离�
 示例 10（优先/加分条件正确示范——加分技能不进 skills）：
 JD 文本：招聘数据分析师，精通 SQL 与 Python，熟悉 Tableau、Power BI 者优先，具备统计学基础，本科及以上学历，有电商行业经验更佳
 输出：{{"position_name": "数据分析师", "skills": [{{"name": "SQL"}}, {{"name": "Python"}}, {{"name": "统计学"}}], "tools": [], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "SQL", "necessity": "must", "level": "高级"}}, {{"skill_name": "Python", "necessity": "must", "level": "高级"}}, {{"skill_name": "统计学", "necessity": "must"}}, {{"skill_name": "Tableau", "necessity": "nice"}}, {{"skill_name": "Power BI", "necessity": "nice"}}]}}
+
+示例 11（标题优先——正文技术栈/职责不得改写标题岗位名）：
+JD 文本：岗位名称：python开发工程师
+岗位职责：设计和开发基于Odoo的应用程序，参与Odoo平台的定制开发与系统集成。
+任职要求：具备扎实的Python开发能力，熟悉Odoo平台的开发环境。
+输出：{{"position_name": "Python开发工程师", "skills": [{{"name": "Python"}}, {{"name": "Odoo"}}], "requirements": [{{"skill_name": "Python", "necessity": "must"}}, {{"skill_name": "Odoo", "necessity": "must"}}]}}
 """
 
 BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输出 JSON 数组（每条 JD 对应一个对象，数组第 i 个元素对应"JD文本 i"）。
@@ -172,6 +185,13 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    （"全栈工程师"、"大模型评测工程师"），括号内为技能/方向列表，不得并入岗位名。
    **岗位名必须是岗位语义词**：不得取自产品名/公司名/人名（如 "Odoo"、"Gemini"），
    也不得输出空字符串——正文存在岗位标题时必须输出岗位名。
+   **标题优先**：岗位名以招聘标题（首行标题/"岗位名称：xxx"/输入标题）为准，
+   正文职责或高频技术栈不得改写标题岗位名——标题"Python工程师"而正文是量化金融
+   仍输出"Python工程师"；标题"python开发工程师"而正文高频 Odoo 仍输出
+   "Python开发工程师"（Odoo 是平台产品名，不得作岗位名）。
+   **技术栈前缀保留**：标题中的技术栈前缀（React、Vue、Golang、SLAM、Java 等）
+   必须保留在岗位名中，不得删除或泛化——"React前端工程师"不得输出"前端开发工程师"；
+   标题无前缀的泛化岗位（"前端工程师"）保持泛化。
 2. 技能（skills）：仅列出**必备**技术技能（如"Python"、"Java"、"数据分析"）。
    **技能名使用标准简短名称**：不要加"系统/维护/开发/技术"等冗余后缀
    （"Windows系统维护"→"Windows"、"Python开发"→"Python"、"Linux运维"→"Linux"），

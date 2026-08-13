@@ -93,7 +93,10 @@ def _load_round1_blind_rows(path: Path, sheet_name: str) -> list[dict[str, str]]
                 elif kind == "s" and value:
                     result[col] = shared[int(value)]
                 elif kind == "inlineStr":
-                    result[col] = "".join(cell.find("m:is", NS).itertext())  # type: ignore[union-attr]
+                    # openpyxl 对空串写 <c t="inlineStr"/> 无 m:is 子元素，
+                    # 按空单元格处理（round1 Artifact-tool 产物为无 t 空单元格）
+                    is_el = cell.find("m:is", NS)
+                    result[col] = "".join(is_el.itertext()) if is_el is not None else ""
                 else:
                     result[col] = value
             rows.append(result)
@@ -165,7 +168,7 @@ def validate_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
         "rows_with_source_url": sum(bool(r.get("source_url", "").strip()) for r in rows),
         "fully_valid_rows": valid_rows,
         "issues": issues,
-        "ready_for_real_run": len(rows) == 12 and valid_rows == 12 and provenance_ok,
+        "ready_for_real_run": valid_rows == len(rows) and provenance_ok and len(rows) > 0,
     }
 
 
