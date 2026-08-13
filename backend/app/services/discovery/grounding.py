@@ -19,6 +19,7 @@ RAG 接地是"辅助确认"而非"硬门控"：未命中权威库/种子的 cand
 """
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -37,6 +38,16 @@ _MATCH_MIN_ALIAS_LEN = 3
 
 # Neo4j 全文查询（Lucene 语法）特殊字符：查询前剔除，避免语法异常
 _LUCENE_SPECIAL = frozenset('+-&|!(){}[]^"~*?:\\/')
+
+# ── 检索融合与缓存（2026-08-13 评审 P1-2 / P2）──
+# RRF 融合常数 k=60（业界默认）：跨源排序融合，消除语义余弦（0-1）与
+# 全文分（5-25）量纲差异——此前直接相加导致高分源垄断 top 排名。
+RRF_K = 60
+# Redis 检索缓存 TTL：occupations 三源仅脚本导入时变更（低频），6h 平衡
+# 新鲜度与命中率；Redis 不可用/异常静默降级（RAG 是增强，不阻塞检索）。
+_CACHE_TTL_SECONDS = 6 * 3600
+# 测试通过 monkeypatch 关闭（避免 fake db 用例命中真实缓存）
+_CACHE_ENABLED = True
 
 
 def _norm(text: str) -> str:
@@ -74,9 +85,12 @@ def _normalize_hit(code, name, category, definition, aliases, pos, score, source
     """统一命中结构（语义/关键词两路同一 shape，供前端/定义草案消费）。
 
     score：语义路为余弦相似度，关键词路为全文分数或 name/别名命中分。
+    name_hit/alias_hits：子串包含（展示用）；exact_hit：岗位名与职业名/别名
+    完全一致（精确桥接，_merge_hits 置顶的依据）。
     """
     name_hit = pos in _norm(name)
     alias_hits = [a for a in (aliases or []) if pos in _norm(a)]
+    exact_hit = _norm(name) == pos or any(_norm(a) == pos for a in (aliases or []))
     return {
         "code": code,
         "name": name,
@@ -84,19 +98,62 @@ def _normalize_hit(code, name, category, definition, aliases, pos, score, source
         "definition": definition,
         "name_hit": name_hit,
         "alias_hits": alias_hits,
+        "exact_hit": exact_hit,
         "score": score,
         "source": source,
     }
 
 
 def _merge_hits(hits: list[dict], limit: int) -> list[dict]:
-    """按 code 合并去重（保留高分），按 score 降序，取前 limit 条。"""
-    best: dict[str, dict] = {}
-    for h in hits:
-        cur = best.get(h["code"])
-        if cur is None or h["score"] > cur["score"]:
-            best[h["code"]] = h
-    return sorted(best.values(), key=lambda h: h["score"], reverse=True)[:limit]
+    """按 code 合并去重，排序用跨源融合分（RRF + 精确命中置顶），取前 limit 条。
+
+    融合排序（08-13 评审 P1-2）：语义路余弦（0-1）与关键词路全文分（5-25）
+    量纲不同，直接相加会让高分源垄断；改用 RRF（Reciprocal Rank Fusion，
+    k=60）按各源内 rank 融合。精确命中（name/aliases 完整包含岗位名）置顶
+    ——cjk 全文分词下"工程技术人员"等泛词噪声分可达 20+，而别名精确匹配
+    （如"前端开发工程师"→ 前端开发工程技术人员 别名）无加权优势会被挤出；
+    置顶确保权威库别名桥接排前（JD 岗位名 → 大典职业）。
+
+    score 字段保留各源原始值（语义余弦/全文分），融合分仅用于排序——
+    消费方（诊断 RAG 的 _occupations）按 score 展示不受融合影响。
+    """
+    # 各源内按原始分降序取 rank（无 source 字段的按单源处理）
+    by_source: dict[str, list[tuple[int, dict]]] = {}
+    for i, h in enumerate(hits):
+        by_source.setdefault(h.get("source") or "unknown", []).append((i, h))
+    fused: dict[int, float] = {}
+    for items in by_source.values():
+        items.sort(key=lambda p: p[1].get("score", 0.0), reverse=True)
+        for rank, (i, _) in enumerate(items, start=1):
+            fused[i] = fused.get(i, 0.0) + 1.0 / (RRF_K + rank)
+
+    def _is_exact(h: dict) -> bool:
+        """精确桥接判定：岗位名与职业名/别名**完全一致**才置顶。
+
+        不能用子串判定——"测试工程师"是"渗透测试工程师"（信息安全职业别名）
+        的子串，子串置顶会把两个不同职业同时抬到顶部，原始分高者胜出，
+        桥接失效（08-13 实测：测试工程师 → 信息安全工程技术人员 误判）。
+        """
+        return bool(h.get("exact_hit"))
+
+    ranked_idx = sorted(
+        range(len(hits)),
+        key=lambda i: (
+            0 if _is_exact(hits[i]) else 1,               # 精确命中置顶
+            -fused[i],                                     # 融合分降序
+            -float(hits[i].get("score", 0.0)),             # 同融合分保留原始高分
+        ),
+    )
+    # 按 code 去重（融合分高者排前，天然保留最优版本）
+    best: dict[str, int] = {}
+    out: list[dict] = []
+    for i in ranked_idx:
+        h = hits[i]
+        if h["code"] in best:
+            continue
+        best[h["code"]] = i
+        out.append(h)
+    return out[:limit]
 
 
 async def _pg_ilike(db: AsyncSession, pos: str, limit: int) -> list[dict]:
@@ -149,7 +206,9 @@ async def _neo4j_fulltext(neo4j, pos: str, limit: int) -> list[dict]:
         return []
     try:
         # 同步 Neo4j 查询放线程池，避免阻塞事件循环
-        rows = await asyncio.to_thread(_query_fulltext, neo4j, q, limit)
+        # 查询范围扩大（limit×3，至少 30）：cjk 分词下精确别名命中可能不在
+        # 全文高分前列，扩大候选集供 _merge_hits 的精确加权拣出
+        rows = await asyncio.to_thread(_query_fulltext, neo4j, q, max(limit * 3, 30))
     except Exception:
         # Neo4j 未同步/不可达：降级 ILIKE，不阻塞接地
         return []
@@ -164,10 +223,45 @@ async def _neo4j_fulltext(neo4j, pos: str, limit: int) -> list[dict]:
     ]
 
 
+async def _expand_fulltext_query(db: AsyncSession, pos: str) -> str:
+    """岗位名 → 规范职业名扩展（08-13 评审 P2 query 扩展）。
+
+    从 occupations 取 aliases 数组**精确等于**岗位名的职业（别名桥接），
+    规范名与岗位名 OR 组合——JD 岗位名（如"前端开发工程师"）与大典规范名
+    （如"计算机软件工程技术人员"）cjk 分词不同，扩展让全文路直接命中目标。
+    精确数组包含（JSONB @>）而非 ILIKE 部分匹配：避免"测试工程师"扩展出
+    "渗透测试工程师"（信息安全）等部分匹配职业放大检索噪声。
+    查询失败/无扩展返回岗位名本身（不放大检索面）。
+    """
+    from app.models.business import Occupation
+
+    try:
+        rows = (
+            await db.scalars(
+                select(Occupation.name)
+                .where(
+                    (Occupation.name == pos)
+                    | (Occupation.aliases.contains([pos]))
+                )
+                .limit(3)
+            )
+        ).all()
+        extras = [n for n in rows if _norm(n) != pos]
+        if not extras:
+            return pos
+        return " OR ".join([pos, *extras])
+    except Exception:
+        # 扩展查询失败回退岗位名本身（扩展是增强，失败不放大/不阻塞检索面）
+        return pos
+
+
 async def _keyword_search(neo4j, db: AsyncSession, pos: str, limit: int) -> list[dict]:
     """关键词路：Neo4j 全文优先，未命中/不可用时降级 PostgreSQL ILIKE。"""
     if neo4j is not None:
-        hits = await _neo4j_fulltext(neo4j, pos, limit)
+        # 规范职业名扩展（ILIKE 反向查）：扩大全文命中面，目标职业无需依赖
+        # 精确加权挤进 top 即可直接被命中
+        q = await _expand_fulltext_query(db, pos)
+        hits = await _neo4j_fulltext(neo4j, q, limit)
         if hits:
             return hits
     return await _pg_ilike(db, pos, limit)
@@ -178,6 +272,11 @@ async def _semantic_search(db: AsyncSession, pos: str, embedder, limit: int) -> 
 
     embedder 为 None（未注入）时跳过语义路；模型不可用抛
     SemanticUnavailableError，由调用方捕获降级为关键词路。
+
+    score 与排序同源（08-13 评审 P1-1）：直接取 1 - cosine_distance——
+    此前排序用完整文本向量（name 强调 + category + aliases + definition，
+    与 import_occupations._embed_text 一致）而 score 用 embedder.similarity
+    (职业名, 岗位名) 重新计算，两者不一致导致 _merge_hits 融合排名失真。
     """
     if embedder is None:
         return []
@@ -186,24 +285,57 @@ async def _semantic_search(db: AsyncSession, pos: str, embedder, limit: int) -> 
     # SBERT 推理放线程池（embed 同步，避免阻塞事件循环）
     qvec = await asyncio.to_thread(embedder.embed, pos)
     stmt = (
-        select(Occupation)
+        select(
+            Occupation,
+            (1 - Occupation.embedding.cosine_distance(qvec)).label("sim"),
+        )
         .order_by(Occupation.embedding.cosine_distance(qvec))
         .limit(limit)
     )
-    rows = (await db.scalars(stmt)).all()
-
-    # 逐行相似度计算放线程池（量小但仍是同步 SBERT encode）
-    names = [r.name for r in rows]
-    scores = await asyncio.to_thread(
-        lambda: [embedder.similarity(name, pos) for name in names]
-    )
+    rows = (await db.execute(stmt)).all()
     return [
         _normalize_hit(
             occ.code, occ.name, occ.category, occ.definition, occ.aliases,
-            pos, score, "semantic",
+            pos, float(sim), "semantic",
         )
-        for occ, score in zip(rows, scores)
+        for occ, sim in rows
     ]
+
+
+def _cache_key(pos: str, limit: int) -> str:
+    """检索缓存键：岗位名 + limit（不同 top-k 口径不互相污染）。"""
+    return f"occ_search:{pos}:{limit}"
+
+
+async def _cache_get(pos: str, limit: int) -> Optional[list[dict]]:
+    """读检索缓存；Redis 不可用/异常/无命中返回 None（RAG 是增强，不阻塞）。"""
+    if not _CACHE_ENABLED:
+        return None
+    try:
+        from app.core.database import redis_client
+
+        raw = await redis_client.get(_cache_key(pos, limit))
+        if not raw:
+            return None
+        hits = json.loads(raw)
+        return hits if isinstance(hits, list) else None
+    except Exception:
+        return None
+
+
+async def _cache_set(pos: str, limit: int, hits: list[dict]) -> None:
+    """写检索缓存（TTL 6h）；Redis 不可用静默跳过。"""
+    if not _CACHE_ENABLED or not hits:
+        return
+    try:
+        from app.core.database import redis_client
+
+        await redis_client.set(
+            _cache_key(pos, limit), json.dumps(hits, ensure_ascii=False),
+            ex=_CACHE_TTL_SECONDS,
+        )
+    except Exception:
+        pass
 
 
 async def search_authoritative(
@@ -213,6 +345,7 @@ async def search_authoritative(
     *,
     neo4j=None,
     embedder=None,
+    use_cache: bool = True,
 ) -> list[dict]:
     """在权威岗位库（occupations 三源：O*NET / 人社部大典 / LinkedIn）检索候选岗位。
 
@@ -229,6 +362,7 @@ async def search_authoritative(
         limit: 返回条数上限（默认 10，对齐设计文档 7.2.3 的 top-10 口径）
         neo4j: Neo4j 驱动（默认 None → 跳过全文路，仅 ILIKE 关键词路）
         embedder: SkillEmbedder（默认 None → 跳过语义路）
+        use_cache: Redis 检索缓存（默认开；评测脚本传 False 测真实检索质量）
 
     Returns:
         命中的 occupation dict 列表（code/name/category/definition/score）
@@ -239,6 +373,13 @@ async def search_authoritative(
     if len(pos) < _MATCH_MIN_ALIAS_LEN:
         return []
 
+    # Redis 检索缓存（评审 P2）：occupations 三源低频变更，命中直接返回
+    # （embedder 前向推理与 Neo4j 全文是最贵的两步，缓存整体跳过后延迟显著下降）
+    if use_cache:
+        cached = await _cache_get(pos, limit)
+        if cached is not None:
+            return cached
+
     semantic_hits = []
     try:
         semantic_hits = await _semantic_search(db, pos, embedder, limit)
@@ -246,7 +387,10 @@ async def search_authoritative(
         # 向量列缺失/扩展不可用/模型不可用 → 语义路降级为关键词路
         pass
     keyword_hits = await _keyword_search(neo4j, db, pos, limit)
-    return _merge_hits([*semantic_hits, *keyword_hits], limit)
+    merged = _merge_hits([*semantic_hits, *keyword_hits], limit)
+    if use_cache:
+        await _cache_set(pos, limit, merged)
+    return merged
 
 
 _DEFINITION_SYSTEM_PROMPT = """你是岗位定义专家。根据岗位名称与参考信息，\
