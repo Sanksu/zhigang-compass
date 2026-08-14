@@ -358,6 +358,10 @@ SKILL_STOPWORDS: set[str] = {
     "内存", "数学", "功能测试", "大模型测试", "安全性测试", "多模态测试",
     "测试理论", "模型推理", "模型调优", "预训练模型", "模型剪枝", "指标体系",
     "服务器", "办公设备", "光束平差法", "特征匹配",
+    # 08-14 迭代二轮：白名单基础词/上位泛词（gold 口径不收、LLM 高频误抽；
+    # 无 _POSITION_SKILL_ROUTING 路由依赖，is_noise_skill 已改为停用词优先）
+    "消息队列", "数据结构", "性能调优", "多线程", "缓存", "多模态",
+    "操作系统", "计算机网络", "性能测试", "数据库", "模型微调", "模型部署",
 }
 
 # 岗位名关键词 → 标准岗位名（合并同义重复岗位，设计文档 4.5 实体对齐的轻量实现）
@@ -1177,9 +1181,15 @@ def is_noise_skill(name: str) -> bool:
     白名单扩充候选挖掘。白名单词与别名标准名整体保护（如"嵌入式开发"不以
     "开发"后缀退化判噪），其余按泛词/岗位名/经验碎片规则判定。
     """
+    # SKILL_STOPWORDS 优先于白名单保护：显式停用词（含白名单基础词）一律判噪
+    # （08-14 盲审迭代：消息队列/数据结构 等上位泛词是 gold 口径不收的，
+    # LLM 高频误抽；路由依赖词如计算机视觉/图像处理/统计学保留白名单保护，
+    # 防破坏 _POSITION_SKILL_ROUTING 岗位聚合）
+    if name in SKILL_STOPWORDS:
+        return True
     if name in SKILL_WHITELIST or name in _ALIAS_STANDARDS:
         return False
-    if name in _GENERIC_NOISE or name in SKILL_STOPWORDS:
+    if name in _GENERIC_NOISE:
         return True
     if len(name) < 2 or name.isdigit():
         return True

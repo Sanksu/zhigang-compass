@@ -99,13 +99,14 @@ class TestStopwordInterception:
         assert out.skills == []
 
     def test_whitelist_word_never_intercepted(self):
-        # 白名单词与泛词同源（操作系统/系统），整体保护不误杀
+        # 08-14 迭代：SKILL_STOPWORDS 优先于白名单保护（is_noise_skill 顺序调整），
+        # 基础词"操作系统"停用后判噪过滤；路由依赖词（计算机视觉等）仍保护
         result = JDExtractionResult(
             position_name="",
-            skills=[SkillExtracted(name="操作系统")],
+            skills=[SkillExtracted(name="操作系统"), SkillExtracted(name="计算机视觉")],
         )
         out = post_process(result)
-        assert [s.name for s in out.skills] == ["操作系统"]
+        assert [s.name for s in out.skills] == ["计算机视觉"]
 
     def test_requirement_fragment_filtered(self):
         result = JDExtractionResult(
@@ -185,13 +186,14 @@ class TestSkillModifierCompoundWords:
         assert [s.name for s in out.skills] == ["Kubernetes"]
 
     def test_alias_key_not_stripped(self):
-        # "性能优化" 本身是别名键：先命中别名，不能被剥成碎片
+        # "性能优化" 命中别名归一为"性能调优"；后者 08-14 起停用（gold 口径
+        # 不收上位泛词），归一后判噪过滤——别名归一的正确性由 normalize 单测保证
         result = JDExtractionResult(
             position_name="",
             skills=[SkillExtracted(name="性能优化")],
         )
         out = post_process(result)
-        assert [s.name for s in out.skills] == ["性能调优"]
+        assert [s.name for s in out.skills] == []
 
     def test_whitelist_word_with_modifier_preserved(self):
         # 白名单词带修饰词（系统运维）整体保护，不剥离

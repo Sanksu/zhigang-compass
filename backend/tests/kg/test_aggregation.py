@@ -96,9 +96,10 @@ class TestPositionSkillsNormalization:
         assert _position_skills(ext) == [("React", "nice", "")]
 
     def test_whitelist_word_preserved(self):
-        # 白名单词整体保护，聚合不被剥成泛词碎片
+        # 08-14 迭代：基础词停用（操作系统 入 SKILL_STOPWORDS，is_noise 优先）——
+        # 抽取端过滤，聚合不再产生该技能
         ext = {"requirements": [{"skill_name": "操作系统", "necessity": "must", "level": None}]}
-        assert _position_skills(ext) == [("操作系统", "must", "")]
+        assert _position_skills(ext) == []
 
     def test_stopword_dropped(self):
         # 归一化后为空的旧泛词碎片（"系统"→""）不进聚合
