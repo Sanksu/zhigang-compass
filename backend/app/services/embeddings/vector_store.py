@@ -58,3 +58,17 @@ async def load_jd_vectors(db: AsyncSession) -> dict[str, list[float]]:
     except SQLAlchemyError as e:
         raise PgvectorUnavailableError(f"jd_embeddings 查询失败: {e}") from e
     return {r.payload.get("jd_id"): r.embedding for r in rows if r.payload.get("jd_id")}
+
+
+async def load_jd_vectors_by_ids(db: AsyncSession, jd_ids: list[str]) -> dict[str, list[float]]:
+    """按 jd_id 集合加载 jd_embeddings（08-14 审查：dedup 语义校验按需加载，
+    此前全量向量入内存；pairs 通常远少于全量记录数）。"""
+    if not jd_ids:
+        return {}
+    try:
+        rows = (await db.scalars(
+            select(JdEmbedding).where(JdEmbedding.jd_id.in_(jd_ids))
+        )).all()
+    except SQLAlchemyError as e:
+        raise PgvectorUnavailableError(f"jd_embeddings 查询失败: {e}") from e
+    return {r.jd_id: r.embedding for r in rows}

@@ -52,12 +52,15 @@ if _playwright_proxy:
     PLAYWRIGHT_LAUNCH_OPTIONS["proxy"] = {"server": _playwright_proxy}
 PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 60000  # 60s（SO/Coursera/edX 广告资源多，30s 易超时）
 
-# ── 中间件栈（UA 轮换 → 指数退避 → 代理池）──
+# ── 中间件栈（UA 轮换 → 代理池 → 指数退避）──
 # 重试由 Scrapy 内置 RetryMiddleware（RETRY_TIMES / RETRY_HTTP_CODES）负责；
-# BackoffRetryMiddleware 优先级高于 RetryMiddleware(550)，先拦截 429/403 做指数退避
+# BackoffRetryMiddleware 优先级高于 RetryMiddleware(550)，先拦截 429/403 做指数退避。
+# ProxyPoolMiddleware(570) 需在 BackoffRetry(560) 之前收到 429/403 响应（响应链
+# 从高序号到低序号）：BackoffRetry 对 429/403 返回 None 会中断响应链，此前
+# ProxyPool(410) 收不到状态码，死代理剔除滞后（08-14 审查修复）
 DOWNLOADER_MIDDLEWARES = {
     "crawlers.middlewares.UARotationMiddleware": 400,
-    "crawlers.middlewares.ProxyPoolMiddleware": 410,
+    "crawlers.middlewares.ProxyPoolMiddleware": 570,
     "crawlers.middlewares.BackoffRetryMiddleware": 560,
 }
 

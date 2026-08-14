@@ -523,7 +523,7 @@ function diffToItems(d: EvolutionDiff): {
   return {
     added: toItems(d.nodes_added, 'added', '节点新增'),
     removed: toItems(d.nodes_removed, 'removed', '节点删除'),
-    changed: toItems(d.nodes_changed, 'changed', '节点属性变化'),
+    changed: toItems(d.nodes_changed, 'changed', '两版本共有（交集节点）'),
   }
 }
 
@@ -660,13 +660,13 @@ function VersionDiffView() {
             <div className="grid grid-cols-3 gap-3 mb-4">
               <StatTile label="新增节点" count={visibleDiff.added.length} tone="emerging" />
               <StatTile label="删除节点" count={visibleDiff.removed.length} tone="declining" />
-              <StatTile label="变化节点" count={visibleDiff.changed.length} tone="stable" />
+              <StatTile label="共有节点" count={visibleDiff.changed.length} tone="stable" />
             </div>
             <Tabs defaultValue="added">
               <TabsList>
                 <TabsTrigger value="added" className="text-xs">新增 ({visibleDiff.added.length})</TabsTrigger>
                 <TabsTrigger value="removed" className="text-xs">删除 ({visibleDiff.removed.length})</TabsTrigger>
-                <TabsTrigger value="changed" className="text-xs">变化 ({visibleDiff.changed.length})</TabsTrigger>
+                <TabsTrigger value="changed" className="text-xs">共有 ({visibleDiff.changed.length})</TabsTrigger>
               </TabsList>
               <TabsContent value="added">
                 <DiffTable items={visibleDiff.added} />

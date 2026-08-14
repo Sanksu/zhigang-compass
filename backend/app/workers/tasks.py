@@ -703,7 +703,7 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     from app.core.database import async_session_factory
     from app.models.raw import JDRaw
     from app.services.data_quality.simhash import find_similar_pairs
-    from app.services.embeddings.vector_store import load_jd_vectors
+    from app.services.embeddings.vector_store import load_jd_vectors_by_ids
     from app.services.matching.semantic import cosine_similarity
 
     # JD 语义去重辅助阈值（§11.4.3 jd_embeddings Cosine）：低于该值不标记
@@ -727,8 +727,10 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
 
         pairs = find_similar_pairs(records)
 
-        # 语义辅助：SimHash 命中对用 jd_embeddings 向量校验（缺向量不拦截）
-        emb_map = await load_jd_vectors(session)
+        # 语义辅助：仅加载 pairs 涉及 jd 的向量（08-14 审查：此前全量加载
+        # jd_embeddings 入内存；pairs 通常远少于全量记录数）
+        pair_ids = sorted({i for p in pairs for i in p})
+        emb_map = await load_jd_vectors_by_ids(session, pair_ids)
         verified_pairs: list[tuple[str, str]] = []
         skipped_emb = 0
         for id_a, id_b in pairs:
