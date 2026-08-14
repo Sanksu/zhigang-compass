@@ -41,7 +41,8 @@ def _post_webhook(payload: str) -> bool:
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             resp.read()
-        logger.info("[alert] 已发送: %s", payload[:200])
+        logger.info("[alert] 已发送: event=%s len=%d（payload 不打日志防敏感字段泄露）",
+                    json.loads(payload).get("event"), len(payload))
         return True
     except Exception as e:  # noqa: BLE001 告警失败不影响主流程
         logger.error("[alert] 发送失败: %s", e)

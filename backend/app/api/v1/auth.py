@@ -1,5 +1,6 @@
 """认证路由：登录、刷新 Token、注册、登出、当前用户。"""
 
+import ipaddress
 import logging
 from typing import Optional
 
@@ -70,9 +71,15 @@ def _client_ip(request: Request) -> str:
     IP（离客户端最近）；开发/直连场景取 peer IP，避免未经验证的伪造头污染审计。
     """
     if settings.is_production:
+        # 与 middleware._client_ip 对齐（08-14）：逐候选校验合法 IP 才采用，
+        # 非法值回退 peer IP，防伪造 XFF 头污染审计 IP
         xff = request.headers.get("x-forwarded-for", "")
-        if xff:
-            return xff.split(",")[0].strip()
+        for candidate in (c.strip() for c in xff.split(",") if c.strip()):
+            try:
+                ipaddress.ip_address(candidate)
+            except ValueError:
+                continue
+            return candidate
     return request.client.host if request.client else ""
 
 

@@ -265,54 +265,53 @@ class LLMProviderChain:
 
     def __init__(self, config_path: Optional[Path] = None):
         self._config_path = config_path or _CONFIG_PATH
+        self._config = self._load_config()
         self._providers = self._load_providers()
         self._temperature = self._load_temperature()
         self._max_tokens = self._load_max_tokens()
         self._top_p = self._load_top_p()
 
-    def _load_providers(self) -> list[dict]:
-        """读取 yaml 并按 priority 升序返回 enabled provider。"""
+    def _load_config(self) -> dict:
+        """一次性读取 yaml（08-14 优化：原 4 个 _load_* 各自读文件，构造链读 4 次）。"""
         if not self._config_path.exists():
             raise LLMConfigurationError(f"LLM 配置缺失: {self._config_path}")
         try:
-            data = yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
+            return yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
         except yaml.YAMLError as e:
             raise LLMConfigurationError(f"LLM 配置解析失败: {e}") from e
+
+    def _load_providers(self) -> list[dict]:
+        """按 priority 升序返回 enabled provider（配置已由 _load_config 读取）。"""
         providers = [
-            p for p in data.get("providers", [])
+            p for p in self._config.get("providers", [])
             if isinstance(p, dict)
         ]
         enabled = [p for p in providers if p.get("enabled")]
         return sorted(enabled, key=lambda p: p.get("priority", 99))
 
     def _load_temperature(self) -> float:
-        """结构化输出温度（yaml `structured_output.temperature`，缺省 0.1）。"""
+        """结构化输出温度（yaml `structured_output.temperature`，缺省 0.1）。
+
+        配置值类型非法（如 "abc"）回落默认——配置缺省容忍，读取一次不重复
+        解析（08-14 优化）。
+        """
         try:
-            data = yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
-            return float(data.get("structured_output", {}).get("temperature", 0.1))
-        except (OSError, yaml.YAMLError, TypeError, ValueError):
+            return float(self._config.get("structured_output", {}).get("temperature", 0.1))
+        except (TypeError, ValueError):
             return 0.1
 
     def _load_max_tokens(self) -> int:
-        """结构化输出 max_tokens（yaml `structured_output.max_tokens`，缺省 2048）。
-
-        设计文档 §6.2：max_tokens = 2048（与 temperature 同源的读取模式）。
-        """
+        """结构化输出 max_tokens（yaml `structured_output.max_tokens`，缺省 2048）。"""
         try:
-            data = yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
-            return int(data.get("structured_output", {}).get("max_tokens", 2048))
-        except (OSError, yaml.YAMLError, TypeError, ValueError):
+            return int(self._config.get("structured_output", {}).get("max_tokens", 2048))
+        except (TypeError, ValueError):
             return 2048
 
     def _load_top_p(self) -> float:
-        """结构化输出 top_p（yaml `structured_output.top_p`，缺省 0.9）。
-
-        设计文档 §6.2：top_p = 0.9（与 temperature 同源的读取模式）。
-        """
+        """结构化输出 top_p（yaml `structured_output.top_p`，缺省 0.9）。"""
         try:
-            data = yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
-            return float(data.get("structured_output", {}).get("top_p", 0.9))
-        except (OSError, yaml.YAMLError, TypeError, ValueError):
+            return float(self._config.get("structured_output", {}).get("top_p", 0.9))
+        except (TypeError, ValueError):
             return 0.9
 
     # ---- 对外接口 ----

@@ -7,7 +7,16 @@ from redis.asyncio import Redis
 from app.core.config import settings
 
 # ---------- PostgreSQL (async) ----------
-engine = create_async_engine(settings.postgres_dsn, echo=settings.debug)
+# 连接池参数（08-14 审查加固）：pool_pre_ping 防依赖抖动时复用失效连接，
+# pool_size 默认 5 按 API 并发放大（100 并发 P95<2s 目标下的合理起步值）
+engine = create_async_engine(
+    settings.postgres_dsn,
+    echo=settings.debug,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=1800,
+)
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -20,6 +29,9 @@ async def get_db() -> AsyncSession:
 neo4j_driver = GraphDatabase.driver(
     settings.neo4j_uri,
     auth=(settings.neo4j_user, settings.neo4j_password),
+    connection_timeout=10,   # 08-14 审查加固：依赖抖动时快速失败而非无限等待
+    max_connection_lifetime=1800,
+    max_connection_pool_size=30,
 )
 
 
