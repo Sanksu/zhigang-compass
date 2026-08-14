@@ -137,11 +137,18 @@ class CourseraSpider(Spider):
             ".cds-ProductCard-partnerNames::text"
         ).get(default="").strip()
 
-        # 评分：新版 DOM 在 [data-testid="visually-hidden"] 内 "Rating, 4.6 out of 5 stars"
-        # 或在 aria-label="4.6 out of 5 stars" 上
+        # 评分（2026-08-14 实测改版：评分文本在 cds-RatingStat 内
+        # "4.6 out of 5 stars"，不再挂在 aria-label/visually-hidden 上）：
+        # 1) cds-RatingStat 文本（当前版）
+        # 2) [data-testid="visually-hidden"] 内 "Rating, 4.6 out of 5 stars"（旧版）
+        # 3) aria-label="4.6 out of 5 stars"（更旧版）
         rating_text = card.xpath(
-            './/*[@data-testid="visually-hidden" and contains(text(), "Rating")]/text()'
+            './/*[contains(@class, "RatingStat")]//text()[contains(., "out of 5 stars")]'
         ).get(default="")
+        if not rating_text:
+            rating_text = card.xpath(
+                './/*[@data-testid="visually-hidden" and contains(text(), "Rating")]/text()'
+            ).get(default="")
         if not rating_text:
             rating_text = card.xpath(
                 './/*/@aria-label[contains(., "out of 5 stars")]'
