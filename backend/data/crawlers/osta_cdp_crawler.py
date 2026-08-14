@@ -11,8 +11,9 @@
        （如出现验证码手动完成；页面出现职业目录即视为会话就绪）
     3. 运行本脚本（保持浏览器开启）：
        python -m crawlers.osta_cdp_crawler
-    脚本连接 CDP（9226）→ 拦截 career API 响应 → 输出 JSONL 到
-    data/crawlers/output/osta_occupations_{ts}.jsonl
+    脚本连接 CDP（9226）→ 拦截 career API 响应 → 递归 subordinate/data 补全
+    细类 → 逐个 career/detail 补全职业定义（--skip-detail 可跳过）→ 输出
+    JSONL 到 data/crawlers/output/osta_occupations_{ts}.jsonl
 
 输出字段：code / name / category / definition / aliases（分号分隔），
 对齐 import_occupations.py 的 CSV 格式，可直接 --csv-dir 导入。
@@ -24,7 +25,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -54,12 +55,14 @@ def _normalize(record: dict) -> dict:
     """API 原始记录 → occupations 表字段（code/name/category/definition/aliases）。
 
     OSTA career API 字段：careerCode / careerName / parentCode / children（递归树），
-    definition 由 detail API 补充（tree 无该字段）。
+    definition 由 detail API 补充（tree 无该字段）。detail body 实测字段（08-13）：
+    text（职业定义）/ bigName / centreName / smallName（类别层级）/ works / task；
+    无别名字段。
     """
     code = str(record.get("careerCode") or record.get("code") or record.get("id") or "")
     name = str(record.get("careerName") or record.get("name") or record.get("title") or "")
-    category = str(record.get("categoryName") or record.get("category") or "")
-    definition = str(record.get("careerDesc") or record.get("definition") or record.get("workContent") or "")
+    category = str(record.get("categoryName") or record.get("category") or record.get("bigName") or "")
+    definition = str(record.get("careerDesc") or record.get("definition") or record.get("workContent") or record.get("text") or "")
     aliases = record.get("alias") or record.get("aliases") or ""
     if isinstance(aliases, list):
         aliases = ";".join(str(a) for a in aliases)
@@ -70,6 +73,19 @@ def _normalize(record: dict) -> dict:
         "definition": definition,
         "aliases": str(aliases),
     }
+
+
+def is_leaf_code(code: str) -> bool:
+    """细类职业判定：10 位编码（如 1-01-00-00，三段连字符）。
+
+    层级：大类 1 位 / 中类 4 位（1-01）/ 小类 7 位（1-01-00）/ 细类 10 位。
+    """
+    return code.count("-") == 3
+
+
+def is_root_code(code: str) -> bool:
+    """大类根判定：1 位编码（如 1，无连字符），共 8 个。"""
+    return code.count("-") == 0
 
 
 def _walk_tree(node: dict, collected: dict[str, dict], depth: int = 0) -> None:
@@ -111,7 +127,67 @@ async def _fetch_children(request, parent_code: str, version_id: int = 2, collec
     return collected
 
 
-async def run(cdp_url: str, timeout_sec: int) -> int:
+async def _fetch_detail(request, code: str, version_id: int = 2) -> dict | None:
+    """GET career/detail 补全职业定义（definition/aliases/category）。
+
+    目录树 API（query/tree/subordinate）不含定义字段；detail 响应含
+    careerDesc/workContent（_normalize 已映射）。结构兼容：body / data /
+    直接对象 / 列表首个。失败返回 None（调用方保留目录数据不回退）。
+    """
+    url = f"https://www.osta.org.cn/api/client/career/detail?careerCode={code}&versionId={version_id}"
+    try:
+        resp = await request.get(url)
+        if resp.status != 200:
+            logger.warning(f"detail 非 200: {resp.status} {code}")
+            return None
+        data = await resp.json()
+    except Exception as e:
+        logger.warning(f"detail 解析失败: {code} {e}")
+        return None
+    if isinstance(data, dict):
+        body = data.get("body") or data.get("data") or data
+        if isinstance(body, list):
+            body = body[0] if body else None
+        return body if isinstance(body, dict) else None
+    if isinstance(data, list) and data:
+        return data[0] if isinstance(data[0], dict) else None
+    return None
+
+
+async def _enrich_details(request, collected: dict[str, dict], interval: float) -> tuple[int, int]:
+    """对细类职业（10 位编码，如 1-01-00-00）逐个补 detail 定义。
+
+    目录采集 2213 条中细类为 1676 个（08-13 实测，code 三段连字符）——
+    逐个 GET career/detail 补 definition/aliases/category，字段级"有值才
+    更新"（detail 权威但不覆盖目录已有值）。串行 + 间隔限速（默认 0.3s/
+    请求，1676 条约 8 分钟）。
+
+    Returns:
+        (成功数, 细类总数)
+    """
+    leaves = sorted(c for c in collected if is_leaf_code(c))
+    if not leaves:
+        logger.warning("无可补 detail 的细类职业（code 均非 10 位细类格式）")
+        return 0, 0
+    logger.info(f"开始补全细类定义：{len(leaves)} 个（间隔 {interval}s，预计 {len(leaves) * interval:.0f}s）…")
+    ok = 0
+    for i, code in enumerate(leaves, 1):
+        detail = await _fetch_detail(request, code)
+        if detail:
+            extra = _normalize(detail)
+            rec = collected[code]
+            for k in ("definition", "aliases", "category"):
+                if extra.get(k) and not rec.get(k):
+                    rec[k] = extra[k]
+            ok += 1
+        if i % 100 == 0 or i == len(leaves):
+            logger.info(f"detail 进度 {i}/{len(leaves)}（成功 {ok}）")
+        await asyncio.sleep(interval)
+    logger.info(f"detail 补全完成：成功 {ok}/{len(leaves)}")
+    return ok, len(leaves)
+
+
+async def run(cdp_url: str, timeout_sec: int, skip_detail: bool = False, detail_interval: float = 0.3) -> int:
     from playwright.async_api import async_playwright
 
     collected: dict[str, dict] = {}
@@ -192,11 +268,69 @@ async def run(cdp_url: str, timeout_sec: int) -> int:
         # 已就绪：树已捕获（8 大类/79 中类/450 小类）——递归 subordinate/data
         # 补全细类（1639 职业，树 API 不含）——用 context.request 继承会话直查
         logger.info("开始递归补全细类职业（subordinate/data 逐级）…")
-        roots = sorted(k for k in collected if k.count("-") == 0)  # 8 个大类根
+        roots = sorted(k for k in collected if is_root_code(k))  # 8 个大类根
         for root_code in roots:
             await _fetch_children(context.request, root_code, 2, collected)
         logger.info(f"递归完成 → 累计 {len(collected)} 条")
+
+        # detail 补全：细类职业定义（career/detail API，目录树不含 definition）
+        if skip_detail:
+            logger.info("--skip-detail：跳过定义补全")
+        else:
+            ok, total = await _enrich_details(context.request, collected, detail_interval)
+            if ok == 0:
+                logger.warning(
+                    f"detail 补全 0/{total}——接口可能不同（参数名/路径变更）或会话失效，"
+                    "目录数据不受影响；可人工在浏览器打开一个职业详情页，观察 on_response 拦截日志确认接口格式"
+                )
         await context.close()
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out = OUTPUT_DIR / f"osta_occupations_{ts}.jsonl"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8") as f:
+        for rec in collected.values():
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    logger.info(f"采集完成: {len(collected)} 条 → {out}")
+    return len(collected)
+
+
+async def run_input(input_path: str, cdp_url: str, detail_interval: float) -> int:
+    """复用已有目录 JSONL：仅补 detail 阶段（跳过目录采集/拦截）。
+
+    目录重采成本高（CDP 窗口 + 人工验证），detail 补全失败重跑时用
+    --input 加载已有目录，直接逐个 career/detail 补全并输出新文件。
+    """
+    from playwright.async_api import async_playwright
+
+    collected: dict[str, dict] = {}
+    for line in Path(input_path).read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        rec = json.loads(line)
+        if rec.get("code") and rec.get("name"):
+            collected[rec["code"]] = rec
+    logger.info(f"已加载目录 {len(collected)} 条 ← {input_path}")
+
+    async with async_playwright() as p:
+        try:
+            browser = await p.chromium.connect_over_cdp(cdp_url)
+        except Exception as e:
+            logger.error(f"❌ CDP 连接失败（{cdp_url}）: {e}")
+            return 0
+        context = await browser.new_context()
+        await context.set_extra_http_headers({"X-Collection-Purpose": _COMPLIANCE["annotation"]})
+        try:
+            cookies = await browser.contexts[0].cookies()
+            if cookies:
+                await context.add_cookies(cookies)
+        except Exception as e:
+            logger.warning(f"cookies 复制失败: {e}")
+        ok, total = await _enrich_details(context.request, collected, detail_interval)
+        await context.close()
+        if ok == 0:
+            logger.warning(f"detail 补全 0/{total}——接口可能不同或会话失效，见诊断说明")
+            return 0
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = OUTPUT_DIR / f"osta_occupations_{ts}.jsonl"
@@ -212,8 +346,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="OSTA 职业目录 CDP 采集器")
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL, help="CDP 端点（默认 9226）")
     parser.add_argument("--timeout", type=int, default=180, help="采集窗口秒数（默认 180，人工验证后调大）")
+    parser.add_argument("--skip-detail", action="store_true", help="跳过细类定义补全（仅目录）")
+    parser.add_argument("--detail-interval", type=float, default=0.3, help="detail 请求间隔秒数（默认 0.3，调大更稳）")
+    parser.add_argument("--input", help="已有目录 JSONL（跳过目录采集，仅补 detail 阶段）")
     args = parser.parse_args()
-    n = asyncio.run(run(args.cdp_url, args.timeout))
+    if args.input:
+        n = asyncio.run(run_input(args.input, args.cdp_url, args.detail_interval))
+    else:
+        n = asyncio.run(run(args.cdp_url, args.timeout, args.skip_detail, args.detail_interval))
     print(f"\n采集 {n} 条。CSV 转换：python -c \"...\" 或直接 --csv-dir 导入")
 
 
