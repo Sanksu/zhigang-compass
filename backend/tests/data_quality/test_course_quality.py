@@ -59,9 +59,10 @@ class TestEnrollmentScore:
     def test_cap_at_100k(self):
         assert enrollment_score(200_000) == 1.0
 
-    def test_zero_or_missing(self):
-        assert enrollment_score(0) == 0.0
-        assert enrollment_score(None) == 0.0
+    def test_zero_or_missing_neutral(self):
+        """缺失/0（爬虫未解析）取中性 0.5——与 rating 口径一致，避免数据缺口双重惩罚。"""
+        assert enrollment_score(0) == 0.5
+        assert enrollment_score(None) == 0.5
 
     def test_monotonic(self):
         assert enrollment_score(10_000) > enrollment_score(1_000)

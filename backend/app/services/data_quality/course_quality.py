@@ -82,13 +82,18 @@ def rating_score(rating: float) -> float:
 
 
 def enrollment_score(enrollment: float) -> float:
-    """注册量（0-1）：对数归一化，10 万 ≈ 满分；缺失/0 取 0。"""
+    """注册量（0-1）：对数归一化，10 万 ≈ 满分；缺失取中性 0.5。
+
+    08-14 调整：缺失（≤0，含爬虫未解析）与 rating 口径一致取中性——否则
+    coursera/edx 课程因注册量未解析（JSONL 原始 0）被系统性压分（AWS 课
+    q=0.45 根因之一），质量评估对数据缺口不应双重惩罚（rating 已中性）。
+    """
     try:
         e = float(enrollment)
     except (TypeError, ValueError):
-        return 0.0
+        return 0.5
     if e <= 0:
-        return 0.0
+        return 0.5
     return min(log10(e) / log10(_ENROLLMENT_LOG_CAP), 1.0)
 
 
