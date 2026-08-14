@@ -113,9 +113,18 @@ async def derive_evolved_from(dry_run: bool = False) -> dict:
             with neo4j_driver.session() as ns:
                 result = ns.run(
                     """
-                    // 旧岗位已从当前图谱消失（快照全量导出），按快照 id 重建为 legacy 节点后再建边
+                    // 旧岗位已从当前图谱消失（快照全量导出），按快照 id 重建为 legacy 节点后再建边。
+                    // 08-14 修复：SET name 前检查同名节点占用（ETL 重跑后新聚合可能已建同名岗位，
+                    // UNIQUE name 约束冲突会中断整个 ETL——AS400 应用程序 案例）——被占用则跳过改名
+                    // （保留 legacy 状态，该条演化边不建，宁缺毋滥）。
                     MERGE (b:Position {id: $old_id})
-                    SET b.name = $old, b.status = 'legacy'
+                    SET b.status = 'legacy'
+                    WITH b
+                    OPTIONAL MATCH (taken:Position {name: $old})
+                    WHERE taken <> b
+                    WITH b, taken
+                    WHERE taken IS NULL
+                    SET b.name = $old
                     WITH b
                     MATCH (a:Position {id: $new_id})
                     MERGE (a)-[r:EVOLVED_FROM]->(b)
