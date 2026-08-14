@@ -2564,6 +2564,15 @@ components:
         radar:
           type: object
           description: 人岗比对五维雷达（§9.5），无数据维度为 null
+          properties:
+            must: { type: number, nullable: true, description: '必备技能匹配分 [0,1]' }
+            nice: { type: number, nullable: true, description: '加分技能匹配分 [0,1]' }
+            experience: { type: number, nullable: true, description: '经验匹配分 [0,1]' }
+            education: { type: number, nullable: true, description: '学历层级映射近似分 [0,1]，无数据为 null' }
+            projects: { type: number, nullable: true, description: '项目匹配近似分 [0,1]，无数据为 null' }
+            domain: { type: number, nullable: true, description: 领域匹配分（仅展示） }
+            skill_level: { type: number, nullable: true, description: 熟练度满足度（仅展示） }
+          required: [must, nice, experience]
         gaps:
           type: array
           items: { $ref: '#/components/schemas/GapSkill' }

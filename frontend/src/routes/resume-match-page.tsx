@@ -14,6 +14,7 @@ import {
   type CandidateProfile,
   type GapItem,
   type MatchResult,
+  type RadarDimension,
   type RecommendItem,
   type ResumeSummary,
   type SkillMatrixItem,
@@ -118,13 +119,27 @@ function toLearningPath(items: BackendLearningPathItem[]): MatchResult['learning
 function toMatchResult(r: BackendMatchResult): MatchResult {
   const skill_matrix: SkillMatrixItem[] = [
     ...r.matched_must.map((s) => ({
-      skill: s, candidate_level: 3, required_level: 3, necessity: 'must' as const, match: 'full' as const,
+      skill: s, candidate_level: 1, required_level: 2, necessity: 'must' as const, match: 'full' as const,
     })),
     ...r.missing_must.map((s) => ({
-      skill: s, candidate_level: 0, required_level: 3, necessity: 'must' as const, match: 'missing' as const,
+      skill: s, candidate_level: 0, required_level: 2, necessity: 'must' as const, match: 'missing' as const,
     })),
   ]
   const gaps: GapItem[] = (r.gaps ?? []).map(toGapItem)
+  // 五维雷达全量消费后端 radar（08-14 审查：此前学历/项目硬编码占位；education/projects
+  // 为保守近似分，无数据维度剔除不占位）
+  const radar = r.radar
+  const radarDims: RadarDimension[] = [
+    { name: '必备技能', candidate: Math.round((radar?.must ?? r.must_score) * 100), required: 100 },
+    { name: '加分技能', candidate: Math.round((radar?.nice ?? r.nice_score) * 100), required: 80 },
+    { name: '工作经验', candidate: Math.round((radar?.experience ?? r.exp_score) * 100), required: 85 },
+  ]
+  if (radar?.education != null) {
+    radarDims.push({ name: '学历背景', candidate: Math.round(radar.education * 100), required: 100 })
+  }
+  if (radar?.projects != null) {
+    radarDims.push({ name: '项目经验', candidate: Math.round(radar.projects * 100), required: 100 })
+  }
   return {
     position_id: r.position_id,
     position_name: r.position_name,
@@ -133,13 +148,7 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
     nice_score: r.nice_score,
     exp_score: r.exp_score,
     summary: r.summary,
-    radar: [
-      { name: '必备技能', candidate: Math.round(r.must_score * 100), required: 100 },
-      { name: '加分技能', candidate: Math.round(r.nice_score * 100), required: 80 },
-      { name: '工作经验', candidate: Math.round(r.exp_score * 100), required: 85 },
-      { name: '学历背景', candidate: 70, required: 75 },
-      { name: '项目经验', candidate: 70, required: 70 },
-    ],
+    radar: radarDims,
     skill_matrix: skill_matrix,
     gaps,
     learning_path: toLearningPath(r.learning_path ?? []),
@@ -748,7 +757,7 @@ export function ResumeMatchPage() {
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm">五维能力对比</CardTitle>
-                    <CardDescription>候选人 vs 岗位要求（三维真实 + 学历/项目占位）</CardDescription>
+                    <CardDescription>候选人 vs 岗位要求（后端雷达评分，education/projects 无数据维度不展示）</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <RadarChart data={matchResult.radar} />

@@ -3549,7 +3549,22 @@ export interface components {
             /** @description 必备技能全缺失判零 */
             unqualified: boolean;
             /** @description 人岗比对五维雷达（§9.5），无数据维度为 null */
-            radar?: Record<string, never>;
+            radar?: {
+                /** @description 必备技能匹配分 [0,1] */
+                must: number | null;
+                /** @description 加分技能匹配分 [0,1] */
+                nice: number | null;
+                /** @description 经验匹配分 [0,1] */
+                experience: number | null;
+                /** @description 学历层级映射近似分 [0,1]，无数据为 null */
+                education?: number | null;
+                /** @description 项目匹配近似分 [0,1]，无数据为 null */
+                projects?: number | null;
+                /** @description 领域匹配分（仅展示） */
+                domain?: number | null;
+                /** @description 熟练度满足度（仅展示） */
+                skill_level?: number | null;
+            };
             /** @description 差距三态（missing/weak/matched 按优先级排序） */
             gaps: components["schemas"]["GapSkill"][];
             /** @description missing/weak 技能先修链 + 课程 Top-3 */

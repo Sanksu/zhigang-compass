@@ -255,13 +255,15 @@ interface SkillHeatmapProps {
   className?: string
 }
 
-const LEVEL_LABEL = ['未掌握', '了解', '熟练', '精通']
+// 三态语义（08-14 审查：此前按虚构熟练度 4 档渲染；现为真实二态判定）
+// 0=缺失（候选人未具备）、1=具备（候选人已具备）、2=必备（岗位要求）
+const LEVEL_LABEL = ['缺失', '具备', '必备']
 
 export function SkillHeatmap({ data, className }: SkillHeatmapProps) {
   const dark = useDarkMode()
   const mutedColor = dark ? '#a1a1aa' : '#71717a'
 
-  // 构造热力图数据：x 轴=技能，y 轴=[候选人, 岗位要求]，值=熟练度
+  // 构造热力图数据：x 轴=技能，y 轴=[候选人, 岗位要求]，值=具备/缺失（候选人）/必备（岗位）
   const skills = data.map((d) => d.skill)
   const categories = ['候选人', '岗位要求']
   const heatData: [number, number, number][] = []
@@ -296,7 +298,7 @@ export function SkillHeatmap({ data, className }: SkillHeatmapProps) {
       },
       visualMap: {
         min: 0,
-        max: 3,
+        max: 2,
         calculable: false,
         orient: 'horizontal',
         left: 'center',
@@ -304,8 +306,8 @@ export function SkillHeatmap({ data, className }: SkillHeatmapProps) {
         itemWidth: 12,
         itemHeight: 80,
         textStyle: { color: mutedColor, fontSize: 10 },
-        inRange: { color: ['#e4e4e7', '#a1a1aa', '#71717a', '#09090b'] },
-        text: ['精通', '未掌握'],
+        inRange: { color: ['#e4e4e7', '#71717a', '#09090b'] },
+        text: ['必备', '缺失'],
       },
       series: [
         {
