@@ -368,7 +368,7 @@ def _domain_score(candidate, position: PositionProfile, semantic=None) -> float 
     for term in ind_terms:
         for d in dom_lower:
             if d == term or d in term or term in d:
-                logger.info(
+                logger.debug(
                     "领域词面命中 pid=%s industry=%r 候选=%r term=%r → 1.0",
                     position.position_id, industry, domains, term,
                 )
