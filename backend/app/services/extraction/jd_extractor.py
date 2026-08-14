@@ -46,13 +46,22 @@ class JDExtractor:
             # 降级纯规则抽取（见类 docstring「LLM 不可用时规则抽取兜底」）
             self._llm = None
 
-    def extract(self, jd_text: str) -> JDExtractionResult:
+    def extract(self, jd_text: str, title_hint: str = "") -> JDExtractionResult:
         """从 JD 文本中抽取结构化实体。
 
         LLM 抽取 → 词典过滤 → 后缀清洗 → 去重；LLM 不可用时规则抽取兜底。
+
+        title_hint：招聘标题（采集端 JobItem.title / 评测端 job_title_raw）。
+        非空时拼到正文首行（对齐生产 `_build_jd_text` 的 title 首行形态），
+        prompt 首行标题规则即生效——岗位名优先采用招聘标题，正文职责/技术栈
+        不得改写（盲审 08-14：评测链路此前丢标题，title 失配 14/32 中
+        7 条为"标题明确但正文带偏"）。
         """
         if not jd_text or len(jd_text.strip()) < 10:
             return JDExtractionResult(position_name="")
+
+        if title_hint and title_hint.strip():
+            jd_text = f"{title_hint.strip()}\n{jd_text}"
 
         if self._llm is None:
             result = self._rule_based_extract(jd_text)

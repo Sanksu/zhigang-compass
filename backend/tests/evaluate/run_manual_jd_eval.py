@@ -277,7 +277,11 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
     for row in rows:
         tracker = TrackingLLM(provider)
         try:
-            result = JDExtractor(llm=tracker).extract(row["detail_raw_text"])
+            # title_hint=job_title_raw：评测输入对齐生产链路（_build_jd_text 首行
+            # 含 title），岗位名优先采用招聘标题（08-14 title 失配根因修复）
+            result = JDExtractor(llm=tracker).extract(
+                row["detail_raw_text"], title_hint=row.get("job_title_raw", "")
+            )
         except Exception as exc:
             failed_samples += 1
             predictions.append({

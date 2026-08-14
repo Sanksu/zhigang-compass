@@ -158,6 +158,12 @@ JD 文本：岗位名称：python开发工程师
 岗位职责：设计和开发基于Odoo的应用程序，参与Odoo平台的定制开发与系统集成。
 任职要求：具备扎实的Python开发能力，熟悉Odoo平台的开发环境。
 输出：{{"position_name": "Python开发工程师", "skills": [{{"name": "Python"}}, {{"name": "Odoo"}}], "requirements": [{{"skill_name": "Python", "necessity": "must"}}, {{"skill_name": "Odoo", "necessity": "must"}}]}}
+
+示例 12（职责方向词/基础理论词不收录 + 优先项进 nice）：
+JD 文本：岗位名称：大模型测试工程师
+岗位职责：负责大模型产品的功能测试、性能测试与安全性测试，搭建自动化测试框架。
+任职要求：熟悉 Python、Java，掌握自动化测试，了解数据结构与 Transformer 原理者优先，本科及以上学历。
+输出：{{"position_name": "大模型测试工程师", "skills": [{{"name": "Python"}}, {{"name": "Java"}}, {{"name": "自动化测试"}}], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Python", "necessity": "must"}}, {{"skill_name": "Java", "necessity": "must"}}, {{"skill_name": "自动化测试", "necessity": "must"}}, {{"skill_name": "数据结构", "necessity": "nice"}}, {{"skill_name": "Transformer", "necessity": "nice"}}]}}
 """
 
 BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输出 JSON 数组（每条 JD 对应一个对象，数组第 i 个元素对应"JD文本 i"）。
