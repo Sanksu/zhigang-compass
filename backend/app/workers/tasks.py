@@ -123,6 +123,18 @@ def _crawl_timeout(spider_name: str) -> int:
     return _CRAWL_TIMEOUT_BY_SPIDER.get(spider_name, _CRAWL_TIMEOUT_SEC)
 
 
+def _candidate_id(skill: str) -> str:
+    """候选岗位 id：短名直接截断；超长（>20 字符）技能名加 hash 后缀防截断碰撞。
+
+    存量短名 id 格式不变（cand-xxx）；去重以 position_name 为键，id 变化无兼容问题。
+    """
+    if len(skill) <= 20:
+        return f"cand-{skill}"
+    import hashlib
+
+    return f"cand-{skill[:20]}-{hashlib.md5(skill.encode()).hexdigest()[:6]}"
+
+
 def _kill_process_tree(proc) -> None:
     """终止爬虫子进程树（08-14 修复：proc.kill() 只杀主进程，Playwright/Chrome
     子进程成孤儿继续打源站——08-13 zhilian 实测挂死 8h）。
@@ -1139,6 +1151,32 @@ async def backfill_embeddings(ctx: dict) -> dict:
         return {"detail": "语义模型不可用，回填跳过"}
 
 
+# ETL 批处理分档上限（08-14 审查：zhilian 单日 8000 条 >> 固定 limit 500/200，
+# 游标推进式每轮只消化固定量 → 积压持续增长；按待处理积压量放大，上限对齐
+# 单轮时间预算，其余下轮继续）
+_ETL_LIMIT_CAP = 2000
+
+
+async def _etl_limit(extracted: bool, default: int) -> int:
+    """按积压量分档 ETL 批处理 limit（extracted=True 查未抽取；False 查已抽取未验证）。"""
+    from sqlalchemy import func, select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import JDRaw
+
+    if extracted:
+        predicate = JDRaw.snapshot["extraction"].astext.is_(None)
+    else:
+        predicate = (JDRaw.snapshot["extraction"].astext.isnot(None)) & (
+            JDRaw.snapshot["validation"].astext.is_(None)
+        )
+    async with async_session_factory() as session:
+        pending = await session.scalar(
+            select(func.count()).select_from(JDRaw).where(predicate)
+        ) or 0
+    return min(max(pending, default), _ETL_LIMIT_CAP)
+
+
 async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: bool = False) -> dict:
     """编排完整 ETL 管线（设计文档 §4.4）。
 
@@ -1196,13 +1234,19 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
     results["stages"]["dedup_simhash"] = await dedup_simhash(ctx)
 
     # ── 阶段 3：结构化 + 入库（M3 启用：LLM 抽取 → snapshot 写回 → Neo4j 入图）──
-    results["stages"]["structure_load"] = await batch_extract(ctx, limit=500)
+    results["stages"]["structure_load"] = await batch_extract(
+        ctx, limit=await _etl_limit(True, 500)
+    )
 
     # ── 阶段 4：时滞检测（M3 启用，须在抽取之后：依赖 snapshot.extraction）──
-    results["stages"]["validate_temporal"] = await validate_temporal(ctx, jd_ids=[])
+    results["stages"]["validate_temporal"] = await validate_temporal(
+        ctx, jd_ids=[], limit=await _etl_limit(False, 200)
+    )
 
     # ── 阶段 5：通胀检测（M3 启用，须在抽取之后：依赖 snapshot.extraction）──
-    results["stages"]["detect_inflation"] = await detect_inflation(ctx, jd_ids=[])
+    results["stages"]["detect_inflation"] = await detect_inflation(
+        ctx, jd_ids=[], limit=await _etl_limit(False, 200)
+    )
 
     # ── 阶段 6：课程入图（course_raw → Course + LEARNABLE_VIA）──
     results["stages"]["load_courses"] = await load_courses(ctx)
@@ -2184,7 +2228,7 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
                 github_anomaly=flags["github"],
             )
             session.add(DiscoveryCandidate(
-                id=f"cand-{skill[:20]}",
+                id=_candidate_id(skill),
                 position_name=skill,
                 state="candidate",
                 features=feat,  # 键与 DiscoveryFeatures schema 兼容
