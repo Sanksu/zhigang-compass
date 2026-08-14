@@ -1,15 +1,15 @@
 {
- "description": "盲审 round2 终审定稿（2026-08-14，张恺天逐条终审确认）：20 条全部定稿，annotator=ZKT；r2_020 按正文自述改为机器视觉算法工程师（终审裁决），其余 19 条维持 AI 复核口径。gold 独立性由人工终审保证。",
+ "description": "盲审 round2 终审定稿（2026-08-14，张恺天逐条终审确认）：20 条全部定稿，annotator=ZKT；r2_020 按正文自述改为机器视觉算法工程师（终审裁决），其余 19 条维持 AI 复核口径。gold 独立性由人工终审保证。（08-14 二轮口径修订：public_007/008 归并改细分；r2_001/r2_015 标题无细分词不保留正文细分）",
  "rationale": "gold 口径对齐 round1：title 按招聘标题主体（去括号修饰、大小写规范；round1 先例『大模型算法工程师→算法工程师』保持一致性；细分算法岗保留细分名——round1 无归并先例，最小干预）；skills 收录必备技能（语言/框架/工具/领域能力，粒度对齐 round1），『优先/加分』条款入 bonus；experience 为 JD 明文年限，未声明留空；education 为 JD 明文学历，未声明留空；core_duties 为职责要点短语。修订独立于抽取器草稿，待张恺天终审（annotator 暂标 AI）。\n终审（张恺天 2026-08-14）：全量确认；r2_020 裁决按正文（机器视觉算法工程师）。",
  "samples": {
   "r2_001": {
-   "review_gold_title": "React前端工程师",
+   "review_gold_title": "前端开发工程师",
    "review_gold_skills": "[\"HTML5\",\"CSS3\",\"JavaScript\",\"Vue\",\"React Native\",\"Vue Router\",\"Pinia\",\"Vuex\",\"Axios\",\"Vite\",\"Webpack\",\"Git\",\"ESLint\",\"Prettier\",\"RESTful API\",\"Flex\",\"Grid\",\"Android开发\",\"iOS开发\"]",
    "review_gold_bonus_skills": "[\"微信小程序开发\",\"Uni-app\",\"Taro\",\"数据可视化\",\"Jest\",\"微前端\",\"PWA\",\"Web性能优化\",\"Web安全\"]",
    "review_gold_experience": "",
    "review_gold_education": "",
    "review_gold_core_duties": "[\"Web/H5/微信小程序开发与多端适配\",\"前端性能优化与兼容性排查\",\"组件封装与代码规范制定\",\"安卓/iOS 打包与上架\"]",
-   "review_note": "title 按终审口径细分（移除泛词『前端开发工程师』）：双栈（RN+Vue+小程序+原生）取硬性必备 React Native（『无原生+RN 开发经验者不考虑』），格式对齐 r2_014『React前端工程师』；skills 19 项（DOM/BOM/AJAX 等 JS 子能力不单列，对齐 round1 粒度）；无学历/年限条款；【口径标注】采集元数据明示 5-10年/大专但正文未声明——按 round1 口径（正文未声明→空）留空，终审可决定 gold 是否参考元数据"
+   "review_note": "终审修订 08-14：标题无细分词不保留正文细分（对齐 r2_014 口径，标题含细分词才保留）——React前端工程师→前端开发工程师"
   },
   "r2_002": {
    "review_gold_title": "Golang后端工程师",
@@ -129,13 +129,13 @@
    "review_note": "title 保留 React 细化（终审口径：移除泛化『前端工程师』，保留『React前端工程师』格式）；3 年+；本科"
   },
   "r2_015": {
-   "review_gold_title": "Vue前端工程师",
+   "review_gold_title": "前端工程师",
    "review_gold_skills": "[\"Android开发\",\"Vue\",\"uni-app\",\"HTML5\",\"CSS3\",\"JavaScript\"]",
    "review_gold_bonus_skills": "[\"iOS开发\",\"微信小程序开发\",\"混合开发\",\"UI设计\"]",
    "review_gold_experience": "",
    "review_gold_education": "",
    "review_gold_core_duties": "[\"移动端与 Web 前端开发维护\",\"前端架构设计与组件化开发\",\"页面实现与接口联调\"]",
-   "review_note": "title 按终审口径细化：移除泛化『前端工程师』，主框架 Vue/uniapp → Vue前端工程师；skills 6 项；无学历/年限条款"
+   "review_note": "终审修订 08-14：标题无细分词不保留正文细分——Vue前端工程师→前端工程师（去级别）"
   },
   "r2_016": {
    "review_gold_title": "全栈开发工程师",
