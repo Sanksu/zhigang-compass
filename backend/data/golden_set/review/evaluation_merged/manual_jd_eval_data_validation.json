@@ -1,7 +1,8 @@
 {
   "row_count": 32,
   "observed_annotators": [
-    "AI"
+    "LQ",
+    "ZKT"
   ],
   "annotator_nonempty_and_consistent": true,
   "rows_with_nonempty_detail": 32,

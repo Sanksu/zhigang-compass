@@ -159,7 +159,9 @@ def validate_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
             valid = False
         if valid:
             valid_rows += 1
-    provenance_ok = len(annotators) == 1 and bool(annotators[0])
+    # 允许多名人工标注者（round1=LQ 人工 + round2=张恺天终审），
+    # 禁止空标注；AI 占位可跑探索评测，但正式基线须人工终审后重跑
+    provenance_ok = bool(annotators) and all(annotators)
     return {
         "row_count": len(rows),
         "observed_annotators": annotators,
@@ -521,7 +523,7 @@ def write_blocker_report(output_dir: Path, validation: dict[str, Any], xlsx: Pat
         f"- 工作簿：`{xlsx}`",
         f"- 盲标数据行数：{validation['row_count']}/{validation['row_count']}",
         f"- 非空正文：{validation['rows_with_nonempty_detail']}/{validation['row_count']}；可追溯 URL：{validation['rows_with_source_url']}/{validation['row_count']}",
-        f"- annotator：{', '.join(repr(x) for x in validation['observed_annotators']) or '空'}；要求为非空且一致",
+        f"- annotator：{', '.join(repr(x) for x in validation['observed_annotators']) or '空'}；要求为非空（多人标注各保留本人代号，禁止空标注）",
         f"- 全字段格式合格且可纳入真实评测的行数：{validation['fully_valid_rows']}/{validation['row_count']}",
         f"- total_samples = {validation['row_count']}",
         "- real_llm_success_samples = 0；fallback_samples = 0；failed_samples = 0（未进入逐条抽取）",
@@ -544,7 +546,7 @@ def write_blocker_report(output_dir: Path, validation: dict[str, Any], xlsx: Pat
         "",
         "## 恢复条件与命令",
         "",
-        "1. 确保 12 条 annotator 非空且一致；将非空的 skills、bonus_skills、core_duties 填为 JSON 字符串数组；experience 留空或写 JSON 对象。空学历表示无明确学历要求，合法且不需要补写。",
+        "1. 确保全部行 annotator 非空（round1/round2 各保留标注者本人代号，如 LQ/张恺天代号）；将非空的 skills、bonus_skills、core_duties 填为 JSON 字符串数组；experience 留空或写 JSON 对象。空学历表示无明确学历要求，合法且不需要补写。",
         "2. 不改变现有标签含义的前提下，重新保存工作簿后运行预检。",
         "3. 只有预检为 12/12 后，才执行真实 LLM 调用。该命令可能产生模型调用费用：",
         "",

@@ -340,7 +340,6 @@ class TestEvalJdLlm:
     evaluate.py 只读最近归档、不重跑（避免重复消耗 LLM 额度）。
     本测试用 tmp_path 构造归档验证读取/跳过/损坏判定与 HTML 渲染。
     """
-
     _ARCHIVE_TEMPLATE = {
         "task": "jd_llm",
         "method": "真实抽取（LLM + 规则兜底，12 条人工盲审）",
@@ -571,3 +570,61 @@ class TestGoldRevisions:
         from tests.evaluate.run_manual_jd_eval import load_gold_revisions
 
         assert load_gold_revisions(tmp_path / "no.json") == {}
+
+
+def _valid_review_row(sample_id: str, annotator: str) -> dict[str, str]:
+    """构造一条格式合法的盲审行（满足 validate_rows 全字段校验）。"""
+    return {
+        "sample_id": sample_id,
+        "detail_raw_text": "岗位职责：负责系统开发。任职要求：熟悉 Python。",
+        "source_url": f"https://example.com/{sample_id}",
+        "review_gold_skills": '["Python"]',
+        "review_gold_bonus_skills": "[]",
+        "review_gold_core_duties": '["系统开发"]',
+        "review_gold_experience": "",
+        "annotator": annotator,
+    }
+
+
+class TestValidateRows:
+    """盲审预检（validate_rows）：annotator 非空即放行，支持多人标注。
+
+    合并口径 round1（LQ 人工）+ round2（张恺天终审）为两名标注者，
+    单一 annotator 检查会误阻塞终审后的正式评测（08-14 放宽）。
+    """
+
+    def _validate(self, rows):
+        from tests.evaluate.run_manual_jd_eval import validate_rows
+
+        return validate_rows(rows)
+
+    def test_multi_annotator_ready(self):
+        """LQ + ZKT 两名人工标注者：预检通过（终审后合并簿场景）。"""
+        rows = [_valid_review_row("jd_012", "LQ"), _valid_review_row("r2_001", "ZKT")]
+        v = self._validate(rows)
+        assert v["ready_for_real_run"] is True
+        assert v["observed_annotators"] == ["LQ", "ZKT"]
+
+    def test_single_annotator_ready(self):
+        rows = [_valid_review_row("jd_012", "LQ")]
+        v = self._validate(rows)
+        assert v["ready_for_real_run"] is True
+
+    def test_empty_annotator_blocked(self):
+        rows = [_valid_review_row("jd_012", ""), _valid_review_row("r2_001", "ZKT")]
+        v = self._validate(rows)
+        assert v["ready_for_real_run"] is False
+        assert v["annotator_nonempty_and_consistent"] is False
+
+    def test_ai_placeholder_runs_exploratory(self):
+        """AI 占位（未终审）仍可跑探索评测，结果须标注非终审。"""
+        rows = [_valid_review_row("r2_001", "AI")]
+        v = self._validate(rows)
+        assert v["ready_for_real_run"] is True
+
+    def test_invalid_json_skills_blocked(self):
+        rows = [_valid_review_row("jd_012", "LQ")]
+        rows[0]["review_gold_skills"] = "not-json"
+        v = self._validate(rows)
+        assert v["ready_for_real_run"] is False
+        assert any(i["field"] == "review_gold_skills" for i in v["issues"])
