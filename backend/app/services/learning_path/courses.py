@@ -40,6 +40,13 @@ _COURSE_MATCH_THRESHOLD = 0.7
 # 宁可无课不可误导）。注意同语言短词虚高（语音合成↔KK音标 0.665）为已知残余。
 _COURSE_TITLE_SIM_THRESHOLD = 0.5
 
+# 灰色带质量门控（08-15 误配课程治理）：sim ∈ [0.5, 0.62) 为中英跨语言短词
+# sim 虚高残余带（多线程↔高级英语 0.558、Qlik↔简明世界史 0.551、Windsurf↔轮滑
+# 0.581 实证误配；合理灰色带 Office→Excel 0.553、推荐算法→ML 课 0.514）。
+# 带内仅保留质量分 ≥0.62 的课程，低质课程宁缺毋滥过滤。
+_GRAY_ZONE_SIM = (0.5, 0.62)
+_GRAY_ZONE_Q_MIN = 0.62
+
 # P1-1 课程级语义兜底阈值：无课技能直接对课程池标题匹配（08-13 实证）。
 # 可救案例：PostgreSQL→MySQL 课 0.601、服务器运维→网络技术 0.554、React→Advanced React 0.863；
 # 课程池缺课案例（Spark→0.469 高级英语、Docker→0.475 物流学、Gin→0.361 世界史）宁缺毋滥。
@@ -189,7 +196,8 @@ def _lexical_hit(skill_name: str, title: str) -> bool:
 
 
 def _filter_by_title_similarity(
-    rows: list[dict], skill_name: str, semantic, title_threshold: float
+    rows: list[dict], skill_name: str, semantic, title_threshold: float,
+    quality_map: dict[tuple[str, str], dict] | None = None,
 ) -> list[dict]:
     """课程名校验（P1-3）：课程名与技能名语义相关才保留。
 
@@ -199,6 +207,12 @@ def _filter_by_title_similarity(
     误配 0.01-0.25、合理 0.6+，阈值 0.5 可过滤误配、保留合理。语义模型不可用
     时不过滤（保持纯规则链路）。词面命中（_lexical_hit）豁免——缩写技能名
     场景语义相似度虚低但词面明确相关（如 AWS 课程）。
+
+    灰色带治理（08-15 误配课程）：sim ∈ [0.5, 0.62) 为中英跨语言短词 sim
+    虚高残余带（'多线程'↔'高级英语' 0.558、'Qlik'↔'简明世界史' 0.551、
+    'Windsurf'↔'轮滑' 0.581 实证）——该带内仅保留质量分 ≥0.62 的课程
+    （合理灰色带课程：Office→Excel 0.553/q0.658、推荐算法→ML 课 0.514/q0.703），
+    低质课程宁缺毋滥过滤（避免误导学习路径）。
     """
     if not rows or semantic is None:
         return rows
@@ -214,8 +228,13 @@ def _filter_by_title_similarity(
             sim = semantic.similarity(skill_name, title)
         except Exception:
             continue
-        if sim >= title_threshold:
-            kept.append(r)
+        if sim < title_threshold:
+            continue
+        if _GRAY_ZONE_SIM[0] <= sim < _GRAY_ZONE_SIM[1] and quality_map is not None:
+            q = (quality_map.get((r.get("source"), r.get("source_id"))) or {}).get("quality_score")
+            if q is None or q < _GRAY_ZONE_Q_MIN:
+                continue
+        kept.append(r)
     return kept
 
 
@@ -339,11 +358,14 @@ async def load_courses_for_skill(
     if not rows:
         return []
 
+    # 灰色带治理需要质量分——提前批量加载（原门控后查询，现提前供门控使用）
+    quality = await _load_quality_map([(r["source"], r["source_id"]) for r in rows])
+
     # P1-3：课程名语义门控（精确边与 fallback 统一校验，防图谱脏边/脏技能误配）
     if semantic is not None:
         rows = await asyncio.to_thread(
             _filter_by_title_similarity, rows, skill_name, semantic,
-            _COURSE_TITLE_SIM_THRESHOLD,
+            _COURSE_TITLE_SIM_THRESHOLD, quality,
         )
         if not rows:
             # 技能级 fallback 命中沾边技能（如 VMware→Virtual Machines 返回
@@ -352,14 +374,17 @@ async def load_courses_for_skill(
             pool_rows = await asyncio.to_thread(
                 _semantic_match_course, skill_name, semantic, _COURSE_POOL_MATCH_THRESHOLD)
             if pool_rows:
+                # 兜底课程的 quality 补查合并（灰色带门控需要）
+                extra_keys = [(r["source"], r["source_id"]) for r in pool_rows
+                              if (r["source"], r["source_id"]) not in quality]
+                if extra_keys:
+                    quality.update(await _load_quality_map(extra_keys))
                 rows = await asyncio.to_thread(
                     _filter_by_title_similarity, pool_rows, skill_name, semantic,
-                    _COURSE_TITLE_SIM_THRESHOLD,
+                    _COURSE_TITLE_SIM_THRESHOLD, quality,
                 )
         if not rows:
             return []
-
-    quality = await _load_quality_map([(r["source"], r["source_id"]) for r in rows])
     items = [
         CourseRecommendation(
             course_id=r["id"],
