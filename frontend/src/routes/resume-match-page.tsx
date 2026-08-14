@@ -20,6 +20,7 @@ import {
 } from '@/components/match/types'
 import type { PositionStatus } from '@/components/graph/types'
 import { apiGet, apiPost, ApiError, getAccessToken } from '@/lib/api'
+import type { components } from '@/types/api'
 
 const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
   candidate: '候选',
@@ -185,7 +186,7 @@ export function ResumeMatchPage() {
 
   // 载入已解析简历列表（后端 /resume/list）
   function loadResumeList() {
-    return apiGet<{ items: ResumeSummary[]; total: number }>('/resume/list')
+    return apiGet<components['schemas']['ResumeListData']>('/resume/list')
       .then((res) => setResumeList(res.items))
       .catch(() => {
         /* 列表加载失败不阻塞页面 */
@@ -205,7 +206,7 @@ export function ResumeMatchPage() {
       form.append('file', file)
       // 不手动设 Content-Type：axios 对 FormData 自动生成含 boundary 的 multipart 头，
       // 手动覆盖会丢失 boundary 导致后端解析失败
-      const res = await apiPost<{ task_id: string; resume_id: string; cached: boolean }>(
+      const res = await apiPost<components['schemas']['ResumeParseTaskData']>(
         '/resume/parse',
         form,
       )
@@ -298,7 +299,7 @@ export function ResumeMatchPage() {
     setStage('parsing')
     setNotice('推荐计算中，请稍候…')
     try {
-      const submitted = await apiPost<{ task_id: string }>('/match/recommend', {
+      const submitted = await apiPost<components['schemas']['RecommendTaskResult']>('/match/recommend', {
         resume_id: resumeId,
         top_n: 10,
       })
@@ -306,7 +307,7 @@ export function ResumeMatchPage() {
       if (task.status !== 'success' || !task.match_id) {
         throw new Error(task.error || '推荐失败，请稍后重试')
       }
-      const result = await apiGet<{ items: BackendMatchResult[] }>(`/match/result/${task.match_id}`)
+      const result = await apiGet<components['schemas']['MatchResultList']>(`/match/result/${task.match_id}`)
       const items = result.items.map(toRecommendItem)
       setRecommendations(items)
       setStage('matched')
@@ -331,7 +332,7 @@ export function ResumeMatchPage() {
     const deadline = Date.now() + maxWaitMs
     for (;;) {
       if (pollCancelledRef.current) throw new Error('已离开页面，推荐轮询中止')
-      const task = await apiGet<{ status: string; match_id?: string; error?: string }>(
+      const task = await apiGet<components['schemas']['MatchTaskStatus']>(
         `/match/task/${taskId}`,
       )
       if (task.status === 'success' || task.status === 'failed') return task
@@ -369,7 +370,7 @@ export function ResumeMatchPage() {
     if (!matchId) return
     setNotice(null)
     try {
-      const task = await apiGet<{ status: string }>(`/match/task/${matchId}`)
+      const task = await apiGet<components['schemas']['MatchTaskStatus']>(`/match/task/${matchId}`)
       if (task.status !== 'success') {
         setNotice('匹配任务尚未完成，请稍后重试')
         return
@@ -389,7 +390,7 @@ export function ResumeMatchPage() {
   async function refreshGaps() {
     if (!matchId) return
     try {
-      const res = await apiGet<{ gaps: BackendGapItem[] }>(`/match/result/${matchId}/gap`)
+      const res = await apiGet<components['schemas']['MatchGapData']>(`/match/result/${matchId}/gap`)
       setMatchResult((prev) => (prev ? { ...prev, gaps: res.gaps.map(toGapItem) } : prev))
       setNotice('差距分析已从快照刷新')
     } catch (e) {
@@ -401,7 +402,7 @@ export function ResumeMatchPage() {
   async function refreshPath() {
     if (!matchId) return
     try {
-      const res = await apiGet<{ learning_path: BackendLearningPathItem[] }>(`/match/result/${matchId}/path`)
+      const res = await apiGet<components['schemas']['MatchPathData']>(`/match/result/${matchId}/path`)
       setMatchResult((prev) => (prev ? { ...prev, learning_path: toLearningPath(res.learning_path) } : prev))
       setNotice('学习路径已从快照刷新')
     } catch (e) {

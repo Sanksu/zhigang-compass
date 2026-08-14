@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { apiGet, ApiError } from '@/lib/api'
+import type { components } from '@/types/api'
 
 // ===== Types =====
 
@@ -52,77 +53,27 @@ interface MetricItem {
 }
 
 /** 后端 /evolution/versions 返回项 */
-interface EvolutionVersion {
-  version_id: string
-  created_at: string | null
-  change_summary: string
-  node_added: number
-  node_removed: number
-  node_changed: number
-}
+type EvolutionVersion = components['schemas']['EvolutionVersion']
 
 /** 后端 /evolution/diff 返回的节点项（含真实名称） */
-interface EvolutionDiffNode {
-  id: string
-  name: string
-  type: string
-}
+type EvolutionDiffNode = components['schemas']['EvolutionDiffNode']
 
 /** 后端 /evolution/diff 返回项 */
-interface EvolutionDiff {
-  nodes_added: EvolutionDiffNode[]
-  nodes_removed: EvolutionDiffNode[]
-  nodes_changed: EvolutionDiffNode[]
-  edges_added: string[]
-  edges_removed: string[]
-}
+type EvolutionDiff = components['schemas']['EvolutionDiff']
 
 /** 后端 /evolution/trends 返回项 */
-interface EvolutionTrends {
-  skill: string
-  window: number
-  points: { date: string | null; version: string; freq: number }[]
-}
+type EvolutionTrends = components['schemas']['EvolutionTrendsData']
 
 /** 后端 /evolution/signals 返回项（EvolutionSignal 序列化） */
-interface EvolutionSignal {
-  skill_id: string
-  skill_name: string
-  z_score: number | null
-  mom_growth: number | null
-  current_freq: number
-  historical_mean: number | null
-  historical_std: number | null
-  trend: 'emerging' | 'rising' | 'stable' | 'declining' | 'protected'
-  confidence: number
-  evidence_refs: string[]
-}
+type EvolutionSignal = components['schemas']['EvolutionSignal']
 
-interface EvolutionSignalsData {
-  window_count: number
-  emerging: EvolutionSignal[]
-  declining: EvolutionSignal[]
-}
+type EvolutionSignalsData = components['schemas']['EvolutionSignalsData']
 
 /** 后端 /evolution/versions/{id} 返回的版本详情 */
-interface EvolutionVersionDetail {
-  version_id: string
-  created_at: string | null
-  change_summary: string
-  triggered_by: string | null
-  node_added: number
-  node_removed: number
-  node_changed: number
-  stats: { nodes: number; edges: number; by_type: Record<string, number> }
-  nodes: { id: string; name: string; type: string }[]
-}
+type EvolutionVersionDetail = components['schemas']['EvolutionVersionDetail']
 
 /** 后端 /evolution/position/{id}/evolution 返回项 */
-interface PositionEvolutionData {
-  position_id: string
-  position_name: string
-  points: { date: string | null; version: string; freq: number; present: boolean }[]
-}
+type PositionEvolutionData = components['schemas']['PositionEvolutionData']
 
 // ===== SignalsView =====
 
@@ -222,14 +173,7 @@ function SignalsView() {
 // ===== TechnologyWatchView =====
 
 /** 技术热点观察池（真实 GET /evolution/watch，MLI 产业化拐点排名） */
-interface WatchItem {
-  skill_name: string
-  sources: string[]
-  mli: number
-  ready_to_industrialize: boolean
-  status: string
-  last_signal_at: string | null
-}
+type WatchItem = components['schemas']['WatchOverviewItem']
 
 const SOURCE_LABEL: Record<string, string> = {
   jd: 'JD',
@@ -245,7 +189,7 @@ function TechnologyWatchView() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    apiGet<{ items: WatchItem[] }>('/evolution/watch?limit=20')
+    apiGet<components['schemas']['WatchOverviewData']>('/evolution/watch?limit=20')
       .then((r) => setData(r.items))
       .catch((e) => setError(e instanceof ApiError ? e.message : '技术热点加载失败'))
   }, [])
@@ -615,7 +559,7 @@ function VersionDiffView() {
 
   // 加载真实版本列表，默认对比最近两个版本
   useEffect(() => {
-    apiGet<{ items: EvolutionVersion[]; total: number }>('/evolution/versions?page=1&size=30')
+    apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=30')
       .then((res) => {
         // 快照可能在同一事务写入导致 created_at 相同，按 version_id（graph_vYYYYMMDD）降序保证稳定
         const items = [...res.items].sort((a, b) => b.version_id.localeCompare(a.version_id))
@@ -876,18 +820,7 @@ const STATE_META: Record<
 }
 
 /** 六态分布 + 最近流转记录（GET /evolution/state-machine） */
-interface StateMachineData {
-  states: Record<string, number>
-  transitions: {
-    id: number
-    position_name: string
-    operator: string
-    from_state: string
-    to_state: string
-    reason: string
-    created_at: string | null
-  }[]
-}
+type StateMachineData = components['schemas']['StateMachineData']
 
 /** 岗位状态机流转（真实 GET /evolution/state-machine，六态分布 + 人工流转记录） */
 function StateMachineView() {
@@ -957,11 +890,11 @@ function StateMachineView() {
                         </TableCell>
                         <TableCell className="text-xs">
                           <span className="inline-flex items-center gap-1">
-                            <Badge variant={STATE_META[t.from_state]?.badge ?? 'outline'} className="text-[9px]">
+                            <Badge variant={STATE_META[t.from_state ?? '']?.badge ?? 'outline'} className="text-[9px]">
                               {t.from_state}
                             </Badge>
                             <span className="text-ink-faint">→</span>
-                            <Badge variant={STATE_META[t.to_state]?.badge ?? 'outline'} className="text-[9px]">
+                            <Badge variant={STATE_META[t.to_state ?? '']?.badge ?? 'outline'} className="text-[9px]">
                               {t.to_state}
                             </Badge>
                           </span>
@@ -988,7 +921,7 @@ export function EvolutionPage() {
 
   // 加载真实版本列表（顶部指标 + diff 下拉共用），按 version_id 降序保证稳定
   useEffect(() => {
-    apiGet<{ items: EvolutionVersion[]; total: number }>('/evolution/versions?page=1&size=30')
+    apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=30')
       .then((res) => setVersions([...res.items].sort((a, b) => b.version_id.localeCompare(a.version_id))))
       .catch(() => {
         /* diff 视图内会提示错误 */

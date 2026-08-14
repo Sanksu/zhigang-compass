@@ -20,6 +20,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiGet, apiPost } from '@/lib/api'
+import type { components } from '@/types/api'
 
 /* ------------------------------------------------------------------ */
 /*  类型定义（对应后端 /admin/* 返回）                                    */
@@ -36,35 +37,8 @@ interface AuditLogItem {
 
 type AuditActionType = '用户管理' | '爬取' | '岗位审核' | '系统'
 
-interface BackendAuditLog {
-  id: number
-  user_id: string
-  action: string
-  resource: string
-  resource_id: string | null
-  detail: { username?: string }
-  ip_address: string
-  created_at: string | null
-}
-
-interface CrawlPlatform {
-  id: string
-  name: string
-  level: string
-  files: number
-  total_count: number
-  today_count: number
-  last_run: string | null
-}
-
-interface CrawlStatusData {
-  metrics: {
-    today_count: number
-    output_total: number
-    raw: { jd: number; course: number; paper: number; community: number }
-  }
-  platforms: CrawlPlatform[]
-}
+/** 后端 /admin/crawl/status 响应 data（契约 CrawlStatusData） */
+type CrawlStatusData = components['schemas']['CrawlStatusData']
 
 interface SourceItem {
   name: string
@@ -154,7 +128,7 @@ export function AdminDashboardPage() {
     Promise.allSettled([
       apiGet<{ items: { id: string }[]; total: number }>('/admin/users?page=1&size=1'),
       apiGet<CrawlStatusData>('/admin/crawl/status'),
-      apiGet<{ items: BackendAuditLog[]; total: number }>('/admin/audit/logs?page=1&size=10'),
+      apiGet<components['schemas']['AuditLogsData']>('/admin/audit/logs?page=1&size=10'),
       apiGet<{ items: unknown[]; total: number }>('/admin/positions/pending'),
     ]).then(([usersRes, crawlRes, auditRes, pendingRes]) => {
       if (cancelled) return
@@ -181,7 +155,7 @@ export function AdminDashboardPage() {
           files: p.files,
           totalCount: p.total_count,
           todayCount: p.today_count,
-          lastRun: p.last_run,
+          lastRun: p.last_run ?? null,
         })),
       )
       setAuditLogs(

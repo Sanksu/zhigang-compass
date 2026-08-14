@@ -23,17 +23,10 @@ import {
 } from '@/components/ui/table'
 import type { ResumeSummary } from '@/components/match/types'
 import { apiDelete, apiGet, apiPost, apiPut, ApiError, getAccessToken } from '@/lib/api'
+import type { components } from '@/types/api'
 
-/** /auth/me 返回的用户资料 */
-interface MeProfile {
-  id: string
-  username: string
-  role: string
-  email: string
-  phone: string
-  bio: string
-  created_at: string | null
-}
+/** /auth/me 返回的用户资料（契约 User） */
+type MeProfile = components['schemas']['User']
 
 const ROLE_LABEL: Record<string, string> = { admin: '管理员', user: '用户', guest: '访客' }
 
@@ -92,7 +85,7 @@ export function ProfilePage() {
 
   const loadResumes = useCallback(async () => {
     try {
-      const data = await apiGet<{ items: ResumeSummary[]; total: number }>('/resume/list')
+      const data = await apiGet<components['schemas']['ResumeListData']>('/resume/list')
       setResumes(data.items)
     } catch {
       setResumes([])

@@ -37,7 +37,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["LoginResult"];
+                            trace_id?: string;
+                        };
                     };
                 };
                 401: components["responses"]["Unauthorized"];
@@ -708,7 +713,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["PagerankData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -751,7 +761,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillClustersData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -831,7 +846,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["ShortestPathData"];
+                            trace_id?: string;
+                        };
                     };
                 };
                 /** @description 两技能间不存在 ≤6 跳可达路径 */
@@ -960,7 +980,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["ResumeListData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -990,14 +1015,7 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody: {
-                content: {
-                    "multipart/form-data": {
-                        /** Format: binary */
-                        file: string;
-                    };
-                };
-            };
+            requestBody?: never;
             responses: {
                 /** @description 已接受，异步处理中 */
                 202: {
@@ -1005,7 +1023,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["ResumeParseTaskData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1268,7 +1291,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["RecommendTaskResult"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1314,7 +1342,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["MatchResult"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1350,7 +1383,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["MatchTaskStatus"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1388,7 +1426,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["MatchResultList"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1426,7 +1469,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["MatchGapData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1464,7 +1512,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["MatchPathData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1505,7 +1558,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["DiagnosisReport"];
+                            trace_id?: string;
+                        };
                     };
                 };
                 /** @description 该匹配结果无差距数据（仅人岗比对可生成诊断报告） */
@@ -1619,7 +1677,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["EvolutionVersionListData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1657,7 +1720,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["EvolutionVersionDetail"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1696,7 +1764,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["EvolutionDiff"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1735,7 +1808,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["EvolutionTrendsData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1773,7 +1851,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["PositionEvolutionData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1809,7 +1892,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["StateMachineData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1847,7 +1935,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["EvolutionSignalsData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1885,7 +1978,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["WatchOverviewData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -2763,7 +2861,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["AuditLogsData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -2870,17 +2973,17 @@ export interface components {
         /** @description 技能差距项（设计文档 §9.5 三态） */
         GapSkill: {
             /** @description 技能名 */
-            skill?: string;
+            skill: string;
             /** @description 图谱技能 ID */
             skill_id?: string | null;
             /** @enum {string} */
-            necessity?: "must" | "nice";
+            necessity: "must" | "nice";
             /** @enum {string} */
-            gap_type?: "missing" | "weak" | "matched";
+            gap_type: "missing" | "weak" | "matched";
             /** @description 技能权重 */
-            weight?: number;
+            weight: number;
             /** @enum {string} */
-            priority?: "high" | "medium" | "low";
+            priority: "high" | "medium" | "low";
             /** @description 候选人当前熟练度 */
             current_proficiency?: string | null;
             /** @description 岗位期望熟练度 */
@@ -2889,27 +2992,27 @@ export interface components {
         /** @description 学习课程推荐（质量分 Top-3，设计文档 §4.6） */
         CourseRecommendation: {
             /** @description 图谱 Course ID */
-            course_id?: string;
-            title?: string;
-            platform?: string;
+            course_id: string;
+            title: string;
+            platform: string;
             quality_score?: number | null;
-            recommended?: boolean;
-            source_url?: string;
+            recommended: boolean;
+            source_url: string;
             /** @description 课程时长（小时） */
             hours?: number | null;
         };
         /** @description 单技能学习路径项（甘特图格式，设计文档 §9.5） */
         LearningPathItem: {
             /** @description 目标技能名 */
-            skill?: string;
+            skill: string;
             skill_id?: string | null;
             /** @description 先修技能链（先修在前） */
-            prerequisites?: string[];
-            courses?: components["schemas"]["CourseRecommendation"][];
+            prerequisites: string[];
+            courses: components["schemas"]["CourseRecommendation"][];
             /** @description 预计学习学时 */
-            estimated_hours?: number;
+            estimated_hours: number;
             /** @enum {string} */
-            priority?: "high" | "medium" | "low";
+            priority: "high" | "medium" | "low";
         };
         /** @description 技能反向查询岗位项（GET /graph/skill/{id}/positions） */
         SkillPositionItem: {
@@ -3050,6 +3153,27 @@ export interface components {
         /** @description GET /admin/users 响应 data（分页） */
         AdminUsersData: {
             items: components["schemas"]["AdminUser"][];
+            total: number;
+            page: number;
+            size: number;
+        };
+        /** @description 审计日志项（GET /admin/audit/logs） */
+        AuditLogItem: {
+            id: number;
+            user_id: string;
+            /** @description 动作（模块前缀命名，如 auth.login） */
+            action: string;
+            resource: string;
+            resource_id?: string | null;
+            /** @description 动作详情（如 {username}），结构随 action 变化 */
+            detail?: Record<string, never>;
+            ip_address: string;
+            /** @description 时间 ISO8601 */
+            created_at?: string | null;
+        };
+        /** @description GET /admin/audit/logs 响应 data（分页） */
+        AuditLogsData: {
+            items: components["schemas"]["AuditLogItem"][];
             total: number;
             page: number;
             size: number;
@@ -3227,6 +3351,326 @@ export interface components {
         /** @description GET/PUT /admin/llm-config 响应/请求 data */
         LlmConfig: {
             providers: components["schemas"]["LlmProviderConfig"][];
+        };
+        /** @description 图谱版本列表项（GET /evolution/versions） */
+        EvolutionVersion: {
+            version_id: string;
+            /** @description 创建时间 ISO8601 */
+            created_at?: string | null;
+            /** @description 版本变更摘要 */
+            change_summary: string;
+            /** @description 触发来源 */
+            triggered_by?: string | null;
+            node_added: number;
+            node_removed: number;
+            node_changed: number;
+        };
+        /** @description GET /evolution/versions 响应 data（分页） */
+        EvolutionVersionListData: {
+            items: components["schemas"]["EvolutionVersion"][];
+            total: number;
+            page: number;
+            size: number;
+        };
+        /** @description 版本 Diff 节点项 */
+        EvolutionDiffNode: {
+            id: string;
+            name: string;
+            type: string;
+        };
+        /** @description 两个版本快照 Diff（GET /evolution/diff） */
+        EvolutionDiff: {
+            nodes_added: components["schemas"]["EvolutionDiffNode"][];
+            nodes_removed: components["schemas"]["EvolutionDiffNode"][];
+            nodes_changed: components["schemas"]["EvolutionDiffNode"][];
+            edges_added: string[];
+            edges_removed: string[];
+        };
+        /** @description 技能频次趋势采样点 */
+        EvolutionTrendPoint: {
+            /** @description 快照日期 YYYY-MM-DD */
+            date?: string | null;
+            version?: string;
+            /** @description 该技能被引用边数 */
+            freq?: number;
+        };
+        /** @description GET /evolution/trends 响应 data */
+        EvolutionTrendsData: {
+            /** @description 技能节点 ID */
+            skill: string;
+            window: number;
+            points: components["schemas"]["EvolutionTrendPoint"][];
+        };
+        /** @description 技能演化信号（GET /evolution/signals，设计文档 §7.1 Z-score） */
+        EvolutionSignal: {
+            skill_id: string;
+            skill_name: string;
+            /** @description Z-score（小基数保护态为 null） */
+            z_score?: number | null;
+            /** @description 环比增长率 */
+            mom_growth?: number | null;
+            current_freq: number;
+            historical_mean?: number | null;
+            historical_std?: number | null;
+            /** @enum {string} */
+            trend: "emerging" | "rising" | "stable" | "declining" | "protected";
+            confidence: number;
+            evidence_refs: string[];
+        };
+        /** @description GET /evolution/signals 响应 data */
+        EvolutionSignalsData: {
+            /** @description 参与计算的快照窗口数 */
+            window_count: number;
+            emerging: components["schemas"]["EvolutionSignal"][];
+            declining: components["schemas"]["EvolutionSignal"][];
+        };
+        /** @description 版本详情（GET /evolution/versions/{version_id}） */
+        EvolutionVersionDetail: {
+            version_id: string;
+            created_at?: string | null;
+            change_summary: string;
+            triggered_by?: string | null;
+            node_added: number;
+            node_removed: number;
+            node_changed: number;
+            /** @description 快照统计 */
+            stats: {
+                nodes?: number;
+                edges?: number;
+                /** @description 节点类型计数（skill/position/...） */
+                by_type?: {
+                    [key: string]: number;
+                };
+            };
+            /** @description 快照节点列表（不含边） */
+            nodes: components["schemas"]["EvolutionDiffNode"][];
+        };
+        /** @description 岗位演化采样点 */
+        PositionEvolutionPoint: {
+            date?: string | null;
+            version?: string;
+            /** @description 该岗位被引用边数 */
+            freq?: number;
+            /** @description 该版本快照中岗位节点是否存在 */
+            present?: boolean;
+        };
+        /** @description GET /evolution/position/{id}/evolution 响应 data */
+        PositionEvolutionData: {
+            position_id: string;
+            position_name: string;
+            points: components["schemas"]["PositionEvolutionPoint"][];
+        };
+        /** @description 岗位状态流转记录项（GET /evolution/state-machine） */
+        StateMachineTransition: {
+            id: number;
+            /** @description 岗位名（resource_id） */
+            position_name: string;
+            /** @description 操作者（admin 用户名） */
+            operator: string;
+            from_state?: string | null;
+            to_state?: string | null;
+            reason: string;
+            created_at?: string | null;
+        };
+        /** @description GET /evolution/state-machine 响应 data */
+        StateMachineData: {
+            /** @description 六态分布（candidate/emerging/stable/declining/archived/rejected） */
+            states: {
+                [key: string]: number;
+            };
+            transitions: components["schemas"]["StateMachineTransition"][];
+        };
+        /** @description 观察池公开摘要项（GET /evolution/watch，MLI 排名） */
+        WatchOverviewItem: {
+            skill_name: string;
+            /** @description 有信号的源（arxiv/course/github/community/jd） */
+            sources: string[];
+            /** @description 媒介落差指数 [0,1] */
+            mli: number;
+            /** @description MLI > 0.6 产业化拐点 */
+            ready_to_industrialize: boolean;
+            status: string;
+            last_signal_at?: string | null;
+        };
+        /** @description GET /evolution/watch 响应 data */
+        WatchOverviewData: {
+            items: components["schemas"]["WatchOverviewItem"][];
+            total: number;
+        };
+        /** @description 已解析简历列表项（GET /resume/list） */
+        ResumeSummaryItem: {
+            id: string;
+            file_name: string;
+            /** @description 候选人技能名列表 */
+            skills: string[];
+            /** @description 工作年限 */
+            total_years: number;
+            education_level?: string | null;
+            updated_at?: string | null;
+        };
+        /** @description GET /resume/list 响应 data */
+        ResumeListData: {
+            items: components["schemas"]["ResumeSummaryItem"][];
+            total: number;
+        };
+        /** @description POST /resume/parse 响应 data（异步解析任务入队） */
+        ResumeParseTaskData: {
+            task_id: string;
+            resume_id: string;
+            /** @description 命中缓存直接返回画像 */
+            cached: boolean;
+        };
+        /** @description 证据引用项（技能 → 原始 JD，图谱 EVIDENCED_BY 链路） */
+        EvidenceRef: {
+            skill: string;
+            source: string;
+            url: string;
+            confidence: number;
+        };
+        /** @description 单岗位匹配结果（设计文档 §9.4，compare 同步 / result 快照） */
+        MatchResult: {
+            /** @description 结果快照 ID（持久化后供 /match/result 系列查询） */
+            match_id: string;
+            /** @description 归属用户（compare 同步返回） */
+            user_id?: string;
+            position_id: string;
+            position_name: string;
+            /** @description 综合得分 [0,1] */
+            total_score: number;
+            must_score: number;
+            nice_score: number;
+            exp_score: number;
+            /** @description 已匹配的必备技能名 */
+            matched_must: string[];
+            /** @description 缺失的必备技能名 */
+            missing_must: string[];
+            /** @description 匹配摘要 */
+            summary: string;
+            /** @description 必备技能全缺失判零 */
+            unqualified: boolean;
+            /** @description 人岗比对五维雷达（§9.5），无数据维度为 null */
+            radar?: Record<string, never>;
+            /** @description 差距三态（missing/weak/matched 按优先级排序） */
+            gaps: components["schemas"]["GapSkill"][];
+            /** @description missing/weak 技能先修链 + 课程 Top-3 */
+            learning_path: components["schemas"]["LearningPathItem"][];
+            evidence_refs: components["schemas"]["EvidenceRef"][];
+        };
+        /** @description 匹配任务状态（GET /match/task/{task_id}） */
+        MatchTaskStatus: {
+            task_id: string;
+            /** @enum {string} */
+            status: "pending" | "running" | "success" | "failed";
+            /** @description 进度 [0,100] */
+            progress?: number;
+            error?: string;
+            /** @description 成功后附，供拉取结果 */
+            match_id?: string;
+        };
+        /** @description POST /match/recommend 响应 data（ARQ 入队） */
+        RecommendTaskResult: {
+            task_id: string;
+        };
+        /** @description GET /match/result/{match_id} 响应 data */
+        MatchResultList: {
+            /** @description 推荐任务结果列表（recommend 多岗位） */
+            items: components["schemas"]["MatchResult"][];
+        };
+        /** @description GET /match/result/{match_id}/gap 响应 data */
+        MatchGapData: {
+            match_id: string;
+            gaps: components["schemas"]["GapSkill"][];
+        };
+        /** @description GET /match/result/{match_id}/path 响应 data */
+        MatchPathData: {
+            match_id: string;
+            learning_path: components["schemas"]["LearningPathItem"][];
+        };
+        /** @description 诊断报告差距建议项（evidence_id 可点击追溯） */
+        GapAdvice: {
+            skill: string;
+            advice: string;
+            evidence_id: string;
+        };
+        /** @description LLM 人岗比对诊断报告（GET /match/result/{match_id}/diagnosis，§9.5） */
+        DiagnosisReport: {
+            match_id?: string;
+            /** @description 总体匹配度解读 */
+            overall_summary: string;
+            /** @description 三维雷达图解读 */
+            radar_analysis: string;
+            /** @description 关键差距 Top-5 及改进建议 */
+            top_gaps: components["schemas"]["GapAdvice"][];
+            /** @description 学习路径解读 */
+            path_analysis?: string;
+            /** @description 整体改进建议清单 */
+            recommendations: string[];
+        };
+        /** @description PageRank 技能项（GET /graph/algorithms/pagerank） */
+        PagerankSkill: {
+            id: string;
+            name: string;
+            /** @description PageRank 得分 */
+            score: number;
+        };
+        /** @description GET /graph/algorithms/pagerank 响应 data */
+        PagerankData: {
+            skills: components["schemas"]["PagerankSkill"][];
+            top_n: number;
+        };
+        /** @description 技能簇成员项 */
+        ClusterSkill: {
+            id: string;
+            name: string;
+        };
+        /** @description LLM 兜底命名结果（skill-clusters 响应） */
+        ClusterLLM: {
+            coherent: boolean;
+            cluster_name?: string | null;
+            rationale?: string | null;
+            splits?: string[];
+        };
+        /** @description 技能簇项（GET /graph/algorithms/skill-clusters） */
+        SkillCluster: {
+            id: number;
+            size: number;
+            /** @description 规则标签（簇内共现 Top-3 技能 · 拼接） */
+            label?: string;
+            /** @description 是否命中 LLM 兜底触发条件 */
+            needs_llm?: boolean;
+            /** @description 触发原因（no_dominant_skill / cross_category / empty_label） */
+            triggers?: string[];
+            llm?: components["schemas"]["ClusterLLM"];
+            skills: components["schemas"]["ClusterSkill"][];
+        };
+        /** @description 层级元数据（阶段三层次化提取，0 = 最细） */
+        ClusterLevel: {
+            level: number;
+            cluster_count: number;
+            /** @description 标准 Q（γ=1.0） */
+            modularity: number;
+        };
+        /** @description GET /graph/algorithms/skill-clusters 响应 data */
+        SkillClustersData: {
+            clusters: components["schemas"]["SkillCluster"][];
+            cluster_count: number;
+            /** @description 层级元数据（Leiden 不支持层级时为 null） */
+            levels?: components["schemas"]["ClusterLevel"][] | null;
+        };
+        /** @description 最短路径节点（GET /graph/algorithms/shortest-path） */
+        ShortestPathNode: {
+            id: string;
+            name: string;
+            type: string;
+        };
+        /** @description GET /graph/algorithms/shortest-path 响应 data */
+        ShortestPathData: {
+            /** @description 起点技能 ID */
+            from: string;
+            /** @description 终点技能 ID */
+            to: string;
+            /** @description 节点序列（≤6 跳，可能经过 Position） */
+            path: components["schemas"]["ShortestPathNode"][];
         };
     };
     responses: {

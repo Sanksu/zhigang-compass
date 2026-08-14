@@ -13,52 +13,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { apiGet } from '@/lib/api'
+import type { components } from '@/types/api'
 
-interface PagerankSkill {
-  id: string
-  name: string
-  score: number
-}
-
-interface ClusterSkill {
-  id: string
-  name: string
-}
-
-/** LLM 兜底命名结果（后端 skill-clusters 响应，契约 openapi.yaml 已声明） */
-interface ClusterLLM {
-  coherent: boolean
-  cluster_name: string | null
-  rationale: string | null
-  splits: string[]
-}
-
-interface SkillCluster {
-  id: number
-  size: number
-  /** 规则标签（簇内共现权重 Top-3 技能，· 拼接） */
-  label?: string
-  /** 是否命中 LLM 兜底触发条件（无主导技能/跨类别复合栈/规则标签为空） */
-  needs_llm?: boolean
-  /** 触发原因（no_dominant_skill / cross_category / empty_label） */
-  triggers?: string[]
-  /** LLM 兜底结果（未触发或 LLM 降级时为 null） */
-  llm?: ClusterLLM | null
-  skills: ClusterSkill[]
-}
-
-/** 层级元数据（阶段三层次化提取：0 = 最细，逐层变粗） */
-interface ClusterLevel {
-  level: number
-  cluster_count: number
-  modularity: number
-}
-
-interface PathNode {
-  id: string
-  name: string
-  type: string
-}
+type PagerankSkill = components['schemas']['PagerankSkill']
+type SkillCluster = components['schemas']['SkillCluster']
+type ClusterLevel = components['schemas']['ClusterLevel']
+type PathNode = components['schemas']['ShortestPathNode']
 
 interface GraphAnalysisPanelProps {
   /** 当前画布技能 id → name 映射，用于最短路径选择下拉 */
@@ -104,7 +64,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
   // 注意：pagerankLoading 初始 true，无需在 effect 内再次 set，避免 react-hooks/set-state-in-effect
   useEffect(() => {
     let cancelled = false
-    apiGet<{ skills: PagerankSkill[] }>('/graph/algorithms/pagerank?top_n=20')
+    apiGet<components['schemas']['PagerankData']>('/graph/algorithms/pagerank?top_n=20')
       .then((r) => {
         if (!cancelled) setPagerank(r.skills)
       })
@@ -126,7 +86,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
     const levelQuery = selectedLevel === null ? '' : `&level=${selectedLevel}`
     ;(async () => {
       try {
-        const r = await apiGet<{ clusters: SkillCluster[]; levels: ClusterLevel[] | null }>(
+        const r = await apiGet<components['schemas']['SkillClustersData']>(
           `/graph/algorithms/skill-clusters?min_size=2${levelQuery}`,
         )
         if (!cancelled) {
@@ -162,7 +122,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
     setPathError(null)
     setPath(null)
     try {
-      const r = await apiGet<{ from: string; to: string; path: PathNode[] }>(
+      const r = await apiGet<components['schemas']['ShortestPathData']>(
         `/graph/algorithms/shortest-path?from=${encodeURIComponent(fromSkill)}&to=${encodeURIComponent(toSkill)}`,
       )
       setPath(r.path)
