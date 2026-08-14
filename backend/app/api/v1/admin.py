@@ -92,12 +92,12 @@ async def create_user(req: dict, db: AsyncSession = Depends(get_db)):
     password = req.get("password") or ""
     role = req.get("role") or "user"
     if len(username) < 3 or len(password) < 6:
-        return error(400, "用户名至少 3 字符，密码至少 6 字符")
+        return error(4000, "用户名至少 3 字符，密码至少 6 字符")
     if role not in ("admin", "user", "guest"):
-        return error(400, "角色非法")
+        return error(4000, "角色非法")
     existing = await db.scalar(select(User).where(User.username == username))
     if existing is not None:
-        return error(409, "用户名已存在")
+        return error(4090, "用户名已存在")
     user = User(username=username, password_hash=hash_password(password), role=role)
     db.add(user)
     await db.commit()
@@ -119,9 +119,9 @@ async def update_user(
     # 自保护：当前登录管理员不允许降级自己的角色或禁用自己，避免后台锁死
     if user_id == current_user.get("sub"):
         if req.get("status") is not None and req["status"] != "active":
-            return error(400, "不能禁用当前登录账户")
+            return error(4000, "不能禁用当前登录账户")
         if req.get("role") and req["role"] != "admin":
-            return error(400, "不能降级当前登录账户")
+            return error(4000, "不能降级当前登录账户")
     if "role" in req and req["role"] in ("admin", "user", "guest"):
         user.role = req["role"]
     if "status" in req:
@@ -363,10 +363,10 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
     logger.info(f"[crawl/trigger] 收到触发请求: platform={platform} keyword={keyword} city={city or '(默认)'}")
     if platform not in _PLATFORM_TO_SPIDER:
         logger.warning(f"[crawl/trigger] 未知平台: {platform}")
-        return error(400, f"未知平台: {platform}（可选: {', '.join(sorted(PLATFORM_META))}）")
+        return error(4000, f"未知平台: {platform}（可选: {', '.join(sorted(PLATFORM_META))}）")
     if not keyword:
         logger.warning("[crawl/trigger] keyword 为空")
-        return error(400, "keyword 不能为空")
+        return error(4000, "keyword 不能为空")
 
     try:
         task = TaskStatus(
@@ -381,7 +381,7 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
         logger.exception(
             f"[crawl/trigger] 任务落库失败: platform={platform} keyword={keyword} city={city or '(默认)'} err={e}"
         )
-        return error(500, f"爬取任务落库失败: {e}")
+        return error(5000, f"爬取任务落库失败: {e}")
     logger.info(f"[crawl/trigger] 任务已建: task_id={task.id} platform={platform} keyword={keyword} city={city or '(默认)'}")
 
     try:
@@ -397,7 +397,7 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
         task.error = f"任务入队失败: {e}"
         await db.commit()
         logger.error(f"[crawl/trigger] 任务入队失败: task_id={task.id} err={e}")
-        return error(500, f"爬取任务入队失败: {e}")
+        return error(5000, f"爬取任务入队失败: {e}")
 
     return ok(data={"task_id": task.id, "platform": platform, "status": "pending"})
 
@@ -471,7 +471,7 @@ async def crawl_task_stream(task_id: str):
     try:
         task_uuid = str(uuid.UUID(task_id))
     except (ValueError, AttributeError):
-        return error(400, "task_id 格式非法")
+        return error(4000, "task_id 格式非法")
 
     from arq import create_pool
     from arq.connections import RedisSettings
@@ -629,15 +629,15 @@ async def review_position(
     action = req.get("action")
     reason = (req.get("reason") or "").strip()
     if action not in ("approve", "reject"):
-        return error(400, "action 必须为 approve 或 reject")
+        return error(4000, "action 必须为 approve 或 reject")
     if not reason:
-        return error(400, "审核必须填写 reason")
+        return error(4000, "审核必须填写 reason")
 
     cand_row = await db.get(DiscoveryCandidate, candidate_id)
     if cand_row is None:
         return error(4040, "候选岗位不存在", http_status=404)
     if cand_row.state != "candidate":
-        return error(409, f"候选岗位当前状态 {cand_row.state}，不可审核")
+        return error(4090, f"候选岗位当前状态 {cand_row.state}，不可审核")
 
     features = DiscoveryFeatures(**cand_row.features)
     candidate = CandidatePosition(
@@ -658,7 +658,7 @@ async def review_position(
 
         conf = cand_row.confidence or {}
         if not can_promote_to_emerging(candidate, confidence=float(conf.get("final_confidence", 0.0))):
-            return error(400, "置信度 < 0.6 或独立源 < 2，不满足 emerging 晋升条件")
+            return error(4000, "置信度 < 0.6 或独立源 < 2，不满足 emerging 晋升条件")
 
     machine = PositionStateMachine()
     with neo4j_driver.session() as neo4j_session:
@@ -755,13 +755,13 @@ async def review_evolution(
 
     action = req.get("action")
     if action not in ("approve", "reject"):
-        return error(400, "action 必须为 approve 或 reject")
+        return error(4000, "action 必须为 approve 或 reject")
 
     cand_row = await db.get(DiscoveryCandidate, candidate_id)
     if cand_row is None:
         return error(4040, "候选岗位不存在", http_status=404)
     if cand_row.state != "emerging":
-        return error(409, f"候选岗位当前状态 {cand_row.state}，仅 emerging 可执行演化审核")
+        return error(4090, f"候选岗位当前状态 {cand_row.state}，仅 emerging 可执行演化审核")
 
     candidate = CandidatePosition(
         candidate_id=cand_row.id,
@@ -861,13 +861,13 @@ async def archive_position(
 
     reason = (req.get("reason") or "").strip()
     if not reason:
-        return error(400, "归档必须填写 reason")
+        return error(4000, "归档必须填写 reason")
 
     cand_row = await db.get(DiscoveryCandidate, candidate_id)
     if cand_row is None:
         return error(4040, "候选岗位不存在", http_status=404)
     if cand_row.state != "declining":
-        return error(409, f"候选岗位当前状态 {cand_row.state}，仅 declining 可归档")
+        return error(4090, f"候选岗位当前状态 {cand_row.state}，仅 declining 可归档")
 
     candidate = CandidatePosition(
         candidate_id=cand_row.id,
@@ -1144,7 +1144,7 @@ async def update_position_definition(
     scenarios = req.get("scenarios")
     err = validate_position_edit(skills, core_duties, scenarios)
     if err:
-        return error(400, err)
+        return error(4000, err)
 
     editor_id = current_user.get("sub") or current_user.get("user_id", "admin")
     with neo4j_driver.session() as session:
@@ -1288,7 +1288,7 @@ async def get_llm_config():
     try:
         cfg = load_llm_config(_LLM_CONFIG_PATH)
     except (OSError, yaml.YAMLError):
-        return error(500, "LLM 配置读取失败")
+        return error(5000, "LLM 配置读取失败")
     cfg["providers"] = mask_providers(cfg.get("providers", []))
     return ok(data=cfg)
 
@@ -1300,9 +1300,9 @@ async def update_llm_config(req: dict):
     try:
         saved = save_llm_config(_LLM_CONFIG_PATH, providers)
     except ValueError as e:
-        return error(400, str(e))
+        return error(4000, str(e))
     except (OSError, yaml.YAMLError):
-        return error(500, "LLM 配置保存失败")
+        return error(5000, "LLM 配置保存失败")
     saved["providers"] = mask_providers(saved.get("providers", []))
     return ok(data=saved)
 

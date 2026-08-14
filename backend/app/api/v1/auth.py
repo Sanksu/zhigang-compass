@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Request, Response
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -89,11 +89,14 @@ async def login(
     """
     user = await db.scalar(select(User).where(User.username == req.username))
     if user is None:
-        # 首次部署 bootstrap：users 表为空时按配置创建 admin 用户，
-        # 创建后即落入 users 表，后续登录走 DB 校验；生产环境禁用该路径
+        # 首次部署 bootstrap：仅当 users 表完全为空时按配置创建 admin 用户，
+        # 创建后即落入 users 表，后续登录走 DB 校验；生产环境禁用该路径。
+        # 08-14 安全修复：原条件为"admin 用户名不存在"——表非空时任何人可用
+        # 默认配置抢注 admin（admin/admin123），改为表空才允许。
         if settings.is_production:
             return error(4010, "用户名或密码错误", http_status=401)
-        if req.username == settings.admin_username and req.password == settings.admin_password:
+        user_count = await db.scalar(select(func.count()).select_from(User))
+        if user_count == 0 and req.username == settings.admin_username and req.password == settings.admin_password:
             user = User(
                 username=req.username,
                 password_hash=hash_password(req.password),
@@ -188,12 +191,12 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     logger.info(f"[register] 收到注册请求: username={req.username}")
     if len(req.username) < 3 or len(req.password) < 6:
         logger.warning(f"[register] 参数校验失败: username={req.username}")
-        return error(400, "用户名至少 3 字符，密码至少 6 字符")
+        return error(4000, "用户名至少 3 字符，密码至少 6 字符")
 
     existing = await db.scalar(select(User).where(User.username == req.username))
     if existing is not None:
         logger.warning(f"[register] 用户名已存在: username={req.username}")
-        return error(409, "用户名已存在")
+        return error(4090, "用户名已存在")
 
     user = User(
         username=req.username,
@@ -224,7 +227,7 @@ async def me(
     """获取当前用户信息（需登录）。"""
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
-        return error(404, "用户不存在")
+        return error(4040, "用户不存在")
     return ok(data={
         "id": user.id,
         "username": user.username,
@@ -249,7 +252,7 @@ async def update_me(
     """
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
-        return error(404, "用户不存在")
+        return error(4040, "用户不存在")
     if req.email is not None:
         user.email = req.email
     if req.phone is not None:
@@ -289,11 +292,11 @@ async def change_password(
     """
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
-        return error(404, "用户不存在")
+        return error(4040, "用户不存在")
     if not verify_password(req.old_password, user.password_hash):
-        return error(400, "原密码错误")
+        return error(4000, "原密码错误")
     if req.old_password == req.new_password:
-        return error(400, "新密码不能与原密码相同")
+        return error(4000, "新密码不能与原密码相同")
     user.password_hash = hash_password(req.new_password)
     db.add(AuditLog(
         user_id=user.id,

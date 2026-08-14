@@ -114,6 +114,39 @@ async def _update_crawl_task(task_id: str | None, **fields) -> None:
 # 保留（Scrapy 逐行落盘），后续 load 仍消费已产出数据。
 _CRAWL_TIMEOUT_SEC = 900
 
+
+def _kill_process_tree(proc) -> None:
+    """终止爬虫子进程树（08-14 修复：proc.kill() 只杀主进程，Playwright/Chrome
+    子进程成孤儿继续打源站——08-13 zhilian 实测挂死 8h）。
+
+    Windows：taskkill /T /F（进程树）；POSIX：killpg（创建时 start_new_session
+    进程组隔离）。
+    """
+    import os
+    import platform
+    import signal
+
+    if platform.system() == "Windows":
+        try:
+            result = subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True, timeout=10,
+            )
+            if result.returncode != 0:
+                proc.kill()  # taskkill 失败（pid 无效等）兜底杀主进程
+        except Exception:
+            proc.kill()
+    else:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception:
+            proc.kill()
+    try:
+        proc.wait(timeout=10)
+    except Exception:
+        pass
+
+
 async def crawl_platform(
     ctx: dict,
     spider_name: str,
@@ -178,6 +211,7 @@ async def crawl_platform(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=_CRAWL_ENV,
+            start_new_session=True,  # POSIX 进程组隔离：超时 killpg 可连带子进程
         )
     except Exception as e:
         msg = f"启动爬虫子进程失败: {e}"
@@ -211,8 +245,7 @@ async def crawl_platform(
     try:
         returncode = await asyncio.wait_for(proc.wait(), timeout=_CRAWL_TIMEOUT_SEC)
     except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
+        _kill_process_tree(proc)  # 同步函数（taskkill/killpg），勿 await
         msg = f"爬虫 {spider_name} 超时（>{_CRAWL_TIMEOUT_SEC}s），已强制终止"
         print(f"[crawl_platform] 任务超时: task_id={task_id} {msg}", flush=True)
         await _update_crawl_task(task_id, status="failed", error=msg[:500])

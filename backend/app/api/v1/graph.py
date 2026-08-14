@@ -551,7 +551,7 @@ async def skill_similar(
             await _cache_set(cache_key, data)
             return ok(data=data)
     except SemanticUnavailableError:
-        return error(503, "语义模型不可用，无法计算相似技能")
+        return error(5000, "语义模型不可用，无法计算相似技能", http_status=503)
     except Exception:
         # skill_embeddings 表缺失 / 向量维度不匹配等 → 降级回退内存扫描
         pass
@@ -574,7 +574,7 @@ async def skill_similar(
             if sid != skill_id
         ]
     except SemanticUnavailableError:
-        return error(503, "语义模型不可用，无法计算相似技能")
+        return error(5000, "语义模型不可用，无法计算相似技能", http_status=503)
 
     similar = sorted(
         (s for s in scores if s[2] >= 0.5),

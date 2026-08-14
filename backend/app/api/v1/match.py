@@ -248,7 +248,7 @@ async def recommend(
     """
     resume_id = _parse_resume_id(req.resume_id)
     if resume_id is None:
-        return error(400, "resume_id 格式非法")
+        return error(4000, "resume_id 格式非法")
     cache = await db.get(ResumeCache, resume_id)
     if cache is None:
         return error(4040, "简历不存在", http_status=404)
@@ -294,7 +294,7 @@ async def compare(
     """
     resume_id = _parse_resume_id(req.resume_id)
     if resume_id is None:
-        return error(400, "resume_id 格式非法")
+        return error(4000, "resume_id 格式非法")
     cache = await db.get(ResumeCache, resume_id)
     if cache is None:
         return error(4040, "简历不存在", http_status=404)
@@ -390,7 +390,7 @@ async def match_task_status(
     try:
         task_uuid = str(uuid.UUID(task_id))
     except (ValueError, AttributeError):
-        return error(400, "task_id 格式非法")
+        return error(4000, "task_id 格式非法")
     task = await db.get(TaskStatus, task_uuid)
     if task is not None:
         if (task.result or {}).get("user_id") != user.get("sub", ""):
@@ -455,7 +455,7 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
     if data is None:
         return error(4040, "匹配结果不存在或已过期", http_status=404)
     if not data.get("gaps"):
-        return error(400, "该匹配结果无差距数据，仅人岗比对可生成诊断报告")
+        return error(4000, "该匹配结果无差距数据，仅人岗比对可生成诊断报告")
 
     cached = await redis_client.get(f"match:diagnosis:{match_id}")
     if cached:
@@ -499,10 +499,10 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
         return error(ERR_LLM_TIMEOUT, f"诊断报告生成失败：{e}", http_status=504)
     except LLMConfigurationError as e:
         # 配置不可用（无 api_key/全部禁用）→ 503（契约：LLM 不可用或超时）
-        return error(503, f"诊断报告生成失败：{e}", http_status=503)
+        return error(5000, f"诊断报告生成失败：{e}", http_status=503)
     except LLMExtractionError as e:
         # 全部 provider 失败（超时/连接/校验）→ 503，避免裸 500 且与契约一致
-        return error(503, f"诊断报告生成失败：{e}", http_status=503)
+        return error(5000, f"诊断报告生成失败：{e}", http_status=503)
 
     payload = {"match_id": match_id, **report.model_dump()}
     await redis_client.set(
