@@ -128,7 +128,8 @@ export function GraphPage() {
   const [selected, setSelected] = useState<NodeDetail | null>(null)
   const [raw, setRaw] = useState<GraphData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // 错误含业务码（08-14 审查：此前仅存 message，4040 与后端未启动混淆归因）
+  const [error, setError] = useState<{ code: number; message: string } | null>(null)
   // 全文检索（GET /graph/search）
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<components['schemas']['SearchResultItem'][]>([])
@@ -191,7 +192,13 @@ export function GraphPage() {
         }
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof ApiError ? e.message : '图谱数据加载失败')
+        if (!cancelled) {
+          setError(
+            e instanceof ApiError
+              ? { code: e.code, message: e.message }
+              : { code: 0, message: '图谱数据加载失败' },
+          )
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -393,7 +400,8 @@ export function GraphPage() {
   if (error) {
     return (
       <Card className="h-[640px] flex items-center justify-center text-sm text-state-archived">
-        {error}（请确认后端服务与数据库已启动）
+        {error.message}
+        {error.code === 4040 ? '（未找到对应数据）' : '（请确认后端服务与数据库已启动）'}
       </Card>
     )
   }
