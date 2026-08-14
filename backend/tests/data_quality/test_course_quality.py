@@ -175,3 +175,21 @@ class TestEvaluateCourse:
         result = evaluate_course({"title": "t", "platform": "edx"})
         assert result.title == "t"
         assert result.platform == "edx"
+
+
+# ── skill_coverage 英文映射（08-14 修复：coursera/edx 英文 ESCO 技能结构性 0 分）──
+
+def test_skill_coverage_english_mapping():
+    """英文 ESCO 技能经 _EN_SKILL_MAP 转中文白名单后命中。"""
+    assert skill_coverage(["Cloud Computing", "Machine Learning"]) > 0.0
+
+
+def test_skill_coverage_unmapped_english():
+    """未映射英文技能保守不命中（宁缺毋滥）。"""
+    assert skill_coverage(["Amazon Redshift", "AWS Kinesis"]) == 0.0
+
+
+def test_skill_coverage_mixed():
+    """中英文混合：映射 + 中文直命中。"""
+    score = skill_coverage(["Cloud Computing", "Python", "机器学习"])
+    assert 0.5 < score <= 1.0
