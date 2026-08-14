@@ -61,7 +61,7 @@ class ZhilianSpider(BaseSpider):
         # JD 采集条数上限（-a max_results=200，默认 200）：按产出条数截断，
         # 防列表页全量遍历超长运行（08-13 实测 zhilian 挂死 8h，900s 超时后
         # 孤儿爬虫仍残留；条数上限在源头截断，与页数上限/900s 超时三重保险）
-        self._max_results = int(kwargs.get("max_results") or 200)
+        self._max_results = int(kwargs.get("max_results") or 100)
         self._items_collected = 0
 
     def _bump_items(self):
