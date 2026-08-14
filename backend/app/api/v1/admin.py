@@ -22,7 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_permission
 from app.core.arq_client import enqueue
-from app.core.config import settings
 from app.core.database import get_db, redis_client
 from app.core.security import hash_password
 from app.models.business import AuditLog, RejectedChange, ResumeFile, TaskStatus, User

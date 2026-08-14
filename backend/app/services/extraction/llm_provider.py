@@ -490,12 +490,10 @@ class LLMProviderChain:
         - 5xx（APIStatusError, status_code>=500）→ LLMServerError，累计熔断
         - 其余（超时/连接/4xx/校验）保持既有 LLMTimeoutError/LLMExtractionError
         """
-        import instructor
         from openai import (
             APIConnectionError,
             APIStatusError,
             APITimeoutError,
-            OpenAI,
             RateLimitError,
         )
 
