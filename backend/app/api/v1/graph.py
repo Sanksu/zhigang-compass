@@ -27,6 +27,11 @@ router = APIRouter()
 # 全景查询缓存 TTL（设计文档 10.3：panorama 短 TTL 30s）
 PANORAMA_CACHE_TTL = 30
 
+# 缓存穿透合并（08-15 压测扩容）：panorama 30s TTL 失效瞬间 100 并发同时
+# miss 打 Neo4j（to_thread 线程池饱和 → P95 20s 长尾根因）。in-flight 表让
+# 同 key 并发请求只放行 1 个查库，其余 await 同一 future 读缓存。
+_inflight: dict[str, asyncio.Future] = {}
+
 # 节点详情缓存 TTL（设计文档 §11.3.5：position:{id} 5min，skill 同档）
 _NODE_CACHE_TTL = 300
 
@@ -55,7 +60,6 @@ async def _cache_set(key: str, data, ttl: int = _NODE_CACHE_TTL) -> None:
     await redis_client.set(key, json.dumps(data), ex=ttl)
 
 
-@router.get("/panorama")
 def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int) -> tuple[dict, list]:
     """panorama 同步 Neo4j 查询（08-14 审查：原在 async 函数内同步阻塞事件循环，抽到线程池）。"""
     nodes: dict[str, dict] = {}
@@ -368,6 +372,7 @@ def _query_view_main(limit: int, status_filter: str) -> list:
         ))
 
 
+@router.get("/panorama")
 async def panorama(
     limit: int = Query(default=100, ge=1, le=600),
     min_weight: float = Query(default=0.3, ge=0.0, le=1.0),
@@ -386,17 +391,31 @@ async def panorama(
     if cached is not None:
         return ok(data=json.loads(cached))
 
-    nodes, edges = await asyncio.to_thread(
-        _query_panorama, scope, focus, min_weight, limit)
+    # single-flight：同 key 并发 miss 只放行一个查库，其余 await 同 future
+    inflight = _inflight.get(cache_key)
+    if inflight is not None:
+        return ok(data=await inflight)
 
-    data = {
-        "nodes": list(nodes.values()),
-        "edges": edges,
-        "stats": {"nodes": len(nodes), "edges": len(edges),
-                  **await asyncio.to_thread(_query_graph_counts)},
-    }
-    await redis_client.set(cache_key, json.dumps(data), ex=PANORAMA_CACHE_TTL)
-    return ok(data=data)
+    future = asyncio.get_running_loop().create_future()
+    _inflight[cache_key] = future
+    try:
+        nodes, edges = await asyncio.to_thread(
+            _query_panorama, scope, focus, min_weight, limit)
+
+        data = {
+            "nodes": list(nodes.values()),
+            "edges": edges,
+            "stats": {"nodes": len(nodes), "edges": len(edges),
+                      **await asyncio.to_thread(_query_graph_counts)},
+        }
+        await redis_client.set(cache_key, json.dumps(data), ex=PANORAMA_CACHE_TTL)
+        future.set_result(data)
+        return ok(data=data)
+    except Exception as exc:
+        future.set_exception(exc)
+        raise
+    finally:
+        _inflight.pop(cache_key, None)
 
 
 @router.get("/skill/{skill_id}/positions")
@@ -437,6 +456,13 @@ async def fulltext_search(
     """
     scope = _position_scope(user)
     offset = (page - 1) * size
+    # 全文检索缓存（08-15 压测扩容）：搜索词重复度高（真实用户/压测同词命中），
+    # 每次打 Neo4j 在 100 并发下排队严重；60s TTL 缓存大幅降 Neo4j 压力
+    cache_key = f"graph:search:{scope}:{type_}:{q}:{page}:{size}"
+    cached = await redis_client.get(cache_key)
+    if cached is not None:
+        return ok(data=json.loads(cached))
+
     items: list[dict] = []
     total = 0
     # 匿名/guest 检索岗位时排除 candidate（全文索引 YIELD 的是完整节点，可直接过滤）
@@ -446,6 +472,7 @@ async def fulltext_search(
 
     items, total = await asyncio.to_thread(
         _query_fulltext_search, q, type_, status_clause, offset, size)
+    await _cache_set(cache_key, {"items": items, "total": total, "page": page, "size": size}, ttl=60)
 
     return ok(data={"items": items, "total": total, "page": page, "size": size})
 
