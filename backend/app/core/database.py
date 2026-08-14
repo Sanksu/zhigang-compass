@@ -31,7 +31,9 @@ neo4j_driver = GraphDatabase.driver(
     auth=(settings.neo4j_user, settings.neo4j_password),
     connection_timeout=10,   # 08-14 审查加固：依赖抖动时快速失败而非无限等待
     max_connection_lifetime=1800,
-    max_connection_pool_size=30,
+    # 压测扩容（08-15 TE-M5-01）：30→100 对齐 100 并发目标——30 连接在
+    # panorama 缓存 miss/search 并发下排队严重（P95 14s 长尾根因之一）
+    max_connection_pool_size=100,
 )
 
 
