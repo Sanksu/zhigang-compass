@@ -128,6 +128,172 @@ def _query_skill_positions(skill_id: str, status_filter: str) -> list[dict]:
         ]
 
 
+def _query_fulltext_search(
+    q: str, type_: str, status_clause: str, offset: int, size: int,
+) -> tuple[list[dict], int]:
+    """fulltext_search 同步 Neo4j 查询（线程池执行，08-14 审查）。"""
+    with neo4j_driver.session() as session:
+        if type_ in ("position", "skill"):
+            index = "position_search" if type_ == "position" else "skill_search"
+            result = session.run(
+                f"""
+                CALL db.index.fulltext.queryNodes('{index}', $q) YIELD node, score
+                {status_clause}
+                RETURN node.id AS id, node.name AS name, score
+                ORDER BY score DESC SKIP $offset LIMIT $size
+                """,
+                q=q, offset=offset, size=size,
+                public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
+            )
+            total_row = session.run(
+                f"""
+                CALL db.index.fulltext.queryNodes('{index}', $q) YIELD node
+                {status_clause}
+                RETURN count(node) AS c
+                """,
+                q=q,
+                public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
+            ).single()
+            total = total_row["c"] if total_row else 0
+        else:
+            try:
+                result = session.run(
+                    "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
+                    "YIELD node, score "
+                    "RETURN node.id AS id, node.source AS name, score "
+                    "ORDER BY score DESC SKIP $offset LIMIT $size",
+                    q=q, offset=offset, size=size,
+                )
+                total_row = session.run(
+                    "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
+                    "YIELD node RETURN count(node) AS c",
+                    q=q,
+                ).single()
+            except Exception:
+                result = session.run(
+                    """
+                    MATCH (e:Evidence)
+                    WHERE e.source CONTAINS $q OR e.raw_text CONTAINS $q
+                    RETURN e.id AS id, e.source AS name, 0.0 AS score
+                    ORDER BY id SKIP $offset LIMIT $size
+                    """,
+                    q=q, offset=offset, size=size,
+                )
+                total_row = session.run(
+                    """
+                    MATCH (e:Evidence)
+                    WHERE e.source CONTAINS $q OR e.raw_text CONTAINS $q
+                    RETURN count(e) AS c
+                    """,
+                    q=q,
+                ).single()
+            total = total_row["c"] if total_row else 0
+        items = [
+            {
+                "id": rec["id"],
+                "name": rec.get("name", rec["id"]),
+                "type": type_,
+                "score": round(rec["score"], 4),
+            }
+            for rec in result
+        ]
+    return items, total
+
+
+def _query_position_skills_by_necessity(id: str) -> dict[str, dict]:
+    """岗位技能（按 necessity 分组，线程池执行，08-14 审查）。"""
+    skills: dict[str, dict] = {}
+    with neo4j_driver.session() as session:
+        rows = session.run(
+            """
+            MATCH (p:Position {id: $id})-[r:REQUIRES]->(s:Skill)
+            RETURN s.id AS skill_id, s.name AS skill_name,
+                   r.necessity AS necessity, r.weight AS weight,
+                   r.level AS level, r.source_count AS source_count
+            ORDER BY r.weight DESC
+            """,
+            id=id,
+        )
+        for rec in rows:
+            necessity = rec.get("necessity", "must")
+            skills.setdefault(necessity, []).append({
+                "skill_id": rec["skill_id"],
+                "skill_name": rec.get("skill_name", rec["skill_id"]),
+                "necessity": necessity,
+                "weight": rec.get("weight", 0.0),
+                "level": rec.get("level", "中级"),
+                "source_count": rec.get("source_count", 1),
+            })
+    return skills
+
+
+def _query_prereq_chain(skill_name: str) -> list[str]:
+    """图谱先修链（线程池执行，08-14 审查）。"""
+    with neo4j_driver.session() as session:
+        return graph_prerequisite_chain(session, skill_name)
+
+
+def _query_skill_ids(names: list[str]) -> dict[str, str]:
+    """技能名 → 图谱 ID（线程池执行）。"""
+    with neo4j_driver.session() as session:
+        rows = session.run(
+            "MATCH (s:Skill) WHERE s.name IN $names RETURN s.name AS name, s.id AS id",
+            names=names,
+        )
+        return {rec["name"]: rec["id"] for rec in rows}
+
+
+def _query_position_skills(id: str, necessity: str | None, status_filter: str) -> list[dict]:
+    """岗位技能（可按 necessity 过滤，线程池执行）。"""
+    query = f"""
+        MATCH (p:Position {{id: $id}})-[r:REQUIRES]->(s:Skill)
+        WHERE ({status_filter}) AND ($necessity IS NULL OR r.necessity = $necessity)
+        RETURN s.id AS skill_id, s.name AS skill_name,
+               r.necessity AS necessity, r.weight AS weight,
+               r.level AS level, r.source_count AS source_count
+        ORDER BY r.weight DESC
+    """
+    with neo4j_driver.session() as session:
+        rows = session.run(
+            query, id=id, necessity=necessity,
+            public_statuses=list(_PUBLIC_POSITION_STATUSES),
+        )
+        return [
+            {
+                "skill_id": rec["skill_id"],
+                "skill_name": rec.get("skill_name", rec["skill_id"]),
+                "necessity": rec.get("necessity", "must"),
+                "weight": rec.get("weight", 0.0),
+                "level": rec.get("level", "中级"),
+                "source_count": rec.get("source_count", 1),
+            }
+            for rec in rows
+        ]
+
+
+def _query_all_skills() -> list[tuple[str, str]]:
+    """全技能 (id, name)（线程池执行）。"""
+    with neo4j_driver.session() as session:
+        rows = session.run("MATCH (s:Skill) RETURN s.id AS id, s.name AS name")
+        return [(rec["id"], rec.get("name", rec["id"])) for rec in rows]
+
+
+def _query_skill_counts(skill_id: str, status_filter: str) -> dict:
+    """技能关联计数（岗位/证据，线程池执行）。"""
+    with neo4j_driver.session() as session:
+        rec = session.run(
+            f"""
+            MATCH (s:Skill {{id: $skill_id}})
+            OPTIONAL MATCH (p:Position)-[r:REQUIRES]->(s)
+            OPTIONAL MATCH (s)-[:EVIDENCED_BY]->(e:Evidence)
+            WITH s, e, CASE WHEN {status_filter} THEN p ELSE null END AS visible_p
+            RETURN count(DISTINCT visible_p) AS positions_count, count(DISTINCT e) AS evidence_count
+            """,
+            skill_id=skill_id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
+        ).single()
+        return dict(rec) if rec else {}
+
+
 async def panorama(
     limit: int = Query(default=100, ge=1, le=600),
     min_weight: float = Query(default=0.3, ge=0.0, le=1.0),
@@ -203,75 +369,8 @@ async def fulltext_search(
         "WHERE node.status IN $public_statuses" if scope == "public" and type_ == "position" else ""
     )
 
-    with neo4j_driver.session() as session:
-        if type_ in ("position", "skill"):
-            index = "position_search" if type_ == "position" else "skill_search"
-            result = session.run(
-                f"""
-                CALL db.index.fulltext.queryNodes('{index}', $q) YIELD node, score
-                {status_clause}
-                RETURN node.id AS id, node.name AS name, score
-                ORDER BY score DESC SKIP $offset LIMIT $size
-                """,
-                q=q, offset=offset, size=size,
-                public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
-            )
-            total_row = session.run(
-                f"""
-                CALL db.index.fulltext.queryNodes('{index}', $q) YIELD node
-                {status_clause}
-                RETURN count(node) AS c
-                """,
-                q=q,
-                public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
-            ).single()
-            total = total_row["c"] if total_row else 0
-        else:
-            # Evidence 全文索引：schema.cypher 建 evidence_search
-            # （ON source, raw_text，cjk 分词）。Evidence 无 name 属性，返回 source
-            # 作为展示名；索引缺失（旧库未重跑 init_neo4j）时降级 CONTAINS 兜底。
-            try:
-                result = session.run(
-                    "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
-                    "YIELD node, score "
-                    "RETURN node.id AS id, node.source AS name, score "
-                    "ORDER BY score DESC SKIP $offset LIMIT $size",
-                    q=q, offset=offset, size=size,
-                )
-                total_row = session.run(
-                    "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
-                    "YIELD node RETURN count(node) AS c",
-                    q=q,
-                ).single()
-            except Exception:
-                result = session.run(
-                    """
-                    MATCH (e:Evidence)
-                    WHERE e.source CONTAINS $q OR e.raw_text CONTAINS $q
-                    RETURN e.id AS id, e.source AS name, 0.0 AS score
-                    ORDER BY id SKIP $offset LIMIT $size
-                    """,
-                    q=q, offset=offset, size=size,
-                )
-                total_row = session.run(
-                    """
-                    MATCH (e:Evidence)
-                    WHERE e.source CONTAINS $q OR e.raw_text CONTAINS $q
-                    RETURN count(e) AS c
-                    """,
-                    q=q,
-                ).single()
-            total = total_row["c"] if total_row else 0
-
-        items = [
-            {
-                "id": rec["id"],
-                "name": rec.get("name", rec["id"]),
-                "type": type_,
-                "score": round(rec["score"], 4),
-            }
-            for rec in result
-        ]
+    items, total = await asyncio.to_thread(
+        _query_fulltext_search, q, type_, status_clause, offset, size)
 
     return ok(data={"items": items, "total": total, "page": page, "size": size})
 
@@ -298,19 +397,12 @@ async def skill_prerequisites(skill_id: str):
     if skill is None:
         return error(4040, "技能不存在", http_status=404)
 
-    chain: list[str] = []
-    with neo4j_driver.session() as session:
-        chain = graph_prerequisite_chain(session, skill["name"])
+    chain = await asyncio.to_thread(_query_prereq_chain, skill["name"])
     if not chain:
         chain = prerequisite_chain(skill["name"])
     id_by_name: dict[str, str] = {}
     if chain:
-        with neo4j_driver.session() as session:
-            rows = session.run(
-                "MATCH (s:Skill) WHERE s.name IN $names RETURN s.name AS name, s.id AS id",
-                names=chain,
-            )
-            id_by_name = {rec["name"]: rec["id"] for rec in rows}
+        id_by_name = await asyncio.to_thread(_query_skill_ids, chain)
     prerequisites = [
         {"skill_id": id_by_name.get(name), "name": name, "depth": i + 1}
         for i, name in enumerate(chain)
@@ -385,28 +477,7 @@ async def position_detail(
     if position is None:
         return error(4040, "岗位不存在", http_status=404)
 
-    skills: dict[str, dict] = {}
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            """
-            MATCH (p:Position {id: $id})-[r:REQUIRES]->(s:Skill)
-            RETURN s.id AS skill_id, s.name AS skill_name,
-                   r.necessity AS necessity, r.weight AS weight,
-                   r.level AS level, r.source_count AS source_count
-            ORDER BY r.weight DESC
-            """,
-            id=id,
-        )
-        for rec in rows:
-            necessity = rec.get("necessity", "must")
-            skills.setdefault(necessity, []).append({
-                "skill_id": rec["skill_id"],
-                "skill_name": rec.get("skill_name", rec["skill_id"]),
-                "necessity": necessity,
-                "weight": rec.get("weight", 0.0),
-                "level": rec.get("level", "中级"),
-                "source_count": rec.get("source_count", 1),
-            })
+    skills = await asyncio.to_thread(_query_position_skills_by_necessity, id)
 
     data = {
         "id": position["id"],
@@ -434,30 +505,8 @@ async def position_skills(
 
     scope = _position_scope(user)
     status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
-    query = f"""
-        MATCH (p:Position {{id: $id}})-[r:REQUIRES]->(s:Skill)
-        WHERE ({status_filter}) AND ($necessity IS NULL OR r.necessity = $necessity)
-        RETURN s.id AS skill_id, s.name AS skill_name,
-               r.necessity AS necessity, r.weight AS weight,
-               r.level AS level, r.source_count AS source_count
-        ORDER BY r.weight DESC
-    """
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            query, id=id, necessity=necessity,
-            public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        )
-        items = [
-            {
-                "skill_id": rec["skill_id"],
-                "skill_name": rec.get("skill_name", rec["skill_id"]),
-                "necessity": rec.get("necessity", "must"),
-                "weight": rec.get("weight", 0.0),
-                "level": rec.get("level", "中级"),
-                "source_count": rec.get("source_count", 1),
-            }
-            for rec in rows
-        ]
+    items = await asyncio.to_thread(
+        _query_position_skills, id, necessity, status_filter)
 
     return ok(data={"position_id": id, "skills": items})
 
@@ -562,11 +611,7 @@ async def skill_similar(
         pass
 
     # 回退路径：skill_embeddings 未回填（表空/缺该技能），内存 SBERT 全量扫描
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            "MATCH (s:Skill) RETURN s.id AS id, s.name AS name"
-        )
-        all_skills = [(rec["id"], rec.get("name", rec["id"])) for rec in rows]
+    all_skills = await asyncio.to_thread(_query_all_skills)
     if not all_skills:
         data = {"skill_id": skill_id, "skill_name": skill["name"], "similar": []}
         await _cache_set(cache_key, data)
@@ -617,18 +662,7 @@ async def skill_detail(
         return error(4040, "技能不存在", http_status=404)
 
     status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
-    with neo4j_driver.session() as session:
-        rec = session.run(
-            f"""
-            MATCH (s:Skill {{id: $skill_id}})
-            OPTIONAL MATCH (p:Position)-[r:REQUIRES]->(s)
-            OPTIONAL MATCH (s)-[:EVIDENCED_BY]->(e:Evidence)
-            WITH s, e, CASE WHEN {status_filter} THEN p ELSE null END AS visible_p
-            RETURN count(DISTINCT visible_p) AS positions_count, count(DISTINCT e) AS evidence_count
-            """,
-            skill_id=skill_id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        ).single()
-        counts = dict(rec) if rec else {}
+    counts = await asyncio.to_thread(_query_skill_counts, skill_id, status_filter)
 
     courses = await load_courses_for_skill(skill_id, skill["name"], top_k=None)
     data = {
