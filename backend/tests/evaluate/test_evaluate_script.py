@@ -105,6 +105,31 @@ class TestEvalMatch:
         assert len(items) >= 300
         assert any(item.get("label") == 1 for item in items)
 
+    def test_jd_golden_skills_clean_of_non_skill_tags(self):
+        """gold_skills 无经验/校招类非技能标签污染（08-14 补词后回归护栏）。
+
+        此前 jd_009 gold_skills=["1年以内"]、jd_076=["校招"] 以垃圾标注计入评测
+        污染指标；补词后已剔除（该 2 样本 gold_skills 为空，评测自动跳过）。
+        """
+        from tests.evaluate.run_baseline import load_golden_set
+
+        from scripts.evaluate import _JD_GOLDEN
+
+        non_skill = {
+            "1年以内", "1年以上", "2年以内", "经验要求", "经验",
+            "校招", "在校", "在校生", "应届", "应届生", "在校/应届",
+            "24届", "25届", "26届", "社招", "秋招", "春招",
+            "经验不限", "1-3年", "3-5年", "5-10年", "10年以上",
+            "大专", "本科", "硕士", "博士", "学历不限",
+            "5天/周", "4天/周", "3天/周", "6天/周",
+            "3个月", "6个月", "9个月", "12个月",
+            "Remote", "全职", "兼职", "实习",
+        }
+        items = load_golden_set(str(_JD_GOLDEN))
+        for item in items:
+            polluted = [s for s in (item.get("gold_skills") or []) if s in non_skill]
+            assert not polluted, f"{item.get('id')} gold_skills 含非技能标签: {polluted}"
+
 
 class TestTop3Accuracy:
     """Top-3 推荐准确率单元测试（设计文档 §9.6/§13.3）。"""
