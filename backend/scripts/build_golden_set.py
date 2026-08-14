@@ -258,10 +258,9 @@ def build_raw_text(item: dict, boss_detail: dict) -> str:
     if welfare:
         parts.append(f"福利待遇：{', '.join(welfare)}")
 
-    # 招聘者信息
-    boss_title = boss_detail.get("bossTitle", "")
-    if boss_title:
-        parts.append(f"招聘者：{boss_detail.get('bossName', '')}（{boss_title}）")
+    # 招聘者信息不进入合成文本（08-14 PII 审查）：bossName/bossTitle 属 PII，
+    # 且与岗位能力无关；strip_sensitive_fields 仅覆盖 original_raw_text，此处防
+    # 合成文本再次泄露（此前 jd_golden_100 44 处含"招聘者：张女士"类人名）
 
     return "\n".join(parts)
 
