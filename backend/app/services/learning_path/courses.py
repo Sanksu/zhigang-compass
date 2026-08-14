@@ -63,6 +63,36 @@ _UNIT_HOURS = {
 # 单位关键词按长度降序（"hours" 先于 "hour"，避免长单位被短单位前缀截断）
 _UNIT_PREFIXES = sorted(_UNIT_HOURS, key=len, reverse=True)
 
+# 技能中文名 → 课程英文标题关键词（08-15 学习路径缺口治理）。
+# 背景：edx/coursera 课程标题为英文，技能为中文名——SBERT 中英跨语言短词
+# 相似度虚低（'微服务' vs 'Microservices and Serverless' 实证 <0.5），
+# 标题门控（0.5）会把课程级兜底已匹配（>0.55）的合理课程全部过滤。
+# 词面豁免扩展：技能中文名命中本表时，课程标题含任一英文关键词即视为相关。
+# 仅收录课程缺口技能（30 案例评审无课清单），避免表膨胀。
+_EN_SKILL_HINTS: dict[str, tuple[str, ...]] = {
+    "微服务": ("microservice",),
+    "Shell": ("shell",),
+    "RESTful API": ("rest api", "restful"),
+    "XML": ("xml",),
+    "RabbitMQ": ("rabbitmq",),
+    "gRPC": ("grpc",),
+    "GCP": ("google cloud",),
+    "OpenSearch": ("opensearch",),
+    "Qdrant": ("qdrant",),
+    "XGBoost": ("xgboost",),
+    "VMware": ("vmware",),
+    "LangGraph": ("langgraph",),
+    "ETL 管道": ("etl",),
+    "API": ("api",),
+    "Groovy": ("groovy",),
+    "Power BI": ("power bi",),
+    "Prometheus": ("prometheus",),
+    "Vue.js": ("vue",),
+    "Qlik": ("qlik",),
+    "Azure": ("azure",),
+    "负载均衡": ("load balanc", "load-balanc"),
+}
+
 
 def parse_duration_hours(duration: str | None) -> float | None:
     """解析课程时长字符串为小时；无法解析返回 None。
@@ -149,8 +179,13 @@ def _lexical_hit(skill_name: str, title: str) -> bool:
     Essentials" 相似度仅 0.472——缩写技能名与长课程名语义相似度虚低，
     纯语义匹配会漏掉词面明确相关的课程。词面命中视为相关（课程名含
     技能名即说明课程围绕该技能）；"Go"/"C" 等短词词面会误配，豁免。
+    扩展（08-15）：技能中文名命中 _EN_SKILL_HINTS 时，课程英文标题含
+    任一英文关键词同样视为词面命中（中英跨语言短词 sim 虚低豁免）。
     """
-    return len(skill_name) >= 3 and skill_name.lower() in title.lower()
+    if len(skill_name) >= 3 and skill_name.lower() in title.lower():
+        return True
+    low = title.lower()
+    return any(h in low for h in _EN_SKILL_HINTS.get(skill_name, ()))
 
 
 def _filter_by_title_similarity(
