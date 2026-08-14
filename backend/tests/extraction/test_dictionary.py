@@ -174,6 +174,20 @@ class TestNormalizePositionName:
         assert normalize_position_name("Go开发工程师") == "Go开发工程师"
         assert normalize_position_name("golang开发") == "Go开发工程师"
 
+    def test_whitelist_backfill_20260814(self):
+        # 08-14 白名单补录（用户确认）：鸿蒙变体合并 / STEM讲师合并 / 统计师入图 /
+        # IC验证规范后缀；复合词限定防误吸
+        assert normalize_position_name("鸿蒙前端开发工程师") == "鸿蒙开发工程师"
+        assert normalize_position_name("鸿蒙全栈工程师") == "鸿蒙开发工程师"
+        assert normalize_position_name("鸿蒙应用开发工程师") == "鸿蒙开发工程师"
+        assert normalize_position_name("鸿蒙生态运营") == ""  # 非开发岗不误吸
+        assert normalize_position_name("课后STEM讲师") == "STEM讲师"
+        assert normalize_position_name("stem工程师") != "STEM讲师"  # 复合词防误吸
+        assert normalize_position_name("统计师") == "统计师"  # 修复不入图
+        assert normalize_position_name("生物统计师") == "生物统计师"  # 不被统计师族吸收
+        assert normalize_position_name("IC验证") == "IC验证工程师"
+        assert normalize_position_name("IC验证工程师") == "IC验证工程师"
+
     def test_untranslated_pure_en_filtered(self):
         # 问题 2：未翻译的纯英文岗位名直接拦截（不入图），不再靠停用词逐条点杀
         assert normalize_position_name("VP of Engineering") == ""
