@@ -21,6 +21,16 @@ from app.services.discovery.state_machine import (
 )
 
 
+class _SeqResult:
+    """next_id 的 Counter 查询结果桩（single 返回 seq）。"""
+
+    def __init__(self, seq: int):
+        self._seq = seq
+
+    def single(self):
+        return {"seq": self._seq}
+
+
 def _candidate(state: PositionState, source_diversity: int = 2, confidence: float | None = 0.8) -> CandidatePosition:
     return CandidatePosition(
         candidate_id="cand-test",
@@ -362,7 +372,12 @@ class TestAutoTransitionFromSnapshots:
 
         class _FakeTx:
             def run(self, query, **params):
+                # next_id 先发 Counter 自增查询（08-14：创建时补全 id/freq）
+                if "Counter" in query:
+                    return _SeqResult(7)
                 assert "MERGE (p:Position {name: $name})" in query
+                assert "ON CREATE SET p.id = $pid, p.freq = 0" in query
+                assert params["pid"] == "pos_0007"
                 assert params["state"] == "stable"
                 assert params["name"] == name
 
@@ -433,6 +448,8 @@ class TestPersist:
 
         class _FakeTx:
             def run(self, query, **params):
+                if "Counter" in query:
+                    return _SeqResult(1)
                 assert "MERGE (p:Position {name: $name})" in query
                 assert "SET p.status = $state" in query
                 assert params["state"] == "emerging"

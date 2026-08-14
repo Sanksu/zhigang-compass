@@ -64,27 +64,6 @@ def _extract_refresh_token(request: Request, req: Optional[RefreshRequest]) -> O
     return request.cookies.get(REFRESH_COOKIE_NAME)
 
 
-# 登录失败锁定（08-14 安全加固）：连续失败超限锁 15 分钟（按 ip:username 双键），
-# 防暴力破解——仅凭 100/min 限流不够（批量 IP 可绕过）
-_LOGIN_FAIL_LIMIT = 5
-_LOGIN_FAIL_WINDOW = 900  # 15 分钟
-
-
-async def _login_fail_key(redis: Redis, ip: str, username: str) -> str:
-    return f"login_fail:{ip}:{username}"
-
-
-async def _register_login_fail(redis: Redis, key: str) -> bool:
-    """失败计数 +1；达限锁窗。返回是否已锁定。"""
-    count = await redis.incr(key)
-    if count == 1:
-        await redis.expire(key, _LOGIN_FAIL_WINDOW)
-    if count >= _LOGIN_FAIL_LIMIT:
-        await redis.setex(key, _LOGIN_FAIL_WINDOW, "locked")
-        return True
-    return False
-
-
 def _client_ip(request: Request) -> str:
     """客户端 IP。
 
@@ -110,15 +89,13 @@ async def login(
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
-    redis: Redis = Depends(get_redis),
 ):
     """用户登录，返回双 Token（凭据校验走 users 表）。
 
     refresh_token 同时写入 httpOnly Cookie，刷新页面后前端可无感恢复会话。
+    暴力破解防护由中间件 IP 限流承担（08-14 决策：移除 ip:username 登录锁定，
+    避免攻击者可故意失败锁死目标账号 15 分钟的账号 DoS 面）。
     """
-    fail_key = await _login_fail_key(redis, _client_ip(request), req.username)
-    if await redis.get(fail_key) == "locked":
-        return error(4290, "登录失败次数过多，请 15 分钟后再试", http_status=429)
     user = await db.scalar(select(User).where(User.username == req.username))
     if user is None:
         # 首次部署 bootstrap：仅当 users 表完全为空时按配置创建 admin 用户，
@@ -138,16 +115,13 @@ async def login(
             await db.commit()
             await db.refresh(user)
         else:
-            await _register_login_fail(redis, fail_key)
             return error(4010, "用户名或密码错误", http_status=401)
     elif not verify_password(req.password, user.password_hash):
-        await _register_login_fail(redis, fail_key)
         return error(4010, "用户名或密码错误", http_status=401)
 
     if not user.is_active:
         return error(4030, "账户已禁用", http_status=403)
 
-    await redis.delete(fail_key)
     access_token = create_access_token(user.id, user.role)
     refresh_token = create_refresh_token(user.id, user.role)
     # refresh_token 写入 httpOnly Cookie（刷新页面后自动恢复会话）

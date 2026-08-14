@@ -317,12 +317,20 @@ class PositionStateMachine:
         state = updated.state.value
 
         def _persist_tx(tx) -> None:
+            # 补全字段（08-14 修复）：候选晋升时图谱可能尚无该岗位节点（JD 尚未
+            # 聚合入图），MERGE 会创建无 id/freq 的残缺节点，下游 loaders 以 p.id
+            # 为主键得 None；创建时补 id（与 import_jd 同源 next_id）与 freq=0
+            from app.services.kg.id_generator import next_id
+
+            pid = next_id(tx, "Position")
             tx.run(
                 """
                 MERGE (p:Position {name: $name})
+                ON CREATE SET p.id = $pid, p.freq = 0
                 SET p.status = $state, p.state_updated_at = $now
                 """,
                 name=updated.position_name,
+                pid=pid,
                 state=state,
                 now=datetime.now(_TZ_CN).isoformat(timespec="seconds"),
             )

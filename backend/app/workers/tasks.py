@@ -1538,18 +1538,26 @@ _JD_TEXT_FIELDS = (
 )
 
 
+# LLM 抽取输入上限（08-14：raw_text 去除 65535 入库截断后，超长 JD 需在输入侧
+# 裁剪防 context 溢出；JD 正文技能信息集中在前部，截尾损失可控）
+_JD_TEXT_MAX_CHARS = 20000
+
+
 def _build_jd_text(snapshot: dict, raw_text: str) -> str:
     """拼装 JD 抽取正文。
 
     优先 snapshot 的干净文本字段（raw_text 为原始 HTML/JSON 备份，不适合直接喂 LLM）；
     但正文字段（description/requirements）缺失时拼接结果过短无法抽取，
     此时回退 raw_text（黄金集等数据正文可能只存在 raw_text 中）。
+    统一裁剪至 _JD_TEXT_MAX_CHARS（入库不再截断，抽取输入侧兜底）。
     """
     body_fields = (snapshot.get("description"), snapshot.get("requirements"))
     if not any(str(f or "").strip() for f in body_fields):
-        return raw_text
-    parts = [str(snapshot.get(f, "")).strip() for f in _JD_TEXT_FIELDS]
-    return "\n".join(p for p in parts if p)
+        text = raw_text
+    else:
+        parts = [str(snapshot.get(f, "")).strip() for f in _JD_TEXT_FIELDS]
+        text = "\n".join(p for p in parts if p)
+    return text[:_JD_TEXT_MAX_CHARS]
 
 
 def _is_jd_text_short(snapshot: dict, raw_text: str) -> bool:

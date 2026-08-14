@@ -24,6 +24,16 @@ _TZ_CN = timezone(timedelta(hours=8))
 _END = datetime(2026, 8, 11, tzinfo=_TZ_CN)
 
 
+class _SeqResult:
+    """next_id 的 Counter 查询结果桩（single 返回 seq）。"""
+
+    def __init__(self, seq: int):
+        self._seq = seq
+
+    def single(self):
+        return {"seq": self._seq}
+
+
 def _jd_row(name: str, post_date: str) -> SimpleNamespace:
     """构造一条已抽取 JDRaw：post_date 用于窗口聚合，extraction 含岗位名。"""
     return SimpleNamespace(
@@ -82,6 +92,9 @@ class _FakeTx:
 
     def run(self, query, **params):
         self._queries.append((query, params))
+        # next_id 的 Counter 自增查询（08-14：persist 创建时补全 id/freq）
+        if "Counter" in query:
+            return _SeqResult(1)
 
 
 class _FakeNeo4jSession:
@@ -159,11 +172,11 @@ class TestAutoTransitionTask:
             "from_state": "emerging",
             "to_state": "stable",
         }]
-        # 候选池状态落库 + Neo4j 幂等 MERGE
+        # 候选池状态落库 + Neo4j 幂等 MERGE（08-14：Counter 自增 + MERGE 共 2 条）
         assert row.state == "stable"
         assert cand_session.committed is True
-        assert len(driver.queries) == 1
-        query, params = driver.queries[0]
+        assert len(driver.queries) == 2
+        query, params = driver.queries[1]
         assert "MERGE (p:Position {name: $name})" in query
         assert "SET p.status = $state" in query
         assert params["name"] == name
@@ -216,8 +229,8 @@ class TestAutoTransitionTask:
         }]
         assert row.state == "stable"
         assert cand_session.committed is True
-        assert len(driver.queries) == 1
-        query, params = driver.queries[0]
+        assert len(driver.queries) == 2  # 08-14：Counter 自增 + MERGE
+        query, params = driver.queries[1]
         assert "SET p.status = $state" in query
         assert params["state"] == "stable"
 
