@@ -225,6 +225,18 @@ SKILL_ALIAS: dict[str, str] = {
     ".net core": ".NET",
     "nodejs": "Node.js",
     "postgres": "PostgreSQL",
+    # P4 学习路径碎片技能治理（2026-08-14，评审 30 案例缺口）：
+    # 英文碎片/平台词归一到白名单标准技能（先修/图谱匹配经 canonical 生效）
+    "nsgs": "网络安全",
+    "nsg": "网络安全",
+    "load-balancers": "负载均衡",
+    "load balancers": "负载均衡",
+    "azure bicep": "Azure",
+    "bicep": "Azure",
+    "burn-in": "老化测试",
+    "burn in": "老化测试",
+    "mxml exchange": "Murex",
+    "domo": "Domo",
 }
 
 # 工具名别名映射：大小写/拼写变体 → 规范名（P1 Tool 节点碎片治理）。
@@ -362,6 +374,9 @@ SKILL_STOPWORDS: set[str] = {
     # 无 _POSITION_SKILL_ROUTING 路由依赖，is_noise_skill 已改为停用词优先）
     "消息队列", "数据结构", "性能调优", "多线程", "缓存", "多模态",
     "操作系统", "计算机网络", "性能测试", "数据库", "模型微调", "模型部署",
+    # P4 学习路径碎片治理（2026-08-14）：评审 30 案例确认的业务词误当技能
+    # （lp_05 审批/工作流、lp_08 Service Mapping——抽取器把业务/工具功能当技能）
+    "审批", "工作流", "模拟", "Service Mapping",
 }
 
 # 岗位名关键词 → 标准岗位名（合并同义重复岗位，设计文档 4.5 实体对齐的轻量实现）
