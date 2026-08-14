@@ -114,9 +114,13 @@ services:
       REDIS_URL: redis://redis:6379/0
       ARQ_REDIS_URL: redis://redis:6379/1
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-      # 国际源走系统代理（与本地爬虫一致，国内源不设即直连）
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      HTTP_PROXY: ${HTTP_PROXY:-}
+      # 国际源走系统代理（与本地爬虫一致，国内源不设即直连）。
+      # 08-14 修复：容器内 127.0.0.1 指向容器自身——默认代理须走
+      # host.docker.internal 指向宿主机 Clash（否则国际源连接被拒，
+      # 实测 arxiv/github/stackoverflow 产出 0 条）；宿主机显式设置
+      # HTTPS_PROXY 时优先（可覆盖）。
+      HTTPS_PROXY: ${HTTPS_PROXY:-http://host.docker.internal:7890}
+      HTTP_PROXY: ${HTTP_PROXY:-http://host.docker.internal:7890}
       # 容器无显示服务器：CDP 浏览器以无头模式运行（本地桌面保持有头以完成登录/验证）
       CDP_HEADLESS: "1"
       # CDP 浏览器代理（glassdoor 等国际源）：容器内经 host.docker.internal 指向宿主机 Clash
