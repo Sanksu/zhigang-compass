@@ -3,6 +3,10 @@
 技能网络 = 岗位共现（network.load_skill_cooccurrence 产物）。PageRank 用
 幂迭代收敛（阻尼 0.85），无向共现边按两个有向边参与入边聚合。纯计算模块，
 不依赖 Neo4j，便于单元测试。
+
+08-14 审查修复：共现边权重（必要性组合因子 × 共现岗位数，network.py P0
+改造产物）此前在排序中完全失效（按邻居数均分）；现按出边权重归一化
+（转移概率 = 边权/出边权重和），等权图退化为原均分行为（现有测试兼容）。
 """
 
 # 默认参数（设计文档 §7.1：gds.pageRank.stream() 的等价收敛策略）
@@ -34,15 +38,17 @@ def pagerank(
     if n == 0:
         return {}
 
-    out_deg = {nd: len(nbs) for nd, nbs in graph.items()}
+    # 加权 PageRank：转移概率按出边权重归一化（w/Σw），强共现边（must-must
+    # 高频组合）分配更多重要性；等权图退化为均分
+    out_w = {nd: sum(nbs.values()) for nd, nbs in graph.items()}
     pr = {nd: 1.0 / n for nd in nodes}
     for _ in range(max_iter):
         new_pr: dict[str, float] = {}
         # 悬空质量：无出边节点（孤立/无邻居）的分数均匀分配给全部节点
-        dangling = sum(pr[nd] for nd in nodes if out_deg[nd] == 0)
+        dangling = sum(pr[nd] for nd in nodes if out_w[nd] == 0)
         for nd in nodes:
             inbound = dangling / n + sum(
-                pr[nb] / out_deg[nb] for nb in graph[nd] if out_deg[nb] > 0
+                pr[nb] * graph[nb][nd] / out_w[nb] for nb in graph[nd] if out_w[nb] > 0
             )
             new_pr[nd] = (1 - damping) / n + damping * inbound
         delta = max(abs(new_pr[nd] - pr[nd]) for nd in nodes)
