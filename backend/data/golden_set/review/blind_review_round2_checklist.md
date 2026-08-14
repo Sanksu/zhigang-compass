@@ -26,6 +26,13 @@
 | r2_003 LLM 应用 vs 算法 | 根据正文判断 | 正文为 LLM 工程化应用（RAG/Agent/部署）→ 大模型应用工程师（不做 round1 归并） |
 | r2_001 / r2_002 泛化 title | 移除「前端/后端工程师」，保留更细划分 | **r2_001 前端开发工程师 → React前端工程师**（双栈取硬性必备 React Native）；**r2_002 后端开发工程师 → Golang后端工程师**（Golang/Python 二选一取序首）；全量校验无泛词 ✓ |
 
+## ✅ 终审完成（2026-08-14，张恺天逐条确认）
+
+- 20 条全部定稿：19 条维持 AI 复核口径，**r2_020 裁决改机器视觉算法工程师**（正文自述机器视觉，不采用招聘标题）
+- `jd_manual_review_round2.xlsx` annotator=ZKT、review_status=人工终审_定稿
+- 合并簿 `jd_manual_review_merged.xlsx` 重建：round1 12 条（LQ）+ round2 20 条（ZKT），annotator 各保留本人代号（评测脚本 validate_rows 已支持多人标注）
+- **正式基线（32 条人工终审 gold，`reports/eval_jd_llm_20260814_2151.json`）：skills F1=0.7563**（P 0.7045/R 0.8164）、bonus 0.6383、title_norm 0.5625、edu 0.9375、0 fallback/0 failed——目标 0.90 未达（差 0.144），历史 AI 口径 0.7744 为非终审参考
+
 ## AI 复核口径评测基线（终审+细化修正后，2026-08-13，`reports/eval_jd_llm_20260813_1903.json`，annotator=AI）
 
 | 指标 | round2 20 条 | 上一轮 |
