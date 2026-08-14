@@ -156,9 +156,9 @@ class TestImportJdSkillNormalization:
         assert names == {"Vue.js"}
 
     def test_whitelist_word_preserved(self):
-        # 白名单词整体保护（clean_skill_name），不被剥成泛词碎片
+        # 08-14 迭代：基础词停用（操作系统 入 SKILL_STOPWORDS）——不建节点
         skill_merges = self._run(["操作系统"])
-        assert skill_merges[0][1]["name"] == "操作系统"
+        assert skill_merges == []
 
     def test_stopword_dropped(self):
         # 归一化后为空（"系统"→""）直接跳过，不建节点

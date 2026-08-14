@@ -164,6 +164,12 @@ JD 文本：岗位名称：大模型测试工程师
 岗位职责：负责大模型产品的功能测试、性能测试与安全性测试，搭建自动化测试框架。
 任职要求：熟悉 Python、Java，掌握自动化测试，了解数据结构与 Transformer 原理者优先，本科及以上学历。
 输出：{{"position_name": "大模型测试工程师", "skills": [{{"name": "Python"}}, {{"name": "Java"}}, {{"name": "自动化测试"}}], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Python", "necessity": "must"}}, {{"skill_name": "Java", "necessity": "must"}}, {{"skill_name": "自动化测试", "necessity": "must"}}, {{"skill_name": "数据结构", "necessity": "nice"}}, {{"skill_name": "Transformer", "necessity": "nice"}}]}}
+
+示例 13（工具链全量列出——JD 明确要求的所有技术栈都必须进 skills，不得省略辅助工具）：
+JD 文本：岗位名称：前端开发工程师
+岗位职责：使用 React、Vue.js 开发 Web 应用，基于 Webpack、Vite 构建打包，执行 ESLint、Prettier 代码规范，接入 Git 版本控制，使用 Axios 调用 RESTful API，开发 React Native 移动端，发布至 iOS/Android 平台。
+任职要求：掌握 HTML5、CSS3、JavaScript、TypeScript，熟悉状态管理（Vuex、Pinia、Vue Router）。
+输出：{{"position_name": "前端开发工程师", "skills": [{{"name": "React"}}, {{"name": "Vue.js"}}, {{"name": "Webpack"}}, {{"name": "Vite"}}, {{"name": "ESLint"}}, {{"name": "Prettier"}}, {{"name": "Git"}}, {{"name": "Axios"}}, {{"name": "RESTful API"}}, {{"name": "React Native"}}, {{"name": "iOS"}}, {{"name": "Android"}}, {{"name": "HTML5"}}, {{"name": "CSS3"}}, {{"name": "JavaScript"}}, {{"name": "TypeScript"}}, {{"name": "Vuex"}}, {{"name": "Pinia"}}, {{"name": "Vue Router"}}], "requirements": [{{"skill_name": "React", "necessity": "must"}}, {{"skill_name": "Vue.js", "necessity": "must"}}, {{"skill_name": "Webpack", "necessity": "must"}}, {{"skill_name": "Git", "necessity": "must"}}, {{"skill_name": "RESTful API", "necessity": "must"}}, {{"skill_name": "JavaScript", "necessity": "must"}}]}}
 """
 
 BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输出 JSON 数组（每条 JD 对应一个对象，数组第 i 个元素对应"JD文本 i"）。
