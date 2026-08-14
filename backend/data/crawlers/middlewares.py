@@ -128,6 +128,12 @@ class ProxyPoolMiddleware:
         """
         if request.meta.get("playwright"):
             return False
+        # robots.txt 请求排除代理：容器内 Twisted CONNECT 隧道经
+        # host.docker.internal 代理连接失败（08-14 实测：robots 请求走代理
+        # 后 IgnoreRequest 使 arxiv/github/stackoverflow 产出 0；robots.txt
+        # 为元数据小文件，直连即可且已验证可达）
+        if "robots.txt" in request.url:
+            return False
         host = urlsplit(request.url).hostname or ""
         if host in ("localhost", "::1") or host.startswith("127."):
             return False

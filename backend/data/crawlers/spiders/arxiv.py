@@ -85,7 +85,10 @@ class ArxivSpider(Spider):
             yield Request(
                 url,
                 callback=self.parse,
-                meta={"category": cat},
+                # API 例外（08-14 用户确认 B 方案）：export.arxiv.org 官方 API
+                # 条款明确允许程序化访问，robots.txt 保守 Disallow: /——跳过
+                # robots 检查（合规依据：https://info.arxiv.org/help/api/）
+                meta={"category": cat, "dont_obey_robotstxt": True},
                 headers={"User-Agent": "zhigang-compass/1.0 (academic-research)"},
             )
 
