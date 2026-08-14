@@ -326,3 +326,22 @@ skills:
     prerequisites:
     - 大语言模型
     - Python
+  推荐算法:
+    prerequisites:
+    - 机器学习
+    - Python
+    - 统计学
+  GCP:
+    prerequisites:
+    - 计算机基础
+    - Linux
+  XGBoost:
+    prerequisites:
+    - 机器学习
+    - Python
+  统计分析:
+    prerequisites:
+    - 统计学
+  数据可视化:
+    prerequisites:
+    - 数据分析
