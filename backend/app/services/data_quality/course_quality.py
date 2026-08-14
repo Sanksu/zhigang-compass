@@ -59,6 +59,75 @@ _DESCRIPTION_MISSING = 0.0
 # 技能标签缺失时的中性值
 _SKILLS_MISSING = 0.0
 
+# 英文 ESCO 技能 → 中文白名单技能映射（评估专用，覆盖课程技能高频项）。
+# 08-14 修复：coursera/edx 课程 skills 为英文标准名，白名单以中文为主——
+# 无映射则 skill_coverage 结构性 0 分。仅收录语义明确的常见项。
+_EN_SKILL_MAP = {
+    "cloud computing": "云计算",
+    "machine learning": "机器学习",
+    "deep learning": "深度学习",
+    "data science": "数据科学",
+    "data analysis": "数据分析",
+    "data analytics": "数据分析",
+    "data warehousing": "数据仓库",
+    "big data": "大数据",
+    "data mining": "数据挖掘",
+    "data visualization": "数据可视化",
+    "data engineering": "数据工程",
+    "data modeling": "数据建模",
+    "natural language processing": "自然语言处理",
+    "computer vision": "计算机视觉",
+    "neural networks": "神经网络",
+    "reinforcement learning": "强化学习",
+    "generative ai": "生成式AI",
+    "prompt engineering": "提示工程",
+    "large language models": "大语言模型",
+    "llm": "大语言模型",
+    "python programming": "Python",
+    "java programming": "Java",
+    "javascript": "JavaScript",
+    "typescript": "TypeScript",
+    "c programming": "C",
+    "c++": "C++",
+    "sql": "SQL",
+    "nosql": "NoSQL",
+    "databases": "数据库",
+    "relational databases": "关系型数据库",
+    "postgresql": "PostgreSQL",
+    "mysql": "MySQL",
+    "mongodb": "MongoDB",
+    "redis": "Redis",
+    "docker": "Docker",
+    "kubernetes": "Kubernetes",
+    "containerization": "容器化",
+    "linux": "Linux",
+    "git": "Git",
+    "restful api": "RESTful API",
+    "api": "API",
+    "microservices": "微服务",
+    "distributed systems": "分布式系统",
+    "software architecture": "软件架构",
+    "cloud security": "云安全",
+    "cybersecurity": "网络安全",
+    "data security": "数据安全",
+    "model deployment": "模型部署",
+    "model training": "模型训练",
+    "model evaluation": "模型评估",
+    "statistics": "统计学",
+    "probability": "概率论",
+    "linear algebra": "线性代数",
+    "time series": "时间序列",
+    "etl": "ETL",
+    "data pipelines": "数据管线",
+    "data preprocessing": "数据预处理",
+    "feature engineering": "特征工程",
+    "recommendation systems": "推荐系统",
+    "computer vision": "计算机视觉",
+    "mlops": "MLOps",
+    "serverless": "无服务器",
+    "devops": "DevOps",
+}
+
 # 时间解析容错：start_date 支持多种格式，解析失败返回 None
 _DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S", "%Y%m%d")
 
@@ -122,7 +191,9 @@ def skill_coverage(skills: list[str]) -> float:
     hit = 0
     total = 0
     for raw in skills:
-        name = normalize_skill(str(raw).strip())
+        text = str(raw).strip()
+        # 英文 ESCO 技能先查评估映射（小写键），命中转中文白名单名
+        name = _EN_SKILL_MAP.get(text.lower()) or normalize_skill(text)
         if not name:
             continue
         total += 1
