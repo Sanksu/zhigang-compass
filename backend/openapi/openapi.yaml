@@ -94,7 +94,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/LoginResult'
+                  trace_id: { type: string }
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -227,7 +233,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/PositionDetail'
+                  trace_id: { type: string }
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -247,7 +259,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/PositionSkillsData'
+                  trace_id: { type: string }
 
   /api/v1/graph/skill/{id}:
     get:
@@ -262,7 +280,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/SkillDetail'
+                  trace_id: { type: string }
 
   /api/v1/graph/skill/{id}/evidence:
     get:
@@ -277,7 +301,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/SkillEvidenceData'
+                  trace_id: { type: string }
 
   /api/v1/graph/skill/{id}/prerequisites:
     get:
@@ -292,7 +322,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/SkillPrerequisitesData'
+                  trace_id: { type: string }
 
   /api/v1/graph/skill/{id}/courses:
     get:
@@ -307,7 +343,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/SkillCoursesData'
+                  trace_id: { type: string }
 
   /api/v1/graph/skill/{id}/positions:
     get:
@@ -322,7 +364,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/SkillPositionsData'
+                  trace_id: { type: string }
 
   /api/v1/graph/skill/similar:
     get:
@@ -343,7 +391,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/SkillSimilarData'
+                  trace_id: { type: string }
 
   /api/v1/graph/panorama:
     get:
@@ -608,7 +662,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/SearchResultsData'
+                  trace_id: { type: string }
 
   # ============================================================
   # 简历模块 /api/v1/resume
@@ -1054,7 +1114,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/AdminUsersData'
+                  trace_id: { type: string }
     post:
       tags: [admin]
       summary: 创建用户
@@ -1129,7 +1195,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/CrawlTriggerResult'
+                  trace_id: { type: string }
 
   /api/v1/admin/crawl/status:
     get:
@@ -1141,7 +1213,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/CrawlStatusData'
+                  trace_id: { type: string }
 
   /api/v1/admin/crawl/history:
     get:
@@ -1156,7 +1234,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/CrawlHistoryData'
+                  trace_id: { type: string }
 
   /api/v1/admin/crawl/task/{task_id}/stream:
     get:
@@ -1185,7 +1269,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/LlmConfig'
+                  trace_id: { type: string }
     put:
       tags: [admin]
       summary: 保存 LLM provider 配置（持久化到 llm_providers.yaml）
@@ -1217,7 +1307,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/LlmConfig'
+                  trace_id: { type: string }
 
   /api/v1/admin/positions/{position_name}:
     get:
@@ -1234,7 +1330,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/PositionEditDetail'
+                  trace_id: { type: string }
         '404':
           description: 岗位不存在
     put:
@@ -1276,7 +1378,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/PositionEditResult'
+                  trace_id: { type: string }
         '400':
           description: 参数不合法（weight 越界 / necessity 非法等）
         '404':
@@ -1292,7 +1400,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/DiscoveryCandidateData'
+                  trace_id: { type: string }
 
   /api/v1/admin/positions/{id}/review:
     post:
@@ -1334,7 +1448,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/DiscoveryCandidateData'
+                  trace_id: { type: string }
 
   /api/v1/admin/positions/{id}/archive:
     put:
@@ -1369,7 +1489,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/DiscoveryCandidateData'
+                  trace_id: { type: string }
 
   /api/v1/admin/discovery/watch:
     get:
@@ -1396,25 +1522,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
                 properties:
+                  code: { type: integer }
+                  msg: { type: string }
                   data:
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            skill_name: { type: string }
-                            signal_source: { type: string }
-                            signal_value: { type: number }
-                            period: { type: string }
-                            status: { type: string }
-                            first_seen_at: { type: string, nullable: true }
-                            last_signal_at: { type: string, nullable: true }
-                      total: { type: integer }
-                      page: { type: integer }
-                      size: { type: integer }
+                    $ref: '#/components/schemas/WatchData'
+                  trace_id: { type: string }
 
   /api/v1/admin/evolution/{id}/review:
     put:
@@ -1613,6 +1727,7 @@ components:
 
     User:
       type: object
+      required: [id, username, role]
       properties:
         id: { type: string }
         username: { type: string }
@@ -1657,3 +1772,438 @@ components:
         courses: { type: array, items: { $ref: '#/components/schemas/CourseRecommendation' } }
         estimated_hours: { type: number, description: 预计学习学时 }
         priority: { type: string, enum: [high, medium, low] }
+
+    # ============================================================
+    # 图详情端点 data（08-14 契约补全：skill/position 详情、搜索）
+    # ============================================================
+
+    SkillPositionItem:
+      type: object
+      description: 技能反向查询岗位项（GET /graph/skill/{id}/positions）
+      required: [position_id, position_name, necessity, weight, level]
+      properties:
+        position_id: { type: string }
+        position_name: { type: string }
+        necessity: { type: string, enum: [must, nice] }
+        weight: { type: number }
+        level: { type: string }
+
+    SkillPositionsData:
+      type: object
+      description: GET /graph/skill/{id}/positions 响应 data
+      required: [skill_id, positions]
+      properties:
+        skill_id: { type: string }
+        positions:
+          type: array
+          items: { $ref: '#/components/schemas/SkillPositionItem' }
+
+    PositionSkillItem:
+      type: object
+      description: 岗位详情技能项（GET /graph/position/{id} must_skills/nice_skills）
+      required: [skill_id, skill_name, necessity, weight, level, source_count]
+      properties:
+        skill_id: { type: string }
+        skill_name: { type: string }
+        necessity: { type: string, enum: [must, nice] }
+        weight: { type: number }
+        level: { type: string }
+        source_count: { type: integer }
+
+    PositionDetail:
+      type: object
+      description: 岗位节点详情（GET /graph/position/{id}）
+      required: [id, name, must_skills, nice_skills]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        required_years: { type: number, nullable: true }
+        required_education: { type: string, nullable: true }
+        last_updated: { type: string, nullable: true, description: 最近更新时间 ISO8601 }
+        status: { type: string, enum: [candidate, emerging, stable, declining, archived] }
+        must_skills:
+          type: array
+          items: { $ref: '#/components/schemas/PositionSkillItem' }
+        nice_skills:
+          type: array
+          items: { $ref: '#/components/schemas/PositionSkillItem' }
+
+    PositionSkillsData:
+      type: object
+      description: GET /graph/position/{id}/skills 响应 data
+      required: [position_id, skills]
+      properties:
+        position_id: { type: string }
+        skills:
+          type: array
+          items: { $ref: '#/components/schemas/PositionSkillItem' }
+
+    SkillEvidenceItem:
+      type: object
+      description: 技能证据项（GET /graph/skill/{id}/evidence，EVIDENCED_BY 原始 JD）
+      required: [id, source, source_url]
+      properties:
+        id: { type: string }
+        source: { type: string }
+        source_url: { type: string }
+        crawled_at: { type: string, nullable: true, description: 抓取时间 ISO8601 }
+
+    SkillEvidenceData:
+      type: object
+      description: GET /graph/skill/{id}/evidence 响应 data
+      required: [skill_id, skill_name, evidence, evidence_count]
+      properties:
+        skill_id: { type: string }
+        skill_name: { type: string }
+        evidence:
+          type: array
+          items: { $ref: '#/components/schemas/SkillEvidenceItem' }
+        evidence_count: { type: integer }
+
+    SimilarSkillItem:
+      type: object
+      description: 相似技能项（GET /graph/skill/similar，语义相似度）
+      required: [skill_id, skill_name, similarity]
+      properties:
+        skill_id: { type: string }
+        skill_name: { type: string }
+        similarity: { type: number, description: "余弦相似度 [0,1]" }
+
+    SkillSimilarData:
+      type: object
+      description: GET /graph/skill/similar 响应 data
+      required: [skill_id, skill_name, similar]
+      properties:
+        skill_id: { type: string }
+        skill_name: { type: string }
+        similar:
+          type: array
+          items: { $ref: '#/components/schemas/SimilarSkillItem' }
+
+    PrerequisiteItem:
+      type: object
+      description: 先修技能链项（GET /graph/skill/{id}/prerequisites）
+      required: [name, depth]
+      properties:
+        skill_id: { type: string, nullable: true, description: 图谱技能 ID（未建图节点为 null） }
+        name: { type: string }
+        depth: { type: integer, description: 先修深度（1 为直接先修） }
+
+    SkillPrerequisitesData:
+      type: object
+      description: GET /graph/skill/{id}/prerequisites 响应 data
+      required: [skill_id, skill_name, prerequisites]
+      properties:
+        skill_id: { type: string }
+        skill_name: { type: string }
+        prerequisites:
+          type: array
+          items: { $ref: '#/components/schemas/PrerequisiteItem' }
+
+    SkillCoursesData:
+      type: object
+      description: GET /graph/skill/{id}/courses 响应 data（courses 复用 CourseRecommendation）
+      required: [skill_id, skill_name, courses]
+      properties:
+        skill_id: { type: string }
+        skill_name: { type: string }
+        courses:
+          type: array
+          items: { $ref: '#/components/schemas/CourseRecommendation' }
+
+    SkillDetail:
+      type: object
+      description: 技能节点详情（GET /graph/skill/{id}）
+      required: [id, name, positions_count, evidence_count, courses_count]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        positions_count: { type: integer, description: 要求该技能的岗位数 }
+        evidence_count: { type: integer, description: 证据条数 }
+        courses_count: { type: integer, description: 关联课程数 }
+
+    SearchResultItem:
+      type: object
+      description: 全文搜索项（GET /graph/search）
+      required: [id, name, type, score]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [position, skill, evidence] }
+        score: { type: number, description: 全文检索得分 }
+
+    SearchResultsData:
+      type: object
+      description: GET /graph/search 响应 data
+      required: [items, total, page, size]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SearchResultItem' }
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+
+    # ============================================================
+    # 认证端点 data（08-14 契约补全）
+    # ============================================================
+
+    LoginResult:
+      type: object
+      description: POST /auth/login 响应 data（JWT 双 Token）
+      required: [access_token, refresh_token, expires_in]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, description: 固定 bearer }
+        expires_in: { type: integer, description: access_token 有效期（秒） }
+
+    # ============================================================
+    # 管理端点 data（08-14 契约补全：crawl/users/llm/review/watch）
+    # ============================================================
+
+    AdminUser:
+      type: object
+      description: 用户管理项（GET /admin/users）
+      required: [id, username, role, is_active]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        role: { type: string, enum: [admin, user, guest] }
+        is_active: { type: boolean }
+        created_at: { type: string, nullable: true }
+        updated_at: { type: string, nullable: true }
+
+    AdminUsersData:
+      type: object
+      description: GET /admin/users 响应 data（分页）
+      required: [items, total, page, size]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminUser' }
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+
+    CrawlPlatform:
+      type: object
+      description: 爬取平台状态项（GET /admin/crawl/status）
+      required: [id, name, level, files, total_count, today_count]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        level: { type: string, enum: [A, B, C, '信号', '论文', '课程'], description: 平台分级（§4 A/B/C + 信号/论文/课程） }
+        files: { type: integer, description: output/*.jsonl 文件数 }
+        total_count: { type: integer, description: raw 表累计入库条数 }
+        today_count: { type: integer, description: 今日（CST）入库条数 }
+        last_run: { type: string, nullable: true, description: 最近运行时间 ISO8601 }
+
+    CrawlMetrics:
+      type: object
+      description: 爬取聚合指标（GET /admin/crawl/status）
+      required: [today_count, output_total, raw]
+      properties:
+        today_count: { type: integer, description: 今日入库新增 }
+        output_total: { type: integer, description: output 文件总数 }
+        raw:
+          type: object
+          description: 各 raw 表累计条数
+          required: [jd, course, paper, community]
+          properties:
+            jd: { type: integer }
+            course: { type: integer }
+            paper: { type: integer }
+            community: { type: integer }
+
+    CrawlStatusData:
+      type: object
+      description: GET /admin/crawl/status 响应 data
+      required: [metrics, platforms]
+      properties:
+        metrics: { $ref: '#/components/schemas/CrawlMetrics' }
+        platforms:
+          type: array
+          items: { $ref: '#/components/schemas/CrawlPlatform' }
+
+    CrawlHistoryItem:
+      type: object
+      description: 爬取任务历史项（GET /admin/crawl/history）
+      required: [id, platform, platform_name, keyword, status, items, error]
+      properties:
+        id: { type: string }
+        platform: { type: string, description: spider 名 }
+        platform_name: { type: string, description: 平台中文名 }
+        keyword: { type: string }
+        status: { type: string, enum: [pending, running, success, failed] }
+        items: { type: integer, description: 入库条数 }
+        error: { type: string }
+        created_at: { type: string, nullable: true }
+
+    CrawlHistoryData:
+      type: object
+      description: GET /admin/crawl/history 响应 data（分页）
+      required: [items, total, page, size]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CrawlHistoryItem' }
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+
+    CrawlTriggerResult:
+      type: object
+      description: POST /admin/crawl/trigger 响应 data（ARQ 入队结果）
+      required: [task_id, platform, status]
+      properties:
+        task_id: { type: string }
+        platform: { type: string }
+        status: { type: string }
+
+    DiscoveryCandidateItem:
+      type: object
+      required: [id, position_name, state, evidence_refs, detected_at]
+      description: |
+        岗位审核候选池项（GET /admin/positions/pending、/admin/evolution/pending、
+        /admin/positions/declining 共用；字段按端点存在性可选）
+      properties:
+        id: { type: string }
+        position_name: { type: string }
+        state: { type: string, enum: [candidate, emerging, stable, declining, archived] }
+        features: { type: object, nullable: true, description: 特征向量（仅 pending） }
+        confidence:
+          type: object
+          nullable: true
+          description: 多维置信度对象（含 final_confidence，非标量）
+        evidence_refs:
+          type: array
+          items: { type: string }
+        seed_matched: { type: boolean, description: 种子岗位命中（pending/evolution） }
+        rag_matched: { type: boolean, description: RAG 检索命中（pending/evolution） }
+        definition_draft: { type: string, description: 岗位定义草案（pending/evolution） }
+        detected_at: { type: string, nullable: true }
+        updated_at: { type: string, nullable: true }
+
+    DiscoveryCandidateData:
+      type: object
+      description: 岗位审核列表响应 data（pending/evolution/declining 分页同构）
+      required: [items, total, page, size]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DiscoveryCandidateItem' }
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+
+    WatchItem:
+      type: object
+      required: [skill_name, signal_source, signal_value, period, status]
+      description: 技术信号监控项（GET /admin/discovery/watch）
+      properties:
+        skill_name: { type: string }
+        signal_source: { type: string }
+        signal_value: { type: number }
+        period: { type: string }
+        status: { type: string }
+        first_seen_at: { type: string, nullable: true }
+        last_signal_at: { type: string, nullable: true }
+
+    WatchData:
+      type: object
+      description: GET /admin/discovery/watch 响应 data（分页）
+      required: [items, total, page, size]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/WatchItem' }
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+
+    PositionEditSkillItem:
+      type: object
+      required: [name, necessity, weight, level]
+      description: 岗位编辑技能项（GET/PUT /admin/positions/{name}）
+      properties:
+        name: { type: string }
+        necessity: { type: string, enum: [must, nice] }
+        weight: { type: number, description: "技能权重 [0,1]" }
+        level: { type: string }
+
+    PositionEditDetail:
+      type: object
+      required: [id, name, level, industry, salary_range, status, core_duties, scenarios, skills, education, certifications]
+      description: 岗位人工编辑详情（GET /admin/positions/{position_name}）
+      properties:
+        id: { type: string }
+        name: { type: string }
+        level: { type: string }
+        industry: { type: string }
+        salary_range: { type: string }
+        status: { type: string }
+        core_duties:
+          type: array
+          items: { type: string }
+        scenarios:
+          type: array
+          items: { type: string }
+        created_at: { type: string }
+        updated_at: { type: string }
+        skills:
+          type: array
+          items: { $ref: '#/components/schemas/PositionEditSkillItem' }
+        education:
+          type: array
+          description: 学历要求（REQUIRES->Education）
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              necessity: { type: string }
+              level: { type: string }
+        certifications:
+          type: array
+          description: 证书要求（REQUIRES->Certification）
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              necessity: { type: string }
+              level: { type: string }
+
+    PositionEditResult:
+      type: object
+      description: PUT /admin/positions/{name} 响应 data
+      required: [position_name, updated]
+      properties:
+        position_name: { type: string }
+        updated: { type: boolean, description: 是否有实际变更（无变更不写编辑日志） }
+        diff_summary: { type: string, description: 变更摘要（供展示/审计） }
+
+    LlmProviderConfig:
+      type: object
+      description: LLM provider 配置项（GET/PUT /admin/llm-config）
+      required: [name, priority, base_url, model, enabled]
+      properties:
+        name: { type: string, description: provider 唯一名（字母/数字/下划线/短横线） }
+        priority: { type: integer, description: 尝试优先级（1 最高，唯一） }
+        base_url: { type: string }
+        api_key: { type: string, description: 回显时打码（*）；提交空白/含掩码保持原值 }
+        model: { type: string }
+        supports_function_calling: { type: boolean }
+        enabled: { type: boolean }
+        extra_body:
+          type: object
+          description: provider 特定请求参数（如 deepseek 关闭思考模式），编辑时须保留
+
+    LlmConfig:
+      type: object
+      description: GET/PUT /admin/llm-config 响应/请求 data
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items: { $ref: '#/components/schemas/LlmProviderConfig' }
+

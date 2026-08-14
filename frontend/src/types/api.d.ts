@@ -80,7 +80,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["LoginResult"];
+                            trace_id?: string;
+                        };
                     };
                 };
                 401: components["responses"]["Unauthorized"];
@@ -312,7 +317,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["PositionDetail"];
+                            trace_id?: string;
+                        };
                     };
                 };
                 404: components["responses"]["NotFound"];
@@ -353,7 +363,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["PositionSkillsData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -391,7 +406,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillDetail"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -429,7 +449,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillEvidenceData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -467,7 +492,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillPrerequisitesData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -505,7 +535,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillCoursesData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -543,7 +578,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillPositionsData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -582,7 +622,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillSimilarData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -872,7 +917,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SearchResultsData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -1874,7 +1924,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["AdminUsersData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -2019,7 +2074,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["CrawlTriggerResult"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -2053,7 +2113,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["CrawlStatusData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -2092,7 +2157,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["CrawlHistoryData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -2166,7 +2236,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["LlmConfig"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -2206,7 +2281,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["LlmConfig"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -2243,7 +2323,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["PositionEditDetail"];
+                            trace_id?: string;
+                        };
                     };
                 };
                 /** @description 岗位不存在 */
@@ -2290,7 +2375,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["PositionEditResult"];
+                            trace_id?: string;
+                        };
                     };
                 };
                 /** @description 参数不合法（weight 越界 / necessity 非法等） */
@@ -2339,7 +2429,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["DiscoveryCandidateData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -2443,7 +2538,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["DiscoveryCandidateData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -2524,7 +2624,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["DiscoveryCandidateData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -2567,7 +2672,12 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ApiResponse"];
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["WatchData"];
+                            trace_id?: string;
+                        };
                     };
                 };
             };
@@ -2744,10 +2854,10 @@ export interface components {
             children?: components["schemas"]["CommunityNode"][];
         };
         User: {
-            id?: string;
-            username?: string;
+            id: string;
+            username: string;
             /** @enum {string} */
-            role?: "admin" | "user" | "guest";
+            role: "admin" | "user" | "guest";
             /** @description 邮箱（可能为空） */
             email?: string | null;
             /** @description 手机号（可能为空） */
@@ -2800,6 +2910,323 @@ export interface components {
             estimated_hours?: number;
             /** @enum {string} */
             priority?: "high" | "medium" | "low";
+        };
+        /** @description 技能反向查询岗位项（GET /graph/skill/{id}/positions） */
+        SkillPositionItem: {
+            position_id: string;
+            position_name: string;
+            /** @enum {string} */
+            necessity: "must" | "nice";
+            weight: number;
+            level: string;
+        };
+        /** @description GET /graph/skill/{id}/positions 响应 data */
+        SkillPositionsData: {
+            skill_id: string;
+            positions: components["schemas"]["SkillPositionItem"][];
+        };
+        /** @description 岗位详情技能项（GET /graph/position/{id} must_skills/nice_skills） */
+        PositionSkillItem: {
+            skill_id: string;
+            skill_name: string;
+            /** @enum {string} */
+            necessity: "must" | "nice";
+            weight: number;
+            level: string;
+            source_count: number;
+        };
+        /** @description 岗位节点详情（GET /graph/position/{id}） */
+        PositionDetail: {
+            id: string;
+            name: string;
+            required_years?: number | null;
+            required_education?: string | null;
+            /** @description 最近更新时间 ISO8601 */
+            last_updated?: string | null;
+            /** @enum {string} */
+            status?: "candidate" | "emerging" | "stable" | "declining" | "archived";
+            must_skills: components["schemas"]["PositionSkillItem"][];
+            nice_skills: components["schemas"]["PositionSkillItem"][];
+        };
+        /** @description GET /graph/position/{id}/skills 响应 data */
+        PositionSkillsData: {
+            position_id: string;
+            skills: components["schemas"]["PositionSkillItem"][];
+        };
+        /** @description 技能证据项（GET /graph/skill/{id}/evidence，EVIDENCED_BY 原始 JD） */
+        SkillEvidenceItem: {
+            id: string;
+            source: string;
+            source_url: string;
+            /** @description 抓取时间 ISO8601 */
+            crawled_at?: string | null;
+        };
+        /** @description GET /graph/skill/{id}/evidence 响应 data */
+        SkillEvidenceData: {
+            skill_id: string;
+            skill_name: string;
+            evidence: components["schemas"]["SkillEvidenceItem"][];
+            evidence_count: number;
+        };
+        /** @description 相似技能项（GET /graph/skill/similar，语义相似度） */
+        SimilarSkillItem: {
+            skill_id: string;
+            skill_name: string;
+            /** @description 余弦相似度 [0,1] */
+            similarity: number;
+        };
+        /** @description GET /graph/skill/similar 响应 data */
+        SkillSimilarData: {
+            skill_id: string;
+            skill_name: string;
+            similar: components["schemas"]["SimilarSkillItem"][];
+        };
+        /** @description 先修技能链项（GET /graph/skill/{id}/prerequisites） */
+        PrerequisiteItem: {
+            /** @description 图谱技能 ID（未建图节点为 null） */
+            skill_id?: string | null;
+            name: string;
+            /** @description 先修深度（1 为直接先修） */
+            depth: number;
+        };
+        /** @description GET /graph/skill/{id}/prerequisites 响应 data */
+        SkillPrerequisitesData: {
+            skill_id: string;
+            skill_name: string;
+            prerequisites: components["schemas"]["PrerequisiteItem"][];
+        };
+        /** @description GET /graph/skill/{id}/courses 响应 data（courses 复用 CourseRecommendation） */
+        SkillCoursesData: {
+            skill_id: string;
+            skill_name: string;
+            courses: components["schemas"]["CourseRecommendation"][];
+        };
+        /** @description 技能节点详情（GET /graph/skill/{id}） */
+        SkillDetail: {
+            id: string;
+            name: string;
+            /** @description 要求该技能的岗位数 */
+            positions_count: number;
+            /** @description 证据条数 */
+            evidence_count: number;
+            /** @description 关联课程数 */
+            courses_count: number;
+        };
+        /** @description 全文搜索项（GET /graph/search） */
+        SearchResultItem: {
+            id: string;
+            name: string;
+            /** @enum {string} */
+            type: "position" | "skill" | "evidence";
+            /** @description 全文检索得分 */
+            score: number;
+        };
+        /** @description GET /graph/search 响应 data */
+        SearchResultsData: {
+            items: components["schemas"]["SearchResultItem"][];
+            total: number;
+            page: number;
+            size: number;
+        };
+        /** @description POST /auth/login 响应 data（JWT 双 Token） */
+        LoginResult: {
+            access_token: string;
+            refresh_token: string;
+            /** @description 固定 bearer */
+            token_type?: string;
+            /** @description access_token 有效期（秒） */
+            expires_in: number;
+        };
+        /** @description 用户管理项（GET /admin/users） */
+        AdminUser: {
+            id: string;
+            username: string;
+            /** @enum {string} */
+            role: "admin" | "user" | "guest";
+            is_active: boolean;
+            created_at?: string | null;
+            updated_at?: string | null;
+        };
+        /** @description GET /admin/users 响应 data（分页） */
+        AdminUsersData: {
+            items: components["schemas"]["AdminUser"][];
+            total: number;
+            page: number;
+            size: number;
+        };
+        /** @description 爬取平台状态项（GET /admin/crawl/status） */
+        CrawlPlatform: {
+            id: string;
+            name: string;
+            /**
+             * @description 平台分级（§4 A/B/C + 信号/论文/课程）
+             * @enum {string}
+             */
+            level: "A" | "B" | "C" | "信号" | "论文" | "课程";
+            /** @description output/*.jsonl 文件数 */
+            files: number;
+            /** @description raw 表累计入库条数 */
+            total_count: number;
+            /** @description 今日（CST）入库条数 */
+            today_count: number;
+            /** @description 最近运行时间 ISO8601 */
+            last_run?: string | null;
+        };
+        /** @description 爬取聚合指标（GET /admin/crawl/status） */
+        CrawlMetrics: {
+            /** @description 今日入库新增 */
+            today_count: number;
+            /** @description output 文件总数 */
+            output_total: number;
+            /** @description 各 raw 表累计条数 */
+            raw: {
+                jd: number;
+                course: number;
+                paper: number;
+                community: number;
+            };
+        };
+        /** @description GET /admin/crawl/status 响应 data */
+        CrawlStatusData: {
+            metrics: components["schemas"]["CrawlMetrics"];
+            platforms: components["schemas"]["CrawlPlatform"][];
+        };
+        /** @description 爬取任务历史项（GET /admin/crawl/history） */
+        CrawlHistoryItem: {
+            id: string;
+            /** @description spider 名 */
+            platform: string;
+            /** @description 平台中文名 */
+            platform_name: string;
+            keyword: string;
+            /** @enum {string} */
+            status: "pending" | "running" | "success" | "failed";
+            /** @description 入库条数 */
+            items: number;
+            error: string;
+            created_at?: string | null;
+        };
+        /** @description GET /admin/crawl/history 响应 data（分页） */
+        CrawlHistoryData: {
+            items: components["schemas"]["CrawlHistoryItem"][];
+            total: number;
+            page: number;
+            size: number;
+        };
+        /** @description POST /admin/crawl/trigger 响应 data（ARQ 入队结果） */
+        CrawlTriggerResult: {
+            task_id: string;
+            platform: string;
+            status: string;
+        };
+        /**
+         * @description 岗位审核候选池项（GET /admin/positions/pending、/admin/evolution/pending、
+         *     /admin/positions/declining 共用；字段按端点存在性可选）
+         */
+        DiscoveryCandidateItem: {
+            id: string;
+            position_name: string;
+            /** @enum {string} */
+            state: "candidate" | "emerging" | "stable" | "declining" | "archived";
+            /** @description 特征向量（仅 pending） */
+            features?: Record<string, never> | null;
+            /** @description 多维置信度对象（含 final_confidence，非标量） */
+            confidence?: Record<string, never> | null;
+            evidence_refs: string[];
+            /** @description 种子岗位命中（pending/evolution） */
+            seed_matched?: boolean;
+            /** @description RAG 检索命中（pending/evolution） */
+            rag_matched?: boolean;
+            /** @description 岗位定义草案（pending/evolution） */
+            definition_draft?: string;
+            detected_at: string | null;
+            updated_at?: string | null;
+        };
+        /** @description 岗位审核列表响应 data（pending/evolution/declining 分页同构） */
+        DiscoveryCandidateData: {
+            items: components["schemas"]["DiscoveryCandidateItem"][];
+            total: number;
+            page: number;
+            size: number;
+        };
+        /** @description 技术信号监控项（GET /admin/discovery/watch） */
+        WatchItem: {
+            skill_name: string;
+            signal_source: string;
+            signal_value: number;
+            period: string;
+            status: string;
+            first_seen_at?: string | null;
+            last_signal_at?: string | null;
+        };
+        /** @description GET /admin/discovery/watch 响应 data（分页） */
+        WatchData: {
+            items: components["schemas"]["WatchItem"][];
+            total: number;
+            page: number;
+            size: number;
+        };
+        /** @description 岗位编辑技能项（GET/PUT /admin/positions/{name}） */
+        PositionEditSkillItem: {
+            name: string;
+            /** @enum {string} */
+            necessity: "must" | "nice";
+            /** @description 技能权重 [0,1] */
+            weight: number;
+            level: string;
+        };
+        /** @description 岗位人工编辑详情（GET /admin/positions/{position_name}） */
+        PositionEditDetail: {
+            id: string;
+            name: string;
+            level: string;
+            industry: string;
+            salary_range: string;
+            status: string;
+            core_duties: string[];
+            scenarios: string[];
+            created_at?: string;
+            updated_at?: string;
+            skills: components["schemas"]["PositionEditSkillItem"][];
+            /** @description 学历要求（REQUIRES->Education） */
+            education: {
+                name?: string;
+                necessity?: string;
+                level?: string;
+            }[];
+            /** @description 证书要求（REQUIRES->Certification） */
+            certifications: {
+                name?: string;
+                necessity?: string;
+                level?: string;
+            }[];
+        };
+        /** @description PUT /admin/positions/{name} 响应 data */
+        PositionEditResult: {
+            position_name: string;
+            /** @description 是否有实际变更（无变更不写编辑日志） */
+            updated: boolean;
+            /** @description 变更摘要（供展示/审计） */
+            diff_summary?: string;
+        };
+        /** @description LLM provider 配置项（GET/PUT /admin/llm-config） */
+        LlmProviderConfig: {
+            /** @description provider 唯一名（字母/数字/下划线/短横线） */
+            name: string;
+            /** @description 尝试优先级（1 最高，唯一） */
+            priority: number;
+            base_url: string;
+            /** @description 回显时打码（*）；提交空白/含掩码保持原值 */
+            api_key?: string;
+            model: string;
+            supports_function_calling?: boolean;
+            enabled: boolean;
+            /** @description provider 特定请求参数（如 deepseek 关闭思考模式），编辑时须保留 */
+            extra_body?: Record<string, never>;
+        };
+        /** @description GET/PUT /admin/llm-config 响应/请求 data */
+        LlmConfig: {
+            providers: components["schemas"]["LlmProviderConfig"][];
         };
     };
     responses: {
