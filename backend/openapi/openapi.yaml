@@ -1565,10 +1565,16 @@ components:
 
     GraphViewStats:
       type: object
-      description: 视图统计（本次返回的节点/边数，非全图）
+      description: 视图统计（nodes/edges 为本次返回数；total_* 为图谱全量，可大于返回数）
       properties:
         nodes: { type: integer }
         edges: { type: integer }
+        total_nodes:
+          type: integer
+          description: 图谱全量节点总数（limit 截断后的总量）
+        total_edges:
+          type: integer
+          description: 图谱全量边总数
 
     GraphViewData:
       type: object

@@ -294,6 +294,17 @@ def _query_skill_counts(skill_id: str, status_filter: str) -> dict:
         return dict(rec) if rec else {}
 
 
+def _query_graph_counts() -> dict:
+    """图谱全量节点/边数（stats.total_*，线程池执行，08-14 契约补全）。"""
+    with neo4j_driver.session() as session:
+        n = session.run(
+            "MATCH (n) WHERE n:Skill OR n:Position RETURN count(n) AS c").single()["c"]
+        e = session.run("MATCH (:Skill)-[r:REQUIRES]->(:Position) RETURN count(r) AS c").single()["c"]
+        # 反向边（Position→Skill 是主方向，REQUIRES 可能双向存在，取 max 防重复口径）
+        e2 = session.run("MATCH (:Position)-[r:REQUIRES]->(:Skill) RETURN count(r) AS c").single()["c"]
+    return {"total_nodes": n, "total_edges": max(e, e2)}
+
+
 async def panorama(
     limit: int = Query(default=100, ge=1, le=600),
     min_weight: float = Query(default=0.3, ge=0.0, le=1.0),
@@ -318,7 +329,8 @@ async def panorama(
     data = {
         "nodes": list(nodes.values()),
         "edges": edges,
-        "stats": {"nodes": len(nodes), "edges": len(edges)},
+        "stats": {"nodes": len(nodes), "edges": len(edges),
+                  **await asyncio.to_thread(_query_graph_counts)},
     }
     await redis_client.set(cache_key, json.dumps(data), ex=PANORAMA_CACHE_TTL)
     return ok(data=data)
@@ -988,7 +1000,8 @@ async def graph_view(
             "view_type": view_type,
             "nodes": list(nodes.values()),
             "edges": edges,
-            "stats": {"nodes": len(nodes), "edges": len(edges)},
+            "stats": {"nodes": len(nodes), "edges": len(edges),
+                      **await asyncio.to_thread(_query_graph_counts)},
         }
     else:
         with neo4j_driver.session() as session:
@@ -1025,7 +1038,8 @@ async def graph_view(
             "view_type": view_type,
             "nodes": list(nodes.values()),
             "edges": edges,
-            "stats": {"nodes": len(nodes), "edges": len(edges)},
+            "stats": {"nodes": len(nodes), "edges": len(edges),
+                      **await asyncio.to_thread(_query_graph_counts)},
         }
 
     await redis_client.set(cache_key, json.dumps(data), ex=30)

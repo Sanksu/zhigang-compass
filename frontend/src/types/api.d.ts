@@ -2671,7 +2671,12 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         ApiResponse: {
-            /** @description 0=成功，非 0=错误码（见设计文档 §2.4.7） */
+            /**
+             * @description 0=成功，非 0=业务错误码（设计文档 §2.4.7）：4000 参数校验 / 4010 未认证 /
+             *     4011 Token 过期 / 4030 无权限 / 4040 资源不存在 / 4090 资源或状态冲突 /
+             *     4290 请求限流 / 5000 内部错误 / 5001 Neo4j 查询失败 / 5002 pgvector 查询失败 /
+             *     5003 LLM 超时（HTTP 504）
+             */
             code: number;
             msg: string;
             /** @description 业务数据（成功时存在） */
@@ -2709,10 +2714,14 @@ export interface components {
             /** @description 熟练度级别（初级/中级/高级/专家） */
             level?: string;
         };
-        /** @description 视图统计（本次返回的节点/边数，非全图） */
+        /** @description 视图统计（nodes/edges 为本次返回数；total_* 为图谱全量，可大于返回数） */
         GraphViewStats: {
             nodes?: number;
             edges?: number;
+            /** @description 图谱全量节点总数（limit 截断后的总量） */
+            total_nodes?: number;
+            /** @description 图谱全量边总数 */
+            total_edges?: number;
         };
         /** @description 图谱视图响应（四种视图同构） */
         GraphViewData: {
