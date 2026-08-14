@@ -43,6 +43,10 @@ def shortest_path(
         if position_statuses is not None
         else ""
     )
+    # 安全限幅（08-14 审查）：Cypher 深度不可参数化，f-string 拼接前限幅防异常输入
+    max_hops = int(max_hops)
+    if not 1 <= max_hops <= 10:
+        max_hops = 6
     try:
         rows = session.run(
             f"""
