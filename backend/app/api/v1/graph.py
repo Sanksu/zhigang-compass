@@ -637,7 +637,8 @@ async def skill_similar(
     try:
         target_vec_row = await db.get(SkillEmbedding, skill_id)
         if target_vec_row is not None:
-            qvec = embedder.embed(skill["name"])
+            # SBERT 推理 CPU 密集，放线程池避免阻塞事件循环
+            qvec = await asyncio.to_thread(embedder.embed, skill["name"])
             rows = (
                 await db.scalars(
                     select(SkillEmbedding)
@@ -663,9 +664,9 @@ async def skill_similar(
             return ok(data=data)
     except SemanticUnavailableError:
         return error(5000, "语义模型不可用，无法计算相似技能", http_status=503)
-    except Exception:
+    except Exception as exc:
         # skill_embeddings 表缺失 / 向量维度不匹配等 → 降级回退内存扫描
-        pass
+        logger.warning("pgvector 技能相似查询降级回退内存扫描: %s", exc)
 
     # 回退路径：skill_embeddings 未回填（表空/缺该技能），内存 SBERT 全量扫描
     all_skills = await asyncio.to_thread(_query_all_skills)
@@ -674,12 +675,16 @@ async def skill_similar(
         await _cache_set(cache_key, data)
         return ok(data=data)
 
-    try:
-        scores = [
+    def _sbert_scan() -> list:
+        # 全量两两相似度 SBERT 推理 CPU 密集，放线程池避免阻塞事件循环
+        return [
             (sid, name, embedder.similarity(skill["name"], name))
             for sid, name in all_skills
             if sid != skill_id
         ]
+
+    try:
+        scores = await asyncio.to_thread(_sbert_scan)
     except SemanticUnavailableError:
         return error(5000, "语义模型不可用，无法计算相似技能", http_status=503)
 

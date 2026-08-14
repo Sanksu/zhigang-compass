@@ -621,10 +621,8 @@ async def review_position(
     Args:
         req: {"action": "approve" | "reject", "reason": "..."}，reason 必填
     """
-    from app.core.database import neo4j_driver
     from app.models.business import DiscoveryCandidate
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
-    from app.services.discovery.state_machine import PositionStateMachine
 
     action = req.get("action")
     reason = (req.get("reason") or "").strip()
@@ -660,16 +658,14 @@ async def review_position(
         if not can_promote_to_emerging(candidate, confidence=float(conf.get("final_confidence", 0.0))):
             return error(4000, "置信度 < 0.6 或独立源 < 2，不满足 emerging 晋升条件")
 
-    machine = PositionStateMachine()
-    with neo4j_driver.session() as neo4j_session:
-        updated = machine.persist(
-            neo4j_session,
-            candidate,
-            target,
-            db=db,
-            operator=current_user.get("sub") or current_user.get("user_id", "admin"),
-            reason=reason,
-        )
+    updated = await asyncio.to_thread(
+        _persist_position_state,
+        candidate,
+        target,
+        db,
+        current_user.get("sub") or current_user.get("user_id", "admin"),
+        reason,
+    )
 
     cand_row.state = updated.state.value
     if action == "reject":
@@ -748,10 +744,8 @@ async def review_evolution(
     Args:
         req: {"action": "approve" | "reject", "modified": {...}?}
     """
-    from app.core.database import neo4j_driver
     from app.models.business import DiscoveryCandidate
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
-    from app.services.discovery.state_machine import PositionStateMachine
 
     action = req.get("action")
     if action not in ("approve", "reject"):
@@ -776,16 +770,14 @@ async def review_evolution(
     )
     target = PositionState.STABLE if action == "approve" else PositionState.DECLINING
 
-    machine = PositionStateMachine()
-    with neo4j_driver.session() as neo4j_session:
-        updated = machine.persist(
-            neo4j_session,
-            candidate,
-            target,
-            db=db,
-            operator=current_user.get("sub") or current_user.get("user_id", "admin"),
-            reason=(req.get("reason") or "").strip() or "admin evolution review",
-        )
+    updated = await asyncio.to_thread(
+        _persist_position_state,
+        candidate,
+        target,
+        db,
+        current_user.get("sub") or current_user.get("user_id", "admin"),
+        (req.get("reason") or "").strip() or "admin evolution review",
+    )
 
     cand_row.state = updated.state.value
     modified = req.get("modified")
@@ -854,10 +846,8 @@ async def archive_position(
     记录（reason 必填）。与 /positions/{id}/review（candidate → emerging/
     rejected）和 /evolution/{id}/review（emerging → stable/declining）并列。
     """
-    from app.core.database import neo4j_driver
     from app.models.business import DiscoveryCandidate
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
-    from app.services.discovery.state_machine import PositionStateMachine
 
     reason = (req.get("reason") or "").strip()
     if not reason:
@@ -880,16 +870,14 @@ async def archive_position(
         rag_matched=cand_row.rag_matched,
         definition_draft=cand_row.definition_draft,
     )
-    machine = PositionStateMachine()
-    with neo4j_driver.session() as neo4j_session:
-        updated = machine.persist(
-            neo4j_session,
-            candidate,
-            PositionState.ARCHIVED,
-            db=db,
-            operator=current_user.get("sub") or current_user.get("user_id", "admin"),
-            reason=reason,
-        )
+    updated = await asyncio.to_thread(
+        _persist_position_state,
+        candidate,
+        PositionState.ARCHIVED,
+        db,
+        current_user.get("sub") or current_user.get("user_id", "admin"),
+        reason,
+    )
     cand_row.state = updated.state.value
     await db.commit()
 
@@ -976,6 +964,40 @@ def position_edit_diff(current: dict, skills, core_duties, scenarios) -> str:
     if scenarios is not None and scenarios != current.get("scenarios", []):
         parts.append("scenarios 更新")
     return "; ".join(parts)
+
+
+def _persist_position_state(candidate, target, db, operator: str, reason: str):
+    """岗位状态持久化（Neo4j 同步驱动 + 审计日志），线程池执行。
+
+    Neo4j 驱动为同步实现，放线程池避免阻塞事件循环；db.add 仅操作
+    Session 内存态（不触 IO），commit 由调用方在主线程完成。
+    """
+    from app.core.database import neo4j_driver
+    from app.services.discovery.state_machine import PositionStateMachine
+
+    machine = PositionStateMachine()
+    with neo4j_driver.session() as neo4j_session:
+        return machine.persist(
+            neo4j_session, candidate, target, db=db, operator=operator, reason=reason
+        )
+
+
+def _query_position_detail(position_name: str) -> dict | None:
+    """岗位详情读取（Neo4j 同步驱动，线程池执行）。"""
+    from app.core.database import neo4j_driver
+
+    with neo4j_driver.session() as session:
+        return session.execute_read(_get_position_detail_tx, position_name)
+
+
+def _edit_position_neo4j(position_name: str, editor_id, skills, core_duties, scenarios) -> dict:
+    """岗位编辑写（Neo4j 同步驱动，线程池执行）。"""
+    from app.core.database import neo4j_driver
+
+    with neo4j_driver.session() as session:
+        return session.execute_write(
+            _edit_position_tx, position_name, editor_id, skills, core_duties, scenarios
+        )
 
 
 def _get_position_detail_tx(tx, position_name: str) -> dict | None:
@@ -1116,10 +1138,7 @@ def _edit_position_tx(tx, position_name, editor_id, skills, core_duties, scenari
 @router.get("/positions/{position_name}")
 async def get_position_detail(position_name: str):
     """岗位详情（§12.2 岗位人工编辑：编辑前查看技能/学历/证书与文本定义）。"""
-    from app.core.database import neo4j_driver
-
-    with neo4j_driver.session() as session:
-        detail = session.execute_read(_get_position_detail_tx, position_name)
+    detail = await asyncio.to_thread(_query_position_detail, position_name)
     if detail is None:
         return error(4040, f"岗位不存在: {position_name}", http_status=404)
     return ok(data=detail)
@@ -1137,8 +1156,6 @@ async def update_position_definition(
         skills: 技能列表全量替换，每项 {name, necessity: must|nice, weight: 0.0-1.0}
         core_duties / scenarios: 字符串数组，更新 Position 节点属性
     """
-    from app.core.database import neo4j_driver
-
     skills = req.get("skills")
     core_duties = req.get("core_duties")
     scenarios = req.get("scenarios")
@@ -1147,10 +1164,9 @@ async def update_position_definition(
         return error(4000, err)
 
     editor_id = current_user.get("sub") or current_user.get("user_id", "admin")
-    with neo4j_driver.session() as session:
-        result = session.execute_write(
-            _edit_position_tx, position_name, editor_id, skills, core_duties, scenarios
-        )
+    result = await asyncio.to_thread(
+        _edit_position_neo4j, position_name, editor_id, skills, core_duties, scenarios
+    )
     if not result["exists"]:
         return error(4040, f"岗位不存在: {position_name}", http_status=404)
     # 编辑已生效：失效岗位详情缓存（graph.py key 为 graph:position:{id}:{scope}，
