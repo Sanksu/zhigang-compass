@@ -94,6 +94,42 @@ def _get_redis_client():
     return _redis_client
 
 
+# instructor/OpenAI client 缓存（08-14 审查：每次调用重建 client，连接池无法复用）。
+# 按 (base_url, api_key, mode, timeout) 复用；上限 32 防 timeout 变化导致的膨胀
+_client_cache: dict = {}
+_CLIENT_CACHE_MAX = 32
+
+
+def _build_client(provider: dict, timeout: int):
+    """构建/复用 instructor client（连接复用，批量/并发场景降低握手开销）。"""
+    import instructor
+    from openai import OpenAI
+
+    api_key = (provider.get("api_key") or "").strip()
+    # from_openai 函数身份入 key：测试 monkeypatch 换 fake 时不命中缓存（每次重建）
+    key = (
+        instructor.from_openai,
+        provider["base_url"],
+        api_key,
+        provider.get("supports_function_calling", True),
+        timeout,
+    )
+    client = _client_cache.get(key)
+    if client is None:
+        client = instructor.from_openai(
+            OpenAI(base_url=key[1], api_key=key[2], timeout=timeout),
+            mode=(
+                instructor.Mode.TOOLS
+                if key[3]
+                else instructor.Mode.JSON_SCHEMA
+            ),
+        )
+        if len(_client_cache) >= _CLIENT_CACHE_MAX:
+            _client_cache.pop(next(iter(_client_cache)))
+        _client_cache[key] = client
+    return client
+
+
 def _redis_get(key: str) -> Optional[str]:
     try:
         return _get_redis_client().get(key)
@@ -467,14 +503,7 @@ class LLMProviderChain:
         if not api_key:
             raise LLMConfigurationError(f"provider '{provider['name']}' 未配置 api_key")
 
-        client = instructor.from_openai(
-            OpenAI(base_url=provider["base_url"], api_key=api_key, timeout=timeout),
-            mode=(
-                instructor.Mode.TOOLS
-                if provider.get("supports_function_calling", True)
-                else instructor.Mode.JSON_SCHEMA
-            ),
-        )
+        client = _build_client(provider, timeout)
         try:
             return client.chat.completions.create(
                 model=provider["model"],

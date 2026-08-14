@@ -166,7 +166,8 @@ async def login(
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
-        "expires_in": 1800,
+        # 与 create_access_token 的 exp 同源（settings），防两处漂移
+        "expires_in": settings.jwt_access_token_expire_minutes * 60,
     })
 
 
@@ -216,7 +217,7 @@ async def refresh_token(
     return ok(data={
         "access_token": new_access,
         "refresh_token": new_refresh,
-        "expires_in": 1800,
+        "expires_in": settings.jwt_access_token_expire_minutes * 60,
     })
 
 

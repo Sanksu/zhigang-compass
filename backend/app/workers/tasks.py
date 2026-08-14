@@ -112,7 +112,15 @@ async def _update_crawl_task(task_id: str | None, **fields) -> None:
 # （08-13 实测 zhilian 挂死 8h，job 超时 kill 后 subprocess 成孤儿继续跑）。
 # 900s 对齐 run_etl_pipeline 注释声明的单源上限；超时 kill 后已写入 jsonl
 # 保留（Scrapy 逐行落盘），后续 load 仍消费已产出数据。
+# 08-14 审查：按源分级——zhilian 全量正常 20-40min，900s 恒杀正常采集；
+# 慢渲染源单独放宽（2400s = 40min 上限），其余源维持 15min 兜底
 _CRAWL_TIMEOUT_SEC = 900
+_CRAWL_TIMEOUT_BY_SPIDER = {"zhilian": 2400}
+
+
+def _crawl_timeout(spider_name: str) -> int:
+    """按源取超时上限（zhilian 40min，其余 15min）。"""
+    return _CRAWL_TIMEOUT_BY_SPIDER.get(spider_name, _CRAWL_TIMEOUT_SEC)
 
 
 def _kill_process_tree(proc) -> None:
@@ -242,11 +250,12 @@ async def crawl_platform(
     )
     # 单源超时保护（P0-1）：爬虫挂死时 kill 子进程，避免 ETL 阶段 1 无限阻塞；
     # 已写入 jsonl 保留（Scrapy 逐行落盘），后续 load 消费已产出数据
+    timeout = _crawl_timeout(spider_name)
     try:
-        returncode = await asyncio.wait_for(proc.wait(), timeout=_CRAWL_TIMEOUT_SEC)
+        returncode = await asyncio.wait_for(proc.wait(), timeout=timeout)
     except asyncio.TimeoutError:
         _kill_process_tree(proc)  # 同步函数（taskkill/killpg），勿 await
-        msg = f"爬虫 {spider_name} 超时（>{_CRAWL_TIMEOUT_SEC}s），已强制终止"
+        msg = f"爬虫 {spider_name} 超时（>{timeout}s），已强制终止"
         print(f"[crawl_platform] 任务超时: task_id={task_id} {msg}", flush=True)
         await _update_crawl_task(task_id, status="failed", error=msg[:500])
         await send_alert("crawl_timeout", msg, spider=spider_name)
