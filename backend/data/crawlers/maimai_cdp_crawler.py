@@ -28,10 +28,8 @@ import argparse
 import asyncio
 import json
 import os
-import re
 import sys
 from pathlib import Path
-from urllib.parse import urljoin
 
 # 独立脚本经 sys.executable 调用时 sys.path[0] 为 crawlers/ 目录，
 # data/ 不在路径上；显式加入以导入 crawlers.settings（与 scripts/ 下脚本的路径引导一致）
@@ -118,7 +116,7 @@ EXTRACT_JOBS_JS = """
 """
 
 
-async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
+async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL, max_items: int = 30) -> int:
     """通过 CDP 连接已启动的 Chrome/Edge，从脉脉飞书招聘页提取岗位。
 
     前置条件：
@@ -141,7 +139,7 @@ async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
             browser = await p.chromium.connect_over_cdp(cdp_url)
         except Exception as e:
             logger.error(f"❌ CDP 连接失败（{cdp_url}）: {e}")
-            logger.info(f"   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
+            logger.info("   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
             return 0
 
         # 隔离：新建独立 context 并复制主 context 的 cookies，
@@ -210,9 +208,9 @@ async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
             await page.close()
             return 0
 
-        logger.info(f"提取到 {len(jobs)} 条岗位")
+        logger.info(f"提取到 {len(jobs)} 条岗位（上限 {max_items}）")
 
-        all_jobs_data.extend(jobs)
+        all_jobs_data.extend(jobs[:max_items])
         await page.close()
 
     # 输出 JSONL
@@ -260,12 +258,14 @@ def _map_job_to_item(job: dict, keyword: str) -> dict | None:
 def main():
     parser = argparse.ArgumentParser(description="脉脉 CDP 采集脚本（飞书招聘页 DOM 提取）")
     parser.add_argument("--keyword", default="", help="搜索关键词（仅作日志，飞书招聘页无搜索功能）")
+    parser.add_argument("--max-items", type=int, default=30,
+                        help="单次采集岗位数上限（默认 30，防无限滚动采集）")
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL,
                         help="CDP 调试端点（默认 http://127.0.0.1:9222，支持局域网内容器浏览器）")
     args = parser.parse_args()
 
     logger.info(f"CDP 端点: {args.cdp_url}")
-    count = asyncio.run(crawl(args.keyword, args.cdp_url))
+    count = asyncio.run(crawl(args.keyword, args.cdp_url, args.max_items))
     sys.exit(0 if count > 0 else 1)
 
 
