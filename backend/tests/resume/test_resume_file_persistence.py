@@ -31,6 +31,13 @@ _RID = "a3b7f0d2-2d5a-4e1c-8f6b-1c3d5e7f9a0b"
 _BODY = b"%PDF-1.4 test"
 
 
+class _FakeRequest:
+    """上传预检用最小 Request 桩（headers 无 content-length → 跳过预检）。"""
+
+    def __init__(self) -> None:
+        self.headers = {}
+
+
 class _FakeDb:
     """假 AsyncSession：scalar/get 返回注入行（无则 None），add/delete/execute 记录。
 
@@ -130,7 +137,7 @@ class TestUploadPersistsFile:
             monkeypatch.setattr(resume_mod, "_enqueue_resume_parse", fake_enqueue)
             db = _FakeDb()
 
-            resp = await parse_resume(self._upload(), db, {"sub": "u1", "role": "user"})
+            resp = await parse_resume(_FakeRequest(), self._upload(), db, {"sub": "u1", "role": "user"})
 
             assert resp.data["cached"] is False
             task = next(o for o in db.added if isinstance(o, TaskStatus))
@@ -152,7 +159,7 @@ class TestUploadPersistsFile:
             cached = ResumeCache(file_hash="h", file_name="a.pdf", parsed_data={})
             db = _FakeDb(rows=[cached])
 
-            resp = await parse_resume(self._upload(), db, {"sub": "u1"})
+            resp = await parse_resume(_FakeRequest(), self._upload(), db, {"sub": "u1"})
 
             assert resp.data["cached"] is True
             assert db.added == []

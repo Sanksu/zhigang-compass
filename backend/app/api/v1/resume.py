@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import String, cast, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -138,11 +138,17 @@ async def list_resumes(
 
 @router.post("/parse", status_code=202)
 async def parse_resume(
+    request: Request,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("user")),
 ):
     """上传简历触发解析（异步任务，含 PII 脱敏预处理）。"""
+    # 上传 DoS 防护（08-14）：读流前按 Content-Length 预检，超大文件直接拒绝，
+    # 避免恶意超大流全量读入内存耗尽服务
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > MAX_UPLOAD_BYTES:
+        return error(4000, f"文件超过 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限", http_status=413)
     content = await file.read()
     if not content:
         return error(4000, "文件为空")

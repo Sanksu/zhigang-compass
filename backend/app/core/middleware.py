@@ -85,7 +85,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if not ip:
             return await call_next(request)
         limit = self.LLM_LIMIT if self._is_llm_route(path) else self.GENERAL_LIMIT
-        key = f"rate:{ip}:{path}"
+        # 限流键收敛到模块级（08-14 修复）：完整路径含资源 ID（graph/skill/{id}/positions
+        # 等），遍历 ID 可每 key 独立计数绕过 100/min；按 /api/v1/{module} 聚合，
+        # LLM 端点独立键（10/min）
+        parts = path.strip("/").split("/")
+        module = "llm" if self._is_llm_route(path) else (parts[2] if len(parts) > 2 else path)
+        key = f"rate:{ip}:{module}"
         try:
             count = await redis_client.incr(key)
             if count == 1:

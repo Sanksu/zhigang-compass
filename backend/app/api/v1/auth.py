@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Request, Response
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -89,11 +89,14 @@ async def login(
     """
     user = await db.scalar(select(User).where(User.username == req.username))
     if user is None:
-        # 首次部署 bootstrap：users 表为空时按配置创建 admin 用户，
-        # 创建后即落入 users 表，后续登录走 DB 校验；生产环境禁用该路径
+        # 首次部署 bootstrap：仅当 users 表完全为空时按配置创建 admin 用户，
+        # 创建后即落入 users 表，后续登录走 DB 校验；生产环境禁用该路径。
+        # 08-14 安全修复：原条件为"admin 用户名不存在"——表非空时任何人可用
+        # 默认配置抢注 admin（admin/admin123），改为表空才允许。
         if settings.is_production:
             return error(4010, "用户名或密码错误", http_status=401)
-        if req.username == settings.admin_username and req.password == settings.admin_password:
+        user_count = await db.scalar(select(func.count()).select_from(User))
+        if user_count == 0 and req.username == settings.admin_username and req.password == settings.admin_password:
             user = User(
                 username=req.username,
                 password_hash=hash_password(req.password),
