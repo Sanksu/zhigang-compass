@@ -121,6 +121,18 @@ const LEVEL_CLASS: Record<PlatformLevel, string> = {
   '课程': 'text-ink-muted border-border',
 }
 
+/**
+ * 平台实时状态从真实爬取历史推导（08-14 审查：此前 status:'idle' 恒硬编码，
+ * "数据源运行状态"表永远显示"空闲"；后端 /admin/crawl/status 无 per-platform 状态，
+ * 用最近任务状态近似——running/pending → 运行中，failed → 失败，其余 → 空闲）
+ */
+function platformStatus(p: PlatformRow, history: HistoryRow[]): CrawlStatus {
+  const last = history.find((h) => h.platformKey === p.id)
+  if (last?.status === 'running' || last?.status === 'pending') return 'running'
+  if (last?.status === 'failed') return 'failed'
+  return 'idle'
+}
+
 /** SSE 日志读取结果：done=任务成功 / failed=任务失败 / closed=流结束（可能仍在后台执行） */
 interface SseLogResult {
   status: 'done' | 'failed' | 'closed'
@@ -331,7 +343,7 @@ export function AdminCrawlPage() {
           { id: 'today', label: '今日采集量', value: res.metrics.today_count.toLocaleString(), delta: '今日新增', deltaColor: 'text-state-emerging', icon: Database, hint: '今日 output/*.jsonl 新增行数（CST）' },
           { id: 'output', label: '累计采集量', value: res.metrics.output_total.toLocaleString(), delta: `+${res.platforms.length}源`, deltaColor: 'text-state-emerging', icon: Database, hint: 'output/*.jsonl 真实行数合计' },
           { id: 'raw', label: 'DB 已入库', value: (res.metrics.raw.jd + res.metrics.raw.course).toLocaleString(), delta: `JD ${res.metrics.raw.jd}`, deltaColor: 'text-state-emerging', icon: Activity, hint: 'jd_raw + course_raw 真实计数' },
-          { id: 'files', label: '采集文件数', value: res.platforms.length.toLocaleString(), delta: '13 源', deltaColor: 'text-ink-muted', icon: Gauge, hint: '有采集记录的平台数' },
+          { id: 'files', label: '采集文件数', value: res.platforms.length.toLocaleString(), delta: `${res.platforms.length} 源`, deltaColor: 'text-ink-muted', icon: Gauge, hint: '有采集记录的平台数' },
         ])
       })
       .catch(() => {
@@ -411,7 +423,7 @@ export function AdminCrawlPage() {
 
   return (
     <>
-      <PageHeader title="爬取管理" description="手动触发 13 源采集 · 进度监控 · 历史回溯" />
+      <PageHeader title="爬取管理" description="手动触发多源采集 · 进度监控 · 历史回溯" />
 
       {/* 触发结果通知 */}
       {notice && (
@@ -445,7 +457,7 @@ export function AdminCrawlPage() {
         <CardHeader>
           <CardTitle className="text-sm flex items-center justify-between">
             <span>平台状态</span>
-            <span className="text-xs font-normal text-ink-faint">13 源在线</span>
+            <span className="text-xs font-normal text-ink-faint">{platforms.length} 源在线</span>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -466,7 +478,7 @@ export function AdminCrawlPage() {
               </TableHeader>
               <TableBody>
                 {platforms.map((p) => {
-                  const meta = STATUS_META[p.status]
+                  const meta = STATUS_META[platformStatus(p, history)]
                   return (
                     <TableRow key={p.id} className={p.status === 'archived' ? 'opacity-50' : ''}>
                       <TableCell className="font-medium">{p.name}</TableCell>
