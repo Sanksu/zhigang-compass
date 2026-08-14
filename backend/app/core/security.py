@@ -41,6 +41,7 @@ def create_access_token(user_id: str, role: str) -> str:
         "sub": user_id,
         "role": role,
         "type": "access",
+        "jti": uuid.uuid4().hex,  # 登出黑名单依据（08-14 补：此前仅 refresh 有 jti，登出后 access 仍有效至过期）
         "iat": int(time.time()),
         "exp": int(time.time()) + settings.jwt_access_token_expire_minutes * 60,
     }

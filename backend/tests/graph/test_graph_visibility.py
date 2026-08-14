@@ -91,7 +91,7 @@ class TestGetOptionalUser:
 
     async def _call(self, token: str | None):
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token) if token else None
-        return await get_optional_user(creds)
+        return await get_optional_user(creds, _FakeRedis())
 
     def test_no_credentials_returns_none(self):
         assert asyncio.run(self._call(None)) is None
@@ -171,3 +171,9 @@ class TestShortestPathStatusFilter:
         session = _Session()
         shortest_path(session, "s1", "s2")
         assert "position_statuses" not in session.queries[0]
+
+class _FakeRedis:
+    """黑名单检查桩（get 返回 None = 未拉黑）。"""
+
+    async def get(self, key):
+        return None

@@ -14,6 +14,7 @@ from app.core.database import get_db, neo4j_driver, redis_client
 from app.models.business import SkillEmbedding
 from app.schemas.common import error, ok
 from app.services.graph_algorithms.config import load_graph_algo_config
+from app.services.graph_algorithms.shortest_path import shortest_path
 from app.services.kg.skill_relations import graph_prerequisite_chain
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
@@ -305,6 +306,68 @@ def _query_graph_counts() -> dict:
     return {"total_nodes": n, "total_edges": max(e, e2)}
 
 
+def _query_skill_evidence(skill_id: str) -> list[dict]:
+    """技能证据列表（线程池执行，08-14 低优先批次）。"""
+    with neo4j_driver.session() as session:
+        rows = session.run(
+            """
+            MATCH (s:Skill {id: $skill_id})-[:EVIDENCED_BY]->(e:Evidence)
+            RETURN e.id AS id, e.source AS source, e.source_url AS source_url,
+                   e.crawled_at AS crawled_at
+            ORDER BY e.crawled_at DESC
+            """,
+            skill_id=skill_id,
+        )
+        return [
+            {
+                "id": rec["id"],
+                "source": rec.get("source", ""),
+                "source_url": rec.get("source_url", ""),
+                "crawled_at": rec.get("crawled_at"),
+            }
+            for rec in rows
+        ]
+
+
+def _query_shortest_path(from_skill: str, to_skill: str, statuses) -> list | None:
+    """最短路径查询（线程池执行）。"""
+    with neo4j_driver.session() as session:
+        return shortest_path(session, from_skill, to_skill, position_statuses=statuses)
+
+
+def _query_view_techstack(limit: int, status_filter: str) -> list:
+    """techStack 视图查询（线程池执行，08-14 低优先批次）。"""
+    with neo4j_driver.session() as session:
+        return list(session.run(
+            f"""
+            MATCH (s:Skill)<-[r:REQUIRES]-(p:Position)
+            WHERE {status_filter}
+            WITH s, count(p) AS heat
+            ORDER BY heat DESC LIMIT $limit
+            MATCH (s)<-[r:REQUIRES]-(p:Position)
+            WHERE {status_filter}
+            RETURN s.id AS sid, s.name AS sname, p.id AS pid, p.name AS pname,
+                   p.status AS pstatus, r
+            """,
+            limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
+        ))
+
+
+def _query_view_main(limit: int, status_filter: str) -> list:
+    """positionCenter/level/panorama 视图查询（线程池执行）。"""
+    with neo4j_driver.session() as session:
+        return list(session.run(
+            f"""
+            MATCH (p:Position)
+            WHERE {status_filter}
+            WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
+            MATCH (p)-[r:REQUIRES]->(s:Skill)
+            RETURN p, s, r
+            """,
+            limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
+        ))
+
+
 async def panorama(
     limit: int = Query(default=100, ge=1, le=600),
     min_weight: float = Query(default=0.3, ge=0.0, le=1.0),
@@ -534,25 +597,7 @@ async def skill_evidence(skill_id: str):
     if skill is None:
         return error(4040, "技能不存在", http_status=404)
 
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            """
-            MATCH (s:Skill {id: $skill_id})-[:EVIDENCED_BY]->(e:Evidence)
-            RETURN e.id AS id, e.source AS source, e.source_url AS source_url,
-                   e.crawled_at AS crawled_at
-            ORDER BY e.crawled_at DESC
-            """,
-            skill_id=skill_id,
-        )
-        evidence = [
-            {
-                "id": rec["id"],
-                "source": rec.get("source", ""),
-                "source_url": rec.get("source_url", ""),
-                "crawled_at": rec.get("crawled_at"),
-            }
-            for rec in rows
-        ]
+    evidence = await asyncio.to_thread(_query_skill_evidence, skill_id)
 
     data = {
         "skill_id": skill_id,
@@ -930,12 +975,11 @@ async def graph_shortest_path(
     （岗位共现边），节点序列按 type 区分。不存在可达路径返回 404。
     匿名/guest 路径经过的 Position 节点仅限公开态（candidate 不外宣）。
     """
-    from app.services.graph_algorithms.shortest_path import shortest_path
 
     scope = _position_scope(user)
     statuses = list(_PUBLIC_POSITION_STATUSES) if scope == "public" else None
-    with neo4j_driver.session() as session:
-        path = shortest_path(session, from_skill, to_skill, position_statuses=statuses)
+    path = await asyncio.to_thread(
+        _query_shortest_path, from_skill, to_skill, statuses)
     if path is None:
         return error(4040, "两技能间不存在 ≤6 跳的可达路径", http_status=404)
     return ok(data={"from": from_skill, "to": to_skill, "path": path})
@@ -964,20 +1008,8 @@ async def graph_view(
     status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
 
     if view_type == "techStack":
-        with neo4j_driver.session() as session:
-            rows = list(session.run(
-                f"""
-                MATCH (s:Skill)<-[r:REQUIRES]-(p:Position)
-                WHERE {status_filter}
-                WITH s, count(p) AS heat
-                ORDER BY heat DESC LIMIT $limit
-                MATCH (s)<-[r:REQUIRES]-(p:Position)
-                WHERE {status_filter}
-                RETURN s.id AS sid, s.name AS sname, p.id AS pid, p.name AS pname,
-                       p.status AS pstatus, r
-                """,
-                limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-            ))
+        rows = await asyncio.to_thread(
+            _query_view_techstack, limit, status_filter)
         nodes: dict[str, dict] = {}
         edges: list[dict] = []
         for record in rows:
@@ -1004,17 +1036,8 @@ async def graph_view(
                       **await asyncio.to_thread(_query_graph_counts)},
         }
     else:
-        with neo4j_driver.session() as session:
-            rows = list(session.run(
-                f"""
-                MATCH (p:Position)
-                WHERE {status_filter}
-                WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
-                MATCH (p)-[r:REQUIRES]->(s:Skill)
-                RETURN p, s, r
-                """,
-                limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-            ))
+        rows = await asyncio.to_thread(
+            _query_view_main, limit, status_filter)
         nodes = {}
         edges = []
         for record in rows:

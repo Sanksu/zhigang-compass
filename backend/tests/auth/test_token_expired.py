@@ -80,7 +80,7 @@ def test_get_current_user_expired_token_emits_4011():
     """过期 token → 401 HTTPException，detail 为统一 body 且 code=4011。"""
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=_expired_access_token())
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(get_current_user(creds))
+        asyncio.run(get_current_user(creds, _FakeRedis()))
     assert exc.value.status_code == 401
     detail = exc.value.detail
     assert isinstance(detail, dict)
@@ -91,7 +91,7 @@ def test_get_current_user_invalid_token_emits_4010():
     """无效 token → 401，code=4010（与过期 4011 区分）。"""
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="not.a.jwt")
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(get_current_user(creds))
+        asyncio.run(get_current_user(creds, _FakeRedis()))
     assert exc.value.status_code == 401
     assert exc.value.detail == "无效或过期的 Token"
 
@@ -100,5 +100,11 @@ def test_get_current_user_valid_token_passes():
     creds = HTTPAuthorizationCredentials(
         scheme="Bearer", credentials=create_access_token("u1", "user")
     )
-    payload = asyncio.run(get_current_user(creds))
+    payload = asyncio.run(get_current_user(creds, _FakeRedis()))
     assert payload["sub"] == "u1"
+
+class _FakeRedis:
+    """黑名单检查桩（get 返回 None = 未拉黑）。"""
+
+    async def get(self, key):
+        return None
