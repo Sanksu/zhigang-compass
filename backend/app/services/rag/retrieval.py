@@ -15,6 +15,7 @@
 """
 
 from dataclasses import dataclass
+import asyncio
 from typing import Optional
 
 from sqlalchemy import select
@@ -115,21 +116,27 @@ async def _occupations(
     return chunks
 
 
+def _query_skill_fulltext(neo4j, q: str) -> list[dict]:
+    """Neo4j skill_search 全文索引查询（同步驱动，线程池执行）。"""
+    with neo4j.session() as session:
+        return session.run(
+            "CALL db.index.fulltext.queryNodes('skill_search', $q) "
+            "YIELD node, score "
+            "RETURN node.name AS name, node.description AS description, score "
+            "LIMIT $limit",
+            q=q,
+            limit=DEFAULT_TOP_K,
+        ).data()
+
+
 async def _skills(neo4j, query: str) -> list[RetrievedChunk]:
     """技能描述（Neo4j skill_search 全文索引关键词路）。"""
     q = _sanitize_fulltext(query)
     if neo4j is None or not q:
         return []
     try:
-        with neo4j.session() as session:
-            rows = session.run(
-                "CALL db.index.fulltext.queryNodes('skill_search', $q) "
-                "YIELD node, score "
-                "RETURN node.name AS name, node.description AS description, score "
-                "LIMIT $limit",
-                q=q,
-                limit=DEFAULT_TOP_K,
-            ).data()
+        # 同步 Neo4j 驱动查询放线程池，避免阻塞事件循环
+        rows = await asyncio.to_thread(_query_skill_fulltext, neo4j, q)
     except Exception:
         # Neo4j 不可达：跳过技能源，不阻塞检索
         return []
