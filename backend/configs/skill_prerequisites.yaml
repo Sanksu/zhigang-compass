@@ -345,3 +345,172 @@ skills:
   数据可视化:
     prerequisites:
     - 数据分析
+  # ---- 08-15 先修补录（学习路径 30 案例评审：先修缺失 114 项次）----
+  Shell:
+    prerequisites:
+    - Linux
+    - 计算机基础
+    hours: 40
+  语音合成:
+    prerequisites:
+    - 语音识别
+    - 计算机基础
+    hours: 60
+  音频特征处理:
+    prerequisites:
+    - 语音识别
+    hours: 50
+  VAD:
+    prerequisites:
+    - 语音识别
+    - 音频特征处理
+    hours: 40
+  语音:
+    prerequisites:
+    - 语音识别
+    hours: 40
+  模型调优:
+    prerequisites:
+    - 机器学习
+    - 深度学习
+    hours: 50
+  Prometheus:
+    prerequisites:
+    - Linux
+    hours: 40
+  LangGraph:
+    prerequisites:
+    - 大语言模型
+    - 机器学习
+    hours: 50
+  NSGs:
+    prerequisites:
+    - Azure
+    - 计算机基础
+    hours: 40
+  load-balancers:
+    prerequisites:
+    - Azure
+    - 计算机基础
+    hours: 40
+  Azure Firewall:
+    prerequisites:
+    - Azure
+    hours: 40
+  Azure Bicep:
+    prerequisites:
+    - Azure
+    hours: 40
+  Vnet peering:
+    prerequisites:
+    - Azure
+    - 计算机基础
+    hours: 40
+  XML:
+    prerequisites:
+    - 计算机基础
+    hours: 40
+  CSS样式:
+    prerequisites:
+    - HTML
+    - CSS
+    hours: 30
+  函数式编程:
+    prerequisites:
+    - 计算机基础
+    - Python
+    hours: 50
+  工作流自动化:
+    prerequisites:
+    - 项目管理
+    hours: 30
+  # ---- 08-15 先修补录二轮（数据工具/云基础设施类）----
+  Informatica:
+    prerequisites:
+    - 数据仓库
+    - ETL
+    hours: 50
+  数据工程:
+    prerequisites:
+    - 数据仓库
+    - SQL
+    hours: 60
+  Alation:
+    prerequisites:
+    - 数据仓库
+    hours: 40
+  Tableau:
+    prerequisites:
+    - 数据可视化
+    - 数据分析
+    hours: 40
+  Power BI:
+    prerequisites:
+    - 数据可视化
+    - 数据分析
+    hours: 40
+  ETL 管道:
+    prerequisites:
+    - 数据仓库
+    - SQL
+    hours: 50
+  DOMO:
+    prerequisites:
+    - 数据可视化
+    hours: 40
+  Qlik:
+    prerequisites:
+    - 数据可视化
+    hours: 40
+  云数据:
+    prerequisites:
+    - 云计算
+    - 数据库
+    hours: 50
+  VMware:
+    prerequisites:
+    - 云计算
+    - Linux
+    hours: 40
+  嵌入向量:
+    prerequisites:
+    - 机器学习
+    hours: 50
+  Agile:
+    prerequisites:
+    - 项目管理
+    hours: 30
+  # ---- 08-15 先修补录三轮（AI/云工程/中间件类）----
+  生成式AI:
+    prerequisites:
+    - 机器学习
+    - 大语言模型
+    hours: 60
+  基础设施即代码:
+    prerequisites:
+    - 云计算
+    - Linux
+    hours: 50
+  可靠性工程:
+    prerequisites:
+    - 计算机基础
+    - Linux
+    hours: 50
+  gRPC:
+    prerequisites:
+    - 微服务
+    - 计算机基础
+    hours: 40
+  Gin:
+    prerequisites:
+    - Go
+    hours: 40
+  容器:
+    prerequisites:
+    - Docker
+    - Linux
+    hours: 40
+  可靠性建模:
+    prerequisites:
+    - 统计分析
+    hours: 50

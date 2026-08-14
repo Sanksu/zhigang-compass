@@ -1,16 +1,16 @@
 {
  "summary": {
   "case_count": 30,
-  "reasonable_count": 12,
-  "reasonable_ratio": 0.4,
+  "reasonable_count": 19,
+  "reasonable_ratio": 0.6333,
   "target_ratio": 0.8,
   "target_met": false,
   "avg_dims": {
    "completeness": 1.0,
-   "prerequisite": 0.62,
+   "prerequisite": 0.747,
    "course": 0.841,
-   "hours": 0.648,
-   "mean": 0.778
+   "hours": 0.752,
+   "mean": 0.834
   },
   "note": "预评分（规则化 AI 评审），专家复核后重跑 --re-score 定稿"
  },
@@ -78,20 +78,22 @@
     },
     {
      "skill": "XML",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础"
+     ],
      "courses": [
       "XML与电子商务应用@icourse163(q=0.5319)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 80.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.9,
+    "prerequisite": 1.0,
     "course": 1.0,
-    "hours": 0.88,
-    "mean": 0.94
+    "hours": 1.0,
+    "mean": 1.0
    },
    "reasonable": true
   },
@@ -104,56 +106,76 @@
    "path_items": [
     {
      "skill": "NSGs",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Azure"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 190.0,
      "priority": "medium"
     },
     {
      "skill": "load-balancers",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Azure"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 190.0,
      "priority": "medium"
     },
     {
      "skill": "Azure Firewall",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Azure"
+     ],
      "courses": [
       "AWS Cloud Technical Essentials@coursera(q=0.661)",
       "Google Cloud Computing Foundations: Networking and Security in Google Cloud@edx(q=0.525)",
       "AWS Cloud Technical Essentials@edx(q=0.525)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 190.0,
      "priority": "medium"
     },
     {
      "skill": "Azure Bicep",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Azure"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 190.0,
      "priority": "medium"
     },
     {
      "skill": "Vnet peering",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Azure"
+     ],
      "courses": [
       "虚拟化技术与应用@icourse163(q=0.6128)",
       "网络数据挖掘与可视化@icourse163(q=0.5413)",
       "云计算导论@icourse163(q=0.5381)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 190.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
+    "prerequisite": 1.0,
     "course": 0.58,
-    "hours": 0.4,
-    "mean": 0.62
+    "hours": 1.0,
+    "mean": 0.9
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_03",
@@ -164,66 +186,83 @@
    "path_items": [
     {
      "skill": "语音合成",
-     "prerequisites": [],
+     "prerequisites": [
+      "语音识别",
+      "计算机基础"
+     ],
      "courses": [
       "Post Baccalaureate Speech-Language Pathology Foundations Online@edx(q=0.525)",
       "高级语言@icourse163(q=0.504)",
       "系统学习美式音标-KK音标@icourse163(q=0.4964)"
      ],
-     "estimated_hours": 70.0,
+     "estimated_hours": 170.0,
      "priority": "medium"
     },
     {
      "skill": "音频特征处理",
-     "prerequisites": [],
+     "prerequisites": [
+      "语音识别"
+     ],
      "courses": [
       "系统学习美式音标-KK音标@icourse163(q=0.4964)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 120.0,
      "priority": "medium"
     },
     {
      "skill": "VAD",
-     "prerequisites": [],
+     "prerequisites": [
+      "语音识别",
+      "音频特征处理"
+     ],
      "courses": [
       "信息描述@icourse163(q=0.5319)",
       "运筹学@icourse163(q=0.5193)",
       "简明世界史（二）@icourse163(q=0.5072)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 160.0,
      "priority": "medium"
     },
     {
      "skill": "语音",
-     "prerequisites": [],
+     "prerequisites": [
+      "语音识别"
+     ],
      "courses": [
       "高级英语@icourse163(q=0.5508)",
       "高级英语演讲@icourse163(q=0.5172)",
       "高级英语@icourse163(q=0.5103)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 110.0,
      "priority": "medium"
     },
     {
      "skill": "模型调优",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "深度学习"
+     ],
      "courses": [
       "人工智能：模型与算法@icourse163(q=0.5965)",
       "数学建模@icourse163(q=0.5581)",
       "试验设计与分析@icourse163(q=0.5006)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 360.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
+    "prerequisite": 1.0,
     "course": 1.0,
-    "hours": 0.52,
-    "mean": 0.76
+    "hours": 1.0,
+    "mean": 1.0
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_04",
@@ -234,22 +273,28 @@
    "path_items": [
     {
      "skill": "Prometheus",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
      "courses": [
       "习近平新时代中国特色社会主义思想概论@icourse163(q=0.5573)"
      ],
-     "estimated_hours": 55.0,
+     "estimated_hours": 135.0,
      "priority": "high"
     },
     {
      "skill": "Shell",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
      "courses": [
       "C Programming with Linux@coursera(q=0.6186)",
       "Linux操作系统@icourse163(q=0.5644)",
       "Linux网络管理@icourse163(q=0.5448)"
      ],
-     "estimated_hours": 55.0,
+     "estimated_hours": 135.0,
      "priority": "high"
     },
     {
@@ -281,21 +326,28 @@
     },
     {
      "skill": "LangGraph",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "大语言模型"
+     ],
      "courses": [
       "Agentic AI: LangChain and LangGraph@edx(q=0.525)",
       "Agentic AI with LangGraph, CrewAI, AG2, and BeeAI@edx(q=0.525)"
      ],
-     "estimated_hours": 70.0,
+     "estimated_hours": 350.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
+    "prerequisite": 1.0,
     "course": 1.0,
     "hours": 1.0,
-    "mean": 0.93
+    "mean": 1.0
    },
    "reasonable": true
   },
@@ -344,35 +396,41 @@
     },
     {
      "skill": "CSS样式",
-     "prerequisites": [],
+     "prerequisites": [
+      "HTML",
+      "CSS"
+     ],
      "courses": [
       "HTML, CSS, and Javascript for Web Developers@coursera(q=0.676)",
       "HTML and CSS in depth@coursera(q=0.6422)",
       "Introduction to Web Development with HTML, CSS, JavaScript@coursera(q=0.6421)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 140.0,
      "priority": "medium"
     },
     {
      "skill": "函数式编程",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python"
+     ],
      "courses": [
       "Programming with JavaScript@coursera(q=0.6656)",
       "Programming Fundamentals@coursera(q=0.6534)",
       "Introductory C Programming@coursera(q=0.6503)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 140.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.6,
+    "prerequisite": 0.8,
     "course": 1.0,
-    "hours": 0.52,
-    "mean": 0.78
+    "hours": 0.76,
+    "mean": 0.89
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_06",
@@ -383,22 +441,33 @@
    "path_items": [
     {
      "skill": "Informatica",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "数据库",
+      "数据仓库",
+      "ETL"
+     ],
      "courses": [
       "Computer Science: Programming with a Purpose@coursera(q=0.6449)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 325.0,
      "priority": "high"
     },
     {
      "skill": "数据工程",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "数据库",
+      "数据仓库"
+     ],
      "courses": [
       "What is Data Science?@coursera(q=0.7348)",
       "What is Data Science?@coursera(q=0.7348)",
       "Data Science Fundamentals with Python and SQL@coursera(q=0.7153)"
      ],
-     "estimated_hours": 70.0,
+     "estimated_hours": 265.0,
      "priority": "high"
     },
     {
@@ -416,32 +485,44 @@
     },
     {
      "skill": "Qlik",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "SQL",
+      "统计学",
+      "数据分析",
+      "数据可视化"
+     ],
      "courses": [
       "简明世界史（一）@icourse163(q=0.5125)",
       "简明世界史（二）@icourse163(q=0.5072)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 320.0,
      "priority": "high"
     },
     {
      "skill": "Alation",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "数据库",
+      "数据仓库"
+     ],
      "courses": [
       "人工智能@icourse163(q=0.6185)",
       "高级英语（1）@icourse163(q=0.5651)",
       "运筹学@icourse163(q=0.5193)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 245.0,
      "priority": "high"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.6,
+    "prerequisite": 1.0,
     "course": 1.0,
-    "hours": 0.64,
-    "mean": 0.81
+    "hours": 1.0,
+    "mean": 1.0
    },
    "reasonable": true
   },
@@ -454,60 +535,90 @@
    "path_items": [
     {
      "skill": "Tableau",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "SQL",
+      "统计学",
+      "数据分析",
+      "数据可视化"
+     ],
      "courses": [
       "Fundamentals of Visualization with Tableau@coursera(q=0.6583)",
       "Data Visualization with Tableau@coursera(q=0.6577)",
       "Tableau Business Intelligence Analyst@coursera(q=0.6454)"
      ],
-     "estimated_hours": 40.0,
+     "estimated_hours": 320.0,
      "priority": "high"
     },
     {
      "skill": "Power BI",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "SQL",
+      "统计学",
+      "数据分析",
+      "数据可视化"
+     ],
      "courses": [
       "Mastering Data Visualization with Power BI and Tableau@coursera(q=0.555)"
      ],
-     "estimated_hours": 40.0,
+     "estimated_hours": 320.0,
      "priority": "high"
     },
     {
      "skill": "ETL 管道",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "数据库",
+      "数据仓库"
+     ],
      "courses": [
       "SQL, ETL and BI Fundamentals@edx(q=0.525)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 255.0,
      "priority": "medium"
     },
     {
      "skill": "DOMO",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "SQL",
+      "统计学",
+      "数据分析",
+      "数据可视化"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 320.0,
      "priority": "medium"
     },
     {
      "skill": "云数据",
-     "prerequisites": [],
+     "prerequisites": [
+      "云计算",
+      "计算机基础",
+      "数据库"
+     ],
      "courses": [
       "数据库原理——GaussDB云数据库@icourse163(q=0.541)",
       "云计算导论@icourse163(q=0.5381)",
       "Introduction to Cloud Computing@edx(q=0.525)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 185.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
+    "prerequisite": 1.0,
     "course": 0.86,
-    "hours": 0.64,
-    "mean": 0.75
+    "hours": 1.0,
+    "mean": 0.96
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_08",
@@ -518,24 +629,30 @@
    "path_items": [
     {
      "skill": "VMware",
-     "prerequisites": [],
+     "prerequisites": [
+      "云计算",
+      "计算机基础",
+      "Linux"
+     ],
      "courses": [
       "虚拟化技术与应用@icourse163(q=0.6128)",
       "云计算技术与应用@icourse163(q=0.5543)",
       "云计算技术与实践@icourse163(q=0.5347)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 190.0,
      "priority": "medium"
     },
     {
      "skill": "Agile",
-     "prerequisites": [],
+     "prerequisites": [
+      "项目管理"
+     ],
      "courses": [
       "人工智能应用素养@icourse163(q=0.6173)",
       "嵌入式系统及应用@icourse163(q=0.5871)",
       "嵌入式应用开发@icourse163(q=0.5633)"
      ],
-     "estimated_hours": 40.0,
+     "estimated_hours": 70.0,
      "priority": "medium"
     },
     {
@@ -558,24 +675,27 @@
     },
     {
      "skill": "Shell",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
      "courses": [
       "C Programming with Linux@coursera(q=0.6186)",
       "Linux操作系统@icourse163(q=0.5644)",
       "Linux网络管理@icourse163(q=0.5448)"
      ],
-     "estimated_hours": 55.0,
+     "estimated_hours": 135.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
+    "prerequisite": 0.8,
     "course": 0.86,
-    "hours": 0.64,
-    "mean": 0.75
+    "hours": 0.76,
+    "mean": 0.85
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_09",
@@ -597,57 +717,78 @@
     },
     {
      "skill": "嵌入向量",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习"
+     ],
      "courses": [
       "互换性与测量技术@icourse163(q=0.5635)",
       "测量学@icourse163(q=0.5388)",
       "运筹学@icourse163(q=0.5193)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 280.0,
      "priority": "medium"
     },
     {
      "skill": "容器",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Docker"
+     ],
      "courses": [
       "Introduction to Containers w/ Docker, Kubernetes & OpenShift@coursera(q=0.6467)",
       "Introduction to Docker@coursera(q=0.6224)",
       "Introduction to Container Basics@coursera(q=0.5583)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 190.0,
      "priority": "medium"
     },
     {
      "skill": "生成式AI",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "大语言模型"
+     ],
      "courses": [
       "IBM AI Developer@coursera(q=0.7156)",
       "Generative AI for Java and Spring Developers@coursera(q=0.6904)",
       "AI Agents in Typescript/Javascript@coursera(q=0.6894)"
      ],
-     "estimated_hours": 70.0,
+     "estimated_hours": 360.0,
      "priority": "medium"
     },
     {
      "skill": "基础设施即代码",
-     "prerequisites": [],
+     "prerequisites": [
+      "云计算",
+      "计算机基础",
+      "Linux"
+     ],
      "courses": [
       "Web编程技术@icourse163(q=0.5998)",
       "嵌入式系统及应用@icourse163(q=0.5871)",
       "网络应用编程@icourse163(q=0.5604)"
      ],
-     "estimated_hours": 55.0,
+     "estimated_hours": 200.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
+    "prerequisite": 0.9,
     "course": 1.0,
-    "hours": 0.64,
-    "mean": 0.79
+    "hours": 0.88,
+    "mean": 0.94
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_10",
@@ -658,13 +799,16 @@
    "path_items": [
     {
      "skill": "可靠性工程",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
      "courses": [
       "Technical Support Fundamentals@coursera(q=0.692)",
       "汽车维护与保养@icourse163(q=0.5773)",
       "Site Reliability Engineering (SRE) Principles@coursera(q=0.5427)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 145.0,
      "priority": "medium"
     },
     {
@@ -682,13 +826,16 @@
     },
     {
      "skill": "可靠性建模",
-     "prerequisites": [],
+     "prerequisites": [
+      "统计学",
+      "统计分析"
+     ],
      "courses": [
       "自动化测试@icourse163(q=0.5451)",
       "Site Reliability Engineering (SRE) Principles@coursera(q=0.5427)",
       "试验设计与分析@icourse163(q=0.5006)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 130.0,
      "priority": "medium"
     },
     {
@@ -711,12 +858,12 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.6,
+    "prerequisite": 0.8,
     "course": 0.86,
-    "hours": 0.52,
-    "mean": 0.74
+    "hours": 0.76,
+    "mean": 0.85
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_11",
@@ -767,29 +914,39 @@
     },
     {
      "skill": "gRPC",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Java",
+      "Spring Boot",
+      "操作系统",
+      "分布式",
+      "微服务"
+     ],
      "courses": [],
-     "estimated_hours": 55.0,
+     "estimated_hours": 315.0,
      "priority": "high"
     },
     {
      "skill": "Gin",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Go"
+     ],
      "courses": [
       "Apache Spark for Data Engineering and Machine Learning@edx(q=0.525)",
       "DevOps and Software Engineering@edx(q=0.525)",
       "Virtualization, Docker, and Kubernetes for Data Engineering@edx(q=0.525)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 135.0,
      "priority": "high"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.8,
+    "prerequisite": 1.0,
     "course": 0.72,
-    "hours": 0.88,
-    "mean": 0.85
+    "hours": 1.0,
+    "mean": 0.93
    },
    "reasonable": true
   },
@@ -1492,11 +1649,13 @@
    "path_items": [
     {
      "skill": "工作流自动化",
-     "prerequisites": [],
+     "prerequisites": [
+      "项目管理"
+     ],
      "courses": [
       "Professional Data Engineer 여정 준비하기@coursera(q=0.5404)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 70.0,
      "priority": "medium"
     },
     {
@@ -1546,10 +1705,10 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.6,
+    "prerequisite": 0.7,
     "course": 1.0,
-    "hours": 0.64,
-    "mean": 0.81
+    "hours": 0.76,
+    "mean": 0.86
    },
    "reasonable": true
   },
@@ -1878,11 +2037,13 @@
     },
     {
      "skill": "工作流自动化",
-     "prerequisites": [],
+     "prerequisites": [
+      "项目管理"
+     ],
      "courses": [
       "Professional Data Engineer 여정 준비하기@coursera(q=0.5404)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 70.0,
      "priority": "medium"
     },
     {
@@ -1902,10 +2063,10 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
+    "prerequisite": 0.8,
     "course": 0.86,
-    "hours": 0.64,
-    "mean": 0.8
+    "hours": 0.76,
+    "mean": 0.85
    },
    "reasonable": true
   },
