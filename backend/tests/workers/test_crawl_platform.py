@@ -135,10 +135,15 @@ def test_timeout_kills_subprocess_and_marks_failed(monkeypatch, tmp_path):
         async def create_subprocess_exec(self, *args, **kwargs):
             return _SlowProc()
 
-        async def gather(self, *aws):
-            await asyncio.gather(*aws)
+        def gather(self, *aws):
+            # 超时路径：gather 不会被真正调度（wait_for 直接抛超时），
+            # 参数协程（_drain 等）在创建后从未 await，close 防 RuntimeWarning
+            for aw in aws:
+                getattr(aw, "close", lambda: None)()
+            return asyncio.sleep(0)
 
         async def wait_for(self, aw, timeout):
+            getattr(aw, "close", lambda: None)()
             raise asyncio.TimeoutError()
 
         TimeoutError = asyncio.TimeoutError
