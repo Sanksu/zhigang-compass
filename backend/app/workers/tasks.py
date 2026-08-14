@@ -1181,6 +1181,19 @@ async def _etl_limit(extracted: bool, default: int) -> int:
     return min(max(pending, default), _ETL_LIMIT_CAP)
 
 
+async def _run_stage(name: str, coro) -> dict:
+    """单阶段隔离执行（08-14 修复：阶段 12.6 evolved_from 崩溃拖垮整个 ETL 实证）。
+
+    任一阶段失败仅记录 error 不阻塞后续阶段——当日快照缺失由阶段 14 的
+    snapshot_graph 幂等重跑或次日 ETL 补齐；失败明细入 results["stages"] 供审计。
+    不自动重试（幂等阶段重试可能放大数据冲突，如 UNIQUE 冲突），留给人工/次日。
+    """
+    try:
+        return await coro
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {str(e)[:300]}"}
+
+
 async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: bool = False) -> dict:
     """编排完整 ETL 管线（设计文档 §4.4）。
 
@@ -1235,43 +1248,43 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
     }
 
     # ── 阶段 2.5：SimHash 跨平台近似去重（标记重复，聚合层跳过）──
-    results["stages"]["dedup_simhash"] = await dedup_simhash(ctx)
+    results["stages"]["dedup_simhash"] = await _run_stage("dedup_simhash", dedup_simhash(ctx))
 
     # ── 阶段 3：结构化 + 入库（M3 启用：LLM 抽取 → snapshot 写回 → Neo4j 入图）──
-    results["stages"]["structure_load"] = await batch_extract(
-        ctx, limit=await _etl_limit(True, 500)
+    results["stages"]["structure_load"] = await _run_stage(
+        "structure_load", batch_extract(ctx, limit=await _etl_limit(True, 500))
     )
 
     # ── 阶段 4：时滞检测（M3 启用，须在抽取之后：依赖 snapshot.extraction）──
-    results["stages"]["validate_temporal"] = await validate_temporal(
-        ctx, jd_ids=[], limit=await _etl_limit(False, 200)
+    results["stages"]["validate_temporal"] = await _run_stage(
+        "validate_temporal", validate_temporal(ctx, jd_ids=[], limit=await _etl_limit(False, 200))
     )
 
     # ── 阶段 5：通胀检测（M3 启用，须在抽取之后：依赖 snapshot.extraction）──
-    results["stages"]["detect_inflation"] = await detect_inflation(
-        ctx, jd_ids=[], limit=await _etl_limit(False, 200)
+    results["stages"]["detect_inflation"] = await _run_stage(
+        "detect_inflation", detect_inflation(ctx, jd_ids=[], limit=await _etl_limit(False, 200))
     )
 
     # ── 阶段 6：课程入图（course_raw → Course + LEARNABLE_VIA）──
-    results["stages"]["load_courses"] = await load_courses(ctx)
+    results["stages"]["load_courses"] = await _run_stage("load_courses", load_courses(ctx))
 
     # ── 阶段 7：课程质量评估（DA-M4-01，六维加权 → 推荐池写回 snapshot["quality"]）──
-    results["stages"]["evaluate_courses"] = await evaluate_courses(ctx)
+    results["stages"]["evaluate_courses"] = await _run_stage("evaluate_courses", evaluate_courses(ctx))
 
     # ── 阶段 8：岗位聚合（Position.freq + REQUIRES weight/source_count）──
-    results["stages"]["aggregate_positions"] = await aggregate_positions(ctx)
+    results["stages"]["aggregate_positions"] = await _run_stage("aggregate_positions", aggregate_positions(ctx))
 
     # ── 阶段 9：多平台交叉验证（DA-M3-03，技能跨源印证/薪资异常/置信度）──
-    results["stages"]["cross_validate"] = await cross_validate_jds(ctx)
+    results["stages"]["cross_validate"] = await _run_stage("cross_validate", cross_validate_jds(ctx))
 
     # ── 阶段 9.5：技能归一化 + SIMILAR_TO 建边（§5.3，SBERT 聚类，幂等）──
-    results["stages"]["skill_normalization"] = await sync_skill_normalization(ctx)
+    results["stages"]["skill_normalization"] = await _run_stage("skill_normalization", sync_skill_normalization(ctx))
 
     # ── 阶段 10：数据多样性报告（DA-M4-02，reports/diversity_{date}.json）──
-    results["stages"]["diversity_report"] = await diversity_report(ctx)
+    results["stages"]["diversity_report"] = await _run_stage("diversity_report", diversity_report(ctx))
 
     # ── 阶段 11：数据更新新鲜度检查（DA-M4-03，T+1 承诺审计）──
-    results["stages"]["check_data_freshness"] = await check_data_freshness(ctx)
+    results["stages"]["check_data_freshness"] = await _run_stage("check_data_freshness", check_data_freshness(ctx))
 
     # ── 阶段 12.5：技能关系建边（§5.1：PREREQUISITE_OF/BELONGS_TO/ALTERNATIVE_OF，字典驱动，幂等）──
     from app.services.kg.skill_relations import sync_skill_relations
@@ -1282,20 +1295,20 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
         with _neo4j_driver.session() as _ns:
             return sync_skill_relations(_ns)
 
-    results["stages"]["skill_relations"] = await asyncio.to_thread(_run_skill_relations)
+    results["stages"]["skill_relations"] = await _run_stage("skill_relations", asyncio.to_thread(_run_skill_relations))
 
     # ── 阶段 12.6：岗位演化关系推导（§5.1：EVOLVED_FROM，版本 diff，幂等）──
     from app.services.evolution.evolved_from import derive_evolved_from
 
-    results["stages"]["evolved_from"] = await derive_evolved_from()
+    results["stages"]["evolved_from"] = await _run_stage("evolved_from", derive_evolved_from())
 
     # ── 阶段 13：pgvector 三表向量回填（§11.4.3，模型不可用时跳过）──
-    results["stages"]["backfill_embeddings"] = await backfill_embeddings(ctx)
+    results["stages"]["backfill_embeddings"] = await _run_stage("backfill_embeddings", backfill_embeddings(ctx))
 
     # ── 阶段 14：发布图谱版本快照（§7.1 T+1 版本管理）──
     # 置于 skill_relations/evolved_from 之后：快照须覆盖本管线全部图变更，
     # 否则发布的版本缺失 SIMILAR_TO/EVOLVED_FROM 等边（审查 major：snapshot 顺序）。
-    results["stages"]["snapshot_graph"] = await snapshot_graph(ctx, triggered_by="scheduled")
+    results["stages"]["snapshot_graph"] = await _run_stage("snapshot_graph", snapshot_graph(ctx, triggered_by="scheduled"))
 
     # ── 阶段 15：新岗位发现 + 自动状态流转（须在快照发布后：依赖当日窗口序列）──
     # 链入 ETL 而非独立 cron，保证 discovery_auto_transition 读到当日快照。

@@ -4,9 +4,11 @@
 入队后无人消费），且各任务均为 async 可调用。
 """
 
+import asyncio
 import inspect
 
 from app.workers.tasks import (
+    _run_stage,
     WorkerSettings,
     aggregate_positions,
     backfill_embeddings,
@@ -87,7 +89,7 @@ def test_etl_pipeline_stages_cover_all_quality_tasks():
                      "aggregate_positions", "cross_validate_jds",
                      "diversity_report", "check_data_freshness",
                      "snapshot_graph"):
-        assert f"await {stage_fn}" in src, f"run_etl_pipeline 缺少阶段 {stage_fn}"
+        assert (f"await {stage_fn}" in src or f"{stage_fn}(ctx" in src), f"run_etl_pipeline 缺少阶段 {stage_fn}"
 
 
 def test_worker_settings_has_redis_config():
@@ -115,3 +117,21 @@ def test_etl_pipeline_has_per_function_timeout():
     )
     assert etl.timeout_s == 10800
     assert etl.max_tries == 1
+
+
+# ── _run_stage 阶段隔离（08-14 修复：evolved_from 崩溃拖垮 ETL 实证）──
+
+def test_run_stage_success():
+    """成功阶段返回原始结果。"""
+    async def _ok():
+        return {"status": "ok"}
+    assert asyncio.run(_run_stage("t", _ok())) == {"status": "ok"}
+
+
+def test_run_stage_failure_isolated():
+    """失败阶段记录 error dict，不抛异常（不阻塞后续阶段）。"""
+    async def _boom():
+        raise ValueError("测试异常")
+    result = asyncio.run(_run_stage("t", _boom()))
+    assert isinstance(result, dict) and "error" in result
+    assert "ValueError" in result["error"]
