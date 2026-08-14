@@ -61,16 +61,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
                 properties:
+                  code: { type: integer }
+                  msg: { type: string }
                   data:
-                    type: object
-                    required: [access_token, refresh_token, token_type, expires_in]
-                    properties:
-                      access_token: { type: string }
-                      refresh_token: { type: string }
-                      token_type: { type: string }
-                      expires_in: { type: integer }
+                    $ref: '#/components/schemas/LoginResult'
+                  trace_id: { type: string }
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -448,20 +445,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
                 properties:
+                  code: { type: integer }
+                  msg: { type: string }
                   data:
-                    properties:
-                      skills:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            id: { type: string }
-                            name: { type: string }
-                            score: { type: number }
-                      top_n: { type: integer }
-
+                    $ref: '#/components/schemas/PagerankData'
+                  trace_id: { type: string }
   /api/v1/graph/algorithms/skill-clusters:
     get:
       tags: [graph]
@@ -486,64 +476,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
                 properties:
+                  code: { type: integer }
+                  msg: { type: string }
                   data:
-                    properties:
-                      clusters:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            id: { type: integer }
-                            size: { type: integer }
-                            label:
-                              type: string
-                              description: 规则标签（簇内共现权重 Top-3 技能，· 拼接）
-                            needs_llm:
-                              type: boolean
-                              description: 是否命中 LLM 兜底触发条件（无主导技能/跨类别复合栈/规则标签为空）
-                            triggers:
-                              type: array
-                              items: { type: string }
-                              description: 触发原因（no_dominant_skill / cross_category / empty_label）
-                            llm:
-                              type: object
-                              nullable: true
-                              description: LLM 兜底结果（未触发或 LLM 降级时为 null）
-                              properties:
-                                coherent: { type: boolean }
-                                cluster_name:
-                                  type: string
-                                  nullable: true
-                                  description: LLM 语义凝练命名（≤8 字）
-                                rationale:
-                                  type: string
-                                  nullable: true
-                                  description: 命名理由（≤3 句）
-                                splits:
-                                  type: array
-                                  items: { type: string }
-                                  description: 不连贯时建议拆分的子技术栈（≤3 个）
-                            skills:
-                              type: array
-                              items:
-                                type: object
-                                properties:
-                                  id: { type: string }
-                                  name: { type: string }
-                      cluster_count: { type: integer }
-                      levels:
-                        type: array
-                        nullable: true
-                        description: 层级元数据（Leiden 算法为 null）；每项 {level, cluster_count, modularity}
-                        items:
-                          type: object
-                          properties:
-                            level: { type: integer }
-                            cluster_count: { type: integer }
-                            modularity: { type: number }
-
+                    $ref: '#/components/schemas/SkillClustersData'
+                  trace_id: { type: string }
   /api/v1/graph/algorithms/community-tree:
     get:
       tags: [graph]
@@ -606,20 +545,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
                 properties:
+                  code: { type: integer }
+                  msg: { type: string }
                   data:
-                    properties:
-                      from: { type: string }
-                      to: { type: string }
-                      path:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            id: { type: string }
-                            name: { type: string }
-                            type: { type: string }
+                    $ref: '#/components/schemas/ShortestPathData'
+                  trace_id: { type: string }
         '404':
           description: 两技能间不存在 ≤6 跳可达路径
 
@@ -688,13 +620,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/ResumeListData'
+                  trace_id: { type: string }
   /api/v1/resume/parse:
     post:
       tags: [resume]
       summary: 上传简历触发解析（异步，含 PII 脱敏预处理）
-      requestBody:
+      schema:
+        type: object
+        properties:
+          code: { type: integer }
+          msg: { type: string }
+          data:
+            $ref: '#/components/schemas/ResumeListData'
+          trace_id: { type: string }
         required: true
         content:
           multipart/form-data:
@@ -711,12 +655,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
                 properties:
+                  code: { type: integer }
+                  msg: { type: string }
                   data:
-                    properties:
-                      task_id: { type: string }
-
+                    $ref: '#/components/schemas/ResumeParseTaskData'
+                  trace_id: { type: string }
   /api/v1/resume/task/{task_id}:
     get:
       tags: [resume]
@@ -837,8 +782,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/RecommendTaskResult'
+                  trace_id: { type: string }
   /api/v1/match/compare:
     post:
       tags: [match]
@@ -861,8 +811,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/MatchResult'
+                  trace_id: { type: string }
   /api/v1/match/task/{task_id}:
     get:
       tags: [match]
@@ -878,8 +833,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/MatchTaskStatus'
+                  trace_id: { type: string }
   /api/v1/match/result/{match_id}:
     get:
       tags: [match]
@@ -892,8 +852,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/MatchResultList'
+                  trace_id: { type: string }
   /api/v1/match/result/{match_id}/gap:
     get:
       tags: [match]
@@ -906,8 +871,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/MatchGapData'
+                  trace_id: { type: string }
   /api/v1/match/result/{match_id}/path:
     get:
       tags: [match]
@@ -920,8 +890,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/MatchPathData'
+                  trace_id: { type: string }
   /api/v1/match/result/{match_id}/diagnosis:
     get:
       tags: [match]
@@ -935,7 +910,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/DiagnosisReport'
+                  trace_id: { type: string }
         '400':
           description: 该匹配结果无差距数据（仅人岗比对可生成诊断报告）
         '404':
@@ -983,8 +964,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/EvolutionVersionListData'
+                  trace_id: { type: string }
   /api/v1/evolution/versions/{version_id}:
     get:
       tags: [evolution]
@@ -997,8 +983,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/EvolutionVersionDetail'
+                  trace_id: { type: string }
   /api/v1/evolution/diff:
     get:
       tags: [evolution]
@@ -1018,8 +1009,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/EvolutionDiff'
+                  trace_id: { type: string }
   /api/v1/evolution/trends:
     get:
       tags: [evolution]
@@ -1038,8 +1034,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/EvolutionTrendsData'
+                  trace_id: { type: string }
   /api/v1/evolution/position/{id}/evolution:
     get:
       tags: [evolution]
@@ -1052,8 +1053,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/PositionEvolutionData'
+                  trace_id: { type: string }
   /api/v1/evolution/state-machine:
     get:
       tags: [evolution]
@@ -1064,8 +1070,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/StateMachineData'
+                  trace_id: { type: string }
   /api/v1/evolution/signals:
     get:
       tags: [evolution]
@@ -1080,8 +1091,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/EvolutionSignalsData'
+                  trace_id: { type: string }
   /api/v1/evolution/watch:
     get:
       tags: [evolution]
@@ -1096,8 +1112,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
-
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/WatchOverviewData'
+                  trace_id: { type: string }
   # ============================================================
   # 管理模块 /api/v1/admin
   # ============================================================
@@ -1574,7 +1595,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiResponse'
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/AuditLogsData'
+                  trace_id: { type: string }
 
 components:
   securitySchemes:
@@ -1740,6 +1767,7 @@ components:
     GapSkill:
       type: object
       description: 技能差距项（设计文档 §9.5 三态）
+      required: [skill, necessity, gap_type, weight, priority]
       properties:
         skill: { type: string, description: 技能名 }
         skill_id: { type: string, nullable: true, description: 图谱技能 ID }
@@ -1753,6 +1781,7 @@ components:
     CourseRecommendation:
       type: object
       description: 学习课程推荐（质量分 Top-3，设计文档 §4.6）
+      required: [course_id, title, platform, recommended, source_url]
       properties:
         course_id: { type: string, description: 图谱 Course ID }
         title: { type: string }
@@ -1765,6 +1794,7 @@ components:
     LearningPathItem:
       type: object
       description: 单技能学习路径项（甘特图格式，设计文档 §9.5）
+      required: [skill, prerequisites, courses, estimated_hours, priority]
       properties:
         skill: { type: string, description: 目标技能名 }
         skill_id: { type: string, nullable: true }
@@ -1982,6 +2012,34 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/AdminUser' }
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+
+    AuditLogItem:
+      type: object
+      description: 审计日志项（GET /admin/audit/logs）
+      required: [id, user_id, action, resource, ip_address]
+      properties:
+        id: { type: integer }
+        user_id: { type: string }
+        action: { type: string, description: 动作（模块前缀命名，如 auth.login） }
+        resource: { type: string }
+        resource_id: { type: string, nullable: true }
+        detail:
+          type: object
+          description: 动作详情（如 {username}），结构随 action 变化
+        ip_address: { type: string }
+        created_at: { type: string, nullable: true, description: 时间 ISO8601 }
+
+    AuditLogsData:
+      type: object
+      description: GET /admin/audit/logs 响应 data（分页）
+      required: [items, total, page, size]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AuditLogItem' }
         total: { type: integer }
         page: { type: integer }
         size: { type: integer }
@@ -2206,4 +2264,496 @@ components:
         providers:
           type: array
           items: { $ref: '#/components/schemas/LlmProviderConfig' }
+
+    # ============================================================
+    # 演化模块端点 data（08-14 契约补全：versions/diff/trends/signals/state-machine/watch）
+    # ============================================================
+
+    EvolutionVersion:
+      type: object
+      description: 图谱版本列表项（GET /evolution/versions）
+      required: [version_id, change_summary, node_added, node_removed, node_changed]
+      properties:
+        version_id: { type: string }
+        created_at: { type: string, nullable: true, description: 创建时间 ISO8601 }
+        change_summary: { type: string, description: 版本变更摘要 }
+        triggered_by: { type: string, nullable: true, description: 触发来源 }
+        node_added: { type: integer }
+        node_removed: { type: integer }
+        node_changed: { type: integer }
+
+    EvolutionVersionListData:
+      type: object
+      description: GET /evolution/versions 响应 data（分页）
+      required: [items, total, page, size]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/EvolutionVersion' }
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+
+    EvolutionDiffNode:
+      type: object
+      description: 版本 Diff 节点项
+      required: [id, name, type]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string }
+
+    EvolutionDiff:
+      type: object
+      description: 两个版本快照 Diff（GET /evolution/diff）
+      required: [nodes_added, nodes_removed, nodes_changed, edges_added, edges_removed]
+      properties:
+        nodes_added:
+          type: array
+          items: { $ref: '#/components/schemas/EvolutionDiffNode' }
+        nodes_removed:
+          type: array
+          items: { $ref: '#/components/schemas/EvolutionDiffNode' }
+        nodes_changed:
+          type: array
+          items: { $ref: '#/components/schemas/EvolutionDiffNode' }
+        edges_added:
+          type: array
+          items: { type: string, description: "source->target" }
+        edges_removed:
+          type: array
+          items: { type: string, description: "source->target" }
+
+    EvolutionTrendPoint:
+      type: object
+      description: 技能频次趋势采样点
+      properties:
+        date: { type: string, nullable: true, description: 快照日期 YYYY-MM-DD }
+        version: { type: string }
+        freq: { type: integer, description: 该技能被引用边数 }
+
+    EvolutionTrendsData:
+      type: object
+      description: GET /evolution/trends 响应 data
+      required: [skill, window, points]
+      properties:
+        skill: { type: string, description: 技能节点 ID }
+        window: { type: integer }
+        points:
+          type: array
+          items: { $ref: '#/components/schemas/EvolutionTrendPoint' }
+
+    EvolutionSignal:
+      type: object
+      description: 技能演化信号（GET /evolution/signals，设计文档 §7.1 Z-score）
+      required: [skill_id, skill_name, current_freq, trend, confidence, evidence_refs]
+      properties:
+        skill_id: { type: string }
+        skill_name: { type: string }
+        z_score: { type: number, nullable: true, description: Z-score（小基数保护态为 null） }
+        mom_growth: { type: number, nullable: true, description: 环比增长率 }
+        current_freq: { type: integer }
+        historical_mean: { type: number, nullable: true }
+        historical_std: { type: number, nullable: true }
+        trend: { type: string, enum: [emerging, rising, stable, declining, protected] }
+        confidence: { type: number }
+        evidence_refs:
+          type: array
+          items: { type: string }
+
+    EvolutionSignalsData:
+      type: object
+      description: GET /evolution/signals 响应 data
+      required: [window_count, emerging, declining]
+      properties:
+        window_count: { type: integer, description: 参与计算的快照窗口数 }
+        emerging:
+          type: array
+          items: { $ref: '#/components/schemas/EvolutionSignal' }
+        declining:
+          type: array
+          items: { $ref: '#/components/schemas/EvolutionSignal' }
+
+    EvolutionVersionDetail:
+      type: object
+      description: 版本详情（GET /evolution/versions/{version_id}）
+      required: [version_id, change_summary, node_added, node_removed, node_changed, stats, nodes]
+      properties:
+        version_id: { type: string }
+        created_at: { type: string, nullable: true }
+        change_summary: { type: string }
+        triggered_by: { type: string, nullable: true }
+        node_added: { type: integer }
+        node_removed: { type: integer }
+        node_changed: { type: integer }
+        stats:
+          type: object
+          description: 快照统计
+          properties:
+            nodes: { type: integer }
+            edges: { type: integer }
+            by_type:
+              type: object
+              description: 节点类型计数（skill/position/...）
+              additionalProperties: { type: integer }
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/EvolutionDiffNode' }
+          description: 快照节点列表（不含边）
+
+    PositionEvolutionPoint:
+      type: object
+      description: 岗位演化采样点
+      properties:
+        date: { type: string, nullable: true }
+        version: { type: string }
+        freq: { type: integer, description: 该岗位被引用边数 }
+        present: { type: boolean, description: 该版本快照中岗位节点是否存在 }
+
+    PositionEvolutionData:
+      type: object
+      description: GET /evolution/position/{id}/evolution 响应 data
+      required: [position_id, position_name, points]
+      properties:
+        position_id: { type: string }
+        position_name: { type: string }
+        points:
+          type: array
+          items: { $ref: '#/components/schemas/PositionEvolutionPoint' }
+
+    StateMachineTransition:
+      type: object
+      description: 岗位状态流转记录项（GET /evolution/state-machine）
+      required: [id, position_name, operator, reason]
+      properties:
+        id: { type: integer }
+        position_name: { type: string, description: 岗位名（resource_id） }
+        operator: { type: string, description: 操作者（admin 用户名） }
+        from_state: { type: string, nullable: true }
+        to_state: { type: string, nullable: true }
+        reason: { type: string }
+        created_at: { type: string, nullable: true }
+
+    StateMachineData:
+      type: object
+      description: GET /evolution/state-machine 响应 data
+      required: [states, transitions]
+      properties:
+        states:
+          type: object
+          description: 六态分布（candidate/emerging/stable/declining/archived/rejected）
+          additionalProperties: { type: integer }
+        transitions:
+          type: array
+          items: { $ref: '#/components/schemas/StateMachineTransition' }
+
+    WatchOverviewItem:
+      type: object
+      description: 观察池公开摘要项（GET /evolution/watch，MLI 排名）
+      required: [skill_name, sources, mli, ready_to_industrialize, status]
+      properties:
+        skill_name: { type: string }
+        sources:
+          type: array
+          items: { type: string }
+          description: 有信号的源（arxiv/course/github/community/jd）
+        mli: { type: number, description: "媒介落差指数 [0,1]" }
+        ready_to_industrialize: { type: boolean, description: MLI > 0.6 产业化拐点 }
+        status: { type: string }
+        last_signal_at: { type: string, nullable: true }
+
+    WatchOverviewData:
+      type: object
+      description: GET /evolution/watch 响应 data
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/WatchOverviewItem' }
+        total: { type: integer }
+
+    # ============================================================
+    # 简历模块端点 data（08-14 契约补全）
+    # ============================================================
+
+    ResumeSummaryItem:
+      type: object
+      description: 已解析简历列表项（GET /resume/list）
+      required: [id, file_name, skills, total_years]
+      properties:
+        id: { type: string }
+        file_name: { type: string }
+        skills:
+          type: array
+          items: { type: string }
+          description: 候选人技能名列表
+        total_years: { type: number, description: 工作年限 }
+        education_level: { type: string, nullable: true }
+        updated_at: { type: string, nullable: true }
+
+    ResumeListData:
+      type: object
+      description: GET /resume/list 响应 data
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ResumeSummaryItem' }
+        total: { type: integer }
+
+    ResumeParseTaskData:
+      type: object
+      description: POST /resume/parse 响应 data（异步解析任务入队）
+      required: [task_id, resume_id, cached]
+      properties:
+        task_id: { type: string }
+        resume_id: { type: string }
+        cached: { type: boolean, description: 命中缓存直接返回画像 }
+
+    # ============================================================
+    # 匹配模块端点 data（08-14 契约补全：compare/result/gap/path/diagnosis/task）
+    # ============================================================
+
+    EvidenceRef:
+      type: object
+      description: 证据引用项（技能 → 原始 JD，图谱 EVIDENCED_BY 链路）
+      required: [skill, source, url, confidence]
+      properties:
+        skill: { type: string }
+        source: { type: string }
+        url: { type: string }
+        confidence: { type: number }
+
+    MatchResult:
+      type: object
+      description: 单岗位匹配结果（设计文档 §9.4，compare 同步 / result 快照）
+      required:
+        - match_id
+        - position_id
+        - position_name
+        - total_score
+        - must_score
+        - nice_score
+        - exp_score
+        - matched_must
+        - missing_must
+        - summary
+        - unqualified
+        - gaps
+        - learning_path
+        - evidence_refs
+      properties:
+        match_id: { type: string, description: 结果快照 ID（持久化后供 /match/result 系列查询） }
+        user_id: { type: string, description: 归属用户（compare 同步返回） }
+        position_id: { type: string }
+        position_name: { type: string }
+        total_score: { type: number, description: "综合得分 [0,1]" }
+        must_score: { type: number }
+        nice_score: { type: number }
+        exp_score: { type: number }
+        matched_must:
+          type: array
+          items: { type: string }
+          description: 已匹配的必备技能名
+        missing_must:
+          type: array
+          items: { type: string }
+          description: 缺失的必备技能名
+        summary: { type: string, description: 匹配摘要 }
+        unqualified: { type: boolean, description: 必备技能全缺失判零 }
+        radar:
+          type: object
+          description: 人岗比对五维雷达（§9.5），无数据维度为 null
+        gaps:
+          type: array
+          items: { $ref: '#/components/schemas/GapSkill' }
+          description: 差距三态（missing/weak/matched 按优先级排序）
+        learning_path:
+          type: array
+          items: { $ref: '#/components/schemas/LearningPathItem' }
+          description: missing/weak 技能先修链 + 课程 Top-3
+        evidence_refs:
+          type: array
+          items: { $ref: '#/components/schemas/EvidenceRef' }
+
+    MatchTaskStatus:
+      type: object
+      description: 匹配任务状态（GET /match/task/{task_id}）
+      required: [task_id, status]
+      properties:
+        task_id: { type: string }
+        status: { type: string, enum: [pending, running, success, failed] }
+        progress: { type: integer, description: "进度 [0,100]" }
+        error: { type: string }
+        match_id: { type: string, description: 成功后附，供拉取结果 }
+
+    RecommendTaskResult:
+      type: object
+      description: POST /match/recommend 响应 data（ARQ 入队）
+      required: [task_id]
+      properties:
+        task_id: { type: string }
+
+    MatchResultList:
+      type: object
+      description: GET /match/result/{match_id} 响应 data
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/MatchResult' }
+          description: 推荐任务结果列表（recommend 多岗位）
+
+    MatchGapData:
+      type: object
+      description: GET /match/result/{match_id}/gap 响应 data
+      required: [match_id, gaps]
+      properties:
+        match_id: { type: string }
+        gaps:
+          type: array
+          items: { $ref: '#/components/schemas/GapSkill' }
+
+    MatchPathData:
+      type: object
+      description: GET /match/result/{match_id}/path 响应 data
+      required: [match_id, learning_path]
+      properties:
+        match_id: { type: string }
+        learning_path:
+          type: array
+          items: { $ref: '#/components/schemas/LearningPathItem' }
+
+    GapAdvice:
+      type: object
+      description: 诊断报告差距建议项（evidence_id 可点击追溯）
+      required: [skill, advice, evidence_id]
+      properties:
+        skill: { type: string }
+        advice: { type: string }
+        evidence_id: { type: string }
+
+    DiagnosisReport:
+      type: object
+      description: LLM 人岗比对诊断报告（GET /match/result/{match_id}/diagnosis，§9.5）
+      required: [overall_summary, radar_analysis, top_gaps, recommendations]
+      properties:
+        match_id: { type: string }
+        overall_summary: { type: string, description: 总体匹配度解读 }
+        radar_analysis: { type: string, description: 三维雷达图解读 }
+        top_gaps:
+          type: array
+          items: { $ref: '#/components/schemas/GapAdvice' }
+          description: 关键差距 Top-5 及改进建议
+        path_analysis: { type: string, description: 学习路径解读 }
+        recommendations:
+          type: array
+          items: { type: string }
+          description: 整体改进建议清单
+
+    # ============================================================
+    # 图算法端点 data（08-14 契约补全：pagerank/skill-clusters/shortest-path）
+    # ============================================================
+
+    PagerankSkill:
+      type: object
+      description: PageRank 技能项（GET /graph/algorithms/pagerank）
+      required: [id, name, score]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        score: { type: number, description: PageRank 得分 }
+
+    PagerankData:
+      type: object
+      description: GET /graph/algorithms/pagerank 响应 data
+      required: [skills, top_n]
+      properties:
+        skills:
+          type: array
+          items: { $ref: '#/components/schemas/PagerankSkill' }
+        top_n: { type: integer }
+
+    ClusterSkill:
+      type: object
+      description: 技能簇成员项
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+
+    ClusterLLM:
+      type: object
+      description: LLM 兜底命名结果（skill-clusters 响应）
+      required: [coherent]
+      properties:
+        coherent: { type: boolean }
+        cluster_name: { type: string, nullable: true }
+        rationale: { type: string, nullable: true }
+        splits:
+          type: array
+          items: { type: string }
+
+    SkillCluster:
+      type: object
+      description: 技能簇项（GET /graph/algorithms/skill-clusters）
+      required: [id, size, skills]
+      properties:
+        id: { type: integer }
+        size: { type: integer }
+        label: { type: string, description: 规则标签（簇内共现 Top-3 技能 · 拼接） }
+        needs_llm: { type: boolean, description: 是否命中 LLM 兜底触发条件 }
+        triggers:
+          type: array
+          items: { type: string }
+          description: 触发原因（no_dominant_skill / cross_category / empty_label）
+        llm: { $ref: '#/components/schemas/ClusterLLM', nullable: true }
+        skills:
+          type: array
+          items: { $ref: '#/components/schemas/ClusterSkill' }
+
+    ClusterLevel:
+      type: object
+      description: 层级元数据（阶段三层次化提取，0 = 最细）
+      required: [level, cluster_count, modularity]
+      properties:
+        level: { type: integer }
+        cluster_count: { type: integer }
+        modularity: { type: number, description: 标准 Q（γ=1.0） }
+
+    SkillClustersData:
+      type: object
+      description: GET /graph/algorithms/skill-clusters 响应 data
+      required: [clusters, cluster_count]
+      properties:
+        clusters:
+          type: array
+          items: { $ref: '#/components/schemas/SkillCluster' }
+        cluster_count: { type: integer }
+        levels:
+          type: array
+          items: { $ref: '#/components/schemas/ClusterLevel' }
+          nullable: true
+          description: 层级元数据（Leiden 不支持层级时为 null）
+
+    ShortestPathNode:
+      type: object
+      description: 最短路径节点（GET /graph/algorithms/shortest-path）
+      required: [id, name, type]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string }
+
+    ShortestPathData:
+      type: object
+      description: GET /graph/algorithms/shortest-path 响应 data
+      required: [from, to, path]
+      properties:
+        from: { type: string, description: 起点技能 ID }
+        to: { type: string, description: 终点技能 ID }
+        path:
+          type: array
+          items: { $ref: '#/components/schemas/ShortestPathNode' }
+          description: 节点序列（≤6 跳，可能经过 Position）
 

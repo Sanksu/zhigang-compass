@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { apiGet } from '@/lib/api'
+import type { components } from '@/types/api'
 
 interface StatItem {
   label: string
@@ -25,25 +26,9 @@ interface ActivityItem {
   color: string
 }
 
-interface CrawlPlatform {
-  id: string
-  name: string
-  level: string
-  total_count: number
-}
+/** 后端 /admin/crawl/status 返回项（契约 CrawlPlatform） */
+type CrawlPlatform = components['schemas']['CrawlPlatform']
 
-interface GraphVersion {
-  version_id: string
-  created_at: string | null
-  change_summary: string
-}
-
-interface AuditLog {
-  id: number
-  action: string
-  detail: { username?: string }
-  created_at: string | null
-}
 
 /** 真实数据驱动的统计卡 */
 const EMPTY_STATS: StatItem[] = [
@@ -81,13 +66,13 @@ export function DashboardPage() {
   useEffect(() => {
     let cancelled = false
     Promise.allSettled([
-      apiGet<{ stats: { nodes: number; edges: number } }>('/graph/panorama?limit=200&min_weight=0.3'),
+      apiGet<components['schemas']['GraphViewData']>('/graph/panorama?limit=200&min_weight=0.3'),
       // 采集统计需 admin 权限：游客 401 时静默降级，不触发全局登出
-      apiGet<{ platforms: CrawlPlatform[] }>('/admin/crawl/status', { skipAuthRedirect: true }),
+      apiGet<components['schemas']['CrawlStatusData']>('/admin/crawl/status', { skipAuthRedirect: true }),
       // 简历/采集/审计统计均需认证：游客 401 时静默降级，不触发全局登出
       apiGet<{ items: unknown[]; total: number }>('/resume/list?limit=100', { skipAuthRedirect: true }),
-      apiGet<{ items: GraphVersion[]; total: number }>('/evolution/versions?page=1&size=10', { skipAuthRedirect: true }),
-      apiGet<{ items: AuditLog[]; total: number }>('/admin/audit/logs?page=1&size=10', { skipAuthRedirect: true }),
+      apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=10', { skipAuthRedirect: true }),
+      apiGet<components['schemas']['AuditLogsData']>('/admin/audit/logs?page=1&size=10', { skipAuthRedirect: true }),
     ]).then(([graphRes, crawlRes, resumeRes, versionRes, auditRes]) => {
       if (cancelled) return
 
