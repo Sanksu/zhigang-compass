@@ -514,3 +514,229 @@ skills:
     prerequisites:
     - 统计分析
     hours: 50
+  # ---- 08-15 先修补录四轮（专家复核内容补强：lp_12/15/16/18/20/21/23/25/26/29/30）----
+  # lp_18 AIoT
+  编译调试:
+    prerequisites:
+    - C语言
+    - 计算机基础
+    hours: 40
+  物联网:
+    prerequisites:
+    - 计算机基础
+    - 网络
+    hours: 50
+  嵌入式Linux:
+    prerequisites:
+    - Linux
+    - C语言
+    hours: 70
+  边缘计算:
+    prerequisites:
+    - 云计算
+    - 物联网
+    hours: 50
+  多线程:
+    prerequisites:
+    - 操作系统
+    - 计算机基础
+    hours: 40
+  # lp_25 应用AI客户
+  应用性能调优:
+    prerequisites:
+    - 计算机基础
+    - Linux
+    hours: 40
+  现代AI:
+    prerequisites:
+    - 机器学习
+    hours: 50
+  图像AI:
+    prerequisites:
+    - 机器学习
+    - 深度学习
+    hours: 50
+  文档AI:
+    prerequisites:
+    - 机器学习
+    - 自然语言处理
+    hours: 50
+  AI解决:
+    prerequisites:
+    - 机器学习
+    hours: 40
+  # lp_12 niche 检索
+  OpenSearch:
+    prerequisites:
+    - 数据库
+    - Linux
+    hours: 50
+  Qdrant:
+    prerequisites:
+    - 机器学习
+    - 数据库
+    hours: 50
+  # lp_30 生成式AI应用
+  Git:
+    prerequisites:
+    - 计算机基础
+    hours: 55
+  embeddings:
+    prerequisites:
+    - 机器学习
+    - 自然语言处理
+    hours: 50
+  检索评估:
+    prerequisites:
+    - 信息检索
+    - 自然语言处理
+    hours: 40
+  Vertex AI:
+    prerequisites:
+    - 机器学习
+    - 云计算
+    hours: 50
+  # lp_26 市场分析师
+  定量分析:
+    prerequisites:
+    - 统计分析
+    - Python
+    hours: 50
+  CFA:
+    prerequisites:
+    - 统计分析
+    hours: 60
+  商业智能:
+    prerequisites:
+    - 数据分析
+    - SQL
+    hours: 50
+  # lp_16 IT站点支持
+  WebEx:
+    prerequisites:
+    - 计算机基础
+    hours: 40
+  Exchange:
+    prerequisites:
+    - 计算机基础
+    hours: 40
+  Cisco VPN:
+    prerequisites:
+    - 计算机基础
+    - Linux
+    hours: 40
+  Microsoft Office:
+    prerequisites:
+    - 计算机基础
+    hours: 30
+  Endpoint Security:
+    prerequisites:
+    - 网络安全
+    - 计算机基础
+    hours: 40
+  # lp_20 企业AI平台
+  Cursor:
+    prerequisites:
+    - 计算机基础
+    - Python
+    hours: 50
+  Windsurf:
+    prerequisites:
+    - 计算机基础
+    hours: 40
+  GitHub Copilot:
+    prerequisites:
+    - 计算机基础
+    - Python
+    hours: 50
+  Claude Code:
+    prerequisites:
+    - 计算机基础
+    - Python
+    hours: 50
+  AI治理:
+    prerequisites:
+    - 机器学习
+    hours: 40
+  # lp_21 计算生物学家
+  CRISPR筛选:
+    prerequisites:
+    - 计算机基础
+    - 统计分析
+    hours: 60
+  Perturb-seq:
+    prerequisites:
+    - 统计分析
+    - 计算机基础
+    hours: 50
+  Squidpy:
+    prerequisites:
+    - Python
+    - 统计分析
+    hours: 50
+  单细胞RNA-seq:
+    prerequisites:
+    - 统计分析
+    - Python
+    hours: 60
+  # lp_29 AR/VR设计验证
+  FDTD:
+    prerequisites:
+    - 线性代数
+    - 计算机基础
+    hours: 60
+  显示:
+    prerequisites:
+    - 计算机基础
+    hours: 40
+  纳米制造:
+    prerequisites:
+    - 计算机基础
+    hours: 50
+  Code V:
+    prerequisites:
+    - MATLAB
+    - 计算机基础
+    hours: 40
+  # lp_15/lp_23 SAP 系
+  Groovy:
+    prerequisites:
+    - Java
+    hours: 55
+  MuleSoft:
+    prerequisites:
+    - Java
+    - SOAP
+    hours: 50
+  SOAP:
+    prerequisites:
+    - XML
+    - 微服务
+    hours: 40
+  JMS:
+    prerequisites:
+    - Java
+    - 消息队列
+    hours: 40
+  ECC:
+    prerequisites:
+    - 计算机基础
+    hours: 40
+  XSUAA:
+    prerequisites:
+    - 云计算
+    hours: 40
+  SAP Business Rules:
+    prerequisites:
+    - 云计算
+    hours: 40
+  Cloud Foundry:
+    prerequisites:
+    - 云计算
+    - Docker
+    hours: 40
+  SAP CAP:
+    prerequisites:
+    - 云计算
+    - Java
+    hours: 50
