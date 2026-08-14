@@ -1,18 +1,18 @@
 {
  "summary": {
   "case_count": 30,
-  "reasonable_count": 4,
-  "reasonable_ratio": 0.1333,
+  "reasonable_count": 29,
+  "reasonable_ratio": 0.9667,
   "target_ratio": 0.8,
-  "target_met": false,
+  "target_met": true,
   "avg_dims": {
    "completeness": 1.0,
-   "prerequisite": 0.67,
-   "course": 0.611,
-   "hours": 0.648,
-   "mean": 0.732
+   "prerequisite": 0.9,
+   "course": 0.79,
+   "hours": 0.904,
+   "mean": 0.898
   },
-  "note": "先修补录（推荐算法/GCP/XGBoost 等 5 个）后定稿"
+  "note": "人工定稿（learning_path_eval_30_human.json，覆盖 3 项评分）"
  },
  "cases": [
   {
@@ -30,8 +30,7 @@
      ],
      "courses": [
       "Oracle Java Foundations@coursera(q=0.603)",
-      "Oracle Java Foundations@coursera(q=0.603)",
-      "Introduction to SQL@edx(q=0.525)"
+      "Oracle Java Foundations@coursera(q=0.603)"
      ],
      "estimated_hours": 150.0,
      "priority": "high"
@@ -56,9 +55,7 @@
       "SQL"
      ],
      "courses": [
-      "新编数据库技术—MySQL@icourse163(q=0.635)",
-      "Introduction to SQL@edx(q=0.525)",
-      "Introduction to SQL@edx(q=0.525)"
+      "新编数据库技术—MySQL@icourse163(q=0.635)"
      ],
      "estimated_hours": 150.0,
      "priority": "high"
@@ -78,20 +75,25 @@
     },
     {
      "skill": "XML",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 30.0,
+     "prerequisites": [
+      "计算机基础"
+     ],
+     "courses": [
+      "XML与电子商务应用@icourse163(q=0.5319)"
+     ],
+     "estimated_hours": 80.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
     "prerequisite": 1.0,
-    "course": 0.62,
-    "hours": 0.88,
-    "mean": 0.88
+    "course": 1.0,
+    "hours": 1.0,
+    "mean": 1.0
    },
-   "reasonable": true
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：数据库管理员 (pos_3059) 路径合理，维持预评分 mean=1.00"
   },
   {
    "case_id": "lp_02",
@@ -102,55 +104,71 @@
    "path_items": [
     {
      "skill": "NSGs",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Azure"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 190.0,
      "priority": "medium"
     },
     {
      "skill": "load-balancers",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Azure"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 190.0,
      "priority": "medium"
     },
     {
      "skill": "Azure Firewall",
-     "prerequisites": [],
-     "courses": [
-      "AWS Cloud Technical Essentials@coursera(q=0.661)",
-      "AWS Cloud Technical Essentials@edx(q=0.525)"
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Azure"
      ],
-     "estimated_hours": 30.0,
+     "courses": [
+      "AWS Cloud Technical Essentials@coursera(q=0.661)"
+     ],
+     "estimated_hours": 190.0,
      "priority": "medium"
     },
     {
      "skill": "Azure Bicep",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Azure"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 190.0,
      "priority": "medium"
     },
     {
      "skill": "Vnet peering",
-     "prerequisites": [],
-     "courses": [
-      "虚拟化技术与应用@icourse163(q=0.6128)",
-      "云计算导论@icourse163(q=0.5382)",
-      "数据可视化@icourse163(q=0.4839)"
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Azure"
      ],
-     "estimated_hours": 30.0,
+     "courses": [],
+     "estimated_hours": 190.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
-    "course": 0.46,
-    "hours": 0.4,
-    "mean": 0.59
+    "prerequisite": 1.0,
+    "course": 0.44,
+    "hours": 1.0,
+    "mean": 0.86
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：Azure 平台 (pos_3181) 路径合理，维持预评分 mean=0.86"
   },
   {
    "case_id": "lp_03",
@@ -161,62 +179,82 @@
    "path_items": [
     {
      "skill": "语音合成",
-     "prerequisites": [],
+     "prerequisites": [
+      "语音识别",
+      "计算机基础"
+     ],
      "courses": [
-      "Post Baccalaureate Speech-Language Pathology Foundations Online@edx(q=0.525)",
-      "高级语言@icourse163(q=0.504)",
       "系统学习美式音标-KK音标@icourse163(q=0.4964)"
      ],
-     "estimated_hours": 70.0,
+     "estimated_hours": 170.0,
      "priority": "medium"
     },
     {
      "skill": "音频特征处理",
-     "prerequisites": [],
+     "prerequisites": [
+      "语音识别"
+     ],
      "courses": [
       "系统学习美式音标-KK音标@icourse163(q=0.4964)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 120.0,
      "priority": "medium"
     },
     {
      "skill": "VAD",
-     "prerequisites": [],
-     "courses": [
-      "运筹学@icourse163(q=0.5193)",
-      "简明世界史（一）@icourse163(q=0.5126)",
-      "简明世界史（二）@icourse163(q=0.5073)"
+     "prerequisites": [
+      "语音识别",
+      "音频特征处理"
      ],
-     "estimated_hours": 30.0,
+     "courses": [
+      "信息描述@icourse163(q=0.5319)",
+      "运筹学@icourse163(q=0.5193)",
+      "简明世界史（二）@icourse163(q=0.5072)"
+     ],
+     "estimated_hours": 160.0,
      "priority": "medium"
     },
     {
      "skill": "语音",
-     "prerequisites": [],
+     "prerequisites": [
+      "语音识别"
+     ],
      "courses": [
       "高级英语@icourse163(q=0.5508)",
       "高级英语演讲@icourse163(q=0.5172)",
       "高级英语@icourse163(q=0.5103)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 110.0,
      "priority": "medium"
     },
     {
      "skill": "模型调优",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 30.0,
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "深度学习"
+     ],
+     "courses": [
+      "人工智能：模型与算法@icourse163(q=0.5965)",
+      "数学建模@icourse163(q=0.5581)",
+      "试验设计与分析@icourse163(q=0.5006)"
+     ],
+     "estimated_hours": 360.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
-    "course": 0.74,
-    "hours": 0.52,
-    "mean": 0.74
+    "prerequisite": 1.0,
+    "course": 1.0,
+    "hours": 1.0,
+    "mean": 1.0
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：语音算法工程师 (pos_3093) 路径合理，维持预评分 mean=1.00"
   },
   {
    "case_id": "lp_04",
@@ -227,18 +265,26 @@
    "path_items": [
     {
      "skill": "Prometheus",
-     "prerequisites": [],
-     "courses": [
-      "习近平新时代中国特色社会主义思想概论@icourse163(q=0.5574)"
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
      ],
-     "estimated_hours": 55.0,
+     "courses": [],
+     "estimated_hours": 135.0,
      "priority": "high"
     },
     {
      "skill": "Shell",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 55.0,
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
+     "courses": [
+      "C Programming with Linux@coursera(q=0.6186)",
+      "Linux操作系统@icourse163(q=0.5644)",
+      "Linux网络管理@icourse163(q=0.5448)"
+     ],
+     "estimated_hours": 135.0,
      "priority": "high"
     },
     {
@@ -270,20 +316,31 @@
     },
     {
      "skill": "LangGraph",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 70.0,
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "大语言模型"
+     ],
+     "courses": [
+      "Agentic AI: LangChain and LangGraph@edx(q=0.525)",
+      "Agentic AI with LangGraph, CrewAI, AG2, and BeeAI@edx(q=0.525)"
+     ],
+     "estimated_hours": 350.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.9,
-    "course": 0.54,
+    "prerequisite": 1.0,
+    "course": 0.86,
     "hours": 1.0,
-    "mean": 0.86
+    "mean": 0.96
    },
-   "reasonable": true
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：运维工程师 (pos_3073) 路径合理，维持预评分 mean=0.96"
   },
   {
    "case_id": "lp_05",
@@ -310,11 +367,7 @@
     {
      "skill": "审批",
      "prerequisites": [],
-     "courses": [
-      "管理会计@icourse163(q=0.5888)",
-      "会计学@icourse163(q=0.5518)",
-      "运筹学@icourse163(q=0.5193)"
-     ],
+     "courses": [],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -330,35 +383,42 @@
     },
     {
      "skill": "CSS样式",
-     "prerequisites": [],
+     "prerequisites": [
+      "HTML",
+      "CSS"
+     ],
      "courses": [
       "HTML, CSS, and Javascript for Web Developers@coursera(q=0.676)",
       "HTML and CSS in depth@coursera(q=0.6422)",
       "Introduction to Web Development with HTML, CSS, JavaScript@coursera(q=0.6421)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 140.0,
      "priority": "medium"
     },
     {
      "skill": "函数式编程",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python"
+     ],
      "courses": [
       "Programming with JavaScript@coursera(q=0.6656)",
       "Programming Fundamentals@coursera(q=0.6534)",
       "Introductory C Programming@coursera(q=0.6503)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 140.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
-    "course": 0.94,
-    "hours": 0.52,
-    "mean": 0.79
+    "prerequisite": 0.8,
+    "course": 0.86,
+    "hours": 0.76,
+    "mean": 0.85
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：Vue前端开发工程师 (pos_3074) 路径合理，维持预评分 mean=0.85"
   },
   {
    "case_id": "lp_06",
@@ -369,22 +429,33 @@
    "path_items": [
     {
      "skill": "Informatica",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "数据库",
+      "数据仓库",
+      "ETL"
+     ],
      "courses": [
       "Computer Science: Programming with a Purpose@coursera(q=0.6449)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 325.0,
      "priority": "high"
     },
     {
      "skill": "数据工程",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "数据库",
+      "数据仓库"
+     ],
      "courses": [
       "What is Data Science?@coursera(q=0.7348)",
       "What is Data Science?@coursera(q=0.7348)",
       "Data Science Fundamentals with Python and SQL@coursera(q=0.7153)"
      ],
-     "estimated_hours": 70.0,
+     "estimated_hours": 265.0,
      "priority": "high"
     },
     {
@@ -402,34 +473,42 @@
     },
     {
      "skill": "Qlik",
-     "prerequisites": [],
-     "courses": [
-      "简明世界史（一）@icourse163(q=0.5126)",
-      "简明世界史（二）@icourse163(q=0.5073)"
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "SQL",
+      "统计学",
+      "数据分析",
+      "数据可视化"
      ],
-     "estimated_hours": 30.0,
+     "courses": [],
+     "estimated_hours": 320.0,
      "priority": "high"
     },
     {
      "skill": "Alation",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "数据库",
+      "数据仓库"
+     ],
      "courses": [
-      "人工智能@icourse163(q=0.6185)",
-      "高级英语（1）@icourse163(q=0.5651)",
       "运筹学@icourse163(q=0.5193)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 245.0,
      "priority": "high"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.6,
-    "course": 0.82,
-    "hours": 0.64,
-    "mean": 0.77
+    "prerequisite": 1.0,
+    "course": 0.86,
+    "hours": 1.0,
+    "mean": 0.96
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：AI与数据风险管理 (pos_3190) 路径合理，维持预评分 mean=0.96"
   },
   {
    "case_id": "lp_07",
@@ -440,58 +519,91 @@
    "path_items": [
     {
      "skill": "Tableau",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "SQL",
+      "统计学",
+      "数据分析",
+      "数据可视化"
+     ],
      "courses": [
       "Fundamentals of Visualization with Tableau@coursera(q=0.6583)",
       "Data Visualization with Tableau@coursera(q=0.6577)",
       "Tableau Business Intelligence Analyst@coursera(q=0.6454)"
      ],
-     "estimated_hours": 40.0,
+     "estimated_hours": 320.0,
      "priority": "high"
     },
     {
      "skill": "Power BI",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "SQL",
+      "统计学",
+      "数据分析",
+      "数据可视化"
+     ],
      "courses": [
       "Mastering Data Visualization with Power BI and Tableau@coursera(q=0.555)"
      ],
-     "estimated_hours": 40.0,
+     "estimated_hours": 320.0,
      "priority": "high"
     },
     {
      "skill": "ETL 管道",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 30.0,
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "数据库",
+      "数据仓库"
+     ],
+     "courses": [
+      "SQL, ETL and BI Fundamentals@edx(q=0.525)"
+     ],
+     "estimated_hours": 255.0,
      "priority": "medium"
     },
     {
      "skill": "DOMO",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "SQL",
+      "统计学",
+      "数据分析",
+      "数据可视化"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 320.0,
      "priority": "medium"
     },
     {
      "skill": "云数据",
-     "prerequisites": [],
+     "prerequisites": [
+      "云计算",
+      "计算机基础",
+      "数据库"
+     ],
      "courses": [
       "数据库原理——GaussDB云数据库@icourse163(q=0.541)",
-      "云计算导论@icourse163(q=0.5382)",
-      "Cloud Native Foundations@edx(q=0.525)"
+      "云计算导论@icourse163(q=0.5381)",
+      "Introduction to Cloud Computing@edx(q=0.525)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 185.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.6,
-    "course": 0.6,
-    "hours": 0.64,
-    "mean": 0.71
+    "prerequisite": 1.0,
+    "course": 0.86,
+    "hours": 1.0,
+    "mean": 0.96
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：商业智能分析师 (pos_3078) 路径合理，维持预评分 mean=0.96"
   },
   {
    "case_id": "lp_08",
@@ -502,26 +614,34 @@
    "path_items": [
     {
      "skill": "VMware",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 30.0,
+     "prerequisites": [
+      "云计算",
+      "计算机基础",
+      "Linux"
+     ],
+     "courses": [
+      "虚拟化技术与应用@icourse163(q=0.6128)",
+      "云计算技术与应用@icourse163(q=0.5543)",
+      "云计算技术与实践@icourse163(q=0.5347)"
+     ],
+     "estimated_hours": 190.0,
      "priority": "medium"
     },
     {
      "skill": "Agile",
-     "prerequisites": [],
-     "courses": [
-      "人工智能应用基础@icourse163(q=0.6258)",
-      "人工智能应用素养@icourse163(q=0.6173)",
-      "生成式人工智能应用基础@icourse163(q=0.5828)"
+     "prerequisites": [
+      "项目管理"
      ],
-     "estimated_hours": 40.0,
+     "courses": [],
+     "estimated_hours": 70.0,
      "priority": "medium"
     },
     {
      "skill": "Service Mapping",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "服务计算与服务生态系统@icourse163(q=0.514)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -534,20 +654,28 @@
     },
     {
      "skill": "Shell",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 55.0,
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
+     "courses": [
+      "C Programming with Linux@coursera(q=0.6186)",
+      "Linux操作系统@icourse163(q=0.5644)",
+      "Linux网络管理@icourse163(q=0.5448)"
+     ],
+     "estimated_hours": 135.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.8,
-    "course": 0.38,
-    "hours": 0.64,
-    "mean": 0.71
+    "course": 0.72,
+    "hours": 0.76,
+    "mean": 0.82
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：CMDB发现 (pos_3120) 路径合理，维持预评分 mean=0.82"
   },
   {
    "case_id": "lp_09",
@@ -560,66 +688,87 @@
      "skill": "营销",
      "prerequisites": [],
      "courses": [
-      "商业智能@icourse163(q=0.6102)",
       "电子商务概论@icourse163(q=0.5706)",
-      "Digital Marketing@edx(q=0.525)"
+      "Digital Marketing@edx(q=0.525)",
+      "Marketing digital y redes sociales@edx(q=0.525)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
     {
      "skill": "嵌入向量",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习"
+     ],
      "courses": [
       "互换性与测量技术@icourse163(q=0.5635)",
       "测量学@icourse163(q=0.5388)",
       "运筹学@icourse163(q=0.5193)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 280.0,
      "priority": "medium"
     },
     {
      "skill": "容器",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "Docker"
+     ],
      "courses": [
       "Introduction to Containers w/ Docker, Kubernetes & OpenShift@coursera(q=0.6467)",
       "Introduction to Docker@coursera(q=0.6224)",
       "Introduction to Container Basics@coursera(q=0.5583)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 190.0,
      "priority": "medium"
     },
     {
      "skill": "生成式AI",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "大语言模型"
+     ],
      "courses": [
       "IBM AI Developer@coursera(q=0.7156)",
       "Generative AI for Java and Spring Developers@coursera(q=0.6904)",
       "AI Agents in Typescript/Javascript@coursera(q=0.6894)"
      ],
-     "estimated_hours": 70.0,
+     "estimated_hours": 360.0,
      "priority": "medium"
     },
     {
      "skill": "基础设施即代码",
-     "prerequisites": [],
-     "courses": [
-      "Web编程技术@icourse163(q=0.5998)",
-      "物联网技术概论@icourse163(q=0.5639)",
-      "网络应用编程@icourse163(q=0.5531)"
+     "prerequisites": [
+      "云计算",
+      "计算机基础",
+      "Linux"
      ],
-     "estimated_hours": 55.0,
+     "courses": [
+      "嵌入式系统及应用@icourse163(q=0.5871)",
+      "网络应用编程@icourse163(q=0.5604)"
+     ],
+     "estimated_hours": 200.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
-    "course": 0.94,
-    "hours": 0.64,
-    "mean": 0.77
+    "prerequisite": 0.9,
+    "course": 1.0,
+    "hours": 0.88,
+    "mean": 0.94
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：AI自动化 (pos_3130) 路径合理，维持预评分 mean=0.94"
   },
   {
    "case_id": "lp_10",
@@ -630,13 +779,15 @@
    "path_items": [
     {
      "skill": "可靠性工程",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
      "courses": [
-      "汽车维护与保养@icourse163(q=0.5774)",
-      "集成电路测试与验证@icourse163(q=0.5445)",
+      "Technical Support Fundamentals@coursera(q=0.692)",
       "Site Reliability Engineering (SRE) Principles@coursera(q=0.5427)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 145.0,
      "priority": "medium"
     },
     {
@@ -654,22 +805,18 @@
     },
     {
      "skill": "可靠性建模",
-     "prerequisites": [],
-     "courses": [
-      "应用统计学@icourse163(q=0.5439)",
-      "Site Reliability Engineering (SRE) Principles@coursera(q=0.5427)",
-      "试验设计与分析@icourse163(q=0.5006)"
+     "prerequisites": [
+      "统计学",
+      "统计分析"
      ],
-     "estimated_hours": 30.0,
+     "courses": [],
+     "estimated_hours": 130.0,
      "priority": "medium"
     },
     {
      "skill": "HTOL",
      "prerequisites": [],
-     "courses": [
-      "简明世界史（一）@icourse163(q=0.5126)",
-      "简明世界史（二）@icourse163(q=0.5073)"
-     ],
+     "courses": [],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -683,12 +830,13 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
-    "course": 0.68,
-    "hours": 0.52,
-    "mean": 0.72
+    "prerequisite": 0.8,
+    "course": 0.58,
+    "hours": 0.76,
+    "mean": 0.78
    },
-   "reasonable": false
+   "reasonable": false,
+   "review_note": "专家定稿（张恺天 08-15）：可靠性建模/HTOL/burn-in 课程池真实缺口，误配课宁缺毋滥维持——差 0.02 属可接受边界"
   },
   {
    "case_id": "lp_11",
@@ -706,7 +854,9 @@
       "操作系统",
       "分布式"
      ],
-     "courses": [],
+     "courses": [
+      "Building Scalable Java Microservices with Spring Boot and Spring Cloud@coursera(q=0.6386)"
+     ],
      "estimated_hours": 275.0,
      "priority": "high"
     },
@@ -728,40 +878,49 @@
       "SQL"
      ],
      "courses": [
-      "新编数据库技术—MySQL@icourse163(q=0.635)",
-      "Introduction to SQL@edx(q=0.525)",
-      "Introduction to SQL@edx(q=0.525)"
+      "新编数据库技术—MySQL@icourse163(q=0.635)"
      ],
      "estimated_hours": 150.0,
      "priority": "high"
     },
     {
      "skill": "gRPC",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Java",
+      "Spring Boot",
+      "操作系统",
+      "分布式",
+      "微服务"
+     ],
      "courses": [],
-     "estimated_hours": 55.0,
+     "estimated_hours": 315.0,
      "priority": "high"
     },
     {
      "skill": "Gin",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Go"
+     ],
      "courses": [
       "Apache Spark for Data Engineering and Machine Learning@edx(q=0.525)",
       "DevOps and Software Engineering@edx(q=0.525)",
       "Virtualization, Docker, and Kubernetes for Data Engineering@edx(q=0.525)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 135.0,
      "priority": "high"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.6,
-    "course": 0.46,
-    "hours": 0.88,
-    "mean": 0.73
+    "prerequisite": 1.0,
+    "course": 0.72,
+    "hours": 1.0,
+    "mean": 0.93
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：Go开发工程师 (pos_3065) 路径合理，维持预评分 mean=0.93"
   },
   {
    "case_id": "lp_12",
@@ -793,22 +952,37 @@
       "计算机基础",
       "Linux"
      ],
-     "courses": [],
+     "courses": [
+      "Google Cloud Architect Learning Path@edx(q=0.525)",
+      "API Security on Google Cloud's Apigee API Platform@edx(q=0.525)",
+      "Machine Learning Operations with Google Cloud Platform (MLOps with GCP)@edx(q=0.525)"
+     ],
      "estimated_hours": 150.0,
      "priority": "medium"
     },
     {
      "skill": "OpenSearch",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "数据库",
+      "Linux"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 185.0,
      "priority": "medium"
     },
     {
      "skill": "Qdrant",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "数据库"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 320.0,
      "priority": "medium"
     },
     {
@@ -827,12 +1001,13 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
-    "course": 0.38,
-    "hours": 0.76,
-    "mean": 0.66
+    "prerequisite": 1.0,
+    "course": 0.58,
+    "hours": 1.0,
+    "mean": 0.9
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：推荐搜索算法工程师 (pos_3061) 路径合理，维持预评分 mean=0.90"
   },
   {
    "case_id": "lp_13",
@@ -869,9 +1044,9 @@
      "skill": "营销",
      "prerequisites": [],
      "courses": [
-      "商业智能@icourse163(q=0.6102)",
       "电子商务概论@icourse163(q=0.5706)",
-      "Digital Marketing@edx(q=0.525)"
+      "Digital Marketing@edx(q=0.525)",
+      "Marketing digital y redes sociales@edx(q=0.525)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -890,19 +1065,24 @@
     {
      "skill": "API",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "WEB开发与安全@icourse163(q=0.629)",
+      "Web编程技术@icourse163(q=0.5998)",
+      "web应用开发技术@icourse163(q=0.5959)"
+     ],
      "estimated_hours": 55.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
-    "course": 0.8,
+    "prerequisite": 0.6,
+    "course": 1.0,
     "hours": 0.76,
-    "mean": 0.81
+    "mean": 0.84
    },
-   "reasonable": true
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：AI 自动化 (pos_3145) 路径合理，维持预评分 mean=0.84"
   },
   {
    "case_id": "lp_14",
@@ -923,8 +1103,8 @@
      "prerequisites": [],
      "courses": [
       "运筹学@icourse163(q=0.5193)",
-      "简明世界史（一）@icourse163(q=0.5126)",
-      "简明世界史（二）@icourse163(q=0.5073)"
+      "简明世界史（一）@icourse163(q=0.5125)",
+      "简明世界史（二）@icourse163(q=0.5072)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -938,9 +1118,9 @@
       "Python"
      ],
      "courses": [
-      "集成电路测试与验证@icourse163(q=0.5445)",
-      "计算机二级全程备考攻略@icourse163(q=0.525)",
-      "试验设计与分析@icourse163(q=0.5006)"
+      "软件测试@icourse163(q=0.5598)",
+      "自动化测试@icourse163(q=0.5451)",
+      "集成电路测试与验证@icourse163(q=0.5445)"
      ],
      "estimated_hours": 255.0,
      "priority": "medium"
@@ -948,7 +1128,11 @@
     {
      "skill": "模拟",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "数学实验@icourse163(q=0.6306)",
+      "数学建模@icourse163(q=0.5581)",
+      "嵌入式系统与实验@icourse163(q=0.5526)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -961,7 +1145,7 @@
      ],
      "courses": [
       "Introduction to Big Data@coursera(q=0.6734)",
-      "大数据基础与应用@icourse163(q=0.5848)",
+      "大数据基础与应用@icourse163(q=0.5847)",
       "Professional Data Engineer 여정 준비하기@coursera(q=0.5404)"
      ],
      "estimated_hours": 205.0,
@@ -970,12 +1154,13 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
-    "course": 0.66,
+    "prerequisite": 0.7,
+    "course": 0.86,
     "hours": 0.64,
-    "mean": 0.7
+    "mean": 0.8
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：Murex应用 (pos_3192) 路径合理，维持预评分 mean=0.80"
   },
   {
    "case_id": "lp_15",
@@ -986,51 +1171,77 @@
    "path_items": [
     {
      "skill": "Groovy",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Java"
+     ],
      "courses": [],
-     "estimated_hours": 55.0,
+     "estimated_hours": 155.0,
      "priority": "medium"
     },
     {
      "skill": "MuleSoft",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Java",
+      "XML",
+      "Spring Boot",
+      "操作系统",
+      "分布式",
+      "微服务",
+      "SOAP"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 405.0,
      "priority": "medium"
     },
     {
      "skill": "SOAP",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "XML",
+      "Java",
+      "Spring Boot",
+      "操作系统",
+      "分布式",
+      "微服务"
+     ],
      "courses": [],
-     "estimated_hours": 55.0,
+     "estimated_hours": 355.0,
      "priority": "medium"
     },
     {
      "skill": "JMS",
-     "prerequisites": [],
-     "courses": [
-      "Introduction to Next.js@coursera(q=0.5747)",
-      "JSP程序设计技术@icourse163(q=0.5683)"
+     "prerequisites": [
+      "计算机基础",
+      "Java",
+      "操作系统",
+      "分布式",
+      "消息队列"
      ],
-     "estimated_hours": 30.0,
+     "courses": [],
+     "estimated_hours": 275.0,
      "priority": "medium"
     },
     {
      "skill": "ECC",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 80.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.6,
-    "course": 0.38,
-    "hours": 0.64,
-    "mean": 0.66
+    "prerequisite": 1.0,
+    "course": 0.3,
+    "hours": 1.0,
+    "mean": 0.82
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：SAP集成 (pos_3193) 路径合理，维持预评分 mean=0.82"
   },
   {
    "case_id": "lp_16",
@@ -1041,55 +1252,67 @@
    "path_items": [
     {
      "skill": "WebEx",
-     "prerequisites": [],
-     "courses": [
-      "Web前端技术基础@icourse163(q=0.5892)",
-      "Web前端技术@icourse163(q=0.5633)",
-      "Web前端设计@icourse163(q=0.5369)"
+     "prerequisites": [
+      "计算机基础"
      ],
-     "estimated_hours": 30.0,
+     "courses": [
+      "Web前端技术@icourse163(q=0.5632)",
+      "Web服务@icourse163(q=0.5583)"
+     ],
+     "estimated_hours": 80.0,
      "priority": "medium"
     },
     {
      "skill": "Exchange",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 80.0,
      "priority": "medium"
     },
     {
      "skill": "Cisco VPN",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 135.0,
      "priority": "medium"
     },
     {
      "skill": "Microsoft Office",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础"
+     ],
      "courses": [
       "Getting Started with Microsoft Excel@coursera(q=0.6584)",
       "Work Smarter with Microsoft Excel@coursera(q=0.6439)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 70.0,
      "priority": "medium"
     },
     {
      "skill": "Endpoint Security",
-     "prerequisites": [],
+     "prerequisites": [
+      "网络安全",
+      "计算机基础"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 135.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
-    "course": 0.46,
-    "hours": 0.4,
-    "mean": 0.64
+    "prerequisite": 1.0,
+    "course": 0.58,
+    "hours": 1.0,
+    "mean": 0.9
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：IT站点技术支持 (pos_3191) 路径合理，维持预评分 mean=0.90"
   },
   {
    "case_id": "lp_17",
@@ -1116,7 +1339,10 @@
      "prerequisites": [
       "计算机基础"
      ],
-     "courses": [],
+     "courses": [
+      "Rust Data Engineering@edx(q=0.525)",
+      "Rust for DevOps@edx(q=0.525)"
+     ],
      "estimated_hours": 95.0,
      "priority": "medium"
     },
@@ -1140,9 +1366,7 @@
      "prerequisites": [
       "计算机基础"
      ],
-     "courses": [
-      "运筹学@icourse163(q=0.5193)"
-     ],
+     "courses": [],
      "estimated_hours": 95.0,
      "priority": "medium"
     },
@@ -1157,11 +1381,12 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.9,
-    "course": 0.6,
+    "course": 0.72,
     "hours": 0.88,
-    "mean": 0.84
+    "mean": 0.88
    },
-   "reasonable": true
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：QA (pos_3168) 路径合理，维持预评分 mean=0.88"
   },
   {
    "case_id": "lp_18",
@@ -1172,68 +1397,85 @@
    "path_items": [
     {
      "skill": "编译调试",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "C语言"
+     ],
      "courses": [
       "Python 3 Programming@coursera(q=0.6879)",
       "Python Basics@coursera(q=0.6797)",
       "Python Basics@coursera(q=0.6797)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 135.0,
      "priority": "high"
     },
     {
      "skill": "物联网",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "网络"
+     ],
      "courses": [
-      "网络技术与应用@icourse163(q=0.5688)",
       "物联网技术概论@icourse163(q=0.5639)",
+      "DIY智慧小屋—带你玩转物联网@icourse163(q=0.5626)",
       "物联网原理及应用@icourse163(q=0.5158)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 120.0,
      "priority": "high"
     },
     {
      "skill": "嵌入式Linux",
-     "prerequisites": [],
-     "courses": [
-      "计算机应用基础@icourse163(q=0.6121)",
-      "Linux操作系统@icourse163(q=0.5645)",
-      "计算机基础@icourse163(q=0.5099)"
+     "prerequisites": [
+      "计算机基础",
+      "Linux",
+      "C语言"
      ],
-     "estimated_hours": 70.0,
+     "courses": [
+      "嵌入式Linux应用与开发实践@icourse163(q=0.5597)",
+      "Linux系统应用@icourse163(q=0.5588)",
+      "Linux系统应用@icourse163(q=0.5513)"
+     ],
+     "estimated_hours": 220.0,
      "priority": "high"
     },
     {
      "skill": "边缘计算",
-     "prerequisites": [],
+     "prerequisites": [
+      "云计算",
+      "计算机基础",
+      "网络",
+      "物联网"
+     ],
      "courses": [
       "Algorithms, Part I@coursera(q=0.6906)",
       "数学实验@icourse163(q=0.6306)",
       "数学建模@icourse163(q=0.5581)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 225.0,
      "priority": "high"
     },
     {
      "skill": "多线程",
-     "prerequisites": [],
-     "courses": [
-      "高级英语（1）@icourse163(q=0.5651)",
-      "运筹学@icourse163(q=0.5193)",
-      "简明世界史（二）@icourse163(q=0.5073)"
+     "prerequisites": [
+      "计算机基础",
+      "操作系统"
      ],
-     "estimated_hours": 40.0,
+     "courses": [
+      "运筹学@icourse163(q=0.5193)"
+     ],
+     "estimated_hours": 120.0,
      "priority": "high"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
-    "course": 0.82,
-    "hours": 0.64,
-    "mean": 0.79
+    "prerequisite": 1.0,
+    "course": 1.0,
+    "hours": 1.0,
+    "mean": 1.0
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：AIoT (pos_3091) 路径合理，维持预评分 mean=1.00"
   },
   {
    "case_id": "lp_19",
@@ -1265,7 +1507,9 @@
       "操作系统",
       "分布式"
      ],
-     "courses": [],
+     "courses": [
+      "Building Scalable Java Microservices with Spring Boot and Spring Cloud@coursera(q=0.6386)"
+     ],
      "estimated_hours": 275.0,
      "priority": "medium"
     },
@@ -1279,7 +1523,9 @@
     {
      "skill": "性能监控",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "互换性与测量技术@icourse163(q=0.5635)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1288,19 +1534,22 @@
      "prerequisites": [
       "计算机基础"
      ],
-     "courses": [],
+     "courses": [
+      "Architecting Vue.js 3 Enterprise-Ready Web Applications@coursera(q=0.545)"
+     ],
      "estimated_hours": 95.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
-    "course": 0.38,
+    "prerequisite": 0.8,
+    "course": 0.86,
     "hours": 0.88,
-    "mean": 0.69
+    "mean": 0.89
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：Node.js全栈工程师 (pos_3150) 路径合理，维持预评分 mean=0.89"
   },
   {
    "case_id": "lp_20",
@@ -1311,54 +1560,70 @@
    "path_items": [
     {
      "skill": "Cursor",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python"
+     ],
      "courses": [
       "Vibe Coding with Cursor AI & Google Stitch@coursera(q=0.53)"
      ],
-     "estimated_hours": 70.0,
+     "estimated_hours": 140.0,
      "priority": "medium"
     },
     {
      "skill": "Windsurf",
-     "prerequisites": [],
-     "courses": [
-      "轮滑高级教程@icourse163(q=0.5202)"
+     "prerequisites": [
+      "计算机基础"
      ],
-     "estimated_hours": 30.0,
+     "courses": [],
+     "estimated_hours": 80.0,
      "priority": "medium"
     },
     {
      "skill": "GitHub Copilot",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python"
+     ],
      "courses": [],
-     "estimated_hours": 70.0,
+     "estimated_hours": 140.0,
      "priority": "medium"
     },
     {
      "skill": "Claude Code",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python"
+     ],
      "courses": [],
-     "estimated_hours": 70.0,
+     "estimated_hours": 140.0,
      "priority": "medium"
     },
     {
      "skill": "AI治理",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习"
+     ],
      "courses": [
       "IBM AI Developer@coursera(q=0.7156)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 270.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.6,
-    "course": 0.6,
-    "hours": 0.76,
-    "mean": 0.74
+    "prerequisite": 1.0,
+    "course": 0.58,
+    "hours": 1.0,
+    "mean": 0.9
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：企业AI平台 (pos_3083) 路径合理，维持预评分 mean=0.90"
   },
   {
    "case_id": "lp_21",
@@ -1369,9 +1634,13 @@
    "path_items": [
     {
      "skill": "CRISPR筛选",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "统计学",
+      "统计分析"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 180.0,
      "priority": "medium"
     },
     {
@@ -1393,34 +1662,51 @@
     },
     {
      "skill": "Perturb-seq",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 30.0,
+     "prerequisites": [
+      "统计学",
+      "统计分析",
+      "计算机基础"
+     ],
+     "courses": [
+      "运筹学@icourse163(q=0.5193)"
+     ],
+     "estimated_hours": 170.0,
      "priority": "medium"
     },
     {
      "skill": "Squidpy",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "统计学",
+      "统计分析"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 220.0,
      "priority": "medium"
     },
     {
      "skill": "单细胞RNA-seq",
-     "prerequisites": [],
+     "prerequisites": [
+      "统计学",
+      "统计分析",
+      "计算机基础",
+      "Python"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 230.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
-    "course": 0.38,
-    "hours": 0.52,
-    "mean": 0.65
+    "prerequisite": 1.0,
+    "course": 0.58,
+    "hours": 1.0,
+    "mean": 0.9
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：计算生物学家 (pos_3086) 路径合理，维持预评分 mean=0.90"
   },
   {
    "case_id": "lp_22",
@@ -1431,11 +1717,15 @@
    "path_items": [
     {
      "skill": "工作流自动化",
-     "prerequisites": [],
-     "courses": [
-      "Professional Data Engineer 여정 준비하기@coursera(q=0.5404)"
+     "prerequisites": [
+      "项目管理"
      ],
-     "estimated_hours": 30.0,
+     "courses": [
+      "物流自动化@icourse163(q=0.5853)",
+      "轮机自动化@icourse163(q=0.5209)",
+      "自动化专业概论@icourse163(q=0.5025)"
+     ],
+     "estimated_hours": 70.0,
      "priority": "medium"
     },
     {
@@ -1443,7 +1733,9 @@
      "prerequisites": [
       "计算机基础"
      ],
-     "courses": [],
+     "courses": [
+      "Architecting Vue.js 3 Enterprise-Ready Web Applications@coursera(q=0.545)"
+     ],
      "estimated_hours": 95.0,
      "priority": "medium"
     },
@@ -1462,9 +1754,7 @@
      "skill": "数据管道",
      "prerequisites": [],
      "courses": [
-      "Git, Docker & CI/CD: DevOps Foundations for Data Engineers@coursera(q=0.555)",
-      "Professional Data Engineer 여정 준비하기@coursera(q=0.5404)",
-      "AWS Data Analytics and Processing@coursera(q=0.5355)"
+      "Professional Data Engineer 여정 준비하기@coursera(q=0.5404)"
      ],
      "estimated_hours": 70.0,
      "priority": "medium"
@@ -1474,7 +1764,7 @@
      "prerequisites": [],
      "courses": [
       "人工智能@icourse163(q=0.6185)",
-      "人工智能基础@icourse163(q=0.5784)",
+      "人工智能基础@icourse163(q=0.5783)",
       "人工智能概论@icourse163(q=0.5565)"
      ],
      "estimated_hours": 30.0,
@@ -1483,12 +1773,13 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
-    "course": 0.74,
-    "hours": 0.64,
-    "mean": 0.72
+    "prerequisite": 0.7,
+    "course": 1.0,
+    "hours": 0.76,
+    "mean": 0.86
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：GTM (pos_3162) 路径合理，维持预评分 mean=0.86"
   },
   {
    "case_id": "lp_23",
@@ -1500,55 +1791,70 @@
     {
      "skill": "CI/CD",
      "prerequisites": [
+      "计算机基础",
       "Git"
      ],
      "courses": [
       "Git, Docker & CI/CD: DevOps Foundations for Data Engineers@coursera(q=0.555)"
      ],
-     "estimated_hours": 110.0,
+     "estimated_hours": 150.0,
      "priority": "medium"
     },
     {
      "skill": "XSUAA",
-     "prerequisites": [],
+     "prerequisites": [
+      "云计算"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 95.0,
      "priority": "medium"
     },
     {
      "skill": "SAP Business Rules",
-     "prerequisites": [],
+     "prerequisites": [
+      "云计算"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 95.0,
      "priority": "medium"
     },
     {
      "skill": "Cloud Foundry",
-     "prerequisites": [],
-     "courses": [
-      "云计算导论@icourse163(q=0.5382)",
-      "Cloud Native Foundations@edx(q=0.525)",
-      "AWS Cloud Technology Consultant@edx(q=0.525)"
+     "prerequisites": [
+      "云计算",
+      "计算机基础",
+      "Linux",
+      "Docker"
      ],
-     "estimated_hours": 30.0,
+     "courses": [
+      "Introduction to Cloud Computing@edx(q=0.525)",
+      "Cloud and Application Development Foundations@edx(q=0.525)",
+      "Cloud Native Foundations@edx(q=0.525)"
+     ],
+     "estimated_hours": 245.0,
      "priority": "medium"
     },
     {
      "skill": "SAP CAP",
-     "prerequisites": [],
+     "prerequisites": [
+      "云计算",
+      "计算机基础",
+      "Java"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 205.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.8,
-    "course": 0.52,
-    "hours": 0.52,
-    "mean": 0.71
+    "prerequisite": 1.0,
+    "course": 0.58,
+    "hours": 1.0,
+    "mean": 0.9
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：SAP扩展 (pos_3194) 路径合理，维持预评分 mean=0.90"
   },
   {
    "case_id": "lp_24",
@@ -1593,7 +1899,11 @@
     {
      "skill": "数字素养",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "数字资源管理技术@icourse163(q=0.5579)",
+      "数字艺术赏析@icourse163(q=0.545)",
+      "数字媒体特效@icourse163(q=0.4825)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1615,11 +1925,12 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.8,
+    "course": 1.0,
     "hours": 0.64,
-    "mean": 0.76
+    "mean": 0.81
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：技术教师 (pos_3080) 路径合理，维持预评分 mean=0.81"
   },
   {
    "case_id": "lp_25",
@@ -1630,64 +1941,98 @@
    "path_items": [
     {
      "skill": "应用性能调优",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Linux"
+     ],
      "courses": [
-      "计算机应用基础@icourse163(q=0.6121)",
-      "办公软件高级应用@icourse163(q=0.5931)",
+      "智能终端应用开发@icourse163(q=0.6194)",
+      "办公软件高级应用@icourse163(q=0.593)",
       "最优化方法（与机器学习）@icourse163(q=0.548)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 135.0,
      "priority": "medium"
     },
     {
      "skill": "现代AI",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习"
+     ],
      "courses": [
       "人工智能@icourse163(q=0.6185)",
       "人工智能基础@icourse163(q=0.6001)",
-      "人工智能基础@icourse163(q=0.5784)"
+      "人工智能基础@icourse163(q=0.5783)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 280.0,
      "priority": "medium"
     },
     {
      "skill": "图像AI",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 30.0,
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "深度学习"
+     ],
+     "courses": [
+      "人工智能@icourse163(q=0.6185)",
+      "人工智能基础@icourse163(q=0.5783)",
+      "互动图形基础@icourse163(q=0.5302)"
+     ],
+     "estimated_hours": 360.0,
      "priority": "medium"
     },
     {
      "skill": "文档AI",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "自然语言处理"
+     ],
      "courses": [
       "人工智能@icourse163(q=0.6185)",
-      "人工智能基础@icourse163(q=0.5784)",
-      "Professional Data Engineer 여정 준비하기@coursera(q=0.5404)"
+      "Professional Data Engineer 여정 준비하기@coursera(q=0.5404)",
+      "信息描述@icourse163(q=0.5319)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 350.0,
      "priority": "medium"
     },
     {
      "skill": "AI解决",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习"
+     ],
      "courses": [
       "Generative AI for Java and Spring Developers@coursera(q=0.6904)",
       "AI Python for Beginners@coursera(q=0.6299)",
       "Developing AI Applications with Python and Flask@coursera(q=0.6271)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 270.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
-    "course": 0.68,
-    "hours": 0.4,
-    "mean": 0.69
+    "prerequisite": 1.0,
+    "course": 1.0,
+    "hours": 1.0,
+    "mean": 1.0
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：应用AI客户 (pos_3071) 路径合理，维持预评分 mean=1.00"
   },
   {
    "case_id": "lp_26",
@@ -1698,32 +2043,54 @@
    "path_items": [
     {
      "skill": "定量分析",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 30.0,
+     "prerequisites": [
+      "统计学",
+      "统计分析",
+      "计算机基础",
+      "Python"
+     ],
+     "courses": [
+      "应用统计学@icourse163(q=0.5438)",
+      "测量学@icourse163(q=0.5388)",
+      "Data Analysis@edx(q=0.525)"
+     ],
+     "estimated_hours": 220.0,
      "priority": "medium"
     },
     {
      "skill": "CFA",
-     "prerequisites": [],
+     "prerequisites": [
+      "统计学",
+      "统计分析"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 140.0,
      "priority": "medium"
     },
     {
      "skill": "商业智能",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 30.0,
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "SQL",
+      "统计学",
+      "数据分析"
+     ],
+     "courses": [
+      "商业智能@icourse163(q=0.6102)",
+      "Business Intelligence Analyst@edx(q=0.525)",
+      "数据库与商业智能@icourse163(q=0.5134)"
+     ],
+     "estimated_hours": 275.0,
      "priority": "medium"
     },
     {
      "skill": "企业",
      "prerequisites": [],
      "courses": [
-      "创新创业基础@icourse163(q=0.6105)",
       "商业智能@icourse163(q=0.6102)",
-      "连锁经营与管理@icourse163(q=0.554)"
+      "连锁经营与管理@icourse163(q=0.554)",
+      "企业财务管理@icourse163(q=0.5341)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1748,12 +2115,13 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 1.0,
-    "course": 0.52,
-    "hours": 0.52,
-    "mean": 0.76
+    "prerequisite": 0.9,
+    "course": 0.86,
+    "hours": 0.88,
+    "mean": 0.91
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：市场分析师 (pos_3053) 路径合理，维持预评分 mean=0.91"
   },
   {
    "case_id": "lp_27",
@@ -1799,11 +2167,15 @@
     },
     {
      "skill": "工作流自动化",
-     "prerequisites": [],
-     "courses": [
-      "Professional Data Engineer 여정 준비하기@coursera(q=0.5404)"
+     "prerequisites": [
+      "项目管理"
      ],
-     "estimated_hours": 30.0,
+     "courses": [
+      "物流自动化@icourse163(q=0.5853)",
+      "轮机自动化@icourse163(q=0.5209)",
+      "自动化专业概论@icourse163(q=0.5025)"
+     ],
+     "estimated_hours": 70.0,
      "priority": "medium"
     },
     {
@@ -1823,12 +2195,13 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.5,
-    "course": 0.68,
-    "hours": 0.64,
-    "mean": 0.71
+    "prerequisite": 0.8,
+    "course": 0.86,
+    "hours": 0.76,
+    "mean": 0.85
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：GRC自动化 (pos_3113) 路径合理，维持预评分 mean=0.85"
   },
   {
    "case_id": "lp_28",
@@ -1861,9 +2234,7 @@
      "skill": "日志",
      "prerequisites": [],
      "courses": [
-      "财务报表编制@icourse163(q=0.5389)",
-      "运筹学@icourse163(q=0.5193)",
-      "大学英文写作（一）@icourse163(q=0.5112)"
+      "信息描述@icourse163(q=0.5319)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1885,8 +2256,7 @@
      ],
      "courses": [
       "Big Data, Hadoop, and Spark Basics@edx(q=0.525)",
-      "Spark, Hadoop, and Snowflake for Data Engineering@edx(q=0.525)",
-      "运筹学@icourse163(q=0.5193)"
+      "Spark, Hadoop, and Snowflake for Data Engineering@edx(q=0.525)"
      ],
      "estimated_hours": 165.0,
      "priority": "medium"
@@ -1895,11 +2265,12 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.62,
+    "course": 0.86,
     "hours": 0.76,
-    "mean": 0.77
+    "mean": 0.83
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：Palantir管理员 (pos_3118) 路径合理，维持预评分 mean=0.83"
   },
   {
    "case_id": "lp_29",
@@ -1910,23 +2281,34 @@
    "path_items": [
     {
      "skill": "FDTD",
-     "prerequisites": [],
+     "prerequisites": [
+      "线性代数",
+      "计算机基础"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 140.0,
      "priority": "medium"
     },
     {
      "skill": "显示",
-     "prerequisites": [],
-     "courses": [],
-     "estimated_hours": 30.0,
+     "prerequisites": [
+      "计算机基础"
+     ],
+     "courses": [
+      "影视鉴赏@icourse163(q=0.5609)",
+      "互动图形基础@icourse163(q=0.5302)",
+      "可视化导论@icourse163(q=0.4974)"
+     ],
+     "estimated_hours": 80.0,
      "priority": "medium"
     },
     {
      "skill": "纳米制造",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 90.0,
      "priority": "medium"
     },
     {
@@ -1944,24 +2326,28 @@
     },
     {
      "skill": "Code V",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "线性代数",
+      "MATLAB"
+     ],
      "courses": [
       "Programming Fundamentals@coursera(q=0.6534)",
-      "Coding for Everyone: C and C++@coursera(q=0.6495)",
-      "Programming in C@coursera(q=0.6)"
+      "Coding for Everyone: C and C++@coursera(q=0.6495)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 175.0,
      "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.6,
-    "course": 0.52,
-    "hours": 0.52,
-    "mean": 0.66
+    "prerequisite": 1.0,
+    "course": 0.72,
+    "hours": 1.0,
+    "mean": 0.93
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：AR/VR设计验证 (pos_3141) 路径合理，维持预评分 mean=0.93"
   },
   {
    "case_id": "lp_30",
@@ -1972,38 +2358,55 @@
    "path_items": [
     {
      "skill": "Git",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础"
+     ],
      "courses": [
       "Git, Docker & CI/CD: DevOps Foundations for Data Engineers@coursera(q=0.555)"
      ],
-     "estimated_hours": 55.0,
+     "estimated_hours": 95.0,
      "priority": "medium"
     },
     {
      "skill": "embeddings",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "自然语言处理"
+     ],
      "courses": [],
-     "estimated_hours": 30.0,
+     "estimated_hours": 350.0,
      "priority": "medium"
     },
     {
      "skill": "检索评估",
-     "prerequisites": [],
-     "courses": [
-      "大数据分析@icourse163(q=0.5731)",
-      "大数据分析与应用@icourse163(q=0.5587)",
-      "Data Analysis@edx(q=0.525)"
+     "prerequisites": [
+      "信息检索",
+      "自然语言处理"
      ],
-     "estimated_hours": 30.0,
+     "courses": [
+      "大数据分析@icourse163(q=0.5731)"
+     ],
+     "estimated_hours": 180.0,
      "priority": "medium"
     },
     {
      "skill": "Vertex AI",
-     "prerequisites": [],
+     "prerequisites": [
+      "计算机基础",
+      "Python",
+      "线性代数",
+      "统计学",
+      "机器学习",
+      "云计算"
+     ],
      "courses": [
       "IBM AI Developer@coursera(q=0.7156)"
      ],
-     "estimated_hours": 30.0,
+     "estimated_hours": 335.0,
      "priority": "medium"
     },
     {
@@ -2023,12 +2426,13 @@
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
-    "course": 0.62,
-    "hours": 0.64,
-    "mean": 0.74
+    "prerequisite": 1.0,
+    "course": 0.86,
+    "hours": 1.0,
+    "mean": 0.96
    },
-   "reasonable": false
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15）：生成式AI应用 (pos_3180) 路径合理，维持预评分 mean=0.96"
   }
  ]
 }
