@@ -272,7 +272,9 @@ def _import_jd_tx(
         source=evidence.get("source", ""),
         source_url=evidence.get("source_url", ""),
         crawled_at=evidence.get("crawled_at", ""),
-        raw_text=str(raw_text)[:65535] if raw_text else "",
+        # 08-14：移除 65535 截断（初始化模板遗留，Neo4j 无属性长度限制），
+        # Evidence 保留 JD 原文完整备份供证据追溯
+        raw_text=str(raw_text) if raw_text else "",
         position_id=position_id,
         now=now,
     )
