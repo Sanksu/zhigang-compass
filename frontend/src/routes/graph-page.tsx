@@ -106,7 +106,9 @@ function toGraphData(raw: PanoramaData): GraphData {
       totalSkills: nodes.filter((n) => n.type === 'skill').length,
       totalEdges: edges.length,
       returnedNodes: nodes.length,
-      totalNodesInGraph: nodes.length,
+      // 08-14 契约修复：全量节点数取后端 total_nodes（此前恒等于返回数，
+      // 「已截断采样」提示为死代码）；后端未返回时回落返回数
+      totalNodesInGraph: raw.stats?.total_nodes ?? nodes.length,
     },
   }
 }

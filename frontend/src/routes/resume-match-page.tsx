@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw, FileText, ThumbsUp, ThumbsDown, RefreshCw, Sparkles } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -319,6 +319,10 @@ export function ResumeMatchPage() {
     }
   }
 
+  // 轮询中止标志（08-14 审查：路由切走后停止轮询，避免卸载后 setState/请求浪费）
+  const pollCancelledRef = useRef(false)
+  useEffect(() => () => { pollCancelledRef.current = true }, [])
+
   // 轮询推荐任务状态：pending/running 等待，success/failed 结束，超时抛错
   async function pollMatchTask(
     taskId: string,
@@ -326,6 +330,7 @@ export function ResumeMatchPage() {
   ): Promise<{ status: string; match_id?: string; error?: string }> {
     const deadline = Date.now() + maxWaitMs
     for (;;) {
+      if (pollCancelledRef.current) throw new Error('已离开页面，推荐轮询中止')
       const task = await apiGet<{ status: string; match_id?: string; error?: string }>(
         `/match/task/${taskId}`,
       )

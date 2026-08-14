@@ -63,6 +63,8 @@ async def _verified_positions(db: AsyncSession, query: str) -> list[RetrievedChu
     q = (query or "").strip().lower()
     if not q:
         return []
+    # 通配符转义（08-14 审查）：用户输入 %/_ 会放大 ILIKE 检索面，转义为字面量
+    q = q.replace("\\", "\\\\").replace("%", "\%").replace("_", "\_")
     rows = (
         await db.scalars(
             select(DiscoveryCandidate)
@@ -154,6 +156,8 @@ async def _diagnoses(db: AsyncSession, query: str) -> list[RetrievedChunk]:
     q = (query or "").strip().lower()
     if not q:
         return []
+    # 通配符转义（08-14 审查）：用户输入 %/_ 会放大 ILIKE 检索面，转义为字面量
+    q = q.replace("\\", "\\\\").replace("%", "\%").replace("_", "\_")
     rows = (
         await db.scalars(
             select(DiagnosisReportRecord)

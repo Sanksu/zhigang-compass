@@ -31,14 +31,14 @@ export type GraphNode = components['schemas']['GraphNode'] & {
 /** 契约 GraphEdge（source/target/weight/necessity/level） */
 export type GraphEdge = components['schemas']['GraphEdge']
 
-/** 前端图统计容器（toGraphData 由返回 nodes/edges 自算，非后端字段） */
+/** 前端图统计容器（由后端 GraphViewStats 契约映射，total_* 为图谱全量） */
 export interface GraphStats {
   totalPositions: number
   totalSkills: number
   totalEdges: number
   /** 实际返回节点数（受 limit 约束） */
   returnedNodes: number
-  /** 全量节点总数（可能 > returnedNodes） */
+  /** 全量节点总数（后端 total_nodes，可能 > returnedNodes；缺失时回落返回数） */
   totalNodesInGraph: number
 }
 
