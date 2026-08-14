@@ -116,7 +116,7 @@ EXTRACT_JOBS_JS = """
 """
 
 
-async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL, max_items: int = 30) -> int:
+async def crawl(keyword: str, cdp_url: str = DEFAULT_CDP_URL, max_items: int = 100) -> int:
     """通过 CDP 连接已启动的 Chrome/Edge，从脉脉飞书招聘页提取岗位。
 
     前置条件：

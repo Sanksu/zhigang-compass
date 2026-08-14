@@ -60,7 +60,7 @@ class ArxivSpider(Spider):
         cats = kwargs.get("categories")
         self.categories = cats.split(",") if cats else DEFAULT_CATEGORIES
         # -a max_results=50 控制单分类拉取数
-        self.max_results = int(kwargs.get("max_results", "50"))
+        self.max_results = int(kwargs.get("max_results", "100"))
         # arXiv 官方约束 1 req/3s，通过 download_delay 控制
         limit = RATE_LIMIT.get(self.platform, {})
         delay_range = limit.get("delay_range", (3, 5))

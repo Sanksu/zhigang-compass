@@ -29,4 +29,4 @@ class LinkedInPublicSpider(JobSpyBaseSpider):
     cities = ["New York", "San Francisco", "Seattle", "Boston", "Remote"]
 
     # 单次采集岗位数上限
-    results_wanted = 20
+    results_wanted = 100

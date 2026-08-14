@@ -74,7 +74,8 @@ class BossSpider(BaseSpider):
         # 历史回爬（G-01）：-a history_days=90 放宽翻页上限并透传 --since-days，
         # 由 boss_cdp_crawler 按发布时间截断；未指定时保持默认增量采集
         self.history_days = int(kwargs.get("history_days") or 0)
-        # 允许 -a max_pages 覆盖页数上限（crawl_platform 统一透传；非法输入回退默认）
+        # 采集总量上限：增量 5 页 × 每页 20 ≈ 100 条（与各源统一 100 上限）；
+        # -a max_pages 可覆盖页数（crawl_platform 统一透传；非法输入回退默认）
         try:
             self._max_pages = int(kwargs.get("max_pages") or 0) or None
         except ValueError:
