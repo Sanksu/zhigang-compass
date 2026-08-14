@@ -247,9 +247,9 @@ def test_semantic_unavailable_on_main_path_returns_503():
                       return_value=_FakeEmbedder(raise_embed=True)):
         resp = asyncio.run(graph_api.skill_similar(skill_id="s1", top_k=10, db=db))
 
-    # error(503, ...) 未显式传 http_status → 按 code 推导 HTTP 503，body code=503
+    # 契约修复（08-14）：body code 用业务码 5000，HTTP 503 由显式 http_status 承载
     assert resp.status_code == 503
-    assert json.loads(resp.body)["code"] == 503
+    assert json.loads(resp.body)["code"] == 5000
 
 
 def test_semantic_unavailable_on_fallback_returns_503():
@@ -265,7 +265,7 @@ def test_semantic_unavailable_on_fallback_returns_503():
 
     # 与主路径一致：HTTP 503 + body code=503
     assert resp.status_code == 503
-    assert json.loads(resp.body)["code"] == 503
+    assert json.loads(resp.body)["code"] == 5000
 
 
 def test_fallback_graph_empty_returns_empty():

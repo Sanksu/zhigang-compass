@@ -188,12 +188,12 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     logger.info(f"[register] 收到注册请求: username={req.username}")
     if len(req.username) < 3 or len(req.password) < 6:
         logger.warning(f"[register] 参数校验失败: username={req.username}")
-        return error(400, "用户名至少 3 字符，密码至少 6 字符")
+        return error(4000, "用户名至少 3 字符，密码至少 6 字符")
 
     existing = await db.scalar(select(User).where(User.username == req.username))
     if existing is not None:
         logger.warning(f"[register] 用户名已存在: username={req.username}")
-        return error(409, "用户名已存在")
+        return error(4090, "用户名已存在")
 
     user = User(
         username=req.username,
@@ -224,7 +224,7 @@ async def me(
     """获取当前用户信息（需登录）。"""
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
-        return error(404, "用户不存在")
+        return error(4040, "用户不存在")
     return ok(data={
         "id": user.id,
         "username": user.username,
@@ -249,7 +249,7 @@ async def update_me(
     """
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
-        return error(404, "用户不存在")
+        return error(4040, "用户不存在")
     if req.email is not None:
         user.email = req.email
     if req.phone is not None:
@@ -289,11 +289,11 @@ async def change_password(
     """
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
-        return error(404, "用户不存在")
+        return error(4040, "用户不存在")
     if not verify_password(req.old_password, user.password_hash):
-        return error(400, "原密码错误")
+        return error(4000, "原密码错误")
     if req.old_password == req.new_password:
-        return error(400, "新密码不能与原密码相同")
+        return error(4000, "新密码不能与原密码相同")
     user.password_hash = hash_password(req.new_password)
     db.add(AuditLog(
         user_id=user.id,

@@ -220,8 +220,9 @@ class TestDownloadResumeFile:
         async def _run():
             db = _FakeDb()
             resp = await download_resume_file("not-a-uuid", db, {"sub": "u1"})
-            assert resp.status_code == 400
-            assert json.loads(resp.body)["code"] == 400
+            # 契约修复（08-14）：业务码 4000 → HTTP 422（设计文档 §2.4.7）
+            assert resp.status_code == 422
+            assert json.loads(resp.body)["code"] == 4000
 
         asyncio.run(_run())
 
