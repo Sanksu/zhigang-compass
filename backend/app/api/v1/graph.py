@@ -55,6 +55,79 @@ async def _cache_set(key: str, data, ttl: int = _NODE_CACHE_TTL) -> None:
 
 
 @router.get("/panorama")
+def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int) -> tuple[dict, list]:
+    """panorama 同步 Neo4j 查询（08-14 审查：原在 async 函数内同步阻塞事件循环，抽到线程池）。"""
+    nodes: dict[str, dict] = {}
+    edges: list[dict] = []
+    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    with neo4j_driver.session() as session:
+        if focus:
+            rows = session.run(
+                f"""
+                MATCH (p:Position {{id: $focus}})-[r:REQUIRES]->(s:Skill)
+                WHERE {status_filter} AND r.weight >= $min_weight
+                RETURN p, s, r
+                """,
+                focus=focus, min_weight=min_weight, public_statuses=list(_PUBLIC_POSITION_STATUSES),
+            )
+        else:
+            rows = session.run(
+                f"""
+                MATCH (p:Position)
+                WHERE {status_filter}
+                WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
+                MATCH (p)-[r:REQUIRES]->(s:Skill)
+                WHERE r.weight >= $min_weight
+                RETURN p, s, r
+                """,
+                limit=limit, min_weight=min_weight, public_statuses=list(_PUBLIC_POSITION_STATUSES),
+            )
+        for record in rows:
+            p, s, r = record["p"], record["s"], record["r"]
+            p_id = p.get("id", "")
+            s_id = s.get("id", "")
+            nodes.setdefault(p_id, {
+                "id": p_id,
+                "name": p.get("name", p_id),
+                "type": "position",
+                "status": p.get("status", "candidate"),
+            })
+            nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
+            edges.append({
+                "source": p_id,
+                "target": s_id,
+                "weight": r.get("weight", 0.0),
+                "necessity": r.get("necessity", "must"),
+                "level": r.get("level", "中级"),
+            })
+    return nodes, edges
+
+
+def _query_skill_positions(skill_id: str, status_filter: str) -> list[dict]:
+    """skill_positions 同步 Neo4j 查询（线程池执行）。"""
+    with neo4j_driver.session() as session:
+        rows = session.run(
+            f"""
+            MATCH (p:Position)-[r:REQUIRES]->(s:Skill {{id: $skill_id}})
+            WHERE {status_filter}
+            RETURN p.id AS position_id, p.name AS position_name,
+                   r.necessity AS necessity, r.weight AS weight, r.level AS level
+            ORDER BY r.weight DESC
+            """,
+            skill_id=skill_id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
+        )
+        return [
+            {
+                "position_id": rec["position_id"],
+                "position_name": rec.get("position_name", rec["position_id"]),
+                "necessity": rec.get("necessity", "must"),
+                "weight": rec.get("weight", 0.0),
+                "level": rec.get("level", "中级"),
+            }
+            for rec in rows
+        ]
+
+
 async def panorama(
     limit: int = Query(default=100, ge=1, le=600),
     min_weight: float = Query(default=0.3, ge=0.0, le=1.0),
@@ -73,57 +146,8 @@ async def panorama(
     if cached is not None:
         return ok(data=json.loads(cached))
 
-    nodes: dict[str, dict] = {}
-    edges: list[dict] = []
-
-    # 匿名/guest 只见公开态岗位：状态过滤条件（focus 分支用 AND 衔接 weight 条件）
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
-
-    with neo4j_driver.session() as session:
-        if focus:
-            rows = session.run(
-                f"""
-                MATCH (p:Position {{id: $focus}})-[r:REQUIRES]->(s:Skill)
-                WHERE {status_filter} AND r.weight >= $min_weight
-                RETURN p, s, r
-                """,
-                focus=focus, min_weight=min_weight, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-            )
-        else:
-            # 先按岗位热度取 Top-N 岗位，再展开其边（limit 语义为岗位数，避免低频岗位被边数截断）
-            rows = session.run(
-                f"""
-                MATCH (p:Position)
-                WHERE {status_filter}
-                WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
-                MATCH (p)-[r:REQUIRES]->(s:Skill)
-                WHERE r.weight >= $min_weight
-                RETURN p, s, r
-                """,
-                limit=limit, min_weight=min_weight, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-            )
-
-        for record in rows:
-            p, s, r = record["p"], record["s"], record["r"]
-            p_id = p.get("id", "")
-            s_id = s.get("id", "")
-            nodes.setdefault(p_id, {
-                "id": p_id,
-                "name": p.get("name", p_id),
-                "type": "position",
-                # 岗位状态机（candidate/emerging/stable/declining/archived）：
-                # 前端按 status 映射形状与颜色（2D 衰退为矩形/琥珀色），
-                # 漏取会让所有岗位兜底成 candidate，状态标记失效
-                "status": p.get("status", "candidate"),
-            })
-            nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
-            edges.append({
-                "source": p_id,
-                "target": s_id,
-                "weight": r.get("weight", 0.0),
-                "necessity": r.get("necessity", "must"),
-                "level": r.get("level", "中级"),
-            })
+    nodes, edges = await asyncio.to_thread(
+        _query_panorama, scope, focus, min_weight, limit)
 
     data = {
         "nodes": list(nodes.values()),
@@ -149,27 +173,8 @@ async def skill_positions(
     if cached is not None:
         return ok(data=cached)
     status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            f"""
-            MATCH (p:Position)-[r:REQUIRES]->(s:Skill {{id: $skill_id}})
-            WHERE {status_filter}
-            RETURN p.id AS position_id, p.name AS position_name,
-                   r.necessity AS necessity, r.weight AS weight, r.level AS level
-            ORDER BY r.weight DESC
-            """,
-            skill_id=skill_id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        )
-        positions = [
-            {
-                "position_id": rec["position_id"],
-                "position_name": rec.get("position_name", rec["position_id"]),
-                "necessity": rec.get("necessity", "must"),
-                "weight": rec.get("weight", 0.0),
-                "level": rec.get("level", "中级"),
-            }
-            for rec in rows
-        ]
+    positions = await asyncio.to_thread(
+        _query_skill_positions, skill_id, status_filter)
     data = {"skill_id": skill_id, "positions": positions}
     await _cache_set(cache_key, data)
     return ok(data=data)
@@ -289,7 +294,7 @@ async def skill_prerequisites(skill_id: str):
     图谱未建边时回退人工维护字典 configs/skill_prerequisites.yaml；
     返回拓扑序（先修在前），并富化图谱技能 ID。
     """
-    skill = _load_skill(skill_id)
+    skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
         return error(4040, "技能不存在", http_status=404)
 
@@ -326,7 +331,7 @@ async def skill_courses(skill_id: str):
     图谱 LEARNABLE_VIA 课程按质量分降序返回（质量分来自 course_raw 评估产物），
     top 3 为学习路径推荐课程。
     """
-    skill = _load_skill(skill_id)
+    skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
         return error(4040, "技能不存在", http_status=404)
 
@@ -376,7 +381,7 @@ async def position_detail(
     cached = await _cache_get(cache_key)
     if cached is not None:
         return ok(data=cached)
-    position = _load_position(id, user)
+    position = await asyncio.to_thread(_load_position, id, user)
     if position is None:
         return error(4040, "岗位不存在", http_status=404)
 
@@ -424,7 +429,7 @@ async def position_skills(
     user: Optional[dict] = Depends(get_optional_user),
 ):
     """[M4] 岗位技能列表（可按 necessity 过滤）。"""
-    if _load_position(id, user) is None:
+    if await asyncio.to_thread(_load_position, id, user) is None:
         return error(4040, "岗位不存在", http_status=404)
 
     scope = _position_scope(user)
@@ -464,7 +469,7 @@ async def skill_evidence(skill_id: str):
     cached = await _cache_get(cache_key)
     if cached is not None:
         return ok(data=cached)
-    skill = _load_skill(skill_id)
+    skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
         return error(4040, "技能不存在", http_status=404)
 
@@ -510,7 +515,7 @@ async def skill_similar(
     未回填或查询失败（表缺失/维度不匹配等）时回退内存 SBERT 全量扫描，口径一致。
     阈值 0.5，过低不返回；SBERT 不可用时返回 503（语义能力缺失，不降级为猜）。
     """
-    skill = _load_skill(skill_id)
+    skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
         return error(4040, "技能不存在", http_status=404)
 
@@ -607,7 +612,7 @@ async def skill_detail(
     cached = await _cache_get(cache_key)
     if cached is not None:
         return ok(data=cached)
-    skill = _load_skill(skill_id)
+    skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
         return error(4040, "技能不存在", http_status=404)
 
