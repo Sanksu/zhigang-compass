@@ -29,15 +29,22 @@ def _name_containment(new: str, old: str) -> bool:
     return len(new) > len(old) and old in new and len(new) - len(old) >= 2
 
 
+# 岗位名通用词片段：几乎所有工程师岗名都含，不参与 split 判定——
+# 否则任意"X工程师" vs "Y工程师"共享"工程/程师"即误建演化边（08-14 测试发现）。
+_GENERIC_NAME_SEGMENTS = frozenset({"工程", "程师", "开发", "分析", "研究", "专员"})
+
+
 def _shared_segments(new: str, old: str, seg_len: int = 2) -> int:
     """新名与旧名共享的连续片段数（split 信号，按片段去重计数）。
 
     与 old_segments 取交集后计数，避免 new 中重复出现的同一片段被重复累计
-    （如"数据数据" vs "数据"：片段"数据"只算 1 次）。
+    （如"数据数据" vs "数据"：片段"数据"只算 1 次）。通用岗位词片段
+    （工程/程师/开发/分析等）排除——防"运维工程师"vs"算法工程师"式误判。
     """
     old_segments = {old[i : i + seg_len] for i in range(len(old) - seg_len + 1)}
     new_segments = {new[i : i + seg_len] for i in range(len(new) - seg_len + 1)}
-    return len(new_segments & old_segments)
+    shared = new_segments & old_segments
+    return len(shared - _GENERIC_NAME_SEGMENTS)
 
 
 def _position_nodes(snapshot: dict) -> dict[str, str]:
