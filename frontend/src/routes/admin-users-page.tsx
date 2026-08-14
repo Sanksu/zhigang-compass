@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/table'
 import { ROLES, type Role } from '@/lib/constants'
 import { apiDelete, apiGet, apiPost, apiPut, ApiError } from '@/lib/api'
+import type { components } from '@/types/api'
 import { useAuthStore } from '@/store/auth'
 
 type UserStatus = 'active' | 'disabled'
@@ -43,15 +44,8 @@ interface UserRow {
   createdAt: string
 }
 
-/** 后端 /admin/users 返回项 */
-interface BackendUser {
-  id: string
-  username: string
-  role: Role
-  is_active: boolean
-  created_at: string | null
-  updated_at: string | null
-}
+/** 后端 /admin/users 返回项（契约 AdminUser） */
+type BackendUser = components['schemas']['AdminUser']
 
 /** 角色 Badge variant — admin 墨色凸显权限，user 中性，guest 灰 */
 const ROLE_VARIANT: Record<Role, 'default' | 'outline' | 'candidate'> = {
@@ -89,7 +83,7 @@ export function AdminUsersPage() {
 
   async function load() {
     try {
-      const res = await apiGet<{ items: BackendUser[]; total: number }>('/admin/users?page=1&size=100')
+      const res = await apiGet<components['schemas']['AdminUsersData']>('/admin/users?page=1&size=100')
       setUsers(res.items.map(toRow))
       setTotal(res.total)
       setError(null)
@@ -103,7 +97,7 @@ export function AdminUsersPage() {
   // 初始加载（setState 均在异步回调内）
   useEffect(() => {
     let cancelled = false
-    apiGet<{ items: BackendUser[]; total: number }>('/admin/users?page=1&size=100')
+    apiGet<components['schemas']['AdminUsersData']>('/admin/users?page=1&size=100')
       .then((res) => {
         if (cancelled) return
         setUsers(res.items.map(toRow))

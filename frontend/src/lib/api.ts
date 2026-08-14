@@ -14,6 +14,7 @@ import axios, {
   type AxiosRequestConfig,
   type InternalAxiosRequestConfig,
 } from 'axios'
+import type { components } from '@/types/api'
 
 const BASE_URL = '/api/v1'
 
@@ -37,16 +38,8 @@ export function getRefreshToken(): string | null {
   return _refreshToken
 }
 
-/** 会话恢复后的用户信息（来自 /auth/me） */
-export interface SessionUser {
-  id: string
-  username: string
-  role: 'guest' | 'user' | 'admin'
-  email?: string
-  phone?: string
-  bio?: string
-  created_at?: string
-}
+/** 会话恢复后的用户信息（来自 /auth/me，契约 User） */
+export type SessionUser = components['schemas']['User']
 
 /**
  * 恢复会话（应用启动/刷新页面时调用）。

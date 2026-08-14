@@ -5,74 +5,32 @@
  * - position：状态机、关联技能数、description
  * - skill：级别、被多少岗位要求、关联证据、反向岗位列表、先修链、学习课程（真实 API）
  * - evidence：来源、描述
+ *
+ * 类型来源：backend/openapi/openapi.yaml components.schemas（契约优先，
+ * AGENTS.md 铁律一），经 openapi-typescript 生成至 src/types/api.d.ts。
  */
 import { X, Network, Cpu, FileText, BookOpen, GitBranch, Briefcase, ExternalLink, UnfoldVertical } from 'lucide-react'
+import type { components } from '@/types/api'
 import type { NodeDetail, PositionStatus } from './types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
+type Schema = components['schemas']
+
 /** 技能反向查询岗位项（GET /graph/skill/{id}/positions） */
-export interface SkillPositionItem {
-  position_id: string
-  position_name: string
-  necessity: 'must' | 'nice'
-  weight: number
-  level: string
-}
-
+export type SkillPositionItem = Schema['SkillPositionItem']
 /** 岗位详情必备/加分技能项（GET /graph/position/{id}） */
-export interface PositionSkillItem {
-  skill_id: string
-  skill_name: string
-  necessity: 'must' | 'nice'
-  weight: number
-  level: string
-  source_count: number
-}
-
+export type PositionSkillItem = Schema['PositionSkillItem']
 /** 岗位节点详情（GET /graph/position/{id}） */
-export interface PositionDetail {
-  id: string
-  name: string
-  required_years?: number | null
-  required_education?: string | null
-  status?: PositionStatus
-  must_skills: PositionSkillItem[]
-  nice_skills: PositionSkillItem[]
-}
-
+export type PositionDetail = Schema['PositionDetail']
 /** 技能证据项（GET /graph/skill/{id}/evidence） */
-export interface SkillEvidenceItem {
-  id: string
-  source: string
-  source_url: string
-  crawled_at?: string | null
-}
-
+export type SkillEvidenceItem = Schema['SkillEvidenceItem']
 /** 相似技能项（GET /graph/skill/similar） */
-export interface SimilarSkillItem {
-  skill_id: string
-  skill_name: string
-  similarity: number
-}
-
+export type SimilarSkillItem = Schema['SimilarSkillItem']
 /** 先修技能链项（GET /graph/skill/{id}/prerequisites） */
-export interface PrerequisiteItem {
-  skill_id: string | null
-  name: string
-  depth: number
-}
-
-/** 学习课程项（GET /graph/skill/{id}/courses） */
-export interface SkillCourseItem {
-  course_id: string
-  title: string
-  platform: string
-  quality_score?: number | null
-  recommended: boolean
-  source_url: string
-  hours?: number | null
-}
+export type PrerequisiteItem = Schema['PrerequisiteItem']
+/** 学习课程项（GET /graph/skill/{id}/courses，契约 CourseRecommendation） */
+export type SkillCourseItem = Schema['CourseRecommendation']
 
 /** 技能节点详情（skill 专属真实 API 数据） */
 export interface SkillDetail {

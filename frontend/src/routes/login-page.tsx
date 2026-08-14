@@ -7,19 +7,10 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAuthStore, permissionsOf } from '@/store/auth'
 import { apiGet, apiPost, ApiError, setAccessToken, setRefreshToken } from '@/lib/api'
+import type { components } from '@/types/api'
 
-interface LoginResult {
-  access_token: string
-  refresh_token: string
-  token_type: string
-  expires_in: number
-}
-
-interface MeResult {
-  id: string
-  username: string
-  role: 'guest' | 'user' | 'admin'
-}
+type LoginResult = components['schemas']['LoginResult']
+type MeResult = components['schemas']['User']
 
 /**
  * 登录页 — 设计文档 §10.2 /login

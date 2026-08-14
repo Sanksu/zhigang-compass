@@ -42,21 +42,12 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { apiGet, apiPost, apiPut, ApiError } from '@/lib/api'
+import type { components } from '@/types/api'
 
-/** 后端 /admin/positions/pending 候选池项（AL-M4-01 DiscoveryCandidate） */
-interface ReviewItem {
-  id: string
-  position_name: string
-  state: string
-  features: Record<string, unknown> | null
-  confidence: Record<string, unknown> | null
-  evidence_refs: string[]
-  seed_matched: boolean
-  rag_matched: boolean
-  definition_draft: string
-  detected_at: string
-  updated_at: string | null
-}
+type Schema = components['schemas']
+
+/** 后端 /admin/positions/pending 候选池项（契约 DiscoveryCandidateItem，AL-M4-01） */
+type ReviewItem = Schema['DiscoveryCandidateItem']
 
 /** 综合置信度（后端 confidence 为多维对象，取 final_confidence 或 0.5 中性值） */
 function confidenceOf(item: ReviewItem): number {
@@ -70,30 +61,11 @@ function confidenceOf(item: ReviewItem): number {
 
 const CONFIDENCE_TONE = (c: number) => (c >= 0.8 ? 'text-state-emerging' : c >= 0.7 ? 'text-state-stable' : 'text-state-declining')
 
-/** 后端 /admin/evolution/pending 项（emerging 待演化审核） */
-interface EvolutionItem {
-  id: string
-  position_name: string
-  state: string
-  confidence: number | null
-  evidence_refs: string[]
-  seed_matched: boolean
-  rag_matched: boolean
-  definition_draft: string
-  detected_at: string
-  updated_at: string | null
-}
+/** 后端 /admin/evolution/pending 项（emerging 待演化审核，契约 DiscoveryCandidateItem） */
+type EvolutionItem = Schema['DiscoveryCandidateItem']
 
-/** 后端 /admin/positions/declining 项（declining 待归档） */
-interface DecliningItem {
-  id: string
-  position_name: string
-  state: string
-  confidence: number | null
-  evidence_refs: string[]
-  detected_at: string
-  updated_at: string | null
-}
+/** 后端 /admin/positions/declining 项（declining 待归档，契约 DiscoveryCandidateItem） */
+type DecliningItem = Schema['DiscoveryCandidateItem']
 
 /**
  * 岗位审核页 — 设计文档 §7.2.2 + AL-M4-01
@@ -114,7 +86,7 @@ export function AdminReviewPage() {
   const [notice, setNotice] = useState<string | null>(null)
 
   const loadQueue = () => {
-    apiGet<{ items: ReviewItem[]; total: number }>('/admin/positions/pending')
+    apiGet<Schema['DiscoveryCandidateData']>('/admin/positions/pending')
       .then((res) => setQueue(res.items))
       .catch(() => setError('审核队列加载失败'))
       .finally(() => setLoading(false))
@@ -421,14 +393,14 @@ function EvolutionReviewTab() {
   const [archiving, setArchiving] = useState(false)
 
   const load = () => {
-    apiGet<{ items: EvolutionItem[]; total: number }>('/admin/evolution/pending')
+    apiGet<Schema['DiscoveryCandidateData']>('/admin/evolution/pending')
       .then((res) => setItems(res.items))
       .catch(() => setError('演化审核队列加载失败'))
       .finally(() => setLoading(false))
   }
 
   const loadDeclining = () => {
-    apiGet<{ items: DecliningItem[]; total: number }>('/admin/positions/declining')
+    apiGet<Schema['DiscoveryCandidateData']>('/admin/positions/declining')
       .then((res) => setDecliningItems(res.items))
       .catch(() => setDecliningItems([]))
       .finally(() => setDecliningLoading(false))
@@ -506,7 +478,7 @@ function EvolutionReviewTab() {
               <Badge variant="outline" className="text-[10px]">approve</Badge>
             </div>
             <div className="text-2xl font-semibold tracking-tight tabular-nums">
-              {items.filter((i) => i.confidence != null && i.confidence >= 0.6).length}
+              {items.filter((i) => confidenceOf(i) >= 0.6).length}
             </div>
             <div className="text-xs text-ink-muted mt-1">置信度 ≥0.6 建议晋级</div>
           </CardContent>
@@ -570,9 +542,9 @@ function EvolutionReviewTab() {
                     </TableCell>
                     <TableCell className="text-xs font-mono text-ink-muted">{item.detected_at}</TableCell>
                     <TableCell>
-                      {item.confidence != null ? (
-                        <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(item.confidence)}`}>
-                          {Math.round(item.confidence * 100)}%
+                      {confidenceOf(item) >= 0.5 ? (
+                        <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
+                          {Math.round(confidenceOf(item) * 100)}%
                         </span>
                       ) : (
                         <span className="text-xs text-ink-faint">—</span>
@@ -692,9 +664,9 @@ function EvolutionReviewTab() {
                     <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
                     <TableCell className="text-xs font-mono text-ink-muted">{item.detected_at}</TableCell>
                     <TableCell>
-                      {item.confidence != null ? (
-                        <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(item.confidence)}`}>
-                          {Math.round(item.confidence * 100)}%
+                      {confidenceOf(item) >= 0.5 ? (
+                        <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
+                          {Math.round(confidenceOf(item) * 100)}%
                         </span>
                       ) : (
                         <span className="text-xs text-ink-faint">—</span>
@@ -774,36 +746,24 @@ function EvolutionReviewTab() {
 /**
  * 岗位人工编辑 Tab — 设计文档 §12.2
  *
- * 后端契约（backend/app/api/v1/admin.py）：
+ * 后端契约（backend/openapi/openapi.yaml）：
  * - GET /admin/positions/{name} 岗位详情：skills[{name, necessity, weight}] / core_duties / scenarios 等
  * - PUT /admin/positions/{name} 技能全量替换（necessity ∈ must|nice，weight ∈ 0-1）+ 文本字段更新，
  *   实际变更写入 PositionEditLog；返回 {position_name, updated, diff_summary}
  */
-interface SkillRow {
+/** 编辑表单技能行（PUT 提交形状：name/necessity/weight，不含只读 level） */
+interface SkillFormRow {
   name: string
   necessity: 'must' | 'nice'
   weight: number
 }
 
-interface PositionDetail {
-  id: string
-  name: string
-  level: string
-  industry: string
-  salary_range: string
-  status: string
-  core_duties: string[]
-  scenarios: string[]
-  updated_at: string
-  skills: SkillRow[]
-  education: { name: string; necessity: string; level: string }[]
-  certifications: { name: string; necessity: string; level: string }[]
-}
+type PositionDetail = Schema['PositionEditDetail']
 
 function PositionEditorTab() {
   const [positionName, setPositionName] = useState('')
   const [detail, setDetail] = useState<PositionDetail | null>(null)
-  const [skills, setSkills] = useState<SkillRow[]>([])
+  const [skills, setSkills] = useState<SkillFormRow[]>([])
   const [coreDuties, setCoreDuties] = useState('')
   const [scenarios, setScenarios] = useState('')
   const [loading, setLoading] = useState(false)
@@ -834,7 +794,7 @@ function PositionEditorTab() {
     }
   }
 
-  function updateSkill(index: number, patch: Partial<SkillRow>) {
+  function updateSkill(index: number, patch: Partial<SkillFormRow>) {
     setSkills((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r)))
   }
 
@@ -851,7 +811,7 @@ function PositionEditorTab() {
     setNotice(null)
     setDiffSummary(null)
     try {
-      const res = await apiPut<{ position_name: string; updated: boolean; diff_summary: string }>(
+      const res = await apiPut<Schema['PositionEditResult']>(
         `/admin/positions/${encodeURIComponent(detail.name)}`,
         {
           skills: cleaned,
@@ -964,7 +924,7 @@ function PositionEditorTab() {
                         <TableCell>
                           <Select
                             value={s.necessity}
-                            onValueChange={(v) => updateSkill(i, { necessity: v as SkillRow['necessity'] })}
+                            onValueChange={(v) => updateSkill(i, { necessity: v as SkillFormRow['necessity'] })}
                           >
                             <SelectTrigger className="h-8">
                               <SelectValue />
@@ -1044,15 +1004,7 @@ function PositionEditorTab() {
  * 数据源：真实 GET /admin/discovery/watch（技术热点信号列表，支持按 status/source 筛选）。
  * 展示技能信号周报：信号源 / 信号值 / 周期 / 状态（watch / candidate_promoted / archived）。
  */
-interface WatchRow {
-  skill_name: string
-  signal_source: string
-  signal_value: number
-  period: string
-  status: string
-  first_seen_at: string | null
-  last_signal_at: string | null
-}
+type WatchRow = Schema['WatchItem']
 
 const WATCH_SOURCE_LABEL: Record<string, string> = {
   jd: 'JD',
@@ -1075,7 +1027,7 @@ function TechnologyWatchTab() {
     const params = new URLSearchParams({ size: '50' })
     if (status) params.set('status', status)
     if (source) params.set('source', source)
-    apiGet<{ items: WatchRow[]; total: number }>(`/admin/discovery/watch?${params}`)
+    apiGet<Schema['WatchData']>(`/admin/discovery/watch?${params}`)
       .then((res) => {
         setItems(res.items)
         setTotal(res.total)
