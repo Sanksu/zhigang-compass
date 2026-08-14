@@ -6,7 +6,10 @@
 聚合口径：
 - Position.freq           = 命中该岗位名的 JD 条数（Evidence 数）
 - Position.required_years = 该岗位 JD 经验要求最小年限的中位数（无则保留原值）
-- Position.last_updated   = 本次聚合时间
+- Position.last_updated   = 该岗位最近一条 JD 的采集时间（crawled_at 规范化 ISO；
+                            无 JD 时间回退本次聚合时间）——供匹配引擎时效衰减
+                            （180d→0.95 / 365d→0.85）判定。此前写"本次聚合时间"
+                            导致岗位恒新鲜、衰减永不触发（08-14 修复）
 - Position.soft_skills    = 软技能白名单（按 JD 命中数降序，设计文档 9.2 节）
 - REQUIRES.weight         = must=0.8 / nice=0.4（沿用图谱现有两档约定）
 - REQUIRES.necessity      = P2-D 三重条件判 must：hit≥3 样本保护 + JD 覆盖率
@@ -26,7 +29,10 @@ from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
+from datetime import datetime
 from statistics import median
+
+from app.services.data_quality.update_status import parse_crawled_at
 
 from app.services.extraction.dictionary import (
     SOFT_SKILL_WHITELIST,
@@ -207,7 +213,7 @@ class SkillAgg:
 
 
 class PositionAgg:
-    __slots__ = ("jd_count", "skills", "exp_years", "soft_skills", "typical_scenarios")
+    __slots__ = ("jd_count", "skills", "exp_years", "soft_skills", "typical_scenarios", "last_crawled")
 
     def __init__(self) -> None:
         self.jd_count = 0
@@ -217,6 +223,8 @@ class PositionAgg:
         self.soft_skills: Counter = Counter()
         # 典型项目场景文本计数（写回 Position.typical_scenarios，按频次降序截断）
         self.typical_scenarios: Counter = Counter()
+        # 最近一条参与聚合 JD 的采集时间（写回 Position.last_updated 供时效衰减）
+        self.last_crawled: datetime | None = None
 
 
 def _min_experience_years(snapshot: dict) -> float | None:
@@ -383,6 +391,13 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
             jd_weight = min(jd_weight, _SOURCE_INFLATION_WEIGHT)
         pa = agg[pos]
         pa.jd_count += 1
+        # 时效衰减依据（08-14 修复）：记录该岗位最近一条 JD 的采集时间
+        # （此前 last_updated 写聚合时间，岗位恒新鲜，engine 的 180d/365d 惩罚永不触发）
+        crawled = getattr(row, "crawled_at", None)
+        if crawled:
+            dt = parse_crawled_at(crawled)
+            if dt is not None and (pa.last_crawled is None or dt > pa.last_crawled):
+                pa.last_crawled = dt
         years = _min_experience_years(snap)
         if years is not None:
             pa.exp_years.append(years)
@@ -454,7 +469,8 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
             "pos": pos,
             "freq": pa.jd_count,
             "req_years": median(pa.exp_years) if pa.exp_years else None,
-            "now": now,
+            # 最近 JD 采集时间（规范化 ISO）；无 JD 时间（旧数据）回退聚合时间
+            "last_updated": pa.last_crawled.isoformat() if pa.last_crawled else now,
             # 软技能按 JD 命中数降序（低频软技能不写入岗位本体）
             "soft_skills": [s for s, _ in pa.soft_skills.most_common()],
             # 典型场景按 JD 命中数降序，上限 20 条防属性膨胀（仅非空时 SET）
@@ -470,7 +486,7 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
                 UNWIND $items AS it
                 MATCH (p:Position {name: it.pos})
                 SET p.freq = it.freq,
-                    p.last_updated = it.now,
+                    p.last_updated = it.last_updated,
                     p.required_years = coalesce(it.req_years, p.required_years),
                     p.soft_skills = it.soft_skills,
                     p.typical_scenarios = coalesce(

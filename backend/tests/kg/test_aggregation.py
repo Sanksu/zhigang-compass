@@ -1,8 +1,10 @@
 """岗位聚合 level 合并测试（设计文档 §5.5 REQUIRES 边）。
 
-覆盖：_position_skills 携带 level、_most_common_level 众数、build_aggregates 收集 level。
+覆盖：_position_skills 携带 level、_most_common_level 众数、build_aggregates 收集 level、
+last_updated 时效依据（08-14 修复：岗位最近 JD 采集时间）。
 """
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -619,3 +621,44 @@ class TestAggregatesAlignedDeletion:
         fake = _FakeSession()
         result = write_aggregates(fake, build_aggregates(rows), now="2026-08-09T00:00:00")
         assert result["removed_edges"] == 0
+
+
+class TestLastUpdated:
+    """时效衰减依据（08-14 修复）：last_updated = 岗位最近 JD 采集时间。"""
+
+    def _row(self, position: str, crawled_at: str | None = None):
+        return SimpleNamespace(
+            snapshot={
+                "extraction": {
+                    "position_name": position,
+                    "requirements": [{"skill_name": "Java", "necessity": "must", "level": None}],
+                }
+            },
+            source="boss",
+            crawled_at=crawled_at,
+        )
+
+    def test_last_crawled_is_max_of_rows(self):
+        """同岗位多条 JD 取最近采集时间。"""
+        rows = [
+            self._row("Java开发工程师", "2026-01-01T00:00:00+00:00"),
+            self._row("Java开发工程师", "2026-06-01T00:00:00+00:00"),
+        ]
+        agg = build_aggregates(rows)
+        assert agg["Java开发工程师"].last_crawled == datetime(2026, 6, 1, tzinfo=timezone.utc)
+
+    def test_write_uses_last_crawled(self):
+        """写回 last_updated = 最近 JD 采集时间（供 engine 时效衰减判定）。"""
+        rows = [self._row("Java开发工程师", "2026-06-01T00:00:00+00:00")]
+        fake = _FakeSession()
+        write_aggregates(fake, build_aggregates(rows), now="2026-08-12T00:00:00")
+        items = fake.calls[0][1]["items"]
+        assert items[0]["last_updated"] == "2026-06-01T00:00:00+00:00"
+
+    def test_missing_crawled_at_falls_back_to_now(self):
+        """无 JD 时间（旧数据）回退聚合时间，与历史行为一致。"""
+        rows = [self._row("Java开发工程师", None)]
+        fake = _FakeSession()
+        write_aggregates(fake, build_aggregates(rows), now="2026-08-12T00:00:00")
+        items = fake.calls[0][1]["items"]
+        assert items[0]["last_updated"] == "2026-08-12T00:00:00"
