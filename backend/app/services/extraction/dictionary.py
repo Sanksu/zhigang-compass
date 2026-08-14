@@ -788,7 +788,7 @@ _POSITION_STOPWORDS: set[str] = {
     "Palantir 管理员", "Kubernetes 服务", "Azure 云", "ML平台", "SCADA迁移与集成",
     "Genesys CCaaS", "SAP BTP", "EDC", "WCS", "DFT", "Power Automate", "KDB",
     "BI", "Angular/NodeJS", "智能体平台", "爬虫", "提示词", "物联网",
-    "GRC 自动化", "云系统管理员",
+    "GRC 自动化", "云系统管理员", "AS400 应用程序", "AS400",
     # 碎片/业务词误抽（工作内容/领域词被抽成岗位，非真实业务岗）
     "应用程序", "商业智能", "安卓", "构建与发布", "工业", "技术支持", "自动化",
     "智能化", "自动化集成", "商业智能与平台管理", "数据处理", "控制系统",
