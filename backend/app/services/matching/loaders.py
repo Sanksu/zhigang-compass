@@ -138,13 +138,18 @@ def load_positions_from_graph() -> list[PositionProfile]:
                 continue
             soft = [s for s in (rec.get("soft") or []) if s]
             pos.soft_skills = soft
+            # 软技能与 REQUIRES nice 同名时去重，避免同一技能重复计入评分
+            existing = {s.skill_name for s in pos.nice_skills}
             for name in soft:
+                if name in existing:
+                    continue
                 pos.nice_skills.append(SkillRequirement(
                     skill_id=name,
                     skill_name=name,
                     necessity=Necessity.NICE,
                     weight=_SOFT_SKILL_WEIGHT,
                 ))
+                existing.add(name)
 
     result = list(positions.values())
     # 预热语义向量：一次 batch encode 所有岗位技能名，评分时不再逐条前向推理
