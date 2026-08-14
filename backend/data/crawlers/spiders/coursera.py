@@ -30,7 +30,10 @@ from crawlers.settings import RATE_LIMIT
 
 
 COURSERA_BASE = "https://www.coursera.org"
-COURSERA_SEARCH_URL = "https://www.coursera.org/search?query={keyword}"
+# 08-14 合规修复：coursera robots.txt 明确 Disallow /search（搜索页禁止爬取），
+# /browse 路径未禁（实测 200 + ProductCard 结构一致）——改用 browse 页 + query 过滤
+# （仍为公开课程元数据，符合 robots 规则）
+COURSERA_SEARCH_URL = "https://www.coursera.org/browse?query={keyword}"
 
 # 默认搜索关键词（与项目 AI/大数据/全栈方向一致）
 DEFAULT_KEYWORDS = ["Python", "Machine Learning", "Data Science", "SQL", "Java"]
