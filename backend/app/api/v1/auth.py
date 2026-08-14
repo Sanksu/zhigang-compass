@@ -358,6 +358,19 @@ async def logout(
     refresh_token 来源：body（旧客户端）或 httpOnly Cookie。
     """
     refresh_token = _extract_refresh_token(request, req)
+    # 08-14 补：拉黑 access token jti（Authorization: Bearer），登出后立即失效
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        access_token = auth_header[7:].strip()
+        try:
+            access_payload = decode_token(access_token)
+            if access_payload and access_payload.get("jti"):
+                await redis.set(
+                    f"token:blacklist:{access_payload['jti']}", "1",
+                    ex=settings.jwt_access_token_expire_minutes * 60,
+                )
+        except (TokenExpiredError, Exception):
+            pass  # access 过期/非法无需拉黑，登出幂等
     try:
         payload = decode_token(refresh_token) if refresh_token else None
     except TokenExpiredError:
