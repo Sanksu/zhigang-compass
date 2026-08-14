@@ -34,7 +34,6 @@ import os
 import subprocess
 import sys
 import time
-from urllib.parse import urlencode
 
 from scrapy import Request
 from scrapy.http import Response
@@ -75,6 +74,11 @@ class BossSpider(BaseSpider):
         # 历史回爬（G-01）：-a history_days=90 放宽翻页上限并透传 --since-days，
         # 由 boss_cdp_crawler 按发布时间截断；未指定时保持默认增量采集
         self.history_days = int(kwargs.get("history_days") or 0)
+        # 允许 -a max_pages 覆盖页数上限（crawl_platform 统一透传；非法输入回退默认）
+        try:
+            self._max_pages = int(kwargs.get("max_pages") or 0) or None
+        except ValueError:
+            self._max_pages = None
         # CDP 调试端点：本地默认 http://127.0.0.1:9222，支持局域网内容器浏览器
         self.cdp_url = os.environ.get("BOSS_CDP_URL", "http://127.0.0.1:9222")
         # cookies 文件模式：容器等无 CDP 浏览器环境复用导出的登录态文件
@@ -98,7 +102,7 @@ class BossSpider(BaseSpider):
 
     def _build_cmd(self, task: dict) -> list[str]:
         """构造 boss_cdp_crawler 采集命令（含历史回爬参数）。"""
-        max_pages = BACKFILL_MAX_PAGES if self.history_days else INCREMENTAL_MAX_PAGES
+        max_pages = self._max_pages or (BACKFILL_MAX_PAGES if self.history_days else INCREMENTAL_MAX_PAGES)
         cmd = [
             sys.executable, self.crawler_script,
             "--keyword", task["keyword"],

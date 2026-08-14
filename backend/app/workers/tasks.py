@@ -115,7 +115,9 @@ async def _update_crawl_task(task_id: str | None, **fields) -> None:
 # 08-14 审查：按源分级——zhilian 全量正常 20-40min，900s 恒杀正常采集；
 # 慢渲染源单独放宽（2400s = 40min 上限），其余源维持 15min 兜底
 _CRAWL_TIMEOUT_SEC = 900
-_CRAWL_TIMEOUT_BY_SPIDER = {"zhilian": 2400}
+# 单源超时上限（秒）。zhilian 详情补抓 8-15s/条限速，max_results=200 有界
+# 正常耗时约 1.6h（5760s）——超时须 > 正常耗时（防误杀），仍兜底挂死。
+_CRAWL_TIMEOUT_BY_SPIDER = {"zhilian": 7200}
 
 
 def _crawl_timeout(spider_name: str) -> int:
