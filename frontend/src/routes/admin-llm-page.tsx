@@ -30,23 +30,12 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiGet, apiPut } from '@/lib/api'
+import type { components } from '@/types/api'
 
-/** LLM provider 配置（对齐契约 /admin/llm-config） */
-interface LlmProviderConfig {
-  name: string
-  priority: number
-  base_url: string
-  api_key?: string
-  model: string
-  supports_function_calling?: boolean
-  enabled?: boolean
-  /** provider 特定请求参数（如 deepseek 关闭思考模式 thinking.type），编辑时须保留 */
-  extra_body?: Record<string, unknown>
-}
+/** LLM provider 配置（契约 LlmProviderConfig，/admin/llm-config） */
+type LlmProviderConfig = components['schemas']['LlmProviderConfig']
 
-interface LlmConfig {
-  providers: LlmProviderConfig[]
-}
+type LlmConfig = components['schemas']['LlmConfig']
 
 interface FormState extends LlmProviderConfig {
   api_key: string

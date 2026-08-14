@@ -22,6 +22,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiGet, apiPost, ApiError, getAccessToken } from '@/lib/api'
+import type { components } from '@/types/api'
 import {
   Dialog,
   DialogContent,
@@ -44,18 +45,6 @@ interface PlatformRow {
   todayCount: number
   totalCount: number
   lastRun: string
-}
-
-/** 后端 /admin/crawl/history 返回项 */
-interface CrawlHistoryItem {
-  id: string
-  platform: string
-  platform_name: string
-  keyword: string
-  status: 'pending' | 'running' | 'success' | 'failed'
-  items: number
-  error: string
-  created_at: string | null
 }
 
 interface HistoryRow {
@@ -84,25 +73,8 @@ interface CurrentTask {
   taskId?: string
 }
 
-/** 后端 /admin/crawl/status 返回项 */
-interface CrawlPlatform {
-  id: string
-  name: string
-  level: PlatformLevel
-  files: number
-  total_count: number
-  today_count: number
-  last_run: string | null
-}
-
-interface CrawlStatusData {
-  metrics: {
-    today_count: number
-    output_total: number
-    raw: { jd: number; course: number; paper: number; community: number }
-  }
-  platforms: CrawlPlatform[]
-}
+/** 后端 /admin/crawl/status 响应 data（契约 CrawlStatusData） */
+type CrawlStatusData = components['schemas']['CrawlStatusData']
 
 interface MetricCardItem {
   id: string
@@ -320,7 +292,7 @@ export function AdminCrawlPage() {
 
   // 加载爬取历史（真实 /admin/crawl/history，task_status 倒序）
   useEffect(() => {
-    apiGet<{ items: CrawlHistoryItem[]; total: number }>('/admin/crawl/history')
+    apiGet<components['schemas']['CrawlHistoryData']>('/admin/crawl/history')
       .then((res) =>
         setHistory(
           res.items.map((h) => ({
@@ -398,7 +370,7 @@ export function AdminCrawlPage() {
     })
     setNotice(null)
     try {
-      const res = await apiPost<{ task_id: string; platform: string; status: string }>('/admin/crawl/trigger', {
+      const res = await apiPost<components['schemas']['CrawlTriggerResult']>('/admin/crawl/trigger', {
         platform,
         keyword,
         city: form.city?.trim() || '',

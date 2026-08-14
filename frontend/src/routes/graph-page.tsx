@@ -131,7 +131,7 @@ export function GraphPage() {
   const [error, setError] = useState<string | null>(null)
   // 全文检索（GET /graph/search）
   const [query, setQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<{ id: string; name: string; type: string; score: number }[]>([])
+  const [searchResults, setSearchResults] = useState<components['schemas']['SearchResultItem'][]>([])
   const [searching, setSearching] = useState(false)
   const [searchDone, setSearchDone] = useState(false)
   const searchBoxRef = useRef<HTMLDivElement>(null)
@@ -274,7 +274,7 @@ export function GraphPage() {
     setSearchDone(true)
     const seq = ++searchSeqRef.current
     setSearching(true)
-    apiGet<{ items: { id: string; name: string; type: string; score: number }[]; total: number }>(
+    apiGet<components['schemas']['SearchResultsData']>(
       `/graph/search?q=${encodeURIComponent(term)}&type=skill&size=8`,
     )
       .then((r) => {
