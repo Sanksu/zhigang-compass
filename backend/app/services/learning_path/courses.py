@@ -71,8 +71,8 @@ _UNIT_PREFIXES = sorted(_UNIT_HOURS, key=len, reverse=True)
 # 仅收录课程缺口技能（30 案例评审无课清单），避免表膨胀。
 _EN_SKILL_HINTS: dict[str, tuple[str, ...]] = {
     "微服务": ("microservice",),
-    "Shell": ("shell",),
-    "RESTful API": ("rest api", "restful"),
+    "Shell": ("shell", "linux"),
+    "RESTful API": ("rest api", "restful", "web"),
     "XML": ("xml",),
     "RabbitMQ": ("rabbitmq",),
     "gRPC": ("grpc",),
@@ -80,10 +80,10 @@ _EN_SKILL_HINTS: dict[str, tuple[str, ...]] = {
     "OpenSearch": ("opensearch",),
     "Qdrant": ("qdrant",),
     "XGBoost": ("xgboost",),
-    "VMware": ("vmware",),
+    "VMware": ("vmware", "虚拟化"),
     "LangGraph": ("langgraph",),
     "ETL 管道": ("etl",),
-    "API": ("api",),
+    "API": ("api", "web"),
     "Groovy": ("groovy",),
     "Power BI": ("power bi",),
     "Prometheus": ("prometheus",),
@@ -345,6 +345,17 @@ async def load_courses_for_skill(
             _filter_by_title_similarity, rows, skill_name, semantic,
             _COURSE_TITLE_SIM_THRESHOLD,
         )
+        if not rows:
+            # 技能级 fallback 命中沾边技能（如 VMware→Virtual Machines 返回
+            # Core Java 等无关课）被门控全滤——此时课程级兜底直配课程池标题
+            # 反而更准（'虚拟化技术与应用' 词面豁免命中），追加一次兜底
+            pool_rows = await asyncio.to_thread(
+                _semantic_match_course, skill_name, semantic, _COURSE_POOL_MATCH_THRESHOLD)
+            if pool_rows:
+                rows = await asyncio.to_thread(
+                    _filter_by_title_similarity, pool_rows, skill_name, semantic,
+                    _COURSE_TITLE_SIM_THRESHOLD,
+                )
         if not rows:
             return []
 

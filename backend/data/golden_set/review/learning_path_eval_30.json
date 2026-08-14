@@ -1,16 +1,16 @@
 {
  "summary": {
   "case_count": 30,
-  "reasonable_count": 9,
-  "reasonable_ratio": 0.3,
+  "reasonable_count": 12,
+  "reasonable_ratio": 0.4,
   "target_ratio": 0.8,
   "target_met": false,
   "avg_dims": {
    "completeness": 1.0,
    "prerequisite": 0.62,
-   "course": 0.757,
+   "course": 0.841,
    "hours": 0.648,
-   "mean": 0.757
+   "mean": 0.778
   },
   "note": "预评分（规则化 AI 评审），专家复核后重跑 --re-score 定稿"
  },
@@ -79,7 +79,9 @@
     {
      "skill": "XML",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "XML与电子商务应用@icourse163(q=0.5319)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     }
@@ -87,9 +89,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.9,
-    "course": 0.86,
+    "course": 1.0,
     "hours": 0.88,
-    "mean": 0.91
+    "mean": 0.94
    },
    "reasonable": true
   },
@@ -119,8 +121,8 @@
      "prerequisites": [],
      "courses": [
       "AWS Cloud Technical Essentials@coursera(q=0.661)",
-      "AWS Cloud Technical Essentials@edx(q=0.525)",
-      "Google Cloud Computing Foundations: Networking and Security in Google Cloud@edx(q=None)"
+      "Google Cloud Computing Foundations: Networking and Security in Google Cloud@edx(q=0.525)",
+      "AWS Cloud Technical Essentials@edx(q=0.525)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -137,8 +139,8 @@
      "prerequisites": [],
      "courses": [
       "虚拟化技术与应用@icourse163(q=0.6128)",
-      "云计算导论@icourse163(q=0.5382)",
-      "数据可视化@icourse163(q=0.4839)"
+      "网络数据挖掘与可视化@icourse163(q=0.5413)",
+      "云计算导论@icourse163(q=0.5381)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -184,9 +186,9 @@
      "skill": "VAD",
      "prerequisites": [],
      "courses": [
+      "信息描述@icourse163(q=0.5319)",
       "运筹学@icourse163(q=0.5193)",
-      "简明世界史（一）@icourse163(q=0.5126)",
-      "简明世界史（二）@icourse163(q=0.5073)"
+      "简明世界史（二）@icourse163(q=0.5072)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -205,7 +207,11 @@
     {
      "skill": "模型调优",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "人工智能：模型与算法@icourse163(q=0.5965)",
+      "数学建模@icourse163(q=0.5581)",
+      "试验设计与分析@icourse163(q=0.5006)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     }
@@ -213,9 +219,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.86,
+    "course": 1.0,
     "hours": 0.52,
-    "mean": 0.72
+    "mean": 0.76
    },
    "reasonable": false
   },
@@ -230,7 +236,7 @@
      "skill": "Prometheus",
      "prerequisites": [],
      "courses": [
-      "习近平新时代中国特色社会主义思想概论@icourse163(q=0.5574)"
+      "习近平新时代中国特色社会主义思想概论@icourse163(q=0.5573)"
      ],
      "estimated_hours": 55.0,
      "priority": "high"
@@ -238,7 +244,11 @@
     {
      "skill": "Shell",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "C Programming with Linux@coursera(q=0.6186)",
+      "Linux操作系统@icourse163(q=0.5644)",
+      "Linux网络管理@icourse163(q=0.5448)"
+     ],
      "estimated_hours": 55.0,
      "priority": "high"
     },
@@ -273,8 +283,8 @@
      "skill": "LangGraph",
      "prerequisites": [],
      "courses": [
-      "Agentic AI: LangChain and LangGraph@edx(q=None)",
-      "Agentic AI with LangGraph, CrewAI, AG2, and BeeAI@edx(q=None)"
+      "Agentic AI: LangChain and LangGraph@edx(q=0.525)",
+      "Agentic AI with LangGraph, CrewAI, AG2, and BeeAI@edx(q=0.525)"
      ],
      "estimated_hours": 70.0,
      "priority": "medium"
@@ -283,9 +293,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.86,
+    "course": 1.0,
     "hours": 1.0,
-    "mean": 0.89
+    "mean": 0.93
    },
    "reasonable": true
   },
@@ -408,8 +418,8 @@
      "skill": "Qlik",
      "prerequisites": [],
      "courses": [
-      "简明世界史（一）@icourse163(q=0.5126)",
-      "简明世界史（二）@icourse163(q=0.5073)"
+      "简明世界史（一）@icourse163(q=0.5125)",
+      "简明世界史（二）@icourse163(q=0.5072)"
      ],
      "estimated_hours": 30.0,
      "priority": "high"
@@ -483,8 +493,8 @@
      "prerequisites": [],
      "courses": [
       "数据库原理——GaussDB云数据库@icourse163(q=0.541)",
-      "云计算导论@icourse163(q=0.5382)",
-      "Introduction to Cloud Computing@edx(q=None)"
+      "云计算导论@icourse163(q=0.5381)",
+      "Introduction to Cloud Computing@edx(q=0.525)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -509,7 +519,11 @@
     {
      "skill": "VMware",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "虚拟化技术与应用@icourse163(q=0.6128)",
+      "云计算技术与应用@icourse163(q=0.5543)",
+      "云计算技术与实践@icourse163(q=0.5347)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -517,9 +531,9 @@
      "skill": "Agile",
      "prerequisites": [],
      "courses": [
-      "人工智能应用基础@icourse163(q=0.6258)",
       "人工智能应用素养@icourse163(q=0.6173)",
-      "生成式人工智能应用基础@icourse163(q=0.5828)"
+      "嵌入式系统及应用@icourse163(q=0.5871)",
+      "嵌入式应用开发@icourse163(q=0.5633)"
      ],
      "estimated_hours": 40.0,
      "priority": "medium"
@@ -527,7 +541,11 @@
     {
      "skill": "Service Mapping",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "Web服务@icourse163(q=0.5583)",
+      "Web服务与RESTful技术@icourse163(q=0.5251)",
+      "服务计算与服务生态系统@icourse163(q=0.514)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -541,7 +559,11 @@
     {
      "skill": "Shell",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "C Programming with Linux@coursera(q=0.6186)",
+      "Linux操作系统@icourse163(q=0.5644)",
+      "Linux网络管理@icourse163(q=0.5448)"
+     ],
      "estimated_hours": 55.0,
      "priority": "medium"
     }
@@ -549,9 +571,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.44,
+    "course": 0.86,
     "hours": 0.64,
-    "mean": 0.65
+    "mean": 0.75
    },
    "reasonable": false
   },
@@ -568,7 +590,7 @@
      "courses": [
       "电子商务概论@icourse163(q=0.5706)",
       "Digital Marketing@edx(q=0.525)",
-      "Marketing digital y redes sociales@edx(q=None)"
+      "Marketing digital y redes sociales@edx(q=0.525)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -611,8 +633,8 @@
      "prerequisites": [],
      "courses": [
       "Web编程技术@icourse163(q=0.5998)",
-      "物联网技术概论@icourse163(q=0.5639)",
-      "网络应用编程@icourse163(q=0.5531)"
+      "嵌入式系统及应用@icourse163(q=0.5871)",
+      "网络应用编程@icourse163(q=0.5604)"
      ],
      "estimated_hours": 55.0,
      "priority": "medium"
@@ -639,7 +661,7 @@
      "prerequisites": [],
      "courses": [
       "Technical Support Fundamentals@coursera(q=0.692)",
-      "汽车维护与保养@icourse163(q=0.5774)",
+      "汽车维护与保养@icourse163(q=0.5773)",
       "Site Reliability Engineering (SRE) Principles@coursera(q=0.5427)"
      ],
      "estimated_hours": 30.0,
@@ -662,7 +684,7 @@
      "skill": "可靠性建模",
      "prerequisites": [],
      "courses": [
-      "应用统计学@icourse163(q=0.5439)",
+      "自动化测试@icourse163(q=0.5451)",
       "Site Reliability Engineering (SRE) Principles@coursera(q=0.5427)",
       "试验设计与分析@icourse163(q=0.5006)"
      ],
@@ -673,8 +695,8 @@
      "skill": "HTOL",
      "prerequisites": [],
      "courses": [
-      "简明世界史（一）@icourse163(q=0.5126)",
-      "简明世界史（二）@icourse163(q=0.5073)"
+      "简明世界史（一）@icourse163(q=0.5125)",
+      "简明世界史（二）@icourse163(q=0.5072)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -802,9 +824,9 @@
       "Linux"
      ],
      "courses": [
-      "Google Cloud Architect Learning Path@edx(q=None)",
-      "API Security on Google Cloud's Apigee API Platform@edx(q=None)",
-      "Machine Learning Operations with Google Cloud Platform (MLOps with GCP)@edx(q=None)"
+      "Google Cloud Architect Learning Path@edx(q=0.525)",
+      "API Security on Google Cloud's Apigee API Platform@edx(q=0.525)",
+      "Machine Learning Operations with Google Cloud Platform (MLOps with GCP)@edx(q=0.525)"
      ],
      "estimated_hours": 150.0,
      "priority": "medium"
@@ -883,7 +905,7 @@
      "courses": [
       "电子商务概论@icourse163(q=0.5706)",
       "Digital Marketing@edx(q=0.525)",
-      "Marketing digital y redes sociales@edx(q=None)"
+      "Marketing digital y redes sociales@edx(q=0.525)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -902,7 +924,11 @@
     {
      "skill": "API",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "WEB开发与安全@icourse163(q=0.629)",
+      "Web编程技术@icourse163(q=0.5998)",
+      "web应用开发技术@icourse163(q=0.5959)"
+     ],
      "estimated_hours": 55.0,
      "priority": "medium"
     }
@@ -910,9 +936,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.86,
+    "course": 1.0,
     "hours": 0.76,
-    "mean": 0.8
+    "mean": 0.84
    },
    "reasonable": true
   },
@@ -935,8 +961,8 @@
      "prerequisites": [],
      "courses": [
       "运筹学@icourse163(q=0.5193)",
-      "简明世界史（一）@icourse163(q=0.5126)",
-      "简明世界史（二）@icourse163(q=0.5073)"
+      "简明世界史（一）@icourse163(q=0.5125)",
+      "简明世界史（二）@icourse163(q=0.5072)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -950,9 +976,9 @@
       "Python"
      ],
      "courses": [
-      "集成电路测试与验证@icourse163(q=0.5445)",
-      "计算机二级全程备考攻略@icourse163(q=0.525)",
-      "试验设计与分析@icourse163(q=0.5006)"
+      "软件测试@icourse163(q=0.5598)",
+      "自动化测试@icourse163(q=0.5451)",
+      "集成电路测试与验证@icourse163(q=0.5445)"
      ],
      "estimated_hours": 255.0,
      "priority": "medium"
@@ -960,7 +986,11 @@
     {
      "skill": "模拟",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "数学实验@icourse163(q=0.6306)",
+      "数学建模@icourse163(q=0.5581)",
+      "嵌入式系统与实验@icourse163(q=0.5526)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -973,7 +1003,7 @@
      ],
      "courses": [
       "Introduction to Big Data@coursera(q=0.6734)",
-      "大数据基础与应用@icourse163(q=0.5848)",
+      "大数据基础与应用@icourse163(q=0.5847)",
       "Professional Data Engineer 여정 준비하기@coursera(q=0.5404)"
      ],
      "estimated_hours": 205.0,
@@ -983,11 +1013,11 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.7,
-    "course": 0.72,
+    "course": 0.86,
     "hours": 0.64,
-    "mean": 0.77
+    "mean": 0.8
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_15",
@@ -1021,6 +1051,7 @@
      "skill": "JMS",
      "prerequisites": [],
      "courses": [
+      "JSP动态WEB开发技术@icourse163(q=0.5893)",
       "Introduction to Next.js@coursera(q=0.5747)",
       "JSP程序设计技术@icourse163(q=0.5683)"
      ],
@@ -1056,8 +1087,8 @@
      "prerequisites": [],
      "courses": [
       "Web前端技术基础@icourse163(q=0.5892)",
-      "Web前端技术@icourse163(q=0.5633)",
-      "Web前端设计@icourse163(q=0.5369)"
+      "Web前端技术@icourse163(q=0.5632)",
+      "Web服务@icourse163(q=0.5583)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1089,7 +1120,10 @@
     {
      "skill": "Endpoint Security",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "网络安全技术@icourse163(q=0.5731)",
+      "网络安全与应用@icourse163(q=0.5059)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     }
@@ -1097,9 +1131,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.58,
+    "course": 0.72,
     "hours": 0.4,
-    "mean": 0.62
+    "mean": 0.65
    },
    "reasonable": false
   },
@@ -1129,8 +1163,8 @@
       "计算机基础"
      ],
      "courses": [
-      "Rust Data Engineering@edx(q=None)",
-      "Rust for DevOps@edx(q=None)"
+      "Rust Data Engineering@edx(q=0.525)",
+      "Rust for DevOps@edx(q=0.525)"
      ],
      "estimated_hours": 95.0,
      "priority": "medium"
@@ -1200,8 +1234,8 @@
      "skill": "物联网",
      "prerequisites": [],
      "courses": [
-      "网络技术与应用@icourse163(q=0.5688)",
       "物联网技术概论@icourse163(q=0.5639)",
+      "DIY智慧小屋—带你玩转物联网@icourse163(q=0.5626)",
       "物联网原理及应用@icourse163(q=0.5158)"
      ],
      "estimated_hours": 30.0,
@@ -1211,9 +1245,9 @@
      "skill": "嵌入式Linux",
      "prerequisites": [],
      "courses": [
-      "计算机应用基础@icourse163(q=0.6121)",
-      "Linux操作系统@icourse163(q=0.5645)",
-      "计算机基础@icourse163(q=0.5099)"
+      "嵌入式Linux应用与开发实践@icourse163(q=0.5597)",
+      "Linux系统应用@icourse163(q=0.5588)",
+      "Linux系统应用@icourse163(q=0.5513)"
      ],
      "estimated_hours": 70.0,
      "priority": "high"
@@ -1235,7 +1269,7 @@
      "courses": [
       "高级英语（1）@icourse163(q=0.5651)",
       "运筹学@icourse163(q=0.5193)",
-      "简明世界史（二）@icourse163(q=0.5073)"
+      "简明世界史（二）@icourse163(q=0.5072)"
      ],
      "estimated_hours": 40.0,
      "priority": "high"
@@ -1296,7 +1330,11 @@
     {
      "skill": "性能监控",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "互换性与测量技术@icourse163(q=0.5635)",
+      "自动化测试@icourse163(q=0.5451)",
+      "集成电路测试与验证@icourse163(q=0.5445)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1305,7 +1343,9 @@
      "prerequisites": [
       "计算机基础"
      ],
-     "courses": [],
+     "courses": [
+      "Architecting Vue.js 3 Enterprise-Ready Web Applications@coursera(q=0.545)"
+     ],
      "estimated_hours": 95.0,
      "priority": "medium"
     }
@@ -1313,9 +1353,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.8,
-    "course": 0.58,
+    "course": 0.86,
     "hours": 0.88,
-    "mean": 0.81
+    "mean": 0.89
    },
    "reasonable": true
   },
@@ -1411,7 +1451,11 @@
     {
      "skill": "Perturb-seq",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "高级英语（1）@icourse163(q=0.5651)",
+      "运筹学@icourse163(q=0.5193)",
+      "简明世界史（二）@icourse163(q=0.5072)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1433,9 +1477,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.44,
+    "course": 0.58,
     "hours": 0.52,
-    "mean": 0.64
+    "mean": 0.68
    },
    "reasonable": false
   },
@@ -1460,7 +1504,9 @@
      "prerequisites": [
       "计算机基础"
      ],
-     "courses": [],
+     "courses": [
+      "Architecting Vue.js 3 Enterprise-Ready Web Applications@coursera(q=0.545)"
+     ],
      "estimated_hours": 95.0,
      "priority": "medium"
     },
@@ -1491,7 +1537,7 @@
      "prerequisites": [],
      "courses": [
       "人工智能@icourse163(q=0.6185)",
-      "人工智能基础@icourse163(q=0.5784)",
+      "人工智能基础@icourse163(q=0.5783)",
       "人工智能概论@icourse163(q=0.5565)"
      ],
      "estimated_hours": 30.0,
@@ -1501,11 +1547,11 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.86,
+    "course": 1.0,
     "hours": 0.64,
-    "mean": 0.78
+    "mean": 0.81
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_23",
@@ -1543,9 +1589,9 @@
      "skill": "Cloud Foundry",
      "prerequisites": [],
      "courses": [
-      "Cloud Native Foundations@edx(q=0.525)",
-      "Introduction to Cloud Computing@edx(q=None)",
-      "Cloud and Application Development Foundations@edx(q=None)"
+      "Introduction to Cloud Computing@edx(q=0.525)",
+      "Cloud and Application Development Foundations@edx(q=0.525)",
+      "Cloud Native Foundations@edx(q=0.525)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1610,7 +1656,11 @@
     {
      "skill": "数字素养",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "数字资源管理技术@icourse163(q=0.5579)",
+      "数字艺术赏析@icourse163(q=0.545)",
+      "数字媒体特效@icourse163(q=0.4825)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1632,11 +1682,11 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.86,
+    "course": 1.0,
     "hours": 0.64,
-    "mean": 0.78
+    "mean": 0.81
    },
-   "reasonable": false
+   "reasonable": true
   },
   {
    "case_id": "lp_25",
@@ -1649,8 +1699,8 @@
      "skill": "应用性能调优",
      "prerequisites": [],
      "courses": [
-      "计算机应用基础@icourse163(q=0.6121)",
-      "办公软件高级应用@icourse163(q=0.5931)",
+      "智能终端应用开发@icourse163(q=0.6194)",
+      "办公软件高级应用@icourse163(q=0.593)",
       "最优化方法（与机器学习）@icourse163(q=0.548)"
      ],
      "estimated_hours": 30.0,
@@ -1662,7 +1712,7 @@
      "courses": [
       "人工智能@icourse163(q=0.6185)",
       "人工智能基础@icourse163(q=0.6001)",
-      "人工智能基础@icourse163(q=0.5784)"
+      "人工智能基础@icourse163(q=0.5783)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1670,7 +1720,11 @@
     {
      "skill": "图像AI",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "人工智能@icourse163(q=0.6185)",
+      "人工智能基础@icourse163(q=0.5783)",
+      "互动图形基础@icourse163(q=0.5302)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1679,8 +1733,8 @@
      "prerequisites": [],
      "courses": [
       "人工智能@icourse163(q=0.6185)",
-      "人工智能基础@icourse163(q=0.5784)",
-      "Professional Data Engineer 여정 준비하기@coursera(q=0.5404)"
+      "Professional Data Engineer 여정 준비하기@coursera(q=0.5404)",
+      "信息描述@icourse163(q=0.5319)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1700,9 +1754,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.5,
-    "course": 0.86,
+    "course": 1.0,
     "hours": 0.4,
-    "mean": 0.69
+    "mean": 0.72
    },
    "reasonable": false
   },
@@ -1716,7 +1770,11 @@
     {
      "skill": "定量分析",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "应用统计学@icourse163(q=0.5438)",
+      "测量学@icourse163(q=0.5388)",
+      "Data Analysis@edx(q=0.525)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1730,7 +1788,11 @@
     {
      "skill": "商业智能",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "商业智能@icourse163(q=0.6102)",
+      "Business Intelligence Analyst@edx(q=0.525)",
+      "数据库与商业智能@icourse163(q=0.5134)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1738,9 +1800,9 @@
      "skill": "企业",
      "prerequisites": [],
      "courses": [
-      "创新创业基础@icourse163(q=0.6105)",
       "商业智能@icourse163(q=0.6102)",
-      "连锁经营与管理@icourse163(q=0.554)"
+      "连锁经营与管理@icourse163(q=0.554)",
+      "企业财务管理@icourse163(q=0.5341)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1766,9 +1828,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.58,
+    "course": 0.86,
     "hours": 0.52,
-    "mean": 0.68
+    "mean": 0.74
    },
    "reasonable": false
   },
@@ -1879,8 +1941,8 @@
      "prerequisites": [],
      "courses": [
       "财务报表编制@icourse163(q=0.5389)",
-      "运筹学@icourse163(q=0.5193)",
-      "大学英文写作（一）@icourse163(q=0.5112)"
+      "信息描述@icourse163(q=0.5319)",
+      "运筹学@icourse163(q=0.5193)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1935,7 +1997,11 @@
     {
      "skill": "显示",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "影视鉴赏@icourse163(q=0.5609)",
+      "互动图形基础@icourse163(q=0.5302)",
+      "可视化导论@icourse163(q=0.4974)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -1974,9 +2040,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.6,
-    "course": 0.58,
+    "course": 0.72,
     "hours": 0.52,
-    "mean": 0.68
+    "mean": 0.71
    },
    "reasonable": false
   },
@@ -2008,7 +2074,7 @@
      "prerequisites": [],
      "courses": [
       "大数据分析@icourse163(q=0.5731)",
-      "大数据分析与应用@icourse163(q=0.5587)",
+      "大数据分析与应用@icourse163(q=0.5586)",
       "Data Analysis@edx(q=0.525)"
      ],
      "estimated_hours": 30.0,
