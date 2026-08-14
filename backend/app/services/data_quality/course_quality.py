@@ -122,7 +122,6 @@ _EN_SKILL_MAP = {
     "data preprocessing": "数据预处理",
     "feature engineering": "特征工程",
     "recommendation systems": "推荐系统",
-    "computer vision": "计算机视觉",
     "mlops": "MLOps",
     "serverless": "无服务器",
     "devops": "DevOps",
