@@ -8,9 +8,10 @@
 import asyncio
 import hashlib
 import json
+import logging
 import uuid
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
@@ -18,13 +19,15 @@ from sqlalchemy import String, cast, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
-from app.core.config import settings
+from app.core.arq_client import enqueue
 from app.core.database import async_session_factory, get_db
 from app.models.business import AuditLog, ResumeCache, ResumeFile, TaskStatus
 from app.schemas.common import ok, error
 from app.services.resume.file_parser import SUPPORTED_EXTENSIONS
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 # 上传目录（根 .gitignore 已忽略 uploads/，仅存运行时文件）
 _UPLOAD_DIR = Path(__file__).resolve().parents[3] / "uploads"
@@ -40,21 +43,7 @@ async def _enqueue_resume_parse(file_path: str, task_id: str) -> None:
 
     队列不可用时抛出异常由调用方处理（标记任务 failed），不静默吞错。
     """
-    from arq import create_pool
-    from arq.connections import RedisSettings
-
-    parsed = urlparse(settings.arq_redis_url)
-    redis_settings = RedisSettings(
-        host=parsed.hostname or "localhost",
-        port=parsed.port or 6379,
-        database=int(parsed.path.lstrip("/") or "1"),
-        password=parsed.password,
-    )
-    pool = await create_pool(redis_settings)
-    try:
-        await pool.enqueue_job("resume_parse", file_path=file_path, task_id=task_id)
-    finally:
-        await pool.close()
+    await enqueue("resume_parse", file_path=file_path, task_id=task_id)
 
 
 async def _persist_resume_file(
@@ -220,8 +209,9 @@ async def parse_resume(
         await _enqueue_resume_parse(str(file_path), str(task.id))
     except Exception as e:
         task.status = "failed"
-        task.error = f"任务入队失败: {e}"
+        task.error = "任务入队失败"  # 固定文案：详情仅入日志，防经 /resume/task 透传内部信息
         await db.commit()
+        logger.error(f"[resume/parse] 任务入队失败: task_id={task.id} err={e}")
 
     return ok(data={"task_id": task.id, "resume_id": task.id, "cached": False})
 

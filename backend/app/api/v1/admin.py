@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_permission
-from app.core.config import settings
+from app.core.arq_client import enqueue
 from app.core.database import get_db, redis_client
 from app.core.security import hash_password
 from app.models.business import AuditLog, RejectedChange, ResumeFile, TaskStatus, User
@@ -315,39 +315,12 @@ async def _enqueue_crawl(
         f"[_enqueue_crawl] 准备入队: task_id={task_id} spider={spider} "
         f"keywords={keywords} cities={cities or '(默认)'}"
     )
-    from arq import create_pool
-    from arq.connections import RedisSettings
-    from urllib.parse import urlparse
-
-    parsed = urlparse(settings.arq_redis_url)
-    redis_settings = RedisSettings(
-        host=parsed.hostname or "localhost",
-        port=parsed.port or 6379,
-        database=int(parsed.path.lstrip("/") or "1"),
-        password=parsed.password,
-    )
-    # 打印 host/port/db 便于定位队列连接问题（不打印密码）
-    logger.info(
-        f"[_enqueue_crawl] ARQ 队列地址: {parsed.hostname or 'localhost'}:"
-        f"{parsed.port or 6379}/{int(parsed.path.lstrip('/') or '1')}"
-    )
-    try:
-        pool = await create_pool(redis_settings)
-    except Exception as e:
-        logger.exception("[_enqueue_crawl] ARQ 连接失败: task_id=%s err=%s", task_id, e)
-        raise
-    try:
-        # task_id 供 crawl_platform 实时写日志队列 + 更新任务状态（SSE 端点消费）
-        kwargs = {"spider_name": spider, "keywords": keywords, "task_id": task_id}
-        if cities:
-            kwargs["cities"] = cities
-        await pool.enqueue_job("crawl_platform", **kwargs)
-        logger.info(f"[_enqueue_crawl] 入队成功: task_id={task_id} job=crawl_platform kwargs={kwargs}")
-    except Exception as e:
-        logger.exception("[_enqueue_crawl] 入队失败: task_id=%s err=%s", task_id, e)
-        raise
-    finally:
-        await pool.close()
+    # task_id 供 crawl_platform 实时写日志队列 + 更新任务状态（SSE 端点消费）
+    kwargs = {"spider_name": spider, "keywords": keywords, "task_id": task_id}
+    if cities:
+        kwargs["cities"] = cities
+    await enqueue("crawl_platform", **kwargs)
+    logger.info(f"[_enqueue_crawl] 入队成功: task_id={task_id} job=crawl_platform kwargs={kwargs}")
 
 
 @router.post("/crawl/trigger", status_code=202)
@@ -381,7 +354,8 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
         logger.exception(
             f"[crawl/trigger] 任务落库失败: platform={platform} keyword={keyword} city={city or '(默认)'} err={e}"
         )
-        return error(5000, f"爬取任务落库失败: {e}")
+        # 08-14 审查：异常详情仅入服务端日志，不随响应外泄（错误详情泄露漏网点）
+        return error(5000, "爬取任务落库失败，请稍后重试")
     logger.info(f"[crawl/trigger] 任务已建: task_id={task.id} platform={platform} keyword={keyword} city={city or '(默认)'}")
 
     try:
@@ -394,10 +368,10 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
         logger.info(f"[crawl/trigger] 任务入队成功: task_id={task.id} spider={_PLATFORM_TO_SPIDER[platform]}")
     except Exception as e:
         task.status = "failed"
-        task.error = f"任务入队失败: {e}"
+        task.error = "任务入队失败"  # 固定文案：详情仅入日志，防经 /crawl/history 透传内部信息
         await db.commit()
         logger.error(f"[crawl/trigger] 任务入队失败: task_id={task.id} err={e}")
-        return error(5000, f"爬取任务入队失败: {e}")
+        return error(5000, "爬取任务入队失败，请稍后重试")
 
     return ok(data={"task_id": task.id, "platform": platform, "status": "pending"})
 
@@ -473,17 +447,7 @@ async def crawl_task_stream(task_id: str):
     except (ValueError, AttributeError):
         return error(4000, "task_id 格式非法")
 
-    from arq import create_pool
-    from arq.connections import RedisSettings
-    from urllib.parse import urlparse
-
-    parsed = urlparse(settings.arq_redis_url)
-    redis_settings = RedisSettings(
-        host=parsed.hostname or "localhost",
-        port=parsed.port or 6379,
-        database=int(parsed.path.lstrip("/") or "1"),
-        password=parsed.password,
-    )
+    from app.core.arq_client import get_pool
 
     async def _get_task(tid: str) -> dict | None:
         from app.core.database import async_session_factory
@@ -494,12 +458,10 @@ async def crawl_task_stream(task_id: str):
         return _crawl_task_payload(task) if task is not None else None
 
     async def _get_logs(tid: str, start: int) -> list[str]:
-        pool = await create_pool(redis_settings)
-        try:
-            raw = await pool.lrange(f"crawl:log:{tid}", start, -1)
-            return [ln.decode("utf-8", errors="replace") if isinstance(ln, bytes) else str(ln) for ln in raw]
-        finally:
-            await pool.close()
+        # 复用模块级 ARQ 连接池（08-14 审查：此前每 0.5s 新建池，600s 轮询 ≈ 1200 次建连）
+        pool = await get_pool()
+        raw = await pool.lrange(f"crawl:log:{tid}", start, -1)
+        return [ln.decode("utf-8", errors="replace") if isinstance(ln, bytes) else str(ln) for ln in raw]
 
     async def _event_gen():
         async for event in _crawl_log_events(task_uuid, _get_logs, _get_task):

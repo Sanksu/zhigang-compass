@@ -11,7 +11,16 @@ from datetime import datetime, timedelta, timezone
 
 # T+1 承诺阈值：某来源数据距今天数 ≤ 1 天视为新鲜（每日发布）
 _T1_DAYS = 1.0
+# 周更源（课程平台按周发布）：按 T+1 恒判过期 → 每日 ETL 告警疲劳
+# （08-14 审查：按源分组阈值，周更源 7 天内视为新鲜）
+_WEEKLY_SOURCES = frozenset({"coursera", "edx", "icourse163"})
+_WEEKLY_DAYS = 7.0
 _TZ_CN = timezone(timedelta(hours=8))
+
+
+def _freshness_threshold(source: str) -> float:
+    """按来源取新鲜度阈值（周更源 7 天，其余 T+1）。"""
+    return _WEEKLY_DAYS if source in _WEEKLY_SOURCES else _T1_DAYS
 
 
 def parse_crawled_at(value: str | None) -> datetime | None:
@@ -71,7 +80,7 @@ def platform_freshness(rows: list[dict], now: datetime | None = None) -> dict:
             })
             continue
         days = round(_days_since(dt, now), 2)
-        fresh = days <= _T1_DAYS
+        fresh = days <= _freshness_threshold(source)
         platforms.append({
             "source": source,
             "last_crawl": dt.isoformat(),

@@ -84,13 +84,26 @@ class TestEvalMatch:
         assert isinstance(r["error_cases"], list)
 
     def test_jd_golden_set_has_positive_samples(self):
-        """黄金集样本足够（字段级评测有意义的前提）。"""
+        """黄金集样本足够（字段级评测有意义的前提）。
+
+        设计文档硬性要求：JD 100 条（M3），此处作为回归护栏防缩水。
+        """
         from tests.evaluate.run_baseline import load_golden_set
 
         from scripts.evaluate import _JD_GOLDEN
 
         items = load_golden_set(str(_JD_GOLDEN))
-        assert len(items) >= 50
+        assert len(items) >= 100
+
+    def test_match_golden_set_has_positive_samples(self):
+        """匹配黄金集规模护栏：100 岗位 × 3 候选（1 正 2 负）= 300 行。"""
+        from tests.evaluate.run_baseline import load_golden_set
+
+        from scripts.evaluate import _MATCH_GOLDEN
+
+        items = load_golden_set(str(_MATCH_GOLDEN))
+        assert len(items) >= 300
+        assert any(item.get("label") == 1 for item in items)
 
 
 class TestTop3Accuracy:

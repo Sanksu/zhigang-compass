@@ -12,7 +12,6 @@ import json
 import logging
 import time
 import uuid
-from urllib.parse import urlparse
 
 from typing import Literal
 
@@ -22,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
-from app.core.config import settings
+from app.core.arq_client import enqueue
 from app.core.database import async_session_factory, get_db, neo4j_driver, redis_client
 from app.core.errors import ERR_LLM_TIMEOUT
 from app.models.business import (
@@ -211,27 +210,13 @@ async def _enqueue_match_recommend(
 
     队列不可用时抛出异常由调用方处理（标记任务 failed），不静默吞错。
     """
-    from arq import create_pool
-    from arq.connections import RedisSettings
-
-    parsed = urlparse(settings.arq_redis_url)
-    redis_settings = RedisSettings(
-        host=parsed.hostname or "localhost",
-        port=parsed.port or 6379,
-        database=int(parsed.path.lstrip("/") or "1"),
-        password=parsed.password,
+    await enqueue(
+        "match_recommend",
+        resume_id=resume_id,
+        top_n=top_n,
+        task_id=task_id,
+        user_id=user_id,
     )
-    pool = await create_pool(redis_settings)
-    try:
-        await pool.enqueue_job(
-            "match_recommend",
-            resume_id=resume_id,
-            top_n=top_n,
-            task_id=task_id,
-            user_id=user_id,
-        )
-    finally:
-        await pool.close()
 
 
 @router.post("/recommend", status_code=202)
@@ -274,8 +259,9 @@ async def recommend(
         )
     except Exception as e:
         task.status = "failed"
-        task.error = f"任务入队失败: {e}"
+        task.error = "任务入队失败"  # 固定文案：详情仅入日志，防经 /match/task 透传内部信息
         await db.commit()
+        logger.error(f"[match/recommend] 任务入队失败: task_id={task.id} err={e}")
 
     return ok(data={"task_id": task.id})
 
