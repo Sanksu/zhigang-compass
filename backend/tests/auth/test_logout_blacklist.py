@@ -6,15 +6,13 @@
 - get_current_user 对黑名单内 jti 返回 401（code=4010）
 - get_optional_user 对黑名单内 jti 按匿名处理（返回 None）
 
-RSA 密钥：与 test_token_expired 同模式，临时密钥对注入 settings。
+RSA 密钥：fixture 收敛于 tests/conftest.py（临时密钥对注入 settings）。
 """
 
 import asyncio
 from unittest.mock import patch
 
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from starlette.requests import Request
@@ -24,38 +22,6 @@ from app.api.deps import get_current_user, get_optional_user
 from app.api.v1.auth import logout
 from app.core.config import settings
 from app.core.security import create_access_token, decode_token
-
-
-@pytest.fixture(scope="session")
-def tmp_rsa_keys(tmp_path_factory):
-    """生成临时 RSA 密钥对并返回 (私钥路径, 公钥路径)。"""
-    tmp = tmp_path_factory.mktemp("jwt-keys-logout")
-    priv_path = tmp / "private.pem"
-    pub_path = tmp / "public.pem"
-
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    priv_path.write_bytes(
-        key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        )
-    )
-    pub_path.write_bytes(
-        key.public_key().public_bytes(
-            serialization.Encoding.PEM,
-            serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-    )
-    return str(priv_path), str(pub_path)
-
-
-@pytest.fixture(autouse=True)
-def _use_tmp_keys(tmp_rsa_keys):
-    priv, pub = tmp_rsa_keys
-    with patch.object(settings, "jwt_private_key_path", priv), \
-         patch.object(settings, "jwt_public_key_path", pub):
-        yield
 
 
 def _make_request(auth_header: str | None) -> Request:
