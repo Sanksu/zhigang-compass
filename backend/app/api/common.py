@@ -1,9 +1,12 @@
-"""API 层公共样板：分页执行/响应、任务序列化、简历归属校验、UUID 规范化。
+"""API 层公共样板：分页执行/响应、任务序列化、简历归属校验、UUID 规范化、SSE 事件骨架。
 
-各 router 曾各自实现的分页、TaskStatus 序列化、简历归属校验在此收敛，
+各 router 曾各自实现的分页、TaskStatus 序列化、简历归属校验、SSE 轮询在此收敛，
 字段与响应结构逐字节保持既有契约（openapi.yaml 不动）。
 """
 
+import asyncio
+import json
+import time
 import uuid
 
 from sqlalchemy import func, select
@@ -93,3 +96,44 @@ def serialize_task(
     if extra:
         data.update(extra)
     return data
+
+
+async def sse_task_events(
+    task_uuid: str,
+    get_task,
+    *,
+    before_poll=None,
+    progress_payload=None,
+    poll_interval: float = 1.0,
+    timeout: float = 300.0,
+):
+    """SSE 任务状态事件序列公共骨架（resume 进度 / admin 爬虫日志共用）。
+
+    get_task: async callable(task_uuid) -> dict | None（已序列化载荷）。
+    before_poll: async callable() -> list[str]，每次轮询前执行并原样 yield
+        （如爬虫日志增量拉取的事件帧）；缺省跳过。
+    progress_payload: callable(task) -> dict，progress 事件载荷；缺省推送完整 task。
+    事件流：progress 周期推送 → 终态 success/failed 推送 done/error 并结束；
+    任务不存在 / 超时推送 error 后结束。
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        if before_poll is not None:
+            for event in await before_poll():
+                yield event
+        task = await get_task(task_uuid)
+        if task is None:
+            yield f"event: error\ndata: {json.dumps({'message': '任务不存在'}, ensure_ascii=False)}\n\n"
+            return
+        if task["status"] == "success":
+            yield f"event: done\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
+            return
+        if task["status"] == "failed":
+            yield f"event: error\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
+            return
+        payload = progress_payload(task) if progress_payload else task
+        yield f"event: progress\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        if time.monotonic() >= deadline:
+            yield f"event: error\ndata: {json.dumps({'message': '推送超时'}, ensure_ascii=False)}\n\n"
+            return
+        await asyncio.sleep(poll_interval)
