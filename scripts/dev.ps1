@@ -1,10 +1,10 @@
 # 智岗罗盘 — 本地开发一键启动（api + worker + 可选前端）
 #
 # 用法：
-#   .\script\dev.ps1         # 确保基础设施 + 启动 api + worker
-#   .\script\dev.ps1 -Frontend      # 额外启动前端 dev server
-#   .\script\dev.ps1 -Restart       # 8000/api/worker 已运行时强制重启（加载最新代码）
-#   .\script\dev.ps1 -SkipInfra     # 跳过 docker 基础设施检查
+#   .\scripts\dev.ps1         # 确保基础设施 + 启动 api + worker
+#   .\scripts\dev.ps1 -Frontend      # 额外启动前端 dev server
+#   .\scripts\dev.ps1 -Restart       # 8000/api/worker 已运行时强制重启（加载最新代码）
+#   .\scripts\dev.ps1 -SkipInfra     # 跳过 docker 基础设施检查
 #
 # 前置条件：
 #   - Docker Desktop 已启动（postgres/redis/neo4j 容器，幂等 up -d）
@@ -28,7 +28,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-# 脚本位于 script/ 下，项目根目录为其父目录
+# 脚本位于 scripts/ 下，项目根目录为其父目录
 $Root = Split-Path $PSScriptRoot -Parent
 $BackendDir = Join-Path $Root "backend"
 $FrontendDir = Join-Path $Root "frontend"

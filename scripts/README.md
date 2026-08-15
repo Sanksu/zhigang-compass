@@ -1,4 +1,4 @@
-# script — 本地开发与运维脚本
+# scripts — 本地开发与运维脚本
 
 存放项目的本地开发一键启动与运维辅助脚本。
 
@@ -9,10 +9,10 @@
 ### 用法
 
 ```powershell
-.\script\dev.ps1                  # 确保基础设施 + 启动 api + worker
-.\script\dev.ps1 -Frontend        # 额外启动前端 dev server
-.\script\dev.ps1 -Restart         # 8000/api/worker 已运行时强制重启（加载最新代码）
-.\script\dev.ps1 -SkipInfra       # 跳过 docker 基础设施检查
+.\scripts\dev.ps1                  # 确保基础设施 + 启动 api + worker
+.\scripts\dev.ps1 -Frontend        # 额外启动前端 dev server
+.\scripts\dev.ps1 -Restart         # 8000/api/worker 已运行时强制重启（加载最新代码）
+.\scripts\dev.ps1 -SkipInfra       # 跳过 docker 基础设施检查
 ```
 
 ### 参数
