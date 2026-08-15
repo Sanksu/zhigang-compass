@@ -256,10 +256,10 @@ class TestAutoTransition:
         c = _candidate(PositionState.EMERGING, source_diversity=3, jd_count=5)
         w = WindowFreq([10, 9, 10])
         assert evaluate_auto_transition(c, w, skill_novelty=0.5) is None
-        # 边界：0.3 不满足（< 0.3 严格）
-        assert evaluate_auto_transition(c, w, skill_novelty=0.3) is None
-        # 0.29 达标
-        assert evaluate_auto_transition(c, w, skill_novelty=0.29) == PositionState.STABLE
+        # 边界：0.2 不满足（< 0.2 严格，08-15 需求调整）
+        assert evaluate_auto_transition(c, w, skill_novelty=0.2) is None
+        # 0.19 达标
+        assert evaluate_auto_transition(c, w, skill_novelty=0.19) == PositionState.STABLE
 
     def test_emerging_to_stable_when_novelty_none(self):
         """skill_novelty=None（数据不可得）不拦截——保持既有行为。"""
