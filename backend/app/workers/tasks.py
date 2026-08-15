@@ -1059,6 +1059,69 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
     }
 
 
+async def graph_health_check(ctx: dict) -> dict:
+    """图谱健康巡检（08-15 全流程评估 P1）：每日 ETL 尾部自动检查。
+
+    把人工图谱扫描自动化——超限项 → webhook 告警（复用 _alert_llm 去重）：
+    1. 空权 REQUIRES 边（应为 0——#216 重复残留同源问题复发检测）
+    2. 孤立 Position（无任何关系——无名/僵尸节点）
+    3. candidate 状态岗位数（发现候选镜像，正常≈0）
+    4. 孤立 Course 覆盖率（>80% 提示课程标签链路异常；当前 ~70% 为
+       icourse163/edx 无标签数据源特性，非故障）
+    """
+    from app.core.database import neo4j_driver
+
+    def _query() -> dict:
+        with neo4j_driver.session() as s:
+            return {
+                "null_weight_edges": s.run(
+                    "MATCH ()-[r:REQUIRES]->(:Skill) "
+                    "WHERE r.weight IS NULL OR r.source_count IS NULL "
+                    "RETURN count(r) AS n"
+                ).single()["n"],
+                "isolated_positions": s.run(
+                    "MATCH (p:Position) WHERE NOT EXISTS { (p)--() } "
+                    "RETURN count(p) AS n"
+                ).single()["n"],
+                "candidate_positions": s.run(
+                    "MATCH (p:Position {status:'candidate'}) RETURN count(p) AS n"
+                ).single()["n"],
+                "total_courses": s.run("MATCH (c:Course) RETURN count(c) AS n").single()["n"],
+                "isolated_courses": s.run(
+                    "MATCH (c:Course) WHERE NOT EXISTS { (c)-[:LEARNABLE_VIA]-() } "
+                    "RETURN count(c) AS n"
+                ).single()["n"],
+            }
+
+    stats = await asyncio.to_thread(_query)
+    alerts: list[tuple[str, str]] = []
+    if stats["null_weight_edges"] > 0:
+        alerts.append((
+            "graph_null_weight_edges",
+            f"空权 REQUIRES 边 {stats['null_weight_edges']} 条（应为 0——重复残留或新写入口径漂移）",
+        ))
+    if stats["isolated_positions"] > 0:
+        alerts.append((
+            "graph_isolated_positions",
+            f"孤立 Position {stats['isolated_positions']} 个（无名/僵尸节点残留）",
+        ))
+    if stats["candidate_positions"] > 0:
+        alerts.append((
+            "graph_candidate_positions",
+            f"图谱 candidate 岗位 {stats['candidate_positions']} 个（发现候选镜像，正常≈0）",
+        ))
+    course_rate = stats["isolated_courses"] / stats["total_courses"] if stats["total_courses"] else 0.0
+    if course_rate > 0.8:
+        alerts.append((
+            "graph_course_coverage",
+            f"孤立课程覆盖率 {course_rate:.0%}（>80%，课程标签链路异常；数据源特性基线 ~70%）",
+        ))
+    alerted = {}
+    for event, msg in alerts:
+        alerted[event] = await _alert_llm(event, msg)
+    return {"stats": stats, "alerts": alerted}
+
+
 async def load_courses(ctx: dict) -> dict:
     """课程数据入图（course_raw → Course/Skill 节点 + LEARNABLE_VIA 关系）。
 
@@ -1626,6 +1689,11 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
         results["stages"]["discovery_auto_transition"] = await discovery_auto_transition(ctx)
     except Exception as e:
         results["stages"]["discovery"] = {"error": str(e)[:500]}
+
+    # ── 阶段 16：图谱健康巡检（08-15 P1：空权边/孤立节点/状态异常 → 告警）──
+    results["stages"]["graph_health_check"] = await _run_stage(
+        "graph_health_check", graph_health_check(ctx)
+    )
 
     return results
 
@@ -2629,12 +2697,44 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
 # ARQ Worker 注册
 # ============================================================
 
+_LLM_ALERT_DEDUP_TTL = 3600  # LLM 告警去重窗口（1 小时，防 5min cron 刷屏）
+
+
+async def _alert_llm(event: str, message: str) -> bool:
+    """LLM 异常告警（Redis SET NX 去重：同事件窗口内只发一次）。
+
+    Redis 不可用时不阻塞告警本身（去重失效可接受——webhook 幂等）。
+    """
+    from app.core.config import settings
+    from app.services.alerting import send_alert
+
+    if not settings.alert_webhook_url:
+        return False
+    key = f"alert:dedup:{event}"
+    try:
+        import redis as redis_sync
+
+        r = redis_sync.Redis.from_url(settings.redis_url, socket_timeout=3)
+        acquired = await asyncio.to_thread(
+            r.set, key, "1", nx=True, ex=_LLM_ALERT_DEDUP_TTL
+        )
+        r.close()
+        if not acquired:
+            return False  # 同事件已告警（窗口内）
+    except Exception:
+        pass
+    return await send_alert(event, message)
+
+
 async def check_llm_providers_health(ctx: dict) -> dict:
     """LLM provider 健康检查（设计文档 §6.5：每 5min 调 /models 端点）。
 
     遍历 enabled provider 探测 /models 可用性，结果写 Redis（llm:health:{name}），
     供调用链展示/运维排查。配置缺失（无 yaml）时跳过并返回原因，不触发
     ARQ 重试；单 provider 探测失败仅记 unhealthy，由熔断/退避机制在调用侧兜底。
+
+    08-15 事故教训（LLM 配置丢失静默降级无人发现）：配置缺失或全部 provider
+    不可用 → webhook 告警（1 小时去重），不再静默。
     """
     from app.services.extraction.llm_provider import (
         LLMConfigurationError,
@@ -2644,7 +2744,17 @@ async def check_llm_providers_health(ctx: dict) -> dict:
     try:
         checked = await asyncio.to_thread(health_check_all)
     except LLMConfigurationError as e:
-        return {"status": "skipped", "reason": str(e)}
+        alerted = await _alert_llm(
+            "llm_config_missing", f"LLM 配置缺失，全链路将降级规则抽取: {e}"
+        )
+        return {"status": "skipped", "reason": str(e), "alerted": alerted}
+    if checked and not any(checked.values()):
+        alerted = await _alert_llm(
+            "llm_providers_down",
+            f"全部 LLM provider 不可用（{len(checked)} 个），抽取将降级规则兜底",
+        )
+        print(f"[check_llm_providers_health] ALL DOWN {checked}", flush=True)
+        return {"status": "degraded", "healthy": checked, "alerted": alerted}
     print(f"[check_llm_providers_health] {checked}", flush=True)
     return {"status": "ok", "healthy": checked}
 
@@ -2706,6 +2816,7 @@ class WorkerSettings:
         watch_signal_daily,
         snapshot_graph,
         check_llm_providers_health,
+        graph_health_check,
     ]
     on_startup = on_startup
     on_shutdown = on_shutdown

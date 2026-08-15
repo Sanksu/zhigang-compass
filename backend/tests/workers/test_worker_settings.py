@@ -15,6 +15,7 @@ from app.workers.tasks import (
     batch_extract,
     check_data_freshness,
     check_llm_providers_health,
+    graph_health_check,
     crawl_platform,
     cross_validate_jds,
     dedup_simhash,
@@ -57,6 +58,7 @@ EXPECTED_FUNCTIONS = [
     watch_signal_daily,
     snapshot_graph,
     check_llm_providers_health,
+    graph_health_check,
 ]
 
 
