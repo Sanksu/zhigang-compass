@@ -1016,8 +1016,15 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
         if skills:
             snap["skills"] = skills
             enriched += 1
-        # 标记已处理（含空结果），防每次 ETL 对同一课程重复调用 LLM
-        snap["skills_enriched"] = True
+            # 标记已处理，防每次 ETL 对同一课程重复调用 LLM
+            snap["skills_enriched"] = True
+        elif llm is None:
+            # LLM 不可用（skipped_no_llm）：不写标记——配置恢复后自动重试，
+            # 避免"LLM 缺失期间误标已处理"导致课程永久无标签
+            pass
+        else:
+            # LLM 已跑但抽取为空（failed 或门控全滤）：标记防重复调用
+            snap["skills_enriched"] = True
         row.snapshot = snap
     if rows:
         async with async_session_factory() as session:
