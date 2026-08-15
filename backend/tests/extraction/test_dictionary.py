@@ -586,3 +586,31 @@ class TestNormalizeProficiency:
         assert normalize_proficiency("") is None
         assert normalize_proficiency("加分项") is None
         assert normalize_proficiency(None) is None
+
+
+class TestAIGenericRouting:
+    """AI 泛词族按技能路由（T-04 第二批，2026-08-15）。
+
+    AI 前缀/拼凑岗位名（无空格变体不命中带空格关键词族）加入
+    _GENERIC_ROUTED_FAMILIES 后按 JD 技能路由到细分族；业务技能
+    不在路由表 → 返回空串不入图（与失真兜底族口径一致）。
+    """
+
+    def test_ai_generic_routes_to_sub_family(self):
+        assert normalize_position_name("AI应用", ["Python", "机器学习"]) == "算法工程师"
+        assert normalize_position_name("AI应用", ["Python", "计算机视觉"]) == "机器视觉算法工程师"
+        assert normalize_position_name("AI产品", ["大模型", "RAG"]) == "大模型算法工程师"
+        assert normalize_position_name("AI智能体", ["大模型", "Agent"]) == "大模型算法工程师"
+        assert normalize_position_name("AIoT", ["嵌入式", "C++"]) == "嵌入式开发工程师"
+        assert normalize_position_name("AI基础设施", ["Kubernetes", "Docker"]) == "DevOps工程师"
+
+    def test_ai_generic_no_skills_returns_empty(self):
+        # 无技能/未命中路由 → 不入图（宁缺毋滥）
+        assert normalize_position_name("AI应用", None) == ""
+        assert normalize_position_name("应用AI客户", ["客户成功", "CRM"]) == ""
+        assert normalize_position_name("零售运营与AI参与", ["零售运营"]) == ""
+        assert normalize_position_name("云AI客户", ["销售"]) == ""
+
+    def test_ai_generic_spaced_variant_still_routes(self):
+        # 带空格变体（"AI 应用"）走算法族关键词 → 路由不回归
+        assert normalize_position_name("AI 应用", ["Python", "机器学习"]) == "算法工程师"
