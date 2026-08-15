@@ -253,9 +253,9 @@ async def _load_snapshots(db: AsyncSession) -> list | None:
 
 
 def _top_nodes_by_heat(
-    indexes: list[dict], node_kind: str, id_prefix: str, edge_side: str, limit: int
+    indexes: list[dict], node_kind: str, id_prefix: str, edge_side: str
 ) -> list[tuple[str, str]]:
-    """按快照出现热度取 Top-N 节点（/positions 与 /skills 共用）。
+    """按快照出现热度全量排序（/positions 与 /skills 共用，分页切片由调用方做）。
 
     热度 = 出现期数降序、最新引用边数降序；返回 [(id, 最近名称)]。
     node_kind: 快照节点 type 值；id_prefix: id 前缀兜底；edge_side:
@@ -270,10 +270,18 @@ def _top_nodes_by_heat(
             rec["name"] = node.get("name") or rec["name"]
             rec["count"] += 1
             rec["latest_freq"] = idx[edge_side].get(nid, 0)
-    top = sorted(
+    ranked = sorted(
         heat.items(), key=lambda kv: (-kv[1]["count"], -kv[1]["latest_freq"])
-    )[:limit]
-    return [(nid, rec["name"]) for nid, rec in top]
+    )
+    return [(nid, rec["name"]) for nid, rec in ranked]
+
+
+def _slice_page(
+    ranked: list, page: int, size: int
+) -> list:
+    """分页切片（page 从 1 起，越界返回空列表）。"""
+    start = (page - 1) * size
+    return ranked[start : start + size]
 
 
 @router.get("/position/{id}/evolution")
@@ -302,16 +310,18 @@ async def position_evolution(
 
 @router.get("/positions")
 async def position_evolution_list(
-    limit: int = Query(default=8, ge=1, le=20),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("guest")),
 ):
-    """默认岗位演化列表：按快照出现热度（出现期数、最新引用边数）取 Top-N。
+    """岗位演化历史列表：按快照出现热度（出现期数、最新引用边数）降序分页。
 
     供演化看板默认展示——页面加载即有岗位演化轨迹，无需先查节点 ID。
     岗位判定：快照节点 type=position（id 前缀 pos_ 兜底）。
+    08-16：limit 改 page/size 分页（演化看板翻页，10 项一页），响应含 total。
     """
-    cache_key = f"evolution:positions:{limit}"
+    cache_key = f"evolution:positions:{page}:{size}"
     cached = await _cache_get_json(cache_key)
     if cached is not None:
         return ok(data=cached)
@@ -321,9 +331,14 @@ async def position_evolution_list(
         return error(4040, "无图谱版本数据", http_status=404)
 
     indexes = _build_snapshot_indexes(snapshots)
-    top = _top_nodes_by_heat(indexes, "position", "pos_", "src", limit)
+    ranked = _top_nodes_by_heat(indexes, "position", "pos_", "src")
+    total = len(ranked)
+    top = _slice_page(ranked, page, size)
     data = {
         "positions": [_rebuild_position_evolution(indexes, pid) for pid, _ in top],
+        "total": total,
+        "page": page,
+        "size": size,
     }
     await _cache_set_json(cache_key, data)
     return ok(data=data)
@@ -331,17 +346,19 @@ async def position_evolution_list(
 
 @router.get("/skills")
 async def skill_evolution_list(
-    limit: int = Query(default=8, ge=1, le=20),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("guest")),
 ):
-    """默认技能演化列表：按快照出现热度（出现期数、最新引用边数）取 Top-N。
+    """技能频次趋势列表：按快照出现热度（出现期数、最新引用边数）降序分页。
 
     与 /positions 同模式，供演化看板技能频次趋势默认展示。
     技能 freq = 被引用边数（edges.target == skill，与 /trends 口径一致）。
     技能判定：快照节点 type=skill（id 前缀 sk_ 兜底）。
+    08-16：limit 改 page/size 分页（演化看板翻页，10 项一页），响应含 total。
     """
-    cache_key = f"evolution:skills:{limit}"
+    cache_key = f"evolution:skills:{page}:{size}"
     cached = await _cache_get_json(cache_key)
     if cached is not None:
         return ok(data=cached)
@@ -351,12 +368,14 @@ async def skill_evolution_list(
         return error(4040, "无图谱版本数据", http_status=404)
 
     indexes = _build_snapshot_indexes(snapshots)
-    top = _top_nodes_by_heat(indexes, "skill", "sk_", "tgt", limit)
+    ranked = _top_nodes_by_heat(indexes, "skill", "sk_", "tgt")
+    total = len(ranked)
+    top = _slice_page(ranked, page, size)
     skills = []
     for sid, _ in top:
         name, points = _rebuild_node_evolution(indexes, sid, edge_side="target")
         skills.append({"skill_id": sid, "skill_name": name, "points": points})
-    data = {"skills": skills}
+    data = {"skills": skills, "total": total, "page": page, "size": size}
     await _cache_set_json(cache_key, data)
     return ok(data=data)
 
@@ -445,14 +464,16 @@ async def state_machine_overview(
 @router.get("/watch")
 async def technology_watch_overview(
     db: AsyncSession = Depends(get_db),
-    limit: int = Query(default=20, ge=1, le=100),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=10, ge=1, le=100),
     user: dict = Depends(require_role("guest")),
 ):
     """观察池公开摘要 + MLI 产业化拐点排名（设计文档 §7.2.5，前端看板）。
 
     按技能聚合 technology_watch 各源最新信号值，用 MLI（媒介落差指数，四维
-    等权）排序输出 Top-N；mli > 0.6 标记 ready_to_industrialize。
+    等权）排序输出分页；mli > 0.6 标记 ready_to_industrialize。
     数据来自 watch_signal_daily 每日任务，仅返回公开摘要（无审核队列细节）。
+    08-16：limit 改 page/size 分页（演化看板翻页，10 项一页）。
     """
     from app.models.business import TechnologyWatch
     from app.services.discovery.mli import compute_mli
@@ -486,4 +507,6 @@ async def technology_watch_overview(
             "last_signal_at": iso(info.get("last_signal_at")),
         })
     items.sort(key=lambda x: (-x["mli"], x["skill_name"]))
-    return ok(data={"items": items[:limit], "total": len(items)})
+    total = len(items)
+    page_items = _slice_page(items, page, size)
+    return ok(data={"items": page_items, "total": total, "page": page, "size": size})

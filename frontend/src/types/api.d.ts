@@ -1876,12 +1876,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 岗位演化列表（默认岗位 Top-N，按快照出现热度降序） */
+        /**
+         * 岗位演化列表（按快照出现热度降序分页）
+         * @description 08-16：limit 改 page/size 分页，响应含 total
+         */
         get: {
             parameters: {
                 query?: {
-                    /** @description 返回岗位数 */
-                    limit?: number;
+                    /** @description 页码（从 1 起） */
+                    page?: number;
+                    /** @description 每页条数 */
+                    size?: number;
                 };
                 header?: never;
                 path?: never;
@@ -1889,7 +1894,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description 默认岗位演化列表 */
+                /** @description 岗位演化列表（data 含 positions/total/page/size） */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1920,12 +1925,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 技能演化列表（默认技能 Top-N，按快照出现热度降序） */
+        /**
+         * 技能演化列表（按快照出现热度降序分页）
+         * @description 08-16：limit 改 page/size 分页，响应含 total
+         */
         get: {
             parameters: {
                 query?: {
-                    /** @description 返回技能数 */
-                    limit?: number;
+                    /** @description 页码（从 1 起） */
+                    page?: number;
+                    /** @description 每页条数 */
+                    size?: number;
                 };
                 header?: never;
                 path?: never;
@@ -1933,7 +1943,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description 默认技能演化列表 */
+                /** @description 技能演化列表（data 含 skills/total/page/size） */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2048,11 +2058,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 观察池公开摘要 + MLI 产业化拐点排名（前端看板） */
+        /**
+         * 观察池公开摘要 + MLI 产业化拐点排名（前端看板，分页）
+         * @description 08-16：limit 改 page/size 分页
+         */
         get: {
             parameters: {
                 query?: {
-                    limit?: number;
+                    /** @description 页码（从 1 起） */
+                    page?: number;
+                    /** @description 每页条数 */
+                    size?: number;
                 };
                 header?: never;
                 path?: never;
@@ -2060,7 +2076,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description 观察池摘要（data 含 items/total，item 含 mli/ready_to_industrialize） */
+                /** @description 观察池摘要（data 含 items/total/page/size，item 含 mli/ready_to_industrialize） */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -3555,9 +3571,13 @@ export interface components {
             position_name: string;
             points: components["schemas"]["PositionEvolutionPoint"][];
         };
-        /** @description GET /evolution/positions 响应 data（默认岗位演化列表，按快照热度降序） */
+        /** @description GET /evolution/positions 响应 data（岗位演化列表，按快照热度降序分页） */
         PositionEvolutionListData: {
             positions: components["schemas"]["PositionEvolutionData"][];
+            /** @description 全部岗位数（翻页计算用） */
+            total: number;
+            page: number;
+            size: number;
         };
         /** @description 技能演化轨迹（GET /evolution/skills 项） */
         SkillEvolutionData: {
@@ -3565,9 +3585,13 @@ export interface components {
             skill_name: string;
             points: components["schemas"]["PositionEvolutionPoint"][];
         };
-        /** @description GET /evolution/skills 响应 data（默认技能演化列表，按快照热度降序） */
+        /** @description GET /evolution/skills 响应 data（技能演化列表，按快照热度降序分页） */
         SkillEvolutionListData: {
             skills: components["schemas"]["SkillEvolutionData"][];
+            /** @description 全部技能数（翻页计算用） */
+            total: number;
+            page: number;
+            size: number;
         };
         /** @description 岗位状态流转记录项（GET /evolution/state-machine） */
         StateMachineTransition: {
@@ -3601,10 +3625,12 @@ export interface components {
             status: string;
             last_signal_at?: string | null;
         };
-        /** @description GET /evolution/watch 响应 data */
+        /** @description GET /evolution/watch 响应 data（分页） */
         WatchOverviewData: {
             items: components["schemas"]["WatchOverviewItem"][];
             total: number;
+            page: number;
+            size: number;
         };
         /** @description 已解析简历列表项（GET /resume/list） */
         ResumeSummaryItem: {
