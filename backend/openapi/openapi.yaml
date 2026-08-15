@@ -1461,6 +1461,16 @@ paths:
     get:
       tags: [admin]
       summary: 待审核岗位列表
+      description: 默认返回 candidate（待 admin 审核是否晋升 emerging），可切换状态过滤
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            default: candidate
+            enum: [candidate, emerging, stable, declining]
+          description: 候选池状态过滤（缺省 candidate——摘要/徽标计数的待审核口径）
       responses:
         '200':
           description: 待审核列表

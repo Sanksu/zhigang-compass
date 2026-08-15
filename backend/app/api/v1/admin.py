@@ -526,7 +526,7 @@ async def _persist_rejected_change(
 
 @router.get("/positions/pending")
 async def positions_pending(
-    state: str | None = Query(default=None, pattern="^(candidate|emerging|stable|declining)$"),
+    state: str = Query(default="candidate", pattern="^(candidate|emerging|stable|declining)$"),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -534,6 +534,8 @@ async def positions_pending(
     """待审核岗位列表（新岗位发现候选池）。
 
     默认返回 candidate（待 admin 审核是否晋升 emerging），可切换状态过滤。
+    （08-15 修复：此前 state 缺省不过滤——摘要/徽标把已晋升 emerging/stable
+    计入"待审核"，29 条中真待办仅 2 条 candidate。）
     """
     from app.models.business import DiscoveryCandidate
 
