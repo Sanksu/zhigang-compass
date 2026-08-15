@@ -42,6 +42,7 @@ EXPECTED_FUNCTIONS = [
     resume_parse,
     match_recommend,
     batch_extract,
+    enrich_course_skills,
     load_courses,
     evaluate_courses,
     diversity_report,

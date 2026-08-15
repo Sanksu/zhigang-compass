@@ -943,6 +943,94 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     }
 
 
+async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
+    """新采集课程技能标签补全（T-05，2026-08-15）。
+
+    背景：icourse163/edx 爬虫不产出 skills 字段（edx 写死空、icourse163 页面
+    无数据）→ 课程无 LEARNABLE_VIA 静态边（存量 974 门孤立课程，产品走
+    learning_path 语义兜底无功能缺陷）。本任务**仅处理新采集课程**
+    （crawled_at >= 最近 7 天，容错 ETL 失败重跑；存量孤立课程不动——
+    T-05 验收），LLM 从标题+描述抽取技能，门控（canonical + 停用词/白名单，
+    与 import_course 同口径，防 08-13 静态脏边问题）后写回
+    snapshot["skills"]；load_courses 阶段随之建 LEARNABLE_VIA 边。
+
+    LLM 不可用/解析失败静默降级（写 skills_enriched 标记防重复抽取，
+    不阻塞 ETL，与 RAG 接地同语义）。
+    """
+    from datetime import date, timedelta
+
+    from sqlalchemy import func, or_, select
+
+    from app.core.database import async_session_factory
+    from app.models.raw import CourseRaw
+    from app.services.extraction.course_skills import (
+        extract_course_skills,
+        filter_skill_tags,
+    )
+    from app.services.extraction.jd_extractor import JDExtractor
+
+    # 新采集窗口：最近 7 天（含 ETL 失败重跑容错；更早课程即存量孤立课程不处理）
+    since = (date.today() - timedelta(days=7)).isoformat()
+
+    async with async_session_factory() as session:
+        stmt = (
+            select(CourseRaw)
+            .where(
+                or_(
+                    CourseRaw.snapshot["skills"].astext.is_(None),
+                    func.jsonb_typeof(CourseRaw.snapshot["skills"]) != "array",
+                    func.jsonb_array_length(CourseRaw.snapshot["skills"]) == 0,
+                ),
+                CourseRaw.snapshot["skills_enriched"].astext.is_(None),
+                CourseRaw.crawled_at >= since,
+            )
+            .order_by(CourseRaw.id.asc())
+        )
+        if limit:
+            stmt = stmt.limit(limit)
+        rows = (await session.scalars(stmt)).all()
+
+    llm = None
+    try:
+        llm = JDExtractor()._llm
+    except Exception:
+        llm = None
+
+    enriched = 0
+    skipped_no_llm = 0
+    failed = 0
+    for row in rows:
+        snap = dict(row.snapshot or {})
+        # 爬虫原始标签（如 coursera 段落解析）先过门控；仍有缺失才走 LLM
+        skills = filter_skill_tags(snap.get("skills") or [])
+        if not skills:
+            if llm is None:
+                skipped_no_llm += 1
+            else:
+                try:
+                    skills = extract_course_skills(
+                        llm, snap.get("title", ""), snap.get("description", "")
+                    )
+                except Exception:
+                    failed += 1
+        if skills:
+            snap["skills"] = skills
+            enriched += 1
+        # 标记已处理（含空结果），防每次 ETL 对同一课程重复调用 LLM
+        snap["skills_enriched"] = True
+        row.snapshot = snap
+    if rows:
+        async with async_session_factory() as session:
+            await session.commit()
+
+    return {
+        "checked": len(rows),
+        "enriched": enriched,
+        "skipped_no_llm": skipped_no_llm,
+        "failed": failed,
+    }
+
+
 async def load_courses(ctx: dict) -> dict:
     """课程数据入图（course_raw → Course/Skill 节点 + LEARNABLE_VIA 关系）。
 
@@ -1447,6 +1535,14 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
     # ── 阶段 5：通胀检测（M3 启用，须在抽取之后：依赖 snapshot.extraction）──
     results["stages"]["detect_inflation"] = await _run_stage(
         "detect_inflation", detect_inflation(ctx, jd_ids=[], limit=await _etl_limit(False, 200))
+    )
+
+    # ── 阶段 5.5：新采集课程技能标签补全（T-05，08-15；须在入图前）──
+    # icourse163/edx 爬虫不产出 skills → 课程无 LEARNABLE_VIA 静态边；
+    # LLM 抽取 + 门控写回 snapshot["skills"]，load_courses 随之建边。
+    # 仅处理最近 7 天新采集课程（存量孤立课程不动，走语义兜底）。
+    results["stages"]["enrich_course_skills"] = await _run_stage(
+        "enrich_course_skills", enrich_course_skills(ctx)
     )
 
     # ── 阶段 6：课程入图（course_raw → Course + LEARNABLE_VIA）──
@@ -2569,6 +2665,7 @@ class WorkerSettings:
         resume_parse,
         match_recommend,
         batch_extract,
+        enrich_course_skills,
         load_courses,
         evaluate_courses,
         diversity_report,
