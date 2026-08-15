@@ -46,6 +46,12 @@ class JDExtractor:
             # 降级纯规则抽取（见类 docstring「LLM 不可用时规则抽取兜底」）
             self._llm = None
 
+    @property
+    def llm(self) -> Optional[LLMProviderChain]:
+        """LLM 客户端公开访问点——tasks.py 课程技能补全等复用同一
+        provider 链（避免重复初始化/重复读配置），勿绕过本属性直取 _llm。"""
+        return self._llm
+
     def extract(self, jd_text: str, title_hint: str = "") -> JDExtractionResult:
         """从 JD 文本中抽取结构化实体。
 

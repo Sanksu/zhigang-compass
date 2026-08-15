@@ -222,6 +222,39 @@ def _rebuild_position_evolution(
     return {"position_id": position_id, "position_name": name, "points": points}
 
 
+async def _load_snapshots(db: AsyncSession) -> list | None:
+    """加载全部版本快照（时间升序）；无数据返回 None（调用方 404）。"""
+    rows = await db.scalars(
+        select(GraphVersion).order_by(GraphVersion.created_at.asc())
+    )
+    snapshots = [v for v in rows]
+    return snapshots or None
+
+
+def _top_nodes_by_heat(
+    indexes: list[dict], node_kind: str, id_prefix: str, edge_side: str, limit: int
+) -> list[tuple[str, str]]:
+    """按快照出现热度取 Top-N 节点（/positions 与 /skills 共用）。
+
+    热度 = 出现期数降序、最新引用边数降序；返回 [(id, 最近名称)]。
+    node_kind: 快照节点 type 值；id_prefix: id 前缀兜底；edge_side:
+    "src"/"tgt"——岗位 source 侧 / 技能 target 侧（与 _rebuild_node_evolution 一致）。
+    """
+    heat: dict[str, dict] = {}  # node_id -> {name, count, latest_freq}
+    for idx in indexes:
+        for nid, node in idx["nodes"].items():
+            if node.get("type") != node_kind and not nid.startswith(id_prefix):
+                continue
+            rec = heat.setdefault(nid, {"name": None, "count": 0, "latest_freq": 0})
+            rec["name"] = node.get("name") or rec["name"]
+            rec["count"] += 1
+            rec["latest_freq"] = idx[edge_side].get(nid, 0)
+    top = sorted(
+        heat.items(), key=lambda kv: (-kv[1]["count"], -kv[1]["latest_freq"])
+    )[:limit]
+    return [(nid, rec["name"]) for nid, rec in top]
+
+
 @router.get("/position/{id}/evolution")
 async def position_evolution(
     id: str,
@@ -233,16 +266,11 @@ async def position_evolution(
     返回 points（时间升序，date/version/freq=该岗位被引用边数），
     并附当前岗位名（快照中最近出现过的名称）。
     """
-    rows = await db.scalars(
-        select(GraphVersion).order_by(GraphVersion.created_at.asc())
-    )
-    snapshots = [v for v in rows]
-    if not snapshots:
+    snapshots = await _load_snapshots(db)
+    if snapshots is None:
         return error(4040, "无图谱版本数据", http_status=404)
     indexes = _build_snapshot_indexes(snapshots)
     return ok(data=_rebuild_position_evolution(indexes, id))
-
-
 @router.get("/positions")
 async def position_evolution_list(
     limit: int = Query(default=8, ge=1, le=20),
@@ -254,31 +282,14 @@ async def position_evolution_list(
     供演化看板默认展示——页面加载即有岗位演化轨迹，无需先查节点 ID。
     岗位判定：快照节点 type=position（id 前缀 pos_ 兜底）。
     """
-    rows = await db.scalars(
-        select(GraphVersion).order_by(GraphVersion.created_at.asc())
-    )
-    snapshots = [v for v in rows]
-    if not snapshots:
+    snapshots = await _load_snapshots(db)
+    if snapshots is None:
         return error(4040, "无图谱版本数据", http_status=404)
 
     indexes = _build_snapshot_indexes(snapshots)
-    heat: dict[str, dict] = {}  # position_id -> {name, count, latest_freq}
-    for idx in indexes:
-        for nid, node in idx["nodes"].items():
-            if node.get("type") != "position" and not nid.startswith("pos_"):
-                continue
-            rec = heat.setdefault(nid, {"name": None, "count": 0, "latest_freq": 0})
-            rec["name"] = node.get("name") or rec["name"]
-            rec["count"] += 1
-            rec["latest_freq"] = idx["src"].get(nid, 0)
-    top = sorted(
-        heat.items(), key=lambda kv: (-kv[1]["count"], -kv[1]["latest_freq"])
-    )[:limit]
-
+    top = _top_nodes_by_heat(indexes, "position", "pos_", "src", limit)
     return ok(data={
-        "positions": [
-            _rebuild_position_evolution(indexes, pid) for pid, _ in top
-        ],
+        "positions": [_rebuild_position_evolution(indexes, pid) for pid, _ in top],
     })
 
 
@@ -294,36 +305,17 @@ async def skill_evolution_list(
     技能 freq = 被引用边数（edges.target == skill，与 /trends 口径一致）。
     技能判定：快照节点 type=skill（id 前缀 sk_ 兜底）。
     """
-    rows = await db.scalars(
-        select(GraphVersion).order_by(GraphVersion.created_at.asc())
-    )
-    snapshots = [v for v in rows]
-    if not snapshots:
+    snapshots = await _load_snapshots(db)
+    if snapshots is None:
         return error(4040, "无图谱版本数据", http_status=404)
 
     indexes = _build_snapshot_indexes(snapshots)
-    heat: dict[str, dict] = {}  # skill_id -> {name, count, latest_freq}
-    for idx in indexes:
-        for nid, node in idx["nodes"].items():
-            if node.get("type") != "skill" and not nid.startswith("sk_"):
-                continue
-            rec = heat.setdefault(nid, {"name": None, "count": 0, "latest_freq": 0})
-            rec["name"] = node.get("name") or rec["name"]
-            rec["count"] += 1
-            rec["latest_freq"] = idx["tgt"].get(nid, 0)
-    top = sorted(
-        heat.items(), key=lambda kv: (-kv[1]["count"], -kv[1]["latest_freq"])
-    )[:limit]
-
-    return ok(data={
-        "skills": [
-            {"skill_id": sid, "skill_name": name, "points": points}
-            for sid, (name, points) in (
-                (sid, _rebuild_node_evolution(indexes, sid, edge_side="target"))
-                for sid, _ in top
-            )
-        ],
-    })
+    top = _top_nodes_by_heat(indexes, "skill", "sk_", "tgt", limit)
+    skills = []
+    for sid, _ in top:
+        name, points = _rebuild_node_evolution(indexes, sid, edge_side="target")
+        skills.append({"skill_id": sid, "skill_name": name, "points": points})
+    return ok(data={"skills": skills})
 
 
 @router.get("/trends")

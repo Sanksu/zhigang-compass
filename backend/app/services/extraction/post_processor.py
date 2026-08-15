@@ -61,7 +61,7 @@ def dedup_skills(skills: list[SkillExtracted]) -> list[SkillExtracted]:
     return result
 
 
-def _is_valid_skill_name(name: str) -> bool:
+def is_valid_skill_name(name: str) -> bool:
     """技能名校验：白名单/别名标准名保护 + 泛词/碎片拦截。
 
     除 SKILL_STOPWORDS 黑名单与单字符碎片外，复用 is_noise_skill 的泛词判定
@@ -94,7 +94,7 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     result.skills = [
         SkillExtracted(name=_clean(s.name), category=s.category, description=s.description)
         for s in result.skills
-        if _is_valid_skill_name(_clean(s.name)) and not _is_soft_noise(_clean(s.name))
+        if is_valid_skill_name(_clean(s.name)) and not _is_soft_noise(_clean(s.name))
     ]
     result.skills = dedup_skills(result.skills)
 
@@ -120,7 +120,7 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     seen: set[tuple[str, str]] = set()
     for req in result.requirements:
         name = _clean(req.skill_name)
-        if not _is_valid_skill_name(name) or _is_soft_noise(name):
+        if not is_valid_skill_name(name) or _is_soft_noise(name):
             continue
         key = (name.lower(), req.necessity)
         if key in seen:
