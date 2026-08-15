@@ -41,6 +41,7 @@ def create_access_token(user_id: str, role: str) -> str:
         "sub": user_id,
         "role": role,
         "type": "access",
+        "aud": settings.jwt_audience,  # audience（08-15 中危修复：防 token 跨服务复用）
         "jti": uuid.uuid4().hex,  # 登出黑名单依据（08-14 补：此前仅 refresh 有 jti，登出后 access 仍有效至过期）
         "iat": int(time.time()),
         "exp": int(time.time()) + settings.jwt_access_token_expire_minutes * 60,
@@ -54,6 +55,7 @@ def create_refresh_token(user_id: str, role: str = "guest") -> str:
         "sub": user_id,
         "role": role,
         "type": "refresh",
+        "aud": settings.jwt_audience,
         "jti": uuid.uuid4().hex,  # 登出黑名单依据（TTL = refresh 有效期）
         "iat": int(time.time()),
         "exp": int(time.time()) + settings.jwt_refresh_token_expire_days * 86400,
@@ -73,7 +75,7 @@ class TokenExpiredError(Exception):
 def decode_token(token: str) -> Optional[dict]:
     try:
         public_key = _load_rsa_key(settings.jwt_public_key_path)
-        return jwt.decode(token, public_key, algorithms=["RS256"])
+        return jwt.decode(token, public_key, algorithms=["RS256"], audience=settings.jwt_audience)
     except jwt.ExpiredSignatureError:
         raise TokenExpiredError("Token 已过期") from None
     except jwt.PyJWTError:

@@ -242,7 +242,9 @@ def _course_pool() -> list[dict]:
     """全课程池（TTL 缓存，课程级语义兜底扫描用）。"""
     now = time.time()
     with _cache_lock:
-        if now - _course_pool_cache["ts"] <= _CACHE_TTL and _course_pool_cache["courses"]:
+        # 08-15 中危修复：空结果也缓存（此前"非空才用缓存"与"无条件刷新 ts"
+        # 矛盾——空结果缓存了却每次重查，重复打 Neo4j）；ts 初值 0 保证首查
+        if now - _course_pool_cache["ts"] <= _CACHE_TTL:
             return _course_pool_cache["courses"]
     with neo4j_driver.session() as session:
         recs = session.run(

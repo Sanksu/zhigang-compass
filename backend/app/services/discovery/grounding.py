@@ -156,17 +156,27 @@ def _merge_hits(hits: list[dict], limit: int) -> list[dict]:
     return out[:limit]
 
 
+def _escape_ilike(pattern: str) -> str:
+    """转义 ILIKE 通配符（%/_）与转义符本身（08-15 中危修复）。
+
+    ILIKE 的 %/_ 是通配符，用户输入含 % 或 _ 会变成模糊匹配（如搜索 "100%" 
+    匹配全部、"_" 匹配单字符）——词面检索应只做字面包含匹配。
+    """
+    return pattern.replace("\\", "\\\\").replace("%", "\%").replace("_", "\_")
+
+
 async def _pg_ilike(db: AsyncSession, pos: str, limit: int) -> list[dict]:
     """PostgreSQL ILIKE 关键词检索（Neo4j 全文路的降级兜底）。"""
     from app.models.business import Occupation
     from sqlalchemy import cast
     from sqlalchemy.dialects import postgresql
 
+    escaped = _escape_ilike(pos)
     stmt = (
         select(Occupation)
         .where(
-            (Occupation.name.ilike(f"%{pos}%"))
-            | (cast(Occupation.aliases, postgresql.TEXT).ilike(f"%{pos}%"))
+            (Occupation.name.ilike(f"%{escaped}%", escape="\\"))
+            | (cast(Occupation.aliases, postgresql.TEXT).ilike(f"%{escaped}%", escape="\\"))
         )
         .limit(limit)
     )

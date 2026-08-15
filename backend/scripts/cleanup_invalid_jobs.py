@@ -15,6 +15,7 @@
 
 import argparse
 import asyncio
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -115,6 +116,19 @@ async def main() -> None:
     if args.dry_run:
         logger.info("[dry-run] 未执行任何删除")
         return
+
+    # 删除前导出待删清单备份（08-15 中危修复：删除不可逆——备份供误杀恢复/审计）
+    backup_dir = _BACKEND_DIR / "reports"
+    backup_dir.mkdir(exist_ok=True)
+    backup_path = backup_dir / f"cleanup_invalid_jobs_deleted_{datetime.now().strftime('%Y%m%d_%H%M')}.jsonl"
+    with backup_path.open("w", encoding="utf-8") as fh:
+        for r in targets:
+            fh.write(json.dumps({
+                "id": r.id, "source": r.source, "source_id": r.source_id,
+                "source_url": r.source_url, "title": (r.snapshot or {}).get("title", ""),
+                "reason": _invalid_job_reason(r.snapshot or {}) or _is_invalid_position(r.snapshot or {}),
+            }, ensure_ascii=False) + "\n")
+    logger.info("待删清单已备份: %s（%s 条）", backup_path, len(targets))
 
     deleted = _delete_evidence(urls)
     logger.info("[1/3] 已删除图谱 Evidence: %s 个", deleted)
