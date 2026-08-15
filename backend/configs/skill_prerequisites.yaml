@@ -117,6 +117,27 @@ skills:
     prerequisites:
     - SQL
     - 数据库
+  # P5 补录（2026-08-15，lp_17 IT 岗岗位池漂移后缺口）：数据治理/集成工具链先修
+  # 全部指向白名单词（数据仓库/SQL/数据库/分布式/ETL 管道），不扩充白名单
+  主数据:
+    prerequisites:
+    - 数据仓库
+    hours: 40
+  ODS:
+    prerequisites:
+    - 数据仓库
+    - SQL
+    hours: 40
+  Databricks:
+    prerequisites:
+    - 数据仓库
+    - 分布式
+    hours: 40
+  Data Factory:
+    prerequisites:
+    - ETL 管道
+    - 数据仓库
+    hours: 40
   Hive:
     prerequisites:
     - SQL
