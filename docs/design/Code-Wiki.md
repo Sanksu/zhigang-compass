@@ -808,7 +808,7 @@ ALERT_WEBHOOK_URL=                   # 飞书/钉钉/企微机器人 webhook，�
 4. **算法核心三道红线**：LLM 抽取 / 匹配引擎 / 演化算法 / 幻觉防控，须算法岗张恺天亲自把关，AI 仅作参考。
 5. **安全代码**：密钥 / Token / 认证 / 权限相关，必须人工逐行审查，禁止 AI 自主产出。
 6. **每 PR ≤ 500 行**：超出必须拆分；`main` 分支禁止直推，需 PR + CI 全绿 + ≥ 1 人 Review。
-7. **Windows 环境**：git 多行提交用多个 `-m` 参数（勿用 heredoc）；pytest 固定加 `--basetemp=.pytest_tmp`（见 [postmortem](../../postmortems/001-powershell-pytest-windows-env.md)）。
+7. **Windows 环境**：git 多行提交用多个 `-m` 参数（勿用 heredoc）；pytest 固定加 `--basetemp=.pytest_tmp`（见 [postmortem](../postmortems/001-powershell-pytest-windows-env.md)）。
 
 ---
 
