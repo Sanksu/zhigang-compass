@@ -2599,10 +2599,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 待审核岗位列表 */
+        /**
+         * 待审核岗位列表
+         * @description 默认返回 candidate（待 admin 审核是否晋升 emerging），可切换状态过滤
+         */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description 候选池状态过滤（缺省 candidate——摘要/徽标计数的待审核口径） */
+                    state?: "candidate" | "emerging" | "stable" | "declining";
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -2998,7 +3004,7 @@ export interface components {
             /** @enum {string} */
             type: "position" | "skill" | "evidence";
             /**
-             * @description 岗位状态机（仅 position 节点）
+             * @description 岗位状态机（仅 position 节点；active=图谱常态岗位，非发现状态机成员）
              * @enum {string}
              */
             status?: "active" | "candidate" | "emerging" | "stable" | "declining" | "archived";
@@ -3136,7 +3142,7 @@ export interface components {
             /** @description 最近更新时间 ISO8601 */
             last_updated?: string | null;
             /** @enum {string} */
-            status?: "active" | "candidate" | "emerging" | "stable" | "declining" | "archived";
+            status?: "candidate" | "emerging" | "stable" | "declining" | "archived";
             must_skills: components["schemas"]["PositionSkillItem"][];
             nice_skills: components["schemas"]["PositionSkillItem"][];
         };
@@ -3287,10 +3293,10 @@ export interface components {
         };
         /** @description 爬取聚合指标（GET /admin/crawl/status） */
         CrawlMetrics: {
-            /** @description 今日入库新增 */
+            /** @description 今日入库新增（CST） */
             today_count: number;
-            /** @description output 文件总数 */
-            output_total: number;
+            /** @description 累计采集量——四表 DB 入库总量（jd/course/paper/community，与仪表盘口径一致） */
+            raw_total: number;
             /** @description 各 raw 表累计条数 */
             raw: {
                 jd: number;

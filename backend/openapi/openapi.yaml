@@ -2117,10 +2117,10 @@ components:
     CrawlMetrics:
       type: object
       description: 爬取聚合指标（GET /admin/crawl/status）
-      required: [today_count, output_total, raw]
+      required: [today_count, raw_total, raw]
       properties:
-        today_count: { type: integer, description: 今日入库新增 }
-        output_total: { type: integer, description: output 文件总数 }
+        today_count: { type: integer, description: 今日入库新增（CST） }
+        raw_total: { type: integer, description: 累计采集量——四表 DB 入库总量（jd/course/paper/community，与仪表盘口径一致） }
         raw:
           type: object
           description: 各 raw 表累计条数
