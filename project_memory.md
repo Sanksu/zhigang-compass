@@ -107,7 +107,7 @@
 | 编号 | 优先级 | 事项 | 验收标准 | 来源 |
 |---|---|---|---|---|
 | T-01 | P0 | **代码修复部署到远端**：tasks.py（batch_extract 跳 SimHash 重复 + `_purge_dup_import_residue`）、dictionary.py（P6 停用词 9 词）、kg_service.py（import_jd 默认 active）、graph.py（fallback active）、schemas.py（active 枚举）、openapi/前端类型颜色——当前 192.168.0.140 远端 worker 仍跑旧代码 | 远端 ETL 跑一轮后：无新空权边产生、新岗位 status=active、业务词技能不重建 | 空权边根因/可见性修正 |
-| T-02 | P0 | **本地改动提交**：12 个文件改动（CHANGELOG/进度跟踪/project_memory 文档 + 6 个后端 + 3 个前端）按团队规范拆 PR（fix(be) 语义修复 / docs 同步），先过 CI | PR 合入 develop，CI 全绿 | 08-15 全会话 |
+| T-02 | P0 | **本地改动提交 → PR 合入**：12 个文件已拆 4 分支 4 PR——**#216** fix(be) SimHash 重复残留治理 / **#217** fix(algo) 停用词 P6 / **#218** fix(be) active 状态 / **#219** docs 审计同步；待 CI 全绿 + review 合入 develop | 4 PR 合入，CI 全绿 | 08-15 全会话 |
 | T-03 | P1 | **26 个发现候选审核**：PG discovery_candidates state='candidate'（含 后端开发工程师/全栈工程师/DevOps/数据科学家/产品经理 等主流岗位）逐条 admin 审核 → emerging/stable/declining/rejected | 候选池无长期滞留 candidate，主流岗位进入公开态（图谱 status 同步） | 可见性修正核查 |
 | T-04 | P1 | **碎片岗位名治理**：9 个 legacy（AI 证据/Web/AI 与自动化/Gemini 应用合作伙伴/AI/ML应用 等）+ 低频碎片岗位（AI 原生构建/CMDB发现/GTM/IT 站点技术支持 等，各 1-2 条真实 JD）——重抽（prompt 迭代后）或 `_POSITION_KEYWORDS`/路由映射归一化，**不直接删节点** | 碎片名映射到规范岗位或重抽后消失；`normalize_position_name` 覆盖 | 脏节点扫描 |
 | T-05 | P1 | **孤立课程爬虫技能标签**：icourse163/edx 爬虫层产出课程技能标签（LLM 抽取 + 门控，防静态脏边——08-13 #192/#198 教训），仅限未来采集，勿手工批量补存量边 | 新采集课程带 skills 标签且经门控；存量 974 门孤立课程不动 | 孤立课程核查 |
