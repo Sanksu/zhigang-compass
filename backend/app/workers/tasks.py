@@ -28,6 +28,17 @@ from arq.worker import func
 from app.core.config import settings
 from app.services.alerting import send_alert
 
+from sqlalchemy import or_, select
+from app.models.business import (
+    DiscoveryCandidate,
+    GraphVersion,
+    MatchResultRecord,
+    ResumeCache,
+    TaskStatus,
+    TechnologyWatch,
+)
+from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
+
 logger = logging.getLogger(__name__)
 
 # 子进程 stdout/stderr 强制 UTF-8（中文 Windows 默认 GBK 管道，按 UTF-8 解码会乱码）
@@ -88,7 +99,6 @@ async def _update_crawl_task(task_id: str | None, **fields) -> None:
     if not task_id:
         return
     from app.core.database import async_session_factory
-    from app.models.business import TaskStatus
 
     async with async_session_factory() as s:
         task = await s.get(TaskStatus, task_id)
@@ -590,10 +600,8 @@ async def validate_temporal(
     检测结果写回 `snapshot["validation"]`（含三类结果 + 叠加降权系数）；
     数据不足（无技能/无发布日期）的 JD 跳过，不做武断判定。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import JDRaw
     from app.services.data_quality.temporal_detector import (
         RECENT_WINDOW_DAYS,
         apply_temporal_decay,
@@ -730,10 +738,8 @@ async def detect_inflation(
     结果写回 `snapshot["inflation"]`（含四维分 / inflation_score / label / decay_weight）。
     缺岗位级别或经验解析失败的 JD 跳过，不做武断判定。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import JDRaw
     from app.services.data_quality.inflation_detector import compute_inflation_score
 
     async with async_session_factory() as session:
@@ -873,10 +879,8 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     将后入库记录标记 `snapshot["_duplicate_of"]` = 先入库记录 id。
     聚合层（aggregation.build_aggregates）跳过被标记记录，避免重复 JD 虚高频次。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import JDRaw
     from app.services.data_quality.simhash import find_similar_pairs
     from app.services.embeddings.vector_store import load_jd_vectors_by_ids
     from app.services.matching.semantic import cosine_similarity
@@ -969,10 +973,9 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
     """
     from datetime import date, timedelta
 
-    from sqlalchemy import func, or_, select
+    from sqlalchemy import func, select
 
     from app.core.database import async_session_factory
-    from app.models.raw import CourseRaw
     from app.services.extraction.course_skills import (
         extract_course_skills,
         filter_skill_tags,
@@ -1128,10 +1131,8 @@ async def load_courses(ctx: dict) -> dict:
     遍历 course_raw.snapshot 调 import_course（Neo4j MERGE 幂等，重复执行
     不产生重复节点）。单条失败不阻塞整体（批量语义）。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
-    from app.models.raw import CourseRaw
     from app.services.kg.kg_service import import_course
 
     async with async_session_factory() as session:
@@ -1161,10 +1162,8 @@ async def evaluate_courses(ctx: dict) -> dict:
     遍历 course_raw 全量课程 → 六维加权质量评分 → 幂等写回
     `snapshot["quality"]`（覆盖更新）。返回推荐池统计，供学习路径取 Top-3。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import CourseRaw
     from app.services.data_quality.course_quality import (
         RECOMMEND_MIN_SCORE,
         evaluate_course,
@@ -1196,10 +1195,8 @@ async def diversity_report(ctx: dict, top_n: int = 10) -> dict:
     聚合四类 raw 表多样性指标，写入 reports/diversity_{date}.json（幂等覆盖）。
     指标口径见 app/services/data_quality/diversity.py。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
     from app.services.data_quality.diversity import (
         course_diversity,
         dedup_stats,
@@ -1270,10 +1267,8 @@ async def check_data_freshness(ctx: dict) -> dict:
     按来源聚合四类 raw 表最新抓取时间，判定平台级新鲜度（≤1 天），
     写入 reports/freshness_{date}.json。过期来源返回在结果中供告警。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
     from app.services.data_quality.update_status import platform_freshness
 
     async def _rows(model):
@@ -1322,10 +1317,8 @@ async def aggregate_positions(ctx: dict) -> dict:
     - Position.freq / required_years / last_updated
     - REQUIRES.weight / necessity / source_count
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
-    from app.models.raw import JDRaw
     from app.services.kg.aggregation import build_aggregates, write_aggregates
 
     async with async_session_factory() as session:
@@ -1353,10 +1346,8 @@ async def cross_validate_jds(ctx: dict, limit: int | None = None) -> dict:
     薪资异常、经验分歧、跨源置信度，结果写回 `snapshot["cross_validation"]`
     （幂等覆盖）。返回组级统计供管线审计。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import JDRaw
     from app.services.data_quality.cross_validate import (
         build_position_groups,
         validate_group,
@@ -1527,7 +1518,6 @@ async def _etl_limit(extracted: bool, default: int) -> int:
     from sqlalchemy import func, select
 
     from app.core.database import async_session_factory
-    from app.models.raw import JDRaw
 
     if extracted:
         predicate = JDRaw.snapshot["extraction"].astext.is_(None)
@@ -1710,10 +1700,8 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
     - 任务状态经 TaskStatus 追踪（parse_resume 路由入队时携带 task_id）
     - 任一环节失败标记 task failed 并记录错误，不做假成功返回
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.business import ResumeCache, TaskStatus
     from app.services.resume.extractor import ResumeExtractor
     from app.services.resume.file_parser import extract_text
     from app.services.resume.pii_mask import mask_pii, restore_pii
@@ -1826,10 +1814,8 @@ async def match_recommend(
     """
     import uuid
 
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory, redis_client
-    from app.models.business import MatchResultRecord, ResumeCache, TaskStatus
     from app.services.matching.engine import RuleBasedMatcher
     from app.services.matching.loaders import build_candidate, load_positions_from_graph
     from app.services.matching.schemas import MatchMode, MatchRequest
@@ -1972,10 +1958,8 @@ async def batch_extract(
 
     全部失败时抛出，由 ARQ 重试机制兜底。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
-    from app.models.raw import JDRaw
     from app.services.extraction.jd_extractor import JDExtractor
     from app.services.kg.kg_service import import_jd
 
@@ -2147,10 +2131,8 @@ async def discovery_daily(ctx: dict) -> dict:
 
     幂等设计：按 position_name upsert，重复执行覆盖更新（同岗位不重复入池）。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import CommunityRaw, JDRaw, PaperRaw
     from app.services.discovery.detector import DiscoveryDetector, DiscoveryInput
     from app.services.discovery.confidence import compute_confidence
     from app.services.extraction.dictionary import normalize_position_name
@@ -2219,7 +2201,6 @@ async def discovery_daily(ctx: dict) -> dict:
     # 从 graph_versions 快照序列重建岗位频次窗口，计算真实 Z-score /
     # 3 月移动平均 / 环比增长率，替代此前 history_days=1/z_score=None 硬编码
     # （否则正常 Z-score 门控永不触发，只能走冷启动）
-    from app.models.business import GraphVersion
     from app.services.discovery.state_machine import freq_z_scores, position_freq_windows
 
     async with async_session_factory() as session:
@@ -2373,11 +2354,8 @@ async def discovery_auto_transition(ctx: dict) -> dict:
 
     数据不足（jd_raw 无已抽取记录或岗位窗口序列 < 2）时跳过，不武断判定（冷启动）。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
-    from app.models.business import DiscoveryCandidate
-    from app.models.raw import JDRaw
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
     from app.services.discovery.state_machine import (
         WindowFreq, decline_rate, evaluate_auto_transition, freq_z_scores,
@@ -2518,8 +2496,6 @@ class _Provider:
 
 async def _upsert_candidate(session, cand) -> None:
     """按 position_name upsert 候选池（幂等：同岗位覆盖更新特征/状态）。"""
-    from app.models.business import DiscoveryCandidate
-    from sqlalchemy import select
 
     row = await session.scalar(
         select(DiscoveryCandidate).where(DiscoveryCandidate.position_name == cand.position_name)
@@ -2564,11 +2540,8 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
         run_date: 统计周期 YYYY-MM-DD（缺省用当天）
     """
     from datetime import date, timedelta
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.business import TechnologyWatch
-    from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
     from app.services.discovery.watch_pool import (
         aggregate_weekly_freqs,
         anomaly_flags,
@@ -2631,7 +2604,6 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
         await session.commit()
 
         # ── 3. 提升候选：JD 源命中且该技能此前已在观察池（设计 §7.2.5 / 方案 §2）──
-        from app.models.business import DiscoveryCandidate
         from app.services.discovery.confidence import compute_confidence
         from app.services.discovery.watch_pool import promotable_skills
 

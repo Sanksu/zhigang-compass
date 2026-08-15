@@ -5,9 +5,7 @@
 → 入队 ARQ resume_parse 任务（PII 脱敏在任务内完成）。
 """
 
-import asyncio
 import hashlib
-import json
 import logging
 import uuid
 from pathlib import Path
@@ -18,7 +16,7 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import String, cast, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.common import iso, owns_resume, parse_uuid, serialize_task
+from app.api.common import iso, owns_resume, parse_uuid, serialize_task, sse_task_events
 from app.api.deps import require_role
 from app.core.arq_client import enqueue
 from app.core.database import async_session_factory, get_db
@@ -249,25 +247,10 @@ async def _task_stream_events(
     事件流：progress 周期推送 → 终态 success/failed 推送 done/error 并结束；
     任务不存在 / 超时推送 error 后结束。
     """
-    import time
-
-    deadline = time.monotonic() + timeout
-    while True:
-        task = await get_task(task_uuid)
-        if task is None:
-            yield f"event: error\ndata: {json.dumps({'message': '任务不存在'}, ensure_ascii=False)}\n\n"
-            return
-        if task["status"] == "success":
-            yield f"event: done\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
-            return
-        if task["status"] == "failed":
-            yield f"event: error\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
-            return
-        yield f"event: progress\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
-        if time.monotonic() >= deadline:
-            yield f"event: error\ndata: {json.dumps({'message': '推送超时'}, ensure_ascii=False)}\n\n"
-            return
-        await asyncio.sleep(poll_interval)
+    async for event in sse_task_events(
+        task_uuid, get_task, poll_interval=poll_interval, timeout=timeout
+    ):
+        yield event
 
 
 @router.get("/{resume_id}")

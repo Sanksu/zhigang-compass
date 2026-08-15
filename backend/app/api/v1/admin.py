@@ -10,7 +10,6 @@ import asyncio
 import json
 import logging
 import re
-import time
 import uuid
 
 import yaml
@@ -20,7 +19,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.common import iso, paginate, paged_ok, serialize_task
+from app.api.common import iso, paginate, paged_ok, serialize_task, sse_task_events
 from app.api.deps import require_permission
 from app.core.arq_client import enqueue
 from app.core.database import get_db, redis_client
@@ -397,31 +396,31 @@ async def _crawl_log_events(
     error 后关闭。日志按 offset 增量拉取，避免重复推送。
     """
     offset = 0
-    deadline = time.monotonic() + timeout
-    while True:
+
+    async def _poll_logs() -> list[str]:
+        nonlocal offset
         try:
             lines = await get_logs(task_uuid, offset)
         except Exception:
             lines = []
-        for ln in lines:
-            yield f"event: log\ndata: {json.dumps({'line': ln}, ensure_ascii=False)}\n\n"
         offset += len(lines)
+        return [
+            f"event: log\ndata: {json.dumps({'line': ln}, ensure_ascii=False)}\n\n"
+            for ln in lines
+        ]
 
-        task = await get_task(task_uuid)
-        if task is None:
-            yield f"event: error\ndata: {json.dumps({'message': '任务不存在'}, ensure_ascii=False)}\n\n"
-            return
-        if task["status"] == "success":
-            yield f"event: done\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
-            return
-        if task["status"] == "failed":
-            yield f"event: error\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
-            return
-        yield f"event: progress\ndata: {json.dumps({'status': task['status'], 'progress': task['progress']}, ensure_ascii=False)}\n\n"
-        if time.monotonic() >= deadline:
-            yield f"event: error\ndata: {json.dumps({'message': '推送超时'}, ensure_ascii=False)}\n\n"
-            return
-        await asyncio.sleep(poll_interval)
+    def _progress(task) -> dict:
+        return {"status": task["status"], "progress": task["progress"]}
+
+    async for event in sse_task_events(
+        task_uuid,
+        get_task,
+        before_poll=_poll_logs,
+        progress_payload=_progress,
+        poll_interval=poll_interval,
+        timeout=timeout,
+    ):
+        yield event
 
 
 @router.get("/crawl/task/{task_id}/stream")
