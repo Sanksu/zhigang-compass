@@ -35,7 +35,10 @@ _inflight: dict[str, asyncio.Future] = {}
 # 节点详情缓存 TTL（设计文档 §11.3.5：position:{id} 5min，skill 同档）
 _NODE_CACHE_TTL = 300
 
-# 匿名/guest 可见的岗位状态（方案一：candidate 待审核不外宣，archived 已下线）
+# 匿名/guest 可见的岗位状态（方案一：candidate 待审核不外宣，archived 已下线）。
+# 08-15 语义修正：图谱常态岗位为 active（import_jd/聚合产生），发现候选为
+# candidate（persist 镜像）——active 暂不公开（用户决策保持匿名范围不变），
+# 如需公开仅需在本元组追加 "active"。
 _PUBLIC_POSITION_STATUSES = ("emerging", "stable", "declining")
 
 
@@ -95,7 +98,7 @@ def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int
                 "id": p_id,
                 "name": p.get("name", p_id),
                 "type": "position",
-                "status": p.get("status", "candidate"),
+                "status": p.get("status", "active"),
             })
             nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
             edges.append({
@@ -1068,7 +1071,7 @@ async def graph_view(
                 "id": p_id,
                 "name": record.get("pname", p_id),
                 "type": "position",
-                "status": record.get("pstatus") or "candidate",
+                "status": record.get("pstatus") or "active",
             })
             edges.append({
                 "source": s_id,
@@ -1096,7 +1099,7 @@ async def graph_view(
                 "id": p_id,
                 "name": p.get("name", p_id),
                 "type": "position",
-                "status": p.get("status", "candidate"),
+                "status": p.get("status", "active"),
             })
             nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
             edges.append({

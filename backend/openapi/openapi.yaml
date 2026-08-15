@@ -1737,8 +1737,8 @@ components:
         type: { type: string, enum: [position, skill, evidence] }
         status:
           type: string
-          enum: [candidate, emerging, stable, declining, archived]
-          description: 岗位状态机（仅 position 节点）
+          enum: [active, candidate, emerging, stable, declining, archived]
+          description: 岗位状态机（仅 position 节点；active=图谱常态岗位，非发现状态机成员）
 
     GraphEdge:
       type: object
