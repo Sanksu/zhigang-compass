@@ -21,3 +21,12 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
 }
+
+/**
+ * 时间戳 → 中文本地化显示（无效/缺省值显示占位符）。
+ */
+export function formatDateTime(value: string | number | Date | null | undefined): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN')
+}

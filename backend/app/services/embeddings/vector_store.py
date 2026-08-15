@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.business import JdEmbedding, ProjectEmbedding, SkillEmbedding
+from app.models.business import JdEmbedding, ProjectEmbedding
 from app.services.matching.semantic import cosine_similarity  # noqa: F401  （供调用方直接使用）
 
 
@@ -20,15 +20,6 @@ class PgvectorUnavailableError(Exception):
     消费点按需降级（skill/similar → 内存扫描、项目比对 → 文本相似度）；
     未降级路径由 main.py 全局处理器兜底发射 5002。
     """
-
-
-async def load_skill_embeddings(db: AsyncSession) -> dict[str, list[float]]:
-    """skill_embeddings → {skill_id: vector}。"""
-    try:
-        rows = (await db.scalars(select(SkillEmbedding))).all()
-    except SQLAlchemyError as e:
-        raise PgvectorUnavailableError(f"skill_embeddings 查询失败: {e}") from e
-    return {r.id: r.embedding for r in rows}
 
 
 async def load_project_vectors(
@@ -49,15 +40,6 @@ async def load_project_vectors(
     except SQLAlchemyError as e:
         raise PgvectorUnavailableError(f"project_embeddings 查询失败: {e}") from e
     return {r.payload.get("text", ""): r.embedding for r in rows if r.payload.get("text")}
-
-
-async def load_jd_vectors(db: AsyncSession) -> dict[str, list[float]]:
-    """jd_embeddings → {jd_id: vector}。"""
-    try:
-        rows = (await db.scalars(select(JdEmbedding))).all()
-    except SQLAlchemyError as e:
-        raise PgvectorUnavailableError(f"jd_embeddings 查询失败: {e}") from e
-    return {r.payload.get("jd_id"): r.embedding for r in rows if r.payload.get("jd_id")}
 
 
 async def load_jd_vectors_by_ids(db: AsyncSession, jd_ids: list[str]) -> dict[str, list[float]]:

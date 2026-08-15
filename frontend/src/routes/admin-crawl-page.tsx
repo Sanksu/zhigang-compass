@@ -22,6 +22,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiGet, apiPost, ApiError, getAccessToken } from '@/lib/api'
+import { formatDateTime } from '@/lib/utils'
 import type { components } from '@/types/api'
 import {
   Dialog,
@@ -310,7 +311,7 @@ export function AdminCrawlPage() {
           res.items.map((h) => ({
             id: h.id,
             platformKey: h.platform,
-            time: h.created_at ? new Date(h.created_at).toLocaleString('zh-CN') : '—',
+            time: formatDateTime(h.created_at),
             platform: h.platform_name || h.platform || '—',
             keyword: h.keyword || '—',
             count: h.items,
@@ -336,7 +337,7 @@ export function AdminCrawlPage() {
             status: 'idle',
             todayCount: p.today_count ?? 0,
             totalCount: p.total_count,
-            lastRun: p.last_run ? new Date(p.last_run).toLocaleString('zh-CN') : '—',
+            lastRun: formatDateTime(p.last_run),
           })),
         )
         setMetrics([

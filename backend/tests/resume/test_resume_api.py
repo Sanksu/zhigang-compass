@@ -1,7 +1,7 @@
 """简历 API 编辑与 SSE 推送的纯函数测试（BE-M4-01）。
 
 端点依赖 DB（PUT 编辑落库、SSE 轮询 TaskStatus），测试聚焦纯逻辑：
-- `_parse_resume_id`：UUID 校验
+- `parse_uuid`（app.api.common）：UUID 校验
 - `_merge_fields`：编辑字段顶层覆盖合并语义
 - `_task_stream_events`：SSE 事件序列（progress/done/error/不存在/超时），注入假任务查询
 - 上传白名单与解析器能力一致性（T-03）
@@ -12,7 +12,8 @@ import pytest
 from sqlalchemy import String, cast, select
 from sqlalchemy.dialects import postgresql
 
-from app.api.v1.resume import ALLOWED_EXTENSIONS, _merge_fields, _parse_resume_id, _task_stream_events
+from app.api.common import parse_uuid
+from app.api.v1.resume import ALLOWED_EXTENSIONS, _merge_fields, _task_stream_events
 from app.models.business import ResumeCache, ResumeFile
 from app.services.resume.file_parser import SUPPORTED_EXTENSIONS
 
@@ -38,12 +39,12 @@ class TestUploadWhitelist:
 class TestParseResumeId:
     def test_valid_uuid(self):
         rid = "a3b7f0d2-2d5a-4e1c-8f6b-1c3d5e7f9a0b"
-        assert _parse_resume_id(rid) == rid
+        assert parse_uuid(rid) == rid
 
     def test_invalid_returns_none(self):
-        assert _parse_resume_id("not-a-uuid") is None
-        assert _parse_resume_id("") is None
-        assert _parse_resume_id(None) is None
+        assert parse_uuid("not-a-uuid") is None
+        assert parse_uuid("") is None
+        assert parse_uuid(None) is None
 
 
 class TestMergeFields:

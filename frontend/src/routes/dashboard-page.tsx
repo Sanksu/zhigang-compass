@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { apiGet } from '@/lib/api'
+import { formatDateTime } from '@/lib/utils'
 import type { components } from '@/types/api'
 
 interface StatItem {
@@ -101,7 +102,7 @@ export function DashboardPage() {
       // 最近活动 = 版本发布（优先全部展示）+ 登录审计补足至 6 条
       const versionActs: ActivityItem[] = versions.map((v) => ({
         id: `v-${v.version_id}`,
-        time: v.created_at ? new Date(v.created_at).toLocaleString('zh-CN') : '—',
+        time: formatDateTime(v.created_at),
         icon: Network,
         title: `图谱版本 ${v.version_id} 发布`,
         desc: v.change_summary || '版本快照',
@@ -109,7 +110,7 @@ export function DashboardPage() {
       }))
       const auditActs: ActivityItem[] = logs.map((l) => ({
         id: `a-${l.id}`,
-        time: l.created_at ? new Date(l.created_at).toLocaleString('zh-CN') : '—',
+        time: formatDateTime(l.created_at),
         icon: Activity,
         title: `${l.detail?.username ?? '用户'} 登录`,
         desc: l.action,

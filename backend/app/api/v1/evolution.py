@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.common import iso, paginate, paged_ok
 from app.api.deps import require_role
 from app.core.database import get_db, redis_client
 from app.models.business import GraphVersion
@@ -85,17 +86,14 @@ async def list_versions(
     user: dict = Depends(require_role("guest")),
 ):
     """图谱版本列表（分页，按创建时间倒序）。"""
-    total = await db.scalar(select(func.count()).select_from(GraphVersion))
-    rows = await db.scalars(
-        select(GraphVersion)
-        .order_by(GraphVersion.created_at.desc())
-        .offset((page - 1) * size)
-        .limit(size)
+    stmt = select(GraphVersion).order_by(GraphVersion.created_at.desc())
+    rows, total = await paginate(
+        db, stmt, page, size, count_stmt=select(func.count()).select_from(GraphVersion)
     )
     items = [
         {
             "version_id": v.id,
-            "created_at": v.created_at.isoformat() if v.created_at else None,
+            "created_at": iso(v.created_at),
             "change_summary": v.change_summary,
             "triggered_by": v.triggered_by,
             "node_added": v.node_added,
@@ -104,7 +102,7 @@ async def list_versions(
         }
         for v in rows
     ]
-    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+    return paged_ok(items, total, page, size)
 
 
 @router.get("/diff")
@@ -176,7 +174,7 @@ async def version_detail(
 
     return ok(data={
         "version_id": v.id,
-        "created_at": v.created_at.isoformat() if v.created_at else None,
+        "created_at": iso(v.created_at),
         "change_summary": v.change_summary,
         "triggered_by": v.triggered_by,
         "node_added": v.node_added,
@@ -437,7 +435,7 @@ async def state_machine_overview(
             "from_state": (log.detail or {}).get("from_state"),
             "to_state": (log.detail or {}).get("to_state"),
             "reason": (log.detail or {}).get("reason", ""),
-            "created_at": log.created_at.isoformat() if log.created_at else None,
+            "created_at": iso(log.created_at),
         }
         for log in logs
     ]
@@ -485,7 +483,7 @@ async def technology_watch_overview(
             "mli": mli.mli,
             "ready_to_industrialize": mli.ready_to_industrialize,
             "status": info["status"],
-            "last_signal_at": info["last_signal_at"].isoformat() if info.get("last_signal_at") else None,
+            "last_signal_at": iso(info.get("last_signal_at")),
         })
     items.sort(key=lambda x: (-x["mli"], x["skill_name"]))
     return ok(data={"items": items[:limit], "total": len(items)})

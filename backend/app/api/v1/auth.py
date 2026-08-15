@@ -9,6 +9,7 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.common import iso
 from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.database import get_db, get_redis
@@ -245,7 +246,7 @@ async def me(
         "email": user.email,
         "phone": user.phone,
         "bio": user.bio,
-        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "created_at": iso(user.created_at),
     })
 
 
@@ -285,7 +286,7 @@ async def update_me(
         "email": user.email,
         "phone": user.phone,
         "bio": user.bio,
-        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "created_at": iso(user.created_at),
     })
 
 

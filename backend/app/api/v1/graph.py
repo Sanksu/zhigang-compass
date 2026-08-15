@@ -52,6 +52,11 @@ def _position_scope(user: Optional[dict]) -> str:
     return "all" if _can_view_all_positions(user) else "public"
 
 
+def _status_clause(scope: str) -> str:
+    """岗位可见性过滤子句：public 时按公开状态过滤，否则不过滤（Cypher 插值）。"""
+    return "p.status IN $public_statuses" if scope == "public" else "true"
+
+
 async def _cache_get(key: str):
     """Redis 缓存读取（JSON 反序列化），未命中返回 None。"""
     cached = await redis_client.get(key)
@@ -67,7 +72,7 @@ def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int
     """panorama 同步 Neo4j 查询（08-14 审查：原在 async 函数内同步阻塞事件循环，抽到线程池）。"""
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
     with neo4j_driver.session() as session:
         if focus:
             rows = session.run(
@@ -435,7 +440,7 @@ async def skill_positions(
     cached = await _cache_get(cache_key)
     if cached is not None:
         return ok(data=cached)
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
     positions = await asyncio.to_thread(
         _query_skill_positions, skill_id, status_filter)
     data = {"skill_id": skill_id, "positions": positions}
@@ -565,7 +570,7 @@ def _load_position(id: str, user: Optional[dict] = None) -> dict | None:
     （视为不存在，避免待审核岗位外泄，见方案一）。
     """
     scope = _position_scope(user)
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
     with neo4j_driver.session() as session:
         rec = session.run(
             f"""
@@ -625,7 +630,7 @@ async def position_skills(
         return error(4040, "岗位不存在", http_status=404)
 
     scope = _position_scope(user)
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
     items = await asyncio.to_thread(
         _query_position_skills, id, necessity, status_filter)
 
@@ -769,7 +774,7 @@ async def skill_detail(
     if skill is None:
         return error(4040, "技能不存在", http_status=404)
 
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
     counts = await asyncio.to_thread(_query_skill_counts, skill_id, status_filter)
 
     courses = await load_courses_for_skill(
@@ -1057,7 +1062,7 @@ async def graph_view(
     if cached is not None:
         return ok(data=json.loads(cached))
 
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
 
     if view_type == "techStack":
         rows = await asyncio.to_thread(
