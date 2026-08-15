@@ -774,6 +774,85 @@ async def detect_inflation(
     return results
 
 
+def _purge_dup_import_residue(urls: list[str]) -> dict:
+    """清除已入图 SimHash 重复记录的图谱残留（08-15 核查后新增）。
+
+    重复记录在 canonical 名下入图即可，其独立入图残留 = 岗位节点 + 空权
+    REQUIRES 边（import_jd 写 necessity/level，聚合跳过重复记录 → 永不获
+    weight/source_count）。规则：
+    1. 删记录 Evidence 的 HAS_EVIDENCE（岗位）边；Evidence 被技能
+       EVIDENCED_BY 引用时保留节点（证据追溯链完整），否则连带删除；
+    2. 受影响岗位删除后无任何证据且 REQUIRES 均无 source_count → 纯重复
+       残留，DETACH DELETE（空权边一并清除）。
+
+    Returns:
+        {"has_edges_removed", "evidence_removed", "positions_removed"}
+    """
+    if not urls:
+        return {"has_edges_removed": 0, "evidence_removed": 0, "positions_removed": 0}
+    from app.core.database import neo4j_driver
+
+    with neo4j_driver.session() as session:
+        # 先收集受影响岗位（须在删证据边之前，删后无法回溯归属）
+        affected = session.run(
+            """
+            MATCH (p:Position)-[:HAS_EVIDENCE]->(e:Evidence)
+            WHERE e.source_url IN $urls
+            RETURN collect(DISTINCT p.name) AS names
+            """,
+            urls=urls,
+        ).single()["names"]
+        if not affected:
+            return {"has_edges_removed": 0, "evidence_removed": 0, "positions_removed": 0}
+
+        has_edges_removed = session.run(
+            """
+            MATCH (:Position)-[h:HAS_EVIDENCE]->(e:Evidence)
+            WHERE e.source_url IN $urls
+            RETURN count(h) AS n
+            """,
+            urls=urls,
+        ).single()["n"]
+        session.run(
+            """
+            MATCH (:Position)-[h:HAS_EVIDENCE]->(e:Evidence)
+            WHERE e.source_url IN $urls
+            DELETE h
+            """,
+            urls=urls,
+        )
+        evidence_removed = session.run(
+            """
+            MATCH (e:Evidence) WHERE e.source_url IN $urls
+            WITH e
+            OPTIONAL MATCH (sk:Skill)-[eb:EVIDENCED_BY]->(e)
+            WITH e, count(eb) AS refs
+            WHERE refs = 0
+            DETACH DELETE e
+            RETURN count(e) AS n
+            """,
+            urls=urls,
+        ).single()["n"]
+        positions_removed = session.run(
+            """
+            UNWIND $names AS name
+            MATCH (p:Position {name: name})
+            WHERE NOT EXISTS { MATCH (p)-[:HAS_EVIDENCE]->(:Evidence) }
+              AND NOT EXISTS {
+                  MATCH (p)-[r:REQUIRES]->(:Skill) WHERE r.source_count IS NOT NULL
+              }
+            DETACH DELETE p
+            RETURN count(p) AS n
+            """,
+            names=affected,
+        ).single()["n"]
+    return {
+        "has_edges_removed": has_edges_removed,
+        "evidence_removed": evidence_removed,
+        "positions_removed": positions_removed,
+    }
+
+
 async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     """SimHash 跨平台近似去重（设计文档 §4.2 消费方）。
 
@@ -841,11 +920,26 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
                 marked += 1
         await session.commit()
 
+        # 入图残留对齐清理（08-15 新增）：去重标记可能晚于抽取入图（重复对
+        # 在后续轮次才发现），已入图的重复记录残留岗位节点 + 空权 REQUIRES 边。
+        # 与 rebuild_graph/聚合口径一致清除；已抽取记录才可能入过图，未抽取
+        # （跳过/失败）记录在图中无残留，无需处理。
+        dup_urls = [
+            (r.snapshot or {}).get("source_url") or r.source_url
+            for id_a, id_b in verified_pairs
+            if (r := id_map.get(id_b)) is not None
+            and (r.snapshot or {}).get("extraction")
+        ]
+        purge_stats: dict = {}
+        if dup_urls:
+            purge_stats = await asyncio.to_thread(_purge_dup_import_residue, dup_urls)
+
     return {
         "checked": len(records),
         "pairs": len(pairs),
         "skipped_emb": skipped_emb,
         "marked": marked,
+        "purged": purge_stats,
     }
 
 
@@ -1713,7 +1807,7 @@ async def batch_extract(
         # 写 skipped 标记推进游标，否则 `extraction IS NULL` 游标永不推进
         # （短文本行/低质行堆积时正常 JD 饿死）
         valid: list[JDRaw] = []
-        results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": []}
+        results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": [], "skipped_dup": 0}
         for row in rows:
             snap = row.snapshot or {}
             if _is_jd_text_short(snap, row.raw_text or ""):
@@ -1773,6 +1867,17 @@ async def batch_extract(
                 f"[batch_extract] 处理 jd_id={row.id}（{i}/{total}，{i / total * 100:.0f}%）",
                 flush=True,
             )
+            # SimHash 重复记录不入图（与 rebuild_graph/聚合口径一致）：重复内容
+            # 已在 canonical 记录名下入图，此处再入会残留"聚合不覆盖"的空权
+            # REQUIRES 边（08-15 核查：7 岗位/115 空权边根因，见 project_memory）。
+            # 抽取结果仍落库——聚合/入图均已跳过该记录，落库仅为推进游标
+            # （`extraction IS NULL` 条件）避免下次批跑重复调用 LLM。
+            if (row.snapshot or {}).get("_duplicate_of"):
+                snap = dict(row.snapshot or {})
+                snap["extraction"] = extraction.model_dump()
+                row.snapshot = snap
+                results["skipped_dup"] += 1
+                continue
             try:
                 evidence = {
                     "source": row.source,
