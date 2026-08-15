@@ -166,6 +166,32 @@ async def version_detail(
     })
 
 
+def _rebuild_position_evolution(
+    snapshots: list, position_id: str
+) -> dict:
+    """从版本快照序列重建单个岗位的演化轨迹（position_evolution 与新列表端点共用）。
+
+    返回 {position_id, position_name, points}，points 时间升序
+    （date/version/freq=该岗位被引用边数/present=节点是否存在）。
+    """
+    name = None
+    points = []
+    for v in snapshots:
+        snapshot = v.snapshot_json or {}
+        nodes = {n.get("id"): n for n in snapshot.get("nodes", []) if isinstance(n, dict)}
+        node = nodes.get(position_id)
+        if node is not None:
+            name = node.get("name") or name
+        freq = sum(1 for e in snapshot.get("edges", []) if e.get("source") == position_id)
+        points.append({
+            "date": v.created_at.date().isoformat() if v.created_at else None,
+            "version": v.id,
+            "freq": freq,
+            "present": node is not None,
+        })
+    return {"position_id": position_id, "position_name": name or position_id, "points": points}
+
+
 @router.get("/position/{id}/evolution")
 async def position_evolution(
     id: str,
@@ -183,24 +209,49 @@ async def position_evolution(
     snapshots = [v for v in rows]
     if not snapshots:
         return error(4040, "无图谱版本数据", http_status=404)
+    return ok(data=_rebuild_position_evolution(snapshots, id))
 
-    name = None
-    points = []
+
+@router.get("/positions")
+async def position_evolution_list(
+    limit: int = Query(default=8, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
+):
+    """默认岗位演化列表：按快照出现热度（出现期数、最新引用边数）取 Top-N。
+
+    供演化看板默认展示——页面加载即有岗位演化轨迹，无需先查节点 ID。
+    岗位判定：快照节点 type=position（id 前缀 pos_ 兜底）。
+    """
+    rows = await db.scalars(
+        select(GraphVersion).order_by(GraphVersion.created_at.asc())
+    )
+    snapshots = [v for v in rows]
+    if not snapshots:
+        return error(4040, "无图谱版本数据", http_status=404)
+
+    heat: dict[str, dict] = {}  # position_id -> {name, count, latest_freq}
     for v in snapshots:
         snapshot = v.snapshot_json or {}
         nodes = {n.get("id"): n for n in snapshot.get("nodes", []) if isinstance(n, dict)}
-        node = nodes.get(id)
-        if node is not None:
-            name = node.get("name") or name
-        freq = sum(1 for e in snapshot.get("edges", []) if e.get("source") == id)
-        points.append({
-            "date": v.created_at.date().isoformat() if v.created_at else None,
-            "version": v.id,
-            "freq": freq,
-            "present": node is not None,
-        })
+        for nid, node in nodes.items():
+            if node.get("type") != "position" and not nid.startswith("pos_"):
+                continue
+            rec = heat.setdefault(nid, {"name": None, "count": 0, "latest_freq": 0})
+            rec["name"] = node.get("name") or rec["name"]
+            rec["count"] += 1
+            rec["latest_freq"] = sum(
+                1 for e in snapshot.get("edges", []) if e.get("source") == nid
+            )
+    top = sorted(
+        heat.items(), key=lambda kv: (-kv[1]["count"], -kv[1]["latest_freq"])
+    )[:limit]
 
-    return ok(data={"position_id": id, "position_name": name or id, "points": points})
+    return ok(data={
+        "positions": [
+            _rebuild_position_evolution(snapshots, pid) for pid, _ in top
+        ],
+    })
 
 
 @router.get("/trends")

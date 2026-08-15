@@ -75,6 +75,9 @@ type EvolutionVersionDetail = components['schemas']['EvolutionVersionDetail']
 /** 后端 /evolution/position/{id}/evolution 返回项 */
 type PositionEvolutionData = components['schemas']['PositionEvolutionData']
 
+/** 后端 /evolution/positions 返回项（默认岗位演化列表） */
+type PositionEvolutionListData = components['schemas']['PositionEvolutionListData']
+
 // ===== SignalsView =====
 
 /** 新兴/衰退技能 Top-N（真实 GET /evolution/signals） */
@@ -352,12 +355,32 @@ function SkillTrendView() {
 
 // ===== PositionEvolutionView =====
 
-/** 岗位演化历史（真实 GET /evolution/position/{id}/evolution，从版本快照重建） */
+/** 岗位演化历史（默认展示 Top-8 岗位，可下拉切换或输入 ID 查特定岗位） */
 function PositionEvolutionView() {
   const [positionId, setPositionId] = useState('')
   const [data, setData] = useState<PositionEvolutionData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 默认岗位列表（08-15：页面打开即有演化轨迹，无需先查节点 ID）
+  const [defaults, setDefaults] = useState<PositionEvolutionData[] | null>(null)
+  const [defaultError, setDefaultError] = useState<string | null>(null)
+
+  // 页面加载即拉取快照热度 Top-8 岗位演化（GET /evolution/positions）
+  useEffect(() => {
+    let cancelled = false
+    apiGet<PositionEvolutionListData>('/evolution/positions?limit=8')
+      .then((r) => {
+        if (cancelled) return
+        setDefaults(r.positions)
+        if (r.positions.length > 0) setData(r.positions[0])
+      })
+      .catch((e) => {
+        if (!cancelled) setDefaultError(e instanceof ApiError ? e.message : '默认岗位加载失败')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   function load() {
     const id = positionId.trim()
@@ -386,6 +409,29 @@ function PositionEvolutionView() {
             <span className="text-[10px] font-normal text-ink-faint">各版本快照中的存在性与关联技能边数</span>
           </span>
           <div className="flex items-center gap-2">
+            {defaults && defaults.length > 0 && (
+              <Select
+                value={data?.position_id ?? ''}
+                onValueChange={(v) => {
+                  const hit = defaults.find((d) => d.position_id === v)
+                  if (hit) {
+                    setData(hit)
+                    setError(null)
+                  }
+                }}
+              >
+                <SelectTrigger className="h-8 w-48 text-xs">
+                  <SelectValue placeholder="选择岗位" />
+                </SelectTrigger>
+                <SelectContent>
+                  {defaults.map((d) => (
+                    <SelectItem key={d.position_id} value={d.position_id} className="text-xs">
+                      {d.position_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <Input
               value={positionId}
               onChange={(e) => setPositionId(e.target.value)}
@@ -402,12 +448,16 @@ function PositionEvolutionView() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {error && <p className="py-6 text-center text-xs text-state-archived">{error}</p>}
-        {!error && !data && (
+        {defaultError && <p className="py-6 text-center text-xs text-state-archived">{defaultError}</p>}
+        {!defaultError && defaults === null && !error && (
+          <p className="py-6 text-center text-xs text-ink-faint">加载默认岗位演化…</p>
+        )}
+        {!defaultError && defaults !== null && defaults.length === 0 && !error && (
           <p className="py-6 text-center text-xs text-ink-faint">
-            输入岗位节点 ID 查看其在各版本快照中的演化轨迹（岗位 ID 可在「能力图谱」详情面板查看）
+            暂无岗位快照数据（版本数据不足），可输入岗位节点 ID 查询
           </p>
         )}
+        {error && <p className="py-6 text-center text-xs text-state-archived">{error}</p>}
         {!error && data && (
           <>
             <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-ink-muted">

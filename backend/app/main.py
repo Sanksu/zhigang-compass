@@ -46,22 +46,32 @@ async def lifespan(app: FastAPI):
             raise RuntimeError("SECRET_KEY 未修改，生产环境拒绝启动")
         if settings.admin_password == "admin123":
             raise RuntimeError("ADMIN_PASSWORD 仍为默认弱口令，生产环境拒绝启动")
-    _prewarm_semantic()
+    await _prewarm_semantic()
     yield
     # 关闭时 — 资源由各自模块管理
 
 
-def _prewarm_semantic() -> None:
-    """后台预加载 SBERT 模型，避免首次匹配请求触发模型加载（>30s 超时）。
+async def _prewarm_semantic() -> None:
+    """启动时同步预加载 SBERT 模型（08-15 修复：比对详情白屏）。
 
-    模型加载约 5-15s，放后台线程执行，不阻塞 API 启动；失败静默
-    （语义不可用时匹配自动降级纯规则，见 semantic.SemanticUnavailableError）。
+    此前后台线程预加载——api 冷启动后首次 compare 实测 16.3s（模型加载 +
+    编码），用户感知"加载比对详情…白屏一段时间"。改为启动阶段同步等待
+    （实测 16s 在 healthcheck start_period 窗口内），用户请求永不感知加载。
+    失败静默（语义不可用时匹配自动降级纯规则，见 semantic.SemanticUnavailableError）。
     """
-    import threading
+    import asyncio
 
     from app.services.matching.semantic import SkillEmbedder
 
-    threading.Thread(target=SkillEmbedder.get().preload, daemon=True).start()
+    try:
+        await asyncio.to_thread(SkillEmbedder.get().preload)
+        # 预热岗位技能向量（08-15 修复：首次 compare 的 positions 加载 +
+        # 批量 encode 实测 16s——比模型加载更长，用户"比对详情白屏"主因）
+        from app.services.matching.loaders import load_positions_from_graph
+
+        await asyncio.to_thread(load_positions_from_graph)
+    except Exception:
+        pass
 
 
 app = FastAPI(
