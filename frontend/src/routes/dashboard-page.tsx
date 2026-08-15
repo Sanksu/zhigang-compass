@@ -88,9 +88,12 @@ export function DashboardPage() {
       setSources(platforms)
 
       const collectTotal = platforms.reduce((s, p) => s + p.total_count, 0)
+      // 采集统计需 admin 权限：非 admin（403 降级）时显示 '—' 而非 "0"——
+      // 0 会被误读为"系统无采集数据"（08-15 修复，与图谱节点卡口径一致）
+      const collectOk = crawlRes.status === 'fulfilled'
       setStats([
         { label: '图谱节点', value: graph ? String(graph.nodes) : '—', delta: `${graph?.edges ?? 0} 边`, icon: Network, hint: 'Neo4j 岗位-技能关系', deltaType: graph ? 'up' : 'neutral' },
-        { label: '累计采集量', value: collectTotal.toLocaleString(), delta: `${platforms.length} 源`, icon: Database, hint: 'output/*.jsonl 真实行数', deltaType: platforms.length ? 'up' : 'neutral' },
+        { label: '累计采集量', value: collectOk ? collectTotal.toLocaleString() : '—', delta: collectOk ? `${platforms.length} 源` : '—', icon: Database, hint: 'output/*.jsonl 真实行数', deltaType: platforms.length ? 'up' : 'neutral' },
         { label: '已解析简历', value: String(resumeTotal), delta: 'resume_cache', icon: Users, hint: '可发起真实匹配', deltaType: resumeTotal ? 'up' : 'neutral' },
         { label: '图谱版本', value: String(versions.length), delta: versions[0]?.version_id ?? '—', icon: GitBranch, hint: 'T+1 快照 · 可 diff', deltaType: versions.length ? 'up' : 'neutral' },
       ])
