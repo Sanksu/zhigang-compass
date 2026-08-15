@@ -147,7 +147,9 @@ def _skills_with_courses() -> list[str]:
     """图谱中有课程的全部技能名（TTL 缓存，供语义 fallback 匹配）。"""
     now = time.time()
     with _cache_lock:
-        if now - _course_skills_cache["ts"] <= _CACHE_TTL and _course_skills_cache["names"]:
+        # 08-15 中危修复：TTL 内直接返回（含空结果）——此前"非空才用缓存"
+        # 使空结果每次重查重复打 Neo4j（与 _course_pool 同矛盾）
+        if now - _course_skills_cache["ts"] <= _CACHE_TTL:
             return _course_skills_cache["names"]
     with neo4j_driver.session() as session:
         recs = session.run(
