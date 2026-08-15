@@ -276,7 +276,7 @@ class TestPositionSkillNovelty:
     """_position_skill_novelty 计算（§7.2.1：Skill.first_seen 平均图谱年龄归一化）。"""
 
     def _run(self, position_rows, first_seen_rows, names=None):
-        from datetime import date, timedelta
+        from datetime import date
 
         from app.workers.tasks import _position_skill_novelty
 
@@ -290,7 +290,6 @@ class TestPositionSkillNovelty:
                         return _FakeRows(rows)
                 return _FakeRows([])
 
-        today = date.today()
         rows_by_query = {"REQUIRES": position_rows, "first_seen": first_seen_rows}
         return _position_skill_novelty(_S(rows_by_query), names or ["岗位A"])
 
