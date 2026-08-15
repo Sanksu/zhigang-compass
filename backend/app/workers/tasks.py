@@ -523,53 +523,6 @@ def _position_skill_novelty(
         out[r["pname"]] = 1.0 - min(avg_age / reference_days, 1.0)
     return out
 
-    logger = logging.getLogger(__name__)
-    names = {canonical_skill_name(s) for s in skills if canonical_skill_name(s)}
-    if not names:
-        logger.info("_graph_skill_first_seen: 无有效技能名，跳过读图（空映射，回退 jd_raw）")
-        return {}
-    logger.info(
-        "_graph_skill_first_seen: 技能请求=%d 归一化去重后=%d",
-        len(skills), len(names),
-    )
-    try:
-        with neo4j_driver.session() as session:
-            rows = session.run(
-                "MATCH (s:Skill) WHERE s.name IN $names "
-                "RETURN s.name AS name, s.first_seen AS first_seen",
-                names=list(names),
-            ).data()
-    except Exception as exc:
-        # 图谱不可达（懒连接失败/服务停止）不阻断时滞检测，回退 jd_raw 推算
-        logger.warning(
-            "_graph_skill_first_seen: 图谱不可达，回退 jd_raw 推算: %s: %s",
-            type(exc).__name__, exc,
-        )
-        return {}
-    out: dict[str, date] = {}
-    parse_failed: list[str] = []
-    for r in rows:
-        raw = r.get("first_seen")
-        if not raw:
-            continue
-        try:
-            out[r["name"]] = datetime.fromisoformat(str(raw)).date()
-        except ValueError:
-            parse_failed.append(r["name"])
-    missing = sorted(names - set(out))
-    logger.info(
-        "_graph_skill_first_seen: 图谱命中=%d/%d%s",
-        len(out), len(names),
-        "" if not missing else f"，缺失 {len(missing)} 个将回退 jd_raw: {missing[:10]}"
-        + ("" if len(missing) <= 10 else f" 等共 {len(missing)} 个"),
-    )
-    if parse_failed:
-        logger.warning(
-            "_graph_skill_first_seen: %d 个技能 first_seen 解析失败被跳过（回退 jd_raw）: %s",
-            len(parse_failed), parse_failed[:10],
-        )
-    return out
-
 
 def _experience_years(snapshot: dict) -> int | None:
     """解析经验要求最小年限（如 "3-5年" → 3）；无法解析返回 None。"""
