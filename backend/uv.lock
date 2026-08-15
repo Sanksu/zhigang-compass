@@ -2704,22 +2704,6 @@ wheels = [
 ]
 
 [[package]]
-name = "paddleocr"
-version = "3.7.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "paddlex", extra = ["ocr-core"] },
-    { name = "pyyaml" },
-    { name = "requests" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/97/b1/9454e886afa925067ce51de2e513d146524645888de299d51ddc1caa3100/paddleocr-3.7.0.tar.gz", hash = "sha256:9b81eb62cf37e590d4873e60262ff56f968ff9de6ce1f565749760ceb1c422e2", size = 3082862, upload-time = "2026-06-11T12:09:52.545Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d2/79/2ade66cf72074a3d2a013e2ba1f256d6116fec797b908fc1b4f9c320d8c4/paddleocr-3.7.0-py3-none-any.whl", hash = "sha256:c0f0a81ad4112727f30c6fcf986ac0ef6a120d31ee0991a01fae0357ee32d338", size = 146750, upload-time = "2026-06-11T12:09:51.204Z" },
-]
-
-[[package]]
 name = "paddlepaddle"
 version = "3.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2853,20 +2837,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/91/c8/4ace3a5c61e39ca21734a5715d0e076eea6200dd8daea2a5b99452f5a0d6/parsel-1.11.0.tar.gz", hash = "sha256:5925fe087eb16fc404a7ed91e31e2c1e2a9b230da4b64f34d81358c0d0e27e88", size = 106849, upload-time = "2026-01-29T07:19:23.388Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/08/23/4e0dae5e5bee14aea26dba003a682e621563451a20f751ed985810f818b6/parsel-1.11.0-py3-none-any.whl", hash = "sha256:bda82575df1774dd64e1c1396163f3cadb3e383e0f8080d43d45fa6705355daa", size = 14176, upload-time = "2026-01-29T07:19:22.255Z" },
-]
-
-[[package]]
-name = "passlib"
-version = "1.7.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b6/06/9da9ee59a67fae7761aab3ccc84fa4f3f33f125b370f1ccdb915bf967c11/passlib-1.7.4.tar.gz", hash = "sha256:defd50f72b65c5402ab2c573830a6978e5f202ad0d984793c8dde2c4152ebe04", size = 689844, upload-time = "2020-10-08T19:00:52.121Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/a4/ab6b7589382ca3df236e03faa71deac88cae040af60c071a78d254a62172/passlib-1.7.4-py2.py3-none-any.whl", hash = "sha256:aa6bca462b8d8bda89c70b382f0c298a20b5560af6cbfa2dce410c0a2fb669f1", size = 525554, upload-time = "2020-10-08T19:00:49.856Z" },
-]
-
-[package.optional-dependencies]
-bcrypt = [
-    { name = "bcrypt" },
 ]
 
 [[package]]
@@ -5307,15 +5277,15 @@ dependencies = [
     { name = "alembic" },
     { name = "arq" },
     { name = "asyncpg" },
+    { name = "bcrypt" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "instructor" },
     { name = "leidenalg" },
     { name = "neo4j" },
     { name = "openai" },
-    { name = "paddleocr" },
     { name = "paddlepaddle" },
-    { name = "passlib", extra = ["bcrypt"] },
+    { name = "paddlex", extra = ["ocr-core"] },
     { name = "pdfplumber" },
     { name = "pgvector" },
     { name = "pillow" },
@@ -5325,7 +5295,6 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "pymupdf" },
-    { name = "pypdf" },
     { name = "python-docx" },
     { name = "python-igraph" },
     { name = "python-jobspy" },
@@ -5341,10 +5310,10 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "locust" },
     { name = "openpyxl" },
     { name = "optuna" },
+    { name = "pypdf" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -5356,15 +5325,15 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "arq", specifier = ">=0.26" },
     { name = "asyncpg", specifier = ">=0.29" },
+    { name = "bcrypt", specifier = ">=4.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "instructor", specifier = ">=1.0" },
     { name = "leidenalg", specifier = ">=0.10" },
     { name = "neo4j", specifier = ">=5.20" },
     { name = "openai", specifier = ">=1.0" },
-    { name = "paddleocr", specifier = ">=2.8" },
     { name = "paddlepaddle", specifier = ">=2.6" },
-    { name = "passlib", extras = ["bcrypt"], specifier = ">=1.7" },
+    { name = "paddlex", extras = ["ocr-core"], specifier = ">=3.0" },
     { name = "pdfplumber", specifier = ">=0.11" },
     { name = "pgvector", specifier = ">=0.2" },
     { name = "pillow", specifier = ">=10.0" },
@@ -5374,7 +5343,6 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8" },
     { name = "pymupdf", specifier = ">=1.24" },
-    { name = "pypdf", specifier = ">=6.14.2" },
     { name = "python-docx", specifier = ">=1.2.0" },
     { name = "python-igraph", specifier = ">=0.11" },
     { name = "python-jobspy", specifier = ">=1.1.82" },
@@ -5390,10 +5358,10 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.27" },
     { name = "locust", specifier = ">=2.0" },
     { name = "openpyxl", specifier = ">=3.1" },
     { name = "optuna", specifier = ">=4.0" },
+    { name = "pypdf", specifier = ">=6.14.2" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "pytest-cov", specifier = ">=5.0" },
