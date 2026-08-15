@@ -220,7 +220,7 @@ def _import_jd_tx(
                 p.level = $level,
                 p.industry = $industry,
                 p.salary_range = $salary_range,
-                p.status = 'candidate',
+                p.status = 'active',
                 p.created_at = $now,
                 p.updated_at = $now
             RETURN p.id AS id

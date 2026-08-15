@@ -24,6 +24,7 @@ import { apiGet, apiPost, ApiError, getAccessToken } from '@/lib/api'
 import type { components } from '@/types/api'
 
 const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
+  active: '活跃',
   candidate: '候选',
   emerging: '新兴',
   stable: '稳定',
@@ -33,6 +34,7 @@ const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
 }
 
 const STATUS_CLASS: Record<PositionStatus | 'low', string> = {
+  active: 'border-state-active/30 text-state-active bg-state-active/10',
   candidate: 'border-state-candidate/30 text-state-candidate bg-state-candidate/10',
   emerging: 'border-state-emerging/30 text-state-emerging bg-state-emerging/10',
   stable: 'border-state-stable/30 text-state-stable bg-state-stable/10',

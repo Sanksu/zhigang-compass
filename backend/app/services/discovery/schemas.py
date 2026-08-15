@@ -9,8 +9,14 @@ from pydantic import BaseModel, Field
 
 
 class PositionState(str, Enum):
-    """岗位生命周期状态机（设计文档 7.2.1 节，六状态）。"""
-    CANDIDATE = "candidate"    # 候选态：趋势监测命中规则门控
+    """岗位生命周期状态机（设计文档 7.2.1 节，六状态）。
+
+    active 为图谱常态（import_jd/聚合产生，有 JD 证据支撑），不属于发现
+    状态机——发现流程只操作 candidate/emerging/stable/declining（08-15 语义
+    修正：此前 import_jd 新岗位默认 candidate 与发现候选混淆）。
+    """
+    ACTIVE = "active"          # 常态：图谱正常岗位（import_jd/聚合产生）
+    CANDIDATE = "candidate"    # 候选态：趋势监测命中规则门控（发现候选，persist 镜像）
     EMERGING = "emerging"      # 新兴态：跨 ≥2 源验证 + 置信度 ≥ 0.6（admin 审核）
     STABLE = "stable"          # 稳定态：jd_count ≥ 5 + 源 ≥ 2 + 波动 < 25% + novelty < 0.2（§7.2.1）
     DECLINING = "declining"    # 衰退态：连续 3 窗口频次下降 > 40%

@@ -66,6 +66,7 @@ const SYMBOL_BY_TYPE: Record<Exclude<NodeType, 'position'>, string> = {
 
 /** 岗位状态机 → 形状（色盲可读：衰退 rect、归档 roundRect 与正常态形状区分） */
 const SYMBOL_BY_STATUS: Record<PositionStatus, string> = {
+  active: 'circle',
   candidate: 'circle',
   emerging: 'triangle',
   stable: 'circle',
@@ -75,6 +76,7 @@ const SYMBOL_BY_STATUS: Record<PositionStatus, string> = {
 
 /** 岗位状态机 → 颜色（与 globals.css 中状态色对齐） */
 const COLOR_BY_STATUS: Record<PositionStatus, string> = {
+  active: '#0ea5e9',
   candidate: '#71717a',
   emerging: '#10b981',
   stable: '#3b82f6',

@@ -38,6 +38,7 @@ export interface Graph3DHandle {
 
 /** 岗位状态机 → 颜色（与 Graph2D 一致） */
 const COLOR_BY_STATUS: Record<PositionStatus, string> = {
+  active: '#0ea5e9',
   candidate: '#71717a',
   emerging: '#10b981',
   stable: '#3b82f6',

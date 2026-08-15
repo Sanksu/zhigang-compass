@@ -3001,7 +3001,7 @@ export interface components {
              * @description 岗位状态机（仅 position 节点）
              * @enum {string}
              */
-            status?: "candidate" | "emerging" | "stable" | "declining" | "archived";
+            status?: "active" | "candidate" | "emerging" | "stable" | "declining" | "archived";
         };
         /** @description 图谱边（REQUIRES 关系） */
         GraphEdge: {
@@ -3136,7 +3136,7 @@ export interface components {
             /** @description 最近更新时间 ISO8601 */
             last_updated?: string | null;
             /** @enum {string} */
-            status?: "candidate" | "emerging" | "stable" | "declining" | "archived";
+            status?: "active" | "candidate" | "emerging" | "stable" | "declining" | "archived";
             must_skills: components["schemas"]["PositionSkillItem"][];
             nice_skills: components["schemas"]["PositionSkillItem"][];
         };

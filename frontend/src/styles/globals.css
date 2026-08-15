@@ -34,6 +34,7 @@
   --color-accent-foreground: #ffffff;
 
   /* 岗位五状态机 — 状态色仅用于状态指示，不作装饰 */
+  --color-state-active: #64748b;     /* 活跃 — 蓝灰，常态在位（08-15 岗位状态语义修正） */
   --color-state-candidate: #71717a;  /* 候选 — 灰，中性等待 */
   --color-state-emerging: #10b981;   /* 新兴 — 绿，信号出现 */
   --color-state-stable: #3b82f6;     /* 稳定 — 蓝，已确立 */
