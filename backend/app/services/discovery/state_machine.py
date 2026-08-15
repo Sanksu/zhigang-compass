@@ -40,6 +40,7 @@ EMERGING_MIN_CONFIDENCE = 0.6      # candidate → emerging
 EMERGING_MIN_SOURCES = 2
 STABLE_MIN_JD_COUNT = 5            # emerging → stable：jd_count ≥ 5（§7.2.1 表格）
 STABLE_MAX_WINDOW_VOLATILITY = 0.25  # 连续 2 窗口波动 < 25%
+STABLE_MAX_SKILL_NOVELTY = 0.3     # §7.2.1：skill_novelty < 0.3（技能成熟度门槛）
 DECLINE_WINDOW_DROP = 0.40         # 连续 3 窗口频次下降 > 40%
 DECLINE_WINDOW_COUNT = 3
 RECOVERY_WINDOW_COUNT = 2          # z_score > 0 连续 2 窗口回升
@@ -215,6 +216,7 @@ def evaluate_auto_transition(
     windows: WindowFreq,
     confidence: Optional[float] = None,
     jd_count: Optional[int] = None,
+    skill_novelty: Optional[float] = None,
 ) -> Optional[PositionState]:
     """自动转换判定（emerging/stable/declining 三态自动流转）。
 
@@ -227,6 +229,9 @@ def evaluate_auto_transition(
         jd_count: 岗位真实 JD 数（任务层从 jd_raw 统计传入，§7.2.1 门槛）。
             None 时回退 len(candidate.evidence_refs)——注意发现链路
             evidence_refs 多为 watch 标记非真实证据，任务层必须传真实值
+        skill_novelty: 岗位技能新颖度 [0,1]（任务层从 Skill.first_seen
+            计算传入，§7.2.1 门槛 < 0.3）。None = 数据不可得，不拦截
+            （岗位无技能/图谱不可达等，保持现有行为）
 
     Returns:
         建议的目标状态；无需迁移返回 None
@@ -246,20 +251,22 @@ def evaluate_auto_transition(
     )
     if state == PositionState.EMERGING:
         # §7.2.1 表格：stable 进入条件 = jd_count ≥ 5 + 跨 ≥2 源 + 连续 2 窗口
-        # 波动 < 25%（+ skill_novelty < 0.3，novelty 特征无数据源暂未实现）。
-        # jd_count 由任务层从 jd_raw 统计传入（08-15 对齐文档：此前用
+        # 波动 < 25% + skill_novelty < 0.3（08-15 全量对齐：此前用
         # confidence ≥ 0.8 替代 jd_count 门槛——jd_count=3 时其他维度满分
         # 也能过 0.8，小基数岗位提前稳定）。
+        # jd_count 由任务层从 jd_raw 统计传入；skill_novelty 由任务层从
+        # Skill.first_seen 平均图谱年龄归一化传入（None 不拦截）。
+        jd = jd_count if jd_count is not None else len(candidate.evidence_refs)
         if (
-            (jd_count if jd_count is not None else len(candidate.evidence_refs))
-            >= STABLE_MIN_JD_COUNT
+            jd >= STABLE_MIN_JD_COUNT
             and window_volatility(windows) < STABLE_MAX_WINDOW_VOLATILITY
             and candidate.features.source_diversity >= EMERGING_MIN_SOURCES
+            and (skill_novelty is None or skill_novelty < STABLE_MAX_SKILL_NOVELTY)
         ):
             logger.debug(
-                "  → stable（jd_count=%d ≥ %d/波动/源多样性均达标）",
-                jd_count if jd_count is not None else len(candidate.evidence_refs),
-                STABLE_MIN_JD_COUNT,
+                "  → stable（jd_count=%d ≥ %d/波动/源多样性/novelty=%s 均达标）",
+                jd, STABLE_MIN_JD_COUNT,
+                f"{skill_novelty:.3f}" if skill_novelty is not None else "N/A",
             )
             return PositionState.STABLE
         if decline_rate(windows, DECLINE_WINDOW_COUNT) > DECLINE_WINDOW_DROP:
