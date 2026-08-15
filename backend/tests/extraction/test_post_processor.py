@@ -126,6 +126,30 @@ class TestStopwordInterception:
         out = post_process(result)
         assert [s.name for s in out.skills] == ["模型对齐"]
 
+    def test_course_marketing_words_filtered(self):
+        # P7（08-15 用户要求）：课程营销/学历词被 LLM 误抽为技能时剔除——
+        # 专转本/专升本（学历提升课程主题）、小白/零基础（入门营销词）
+        result = JDExtractionResult(
+            position_name="",
+            skills=[
+                SkillExtracted(name="专转本"),
+                SkillExtracted(name="专升本"),
+                SkillExtracted(name="小白"),
+                SkillExtracted(name="零基础"),
+            ],
+        )
+        out = post_process(result)
+        assert out.skills == []
+
+    def test_course_marketing_compound_not_hit(self):
+        # 精确匹配不伤复合表达中的合法技能词（"零基础入门"中的入门课程）
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="零基础入门")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["零基础入门"]
+
 
 class TestDedupSkills:
     def test_case_insensitive_dedup_keeps_first(self):
