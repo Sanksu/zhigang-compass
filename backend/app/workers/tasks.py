@@ -1300,7 +1300,9 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
 
     # 按设计文档 §4.4 数据更新频率分组
     # 国内 A 级 + B 级（02:00 / 04:00）
-    domestic_platforms = ["boss", "zhilian"]
+    # 08-15 暂停 boss 源采集（用户要求）；保留 spider 代码与 CDP 逻辑，
+    # 恢复采集时移回 "boss" 即可（zhilian 不受影响，独立循环调度）
+    domestic_platforms = ["zhilian"]
     # 国际 A/B 级（错峰）。monster 的 DataDome 防护（IP 信誉 + 浏览器真实性双重
     # 校验）在容器环境实测不可绕过（headless/CDP/指纹伪装/xdotool 全被拦截），
     # 暂从自动采集列表移除；保留 spider 代码，待有住宅代理/指纹浏览器后再启用
