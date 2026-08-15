@@ -981,7 +981,9 @@ async def aggregate_positions(ctx: dict) -> dict:
         )).all()
 
     now = datetime.now(timezone(timedelta(hours=8))).isoformat()
-    agg = build_aggregates(rows)
+    # 08-15 审查 M2：build_aggregates 为万级 JD 的同步 CPU 聚合（归一化/权重
+    # 计算），原直跑 async 上下文可阻塞 ARQ 事件循环数秒——放线程池
+    agg = await asyncio.to_thread(build_aggregates, rows)
 
     def _write():
         # 同步 Neo4j 写入放线程池，并正确关闭 session（原实现 session 泄漏）
