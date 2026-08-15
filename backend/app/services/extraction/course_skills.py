@@ -6,14 +6,14 @@ learning_path 语义兜底无功能缺陷）。本模块对新采集课程做 LL
 门控后写回 snapshot["skills"]，load_courses 阶段随之建静态边。
 
 防脏边（08-13 #192/#198 教训）：抽取结果经 canonical_skill_name +
-_is_valid_skill_name（停用词/白名单口径，与 import_course 一致）过滤，
+is_valid_skill_name（停用词/白名单口径，与 import_course 一致）过滤，
 未通过即丢弃；LLM 不可用/解析失败静默降级（不阻塞 ETL，与 RAG 接地同语义）。
 """
 
 from pydantic import BaseModel, Field
 
 from app.services.extraction.post_processor import (
-    _is_valid_skill_name,
+    is_valid_skill_name,
     canonical_skill_name,
 )
 
@@ -79,7 +79,7 @@ def extract_course_skills(llm, title: str, description: str) -> list[str]:
     seen: set[str] = set()
     for raw in result.skills or []:
         name = canonical_skill_name((raw or "").strip())
-        if not name or not _is_valid_skill_name(name) or name in seen:
+        if not name or not is_valid_skill_name(name) or name in seen:
             continue
         seen.add(name)
         skills.append(name)
@@ -99,7 +99,7 @@ def filter_skill_tags(skills: list) -> list[str]:
             s = s.get("name") or s.get("skill") or ""
         raw = str(s or "").strip()
         name = canonical_skill_name(raw)
-        if not name or not _is_valid_skill_name(name) or name in seen:
+        if not name or not is_valid_skill_name(name) or name in seen:
             continue
         seen.add(name)
         out.append(name)

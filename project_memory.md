@@ -86,8 +86,8 @@
 ## 2026-08-15 岗位可见性语义修正（用户决策：保持匿名范围不变）
 
 - **背景**：图谱 Position.status 承担双语义——发现状态机（candidate/emerging/stable/declining/archived/rejected）与 import_jd 占位默认值（candidate）。PR #93「岗位可见性分级」按"candidate 待审核不外宣"设计（匿名/guest 仅见 emerging/stable/declining），但 import_jd 把**所有**新岗位默认标 candidate → 137 个普通岗位（含 Java 426/前端 433/后端 415 等 26 个主流岗位）全部对匿名隐藏，匿名全景图仅 3 个 stable 岗位。
-- **用户决策（2026-08-15）**：**保持现状不公开**——匿名可见范围不变（3 个 stable），只修正状态语义。
-- **实施**：① `PositionState` 新增 `ACTIVE = "active"`（图谱常态岗位，import_jd/聚合产生，非发现状态机成员）；② import_jd 创建岗位默认 `status='candidate'` → `'active'`；③ `_PUBLIC_POSITION_STATUSES` 不变（active 暂不公开，如需公开仅需追加 "active"）；④ graph.py status fallback 默认值 candidate → active；⑤ openapi/前端类型与颜色表同步（active 用 sky #0ea5e9）；⑥ 存量迁移：图谱 151 个 candidate 岗位全部 SET active（先备份 `backend/reports/status_migration_20260815.jsonl`）——判定依据：persist 写入的镜像带 `state_updated_at`（3 个 stable 都有），151 个 candidate 全部无该属性（纯 import 占位；26 个名字与 PG 候选池重合属巧合，discovery_daily 只写 PG 不写图谱）。
+- **用户决策（2026-08-15）**：**保持现状不公开**——匿名可见范围不变（3 个 stable），只修正状态语义。（注：08-15 当日决策反转，PR #222 已把 active 追加进 `_PUBLIC_POSITION_STATUSES` 开放，见待办 T-07。）
+- **实施**：① `PositionState` 新增 `ACTIVE = "active"`（图谱常态岗位，import_jd/聚合产生，非发现状态机成员）；② import_jd 创建岗位默认 `status='candidate'` → `'active'`；③ `_PUBLIC_POSITION_STATUSES` 08-15 当日追加 "active"（PR #222，决策反转）；④ graph.py status fallback 默认值 candidate → active；⑤ openapi/前端类型与颜色表同步（active 用蓝灰 #64748b，对齐 globals.css 设计令牌）；⑥ 存量迁移：图谱 151 个 candidate 岗位全部 SET active（先备份 `backend/reports/status_migration_20260815.jsonl`）——判定依据：persist 写入的镜像带 `state_updated_at`（3 个 stable 都有），151 个 candidate 全部无该属性（纯 import 占位；26 个名字与 PG 候选池重合属巧合，discovery_daily 只写 PG 不写图谱）。
 - **迁移后状态**：active 151 / candidate 0 / stable 3 / legacy 9（legacy 碎片岗位不动，待碎片治理）；匿名可见岗位 = 3 stable（模拟 public 查询验证）。candidate 语义现在只由 persist 产生（发现候选镜像），图谱中为 0——语义干净。
 - **注意**：26 个 PG discovery_candidates（state='candidate'）岗位名（后端开发工程师/全栈工程师/DevOps 等主流岗位在列）仍**待 admin 审核**——审核通过后 persist 会把图谱 status 从 active 直接 SET emerging/stable（persist 不校验图谱侧状态，无阻碍）。岗位可见性开放（active 入 public statuses）与碎片岗位名治理是后续待办。
 
@@ -107,9 +107,9 @@
 | 编号 | 优先级 | 事项 | 验收标准 | 来源 |
 |---|---|---|---|---|
 | T-01 | P0 | **代码修复部署到远端**：tasks.py（batch_extract 跳 SimHash 重复 + `_purge_dup_import_residue`）、dictionary.py（P6 停用词 9 词）、kg_service.py（import_jd 默认 active）、graph.py（fallback active）、schemas.py（active 枚举）、openapi/前端类型颜色——当前 192.168.0.140 远端 worker 仍跑旧代码 | 远端 ETL 跑一轮后：无新空权边产生、新岗位 status=active、业务词技能不重建 | 空权边根因/可见性修正 |
-| T-02 | P0 | **本地改动提交 → PR 合入**：12 个文件已拆 4 分支 4 PR——**#216** fix(be) SimHash 重复残留治理 / **#217** fix(algo) 停用词 P6 / **#218** fix(be) active 状态 / **#219** docs 审计同步；待 CI 全绿 + review 合入 develop | 4 PR 合入，CI 全绿 | 08-15 全会话 |
+| T-02 | P0 | **本地改动提交 → PR 合入** ✅ 已完成（08-15 16:36-16:41）：**#216** fix(be) SimHash 重复残留治理 / **#217** fix(algo) 停用词 P6 / **#218** fix(be) active 状态 / **#219** docs 审计同步——4 PR 全部 CI 全绿合入 develop | 4 PR 合入，CI 全绿 | 08-15 全会话 |
 | T-03 | P1 | **26 个发现候选审核** ✅ 已完成（08-15）：24 个置信度 ≥0.6 且源 ≥2 晋升 emerging（含 后端/全栈/DevOps/算法/数据科学家 等主流岗位，复刻 admin review 链路：PG state + 图谱 status + audit_logs 24 条，备份 t03_candidate_review_20260815.jsonl）；**产品助理/AI/ML（final=0.55 <0.6）保持 candidate 继续观察**；匿名可见岗位 3 → 27（emerging 为公开态，审核通过即对外发布） | 候选池无长期滞留 candidate，主流岗位进入公开态 | 可见性修正核查 |
-| T-04 | P1 | **碎片岗位名治理**：9 个 legacy（AI 证据/Web/AI 与自动化/Gemini 应用合作伙伴/AI/ML应用 等）+ 低频碎片岗位（AI 原生构建/CMDB发现/GTM/IT 站点技术支持 等，各 1-2 条真实 JD）——重抽（prompt 迭代后）或 `_POSITION_KEYWORDS`/路由映射归一化，**不直接删节点** | 碎片名映射到规范岗位或重抽后消失；`normalize_position_name` 覆盖 | 脏节点扫描 |
-| T-05 | P1 | **孤立课程爬虫技能标签**：icourse163/edx 爬虫层产出课程技能标签（LLM 抽取 + 门控，防静态脏边——08-13 #192/#198 教训），仅限未来采集，勿手工批量补存量边 | 新采集课程带 skills 标签且经门控；存量 974 门孤立课程不动 | 孤立课程核查 |
-| T-06 | P2 | **孤立技能池评估**：4344 个无 REQUIRES 入边技能（3763 有证据）——按 08-09 先例（先查白名单/证据/课程关联再删）评估是否清理 | 评估报告：白名单内保留数/可删数，必要时清理 | 图谱健康检查 |
-| T-07 | P2 | **岗位可见性开放**：`_PUBLIC_POSITION_STATUSES` 追加 "active"（匿名可见全部有支撑岗位）——**须在 T-04 碎片治理完成后**，避免碎片岗位名外泄；用户 08-15 已决策暂不开放 | 碎片治理完成后重新决策；开放时模拟 public 查询验证岗位数 | 可见性修正（用户决策） |
+| T-04 | P1 | **碎片岗位名治理** ✅ 已完成两批（08-15，PR #220）：第一批 P7 停用词拦截 + 映射归位 + 存量清理脚本（IT 系统管理员保留、首席统计师映射撤销）；第二批 AI 泛词族按技能路由（`_GENERIC_ROUTED_FAMILIES`） | 碎片名映射到规范岗位或重抽后消失；`normalize_position_name` 覆盖 | 脏节点扫描 |
+| T-05 | P1 | **孤立课程爬虫技能标签** ✅ 已完成（08-15，PR #221）：`enrich_course_skills` 对新采集课程做 LLM 技能抽取 + `is_valid_skill_name` 门控，写回 `snapshot[skills]`，load_courses 随之建静态边；存量 974 门孤立课程不动 | 新采集课程带 skills 标签且经门控；存量 974 门孤立课程不动 | 孤立课程核查 |
+| T-06 | P2 | **孤立技能池评估** ✅ 已完成（08-15）：评估报告产出 + 停用词残留清理 26 个 | 评估报告：白名单内保留数/可删数，必要时清理 | 图谱健康检查 |
+| T-07 | P2 | **岗位可见性开放** ✅ 已完成（08-15 决策反转，PR #222）：用户 08-15 决定开放，`_PUBLIC_POSITION_STATUSES` 追加 "active"（c575bc4），匿名可见范围扩大至全部有支撑岗位 | 开放时模拟 public 查询验证岗位数 | 可见性修正（用户决策） |

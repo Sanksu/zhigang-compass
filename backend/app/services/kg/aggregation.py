@@ -38,7 +38,7 @@ from app.services.extraction.dictionary import (
     SOFT_SKILL_WHITELIST,
     skill_category,
 )
-from app.services.extraction.post_processor import _is_valid_skill_name, canonical_skill_name
+from app.services.extraction.post_processor import is_valid_skill_name, canonical_skill_name
 
 # 图谱 weight 两档约定
 _WEIGHT_MUST = 0.8
@@ -254,7 +254,7 @@ def _position_skills(ext: dict) -> list[tuple[str, str, str]]:
     """
     def _norm(name: str) -> str:
         n = canonical_skill_name(name)
-        return n if _is_valid_skill_name(n) else ""
+        return n if is_valid_skill_name(n) else ""
 
     reqs = ext.get("requirements") or []
     out: list[tuple[str, str, str]] = []

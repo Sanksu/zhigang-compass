@@ -86,10 +86,12 @@ services:
       # SBERT 模型（backend/models/sbert）挂载进容器：镜像内无模型文件，
       # 不挂载时 SkillEmbedder 会尝试从 HuggingFace 下载（外网受限挂起）
       - ./backend/models:/app/models:ro
-      # 上传文件共享卷（08-15 修复：resume_parse 任务在 worker 容器读 /app/uploads）
+      # LLM provider 配置（08-15 恢复）：.gitignore 不入镜像（含 api_key），
+      # 挂载宿主机文件——可写（管理后台 /admin/llm 写回持久化）
+      - ./backend/configs/llm_providers.yaml:/app/configs/llm_providers.yaml
+      # 上传文件共享卷（08-15 修复）：resume_parse 任务在 worker 容器读 /app/uploads——
+      # 此前 api 落盘 worker 读不到，任务 failed「文件不存在」
       - uploads_data:/app/uploads
-      # 上传文件共享卷（08-15 修复：resume_parse 任务在 worker 容器读
-      # /app/uploads——此前 api 落盘 worker 读不到，任务 failed「文件不存在」）
 
   # ARQ 异步任务 worker（BE-M3-04）：消费 resume_parse / run_etl_pipeline 等队列任务
   worker:
@@ -139,6 +141,9 @@ services:
       - ${USERPROFILE:-~}/.zhigang-compass/boss-cookies.json:/home/app/.zhigang-compass/boss-cookies.json
       # 上传文件共享卷（08-15 修复：resume_parse 任务在 worker 容器读 /app/uploads）
       - uploads_data:/app/uploads
+      # LLM provider 配置（08-15 恢复）：与 api 同款挂载，worker 的
+      # enrich_course_skills/爬虫登录后处理等 LLM 链路共用
+      - ./backend/configs/llm_providers.yaml:/app/configs/llm_providers.yaml
     depends_on:
       postgres:
         condition: service_healthy

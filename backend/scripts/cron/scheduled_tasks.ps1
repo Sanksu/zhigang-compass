@@ -69,7 +69,7 @@ foreach ($task in $Tasks) {
     # 构造命令（cmd 语法：路径无空格前提下不用引号；单引号为 PowerShell 语法
     # cmd 不识别——2026-08-13 实测 05:00 ETLDaily 退出码 1 根因之一）
     $argString = ($task.Args | ForEach-Object { $_ }) -join ' '
-    $cmd = "cd /d $BackendDir && uv run python scripts\cron\$($task.Script) $argString >> $LogDir\$($task.Name).log 2>&1"
+    $cmd = "cd /d $BackendDir && uv run python scripts\cron\$($task.Script) $argString >> $logFile 2>&1"
 
     if ($task.Proxy) {
         $cmd = "set HTTPS_PROXY=http://127.0.0.1:7890 && $cmd"

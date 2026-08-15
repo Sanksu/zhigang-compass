@@ -36,9 +36,9 @@ export interface Graph3DHandle {
   resetView: () => void
 }
 
-/** 岗位状态机 → 颜色（与 Graph2D 一致） */
+/** 岗位状态机 → 颜色（与 globals.css 中状态色对齐，设计令牌单一事实源） */
 const COLOR_BY_STATUS: Record<PositionStatus, string> = {
-  active: '#0ea5e9',
+  active: '#64748b',
   candidate: '#71717a',
   emerging: '#10b981',
   stable: '#3b82f6',

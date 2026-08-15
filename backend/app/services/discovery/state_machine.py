@@ -217,7 +217,6 @@ def can_promote_to_emerging(
 def evaluate_auto_transition(
     candidate: CandidatePosition,
     windows: WindowFreq,
-    confidence: Optional[float] = None,
     jd_count: Optional[int] = None,
     skill_novelty: Optional[float] = None,
 ) -> Optional[PositionState]:
@@ -226,35 +225,27 @@ def evaluate_auto_transition(
     Args:
         candidate: 候选岗位
         windows: 频次窗口序列
-        confidence: 兼容参数（08-15 起 stable 判定不再用置信度——
-            对齐 §7.2.1 表格改用 jd_count ≥ 5 显式门槛；保留签名避免
-            调用方改动，candidate→emerging 仍用 can_promote_to_emerging）
         jd_count: 岗位真实 JD 数（任务层从 jd_raw 统计传入，§7.2.1 门槛）。
             None 时回退 len(candidate.evidence_refs)——注意发现链路
             evidence_refs 多为 watch 标记非真实证据，任务层必须传真实值
         skill_novelty: 岗位技能新颖度 [0,1]（任务层从 Skill.first_seen
-            计算传入，§7.2.1 门槛 < 0.3）。None = 数据不可得，不拦截
+            计算传入，§7.2.1 门槛 < 0.2）。None = 数据不可得，不拦截
             （岗位无技能/图谱不可达等，保持现有行为）
 
     Returns:
         建议的目标状态；无需迁移返回 None
     """
-    if confidence is None:
-        confidence = (
-            candidate.confidence.final_confidence if candidate.confidence else 0.0
-        )
-
     state = candidate.state
     logger.debug(
-        "auto_transition 判定: position=%s state=%s confidence=%.3f "
+        "auto_transition 判定: position=%s state=%s "
         "windows=%s z_scores=%s volatility=%.3f decline_rate=%.3f",
-        candidate.position_name, state.value, confidence,
+        candidate.position_name, state.value,
         windows.freqs, windows.z_scores,
         window_volatility(windows), decline_rate(windows, DECLINE_WINDOW_COUNT),
     )
     if state == PositionState.EMERGING:
         # §7.2.1 表格：stable 进入条件 = jd_count ≥ 5 + 跨 ≥2 源 + 连续 2 窗口
-        # 波动 < 25% + skill_novelty < 0.3（08-15 全量对齐：此前用
+        # 波动 < 25% + skill_novelty < 0.2（08-15 全量对齐：此前用
         # confidence ≥ 0.8 替代 jd_count 门槛——jd_count=3 时其他维度满分
         # 也能过 0.8，小基数岗位提前稳定）。
         # jd_count 由任务层从 jd_raw 统计传入；skill_novelty 由任务层从
