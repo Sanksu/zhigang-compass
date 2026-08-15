@@ -1018,13 +1018,17 @@ const WATCH_SOURCE_LABEL: Record<string, string> = {
 function TechnologyWatchTab() {
   const [items, setItems] = useState<WatchRow[]>([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState('')
   const [sourceFilter, setSourceFilter] = useState('')
 
-  const load = (status = '', source = '') => {
-    const params = new URLSearchParams({ size: '50' })
+  const PAGE_SIZE = 50
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  const load = (status = '', source = '', p = 1) => {
+    const params = new URLSearchParams({ page: String(p), size: String(PAGE_SIZE) })
     if (status) params.set('status', status)
     if (source) params.set('source', source)
     apiGet<Schema['WatchData']>(`/admin/discovery/watch?${params}`)
@@ -1043,7 +1047,7 @@ function TechnologyWatchTab() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); load(v, sourceFilter) }}>
+        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); load(v, sourceFilter, 1) }}>
           <SelectTrigger className="w-36 h-8 text-xs">
             <SelectValue placeholder="状态筛选" />
           </SelectTrigger>
@@ -1054,7 +1058,7 @@ function TechnologyWatchTab() {
             <SelectItem value="archived">已归档</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={sourceFilter} onValueChange={(v) => { setSourceFilter(v); load(statusFilter, v) }}>
+        <Select value={sourceFilter} onValueChange={(v) => { setSourceFilter(v); setPage(1); load(statusFilter, v, 1) }}>
           <SelectTrigger className="w-32 h-8 text-xs">
             <SelectValue placeholder="来源筛选" />
           </SelectTrigger>
@@ -1121,6 +1125,34 @@ function TechnologyWatchTab() {
                   ))}
                 </TableBody>
               </Table>
+            )}
+            {/* 翻页：总条数 > 每页 50 时出现（后端 /admin/discovery/watch 已分页） */}
+            {total > PAGE_SIZE && (
+              <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
+                <span className="text-xs text-ink-muted">
+                  第 {page} / {totalPages} 页 · 每页 {PAGE_SIZE} 条
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2.5 text-xs"
+                    disabled={page <= 1 || loading}
+                    onClick={() => { const p = page - 1; setPage(p); load(statusFilter, sourceFilter, p) }}
+                  >
+                    上一页
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2.5 text-xs"
+                    disabled={page >= totalPages || loading}
+                    onClick={() => { const p = page + 1; setPage(p); load(statusFilter, sourceFilter, p) }}
+                  >
+                    下一页
+                  </Button>
+                </div>
+              </div>
             )}
           </CardContent>
         </Card>
