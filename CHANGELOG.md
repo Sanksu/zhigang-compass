@@ -1,7 +1,7 @@
 # 变更日志（CHANGELOG）
 
 > 智岗罗盘——多源异构驱动的岗位能力动态演化与人岗匹配系统（XH-202621）
-> 项目周期：2026.07.13 — 2026.09.05。本文件按里程碑汇总主要变更（git 历史 550+ commits / 215 PR）。
+> 项目周期：2026.07.13 — 2026.09.05。本文件按里程碑汇总主要变更（git 历史 620+ commits / 190+ merged PR）。
 
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
@@ -78,4 +78,4 @@
 
 - 分支：`<type>/<模块前缀>-<简述>`；commit：`<type>(<scope>): <description>`
 - 主线策略：feature 从 develop 切出 → PR + CI 全绿 + ≥1 Review → squash merge
-- 详细 PR 记录见 GitHub（190+ merged PR）
+- 详细 PR 记录见 GitHub（190+ merged PR，与头部统计同源）
