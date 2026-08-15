@@ -27,3 +27,32 @@ if (typeof ResizeObserver === 'undefined') {
   }
   window.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver
 }
+
+// Node 26 的原生 localStorage（实验性，需 --localstorage-file）与 jsdom 缺省
+// url 配置下均不可用（ui.ts 主题持久化与多组件测试依赖）；统一注入内存实现
+let hasLocalStorage: boolean
+try {
+  hasLocalStorage = typeof window.localStorage?.getItem === 'function'
+} catch {
+  hasLocalStorage = false
+}
+if (!hasLocalStorage) {
+  const store = new Map<string, string>()
+  Object.defineProperty(window, 'localStorage', {
+    writable: true,
+    value: {
+      get length() {
+        return store.size
+      },
+      clear: () => store.clear(),
+      getItem: (k: string) => store.get(k) ?? null,
+      key: (i: number) => [...store.keys()][i] ?? null,
+      removeItem: (k: string) => {
+        store.delete(k)
+      },
+      setItem: (k: string, v: string) => {
+        store.set(k, String(v))
+      },
+    } as Storage,
+  })
+}
