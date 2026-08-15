@@ -251,13 +251,21 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
         if ts and (pid not in task_last_run or ts > task_last_run[pid]):
             task_last_run[pid] = ts
 
-    # 平台 → output/*.jsonl 文件数
+    # 平台 → output/*.jsonl 文件数 + 累计采集行数（08-15：文件数只是批次产物
+    # 数，行数才是采集记录条数——前端"累计采集量"卡口径；190 文件逐行统计
+    # 约百毫秒级，admin 页低频请求可接受）
     file_counts: dict[str, int] = {}
+    output_lines = 0
     if _OUTPUT_DIR.exists():
         for f in sorted(_OUTPUT_DIR.glob("*.jsonl")):
             platform = _match_platform(f.stem)
             if platform is not None:
                 file_counts[platform] = file_counts.get(platform, 0) + 1
+            try:
+                with f.open(encoding="utf-8", errors="replace") as fh:
+                    output_lines += sum(1 for _ in fh)
+            except OSError:
+                continue
 
     # 全量平台聚合（13 源）：raw 入库为准，无记录平台也列出（前端展示"归档"状态）
     platforms = []
@@ -286,7 +294,7 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
     return ok(data={
         "metrics": {
             "today_count": sum(s["today"] for s in raw_stats.values()),  # 今日（CST）入库新增
-            "output_total": sum(file_counts.values()),
+            "output_total": output_lines,  # 累计采集量：output/*.jsonl 真实行数（08-15 语义修正，原为文件数）
             "raw": raw_counts,
         },
         "platforms": sorted(platforms, key=lambda x: (x["level"], x["id"])),
