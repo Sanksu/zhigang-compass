@@ -331,10 +331,17 @@ class CleaningPipeline:
             f"{item.get('source', '')}:{item.get('source_id', '')}".encode()
         ).hexdigest()
 
-        # PII 脱敏：description/requirements/raw_text 均可能含手机/邮箱/身份证，
-        # 对所有招聘源统一脱敏，is_desensitized 标记
+        # PII 脱敏：title/description/requirements/raw_text 均可能含手机/邮箱/身份证
+        # （08-15 中危修复：补 title 字段 + 课程/论文/社区 Item 的文本字段——
+        # 此前仅 JobItem 三字段，标题含"李工138xxx"类联系方式会漏网），
+        # 对所有 Item 类型统一脱敏，is_desensitized 标记
         if isinstance(item, JobItem):
-            for field in ("description", "requirements", "raw_text"):
+            for field in ("title", "description", "requirements", "raw_text"):
+                if item.get(field) and isinstance(item.get(field), str):
+                    item[field] = self._desensitize(item[field])
+            item["is_desensitized"] = True
+        else:
+            for field in ("title", "description", "raw_text"):
                 if item.get(field) and isinstance(item.get(field), str):
                     item[field] = self._desensitize(item[field])
             item["is_desensitized"] = True

@@ -131,10 +131,11 @@ class OccupationAligner:
                 rows = self._load_from_pg()
                 if rows is None:
                     rows = self._load_from_neo4j()
-                if not rows:
-                    # 数据源均不可达/为空：返回已缓存（若有），否则空 → 无命中
-                    rows = self._occupations
-            self._occupations = rows or []
+            if not rows:
+                # 数据源均不可达/为空（08-15 中危修复）：返回已缓存（若有），
+                # 但**不刷新 ts**——失败不缓存空结果 1h，下次调用立即重试
+                return self._occupations
+            self._occupations = rows
             self._ts = now
             return self._occupations
 
