@@ -102,6 +102,35 @@ def import_jd(
     return session.execute_write(_import_jd_tx, extraction, evidence, occupation)
 
 
+def _upsert_skill_node(tx, skill_name: str, now: str) -> None:
+    """Skill 节点 upsert：按 name 合并（MERGE ON CREATE 兜底并发竞态，防重复建节点）。
+
+    JD 入图（_import_skill_edge）与课程入图（_import_course_tx）共用，
+    name 须已由调用方归一化。
+    """
+    result = tx.run(
+        "MATCH (s:Skill {name: $name}) RETURN s.id AS id",
+        name=skill_name,
+    )
+    record = result.single()
+    if not record:
+        skill_id = next_id(tx, "Skill")
+        tx.run(
+            """
+            MERGE (s:Skill {name: $name})
+            ON CREATE SET s.id = $id,
+                s.name = $name,
+                s.category = $category,
+                s.created_at = $now,
+                s.first_seen = $now
+            """,
+            id=skill_id,
+            name=skill_name,
+            category=skill_category(skill_name),
+            now=now,
+        )
+
+
 def _import_skill_edge(
     tx,
     position_id: str,
@@ -184,102 +213,16 @@ def _import_jd_tx(
         # 空抽取（正文质量差导致无岗位名）不入图，避免产生空岗位节点
         return ""
 
-    # 1. Position：按 name 合并，不存在时分配新 ID。
-    #    先 MATCH 快查避免无谓消耗 Counter；并发下两个事务同时未命中时，
-    #    MERGE ON CREATE 兜底保证只产生一个节点（RETURN 拿回实际 id）。
-    result = tx.run(
-        "MATCH (p:Position {name: $name}) RETURN p.id AS id",
-        name=position_name,
-    )
-    record = result.single()
-    if record:
-        position_id = record["id"]
-        # SET 非空保护：新抽取结果缺字段（空串）时不覆盖已有值，
-        # 避免低质量 JD 把已有岗位的 level/industry/salary 洗空
-        tx.run(
-            """
-            MATCH (p:Position {id: $id})
-            SET p.level = CASE WHEN $level <> '' THEN $level ELSE p.level END,
-                p.industry = CASE WHEN $industry <> '' THEN $industry ELSE p.industry END,
-                p.salary_range = CASE WHEN $salary_range <> '' THEN $salary_range ELSE p.salary_range END,
-                p.updated_at = $now
-            """,
-            id=position_id,
-            level=extraction.level or "",
-            industry=extraction.industry or "",
-            salary_range=extraction.salary_range or "",
-            now=now,
-        )
-    else:
-        position_id = next_id(tx, "Position")
-        result = tx.run(
-            """
-            MERGE (p:Position {name: $name})
-            ON CREATE SET p.id = $id,
-                p.name = $name,
-                p.level = $level,
-                p.industry = $industry,
-                p.salary_range = $salary_range,
-                p.status = 'active',
-                p.created_at = $now,
-                p.updated_at = $now
-            RETURN p.id AS id
-            """,
-            id=position_id,
-            name=position_name,
-            level=extraction.level or "",
-            industry=extraction.industry or "",
-            salary_range=extraction.salary_range or "",
-            now=now,
-        )
-        record = result.single()
-        if record:
-            position_id = record["id"]
-
-    # 1.5 Occupation 归属（设计文档 §5.1 (Position)-[:BELONGS_TO_OCCUPATION]->(Occupation)）。
-    # occupation 由 import_jd 事务外对齐（规则优先 + SBERT 语义兜底），未命中为 None 不入边。
-    if occupation is not None:
-        occ_code, occ_conf = occupation
-        tx.run(
-            """
-            MATCH (p:Position {id: $position_id})
-            SET p.occupation_code = $code
-            MERGE (p)-[:BELONGS_TO_OCCUPATION {confidence: $conf}]->(o:Occupation {code: $code})
-            """,
-            position_id=position_id,
-            code=occ_code,
-            conf=occ_conf,
-        )
-
-    # 2. Evidence：每次创建新节点（每个 JD 原文对应一个 Evidence）
-    evidence_id = next_id(tx, "Evidence")
-    raw_text = evidence.get("raw_text", "")
-    tx.run(
-        """
-        CREATE (e:Evidence {
-            id: $id,
-            source: $source,
-            source_url: $source_url,
-            crawled_at: $crawled_at,
-            raw_text: $raw_text,
-            created_at: $now
-        })
-        WITH e
-        MATCH (p:Position {id: $position_id})
-        CREATE (p)-[:HAS_EVIDENCE]->(e)
-        """,
-        id=evidence_id,
-        source=evidence.get("source", ""),
-        source_url=evidence.get("source_url", ""),
-        crawled_at=evidence.get("crawled_at", ""),
-        # 08-14：移除 65535 截断（初始化模板遗留，Neo4j 无属性长度限制），
-        # Evidence 保留 JD 原文完整备份供证据追溯
-        raw_text=str(raw_text) if raw_text else "",
-        position_id=position_id,
+    position_id = _upsert_position_node(
+        tx, position_name,
+        level=extraction.level or "",
+        industry=extraction.industry or "",
+        salary_range=extraction.salary_range or "",
         now=now,
     )
+    _attach_occupation(tx, position_id, occupation)
+    evidence_id = _create_evidence(tx, position_id, evidence, now)
 
-    # 3. Skills + REQUIRES 关系
     # 技能名与抽取链路一致归一化（normalize_skill → clean_skill_name → 黑名单过滤）：
     # 重建时 jd_raw 快照可能是 P1-1/P1-2 扩充前的旧值（Vue3/reactjs、嵌入式/前端等
     # 泛词），归一化后才能合并到规范节点，避免重建出旧名/泛词 Skill 使合并效果回退。
@@ -311,37 +254,14 @@ def _import_jd_tx(
             evidence_id=evidence_id, now=now,
         )
 
-    # 4. Tools（如果有）
+    # Tools（节点 upsert 复用 _upsert_tool_node；JD 中出现的工具均视为必备要求，
+    # 显式写 necessity='must'——与 Education/Certification 口径一致，避免消费方
+    # 依赖兜底默认值）
     for tool in extraction.tools:
         tool_name = tool.name.strip()
         if not tool_name:
             continue
-
-        result = tx.run(
-            "MATCH (t:Tool {name: $name}) RETURN t.id AS id",
-            name=tool_name,
-        )
-        record = result.single()
-        if not record:
-            tool_id = next_id(tx, "Tool")
-            tx.run(
-                """
-                MERGE (t:Tool {name: $name})
-                ON CREATE SET t.id = $id,
-                    t.name = $name,
-                    t.category = $category,
-                    t.vendor = $vendor,
-                    t.created_at = $now
-                """,
-                id=tool_id,
-                name=tool_name,
-                category=tool.category or "",
-                vendor=tool.vendor or "",
-                now=now,
-            )
-
-        # JD 中出现的工具均视为必备要求，显式写 necessity='must'
-        # （与 Education/Certification 口径一致，避免消费方依赖兜底默认值）
+        _upsert_tool_node(tx, tool_name, tool.category or "", tool.vendor or "", now)
         tx.run(
             """
             MATCH (p:Position {id: $position_id}), (t:Tool {name: $tool_name})
@@ -352,69 +272,219 @@ def _import_jd_tx(
             tool_name=tool_name,
         )
 
-    # 5. Education（学历/专业要求节点，schema.cypher §5：REQUIRES 目标含 Education）。
-    # JD 侧抽取结果无 institution 字段（JDExtractionResult.education 仅 level/major），
-    # 故节点不含 institution；name 取 level·major 组合，同名要求跨 JD 归并到同一节点。
     if extraction.education:
-        edu = extraction.education
-        edu_name = " · ".join(part for part in (edu.level or "", edu.major or "") if part)
-        if edu_name:
-            education_id = _stable_id("Education", edu_name)
-            tx.run(
-                """
-                MERGE (e:Education {id: $id})
-                ON CREATE SET e.created_at = $now
-                SET e.name = $name, e.level = $level, e.major = $major
-                """,
-                id=education_id,
-                name=edu_name,
-                level=edu.level or "",
-                major=edu.major or "",
-                now=now,
-            )
-            # Position → REQUIRES → Education（学历要求为 JD 必备项）
-            tx.run(
-                """
-                MATCH (p:Position {id: $position_id}), (e:Education {id: $education_id})
-                MERGE (p)-[:REQUIRES {necessity: 'must'}]->(e)
-                """,
-                position_id=position_id,
-                education_id=education_id,
-            )
+        _link_education_requirement(tx, position_id, extraction.education, now)
 
-    # 6. Certifications（证书要求节点，schema.cypher §5：REQUIRES 目标含 Certification）。
-    # JD 侧抽取结果无 issuer 字段（JDExtractionResult.certifications 仅 name），
-    # 故节点不含 issuer；同名证书要求跨 JD 归并到同一节点。
     for cert in extraction.certifications:
-        cert_name = cert.name.strip()
-        if not cert_name:
-            continue
-        certification_id = _stable_id("Certification", cert_name)
-        tx.run(
-            """
-            MERGE (c:Certification {id: $id})
-            ON CREATE SET c.created_at = $now
-            SET c.name = $name
-            """,
-            id=certification_id,
-            name=cert_name,
-            now=now,
-        )
-        # Position → REQUIRES → Certification（证书要求为 JD 必备项）
-        tx.run(
-            """
-            MATCH (p:Position {id: $position_id}), (c:Certification {id: $certification_id})
-            MERGE (p)-[:REQUIRES {necessity: 'must'}]->(c)
-            """,
-            position_id=position_id,
-            certification_id=certification_id,
-        )
+        _link_certification_requirement(tx, position_id, cert, now)
 
     return position_id
 
 
-# ============================================================
-# Course 入图
+def _upsert_position_node(
+    tx,
+    position_name: str,
+    level: str,
+    industry: str,
+    salary_range: str,
+    now: str,
+) -> str:
+    """Position 节点 upsert：按 name 合并，不存在时分配新 ID，返回 position_id。
+
+    先 MATCH 快查避免无谓消耗 Counter；并发下两个事务同时未命中时，
+    MERGE ON CREATE 兜底保证只产生一个节点（RETURN 拿回实际 id）。
+    SET 非空保护：新抽取结果缺字段（空串）时不覆盖已有值，避免低质量 JD
+    把已有岗位的 level/industry/salary_range 洗空。
+    """
+    result = tx.run(
+        "MATCH (p:Position {name: $name}) RETURN p.id AS id",
+        name=position_name,
+    )
+    record = result.single()
+    if record:
+        position_id = record["id"]
+        tx.run(
+            """
+            MATCH (p:Position {id: $id})
+            SET p.level = CASE WHEN $level <> '' THEN $level ELSE p.level END,
+                p.industry = CASE WHEN $industry <> '' THEN $industry ELSE p.industry END,
+                p.salary_range = CASE WHEN $salary_range <> '' THEN $salary_range ELSE p.salary_range END,
+                p.updated_at = $now
+            """,
+            id=position_id,
+            level=level,
+            industry=industry,
+            salary_range=salary_range,
+            now=now,
+        )
+    else:
+        position_id = next_id(tx, "Position")
+        result = tx.run(
+            """
+            MERGE (p:Position {name: $name})
+            ON CREATE SET p.id = $id,
+                p.name = $name,
+                p.level = $level,
+                p.industry = $industry,
+                p.salary_range = $salary_range,
+                p.status = 'active',
+                p.created_at = $now,
+                p.updated_at = $now
+            RETURN p.id AS id
+            """,
+            id=position_id,
+            name=position_name,
+            level=level,
+            industry=industry,
+            salary_range=salary_range,
+            now=now,
+        )
+        record = result.single()
+        if record:
+            position_id = record["id"]
+    return position_id
+
+
+def _attach_occupation(tx, position_id: str, occupation: tuple[str, float] | None) -> None:
+    """Occupation 归属（设计文档 §5.1 (Position)-[:BELONGS_TO_OCCUPATION]->(Occupation)）。
+
+    occupation 由 import_jd 事务外对齐（规则优先 + SBERT 语义兜底），未命中为 None 不入边。
+    """
+    if occupation is not None:
+        occ_code, occ_conf = occupation
+        tx.run(
+            """
+            MATCH (p:Position {id: $position_id})
+            SET p.occupation_code = $code
+            MERGE (p)-[:BELONGS_TO_OCCUPATION {confidence: $conf}]->(o:Occupation {code: $code})
+            """,
+            position_id=position_id,
+            code=occ_code,
+            conf=occ_conf,
+        )
+
+
+def _create_evidence(tx, position_id: str, evidence: dict, now: str) -> str:
+    """Evidence 节点 + HAS_EVIDENCE 边（每个 JD 原文对应一个 Evidence，CREATE 留证），返回 evidence_id。"""
+    evidence_id = next_id(tx, "Evidence")
+    raw_text = evidence.get("raw_text", "")
+    tx.run(
+        """
+        CREATE (e:Evidence {
+            id: $id,
+            source: $source,
+            source_url: $source_url,
+            crawled_at: $crawled_at,
+            raw_text: $raw_text,
+            created_at: $now
+        })
+        WITH e
+        MATCH (p:Position {id: $position_id})
+        CREATE (p)-[:HAS_EVIDENCE]->(e)
+        """,
+        id=evidence_id,
+        source=evidence.get("source", ""),
+        source_url=evidence.get("source_url", ""),
+        crawled_at=evidence.get("crawled_at", ""),
+        # 08-14：移除 65535 截断（初始化模板遗留，Neo4j 无属性长度限制），
+        # Evidence 保留 JD 原文完整备份供证据追溯
+        raw_text=str(raw_text) if raw_text else "",
+        position_id=position_id,
+        now=now,
+    )
+    return evidence_id
+
+
+def _upsert_tool_node(tx, tool_name: str, category: str, vendor: str, now: str) -> None:
+    """Tool 节点 upsert：按 name 合并（MERGE ON CREATE 兜底并发竞态，防重复建节点）。"""
+    result = tx.run(
+        "MATCH (t:Tool {name: $name}) RETURN t.id AS id",
+        name=tool_name,
+    )
+    record = result.single()
+    if not record:
+        tool_id = next_id(tx, "Tool")
+        tx.run(
+            """
+            MERGE (t:Tool {name: $name})
+            ON CREATE SET t.id = $id,
+                t.name = $name,
+                t.category = $category,
+                t.vendor = $vendor,
+                t.created_at = $now
+            """,
+            id=tool_id,
+            name=tool_name,
+            category=category,
+            vendor=vendor,
+            now=now,
+        )
+
+
+def _link_education_requirement(tx, position_id: str, edu, now: str) -> None:
+    """学历要求节点 + REQUIRES 边（schema.cypher §5：REQUIRES 目标含 Education）。
+
+    JD 侧抽取结果无 institution 字段（JDExtractionResult.education 仅 level/major），
+    故节点不含 institution；name 取 level·major 组合，同名要求跨 JD 归并到同一节点。
+    """
+    edu_name = " · ".join(part for part in (edu.level or "", edu.major or "") if part)
+    if not edu_name:
+        return
+    education_id = _stable_id("Education", edu_name)
+    tx.run(
+        """
+        MERGE (e:Education {id: $id})
+        ON CREATE SET e.created_at = $now
+        SET e.name = $name, e.level = $level, e.major = $major
+        """,
+        id=education_id,
+        name=edu_name,
+        level=edu.level or "",
+        major=edu.major or "",
+        now=now,
+    )
+    # Position → REQUIRES → Education（学历要求为 JD 必备项）
+    tx.run(
+        """
+        MATCH (p:Position {id: $position_id}), (e:Education {id: $education_id})
+        MERGE (p)-[:REQUIRES {necessity: 'must'}]->(e)
+        """,
+        position_id=position_id,
+        education_id=education_id,
+    )
+
+
+def _link_certification_requirement(tx, position_id: str, cert, now: str) -> None:
+    """证书要求节点 + REQUIRES 边（schema.cypher §5：REQUIRES 目标含 Certification）。
+
+    JD 侧抽取结果无 issuer 字段（JDExtractionResult.certifications 仅 name），
+    故节点不含 issuer；同名证书要求跨 JD 归并到同一节点。
+    """
+    cert_name = cert.name.strip()
+    if not cert_name:
+        return
+    certification_id = _stable_id("Certification", cert_name)
+    tx.run(
+        """
+        MERGE (c:Certification {id: $id})
+        ON CREATE SET c.created_at = $now
+        SET c.name = $name
+        """,
+        id=certification_id,
+        name=cert_name,
+        now=now,
+    )
+    # Position → REQUIRES → Certification（证书要求为 JD 必备项）
+    tx.run(
+        """
+        MATCH (p:Position {id: $position_id}), (c:Certification {id: $certification_id})
+        MERGE (p)-[:REQUIRES {necessity: 'must'}]->(c)
+        """,
+        position_id=position_id,
+        certification_id=certification_id,
+    )
+
+
 # ============================================================
 
 def import_course(session: Session, course_data: dict) -> str:
@@ -437,11 +507,48 @@ def import_course(session: Session, course_data: dict) -> str:
 
 def _import_course_tx(tx, course_data: dict) -> str:
     now = _now()
+    course_id = _upsert_course_node(tx, course_data, now)
+
+    # Skills + LEARNABLE_VIA 关系
+    skills = course_data.get("skills", [])
+    if isinstance(skills, str):
+        skills = [s.strip() for s in skills.split(",") if s.strip()]
+
+    for skill_name in skills:
+        if not skill_name or not skill_name.strip():
+            continue
+        # 技能名与 JD 入图侧一致归一化（canonical_skill_name → 黑名单过滤）：
+        # 课程源技能名可能是英文原始名（"Prompt Engineering"），不归一化会与
+        # JD 侧规范节点（"提示工程"）分裂成两个 Skill 节点，导致 LEARNABLE_VIA
+        # 与 REQUIRES 无法在同一节点汇聚（数据审查 major：课程入图技能名口径）。
+        skill_name = canonical_skill_name(skill_name.strip())
+        if not skill_name or not is_valid_skill_name(skill_name):
+            continue
+
+        _upsert_skill_node(tx, skill_name, now)
+
+        # LEARNABLE_VIA 关系（Skill → Course）
+        tx.run(
+            """
+            MATCH (s:Skill {name: $skill_name}), (c:Course {id: $course_id})
+            MERGE (s)-[:LEARNABLE_VIA]->(c)
+            """,
+            skill_name=skill_name,
+            course_id=course_id,
+        )
+
+    return course_id
+
+
+def _upsert_course_node(tx, course_data: dict, now: str) -> str:
+    """Course 节点 upsert：按 source + source_id 合并，返回 course_id。
+
+    先 MATCH 快查避免无谓消耗 Counter；并发下 MERGE ON CREATE 兜底防重复建节点。
+    SET 非空保护：新数据缺字段（空串/0）时不覆盖已有值，避免低质量快照把
+    课程评分/时长等已有信息洗空。
+    """
     source = course_data.get("source", "")
     source_id = course_data.get("source_id", "")
-
-    # 1. Course：按 source + source_id 合并。
-    #    先 MATCH 快查避免无谓消耗 Counter；并发下 MERGE ON CREATE 兜底防重复建节点。
     result = tx.run(
         """
         MATCH (c:Course {source: $source, source_id: $source_id})
@@ -454,8 +561,6 @@ def _import_course_tx(tx, course_data: dict) -> str:
 
     if record:
         course_id = record["id"]
-        # SET 非空保护：新数据缺字段（空串/0）时不覆盖已有值，
-        # 避免低质量快照把课程评分/时长等已有信息洗空
         tx.run(
             """
             MATCH (c:Course {id: $id})
@@ -520,54 +625,4 @@ def _import_course_tx(tx, course_data: dict) -> str:
         record = result.single()
         if record:
             course_id = record["id"]
-
-    # 2. Skills + LEARNABLE_VIA 关系
-    skills = course_data.get("skills", [])
-    if isinstance(skills, str):
-        skills = [s.strip() for s in skills.split(",") if s.strip()]
-
-    for skill_name in skills:
-        if not skill_name or not skill_name.strip():
-            continue
-        # 技能名与 JD 入图侧一致归一化（canonical_skill_name → 黑名单过滤）：
-        # 课程源技能名可能是英文原始名（"Prompt Engineering"），不归一化会与
-        # JD 侧规范节点（"提示工程"）分裂成两个 Skill 节点，导致 LEARNABLE_VIA
-        # 与 REQUIRES 无法在同一节点汇聚（数据审查 major：课程入图技能名口径）。
-        skill_name = canonical_skill_name(skill_name.strip())
-        if not skill_name or not is_valid_skill_name(skill_name):
-            continue
-
-        # Skill：按 name 合并（MERGE ON CREATE 兜底并发竞态，防重复建节点）
-        result = tx.run(
-            "MATCH (s:Skill {name: $name}) RETURN s.id AS id",
-            name=skill_name,
-        )
-        record = result.single()
-        if not record:
-            skill_id = next_id(tx, "Skill")
-            tx.run(
-                """
-                MERGE (s:Skill {name: $name})
-                ON CREATE SET s.id = $id,
-                    s.name = $name,
-                    s.category = $category,
-                    s.created_at = $now,
-                    s.first_seen = $now
-                """,
-                id=skill_id,
-                name=skill_name,
-                category=skill_category(skill_name),
-                now=now,
-            )
-
-        # LEARNABLE_VIA 关系（Skill → Course）
-        tx.run(
-            """
-            MATCH (s:Skill {name: $skill_name}), (c:Course {id: $course_id})
-            MERGE (s)-[:LEARNABLE_VIA]->(c)
-            """,
-            skill_name=skill_name,
-            course_id=course_id,
-        )
-
     return course_id
