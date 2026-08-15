@@ -529,7 +529,8 @@ async def skill_courses(skill_id: str):
     if skill is None:
         return error(4040, "技能不存在", http_status=404)
 
-    courses = await load_courses_for_skill(skill_id, skill["name"], top_k=None)
+    courses = await load_courses_for_skill(
+        skill_id, skill["name"], top_k=None, semantic=_course_semantic())
     return ok(
         data={
             "skill_id": skill_id,
@@ -537,6 +538,21 @@ async def skill_courses(skill_id: str):
             "courses": [c.model_dump() for c in courses],
         }
     )
+
+
+def _course_semantic() -> object | None:
+    """课程门控语义器（08-15 审查 M1：graph API 课程与 learning-path 同门控）。
+
+    语义可用：P1-3 标题门控 + 灰色带质量门控全部生效（脏 LEARNABLE_VIA 边
+    不再外泄，口径与 compare 学习路径一致）；模型不可用降级 None——courses
+    是增强能力，纯规则链路继续（与 match 诊断链路降级一致，不 503 不空列表）。
+    """
+    try:
+        embedder = SkillEmbedder.get()
+        embedder.embed("__probe__")  # 触发惰性加载，探测模型可用性
+        return embedder
+    except SemanticUnavailableError:
+        return None
 
 
 def _load_position(id: str, user: Optional[dict] = None) -> dict | None:
@@ -753,7 +769,8 @@ async def skill_detail(
     status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
     counts = await asyncio.to_thread(_query_skill_counts, skill_id, status_filter)
 
-    courses = await load_courses_for_skill(skill_id, skill["name"], top_k=None)
+    courses = await load_courses_for_skill(
+        skill_id, skill["name"], top_k=None, semantic=_course_semantic())
     data = {
         "id": skill_id,
         "name": skill["name"],
