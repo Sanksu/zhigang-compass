@@ -57,6 +57,7 @@ EXPECTED_FUNCTIONS = [
     watch_signal_daily,
     snapshot_graph,
     check_llm_providers_health,
+    graph_health_check,
 ]
 
 
