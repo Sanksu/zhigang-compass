@@ -258,15 +258,21 @@ async def crawl_platform(
                 if len(tail) > 200:
                     tail.pop(0)
 
-    await asyncio.gather(
-        _drain(proc.stdout),
-        _drain(proc.stderr, stderr_tail),
-    )
     # 单源超时保护（P0-1）：爬虫挂死时 kill 子进程，避免 ETL 阶段 1 无限阻塞；
     # 已写入 jsonl 保留（Scrapy 逐行落盘），后续 load 消费已产出数据
+    # 08-15 审查 H1：drain 必须与 wait_for 同域——原实现 gather 在 wait_for 之前，
+    # 子进程挂死且无输出时 readline 永不 EOF，wait_for 永不触发（kill 成摆设）
     timeout = _crawl_timeout(spider_name)
     try:
-        returncode = await asyncio.wait_for(proc.wait(), timeout=timeout)
+        await asyncio.wait_for(
+            asyncio.gather(
+                _drain(proc.stdout),
+                _drain(proc.stderr, stderr_tail),
+            ),
+            timeout=timeout,
+        )
+        # gather 完成 = stdout/stderr 已 EOF，进程退出在即，wait 立即返回
+        returncode = await proc.wait()
     except asyncio.TimeoutError:
         _kill_process_tree(proc)  # 同步函数（taskkill/killpg），勿 await
         msg = f"爬虫 {spider_name} 超时（>{timeout}s），已强制终止"
@@ -975,7 +981,9 @@ async def aggregate_positions(ctx: dict) -> dict:
         )).all()
 
     now = datetime.now(timezone(timedelta(hours=8))).isoformat()
-    agg = build_aggregates(rows)
+    # 08-15 审查 M2：build_aggregates 为万级 JD 的同步 CPU 聚合（归一化/权重
+    # 计算），原直跑 async 上下文可阻塞 ARQ 事件循环数秒——放线程池
+    agg = await asyncio.to_thread(build_aggregates, rows)
 
     def _write():
         # 同步 Neo4j 写入放线程池，并正确关闭 session（原实现 session 泄漏）
