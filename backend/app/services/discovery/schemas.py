@@ -12,7 +12,7 @@ class PositionState(str, Enum):
     """岗位生命周期状态机（设计文档 7.2.1 节，六状态）。"""
     CANDIDATE = "candidate"    # 候选态：趋势监测命中规则门控
     EMERGING = "emerging"      # 新兴态：跨 ≥2 源验证 + 置信度 ≥ 0.6（admin 审核）
-    STABLE = "stable"          # 稳定态：jd_count ≥ 5 + 跨 2 窗口波动 < 25%
+    STABLE = "stable"          # 稳定态：jd_count ≥ 5 + 源 ≥ 2 + 波动 < 25% + novelty < 0.2（§7.2.1）
     DECLINING = "declining"    # 衰退态：连续 3 窗口频次下降 > 40%
     ARCHIVED = "archived"      # 归档态：admin 确认衰退（终态）
     REJECTED = "rejected"      # 驳回态：admin 驳回 candidate（终态，不入图谱）
