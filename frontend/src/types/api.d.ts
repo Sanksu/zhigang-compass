@@ -1913,6 +1913,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/evolution/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 技能演化列表（默认技能 Top-N，按快照出现热度降序） */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 返回技能数 */
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 默认技能演化列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillEvolutionListData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/evolution/state-machine": {
         parameters: {
             query?: never;
@@ -3508,6 +3552,16 @@ export interface components {
         /** @description GET /evolution/positions 响应 data（默认岗位演化列表，按快照热度降序） */
         PositionEvolutionListData: {
             positions: components["schemas"]["PositionEvolutionData"][];
+        };
+        /** @description 技能演化轨迹（GET /evolution/skills 项） */
+        SkillEvolutionData: {
+            skill_id: string;
+            skill_name: string;
+            points: components["schemas"]["PositionEvolutionPoint"][];
+        };
+        /** @description GET /evolution/skills 响应 data（默认技能演化列表，按快照热度降序） */
+        SkillEvolutionListData: {
+            skills: components["schemas"]["SkillEvolutionData"][];
         };
         /** @description 岗位状态流转记录项（GET /evolution/state-machine） */
         StateMachineTransition: {

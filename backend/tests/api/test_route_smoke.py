@@ -168,3 +168,38 @@ async def test_graph_view_smoke_mocked(monkeypatch):
     body = resp.json()
     assert body["data"]["view_type"] == "level"
     assert body["data"]["nodes"][0]["id"] == "pos_1"
+
+@pytest.mark.asyncio
+async def test_spa_fallback_serves_index_for_frontend_routes(tmp_path):
+    """前端 history 路由刷新回退 index.html（08-15 修复：/evolution 等 404）。"""
+    from app.main import _SPAFallbackStaticFiles
+
+    (tmp_path / "index.html").write_text("<html>智岗罗盘</html>", encoding="utf-8")
+    sf = _SPAFallbackStaticFiles(directory=str(tmp_path), html=True)
+    scope = {
+        "type": "http", "method": "GET", "path": "/evolution",
+        "headers": [], "query_string": b"", "scheme": "http",
+        "server": ("test", 80), "client": ("127.0.0.1", 1),
+        "root_path": "", "app": None, "state": {},
+    }
+    resp = await sf.get_response("evolution", scope)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+
+
+@pytest.mark.asyncio
+async def test_spa_fallback_preserves_api_404(tmp_path):
+    """API 路径 404 保持 JSON（不 fallback 到 index.html，契约响应不受污染）。"""
+    from app.main import _SPAFallbackStaticFiles
+
+    (tmp_path / "index.html").write_text("<html>app</html>", encoding="utf-8")
+    sf = _SPAFallbackStaticFiles(directory=str(tmp_path), html=True)
+    scope = {
+        "type": "http", "method": "GET", "path": "/api/v1/nonexistent",
+        "headers": [], "query_string": b"", "scheme": "http",
+        "server": ("test", 80), "client": ("127.0.0.1", 1),
+        "root_path": "", "app": None, "state": {},
+    }
+    with pytest.raises(Exception) as exc:
+        await sf.get_response("nonexistent", scope)
+    assert getattr(exc.value, "status_code", 404) == 404

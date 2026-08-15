@@ -5,7 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.api.v1.evolution import _rebuild_position_evolution, position_evolution_list
+from app.api.v1.evolution import (
+    _rebuild_node_evolution,
+    _rebuild_position_evolution,
+    position_evolution_list,
+    skill_evolution_list,
+)
 
 
 def _version(vid: str, nodes: list[dict], edges: list[tuple[str, str]]):
@@ -99,3 +104,55 @@ class TestPositionEvolutionList:
         res = await position_evolution_list(limit=8, db=db, user={})
         assert res.status_code == 404
         assert json.loads(res.body)["code"] == 4040
+
+class TestSkillEvolutionList:
+    @pytest.mark.asyncio
+    async def test_returns_top_skills_by_heat_target_side(self):
+        snapshots = [
+            _version("graph_v20260801", [_node("sk_1", "Python", "skill"), _node("sk_2", "React", "skill")], [("pos_1", "sk_1")]),
+            _version("graph_v20260802", [_node("sk_1", "Python")], [("pos_1", "sk_1"), ("pos_2", "sk_1")]),
+        ]
+        db = _db_with(snapshots)
+        res = await skill_evolution_list(limit=8, db=db, user={})
+        skills = res.data["skills"]
+        # sk_1 出现 2 期且 freq 更高 → 首位；freq 按 edges.target 统计
+        assert skills[0]["skill_id"] == "sk_1"
+        assert skills[0]["skill_name"] == "Python"
+        assert skills[0]["points"][1]["freq"] == 2
+        assert skills[1]["skill_id"] == "sk_2"
+        assert skills[1]["points"][0]["freq"] == 0  # target 侧无引用
+
+    @pytest.mark.asyncio
+    async def test_filters_non_skill_nodes(self):
+        snapshots = [
+            _version(
+                "graph_v20260801",
+                [_node("sk_1", "Python", "skill"), _node("pos_1", "后端工程师"), _node("co_1", "课程", "course")],
+                [("pos_1", "sk_1")],
+            ),
+        ]
+        db = _db_with(snapshots)
+        res = await skill_evolution_list(limit=8, db=db, user={})
+        assert [s["skill_id"] for s in res.data["skills"]] == ["sk_1"]
+
+    @pytest.mark.asyncio
+    async def test_limit_and_no_snapshots(self):
+        snapshots = [_version("graph_v20260801", [_node("sk_1"), _node("sk_2"), _node("sk_3")], [])]
+        db = _db_with(snapshots)
+        res = await skill_evolution_list(limit=2, db=db, user={})
+        assert len(res.data["skills"]) == 2
+        db0 = _db_with([])
+        res0 = await skill_evolution_list(limit=8, db=db0, user={})
+        assert res0.status_code == 404
+
+
+class TestRebuildNodeEvolution:
+    def test_edge_side_target(self):
+        snapshots = [
+            _version("graph_v20260801", [_node("sk_1", "Python", "skill")], [("pos_1", "sk_1")]),
+            _version("graph_v20260802", [], []),
+        ]
+        name, points = _rebuild_node_evolution(snapshots, "sk_1", edge_side="target")
+        assert name == "Python"
+        assert [p["freq"] for p in points] == [1, 0]
+        assert [p["present"] for p in points] == [True, False]
