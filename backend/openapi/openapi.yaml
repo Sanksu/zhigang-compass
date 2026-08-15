@@ -1060,6 +1060,29 @@ paths:
                   data:
                     $ref: '#/components/schemas/PositionEvolutionData'
                   trace_id: { type: string }
+  /api/v1/evolution/positions:
+    get:
+      tags: [evolution]
+      summary: 岗位演化列表（默认岗位 Top-N，按快照出现热度降序）
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 8, minimum: 1, maximum: 20 }
+          description: 返回岗位数
+      responses:
+        '200':
+          description: 默认岗位演化列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/PositionEvolutionListData'
+                  trace_id: { type: string }
   /api/v1/evolution/state-machine:
     get:
       tags: [evolution]
@@ -2421,6 +2444,15 @@ components:
         points:
           type: array
           items: { $ref: '#/components/schemas/PositionEvolutionPoint' }
+
+    PositionEvolutionListData:
+      type: object
+      description: GET /evolution/positions 响应 data（默认岗位演化列表，按快照热度降序）
+      required: [positions]
+      properties:
+        positions:
+          type: array
+          items: { $ref: '#/components/schemas/PositionEvolutionData' }
 
     StateMachineTransition:
       type: object

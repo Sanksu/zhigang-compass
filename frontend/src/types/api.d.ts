@@ -1869,6 +1869,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/evolution/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 岗位演化列表（默认岗位 Top-N，按快照出现热度降序） */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 返回岗位数 */
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 默认岗位演化列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["PositionEvolutionListData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/evolution/state-machine": {
         parameters: {
             query?: never;
@@ -2887,7 +2931,8 @@ export interface components {
             /**
              * @description 0=成功，非 0=业务错误码（设计文档 §2.4.7）：4000 参数校验 / 4010 未认证 /
              *     4011 Token 过期 / 4030 无权限 / 4040 资源不存在 / 4090 资源或状态冲突 /
-             *     4290 请求限流 / 5000 内部错误 / 5001 Neo4j 查询失败 / 5002 pgvector 查询失败 /
+             *     4290 请求限流 / 5000 内部错误（含 LLM 能力不可用场景，HTTP 503）/
+             *     5001 Neo4j 查询失败 / 5002 pgvector 查询失败 /
              *     5003 LLM 超时（HTTP 504）
              */
             code: number;
@@ -3459,6 +3504,10 @@ export interface components {
             position_id: string;
             position_name: string;
             points: components["schemas"]["PositionEvolutionPoint"][];
+        };
+        /** @description GET /evolution/positions 响应 data（默认岗位演化列表，按快照热度降序） */
+        PositionEvolutionListData: {
+            positions: components["schemas"]["PositionEvolutionData"][];
         };
         /** @description 岗位状态流转记录项（GET /evolution/state-machine） */
         StateMachineTransition: {
