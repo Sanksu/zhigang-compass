@@ -89,6 +89,10 @@ services:
       # LLM provider 配置（08-15 恢复）：.gitignore 不入镜像（含 api_key），
       # 挂载宿主机文件——可写（管理后台 /admin/llm 写回持久化）
       - ./backend/configs/llm_providers.yaml:/app/configs/llm_providers.yaml
+      # 爬虫输出目录（08-15 修复：累计采集量统计读 /app/data/crawlers/output，
+      # 此前 api 容器无挂载——容器内为空目录，爬取管理页累计采集量恒 0；
+      # worker 侧已有同款挂载，双向读写一致）
+      - ./backend/data/crawlers/output:/app/data/crawlers/output
       # 上传文件共享卷（08-15 修复）：resume_parse 任务在 worker 容器读 /app/uploads——
       # 此前 api 落盘 worker 读不到，任务 failed「文件不存在」
       - uploads_data:/app/uploads

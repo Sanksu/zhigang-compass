@@ -340,18 +340,19 @@ export function AdminCrawlPage() {
           })),
         )
         setMetrics([
-          { id: 'today', label: '今日采集量', value: res.metrics.today_count.toLocaleString(), delta: '今日新增', deltaColor: 'text-state-emerging', icon: Database, hint: '今日 output/*.jsonl 新增行数（CST）' },
-          { id: 'output', label: '累计采集量', value: res.metrics.output_total.toLocaleString(), delta: `+${res.platforms.length}源`, deltaColor: 'text-state-emerging', icon: Database, hint: 'output/*.jsonl 真实行数合计' },
-          { id: 'raw', label: 'DB 已入库', value: (res.metrics.raw.jd + res.metrics.raw.course).toLocaleString(), delta: `JD ${res.metrics.raw.jd}`, deltaColor: 'text-state-emerging', icon: Activity, hint: 'jd_raw + course_raw 真实计数' },
-          { id: 'files', label: '采集文件数', value: res.platforms.length.toLocaleString(), delta: `${res.platforms.length} 源`, deltaColor: 'text-ink-muted', icon: Gauge, hint: '有采集记录的平台数' },
+          { id: 'today', label: '今日采集量', value: res.metrics.today_count.toLocaleString(), delta: '今日新增', deltaColor: 'text-state-emerging', icon: Database, hint: '今日 DB 入库新增（CST）' },
+          // 累计采集量统一 DB 口径（08-15 用户决策）：与仪表盘一致的四表入库总量
+          { id: 'total', label: '累计采集量', value: (res.metrics.raw_total ?? 0).toLocaleString(), delta: `+${res.platforms.length}源`, deltaColor: 'text-state-emerging', icon: Database, hint: 'DB 入库总量（jd/course/paper/community）· 与仪表盘口径一致' },
+          { id: 'raw', label: 'JD/课程入库', value: (res.metrics.raw.jd + res.metrics.raw.course).toLocaleString(), delta: `JD ${res.metrics.raw.jd}`, deltaColor: 'text-state-emerging', icon: Activity, hint: 'jd_raw + course_raw 细分计数' },
+          { id: 'files', label: '有记录平台', value: res.platforms.length.toLocaleString(), delta: `${res.platforms.length} 源`, deltaColor: 'text-ink-muted', icon: Gauge, hint: '有采集记录的平台数' },
         ])
       })
       .catch(() => {
         setMetrics([
           { id: 'today', label: '今日采集量', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Database, hint: '状态加载失败' },
-          { id: 'output', label: '累计采集量', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Database, hint: '请确认后端服务已启动' },
-          { id: 'raw', label: 'DB 已入库', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Activity, hint: '—' },
-          { id: 'files', label: '采集文件数', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Gauge, hint: '—' },
+          { id: 'total', label: '累计采集量', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Database, hint: '请确认后端服务已启动' },
+          { id: 'raw', label: 'JD/课程入库', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Activity, hint: '—' },
+          { id: 'files', label: '有记录平台', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Gauge, hint: '—' },
         ])
       })
       .finally(() => setLoading(false))

@@ -251,7 +251,7 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
         if ts and (pid not in task_last_run or ts > task_last_run[pid]):
             task_last_run[pid] = ts
 
-    # 平台 → output/*.jsonl 文件数
+    # 平台 → output/*.jsonl 文件数（platforms[].files 字段，管理参考用）
     file_counts: dict[str, int] = {}
     if _OUTPUT_DIR.exists():
         for f in sorted(_OUTPUT_DIR.glob("*.jsonl")):
@@ -286,7 +286,9 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
     return ok(data={
         "metrics": {
             "today_count": sum(s["today"] for s in raw_stats.values()),  # 今日（CST）入库新增
-            "output_total": sum(file_counts.values()),
+            # 累计采集量统一 DB 口径（08-15 用户决策）：与仪表盘一致的四表入库
+            # 总量；output jsonl 行数口径废弃（output 含未入库/重复记录，易误导）
+            "raw_total": raw_counts["jd"] + raw_counts["course"] + raw_counts["paper"] + raw_counts["community"],
             "raw": raw_counts,
         },
         "platforms": sorted(platforms, key=lambda x: (x["level"], x["id"])),
