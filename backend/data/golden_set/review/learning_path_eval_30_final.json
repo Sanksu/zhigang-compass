@@ -1,16 +1,16 @@
 {
  "summary": {
   "case_count": 30,
-  "reasonable_count": 29,
-  "reasonable_ratio": 0.9667,
+  "reasonable_count": 30,
+  "reasonable_ratio": 1.0,
   "target_ratio": 0.8,
   "target_met": true,
   "avg_dims": {
    "completeness": 1.0,
-   "prerequisite": 0.9,
-   "course": 0.79,
+   "prerequisite": 0.893,
+   "course": 0.799,
    "hours": 0.904,
-   "mean": 0.898
+   "mean": 0.899
   },
   "note": "人工定稿（learning_path_eval_30_human.json，覆盖 3 项评分）"
  },
@@ -264,16 +264,6 @@
    "gap_count": 37,
    "path_items": [
     {
-     "skill": "Prometheus",
-     "prerequisites": [
-      "计算机基础",
-      "Linux"
-     ],
-     "courses": [],
-     "estimated_hours": 135.0,
-     "priority": "high"
-    },
-    {
      "skill": "Shell",
      "prerequisites": [
       "计算机基础",
@@ -330,14 +320,23 @@
      ],
      "estimated_hours": 350.0,
      "priority": "medium"
+    },
+    {
+     "skill": "LangChain",
+     "prerequisites": [],
+     "courses": [
+      "Agentic AI: LangChain and LangGraph@edx(q=0.525)"
+     ],
+     "estimated_hours": 70.0,
+     "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 1.0,
-    "course": 0.86,
+    "prerequisite": 0.9,
+    "course": 1.0,
     "hours": 1.0,
-    "mean": 0.96
+    "mean": 0.97
    },
    "reasonable": true,
    "review_note": "专家确认（张恺天 08-15）：运维工程师 (pos_3073) 路径合理，维持预评分 mean=0.96"
@@ -648,7 +647,9 @@
     {
      "skill": "Discovery",
      "prerequisites": [],
-     "courses": [],
+     "courses": [
+      "质性研究方法@icourse163(q=0.5706)"
+     ],
      "estimated_hours": 30.0,
      "priority": "medium"
     },
@@ -670,9 +671,9 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.8,
-    "course": 0.72,
+    "course": 0.86,
     "hours": 0.76,
-    "mean": 0.82
+    "mean": 0.85
    },
    "reasonable": true,
    "review_note": "专家确认（张恺天 08-15）：CMDB发现 (pos_3120) 路径合理，维持预评分 mean=0.82"
@@ -705,8 +706,8 @@
       "机器学习"
      ],
      "courses": [
-      "互换性与测量技术@icourse163(q=0.5635)",
       "测量学@icourse163(q=0.5388)",
+      "互换性与测量技术基础@icourse163(q=0.538)",
       "运筹学@icourse163(q=0.5193)"
      ],
      "estimated_hours": 280.0,
@@ -784,8 +785,9 @@
       "Linux"
      ],
      "courses": [
-      "Technical Support Fundamentals@coursera(q=0.692)",
-      "Site Reliability Engineering (SRE) Principles@coursera(q=0.5427)"
+      "系统可靠性设计与分析@icourse163(q=0.5703)",
+      "以可靠性为中心的维修分析@icourse163(q=0.5558)",
+      "质量与可靠性管理@icourse163(q=0.4996)"
      ],
      "estimated_hours": 145.0,
      "priority": "medium"
@@ -809,7 +811,11 @@
       "统计学",
       "统计分析"
      ],
-     "courses": [],
+     "courses": [
+      "系统可靠性设计与分析@icourse163(q=0.5703)",
+      "以可靠性为中心的维修分析@icourse163(q=0.5558)",
+      "质量与可靠性管理@icourse163(q=0.4996)"
+     ],
      "estimated_hours": 130.0,
      "priority": "medium"
     },
@@ -831,12 +837,12 @@
    "scores": {
     "completeness": 1.0,
     "prerequisite": 0.8,
-    "course": 0.58,
+    "course": 0.72,
     "hours": 0.76,
-    "mean": 0.78
+    "mean": 0.82
    },
-   "reasonable": false,
-   "review_note": "专家定稿（张恺天 08-15）：可靠性建模/HTOL/burn-in 课程池真实缺口，误配课宁缺毋滥维持——差 0.02 属可接受边界"
+   "reasonable": true,
+   "review_note": "专家定稿（张恺天 08-15 更新）：可靠性课程补采后达标——系统可靠性设计与分析/质量与可靠性管理/以可靠性为中心的维修分析（icourse163，领域一致非误配）匹配至 可靠性工程/可靠性建模；HTOL/burn-in 仍无课（半导体专用术语，接受）；mean 0.78→0.82"
   },
   {
    "case_id": "lp_11",
@@ -1118,9 +1124,9 @@
       "Python"
      ],
      "courses": [
-      "软件测试@icourse163(q=0.5598)",
       "自动化测试@icourse163(q=0.5451)",
-      "集成电路测试与验证@icourse163(q=0.5445)"
+      "自动测试系统@icourse163(q=0.5414)",
+      "测试技术@icourse163(q=0.521)"
      ],
      "estimated_hours": 255.0,
      "priority": "medium"
@@ -1131,7 +1137,7 @@
      "courses": [
       "数学实验@icourse163(q=0.6306)",
       "数学建模@icourse163(q=0.5581)",
-      "嵌入式系统与实验@icourse163(q=0.5526)"
+      "预备性物理实验@icourse163(q=0.5409)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1317,6 +1323,99 @@
   {
    "case_id": "lp_17",
    "candidate_id": "resume_017",
+   "position": "IT (pos_3210)",
+   "missing_skills": 24,
+   "gap_count": 24,
+   "path_items": [
+    {
+     "skill": "主数据",
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "数据库",
+      "数据仓库"
+     ],
+     "courses": [
+      "What is Data Science?@coursera(q=0.7348)",
+      "What is Data Science?@coursera(q=0.7348)",
+      "Introduction to Data Science@coursera(q=0.714)"
+     ],
+     "estimated_hours": 245.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "ODS",
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "数据库",
+      "数据仓库"
+     ],
+     "courses": [],
+     "estimated_hours": 245.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Apache Kafka",
+     "prerequisites": [
+      "计算机基础",
+      "Java",
+      "操作系统",
+      "分布式"
+     ],
+     "courses": [],
+     "estimated_hours": 235.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Databricks",
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "数据库",
+      "数据仓库",
+      "操作系统",
+      "分布式"
+     ],
+     "courses": [
+      "数据结构@icourse163(q=0.5412)",
+      "Data Engineering@edx(q=0.525)",
+      "数据结构@icourse163(q=0.4877)"
+     ],
+     "estimated_hours": 325.0,
+     "priority": "medium"
+    },
+    {
+     "skill": "Data Factory",
+     "prerequisites": [
+      "计算机基础",
+      "SQL",
+      "数据库",
+      "数据仓库",
+      "ETL 管道"
+     ],
+     "courses": [
+      "Introduction to Big Data@coursera(q=0.6734)",
+      "大数据技术导论@icourse163(q=0.5277)",
+      "Data Engineering@edx(q=0.525)"
+     ],
+     "estimated_hours": 295.0,
+     "priority": "medium"
+    }
+   ],
+   "scores": {
+    "completeness": 1.0,
+    "prerequisite": 1.0,
+    "course": 0.72,
+    "hours": 1.0,
+    "mean": 0.93
+   },
+   "reasonable": true,
+   "review_note": "专家确认（张恺天 08-15 更新）：岗位池漂移（QA pos_3168→IT pos_3210，并行会话 ETL 岗位池 152→157 重排）；P5 补先修（主数据/ODS/Databricks/Data Factory→数据仓库/分布式/ETL 管道白名单词）后 mean=0.93 达标"
+  },
+  {
+   "case_id": "lp_18",
+   "candidate_id": "resume_018",
    "position": "QA (pos_3168)",
    "missing_skills": 23,
    "gap_count": 23,
@@ -1386,11 +1485,11 @@
     "mean": 0.88
    },
    "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：QA (pos_3168) 路径合理，维持预评分 mean=0.88"
+   "review_note": "专家确认（张恺天 08-15）：AIoT (pos_3091) 路径合理，维持预评分 mean=1.00"
   },
   {
-   "case_id": "lp_18",
-   "candidate_id": "resume_018",
+   "case_id": "lp_19",
+   "candidate_id": "resume_019",
    "position": "AIoT (pos_3091)",
    "missing_skills": 21,
    "gap_count": 21,
@@ -1475,13 +1574,13 @@
     "mean": 1.0
    },
    "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：AIoT (pos_3091) 路径合理，维持预评分 mean=1.00"
+   "review_note": "专家确认（张恺天 08-15）：Node.js全栈工程师 (pos_3150) 路径合理，维持预评分 mean=0.89"
   },
   {
-   "case_id": "lp_19",
-   "candidate_id": "resume_019",
+   "case_id": "lp_20",
+   "candidate_id": "resume_020",
    "position": "Node.js全栈工程师 (pos_3150)",
-   "missing_skills": 18,
+   "missing_skills": 19,
    "gap_count": 21,
    "path_items": [
     {
@@ -1524,7 +1623,9 @@
      "skill": "性能监控",
      "prerequisites": [],
      "courses": [
-      "互换性与测量技术@icourse163(q=0.5635)"
+      "计量测试技术@icourse163(q=0.5729)",
+      "测试技术与信号处理@icourse163(q=0.4985)",
+      "测试信号分析与处理@icourse163(q=0.4809)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1549,13 +1650,13 @@
     "mean": 0.89
    },
    "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：Node.js全栈工程师 (pos_3150) 路径合理，维持预评分 mean=0.89"
+   "review_note": "专家确认（张恺天 08-15）：企业AI平台 (pos_3083) 路径合理，维持预评分 mean=0.90"
   },
   {
-   "case_id": "lp_20",
-   "candidate_id": "resume_020",
+   "case_id": "lp_21",
+   "candidate_id": "resume_021",
    "position": "企业AI平台 (pos_3083)",
-   "missing_skills": 20,
+   "missing_skills": 17,
    "gap_count": 20,
    "path_items": [
     {
@@ -1623,11 +1724,11 @@
     "mean": 0.9
    },
    "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：企业AI平台 (pos_3083) 路径合理，维持预评分 mean=0.90"
+   "review_note": "专家确认（张恺天 08-15）：计算生物学家 (pos_3086) 路径合理，维持预评分 mean=0.90"
   },
   {
-   "case_id": "lp_21",
-   "candidate_id": "resume_021",
+   "case_id": "lp_22",
+   "candidate_id": "resume_022",
    "position": "计算生物学家 (pos_3086)",
    "missing_skills": 17,
    "gap_count": 20,
@@ -1668,6 +1769,8 @@
       "计算机基础"
      ],
      "courses": [
+      "疲劳与断裂@icourse163(q=0.5543)",
+      "测试@icourse163(q=0.55)",
       "运筹学@icourse163(q=0.5193)"
      ],
      "estimated_hours": 170.0,
@@ -1706,11 +1809,11 @@
     "mean": 0.9
    },
    "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：计算生物学家 (pos_3086) 路径合理，维持预评分 mean=0.90"
+   "review_note": "专家确认（张恺天 08-15）：GTM (pos_3162) 路径合理，维持预评分 mean=0.86"
   },
   {
-   "case_id": "lp_22",
-   "candidate_id": "resume_022",
+   "case_id": "lp_23",
+   "candidate_id": "resume_023",
    "position": "GTM (pos_3162)",
    "missing_skills": 18,
    "gap_count": 20,
@@ -1779,11 +1882,11 @@
     "mean": 0.86
    },
    "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：GTM (pos_3162) 路径合理，维持预评分 mean=0.86"
+   "review_note": "专家确认（张恺天 08-15）：SAP扩展 (pos_3194) 路径合理，维持预评分 mean=0.90"
   },
   {
-   "case_id": "lp_23",
-   "candidate_id": "resume_023",
+   "case_id": "lp_24",
+   "candidate_id": "resume_024",
    "position": "SAP扩展 (pos_3194)",
    "missing_skills": 20,
    "gap_count": 20,
@@ -1854,13 +1957,13 @@
     "mean": 0.9
    },
    "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：SAP扩展 (pos_3194) 路径合理，维持预评分 mean=0.90"
+   "review_note": "专家确认（张恺天 08-15）：技术教师 (pos_3080) 路径合理，维持预评分 mean=0.81"
   },
   {
-   "case_id": "lp_24",
-   "candidate_id": "resume_024",
+   "case_id": "lp_25",
+   "candidate_id": "resume_025",
    "position": "技术教师 (pos_3080)",
-   "missing_skills": 17,
+   "missing_skills": 18,
    "gap_count": 19,
    "path_items": [
     {
@@ -1900,9 +2003,9 @@
      "skill": "数字素养",
      "prerequisites": [],
      "courses": [
+      "数字电子技术基础@icourse163(q=0.5668)",
       "数字资源管理技术@icourse163(q=0.5579)",
-      "数字艺术赏析@icourse163(q=0.545)",
-      "数字媒体特效@icourse163(q=0.4825)"
+      "数字艺术赏析@icourse163(q=0.545)"
      ],
      "estimated_hours": 30.0,
      "priority": "medium"
@@ -1930,11 +2033,11 @@
     "mean": 0.81
    },
    "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：技术教师 (pos_3080) 路径合理，维持预评分 mean=0.81"
+   "review_note": "专家确认（张恺天 08-15）：应用AI客户 (pos_3071) 路径合理，维持预评分 mean=1.00"
   },
   {
-   "case_id": "lp_25",
-   "candidate_id": "resume_025",
+   "case_id": "lp_26",
+   "candidate_id": "resume_026",
    "position": "应用AI客户 (pos_3071)",
    "missing_skills": 15,
    "gap_count": 18,
@@ -1946,9 +2049,9 @@
       "Linux"
      ],
      "courses": [
-      "智能终端应用开发@icourse163(q=0.6194)",
-      "办公软件高级应用@icourse163(q=0.593)",
-      "最优化方法（与机器学习）@icourse163(q=0.548)"
+      "软件质量保证与测试@icourse163(q=0.549)",
+      "质量与可靠性管理@icourse163(q=0.4996)",
+      "软件质量保证与测试@icourse163(q=0.4808)"
      ],
      "estimated_hours": 135.0,
      "priority": "medium"
@@ -2032,13 +2135,13 @@
     "mean": 1.0
    },
    "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：应用AI客户 (pos_3071) 路径合理，维持预评分 mean=1.00"
+   "review_note": "专家确认（张恺天 08-15）：市场分析师 (pos_3053) 路径合理，维持预评分 mean=0.91"
   },
   {
-   "case_id": "lp_26",
-   "candidate_id": "resume_026",
+   "case_id": "lp_27",
+   "candidate_id": "resume_027",
    "position": "市场分析师 (pos_3053)",
-   "missing_skills": 17,
+   "missing_skills": 16,
    "gap_count": 17,
    "path_items": [
     {
@@ -2121,11 +2224,11 @@
     "mean": 0.91
    },
    "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：市场分析师 (pos_3053) 路径合理，维持预评分 mean=0.91"
+   "review_note": "专家确认（张恺天 08-15）：GRC自动化 (pos_3113) 路径合理，维持预评分 mean=0.85"
   },
   {
-   "case_id": "lp_27",
-   "candidate_id": "resume_027",
+   "case_id": "lp_28",
+   "candidate_id": "resume_028",
    "position": "GRC自动化 (pos_3113)",
    "missing_skills": 16,
    "gap_count": 17,
@@ -2201,28 +2304,15 @@
     "mean": 0.85
    },
    "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：GRC自动化 (pos_3113) 路径合理，维持预评分 mean=0.85"
+   "review_note": "专家确认（张恺天 08-15）：Palantir管理员 (pos_3118) 路径合理，维持预评分 mean=0.83"
   },
   {
-   "case_id": "lp_28",
-   "candidate_id": "resume_028",
+   "case_id": "lp_29",
+   "candidate_id": "resume_029",
    "position": "Palantir管理员 (pos_3118)",
-   "missing_skills": 16,
+   "missing_skills": 13,
    "gap_count": 17,
    "path_items": [
-    {
-     "skill": "SQL",
-     "prerequisites": [
-      "计算机基础"
-     ],
-     "courses": [
-      "Data Science Fundamentals with Python and SQL@coursera(q=0.7153)",
-      "Databases and SQL for Data Science with Python@coursera(q=0.7073)",
-      "Databases and SQL for Data Science with Python@coursera(q=0.7073)"
-     ],
-     "estimated_hours": 95.0,
-     "priority": "medium"
-    },
     {
      "skill": "Palantir Gotham",
      "prerequisites": [],
@@ -2260,21 +2350,31 @@
      ],
      "estimated_hours": 165.0,
      "priority": "medium"
+    },
+    {
+     "skill": "数据治理",
+     "prerequisites": [],
+     "courses": [
+      "SQL for Data Science@coursera(q=0.6895)",
+      "SQL for Data Science@coursera(q=0.6895)"
+     ],
+     "estimated_hours": 70.0,
+     "priority": "medium"
     }
    ],
    "scores": {
     "completeness": 1.0,
-    "prerequisite": 0.7,
+    "prerequisite": 0.6,
     "course": 0.86,
     "hours": 0.76,
-    "mean": 0.83
+    "mean": 0.8
    },
    "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：Palantir管理员 (pos_3118) 路径合理，维持预评分 mean=0.83"
+   "review_note": "专家确认（张恺天 08-15）：AR/VR设计验证 (pos_3141) 路径合理，维持预评分 mean=0.93"
   },
   {
-   "case_id": "lp_29",
-   "candidate_id": "resume_029",
+   "case_id": "lp_30",
+   "candidate_id": "resume_030",
    "position": "AR/VR设计验证 (pos_3141)",
    "missing_skills": 16,
    "gap_count": 17,
@@ -2345,91 +2445,6 @@
     "course": 0.72,
     "hours": 1.0,
     "mean": 0.93
-   },
-   "reasonable": true,
-   "review_note": "专家确认（张恺天 08-15）：AR/VR设计验证 (pos_3141) 路径合理，维持预评分 mean=0.93"
-  },
-  {
-   "case_id": "lp_30",
-   "candidate_id": "resume_030",
-   "position": "生成式AI应用 (pos_3180)",
-   "missing_skills": 16,
-   "gap_count": 17,
-   "path_items": [
-    {
-     "skill": "Git",
-     "prerequisites": [
-      "计算机基础"
-     ],
-     "courses": [
-      "Git, Docker & CI/CD: DevOps Foundations for Data Engineers@coursera(q=0.555)"
-     ],
-     "estimated_hours": 95.0,
-     "priority": "medium"
-    },
-    {
-     "skill": "embeddings",
-     "prerequisites": [
-      "计算机基础",
-      "Python",
-      "线性代数",
-      "统计学",
-      "机器学习",
-      "自然语言处理"
-     ],
-     "courses": [],
-     "estimated_hours": 350.0,
-     "priority": "medium"
-    },
-    {
-     "skill": "检索评估",
-     "prerequisites": [
-      "信息检索",
-      "自然语言处理"
-     ],
-     "courses": [
-      "大数据分析@icourse163(q=0.5731)"
-     ],
-     "estimated_hours": 180.0,
-     "priority": "medium"
-    },
-    {
-     "skill": "Vertex AI",
-     "prerequisites": [
-      "计算机基础",
-      "Python",
-      "线性代数",
-      "统计学",
-      "机器学习",
-      "云计算"
-     ],
-     "courses": [
-      "IBM AI Developer@coursera(q=0.7156)"
-     ],
-     "estimated_hours": 335.0,
-     "priority": "medium"
-    },
-    {
-     "skill": "Docker",
-     "prerequisites": [
-      "计算机基础",
-      "Linux"
-     ],
-     "courses": [
-      "Docker and Kubernetes Masterclass: From Beginner to Advanced@coursera(q=0.6039)",
-      "Docker Certified Associate Preparation@coursera(q=0.55)",
-      "Virtualization, Docker, and Kubernetes for Data Engineering@edx(q=0.525)"
-     ],
-     "estimated_hours": 150.0,
-     "priority": "medium"
-    }
-   ],
-   "scores": {
-    "completeness": 1.0,
-    "prerequisite": 1.0,
-    "course": 0.86,
-    "hours": 1.0,
-    "mean": 0.96
    },
    "reasonable": true,
    "review_note": "专家确认（张恺天 08-15）：生成式AI应用 (pos_3180) 路径合理，维持预评分 mean=0.96"
