@@ -111,10 +111,20 @@ class TestStopwordInterception:
     def test_requirement_fragment_filtered(self):
         result = JDExtractionResult(
             position_name="",
-            requirements=[REQUIRESRelation(skill_name="监控", necessity="must")],
+            requirements=[REQUIRESRelation(skill_name="告警", necessity="must")],
         )
         out = post_process(result)
         assert out.requirements == []
+
+    def test_bare_fragment_stopwords(self):
+        # 08-15 迭代二：裸碎片词（模型把"模型对齐/模型量化"拆出裸词"对齐/量化"）停用；
+        # 精确匹配不伤"模型对齐/量化交易"类复合词
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="对齐"), SkillExtracted(name="模型对齐")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["模型对齐"]
 
 
 class TestDedupSkills:
@@ -186,8 +196,8 @@ class TestSkillModifierCompoundWords:
         assert [s.name for s in out.skills] == ["Kubernetes"]
 
     def test_alias_key_not_stripped(self):
-        # "性能优化" 命中别名归一为"性能调优"；后者 08-14 起停用（gold 口径
-        # 不收上位泛词），归一后判噪过滤——别名归一的正确性由 normalize 单测保证
+        # "性能优化" 命中别名归一为"性能调优"；后者为停用词（08-15 实测解除后
+        # 净效应为负——1 TP vs 5 FP 级误抽），归一后判噪过滤
         result = JDExtractionResult(
             position_name="",
             skills=[SkillExtracted(name="性能优化")],

@@ -80,6 +80,8 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    时，该结构内的技能标 "nice" 且**不得出现在 skills 字段**（skills 仅收录必备技能）。
    示例："熟悉 Python、SQL 者优先" → skills 不含 Python/SQL，requirements 中 Python/SQL
    均标 "nice"。
+   **同一技能只能出现在一个位置**：已列入 skills 的技能不得再进 requirements，
+   反之亦然——加分项只能进 requirements(nice)，禁止在 skills 中重复出现。
    **反向保护**：以下语境中的技能必须保留为必备（must）并进入 skills，不得因附近出现
    "如/等/或"就降级或漏抽："任职要求/岗位要求"清单中的技能、"精通/熟练掌握/熟悉/具备 XX"
    明确要求的技能（如"熟悉常用测试管理工具，如 Jira、QC 等"→ Jira、QC 均为 must 进 skills；
@@ -170,6 +172,12 @@ JD 文本：岗位名称：前端开发工程师
 岗位职责：使用 React、Vue.js 开发 Web 应用，基于 Webpack、Vite 构建打包，执行 ESLint、Prettier 代码规范，接入 Git 版本控制，使用 Axios 调用 RESTful API，开发 React Native 移动端，发布至 iOS/Android 平台。
 任职要求：掌握 HTML5、CSS3、JavaScript、TypeScript，熟悉状态管理（Vuex、Pinia、Vue Router）。
 输出：{{"position_name": "前端开发工程师", "skills": [{{"name": "React"}}, {{"name": "Vue.js"}}, {{"name": "Webpack"}}, {{"name": "Vite"}}, {{"name": "ESLint"}}, {{"name": "Prettier"}}, {{"name": "Git"}}, {{"name": "Axios"}}, {{"name": "RESTful API"}}, {{"name": "React Native"}}, {{"name": "iOS"}}, {{"name": "Android"}}, {{"name": "HTML5"}}, {{"name": "CSS3"}}, {{"name": "JavaScript"}}, {{"name": "TypeScript"}}, {{"name": "Vuex"}}, {{"name": "Pinia"}}, {{"name": "Vue Router"}}], "requirements": [{{"skill_name": "React", "necessity": "must"}}, {{"skill_name": "Vue.js", "necessity": "must"}}, {{"skill_name": "Webpack", "necessity": "must"}}, {{"skill_name": "Git", "necessity": "must"}}, {{"skill_name": "RESTful API", "necessity": "must"}}, {{"skill_name": "JavaScript", "necessity": "must"}}]}}
+
+示例 14（加分项技能严格分离——只进 nice 不进 skills，多个加分项并列时同样适用）：
+JD 文本：岗位名称：java开发工程师
+岗位职责：负责 Java 后端开发与系统实施，精通 Java、Spring Boot，掌握 HTML、CSS、JavaScript，熟悉 Vue、React 前端框架，熟悉 MySQL 数据库与 SQL 开发。
+任职要求：本科及以上学历；熟悉 MES、WMS 系统者优先，了解 OPC UA、Modbus 通信协议更佳，熟悉 Redis 缓存加分，有 ERP 实施经验者优先。
+输出：{{"position_name": "Java开发工程师", "skills": [{{"name": "Java"}}, {{"name": "Spring Boot"}}, {{"name": "HTML"}}, {{"name": "CSS"}}, {{"name": "JavaScript"}}, {{"name": "Vue"}}, {{"name": "React"}}, {{"name": "MySQL"}}, {{"name": "SQL"}}], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Java", "necessity": "must"}}, {{"skill_name": "Spring Boot", "necessity": "must"}}, {{"skill_name": "HTML", "necessity": "must"}}, {{"skill_name": "CSS", "necessity": "must"}}, {{"skill_name": "JavaScript", "necessity": "must"}}, {{"skill_name": "Vue", "necessity": "must"}}, {{"skill_name": "React", "necessity": "must"}}, {{"skill_name": "MySQL", "necessity": "must"}}, {{"skill_name": "SQL", "necessity": "must"}}, {{"skill_name": "MES", "necessity": "nice"}}, {{"skill_name": "WMS", "necessity": "nice"}}, {{"skill_name": "OPC UA", "necessity": "nice"}}, {{"skill_name": "Modbus", "necessity": "nice"}}, {{"skill_name": "Redis", "necessity": "nice"}}, {{"skill_name": "ERP", "necessity": "nice"}}]}}
 """
 
 BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输出 JSON 数组（每条 JD 对应一个对象，数组第 i 个元素对应"JD文本 i"）。
@@ -245,6 +253,8 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    时，该结构内的技能标 "nice" 且**不得出现在 skills 字段**（skills 仅收录必备技能）。
    示例："熟悉 Python、SQL 者优先" → skills 不含 Python/SQL，requirements 中 Python/SQL
    均标 "nice"。
+   **同一技能只能出现在一个位置**：已列入 skills 的技能不得再进 requirements，
+   反之亦然——加分项只能进 requirements(nice)，禁止在 skills 中重复出现。
    **反向保护**：以下语境中的技能必须保留为必备（must）并进入 skills，不得因附近出现
    "如/等/或"就降级或漏抽："任职要求/岗位要求"清单中的技能、"精通/熟练掌握/熟悉/具备 XX"
    明确要求的技能（如"熟悉常用测试管理工具，如 Jira、QC 等"→ Jira、QC 均为 must 进 skills；
