@@ -22,7 +22,7 @@ import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 import { skillLabelThreshold } from './graph-utils'
-import { enforceSpread, type EChartsModel } from './graph-layout'
+import { enforceSpread, hasPositionOverlap, type EChartsModel } from './graph-layout'
 import { useGraphPan } from './use-graph-pan'
 import { escapeHtml } from '@/lib/utils'
 
@@ -100,9 +100,11 @@ function colorOf(node: GraphNode, dark: boolean): string {
   return COLOR_EVIDENCE
 }
 
-/** value 映射到 symbolSize，范围 [16, 56]；技能/证据节点整体缩小，减少与岗位节点的视觉干扰 */
-function sizeOf(node: GraphNode): number {
-  const v = node.value ?? 30
+/** value 映射到 symbolSize，范围 [16, 56]；技能/证据节点整体缩小，减少与岗位节点的视觉干扰。
+ *  布局质量把岗位 value 固定为 300（仅参与斥力），展示尺寸必须用原始 value（displayValue 兜底）——
+ *  否则固定大值会把岗位圆撑到 56px 封顶、与布局斥力语义脱节（2026-08-15）。 */
+function sizeOf(node: GraphNode, displayValue?: number): number {
+  const v = displayValue ?? node.value ?? 30
   // 岗位 > 技能 > 证据，基础大小不同
   const base = node.type === 'position' ? 36 : node.type === 'skill' ? 20 : 15
   const scaled = base + (v / 100) * 20
@@ -112,6 +114,19 @@ function sizeOf(node: GraphNode): number {
 function weightToWidth(weight?: number): number {
   if (!weight) return 1
   return 0.5 + weight * 2.5 // [0.5, 3]
+}
+
+/** 窄屏判定（<640px）：力导向参数降档（外部全景图同款 isNarrow 适配） */
+function isNarrowScreen(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
+}
+
+/** #RRGGBB → rgba()（展开岗位高亮光晕用，跟随状态色生成半透明阴影） */
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return hex
+  const n = parseInt(m[1], 16)
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`
 }
 
 /** 暗色模式判定 — 跟随 documentElement 上的 .dark 类 */
@@ -127,6 +142,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   const chartRef = useRef<echarts.ECharts | null>(null)
   // 主题版本号：暗色切换时递增，触发数据 effect 完全重建确保颜色全量刷新
   const [themeVersion, setThemeVersion] = useState(0)
+  // 窄屏状态：跨 <640px 断点时触发数据 effect 重建（力导向参数降档，外部全景图同款适配）
+  const [isNarrow, setIsNarrow] = useState(() => isNarrowScreen())
   // 空白拖拽平移 hook：提供 group 访问、累计偏移、事件绑定
   const { panGroup, panOffset, bindPanEvents } = useGraphPan(chartRef)
 
@@ -185,10 +202,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const unbindPan = bindPanEvents(chart)
 
     // 布局收敛 → 强制分散重叠的岗位节点。
-    // 只用 forceLayoutEnd：finished 会在渲染动画期间多次触发，导致展开时强制分散被反复
-    // 执行、节点抖动；forceLayoutEnd 在力导向算法收敛后只触发一次，此时再推开重叠对。
+    // 双保险：forceLayoutEnd 事件（正常收敛路径）+ 数据 effect 的轮询静止检测
+    // （friction 较低/节点多时布局可能以非收敛路径停止，forceLayoutEnd 不派发，
+    // 实测岗位中心视图岗位中心距 42px 重叠——事件未触发，岗位分散从未执行）。
+    // maxIterations 20：岗位中心视图 107+ 岗位连环重叠，5 轮迭代推不干净。
+    // minGap 60（2026-08-15）：岗位圆边缘间距兜底（岗位直径上限 56，radius+minGap
+    // 中心距 ≥116px；96px 实测观感偏紧凑，调至 60 更舒展）。
     const onForceLayoutEnd = () => {
-      enforceSpread(chart, { minGap: 32, maxIterations: 5 })
+      enforceSpread(chart, { minGap: 60, maxIterations: 20, animate: true })
     }
     chart.on('forceLayoutEnd', onForceLayoutEnd)
 
@@ -231,6 +252,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     return () => observer.disconnect()
   }, [])
 
+  // 窄屏断点监听 → 更新 isNarrow 状态（触发数据 effect 重建，见 ①）
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)')
+    const onChange = () => setIsNarrow(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
   // ============================================================
   // ① 数据渲染 effect — 仅 data 或 themeVersion 变化时重建
   //    不依赖 selectedId，避免点击节点触发 force 布局重算
@@ -249,19 +278,33 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const nodes = data.nodes.map((n) => ({
       // 原始字段透传（含 id/name），供 ECharts 与 tooltip/click 回调使用
       ...n,
-      // 力导向布局质量（value 参与斥力计算，越大排斥越强）：岗位 ×3 放大布局权重，
-      // 让高频大岗位主动排斥远离，避免斥力不足时互相重叠（2026-08-11）。
+      // 力导向布局质量（value 参与斥力计算，越大排斥越强）：
+      // 岗位固定大值 1000——repulsion 数组按全节点 value 的 extent 线性映射，
+      // 若岗位用 degree 派生值，会被高频技能（degree 可达数百）压制在映射中段，
+      // 岗位拿不到最大斥力、被共享技能弹簧力拉拢而聚团重叠（2026-08-15 根因，
+      // 与阻尼/收敛无关）。固定 1000 > 技能 degree 上界 → 岗位全部映射到 repulsion
+      // 高端（对齐外部"岗位固定 value=30 拿最大斥力"语义）；技能保持 degree 映射低端。
       // 注意此 value 会覆盖透传的原始 value，tooltip/label 显示改用 displayValue 兜底。
-      value: n.type === 'position' ? (n.value ?? 0) * 3 : (n.value ?? 0),
+      value: n.type === 'position' ? 1000 : (n.value ?? 0),
       displayValue: n.value,
       symbol: symbolOf(n),
-      symbolSize: sizeOf(n),
+      // 展示尺寸用原始 value（布局放大值不撑大节点，见 sizeOf 注释）
+      symbolSize: sizeOf(n, n.value),
       category: n.type,
       itemStyle: {
         color: colorOf(n, dark),
         borderColor,
-        // 展开的岗位加粗描边，提示其技能当前可见（可点击收起）
-        borderWidth: expandedPositions?.has(n.id) ? 3 : 1,
+        // 展开的岗位高亮描边：亮色粗描边（暗色模式用浅色）+ 状态色增强光晕，
+        // 与未展开（1px 灰描边）明显区分，提示其技能当前可见（可点击收起）。
+        // 选中态由 dispatchAction select 样式覆盖（优先级更高），两者不冲突。
+        ...(n.type === 'position' && expandedPositions?.has(n.id)
+          ? {
+              borderColor: dark ? '#fafafa' : '#ffffff',
+              borderWidth: 3,
+              shadowBlur: isNarrow ? 14 : 22,
+              shadowColor: hexToRgba(colorOf(n, dark), 0.55),
+            }
+          : {}),
       },
       // 不在此处根据 selectedId 设置选中样式 — 选中高亮走 dispatchAction（②）
       label: {
@@ -329,21 +372,27 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           // 主线程长时间阻塞 → 页面冻结（2026-08-08 实测 techStack 视图 10.8s）。
           // 动画时长由收敛步数决定（固定约 8s），节点数量影响每步成本。
           force: {
-            // 斥力/边长/重力调参（2026-08-11）：
+            // 斥力/边长/重力/阻尼调参（2026-08-15 按外部全景图校准 repulsion/edgeLength，
+            // 含窄屏降档）：
             // - repulsion 必须是数组 [low, high]：ECharts 用 linearMap(value, extent, [low,high])
-            //   按节点 value 线性映射斥力（固定值 350 对所有节点常数，岗位 value×3 布局放大无效）。
-            //   岗位 value×3 后分布在高端 → 斥力接近 high，技能在低端 → 接近 low。
-            // - gravity 调小，减弱向中心聚拢，避免高频大岗位堆在中央重叠。
-            repulsion: [150, 600],
-            edgeLength: [80, 240],
-            gravity: 0.04,
-            friction: 0.6,
+            //   按节点 value 线性映射斥力。岗位布局 value 固定 1000（见节点 map），
+            //   全部岗位映射到高端斥力；技能按 degree 映射低端。
+            // - friction 0.2 低阻尼：布局充分展开（岗位间距大）、收敛慢（30s+），
+            //   岗位防重叠由重叠驱动的兜底补齐（hasPositionOverlap 逐帧检测），
+            //   布局最终静止后连续 10 帧无重叠才停止，与 friction 取值无关。
+            // - 窄屏整体降档：斥力/边长缩小、重力增大，小画布上布局更快收敛不发散。
+            repulsion: isNarrow ? [160, 420] : [320, 1000],
+            edgeLength: isNarrow ? [70, 150] : [140, 300],
+            gravity: isNarrow ? 0.16 : 0.092,
+            friction: 0.2,
             layoutAnimation: true,
           },
           scaleLimit: { min: 0.3, max: 4 },
           emphasis: {
-            focus: 'adjacency',
-            lineStyle: { width: 3, opacity: 0.9 },
+            // 2026-08-15 去掉悬停强调：focus 'adjacency' 会在 hover 时把相邻边加粗高亮、
+            // 其余节点变淡，视觉干扰大；改 focus 'none' 后 hover 仅保留标签显示
+            // （低关联技能悬停可读名），不再有任何加粗/高亮效果
+            focus: 'none',
             label: { show: true },
           },
           selectedMode: 'single',
@@ -374,7 +423,55 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     // 默认 merge（不 replaceMerge）：ECharts 按 name diff 保留已有节点坐标，
     // 展开/收起时仅新增/移除技能节点，已有节点位置不被重置
     chart.setOption(option)
-  }, [data, themeVersion, expandedPositions])
+
+    // 布局岗位防重叠兜底（仅布局静止后执行）：
+    // 动画中执行 enforceSpread 无效且有害——force 布局弹簧力会把岗位拉回
+    // （推-拉循环 = 抖动 + 重叠残留，动画期间推开永远不生效）。
+    // 只在布局静止后严格兜底：连续 10 帧位移 <1px 判定静止 → 若有岗位重叠
+    // （边缘 <minGap 60）平滑推开一次（animate 300ms 过渡，force 已停不会拉回），
+    // 位移后重新静止判定，连续 10 帧无重叠才停止轮询。
+    let cleanFrames = 0
+    let stableFrames = 0
+    let lastPos: number[] = []
+    let rafId = 0
+    // animate 动画冷却截止时间：动画期间不触发新推开（防打断插值导致岗位停在半路）
+    let animatingUntil = 0
+    const checkOverlap = () => {
+      const seriesModel = (chart as unknown as { getModel(): EChartsModel | null }).getModel()?.getSeriesByIndex(0)
+      const list = seriesModel?.getData()
+      if (list) {
+        const count = Math.min(list.count(), 500)
+        const cur: number[] = new Array(count * 2)
+        for (let i = 0; i < count; i++) {
+          const l = list.getItemLayout(i)
+          cur[i * 2] = l?.[0] ?? 0
+          cur[i * 2 + 1] = l?.[1] ?? 0
+        }
+        let moved = 0
+        if (lastPos.length === cur.length) {
+          for (let i = 0; i < cur.length; i++) moved += Math.abs(cur[i] - lastPos[i])
+        }
+        lastPos = cur
+        stableFrames = moved < 1 ? stableFrames + 1 : 0
+      }
+      if (stableFrames >= 10 && performance.now() >= animatingUntil) {
+        if (hasPositionOverlap(chart, 60)) {
+          // 静止后仍有重叠 → 平滑推开一次（force 已停，不会被拉回）
+          enforceSpread(chart, { minGap: 60, maxIterations: 20, animate: true })
+          // 动画冷却：350ms 内不触发新推开，避免打断 animate 插值（否则岗位停在半路）
+          animatingUntil = performance.now() + 350
+          stableFrames = 0
+          cleanFrames = 0
+        } else {
+          cleanFrames += 1
+          if (cleanFrames >= 10) return
+        }
+      }
+      rafId = requestAnimationFrame(checkOverlap)
+    }
+    rafId = requestAnimationFrame(checkOverlap)
+    return () => cancelAnimationFrame(rafId)
+  }, [data, themeVersion, expandedPositions, isNarrow])
 
   // ============================================================
   // ② 选中态高亮 effect — 仅 selectedId 变化时触发
