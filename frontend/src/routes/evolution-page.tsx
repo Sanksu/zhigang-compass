@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PaginationBar } from '@/components/ui/pagination'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -190,10 +191,29 @@ const SOURCE_LABEL: Record<string, string> = {
 function TechnologyWatchView() {
   const [data, setData] = useState<WatchItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // 08-16 翻页：观察池 10 项一页（GET /evolution/watch page/size）
+  const PAGE_SIZE = 10
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [pageLoading, setPageLoading] = useState(false)
+
+  function loadPage(p: number) {
+    setPageLoading(true)
+    apiGet<components['schemas']['WatchOverviewData']>(`/evolution/watch?page=${p}&size=${PAGE_SIZE}`)
+      .then((r) => {
+        setData(r.items)
+        setTotal(r.total)
+      })
+      .catch((e) => setError(e instanceof ApiError ? e.message : '技术热点加载失败'))
+      .finally(() => setPageLoading(false))
+  }
 
   useEffect(() => {
-    apiGet<components['schemas']['WatchOverviewData']>('/evolution/watch?limit=20')
-      .then((r) => setData(r.items))
+    apiGet<components['schemas']['WatchOverviewData']>(`/evolution/watch?page=1&size=${PAGE_SIZE}`)
+      .then((r) => {
+        setData(r.items)
+        setTotal(r.total)
+      })
       .catch((e) => setError(e instanceof ApiError ? e.message : '技术热点加载失败'))
   }, [])
 
@@ -263,6 +283,19 @@ function TechnologyWatchView() {
             </TableBody>
           </Table>
         )}
+        {/* 观察池翻页（10 项一页，08-16） */}
+        {data && data.length > 0 && (
+          <PaginationBar
+            page={page}
+            total={total}
+            pageSize={PAGE_SIZE}
+            loading={pageLoading}
+            onPageChange={(p) => {
+              setPage(p)
+              loadPage(p)
+            }}
+          />
+        )}
       </CardContent>
     </Card>
   )
@@ -283,14 +316,31 @@ function SkillTrendView() {
   const [defaults, setDefaults] = useState<components['schemas']['SkillEvolutionData'][] | null>(null)
   const [selected, setSelected] = useState<components['schemas']['SkillEvolutionData'] | null>(null)
   const [defaultError, setDefaultError] = useState<string | null>(null)
+  // 08-16 翻页：默认技能列表 10 项一页（GET /evolution/skills page/size）
+  const PAGE_SIZE = 10
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [pageLoading, setPageLoading] = useState(false)
 
-  // 页面加载即拉取快照热度 Top-8 技能演化（GET /evolution/skills）
+  function loadPage(p: number) {
+    setPageLoading(true)
+    apiGet<SkillEvolutionListData>(`/evolution/skills?page=${p}&size=${PAGE_SIZE}`)
+      .then((r) => {
+        setDefaults(r.skills)
+        setTotal(r.total)
+      })
+      .catch(() => setDefaultError('默认技能加载失败'))
+      .finally(() => setPageLoading(false))
+  }
+
+  // 页面加载即拉取第 1 页快照热度技能演化（GET /evolution/skills）
   useEffect(() => {
     let cancelled = false
-    apiGet<SkillEvolutionListData>('/evolution/skills?limit=8')
+    apiGet<SkillEvolutionListData>(`/evolution/skills?page=1&size=${PAGE_SIZE}`)
       .then((r) => {
         if (cancelled) return
         setDefaults(r.skills)
+        setTotal(r.total)
         if (r.skills.length > 0) setSelected(r.skills[0])
       })
       .catch((e) => {
@@ -411,6 +461,19 @@ function SkillTrendView() {
                 ))}
               </TableBody>
             </Table>
+            {/* 默认技能列表翻页（10 项一页，08-16） */}
+            {defaults && (
+              <PaginationBar
+                page={page}
+                total={total}
+                pageSize={PAGE_SIZE}
+                loading={pageLoading}
+                onPageChange={(p) => {
+                  setPage(p)
+                  loadPage(p)
+                }}
+              />
+            )}
           </>
         )}
       </CardContent>
@@ -429,14 +492,31 @@ function PositionEvolutionView() {
   // 默认岗位列表（08-15：页面打开即有演化轨迹，无需先查节点 ID）
   const [defaults, setDefaults] = useState<PositionEvolutionData[] | null>(null)
   const [defaultError, setDefaultError] = useState<string | null>(null)
+  // 08-16 翻页：默认岗位列表 10 项一页（GET /evolution/positions page/size）
+  const PAGE_SIZE = 10
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [pageLoading, setPageLoading] = useState(false)
 
-  // 页面加载即拉取快照热度 Top-8 岗位演化（GET /evolution/positions）
+  function loadPage(p: number) {
+    setPageLoading(true)
+    apiGet<PositionEvolutionListData>(`/evolution/positions?page=${p}&size=${PAGE_SIZE}`)
+      .then((r) => {
+        setDefaults(r.positions)
+        setTotal(r.total)
+      })
+      .catch(() => setDefaultError('默认岗位加载失败'))
+      .finally(() => setPageLoading(false))
+  }
+
+  // 页面加载即拉取第 1 页快照热度岗位演化（GET /evolution/positions）
   useEffect(() => {
     let cancelled = false
-    apiGet<PositionEvolutionListData>('/evolution/positions?limit=8')
+    apiGet<PositionEvolutionListData>(`/evolution/positions?page=1&size=${PAGE_SIZE}`)
       .then((r) => {
         if (cancelled) return
         setDefaults(r.positions)
+        setTotal(r.total)
         if (r.positions.length > 0) setData(r.positions[0])
       })
       .catch((e) => {
@@ -560,6 +640,19 @@ function PositionEvolutionView() {
                 </TableBody>
               </Table>
             )}
+            {/* 默认岗位列表翻页（10 项一页，08-16） */}
+            {defaults && (
+              <PaginationBar
+                page={page}
+                total={total}
+                pageSize={PAGE_SIZE}
+                loading={pageLoading}
+                onPageChange={(p) => {
+                  setPage(p)
+                  loadPage(p)
+                }}
+              />
+            )}
           </>
         )}
       </CardContent>
@@ -646,6 +739,11 @@ function VersionDiffView() {
   const [versions, setVersions] = useState<EvolutionVersion[]>([])
   const [v1, setV1] = useState<string>('')
   const [v2, setV2] = useState<string>('')
+  // 08-16 翻页：版本列表 10 项一页（GET /evolution/versions page/size）
+  const PAGE_SIZE = 10
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [pageLoading, setPageLoading] = useState(false)
   // diff 绑定请求时的版本对，渲染层据此判断当前结果是否仍有效（避免 effect 内同步 setState）
   const [diff, setDiff] = useState<{
     v1: string
@@ -672,21 +770,31 @@ function VersionDiffView() {
       .finally(() => setDetailLoading(false))
   }
 
-  // 加载真实版本列表，默认对比最近两个版本
-  useEffect(() => {
-    apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=30')
+  function loadVersionsPage(p: number) {
+    setPageLoading(true)
+    apiGet<components['schemas']['EvolutionVersionListData']>(`/evolution/versions?page=${p}&size=${PAGE_SIZE}`)
       .then((res) => {
         // 快照可能在同一事务写入导致 created_at 相同，按 version_id（graph_vYYYYMMDD）降序保证稳定
         const items = [...res.items].sort((a, b) => b.version_id.localeCompare(a.version_id))
         setVersions(items)
-        if (items.length >= 2) {
-          setV1(items[1].version_id)
-          setV2(items[0].version_id)
-        } else if (items.length === 1) {
-          setV1(items[0].version_id)
+        setTotal(res.total)
+        // 默认对比最近两个版本（首次加载/尚未选择时；翻页后不覆盖已选版本对）
+        if (!v1 && !v2) {
+          if (items.length >= 2) {
+            setV1(items[1].version_id)
+            setV2(items[0].version_id)
+          } else if (items.length === 1) {
+            setV1(items[0].version_id)
+          }
         }
       })
       .catch(() => setError('版本列表加载失败'))
+      .finally(() => setPageLoading(false))
+  }
+
+  // 加载第 1 页版本列表，默认对比最近两个版本
+  useEffect(() => {
+    loadVersionsPage(1)
   }, [])
 
   // 版本对变化 → 拉取真实 diff（setState 均在异步回调内）
@@ -797,6 +905,19 @@ function VersionDiffView() {
         )}
         {!loading && !error && versions.length > 0 && v1 && v2 && v1 === v2 && (
           <div className="py-10 text-center text-xs text-ink-muted">请选择两个不同版本进行对比</div>
+        )}
+        {/* 版本列表翻页（10 项一页，08-16）——版本选择器随页切换 */}
+        {versions.length > 0 && (
+          <PaginationBar
+            page={page}
+            total={total}
+            pageSize={PAGE_SIZE}
+            loading={pageLoading}
+            onPageChange={(p) => {
+              setPage(p)
+              loadVersionsPage(p)
+            }}
+          />
         )}
       </CardContent>
     </Card>

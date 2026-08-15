@@ -1063,16 +1063,22 @@ paths:
   /api/v1/evolution/positions:
     get:
       tags: [evolution]
-      summary: 岗位演化列表（默认岗位 Top-N，按快照出现热度降序）
+      summary: 岗位演化列表（按快照出现热度降序分页）
+      description: 08-16：limit 改 page/size 分页，响应含 total
       parameters:
-        - name: limit
+        - name: page
           in: query
           required: false
-          schema: { type: integer, default: 8, minimum: 1, maximum: 20 }
-          description: 返回岗位数
+          schema: { type: integer, default: 1, minimum: 1 }
+          description: 页码（从 1 起）
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
+          description: 每页条数
       responses:
         '200':
-          description: 默认岗位演化列表
+          description: 岗位演化列表（data 含 positions/total/page/size）
           content:
             application/json:
               schema:
@@ -1086,16 +1092,22 @@ paths:
   /api/v1/evolution/skills:
     get:
       tags: [evolution]
-      summary: 技能演化列表（默认技能 Top-N，按快照出现热度降序）
+      summary: 技能演化列表（按快照出现热度降序分页）
+      description: 08-16：limit 改 page/size 分页，响应含 total
       parameters:
-        - name: limit
+        - name: page
           in: query
           required: false
-          schema: { type: integer, default: 8, minimum: 1, maximum: 20 }
-          description: 返回技能数
+          schema: { type: integer, default: 1, minimum: 1 }
+          description: 页码（从 1 起）
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
+          description: 每页条数
       responses:
         '200':
-          description: 默认技能演化列表
+          description: 技能演化列表（data 含 skills/total/page/size）
           content:
             application/json:
               schema:
@@ -1147,14 +1159,22 @@ paths:
   /api/v1/evolution/watch:
     get:
       tags: [evolution]
-      summary: 观察池公开摘要 + MLI 产业化拐点排名（前端看板）
+      summary: 观察池公开摘要 + MLI 产业化拐点排名（前端看板，分页）
+      description: 08-16：limit 改 page/size 分页
       parameters:
-        - name: limit
+        - name: page
           in: query
-          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+          required: false
+          schema: { type: integer, default: 1, minimum: 1 }
+          description: 页码（从 1 起）
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 10, minimum: 1, maximum: 100 }
+          description: 每页条数
       responses:
         '200':
-          description: 观察池摘要（data 含 items/total，item 含 mli/ready_to_industrialize）
+          description: 观察池摘要（data 含 items/total/page/size，item 含 mli/ready_to_industrialize）
           content:
             application/json:
               schema:
@@ -2480,12 +2500,15 @@ components:
 
     PositionEvolutionListData:
       type: object
-      description: GET /evolution/positions 响应 data（默认岗位演化列表，按快照热度降序）
-      required: [positions]
+      description: GET /evolution/positions 响应 data（岗位演化列表，按快照热度降序分页）
+      required: [positions, total, page, size]
       properties:
         positions:
           type: array
           items: { $ref: '#/components/schemas/PositionEvolutionData' }
+        total: { type: integer, description: 全部岗位数（翻页计算用） }
+        page: { type: integer }
+        size: { type: integer }
 
     SkillEvolutionData:
       type: object
@@ -2500,12 +2523,15 @@ components:
 
     SkillEvolutionListData:
       type: object
-      description: GET /evolution/skills 响应 data（默认技能演化列表，按快照热度降序）
-      required: [skills]
+      description: GET /evolution/skills 响应 data（技能演化列表，按快照热度降序分页）
+      required: [skills, total, page, size]
       properties:
         skills:
           type: array
           items: { $ref: '#/components/schemas/SkillEvolutionData' }
+        total: { type: integer, description: 全部技能数（翻页计算用） }
+        page: { type: integer }
+        size: { type: integer }
 
     StateMachineTransition:
       type: object
@@ -2550,13 +2576,15 @@ components:
 
     WatchOverviewData:
       type: object
-      description: GET /evolution/watch 响应 data
-      required: [items, total]
+      description: GET /evolution/watch 响应 data（分页）
+      required: [items, total, page, size]
       properties:
         items:
           type: array
           items: { $ref: '#/components/schemas/WatchOverviewItem' }
         total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
 
     # ============================================================
     # 简历模块端点 data（08-14 契约补全）
