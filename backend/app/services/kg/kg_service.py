@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from neo4j import Session
 
 from app.services.extraction.dictionary import normalize_position_name, skill_category
-from app.services.extraction.post_processor import _is_valid_skill_name, canonical_skill_name
+from app.services.extraction.post_processor import is_valid_skill_name, canonical_skill_name
 from app.services.extraction.schemas import JDExtractionResult
 from app.services.kg.id_generator import PREFIX_MAP, next_id
 
@@ -289,7 +289,7 @@ def _import_jd_tx(
     handled_skills: set[str] = set()
     for req in extraction.requirements:
         skill_name = canonical_skill_name(req.skill_name)
-        if not skill_name or not _is_valid_skill_name(skill_name):
+        if not skill_name or not is_valid_skill_name(skill_name):
             continue
         handled_skills.add(skill_name)
         _import_skill_edge(
@@ -300,7 +300,7 @@ def _import_jd_tx(
 
     for skill in extraction.skills:
         skill_name = canonical_skill_name(skill.name)
-        if not skill_name or not _is_valid_skill_name(skill_name):
+        if not skill_name or not is_valid_skill_name(skill_name):
             continue
         if skill_name in handled_skills:
             continue
@@ -534,7 +534,7 @@ def _import_course_tx(tx, course_data: dict) -> str:
         # JD 侧规范节点（"提示工程"）分裂成两个 Skill 节点，导致 LEARNABLE_VIA
         # 与 REQUIRES 无法在同一节点汇聚（数据审查 major：课程入图技能名口径）。
         skill_name = canonical_skill_name(skill_name.strip())
-        if not skill_name or not _is_valid_skill_name(skill_name):
+        if not skill_name or not is_valid_skill_name(skill_name):
             continue
 
         # Skill：按 name 合并（MERGE ON CREATE 兜底并发竞态，防重复建节点）

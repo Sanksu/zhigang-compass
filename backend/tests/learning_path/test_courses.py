@@ -88,6 +88,36 @@ class TestTitleSimilarityGate:
         kept = _filter_by_title_similarity(rows, "AWS", semantic, _COURSE_TITLE_SIM_THRESHOLD)
         assert len(kept) == 1
 
+    def test_hint_hit_low_quality_filtered(self):
+        """弱词面命中（_EN_SKILL_HINTS 关键词）豁免 sim 阈值但质量底线仍生效。
+
+        08-15 审查：'微服务'↔标题含 microservice 的课程 sim 可能 < 0.5
+        （中英跨语言短词虚低），词面直通会绕过灰色带质量门控放大误配——
+        低质量课程即使命中关键词也拦截（宁缺毋滥）。
+        """
+        rows = [_row("c1", "Microservices with .NET")]
+        semantic = _FakeSemantic({("微服务", "Microservices with .NET"): 0.42})
+        quality = {("edx", "c1"): {"quality_score": 0.4}}
+        kept = _filter_by_title_similarity(
+            rows, "微服务", semantic, _COURSE_TITLE_SIM_THRESHOLD, quality)
+        assert kept == []
+
+    def test_hint_hit_high_quality_kept(self):
+        """弱词面命中 + 质量 ≥0.62 → 保留（词面相关 + 质量达标双条件）。"""
+        rows = [_row("c1", "Microservices with .NET")]
+        semantic = _FakeSemantic({("微服务", "Microservices with .NET"): 0.42})
+        quality = {("edx", "c1"): {"quality_score": 0.71}}
+        kept = _filter_by_title_similarity(
+            rows, "微服务", semantic, _COURSE_TITLE_SIM_THRESHOLD, quality)
+        assert len(kept) == 1
+
+    def test_hint_hit_without_quality_map_kept(self):
+        """弱词面 + quality_map 未提供 → 通过（与 semantic=None 降级行为一致）。"""
+        rows = [_row("c1", "Microservices with .NET")]
+        semantic = _FakeSemantic({("微服务", "Microservices with .NET"): 0.42})
+        kept = _filter_by_title_similarity(rows, "微服务", semantic, _COURSE_TITLE_SIM_THRESHOLD)
+        assert len(kept) == 1
+
     def test_semantic_none_keeps_all(self):
         """semantic=None（纯规则链路）不过滤——语义不可用降级行为。"""
         rows = [_row("c1", "任意课程")]

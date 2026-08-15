@@ -271,8 +271,18 @@ async def crawl_platform(
             ),
             timeout=timeout,
         )
-        # gather 完成 = stdout/stderr 已 EOF，进程退出在即，wait 立即返回
-        returncode = await proc.wait()
+        # gather 完成 = stdout/stderr 已 EOF，进程退出在即；wait 仍套 10s 短超时兜底
+        # （子进程 spawn 孙进程/持有 fd 副本时 EOF 后可能不退出——08-15 审查回归，
+        #  原 H1 修复把 wait 移出 wait_for 丢失了超时保护，裸 wait 会永久挂起）
+        try:
+            returncode = await asyncio.wait_for(proc.wait(), timeout=10)
+        except asyncio.TimeoutError:
+            _kill_process_tree(proc)  # 同步函数（taskkill/killpg），勿 await
+            msg = f"爬虫 {spider_name} 输出流已关闭但进程未退出（wait 10s 超时），已强制终止"
+            print(f"[crawl_platform] 任务异常: task_id={task_id} {msg}", flush=True)
+            await _update_crawl_task(task_id, status="failed", error=msg[:500])
+            await send_alert("crawl_timeout", msg, spider=spider_name)
+            raise RuntimeError(msg)
     except asyncio.TimeoutError:
         _kill_process_tree(proc)  # 同步函数（taskkill/killpg），勿 await
         msg = f"爬虫 {spider_name} 超时（>{timeout}s），已强制终止"
@@ -456,12 +466,12 @@ def _graph_skill_first_seen(skills: Iterable[str]) -> dict[str, date]:
 def _position_skill_novelty(
     session, position_names: list[str], reference_days: int | None = None,
 ) -> dict[str, float | None]:
-    """岗位技能新颖度（§7.2.1 skill_novelty < 0.3，08-15 实现）。
+    """岗位技能新颖度（§7.2.1 skill_novelty < 0.2，08-15 需求调整 0.3→0.2）。
 
     数据源：Neo4j Skill.first_seen（实测 100% 覆盖）——岗位 REQUIRES 技能
     平均图谱年龄归一化：
         novelty = 1 - min(avg_age_days / reference_days, 1)
-    语义：岗位技能平均出现 ≥ reference_days×0.7 天（novelty < 0.3）视为
+    语义：岗位技能平均出现 ≥ reference_days×0.8 天（novelty < 0.2）视为
     技能成熟，才允许 stable（新技能驱动的岗位仍处演化期）。
 
     reference_days 默认自适应图谱生命周期（today - 图谱最早技能首见时间）：
@@ -992,7 +1002,7 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
 
     llm = None
     try:
-        llm = JDExtractor()._llm
+        llm = JDExtractor().llm
     except Exception:
         llm = None
 
@@ -1003,6 +1013,7 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
         snap = dict(row.snapshot or {})
         # 爬虫原始标签（如 coursera 段落解析）先过门控；仍有缺失才走 LLM
         skills = filter_skill_tags(snap.get("skills") or [])
+        llm_ok = False
         if not skills:
             if llm is None:
                 skipped_no_llm += 1
@@ -1011,13 +1022,18 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
                     skills = extract_course_skills(
                         llm, snap.get("title", ""), snap.get("description", "")
                     )
+                    llm_ok = True  # 正常返回（含宁少勿滥空数组）= 确定性结果
                 except Exception:
-                    failed += 1
+                    failed += 1  # 瞬时失败：不标记完成，下次 ETL 重试补全
         if skills:
             snap["skills"] = skills
             enriched += 1
-        # 标记已处理（含空结果），防每次 ETL 对同一课程重复调用 LLM
-        snap["skills_enriched"] = True
+            # 标记已处理（含空结果），防每次 ETL 对同一课程重复调用 LLM
+            snap["skills_enriched"] = True
+        elif llm is None or llm_ok:
+            # 确定性跳过：LLM 配置缺失（重试无意义）或 LLM 正常判定无技能
+            snap["skills_enriched"] = True
+        # LLM 调用异常（failed）→ 不写标记，课程保持可重试
         row.snapshot = snap
     if rows:
         async with async_session_factory() as session:
@@ -2218,7 +2234,7 @@ async def discovery_daily(ctx: dict) -> dict:
 
     llm = None
     try:
-        llm = JDExtractor()._llm
+        llm = JDExtractor().llm
     except Exception:
         llm = None
     async with async_session_factory() as session:
@@ -2364,7 +2380,6 @@ async def discovery_auto_transition(ctx: dict) -> dict:
                 rag_matched=row.rag_matched,
                 definition_draft=row.definition_draft,
             )
-            conf = float((row.confidence or {}).get("final_confidence", 0.0))
             # z_scores 由频次序列自身重建（freq_z_scores）：declining 岗位回升
             # 时最近 2 窗口 z > 0，触发 declining → stable 自动回迁
             windows = WindowFreq(freqs=freqs, z_scores=freq_z_scores(freqs))
@@ -2373,7 +2388,7 @@ async def discovery_auto_transition(ctx: dict) -> dict:
             # 标记非真实证据，全部候选只有 1 条）
             jd_count = sum(daily_freqs.get(name, {}).values())
             target = evaluate_auto_transition(
-                candidate, windows, confidence=conf, jd_count=jd_count,
+                candidate, windows, jd_count=jd_count,
                 skill_novelty=novelty_map.get(row.position_name),
             )
             _logger.info(

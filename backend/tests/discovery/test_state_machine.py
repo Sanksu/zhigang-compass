@@ -252,7 +252,7 @@ class TestAutoTransition:
         assert evaluate_auto_transition(c, w) == PositionState.STABLE
 
     def test_emerging_stays_when_skill_novelty_high(self):
-        """§7.2.1：skill_novelty ≥ 0.3 不升级 stable（新技能驱动岗位仍处演化期）。"""
+        """§7.2.1：skill_novelty ≥ 0.2 不升级 stable（新技能驱动岗位仍处演化期）。"""
         c = _candidate(PositionState.EMERGING, source_diversity=3, jd_count=5)
         w = WindowFreq([10, 9, 10])
         assert evaluate_auto_transition(c, w, skill_novelty=0.5) is None

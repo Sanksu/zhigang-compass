@@ -74,9 +74,9 @@ const SYMBOL_BY_STATUS: Record<PositionStatus, string> = {
   archived: 'roundRect',
 }
 
-/** 岗位状态机 → 颜色（与 globals.css 中状态色对齐） */
+/** 岗位状态机 → 颜色（与 globals.css 中状态色对齐，设计令牌单一事实源） */
 const COLOR_BY_STATUS: Record<PositionStatus, string> = {
-  active: '#0ea5e9',
+  active: '#64748b',
   candidate: '#71717a',
   emerging: '#10b981',
   stable: '#3b82f6',
@@ -101,7 +101,7 @@ function colorOf(node: GraphNode, dark: boolean): string {
 }
 
 /** value 映射到 symbolSize，范围 [16, 56]；技能/证据节点整体缩小，减少与岗位节点的视觉干扰。
- *  布局质量把岗位 value 固定为 300（仅参与斥力），展示尺寸必须用原始 value（displayValue 兜底）——
+ *  布局质量把岗位 value 固定为 1000（仅参与斥力），展示尺寸必须用原始 value（displayValue 兜底）——
  *  否则固定大值会把岗位圆撑到 56px 封顶、与布局斥力语义脱节（2026-08-15）。 */
 function sizeOf(node: GraphNode, displayValue?: number): number {
   const v = displayValue ?? node.value ?? 30
@@ -176,7 +176,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           name: d.name,
           type: d.type,
           status: d.status,
-          // 布局质量已把岗位 value 放大 3 倍，展示侧还原为原始 value（displayValue 兜底）
+          // 布局质量已把岗位 value 固定为 1000（仅参与斥力），展示侧还原为原始 value（displayValue 兜底）
           value: d.displayValue ?? d.value,
         })
       }

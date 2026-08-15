@@ -2,9 +2,11 @@
 
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.api.v1 import evolution as evolution_api
 from app.api.v1.evolution import (
     _build_snapshot_indexes,
     _rebuild_node_evolution,
@@ -12,6 +14,19 @@ from app.api.v1.evolution import (
     position_evolution_list,
     skill_evolution_list,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_redis(monkeypatch):
+    """单测不依赖真实 Redis（缓存层 08-15 新增）：get 恒 None、set 不写。
+
+    本地 redis 若在运行，真实 set 会让缓存跨用例命中（如 limit=2 的结果
+    被 limit=8 的 404 用例读到），测试隔离被破坏——按项目惯例换 AsyncMock。
+    """
+    redis = MagicMock()
+    redis.get = AsyncMock(return_value=None)
+    redis.set = AsyncMock(return_value=None)
+    monkeypatch.setattr(evolution_api, "redis_client", redis)
 
 
 def _version(vid: str, nodes: list[dict], edges: list[tuple[str, str]]):

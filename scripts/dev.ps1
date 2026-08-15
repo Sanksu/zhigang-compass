@@ -1,4 +1,4 @@
-# 智岗罗盘 — 本地开发一键启动（api + worker + 可选前端）
+﻿# 智岗罗盘 — 本地开发一键启动（api + worker + 可选前端）
 #
 # 用法：
 #   .\scripts\dev.ps1         # 确保基础设施 + 启动 api + worker

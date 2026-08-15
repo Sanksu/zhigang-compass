@@ -1,7 +1,7 @@
 # 术语表（Glossary）
 
 > 智岗罗盘项目术语速查。定义来源：设计文档（docs/design/设计文档.md）+ 代码实现口径。
-> 交付标准：≥ 50 条术语（本表 60 条）。
+> 交付标准：≥ 50 条术语（本表 72 条）。
 
 ## 一、系统与架构
 
@@ -22,7 +22,7 @@
 
 | 术语 | 定义 |
 |---|---|
-| 13 源三级分级 | 数据源按可信度分 A/B/C 三级（拉勾网 2026-08-01 移除，原 14 源） |
+| 13 源三级分级 | 数据源按可信度分 A/B/C 三级（拉勾网 2026-08-01 移除，原 14 源；BOSS 直聘 2026-08-15 起暂停采集，恢复时间待定） |
 | 代理池三梯队 | 第一梯队 Rotating 代理池 / 第二梯队 PROXY_POOL + ProxyPoolMiddleware 随机轮换 / 第三梯队直连兜底 |
 | SimHash 去重 | 64-bit 语义指纹近似去重（汉明距 ≤ 3），跨平台识别同岗位 |
 | 时效加权 | `weight = 1.0 (≤30天) / exp(-0.01×(days_ago-30)) (>30天)` |
@@ -60,7 +60,7 @@
 | 熟练度映射 | 精通→3 / 熟练熟悉→2 / 了解→1 / 项目中使用→2 |
 | 跨域降权 | P2-C：岗位族期望技能类别白名单（_ALLOWED_SKILL_CATEGORIES），跨域技能降权 |
 | PageRank | 图算法：岗位/技能重要性排名 |
-| Louvain | 图算法：技能簇社区发现（Leiden 已切换，2026-08-13） |
+| Leiden | 图算法：技能簇社区发现（2026-08-13 由 Louvain 切换） |
 | 最短路径 | 图算法：岗位间技能迁移路径（转岗推荐） |
 | SBERT | sentence-transformers 多语言语义模型（paraphrase-multilingual-MiniLM），语义匹配/课程推荐 |
 | RAG 接地 | 检索增强生成：仅基于图谱证据生成岗位定义/回答，证据不足明确说明 |
@@ -77,7 +77,7 @@
 | Z-score 门控 | 演化检测：技能频次变化统计显著性判定（+ MoM 环比辅助） |
 | 技术热点观察池 | arXiv/GitHub/StackOverflow 信号池（不独立触发 candidate），admin 周报可见 |
 | 媒介落差指数 MLI | 论文/课程/社区/招聘四维信号综合，MLI > 0.6 判定产业拐点 |
-| 状态机 | 岗位生命周期：emerging → stable → declining（含置信度阈值） |
+| 状态机 | 岗位生命周期：active（图谱常态）→ candidate → emerging → stable → declining → archived（08-15 新增 active 常态，import_jd 默认态；阈值见设计文档 §7.2.1） |
 | 种子列表 | 预置 12 个新兴岗位种子（AI Agent 工程师/RAG 工程师等）引导发现 |
 | graph_v{date} | 演化全量快照（APOC 导出，PostgreSQL JSONB 存储） |
 
