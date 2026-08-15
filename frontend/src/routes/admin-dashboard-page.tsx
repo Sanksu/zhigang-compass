@@ -23,6 +23,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiGet, apiPost } from '@/lib/api'
+import { formatDateTime } from '@/lib/utils'
 import type { components } from '@/types/api'
 
 /* ------------------------------------------------------------------ */
@@ -175,7 +176,7 @@ export function AdminDashboardPage() {
       setAuditLogs(
         logs.map((l) => ({
           id: l.id,
-          time: l.created_at ? new Date(l.created_at).toLocaleString('zh-CN') : '—',
+          time: formatDateTime(l.created_at),
           type: actionType(l.action),
           operator: l.detail?.username ?? l.user_id,
           detail: `${l.action} · ${l.resource}`,

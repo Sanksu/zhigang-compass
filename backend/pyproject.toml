@@ -55,6 +55,8 @@ dev-dependencies = [
 # ── 代码质量（CI 门禁：uv run ruff check）──
 [tool.ruff]
 line-length = 120
+# 归档目录（scripts/archive/）为历史一次性脚本留档，退出 lint
+exclude = ["scripts/archive"]
 # 仅启用正确性类规则（pyflakes F + pycodestyle 子集 + 未使用变量），
 # 不含风格类（E501 行宽）与自动格式化，避免与既有代码风格冲突
 lint.select = ["F", "E401", "E402"]

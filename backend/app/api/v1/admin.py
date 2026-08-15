@@ -20,6 +20,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.common import iso, paginate, paged_ok, serialize_task
 from app.api.deps import require_permission
 from app.core.arq_client import enqueue
 from app.core.database import get_db, redis_client
@@ -67,9 +68,9 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ):
     """用户列表（分页）。"""
-    total = await db.scalar(select(func.count()).select_from(User))
-    rows = await db.scalars(
-        select(User).order_by(User.created_at.desc()).offset((page - 1) * size).limit(size)
+    stmt = select(User).order_by(User.created_at.desc())
+    rows, total = await paginate(
+        db, stmt, page, size, count_stmt=select(func.count()).select_from(User)
     )
     items = [
         {
@@ -77,12 +78,12 @@ async def list_users(
             "username": u.username,
             "role": u.role,
             "is_active": u.is_active,
-            "created_at": u.created_at.isoformat() if u.created_at else None,
-            "updated_at": u.updated_at.isoformat() if u.updated_at else None,
+            "created_at": iso(u.created_at),
+            "updated_at": iso(u.updated_at),
         }
         for u in rows
     ]
-    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+    return paged_ok(items, total, page, size)
 
 
 @router.post("/users", status_code=201)
@@ -175,9 +176,8 @@ async def audit_logs(
         prefix = category.lower() + "%"
         stmt = stmt.where(AuditLog.action.like(prefix))
         count_stmt = count_stmt.where(AuditLog.action.like(prefix))
-    total = await db.scalar(count_stmt)
-    rows = await db.scalars(
-        stmt.order_by(AuditLog.created_at.desc()).offset((page - 1) * size).limit(size)
+    rows, total = await paginate(
+        db, stmt, page, size, count_stmt=count_stmt
     )
     items = [
         {
@@ -188,11 +188,11 @@ async def audit_logs(
             "resource_id": log.resource_id,
             "detail": log.detail,
             "ip_address": log.ip_address,
-            "created_at": log.created_at.isoformat() if log.created_at else None,
+            "created_at": iso(log.created_at),
         }
         for log in rows
     ]
-    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+    return paged_ok(items, total, page, size)
 
 
 # ============================================================
@@ -247,7 +247,7 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
         if not spider:
             continue
         pid = _SPIDER_TO_PLATFORM.get(spider, spider)
-        ts = t.created_at.isoformat() if t.created_at else None
+        ts = iso(t.created_at)
         if ts and (pid not in task_last_run or ts > task_last_run[pid]):
             task_last_run[pid] = ts
 
@@ -263,7 +263,7 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
     platforms = []
     for pid, meta in PLATFORM_META.items():
         st = raw_stats.get(pid, {"total": 0, "today": 0, "last": None})
-        last_run = st["last"].isoformat() if st["last"] else None
+        last_run = iso(st["last"])
         ts = task_last_run.get(pid)
         if ts and (last_run is None or ts > last_run):
             last_run = ts
@@ -380,18 +380,6 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
 # 爬虫实时日志（SSE）：手动触发后逐行推送 scrapy 终端输出
 # ============================================================
 
-def _crawl_task_payload(task) -> dict:
-    """crawl 任务状态 → SSE data 载荷（TaskStatus ORM 对象不可直接 JSON 序列化）。"""
-    return {
-        "task_id": task.id,
-        "task_type": task.task_type,
-        "status": task.status,
-        "progress": task.progress,
-        "result": task.result,
-        "error": task.error,
-    }
-
-
 async def _crawl_log_events(
     task_uuid: str,
     get_logs,
@@ -455,7 +443,7 @@ async def crawl_task_stream(task_id: str):
 
         async with async_session_factory() as session:
             task = await session.get(TaskStatus, tid)
-        return _crawl_task_payload(task) if task is not None else None
+        return serialize_task(task) if task is not None else None
 
     async def _get_logs(tid: str, start: int) -> list[str]:
         # 复用模块级 ARQ 连接池（08-14 审查：此前每 0.5s 新建池，600s 轮询 ≈ 1200 次建连）
@@ -485,11 +473,10 @@ async def crawl_history(
     count_stmt = (
         select(func.count()).select_from(TaskStatus).where(TaskStatus.task_type == "crawl")
     )
-    total = await db.scalar(count_stmt) or 0
-    rows = await db.scalars(
-        stmt.order_by(TaskStatus.created_at.desc()).offset((page - 1) * size).limit(size)
+    rows, total = await paginate(
+        db, stmt.order_by(TaskStatus.created_at.desc()), page, size, count_stmt=count_stmt
     )
-    return ok(data={"items": [_history_row(t) for t in rows], "total": total, "page": page, "size": size})
+    return paged_ok([_history_row(t) for t in rows], total, page, size)
 
 
 def _history_row(task) -> dict:
@@ -504,7 +491,7 @@ def _history_row(task) -> dict:
         "status": task.status,
         "items": result.get("items") or 0,
         "error": task.error or "",
-        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "created_at": iso(task.created_at),
     }
 
 
@@ -544,11 +531,9 @@ async def positions_pending(
     if state:
         stmt = stmt.where(DiscoveryCandidate.state == state)
         count_stmt = count_stmt.where(DiscoveryCandidate.state == state)
-    total = await db.scalar(count_stmt)
-    rows = await db.scalars(
-        stmt.order_by(DiscoveryCandidate.detected_at.desc())
-        .offset((page - 1) * size)
-        .limit(size)
+    rows, total = await paginate(
+        db, stmt.order_by(DiscoveryCandidate.detected_at.desc()), page, size,
+        count_stmt=count_stmt,
     )
     items = [
         {
@@ -562,11 +547,11 @@ async def positions_pending(
             "rag_matched": c.rag_matched,
             "definition_draft": c.definition_draft,
             "detected_at": c.detected_at,
-            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            "updated_at": iso(c.updated_at),
         }
         for c in rows
     ]
-    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+    return paged_ok(items, total, page, size)
 
 
 @router.post("/positions/{candidate_id}/review")
@@ -669,11 +654,9 @@ async def evolution_pending(
     count_stmt = select(func.count()).select_from(DiscoveryCandidate).where(
         DiscoveryCandidate.state == "emerging"
     )
-    total = await db.scalar(count_stmt)
-    rows = await db.scalars(
-        stmt.order_by(DiscoveryCandidate.updated_at.desc())
-        .offset((page - 1) * size)
-        .limit(size)
+    rows, total = await paginate(
+        db, stmt.order_by(DiscoveryCandidate.updated_at.desc()), page, size,
+        count_stmt=count_stmt,
     )
     items = [
         {
@@ -686,11 +669,11 @@ async def evolution_pending(
             "rag_matched": c.rag_matched,
             "definition_draft": c.definition_draft,
             "detected_at": c.detected_at,
-            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            "updated_at": iso(c.updated_at),
         }
         for c in rows
     ]
-    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+    return paged_ok(items, total, page, size)
 
 
 @router.put("/evolution/{candidate_id}/review")
@@ -776,11 +759,9 @@ async def positions_declining(
     count_stmt = select(func.count()).select_from(DiscoveryCandidate).where(
         DiscoveryCandidate.state == "declining"
     )
-    total = await db.scalar(count_stmt)
-    rows = await db.scalars(
-        stmt.order_by(DiscoveryCandidate.updated_at.desc())
-        .offset((page - 1) * size)
-        .limit(size)
+    rows, total = await paginate(
+        db, stmt.order_by(DiscoveryCandidate.updated_at.desc()), page, size,
+        count_stmt=count_stmt,
     )
     items = [
         {
@@ -790,11 +771,11 @@ async def positions_declining(
             "confidence": c.confidence,
             "evidence_refs": c.evidence_refs,
             "detected_at": c.detected_at,
-            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            "updated_at": iso(c.updated_at),
         }
         for c in rows
     ]
-    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+    return paged_ok(items, total, page, size)
 
 
 @router.put("/positions/{candidate_id}/archive")
@@ -1307,10 +1288,7 @@ async def list_technology_watch(
         stmt = stmt.where(TechnologyWatch.status == status)
     if source:
         stmt = stmt.where(TechnologyWatch.signal_source == source)
-    total = (await db.scalar(select(func.count()).select_from(stmt.subquery()))) or 0
-    rows = (await db.scalars(
-        stmt.offset((page - 1) * size).limit(size)
-    )).all()
+    rows, total = await paginate(db, stmt, page, size)
     items = [
         {
             "skill_name": r.skill_name,
@@ -1318,9 +1296,9 @@ async def list_technology_watch(
             "signal_value": r.signal_value,
             "period": r.period,
             "status": r.status,
-            "first_seen_at": r.first_seen_at.isoformat() if r.first_seen_at else None,
-            "last_signal_at": r.last_signal_at.isoformat() if r.last_signal_at else None,
+            "first_seen_at": iso(r.first_seen_at),
+            "last_signal_at": iso(r.last_signal_at),
         }
         for r in rows
     ]
-    return ok(data={"items": items, "total": total, "page": page, "size": size})
+    return paged_ok(items, total, page, size)

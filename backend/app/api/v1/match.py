@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.common import owns_resume, parse_uuid, serialize_task
 from app.api.deps import require_role
 from app.core.arq_client import enqueue
 from app.core.database import async_session_factory, get_db, neo4j_driver, redis_client
@@ -29,7 +30,6 @@ from app.models.business import (
     MatchFeedbackRecord,
     MatchResultRecord,
     ResumeCache,
-    ResumeFile,
     TaskStatus,
 )
 from app.schemas.common import ok, error
@@ -53,24 +53,6 @@ class RecommendRequest(BaseModel):
 class CompareRequest(BaseModel):
     resume_id: str
     position_id: str
-
-
-def _parse_resume_id(raw: str) -> str | None:
-    """校验并规范化 resume_id（外部输入，非法 UUID 返回 None）。"""
-    try:
-        return str(uuid.UUID(raw))
-    except (ValueError, AttributeError):
-        return None
-
-
-async def _owns_resume(db: AsyncSession, resume_id: str, user_id: str) -> bool:
-    """校验当前用户是否拥有该简历（resume_cache 无 user_id，归属记录在 resume_files）。"""
-    row = await db.scalar(
-        select(ResumeFile.id).where(
-            ResumeFile.resume_id == resume_id, ResumeFile.user_id == user_id
-        )
-    )
-    return row is not None
 
 
 def _load_evidence_for_position(position_id: str) -> list[dict]:
@@ -231,13 +213,13 @@ async def recommend(
     match:result（Redis TTL 24h）+ match_results 落库，前端轮询
     GET /match/task/{task_id} 拿到 match_id 后再取结果。
     """
-    resume_id = _parse_resume_id(req.resume_id)
+    resume_id = parse_uuid(req.resume_id)
     if resume_id is None:
         return error(4000, "resume_id 格式非法")
     cache = await db.get(ResumeCache, resume_id)
     if cache is None:
         return error(4040, "简历不存在", http_status=404)
-    if not await _owns_resume(db, resume_id, user.get("sub", "")):
+    if not await owns_resume(db, resume_id, user.get("sub", "")):
         return error(4030, "无权使用该简历发起匹配", http_status=403)
 
     task = TaskStatus(
@@ -278,13 +260,13 @@ async def compare(
     （missing/weak 技能的先修链 + 课程 Top-3，设计文档 §9.5 / §4.6），
     并持久化快照返回 match_id（供 match/result|gap|path|feedback 查询）。
     """
-    resume_id = _parse_resume_id(req.resume_id)
+    resume_id = parse_uuid(req.resume_id)
     if resume_id is None:
         return error(4000, "resume_id 格式非法")
     cache = await db.get(ResumeCache, resume_id)
     if cache is None:
         return error(4040, "简历不存在", http_status=404)
-    if not await _owns_resume(db, resume_id, user.get("sub", "")):
+    if not await owns_resume(db, resume_id, user.get("sub", "")):
         return error(4030, "无权使用该简历发起比对", http_status=403)
 
     # 项目向量（pgvector project_embeddings 回填产物）：未回填/表不可用时为空 dict，
@@ -381,12 +363,8 @@ async def match_task_status(
     if task is not None:
         if (task.result or {}).get("user_id") != user.get("sub", ""):
             return error(4040, "匹配任务不存在或已过期", http_status=404)
-        data = {
-            "task_id": task.id,
-            "status": task.status,
-            "progress": task.progress,
-            "error": task.error or "",
-        }
+        data = serialize_task(task, exclude=("task_type", "result"))
+        data["error"] = data["error"] or ""
         if task.status == "success":
             data["match_id"] = (task.result or {}).get("match_id")
         return ok(data=data)
