@@ -40,7 +40,10 @@ EMERGING_MIN_CONFIDENCE = 0.6      # candidate → emerging
 EMERGING_MIN_SOURCES = 2
 STABLE_MIN_JD_COUNT = 5            # emerging → stable：jd_count ≥ 5（§7.2.1 表格）
 STABLE_MAX_WINDOW_VOLATILITY = 0.25  # 连续 2 窗口波动 < 25%
-STABLE_MAX_SKILL_NOVELTY = 0.3     # §7.2.1：skill_novelty < 0.3（技能成熟度门槛）
+STABLE_MAX_SKILL_NOVELTY = 0.2     # skill_novelty 阈值（08-15 需求调整：文档 0.3
+                                    # → 0.2——自适应参考周期下 0.3 仅需技能出现
+                                    # ≥0.7×生命周期即成熟，冷启动 33 天图谱下
+                                    # 23 天即成熟偏宽松；0.2 需 ≥0.8×生命周期）
 DECLINE_WINDOW_DROP = 0.40         # 连续 3 窗口频次下降 > 40%
 DECLINE_WINDOW_COUNT = 3
 RECOVERY_WINDOW_COUNT = 2          # z_score > 0 连续 2 窗口回升
