@@ -332,9 +332,28 @@ export function GraphPage() {
   // 画布可见数据：
   // - techStack（技能为中心）：全量展示技能+边，不做岗位过滤
   // - 岗位中心视图：展示岗位节点 + 已展开岗位的技能（单岗位技能数上限防重叠）
+  // 岗位显示数量限制（Top-30 按关联度降序 + 展开的岗位必显示，2026-08-15）：
+  // 岗位中心/技术栈视图岗位全量 100+，物理上放不下岗位防重叠所需间距
+  // （enforceSpread minGap 60 → 每岗位约 1.06 万 px²，画布仅 ~54 万 px² 容量 ~30 岗位），
+  // 且全量渲染节点爆炸不可读。低频岗位不显示，可在搜索/详情面板中触达。
+  const MAX_POSITIONS = 30
   const visibleData = useMemo<GraphData | null>(() => {
     if (!data) return null
-    if (view === 'techStack') return data
+
+    const keepPositions = new Set<string>()
+    data.nodes
+      .filter((n) => n.type === 'position')
+      .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      .slice(0, MAX_POSITIONS)
+      .forEach((p) => keepPositions.add(p.id))
+    expandedPositions.forEach((id) => keepPositions.add(id))
+
+    if (view === 'techStack') {
+      const nodes = data.nodes.filter((n) => n.type !== 'position' || keepPositions.has(n.id))
+      const nodeIds = new Set(nodes.map((n) => n.id))
+      const edges = data.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+      return { ...data, nodes, edges }
+    }
 
     // 每个展开岗位：按边权重取 Top-N 技能（多岗位共享技能去重）
     const perPositionSkills = new Map<string, string[]>()
@@ -351,11 +370,13 @@ export function GraphPage() {
       perPositionSkills.set(pid, skills)
     }
     const skillIds = new Set([...perPositionSkills.values()].flat())
-    const nodes = data.nodes.filter((n) => n.type === 'position' || skillIds.has(n.id))
-    // 只保留两端都可见的边（岗位-技能关系，且技能在展开上限内）
+    const nodes = data.nodes.filter((n) =>
+      n.type === 'position' ? keepPositions.has(n.id) : skillIds.has(n.id),
+    )
+    // 只保留两端都可见的边（岗位-技能关系，且岗位在显示集、技能在展开上限内）
     const edges = data.edges.filter((e) => {
-      const a = expandedPositions.has(e.source)
-      const b = expandedPositions.has(e.target)
+      const a = keepPositions.has(e.source)
+      const b = keepPositions.has(e.target)
       return (a && skillIds.has(e.target)) || (b && skillIds.has(e.source))
     })
     return { ...data, nodes, edges }
