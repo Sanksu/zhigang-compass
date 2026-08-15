@@ -4,6 +4,7 @@
 T+1 全量快照（设计文档 7.1）。
 """
 
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
@@ -166,37 +167,58 @@ async def version_detail(
     })
 
 
+def _build_snapshot_indexes(snapshots: list) -> list[dict]:
+    """一次性构建全部快照索引（08-15 超时根因修复）。
+
+    原实现每节点对全部边 sum 统计 freq——O(节点×边)（2 万×6 万×11 期）
+    秒级变分钟级，浏览器并发演化请求 30s 超时。索引化后：
+      nodes: id → 节点 dict（一次构建复用）
+      src/tgt: collections.Counter 边计数（O(边) 一次，节点查 freq O(1)）
+    """
+    indexes = []
+    for v in snapshots:
+        snapshot = v.snapshot_json or {}
+        nodes = {n.get("id"): n for n in snapshot.get("nodes", []) if isinstance(n, dict)}
+        edges = snapshot.get("edges", []) or []
+        indexes.append({
+            "v": v,
+            "nodes": nodes,
+            "src": Counter(e.get("source") for e in edges),
+            "tgt": Counter(e.get("target") for e in edges),
+        })
+    return indexes
+
+
 def _rebuild_node_evolution(
-    snapshots: list, node_id: str, edge_side: str = "source"
+    indexes: list[dict], node_id: str, edge_side: str = "source"
 ) -> tuple[str, list]:
-    """从版本快照序列重建节点演化轨迹（岗位 source 侧 / 技能 target 侧）。
+    """从快照索引重建节点演化轨迹（岗位 source 侧 / 技能 target 侧）。
 
     返回 (最近名称或 id, points)，points 时间升序
     （date/version/freq=节点被引用边数/present=节点是否存在）。
     """
     name = None
     points = []
-    for v in snapshots:
-        snapshot = v.snapshot_json or {}
-        nodes = {n.get("id"): n for n in snapshot.get("nodes", []) if isinstance(n, dict)}
-        node = nodes.get(node_id)
+    for idx in indexes:
+        node = idx["nodes"].get(node_id)
         if node is not None:
             name = node.get("name") or name
-        freq = sum(1 for e in snapshot.get("edges", []) if e.get(edge_side) == node_id)
+        counter = idx["src"] if edge_side == "source" else idx["tgt"]
+        v = idx["v"]
         points.append({
             "date": v.created_at.date().isoformat() if v.created_at else None,
             "version": v.id,
-            "freq": freq,
+            "freq": counter.get(node_id, 0),
             "present": node is not None,
         })
     return name or node_id, points
 
 
 def _rebuild_position_evolution(
-    snapshots: list, position_id: str
+    indexes: list[dict], position_id: str
 ) -> dict:
-    """从版本快照序列重建单个岗位的演化轨迹（position_evolution 与新列表端点共用）。"""
-    name, points = _rebuild_node_evolution(snapshots, position_id, edge_side="source")
+    """从快照索引重建单个岗位的演化轨迹（position_evolution 与新列表端点共用）。"""
+    name, points = _rebuild_node_evolution(indexes, position_id, edge_side="source")
     return {"position_id": position_id, "position_name": name, "points": points}
 
 
@@ -217,7 +239,8 @@ async def position_evolution(
     snapshots = [v for v in rows]
     if not snapshots:
         return error(4040, "无图谱版本数据", http_status=404)
-    return ok(data=_rebuild_position_evolution(snapshots, id))
+    indexes = _build_snapshot_indexes(snapshots)
+    return ok(data=_rebuild_position_evolution(indexes, id))
 
 
 @router.get("/positions")
@@ -238,26 +261,23 @@ async def position_evolution_list(
     if not snapshots:
         return error(4040, "无图谱版本数据", http_status=404)
 
+    indexes = _build_snapshot_indexes(snapshots)
     heat: dict[str, dict] = {}  # position_id -> {name, count, latest_freq}
-    for v in snapshots:
-        snapshot = v.snapshot_json or {}
-        nodes = {n.get("id"): n for n in snapshot.get("nodes", []) if isinstance(n, dict)}
-        for nid, node in nodes.items():
+    for idx in indexes:
+        for nid, node in idx["nodes"].items():
             if node.get("type") != "position" and not nid.startswith("pos_"):
                 continue
             rec = heat.setdefault(nid, {"name": None, "count": 0, "latest_freq": 0})
             rec["name"] = node.get("name") or rec["name"]
             rec["count"] += 1
-            rec["latest_freq"] = sum(
-                1 for e in snapshot.get("edges", []) if e.get("source") == nid
-            )
+            rec["latest_freq"] = idx["src"].get(nid, 0)
     top = sorted(
         heat.items(), key=lambda kv: (-kv[1]["count"], -kv[1]["latest_freq"])
     )[:limit]
 
     return ok(data={
         "positions": [
-            _rebuild_position_evolution(snapshots, pid) for pid, _ in top
+            _rebuild_position_evolution(indexes, pid) for pid, _ in top
         ],
     })
 
@@ -281,19 +301,16 @@ async def skill_evolution_list(
     if not snapshots:
         return error(4040, "无图谱版本数据", http_status=404)
 
+    indexes = _build_snapshot_indexes(snapshots)
     heat: dict[str, dict] = {}  # skill_id -> {name, count, latest_freq}
-    for v in snapshots:
-        snapshot = v.snapshot_json or {}
-        nodes = {n.get("id"): n for n in snapshot.get("nodes", []) if isinstance(n, dict)}
-        for nid, node in nodes.items():
+    for idx in indexes:
+        for nid, node in idx["nodes"].items():
             if node.get("type") != "skill" and not nid.startswith("sk_"):
                 continue
             rec = heat.setdefault(nid, {"name": None, "count": 0, "latest_freq": 0})
             rec["name"] = node.get("name") or rec["name"]
             rec["count"] += 1
-            rec["latest_freq"] = sum(
-                1 for e in snapshot.get("edges", []) if e.get("target") == nid
-            )
+            rec["latest_freq"] = idx["tgt"].get(nid, 0)
     top = sorted(
         heat.items(), key=lambda kv: (-kv[1]["count"], -kv[1]["latest_freq"])
     )[:limit]
@@ -302,7 +319,7 @@ async def skill_evolution_list(
         "skills": [
             {"skill_id": sid, "skill_name": name, "points": points}
             for sid, (name, points) in (
-                (sid, _rebuild_node_evolution(snapshots, sid, edge_side="target"))
+                (sid, _rebuild_node_evolution(indexes, sid, edge_side="target"))
                 for sid, _ in top
             )
         ],

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.api.v1.evolution import (
+    _build_snapshot_indexes,
     _rebuild_node_evolution,
     _rebuild_position_evolution,
     position_evolution_list,
@@ -42,7 +43,7 @@ class TestRebuildPositionEvolution:
             _version("graph_v20260802", [_node("pos_1", "后端工程师")], [("pos_1", "s1"), ("pos_1", "s2")]),
             _version("graph_v20260803", [], []),  # 岗位消失
         ]
-        data = _rebuild_position_evolution(snapshots, "pos_1")
+        data = _rebuild_position_evolution(_build_snapshot_indexes(snapshots), "pos_1")
         assert data["position_id"] == "pos_1"
         assert data["position_name"] == "后端工程师"
         assert [p["present"] for p in data["points"]] == [True, True, False]
@@ -51,7 +52,7 @@ class TestRebuildPositionEvolution:
 
     def test_name_falls_back_to_id(self):
         snapshots = [_version("graph_v20260801", [_node("pos_x", "")], [])]
-        data = _rebuild_position_evolution(snapshots, "pos_x")
+        data = _rebuild_position_evolution(_build_snapshot_indexes(snapshots), "pos_x")
         assert data["position_name"] == "pos_x"
 
 
@@ -152,7 +153,7 @@ class TestRebuildNodeEvolution:
             _version("graph_v20260801", [_node("sk_1", "Python", "skill")], [("pos_1", "sk_1")]),
             _version("graph_v20260802", [], []),
         ]
-        name, points = _rebuild_node_evolution(snapshots, "sk_1", edge_side="target")
+        name, points = _rebuild_node_evolution(_build_snapshot_indexes(snapshots), "sk_1", edge_side="target")
         assert name == "Python"
         assert [p["freq"] for p in points] == [1, 0]
         assert [p["present"] for p in points] == [True, False]
