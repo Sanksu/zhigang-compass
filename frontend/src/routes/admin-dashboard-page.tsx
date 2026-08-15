@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import {
   Activity,
+  Bot,
+  ClipboardCheck,
   Database,
+  Globe,
   RefreshCw,
   Shield,
   Users,
@@ -89,8 +92,19 @@ function actionType(action: string): AuditActionType {
   return '系统'
 }
 
-const QUICK_ACTIONS = [
+export const QUICK_ACTIONS: {
+  id: string
+  label: string
+  icon: typeof RefreshCw
+  desc: string
+  /** 导航型快捷入口（to 存在时渲染 Link，否则为触发型按钮） */
+  to?: string
+}[] = [
   { id: 'crawl', label: '触发全量爬取', icon: RefreshCw, desc: '重新采集所有数据源' },
+  { id: 'goto-review', label: '前往岗位审核', icon: ClipboardCheck, desc: '处理候选晋升 / 驳回', to: '/admin/review' },
+  { id: 'goto-crawl', label: '爬取管理', icon: Globe, desc: '单源触发 · 任务状态 · 输出查看', to: '/admin/crawl' },
+  { id: 'goto-llm', label: 'LLM 配置', icon: Bot, desc: '多 Provider 重试链 · 健康检查', to: '/admin/llm' },
+  { id: 'goto-users', label: '用户管理', icon: Users, desc: '账号 · 角色 · 状态', to: '/admin/users' },
 ]
 
 const LEVEL_VARIANT: Record<string, SourceItem['levelVariant']> = {
@@ -365,7 +379,7 @@ export function AdminDashboardPage() {
         </Card>
       </div>
 
-      {/* 快捷操作区 */}
+      {/* 快捷操作区：触发型（爬取）+ 导航型（审核/爬取管理/LLM/用户） */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">快捷操作</CardTitle>
@@ -376,7 +390,29 @@ export function AdminDashboardPage() {
               const Icon = action.icon
               const isRunning = runningActions.has(action.id)
               const message = actionMessages.get(action.id)
-              return (
+              const inner = (
+                <>
+                  <div className="flex items-center gap-2 w-full">
+                    <Icon className={`size-4 shrink-0 ${isRunning ? 'animate-spin' : ''}`} />
+                    <span className="text-sm font-medium">{action.label}</span>
+                    {/* 审核入口显示真实待审核数（/admin/positions/pending total） */}
+                    {action.id === 'goto-review' && auditQueueCount > 0 && (
+                      <span className="ml-auto rounded-full bg-state-candidate/15 px-2 py-0.5 text-[10px] font-medium text-state-candidate">
+                        {auditQueueCount}
+                      </span>
+                    )}
+                    {message && (
+                      <span className="ml-auto text-[10px] text-state-emerging font-medium">{message}</span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-ink-muted font-normal">{action.desc}</span>
+                </>
+              )
+              return action.to ? (
+                <Button key={action.id} variant="outline" asChild className="h-auto flex-col items-start gap-2 p-4 text-left">
+                  <Link to={action.to}>{inner}</Link>
+                </Button>
+              ) : (
                 <Button
                   key={action.id}
                   variant="outline"
@@ -384,14 +420,7 @@ export function AdminDashboardPage() {
                   onClick={() => handleQuickAction(action.id)}
                   className="h-auto flex-col items-start gap-2 p-4 text-left"
                 >
-                  <div className="flex items-center gap-2 w-full">
-                    <Icon className={`size-4 shrink-0 ${isRunning ? 'animate-spin' : ''}`} />
-                    <span className="text-sm font-medium">{action.label}</span>
-                    {message && (
-                      <span className="ml-auto text-[10px] text-state-emerging font-medium">{message}</span>
-                    )}
-                  </div>
-                  <span className="text-[11px] text-ink-muted font-normal">{action.desc}</span>
+                  {inner}
                 </Button>
               )
             })}
