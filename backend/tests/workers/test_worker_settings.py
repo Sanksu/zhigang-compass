@@ -22,6 +22,7 @@ from app.workers.tasks import (
     discovery_auto_transition,
     discovery_daily,
     diversity_report,
+    enrich_course_skills,
     evaluate_courses,
     load_courses,
     match_recommend,

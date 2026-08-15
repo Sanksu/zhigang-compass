@@ -5,8 +5,6 @@
 - extract_course_skills：LLM 不可用/失败降级、非法输出过滤
 """
 
-import pytest
-
 from app.services.extraction.course_skills import (
     CourseSkillResult,
     build_prompt,
