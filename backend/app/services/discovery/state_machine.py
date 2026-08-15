@@ -4,7 +4,7 @@
 - → candidate: 自动（规则门控，每日定时任务，detector.passes_gate）
 - candidate → emerging: admin 审核 + 置信度 ≥ 0.6 AND source_diversity ≥ 2（§7.2.4 阈值表）
 - candidate → rejected: admin 审核
-- emerging → stable: 自动（置信度 ≥ 0.8 AND 连续 2 窗口波动 < 25% AND source_diversity ≥ 2）
+- emerging → stable: 自动（jd_count ≥ 5 AND 连续 2 窗口波动 < 25% AND source_diversity ≥ 2，§7.2.1）
 - emerging → declining: 自动（连续 3 窗口频次下降 > 40%）
 - stable → declining: 自动（连续 3 窗口频次下降 > 40%）
 - declining → archived: admin 确认衰退
@@ -38,7 +38,7 @@ VALID_TRANSITIONS: dict[PositionState, set[PositionState]] = {
 # 转换阈值（设计文档 7.2.4 阈值表 + 7.2.1 状态机表）
 EMERGING_MIN_CONFIDENCE = 0.6      # candidate → emerging
 EMERGING_MIN_SOURCES = 2
-STABLE_MIN_CONFIDENCE = 0.8        # emerging → stable
+STABLE_MIN_JD_COUNT = 5            # emerging → stable：jd_count ≥ 5（§7.2.1 表格）
 STABLE_MAX_WINDOW_VOLATILITY = 0.25  # 连续 2 窗口波动 < 25%
 DECLINE_WINDOW_DROP = 0.40         # 连续 3 窗口频次下降 > 40%
 DECLINE_WINDOW_COUNT = 3
@@ -214,8 +214,19 @@ def evaluate_auto_transition(
     candidate: CandidatePosition,
     windows: WindowFreq,
     confidence: Optional[float] = None,
+    jd_count: Optional[int] = None,
 ) -> Optional[PositionState]:
     """自动转换判定（emerging/stable/declining 三态自动流转）。
+
+    Args:
+        candidate: 候选岗位
+        windows: 频次窗口序列
+        confidence: 兼容参数（08-15 起 stable 判定不再用置信度——
+            对齐 §7.2.1 表格改用 jd_count ≥ 5 显式门槛；保留签名避免
+            调用方改动，candidate→emerging 仍用 can_promote_to_emerging）
+        jd_count: 岗位真实 JD 数（任务层从 jd_raw 统计传入，§7.2.1 门槛）。
+            None 时回退 len(candidate.evidence_refs)——注意发现链路
+            evidence_refs 多为 watch 标记非真实证据，任务层必须传真实值
 
     Returns:
         建议的目标状态；无需迁移返回 None
@@ -234,12 +245,22 @@ def evaluate_auto_transition(
         window_volatility(windows), decline_rate(windows, DECLINE_WINDOW_COUNT),
     )
     if state == PositionState.EMERGING:
+        # §7.2.1 表格：stable 进入条件 = jd_count ≥ 5 + 跨 ≥2 源 + 连续 2 窗口
+        # 波动 < 25%（+ skill_novelty < 0.3，novelty 特征无数据源暂未实现）。
+        # jd_count 由任务层从 jd_raw 统计传入（08-15 对齐文档：此前用
+        # confidence ≥ 0.8 替代 jd_count 门槛——jd_count=3 时其他维度满分
+        # 也能过 0.8，小基数岗位提前稳定）。
         if (
-            confidence >= STABLE_MIN_CONFIDENCE
+            (jd_count if jd_count is not None else len(candidate.evidence_refs))
+            >= STABLE_MIN_JD_COUNT
             and window_volatility(windows) < STABLE_MAX_WINDOW_VOLATILITY
             and candidate.features.source_diversity >= EMERGING_MIN_SOURCES
         ):
-            logger.debug("  → stable（置信度/波动/源多样性均达标）")
+            logger.debug(
+                "  → stable（jd_count=%d ≥ %d/波动/源多样性均达标）",
+                jd_count if jd_count is not None else len(candidate.evidence_refs),
+                STABLE_MIN_JD_COUNT,
+            )
             return PositionState.STABLE
         if decline_rate(windows, DECLINE_WINDOW_COUNT) > DECLINE_WINDOW_DROP:
             logger.debug("  → declining（最近3窗口下降率 > %s）", DECLINE_WINDOW_DROP)

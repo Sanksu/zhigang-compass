@@ -2071,7 +2071,13 @@ async def discovery_auto_transition(ctx: dict) -> dict:
             # z_scores 由频次序列自身重建（freq_z_scores）：declining 岗位回升
             # 时最近 2 窗口 z > 0，触发 declining → stable 自动回迁
             windows = WindowFreq(freqs=freqs, z_scores=freq_z_scores(freqs))
-            target = evaluate_auto_transition(candidate, windows, confidence=conf)
+            # jd_count = jd_raw 中该岗位真实 JD 数（§7.2.1 stable 门槛，
+            # 08-15 对齐文档：不可用 evidence_refs——发现链路存的是 watch
+            # 标记非真实证据，全部候选只有 1 条）
+            jd_count = sum(daily_freqs.get(name, {}).values())
+            target = evaluate_auto_transition(
+                candidate, windows, confidence=conf, jd_count=jd_count,
+            )
             _logger.info(
                 "auto_transition: %s state=%s 30天窗口序列=%s z_scores=%s "
                 "volatility=%.3f decline_rate=%.3f → %s",

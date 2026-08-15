@@ -31,7 +31,12 @@ class _SeqResult:
         return {"seq": self._seq}
 
 
-def _candidate(state: PositionState, source_diversity: int = 2, confidence: float | None = 0.8) -> CandidatePosition:
+def _candidate(
+    state: PositionState,
+    source_diversity: int = 2,
+    confidence: float | None = 0.8,
+    jd_count: int = 5,
+) -> CandidatePosition:
     return CandidatePosition(
         candidate_id="cand-test",
         position_name="RAG 工程师",
@@ -43,6 +48,7 @@ def _candidate(state: PositionState, source_diversity: int = 2, confidence: floa
         if confidence is not None
         else None,
         detected_at="2026-08-02T00:00:00+08:00",
+        evidence_refs=[f"ev_{i}" for i in range(jd_count)],
     )
 
 
@@ -229,14 +235,31 @@ class TestAutoTransition:
         w = WindowFreq([10, 9, 10])
         assert evaluate_auto_transition(c, w) == PositionState.STABLE
 
+    def test_emerging_stays_when_jd_count_below_5(self):
+        """§7.2.1 对齐（08-15）：jd_count < 5 不升级 stable（小基数保护）。
+
+        回归：原实现用 confidence ≥ 0.8 替代 jd_count 门槛——jd_count=4 时
+        其他维度满分也能过 0.8 提前稳定。
+        """
+        c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9, jd_count=4)
+        w = WindowFreq([10, 9, 10])
+        assert evaluate_auto_transition(c, w) is None
+
+    def test_emerging_to_stable_at_jd_count_boundary(self):
+        """jd_count = 5 恰好达标（边界）。"""
+        c = _candidate(PositionState.EMERGING, source_diversity=3, jd_count=5)
+        w = WindowFreq([10, 9, 10])
+        assert evaluate_auto_transition(c, w) == PositionState.STABLE
+
     def test_emerging_stays_when_volatile(self):
         c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
         w = WindowFreq([10, 5, 10])  # 波动 50% > 25%
         assert evaluate_auto_transition(c, w) is None
 
     def test_emerging_to_declining(self):
+        """下降趋势 + 最近窗口仍剧烈波动 → declining（波动 37.5% > 25% 不进 stable）。"""
         c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.5)
-        w = WindowFreq([10, 6, 5])
+        w = WindowFreq([10, 8, 5])  # 最近 2 窗口 [8,5] 波动 37.5%，decline 50%
         assert evaluate_auto_transition(c, w) == PositionState.DECLINING
 
     def test_stable_to_declining(self):
