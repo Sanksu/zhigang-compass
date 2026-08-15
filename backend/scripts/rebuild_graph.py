@@ -54,6 +54,53 @@ async def _load_extracted() -> list[tuple[JDRaw, dict]]:
     return [(r, (r.snapshot or {}).get("extraction") or {}) for r in rows]
 
 
+_REVIEWED_STATES = (
+    "emerging", "stable", "declining", "archived", "rejected",
+)
+
+
+async def _restore_reviewed_statuses() -> int:
+    """重建后按候选池回写审核状态（08-16 审查：审核列表 ↔ 图谱对应，风险 A）。
+
+    图谱重建把全部岗位置为 active；已审核岗位（emerging/stable/declining/
+    archived/rejected）的状态存于 discovery_candidates，重放完成后恢复
+    Position.status——否则"已归档/已驳回"岗位重建后复活为公开 active，且
+    审核列表与图谱显示不一致。仅更新重建后确实存在的节点（MATCH），无 JD
+    支撑的已审核岗位不创建孤儿节点。返回回写岗位数。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.business import DiscoveryCandidate
+
+    async with async_session_factory() as s:
+        rows = (await s.scalars(
+            select(DiscoveryCandidate).where(
+                DiscoveryCandidate.state.in_(_REVIEWED_STATES)
+            )
+        )).all()
+    pairs = [(r.position_name, r.state) for r in rows]
+    if not pairs:
+        return 0
+
+    tz_cn = timezone(timedelta(hours=8))
+
+    def _write() -> None:
+        now = datetime.now(tz_cn).isoformat(timespec="seconds")
+        with neo4j_driver.session() as session:
+            for name, state in pairs:
+                session.run(
+                    """
+                    MATCH (p:Position {name: $name})
+                    SET p.status = $state, p.state_updated_at = $now
+                    """,
+                    name=name, state=state, now=now,
+                )
+
+    await asyncio.to_thread(_write)
+    logger.info("回写审核状态 %s 个岗位（%s）", len(pairs), "/".join(_REVIEWED_STATES))
+    return len(pairs)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="重建图谱（全库级破坏操作）")
     parser.add_argument("--yes", action="store_true", help="跳过交互确认")
@@ -130,6 +177,9 @@ def main() -> None:
 
         results["relations"] = await asyncio.to_thread(_relations)
         results["evolved"] = await derive_evolved_from()
+        # 审核状态回写（08-16 风险 A）：重建把全部岗位置 active，候选池已审核
+        # 状态在此恢复，快照含最终状态（避免"已归档岗位复活为公开 active"）
+        results["reviewed_status"] = await _restore_reviewed_statuses()
         results["snapshot"] = await snapshot_graph({}, triggered_by="manual-rebuild")
         return results
 
