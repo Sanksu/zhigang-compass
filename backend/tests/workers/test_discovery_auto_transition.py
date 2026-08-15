@@ -275,7 +275,7 @@ class TestAutoTransitionTask:
 class TestPositionSkillNovelty:
     """_position_skill_novelty 计算（§7.2.1：Skill.first_seen 平均图谱年龄归一化）。"""
 
-    def _run(self, position_rows, first_seen_rows, names=None):
+    def _run(self, position_rows, first_seen_rows, names=None, reference_days=None):
         from app.workers.tasks import _position_skill_novelty
 
         class _S:
@@ -289,7 +289,7 @@ class TestPositionSkillNovelty:
                 return _FakeRows([])
 
         rows_by_query = {"REQUIRES": position_rows, "first_seen": first_seen_rows}
-        return _position_skill_novelty(_S(rows_by_query), names or ["岗位A"])
+        return _position_skill_novelty(_S(rows_by_query), names or ["岗位A"], reference_days=reference_days)
 
     def test_mature_skills_low_novelty(self):
         """技能平均年龄 ≥ 255 天（novelty < 0.3）→ 可 stable。"""
@@ -303,13 +303,14 @@ class TestPositionSkillNovelty:
         assert out["岗位A"] == 0.0  # 1 - min(400/365, 1) = 0
 
     def test_new_skills_high_novelty(self):
-        """技能平均年龄小（novelty ≥ 0.3）→ 拦截 stable。"""
+        """技能平均年龄小（novelty ≥ 0.3）→ 拦截 stable（固定 365 参考周期）。"""
         from datetime import date, timedelta
         recent = date.today() - timedelta(days=30)
         out = self._run(
             [{"pname": "岗位A", "skills": ["AI 原生", "多模态"]}],
             [{"name": "AI 原生", "first_seen": recent.isoformat()},
              {"name": "多模态", "first_seen": recent.isoformat()}],
+            reference_days=365,
         )
         assert out["岗位A"] > 0.3
 
@@ -322,6 +323,7 @@ class TestPositionSkillNovelty:
             [{"pname": "岗位A", "skills": ["Python", "AI 原生"]}],
             [{"name": "Python", "first_seen": old.isoformat()},
              {"name": "AI 原生", "first_seen": recent.isoformat()}],
+            reference_days=365,
         )
         avg = (400 + 40) / 2
         assert out["岗位A"] == pytest.approx(1 - min(avg / 365, 1.0), abs=1e-3)
@@ -338,7 +340,33 @@ class TestPositionSkillNovelty:
             [{"name": "Python", "first_seen": None}],
         )
         assert out["岗位A"] is None
+    def test_adaptive_reference_cold_start(self):
+        """自适应参考周期（冷启动）：图谱早期存量技能 novelty=0（可 stable）。
 
+        图谱仅运行 33 天时固定 365 天参考周期会让全部技能 novelty≈0.99
+        （实测），任何岗位无法 stable——自适应后首日技能 novelty=0。
+        """
+        from datetime import date, timedelta
+        start = date.today() - timedelta(days=33)
+        recent = date.today() - timedelta(days=2)
+        out = self._run(
+            [{"pname": "岗位A", "skills": ["Vue", "AI 原生"]}],
+            [{"name": "Vue", "first_seen": start.isoformat()},
+             {"name": "AI 原生", "first_seen": recent.isoformat()}],
+        )
+        # 参考周期 = 33 天（图谱生命周期）；Vue 首日出现 → avg_age 17.5 → novelty ≈ 0.47
+        assert out["岗位A"] is not None
+        assert 0.3 < out["岗位A"] < 0.6
+
+    def test_adaptive_reference_earliest_skill_mature(self):
+        """图谱首日即有的存量技能 → novelty=0（成熟可 stable）。"""
+        from datetime import date, timedelta
+        start = date.today() - timedelta(days=33)
+        out = self._run(
+            [{"pname": "岗位A", "skills": ["Vue"]}],
+            [{"name": "Vue", "first_seen": start.isoformat()}],
+        )
+        assert out["岗位A"] == 0.0
 
 class TestAutoTransitionTaskNoveltyGate:
     """任务级：skill_novelty ≥ 0.3 的岗位即使其他条件达标也不升级 stable。"""
@@ -349,10 +377,12 @@ class TestAutoTransitionTaskNoveltyGate:
         row = _candidate_row(name)
         cand_session = _FakeSession([row])
         from datetime import date, timedelta
-        recent = date.today() - timedelta(days=20)
+        start = date.today() - timedelta(days=30)
+        recent = date.today() - timedelta(days=2)
         driver = _FakeDriver(rows_by_query={
-            "REQUIRES": [{"pname": name, "skills": ["AI 原生"]}],
-            "first_seen": [{"name": "AI 原生", "first_seen": recent.isoformat()}],
+            "REQUIRES": [{"pname": name, "skills": ["Vue", "AI 原生"]}],
+            "first_seen": [{"name": "Vue", "first_seen": start.isoformat()},
+                           {"name": "AI 原生", "first_seen": recent.isoformat()}],
         })
 
         result = _run_task([jd_session, cand_session], driver)

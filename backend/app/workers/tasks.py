@@ -454,7 +454,7 @@ def _graph_skill_first_seen(skills: Iterable[str]) -> dict[str, date]:
 
 
 def _position_skill_novelty(
-    session, position_names: list[str], reference_days: int = 365,
+    session, position_names: list[str], reference_days: int | None = None,
 ) -> dict[str, float | None]:
     """岗位技能新颖度（§7.2.1 skill_novelty < 0.3，08-15 实现）。
 
@@ -464,13 +464,18 @@ def _position_skill_novelty(
     语义：岗位技能平均出现 ≥ reference_days×0.7 天（novelty < 0.3）视为
     技能成熟，才允许 stable（新技能驱动的岗位仍处演化期）。
 
+    reference_days 默认自适应图谱生命周期（today - 图谱最早技能首见时间）：
+    固定 365 天在冷启动阶段不适配——图谱仅运行 33 天时全部技能 novelty≈0.99
+    （实测），任何岗位都无法 stable；相对口径下图谱首日即有的存量技能
+    novelty=0（成熟），近期新增技能 novelty 高（演化期）。
+
     岗位无技能 / first_seen 全缺失 / 图谱不可达 → None（判定层不拦截，
     保持"novelty 数据不可得时不阻塞"的既有行为）。
 
     Args:
         session: Neo4j 会话（同步）
         position_names: 岗位名列表
-        reference_days: 归一化参考周期（默认 365 天，可配置）
+        reference_days: 归一化参考周期（默认 None = 图谱生命周期，可配置）
 
     Returns:
         {岗位名: novelty | None}
@@ -510,6 +515,10 @@ def _position_skill_novelty(
             logger.warning("_position_skill_novelty: first_seen 查询失败: %s", exc)
 
     today = date.today()
+    if reference_days is None:
+        # 自适应参考周期 = 图谱生命周期（最早技能首见至今）；首日技能 novelty=0
+        earliest = min(first_seen.values(), default=None)
+        reference_days = max((today - earliest).days, 1) if earliest else 1
     out: dict[str, float | None] = {}
     for r in rows:
         ages = [
