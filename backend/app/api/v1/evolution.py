@@ -6,17 +6,40 @@ T+1 全量快照（设计文档 7.1）。
 
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+import json
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_role
-from app.core.database import get_db
+from app.core.database import get_db, redis_client
 from app.models.business import GraphVersion
 from app.schemas.common import ok, error
 
 router = APIRouter()
+
+# 演化列表缓存 TTL（60s）：快照每日 05:00 更新，列表查询每请求全量加载
+# 快照建索引（O(快照×节点×边)），看板高频访问下重复计算（08-15 审查）。
+# 缓存是增强非正确性依赖：redis 不可用（测试环境/故障）时自动降级直查。
+EVOLUTION_CACHE_TTL = 60
+
+
+async def _cache_get_json(key: str):
+    """Redis 缓存读取（JSON）；redis 不可用时返回 None（不阻塞主查询）。"""
+    try:
+        cached = await redis_client.get(key)
+        return json.loads(cached) if cached else None
+    except Exception:
+        return None
+
+
+async def _cache_set_json(key: str, data, ttl: int = EVOLUTION_CACHE_TTL) -> None:
+    """Redis 缓存写入；失败静默（缓存写失败不影响响应正确性）。"""
+    try:
+        await redis_client.set(key, json.dumps(data), ex=ttl)
+    except Exception:
+        pass
 
 
 def _diff_snapshots(a: dict, b: dict) -> dict:
@@ -266,11 +289,19 @@ async def position_evolution(
     返回 points（时间升序，date/version/freq=该岗位被引用边数），
     并附当前岗位名（快照中最近出现过的名称）。
     """
+    cache_key = f"evolution:position:{id}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+
     snapshots = await _load_snapshots(db)
     if snapshots is None:
         return error(4040, "无图谱版本数据", http_status=404)
     indexes = _build_snapshot_indexes(snapshots)
-    return ok(data=_rebuild_position_evolution(indexes, id))
+    data = _rebuild_position_evolution(indexes, id)
+    await _cache_set_json(cache_key, data)
+    return ok(data=data)
+
 @router.get("/positions")
 async def position_evolution_list(
     limit: int = Query(default=8, ge=1, le=20),
@@ -282,15 +313,22 @@ async def position_evolution_list(
     供演化看板默认展示——页面加载即有岗位演化轨迹，无需先查节点 ID。
     岗位判定：快照节点 type=position（id 前缀 pos_ 兜底）。
     """
+    cache_key = f"evolution:positions:{limit}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+
     snapshots = await _load_snapshots(db)
     if snapshots is None:
         return error(4040, "无图谱版本数据", http_status=404)
 
     indexes = _build_snapshot_indexes(snapshots)
     top = _top_nodes_by_heat(indexes, "position", "pos_", "src", limit)
-    return ok(data={
+    data = {
         "positions": [_rebuild_position_evolution(indexes, pid) for pid, _ in top],
-    })
+    }
+    await _cache_set_json(cache_key, data)
+    return ok(data=data)
 
 
 @router.get("/skills")
@@ -305,6 +343,11 @@ async def skill_evolution_list(
     技能 freq = 被引用边数（edges.target == skill，与 /trends 口径一致）。
     技能判定：快照节点 type=skill（id 前缀 sk_ 兜底）。
     """
+    cache_key = f"evolution:skills:{limit}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+
     snapshots = await _load_snapshots(db)
     if snapshots is None:
         return error(4040, "无图谱版本数据", http_status=404)
@@ -315,7 +358,9 @@ async def skill_evolution_list(
     for sid, _ in top:
         name, points = _rebuild_node_evolution(indexes, sid, edge_side="target")
         skills.append({"skill_id": sid, "skill_name": name, "points": points})
-    return ok(data={"skills": skills})
+    data = {"skills": skills}
+    await _cache_set_json(cache_key, data)
+    return ok(data=data)
 
 
 @router.get("/trends")

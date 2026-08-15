@@ -1013,6 +1013,7 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
         snap = dict(row.snapshot or {})
         # 爬虫原始标签（如 coursera 段落解析）先过门控；仍有缺失才走 LLM
         skills = filter_skill_tags(snap.get("skills") or [])
+        llm_ok = False
         if not skills:
             if llm is None:
                 skipped_no_llm += 1
@@ -1021,13 +1022,18 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
                     skills = extract_course_skills(
                         llm, snap.get("title", ""), snap.get("description", "")
                     )
+                    llm_ok = True  # 正常返回（含宁少勿滥空数组）= 确定性结果
                 except Exception:
-                    failed += 1
+                    failed += 1  # 瞬时失败：不标记完成，下次 ETL 重试补全
         if skills:
             snap["skills"] = skills
             enriched += 1
-        # 标记已处理（含空结果），防每次 ETL 对同一课程重复调用 LLM
-        snap["skills_enriched"] = True
+            # 标记已处理（含空结果），防每次 ETL 对同一课程重复调用 LLM
+            snap["skills_enriched"] = True
+        elif llm is None or llm_ok:
+            # 确定性跳过：LLM 配置缺失（重试无意义）或 LLM 正常判定无技能
+            snap["skills_enriched"] = True
+        # LLM 调用异常（failed）→ 不写标记，课程保持可重试
         row.snapshot = snap
     if rows:
         async with async_session_factory() as session:
