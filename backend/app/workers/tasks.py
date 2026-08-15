@@ -999,6 +999,7 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
     enriched = 0
     skipped_no_llm = 0
     failed = 0
+    updates: dict[int, dict] = {}
     for row in rows:
         snap = dict(row.snapshot or {})
         # 爬虫原始标签（如 coursera 段落解析）先过门控；仍有缺失才走 LLM
@@ -1021,13 +1022,23 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
         elif llm is None:
             # LLM 不可用（skipped_no_llm）：不写标记——配置恢复后自动重试，
             # 避免"LLM 缺失期间误标已处理"导致课程永久无标签
-            pass
+            continue
         else:
             # LLM 已跑但抽取为空（failed 或门控全滤）：标记防重复调用
             snap["skills_enriched"] = True
-        row.snapshot = snap
-    if rows:
+        updates[row.id] = snap
+    if updates:
+        # 08-15 修复：此前在已关闭的 session 的 ORM 对象上改 snapshot 后于新
+        # session commit——detached 对象的修改不会落库，写回全部静默丢失
+        # （实测 PG 0 条）。重新加载本 session 的 ORM 对象再写回。
         async with async_session_factory() as session:
+            objs = (
+                await session.scalars(
+                    select(CourseRaw).where(CourseRaw.id.in_(list(updates)))
+                )
+            ).all()
+            for o in objs:
+                o.snapshot = updates[o.id]
             await session.commit()
 
     return {
