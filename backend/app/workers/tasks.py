@@ -453,6 +453,124 @@ def _graph_skill_first_seen(skills: Iterable[str]) -> dict[str, date]:
     return out
 
 
+def _position_skill_novelty(
+    session, position_names: list[str], reference_days: int = 365,
+) -> dict[str, float | None]:
+    """岗位技能新颖度（§7.2.1 skill_novelty < 0.3，08-15 实现）。
+
+    数据源：Neo4j Skill.first_seen（实测 100% 覆盖）——岗位 REQUIRES 技能
+    平均图谱年龄归一化：
+        novelty = 1 - min(avg_age_days / reference_days, 1)
+    语义：岗位技能平均出现 ≥ reference_days×0.7 天（novelty < 0.3）视为
+    技能成熟，才允许 stable（新技能驱动的岗位仍处演化期）。
+
+    岗位无技能 / first_seen 全缺失 / 图谱不可达 → None（判定层不拦截，
+    保持"novelty 数据不可得时不阻塞"的既有行为）。
+
+    Args:
+        session: Neo4j 会话（同步）
+        position_names: 岗位名列表
+        reference_days: 归一化参考周期（默认 365 天，可配置）
+
+    Returns:
+        {岗位名: novelty | None}
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    try:
+        rows = session.run(
+            "MATCH (p:Position)-[r:REQUIRES]->(s:Skill) "
+            "WHERE p.name IN $names "
+            "RETURN p.name AS pname, collect(DISTINCT s.name) AS skills",
+            names=list(position_names),
+        ).data()
+    except Exception as exc:
+        logger.warning("_position_skill_novelty: 图谱查询失败: %s", exc)
+        return {}
+
+    all_skills = {s for r in rows for s in (r.get("skills") or [])}
+    first_seen: dict[str, date] = {}
+    if all_skills:
+        try:
+            recs = session.run(
+                "MATCH (s:Skill) WHERE s.name IN $names "
+                "RETURN s.name AS name, s.first_seen AS first_seen",
+                names=list(all_skills),
+            ).data()
+            for rec in recs:
+                fs = rec.get("first_seen")
+                if not fs:
+                    continue
+                try:
+                    first_seen[rec["name"]] = date.fromisoformat(str(fs)[:10])
+                except ValueError:
+                    continue
+        except Exception as exc:
+            logger.warning("_position_skill_novelty: first_seen 查询失败: %s", exc)
+
+    today = date.today()
+    out: dict[str, float | None] = {}
+    for r in rows:
+        ages = [
+            (today - first_seen[s]).days
+            for s in (r.get("skills") or []) if s in first_seen
+        ]
+        if not ages:
+            out[r["pname"]] = None
+            continue
+        avg_age = sum(ages) / len(ages)
+        out[r["pname"]] = 1.0 - min(avg_age / reference_days, 1.0)
+    return out
+
+    logger = logging.getLogger(__name__)
+    names = {canonical_skill_name(s) for s in skills if canonical_skill_name(s)}
+    if not names:
+        logger.info("_graph_skill_first_seen: 无有效技能名，跳过读图（空映射，回退 jd_raw）")
+        return {}
+    logger.info(
+        "_graph_skill_first_seen: 技能请求=%d 归一化去重后=%d",
+        len(skills), len(names),
+    )
+    try:
+        with neo4j_driver.session() as session:
+            rows = session.run(
+                "MATCH (s:Skill) WHERE s.name IN $names "
+                "RETURN s.name AS name, s.first_seen AS first_seen",
+                names=list(names),
+            ).data()
+    except Exception as exc:
+        # 图谱不可达（懒连接失败/服务停止）不阻断时滞检测，回退 jd_raw 推算
+        logger.warning(
+            "_graph_skill_first_seen: 图谱不可达，回退 jd_raw 推算: %s: %s",
+            type(exc).__name__, exc,
+        )
+        return {}
+    out: dict[str, date] = {}
+    parse_failed: list[str] = []
+    for r in rows:
+        raw = r.get("first_seen")
+        if not raw:
+            continue
+        try:
+            out[r["name"]] = datetime.fromisoformat(str(raw)).date()
+        except ValueError:
+            parse_failed.append(r["name"])
+    missing = sorted(names - set(out))
+    logger.info(
+        "_graph_skill_first_seen: 图谱命中=%d/%d%s",
+        len(out), len(names),
+        "" if not missing else f"，缺失 {len(missing)} 个将回退 jd_raw: {missing[:10]}"
+        + ("" if len(missing) <= 10 else f" 等共 {len(missing)} 个"),
+    )
+    if parse_failed:
+        logger.warning(
+            "_graph_skill_first_seen: %d 个技能 first_seen 解析失败被跳过（回退 jd_raw）: %s",
+            len(parse_failed), parse_failed[:10],
+        )
+    return out
+
+
 def _experience_years(snapshot: dict) -> int | None:
     """解析经验要求最小年限（如 "3-5年" → 3）；无法解析返回 None。"""
     import re
@@ -2043,6 +2161,20 @@ async def discovery_auto_transition(ctx: dict) -> dict:
             )
         )).all()
 
+        # ── 2.5 skill_novelty（§7.2.1，08-15）：批量查询岗位技能新颖度 ──
+        # 数据源：Neo4j Skill.first_seen（100% 覆盖）——岗位 REQUIRES 技能
+        # 平均图谱年龄归一化；图谱不可达/无技能返回 None（判定层不拦截）
+        novelty_map: dict[str, float | None] = {}
+        try:
+            with neo4j_driver.session() as neo4j_session:
+                novelty_map = await asyncio.to_thread(
+                    _position_skill_novelty,
+                    neo4j_session,
+                    [row.position_name for row in rows],
+                )
+        except Exception as exc:
+            _logger.warning("auto_transition: skill_novelty 查询失败，本次不拦截: %s", exc)
+
         for row in rows:
             name = normalize_position_name(row.position_name)
             if not name:
@@ -2077,13 +2209,16 @@ async def discovery_auto_transition(ctx: dict) -> dict:
             jd_count = sum(daily_freqs.get(name, {}).values())
             target = evaluate_auto_transition(
                 candidate, windows, confidence=conf, jd_count=jd_count,
+                skill_novelty=novelty_map.get(row.position_name),
             )
             _logger.info(
                 "auto_transition: %s state=%s 30天窗口序列=%s z_scores=%s "
-                "volatility=%.3f decline_rate=%.3f → %s",
+                "volatility=%.3f decline_rate=%.3f novelty=%s → %s",
                 row.position_name, row.state, freqs,
                 [round(z, 3) for z in windows.z_scores],
                 window_volatility(windows), decline_rate(windows),
+                f"{novelty_map.get(row.position_name):.3f}"
+                if novelty_map.get(row.position_name) is not None else "N/A",
                 target.value if target else "不迁移",
             )
             if target is None:

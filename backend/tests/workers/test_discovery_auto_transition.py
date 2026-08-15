@@ -12,6 +12,7 @@ emerging → stable 自动升级链路在真实任务函数内完整生效：
 不依赖真实基础设施，全部 DB 交互由 fake 捕获断言。
 """
 
+import pytest
 import asyncio
 import unittest.mock as mock
 from datetime import datetime, timedelta, timezone
@@ -98,8 +99,11 @@ class _FakeTx:
 
 
 class _FakeNeo4jSession:
-    def __init__(self, queries):
+    def __init__(self, queries, rows_by_query: dict | None = None):
         self._queries = queries
+        # skill_novelty 查询返回（08-15）：按 Cypher 关键字匹配——REQUIRES
+        # 查询返回岗位技能映射、first_seen 查询返回技能首见时间
+        self._rows_by_query = rows_by_query or {}
 
     def __enter__(self):
         return self
@@ -110,13 +114,31 @@ class _FakeNeo4jSession:
     def execute_write(self, fn):
         fn(_FakeTx(self._queries))
 
+    def run(self, query, **params):
+        self._queries.append((query, params))
+        for key, rows in self._rows_by_query.items():
+            if key in query:
+                return _FakeRows(rows)
+        return _FakeRows([])
+
+
+class _FakeRows:
+    """session.run().data() 桩。"""
+
+    def __init__(self, rows: list[dict]):
+        self._rows = rows
+
+    def data(self):
+        return self._rows
+
 
 class _FakeDriver:
-    def __init__(self):
+    def __init__(self, rows_by_query: dict | None = None):
         self.queries = []
+        self._rows_by_query = rows_by_query
 
     def session(self):
-        return _FakeNeo4jSession(self.queries)
+        return _FakeNeo4jSession(self.queries, self._rows_by_query)
 
 
 def _candidate_row(name: str = "RAG", state: str = "emerging", confidence: float = 0.9):
@@ -175,8 +197,8 @@ class TestAutoTransitionTask:
         # 候选池状态落库 + Neo4j 幂等 MERGE（08-14：Counter 自增 + MERGE 共 2 条）
         assert row.state == "stable"
         assert cand_session.committed is True
-        assert len(driver.queries) == 2
-        query, params = driver.queries[1]
+        assert len(driver.queries) == 3
+        query, params = driver.queries[2]
         assert "MERGE (p:Position {name: $name})" in query
         assert "SET p.status = $state" in query
         assert params["name"] == name
@@ -209,7 +231,8 @@ class TestAutoTransitionTask:
         assert result["transitions"] == 0
         assert result["detail"] == []
         assert row.state == "emerging"
-        assert driver.queries == []
+        # 08-15：novelty 批量查询执行（REQUIRES），但不迁移则无 persist 写入
+        assert all("MERGE" not in q for q, _ in driver.queries)
 
     def test_recovery_from_declining_to_stable(self):
         """发布频次先降后升（最近 2 窗口 z > 0）→ declining 自动回迁 stable。"""
@@ -229,8 +252,8 @@ class TestAutoTransitionTask:
         }]
         assert row.state == "stable"
         assert cand_session.committed is True
-        assert len(driver.queries) == 2  # 08-14：Counter 自增 + MERGE
-        query, params = driver.queries[1]
+        assert len(driver.queries) == 3  # 08-15：novelty REQUIRES 查询 + Counter 自增 + MERGE
+        query, params = driver.queries[2]
         assert "SET p.status = $state" in query
         assert params["state"] == "stable"
 
@@ -245,4 +268,97 @@ class TestAutoTransitionTask:
         result = _run_task([jd_session, cand_session], driver)
 
         assert result["transitions"] == 0
-        assert driver.queries == []
+        # 08-15：novelty 批量查询在循环前无条件执行（空岗位集发 1 条
+        # REQUIRES 查询），但不得有任何 persist 写入（MERGE）
+        assert all("MERGE" not in q for q, _ in driver.queries)
+
+class TestPositionSkillNovelty:
+    """_position_skill_novelty 计算（§7.2.1：Skill.first_seen 平均图谱年龄归一化）。"""
+
+    def _run(self, position_rows, first_seen_rows, names=None):
+        from datetime import date, timedelta
+
+        from app.workers.tasks import _position_skill_novelty
+
+        class _S:
+            def __init__(self, rows_by_query):
+                self._map = rows_by_query
+
+            def run(self, query, **params):
+                for key, rows in self._map.items():
+                    if key in query:
+                        return _FakeRows(rows)
+                return _FakeRows([])
+
+        today = date.today()
+        rows_by_query = {"REQUIRES": position_rows, "first_seen": first_seen_rows}
+        return _position_skill_novelty(_S(rows_by_query), names or ["岗位A"])
+
+    def test_mature_skills_low_novelty(self):
+        """技能平均年龄 ≥ 255 天（novelty < 0.3）→ 可 stable。"""
+        from datetime import date, timedelta
+        old = date.today() - timedelta(days=400)
+        out = self._run(
+            [{"pname": "岗位A", "skills": ["Python", "SQL"]}],
+            [{"name": "Python", "first_seen": old.isoformat()},
+             {"name": "SQL", "first_seen": old.isoformat()}],
+        )
+        assert out["岗位A"] == 0.0  # 1 - min(400/365, 1) = 0
+
+    def test_new_skills_high_novelty(self):
+        """技能平均年龄小（novelty ≥ 0.3）→ 拦截 stable。"""
+        from datetime import date, timedelta
+        recent = date.today() - timedelta(days=30)
+        out = self._run(
+            [{"pname": "岗位A", "skills": ["AI 原生", "多模态"]}],
+            [{"name": "AI 原生", "first_seen": recent.isoformat()},
+             {"name": "多模态", "first_seen": recent.isoformat()}],
+        )
+        assert out["岗位A"] > 0.3
+
+    def test_mixed_skills_average(self):
+        """新老技能混合取平均。"""
+        from datetime import date, timedelta
+        old = date.today() - timedelta(days=400)
+        recent = date.today() - timedelta(days=40)
+        out = self._run(
+            [{"pname": "岗位A", "skills": ["Python", "AI 原生"]}],
+            [{"name": "Python", "first_seen": old.isoformat()},
+             {"name": "AI 原生", "first_seen": recent.isoformat()}],
+        )
+        avg = (400 + 40) / 2
+        assert out["岗位A"] == pytest.approx(1 - min(avg / 365, 1.0), abs=1e-3)
+
+    def test_no_skills_returns_none(self):
+        """岗位无 REQUIRES 技能 → None（判定层不拦截）。"""
+        out = self._run([{"pname": "岗位A", "skills": []}], [])
+        assert out["岗位A"] is None
+
+    def test_missing_first_seen_skipped(self):
+        """first_seen 缺失的技能不参与平均；全缺失 → None。"""
+        out = self._run(
+            [{"pname": "岗位A", "skills": ["Python", "SQL"]}],
+            [{"name": "Python", "first_seen": None}],
+        )
+        assert out["岗位A"] is None
+
+
+class TestAutoTransitionTaskNoveltyGate:
+    """任务级：skill_novelty ≥ 0.3 的岗位即使其他条件达标也不升级 stable。"""
+
+    def test_emerging_not_promoted_when_novelty_high(self):
+        name = "RAG"
+        jd_session = _FakeSession(_jd_rows_by_window(name, [11, 10, 11, 10]))
+        row = _candidate_row(name)
+        cand_session = _FakeSession([row])
+        from datetime import date, timedelta
+        recent = date.today() - timedelta(days=20)
+        driver = _FakeDriver(rows_by_query={
+            "REQUIRES": [{"pname": name, "skills": ["AI 原生"]}],
+            "first_seen": [{"name": "AI 原生", "first_seen": recent.isoformat()}],
+        })
+
+        result = _run_task([jd_session, cand_session], driver)
+
+        assert result["transitions"] == 0
+        assert row.state == "emerging"  # 未升级

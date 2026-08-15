@@ -251,6 +251,22 @@ class TestAutoTransition:
         w = WindowFreq([10, 9, 10])
         assert evaluate_auto_transition(c, w) == PositionState.STABLE
 
+    def test_emerging_stays_when_skill_novelty_high(self):
+        """§7.2.1：skill_novelty ≥ 0.3 不升级 stable（新技能驱动岗位仍处演化期）。"""
+        c = _candidate(PositionState.EMERGING, source_diversity=3, jd_count=5)
+        w = WindowFreq([10, 9, 10])
+        assert evaluate_auto_transition(c, w, skill_novelty=0.5) is None
+        # 边界：0.3 不满足（< 0.3 严格）
+        assert evaluate_auto_transition(c, w, skill_novelty=0.3) is None
+        # 0.29 达标
+        assert evaluate_auto_transition(c, w, skill_novelty=0.29) == PositionState.STABLE
+
+    def test_emerging_to_stable_when_novelty_none(self):
+        """skill_novelty=None（数据不可得）不拦截——保持既有行为。"""
+        c = _candidate(PositionState.EMERGING, source_diversity=3, jd_count=5)
+        w = WindowFreq([10, 9, 10])
+        assert evaluate_auto_transition(c, w, skill_novelty=None) == PositionState.STABLE
+
     def test_emerging_stays_when_volatile(self):
         c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
         w = WindowFreq([10, 5, 10])  # 波动 50% > 25%
