@@ -270,12 +270,36 @@ function TechnologyWatchView() {
 
 // ===== SkillTrendView =====
 
-/** 技能频次趋势（真实 GET /evolution/trends，按技能节点 ID 查询） */
+/** 后端 /evolution/skills 返回项（默认技能演化列表） */
+type SkillEvolutionListData = components['schemas']['SkillEvolutionListData']
+
+/** 技能频次趋势（默认展示 Top-8 技能，可下拉切换或输入 ID 查特定技能） */
 function SkillTrendView() {
   const [skillId, setSkillId] = useState('')
   const [data, setData] = useState<EvolutionTrends | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 默认技能列表（08-15：页面打开即有趋势，无需先查节点 ID）
+  const [defaults, setDefaults] = useState<components['schemas']['SkillEvolutionData'][] | null>(null)
+  const [selected, setSelected] = useState<components['schemas']['SkillEvolutionData'] | null>(null)
+  const [defaultError, setDefaultError] = useState<string | null>(null)
+
+  // 页面加载即拉取快照热度 Top-8 技能演化（GET /evolution/skills）
+  useEffect(() => {
+    let cancelled = false
+    apiGet<SkillEvolutionListData>('/evolution/skills?limit=8')
+      .then((r) => {
+        if (cancelled) return
+        setDefaults(r.skills)
+        if (r.skills.length > 0) setSelected(r.skills[0])
+      })
+      .catch((e) => {
+        if (!cancelled) setDefaultError(e instanceof ApiError ? e.message : '默认技能加载失败')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   function load() {
     const id = skillId.trim()
@@ -294,6 +318,10 @@ function SkillTrendView() {
       .finally(() => setLoading(false))
   }
 
+  // 当前展示：手动查询结果优先，否则默认选中技能
+  const points = data?.points ?? selected?.points ?? null
+  const title = data ? data.skill : (selected?.skill_name ?? null)
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -303,6 +331,30 @@ function SkillTrendView() {
             <span>技能频次趋势 · 最近 90 天</span>
           </span>
           <div className="flex items-center gap-2">
+            {defaults && defaults.length > 0 && (
+              <Select
+                value={selected?.skill_id ?? ''}
+                onValueChange={(v) => {
+                  const hit = defaults.find((d) => d.skill_id === v)
+                  if (hit) {
+                    setSelected(hit)
+                    setData(null)
+                    setError(null)
+                  }
+                }}
+              >
+                <SelectTrigger className="h-8 w-48 text-xs">
+                  <SelectValue placeholder="选择技能" />
+                </SelectTrigger>
+                <SelectContent>
+                  {defaults.map((d) => (
+                    <SelectItem key={d.skill_id} value={d.skill_id} className="text-xs">
+                      {d.skill_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <Input
               value={skillId}
               onChange={(e) => setSkillId(e.target.value)}
@@ -319,34 +371,47 @@ function SkillTrendView() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {error && <p className="py-6 text-center text-xs text-state-archived">{error}</p>}
-        {!error && !data && (
+        {defaultError && <p className="py-6 text-center text-xs text-state-archived">{defaultError}</p>}
+        {!defaultError && defaults === null && !error && (
+          <p className="py-6 text-center text-xs text-ink-faint">加载默认技能趋势…</p>
+        )}
+        {!defaultError && defaults !== null && defaults.length === 0 && !error && (
           <p className="py-6 text-center text-xs text-ink-faint">
-            输入技能节点 ID 查询各版本快照中的关联频次（技能 ID 可在「能力图谱」详情面板查看）
+            暂无技能快照数据（版本数据不足），可输入技能节点 ID 查询
           </p>
         )}
-        {!error && data && data.points.length === 0 && (
+        {error && <p className="py-6 text-center text-xs text-state-archived">{error}</p>}
+        {!error && points && points.length === 0 && (
           <p className="py-6 text-center text-xs text-ink-faint">该技能在各版本快照中无关联边</p>
         )}
-        {!error && data && data.points.length > 0 && (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>快照日期</TableHead>
-                <TableHead>版本</TableHead>
-                <TableHead className="text-right">关联岗位数</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.points.map((p) => (
-                <TableRow key={p.version}>
-                  <TableCell className="text-xs font-mono text-ink-muted">{p.date ?? '—'}</TableCell>
-                  <TableCell className="font-mono text-xs text-ink-secondary">{p.version}</TableCell>
-                  <TableCell className="text-right tabular-nums font-mono">{p.freq}</TableCell>
+        {!error && points && points.length > 0 && (
+          <>
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+              <span className="font-medium text-ink">{title}</span>
+              <span className="font-mono text-[10px] text-ink-faint">
+                {data?.skill ?? selected?.skill_id}
+              </span>
+              <span className="text-ink-faint">· 共 {points.length} 期快照</span>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>快照日期</TableHead>
+                  <TableHead>版本</TableHead>
+                  <TableHead className="text-right">关联岗位数</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {points.map((p) => (
+                  <TableRow key={p.version}>
+                    <TableCell className="text-xs font-mono text-ink-muted">{p.date ?? '—'}</TableCell>
+                    <TableCell className="font-mono text-xs text-ink-secondary">{p.version}</TableCell>
+                    <TableCell className="text-right tabular-nums font-mono">{p.freq}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
         )}
       </CardContent>
     </Card>

@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from neo4j.exceptions import GqlError
 
 from app.core.config import settings
@@ -150,6 +151,31 @@ async def health_check():
 
 
 # ---------- 前端静态资源（生产：同端口托管；开发：Vite dev server 独立） ----------
+class _SPAFallbackStaticFiles(StaticFiles):
+    """SPA history 路由回退（08-15 修复：前端路由刷新 404）。
+
+    StaticFiles(html=True) 只回退目录索引，/evolution 等前端路由直接
+    刷新时 404 {"detail":"Not Found"}。本类将非 /api 路径的 404 回退到
+    index.html（前端 Router 接管渲染）；/api/* 404 保持原样（契约 JSON）。
+    """
+
+    async def get_response(self, path: str, scope):
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            # Starlette 1.3 静态文件未命中 raise HTTPException(404)（非返回 404 响应）；
+            # 注意用 starlette.exceptions.HTTPException（fastapi.HTTPException 是独立类）
+            if exc.status_code == 404 and not scope.get("path", "").startswith("/api/"):
+                return await super().get_response("index.html", scope)
+            raise
+        if response.status_code == 404 and not scope.get("path", "").startswith("/api/"):
+            return await super().get_response("index.html", scope)
+        return response
+
+
 frontend_dist = Path(settings.frontend_dist_dir)
 if frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+    app.mount(
+        "/", _SPAFallbackStaticFiles(directory=str(frontend_dist), html=True),
+        name="frontend",
+    )

@@ -166,30 +166,38 @@ async def version_detail(
     })
 
 
-def _rebuild_position_evolution(
-    snapshots: list, position_id: str
-) -> dict:
-    """从版本快照序列重建单个岗位的演化轨迹（position_evolution 与新列表端点共用）。
+def _rebuild_node_evolution(
+    snapshots: list, node_id: str, edge_side: str = "source"
+) -> tuple[str, list]:
+    """从版本快照序列重建节点演化轨迹（岗位 source 侧 / 技能 target 侧）。
 
-    返回 {position_id, position_name, points}，points 时间升序
-    （date/version/freq=该岗位被引用边数/present=节点是否存在）。
+    返回 (最近名称或 id, points)，points 时间升序
+    （date/version/freq=节点被引用边数/present=节点是否存在）。
     """
     name = None
     points = []
     for v in snapshots:
         snapshot = v.snapshot_json or {}
         nodes = {n.get("id"): n for n in snapshot.get("nodes", []) if isinstance(n, dict)}
-        node = nodes.get(position_id)
+        node = nodes.get(node_id)
         if node is not None:
             name = node.get("name") or name
-        freq = sum(1 for e in snapshot.get("edges", []) if e.get("source") == position_id)
+        freq = sum(1 for e in snapshot.get("edges", []) if e.get(edge_side) == node_id)
         points.append({
             "date": v.created_at.date().isoformat() if v.created_at else None,
             "version": v.id,
             "freq": freq,
             "present": node is not None,
         })
-    return {"position_id": position_id, "position_name": name or position_id, "points": points}
+    return name or node_id, points
+
+
+def _rebuild_position_evolution(
+    snapshots: list, position_id: str
+) -> dict:
+    """从版本快照序列重建单个岗位的演化轨迹（position_evolution 与新列表端点共用）。"""
+    name, points = _rebuild_node_evolution(snapshots, position_id, edge_side="source")
+    return {"position_id": position_id, "position_name": name, "points": points}
 
 
 @router.get("/position/{id}/evolution")
@@ -250,6 +258,53 @@ async def position_evolution_list(
     return ok(data={
         "positions": [
             _rebuild_position_evolution(snapshots, pid) for pid, _ in top
+        ],
+    })
+
+
+@router.get("/skills")
+async def skill_evolution_list(
+    limit: int = Query(default=8, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
+):
+    """默认技能演化列表：按快照出现热度（出现期数、最新引用边数）取 Top-N。
+
+    与 /positions 同模式，供演化看板技能频次趋势默认展示。
+    技能 freq = 被引用边数（edges.target == skill，与 /trends 口径一致）。
+    技能判定：快照节点 type=skill（id 前缀 sk_ 兜底）。
+    """
+    rows = await db.scalars(
+        select(GraphVersion).order_by(GraphVersion.created_at.asc())
+    )
+    snapshots = [v for v in rows]
+    if not snapshots:
+        return error(4040, "无图谱版本数据", http_status=404)
+
+    heat: dict[str, dict] = {}  # skill_id -> {name, count, latest_freq}
+    for v in snapshots:
+        snapshot = v.snapshot_json or {}
+        nodes = {n.get("id"): n for n in snapshot.get("nodes", []) if isinstance(n, dict)}
+        for nid, node in nodes.items():
+            if node.get("type") != "skill" and not nid.startswith("sk_"):
+                continue
+            rec = heat.setdefault(nid, {"name": None, "count": 0, "latest_freq": 0})
+            rec["name"] = node.get("name") or rec["name"]
+            rec["count"] += 1
+            rec["latest_freq"] = sum(
+                1 for e in snapshot.get("edges", []) if e.get("target") == nid
+            )
+    top = sorted(
+        heat.items(), key=lambda kv: (-kv[1]["count"], -kv[1]["latest_freq"])
+    )[:limit]
+
+    return ok(data={
+        "skills": [
+            {"skill_id": sid, "skill_name": name, "points": points}
+            for sid, (name, points) in (
+                (sid, _rebuild_node_evolution(snapshots, sid, edge_side="target"))
+                for sid, _ in top
+            )
         ],
     })
 
