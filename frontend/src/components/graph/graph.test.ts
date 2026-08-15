@@ -2,9 +2,12 @@
  * 图谱渲染纯函数单测 — 覆盖本轮显示逻辑优化新增的核心行为：
  * - graph-2d：技能标签密度阈值（中位数截断，低关联技能不常显）
  * - graph-3d：节点视觉半径（类型基础差 + 选中/展开放大）
+ * - graph-layout：岗位防重叠（hasPositionOverlap 判定 + enforceSpread 强制分散，
+ *   2026-08-15 重叠修复双保险的纯函数部分）
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { skillLabelThreshold, nodeRadius } from './graph-utils'
+import { enforceSpread, hasPositionOverlap } from './graph-layout'
 import type { GraphNode } from './types'
 
 function skill(id: string, value?: number): GraphNode {
@@ -13,6 +16,35 @@ function skill(id: string, value?: number): GraphNode {
 
 function position(id: string, value?: number): GraphNode {
   return { id, name: id, type: 'position', value }
+}
+
+/** 构造 ECharts chart 最小 fake：nodes/layouts 按引用维护，可断言写回结果 */
+function makeChart(
+  nodes: { type: string; symbolSize?: number }[],
+  layouts: (number[] | undefined)[],
+) {
+  const layoutsCopy = layouts.map((l) => (l ? [...l] : undefined))
+  let refreshed = 0
+  const chart = {
+    // getModel 可空（与 EChartsModel 最小类型一致：dispose 后返回 null）
+    getModel: (): {
+      getSeriesByIndex(index: number): { getData(): typeof list } | null
+    } | null => ({
+      getSeriesByIndex: () => ({ getData: () => list }),
+    }),
+    getZr: () => ({ refresh: () => void refreshed++ }),
+    layouts: layoutsCopy,
+    refreshed: () => refreshed,
+  }
+  const list = {
+    count: () => nodes.length,
+    getRawDataItem: (i: number) => nodes[i],
+    getItemLayout: (i: number) => layoutsCopy[i],
+    setItemLayout: (i: number, l: number[]) => {
+      layoutsCopy[i] = [...l]
+    },
+  }
+  return chart
 }
 
 describe('skillLabelThreshold', () => {
@@ -77,5 +109,95 @@ describe('nodeRadius', () => {
     const small = skill('s1', 0)
     const big = skill('s2', 100)
     expect(nodeRadius(big, false, false)).toBeGreaterThan(nodeRadius(small, false, false))
+  })
+})
+
+describe('hasPositionOverlap', () => {
+  it('岗位间距 < 半径和 + minGap（-1px 容差）→ true', () => {
+    // symbolSize 20 → 半径 10；minGap 60 → 判定阈 10+10+60-1 = 79
+    const chart = makeChart(
+      [{ type: 'position', symbolSize: 20 }, { type: 'position', symbolSize: 20 }],
+      [[0, 0], [50, 0]],
+    )
+    expect(hasPositionOverlap(chart as never)).toBe(true)
+  })
+
+  it('间距足够（≥ 半径和 + minGap）→ false', () => {
+    const chart = makeChart(
+      [{ type: 'position', symbolSize: 20 }, { type: 'position', symbolSize: 20 }],
+      [[0, 0], [100, 0]],
+    )
+    expect(hasPositionOverlap(chart as never)).toBe(false)
+  })
+
+  it('技能节点重叠不计（仅统计岗位节点）', () => {
+    const chart = makeChart(
+      [{ type: 'position', symbolSize: 20 }, { type: 'skill', symbolSize: 20 }],
+      [[0, 0], [0, 0]],
+    )
+    expect(hasPositionOverlap(chart as never)).toBe(false)
+  })
+
+  it('chart 已 dispose（getModel 返回 null）→ false 不抛错', () => {
+    const chart = makeChart([], [])
+    chart.getModel = () => null
+    expect(hasPositionOverlap(chart as never)).toBe(false)
+  })
+})
+
+describe('enforceSpread', () => {
+  it('重叠岗位对沿连线双向推开至 minDist（默认硬写回）', () => {
+    // 半径 10 + minGap 14 → minDist 34；间距 20 → 各推 7 → 34
+    const chart = makeChart(
+      [{ type: 'position', symbolSize: 20 }, { type: 'position', symbolSize: 20 }],
+      [[0, 0], [20, 0]],
+    )
+    enforceSpread(chart as never, { minGap: 14 })
+    expect(chart.layouts[0]).toEqual([-7, 0])
+    expect(chart.layouts[1]).toEqual([27, 0])
+    expect(chart.refreshed()).toBeGreaterThan(0)
+  })
+
+  it('无重叠不位移', () => {
+    const chart = makeChart(
+      [{ type: 'position', symbolSize: 20 }, { type: 'position', symbolSize: 20 }],
+      [[0, 0], [100, 0]],
+    )
+    enforceSpread(chart as never, { minGap: 14 })
+    expect(chart.layouts[0]).toEqual([0, 0])
+    expect(chart.layouts[1]).toEqual([100, 0])
+  })
+
+  it('重叠对经 maxIterations 多轮迭代收敛（三角连环重叠）', () => {
+    // 3 个岗位两两重叠（间距 12/12/16.97 均 < 34）：松弛迭代后任意两两 ≥ minDist
+    const chart = makeChart(
+      [{ type: 'position', symbolSize: 20 }, { type: 'position', symbolSize: 20 }, { type: 'position', symbolSize: 20 }],
+      [[0, 0], [12, 0], [0, 12]],
+    )
+    enforceSpread(chart as never, { minGap: 14, maxIterations: 20 })
+    const pts = chart.layouts.map((l) => (l as number[]).slice(0, 2))
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        const d = Math.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1])
+        expect(d).toBeGreaterThanOrEqual(34 - 1e-6)
+      }
+    }
+  })
+
+  it('animate 模式经 rAF 插值到终态（无硬跳）', () => {
+    vi.useFakeTimers()
+    try {
+      const chart = makeChart(
+        [{ type: 'position', symbolSize: 20 }, { type: 'position', symbolSize: 20 }],
+        [[0, 0], [20, 0]],
+      )
+      enforceSpread(chart as never, { minGap: 14, animate: true, duration: 100 })
+      // 首帧同步执行后注册 rAF；推进超过 duration → 插值到终态（= 硬写回位置）
+      vi.advanceTimersByTime(150)
+      expect(chart.layouts[0]).toEqual([-7, 0])
+      expect(chart.layouts[1]).toEqual([27, 0])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

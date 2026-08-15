@@ -113,7 +113,9 @@ function toGraphData(raw: PanoramaData): GraphData {
   }
 }
 
-/** 非全景视图已由后端 /graph/view/{view_type} 提供（技术栈/级别/岗位中心均为服务端过滤）。 */
+/** 非全景视图已由后端 /graph/view/{view_type} 提供（技术栈/级别/岗位中心均为服务端过滤）；
+ *  画布岗位数上限（MAX_POSITIONS=30，见 visibleData）为前端展示层裁剪——高频岗位 Top-30
+ *  保底显示 + 已展开岗位必显示，低频岗位经搜索/详情面板触达（2026-08-15 画布容量限制）。 */
 
 /**
  * 能力图谱页 — 设计文档 §10.3
@@ -702,6 +704,9 @@ export function GraphPage() {
       {/* 图例：与画布实际渲染对齐（形状+颜色，支持色盲识别） */}
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-muted" role="list" aria-label="图谱图例">
         <span className="font-medium text-ink-secondary">图例：</span>
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span className="size-2.5 rounded-full bg-state-active" role="img" aria-label="活跃岗位：蓝灰圆形" /> 活跃
+        </span>
         <span className="flex items-center gap-1.5" role="listitem">
           <span className="size-2.5 rounded-full bg-state-stable" role="img" aria-label="稳定岗位：蓝色圆形" /> 稳定
         </span>
