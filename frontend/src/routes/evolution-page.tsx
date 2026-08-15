@@ -792,9 +792,32 @@ function VersionDiffView() {
       .finally(() => setPageLoading(false))
   }
 
-  // 加载第 1 页版本列表，默认对比最近两个版本
+  // 加载第 1 页版本列表，默认对比最近两个版本。
+  // 初始加载不调用 loadVersionsPage（内含同步 setPageLoading——
+  // effect 内同步 setState 违反 react-hooks/set-state-in-effect，CI lint error）
   useEffect(() => {
-    loadVersionsPage(1)
+    let cancelled = false
+    apiGet<components['schemas']['EvolutionVersionListData']>(`/evolution/versions?page=1&size=${PAGE_SIZE}`)
+      .then((res) => {
+        if (cancelled) return
+        // 快照可能在同一事务写入导致 created_at 相同，按 version_id（graph_vYYYYMMDD）降序保证稳定
+        const items = [...res.items].sort((a, b) => b.version_id.localeCompare(a.version_id))
+        setVersions(items)
+        setTotal(res.total)
+        // 默认对比最近两个版本（首次加载/尚未选择时）
+        if (!v1 && !v2) {
+          if (items.length >= 2) {
+            setV1(items[1].version_id)
+            setV2(items[0].version_id)
+          } else if (items.length === 1) {
+            setV1(items[0].version_id)
+          }
+        }
+      })
+      .catch(() => setError('版本列表加载失败'))
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   // 版本对变化 → 拉取真实 diff（setState 均在异步回调内）
