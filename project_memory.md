@@ -136,3 +136,30 @@
 - **影响披露**：重聚合触发 cleanup_graph._reaggregate 既有孤立技能对齐清理（Skill 8005→1771：1629 有岗位入边 + 270 有课程边 + 白名单保留）——08-15"真实低频 4200 保留"是手动清理口径，_reaggregate 自动化本就会删，属设计行为非本次引入。
 - **待办**：PR #260 需张恺天确认（算法核心红线）后合并；合并后部署（dictionary.py 进镜像）；jd_raw 5 对（AI与数据风险管理/经理、AI基础设施±空格、AI 生产力、数据专家）由 P10 映射+清洗在下次 ETL 自动归一。
 - **教训**：① 语义别名表键/值都是岗位名原文，查表用变体键反向索引（直接 get 变体键会大小写不匹配永不命中）；② Windows 下跨 asyncio.run 复用 SQLAlchemy async 池连接必崩（Event loop is closed）——每次 asyncio.run 结束时 await engine.dispose()；③ 并行会话切分支会带走/覆盖工作区未提交修改——commit 落袋后分支被切走也不丢（rebase 移回 + branch -f 恢复对方 commit）。
+
+## 2026-08-16 人工决策记录（Sanksu 逐项决策，全部闭环）
+
+- **#264 review**：口头确认跳过（已合并部署）
+- **§7.2.1 stable 条件**：方案 A 已实现（STABLE_MIN_JD_COUNT=5 + 任务层 jd_count/skill_novelty 传入，测试 test_emerging_stays_when_jd_count_below_5）——决策关闭
+- **BT 补标注（PR #266）**：决策 nice 口径 B（抽取独立）/弱监督注入/384 对/v1 并存；v2 调优 w_exp=0.476 脱离退化（v1 时无可学信息）；生产权重未覆盖，BT 迭代正式启动待张恺天确认 #266
+- **JD gold 3 裁决**：public_007/008 不归并、public_009 按正文改标「数据产品经理」（xlsx 标注已符合）、r2_001/015 接受修订——确认现有标注，零改动
+- **课程可疑档 607**：课程边重建后全部无 sim 属性（978 条/496 门覆盖）——无分档对象，自然关闭（NULL 边设计上不清理）
+- **空壳岗位 8 个**：图谱加 `flagged='no_skills'` 标记（备份 reports/flagged_no_skills_20260816_180138.jsonl）
+- **AI/ML（rejected）收证据**：接受现状（freq 12→13，rejected 不公开不影响对账）
+- **boss 源**：维持暂停（DataDome 防护不可绕过，crawl_spider 注释确认）
+- **补采**：glassdoor 已入队（08-16 18:02）、maimai 等 23:00 合规窗口（CrawlMaimai 计划任务已注册）、monster 停采接受过期
+
+## 排期清单（08-16 决策：审查遗留 + 中危全部排期）
+
+| 编号 | 事项 | 优先级 | 来源 |
+|---|---|---|---|
+| S-01 | audience 校验（接口 audience 参数合法性） | P2 | audit-0815 遗留 |
+| S-02 | Top-30 前端裁剪后端化（分页参数后端落地） | P2 | audit-0815 遗留 |
+| S-03 | 前端假数据清理 | P3 | 08-14 中危 |
+| S-04 | 前端轮询治理 | P3 | 08-14 中危 |
+| S-05 | DTO 漂移（契约类型对齐） | P2 | 08-14 中危 |
+| S-06 | graph 同步 Neo4j（图谱缓存一致性） | P2 | 08-14 中危 |
+| S-07 | 登录锁定（暴力破解防护） | P2 | 08-14 中危 |
+| S-08 | token 黑名单 | P3 | 08-14 中危 |
+| S-09 | ETL 阶段隔离 | P2 | 08-14 中危 |
+| S-10 | BT 迭代正式启动（v2 权重启用，待 #266 确认） | P1 | AL-M5-02 |
