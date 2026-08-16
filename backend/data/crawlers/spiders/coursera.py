@@ -23,8 +23,8 @@ from urllib.parse import quote, urljoin
 
 from scrapy import Request, Spider
 from scrapy.http import Response
-from scrapy_playwright.page import PageMethod
 
+from crawlers.base_spider import make_playwright_request
 from crawlers.items import CourseItem
 from crawlers.settings import RATE_LIMIT
 
@@ -71,9 +71,11 @@ class CourseraSpider(Spider):
         for keyword in keywords:
             url = COURSERA_SEARCH_URL.format(keyword=quote(keyword)) if keyword else "https://www.coursera.org/browse"
             self.logger.info(f"开始采集 Coursera: 关键词={keyword or '(热门)'}")
-            yield self._make_playwright_request(
+            yield make_playwright_request(
                 url,
                 meta={"keyword": keyword, "page": 1},
+                selector="li.cds-grid-item a.cds-CommonCard-titleLink, .ais-InfiniteHits-item, .no-results, [data-e2e='no-results']",
+                scroll_times=max(1, self.max_pages),
             )
 
     def parse(self, response: Response):
@@ -115,9 +117,11 @@ class CourseraSpider(Spider):
             base = COURSERA_SEARCH_URL.format(keyword=quote(keyword)) if keyword else "https://www.coursera.org/browse"
             sep = "&" if "?" in base else "?"
             next_url = f"{base}{sep}page={current_page + 1}"
-            yield self._make_playwright_request(
+            yield make_playwright_request(
                 next_url,
                 meta={"keyword": keyword, "page": current_page + 1},
+                selector="li.cds-grid-item a.cds-CommonCard-titleLink, .ais-InfiniteHits-item, .no-results, [data-e2e='no-results']",
+                scroll_times=max(1, self.max_pages),
             )
 
     def _card_to_item(self, card, meta: dict) -> CourseItem:
@@ -327,34 +331,3 @@ class CourseraSpider(Spider):
         except (ValueError, TypeError):
             return 0
 
-    def _make_playwright_request(self, url: str, meta: dict, callback=None):
-        """构造 Playwright 渲染请求，等待课程卡片加载。"""
-        methods = [
-            # 等待课程卡片或无结果提示出现
-            PageMethod(
-                "wait_for_selector",
-                "li.cds-grid-item a.cds-CommonCard-titleLink, .ais-InfiniteHits-item, .no-results, [data-e2e='no-results']",
-                timeout=20000,
-            ),
-        ]
-        # 滚动到底部触发卡片懒加载（08-16 实测：浏览页首屏仅渲染 4 张标题链接，
-        # 其余卡片随滚动渲染——单次半屏滚动导致空词模式产出仅 4 条）
-        for _ in range(max(1, self.max_pages)):
-            methods.append(PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"))
-            methods.append(PageMethod("wait_for_timeout", 3000))
-
-        return Request(
-            url,
-            callback=callback or self.parse,
-            meta={
-                "playwright": True,
-                "playwright_page_methods": methods,
-                **meta,
-            },
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-            dont_filter=True,
-        )

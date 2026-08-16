@@ -1,12 +1,16 @@
 """爬虫基类：统一搜索关键字/城市配置 + 合规声明 + JobItem 构造。"""
 
+import json
+import os
+import subprocess
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
-from scrapy import Spider
+from scrapy_playwright.page import PageMethod
+from scrapy import Request, Spider
 from scrapy.http import Response
 
-from crawlers.settings import RATE_LIMIT, MAIMAI_COMPLIANCE
+from crawlers.settings import RATE_LIMIT, MAIMAI_COMPLIANCE, SUBPROCESS_TIMEOUT
 from crawlers.items import JobItem
 
 
@@ -16,6 +20,87 @@ DEFAULT_KEYWORDS: list[str] = []
 
 # 默认搜索城市：空 = 不限城市（08-16 用户决策）；前端手动触发时通过 -a cities= 指定
 DEFAULT_CITIES: list[str] = []
+
+
+# 课程源浏览器渲染请求的 UA（coursera/edx 原两份相同 dict）
+_BROWSER_UA = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def make_playwright_request(
+    url: str,
+    meta: dict,
+    selector: str,
+    *,
+    wait_timeout: int = 20000,
+    scroll_times: int = 0,
+    scroll_wait_ms: int = 3000,
+    callback=None,
+    headers: dict | None = None,
+) -> Request:
+    """构造 Playwright 渲染请求（08-17 收敛 coursera/zhilian/edx 三处同构）。
+
+    等待 selector 出现（timeout=wait_timeout）后按 scroll_times 次滚动到底部
+    触发懒加载（每次间隔 scroll_wait_ms；0 则不等）。headers 缺省用课程源 UA。
+    """
+    methods = [PageMethod("wait_for_selector", selector, timeout=wait_timeout)]
+    for _ in range(max(0, scroll_times)):
+        methods.append(PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"))
+        if scroll_wait_ms > 0:
+            methods.append(PageMethod("wait_for_timeout", scroll_wait_ms))
+
+    return Request(
+        url,
+        callback=callback,
+        meta={"playwright": True, "playwright_page_methods": methods, **meta},
+        headers=_BROWSER_UA if headers is None else headers,
+        dont_filter=True,
+    )
+
+
+def run_script(cmd: list[str], cwd: str, logger, label: str) -> tuple[str, str, int] | None:
+    """执行采集脚本：Popen + 超时终止（08-17 收敛 6 处相同子进程样板）。
+
+    启动失败 / 超时返回 None（调用方自行 continue/return）；
+    成功返回 (stdout, stderr, returncode)，退出码/错误流供调用方记录 CDP 日志。
+    """
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            cwd=cwd,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
+        )
+    except Exception as e:
+        logger.error(f"启动采集脚本失败: {e}")
+        return None
+    # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
+    try:
+        stdout, stderr = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
+        return stdout, stderr, proc.returncode
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        logger.error(f"{label} 超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+        return None
+
+
+def iter_jsonl(stdout: str, logger):
+    """逐行解析采集脚本 JSONL 输出；损坏行记日志跳过（08-17 收敛 6 处相同解析循环）。"""
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            yield json.loads(line)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
 
 
 class BaseSpider(Spider):
