@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_optional_user, role_rank
 from app.core.database import get_db, neo4j_driver, redis_client
+from app.core.errors import ERR_INTERNAL, ERR_NOT_FOUND
 from app.models.business import SkillEmbedding
 from app.schemas.common import error, ok
 from app.services.graph_algorithms.config import load_graph_algo_config
@@ -18,7 +19,7 @@ from app.services.graph_algorithms.shortest_path import shortest_path
 from app.services.kg.skill_relations import graph_prerequisite_chain
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
-from app.services.matching.semantic import SkillEmbedder, SemanticUnavailableError
+from app.services.matching.semantic import SemanticUnavailableError, SkillEmbedder
 
 logger = logging.getLogger(__name__)
 
@@ -505,7 +506,7 @@ async def skill_prerequisites(skill_id: str):
     """
     skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
     chain = await asyncio.to_thread(_query_prereq_chain, skill["name"])
     if not chain:
@@ -535,7 +536,7 @@ async def skill_courses(skill_id: str):
     """
     skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
     courses = await load_courses_for_skill(
         skill_id, skill["name"], top_k=None, semantic=_course_semantic())
@@ -601,7 +602,7 @@ async def position_detail(
         return ok(data=cached)
     position = await asyncio.to_thread(_load_position, id, user)
     if position is None:
-        return error(4040, "岗位不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "岗位不存在", http_status=404)
 
     skills = await asyncio.to_thread(_query_position_skills_by_necessity, id)
 
@@ -627,7 +628,7 @@ async def position_skills(
 ):
     """[M4] 岗位技能列表（可按 necessity 过滤）。"""
     if await asyncio.to_thread(_load_position, id, user) is None:
-        return error(4040, "岗位不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "岗位不存在", http_status=404)
 
     scope = _position_scope(user)
     status_filter = _status_clause(scope)
@@ -646,7 +647,7 @@ async def skill_evidence(skill_id: str):
         return ok(data=cached)
     skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
     evidence = await asyncio.to_thread(_query_skill_evidence, skill_id)
 
@@ -674,7 +675,7 @@ async def skill_similar(
     """
     skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
     cache_key = f"graph:skill:similar:{skill_id}:{top_k}"
     cached = await _cache_get(cache_key)
@@ -714,7 +715,7 @@ async def skill_similar(
             await _cache_set(cache_key, data)
             return ok(data=data)
     except SemanticUnavailableError:
-        return error(5000, "语义模型不可用，无法计算相似技能", http_status=503)
+        return error(ERR_INTERNAL, "语义模型不可用，无法计算相似技能", http_status=503)
     except Exception as exc:
         # skill_embeddings 表缺失 / 向量维度不匹配等 → 降级回退内存扫描
         logger.warning("pgvector 技能相似查询降级回退内存扫描: %s", exc)
@@ -737,7 +738,7 @@ async def skill_similar(
     try:
         scores = await asyncio.to_thread(_sbert_scan)
     except SemanticUnavailableError:
-        return error(5000, "语义模型不可用，无法计算相似技能", http_status=503)
+        return error(ERR_INTERNAL, "语义模型不可用，无法计算相似技能", http_status=503)
 
     similar = sorted(
         (s for s in scores if s[2] >= 0.5),
@@ -772,7 +773,7 @@ async def skill_detail(
         return ok(data=cached)
     skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
     status_filter = _status_clause(scope)
     counts = await asyncio.to_thread(_query_skill_counts, skill_id, status_filter)
@@ -1038,7 +1039,7 @@ async def graph_shortest_path(
     path = await asyncio.to_thread(
         _query_shortest_path, from_skill, to_skill, statuses)
     if path is None:
-        return error(4040, "两技能间不存在 ≤6 跳的可达路径", http_status=404)
+        return error(ERR_NOT_FOUND, "两技能间不存在 ≤6 跳的可达路径", http_status=404)
     return ok(data={"from": from_skill, "to": to_skill, "path": path})
 
 

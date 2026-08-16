@@ -37,13 +37,13 @@ class TestGraph:
     def test_panorama_guest_excludes_candidate(self, client: httpx.Client):
         """方案一：匿名/guest 全景不含 candidate 岗位（user/admin 可见全量）。
 
-        构造验证：当前真实库岗位多为 candidate，guest 返回的 position 节点
-        status 必须全部 ∈ {emerging, stable, declining}。
+        构造验证：guest 返回的 position 节点 status 必须全部 ∈ 公开状态集
+        （#218 后 active 为常态公开，仅 candidate 待审核不外宣）。
         """
         r = client.get("/api/v1/graph/panorama", params={"limit": 600})
         assert r.status_code == 200
         data = r.json()["data"]
-        visible = {"emerging", "stable", "declining"}
+        visible = {"active", "emerging", "stable", "declining"}
         for node in data["nodes"]:
             if node["type"] == "position":
                 assert node.get("status", "candidate") in visible, (

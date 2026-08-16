@@ -113,8 +113,8 @@ def client(base_url: str, auth_headers: dict | None) -> httpx.Client:
             if resumes.get("items"):
                 rid = resumes["items"][0]["id"]
                 warmup.post("/api/v1/match/recommend", json={"resume_id": rid, "top_n": 1}, headers=warm_headers)
-        except (httpx.HTTPError, KeyError, TypeError, IndexError):
-            pass  # 预热失败不阻断测试（无简历/接口异常时用例自身会 skip）
+        except (httpx.HTTPError, KeyError, TypeError, IndexError, AttributeError):
+            pass  # 预热失败不阻断测试（无简历/接口异常/响应缺 data 时用例自身会 skip）
 
     with httpx.Client(base_url=base_url, timeout=120) as c:
         yield c

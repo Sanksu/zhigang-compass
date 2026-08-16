@@ -20,8 +20,9 @@ from app.api.common import iso, owns_resume, parse_uuid, serialize_task, sse_tas
 from app.api.deps import require_role
 from app.core.arq_client import enqueue
 from app.core.database import async_session_factory, get_db
+from app.core.errors import ERR_FORBIDDEN, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import AuditLog, ResumeCache, ResumeFile, TaskStatus
-from app.schemas.common import ok, error
+from app.schemas.common import error, ok
 from app.services.resume.file_parser import SUPPORTED_EXTENSIONS
 
 router = APIRouter()
@@ -126,18 +127,18 @@ async def parse_resume(
     # 避免恶意超大流全量读入内存耗尽服务
     content_length = request.headers.get("content-length")
     if content_length and content_length.isdigit() and int(content_length) > MAX_UPLOAD_BYTES:
-        return error(4000, f"文件超过 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限", http_status=413)
+        return error(ERR_VALIDATION, f"文件超过 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限", http_status=413)
     content = await file.read()
     if not content:
-        return error(4000, "文件为空")
+        return error(ERR_VALIDATION, "文件为空")
     if len(content) > MAX_UPLOAD_BYTES:
-        return error(4000, f"文件超过 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限")
+        return error(ERR_VALIDATION, f"文件超过 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限")
 
     suffix = Path(file.filename or "resume").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         supported = "/".join(sorted(ext.lstrip(".") for ext in ALLOWED_EXTENSIONS))
         hint = "，.doc 请转存为 .docx" if suffix == ".doc" else ""
-        return error(4000, f"仅支持 {supported} 格式{hint}")
+        return error(ERR_VALIDATION, f"仅支持 {supported} 格式{hint}")
 
     file_hash = hashlib.sha256(content).hexdigest()
 
@@ -211,12 +212,12 @@ async def task_status(task_id: str, db: AsyncSession = Depends(get_db), user: di
     try:
         task_uuid = str(uuid.UUID(task_id))
     except (ValueError, AttributeError):
-        return error(4000, "task_id 格式非法")
+        return error(ERR_VALIDATION, "task_id 格式非法")
     task = await db.get(TaskStatus, task_uuid)
     if task is None:
-        return error(4040, "任务不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "任务不存在", http_status=404)
     if not await _user_owns_task(db, task, user.get("sub", "")):
-        return error(4030, "无权查看该任务", http_status=403)
+        return error(ERR_FORBIDDEN, "无权查看该任务", http_status=403)
     return ok(data=serialize_task(
         task,
         strip_fields=("file_path",),  # 不向客户端暴露服务端绝对路径
@@ -258,12 +259,12 @@ async def get_resume(resume_id: str, db: AsyncSession = Depends(get_db), user: d
     """简历解析详情（FE-M4-04 个人中心"查看"：完整画像）。"""
     rid = parse_uuid(resume_id)
     if rid is None:
-        return error(4000, "resume_id 格式非法")
+        return error(ERR_VALIDATION, "resume_id 格式非法")
     resume = await db.get(ResumeCache, rid)
     if resume is None:
-        return error(4040, "简历不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "简历不存在", http_status=404)
     if not await owns_resume(db, rid, user.get("sub", "")):
-        return error(4030, "无权访问该简历", http_status=403)
+        return error(ERR_FORBIDDEN, "无权访问该简历", http_status=403)
     return ok(data={
         "id": resume.id,
         "file_name": resume.file_name,
@@ -289,16 +290,16 @@ async def update_resume(
     """
     rid = parse_uuid(resume_id)
     if rid is None:
-        return error(4000, "resume_id 格式非法")
+        return error(ERR_VALIDATION, "resume_id 格式非法")
     resume = await db.get(ResumeCache, rid)
     if resume is None:
-        return error(4040, "简历不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "简历不存在", http_status=404)
     if not await owns_resume(db, rid, user.get("sub", "")):
-        return error(4030, "无权修改该简历", http_status=403)
+        return error(ERR_FORBIDDEN, "无权修改该简历", http_status=403)
 
     fields = req.get("fields")
     if not isinstance(fields, dict) or not fields:
-        return error(4000, "fields 必须为非空对象")
+        return error(ERR_VALIDATION, "fields 必须为非空对象")
 
     resume.parsed_data = _merge_fields(resume.parsed_data or {}, fields)
     resume.version += 1
@@ -332,7 +333,7 @@ async def task_stream(task_id: str, user: dict = Depends(require_role("user"))):
     try:
         task_uuid = str(uuid.UUID(task_id))
     except (ValueError, AttributeError):
-        return error(4000, "task_id 格式非法")
+        return error(ERR_VALIDATION, "task_id 格式非法")
 
     async def _get_task(tid: str) -> dict | None:
         async with async_session_factory() as session:
@@ -357,12 +358,12 @@ async def delete_resume(resume_id: str, db: AsyncSession = Depends(get_db), user
     """删除简历记录及落盘文件（FE-M4-04 个人中心）。"""
     rid = parse_uuid(resume_id)
     if rid is None:
-        return error(4000, "resume_id 格式非法")
+        return error(ERR_VALIDATION, "resume_id 格式非法")
     resume = await db.get(ResumeCache, rid)
     if resume is None:
-        return error(4040, "简历不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "简历不存在", http_status=404)
     if not await owns_resume(db, rid, user.get("sub", "")):
-        return error(4030, "无权删除该简历", http_status=403)
+        return error(ERR_FORBIDDEN, "无权删除该简历", http_status=403)
 
     # 仅删除当前用户的归属记录；resume_cache 按内容哈希全局唯一，
     # 其他用户命中同一缓存时仍有归属，不得连坐删除
@@ -418,12 +419,12 @@ async def download_resume_file(
     """
     rid = parse_uuid(resume_id)
     if rid is None:
-        return error(4000, "resume_id 格式非法")
+        return error(ERR_VALIDATION, "resume_id 格式非法")
     row = await _fetch_resume_file(db, rid)
     if row is None:
-        return error(4040, "简历文件不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "简历文件不存在", http_status=404)
     if row.user_id != user.get("sub", ""):
-        return error(4030, "无权下载该简历文件", http_status=403)
+        return error(ERR_FORBIDDEN, "无权下载该简历文件", http_status=403)
     return Response(
         content=row.content,
         media_type=row.content_type or "application/octet-stream",
