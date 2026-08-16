@@ -26,7 +26,7 @@ describe('QUICK_ACTIONS 快捷操作面板', () => {
   it('导航目标均为已注册的管理路由', () => {
     const navs = QUICK_ACTIONS.filter((a) => a.to).map((a) => a.to)
     expect(navs).toEqual(
-      expect.arrayContaining(['/admin/review', '/admin/crawl', '/admin/llm', '/admin/users', '/admin/settings']),
+      expect.arrayContaining(['/admin/review', '/admin/crawl', '/admin/llm', '/admin/users', '/admin/settings/tasks']),
     )
   })
 
