@@ -332,9 +332,14 @@ function TechnologyWatchView() {
   const [total, setTotal] = useState(0)
   const [pageLoading, setPageLoading] = useState(false)
 
+  // 请求共享：loadPage 与初始 effect 复用同一 fetch（08-17 收敛重复请求）
+  function fetchWatchPage(p: number) {
+    return apiGet<components['schemas']['WatchOverviewData']>(`/evolution/watch?page=${p}&size=${PAGE_SIZE}`)
+  }
+
   function loadPage(p: number) {
     setPageLoading(true)
-    apiGet<components['schemas']['WatchOverviewData']>(`/evolution/watch?page=${p}&size=${PAGE_SIZE}`)
+    fetchWatchPage(p)
       .then((r) => {
         setData(r.items)
         setTotal(r.total)
@@ -343,11 +348,21 @@ function TechnologyWatchView() {
       .finally(() => setPageLoading(false))
   }
 
-  // 初始加载直接复用 loadPage（08-17：原先同请求写两遍）。
-  // 同步 setPageLoading(true) 无意义（首帧已渲染），规则提示可忽略
-  // eslint-disable-next-line react-hooks/set-state-in-effect
+  // 初始加载：setState 均在请求回调（异步）中，规避 effect 同步 setState 规则
   useEffect(() => {
-    loadPage(1)
+    let cancelled = false
+    fetchWatchPage(1)
+      .then((r) => {
+        if (cancelled) return
+        setData(r.items)
+        setTotal(r.total)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(errMsg(e, '技术热点加载失败'))
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   if (error) {
@@ -502,9 +517,12 @@ function SnapshotTimelineView<T extends { points?: SnapshotPoint[] }>({
   const [snapshotPage, setSnapshotPage] = useState(1)
   const [searchLoading, setSearchLoading] = useState(false)
 
-  // 配置经 ref 传递，effect 仅首挂载执行（避免内联回调导致的重复请求）
+  // 配置经 ref 传递，effect 仅首挂载执行（避免内联回调导致的重复请求）；
+  // ref 更新放 effect（render 中写 ref 违反 react-hooks/refs）
   const cfgRef = useRef({ searchUrl, detailUrl, defaultErrorMsg, loadErrorMsg, idErrorMsg, listUrl, extractList })
-  cfgRef.current = { searchUrl, detailUrl, defaultErrorMsg, loadErrorMsg, idErrorMsg, listUrl, extractList }
+  useEffect(() => {
+    cfgRef.current = { searchUrl, detailUrl, defaultErrorMsg, loadErrorMsg, idErrorMsg, listUrl, extractList }
+  })
 
   function search(q: string) {
     setSearchLoading(true)
