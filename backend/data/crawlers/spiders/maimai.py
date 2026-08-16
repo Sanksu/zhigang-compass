@@ -52,7 +52,7 @@ class MaimaiSpider(BaseSpider):
     platform = "maimai"
 
     # 脉脉飞书招聘页无城市筛选，固定城市列表仅作日志记录
-    cities = ["北京"]
+    cities: list[str] = []  # 城市仅作日志记录（飞书招聘页无城市筛选，08-16 置空）
 
     def start_requests(self):
         """合规守卫：仅夜间 22:00-08:00 启动。

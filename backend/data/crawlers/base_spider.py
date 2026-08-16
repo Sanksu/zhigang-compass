@@ -14,8 +14,8 @@ from crawlers.items import JobItem
 # 前端手动触发时通过 -a keywords= 显式指定
 DEFAULT_KEYWORDS: list[str] = []
 
-# 默认搜索城市
-DEFAULT_CITIES = ["北京", "上海", "深圳", "杭州", "广州"]
+# 默认搜索城市：空 = 不限城市（08-16 用户决策）；前端手动触发时通过 -a cities= 指定
+DEFAULT_CITIES: list[str] = []
 
 
 class BaseSpider(Spider):
