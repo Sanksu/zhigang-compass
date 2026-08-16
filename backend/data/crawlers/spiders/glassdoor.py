@@ -39,6 +39,9 @@ class GlassdoorSpider(BaseSpider):
     # Glassdoor 默认搜索美国城市
     cities = ["New York", "San Francisco", "Seattle", "Boston", "Remote"]
 
+    # 单次采集总上限（多关键词×城市任务合计，08-16 用户决策）
+    max_items_total = 100
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # 历史回爬（G-01）：-a history_days=90 放宽翻页上限（SSR 按发布倒序，
@@ -90,9 +93,17 @@ class GlassdoorSpider(BaseSpider):
 
         task_total = len(tasks)
         _started = time.monotonic()
+        _collected = 0  # 单次采集累计产出（跨关键词×城市任务合计，上限 max_items_total）
         for task_idx, task in enumerate(tasks):
             keyword = task["keyword"]
             city = task["city"]
+            remaining = self.max_items_total - _collected
+            if remaining <= 0:
+                self.logger.info(
+                    f"[glassdoor] 已达单次采集上限 {self.max_items_total} 条，"
+                    f"跳过剩余 {task_total - task_idx} 个任务"
+                )
+                break
             self.logger.info(f"[glassdoor] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword} city={city}")
 
             cmd = [
@@ -128,6 +139,8 @@ class GlassdoorSpider(BaseSpider):
 
             item_count = 0
             for line in stdout.splitlines():
+                if _collected >= self.max_items_total:
+                    break
                 line = line.strip()
                 if not line:
                     continue
@@ -138,6 +151,7 @@ class GlassdoorSpider(BaseSpider):
                     continue
 
                 item_count += 1
+                _collected += 1
                 yield self.make_item(
                     source_id=str(item_data.get("id", "")),
                     source_url=item_data.get("url", ""),
@@ -159,7 +173,7 @@ class GlassdoorSpider(BaseSpider):
             if stderr_output:
                 for line in stderr_output.strip().splitlines()[-5:]:
                     self.logger.info(f"[cdp] {line}")
-            self.logger.info(f"[glassdoor] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条")
+            self.logger.info(f"[glassdoor] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条（累计 {_collected}/{self.max_items_total}）")
 
     def _on_error(self, failure):
         """占位请求失败回调。"""

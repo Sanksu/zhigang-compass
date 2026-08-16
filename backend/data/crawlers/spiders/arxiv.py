@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 from scrapy import Request, Spider
+from scrapy.exceptions import CloseSpider
 from scrapy.http import Response
 
 from crawlers.items import PaperItem
@@ -51,11 +52,15 @@ class ArxivSpider(Spider):
     name = "arxiv"
     platform = "arxiv"
 
+    # 单次采集总上限（多分类合计，08-16 用户决策）
+    max_items_total = 100
+
     # Atom 命名空间
     namespaces = {"atom": "http://www.w3.org/2005/Atom"}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._collected = 0  # 单次采集累计产出（跨分类合计）
         # -a categories=cs.AI,cs.LG 覆盖默认分类
         cats = kwargs.get("categories")
         self.categories = cats.split(",") if cats else DEFAULT_CATEGORIES
@@ -107,12 +112,17 @@ class ArxivSpider(Spider):
 
         item_count = 0
         for entry in entries:
+            if self._collected >= self.max_items_total:
+                break
             item = self._entry_to_item(entry, response.meta["category"])
             if item:
                 item_count += 1
+                self._collected += 1
                 yield item
 
         self.logger.info(f"[arxiv] 分类 {response.meta['category']} 产出 {item_count} 条论文")
+        if self._collected >= self.max_items_total:
+            raise CloseSpider(f"达到单次采集上限 {self.max_items_total} 条")
 
     def _entry_to_item(self, entry, category: str) -> PaperItem:
         """将 Atom <entry> 元素转为 PaperItem。"""

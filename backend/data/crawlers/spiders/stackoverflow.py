@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 from scrapy import Request, Spider
+from scrapy.exceptions import CloseSpider
 from scrapy.http import Response
 
 from crawlers.items import CommunityTrendItem
@@ -44,8 +45,12 @@ class StackoverflowSpider(Spider):
     name = "stackoverflow"
     platform = "stackoverflow"
 
+    # 单次采集总上限（多标签/多页合计，08-16 用户决策）
+    max_items_total = 100
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._collected = 0  # 单次采集累计产出（跨标签合计）
         # -a tags=python,machine-learning 覆盖默认标签
         tags = kwargs.get("tags")
         self.tags = tags.split(",") if tags else DEFAULT_TAGS
@@ -82,9 +87,12 @@ class StackoverflowSpider(Spider):
         items = data.get("items", [])
         item_count = 0
         for it in items:
+            if self._collected >= self.max_items_total:
+                break
             item = self._api_item_to_item(it, response.meta)
             if item:
                 item_count += 1
+                self._collected += 1
                 yield item
 
         # 翻页：has_more 且未达 max_pages
@@ -92,6 +100,8 @@ class StackoverflowSpider(Spider):
         self.logger.info(
             f"[stackoverflow] tag={response.meta['tag']} 页={current_page} 产出 {item_count} 条"
         )
+        if self._collected >= self.max_items_total:
+            raise CloseSpider(f"达到单次采集上限 {self.max_items_total} 条")
         if data.get("has_more") and current_page < self.max_pages:
             tag = response.meta["tag"]
             next_url = self._build_api_url(tag, current_page + 1)

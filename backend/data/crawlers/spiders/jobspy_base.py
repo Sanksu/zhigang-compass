@@ -26,7 +26,8 @@ class JobSpyBaseSpider(BaseSpider):
     """通过 subprocess 调用 jobspy_crawler.py 采集 JobSpy 支持的平台。"""
 
     site_name: str = ""  # 子类必须设置：indeed / linkedin
-    results_wanted = 20  # 单次采集岗位数上限
+    results_wanted = 20  # 单任务（关键词×城市）岗位数上限
+    max_items_total = 100  # 单次采集总上限（跨任务合计，08-16 用户决策）
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -36,14 +37,18 @@ class JobSpyBaseSpider(BaseSpider):
         # 历史回爬（G-01）：-a history_days=90 透传 --days-old 到 jobspy_crawler
         self.history_days = int(kwargs.get("history_days") or 0)
 
-    def _build_cmd(self, keyword: str, city: str) -> list[str]:
-        """构造 jobspy_crawler 采集命令（含历史回爬 --days-old 参数）。"""
+    def _build_cmd(self, keyword: str, city: str, limit: int | None = None) -> list[str]:
+        """构造 jobspy_crawler 采集命令（含历史回爬 --days-old 参数）。
+
+        limit: 单次采集剩余配额（max_items_total 减去已产出），None 不额外限制。
+        """
+        wanted = min(self.results_wanted, limit) if limit else self.results_wanted
         cmd = [
             sys.executable, self.crawler_script,
             "--site", self.site_name,
             "--keyword", keyword,
             "--city", city,
-            "--results-wanted", str(self.results_wanted),
+            "--results-wanted", str(wanted),
         ]
         if self.history_days:
             cmd.extend(["--days-old", str(self.history_days)])
@@ -62,12 +67,20 @@ class JobSpyBaseSpider(BaseSpider):
 
         task_total = len(tasks)
         _started = time.monotonic()
+        _collected = 0  # 单次采集累计产出（跨关键词×城市任务合计，上限 max_items_total）
         for task_idx, task in enumerate(tasks):
             keyword = task["keyword"]
             city = task["city"]
+            remaining = self.max_items_total - _collected
+            if remaining <= 0:
+                self.logger.info(
+                    f"[{self.platform}] 已达单次采集上限 {self.max_items_total} 条，"
+                    f"跳过剩余 {task_total - task_idx} 个任务"
+                )
+                break
             self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword} city={city}")
 
-            cmd = self._build_cmd(keyword, city)
+            cmd = self._build_cmd(keyword, city, remaining)
 
             try:
                 proc = subprocess.Popen(
@@ -131,7 +144,8 @@ class JobSpyBaseSpider(BaseSpider):
                 self.logger.error(f"JobSpy 脚本退出码 {proc.returncode}: {stderr[-500:]}")
             elif stderr:
                 self.logger.debug(f"JobSpy stderr: {stderr[-300:]}")
-            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条")
+            _collected += item_count
+            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条（累计 {_collected}/{self.max_items_total}）")
 
     def parse(self, response: Response):
         """占位：start_requests 已直接 yield Item，无需 parse。"""
