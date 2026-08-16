@@ -206,6 +206,11 @@ class TrackingLLM:
 def _metric(tp: int, fp: int, fn: int) -> dict[str, float | int]:
     p = tp / (tp + fp) if tp + fp else 0.0
     r = tp / (tp + fn) if tp + fn else 0.0
+    # 空对空（gold 无技能 + 预测无技能）= 完全匹配，f1 记 1.0
+    # （08-17 扩盲审集：非技术岗样本（Thatcher/客房服务员）gold 空技能，
+    # 预测正确输出空却记 f1=0 会系统性拉低均值）
+    if tp == 0 and fp == 0 and fn == 0:
+        return {"tp": 0, "fp": 0, "fn": 0, "precision": 1.0, "recall": 1.0, "f1": 1.0}
     return {"tp": tp, "fp": fp, "fn": fn, "precision": p, "recall": r, "f1": 2 * p * r / (p + r) if p + r else 0.0}
 
 
