@@ -50,8 +50,9 @@ _GRAY_ZONE_Q_MIN = 0.62
 # P1-1 课程级语义兜底阈值：无课技能直接对课程池标题匹配（08-13 实证）。
 # 可救案例：PostgreSQL→MySQL 课 0.601、服务器运维→网络技术 0.554、React→Advanced React 0.863；
 # 课程池缺课案例（Spark→0.469 高级英语、Docker→0.475 物流学、Gin→0.361 世界史）宁缺毋滥。
-# 0.55 介于门控 0.5 与技能级 fallback 0.7 之间。
-_COURSE_POOL_MATCH_THRESHOLD = 0.55
+# 08-16 对齐门控 0.5（course 0.85 收尾）：0.5-0.55 边缘课程进入标题门控与灰色带质量门控
+# 双把关（非直通），仅放宽初筛不放大误配。
+_COURSE_POOL_MATCH_THRESHOLD = 0.5
 
 # P1-1 低质课程过滤：icourse163 期末突击/复习资料类课程（标题特征，噪声不入推荐池）
 _LOW_QUALITY_TITLE_MARKERS = ("期末冲刺", "不挂科", "学霸笔记", "期末复习", "考前突击")
@@ -182,14 +183,34 @@ def _semantic_match_skill(
 
 
 def _lexical_hit(skill_name: str, title: str) -> bool:
-    """强词面命中：技能名（≥3 字符）直接包含在课程名中。
+    """强词面命中：技能名或其核心 token（≥3 字符）直接包含在课程名中。
 
     背景（08-13 AWS 补采实证）：SBERT 对 "AWS" vs "AWS Cloud Technical
     Essentials" 相似度仅 0.472——缩写技能名与长课程名语义相似度虚低，
     词面包含即证明课程围绕该技能（豁免 sim 阈值）；"Go"/"C" 等短词
     词面会误配，豁免。
+    08-16 增强（课程语义 0.85 收尾）：带后缀/多词技能名整串子串不命中
+    （"Express.js" vs 课程名 "…Node.js and Express"、"RESTful API" vs
+    "…RESTful技术"）——按非字母数字拆分 token（≥3 字符），任一 token
+    命中课程名即词面相关；泛化 token（code/app/api/web 等，如
+    "Claude Code" 的 "code" ∈ "No-Code…" 实证误配）不做 token 命中。
     """
-    return len(skill_name) >= 3 and skill_name.lower() in title.lower()
+    low_skill = skill_name.lower()
+    low_title = title.lower()
+    if len(skill_name) >= 3 and low_skill in low_title:
+        return True
+    tokens = re.split(r"[^a-z0-9\u4e00-\u9fff]+", low_skill)
+    return any(
+        len(t) >= 3 and t not in _GENERIC_LEXICAL_TOKENS and t in low_title
+        for t in tokens
+    )
+
+
+# 泛化 token（token 级词面不豁免）：单独命中不构成相关性信号
+# （"Claude Code"→"No-Code…"、"X API"→任意含 api 标题 实证误配）
+_GENERIC_LEXICAL_TOKENS = frozenset({
+    "code", "app", "api", "web", "data", "cloud", "tech", "ai", "ml", "dev", "sys",
+})
 
 
 def _lexical_hint_hit(skill_name: str, title: str) -> bool:
