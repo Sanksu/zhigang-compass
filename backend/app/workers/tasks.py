@@ -26,6 +26,7 @@ from arq.cron import cron
 from arq.worker import func
 
 from app.core.config import settings
+from app.core import runtime_config
 from app.services.alerting import send_alert
 
 from sqlalchemy import or_, select
@@ -2712,7 +2713,9 @@ async def _alert_llm(event: str, message: str) -> bool:
     from app.core.config import settings
     from app.services.alerting import send_alert
 
-    if not settings.alert_webhook_url:
+    # 08-16：管理后台可编辑 webhook（runtime_settings.json，重启生效）
+    webhook = runtime_config.get("alert_webhook_url") or settings.alert_webhook_url
+    if not webhook:
         return False
     key = f"alert:dedup:{event}"
     try:
@@ -2825,8 +2828,9 @@ class WorkerSettings:
     on_startup = on_startup
     on_shutdown = on_shutdown
     redis_settings = RedisSettings.from_dsn(settings.arq_redis_url)
-    concurrency = settings.arq_concurrency
-    job_timeout = settings.arq_job_timeout
+    # 08-16：管理后台可编辑（runtime_settings.json，重启生效），未设置时回退 env
+    concurrency = runtime_config.get("arq_concurrency", settings.arq_concurrency)
+    job_timeout = runtime_config.get("arq_job_timeout", settings.arq_job_timeout)
     max_retries = 2
     retry_delay = 10
     # 定时任务（设计文档 §6.5）：每 5min 探测 provider 健康并写 Redis；

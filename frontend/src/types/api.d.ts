@@ -1887,8 +1887,6 @@ export interface paths {
                     page?: number;
                     /** @description 每页条数 */
                     size?: number;
-                    /** @description 名称模糊搜索（08-16：下拉全量可搜索） */
-                    q?: string;
                 };
                 header?: never;
                 path?: never;
@@ -1938,8 +1936,6 @@ export interface paths {
                     page?: number;
                     /** @description 每页条数 */
                     size?: number;
-                    /** @description 名称模糊搜索（08-16：下拉全量可搜索） */
-                    q?: string;
                 };
                 header?: never;
                 path?: never;
@@ -2413,6 +2409,76 @@ export interface paths {
             };
         };
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/runtime-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读取运行时配置（非敏感运行参数，admin only） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 当前生效配置（rate_limit 为各源生效值） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["RuntimeConfig"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        /** 保存运行时配置（持久化 runtime_settings.json，重启后生效） */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RuntimeConfig"];
+                };
+            };
+            responses: {
+                /** @description 保存成功（返回规范化后的配置） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["RuntimeConfig"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -3448,6 +3514,28 @@ export interface components {
             updated: boolean;
             /** @description 变更摘要（供展示/审计） */
             diff_summary?: string;
+        };
+        /** @description 运行时配置（GET/PUT /admin/runtime-config，重启后生效） */
+        RuntimeConfig: {
+            /** @description ARQ 任务并发数（1-100） */
+            arq_concurrency?: number;
+            /** @description ARQ 任务超时秒（60-86400） */
+            arq_job_timeout?: number;
+            /** @description 告警 webhook（空=不告警） */
+            alert_webhook_url?: string;
+            /** @description 演化列表缓存 TTL 秒（5-3600） */
+            evolution_cache_ttl?: number;
+            /** @description 爬虫单次采集条数上限（10-1000） */
+            crawl_items_cap?: number;
+            /** @description 爬虫限频（source → {req_per_min, delay_range:[min,max] 秒}） */
+            rate_limit?: {
+                [key: string]: {
+                    /** @description 每分钟请求数（1-600） */
+                    req_per_min?: number;
+                    /** @description 请求间隔 [min, max] 秒（1-300） */
+                    delay_range?: number[];
+                };
+            };
         };
         /** @description LLM provider 配置项（GET/PUT /admin/llm-config） */
         LlmProviderConfig: {

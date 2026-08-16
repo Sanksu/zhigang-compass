@@ -1269,6 +1269,47 @@ async def update_llm_config(req: dict):
 
 
 # ============================================================
+# 运行时配置（08-16：管理后台 /admin/settings 可编辑、重启生效）
+# ============================================================
+
+@router.get("/runtime-config")
+async def get_runtime_config():
+    """读取运行时配置（非敏感运行参数；rate_limit 返回各源生效值）。"""
+    from app.core import runtime_config
+
+    data = runtime_config.load_all()
+    # rate_limit 展示"默认 + 覆盖"合并后的生效值（crawlers.settings 启动时已合并）
+    try:
+        from crawlers.settings import RATE_LIMIT as CRAWLER_RATE_LIMIT
+
+        data["rate_limit"] = {
+            src: {
+                "req_per_min": cfg.get("req_per_min", 4),
+                "delay_range": [int(cfg["delay_range"][0]), int(cfg["delay_range"][1])]
+                if cfg.get("delay_range") else None,
+            }
+            for src, cfg in CRAWLER_RATE_LIMIT.items()
+        }
+    except Exception:
+        pass  # 独立运行环境无 crawlers 包时仅返回文件内容
+    return ok(data=data)
+
+
+@router.put("/runtime-config")
+async def update_runtime_config(req: dict):
+    """校验并持久化运行时配置（runtime_settings.json，重启后生效）。"""
+    from app.core import runtime_config
+
+    try:
+        data = runtime_config.save(req)
+    except ValueError as e:
+        return error(ERR_VALIDATION, str(e))
+    except OSError:
+        return error(ERR_INTERNAL, "配置保存失败，请检查目录权限")
+    return ok(data=data)
+
+
+# ============================================================
 # 技术热点观察池（设计文档 7.2.5，admin 周报可见）
 # ============================================================
 

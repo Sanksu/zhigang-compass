@@ -25,7 +25,7 @@ from scrapy import Request
 from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
-from crawlers.settings import SUBPROCESS_TIMEOUT
+from crawlers.settings import CRAWL_ITEMS_CAP, SUBPROCESS_TIMEOUT
 from crawlers.setup_boss_chrome import ensure_cdp_chrome, platform_profile_dir
 
 
@@ -39,8 +39,8 @@ class GlassdoorSpider(BaseSpider):
     # Glassdoor 默认搜索美国城市
     cities = ["New York", "San Francisco", "Seattle", "Boston", "Remote"]
 
-    # 单次采集总上限（多关键词×城市任务合计，08-16 用户决策）
-    max_items_total = 100
+    # 单次采集总上限（多关键词×城市任务合计，08-16 用户决策；后台可配置）
+    max_items_total = CRAWL_ITEMS_CAP
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
