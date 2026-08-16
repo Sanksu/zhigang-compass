@@ -123,6 +123,10 @@ credentials.json
 backend/configs/llm_providers.yaml
 !backend/configs/llm_providers.yaml.example
 
+# 运行时配置（管理后台 /admin/settings 落盘，重启生效；模板保留）
+backend/configs/runtime_settings.json
+!backend/configs/runtime_settings.json.example
+
 # ---------- 数据库 ----------
 *.sqlite3
 *.sqlite3-journal

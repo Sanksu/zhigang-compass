@@ -19,7 +19,7 @@ from pathlib import Path
 from scrapy.http import Response
 
 from crawlers.base_spider import BaseSpider
-from crawlers.settings import SUBPROCESS_TIMEOUT
+from crawlers.settings import CRAWL_ITEMS_CAP, SUBPROCESS_TIMEOUT
 
 
 class JobSpyBaseSpider(BaseSpider):
@@ -27,7 +27,7 @@ class JobSpyBaseSpider(BaseSpider):
 
     site_name: str = ""  # 子类必须设置：indeed / linkedin
     results_wanted = 20  # 单任务（关键词×城市）岗位数上限
-    max_items_total = 100  # 单次采集总上限（跨任务合计，08-16 用户决策）
+    max_items_total = CRAWL_ITEMS_CAP  # 单次采集总上限（跨任务合计，08-16 可后台配置）
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

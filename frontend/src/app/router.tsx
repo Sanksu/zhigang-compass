@@ -17,6 +17,7 @@ const AdminUsersPage = lazy(() => import('@/routes/admin-users-page').then((m) =
 const AdminCrawlPage = lazy(() => import('@/routes/admin-crawl-page').then((m) => ({ default: m.AdminCrawlPage })))
 const AdminReviewPage = lazy(() => import('@/routes/admin-review-page').then((m) => ({ default: m.AdminReviewPage })))
 const AdminLlmPage = lazy(() => import('@/routes/admin-llm-page').then((m) => ({ default: m.AdminLlmPage })))
+const AdminSettingsPage = lazy(() => import('@/routes/admin-settings-page').then((m) => ({ default: m.AdminSettingsPage })))
 
 function RouteLoading() {
   return (
@@ -60,6 +61,10 @@ const protectedRoutes = [
       {
         path: 'admin/llm',
         element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminLlmPage /></Suspense></AuthGuard>,
+      },
+      {
+        path: 'admin/settings',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage /></Suspense></AuthGuard>,
       },
     ],
   },

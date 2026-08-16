@@ -89,6 +89,8 @@ services:
       # LLM provider 配置（08-15 恢复）：.gitignore 不入镜像（含 api_key），
       # 挂载宿主机文件——可写（管理后台 /admin/llm 写回持久化）
       - ./backend/configs/llm_providers.yaml:/app/configs/llm_providers.yaml
+      # 运行时配置（08-16 管理后台 /admin/settings 可写；api/worker 共享宿主文件，重启后生效）
+      - ./backend/configs/runtime_settings.json:/app/configs/runtime_settings.json
       # 爬虫输出目录（08-15 修复：累计采集量统计读 /app/data/crawlers/output，
       # 此前 api 容器无挂载——容器内为空目录，爬取管理页累计采集量恒 0；
       # worker 侧已有同款挂载，双向读写一致）
@@ -153,6 +155,8 @@ services:
       # LLM provider 配置（08-15 恢复）：与 api 同款挂载，worker 的
       # enrich_course_skills/爬虫登录后处理等 LLM 链路共用
       - ./backend/configs/llm_providers.yaml:/app/configs/llm_providers.yaml
+      # 运行时配置（08-16 管理后台 /admin/settings 可写；api/worker 共享宿主文件，重启后生效）
+      - ./backend/configs/runtime_settings.json:/app/configs/runtime_settings.json
     depends_on:
       postgres:
         condition: service_healthy

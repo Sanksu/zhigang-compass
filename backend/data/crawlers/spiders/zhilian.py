@@ -18,6 +18,7 @@ from scrapy.http import Response
 from scrapy_playwright.page import PageMethod
 
 from crawlers.base_spider import BaseSpider
+from crawlers.settings import CRAWL_ITEMS_CAP
 from crawlers.zhilian_detail import extract_job_detail
 
 # 智联城市代码映射
@@ -61,7 +62,7 @@ class ZhilianSpider(BaseSpider):
         # JD 采集条数上限（-a max_results=200，默认 200）：按产出条数截断，
         # 防列表页全量遍历超长运行（08-13 实测 zhilian 挂死 8h，900s 超时后
         # 孤儿爬虫仍残留；条数上限在源头截断，与页数上限/900s 超时三重保险）
-        self._max_results = int(kwargs.get("max_results") or 100)
+        self._max_results = int(kwargs.get("max_results") or CRAWL_ITEMS_CAP)
         self._items_collected = 0
 
     def _bump_items(self):

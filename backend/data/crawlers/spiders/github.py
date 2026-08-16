@@ -26,7 +26,7 @@ import json
 from urllib.parse import quote
 
 from crawlers.items import CommunityTrendItem
-from crawlers.settings import RATE_LIMIT
+from crawlers.settings import CRAWL_ITEMS_CAP, RATE_LIMIT
 
 
 GITHUB_SEARCH_API = "https://api.github.com/search/repositories"
@@ -74,7 +74,7 @@ class GithubSpider(Spider):
         if not self.languages:
             # 全局热度：不限语言，窗口内 star 最高的 100 个仓库（单次采集上限内）
             query = f"created:>{created}"
-            url = f"{GITHUB_SEARCH_API}?q={quote(query)}&sort=stars&order=desc&per_page=100"
+            url = f"{GITHUB_SEARCH_API}?q={quote(query)}&sort=stars&order=desc&per_page={min(CRAWL_ITEMS_CAP, 100)}"
             self.logger.info(f"开始采集 GitHub 全局热门 (created>{created})")
             yield Request(
                 url,

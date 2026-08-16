@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.common import iso, paged_ok, paginate
+from app.core import runtime_config
 from app.api.deps import require_role
 from app.core.database import get_db, redis_client
 from app.core.errors import ERR_NOT_FOUND
@@ -21,10 +22,11 @@ from app.schemas.common import error, ok
 
 router = APIRouter()
 
-# 演化列表缓存 TTL（60s）：快照每日 05:00 更新，列表查询每请求全量加载
+# 演化列表缓存 TTL（默认 60s）：快照每日 05:00 更新，列表查询每请求全量加载
 # 快照建索引（O(快照×节点×边)），看板高频访问下重复计算（08-15 审查）。
 # 缓存是增强非正确性依赖：redis 不可用（测试环境/故障）时自动降级直查。
-EVOLUTION_CACHE_TTL = 60
+# 08-16 管理后台可编辑（runtime_settings.json，重启生效）
+EVOLUTION_CACHE_TTL = runtime_config.get("evolution_cache_ttl", 60)
 
 
 async def _cache_get_json(key: str):

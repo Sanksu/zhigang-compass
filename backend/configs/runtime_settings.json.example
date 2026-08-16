@@ -1,0 +1,8 @@
+{
+  "arq_concurrency": 10,
+  "arq_job_timeout": 1800,
+  "alert_webhook_url": "",
+  "evolution_cache_ttl": 60,
+  "crawl_items_cap": 100,
+  "rate_limit": {}
+}

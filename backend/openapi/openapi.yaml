@@ -1076,11 +1076,6 @@ paths:
           required: false
           schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
           description: 每页条数
-        - name: q
-          in: query
-          required: false
-          schema: { type: string }
-          description: 名称模糊搜索（08-16：下拉全量可搜索）
       responses:
         '200':
           description: 岗位演化列表（data 含 positions/total/page/size）
@@ -1110,11 +1105,6 @@ paths:
           required: false
           schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
           description: 每页条数
-        - name: q
-          in: query
-          required: false
-          schema: { type: string }
-          description: 名称模糊搜索（08-16：下拉全量可搜索）
       responses:
         '200':
           description: 技能演化列表（data 含 skills/total/page/size）
@@ -1355,6 +1345,46 @@ paths:
             text/event-stream:
               schema:
                 type: string
+
+  /api/v1/admin/runtime-config:
+    get:
+      tags: [admin]
+      summary: 读取运行时配置（非敏感运行参数，admin only）
+      responses:
+        '200':
+          description: 当前生效配置（rate_limit 为各源生效值）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/RuntimeConfig'
+                  trace_id: { type: string }
+    put:
+      tags: [admin]
+      summary: 保存运行时配置（持久化 runtime_settings.json，重启后生效）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeConfig'
+      responses:
+        '200':
+          description: 保存成功（返回规范化后的配置）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/RuntimeConfig'
+                  trace_id: { type: string }
 
   /api/v1/admin/llm-config:
     get:
@@ -2326,6 +2356,29 @@ components:
         position_name: { type: string }
         updated: { type: boolean, description: 是否有实际变更（无变更不写编辑日志） }
         diff_summary: { type: string, description: 变更摘要（供展示/审计） }
+
+    RuntimeConfig:
+      type: object
+      description: 运行时配置（GET/PUT /admin/runtime-config，重启后生效）
+      properties:
+        arq_concurrency: { type: integer, description: ARQ 任务并发数（1-100） }
+        arq_job_timeout: { type: integer, description: ARQ 任务超时秒（60-86400） }
+        alert_webhook_url: { type: string, description: 告警 webhook（空=不告警） }
+        evolution_cache_ttl: { type: integer, description: 演化列表缓存 TTL 秒（5-3600） }
+        crawl_items_cap: { type: integer, description: 爬虫单次采集条数上限（10-1000） }
+        rate_limit:
+          type: object
+          description: 爬虫限频（source → {req_per_min, delay_range:[min,max] 秒}）
+          additionalProperties:
+            type: object
+            properties:
+              req_per_min: { type: integer, description: 每分钟请求数（1-600） }
+              delay_range:
+                type: array
+                items: { type: integer }
+                minItems: 2
+                maxItems: 2
+                description: 请求间隔 [min, max] 秒（1-300）
 
     LlmProviderConfig:
       type: object

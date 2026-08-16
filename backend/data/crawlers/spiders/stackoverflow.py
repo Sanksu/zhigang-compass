@@ -26,7 +26,7 @@ from scrapy.exceptions import CloseSpider
 from scrapy.http import Response
 
 from crawlers.items import CommunityTrendItem
-from crawlers.settings import RATE_LIMIT
+from crawlers.settings import CRAWL_ITEMS_CAP, RATE_LIMIT
 
 
 # Stack Exchange API 端点（site=stackoverflow）
@@ -46,8 +46,8 @@ class StackoverflowSpider(Spider):
     name = "stackoverflow"
     platform = "stackoverflow"
 
-    # 单次采集总上限（多标签/多页合计，08-16 用户决策）
-    max_items_total = 100
+    # 单次采集总上限（多标签/多页合计，08-16 用户决策；后台可配置）
+    max_items_total = CRAWL_ITEMS_CAP
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
