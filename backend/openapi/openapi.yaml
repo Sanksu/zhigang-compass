@@ -1271,10 +1271,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [platform, keyword]
+              required: [platform]
               properties:
                 platform: { type: string, description: "平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx" }
-                keyword: { type: string }
+                keyword: { type: string, description: "关键词（可选，留空则采集平台热度/最新内容，08-16 起爬虫不再内置默认关键词）" }
                 city: { type: string, description: "城市（可选，海外源默认英文城市）" }
       responses:
         '202':

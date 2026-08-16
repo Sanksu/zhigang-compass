@@ -330,17 +330,15 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
 
     校验平台（PLATFORM_META 白名单）→ 建 TaskStatus(pending) → 入队 ARQ
     crawl_platform → 返回 task_id。队列不可用时标记任务 failed 并返回 500。
+    keyword 留空 = 采集平台热度/最新内容（08-16 用户决策）。
     """
     platform = (req.get("platform") or "").strip()
     keyword = (req.get("keyword") or "").strip()
     city = (req.get("city") or "").strip()
-    logger.info(f"[crawl/trigger] 收到触发请求: platform={platform} keyword={keyword} city={city or '(默认)'}")
+    logger.info(f"[crawl/trigger] 收到触发请求: platform={platform} keyword={keyword or '(空=热度/最新)'} city={city or '(默认)'}")
     if platform not in _PLATFORM_TO_SPIDER:
         logger.warning(f"[crawl/trigger] 未知平台: {platform}")
         return error(4000, f"未知平台: {platform}（可选: {', '.join(sorted(PLATFORM_META))}）")
-    if not keyword:
-        logger.warning("[crawl/trigger] keyword 为空")
-        return error(4000, "keyword 不能为空")
 
     try:
         task = TaskStatus(
@@ -362,7 +360,7 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
     try:
         await _enqueue_crawl(
             _PLATFORM_TO_SPIDER[platform],
-            [keyword],
+            [keyword] if keyword else [],  # 空关键词 = 平台热度/最新采集（08-16 用户决策）
             cities=[city] if city else None,
             task_id=str(task.id),
         )

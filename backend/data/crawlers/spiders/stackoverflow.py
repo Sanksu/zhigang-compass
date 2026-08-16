@@ -32,8 +32,9 @@ from crawlers.settings import RATE_LIMIT
 # Stack Exchange API 端点（site=stackoverflow）
 STACKEXCHANGE_API = "https://api.stackexchange.com/2.3/questions"
 
-# 默认关注的标签（覆盖项目 AI/大数据/全栈方向）
-DEFAULT_TAGS = ["python", "machine-learning", "java", "javascript", "sql"]
+# 默认标签：空 = 全局热度（08-16 用户决策，不限定标签，按投票数排序）；
+# 传 -a tags=python,machine-learning 时按标签分别采集
+DEFAULT_TAGS: list[str] = []
 
 # 单次请求条数上限（API 允许 100）
 PAGE_SIZE = 100
@@ -67,8 +68,10 @@ class StackoverflowSpider(Spider):
             yield request
 
     def start_requests(self):
-        for tag in self.tags:
-            self.logger.info(f"开始采集 Stack Overflow 标签: {tag} (API)")
+        # 空标签 = 全局热度（08-16 用户决策，sort=votes 无 tagged）
+        tags = self.tags or [""]
+        for tag in tags:
+            self.logger.info(f"开始采集 Stack Overflow: {tag or '全局热度'} (API)")
             url = self._build_api_url(tag, 1)
             yield self._make_request(url, meta={"tag": tag, "page": 1})
 
@@ -111,10 +114,16 @@ class StackoverflowSpider(Spider):
             )
 
     def _build_api_url(self, tag: str, page: int) -> str:
-        """构造 Stack Exchange 查询 URL（最新问题排序）。"""
+        """构造 Stack Exchange 查询 URL（最新问题排序；tag 空 = 全局热度按投票）。"""
+        if tag:
+            return (
+                f"{STACKEXCHANGE_API}?tagged={quote(tag)}&site=stackoverflow"
+                f"&sort=creation&order=desc&pagesize={PAGE_SIZE}&page={page}"
+            )
+        # 全局热度（08-16 用户决策）：无标签过滤，按投票数排序取热门问题
         return (
-            f"{STACKEXCHANGE_API}?tagged={quote(tag)}&site=stackoverflow"
-            f"&sort=creation&order=desc&pagesize={PAGE_SIZE}&page={page}"
+            f"{STACKEXCHANGE_API}?site=stackoverflow"
+            f"&sort=votes&order=desc&pagesize={PAGE_SIZE}&page={page}"
         )
 
     def _make_request(self, url: str, meta: dict):
