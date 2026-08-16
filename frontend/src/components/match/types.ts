@@ -9,24 +9,15 @@ import type { components } from '@/types/api'
  * - POST /api/v1/match/compare → 单点人岗比对
  */
 
-/** 后端 match 返回的岗位评分项（recommend / compare 共用） */
 /** 后端匹配结果（契约 MatchResult，compare 同步 / result 快照共用） */
 export type BackendMatchResult = components['schemas']['MatchResult']
-
-/** 后端证据引用项（契约 EvidenceRef） */
-export type BackendEvidenceRef = components['schemas']['EvidenceRef']
 
 /** 后端差距项（契约 GapSkill） */
 export type BackendGapItem = components['schemas']['GapSkill']
 
-/** 后端学习路径项 */
 /** 后端学习路径项（契约 LearningPathItem） */
 export type BackendLearningPathItem = components['schemas']['LearningPathItem']
 
-/** 后端课程推荐（契约 CourseRecommendation） */
-export type BackendCourseRecommendation = components['schemas']['CourseRecommendation']
-
-/** LLM 诊断报告 — 设计文档 §9.5（GET /match/result/{id}/diagnosis，结果缓存 24h） */
 /** LLM 诊断报告（契约 DiagnosisReport，GET /match/result/{id}/diagnosis） */
 export type BackendDiagnosisReport = components['schemas']['DiagnosisReport']
 

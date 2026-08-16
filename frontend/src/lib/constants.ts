@@ -7,9 +7,3 @@ export const ROLES: Record<Role, string> = {
   user: '用户',
   admin: '管理员',
 }
-
-/** Token 刷新阈值（秒）— 提前 5 分钟刷新 */
-export const TOKEN_REFRESH_MARGIN = 5 * 60
-
-/** 应用名 */
-export const APP_NAME = '智岗罗盘'
