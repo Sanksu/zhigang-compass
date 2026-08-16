@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from scrapy.http import Request, Response
+from tests.helpers import FakeProc
 
 _BACKEND = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_BACKEND))
@@ -40,13 +41,6 @@ def _job_line(i: int) -> str:
     )
 
 
-class _FakeProc:
-    def __init__(self, lines):
-        self._lines = lines
-        self.returncode = 0
-
-    def communicate(self, timeout=None):
-        return ("\n".join(self._lines), "")
 
 
 class TestJobSpyEmptyKeywords:
@@ -58,7 +52,7 @@ class TestJobSpyEmptyKeywords:
         def fake_popen(cmd, **kwargs):
             calls.append(cmd)
             wanted = int(cmd[cmd.index("--results-wanted") + 1])
-            return _FakeProc([_job_line(i) for i in range(min(60, wanted))])
+            return FakeProc([_job_line(i) for i in range(min(60, wanted))])
 
         monkeypatch.setattr(subprocess, "Popen", fake_popen)
         spider = LinkedInPublicSpider.__new__(LinkedInPublicSpider)
@@ -174,7 +168,7 @@ class TestIcourse163EmptyKeywords:
 
         def fake_popen(cmd, **kwargs):
             calls.append(cmd)
-            return _FakeProc([])
+            return FakeProc([])
 
         monkeypatch.setattr(subprocess, "Popen", fake_popen)
         spider = Icourse163Spider.__new__(Icourse163Spider)

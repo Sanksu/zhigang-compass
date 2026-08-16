@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from scrapy.http import Request, Response
+from tests.helpers import FakeProc
 
 _BACKEND = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_BACKEND))
@@ -21,12 +22,6 @@ from crawlers.spiders.linkedin_public import LinkedInPublicSpider
 from crawlers.spiders.zhilian import ZhilianSpider
 
 
-class _FakeProc:
-    def __init__(self):
-        self.returncode = 0
-
-    def communicate(self, timeout=None):
-        return ("", "")
 
 
 class TestJobSpyEmptyCity:
@@ -37,7 +32,7 @@ class TestJobSpyEmptyCity:
 
         def fake_popen(cmd, **kwargs):
             calls.append(cmd)
-            return _FakeProc()
+            return FakeProc([])
 
         monkeypatch.setattr(subprocess, "Popen", fake_popen)
         spider = LinkedInPublicSpider.__new__(LinkedInPublicSpider)
@@ -63,7 +58,7 @@ class TestGlassdoorEmptyCity:
 
         def fake_popen(cmd, **kwargs):
             calls.append(cmd)
-            return _FakeProc()
+            return FakeProc([])
 
         monkeypatch.setattr(subprocess, "Popen", fake_popen)
         spider = GlassdoorSpider.__new__(GlassdoorSpider)

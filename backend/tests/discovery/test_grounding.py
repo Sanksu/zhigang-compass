@@ -10,9 +10,9 @@ import pytest
 from app.services.discovery.grounding import (
     _generate_definition,
     _merge_hits,
-    _sanitize_fulltext,
     match_seed,
     search_authoritative,
+    sanitize_fulltext,
 )
 
 
@@ -318,11 +318,11 @@ class TestThreadingWrappers:
 
 class TestFulltextSanitize:
     def test_strips_lucene_specials(self):
-        assert _sanitize_fulltext("C++ 工程师") == "C 工程师"
-        assert _sanitize_fulltext("岗位:(高级)") == "岗位高级"
+        assert sanitize_fulltext("C++ 工程师") == "C 工程师"
+        assert sanitize_fulltext("岗位:(高级)") == "岗位高级"
 
     def test_empty_after_sanitize(self):
-        assert _sanitize_fulltext(":::") == ""
+        assert sanitize_fulltext(":::") == ""
 
 
 class TestMergeHits:
