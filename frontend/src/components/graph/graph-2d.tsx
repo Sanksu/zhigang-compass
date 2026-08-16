@@ -144,6 +144,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   const highlightTimerRef = useRef<number | null>(null)
   /** 布局静止后是否已执行过自动适配（fitView 幂等标志，08-16） */
   const fitDoneRef = useRef(false)
+  /** fitView 记录的适配后视角——resetView 的复位目标（08-16） */
+  const fittedViewRef = useRef<{ center: [number, number]; zoom: number } | null>(null)
   // 主题版本号：暗色切换时递增，触发数据 effect 完全重建确保颜色全量刷新
   const [themeVersion, setThemeVersion] = useState(0)
   // 窄屏状态：跨 <640px 断点时触发数据 effect 重建（力导向参数降档，外部全景图同款适配）
@@ -151,12 +153,17 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   // 空白拖拽平移 hook：提供 group 访问、累计偏移、事件绑定
   const { panGroup, panOffset, bindPanEvents } = useGraphPan(chartRef)
 
-  // 重置视角：还原 ECharts roam 缩放/平移 + 清掉手动平移累积的 group 偏移
-  // （声明在 init effect 之前，dblclick 空白复位与父组件 ref 调用共用）
+  // 重置视角：还原到初始视图（fitView 适配后视图）+ 清掉手动平移累积的 group 偏移。
+  // 不用 dispatchAction restore：restore 语义是 resetOption('recreate') 从最初 option
+  // 重建图表（丢 fitView 视角、重跑力导向布局且轮询兜底已退出），实测复位后视图失真。
+  // 声明在 init effect 之前，dblclick 空白复位与父组件 ref 调用共用
   const resetView = useCallback(() => {
     const chart = chartRef.current
     if (!chart) return
-    chart.dispatchAction({ type: 'restore' })
+    const v = fittedViewRef.current
+    chart.setOption({
+      series: [v ? { center: v.center, zoom: v.zoom } : { center: ['50%', '50%'], zoom: 1 }],
+    })
     const group = panGroup()
     if (group) {
       group.x -= panOffset.current.x
@@ -197,6 +204,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     if (w === 0 || h === 0) return
     const zoom = Math.min(1, Math.min(w / (maxX - minX), h / (maxY - minY)) * 0.9)
     const center: [number, number] = [((minX + maxX) / 2) / w, ((minY + maxY) / 2) / h]
+    fittedViewRef.current = { center, zoom }
     chart.setOption({ series: [{ center, zoom }] })
   }, [])
 
