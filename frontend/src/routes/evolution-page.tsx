@@ -61,8 +61,6 @@ type EvolutionDiffNode = components['schemas']['EvolutionDiffNode']
 /** 后端 /evolution/diff 返回项 */
 type EvolutionDiff = components['schemas']['EvolutionDiff']
 
-/** 后端 /evolution/trends 返回项 */
-type EvolutionTrends = components['schemas']['EvolutionTrendsData']
 
 /** 后端 /evolution/signals 返回项（EvolutionSignal 序列化） */
 type EvolutionSignal = components['schemas']['EvolutionSignal']
@@ -445,8 +443,8 @@ function TechnologyWatchView() {
  */
 interface SnapshotPoint {
   date?: string | null
-  version: string
-  freq: number
+  version?: string
+  freq?: number
   present?: boolean
 }
 
@@ -710,7 +708,7 @@ function PositionEvolutionView() {
       extractList={(r) => (r as PositionEvolutionListData).positions}
       extractPoints={(d) => d.points ?? []}
       freqLabel="关联技能边数"
-      extraColumns={(d, p) => (
+      extraColumns={(_d, p) => (
         <TableCell className="text-right">
           {p.present ? (
             <Badge variant="outline" className="text-[10px] text-state-stable">存在</Badge>
