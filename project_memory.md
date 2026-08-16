@@ -113,3 +113,17 @@
 | T-05 | P1 | **孤立课程爬虫技能标签** ✅ 实弹验证通过（08-15）：PR **#221**（course_skills.py LLM 抽取 + 门控 + enrich_course_skills 仅新采集课程 + ETL 阶段 5.5）+ **#225**（enrich 写回与标记修复）合入部署；手动触发验证——LLM 恢复后 enrich limit=50 抽取 49/50 写回成功、load_courses 入图（LEARNABLE_VIA 4584→4822，孤立课程 974→925）；存量 974 门孤立课程不动（语义兜底覆盖）；小噪音：'VIP课程' 类非技能词可后续补停用词 | 新采集课程带 skills 标签且经门控；存量 974 门孤立课程不动 | 孤立课程核查 |
 | T-06 | P2 | **孤立技能池评估** ✅ 完成（08-15）：孤立技能 4950/6543（75.6%）分类——白名单内 123 保留 / 有课程 601 保留 / **停用词残留 26 已清理**（备份 stopword_skills_cleanup_20260815.jsonl）/ 真实低频 ~4200 保留（不全删：R/ArcGIS/Socket 等真实技能，08-09 先例仅适用小规模；12 个停用词∩白名单词有入边由聚合对齐删除自愈） | 评估报告：白名单内保留数/可删数，必要时清理 | 图谱健康检查 |
 | T-07 | P2 | **岗位可见性开放** ✅ 完成（08-15 决策反转，PR **#222** feat/be-visibility-open-active）：用户决策"T-04 治理完成后开放"——`_PUBLIC_POSITION_STATUSES` 追加 "active"，匿名可见 27→125 岗位（active 98 + emerging 24 + stable 3），candidate 仍不外宣；部署后模拟 public 查询验证 110 岗位（与数据层一致） | 碎片治理完成后重新决策；开放时模拟 public 查询验证岗位数 | 可见性修正（用户决策） |
+
+## 2026-08-16 图谱治理与 LinkedIn 描述缺陷修复（对账驱动）
+
+**对账基线（audit_position_status/verify_neo4j/freshness/whitelist/learnable_via 全跑）**：
+- 岗位状态对账零漂移（候选池 ↔ 图谱：stable 3/emerging 24/rejected 2 完全一致）；Position 97（active 65/emerging 24/stable 3/legacy 3/rejected 2）无重复名、无碎片（legacy 3 待决策）
+- verify_neo4j 的"大数字"是 Counter ID 计数非节点数（勿误读）
+
+**治理执行**：
+1. **课程脏边**：LEARNABLE_VIA 4822→2858（删 1964 条 sim<0.3，备份 `reports/learnable_via_deleted_20260816_024440.jsonl`）
+2. **伪技能节点**：209 个"脏技能"中真实技能（Python 等岗位依赖）不可删；删 315 个完全孤立课程主题词节点（备份 `reports/dirty_skills_deleted_20260816.jsonl`）；Skill 6591→6276
+3. **LinkedIn 描述恒空根因（PR #244）**：JobSpy 需 `linkedin_fetch_description=True` 才抓详情——从未传 → 1938 条 linkedin JD description 恒空 → 空技能 JD 占全库 79.6%（1523/7362）→ 6 岗位"空壳"
+4. **重采验证闭环**：307 条新 JD 99.7% 有描述 → batch_extract 294 条 99% 有技能 → React开发工程师 0→18 技能边、Skill +1762
+
+**教训**：① arq enqueue 的 task_id 必须 UUID；② crawled_at varchar 的 UTC 'T' 字符串比较陷阱（过滤用 LIKE 前缀）；③ "脏技能"审计先查岗位依赖再决策删除；④ 存量空描述 JD 无法回溯（重爬不重抽），依赖新采集增量。
