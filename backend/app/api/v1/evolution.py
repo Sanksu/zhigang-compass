@@ -334,7 +334,8 @@ async def position_evolution_list(
 
     indexes = _build_snapshot_indexes(snapshots)
     ranked = _top_nodes_by_heat(indexes, "position", "pos_", "src")
-    if q:
+    # isinstance 防御：测试直调端点时 q 为 Query 对象（HTTP 下恒为 str）
+    if isinstance(q, str) and q.strip():
         ql = q.strip().lower()
         ranked = [(nid, name) for nid, name in ranked if name and ql in name.lower()]
     total = len(ranked)
@@ -376,7 +377,8 @@ async def skill_evolution_list(
 
     indexes = _build_snapshot_indexes(snapshots)
     ranked = _top_nodes_by_heat(indexes, "skill", "sk_", "tgt")
-    if q:
+    # isinstance 防御：测试直调端点时 q 为 Query 对象（HTTP 下恒为 str）
+    if isinstance(q, str) and q.strip():
         ql = q.strip().lower()
         ranked = [(nid, name) for nid, name in ranked if name and ql in name.lower()]
     total = len(ranked)
