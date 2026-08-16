@@ -110,10 +110,11 @@ class CourseraSpider(Spider):
             f"[coursera] kw={response.meta['keyword']} 页={current_page} 产出 {item_count} 条"
         )
         if current_page < self.max_pages:
-            # Coursera 用 &page=N 翻页
+            # Coursera 用 page=N 翻页（浏览页无 query 参数，须用 ? 而非 &）
             keyword = response.meta["keyword"]
             base = COURSERA_SEARCH_URL.format(keyword=quote(keyword)) if keyword else "https://www.coursera.org/browse"
-            next_url = f"{base}&page={current_page + 1}"
+            sep = "&" if "?" in base else "?"
+            next_url = f"{base}{sep}page={current_page + 1}"
             yield self._make_playwright_request(
                 next_url,
                 meta={"keyword": keyword, "page": current_page + 1},
@@ -129,6 +130,9 @@ class CourseraSpider(Spider):
         href = title_link.css("::attr(href)").get()
 
         if not title or not href:
+            return None
+        # 浏览页混入职业角色页（/career-academy/roles/...），非课程，跳过
+        if "/career-academy/" in href:
             return None
 
         # href 可能是 /learn/{slug}（旧版）或 /search?query=...&xdpModal=course~{id}（新版 modal UX）
@@ -325,20 +329,26 @@ class CourseraSpider(Spider):
 
     def _make_playwright_request(self, url: str, meta: dict, callback=None):
         """构造 Playwright 渲染请求，等待课程卡片加载。"""
+        methods = [
+            # 等待课程卡片或无结果提示出现
+            PageMethod(
+                "wait_for_selector",
+                "li.cds-grid-item a.cds-CommonCard-titleLink, .ais-InfiniteHits-item, .no-results, [data-e2e='no-results']",
+                timeout=20000,
+            ),
+        ]
+        # 滚动到底部触发卡片懒加载（08-16 实测：浏览页首屏仅渲染 4 张标题链接，
+        # 其余卡片随滚动渲染——单次半屏滚动导致空词模式产出仅 4 条）
+        for _ in range(max(1, self.max_pages)):
+            methods.append(PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"))
+            methods.append(PageMethod("wait_for_timeout", 3000))
+
         return Request(
             url,
             callback=callback or self.parse,
             meta={
                 "playwright": True,
-                "playwright_page_methods": [
-                    # 等待课程卡片或无结果提示出现
-                    PageMethod(
-                        "wait_for_selector",
-                        "li.cds-grid-item a.cds-CommonCard-titleLink, .ais-InfiniteHits-item, .no-results, [data-e2e='no-results']",
-                        timeout=20000,
-                    ),
-                    PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight/2)"),
-                ],
+                "playwright_page_methods": methods,
                 **meta,
             },
             headers={
