@@ -13,6 +13,7 @@ emerging → stable 自动升级链路在真实任务函数内完整生效：
 """
 
 import pytest
+from tests.helpers import SeqResult
 import asyncio
 import unittest.mock as mock
 from datetime import datetime, timedelta, timezone
@@ -25,14 +26,6 @@ _TZ_CN = timezone(timedelta(hours=8))
 _END = datetime(2026, 8, 11, tzinfo=_TZ_CN)
 
 
-class _SeqResult:
-    """next_id 的 Counter 查询结果桩（single 返回 seq）。"""
-
-    def __init__(self, seq: int):
-        self._seq = seq
-
-    def single(self):
-        return {"seq": self._seq}
 
 
 def _jd_row(name: str, post_date: str) -> SimpleNamespace:
@@ -95,7 +88,7 @@ class _FakeTx:
         self._queries.append((query, params))
         # next_id 的 Counter 自增查询（08-14：persist 创建时补全 id/freq）
         if "Counter" in query:
-            return _SeqResult(1)
+            return SeqResult(1)
 
 
 class _FakeNeo4jSession:

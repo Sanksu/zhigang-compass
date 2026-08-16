@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.helpers import FakeProc
 from scrapy.exceptions import CloseSpider
 from scrapy.http import Request, Response, TextResponse, XmlResponse
 
@@ -42,15 +43,6 @@ def _job_line(i: int, title: str = "Job") -> str:
     )
 
 
-class _FakeProc:
-    """模拟子进程：communicate 返回预置 stdout，returncode=0。"""
-
-    def __init__(self, lines):
-        self._lines = lines
-        self.returncode = 0
-
-    def communicate(self, timeout=None):
-        return ("\n".join(self._lines), "")
 
 
 def _fake_popen(lines_provider):
@@ -60,7 +52,7 @@ def _fake_popen(lines_provider):
     def fake_popen(cmd, **kwargs):
         calls.append(cmd)
         wanted = int(cmd[cmd.index("--results-wanted") + 1])
-        return _FakeProc(lines_provider(wanted))
+        return FakeProc(lines_provider(wanted))
 
     return fake_popen, calls
 
@@ -242,7 +234,7 @@ class TestGlassdoorTotalCap:
 
             def fake_popen(cmd, **kwargs):
                 calls.append(cmd)
-                return _FakeProc([_job_line(i) for i in range(60)])
+                return FakeProc([_job_line(i) for i in range(60)])
 
             return fake_popen, calls
 

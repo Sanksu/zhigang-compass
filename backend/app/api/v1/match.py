@@ -137,6 +137,17 @@ async def _load_match_result(match_id: str, user_id: str) -> dict | None:
     return data if owner is not None else None
 
 
+async def _load_or_404(match_id: str, user: dict) -> dict:
+    """加载匹配结果并校验归属；不存在/越权返回 404 错误响应。
+
+    越权与不存在同 404（不泄露资源存在性）；结果子路由共用。
+    """
+    data = await _load_match_result(match_id, user.get("sub", ""))
+    if data is None:
+        return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
+    return data
+
+
 async def _persist_diagnosis_report(
     session: AsyncSession, match_id: str, position_name: str, payload: dict
 ) -> None:
@@ -380,27 +391,21 @@ async def match_task_status(
 @router.get("/result/{match_id}")
 async def match_result(match_id: str, user: dict = Depends(require_role("user"))):
     """[M4] 获取匹配结果（recommend/compare 返回的 match_id，仅限本人结果）。"""
-    data = await _load_match_result(match_id, user.get("sub", ""))
-    if data is None:
-        return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
+    data = await _load_or_404(match_id, user)
     return ok(data=data)
 
 
 @router.get("/result/{match_id}/gap")
 async def match_result_gap(match_id: str, user: dict = Depends(require_role("user"))):
     """[M4] 获取差距分析（compare 结果的 gaps 三态列表，仅限本人结果）。"""
-    data = await _load_match_result(match_id, user.get("sub", ""))
-    if data is None:
-        return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
+    data = await _load_or_404(match_id, user)
     return ok(data={"match_id": match_id, "gaps": data.get("gaps", [])})
 
 
 @router.get("/result/{match_id}/path")
 async def match_result_path(match_id: str, user: dict = Depends(require_role("user"))):
     """[M4] 获取学习路径（compare 结果的 missing/weak 技能先修链 + 课程，仅限本人结果）。"""
-    data = await _load_match_result(match_id, user.get("sub", ""))
-    if data is None:
-        return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
+    data = await _load_or_404(match_id, user)
     return ok(data={"match_id": match_id, "learning_path": data.get("learning_path", [])})
 
 
@@ -414,9 +419,7 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
     每条差距断言附 evidence_id 可追溯）。仅人岗比对（compare）快照含 gaps，
     AUTO 推荐快照返回 400；LLM 超时返回 5003/504、配置不可用返回 503（诊断是增强功能，不阻断主流程）。
     """
-    data = await _load_match_result(match_id, user.get("sub", ""))
-    if data is None:
-        return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
+    data = await _load_or_404(match_id, user)
     if not data.get("gaps"):
         return error(ERR_VALIDATION, "该匹配结果无差距数据，仅人岗比对可生成诊断报告")
 

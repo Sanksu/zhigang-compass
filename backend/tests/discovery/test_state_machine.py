@@ -5,6 +5,7 @@ candidate→emerging 条件、持久化幂等与审计日志。
 """
 
 import pytest
+from tests.helpers import SeqResult
 
 from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
 from app.services.discovery.state_machine import (
@@ -21,14 +22,6 @@ from app.services.discovery.state_machine import (
 )
 
 
-class _SeqResult:
-    """next_id 的 Counter 查询结果桩（single 返回 seq）。"""
-
-    def __init__(self, seq: int):
-        self._seq = seq
-
-    def single(self):
-        return {"seq": self._seq}
 
 
 def _candidate(
@@ -413,7 +406,7 @@ class TestAutoTransitionFromSnapshots:
             def run(self, query, **params):
                 # next_id 先发 Counter 自增查询（08-14：创建时补全 id/freq）
                 if "Counter" in query:
-                    return _SeqResult(7)
+                    return SeqResult(7)
                 assert "MERGE (p:Position {name: $name})" in query
                 assert "ON CREATE SET p.id = $pid, p.freq = 0" in query
                 assert params["pid"] == "pos_0007"
@@ -488,7 +481,7 @@ class TestPersist:
         class _FakeTx:
             def run(self, query, **params):
                 if "Counter" in query:
-                    return _SeqResult(1)
+                    return SeqResult(1)
                 assert "MERGE (p:Position {name: $name})" in query
                 assert "SET p.status = $state" in query
                 assert params["state"] == "emerging"

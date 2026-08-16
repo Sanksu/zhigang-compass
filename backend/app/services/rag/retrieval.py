@@ -30,13 +30,9 @@ _VERIFIED_STATES = ("candidate", "emerging", "stable")
 DEFAULT_TOP_K = 10
 DEFAULT_MAX_TOKENS = 3000
 
-# Neo4j 全文查询（Lucene 语法）特殊字符：查询前剔除，避免语法异常
-_LUCENE_SPECIAL = frozenset('+-&|!(){}[]^"~*?:\\/')
 
 
-def _sanitize_fulltext(q: str) -> str:
-    """剔除 Neo4j 全文查询的 Lucene 特殊字符，空串视为无关键词命中。"""
-    return "".join(ch for ch in q if ch not in _LUCENE_SPECIAL).strip()
+from app.services.kg.fulltext import sanitize_fulltext
 
 
 def _estimate_tokens(text: str) -> int:
@@ -131,7 +127,7 @@ def _query_skill_fulltext(neo4j, q: str) -> list[dict]:
 
 async def _skills(neo4j, query: str) -> list[RetrievedChunk]:
     """技能描述（Neo4j skill_search 全文索引关键词路）。"""
-    q = _sanitize_fulltext(query)
+    q = sanitize_fulltext(query)
     if neo4j is None or not q:
         return []
     try:
