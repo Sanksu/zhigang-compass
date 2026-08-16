@@ -10,6 +10,7 @@
  * 共用：暗色模式跟随 + 容器尺寸 0 自愈 + 按需导入
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { isDark } from '@/lib/utils'
 import * as echarts from 'echarts/core'
 import { GaugeChart, RadarChart as ERadar, HeatmapChart, BarChart, LinesChart } from 'echarts/charts'
 import {
