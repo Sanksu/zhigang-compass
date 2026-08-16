@@ -51,23 +51,53 @@ def evaluate_pairs(pairs: list[dict], weights, semantic, sim_threshold: float) -
 
     scores, labels = [], []
     for p in pairs:
-        musts = [
-            SkillRequirement(
-                skill_id=s, skill_name=s, necessity=Necessity.MUST, weight=1.0
+        if "position_skills_must" in p:
+            # v2（BT 黄金集补标注 2026-08-16）：must/nice/年限/候选年限+熟练度
+            # 维度标注——exp 维度有区分力（弱监督注入年限不足负例）
+            musts = [
+                SkillRequirement(
+                    skill_id=s, skill_name=s, necessity=Necessity.MUST, weight=1.0
+                )
+                for s in p["position_skills_must"]
+            ]
+            nices = [
+                SkillRequirement(
+                    skill_id=s, skill_name=s, necessity=Necessity.NICE, weight=1.0
+                )
+                for s in p.get("position_skills_nice") or []
+            ]
+            position = PositionProfile(
+                position_id=p["position_id"], name=p["position_id"],
+                must_skills=musts, nice_skills=nices,
+                required_years=p.get("required_years") or None,
             )
-            for s in p["position_skills"]
-        ]
-        position = PositionProfile(
-            position_id=p["position_id"], name=p["position_id"], must_skills=musts
-        )
-        candidate = CandidateProfile(
-            user_id="eval",
-            skills=[
-                CandidateSkill(skill_id=s, skill_name=s, proficiency=2)
-                for s in p["candidate_skills"]
-            ],
-            total_years=5.0,
-        )
+            candidate = CandidateProfile(
+                user_id="eval",
+                skills=[
+                    CandidateSkill(skill_id=s, skill_name=s, proficiency=p.get("candidate_proficiency", 2))
+                    for s in p["candidate_skills"]
+                ],
+                total_years=p.get("candidate_total_years", 5.0),
+            )
+        else:
+            # v1：position_skills 全 must、候选无年限信息（exp 恒满分退化）
+            musts = [
+                SkillRequirement(
+                    skill_id=s, skill_name=s, necessity=Necessity.MUST, weight=1.0
+                )
+                for s in p["position_skills"]
+            ]
+            position = PositionProfile(
+                position_id=p["position_id"], name=p["position_id"], must_skills=musts
+            )
+            candidate = CandidateProfile(
+                user_id="eval",
+                skills=[
+                    CandidateSkill(skill_id=s, skill_name=s, proficiency=2)
+                    for s in p["candidate_skills"]
+                ],
+                total_years=5.0,
+            )
         r = score_position(
             candidate, position, weights=weights, semantic=semantic, sim_threshold=sim_threshold
         )
@@ -141,13 +171,16 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=50)
     parser.add_argument("--no-semantic", action="store_true", help="纯规则调优（不注入 SBERT）")
     parser.add_argument("--eval-only", action="store_true", help="仅评估当前配置文件，不调优")
+    parser.add_argument("--golden", type=Path, default=_GOLDEN_MATCH,
+                        help="黄金集路径（默认 v1 golden_set_match.jsonl；"
+                             "v2 传 golden_set_match_v2.jsonl，BT 补标注 08-16）")
     args = parser.parse_args()
 
-    if not _GOLDEN_MATCH.exists():
-        logger.warning("匹配黄金集不存在: %s（先运行 scripts/build_match_golden.py）", _GOLDEN_MATCH)
+    if not args.golden.exists():
+        logger.warning("匹配黄金集不存在: %s", args.golden)
         return
 
-    pairs = load_pairs(_GOLDEN_MATCH)
+    pairs = load_pairs(args.golden)
     semantic = None
     if not args.no_semantic and not args.eval_only:
         from app.services.matching.semantic import SkillEmbedder
