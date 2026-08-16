@@ -85,6 +85,3 @@ export const adminNavGroups: AdminNavGroup[] = [
     ],
   },
 ]
-
-/** 扁平管理项（兼容引用；新代码优先用 adminNavGroups） */
-export const adminNav: NavItem[] = adminNavGroups.flatMap((g) => g.items)
