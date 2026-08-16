@@ -199,6 +199,7 @@ function SearchableSelect({
   loading,
   onSearch,
   onSelect,
+  pageSize,
 }: {
   value: string
   placeholder: string
@@ -206,15 +207,22 @@ function SearchableSelect({
   loading?: boolean
   onSearch?: (q: string) => void
   onSelect: (v: string) => void
+  /** 选项分页（10 项一页，08-16 用户决策：版本对比下拉翻页浏览） */
+  pageSize?: number
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
+  const [optionPage, setOptionPage] = useState(1)
   const timerRef = useRef<number | null>(null)
   const current = options.find((o) => o.value === value)
   const ql = q.trim().toLowerCase()
-  const visible = ql
+  const filtered = ql
     ? options.filter((o) => o.label.toLowerCase().includes(ql))
     : options
+  const totalPages = pageSize ? Math.max(1, Math.ceil(filtered.length / pageSize)) : 1
+  const visible = pageSize
+    ? filtered.slice((optionPage - 1) * pageSize, optionPage * pageSize)
+    : filtered
 
   return (
     <div className="relative">
@@ -226,6 +234,7 @@ function SearchableSelect({
         onClick={() => {
           setOpen((v) => !v)
           setQ('')
+          setOptionPage(1)
         }}
       >
         <span className="truncate text-ink">{current?.label || placeholder}</span>
@@ -244,6 +253,7 @@ function SearchableSelect({
                 onChange={(e) => {
                   const v = e.target.value
                   setQ(v)
+                  setOptionPage(1)
                   if (!onSearch) return
                   if (timerRef.current) window.clearTimeout(timerRef.current)
                   timerRef.current = window.setTimeout(() => onSearch(v.trim()), 300)
@@ -274,6 +284,34 @@ function SearchableSelect({
                 ))
               )}
             </div>
+            {/* 选项分页（10 项一页，08-16 用户决策） */}
+            {pageSize && totalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-border px-2 py-1.5">
+                <span className="text-[10px] text-ink-faint">
+                  第 {Math.min(optionPage, totalPages)} / {totalPages} 页 · 共 {filtered.length} 个
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[10px]"
+                    disabled={optionPage <= 1}
+                    onClick={() => setOptionPage((p) => Math.max(1, p - 1))}
+                  >
+                    上一页
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[10px]"
+                    disabled={optionPage >= totalPages}
+                    onClick={() => setOptionPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    下一页
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -920,6 +958,7 @@ function VersionDiffView() {
               value={v1}
               placeholder="选择版本"
               options={versions.map((v) => ({ value: v.version_id, label: v.version_id }))}
+              pageSize={10}
               onSelect={setV1}
             />
             <span className="text-xs text-ink-faint">vs</span>
@@ -927,6 +966,7 @@ function VersionDiffView() {
               value={v2}
               placeholder="选择版本"
               options={versions.map((v) => ({ value: v.version_id, label: v.version_id }))}
+              pageSize={10}
               onSelect={setV2}
             />
             <Button
