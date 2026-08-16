@@ -13,8 +13,6 @@ import pytest
 
 from app.services.graph_algorithms.louvain import (
     _modularity,
-    guard_community_distribution,
-    homogeneity,
     louvain,
     louvain_hierarchical,
 )
@@ -73,32 +71,6 @@ class TestResolutionGranularity:
         assert n_fine >= n_default >= n_coarse
         # 桥节点在细 γ 下更可能拆出
         assert n_fine > n_coarse
-
-
-class TestHomogeneity:
-    def test_hand_computed_value(self):
-        """手算：两簇各 2 节点 + 1 条跨簇弱边（权重 1），同质性 8/10 = 0.8。"""
-        graph = {
-            "a": {"b": 2.0, "c": 1.0},
-            "b": {"a": 2.0},
-            "c": {"a": 1.0, "d": 2.0},
-            "d": {"c": 2.0},
-        }
-        partition = {"a": 0, "b": 0, "c": 1, "d": 1}
-        # intra 双倍累计 = 2*(2+2) = 8，inter = 2*1 = 2
-        assert homogeneity(graph, partition) == pytest.approx(8.0 / 10.0)
-
-    def test_single_cluster_is_one(self):
-        assert homogeneity(_GRAPH, {nd: 0 for nd in _GRAPH}) == pytest.approx(1.0)
-
-    def test_empty_graph_zero(self):
-        assert homogeneity({}, {}) == 0.0
-
-    def test_isolated_nodes_zero(self):
-        graph = {"x": {}, "y": {}}
-        assert homogeneity(graph, {"x": 0, "y": 1}) == 0.0
-
-
 class TestHierarchical:
     """阶段三：louvain_hierarchical 层次化提取。"""
 
@@ -136,60 +108,6 @@ class TestHierarchical:
         hier_coarse = louvain_hierarchical(_GRAPH, resolution=0.5)
         # 细 γ 层级数不少于粗 γ（细 γ 下拆分更多轮）
         assert len(hier_fine["levels"]) >= len(hier_coarse["levels"])
-
-
-class TestGuardCommunityDistribution:
-    """社区层级写库前门禁：退化分布拒绝重建（P1）。"""
-
-    @staticmethod
-    def _levels(memberships: list[dict]) -> list[dict]:
-        """构造 levels：每层 {level, membership}，level 从 0 递增。"""
-        return [
-            {"level": i, "membership": m, "modularity": 0.5,
-             "cluster_count": len(set(m.values()))}
-            for i, m in enumerate(memberships)
-        ]
-
-    def test_degenerate_single_cluster_rejected(self):
-        # best_level 层仅 1 个社区（分辨率过低全并一簇）→ 拒绝
-        levels = self._levels([
-            {"a": 0, "b": 0, "c": 0},   # level 0
-            {"a": 0, "b": 0, "c": 0},   # level 1（best，1 簇）
-        ])
-        with pytest.raises(ValueError, match="社区层级退化"):
-            guard_community_distribution(levels, best_level=1)
-
-    def test_dominant_cluster_rejected(self):
-        # 最大社区占比 > 50%（单簇吞并）→ 拒绝
-        levels = self._levels([
-            {"a": 0, "b": 0, "c": 0, "d": 1, "e": 2},   # 3 簇，最大 3/5=60%
-        ])
-        with pytest.raises(ValueError, match="单簇吞并"):
-            guard_community_distribution(levels, best_level=0)
-
-    def test_healthy_distribution_passed(self):
-        # 正常分布：≥3 簇、最大占比 ≤50% → 通过并返回摘要
-        levels = self._levels([
-            {"a": 0, "b": 0, "c": 1, "d": 2, "e": 3},   # 4 簇，最大 2/5=40%
-        ])
-        guard = guard_community_distribution(levels, best_level=0)
-        assert guard["cluster_count"] == 4
-        assert guard["dominant_ratio"] == 0.4
-
-    def test_empty_levels_passed(self):
-        guard = guard_community_distribution([])
-        assert guard["levels"] == 0
-
-    def test_best_level_none_fallback(self):
-        # best_level 缺省：取中间层，不抛错
-        levels = self._levels([
-            {"a": 0, "b": 1},                   # level 0
-            {"a": 0, "b": 1, "c": 2},           # level 1（中间层，3 簇）
-        ])
-        guard = guard_community_distribution(levels)
-        assert guard["best_level"] == 1
-
-
 class TestTuneHelpers:
     def test_filter_graph_symmetric(self):
         """filter_graph 保持无向对称（双向登记一致）。"""

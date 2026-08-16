@@ -1,4 +1,4 @@
-"""Neo4b 自增 ID 生成。
+"""Neo4j 自增 ID 生成。
 
 使用 Counter 节点实现原子自增，prefix 映射表：
 

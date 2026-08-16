@@ -1189,27 +1189,3 @@ def is_noise_skill(name: str) -> bool:
 # 白名单词小写 → 标准写法映射（normalize_skill 用于大小写统一）
 _SKILL_WHITELIST_LOWER: dict[str, str] = {w.lower(): w for w in SKILL_WHITELIST}
 
-
-# 熟练度映射（JD 自然语言 → level 三档，按优先级从高到低匹配）：
-# 高级词先匹配（"精通/深入/专家/资深"），避免被中级/初级子串误吞（如"熟练掌握"）
-_PROFICIENCY_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
-    (("精通", "深入", "专家", "资深"), "高级"),
-    (("掌握", "熟练", "独立"), "中级"),
-    (("熟悉", "了解", "入门", "基础"), "初级"),
-]
-
-
-def normalize_proficiency(text: str) -> str | None:
-    """JD 自然语言熟练度 → level 三档（了解/熟悉→初级、掌握→中级、精通→高级）。
-
-    直接命中规范枚举（初级/中级/高级）原样返回；未命中返回 None（不武断判定）。
-    """
-    if not text:
-        return None
-    t = text.strip()
-    if t in ("初级", "中级", "高级"):
-        return t
-    for keywords, level in _PROFICIENCY_KEYWORDS:
-        if any(k in t for k in keywords):
-            return level
-    return None

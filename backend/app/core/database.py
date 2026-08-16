@@ -37,9 +37,6 @@ neo4j_driver = GraphDatabase.driver(
 )
 
 
-def get_neo4j():
-    with neo4j_driver.session() as session:
-        yield session
 
 
 # ---------- Redis (async) ----------

@@ -17,7 +17,6 @@ import asyncio
 import json
 import os
 import sys
-import traceback
 from pathlib import Path
 from urllib.parse import urlencode
 
