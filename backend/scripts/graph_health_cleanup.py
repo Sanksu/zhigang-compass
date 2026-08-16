@@ -90,7 +90,7 @@ def stage_a_dirty_edges(semantic, apply: bool) -> int:
     logger.info(f"  同语言脏边: {len(dirty)} 条（跨语言保留 {len(cross)} 条）")
     if not dirty:
         return 0
-    _backup(dirty, "dirty_edges", apply)
+    _backup(dirty, "dirty_edges")
     if not apply:
         logger.info("  (dry-run，--apply 才删除)")
         return len(dirty)
@@ -131,7 +131,7 @@ def stage_b_isolated(semantic, apply: bool) -> int:
     logger.info(f"  孤立伪技能: {len(rows)} 个")
     if not rows:
         return 0
-    _backup(rows, "isolated_skills", apply)
+    _backup(rows, "isolated_skills")
     if not apply:
         logger.info("  (dry-run，--apply 才删除)")
         return len(rows)
@@ -158,7 +158,7 @@ def stage_c_teaching(semantic, apply: bool) -> int:
     logger.info(f"  教学领域伪技能: {len(rows)} 个")
     if not rows:
         return 0
-    _backup(rows, "teaching_skills", apply)
+    _backup(rows, "teaching_skills")
     if not apply:
         logger.info("  (dry-run，--apply 才删除)")
         return len(rows)
