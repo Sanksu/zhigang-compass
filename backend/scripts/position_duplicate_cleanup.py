@@ -46,7 +46,7 @@ sys.path.insert(0, str(ROOT))
 
 from sqlalchemy import select
 
-from app.core.database import async_session_factory, neo4j_driver
+from app.core.database import async_session_factory, engine, neo4j_driver
 from app.core.logging import setup_logging
 from app.models.business import DiscoveryCandidate
 from app.models.raw import JDRaw
@@ -123,6 +123,9 @@ async def _load_pg() -> tuple[list[dict], set[str]]:
         n = (ext.get("position_name") or "").strip()
         if n:
             jd_names.add(n)
+    # 关闭池连接：跨 asyncio.run 复用会触发 "Event loop is closed"（Windows
+    # Proactor 坑），--reaggregate 等独立 asyncio.run 需要干净连接池
+    await engine.dispose()
     return candidates, jd_names
 
 

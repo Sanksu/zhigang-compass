@@ -687,7 +687,9 @@ class TestPositionVariantCleaning:
         assert normalize_position_name("Software Engineer") == ""
 
     def test_alias_table_consistency(self):
-        # CI 把关：键值非空、键值不同、变体键唯一、同组归并（空表幂等通过）
+        # CI 把关：键值非空、键值不同、变体键唯一、无自映射（空表幂等通过）。
+        # 跨组别名合法（AS400应用 → AS400应用程序 变体键不同，属归一目标迁移），
+        # 不强制 vk(键) == vk(值)；值须为清洗后规范名（无空白，防输出分裂）
         from app.services.extraction import dictionary as d
 
         seen: set[str] = set()
@@ -697,4 +699,4 @@ class TestPositionVariantCleaning:
             vk = d._variant_key(k)
             assert vk not in seen  # 一个变体键只能对应一个规范名
             seen.add(vk)
-            assert vk == d._variant_key(v)  # 别名键与规范名同组，合并后成单成员组
+            assert d._clean_variant(v) == v  # 值须为清洗后形式（无空白）

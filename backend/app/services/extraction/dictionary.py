@@ -419,8 +419,18 @@ _TECH_STACKS: tuple[tuple[str, str], ...] = (
 # 变体键 → 规范岗位名。SBERT 语义提议 + 人工复核确认的对写入本表，
 # normalize_position_name 入口先查表（键/值均为岗位名原文，查表时计算变体键），
 # 防止"数据科学与 vs 数据科学"类语义近似名再分裂成两个图谱节点。
-# 格式对齐 _EN_POSITION_MAP（dict[str, str]）；空表时无行为（幂等）。
-_POSITION_ALIAS: dict[str, str] = {}
+# 格式对齐 _EN_POSITION_MAP（dict[str, str]）；值须为清洗后规范名（无空格），
+# 与 _variant_key(键) == _variant_key(值) 一致性由 test_alias_table_consistency 把关。
+_POSITION_ALIAS: dict[str, str] = {
+    # 2026-08-16 复核确认（sim ≥ 0.90 语义对，证据比见 reports/position_duplicates_stageB_*）
+    "AI数据科学与机器人教练": "AI数据科学机器人教练",
+    "Angular开发工程师": "Angular前端开发工程师",
+    "React开发工程师": "React前端开发工程师",
+    "STEM讲师": "STEM科技教育讲师",
+    "AS400应用": "AS400应用程序",
+    "AS400 应用程序": "AS400应用程序",  # 存量带空格节点改名统一（清洗后规范名）
+    "AI/ML应用": "AI/ML",
+}
 
 
 # 英文岗位名 → 中文标准名（国际源 JD 的 position_name 翻译，再与中文岗位合并去重）
