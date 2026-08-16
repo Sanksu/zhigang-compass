@@ -97,7 +97,7 @@ class TestZhilianEmptyKeywords:
 
         assert len(requests) == 1
         assert "kw=" in requests[0].url
-        assert requests[0].url.endswith("kw=&pn=1")
+        assert "kw=&pn=1" in requests[0].url
         assert requests[0].meta["keyword"] == ""
 
 

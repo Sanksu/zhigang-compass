@@ -87,16 +87,7 @@ interface MetricCardItem {
   hint: string
 }
 
-/** 平台切换时的默认搜索参数：仅预填城市；关键词留空 = 采集平台热度/最新（08-16 用户决策） */
-const PLATFORM_DEFAULTS: Record<string, { city: string }> = {
-  boss: { city: '北京' },
-  zhilian: { city: '北京' },
-  maimai: { city: '北京' },
-  monster: { city: 'New York' },
-  indeed: { city: 'New York' },
-  glassdoor: { city: 'New York' },
-  linkedin: { city: 'New York' },
-}
+// 08-16 用户决策：无平台默认关键词/城市——留空 = 平台热度/最新且不限城市
 
 const STATUS_META: Record<CrawlStatus, { variant: 'stable' | 'candidate' | 'archived'; label: string }> = {
   running: { variant: 'stable', label: '运行中' },
@@ -280,7 +271,7 @@ export function AdminCrawlPage() {
   const [form, setForm] = useState({
     platform: 'boss',
     keyword: '',
-    city: '北京',
+    city: '',
     maxPages: 30,
   })
   const [currentTask, setCurrentTask] = useState<CurrentTask | null>(null)
@@ -365,7 +356,6 @@ export function AdminCrawlPage() {
   // 触发爬取 → 真实 POST /admin/crawl/trigger（ARQ 入队，202 返回 task_id）
   async function triggerCrawl(platform: string) {
     if (isBusy) return
-    const def = PLATFORM_DEFAULTS[platform]
     const keyword = form.keyword?.trim() ?? ''
     if (!platform) {
       setNotice('请选择平台')
@@ -374,7 +364,7 @@ export function AdminCrawlPage() {
     setCurrentTask({
       platform: platforms.find((p) => p.id === platform)?.name ?? platform,
       keyword,
-      city: form.city || def?.city || '北京',
+      city: form.city?.trim() || '',
       maxPages: form.maxPages || 30,
       status: 'queued',
       progress: 0,
@@ -538,15 +528,11 @@ export function AdminCrawlPage() {
                 <Select
                   value={form.platform}
                   onValueChange={(v) =>
-                    setForm((f) => {
-                      const def = PLATFORM_DEFAULTS[v]
-                      const prevDef = PLATFORM_DEFAULTS[f.platform]
-                      // 城市未手动输入（为空或仍为上一平台默认值）时跟随新平台默认；
-                      // 关键词无平台默认（留空 = 热度/最新），保持用户输入
-                      const city =
-                        def && (!f.city.trim() || f.city === prevDef?.city) ? def.city : f.city
-                      return { ...f, platform: v, keyword: f.keyword, city }
-                    })
+                    setForm((f) => ({
+                      // 关键词/城市均无平台默认（留空 = 热度/最新且不限城市，08-16 用户决策）
+                      ...f,
+                      platform: v,
+                    }))
                   }
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -570,7 +556,7 @@ export function AdminCrawlPage() {
                 <Input
                   value={form.city}
                   onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
-                  placeholder={PLATFORM_DEFAULTS[form.platform]?.city ?? '北京'}
+                  placeholder="留空则不限城市"
                 />
               </div>
               <div className="space-y-1.5">

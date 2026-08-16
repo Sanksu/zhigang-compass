@@ -77,15 +77,19 @@ class ZhilianSpider(BaseSpider):
         return any(_is_older_than_days(v, self.history_days) for v in publish_time_map.values())
 
     def start_requests(self):
-        # 空关键词 = 平台默认推荐列表（热度/最新，08-16 用户决策）
+        # 空关键词/空城市 = 平台默认推荐列表且不限城市（08-16 用户决策）
         keywords = self.keywords or [""]
+        cities = self.cities or [""]
         for keyword in keywords:
-            for city in self.cities:
+            for city in cities:
                 city_code = ZHILIAN_CITY_CODES.get(city)
-                if not city_code:
+                if city and not city_code:
                     self.logger.warning(f"跳过未映射城市: {city}（智联城市码表仅含 {list(ZHILIAN_CITY_CODES)}）")
                     continue
-                url = f"{self.SEARCH_URL}?{self.build_query({'jl': city_code, 'kw': keyword, 'pn': 1})}"
+                params = {"kw": keyword, "pn": 1}
+                if city_code:
+                    params["jl"] = city_code
+                url = f"{self.SEARCH_URL}?{self.build_query(params)}"
                 yield self._make_playwright_request(
                     url,
                     meta={"keyword": keyword, "city": city, "page": 1},

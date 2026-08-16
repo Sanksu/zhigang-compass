@@ -56,11 +56,12 @@ class JobSpyBaseSpider(BaseSpider):
 
     def start_requests(self):
         """通过 subprocess 调用 JobSpy 采集脚本，解析 JSONL 输出并 yield Item。"""
-        # 空关键词 = 按平台热度/最新采集（08-16 用户决策）：每城市取默认岗位流
+        # 空关键词/空城市 = 按平台热度/最新且不限位置采集（08-16 用户决策）
         keywords = self.keywords or [""]
+        cities = self.cities or [""]
         tasks = []
         for keyword in keywords:
-            for city in self.cities:
+            for city in cities:
                 tasks.append({"keyword": keyword, "city": city})
 
         if not tasks:
