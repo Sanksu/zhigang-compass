@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { apiGet, apiPut, ApiError } from '@/lib/api'
+import {apiGet, apiPut, errMsg} from '@/lib/api'
 import type { components } from '@/types/api'
 
 /** 运行时配置（契约 RuntimeConfig，/admin/runtime-config，重启后生效） */
@@ -75,7 +75,7 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
         }
         setScalars(next)
       })
-      .catch((e) => setFeedback({ type: 'err', text: e instanceof ApiError ? e.message : '配置加载失败' }))
+      .catch((e) => setFeedback({ type: 'err', text: errMsg(e, '配置加载失败') }))
       .finally(() => setLoading(false))
   }, [section])
 
@@ -125,7 +125,7 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
       }
       setFeedback({ type: 'ok', text: '已保存，重启 api/worker 容器后生效' })
     } catch (e) {
-      setFeedback({ type: 'err', text: e instanceof ApiError ? e.message : '保存失败' })
+      setFeedback({ type: 'err', text: errMsg(e, '保存失败') })
     } finally {
       setSaving(false)
     }

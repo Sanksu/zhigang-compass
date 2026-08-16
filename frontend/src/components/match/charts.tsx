@@ -10,6 +10,7 @@
  * 共用：暗色模式跟随 + 容器尺寸 0 自愈 + 按需导入
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { isDark } from '@/lib/utils'
 import * as echarts from 'echarts/core'
 import { GaugeChart, RadarChart as ERadar, HeatmapChart, BarChart, LinesChart } from 'echarts/charts'
 import {
@@ -48,10 +49,6 @@ echarts.use([
 ])
 
 /** 暗色模式判定 */
-function isDark(): boolean {
-  return document.documentElement.classList.contains('dark')
-}
-
 /**
  * 暗色模式响应式订阅：class 变化触发 setDark → 组件 re-render
  * → useEChart 收到含新 dark 的 optionBuilder，deps 触发 setOption 刷新颜色。

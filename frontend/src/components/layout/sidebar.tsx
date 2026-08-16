@@ -10,6 +10,16 @@ import { mainNav, adminNavGroups, type NavItem, type AdminNavGroup } from './nav
  * 侧边栏 — 桌面端 240px 固定，移动端作为抽屉式侧栏由菜单按钮控制展开收起
  * 08-16：管理后台改层级分组（管理 + 配置中心），组可折叠
  */
+const FooterBlock = (
+  <div className="border-t border-border px-3 py-3">
+    <p className="text-xs text-ink-faint leading-relaxed">
+      智岗罗盘 v0.1.0
+      <br />
+      <span className="font-mono">XH-202621</span>
+    </p>
+  </div>
+)
+
 export function Sidebar() {
   const { user } = useAuthStore()
   const { sidebarOpen, closeSidebar } = useUIStore()
@@ -102,25 +112,13 @@ export function Sidebar() {
           </button>
         </div>
         {navContent}
-        <div className="border-t border-border px-3 py-3">
-          <p className="text-xs text-ink-faint leading-relaxed">
-            智岗罗盘 v0.1.0
-            <br />
-            <span className="font-mono">XH-202621</span>
-          </p>
-        </div>
+{FooterBlock}
       </aside>
 
       {/* 桌面端固定侧栏 */}
       <aside className="hidden lg:flex w-60 flex-col border-r border-border bg-subtle">
         {navContent}
-        <div className="border-t border-border px-3 py-3">
-          <p className="text-xs text-ink-faint leading-relaxed">
-            智岗罗盘 v0.1.0
-            <br />
-            <span className="font-mono">XH-202621</span>
-          </p>
-        </div>
+{FooterBlock}
       </aside>
     </>
   )

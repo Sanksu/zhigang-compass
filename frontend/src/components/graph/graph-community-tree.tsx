@@ -7,6 +7,7 @@
  * 节点可折叠（expandAndCollapse）。暗色模式跟随 store theme 切换刷新。
  */
 import { useEffect, useRef, useState } from 'react'
+import { isDark } from '@/lib/utils'
 import * as echarts from 'echarts'
 import { GitFork, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,10 +23,6 @@ interface GraphCommunityTreeProps {
 }
 
 /** 暗色模式判定 — 跟随 documentElement 上的 .dark 类（与 graph-2d 同口径） */
-function isDark(): boolean {
-  return document.documentElement.classList.contains('dark')
-}
-
 export function GraphCommunityTree({ className }: GraphCommunityTreeProps) {
   const chartRef = useRef<HTMLDivElement>(null)
   const [tree, setTree] = useState<CommunityNode[] | null>(null)
