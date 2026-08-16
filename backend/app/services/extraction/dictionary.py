@@ -10,6 +10,7 @@
 """
 
 import re
+import unicodedata
 from pathlib import Path
 
 import yaml
@@ -413,6 +414,24 @@ _TECH_STACKS: tuple[tuple[str, str], ...] = (
     ("echarts", "ECharts"), ("uni-app", "uni-app"), ("taro", "Taro"),
     ("electron", "Electron"), ("webgl", "WebGL"),
 )
+
+# 语义近似岗位对别名（2026-08-16 重复岗位对治理 B 阶段产物）：
+# 变体键 → 规范岗位名。SBERT 语义提议 + 人工复核确认的对写入本表，
+# normalize_position_name 入口先查表（键/值均为岗位名原文，查表时计算变体键），
+# 防止"数据科学与 vs 数据科学"类语义近似名再分裂成两个图谱节点。
+# 格式对齐 _EN_POSITION_MAP（dict[str, str]）；值须为清洗后规范名（无空格），
+# 与 _variant_key(键) == _variant_key(值) 一致性由 test_alias_table_consistency 把关。
+_POSITION_ALIAS: dict[str, str] = {
+    # 2026-08-16 复核确认（sim ≥ 0.90 语义对，证据比见 reports/position_duplicates_stageB_*）
+    "AI数据科学与机器人教练": "AI数据科学机器人教练",
+    "Angular开发工程师": "Angular前端开发工程师",
+    "React开发工程师": "React前端开发工程师",
+    "STEM讲师": "STEM科技教育讲师",
+    "AS400应用": "AS400应用程序",
+    "AS400 应用程序": "AS400应用程序",  # 存量带空格节点改名统一（清洗后规范名）
+    "AI/ML应用": "AI/ML",
+}
+
 
 # 英文岗位名 → 中文标准名（国际源 JD 的 position_name 翻译，再与中文岗位合并去重）
 _EN_POSITION_MAP: dict[str, str] = {
@@ -894,6 +913,40 @@ def _route_position_by_skills(skills: list[str] | None) -> str:
     return ""
 
 
+# CJK 标点（变体键剔除用）。ASCII 标点保留——C++/C#/Node.js 等技术名
+# 依赖 + # . / 等符号，去掉会合并成错误岗位（"C++开发工程师" vs "C开发工程师"）。
+_CJK_PUNCT_RE = re.compile(r"[，。！？、；：（）《》「」『』【】·…—–-]")
+
+
+def _variant_key(name: str) -> str:
+    """岗位名字符级变体键：NFKC（全角→半角）+ 去全部空白 + 去 CJK 标点 + 小写。
+
+    仅用于重复岗位对枚举分组与语义别名查表（_POSITION_ALIAS），不做改名：
+    "CMDB 发现" 与 "CMDB发现"、全角 "ＡＩ" 与 "AI" 归为同键；ASCII 标点保留
+    （防 C++/C# 误并）。
+    """
+    s = unicodedata.normalize("NFKC", name)
+    s = _CJK_PUNCT_RE.sub("", s)
+    return re.sub(r"\s+", "", s).casefold()
+
+
+def _clean_variant(name: str) -> str:
+    """岗位名输出收敛：NFKC + 去全部空白（含全角空格 U+3000）。
+
+    仅去空白、不动标点——ASCII 标点技术名（C++/C#/Node.js）与中文标点
+    （"产品、运营经理" 去顿号会改变语义）均保留。作为 normalize_position_name
+    最终输出前的一步，使带空格变体与规范名指向同一图谱节点。
+    """
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", name))
+
+
+# _POSITION_ALIAS 的变体键反向索引（表键为岗位名原文，查表用变体键）：
+# 模块加载时构建；_POSITION_ALIAS 增加条目后需同步（测试/复核流程负责）。
+_POSITION_ALIAS_BY_VARIANT: dict[str, str] = {
+    _variant_key(k): v for k, v in _POSITION_ALIAS.items()
+}
+
+
 def normalize_position_name(name: str, skills: list[str] | None = None) -> str:
     """岗位名归一化：英文翻译中文 + 合并同义重复岗位，保留技术栈细分维度。
 
@@ -921,6 +974,12 @@ def normalize_position_name(name: str, skills: list[str] | None = None) -> str:
     - "技术" → ""（泛词不入图）
     - "SQL" → ""（技能词不入图）
     """
+    # 语义别名收敛（2026-08-16 重复岗位对治理）：变体键命中别名表 → 用规范名
+    # 继续归一化。别名键为中文/中英混合岗位名，英文原名校（"Software Engineer"）
+    # 的变体键不会命中中文键，翻译路径不受影响。
+    alias = _POSITION_ALIAS_BY_VARIANT.get(_variant_key(name))
+    if alias:
+        name = alias
     translated = _translate_en_position(name)
     # 实习类岗位不入图（招聘形态，非正式岗位族；含"实习"即过滤，含翻译结果）
     if "实习" in (translated or name):
@@ -980,7 +1039,10 @@ def normalize_position_name(name: str, skills: list[str] | None = None) -> str:
         # 单英文词（RAG/SRE 等缩写或技术词）原样保留，discovery 等下游依赖其作为岗位名
         if result.lower() == name.strip().lower() and " " in name.strip():
             return ""
-    return result
+    # 输出收敛（2026-08-16 重复岗位对治理）：去空白/全角统一在关键词/停用词匹配
+    # 之后做，不改动既有命中逻辑；使 "AI 数据科学机器人教练" 与规范名
+    # "AI数据科学机器人教练" 指向同一图谱节点
+    return _clean_variant(result)
 
 
 # 技能名尾随修饰词（"MySQL 优化"→"MySQL"、"K8s 运维"→"K8s"）。未命中别名/白名单

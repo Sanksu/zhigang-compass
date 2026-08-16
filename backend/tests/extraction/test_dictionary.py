@@ -8,8 +8,10 @@
 from app.services.extraction.dictionary import (
     SOFT_SKILL_WHITELIST,
     _POSITION_PREFIX_RE,
+    _clean_variant,
     _normalize_base,
     _translate_en_position,
+    _variant_key,
     normalize_position_name,
     normalize_proficiency,
     normalize_skill,
@@ -636,3 +638,65 @@ class TestP10FragmentFallback:
         assert normalize_position_name("WebGL开发工程师") == "WebGL开发工程师"
         assert normalize_position_name("WebSphere管理员") == "WebSphere管理员"
         assert normalize_position_name("web前端开发工程师") == "前端开发工程师"
+
+
+class TestPositionVariantCleaning:
+    """重复岗位对治理：字符级变体键/输出收敛/语义别名（2026-08-16）。"""
+
+    def test_variant_key_whitespace_and_fullwidth(self):
+        assert _variant_key("CMDB 发现") == _variant_key("CMDB发现") == "cmdb发现"
+        assert _variant_key("ＡＩ数据科学") == _variant_key("AI数据科学") == "ai数据科学"
+
+    def test_variant_key_keeps_ascii_punct(self):
+        # C++/C# 依赖 ASCII 标点，不得与 C/C# 合并
+        assert _variant_key("C++开发工程师") == "c++开发工程师"
+        assert _variant_key("C开发工程师") != _variant_key("C++开发工程师")
+
+    def test_variant_key_strips_cjk_punct(self):
+        assert _variant_key("产品、运营经理") == _variant_key("产品运营经理")
+
+    def test_clean_variant_removes_whitespace_only(self):
+        assert _clean_variant("AI 数据科学机器人教练") == "AI数据科学机器人教练"
+        assert _clean_variant("ＡＩ") == "AI"
+        assert _clean_variant("C++ 开发工程师") == "C++开发工程师"  # ASCII 标点保留
+
+    def test_normalize_converges_whitespace_variant(self):
+        assert normalize_position_name("AI 数据科学机器人教练") == "AI数据科学机器人教练"
+        assert normalize_position_name("React 前端开发工程师") == "React前端开发工程师"
+
+    def test_normalize_existing_paths_unaffected(self):
+        # 关键词/翻译/停用词路径零回归
+        assert normalize_position_name("前端开发工程师") == "前端开发工程师"
+        assert normalize_position_name("web") == "Web开发工程师"
+        assert normalize_position_name("Software Engineer") == ""
+        assert normalize_position_name("实习") == ""
+
+    def test_alias_redirect(self, monkeypatch):
+        # 语义别名：键/值为岗位名原文，入口按变体键收敛（临时注入）
+        from app.services.extraction import dictionary as d
+
+        monkeypatch.setitem(d._POSITION_ALIAS, "AI数据科学与机器人教练", "AI数据科学机器人教练")
+        monkeypatch.setattr(
+            d, "_POSITION_ALIAS_BY_VARIANT",
+            {d._variant_key(k): v for k, v in d._POSITION_ALIAS.items()},
+        )
+        assert normalize_position_name("AI 数据科学与机器人教练") == "AI数据科学机器人教练"
+        assert normalize_position_name("AI数据科学与机器人教练") == "AI数据科学机器人教练"
+        # 无关岗位名与英文翻译路径不受别名影响
+        assert normalize_position_name("前端开发工程师") == "前端开发工程师"
+        assert normalize_position_name("Software Engineer") == ""
+
+    def test_alias_table_consistency(self):
+        # CI 把关：键值非空、键值不同、变体键唯一、无自映射（空表幂等通过）。
+        # 跨组别名合法（AS400应用 → AS400应用程序 变体键不同，属归一目标迁移），
+        # 不强制 vk(键) == vk(值)；值须为清洗后规范名（无空白，防输出分裂）
+        from app.services.extraction import dictionary as d
+
+        seen: set[str] = set()
+        for k, v in d._POSITION_ALIAS.items():
+            assert k and v
+            assert k != v
+            vk = d._variant_key(k)
+            assert vk not in seen  # 一个变体键只能对应一个规范名
+            seen.add(vk)
+            assert d._clean_variant(v) == v  # 值须为清洗后形式（无空白）

@@ -51,3 +51,7 @@ LOG_DIR=/opt/zhigang-compass/logs
 # 脏边（同语言 sim<0.30）/孤立伪技能/教学词自动清理，备份 reports/graph_health_*。
 # SBERT 加载约 1 分钟；--dry-run 可人工复核。
 30 6 * * * cd $BACKEND_DIR && uv run python scripts/cron/graph_health_daily.py >> $LOG_DIR/graph_health_$(date +\%Y\%m\%d).log 2>&1
+
+# ── 岗位重复对治理（每日 06:45，GraphHealth 之后）──
+# 字符级变体/语义别名合并 + 语义近似对提议（复核清单），备份 reports/position_duplicates_*。
+45 6 * * * cd $BACKEND_DIR && uv run python scripts/cron/position_dup_daily.py >> $LOG_DIR/position_dup_$(date +\%Y\%m\%d).log 2>&1
