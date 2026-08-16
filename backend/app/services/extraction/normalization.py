@@ -15,6 +15,7 @@
 （不引入 scipy/networkx，numpy 为既有传递依赖），自写聚合链接。
 """
 
+import re
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -22,6 +23,19 @@ from typing import Protocol
 DISTANCE_THRESHOLD = 0.25
 # §5.3 同簇内自动建 SIMILAR_TO 的相似度下限
 SIMILAR_TO_THRESHOLD = 0.85
+
+# 短英文词聚类保护（08-16）：纯英文 ≤6 字符全部跳过聚类。
+# 实测 SBERT 对短英文缩写/产品名的嵌入虚高相似（Seata vs ADASIS 0.758、
+# UART vs ADASIS 0.766、ArkUI 0.803——均 ≥ 0.75 聚类阈值），代表链接会把
+# 无关缩写并簇（ADASIS 簇 60 个无关成员，08-16 链式漂移回归源）。
+# 白名单词（Python/React 等）本就是标准名无需聚类；同义变体（Python3、
+# "Python 3.0"、C++ 等）长度 >6 或含符号不保护，聚类合并仍生效。
+_ABBREV_RE = re.compile(r"^[A-Za-z]{1,6}$")
+
+
+def _should_protect(name: str) -> bool:
+    """短英文词聚类保护判定：纯英文 ≤6 字符（缩写/产品名漂移源）。"""
+    return bool(_ABBREV_RE.match(name))
 
 
 class EmbedderLike(Protocol):
@@ -185,6 +199,11 @@ class SkillNormalizer:
             standard = self._alias.get(name) or self._alias.get(name.lower())
             if standard:
                 result[name] = SkillNormResult(standard=standard, confidence=1.0)
+            elif _should_protect(name):
+                # 短英文词聚类保护（08-16）：非白名单缩写/产品名 SBERT 嵌入
+                # 虚高相似（Seata vs ADASIS 0.758 实测），聚类会把无关缩写
+                # 并簇——跳过聚类保持原名（自成一簇语义）
+                result[name] = SkillNormResult(standard=name, confidence=1.0)
             else:
                 clustered_pool.append(name)
 
