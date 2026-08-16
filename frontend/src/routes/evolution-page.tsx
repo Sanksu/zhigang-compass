@@ -10,7 +10,7 @@
  * - GET /api/v1/evolution/position/{id}/evolution → 岗位演化历史
  * - GET /api/v1/evolution/state-machine → 岗位状态机流转（六态分布 + 人工审核记录）
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Calendar, GitBranch, TrendingUp, TrendingDown, Eye, Boxes } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -19,7 +19,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PaginationBar } from '@/components/ui/pagination'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
@@ -188,6 +187,100 @@ const SOURCE_LABEL: Record<string, string> = {
   stackoverflow: 'SO',
 }
 
+/** 可搜索下拉（08-16：岗位/技能/版本全量可搜索选择）
+ *
+ * options 为当前可选项；输入时先本地过滤，若提供 onSearch 则由父组件
+ * 防抖拉取后端匹配（positions/skills 走 q 参数；versions 仅本地过滤）。
+ */
+function SearchableSelect({
+  value,
+  placeholder,
+  options,
+  loading,
+  onSearch,
+  onSelect,
+}: {
+  value: string
+  placeholder: string
+  options: { value: string; label: string }[]
+  loading?: boolean
+  onSearch?: (q: string) => void
+  onSelect: (v: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const timerRef = useRef<number | null>(null)
+  const current = options.find((o) => o.value === value)
+  const ql = q.trim().toLowerCase()
+  const visible = ql
+    ? options.filter((o) => o.label.toLowerCase().includes(ql))
+    : options
+
+  return (
+    <div className="relative">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-8 w-48 justify-start font-mono text-xs"
+        onClick={() => {
+          setOpen((v) => !v)
+          setQ('')
+        }}
+      >
+        <span className="truncate text-ink">{current?.label || placeholder}</span>
+      </Button>
+      {open && (
+        <>
+          {/* 点击外部关闭 */}
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute z-50 mt-1 w-64 rounded-md border border-border bg-elevated shadow-lg">
+            <div className="p-1.5">
+              <Input
+                autoFocus
+                value={q}
+                placeholder="输入名称搜索…"
+                className="h-7 text-xs"
+                onChange={(e) => {
+                  const v = e.target.value
+                  setQ(v)
+                  if (!onSearch) return
+                  if (timerRef.current) window.clearTimeout(timerRef.current)
+                  timerRef.current = window.setTimeout(() => onSearch(v.trim()), 300)
+                }}
+              />
+            </div>
+            <div className="max-h-64 overflow-auto p-1">
+              {loading ? (
+                <p className="px-2 py-3 text-center text-xs text-ink-faint">搜索中…</p>
+              ) : visible.length === 0 ? (
+                <p className="px-2 py-3 text-center text-xs text-ink-faint">无匹配结果</p>
+              ) : (
+                visible.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    className={cn(
+                      'block w-full truncate rounded px-2 py-1.5 text-left text-xs hover:bg-subtle',
+                      o.value === value && 'bg-subtle font-medium',
+                    )}
+                    onClick={() => {
+                      onSelect(o.value)
+                      setOpen(false)
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function TechnologyWatchView() {
   const [data, setData] = useState<WatchItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -319,6 +412,16 @@ function SkillTrendView() {
   // 08-16 用户决策：翻页针对快照时间线（10 期/页、最新在前），技能列表不翻页
   const SNAPSHOT_PAGE_SIZE = 10
   const [snapshotPage, setSnapshotPage] = useState(1)
+  // 下拉全量可搜索（08-16：后端 q 参数按名称模糊过滤）
+  const [searchLoading, setSearchLoading] = useState(false)
+
+  function searchSkills(q: string) {
+    setSearchLoading(true)
+    apiGet<SkillEvolutionListData>(`/evolution/skills?page=1&size=10&q=${encodeURIComponent(q)}`)
+      .then((r) => setDefaults(r.skills))
+      .catch(() => setDefaultError('技能搜索失败'))
+      .finally(() => setSearchLoading(false))
+  }
 
   // 页面加载即拉取 Top-10 热度技能（GET /evolution/skills）
   useEffect(() => {
@@ -379,10 +482,14 @@ function SkillTrendView() {
           </span>
           <div className="flex items-center gap-2">
             {defaults && defaults.length > 0 && (
-              <Select
+              <SearchableSelect
                 value={selected?.skill_id ?? ''}
-                onValueChange={(v) => {
-                  const hit = defaults.find((d) => d.skill_id === v)
+                placeholder="选择技能"
+                options={(defaults ?? []).map((d) => ({ value: d.skill_id, label: d.skill_name }))}
+                loading={searchLoading}
+                onSearch={(q) => searchSkills(q)}
+                onSelect={(v) => {
+                  const hit = defaults?.find((d) => d.skill_id === v)
                   if (hit) {
                     setSelected(hit)
                     setSnapshotPage(1)
@@ -390,18 +497,7 @@ function SkillTrendView() {
                     setError(null)
                   }
                 }}
-              >
-                <SelectTrigger className="h-8 w-48 text-xs">
-                  <SelectValue placeholder="选择技能" />
-                </SelectTrigger>
-                <SelectContent>
-                  {defaults.map((d) => (
-                    <SelectItem key={d.skill_id} value={d.skill_id} className="text-xs">
-                      {d.skill_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
             )}
             <Input
               value={skillId}
@@ -489,6 +585,18 @@ function PositionEvolutionView() {
   // 08-16 用户决策：翻页针对快照时间线（10 期/页、最新在前），岗位列表不翻页
   const SNAPSHOT_PAGE_SIZE = 10
   const [snapshotPage, setSnapshotPage] = useState(1)
+  // 下拉全量可搜索（08-16：后端 q 参数按名称模糊过滤）
+  const [searchLoading, setSearchLoading] = useState(false)
+
+  function searchPositions(q: string) {
+    setSearchLoading(true)
+    apiGet<PositionEvolutionListData>(
+      `/evolution/positions?page=1&size=10&q=${encodeURIComponent(q)}`,
+    )
+      .then((r) => setDefaults(r.positions))
+      .catch(() => setDefaultError('岗位搜索失败'))
+      .finally(() => setSearchLoading(false))
+  }
 
   // 页面加载即拉取 Top-10 热度岗位（GET /evolution/positions）
   useEffect(() => {
@@ -547,28 +655,21 @@ function PositionEvolutionView() {
           </span>
           <div className="flex items-center gap-2">
             {defaults && defaults.length > 0 && (
-              <Select
+              <SearchableSelect
                 value={data?.position_id ?? ''}
-                onValueChange={(v) => {
-                  const hit = defaults.find((d) => d.position_id === v)
+                placeholder="选择岗位"
+                options={(defaults ?? []).map((d) => ({ value: d.position_id, label: d.position_name }))}
+                loading={searchLoading}
+                onSearch={(q) => searchPositions(q)}
+                onSelect={(v) => {
+                  const hit = defaults?.find((d) => d.position_id === v)
                   if (hit) {
                     setData(hit)
                     setSnapshotPage(1)
                     setError(null)
                   }
                 }}
-              >
-                <SelectTrigger className="h-8 w-48 text-xs">
-                  <SelectValue placeholder="选择岗位" />
-                </SelectTrigger>
-                <SelectContent>
-                  {defaults.map((d) => (
-                    <SelectItem key={d.position_id} value={d.position_id} className="text-xs">
-                      {d.position_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
             )}
             <Input
               value={positionId}
@@ -730,12 +831,8 @@ function VersionDiffView() {
   const [versions, setVersions] = useState<EvolutionVersion[]>([])
   const [v1, setV1] = useState<string>('')
   const [v2, setV2] = useState<string>('')
-  // 08-16 翻页：版本列表 10 项一页（GET /evolution/versions page/size）
-  const PAGE_SIZE = 10
-  const [page, setPage] = useState(1)
-  const [total, setTotal] = useState(0)
-  const [pageLoading, setPageLoading] = useState(false)
-  // diff 绑定请求时的版本对，渲染层据此判断当前结果是否仍有效（避免 effect 内同步 setState）
+  // 08-16 用户决策：版本下拉全量可搜索（保留 90 天 ≈ ≤90 个版本，一次拉全，
+  // 移除列表分页——原分页条在巨型 diff 表下方不可见且翻页后下拉选项不全）
   const [diff, setDiff] = useState<{
     v1: string
     v2: string
@@ -761,40 +858,16 @@ function VersionDiffView() {
       .finally(() => setDetailLoading(false))
   }
 
-  function loadVersionsPage(p: number) {
-    setPageLoading(true)
-    apiGet<components['schemas']['EvolutionVersionListData']>(`/evolution/versions?page=${p}&size=${PAGE_SIZE}`)
-      .then((res) => {
-        // 快照可能在同一事务写入导致 created_at 相同，按 version_id（graph_vYYYYMMDD）降序保证稳定
-        const items = [...res.items].sort((a, b) => b.version_id.localeCompare(a.version_id))
-        setVersions(items)
-        setTotal(res.total)
-        // 默认对比最近两个版本（首次加载/尚未选择时；翻页后不覆盖已选版本对）
-        if (!v1 && !v2) {
-          if (items.length >= 2) {
-            setV1(items[1].version_id)
-            setV2(items[0].version_id)
-          } else if (items.length === 1) {
-            setV1(items[0].version_id)
-          }
-        }
-      })
-      .catch(() => setError('版本列表加载失败'))
-      .finally(() => setPageLoading(false))
-  }
-
-  // 加载第 1 页版本列表，默认对比最近两个版本。
-  // 初始加载不调用 loadVersionsPage（内含同步 setPageLoading——
-  // effect 内同步 setState 违反 react-hooks/set-state-in-effect，CI lint error）
+  // 加载全量版本列表（size=100，覆盖 90 天保留期），默认对比最近两个版本。
+  // 初始加载不设 loading 态（effect 内同步 setState 违反 react-hooks/set-state-in-effect）
   useEffect(() => {
     let cancelled = false
-    apiGet<components['schemas']['EvolutionVersionListData']>(`/evolution/versions?page=1&size=${PAGE_SIZE}`)
+    apiGet<components['schemas']['EvolutionVersionListData']>(`/evolution/versions?page=1&size=100`)
       .then((res) => {
         if (cancelled) return
         // 快照可能在同一事务写入导致 created_at 相同，按 version_id（graph_vYYYYMMDD）降序保证稳定
         const items = [...res.items].sort((a, b) => b.version_id.localeCompare(a.version_id))
         setVersions(items)
-        setTotal(res.total)
         // 默认对比最近两个版本（首次加载/尚未选择时）
         if (!v1 && !v2) {
           if (items.length >= 2) {
@@ -843,31 +916,19 @@ function VersionDiffView() {
             <span>版本快照对比</span>
           </span>
           <div className="flex items-center gap-1.5">
-            <Select value={v1} onValueChange={setV1} disabled={versions.length === 0}>
-              <SelectTrigger className="h-8 w-[150px] font-mono text-xs">
-                <SelectValue placeholder="选择版本" />
-              </SelectTrigger>
-              <SelectContent>
-                {versions.map((v) => (
-                  <SelectItem key={v.version_id} value={v.version_id} className="font-mono text-xs">
-                    {v.version_id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              value={v1}
+              placeholder="选择版本"
+              options={versions.map((v) => ({ value: v.version_id, label: v.version_id }))}
+              onSelect={setV1}
+            />
             <span className="text-xs text-ink-faint">vs</span>
-            <Select value={v2} onValueChange={setV2} disabled={versions.length === 0}>
-              <SelectTrigger className="h-8 w-[150px] font-mono text-xs">
-                <SelectValue placeholder="选择版本" />
-              </SelectTrigger>
-              <SelectContent>
-                {versions.map((v) => (
-                  <SelectItem key={v.version_id} value={v.version_id} className="font-mono text-xs">
-                    {v.version_id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              value={v2}
+              placeholder="选择版本"
+              options={versions.map((v) => ({ value: v.version_id, label: v.version_id }))}
+              onSelect={setV2}
+            />
             <Button
               size="sm"
               variant="ghost"
@@ -919,19 +980,6 @@ function VersionDiffView() {
         )}
         {!loading && !error && versions.length > 0 && v1 && v2 && v1 === v2 && (
           <div className="py-10 text-center text-xs text-ink-muted">请选择两个不同版本进行对比</div>
-        )}
-        {/* 版本列表翻页（10 项一页，08-16）——版本选择器随页切换 */}
-        {versions.length > 0 && (
-          <PaginationBar
-            page={page}
-            total={total}
-            pageSize={PAGE_SIZE}
-            loading={pageLoading}
-            onPageChange={(p) => {
-              setPage(p)
-              loadVersionsPage(p)
-            }}
-          />
         )}
       </CardContent>
     </Card>
