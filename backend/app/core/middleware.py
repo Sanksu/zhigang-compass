@@ -92,9 +92,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         module = "llm" if self._is_llm_route(path) else (parts[2] if len(parts) > 2 else path)
         key = f"rate:{ip}:{module}"
         try:
-            count = await redis_client.incr(key)
-            if count == 1:
-                await redis_client.expire(key, self.WINDOW_SECONDS)
+            # 原子窗口：SET NX EX 创建计数（08-16 审查：原 incr+expire 两步在
+            # Redis 瞬时错误时可能留下无 TTL 的 key，该 IP+模块永久 429）
+            created = await redis_client.set(key, 1, nx=True, ex=self.WINDOW_SECONDS)
+            count = 1 if created else await redis_client.incr(key)
         except Exception:
             return await call_next(request)
         if count > limit:

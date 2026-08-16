@@ -631,14 +631,7 @@ paths:
     post:
       tags: [resume]
       summary: 上传简历触发解析（异步，含 PII 脱敏预处理）
-      schema:
-        type: object
-        properties:
-          code: { type: integer }
-          msg: { type: string }
-          data:
-            $ref: '#/components/schemas/ResumeListData'
-          trace_id: { type: string }
+      requestBody:
         required: true
         content:
           multipart/form-data:
@@ -2106,6 +2099,7 @@ components:
         detail:
           type: object
           description: 动作详情（如 {username}），结构随 action 变化
+          additionalProperties: true
         ip_address: { type: string }
         created_at: { type: string, nullable: true, description: 时间 ISO8601 }
 

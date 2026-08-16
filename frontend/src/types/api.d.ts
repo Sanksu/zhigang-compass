@@ -1015,7 +1015,14 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /** Format: binary */
+                        file: string;
+                    };
+                };
+            };
             responses: {
                 /** @description 已接受，异步处理中 */
                 202: {
@@ -3278,7 +3285,9 @@ export interface components {
             resource: string;
             resource_id?: string | null;
             /** @description 动作详情（如 {username}），结构随 action 变化 */
-            detail?: Record<string, never>;
+            detail?: {
+                [key: string]: unknown;
+            };
             ip_address: string;
             /** @description 时间 ISO8601 */
             created_at?: string | null;

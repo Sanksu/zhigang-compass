@@ -140,6 +140,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
+  // 聚焦高亮降高亮定时器：组件卸载时清理，避免对已 dispose 实例 dispatchAction
+  const highlightTimerRef = useRef<number | null>(null)
   // 主题版本号：暗色切换时递增，触发数据 effect 完全重建确保颜色全量刷新
   const [themeVersion, setThemeVersion] = useState(0)
   // 窄屏状态：跨 <640px 断点时触发数据 effect 重建（力导向参数降档，外部全景图同款适配）
@@ -221,6 +223,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     return () => {
       unbindPan()
       chart.off('forceLayoutEnd', onForceLayoutEnd)
+      if (highlightTimerRef.current !== null) {
+        window.clearTimeout(highlightTimerRef.current)
+        highlightTimerRef.current = null
+      }
       chart.dispose()
       chartRef.current = null
     }
@@ -523,7 +529,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       chart.getZr().refresh()
       // 高亮目标节点约 1.5s，提示用户已定位
       chart.dispatchAction({ type: 'highlight', seriesIndex: 0, name: node.name })
-      window.setTimeout(() => {
+      if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current)
+      highlightTimerRef.current = window.setTimeout(() => {
+        highlightTimerRef.current = null
         chart.dispatchAction({ type: 'downplay', seriesIndex: 0, name: node.name })
       }, 1500)
     },

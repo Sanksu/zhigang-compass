@@ -39,10 +39,11 @@ interface AuthState {
   hasPermission: (perm: string) => boolean
 }
 
-/** 后端 me 不返回权限列表，按角色映射（与后端 RBAC 规则一致） */
+/** 后端 me 不返回权限列表，按角色映射（与后端 core/security.py ROLE_PERMISSIONS 一致） */
 export function permissionsOf(role: Role): string[] {
   if (role === 'admin') return ['*']
-  return []
+  if (role === 'user') return ['graph:read', 'graph:write', 'data:read', 'match:run']
+  return ['graph:read'] // guest
 }
 
 export const useAuthStore = create<AuthState>((set, get) => {
