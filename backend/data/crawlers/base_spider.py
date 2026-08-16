@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
-from scrapy import Spider, Request
+from scrapy import Spider
 from scrapy.http import Response
 
 from crawlers.settings import RATE_LIMIT, MAIMAI_COMPLIANCE

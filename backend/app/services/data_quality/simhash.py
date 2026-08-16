@@ -29,12 +29,13 @@ def _token_hash(token: str) -> int:
     return int.from_bytes(hashlib.md5(token.encode("utf-8")).digest()[:8], "big")
 
 
+
+
 def simhash64(text: str) -> int:
-    """计算文本的 64-bit SimHash 指纹。
+    """计算文本的 64-bit SimHash 指纹（pipelines 采集管线语义去重使用）。
 
     对每个 token 哈希，按位加权投票（该位为 1 +1，为 0 -1），
-    最终指纹的每个 bit 取投票符号。
-    空文本或无 token 时返回 0（无法判定相似，由调用方忽略）。
+    最终指纹的每个 bit 取投票符号。空文本或无 token 时返回 0。
     """
     tokens = _tokenize(text)
     if not tokens:
@@ -56,6 +57,8 @@ def simhash64(text: str) -> int:
 def hamming_distance(a: int, b: int) -> int:
     """两个 64-bit 指纹的海明距离（异或后统计置位 bit 数）。"""
     return (a ^ b).bit_count()
+
+
 
 
 def is_duplicate(a: int, b: int, threshold: int = DEFAULT_HAMMING_THRESHOLD) -> bool:

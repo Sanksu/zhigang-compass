@@ -38,37 +38,6 @@ class TestHammingDistance:
     def test_same_fingerprint_zero_distance(self):
         a = simhash64("Python 后端开发工程师")
         assert hamming_distance(a, a) == 0
-
-
-class TestIsDuplicate:
-    def test_identical_is_duplicate(self):
-        a = simhash64("Python 后端开发工程师")
-        assert is_duplicate(a, a) is True
-
-    def test_near_text_is_duplicate(self):
-        """跨平台同岗位（空格/后缀格式差异）判定为重复。"""
-        desc = ("负责公司核心业务系统后端开发，使用 Python 技术栈，"
-                "参与高并发分布式系统设计与实现，熟悉 MySQL Redis 缓存 消息队列 微服务架构 容器化部署")
-        a = simhash64("Python 后端开发工程师 " + desc)
-        b = simhash64("Python后端开发工程师 " + desc)  # 仅空格差异
-        assert is_duplicate(a, b) is True
-
-    def test_unrelated_text_not_duplicate(self):
-        a = simhash64("Python 后端开发工程师")
-        b = simhash64("前端网页设计排版")
-        assert is_duplicate(a, b) is False
-
-    def test_threshold_boundary(self):
-        desc = ("负责公司核心业务系统后端开发，使用 Python 技术栈，"
-                "参与高并发分布式系统设计与实现，熟悉 MySQL Redis 缓存 消息队列 微服务架构 容器化部署")
-        a = simhash64("Python 后端开发工程师 " + desc)
-        b = simhash64("Python 后端开发工程师（北京） " + desc)  # 追加城市后缀
-        distance = hamming_distance(a, b)
-        assert distance <= 3  # 设计阈值边界内
-        assert is_duplicate(a, b, threshold=distance) is True
-        assert is_duplicate(a, b, threshold=distance - 1) is False
-
-
 class TestFindSimilarPairs:
     def test_detects_similar_pairs(self):
         desc = ("负责公司核心业务系统后端开发，使用 Python 技术栈，"

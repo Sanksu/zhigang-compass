@@ -208,6 +208,3 @@ def apply_temporal_decay(
     return min(weights)
 
 
-def is_within_recent_window(publish_date: date, reference_date: date) -> bool:
-    """发布日期是否落在近 90 天窗口内（设计文档 §4.7.2 同岗位近期 JD 定义）。"""
-    return (reference_date - publish_date).days <= RECENT_WINDOW_DAYS

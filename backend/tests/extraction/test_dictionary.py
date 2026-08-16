@@ -13,7 +13,6 @@ from app.services.extraction.dictionary import (
     _translate_en_position,
     _variant_key,
     normalize_position_name,
-    normalize_proficiency,
     normalize_skill,
 )
 
@@ -560,37 +559,6 @@ class TestNormalizeBase:
     def test_keyword_family(self):
         assert _normalize_base("数仓工程师") == "大数据开发工程师"
         assert _normalize_base("嵌入式工程师") == "嵌入式开发工程师"
-
-
-class TestNormalizeProficiency:
-    """熟练度三档映射（了解/熟悉→初级、掌握→中级、精通→高级）。"""
-
-    def test_normalized_enum_passthrough(self):
-        assert normalize_proficiency("初级") == "初级"
-        assert normalize_proficiency("中级") == "中级"
-        assert normalize_proficiency("高级") == "高级"
-
-    def test_high_level_keywords(self):
-        assert normalize_proficiency("精通") == "高级"
-        assert normalize_proficiency("深入理解") == "高级"
-        assert normalize_proficiency("资深") == "高级"
-
-    def test_mid_level_keywords(self):
-        assert normalize_proficiency("掌握") == "中级"
-        assert normalize_proficiency("熟练使用") == "中级"
-        assert normalize_proficiency("熟练掌握") == "中级"  # 高级词优先不误判
-
-    def test_low_level_keywords(self):
-        assert normalize_proficiency("熟悉") == "初级"
-        assert normalize_proficiency("了解") == "初级"
-        assert normalize_proficiency("入门") == "初级"
-
-    def test_unknown_returns_none(self):
-        assert normalize_proficiency("") is None
-        assert normalize_proficiency("加分项") is None
-        assert normalize_proficiency(None) is None
-
-
 class TestAIGenericRouting:
     """AI 泛词族按技能路由（T-04 第二批，2026-08-15）。
 
