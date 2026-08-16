@@ -235,14 +235,18 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       }
     })
 
-    // 节点双击 → 岗位展开/收起其技能；空白区域双击 → 复位视角（08-16 交互优化）
+    // 节点双击 → 岗位展开/收起其技能（chart 层仅在命中节点时派发，空白点击无 params）
     chart.on('dblclick', (params) => {
       if (params.dataType === 'node' && params.data) {
         const d = params.data as GraphNode
         if (d.type === 'position') onTogglePosition(d.id)
-      } else if ((params as { dataType?: string }).dataType === 'none') {
-        resetView()
       }
+    })
+    // 空白区域双击 → 复位视角（08-16 交互优化）。
+    // 必须走 zr 层：ECharts chart.on 对空白点击不派发事件（params 为 undefined，
+    // 见 echarts _initEvents 仅在有命中元素时 trigger），zr 层 target 为空可判定空白。
+    chart.getZr().on('dblclick', (params) => {
+      if (!params.target) resetView()
     })
 
     // 画布空白点击 → 清空选中
