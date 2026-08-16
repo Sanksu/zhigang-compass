@@ -17,15 +17,14 @@
 
 import json
 import os
-import subprocess
 import sys
 import time
 
 from scrapy import Request
 from scrapy.http import Response
 
-from crawlers.base_spider import BaseSpider
-from crawlers.settings import CRAWL_ITEMS_CAP, SUBPROCESS_TIMEOUT
+from crawlers.base_spider import BaseSpider, iter_jsonl, run_script
+from crawlers.settings import CRAWL_ITEMS_CAP
 from crawlers.setup_boss_chrome import ensure_cdp_chrome, platform_profile_dir
 
 
@@ -117,42 +116,16 @@ class GlassdoorSpider(BaseSpider):
                 "--cdp-url", cdp_url,
             ]
 
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    cwd=os.path.dirname(CRAWLER_SCRIPT),
-                    env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
-                )
-            except Exception as e:
-                self.logger.error(f"启动 CDP 脚本失败: {e}")
+            result = run_script(cmd, os.path.dirname(CRAWLER_SCRIPT), self.logger,
+                               f"[glassdoor] 任务 {task_idx + 1}/{task_total}")
+            if result is None:
                 continue
-
-            # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
-            try:
-                stdout, stderr_output = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                stdout, stderr_output = proc.communicate()
-                self.logger.error(f"[glassdoor] 任务 {task_idx + 1}/{task_total} 超时（>{SUBPROCESS_TIMEOUT}s），已终止")
-                continue
+            stdout, stderr_output, returncode = result
 
             item_count = 0
-            for line in stdout.splitlines():
+            for item_data in iter_jsonl(stdout, self.logger):
                 if _collected >= self.max_items_total:
                     break
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    item_data = json.loads(line)
-                except json.JSONDecodeError as e:
-                    self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
-                    continue
-
                 item_count += 1
                 _collected += 1
                 yield self.make_item(
@@ -171,8 +144,8 @@ class GlassdoorSpider(BaseSpider):
                     post_date=item_data.get("date_posted", ""),
                 )
 
-            if proc.returncode != 0 and not (stderr_output and stderr_output.strip().endswith("count=0")):
-                self.logger.warning(f"CDP 脚本退出码 {proc.returncode}")
+            if returncode != 0 and not (stderr_output and stderr_output.strip().endswith("count=0")):
+                self.logger.warning(f"CDP 脚本退出码 {returncode}")
             if stderr_output:
                 for line in stderr_output.strip().splitlines()[-5:]:
                     self.logger.info(f"[cdp] {line}")

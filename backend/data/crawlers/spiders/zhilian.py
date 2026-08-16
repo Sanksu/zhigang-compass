@@ -15,9 +15,8 @@ from datetime import datetime, timedelta, timezone
 
 from scrapy.exceptions import CloseSpider
 from scrapy.http import Response
-from scrapy_playwright.page import PageMethod
 
-from crawlers.base_spider import BaseSpider
+from crawlers.base_spider import make_playwright_request, BaseSpider
 from crawlers.settings import CRAWL_ITEMS_CAP
 from crawlers.zhilian_detail import extract_job_detail
 
@@ -91,9 +90,14 @@ class ZhilianSpider(BaseSpider):
                 if city_code:
                     params["jl"] = city_code
                 url = f"{self.SEARCH_URL}?{self.build_query(params)}"
-                yield self._make_playwright_request(
+                yield make_playwright_request(
                     url,
                     meta={"keyword": keyword, "city": city, "page": 1},
+                    selector=".joblist-box__item",
+                    wait_timeout=15000,
+                    scroll_times=1,
+                    scroll_wait_ms=0,
+                    headers=self._compliance_headers(),
                 )
 
     def _extract_publish_time_map(self, response: Response) -> dict:
@@ -218,13 +222,18 @@ class ZhilianSpider(BaseSpider):
             next_href = response.css(".next-page::attr(href), a.pageset[rel=next]::attr(href)").get()
             if next_href:
                 next_url = response.urljoin(next_href)
-                yield self._make_playwright_request(
+                yield make_playwright_request(
                     next_url,
                     meta={
                         "keyword": response.meta["keyword"],
                         "city": response.meta["city"],
                         "page": current_page + 1,
                     },
+                    selector=".joblist-box__item",
+                    wait_timeout=15000,
+                    scroll_times=1,
+                    scroll_wait_ms=0,
+                    headers=self._compliance_headers(),
                 )
 
     def _make_detail_request(self, url: str, job: dict):
@@ -289,20 +298,3 @@ class ZhilianSpider(BaseSpider):
             post_date=job["post_date"],
         )
 
-    def _make_playwright_request(self, url: str, meta: dict):
-        """构造 Playwright 渲染请求，等待列表卡片加载。"""
-        from scrapy.http import Request
-        return Request(
-            url,
-            callback=self.parse,
-            meta={
-                "playwright": True,
-                "playwright_page_methods": [
-                    PageMethod("wait_for_selector", ".joblist-box__item", timeout=15000),
-                    PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"),
-                ],
-                **meta,
-            },
-            headers=self._compliance_headers(),
-            dont_filter=True,
-        )

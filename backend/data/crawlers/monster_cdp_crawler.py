@@ -22,6 +22,7 @@ from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.logging import setup_logging
+from crawlers.cdp_common import connect_cdp, isolated_page
 
 logger = setup_logging("monster_cdp_crawler", stream=sys.stderr)
 
@@ -59,28 +60,14 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
 
     async with async_playwright() as p:
         # CDP 连接已启动的浏览器（绕过 DataDome 的 headless 检测）
-        try:
-            browser = await p.chromium.connect_over_cdp(cdp_url)
-            logger.info(f"✅ CDP 连接成功: {cdp_url}（浏览器版本: {browser.version}）")
-        except Exception as e:
-            logger.error(f"❌ CDP 连接失败（{cdp_url}）: {e}")
-            logger.info(f"   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
+        browser = await connect_cdp(p, cdp_url)
+        if browser is None:
             return 0
+        logger.info(f"✅ CDP 连接成功: {cdp_url}（浏览器版本: {browser.version}）")
 
         # 隔离：新建独立 context 并复制主 context 的 cookies（保留 DataDome 验证），
         # 爬虫导航只发生在隔离 context 内，不触碰用户正在浏览的页面
-        context = await browser.new_context()
-        if browser.contexts:
-            try:
-                _cookies = await browser.contexts[0].cookies()
-                if _cookies:
-                    await context.add_cookies(_cookies)
-                    logger.info(f"ℹ️ 已复制 {len(_cookies)} 个 cookies 到隔离 context")
-                else:
-                    logger.warning(f"⚠️ 主 context 无 cookies（DataDome 验证可能未完成）")
-            except Exception as e:
-                logger.warning(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
-        page = await context.new_page()
+        context, page = await isolated_page(browser)
 
         # 监听所有响应，拦截 Monster 内部 API
         captured_api_responses = []
