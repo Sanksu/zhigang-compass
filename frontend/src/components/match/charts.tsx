@@ -48,10 +48,6 @@ echarts.use([
 ])
 
 /** 暗色模式判定 */
-function isDark(): boolean {
-  return document.documentElement.classList.contains('dark')
-}
-
 /**
  * 暗色模式响应式订阅：class 变化触发 setDark → 组件 re-render
  * → useEChart 收到含新 dark 的 optionBuilder，deps 触发 setOption 刷新颜色。

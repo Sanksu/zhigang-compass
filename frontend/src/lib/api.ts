@@ -78,6 +78,12 @@ export class ApiError extends Error {
   }
 }
 
+
+
+/** 错误消息提取：ApiError 取后端 msg，其余回退文案（08-17 收敛 36 处重复三元）。 */
+export function errMsg(e: unknown, fallback: string): string {
+  return e instanceof ApiError ? e.message : fallback
+}
 export interface ApiResponse<T = unknown> {
   code: number
   msg: string

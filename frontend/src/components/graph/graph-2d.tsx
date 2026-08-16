@@ -22,9 +22,9 @@ import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 import { skillLabelThreshold } from './graph-utils'
-import { enforceSpread, hasPositionOverlap, type EChartsModel } from './graph-layout'
+import { COLOR_BY_STATUS, enforceSpread, hasPositionOverlap, type EChartsModel } from './graph-layout'
 import { useGraphPan } from './use-graph-pan'
-import { escapeHtml } from '@/lib/utils'
+import { escapeHtml, isDark } from '@/lib/utils'
 
 /** ECharts 回调参数最小类型 — 覆盖本组件使用的 tooltip/label/select 回调字段 */
 interface EChartsParam {
@@ -74,16 +74,6 @@ const SYMBOL_BY_STATUS: Record<PositionStatus, string> = {
   archived: 'roundRect',
 }
 
-/** 岗位状态机 → 颜色（与 globals.css 中状态色对齐，设计令牌单一事实源） */
-const COLOR_BY_STATUS: Record<PositionStatus, string> = {
-  active: '#64748b',
-  candidate: '#71717a',
-  emerging: '#10b981',
-  stable: '#3b82f6',
-  declining: '#f59e0b',
-  archived: '#ef4444',
-}
-
 const COLOR_SKILL_LIGHT = '#09090b'
 const COLOR_SKILL_DARK = '#fafafa'
 const COLOR_EVIDENCE = '#a1a1aa'
@@ -127,11 +117,6 @@ function hexToRgba(hex: string, alpha: number): string {
   if (!m) return hex
   const n = parseInt(m[1], 16)
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`
-}
-
-/** 暗色模式判定 — 跟随 documentElement 上的 .dark 类 */
-function isDarkMode(): boolean {
-  return document.documentElement.classList.contains('dark')
 }
 
 export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
@@ -339,7 +324,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const chart = chartRef.current
     if (!chart) return
 
-    const dark = isDarkMode()
+    const dark = isDark()
     const textColor = dark ? '#fafafa' : '#09090b'
     const mutedColor = dark ? '#a1a1aa' : '#71717a'
     const borderColor = dark ? '#27272a' : '#e4e4e7'

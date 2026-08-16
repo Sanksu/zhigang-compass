@@ -30,7 +30,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { ROLES, type Role } from '@/lib/constants'
-import { apiDelete, apiGet, apiPost, apiPut, ApiError } from '@/lib/api'
+import {apiDelete, apiGet, apiPost, apiPut, errMsg} from '@/lib/api'
 import type { components } from '@/types/api'
 import { useAuthStore } from '@/store/auth'
 
@@ -88,7 +88,7 @@ export function AdminUsersPage() {
       setTotal(res.total)
       setError(null)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '用户列表加载失败')
+      setError(errMsg(e, '用户列表加载失败'))
     } finally {
       setLoading(false)
     }
@@ -105,7 +105,7 @@ export function AdminUsersPage() {
         setError(null)
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof ApiError ? e.message : '用户列表加载失败')
+        if (!cancelled) setError(errMsg(e, '用户列表加载失败'))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -124,7 +124,7 @@ export function AdminUsersPage() {
       await apiPut(`/admin/users/${id}`, { role })
       await load()
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '角色更新失败')
+      setError(errMsg(e, '角色更新失败'))
     }
   }
 
@@ -139,7 +139,7 @@ export function AdminUsersPage() {
       await apiPut(`/admin/users/${id}`, { status: u.status === 'active' ? 'disabled' : 'active' })
       await load()
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '状态更新失败')
+      setError(errMsg(e, '状态更新失败'))
     }
   }
 
@@ -156,7 +156,7 @@ export function AdminUsersPage() {
       await load()
       setError(null)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '删除失败')
+      setError(errMsg(e, '删除失败'))
     }
   }
 
@@ -172,7 +172,7 @@ export function AdminUsersPage() {
       setCreateOpen(false)
       await load()
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : '创建失败')
+      setError(errMsg(e, '创建失败'))
     }
   }
 

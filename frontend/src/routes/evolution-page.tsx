@@ -28,7 +28,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { apiGet, ApiError } from '@/lib/api'
+import {apiGet, errMsg} from '@/lib/api'
 import type { components } from '@/types/api'
 
 // ===== Types =====
@@ -88,7 +88,7 @@ function SignalsView() {
   useEffect(() => {
     apiGet<EvolutionSignalsData>('/evolution/signals?top_n=10')
       .then(setData)
-      .catch((e) => setError(e instanceof ApiError ? e.message : '信号加载失败'))
+      .catch((e) => setError(errMsg(e, '信号加载失败')))
   }, [])
 
   if (error) {
@@ -335,7 +335,7 @@ function TechnologyWatchView() {
         setData(r.items)
         setTotal(r.total)
       })
-      .catch((e) => setError(e instanceof ApiError ? e.message : '技术热点加载失败'))
+      .catch((e) => setError(errMsg(e, '技术热点加载失败')))
       .finally(() => setPageLoading(false))
   }
 
@@ -345,7 +345,7 @@ function TechnologyWatchView() {
         setData(r.items)
         setTotal(r.total)
       })
-      .catch((e) => setError(e instanceof ApiError ? e.message : '技术热点加载失败'))
+      .catch((e) => setError(errMsg(e, '技术热点加载失败')))
   }, [])
 
   if (error) {
@@ -471,7 +471,7 @@ function SkillTrendView() {
         if (r.skills.length > 0) setSelected(r.skills[0])
       })
       .catch((e) => {
-        if (!cancelled) setDefaultError(e instanceof ApiError ? e.message : '默认技能加载失败')
+        if (!cancelled) setDefaultError(errMsg(e, '默认技能加载失败'))
       })
     return () => {
       cancelled = true
@@ -493,7 +493,7 @@ function SkillTrendView() {
       })
       .catch((e) => {
         setData(null)
-        setError(e instanceof ApiError ? e.message : '趋势查询失败')
+        setError(errMsg(e, '趋势查询失败'))
       })
       .finally(() => setLoading(false))
   }
@@ -647,7 +647,7 @@ function PositionEvolutionView() {
         if (r.positions.length > 0) setData(r.positions[0])
       })
       .catch((e) => {
-        if (!cancelled) setDefaultError(e instanceof ApiError ? e.message : '默认岗位加载失败')
+        if (!cancelled) setDefaultError(errMsg(e, '默认岗位加载失败'))
       })
     return () => {
       cancelled = true
@@ -669,7 +669,7 @@ function PositionEvolutionView() {
       })
       .catch((e) => {
         setData(null)
-        setError(e instanceof ApiError ? e.message : '演化历史查询失败')
+        setError(errMsg(e, '演化历史查询失败'))
       })
       .finally(() => setLoading(false))
   }
@@ -894,7 +894,7 @@ function VersionDiffView() {
     setDetailLoading(true)
     apiGet<EvolutionVersionDetail>(`/evolution/versions/${encodeURIComponent(id)}`)
       .then(setDetail)
-      .catch((e) => setDetailError(e instanceof ApiError ? e.message : '版本详情加载失败'))
+      .catch((e) => setDetailError(errMsg(e, '版本详情加载失败')))
       .finally(() => setDetailLoading(false))
   }
 

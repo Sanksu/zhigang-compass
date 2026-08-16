@@ -20,3 +20,14 @@ export function nodeRadius(node: GraphNode, selected: boolean, expanded: boolean
   else if (expanded && node.type === 'position') r *= 1.2
   return r
 }
+
+/** 岗位状态机 → 颜色（与 globals.css 中状态色对齐，设计令牌单一事实源；2D/3D 共用） */
+export const COLOR_BY_STATUS: Record<PositionStatus, string> = {
+  active: '#64748b',
+  candidate: '#71717a',
+  emerging: '#10b981',
+  stable: '#3b82f6',
+  declining: '#f59e0b',
+  archived: '#ef4444',
+}
+

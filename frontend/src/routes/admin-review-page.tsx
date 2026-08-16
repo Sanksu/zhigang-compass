@@ -41,7 +41,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { apiGet, apiPost, apiPut, ApiError } from '@/lib/api'
+import {apiGet, apiPost, apiPut, errMsg} from '@/lib/api'
 import type { components } from '@/types/api'
 
 type Schema = components['schemas']
@@ -112,7 +112,7 @@ export function AdminReviewPage() {
       setNotice(`已${action === 'approve' ? '批准晋升 emerging' : '驳回（rejected）'}：${reviewTarget.position_name}`)
       loadQueue()
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '审核提交失败，请重试')
+      setNotice(errMsg(e, '审核提交失败，请重试'))
     } finally {
       setSubmitting(false)
     }
@@ -422,7 +422,7 @@ function EvolutionReviewTab() {
       setNotice(`已${action === 'approve' ? '确认晋级 stable' : '确认衰退 declining'}：${reviewTarget.position_name}`)
       load()
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '审核提交失败，请重试')
+      setNotice(errMsg(e, '审核提交失败，请重试'))
     } finally {
       setSubmitting(false)
     }
@@ -444,7 +444,7 @@ function EvolutionReviewTab() {
       setNotice(`已归档（终态）：${archiveTarget.position_name}`)
       loadDeclining()
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '归档提交失败，请重试')
+      setNotice(errMsg(e, '归档提交失败，请重试'))
     } finally {
       setArchiving(false)
     }
@@ -788,7 +788,7 @@ function PositionEditorTab() {
       setScenarios(d.scenarios.join('\n'))
     } catch (e) {
       setDetail(null)
-      setNotice(e instanceof ApiError ? e.message : '岗位详情加载失败')
+      setNotice(errMsg(e, '岗位详情加载失败'))
     } finally {
       setLoading(false)
     }
@@ -822,7 +822,7 @@ function PositionEditorTab() {
       setNotice(res.updated ? '已保存编辑（变更已写入 PositionEditLog）' : '无变更（未写入编辑日志）')
       setDiffSummary(res.diff_summary || null)
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '保存失败，请重试')
+      setNotice(errMsg(e, '保存失败，请重试'))
     } finally {
       setSaving(false)
     }

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { apiPost, ApiError } from '@/lib/api'
+import {apiPost, errMsg} from '@/lib/api'
 import type { components } from '@/types/api'
 
 /** 注册返回（契约 User 必填子集：id/username/role） */
@@ -42,7 +42,7 @@ export function RegisterPage() {
       })
       navigate('/login', { replace: true })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '注册失败，请稍后重试')
+      setError(errMsg(err, '注册失败，请稍后重试'))
     } finally {
       setLoading(false)
     }
