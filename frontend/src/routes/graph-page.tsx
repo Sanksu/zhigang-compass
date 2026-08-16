@@ -129,6 +129,9 @@ export function GraphPage() {
   const [mode, setMode] = useState<'2d' | '3d'>('2d')
   const [selected, setSelected] = useState<NodeDetail | null>(null)
   const [raw, setRaw] = useState<GraphData | null>(null)
+  // 视图数据缓存（session 级，08-16 性能优化）：同视图切换回来不重复请求/转换。
+  // 数据随每日 ETL 更新，session 内缓存可接受（页面刷新即失效）
+  const viewCacheRef = useRef<Map<GraphViewType, GraphData>>(new Map())
   const [loading, setLoading] = useState(true)
   // 错误含业务码（08-14 审查：此前仅存 message，4040 与后端未启动混淆归因）
   const [error, setError] = useState<{ code: number; message: string } | null>(null)
@@ -176,22 +179,32 @@ export function GraphPage() {
   // 控制画布规模在 ECharts force 布局可承受范围，避免主线程长时间阻塞（2026-08-08）
   useEffect(() => {
     let cancelled = false
+    // 数据到位后统一应用：设置数据 + 非技术栈视图自动展开 Top 岗位 + 结束 loading
+    const applyViewData = (g: GraphData) => {
+      setRaw(g)
+      setError(null)
+      if (view !== 'techStack') {
+        const top = g.nodes
+          .filter((n) => n.type === 'position')
+          .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+          .slice(0, AUTO_EXPAND_COUNT)
+          .map((n) => n.id)
+        setExpandedPositions(new Set(top))
+      }
+      setLoading(false)
+    }
+    const cached = viewCacheRef.current.get(view)
+    if (cached) {
+      // 命中缓存：跳过网络请求与转换（08-16 性能优化）
+      applyViewData(cached)
+      return
+    }
     apiGet<PanoramaData>(`/graph/view/${view}?limit=120`)
       .then((res) => {
         if (cancelled) return
         const g = toGraphData(res)
-        setRaw(g)
-        setError(null)
-        // 非技术栈视图首屏自动展开 Top 高频岗位，让"岗位-技能关系"直接可见；
-        // 技术栈视图已全量展示技能，无需展开。数据到达时一并重建，避免 effect 内同步 setState。
-        if (view !== 'techStack') {
-          const top = g.nodes
-            .filter((n) => n.type === 'position')
-            .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-            .slice(0, AUTO_EXPAND_COUNT)
-            .map((n) => n.id)
-          setExpandedPositions(new Set(top))
-        }
+        viewCacheRef.current.set(view, g)
+        applyViewData(g)
       })
       .catch((e) => {
         if (!cancelled) {
