@@ -257,6 +257,14 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("golang", "go"), "Go开发工程师"),
     (("c/c++", "c++", "c语言"), "C++开发工程师"),
     (("全栈",), "全栈工程师"),
+    # P10 英文裸词/中文碎片兜底（2026-08-16 legacy 决策）：LLM 把
+    # "Senior Web Engineer" 压成裸词 "Web"、把 "AI Infra Engineer" 翻译
+    # 成丢后缀的 "AI 基础设施"——置于尾部仅兜底未命中任何族/后缀的碎片；
+    # "web" 词边界匹配防误伤 WebGL/WebSphere，"web前端" 已由前端族先行拦截
+    (("web",), "Web开发工程师"),
+    (("AI 基础设施", "ai infra"), "AI基础设施工程师"),
+    (("AI 生产力", "ai productivity"), "AI生产力工程师"),
+    (("AI与数据风险管理", "ai and data risk"), "AI与数据风险管理经理"),
     (("游戏",), "游戏开发工程师"),
     (("硬件",), "硬件工程师"),
     (("软件",), "软件开发工程师"),
@@ -408,6 +416,14 @@ _TECH_STACKS: tuple[tuple[str, str], ...] = (
 
 # 英文岗位名 → 中文标准名（国际源 JD 的 position_name 翻译，再与中文岗位合并去重）
 _EN_POSITION_MAP: dict[str, str] = {
+    # P10（2026-08-16）：web/AI 碎片兜底——LLM 输出完整英文岗位名时直接翻译；
+    # 裸词 "Web" 亦命中（纯英文走翻译路径，见 _translate_en_position）
+    "web": "Web开发工程师",
+    "web engineer": "Web开发工程师",
+    "web developer": "Web开发工程师",
+    "ai infra engineer": "AI基础设施工程师",
+    "ai productivity engineer": "AI生产力工程师",
+    "ai and data risk management": "AI与数据风险管理经理",
     "software engineer": "软件工程师",
     "senior software engineer": "软件工程师",
     "staff software engineer": "软件工程师",

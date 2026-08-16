@@ -316,31 +316,17 @@ function SkillTrendView() {
   const [defaults, setDefaults] = useState<components['schemas']['SkillEvolutionData'][] | null>(null)
   const [selected, setSelected] = useState<components['schemas']['SkillEvolutionData'] | null>(null)
   const [defaultError, setDefaultError] = useState<string | null>(null)
-  // 08-16 翻页：默认技能列表 10 项一页（GET /evolution/skills page/size）
-  const PAGE_SIZE = 10
-  const [page, setPage] = useState(1)
-  const [total, setTotal] = useState(0)
-  const [pageLoading, setPageLoading] = useState(false)
+  // 08-16 用户决策：翻页针对快照时间线（10 期/页、最新在前），技能列表不翻页
+  const SNAPSHOT_PAGE_SIZE = 10
+  const [snapshotPage, setSnapshotPage] = useState(1)
 
-  function loadPage(p: number) {
-    setPageLoading(true)
-    apiGet<SkillEvolutionListData>(`/evolution/skills?page=${p}&size=${PAGE_SIZE}`)
-      .then((r) => {
-        setDefaults(r.skills)
-        setTotal(r.total)
-      })
-      .catch(() => setDefaultError('默认技能加载失败'))
-      .finally(() => setPageLoading(false))
-  }
-
-  // 页面加载即拉取第 1 页快照热度技能演化（GET /evolution/skills）
+  // 页面加载即拉取 Top-10 热度技能（GET /evolution/skills）
   useEffect(() => {
     let cancelled = false
-    apiGet<SkillEvolutionListData>(`/evolution/skills?page=1&size=${PAGE_SIZE}`)
+    apiGet<SkillEvolutionListData>(`/evolution/skills?page=1&size=10`)
       .then((r) => {
         if (cancelled) return
         setDefaults(r.skills)
-        setTotal(r.total)
         if (r.skills.length > 0) setSelected(r.skills[0])
       })
       .catch((e) => {
@@ -360,7 +346,10 @@ function SkillTrendView() {
     setLoading(true)
     setError(null)
     apiGet<EvolutionTrends>(`/evolution/trends?skill=${encodeURIComponent(id)}&window=90`)
-      .then((r) => setData(r))
+      .then((r) => {
+        setData(r)
+        setSnapshotPage(1)
+      })
       .catch((e) => {
         setData(null)
         setError(e instanceof ApiError ? e.message : '趋势查询失败')
@@ -371,6 +360,14 @@ function SkillTrendView() {
   // 当前展示：手动查询结果优先，否则默认选中技能
   const points = data?.points ?? selected?.points ?? null
   const title = data ? data.skill : (selected?.skill_name ?? null)
+  // 快照时间线：日期最新在前，按 10 期/页切片（08-16 用户决策）
+  const allSnapshotPoints = (points ?? []).slice().sort((a, b) =>
+    (b.date ?? '').localeCompare(a.date ?? '') || (b.version ?? '').localeCompare(a.version ?? ''),
+  )
+  const pagePoints = allSnapshotPoints.slice(
+    (snapshotPage - 1) * SNAPSHOT_PAGE_SIZE,
+    snapshotPage * SNAPSHOT_PAGE_SIZE,
+  )
 
   return (
     <Card>
@@ -388,6 +385,7 @@ function SkillTrendView() {
                   const hit = defaults.find((d) => d.skill_id === v)
                   if (hit) {
                     setSelected(hit)
+                    setSnapshotPage(1)
                     setData(null)
                     setError(null)
                   }
@@ -452,7 +450,7 @@ function SkillTrendView() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {points.map((p) => (
+                {pagePoints.map((p) => (
                   <TableRow key={p.version}>
                     <TableCell className="text-xs font-mono text-ink-muted">{p.date ?? '—'}</TableCell>
                     <TableCell className="font-mono text-xs text-ink-secondary">{p.version}</TableCell>
@@ -461,17 +459,13 @@ function SkillTrendView() {
                 ))}
               </TableBody>
             </Table>
-            {/* 默认技能列表翻页（10 项一页，08-16） */}
-            {defaults && (
+            {/* 快照时间线翻页（10 期/页、最新在前，08-16 用户决策） */}
+            {allSnapshotPoints.length > SNAPSHOT_PAGE_SIZE && (
               <PaginationBar
-                page={page}
-                total={total}
-                pageSize={PAGE_SIZE}
-                loading={pageLoading}
-                onPageChange={(p) => {
-                  setPage(p)
-                  loadPage(p)
-                }}
+                page={snapshotPage}
+                total={allSnapshotPoints.length}
+                pageSize={SNAPSHOT_PAGE_SIZE}
+                onPageChange={setSnapshotPage}
               />
             )}
           </>
@@ -492,31 +486,17 @@ function PositionEvolutionView() {
   // 默认岗位列表（08-15：页面打开即有演化轨迹，无需先查节点 ID）
   const [defaults, setDefaults] = useState<PositionEvolutionData[] | null>(null)
   const [defaultError, setDefaultError] = useState<string | null>(null)
-  // 08-16 翻页：默认岗位列表 10 项一页（GET /evolution/positions page/size）
-  const PAGE_SIZE = 10
-  const [page, setPage] = useState(1)
-  const [total, setTotal] = useState(0)
-  const [pageLoading, setPageLoading] = useState(false)
+  // 08-16 用户决策：翻页针对快照时间线（10 期/页、最新在前），岗位列表不翻页
+  const SNAPSHOT_PAGE_SIZE = 10
+  const [snapshotPage, setSnapshotPage] = useState(1)
 
-  function loadPage(p: number) {
-    setPageLoading(true)
-    apiGet<PositionEvolutionListData>(`/evolution/positions?page=${p}&size=${PAGE_SIZE}`)
-      .then((r) => {
-        setDefaults(r.positions)
-        setTotal(r.total)
-      })
-      .catch(() => setDefaultError('默认岗位加载失败'))
-      .finally(() => setPageLoading(false))
-  }
-
-  // 页面加载即拉取第 1 页快照热度岗位演化（GET /evolution/positions）
+  // 页面加载即拉取 Top-10 热度岗位（GET /evolution/positions）
   useEffect(() => {
     let cancelled = false
-    apiGet<PositionEvolutionListData>(`/evolution/positions?page=1&size=${PAGE_SIZE}`)
+    apiGet<PositionEvolutionListData>(`/evolution/positions?page=1&size=10`)
       .then((r) => {
         if (cancelled) return
         setDefaults(r.positions)
-        setTotal(r.total)
         if (r.positions.length > 0) setData(r.positions[0])
       })
       .catch((e) => {
@@ -536,13 +516,25 @@ function PositionEvolutionView() {
     setLoading(true)
     setError(null)
     apiGet<PositionEvolutionData>(`/evolution/position/${encodeURIComponent(id)}/evolution`)
-      .then((r) => setData(r))
+      .then((r) => {
+        setData(r)
+        setSnapshotPage(1)
+      })
       .catch((e) => {
         setData(null)
         setError(e instanceof ApiError ? e.message : '演化历史查询失败')
       })
       .finally(() => setLoading(false))
   }
+
+  // 快照时间线：日期最新在前，按 10 期/页切片（08-16 用户决策）
+  const allPoints = (data?.points ?? []).slice().sort((a, b) =>
+    (b.date ?? '').localeCompare(a.date ?? '') || (b.version ?? '').localeCompare(a.version ?? ''),
+  )
+  const points = allPoints.slice(
+    (snapshotPage - 1) * SNAPSHOT_PAGE_SIZE,
+    snapshotPage * SNAPSHOT_PAGE_SIZE,
+  )
 
   return (
     <Card>
@@ -561,6 +553,7 @@ function PositionEvolutionView() {
                   const hit = defaults.find((d) => d.position_id === v)
                   if (hit) {
                     setData(hit)
+                    setSnapshotPage(1)
                     setError(null)
                   }
                 }}
@@ -613,45 +606,43 @@ function PositionEvolutionView() {
             {data.points.length === 0 ? (
               <p className="py-6 text-center text-xs text-ink-faint">该岗位在各版本快照中均未出现</p>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>快照日期</TableHead>
-                    <TableHead>版本</TableHead>
-                    <TableHead className="text-right">关联技能边数</TableHead>
-                    <TableHead className="text-right">快照中存在</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {data.points.map((p) => (
-                    <TableRow key={p.version}>
-                      <TableCell className="text-xs font-mono text-ink-muted">{p.date ?? '—'}</TableCell>
-                      <TableCell className="font-mono text-xs text-ink-secondary">{p.version}</TableCell>
-                      <TableCell className="text-right tabular-nums font-mono">{p.freq}</TableCell>
-                      <TableCell className="text-right">
-                        {p.present ? (
-                          <Badge variant="outline" className="text-[10px] text-state-stable">存在</Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[10px] text-ink-faint">未收录</Badge>
-                        )}
-                      </TableCell>
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>快照日期</TableHead>
+                      <TableHead>版本</TableHead>
+                      <TableHead className="text-right">关联技能边数</TableHead>
+                      <TableHead className="text-right">快照中存在</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-            {/* 默认岗位列表翻页（10 项一页，08-16） */}
-            {defaults && (
-              <PaginationBar
-                page={page}
-                total={total}
-                pageSize={PAGE_SIZE}
-                loading={pageLoading}
-                onPageChange={(p) => {
-                  setPage(p)
-                  loadPage(p)
-                }}
-              />
+                  </TableHeader>
+                  <TableBody>
+                    {points.map((p) => (
+                      <TableRow key={p.version}>
+                        <TableCell className="text-xs font-mono text-ink-muted">{p.date ?? '—'}</TableCell>
+                        <TableCell className="font-mono text-xs text-ink-secondary">{p.version}</TableCell>
+                        <TableCell className="text-right tabular-nums font-mono">{p.freq}</TableCell>
+                        <TableCell className="text-right">
+                          {p.present ? (
+                            <Badge variant="outline" className="text-[10px] text-state-stable">存在</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] text-ink-faint">未收录</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {/* 快照时间线翻页（10 期/页、最新在前，08-16 用户决策） */}
+                {allPoints.length > SNAPSHOT_PAGE_SIZE && (
+                  <PaginationBar
+                    page={snapshotPage}
+                    total={allPoints.length}
+                    pageSize={SNAPSHOT_PAGE_SIZE}
+                    onPageChange={setSnapshotPage}
+                  />
+                )}
+              </>
             )}
           </>
         )}
