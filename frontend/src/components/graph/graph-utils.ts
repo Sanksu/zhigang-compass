@@ -1,4 +1,4 @@
-import type { GraphNode } from './types'
+import type { GraphNode, PositionStatus } from './types'
 
 /** 技能标签显示阈值：低于全图技能节点 value 中位数的不常显标签（悬停/选中时经 emphasis 仍显示），
  *  避免技能全量渲染时标签叠字遮挡，同时减少 label 渲染开销 */
