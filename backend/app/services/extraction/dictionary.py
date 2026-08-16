@@ -266,6 +266,21 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("AI 基础设施", "ai infra"), "AI基础设施工程师"),
     (("AI 生产力", "ai productivity"), "AI生产力工程师"),
     (("AI与数据风险管理", "ai and data risk"), "AI与数据风险管理经理"),
+    # P11 岗位名碎片归位（2026-08-16 岗位处置）：LLM 把团队名/技术栈名/产品名
+    # 压成岗位名（"FPGA团队"、"Kubernetes与OpenShift"、"Endur技术"）——按
+    # JD 技能语义归位到规范岗位（图谱已有节点优先，存量见
+    # scripts/position_fragment_redirect.py）；"tak" 词边界匹配防误伤 stack 等
+    (("fpga团队",), "FPGA验证"),
+    (("kubernetes与openshift",), "DevOps工程师"),
+    (("endur技术",), "后端开发工程师"),
+    (("stem课程",), "STEM科技教育讲师"),
+    (("cfd分析",), "CFD分析工程师"),
+    (("仪器ait",), "仪器AIT工程师"),
+    (("obd标定",), "OBD标定工程师"),
+    (("tak",), "移动开发工程师"),
+    # "ux" 词边界命中（UX设计师 剥壳前拦截，防 _EN_POSITION_MAP 翻译结果被
+    # _normalize_base 剥后缀成裸 "UX"）
+    (("ux",), "UX设计师"),
     (("游戏",), "游戏开发工程师"),
     (("硬件",), "硬件工程师"),
     (("软件",), "软件开发工程师"),
@@ -443,6 +458,10 @@ _EN_POSITION_MAP: dict[str, str] = {
     "ai infra engineer": "AI基础设施工程师",
     "ai productivity engineer": "AI生产力工程师",
     "ai and data risk management": "AI与数据风险管理经理",
+    # P11 英文碎片归位（2026-08-16 岗位处置）：Staff 为 Staff Engineer 缩略
+    # （走失真兜底族按技能路由）、UX 为用户体验设计师
+    "staff": "软件工程师",
+    "ux": "UX设计师",
     "software engineer": "软件工程师",
     "senior software engineer": "软件工程师",
     "staff software engineer": "软件工程师",
