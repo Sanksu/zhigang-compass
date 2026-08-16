@@ -6,10 +6,11 @@
 - zhilian：空城市 → URL 不带 jl 参数（全国）
 """
 
-import json
 import subprocess
 import sys
 from pathlib import Path
+
+from scrapy.http import Request, Response
 
 _BACKEND = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_BACKEND))
@@ -74,13 +75,11 @@ class TestGlassdoorEmptyCity:
         spider.cities = []
 
         tasks = [{"keyword": "Python", "city": ""}]
-        req = __import__("scrapy.http", fromlist=["Request"]).Request(
+        req = Request(
             url="http://127.0.0.1:9224/json/version",
             meta={"tasks": tasks, "cdp_url": "http://127.0.0.1:9224"},
         )
-        resp = __import__("scrapy.http", fromlist=["Response"]).Response(
-            url="http://127.0.0.1:9224/json/version", request=req,
-        )
+        resp = Response(url="http://127.0.0.1:9224/json/version", request=req)
         list(spider.parse(resp))
 
         assert len(calls) == 1
