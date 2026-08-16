@@ -700,3 +700,29 @@ class TestPositionVariantCleaning:
             assert vk not in seen  # 一个变体键只能对应一个规范名
             seen.add(vk)
             assert d._clean_variant(v) == v  # 值须为清洗后形式（无空白）
+
+
+class TestP11FragmentRedirect:
+    """P11 岗位名碎片归位（2026-08-16 岗位处置）：团队名/技术栈名/产品名
+    按 JD 技能语义归位到规范岗位；词边界防误伤。"""
+
+    def test_en_fragments(self):
+        assert normalize_position_name("Staff", ["Java", "Spring"]) == "后端开发工程师"
+        assert normalize_position_name("UX") == "UX设计师"
+        assert normalize_position_name("UX设计师") == "UX设计师"  # 幂等
+
+    def test_cn_fragments(self):
+        assert normalize_position_name("FPGA团队") == "FPGA验证"
+        assert normalize_position_name("Kubernetes与OpenShift") == "DevOps工程师"
+        assert normalize_position_name("Endur技术") == "后端开发工程师"
+        assert normalize_position_name("STEM课程") == "STEM科技教育讲师"
+        assert normalize_position_name("仪器AIT") == "仪器AIT工程师"
+        assert normalize_position_name("OBD标定") == "OBD标定工程师"
+        assert normalize_position_name("TAK") == "移动开发工程师"
+        assert normalize_position_name("CFD分析") == "CFD分析工程师"
+
+    def test_no_false_positive(self):
+        # 词边界保护：stack 含 tak 不误伤；IT 泛词不拦（T-04 决策）；web 族先行
+        assert normalize_position_name("stack") == "stack"
+        assert normalize_position_name("IT系统管理员") == "IT系统管理员"
+        assert normalize_position_name("web前端开发工程师") == "前端开发工程师"
