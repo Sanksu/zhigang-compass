@@ -1,0 +1,21 @@
+# 行尾统一策略（2026-08-16 第三轮审查：修复 core.autocrlf=true 导致的
+# 工作区状态抖动——文件被 Git 判为 modified 但 diff 为空）
+# - 文本文件统一 LF 入库（Git 规范），Windows 检出时按 core.autocrlf 转 CRLF
+# - PowerShell 脚本显式 CRLF（Windows 计划任务依赖，见 docs/postmortems/002）
+# - 二进制文件禁止行尾转换
+
+* text=auto
+
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.xlsx binary
+*.pdf binary
+*.pem binary

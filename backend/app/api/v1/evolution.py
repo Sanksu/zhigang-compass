@@ -4,19 +4,20 @@
 T+1 全量快照（设计文档 7.1）。
 """
 
+import json
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-import json
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.common import iso, paginate, paged_ok
+from app.api.common import iso, paged_ok, paginate
 from app.api.deps import require_role
 from app.core.database import get_db, redis_client
+from app.core.errors import ERR_NOT_FOUND
 from app.models.business import GraphVersion
-from app.schemas.common import ok, error
+from app.schemas.common import error, ok
 
 router = APIRouter()
 
@@ -116,7 +117,7 @@ async def version_diff(
     va = await db.get(GraphVersion, from_version)
     vb = await db.get(GraphVersion, to_version)
     if va is None or vb is None:
-        return error(4040, "版本不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "版本不存在", http_status=404)
     return ok(data=_diff_snapshots(va.snapshot_json, vb.snapshot_json))
 
 
@@ -162,7 +163,7 @@ async def version_detail(
     """
     v = await db.get(GraphVersion, version_id)
     if v is None:
-        return error(4040, "版本不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "版本不存在", http_status=404)
 
     snapshot = v.snapshot_json or {}
     nodes = snapshot.get("nodes", [])
@@ -302,7 +303,7 @@ async def position_evolution(
 
     snapshots = await _load_snapshots(db)
     if snapshots is None:
-        return error(4040, "无图谱版本数据", http_status=404)
+        return error(ERR_NOT_FOUND, "无图谱版本数据", http_status=404)
     indexes = _build_snapshot_indexes(snapshots)
     data = _rebuild_position_evolution(indexes, id)
     await _cache_set_json(cache_key, data)
@@ -328,7 +329,7 @@ async def position_evolution_list(
 
     snapshots = await _load_snapshots(db)
     if snapshots is None:
-        return error(4040, "无图谱版本数据", http_status=404)
+        return error(ERR_NOT_FOUND, "无图谱版本数据", http_status=404)
 
     indexes = _build_snapshot_indexes(snapshots)
     ranked = _top_nodes_by_heat(indexes, "position", "pos_", "src")
@@ -365,7 +366,7 @@ async def skill_evolution_list(
 
     snapshots = await _load_snapshots(db)
     if snapshots is None:
-        return error(4040, "无图谱版本数据", http_status=404)
+        return error(ERR_NOT_FOUND, "无图谱版本数据", http_status=404)
 
     indexes = _build_snapshot_indexes(snapshots)
     ranked = _top_nodes_by_heat(indexes, "skill", "sk_", "tgt")

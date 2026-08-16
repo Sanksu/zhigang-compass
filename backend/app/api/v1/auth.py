@@ -13,6 +13,7 @@ from app.api.common import iso
 from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.database import get_db, get_redis
+from app.core.errors import ERR_CONFLICT, ERR_FORBIDDEN, ERR_NOT_FOUND, ERR_UNAUTHORIZED, ERR_VALIDATION
 from app.core.security import (
     TokenExpiredError,
     create_access_token,
@@ -30,7 +31,7 @@ from app.schemas.business import (
     RegisterRequest,
     UpdateProfileRequest,
 )
-from app.schemas.common import ok, error
+from app.schemas.common import error, ok
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,7 @@ async def login(
         # 08-14 安全修复：原条件为"admin 用户名不存在"——表非空时任何人可用
         # 默认配置抢注 admin（admin/admin123），改为表空才允许。
         if settings.is_production:
-            return error(4010, "用户名或密码错误", http_status=401)
+            return error(ERR_UNAUTHORIZED, "用户名或密码错误", http_status=401)
         user_count = await db.scalar(select(func.count()).select_from(User))
         if user_count == 0 and req.username == settings.admin_username and req.password == settings.admin_password:
             user = User(
@@ -116,12 +117,12 @@ async def login(
             await db.commit()
             await db.refresh(user)
         else:
-            return error(4010, "用户名或密码错误", http_status=401)
+            return error(ERR_UNAUTHORIZED, "用户名或密码错误", http_status=401)
     elif not verify_password(req.password, user.password_hash):
-        return error(4010, "用户名或密码错误", http_status=401)
+        return error(ERR_UNAUTHORIZED, "用户名或密码错误", http_status=401)
 
     if not user.is_active:
-        return error(4030, "账户已禁用", http_status=403)
+        return error(ERR_FORBIDDEN, "账户已禁用", http_status=403)
 
     access_token = create_access_token(user.id, user.role)
     refresh_token = create_refresh_token(user.id, user.role)
@@ -162,23 +163,23 @@ async def refresh_token(
     """
     refresh_token = _extract_refresh_token(request, req)
     if not refresh_token:
-        return error(4010, "缺少 refresh_token", http_status=401)
+        return error(ERR_UNAUTHORIZED, "缺少 refresh_token", http_status=401)
     try:
         payload = decode_token(refresh_token)
     except TokenExpiredError:
         # refresh 过期（7 天 TTL）无法续期，引导重新登录（4011 专指 access 过期触发刷新）
-        return error(4010, "refresh_token 已过期，请重新登录", http_status=401)
+        return error(ERR_UNAUTHORIZED, "refresh_token 已过期，请重新登录", http_status=401)
     if payload is None or payload.get("type") != "refresh":
-        return error(4010, "无效的 refresh_token", http_status=401)
+        return error(ERR_UNAUTHORIZED, "无效的 refresh_token", http_status=401)
     jti = payload.get("jti")
     if jti:
         revoked = await redis.get(f"token:blacklist:{jti}")
         if revoked:
-            return error(4010, "refresh_token 已失效", http_status=401)
+            return error(ERR_UNAUTHORIZED, "refresh_token 已失效", http_status=401)
     user_id = payload["sub"]
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
-        return error(4010, "用户不存在或已禁用", http_status=401)
+        return error(ERR_UNAUTHORIZED, "用户不存在或已禁用", http_status=401)
     # 轮换：旧 refresh 拉黑防重放，签发新 refresh 并重写 httpOnly Cookie
     if jti:
         await redis.set(
@@ -202,12 +203,12 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     logger.info(f"[register] 收到注册请求: username={req.username}")
     if len(req.username) < 3 or len(req.password) < 6:
         logger.warning(f"[register] 参数校验失败: username={req.username}")
-        return error(4000, "用户名至少 3 字符，密码至少 6 字符")
+        return error(ERR_VALIDATION, "用户名至少 3 字符，密码至少 6 字符")
 
     existing = await db.scalar(select(User).where(User.username == req.username))
     if existing is not None:
         logger.warning(f"[register] 用户名已存在: username={req.username}")
-        return error(4090, "用户名已存在")
+        return error(ERR_CONFLICT, "用户名已存在")
 
     user = User(
         username=req.username,
@@ -238,7 +239,7 @@ async def me(
     """获取当前用户信息（需登录）。"""
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
-        return error(4040, "用户不存在")
+        return error(ERR_NOT_FOUND, "用户不存在")
     return ok(data={
         "id": user.id,
         "username": user.username,
@@ -263,7 +264,7 @@ async def update_me(
     """
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
-        return error(4040, "用户不存在")
+        return error(ERR_NOT_FOUND, "用户不存在")
     if req.email is not None:
         user.email = req.email
     if req.phone is not None:
@@ -303,11 +304,11 @@ async def change_password(
     """
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
-        return error(4040, "用户不存在")
+        return error(ERR_NOT_FOUND, "用户不存在")
     if not verify_password(req.old_password, user.password_hash):
-        return error(4000, "原密码错误")
+        return error(ERR_VALIDATION, "原密码错误")
     if req.old_password == req.new_password:
-        return error(4000, "新密码不能与原密码相同")
+        return error(ERR_VALIDATION, "新密码不能与原密码相同")
     user.password_hash = hash_password(req.new_password)
     db.add(AuditLog(
         user_id=user.id,

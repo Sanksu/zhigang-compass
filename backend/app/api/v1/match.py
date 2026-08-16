@@ -12,7 +12,6 @@ import json
 import logging
 import time
 import uuid
-
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -24,7 +23,7 @@ from app.api.common import owns_resume, parse_uuid, serialize_task
 from app.api.deps import require_role
 from app.core.arq_client import enqueue
 from app.core.database import async_session_factory, get_db, neo4j_driver, redis_client
-from app.core.errors import ERR_LLM_TIMEOUT
+from app.core.errors import ERR_FORBIDDEN, ERR_INTERNAL, ERR_LLM_TIMEOUT, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import (
     DiagnosisReportRecord,
     MatchFeedbackRecord,
@@ -32,13 +31,13 @@ from app.models.business import (
     ResumeCache,
     TaskStatus,
 )
-from app.schemas.common import ok, error
+from app.schemas.common import error, ok
 from app.services.embeddings.vector_store import PgvectorUnavailableError, load_project_vectors
+from app.services.learning_path.generator import LearningPathGenerator
 from app.services.matching.engine import RuleBasedMatcher
 from app.services.matching.loaders import build_candidate, load_positions_from_graph
 from app.services.matching.schemas import MatchMode, MatchRequest
 from app.services.matching.semantic import SkillEmbedder
-from app.services.learning_path.generator import LearningPathGenerator
 
 router = APIRouter()
 
@@ -215,12 +214,12 @@ async def recommend(
     """
     resume_id = parse_uuid(req.resume_id)
     if resume_id is None:
-        return error(4000, "resume_id 格式非法")
+        return error(ERR_VALIDATION, "resume_id 格式非法")
     cache = await db.get(ResumeCache, resume_id)
     if cache is None:
-        return error(4040, "简历不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "简历不存在", http_status=404)
     if not await owns_resume(db, resume_id, user.get("sub", "")):
-        return error(4030, "无权使用该简历发起匹配", http_status=403)
+        return error(ERR_FORBIDDEN, "无权使用该简历发起匹配", http_status=403)
 
     task = TaskStatus(
         task_type="match_recommend",
@@ -262,12 +261,12 @@ async def compare(
     """
     resume_id = parse_uuid(req.resume_id)
     if resume_id is None:
-        return error(4000, "resume_id 格式非法")
+        return error(ERR_VALIDATION, "resume_id 格式非法")
     cache = await db.get(ResumeCache, resume_id)
     if cache is None:
-        return error(4040, "简历不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "简历不存在", http_status=404)
     if not await owns_resume(db, resume_id, user.get("sub", "")):
-        return error(4030, "无权使用该简历发起比对", http_status=403)
+        return error(ERR_FORBIDDEN, "无权使用该简历发起比对", http_status=403)
 
     # 项目向量（pgvector project_embeddings 回填产物）：未回填/表不可用时为空 dict，
     # 评分回退文本相似度（engine._project_score 对空 dict 即回退）
@@ -299,7 +298,7 @@ async def compare(
 
     computed = await asyncio.to_thread(_compute)
     if computed is None:
-        return error(4040, "岗位不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "岗位不存在", http_status=404)
     candidate, target, result, semantic = computed
     path = await LearningPathGenerator().generate(candidate, target, semantic=semantic)
 
@@ -358,11 +357,11 @@ async def match_task_status(
     try:
         task_uuid = str(uuid.UUID(task_id))
     except (ValueError, AttributeError):
-        return error(4000, "task_id 格式非法")
+        return error(ERR_VALIDATION, "task_id 格式非法")
     task = await db.get(TaskStatus, task_uuid)
     if task is not None:
         if (task.result or {}).get("user_id") != user.get("sub", ""):
-            return error(4040, "匹配任务不存在或已过期", http_status=404)
+            return error(ERR_NOT_FOUND, "匹配任务不存在或已过期", http_status=404)
         data = serialize_task(task, exclude=("task_type", "result"))
         data["error"] = data["error"] or ""
         if task.status == "success":
@@ -371,10 +370,10 @@ async def match_task_status(
 
     cached = await redis_client.get(f"match:task:{task_id}")
     if cached is None:
-        return error(4040, "匹配任务不存在或已过期", http_status=404)
+        return error(ERR_NOT_FOUND, "匹配任务不存在或已过期", http_status=404)
     data = json.loads(cached)
     if not await _match_task_cache_owned(data, user.get("sub", "")):
-        return error(4040, "匹配任务不存在或已过期", http_status=404)
+        return error(ERR_NOT_FOUND, "匹配任务不存在或已过期", http_status=404)
     return ok(data=data)
 
 
@@ -383,7 +382,7 @@ async def match_result(match_id: str, user: dict = Depends(require_role("user"))
     """[M4] 获取匹配结果（recommend/compare 返回的 match_id，仅限本人结果）。"""
     data = await _load_match_result(match_id, user.get("sub", ""))
     if data is None:
-        return error(4040, "匹配结果不存在或已过期", http_status=404)
+        return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
     return ok(data=data)
 
 
@@ -392,7 +391,7 @@ async def match_result_gap(match_id: str, user: dict = Depends(require_role("use
     """[M4] 获取差距分析（compare 结果的 gaps 三态列表，仅限本人结果）。"""
     data = await _load_match_result(match_id, user.get("sub", ""))
     if data is None:
-        return error(4040, "匹配结果不存在或已过期", http_status=404)
+        return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
     return ok(data={"match_id": match_id, "gaps": data.get("gaps", [])})
 
 
@@ -401,7 +400,7 @@ async def match_result_path(match_id: str, user: dict = Depends(require_role("us
     """[M4] 获取学习路径（compare 结果的 missing/weak 技能先修链 + 课程，仅限本人结果）。"""
     data = await _load_match_result(match_id, user.get("sub", ""))
     if data is None:
-        return error(4040, "匹配结果不存在或已过期", http_status=404)
+        return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
     return ok(data={"match_id": match_id, "learning_path": data.get("learning_path", [])})
 
 
@@ -417,9 +416,9 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
     """
     data = await _load_match_result(match_id, user.get("sub", ""))
     if data is None:
-        return error(4040, "匹配结果不存在或已过期", http_status=404)
+        return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
     if not data.get("gaps"):
-        return error(4000, "该匹配结果无差距数据，仅人岗比对可生成诊断报告")
+        return error(ERR_VALIDATION, "该匹配结果无差距数据，仅人岗比对可生成诊断报告")
 
     cached = await redis_client.get(f"match:diagnosis:{match_id}")
     if cached:
@@ -465,11 +464,11 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
     except LLMConfigurationError as e:
         # 配置不可用（无 api_key/全部禁用）→ 503（契约：LLM 不可用或超时）
         logger.warning("诊断报告 LLM 配置不可用: %s", e)
-        return error(5000, "诊断报告生成失败：LLM 配置不可用", http_status=503)
+        return error(ERR_INTERNAL, "诊断报告生成失败：LLM 配置不可用", http_status=503)
     except LLMExtractionError as e:
         # 全部 provider 失败（超时/连接/校验）→ 503，避免裸 500 且与契约一致
         logger.warning("诊断报告 LLM 抽取失败: %s", e)
-        return error(5000, "诊断报告生成失败：LLM 服务异常", http_status=503)
+        return error(ERR_INTERNAL, "诊断报告生成失败：LLM 服务异常", http_status=503)
 
     payload = {"match_id": match_id, **report.model_dump()}
     await redis_client.set(
@@ -500,7 +499,7 @@ async def match_feedback(
     """
     cached = await _load_match_result(req.match_id, user.get("sub", ""))
     if cached is None:
-        return error(4040, "匹配结果不存在或已过期", http_status=404)
+        return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
     key = f"match:feedback:{req.match_id}"
     await redis_client.rpush(key, json.dumps({"score": req.score, "created_at": _ts()}))
     await redis_client.expire(key, 90 * 24 * 3600)
