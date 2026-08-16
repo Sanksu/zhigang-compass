@@ -17,6 +17,7 @@
 from dataclasses import dataclass
 import asyncio
 from typing import Optional
+from app.services.kg.fulltext import sanitize_fulltext
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +33,6 @@ DEFAULT_MAX_TOKENS = 3000
 
 
 
-from app.services.kg.fulltext import sanitize_fulltext
 
 
 def _estimate_tokens(text: str) -> int:

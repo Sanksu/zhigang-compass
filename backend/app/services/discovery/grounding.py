@@ -22,6 +22,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Optional
+from app.services.kg.fulltext import sanitize_fulltext
 
 import yaml
 from pydantic import BaseModel
@@ -49,7 +50,6 @@ _CACHE_TTL_SECONDS = 6 * 3600
 _CACHE_ENABLED = True
 
 
-from app.services.kg.fulltext import sanitize_fulltext
 def _norm(text: str) -> str:
     """归一化：小写 + 去首尾空白。"""
     return (text or "").strip().lower()
