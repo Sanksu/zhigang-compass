@@ -127,3 +127,12 @@
 4. **重采验证闭环**：307 条新 JD 99.7% 有描述 → batch_extract 294 条 99% 有技能 → React开发工程师 0→18 技能边、Skill +1762
 
 **教训**：① arq enqueue 的 task_id 必须 UUID；② crawled_at varchar 的 UTC 'T' 字符串比较陷阱（过滤用 LIKE 前缀）；③ "脏技能"审计先查岗位依赖再决策删除；④ 存量空描述 JD 无法回溯（重爬不重抽），依赖新采集增量。
+
+## 2026-08-16 重复岗位对治理（PR #260，Sanksu 会话）
+
+- **根因**：normalize_position_name 无字符级清洗 + 入图按 name 精确 MERGE——空格/全角差异（CMDB 发现 vs CMDB发现）与语义近似名（AI 数据科学机器人教练 vs AI数据科学与机器人教练）分裂成多个图谱节点/候选行。
+- **代码（fix/algo-position-dup-merge）**：dictionary.py 加 `_variant_key`（NFKC+去空白+去CJK标点+casefold，保留 ASCII 标点保护 C++/C#）、`_clean_variant`（输出收敛，关键词/翻译/停用词逻辑零改动）、`_POSITION_ALIAS` 别名表+变体键反向索引（7 条人工复核确认：AI数据科学与→AI数据科学、Angular/React 开发→前端、STEM讲师→STEM科技教育讲师、AS400 双向、AI/ML应用→AI/ML）；`scripts/position_duplicate_cleanup.py` 三来源盘点（Neo4j/PG 候选池/jd_raw）双阶段（A 字符级自动合并/改名 + B SBERT sim≥0.9 语义提议清单）；`cron/position_dup_daily.py` + ZhigangETL_PositionDup 06:45 已注册（8 任务）。
+- **执行（本地库）**：--apply 合并 4 对 + 改名 1（AI数据科学机器人教练 ev1+1、React前端 14+2、Angular前端 4+1、STEM科技教育讲师 1+1、AS400应用程序），AI/ML（rejected）受保护未动；重聚合 positions 99/edges 3786；audit_position_status 零漂移；脚本幂等（二次运行 0 计划）；备份 `reports/position_duplicates_stageA/B_20260816_*.jsonl`。
+- **影响披露**：重聚合触发 cleanup_graph._reaggregate 既有孤立技能对齐清理（Skill 8005→1771：1629 有岗位入边 + 270 有课程边 + 白名单保留）——08-15"真实低频 4200 保留"是手动清理口径，_reaggregate 自动化本就会删，属设计行为非本次引入。
+- **待办**：PR #260 需张恺天确认（算法核心红线）后合并；合并后部署（dictionary.py 进镜像）；jd_raw 5 对（AI与数据风险管理/经理、AI基础设施±空格、AI 生产力、数据专家）由 P10 映射+清洗在下次 ETL 自动归一。
+- **教训**：① 语义别名表键/值都是岗位名原文，查表用变体键反向索引（直接 get 变体键会大小写不匹配永不命中）；② Windows 下跨 asyncio.run 复用 SQLAlchemy async 池连接必崩（Event loop is closed）——每次 asyncio.run 结束时 await engine.dispose()；③ 并行会话切分支会带走/覆盖工作区未提交修改——commit 落袋后分支被切走也不丢（rebase 移回 + branch -f 恢复对方 commit）。
