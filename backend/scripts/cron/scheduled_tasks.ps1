@@ -44,6 +44,8 @@ $Tasks = @(
     @{ Name = "ETLDaily";       Time = "05:00"; Script = "etl_daily.py";    Args = @() },
     # 图谱健康治理（06:30，ETL 完成后；脏边/伪技能自动清理，备份 reports/graph_health_*）
     @{ Name = "GraphHealth";    Time = "06:30"; Script = "graph_health_daily.py"; Args = @() }
+    # 岗位重复对治理（06:45，GraphHealth 之后；变体合并/语义提议，备份 reports/position_duplicates_*）
+    @{ Name = "PositionDup";    Time = "06:45"; Script = "position_dup_daily.py"; Args = @() }
 )
 
 if (-not (Test-Path $LogDir)) {
