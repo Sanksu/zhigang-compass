@@ -170,11 +170,11 @@ def stage_c_teaching(semantic, apply: bool) -> int:
     return n
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="图谱健康自动治理（脏边/伪技能）")
     parser.add_argument("--apply", action="store_true", help="执行清理（默认 dry-run 只报告+备份）")
     parser.add_argument("--stage", choices=["A", "B", "C"], help="只跑指定阶段（默认全部）")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     from app.services.matching.semantic import SkillEmbedder
 

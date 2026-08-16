@@ -41,7 +41,9 @@ $Tasks = @(
     @{ Name = "CrawlEdx";        Time = "10:30"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("edx", "100"); Proxy = $true },
     @{ Name = "CrawlIcourse163"; Time = "11:00"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("icourse163", "100") },
     # ETL 主管线（05:00；阶段 1 采集 + LLM 抽取 + 快照 + 发现/自动流转）
-    @{ Name = "ETLDaily";       Time = "05:00"; Script = "etl_daily.py";    Args = @() }
+    @{ Name = "ETLDaily";       Time = "05:00"; Script = "etl_daily.py";    Args = @() },
+    # 图谱健康治理（06:30，ETL 完成后；脏边/伪技能自动清理，备份 reports/graph_health_*）
+    @{ Name = "GraphHealth";    Time = "06:30"; Script = "graph_health_daily.py"; Args = @() }
 )
 
 if (-not (Test-Path $LogDir)) {
