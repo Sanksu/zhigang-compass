@@ -34,8 +34,8 @@ EDX_BASE = "https://www.edx.org"
 # edX 搜索参数是 q（search_key 为旧版参数，已失效，返回浏览模式而非搜索结果）
 EDX_SEARCH_URL = "https://www.edx.org/search?q={keyword}"
 
-# 默认搜索关键词（与项目 AI/大数据/全栈方向一致）
-DEFAULT_KEYWORDS = ["Python", "Data Science", "Machine Learning", "SQL", "Java"]
+# 默认搜索关键词：空 = 全量课程浏览（08-16 用户决策，不再内置定向词）
+DEFAULT_KEYWORDS: list[str] = []
 
 # edX 大卡片内 a 标签特征类名（用于卡片定位）
 EDX_CARD_LINK_XPATH = (
@@ -70,9 +70,11 @@ class EdxSpider(Spider):
             yield request
 
     def start_requests(self):
-        for keyword in self.keywords:
-            url = EDX_SEARCH_URL.format(keyword=quote(keyword))
-            self.logger.info(f"开始采集 edX: 关键词={keyword}")
+        # 空关键词 = 全量课程浏览（08-16 用户决策，不再内置定向词）
+        keywords = self.keywords or [""]
+        for keyword in keywords:
+            url = EDX_SEARCH_URL.format(keyword=quote(keyword)) if keyword else "https://www.edx.org/search"
+            self.logger.info(f"开始采集 edX: 关键词={keyword or '(全部)'}")
             yield self._make_playwright_request(
                 url,
                 meta={"keyword": keyword},

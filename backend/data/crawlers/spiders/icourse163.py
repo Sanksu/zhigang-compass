@@ -30,8 +30,8 @@ from crawlers.items import CourseItem
 from crawlers.settings import RATE_LIMIT, SUBPROCESS_TIMEOUT
 
 
-# 默认搜索关键词（与项目 AI/大数据/全栈方向一致）
-DEFAULT_KEYWORDS = ["Python", "机器学习", "人工智能", "数据结构", "数据库"]
+# 默认搜索关键词：空 = 平台默认课程流（08-16 用户决策，不再内置定向词）
+DEFAULT_KEYWORDS: list[str] = []
 
 
 class Icourse163Spider(Spider):
@@ -86,10 +86,8 @@ class Icourse163Spider(Spider):
 
     async def parse(self, response: Response):
         """通过 subprocess 调用独立采集脚本，解析 JSONL 输出并 yield Item。"""
-        keywords = response.meta.get("keywords") or self.keywords
-        if not keywords:
-            self.logger.error("无采集关键词，请通过 -a keywords= 指定")
-            return
+        # 空关键词 = 平台默认课程流（08-16 用户决策）
+        keywords = (response.meta.get("keywords") or self.keywords) or [""]
 
         python_exe = sys.executable
         keyword_total = len(keywords)

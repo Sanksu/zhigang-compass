@@ -10,11 +10,9 @@ from crawlers.settings import RATE_LIMIT, MAIMAI_COMPLIANCE
 from crawlers.items import JobItem
 
 
-# 默认搜索关键字（覆盖项目关注的 AI/大数据/全栈方向）
-DEFAULT_KEYWORDS = [
-    "Python", "Java", "前端", "算法工程师",
-    "数据分析", "大模型", "全栈", "后端",
-]
+# 默认搜索关键字：空 = 按平台热度/最新采集（08-16 用户决策，不再内置定向词）。
+# 前端手动触发时通过 -a keywords= 显式指定
+DEFAULT_KEYWORDS: list[str] = []
 
 # 默认搜索城市
 DEFAULT_CITIES = ["北京", "上海", "深圳", "杭州", "广州"]

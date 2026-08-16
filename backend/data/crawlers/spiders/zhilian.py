@@ -77,7 +77,9 @@ class ZhilianSpider(BaseSpider):
         return any(_is_older_than_days(v, self.history_days) for v in publish_time_map.values())
 
     def start_requests(self):
-        for keyword in self.keywords:
+        # 空关键词 = 平台默认推荐列表（热度/最新，08-16 用户决策）
+        keywords = self.keywords or [""]
+        for keyword in keywords:
             for city in self.cities:
                 city_code = ZHILIAN_CITY_CODES.get(city)
                 if not city_code:

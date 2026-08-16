@@ -56,8 +56,10 @@ class GlassdoorSpider(BaseSpider):
 
     def start_requests(self):
         """构建采集任务，用占位 Request 触发 parse。"""
+        # 空关键词 = 按平台热度/最新采集（08-16 用户决策）：每城市取默认岗位流
+        keywords = self.keywords or [""]
         tasks = []
-        for keyword in self.keywords:
+        for keyword in keywords:
             for city in self.cities:
                 tasks.append({"keyword": keyword, "city": city})
 

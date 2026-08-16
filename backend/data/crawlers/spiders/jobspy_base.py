@@ -56,8 +56,10 @@ class JobSpyBaseSpider(BaseSpider):
 
     def start_requests(self):
         """通过 subprocess 调用 JobSpy 采集脚本，解析 JSONL 输出并 yield Item。"""
+        # 空关键词 = 按平台热度/最新采集（08-16 用户决策）：每城市取默认岗位流
+        keywords = self.keywords or [""]
         tasks = []
-        for keyword in self.keywords:
+        for keyword in keywords:
             for city in self.cities:
                 tasks.append({"keyword": keyword, "city": city})
 
@@ -78,7 +80,7 @@ class JobSpyBaseSpider(BaseSpider):
                     f"跳过剩余 {task_total - task_idx} 个任务"
                 )
                 break
-            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword} city={city}")
+            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword or '(全局)'} city={city}")
 
             cmd = self._build_cmd(keyword, city, remaining)
 

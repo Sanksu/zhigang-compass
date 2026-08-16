@@ -87,15 +87,15 @@ interface MetricCardItem {
   hint: string
 }
 
-/** 平台切换时的默认搜索参数：海外源默认英文城市/英文关键词，国内源默认中文 */
-const PLATFORM_DEFAULTS: Record<string, { keyword: string; city: string }> = {
-  boss: { keyword: '高级前端', city: '北京' },
-  zhilian: { keyword: '高级前端', city: '北京' },
-  maimai: { keyword: '高级前端', city: '北京' },
-  monster: { keyword: 'Python', city: 'New York' },
-  indeed: { keyword: 'Python', city: 'New York' },
-  glassdoor: { keyword: 'Python', city: 'New York' },
-  linkedin: { keyword: 'Python', city: 'New York' },
+/** 平台切换时的默认搜索参数：仅预填城市；关键词留空 = 采集平台热度/最新（08-16 用户决策） */
+const PLATFORM_DEFAULTS: Record<string, { city: string }> = {
+  boss: { city: '北京' },
+  zhilian: { city: '北京' },
+  maimai: { city: '北京' },
+  monster: { city: 'New York' },
+  indeed: { city: 'New York' },
+  glassdoor: { city: 'New York' },
+  linkedin: { city: 'New York' },
 }
 
 const STATUS_META: Record<CrawlStatus, { variant: 'stable' | 'candidate' | 'archived'; label: string }> = {
@@ -366,9 +366,9 @@ export function AdminCrawlPage() {
   async function triggerCrawl(platform: string) {
     if (isBusy) return
     const def = PLATFORM_DEFAULTS[platform]
-    const keyword = form.keyword?.trim() || def?.keyword || '高级前端'
-    if (!platform || !keyword) {
-      setNotice('请选择平台并填写关键词')
+    const keyword = form.keyword?.trim() ?? ''
+    if (!platform) {
+      setNotice('请选择平台')
       return
     }
     setCurrentTask({
@@ -541,12 +541,11 @@ export function AdminCrawlPage() {
                     setForm((f) => {
                       const def = PLATFORM_DEFAULTS[v]
                       const prevDef = PLATFORM_DEFAULTS[f.platform]
-                      // 关键词/城市未手动输入（为空或仍为上一平台默认值）时，跟随新平台默认
-                      const keyword =
-                        def && (!f.keyword.trim() || f.keyword === prevDef?.keyword) ? def.keyword : f.keyword
+                      // 城市未手动输入（为空或仍为上一平台默认值）时跟随新平台默认；
+                      // 关键词无平台默认（留空 = 热度/最新），保持用户输入
                       const city =
                         def && (!f.city.trim() || f.city === prevDef?.city) ? def.city : f.city
-                      return { ...f, platform: v, keyword, city }
+                      return { ...f, platform: v, keyword: f.keyword, city }
                     })
                   }
                 >
@@ -563,7 +562,7 @@ export function AdminCrawlPage() {
                 <Input
                   value={form.keyword}
                   onChange={(e) => setForm((f) => ({ ...f, keyword: e.target.value }))}
-                  placeholder={PLATFORM_DEFAULTS[form.platform]?.keyword ?? '高级前端'}
+                  placeholder="留空则采集平台热度/最新内容"
                 />
               </div>
               <div className="space-y-1.5">

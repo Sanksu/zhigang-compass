@@ -2263,7 +2263,8 @@ export interface paths {
                     "application/json": {
                         /** @description 平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx */
                         platform: string;
-                        keyword: string;
+                        /** @description 关键词（可选，留空则采集平台热度/最新内容，08-16 起爬虫不再内置默认关键词） */
+                        keyword?: string;
                         /** @description 城市（可选，海外源默认英文城市） */
                         city?: string;
                     };

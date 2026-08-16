@@ -35,8 +35,8 @@ COURSERA_BASE = "https://www.coursera.org"
 # （仍为公开课程元数据，符合 robots 规则）
 COURSERA_SEARCH_URL = "https://www.coursera.org/browse?query={keyword}"
 
-# 默认搜索关键词（与项目 AI/大数据/全栈方向一致）
-DEFAULT_KEYWORDS = ["Python", "Machine Learning", "Data Science", "SQL", "Java"]
+# 默认搜索关键词：空 = browse 热门课全量（08-16 用户决策，不再内置定向词）
+DEFAULT_KEYWORDS: list[str] = []
 
 
 class CourseraSpider(Spider):
@@ -66,9 +66,11 @@ class CourseraSpider(Spider):
             yield request
 
     def start_requests(self):
-        for keyword in self.keywords:
-            url = COURSERA_SEARCH_URL.format(keyword=quote(keyword))
-            self.logger.info(f"开始采集 Coursera: 关键词={keyword}")
+        # 空关键词 = browse 热门课全量（08-16 用户决策）
+        keywords = self.keywords or [""]
+        for keyword in keywords:
+            url = COURSERA_SEARCH_URL.format(keyword=quote(keyword)) if keyword else "https://www.coursera.org/browse"
+            self.logger.info(f"开始采集 Coursera: 关键词={keyword or '(热门)'}")
             yield self._make_playwright_request(
                 url,
                 meta={"keyword": keyword, "page": 1},
@@ -110,7 +112,8 @@ class CourseraSpider(Spider):
         if current_page < self.max_pages:
             # Coursera 用 &page=N 翻页
             keyword = response.meta["keyword"]
-            next_url = f"{COURSERA_SEARCH_URL.format(keyword=quote(keyword))}&page={current_page + 1}"
+            base = COURSERA_SEARCH_URL.format(keyword=quote(keyword)) if keyword else "https://www.coursera.org/browse"
+            next_url = f"{base}&page={current_page + 1}"
             yield self._make_playwright_request(
                 next_url,
                 meta={"keyword": keyword, "page": current_page + 1},

@@ -30,16 +30,9 @@ from crawlers.settings import RATE_LIMIT
 # arXiv API 端点
 ARXIV_API = "https://export.arxiv.org/api/query"
 
-# 默认拉取的 cs.* 分类（覆盖项目关注的 AI/大数据/全栈方向）
-DEFAULT_CATEGORIES = [
-    "cs.AI",   # 人工智能
-    "cs.LG",   # 机器学习
-    "cs.CL",   # 计算语言学（NLP）
-    "cs.CV",   # 计算机视觉
-    "cs.SE",   # 软件工程
-    "cs.DB",   # 数据库
-    "stat.ML", # 统计机器学习
-]
+# 默认分类：空 = 全局最新（08-16 用户决策，不限定 cs.* 分类）；
+# 传 -a categories=cs.AI,cs.LG 时按分类分别拉取
+DEFAULT_CATEGORIES: list[str] = []
 
 
 class ArxivSpider(Spider):
@@ -77,25 +70,43 @@ class ArxivSpider(Spider):
             yield request
 
     def start_requests(self):
-        for cat in self.categories:
-            params = {
-                "search_query": f"cat:{cat}",
-                "start": 0,
-                "max_results": self.max_results,
-                "sortBy": "submittedDate",
-                "sortOrder": "descending",
-            }
-            url = f"{ARXIV_API}?{urlencode(params)}"
-            self.logger.info(f"开始采集 arXiv 分类 {cat}（max={self.max_results}）")
-            yield Request(
-                url,
-                callback=self.parse,
-                # API 例外（08-14 用户确认 B 方案）：export.arxiv.org 官方 API
-                # 条款明确允许程序化访问，robots.txt 保守 Disallow: /——跳过
-                # robots 检查（合规依据：https://info.arxiv.org/help/api/）
-                meta={"category": cat, "dont_obey_robotstxt": True},
-                headers={"User-Agent": "zhigang-compass/1.0 (academic-research)"},
-            )
+        # API 例外（08-14 用户确认 B 方案）：export.arxiv.org 官方 API 条款明确
+        # 允许程序化访问，robots.txt 保守 Disallow: /——跳过 robots 检查
+        # （合规依据：https://info.arxiv.org/help/api/）
+        if self.categories:
+            for cat in self.categories:
+                params = {
+                    "search_query": f"cat:{cat}",
+                    "start": 0,
+                    "max_results": self.max_results,
+                    "sortBy": "submittedDate",
+                    "sortOrder": "descending",
+                }
+                url = f"{ARXIV_API}?{urlencode(params)}"
+                self.logger.info(f"开始采集 arXiv 分类 {cat}（max={self.max_results}）")
+                yield Request(
+                    url,
+                    callback=self.parse,
+                    meta={"category": cat, "dont_obey_robotstxt": True},
+                    headers={"User-Agent": "zhigang-compass/1.0 (academic-research)"},
+                )
+            return
+
+        # 全局最新（08-16 用户决策）：不带 search_query，API 返回全站最新投稿
+        params = {
+            "start": 0,
+            "max_results": self.max_results,
+            "sortBy": "submittedDate",
+            "sortOrder": "descending",
+        }
+        url = f"{ARXIV_API}?{urlencode(params)}"
+        self.logger.info(f"开始采集 arXiv 全局最新（max={self.max_results}）")
+        yield Request(
+            url,
+            callback=self.parse,
+            meta={"category": "global", "dont_obey_robotstxt": True},
+            headers={"User-Agent": "zhigang-compass/1.0 (academic-research)"},
+        )
 
     def parse(self, response: Response):
         """解析 Atom XML，产出 PaperItem。"""
