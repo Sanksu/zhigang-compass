@@ -313,6 +313,7 @@ async def position_evolution(
 async def position_evolution_list(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=10, ge=1, le=50),
+    q: str | None = Query(default=None, description="按岗位名称模糊过滤（08-16：下拉全量可搜索）"),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("guest")),
 ):
@@ -320,9 +321,10 @@ async def position_evolution_list(
 
     供演化看板默认展示——页面加载即有岗位演化轨迹，无需先查节点 ID。
     岗位判定：快照节点 type=position（id 前缀 pos_ 兜底）。
-    08-16：limit 改 page/size 分页（演化看板翻页，10 项一页），响应含 total。
+    08-16：limit 改 page/size 分页（演化看板翻页，10 项一页），响应含 total；
+    q 参数按名称模糊过滤（大小写不敏感），供下拉搜索。
     """
-    cache_key = f"evolution:positions:{page}:{size}"
+    cache_key = f"evolution:positions:{page}:{size}:{q or ''}"
     cached = await _cache_get_json(cache_key)
     if cached is not None:
         return ok(data=cached)
@@ -333,6 +335,10 @@ async def position_evolution_list(
 
     indexes = _build_snapshot_indexes(snapshots)
     ranked = _top_nodes_by_heat(indexes, "position", "pos_", "src")
+    # isinstance 防御：测试直调端点时 q 为 Query 对象（HTTP 下恒为 str）
+    if isinstance(q, str) and q.strip():
+        ql = q.strip().lower()
+        ranked = [(nid, name) for nid, name in ranked if name and ql in name.lower()]
     total = len(ranked)
     top = _slice_page(ranked, page, size)
     data = {
@@ -349,6 +355,7 @@ async def position_evolution_list(
 async def skill_evolution_list(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=10, ge=1, le=50),
+    q: str | None = Query(default=None, description="按技能名称模糊过滤（08-16：下拉全量可搜索）"),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("guest")),
 ):
@@ -357,9 +364,10 @@ async def skill_evolution_list(
     与 /positions 同模式，供演化看板技能频次趋势默认展示。
     技能 freq = 被引用边数（edges.target == skill，与 /trends 口径一致）。
     技能判定：快照节点 type=skill（id 前缀 sk_ 兜底）。
-    08-16：limit 改 page/size 分页（演化看板翻页，10 项一页），响应含 total。
+    08-16：limit 改 page/size 分页（演化看板翻页，10 项一页），响应含 total；
+    q 参数按名称模糊过滤（大小写不敏感），供下拉搜索。
     """
-    cache_key = f"evolution:skills:{page}:{size}"
+    cache_key = f"evolution:skills:{page}:{size}:{q or ''}"
     cached = await _cache_get_json(cache_key)
     if cached is not None:
         return ok(data=cached)
@@ -370,6 +378,10 @@ async def skill_evolution_list(
 
     indexes = _build_snapshot_indexes(snapshots)
     ranked = _top_nodes_by_heat(indexes, "skill", "sk_", "tgt")
+    # isinstance 防御：测试直调端点时 q 为 Query 对象（HTTP 下恒为 str）
+    if isinstance(q, str) and q.strip():
+        ql = q.strip().lower()
+        ranked = [(nid, name) for nid, name in ranked if name and ql in name.lower()]
     total = len(ranked)
     top = _slice_page(ranked, page, size)
     skills = []

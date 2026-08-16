@@ -1076,6 +1076,11 @@ paths:
           required: false
           schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
           description: 每页条数
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+          description: 名称模糊搜索（08-16：下拉全量可搜索）
       responses:
         '200':
           description: 岗位演化列表（data 含 positions/total/page/size）
@@ -1105,6 +1110,11 @@ paths:
           required: false
           schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
           description: 每页条数
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+          description: 名称模糊搜索（08-16：下拉全量可搜索）
       responses:
         '200':
           description: 技能演化列表（data 含 skills/total/page/size）

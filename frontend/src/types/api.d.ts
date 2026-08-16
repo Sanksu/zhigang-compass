@@ -1887,6 +1887,8 @@ export interface paths {
                     page?: number;
                     /** @description 每页条数 */
                     size?: number;
+                    /** @description 名称模糊搜索（08-16：下拉全量可搜索） */
+                    q?: string;
                 };
                 header?: never;
                 path?: never;
@@ -1936,6 +1938,8 @@ export interface paths {
                     page?: number;
                     /** @description 每页条数 */
                     size?: number;
+                    /** @description 名称模糊搜索（08-16：下拉全量可搜索） */
+                    q?: string;
                 };
                 header?: never;
                 path?: never;
