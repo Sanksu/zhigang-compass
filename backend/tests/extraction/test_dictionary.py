@@ -614,3 +614,25 @@ class TestAIGenericRouting:
     def test_ai_generic_spaced_variant_still_routes(self):
         # 带空格变体（"AI 应用"）走算法族关键词 → 路由不回归
         assert normalize_position_name("AI 应用", ["Python", "机器学习"]) == "算法工程师"
+
+
+class TestP10FragmentFallback:
+    """P10 英文裸词/中文碎片兜底（2026-08-16 legacy 决策）。
+
+    LLM 把 "Senior Web Engineer" 压成裸词 "Web"、把 "AI Infra Engineer"
+    翻译成丢后缀的 "AI 基础设施"——兜底映射到规范岗位名。
+    """
+
+    def test_web_bare_word_mapped(self):
+        assert normalize_position_name("Web") == "Web开发工程师"
+
+    def test_ai_fragment_mapped(self):
+        assert normalize_position_name("AI 基础设施") == "AI基础设施工程师"
+        assert normalize_position_name("AI 生产力") == "AI生产力工程师"
+        assert normalize_position_name("AI与数据风险管理") == "AI与数据风险管理经理"
+
+    def test_web_no_false_positive(self):
+        # 词边界保护：不误伤 WebGL/WebSphere/web前端
+        assert normalize_position_name("WebGL开发工程师") == "WebGL开发工程师"
+        assert normalize_position_name("WebSphere管理员") == "WebSphere管理员"
+        assert normalize_position_name("web前端开发工程师") == "前端开发工程师"
