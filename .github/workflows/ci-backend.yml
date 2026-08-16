@@ -1,16 +1,13 @@
 name: CI Backend
 
+# 全量触发（无 paths 过滤）：分支保护将本 workflow 设为 develop 必过 check，
+# 若按 backend/** 过滤，docs-only PR 永不触发本 workflow → 保护死锁无法合并
+# （2026-08-16 与 ci-frontend.yml 同步修复）
 on:
   push:
     branches: [main, develop]
-    paths:
-      - 'backend/**'
-      - '.github/workflows/ci-backend.yml'
   pull_request:
     branches: [main, develop]
-    paths:
-      - 'backend/**'
-      - '.github/workflows/ci-backend.yml'
 
 defaults:
   run:
