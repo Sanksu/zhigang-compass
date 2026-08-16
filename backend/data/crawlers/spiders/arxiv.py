@@ -92,8 +92,10 @@ class ArxivSpider(Spider):
                 )
             return
 
-        # 全局最新（08-16 用户决策）：不带 search_query，API 返回全站最新投稿
+        # 全局最新（08-16 用户决策）：cat:* 匹配全部分类（API 不接受省略
+        # search_query，实测 cat:* 通配返回全站最新投稿）
         params = {
+            "search_query": "cat:*",
             "start": 0,
             "max_results": self.max_results,
             "sortBy": "submittedDate",

@@ -115,7 +115,8 @@ class TestArxivEmptyCategories:
         requests = list(spider.start_requests())
 
         assert len(requests) == 1
-        assert "search_query" not in requests[0].url
+        # cat:* 通配全部分类（API 不接受省略 search_query，实测 400）
+        assert "search_query=cat%3A%2A" in requests[0].url
         assert "sortBy=submittedDate" in requests[0].url
         assert requests[0].meta["category"] == "global"
 
