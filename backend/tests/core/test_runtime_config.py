@@ -81,3 +81,11 @@ class TestSave:
     def test_save_returns_normalized(self, _isolated_config):
         data = rc.save({"rate_limit": {"maimai": {"delay_range": (8, 12)}}})
         assert data["rate_limit"]["maimai"]["delay_range"] == [8, 12]
+
+    def test_partial_save_keeps_existing(self, _isolated_config):
+        """拆页语义：只提交部分键时，未提供的键保留文件现有值。"""
+        rc.save({"arq_concurrency": 15, "crawl_items_cap": 200})
+        data = rc.save({"arq_concurrency": 8})
+        assert data["arq_concurrency"] == 8
+        assert data["crawl_items_cap"] == 200  # 未被覆盖
+        assert data["arq_job_timeout"] == 1800

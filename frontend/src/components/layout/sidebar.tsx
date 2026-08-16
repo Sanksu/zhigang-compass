@@ -1,16 +1,21 @@
+import { useState } from 'react'
 import { NavLink } from 'react-router'
+import { ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
 import { useUIStore } from '@/store/ui'
-import { mainNav, adminNav, type NavItem } from './nav-config'
+import { mainNav, adminNavGroups, type NavItem, type AdminNavGroup } from './nav-config'
 
 /**
  * 侧边栏 — 桌面端 240px 固定，移动端作为抽屉式侧栏由菜单按钮控制展开收起
+ * 08-16：管理后台改层级分组（管理 + 配置中心），组可折叠
  */
 export function Sidebar() {
   const { user } = useAuthStore()
   const { sidebarOpen, closeSidebar } = useUIStore()
   const role = user?.role
+  // 管理组默认展开（本地状态，不持久化）
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
 
   function filterByRole(items: NavItem[]): NavItem[] {
     if (!role) return items.filter((i) => !i.requireRole)
@@ -18,7 +23,16 @@ export function Sidebar() {
   }
 
   const visibleMain = filterByRole(mainNav)
-  const visibleAdmin = role === 'admin' ? adminNav : []
+  const visibleGroups: AdminNavGroup[] = role === 'admin' ? adminNavGroups : []
+
+  function toggleGroup(label: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(label)) next.delete(label)
+      else next.add(label)
+      return next
+    })
+  }
 
   const navContent = (
     <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
@@ -26,18 +40,32 @@ export function Sidebar() {
         <NavItemLink key={item.to} item={item} onClick={closeSidebar} />
       ))}
 
-      {visibleAdmin.length > 0 && (
-        <>
-          <div className="pt-4 pb-2 px-3">
-            <span className="text-xs font-medium text-ink-faint uppercase tracking-wider">
-              管理后台
-            </span>
+      {visibleGroups.map((group) => {
+        const items = filterByRole(group.items)
+        if (items.length === 0) return null
+        const collapsed = collapsedGroups.has(group.label)
+        return (
+          <div key={group.label}>
+            <button
+              type="button"
+              onClick={() => toggleGroup(group.label)}
+              className="flex w-full items-center justify-between rounded-md px-3 py-2 text-xs font-medium text-ink-faint uppercase tracking-wider hover:text-ink"
+            >
+              <span>{group.label}</span>
+              <ChevronDown
+                className={cn('size-3.5 transition-transform', collapsed && '-rotate-90')}
+              />
+            </button>
+            {!collapsed && (
+              <div className="space-y-0.5">
+                {items.map((item) => (
+                  <NavItemLink key={item.to} item={item} onClick={closeSidebar} />
+                ))}
+              </div>
+            )}
           </div>
-          {visibleAdmin.map((item) => (
-            <NavItemLink key={item.to} item={item} onClick={closeSidebar} />
-          ))}
-        </>
-      )}
+        )
+      })}
     </nav>
   )
 

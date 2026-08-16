@@ -96,12 +96,15 @@ def _validate_rate_limit(value) -> dict:
 
 
 def save(values: dict) -> dict:
-    """校验并持久化；返回规范化后的完整配置（校验失败抛 ValueError）。"""
+    """校验并持久化；返回规范化后的完整配置（校验失败抛 ValueError）。
+
+    增量合并语义（08-16 拆页后各页只提交自己的字段）：未提供的键保留
+    文件现有值，不重置为默认——避免任务页保存覆盖采集页配置。
+    """
     with _lock:
-        data = dict(DEFAULTS)
+        data = _read_file()
         for key, default in DEFAULTS.items():
             if key not in values:
-                data[key] = default
                 continue
             v = values[key]
             if key == "rate_limit":

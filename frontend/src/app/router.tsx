@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { createBrowserRouter, RouterProvider } from 'react-router'
+import { Navigate, createBrowserRouter, RouterProvider } from 'react-router'
 import { AppShell } from '@/components/layout/app-shell'
 import { AuthGuard, GuestGuard } from '@/routes/guards'
 import { CompassMark } from '@/components/layout/compass-mark'
@@ -64,7 +64,19 @@ const protectedRoutes = [
       },
       {
         path: 'admin/settings',
-        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage /></Suspense></AuthGuard>,
+        element: <Navigate to="/admin/settings/tasks" replace />,
+      },
+      {
+        path: 'admin/settings/tasks',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="tasks" /></Suspense></AuthGuard>,
+      },
+      {
+        path: 'admin/settings/crawl',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="crawl" /></Suspense></AuthGuard>,
+      },
+      {
+        path: 'admin/settings/evolution',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="evolution" /></Suspense></AuthGuard>,
       },
     ],
   },
