@@ -455,7 +455,7 @@ function SkillTrendView() {
 
   function searchSkills(q: string) {
     setSearchLoading(true)
-    apiGet<SkillEvolutionListData>(`/evolution/skills?page=1&size=10&q=${encodeURIComponent(q)}`)
+    apiGet<SkillEvolutionListData>(`/evolution/skills?page=1&size=50&q=${encodeURIComponent(q)}`)
       .then((r) => setDefaults(r.skills))
       .catch(() => setDefaultError('技能搜索失败'))
       .finally(() => setSearchLoading(false))
@@ -464,7 +464,7 @@ function SkillTrendView() {
   // 页面加载即拉取 Top-10 热度技能（GET /evolution/skills）
   useEffect(() => {
     let cancelled = false
-    apiGet<SkillEvolutionListData>(`/evolution/skills?page=1&size=10`)
+    apiGet<SkillEvolutionListData>(`/evolution/skills?page=1&size=50`)
       .then((r) => {
         if (cancelled) return
         setDefaults(r.skills)
@@ -525,6 +525,7 @@ function SkillTrendView() {
                 placeholder="选择技能"
                 options={(defaults ?? []).map((d) => ({ value: d.skill_id, label: d.skill_name }))}
                 loading={searchLoading}
+                pageSize={10}
                 onSearch={(q) => searchSkills(q)}
                 onSelect={(v) => {
                   const hit = defaults?.find((d) => d.skill_id === v)
@@ -629,7 +630,7 @@ function PositionEvolutionView() {
   function searchPositions(q: string) {
     setSearchLoading(true)
     apiGet<PositionEvolutionListData>(
-      `/evolution/positions?page=1&size=10&q=${encodeURIComponent(q)}`,
+      `/evolution/positions?page=1&size=50&q=${encodeURIComponent(q)}`,
     )
       .then((r) => setDefaults(r.positions))
       .catch(() => setDefaultError('岗位搜索失败'))
@@ -639,7 +640,7 @@ function PositionEvolutionView() {
   // 页面加载即拉取 Top-10 热度岗位（GET /evolution/positions）
   useEffect(() => {
     let cancelled = false
-    apiGet<PositionEvolutionListData>(`/evolution/positions?page=1&size=10`)
+    apiGet<PositionEvolutionListData>(`/evolution/positions?page=1&size=50`)
       .then((r) => {
         if (cancelled) return
         setDefaults(r.positions)
@@ -698,6 +699,7 @@ function PositionEvolutionView() {
                 placeholder="选择岗位"
                 options={(defaults ?? []).map((d) => ({ value: d.position_id, label: d.position_name }))}
                 loading={searchLoading}
+                pageSize={10}
                 onSearch={(q) => searchPositions(q)}
                 onSelect={(v) => {
                   const hit = defaults?.find((d) => d.position_id === v)
@@ -1007,13 +1009,13 @@ function VersionDiffView() {
                 <TabsTrigger value="changed" className="text-xs">共有 ({visibleDiff.changed.length})</TabsTrigger>
               </TabsList>
               <TabsContent value="added">
-                <DiffTable items={visibleDiff.added} />
+                <PaginatedDiffTable key={`${v1}:${v2}`} items={visibleDiff.added} />
               </TabsContent>
               <TabsContent value="removed">
-                <DiffTable items={visibleDiff.removed} />
+                <PaginatedDiffTable key={`${v1}:${v2}`} items={visibleDiff.removed} />
               </TabsContent>
               <TabsContent value="changed">
-                <DiffTable items={visibleDiff.changed} />
+                <PaginatedDiffTable key={`${v1}:${v2}`} items={visibleDiff.changed} />
               </TabsContent>
             </Tabs>
           </>
@@ -1141,6 +1143,31 @@ function DiffTable({ items }: { items: VersionDiffItem[] }) {
         ))}
       </TableBody>
     </Table>
+  )
+}
+
+/** 版本 diff 表格分页（10 项一页，08-16 用户决策：新增/删除/共有三标签翻页）。
+ *
+ * 切换版本对时通过 key 重挂载重置页码；切换标签页时 Radix Tabs 卸载
+ * 非激活内容，页码同样归位。
+ */
+const DIFF_PAGE_SIZE = 10
+
+function PaginatedDiffTable({ items }: { items: VersionDiffItem[] }) {
+  const [page, setPage] = useState(1)
+  const slice = items.slice((page - 1) * DIFF_PAGE_SIZE, page * DIFF_PAGE_SIZE)
+  return (
+    <>
+      <DiffTable items={slice} />
+      {items.length > DIFF_PAGE_SIZE && (
+        <PaginationBar
+          page={page}
+          total={items.length}
+          pageSize={DIFF_PAGE_SIZE}
+          onPageChange={setPage}
+        />
+      )}
+    </>
   )
 }
 
