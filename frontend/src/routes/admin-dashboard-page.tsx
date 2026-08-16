@@ -180,7 +180,7 @@ export function AdminDashboardPage() {
           id: l.id,
           time: formatDateTime(l.created_at),
           type: actionType(l.action),
-          operator: l.detail?.username ?? l.user_id,
+          operator: (l.detail?.username as string | undefined) ?? l.user_id,
           detail: `${l.action} · ${l.resource}`,
           ip: l.ip_address || '—',
         })),
@@ -202,9 +202,10 @@ export function AdminDashboardPage() {
     })
     try {
       // 真实触发：对每个平台入队 crawl_platform 任务（POST /admin/crawl/trigger）
+      // 不传 keyword：留空走平台热度/最新采集（08-16 起爬虫无默认关键词，契约 keyword 可选）
       const res = await apiGet<CrawlStatusData>('/admin/crawl/status')
       for (const p of res.platforms) {
-        await apiPost('/admin/crawl/trigger', { platform: p.id, keyword: '高级前端' })
+        await apiPost('/admin/crawl/trigger', { platform: p.id })
       }
       setActionMessages((prev) => new Map(prev).set(id, `已入队 ${res.platforms.length} 个平台`))
     } catch (e) {
