@@ -129,6 +129,13 @@ _CRAWL_TIMEOUT_SEC = 900
 # 正常耗时约 1.6h（5760s）——超时须 > 正常耗时（防误杀），仍兜底挂死。
 _CRAWL_TIMEOUT_BY_SPIDER = {"zhilian": 7200}
 
+# 课程技能抽取（enrich_course_skills）失败重试配置（08-16 用户要求）：
+# 单课程 LLM 抽取失败后延迟 _ENRICH_RETRY_DELAY_SECONDS 秒再次进入队列
+# （下次 ETL 阶段 5.5 到期才重试，避免瞬时故障风暴下每次 ETL 全量重试）；
+# 累计失败达 _ENRICH_MAX_FAILS 次后放弃（写 skills_enriched，防无限重试）。
+_ENRICH_RETRY_DELAY_SECONDS = 3600   # 失败后延迟 1 小时重试
+_ENRICH_MAX_FAILS = 3                # 累计失败 3 次放弃
+
 
 def _crawl_timeout(spider_name: str) -> int:
     """按源取超时上限（zhilian 40min，其余 15min）。"""
@@ -984,6 +991,11 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
 
     # 新采集窗口：最近 7 天（含 ETL 失败重跑容错；更早课程即存量孤立课程不处理）
     since = (date.today() - timedelta(days=7)).isoformat()
+    # 延迟重试（08-16 用户要求）：LLM 抽取失败的课程延迟配置时间后再次入队，
+    # 避免每次 ETL 都立即重试全部失败课程（LLM 瞬时故障风暴）；累计失败
+    # 达上限后放弃（写 skills_enriched，防无限重试）
+    retry_delay = timedelta(seconds=_ENRICH_RETRY_DELAY_SECONDS)
+    retry_cutoff = datetime.now(timezone(timedelta(hours=8))) - retry_delay
 
     async with async_session_factory() as session:
         stmt = (
@@ -996,6 +1008,11 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
                 ),
                 CourseRaw.snapshot["skills_enriched"].astext.is_(None),
                 CourseRaw.crawled_at >= since,
+                # 延迟中跳过：skills_retry_at 未到（或缺失）才入选
+                or_(
+                    CourseRaw.snapshot["skills_retry_at"].astext.is_(None),
+                    CourseRaw.snapshot["skills_retry_at"].astext <= retry_cutoff.isoformat(),
+                ),
             )
             .order_by(CourseRaw.id.asc())
         )
@@ -1017,6 +1034,7 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
         snap = dict(row.snapshot or {})
         # 爬虫原始标签（如 coursera 段落解析）先过门控；仍有缺失才走 LLM
         skills = filter_skill_tags(snap.get("skills") or [])
+        llm_errored = False
         if not skills:
             if llm is None:
                 skipped_no_llm += 1
@@ -1027,6 +1045,17 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
                     )
                 except Exception:
                     failed += 1
+                    llm_errored = True
+                    # 失败计数 + 延迟重试时间戳（下次 ETL 到期才重入队）
+                    fails = int(snap.get("skills_enrich_fails") or 0) + 1
+                    snap["skills_enrich_fails"] = fails
+                    if fails >= _ENRICH_MAX_FAILS:
+                        # 累计失败达上限：放弃（防无限重试），保留失败计数供排查
+                        snap["skills_enriched"] = True
+                    else:
+                        snap["skills_retry_at"] = (
+                            datetime.now(timezone(timedelta(hours=8))) + retry_delay
+                        ).isoformat()
         if skills:
             snap["skills"] = skills
             enriched += 1
@@ -1036,8 +1065,11 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
             # LLM 不可用（skipped_no_llm）：不写标记——配置恢复后自动重试，
             # 避免"LLM 缺失期间误标已处理"导致课程永久无标签
             continue
+        elif llm_errored:
+            # 异常失败（未达放弃上限）：不写标记——retry_at 到期后重入队
+            pass
         else:
-            # LLM 已跑但抽取为空（failed 或门控全滤）：标记防重复调用
+            # LLM 正常判定无技能（宁少勿滥空数组）：标记防重复调用
             snap["skills_enriched"] = True
         updates[row.id] = snap
     if updates:
