@@ -486,7 +486,8 @@ class TestNormalizePositionName:
         assert normalize_position_name("策略分析师") == "策略分析师"
         assert normalize_position_name("可持续发展分析师") == "可持续发展分析师"
         # 英文未翻译岗 P2 一并停用（低频脏边，见清理决策）
-        assert normalize_position_name("AI Infra Engineer") == ""
+        # P10（08-16）例外：AI Infra Engineer 翻译丢后缀碎片 → AI基础设施工程师族
+        assert normalize_position_name("AI Infra Engineer") == "AI基础设施工程师"
         assert normalize_position_name("Manager, Logistics") == ""
         assert normalize_position_name("量化分析师") == "量化分析师"  # 细分族优先，不因"量化"停用词被拦
         # 2026-08-08 P0 停用词扩充后，细分分析师岗不受"分析师"兜底拦截影响
@@ -604,7 +605,9 @@ class TestAIGenericRouting:
         assert normalize_position_name("AI产品", ["大模型", "RAG"]) == "大模型算法工程师"
         assert normalize_position_name("AI智能体", ["大模型", "Agent"]) == "大模型算法工程师"
         assert normalize_position_name("AIoT", ["嵌入式", "C++"]) == "嵌入式开发工程师"
-        assert normalize_position_name("AI基础设施", ["Kubernetes", "Docker"]) == "DevOps工程师"
+        # P10（08-16）AI基础设施 已建独立族（AI Infra Engineer 翻译丢后缀），
+        # 无空格变体同族——不再走泛词路由（T-04 泛词条目已随 P10 清理）
+        assert normalize_position_name("AI基础设施", ["Kubernetes", "Docker"]) == "AI基础设施工程师"
 
     def test_ai_generic_no_skills_returns_empty(self):
         # 无技能/未命中路由 → 不入图（宁缺毋滥）
@@ -726,3 +729,23 @@ class TestP11FragmentRedirect:
         assert normalize_position_name("stack") == "stack"
         assert normalize_position_name("IT系统管理员") == "IT系统管理员"
         assert normalize_position_name("web前端开发工程师") == "前端开发工程师"
+
+
+class TestP11LateReview:
+    """Stage B 晚复核新对（2026-08-16）：AI基础设施支持归位 + AI客户类拦截。"""
+
+    def test_ai_infra_support_aliased(self):
+        assert normalize_position_name("AI基础设施支持") == "AI基础设施工程师"
+        assert normalize_position_name("AI 基础设施支持") == "AI基础设施工程师"
+
+    def test_ai_infra_no_space_keyword(self):
+        # 清洗后无空格输入命中 P10 无空格变体（#260 清洗暴露的兼容缺陷：
+        # 原关键词带空格，无空格输入剥壳后落入 AI 泛词族被路由为空）
+        assert normalize_position_name("AI基础设施") == "AI基础设施工程师"
+        assert normalize_position_name("AI 基础设施") == "AI基础设施工程师"
+        assert normalize_position_name("AI生产力") == "AI生产力工程师"
+        assert normalize_position_name("AI基础设施工程师") == "AI基础设施工程师"
+
+    def test_ai_customer_blocked(self):
+        assert normalize_position_name("AI客户") == ""
+        assert normalize_position_name("应用AI客户") == ""
