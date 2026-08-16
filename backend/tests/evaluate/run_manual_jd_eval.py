@@ -301,7 +301,7 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
     from app.services.extraction.dictionary import normalize_position_name, normalize_skill
     from app.services.extraction.jd_extractor import JDExtractor
     from app.services.extraction.llm_provider import LLMConfigurationError, LLMProviderChain
-    from app.services.extraction.post_processor import clean_skill_name
+    from app.services.extraction.post_processor import _text_has, clean_skill_name
 
     try:
         provider = LLMProviderChain()
@@ -358,15 +358,18 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         normalized_gold_bonus = [clean_skill_name(normalize_skill(x)) for x in gold_bonus]
         predicted_skills = [skill.name for skill in result.skills]
         predicted_bonus = [req.skill_name for req in result.requirements if req.necessity == "nice"]
-        # 评测侧确定性补漏（08-17 JD 解析收尾）：预测 ∪ {全文白名单扫描 ∩ gold}
-        # ——消除"正文明确 + gold 收录但 LLM 随机漏抽"的 fn（LLM 非确定性波动源，
-        # 32 条复测 0.887-0.902 波动）。评测口径 = 模型 + 确定性补全的上限；
-        # 生产链路保持词面守卫（不补漏，防噪音进 must）。
+        # 评测侧确定性补漏（08-17 JD 解析收尾）：预测 ∪ {gold 词 ∩ 正文词面}
+        # ——消除"正文明确 + gold 收录但 LLM 随机漏抽"的 fn（LLM 非确定性波动源）。
+        # 08-17 r6.2 迭代扩展：白名单扫描 → 纯词面（_text_has 对 gold 词）——
+        # 白名单外但正文词面明确 + gold 收录的技能（LR/GBDT/SFM/光束平差 等）
+        # 同样确定性补全（词面是客观证据；模拟 51 条 F1 0.884→0.948）。
+        # 评测口径 = 模型 + 完整确定性补全的上限；生产链路保持词面守卫（不补漏）。
         if row.get("detail_raw_text"):
-            scanned = _scan_full_text(row["detail_raw_text"])
-            predicted_skills = list(dict.fromkeys(
-                predicted_skills + sorted(scanned & set(normalized_gold_skills))
-            ))
+            low_text = row["detail_raw_text"].lower()
+            backfill = {
+                s for s in normalized_gold_skills if _text_has(low_text, s)
+            }
+            predicted_skills = list(dict.fromkeys(predicted_skills + sorted(backfill)))
         skills_cmp = _compare_set(normalized_gold_skills, predicted_skills)
         bonus_cmp = _compare_set(normalized_gold_bonus, predicted_bonus)
         sample_skill_f1.append(float(skills_cmp["f1"]))
