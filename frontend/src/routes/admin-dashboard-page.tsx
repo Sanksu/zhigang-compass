@@ -178,7 +178,7 @@ export function AdminDashboardPage() {
           id: l.id,
           time: formatDateTime(l.created_at),
           type: actionType(l.action),
-          operator: l.detail?.username ?? l.user_id,
+          operator: (l.detail?.username as string | undefined) ?? l.user_id,
           detail: `${l.action} · ${l.resource}`,
           ip: l.ip_address || '—',
         })),
