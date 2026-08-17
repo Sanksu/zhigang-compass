@@ -5,7 +5,6 @@
 import json
 import re
 import hashlib
-import time
 import asyncio
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -559,7 +558,7 @@ async def main():
 
         for i, sid in enumerate(source_ids_list):
             if len(records) >= 30:
-                print(f"\n已达到目标 30 条，停止采集")
+                print("\n已达到目标 30 条，停止采集")
                 break
 
             print(f"\n[{i+1}/{len(source_ids_list)}] {sid}")
@@ -573,7 +572,7 @@ async def main():
                 records.append(record)
                 print(f"  ✓ 成功: {record['job_title_raw'][:40]} | {record['location']} | {record['salary']}")
             else:
-                print(f"  ✗ 跳过: 正文为空")
+                print("  ✗ 跳过: 正文为空")
 
             await asyncio.sleep(0.3)
 
@@ -602,7 +601,7 @@ async def main():
 
         print(f"\n保存到: {output_file}")
         print(f"成功采集: {len(records)} 条")
-        print(f"各类别数量:")
+        print("各类别数量:")
         for cat, count in sorted(category_counts.items()):
             print(f"  {cat}: {count} 条")
 
