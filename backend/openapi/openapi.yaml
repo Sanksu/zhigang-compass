@@ -891,9 +891,31 @@ paths:
                     $ref: '#/components/schemas/MatchPathData'
                   trace_id: { type: string }
   /api/v1/match/result/{match_id}/diagnosis:
+    post:
+      tags: [match]
+      summary: 异步生成或复用人岗比对诊断报告
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '202':
+          description: 诊断任务已创建或复用
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/DiagnosisTaskResponse'
+                  trace_id: { type: string }
+        '400':
+          description: 该匹配结果无差距数据
+        '404':
+          description: 匹配结果不存在或无权访问
     get:
       tags: [match]
-      summary: 获取人岗比对诊断报告
+      summary: 获取人岗比对诊断报告（兼容同步生成）
       description: LLM 基于结果快照（分数/差距/学习路径/证据）生成结构化诊断报告，结果缓存 24h
       parameters:
         - $ref: '#/components/parameters/Id'
@@ -2766,6 +2788,17 @@ components:
         progress: { type: integer, description: "进度 [0,100]" }
         error: { type: string }
         match_id: { type: string, description: 成功后附，供拉取结果 }
+
+    DiagnosisTaskResponse:
+      type: object
+      description: POST /match/result/{match_id}/diagnosis 响应 data
+      required: [task_id, status]
+      properties:
+        task_id: { type: string }
+        status: { type: string, enum: [pending, running, success, failed] }
+        match_id: { type: string }
+        report: { $ref: '#/components/schemas/DiagnosisReport', nullable: true }
+        error: { type: string }
 
     RecommendTaskResult:
       type: object
