@@ -4,9 +4,13 @@
 graph.neo4j_driver 经测试 patch 后直达本层，见 tests/graph/test_graph_query_text.py
 等对 _query_* 包装的调用路径）。每个函数只做「开 session + 转调」，Cypher
 与结果处理全部收敛在 queries.py。
+
+sync 函数供 workers/脚本/非热路径端点使用；async 变体（*_async）供 graph
+API 热路径（panorama/search/view 等）使用——接收 async 驱动 → async with
+开 session → 委托 queries_async.py（见 P2 迁移说明）。
 """
 
-from app.services.graph import queries
+from app.services.graph import queries, queries_async
 
 
 def query_panorama(driver, scope, focus, min_weight, limit) -> tuple[dict, list]:
@@ -87,3 +91,36 @@ def load_skill(driver, skill_id) -> dict | None:
 def load_position(driver, id, user=None) -> dict | None:
     with driver.session() as session:
         return queries.load_position(session, id, user)
+
+
+# ---------- async 变体（graph API 热路径，P2 迁移） ----------
+
+
+async def query_panorama_async(driver, scope, focus, min_weight, limit) -> tuple[dict, list]:
+    async with driver.session() as session:
+        return await queries_async.query_panorama(session, scope, focus, min_weight, limit)
+
+
+async def query_skill_positions_async(driver, skill_id, status_filter) -> list[dict]:
+    async with driver.session() as session:
+        return await queries_async.query_skill_positions(session, skill_id, status_filter)
+
+
+async def query_fulltext_search_async(driver, q, type_, status_clause, offset, size) -> tuple[list[dict], int]:
+    async with driver.session() as session:
+        return await queries_async.query_fulltext_search(session, q, type_, status_clause, offset, size)
+
+
+async def query_graph_counts_async(driver) -> dict:
+    async with driver.session() as session:
+        return await queries_async.query_graph_counts(session)
+
+
+async def query_view_techstack_async(driver, limit, status_filter) -> list:
+    async with driver.session() as session:
+        return await queries_async.query_view_techstack(session, limit, status_filter)
+
+
+async def query_view_main_async(driver, limit, status_filter) -> list:
+    async with driver.session() as session:
+        return await queries_async.query_view_main(session, limit, status_filter)
