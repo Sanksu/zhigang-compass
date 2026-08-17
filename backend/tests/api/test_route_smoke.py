@@ -103,15 +103,18 @@ async def test_panorama_smoke_mocked(monkeypatch):
     """panorama 端点冒烟：全 mock 下 200 + {nodes, edges, stats} 契约结构。"""
     from app.api.v1 import graph as graph_mod
 
-    monkeypatch.setattr(graph_mod, "redis_client", _FakeRedis())
-    monkeypatch.setattr(
-        graph_mod, "_query_panorama",
-        lambda scope, focus, min_weight, limit: (
+    async def _mock_panorama(scope, focus, min_weight, limit):
+        return (
             {"pos_1": {"id": "pos_1", "name": "测试岗位", "type": "position", "status": "stable"}},
             [{"source": "pos_1", "target": "sk_1", "weight": 0.9, "necessity": "must", "level": "中级"}],
-        ),
-    )
-    monkeypatch.setattr(graph_mod, "_query_graph_counts", lambda: {"total_nodes": 2, "total_edges": 1})
+        )
+
+    async def _mock_graph_counts():
+        return {"total_nodes": 2, "total_edges": 1}
+
+    monkeypatch.setattr(graph_mod, "redis_client", _FakeRedis())
+    monkeypatch.setattr(graph_mod, "_query_panorama", _mock_panorama)
+    monkeypatch.setattr(graph_mod, "_query_graph_counts", _mock_graph_counts)
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -129,14 +132,14 @@ async def test_skill_positions_smoke_mocked(monkeypatch):
     """skill/{id}/positions 冒烟：匿名可见性过滤不破坏响应结构。"""
     from app.api.v1 import graph as graph_mod
 
-    monkeypatch.setattr(graph_mod, "redis_client", _FakeRedis())
-    monkeypatch.setattr(
-        graph_mod, "_query_skill_positions",
-        lambda skill_id, status_filter: [
+    async def _mock_skill_positions(skill_id, status_filter):
+        return [
             {"position_id": "pos_1", "position_name": "测试岗位",
              "necessity": "must", "weight": 0.8, "level": "中级"},
-        ],
-    )
+        ]
+
+    monkeypatch.setattr(graph_mod, "redis_client", _FakeRedis())
+    monkeypatch.setattr(graph_mod, "_query_skill_positions", _mock_skill_positions)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/v1/graph/skill/sk_1/positions")
@@ -151,16 +154,19 @@ async def test_graph_view_smoke_mocked(monkeypatch):
     """view/{view_type} 冒烟：视图端点挂载 + 契约结构。"""
     from app.api.v1 import graph as graph_mod
 
-    monkeypatch.setattr(graph_mod, "redis_client", _FakeRedis())
-    monkeypatch.setattr(
-        graph_mod, "_query_view_main",
-        lambda limit, status_filter: [
+    async def _mock_view_main(limit, status_filter):
+        return [
             {"p": {"id": "pos_1", "name": "测试岗位", "status": "stable"},
              "s": {"id": "sk_1", "name": "测试技能"},
              "r": {"weight": 0.8, "necessity": "must", "level": "中级"}},
-        ],
-    )
-    monkeypatch.setattr(graph_mod, "_query_graph_counts", lambda: {"total_nodes": 2, "total_edges": 1})
+        ]
+
+    async def _mock_graph_counts():
+        return {"total_nodes": 2, "total_edges": 1}
+
+    monkeypatch.setattr(graph_mod, "redis_client", _FakeRedis())
+    monkeypatch.setattr(graph_mod, "_query_view_main", _mock_view_main)
+    monkeypatch.setattr(graph_mod, "_query_graph_counts", _mock_graph_counts)
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -169,6 +175,46 @@ async def test_graph_view_smoke_mocked(monkeypatch):
     body = resp.json()
     assert body["data"]["view_type"] == "level"
     assert body["data"]["nodes"][0]["id"] == "pos_1"
+
+
+def test_panorama_hotpath_no_to_thread_for_neo4j():
+    """P2 回归：panorama 热路径不再以 asyncio.to_thread 包 Neo4j 查询。
+
+    源码级断言（路由表探测不到的形态）：handler 体内 await _query_panorama /
+    _query_graph_counts，且不再出现 to_thread(_query_panorama /
+    to_thread(_query_graph_counts)。包装层应为 async 且经由 async_neo4j_driver
+    （database.py 新驱动）直查。
+    """
+    import inspect
+
+    from app.api.v1 import graph as graph_mod
+
+    src = inspect.getsource(graph_mod.panorama)
+    assert "await _query_panorama(" in src, "panorama handler 应 await _query_panorama"
+    assert "await _query_graph_counts()" in src, "panorama handler 应 await _query_graph_counts"
+    assert "to_thread(_query_panorama" not in src, "panorama 不再 to_thread 包 panorama 查询"
+    assert "to_thread(_query_graph_counts" not in src, "panorama 不再 to_thread 包 graph_counts"
+
+    wrapper_src = inspect.getsource(graph_mod._query_panorama)
+    assert wrapper_src.lstrip().startswith("async def"), "_query_panorama 应为 async 包装"
+    assert "async_neo4j_driver" in wrapper_src, "_query_panorama 应使用 async_neo4j_driver"
+    assert "asyncio.to_thread" not in wrapper_src, "_query_panorama 内不应再 to_thread"
+
+
+def test_hotspot_wrappers_use_async_driver():
+    """P2 回归：其余热路径包装（skill_positions/fulltext/view/graph_counts）
+    也未回退 to_thread——从数据库模块取 async 驱动直查。"""
+    import inspect
+
+    from app.api.v1 import graph as graph_mod
+
+    for name in ("_query_skill_positions", "_query_fulltext_search", "_query_graph_counts",
+                 "_query_view_techstack", "_query_view_main"):
+        src = inspect.getsource(getattr(graph_mod, name))
+        assert src.lstrip().startswith("async def"), f"{name} 应为 async 包装"
+        assert "async_neo4j_driver" in src, f"{name} 应使用 async_neo4j_driver"
+        assert "asyncio.to_thread" not in src, f"{name} 内不应再 to_thread"
+
 
 @pytest.mark.asyncio
 async def test_spa_fallback_serves_index_for_frontend_routes(tmp_path):
