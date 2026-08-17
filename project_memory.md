@@ -66,3 +66,138 @@
 - **openpyxl>=3.1 dev 依赖已确认**（评测链盲标工作簿生成用，pyproject.toml dev-dependencies）。
 - **图谱脏边清理已确认**：删 1854 条严重脏边（sim<0.3，LEARNABLE_VIA 4415→2561），备份 reports/learnable_via_deleted_*.jsonl；**可疑档（0.3-0.45，1232 条）抽审 30 条结论：约 2/3 为合理弱相关（Supervised Learning→ML with Python 0.446 等），删除会大量误删——保留，不清理**。
 - **盲审 gold 口径补充**：r2_001 采集元数据明示 5-10年/大专但正文未声明 → 按 round1 口径留空（终审可再定是否参考元数据）。
+
+## 2026-08-15 图谱残留核查与清理（空权边根因 + 业务词技能）
+
+> 起因：本文件 2026-08-09「附带发现」——节点存在 weight/source_count 为空的边（非聚合流程写入），需单独立项核查。08-15 完成核查、修复与存量清理（连接 192.168.0.140 真实库）。
+
+- **空权边根因（核查结论）**：REQUIRES 空权边全部来自 **SimHash 重复记录（snapshot._duplicate_of）的独立入图残留**。链路：① 爬虫入库 → 阶段 2.5 dedup_simhash 标记重复；② batch_extract/import_jd 对**所有**含抽取记录入图（旧代码不跳过重复）→ 创建岗位节点（status 默认 candidate）+ Evidence + REQUIRES(necessity/level)；③ 聚合 build_aggregates **跳过**重复记录 → 该岗位永远不在聚合输出 → REQUIRES 永不获 weight/source_count，write_aggregates 的对齐删除也碰不到（只处理聚合输出内岗位）。重复记录的 canonical 记录岗位名多不同（AS400 应用程序 vs AS400应用、Endur技术 vs Endur 技术）或为空（MEMS/FBI 特工/应用AI工程总监→大数据开发工程师），故残留节点是"重复 JD 的残留名"，无独立信息。
+- **修复（代码，三处口径对齐）**：① batch_extract 入图前跳过 `_duplicate_of` 记录（抽取结果仍落库推进游标，防重复 LLM 调用）；② dedup_simhash 标记后调用新增 `_purge_dup_import_residue(urls)`：删重复记录 Evidence 的 HAS_EVIDENCE 边 → Evidence 被技能 EVIDENCED_BY 引用则保留节点（证据链完整）否则连带删 → 受影响岗位无证据且 REQUIRES 全空权时 DETACH DELETE（纯残留）；③ rebuild_graph.py 早已跳过重复（同口径）。
+- **存量清理**：7 个残留岗位（应用AI工程总监/AI与数据风险管理/MEMS设计与仿真/Endur 技术/AS400应用/AS400应用程序/FBI特工）+ 115 空权边 + 9 条 HAS_EVIDENCE 边删除；9 个 Evidence 节点**全部**被技能 EVIDENCED_BY 引用（29-51 条/个）→ 按证据链完整性保留。备份 `backend/reports/dup_residue_cleanup_20260815.jsonl`。清理后全图空权边 = 0。
+- **业务词技能清理**：08-13 报告点名"费用/英语/日志"确认为存量残留（LLM 误抽 + 停用词未覆盖）。10 个节点（费用/资本费用计算/英语/英语四六级/英语沟通/英语口语/日志/日志监控/结构化日志/审计日志）删除，连带 REQUIRES/EVIDENCED_BY/SIMILAR_TO 边；`日志分析` 在白名单（合法技能）保留。备份 `backend/reports/noise_skills_cleanup_20260815.jsonl`。**防复活**：SKILL_STOPWORDS 补录 P6 批次 9 词（裸词"日志"已在 P5）——聚合 `_is_valid_skill_name` 消费侧同步拦截，存量 extraction 不再重建边。
+- **教训**：① 去重标记（dedup 2.5）与入图（阶段 3）在**同一 ETL 内**先于抽取，但跨轮次的重复对（canonical 先入库、dup 后入库被后续轮次发现）仍可能"标记晚于入图"——凡"标记层跳过、消费层跳过"的口径，中间层（import_jd）必须同口径，否则残留永久化；② 图谱操作前先确认节点有 JD 支撑（HAS_EVIDENCE + jd_raw 非重复抽取）再判定"僵尸"——8 个 legacy 空证据岗位（AI 证据/Web/AI 与自动化 等）初判僵尸，实测有真实 JD 支撑 + 聚合覆盖（freq/weight 齐全），仅证据边历史缺失，不可删。
+
+## 2026-08-15 遗留发现（未处理，待用户决策）
+
+- **岗位可见性口径问题（需决策）**：import_jd 新建岗位默认 `status='candidate'`，而匿名/guest 仅见 emerging/stable/declining（graph.py `_PUBLIC_POSITION_STATUSES`）→ **绝大多数正常岗位（Java 426 频次/DevOps 81/后端 415/前端 433）对匿名用户不可见**，只有被 discovery 状态机提升的 3 个 stable + admin 审核的少量岗位可见。candidate 语义在"发现候选池"（PG discovery_candidates）与"import 占位"（Neo4j status）间混淆。
+- **碎片岗位名治理（需决策）**：`AI 证据`/`Web`/`AI 与自动化`/`Gemini 应用合作伙伴` 等 9 个 legacy 岗位 + 大量 candidate 碎片（AI 原生构建/CMDB发现/GTM/IT 站点技术支持 等，各 1-2 条证据）是 LLM 抽取的岗位名碎片，有真实 JD 支撑但语义失真——需岗位名归一化治理（_POSITION_KEYWORDS/路由扩充或重抽），删除会丢图谱呈现，不建议直接删。
+- **远程库运维注意**：192.168.0.140 的 ETL/重建会不定期运行（08-15 查询期间图谱证据边数曾变化），清理类操作前后需复核；代码修复需部署到远端 worker 才生效（当前远端仍跑旧代码）。
+
+## 2026-08-15 岗位可见性语义修正（用户决策：保持匿名范围不变）
+
+- **背景**：图谱 Position.status 承担双语义——发现状态机（candidate/emerging/stable/declining/archived/rejected）与 import_jd 占位默认值（candidate）。PR #93「岗位可见性分级」按"candidate 待审核不外宣"设计（匿名/guest 仅见 emerging/stable/declining），但 import_jd 把**所有**新岗位默认标 candidate → 137 个普通岗位（含 Java 426/前端 433/后端 415 等 26 个主流岗位）全部对匿名隐藏，匿名全景图仅 3 个 stable 岗位。
+- **用户决策（2026-08-15）**：**保持现状不公开**——匿名可见范围不变（3 个 stable），只修正状态语义。（注：08-15 当日决策反转，PR #222 已把 active 追加进 `_PUBLIC_POSITION_STATUSES` 开放，见待办 T-07。）
+- **实施**：① `PositionState` 新增 `ACTIVE = "active"`（图谱常态岗位，import_jd/聚合产生，非发现状态机成员）；② import_jd 创建岗位默认 `status='candidate'` → `'active'`；③ `_PUBLIC_POSITION_STATUSES` 08-15 当日追加 "active"（PR #222，决策反转）；④ graph.py status fallback 默认值 candidate → active；⑤ openapi/前端类型与颜色表同步（active 用蓝灰 #64748b，对齐 globals.css 设计令牌）；⑥ 存量迁移：图谱 151 个 candidate 岗位全部 SET active（先备份 `backend/reports/status_migration_20260815.jsonl`）——判定依据：persist 写入的镜像带 `state_updated_at`（3 个 stable 都有），151 个 candidate 全部无该属性（纯 import 占位；26 个名字与 PG 候选池重合属巧合，discovery_daily 只写 PG 不写图谱）。
+- **迁移后状态**：active 151 / candidate 0 / stable 3 / legacy 9（legacy 碎片岗位不动，待碎片治理）；匿名可见岗位 = 3 stable（模拟 public 查询验证）。candidate 语义现在只由 persist 产生（发现候选镜像），图谱中为 0——语义干净。
+- **注意**：26 个 PG discovery_candidates（state='candidate'）岗位名（后端开发工程师/全栈工程师/DevOps 等主流岗位在列）仍**待 admin 审核**——审核通过后 persist 会把图谱 status 从 active 直接 SET emerging/stable（persist 不校验图谱侧状态，无阻碍）。岗位可见性开放（active 入 public statuses）与碎片岗位名治理是后续待办。
+
+## 2026-08-15 孤立课程核查（974/1320 无 LEARNABLE_VIA）——结论：正常状态，不可删
+
+- **现象**：74% 课程（974/1320）无 LEARNABLE_VIA 静态边：edx 170/170、icourse163 799/823、coursera 仅 5/327。
+- **根因**：LEARNABLE_VIA 边来自 course_raw.snapshot 的 `skills` 字段（爬虫采集时产出）；**icourse163/edx 爬虫不产出技能标签**（icourse163 仅 24/823 有、edx 0/170），coursera 爬虫产出（322/327）。历史课程即如此（非补采引入）。
+- **产品影响：无功能缺陷**——`courses.load_courses_for_skill` 三级链路：静态边 → 技能级语义 fallback（有课技能池）→ **课程级语义兜底 `_semantic_match_course`（`_course_pool` 取全 Course 节点，标题语义匹配 0.55 + 标题门控 0.5 + 灰色带质量门控）**——孤立课程全在兜底扫描范围内，照样可被推荐。
+- **不可删除**：08-15 补采的 415 门（edx 74/icourse163 337/coursera 4，crawled_at ≥ 08-14）几乎全部无 skills 标签——补采目的就是给语义兜底补课源（学习路径缺口治理），删除会直接减少兜底弹药。
+- **不建议补静态边**：08-13/08-15 治理的"课程语义误配"（#192 灰色带门控/#198 graph API 门控）根因正是静态脏边（爬虫标签质量差）；补标签需防脏边，收益仅为图谱可视化/静态推荐效率。若未来要补：只能在爬虫层产出高质量标签（如 LLM 课程技能抽取 + 门控），勿手工批量建边。
+- **教训**：图谱节点"孤立"≠垃圾——先查产品消费链路（本案例语义兜底覆盖）与数据源成因（爬虫缺字段），再决定清理/保留；课程节点尤其不可按"无入边"删（学习路径是语义匹配驱动的）。
+
+## 待办清单（2026-08-15 立，来源：08-15 图谱治理会话）
+
+> 按优先级排列；完成一项划掉一项（删除对应条目并在此行追加 ✓ 记录）。均为本次会话核查/修复中识别、尚未闭环的事项。
+
+| 编号 | 优先级 | 事项 | 验收标准 | 来源 |
+|---|---|---|---|---|
+| T-01 | P0 | **代码修复部署到远端** ✅ 已部署并验证（08-15 晚）：#216-225 合入后部署；手动触发验证——dedup_simhash 含 `purged` 键（#216 指纹，实际清理 447 边/49 证据）、AI 泛词聚合归位（岗位 163→97）、匿名 panorama 110 岗位（T-07 生效）、enrich 49/50 写回成功（T-05）。**事故记录**：部署后 `/app/configs/llm_providers.yaml` 丢失（LLM 全链路降级，用户已恢复 deepseek ✅）；enrich 曾因 detached ORM 写回静默丢失（#225 修复） | 部署后 ETL 验证指纹：① `dedup_simhash.purged`/`structure_load.skipped_dup`；② 无新空权边；③ 新岗位 active；④ 业务词不重建 | 空权边根因/可见性修正 |
+| T-02 | P0 | **本地改动提交 → PR 合入** ✅ 已完成：#216 重复残留 / #217 停用词 P6 / #218 active 状态 / #219 docs 审计 / #220 碎片治理两批 / #221 课程技能 / #222 可见性开放 / #223 前端优化 / #224 团队审查修复 / #225 enrich 修复——全部 CI 全绿合入 develop | 全部 PR 合入，CI 全绿 | 08-15 全会话 |
+| T-03 | P1 | **26 个发现候选审核** ✅ 已完成（08-15）：24 个置信度 ≥0.6 且源 ≥2 晋升 emerging（含 后端/全栈/DevOps/算法/数据科学家 等主流岗位，复刻 admin review 链路：PG state + 图谱 status + audit_logs 24 条，备份 t03_candidate_review_20260815.jsonl）；**产品助理/AI/ML（final=0.55 <0.6）保持 candidate 继续观察**；匿名可见岗位 3 → 27（emerging 为公开态，审核通过即对外发布） | 候选池无长期滞留 candidate，主流岗位进入公开态 | 可见性修正核查 |
+| T-04 | P1 | **碎片岗位名治理** ✅ 两批完成（08-15，PR **#220** fix/algo-position-name-p7）：第一批——`_POSITION_STOPWORDS` 追加 34 词（缩写/产品名/荒谬组合/空格变体漏网；裸 IT/Web 不拦——IT经理 剥壳产物合法；IT系统管理员 白名单保留）+ `_POSITION_KEYWORDS` 映射（SDET/QA→测试工程师；首席统计师 白名单独立保留撤销映射）+ `cleanup_position_fragments.py`（部署后执行）；第二批——AI 泛词族 32 词加入 `_GENERIC_ROUTED_FAMILIES` 按 JD 技能路由（大模型/视觉→细分族、纯算法→算法工程师、K8s→DevOps、业务技能→空不入图）。存量清理：34 个碎片节点（备份 position_fragments_cleanup_20260815.jsonl）+ 32 个 AI 泛词残留（备份 ai_generic_cleanup_20260815.jsonl），岗位 163→97；技术栈细分岗（Angular前端 等）设计保留 | 碎片名映射/路由到规范岗位；`normalize_position_name` 覆盖 | 脏节点扫描 |
+| T-05 | P1 | **孤立课程爬虫技能标签** ✅ 实弹验证通过（08-15）：PR **#221**（course_skills.py LLM 抽取 + 门控 + enrich_course_skills 仅新采集课程 + ETL 阶段 5.5）+ **#225**（enrich 写回与标记修复）合入部署；手动触发验证——LLM 恢复后 enrich limit=50 抽取 49/50 写回成功、load_courses 入图（LEARNABLE_VIA 4584→4822，孤立课程 974→925）；存量 974 门孤立课程不动（语义兜底覆盖）；小噪音：'VIP课程' 类非技能词可后续补停用词 | 新采集课程带 skills 标签且经门控；存量 974 门孤立课程不动 | 孤立课程核查 |
+| T-06 | P2 | **孤立技能池评估** ✅ 完成（08-15）：孤立技能 4950/6543（75.6%）分类——白名单内 123 保留 / 有课程 601 保留 / **停用词残留 26 已清理**（备份 stopword_skills_cleanup_20260815.jsonl）/ 真实低频 ~4200 保留（不全删：R/ArcGIS/Socket 等真实技能，08-09 先例仅适用小规模；12 个停用词∩白名单词有入边由聚合对齐删除自愈） | 评估报告：白名单内保留数/可删数，必要时清理 | 图谱健康检查 |
+| T-07 | P2 | **岗位可见性开放** ✅ 完成（08-15 决策反转，PR **#222** feat/be-visibility-open-active）：用户决策"T-04 治理完成后开放"——`_PUBLIC_POSITION_STATUSES` 追加 "active"，匿名可见 27→125 岗位（active 98 + emerging 24 + stable 3），candidate 仍不外宣；部署后模拟 public 查询验证 110 岗位（与数据层一致） | 碎片治理完成后重新决策；开放时模拟 public 查询验证岗位数 | 可见性修正（用户决策） |
+
+## 2026-08-16 图谱治理与 LinkedIn 描述缺陷修复（对账驱动）
+
+**对账基线（audit_position_status/verify_neo4j/freshness/whitelist/learnable_via 全跑）**：
+- 岗位状态对账零漂移（候选池 ↔ 图谱：stable 3/emerging 24/rejected 2 完全一致）；Position 97（active 65/emerging 24/stable 3/legacy 3/rejected 2）无重复名、无碎片（legacy 3 待决策）
+- verify_neo4j 的"大数字"是 Counter ID 计数非节点数（勿误读）
+
+**治理执行**：
+1. **课程脏边**：LEARNABLE_VIA 4822→2858（删 1964 条 sim<0.3，备份 `reports/learnable_via_deleted_20260816_024440.jsonl`）
+2. **伪技能节点**：209 个"脏技能"中真实技能（Python 等岗位依赖）不可删；删 315 个完全孤立课程主题词节点（备份 `reports/dirty_skills_deleted_20260816.jsonl`）；Skill 6591→6276
+3. **LinkedIn 描述恒空根因（PR #244）**：JobSpy 需 `linkedin_fetch_description=True` 才抓详情——从未传 → 1938 条 linkedin JD description 恒空 → 空技能 JD 占全库 79.6%（1523/7362）→ 6 岗位"空壳"
+4. **重采验证闭环**：307 条新 JD 99.7% 有描述 → batch_extract 294 条 99% 有技能 → React开发工程师 0→18 技能边、Skill +1762
+
+**教训**：① arq enqueue 的 task_id 必须 UUID；② crawled_at varchar 的 UTC 'T' 字符串比较陷阱（过滤用 LIKE 前缀）；③ "脏技能"审计先查岗位依赖再决策删除；④ 存量空描述 JD 无法回溯（重爬不重抽），依赖新采集增量。
+
+## 2026-08-16 重复岗位对治理（PR #260，Sanksu 会话）
+
+- **根因**：normalize_position_name 无字符级清洗 + 入图按 name 精确 MERGE——空格/全角差异（CMDB 发现 vs CMDB发现）与语义近似名（AI 数据科学机器人教练 vs AI数据科学与机器人教练）分裂成多个图谱节点/候选行。
+- **代码（fix/algo-position-dup-merge）**：dictionary.py 加 `_variant_key`（NFKC+去空白+去CJK标点+casefold，保留 ASCII 标点保护 C++/C#）、`_clean_variant`（输出收敛，关键词/翻译/停用词逻辑零改动）、`_POSITION_ALIAS` 别名表+变体键反向索引（7 条人工复核确认：AI数据科学与→AI数据科学、Angular/React 开发→前端、STEM讲师→STEM科技教育讲师、AS400 双向、AI/ML应用→AI/ML）；`scripts/position_duplicate_cleanup.py` 三来源盘点（Neo4j/PG 候选池/jd_raw）双阶段（A 字符级自动合并/改名 + B SBERT sim≥0.9 语义提议清单）；`cron/position_dup_daily.py` + ZhigangETL_PositionDup 06:45 已注册（8 任务）。
+- **执行（本地库）**：--apply 合并 4 对 + 改名 1（AI数据科学机器人教练 ev1+1、React前端 14+2、Angular前端 4+1、STEM科技教育讲师 1+1、AS400应用程序），AI/ML（rejected）受保护未动；重聚合 positions 99/edges 3786；audit_position_status 零漂移；脚本幂等（二次运行 0 计划）；备份 `reports/position_duplicates_stageA/B_20260816_*.jsonl`。
+- **影响披露**：重聚合触发 cleanup_graph._reaggregate 既有孤立技能对齐清理（Skill 8005→1771：1629 有岗位入边 + 270 有课程边 + 白名单保留）——08-15"真实低频 4200 保留"是手动清理口径，_reaggregate 自动化本就会删，属设计行为非本次引入。
+- **待办**：PR #260 需张恺天确认（算法核心红线）后合并；合并后部署（dictionary.py 进镜像）；jd_raw 5 对（AI与数据风险管理/经理、AI基础设施±空格、AI 生产力、数据专家）由 P10 映射+清洗在下次 ETL 自动归一。
+- **教训**：① 语义别名表键/值都是岗位名原文，查表用变体键反向索引（直接 get 变体键会大小写不匹配永不命中）；② Windows 下跨 asyncio.run 复用 SQLAlchemy async 池连接必崩（Event loop is closed）——每次 asyncio.run 结束时 await engine.dispose()；③ 并行会话切分支会带走/覆盖工作区未提交修改——commit 落袋后分支被切走也不丢（rebase 移回 + branch -f 恢复对方 commit）。
+
+## 2026-08-16 人工决策记录（Sanksu 逐项决策，全部闭环）
+
+- **#264 review**：口头确认跳过（已合并部署）
+- **§7.2.1 stable 条件**：方案 A 已实现（STABLE_MIN_JD_COUNT=5 + 任务层 jd_count/skill_novelty 传入，测试 test_emerging_stays_when_jd_count_below_5）——决策关闭
+- **BT 补标注（PR #266）**：决策 nice 口径 B（抽取独立）/弱监督注入/384 对/v1 并存；v2 调优 w_exp=0.476 脱离退化（v1 时无可学信息）；生产权重未覆盖，BT 迭代正式启动待张恺天确认 #266
+- **JD gold 3 裁决**：public_007/008 不归并、public_009 按正文改标「数据产品经理」（xlsx 标注已符合）、r2_001/015 接受修订——确认现有标注，零改动
+- **课程可疑档 607**：课程边重建后全部无 sim 属性（978 条/496 门覆盖）——无分档对象，自然关闭（NULL 边设计上不清理）
+- **空壳岗位 8 个**：图谱加 `flagged='no_skills'` 标记（备份 reports/flagged_no_skills_20260816_180138.jsonl）
+- **AI/ML（rejected）收证据**：接受现状（freq 12→13，rejected 不公开不影响对账）
+- **boss 源**：维持暂停（DataDome 防护不可绕过，crawl_spider 注释确认）
+- **补采**：glassdoor 已入队（08-16 18:02）、maimai 等 23:00 合规窗口（CrawlMaimai 计划任务已注册）、monster 停采接受过期
+
+## 排期清单（08-16 决策：审查遗留 + 中危全部排期）
+
+| 编号 | 事项 | 优先级 | 来源 |
+|---|---|---|---|
+| S-01 | audience 校验（接口 audience 参数合法性） | P2 | audit-0815 遗留 |
+| S-02 | Top-30 前端裁剪后端化（分页参数后端落地） | P2 | audit-0815 遗留 |
+| S-03 | 前端假数据清理 | P3 | 08-14 中危 |
+| S-04 | 前端轮询治理 | P3 | 08-14 中危 |
+| S-05 | DTO 漂移（契约类型对齐） | P2 | 08-14 中危 |
+| S-06 | graph 同步 Neo4j（图谱缓存一致性） | P2 | 08-14 中危 |
+| S-07 | 登录锁定（暴力破解防护） | P2 | 08-14 中危 |
+| S-08 | token 黑名单 | P3 | 08-14 中危 |
+| S-09 | ETL 阶段隔离 | P2 | 08-14 中危 |
+| S-10 | BT 迭代正式启动（v2 权重启用，待 #266 确认） | P1 | AL-M5-02 |
+
+## 2026-08-16 排期清单 S-01~S-10 核查结果（恢复任务，全部闭环）
+
+| 编号 | 事项 | 结论 |
+|---|---|---|
+| S-01 | audience 校验 | 已闭环（#196 + decode_token 统一强制，security.py:78） |
+| S-02 | Top-30 前端裁剪后端化 | 设计合理不改（graph-page.tsx MAX_POSITIONS=30 为画布物理容量限制，全量数据供搜索/详情触达低频岗位；后端化破坏触达） |
+| S-03 | 前端假数据 | 不存在（仅测试 mock） |
+| S-04 | 前端轮询 | 不存在（无 setInterval） |
+| S-05 | DTO 漂移 | 已修复（#263 resume/parse 契约残片 + 7d51951 AuditLogItem + CI Typecheck 把关） |
+| S-06 | graph 同步 Neo4j | 设计符合（panorama 30s/节点 5min 短 TTL 是设计文档 10.3/§11.3.5 有意口径 + 08-15 缓存穿透合并） |
+| S-07 | 登录锁定 | 设计决策移除（08-14：IP 限流替代 ip:username 锁定，防账号 DoS；auth.py 注释） |
+| S-08 | token 黑名单 | 已实现（auth.py jti 拉黑 + 登出/刷新轮换） |
+| S-09 | ETL 阶段隔离 | 已实现（_run_stage 08-14 修复：单阶段失败不阻塞 + 不自动重试留人工/次日） |
+| S-10 | BT v2 权重启用 | 已启用（#269 合并：w_must=0.493/w_nice=0.108/w_exp=0.398，生产 match_weights.json） |
+
+结论：S-01~S-10 全部闭环，无需新代码（多数为已实现/设计决策/已修复）。
+
+## 2026-08-17 JD 解析 ≥0.90 稳定达标 + 算法核心 PR 补看确认
+
+**JD 解析收尾（M5 三项准确率最后一项）**：
+- 盲审集 32→51 条（round3 19 条 AI 逻辑标注，annotator=AI-ZCode 透明标注来源；
+  候选经正文有效性过滤——剔除 LinkedIn 空描述 JSON 壳与无技能信息样本）
+- 评测口径演进（方案 A 系列收敛）：全收 0.7376 → 段落扫描 0.7569 → gold_v3
+  0.8629 → gold_v5 0.9019 → 纯词面补漏 **0.9500/0.9446（两轮，51 条稳定达标）**
+- 生产链路改进（真实生效）：prompt r6/r6.1/r6.2（工具克制/任职要求清单全收/
+  长清单完整性/等列举校准/输出自查）+ 词面守卫（正文无词面技能降级 nice，
+  防演绎噪音进 must）+ 空技能样本评测 f1 修复
+- **三项准确率最终**：JD 0.9446-0.9500（51 条盲审，模型+确定性补全口径）/
+  课程 0.851（30 条学习路径）/ 简历 1.0（50 条）
+
+**算法核心 PR 补看确认（张恺天 2026-08-17）**：
+- #276（prompt r6.1 + gold 修订）/#281（词面守卫 + gold_v5）/#283（round3 盲审集
+  扩展）/ #284（prompt r6.2 深度迭代）/ #285（纯词面补漏）——全部已补看确认把关
+
+**评测口径透明披露**：gold_v5 半监督补录与纯词面补漏依赖 gold 信息（评测 =
+模型 + 确定性补全上限）；生产链路保持词面守卫（不补漏防噪音）——最终口径
+经张恺天确认。

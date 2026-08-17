@@ -23,8 +23,8 @@ from urllib.parse import quote, urljoin
 
 from scrapy import Request, Spider
 from scrapy.http import Response
-from scrapy_playwright.page import PageMethod
 
+from crawlers.base_spider import make_playwright_request
 from crawlers.items import CourseItem
 from crawlers.settings import RATE_LIMIT
 
@@ -35,8 +35,8 @@ COURSERA_BASE = "https://www.coursera.org"
 # （仍为公开课程元数据，符合 robots 规则）
 COURSERA_SEARCH_URL = "https://www.coursera.org/browse?query={keyword}"
 
-# 默认搜索关键词（与项目 AI/大数据/全栈方向一致）
-DEFAULT_KEYWORDS = ["Python", "Machine Learning", "Data Science", "SQL", "Java"]
+# 默认搜索关键词：空 = browse 热门课全量（08-16 用户决策，不再内置定向词）
+DEFAULT_KEYWORDS: list[str] = []
 
 
 class CourseraSpider(Spider):
@@ -66,12 +66,16 @@ class CourseraSpider(Spider):
             yield request
 
     def start_requests(self):
-        for keyword in self.keywords:
-            url = COURSERA_SEARCH_URL.format(keyword=quote(keyword))
-            self.logger.info(f"开始采集 Coursera: 关键词={keyword}")
-            yield self._make_playwright_request(
+        # 空关键词 = browse 热门课全量（08-16 用户决策）
+        keywords = self.keywords or [""]
+        for keyword in keywords:
+            url = COURSERA_SEARCH_URL.format(keyword=quote(keyword)) if keyword else "https://www.coursera.org/browse"
+            self.logger.info(f"开始采集 Coursera: 关键词={keyword or '(热门)'}")
+            yield make_playwright_request(
                 url,
                 meta={"keyword": keyword, "page": 1},
+                selector="li.cds-grid-item a.cds-CommonCard-titleLink, .ais-InfiniteHits-item, .no-results, [data-e2e='no-results']",
+                scroll_times=max(1, self.max_pages),
             )
 
     def parse(self, response: Response):
@@ -108,12 +112,16 @@ class CourseraSpider(Spider):
             f"[coursera] kw={response.meta['keyword']} 页={current_page} 产出 {item_count} 条"
         )
         if current_page < self.max_pages:
-            # Coursera 用 &page=N 翻页
+            # Coursera 用 page=N 翻页（浏览页无 query 参数，须用 ? 而非 &）
             keyword = response.meta["keyword"]
-            next_url = f"{COURSERA_SEARCH_URL.format(keyword=quote(keyword))}&page={current_page + 1}"
-            yield self._make_playwright_request(
+            base = COURSERA_SEARCH_URL.format(keyword=quote(keyword)) if keyword else "https://www.coursera.org/browse"
+            sep = "&" if "?" in base else "?"
+            next_url = f"{base}{sep}page={current_page + 1}"
+            yield make_playwright_request(
                 next_url,
                 meta={"keyword": keyword, "page": current_page + 1},
+                selector="li.cds-grid-item a.cds-CommonCard-titleLink, .ais-InfiniteHits-item, .no-results, [data-e2e='no-results']",
+                scroll_times=max(1, self.max_pages),
             )
 
     def _card_to_item(self, card, meta: dict) -> CourseItem:
@@ -126,6 +134,9 @@ class CourseraSpider(Spider):
         href = title_link.css("::attr(href)").get()
 
         if not title or not href:
+            return None
+        # 浏览页混入职业角色页（/career-academy/roles/...），非课程，跳过
+        if "/career-academy/" in href:
             return None
 
         # href 可能是 /learn/{slug}（旧版）或 /search?query=...&xdpModal=course~{id}（新版 modal UX）
@@ -320,28 +331,3 @@ class CourseraSpider(Spider):
         except (ValueError, TypeError):
             return 0
 
-    def _make_playwright_request(self, url: str, meta: dict, callback=None):
-        """构造 Playwright 渲染请求，等待课程卡片加载。"""
-        return Request(
-            url,
-            callback=callback or self.parse,
-            meta={
-                "playwright": True,
-                "playwright_page_methods": [
-                    # 等待课程卡片或无结果提示出现
-                    PageMethod(
-                        "wait_for_selector",
-                        "li.cds-grid-item a.cds-CommonCard-titleLink, .ais-InfiniteHits-item, .no-results, [data-e2e='no-results']",
-                        timeout=20000,
-                    ),
-                    PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight/2)"),
-                ],
-                **meta,
-            },
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-            dont_filter=True,
-        )

@@ -92,9 +92,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         module = "llm" if self._is_llm_route(path) else (parts[2] if len(parts) > 2 else path)
         key = f"rate:{ip}:{module}"
         try:
-            count = await redis_client.incr(key)
-            if count == 1:
-                await redis_client.expire(key, self.WINDOW_SECONDS)
+            # 原子窗口：SET NX EX 创建计数（08-16 审查：原 incr+expire 两步在
+            # Redis 瞬时错误时可能留下无 TTL 的 key，该 IP+模块永久 429）
+            created = await redis_client.set(key, 1, nx=True, ex=self.WINDOW_SECONDS)
+            count = 1 if created else await redis_client.incr(key)
         except Exception:
             return await call_next(request)
         if count > limit:
@@ -120,9 +121,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         # CSP
+        # style-src 'unsafe-inline'：ECharts tooltip 经 innerHTML + style 属性渲染，
+        # 严格 style-src 会拦截其内联样式导致 tooltip 不显示（08-16 修复，回退 default-src
+        # 后 ECharts 走 canvas tooltip 层）。tooltip 内容已在前端 formatter 做 escapeHtml，
+        # 且 script-src 已含 'unsafe-inline'，style 放行不新增脚本类攻击面。
+        # font-src data:：图标字体以 base64 data URI 内联打包，需放行。
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "font-src 'self' data:; "
             "worker-src 'self' blob:; "
             "img-src 'self' data: https:"
         )

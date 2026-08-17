@@ -20,10 +20,11 @@ import {
   type SkillMatrixItem,
 } from '@/components/match/types'
 import type { PositionStatus } from '@/components/graph/types'
-import { apiGet, apiPost, ApiError, getAccessToken } from '@/lib/api'
+import {apiGet, apiPost, getAccessToken, errMsg} from '@/lib/api'
 import type { components } from '@/types/api'
 
 const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
+  active: '活跃',
   candidate: '候选',
   emerging: '新兴',
   stable: '稳定',
@@ -33,6 +34,7 @@ const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
 }
 
 const STATUS_CLASS: Record<PositionStatus | 'low', string> = {
+  active: 'border-state-active/30 text-state-active bg-state-active/10',
   candidate: 'border-state-candidate/30 text-state-candidate bg-state-candidate/10',
   emerging: 'border-state-emerging/30 text-state-emerging bg-state-emerging/10',
   stable: 'border-state-stable/30 text-state-stable bg-state-stable/10',
@@ -227,7 +229,7 @@ export function ResumeMatchPage() {
       await streamParseProgress(res.task_id, file.name)
     } catch (e) {
       setStage('upload')
-      setNotice(e instanceof ApiError ? e.message : '上传失败，请检查后端服务')
+      setNotice(errMsg(e, '上传失败，请检查后端服务'))
     }
   }
 
@@ -325,7 +327,7 @@ export function ResumeMatchPage() {
       setNotice(null)
     } catch (e) {
       setStage('upload')
-      setNotice(e instanceof ApiError ? e.message : '推荐失败，请检查后端服务')
+      setNotice(errMsg(e, '推荐失败，请检查后端服务'))
     }
   }
 
@@ -367,7 +369,7 @@ export function ResumeMatchPage() {
       setMatchId(res.match_id ?? null)
       setMatchResult(toMatchResult(res))
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '比对失败')
+      setNotice(errMsg(e, '比对失败'))
     } finally {
       setLoadingDetail(false)
     }
@@ -391,7 +393,7 @@ export function ResumeMatchPage() {
         setNotice('已从结果快照刷新（无需重新计算）')
       }
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '快照刷新失败（结果可能已过期，请重新比对）')
+      setNotice(errMsg(e, '快照刷新失败（结果可能已过期，请重新比对）'))
     }
   }
 
@@ -403,7 +405,7 @@ export function ResumeMatchPage() {
       setMatchResult((prev) => (prev ? { ...prev, gaps: res.gaps.map(toGapItem) } : prev))
       setNotice('差距分析已从快照刷新')
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '差距刷新失败')
+      setNotice(errMsg(e, '差距刷新失败'))
     }
   }
 
@@ -415,7 +417,7 @@ export function ResumeMatchPage() {
       setMatchResult((prev) => (prev ? { ...prev, learning_path: toLearningPath(res.learning_path) } : prev))
       setNotice('学习路径已从快照刷新')
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '学习路径刷新失败')
+      setNotice(errMsg(e, '学习路径刷新失败'))
     }
   }
 
@@ -434,7 +436,7 @@ export function ResumeMatchPage() {
       setDiagnosis(report)
     } catch (e) {
       setDiagnosis(null)
-      setNotice(e instanceof ApiError ? e.message : '诊断报告生成失败，请稍后重试')
+      setNotice(errMsg(e, '诊断报告生成失败，请稍后重试'))
     } finally {
       setDiagnosisLoading(false)
     }
@@ -450,7 +452,7 @@ export function ResumeMatchPage() {
       setFeedback(score)
       setNotice(`已记录反馈（${score === 1 ? '👍 匹配结果有用' : '👎 匹配结果不准确'}）`)
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '反馈提交失败')
+      setNotice(errMsg(e, '反馈提交失败'))
     } finally {
       setFeedbackSubmitting(false)
     }

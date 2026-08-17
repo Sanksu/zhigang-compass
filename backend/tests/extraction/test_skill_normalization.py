@@ -13,6 +13,7 @@ from app.services.extraction.normalization import (
     SkillNormalizer,
     SkillNormResult,
     _agglomerative_clusters,
+    _should_protect,
     guard_cluster_distribution,
 )
 
@@ -184,13 +185,14 @@ class TestSkillNormalizer:
         assert result["PyTorch"].standard == "PyTorch"
 
     def test_confidence_calculation(self):
-        # 簇内成员相似度均值作为置信度（A 为代表，B/C 为成员）
-        embedder = _FakeEmbedder({("A", "B"): 0.8, ("A", "C"): 0.6})
+        # 簇内成员相似度均值作为置信度（ClusterA 为代表，ClusterB 为成员；
+        # 单字符 A/B/C 已被缩写保护，改用长词）
+        embedder = _FakeEmbedder({("ClusterA", "ClusterB"): 0.8, ("ClusterA", "ClusterC"): 0.6})
         normalizer = SkillNormalizer(embedder=embedder, alias_map={})
-        result = normalizer.normalize_many(["A", "B", "C"])
-        # 簇 [A,B]：A 为代表（频次并列取首），B 为唯一成员
-        assert result["B"].standard == "A"
-        assert result["B"].confidence == pytest.approx(0.8, abs=1e-4)
+        result = normalizer.normalize_many(["ClusterA", "ClusterB", "ClusterC"])
+        # 簇 [ClusterA, ClusterB]：ClusterA 为代表（频次并列取首）
+        assert result["ClusterB"].standard == "ClusterA"
+        assert result["ClusterB"].confidence == pytest.approx(0.8, abs=1e-4)
 
     def test_embedder_unavailable_fallback(self):
         # 模型不可用（抛异常）→ 每项自成一簇，不抛错
@@ -247,3 +249,45 @@ class TestSimilarPairs:
             "Python": SkillNormResult("Python", 1.0),
         }
         assert normalizer.similar_pairs(normalized) == []
+
+
+class TestAbbreviationProtection:
+    """英文缩写词聚类保护（08-16 链式漂移回归修复）。
+
+    实测 SBERT 对短英文缩写/产品名嵌入虚高相似（Seata vs ADASIS 0.758、
+    UART vs ADASIS 0.766、ArkUI 0.803——均 ≥ 0.75 聚类阈值），代表链接
+    会把无关缩写并簇（ADASIS 簇 60 个无关成员）。保护：长度 ≤4 纯英文词
+    跳过聚类保持原名。
+    """
+
+    def test_abbreviation_skips_clustering(self):
+        # 桩 embedder 对任意对返回 0.9（必然并簇）——保护后缩写保持原名
+        class _AllSimilar:
+            def similarity(self, a, b):
+                return 0.9
+
+        normalizer = SkillNormalizer(embedder=_AllSimilar(), alias_map={})
+        result = normalizer.normalize_many(["Seata", "UART", "ADASIS", "XLA"])
+        # 4 个缩写各自保持原名（未被并簇）
+        assert result["Seata"].standard == "Seata"
+        assert result["UART"].standard == "UART"
+        assert result["ADASIS"].standard == "ADASIS"
+        assert result["XLA"].standard == "XLA"
+
+    def test_normal_words_still_cluster(self):
+        # >6 字符/含符号的变体不受保护，正常聚类（同前缀 0.9 并簇；
+        # 短标准名 Python 被保护保持原名，其变体间仍可合并）
+        normalizer = SkillNormalizer(
+            embedder=_python_sim_embedder(), alias_map={}
+        )
+        result = normalizer.normalize_many(["Python3", "Python 3"])
+        assert result["Python3"].standard == result["Python 3"].standard
+
+    def test_boundary_length(self):
+        # 边界：4 字符保护（Java 类短词），5 字符不保护（React 类正常聚类）
+        assert _should_protect("Seata") is True  # 非白名单 5 字符
+        assert _should_protect("ADASIS") is True  # 非白名单 6 字符
+        assert _should_protect("React") is True  # 纯英文 5 字符全部保护
+        assert _should_protect("C++") is False  # 含符号非纯英文
+        assert _should_protect("Python3") is False  # 7 字符变体不保护（聚类保留）
+        assert _should_protect("机器学习") is False  # 中文不保护

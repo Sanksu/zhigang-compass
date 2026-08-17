@@ -17,6 +17,7 @@ from typing import Iterator
 
 import httpx
 import pytest
+from starlette.exceptions import HTTPException
 
 from app.main import app
 
@@ -200,6 +201,6 @@ async def test_spa_fallback_preserves_api_404(tmp_path):
         "server": ("test", 80), "client": ("127.0.0.1", 1),
         "root_path": "", "app": None, "state": {},
     }
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(HTTPException) as exc:
         await sf.get_response("nonexistent", scope)
-    assert getattr(exc.value, "status_code", 404) == 404
+    assert exc.value.status_code == 404

@@ -1015,7 +1015,14 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /** Format: binary */
+                        file: string;
+                    };
+                };
+            };
             responses: {
                 /** @description 已接受，异步处理中 */
                 202: {
@@ -1876,12 +1883,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 岗位演化列表（默认岗位 Top-N，按快照出现热度降序） */
+        /**
+         * 岗位演化列表（按快照出现热度降序分页）
+         * @description 08-16：limit 改 page/size 分页，响应含 total
+         */
         get: {
             parameters: {
                 query?: {
-                    /** @description 返回岗位数 */
-                    limit?: number;
+                    /** @description 页码（从 1 起） */
+                    page?: number;
+                    /** @description 每页条数 */
+                    size?: number;
                 };
                 header?: never;
                 path?: never;
@@ -1889,7 +1901,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description 默认岗位演化列表 */
+                /** @description 岗位演化列表（data 含 positions/total/page/size） */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1920,12 +1932,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 技能演化列表（默认技能 Top-N，按快照出现热度降序） */
+        /**
+         * 技能演化列表（按快照出现热度降序分页）
+         * @description 08-16：limit 改 page/size 分页，响应含 total
+         */
         get: {
             parameters: {
                 query?: {
-                    /** @description 返回技能数 */
-                    limit?: number;
+                    /** @description 页码（从 1 起） */
+                    page?: number;
+                    /** @description 每页条数 */
+                    size?: number;
                 };
                 header?: never;
                 path?: never;
@@ -1933,7 +1950,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description 默认技能演化列表 */
+                /** @description 技能演化列表（data 含 skills/total/page/size） */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2048,11 +2065,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 观察池公开摘要 + MLI 产业化拐点排名（前端看板） */
+        /**
+         * 观察池公开摘要 + MLI 产业化拐点排名（前端看板，分页）
+         * @description 08-16：limit 改 page/size 分页
+         */
         get: {
             parameters: {
                 query?: {
-                    limit?: number;
+                    /** @description 页码（从 1 起） */
+                    page?: number;
+                    /** @description 每页条数 */
+                    size?: number;
                 };
                 header?: never;
                 path?: never;
@@ -2060,7 +2083,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description 观察池摘要（data 含 items/total，item 含 mli/ready_to_industrialize） */
+                /** @description 观察池摘要（data 含 items/total/page/size，item 含 mli/ready_to_industrialize） */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2247,7 +2270,8 @@ export interface paths {
                     "application/json": {
                         /** @description 平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx */
                         platform: string;
-                        keyword: string;
+                        /** @description 关键词（可选，留空则采集平台热度/最新内容，08-16 起爬虫不再内置默认关键词） */
+                        keyword?: string;
                         /** @description 城市（可选，海外源默认英文城市） */
                         city?: string;
                     };
@@ -2392,6 +2416,76 @@ export interface paths {
             };
         };
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/runtime-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读取运行时配置（非敏感运行参数，admin only） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 当前生效配置（rate_limit 为各源生效值） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["RuntimeConfig"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        /** 保存运行时配置（持久化 runtime_settings.json，重启后生效） */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RuntimeConfig"];
+                };
+            };
+            responses: {
+                /** @description 保存成功（返回规范化后的配置） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["RuntimeConfig"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -2599,10 +2693,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 待审核岗位列表 */
+        /**
+         * 待审核岗位列表
+         * @description 默认返回 candidate（待 admin 审核是否晋升 emerging），可切换状态过滤
+         */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description 候选池状态过滤（缺省 candidate——摘要/徽标计数的待审核口径） */
+                    state?: "candidate" | "emerging" | "stable" | "declining";
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -2998,10 +3098,10 @@ export interface components {
             /** @enum {string} */
             type: "position" | "skill" | "evidence";
             /**
-             * @description 岗位状态机（仅 position 节点）
+             * @description 岗位状态机（仅 position 节点；active=图谱常态岗位，非发现状态机成员）
              * @enum {string}
              */
-            status?: "candidate" | "emerging" | "stable" | "declining" | "archived";
+            status?: "active" | "candidate" | "emerging" | "stable" | "declining" | "archived";
         };
         /** @description 图谱边（REQUIRES 关系） */
         GraphEdge: {
@@ -3255,7 +3355,9 @@ export interface components {
             resource: string;
             resource_id?: string | null;
             /** @description 动作详情（如 {username}），结构随 action 变化 */
-            detail?: Record<string, never>;
+            detail?: {
+                [key: string]: unknown;
+            };
             ip_address: string;
             /** @description 时间 ISO8601 */
             created_at?: string | null;
@@ -3287,10 +3389,10 @@ export interface components {
         };
         /** @description 爬取聚合指标（GET /admin/crawl/status） */
         CrawlMetrics: {
-            /** @description 今日入库新增 */
+            /** @description 今日入库新增（CST） */
             today_count: number;
-            /** @description output 文件总数 */
-            output_total: number;
+            /** @description 累计采集量——四表 DB 入库总量（jd/course/paper/community，与仪表盘口径一致） */
+            raw_total: number;
             /** @description 各 raw 表累计条数 */
             raw: {
                 jd: number;
@@ -3422,6 +3524,28 @@ export interface components {
             /** @description 变更摘要（供展示/审计） */
             diff_summary?: string;
         };
+        /** @description 运行时配置（GET/PUT /admin/runtime-config，重启后生效） */
+        RuntimeConfig: {
+            /** @description ARQ 任务并发数（1-100） */
+            arq_concurrency?: number;
+            /** @description ARQ 任务超时秒（60-86400） */
+            arq_job_timeout?: number;
+            /** @description 告警 webhook（空=不告警） */
+            alert_webhook_url?: string;
+            /** @description 演化列表缓存 TTL 秒（5-3600） */
+            evolution_cache_ttl?: number;
+            /** @description 爬虫单次采集条数上限（10-1000） */
+            crawl_items_cap?: number;
+            /** @description 爬虫限频（source → {req_per_min, delay_range:[min,max] 秒}） */
+            rate_limit?: {
+                [key: string]: {
+                    /** @description 每分钟请求数（1-600） */
+                    req_per_min?: number;
+                    /** @description 请求间隔 [min, max] 秒（1-300） */
+                    delay_range?: number[];
+                };
+            };
+        };
         /** @description LLM provider 配置项（GET/PUT /admin/llm-config） */
         LlmProviderConfig: {
             /** @description provider 唯一名（字母/数字/下划线/短横线） */
@@ -3549,9 +3673,13 @@ export interface components {
             position_name: string;
             points: components["schemas"]["PositionEvolutionPoint"][];
         };
-        /** @description GET /evolution/positions 响应 data（默认岗位演化列表，按快照热度降序） */
+        /** @description GET /evolution/positions 响应 data（岗位演化列表，按快照热度降序分页） */
         PositionEvolutionListData: {
             positions: components["schemas"]["PositionEvolutionData"][];
+            /** @description 全部岗位数（翻页计算用） */
+            total: number;
+            page: number;
+            size: number;
         };
         /** @description 技能演化轨迹（GET /evolution/skills 项） */
         SkillEvolutionData: {
@@ -3559,9 +3687,13 @@ export interface components {
             skill_name: string;
             points: components["schemas"]["PositionEvolutionPoint"][];
         };
-        /** @description GET /evolution/skills 响应 data（默认技能演化列表，按快照热度降序） */
+        /** @description GET /evolution/skills 响应 data（技能演化列表，按快照热度降序分页） */
         SkillEvolutionListData: {
             skills: components["schemas"]["SkillEvolutionData"][];
+            /** @description 全部技能数（翻页计算用） */
+            total: number;
+            page: number;
+            size: number;
         };
         /** @description 岗位状态流转记录项（GET /evolution/state-machine） */
         StateMachineTransition: {
@@ -3595,10 +3727,12 @@ export interface components {
             status: string;
             last_signal_at?: string | null;
         };
-        /** @description GET /evolution/watch 响应 data */
+        /** @description GET /evolution/watch 响应 data（分页） */
         WatchOverviewData: {
             items: components["schemas"]["WatchOverviewItem"][];
             total: number;
+            page: number;
+            size: number;
         };
         /** @description 已解析简历列表项（GET /resume/list） */
         ResumeSummaryItem: {

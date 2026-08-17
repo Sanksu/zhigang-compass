@@ -15,9 +15,9 @@ from datetime import datetime, timedelta, timezone
 
 from scrapy.exceptions import CloseSpider
 from scrapy.http import Response
-from scrapy_playwright.page import PageMethod
 
-from crawlers.base_spider import BaseSpider
+from crawlers.base_spider import make_playwright_request, BaseSpider
+from crawlers.settings import CRAWL_ITEMS_CAP
 from crawlers.zhilian_detail import extract_job_detail
 
 # 智联城市代码映射
@@ -61,7 +61,7 @@ class ZhilianSpider(BaseSpider):
         # JD 采集条数上限（-a max_results=200，默认 200）：按产出条数截断，
         # 防列表页全量遍历超长运行（08-13 实测 zhilian 挂死 8h，900s 超时后
         # 孤儿爬虫仍残留；条数上限在源头截断，与页数上限/900s 超时三重保险）
-        self._max_results = int(kwargs.get("max_results") or 100)
+        self._max_results = int(kwargs.get("max_results") or CRAWL_ITEMS_CAP)
         self._items_collected = 0
 
     def _bump_items(self):
@@ -77,16 +77,27 @@ class ZhilianSpider(BaseSpider):
         return any(_is_older_than_days(v, self.history_days) for v in publish_time_map.values())
 
     def start_requests(self):
-        for keyword in self.keywords:
-            for city in self.cities:
+        # 空关键词/空城市 = 平台默认推荐列表且不限城市（08-16 用户决策）
+        keywords = self.keywords or [""]
+        cities = self.cities or [""]
+        for keyword in keywords:
+            for city in cities:
                 city_code = ZHILIAN_CITY_CODES.get(city)
-                if not city_code:
+                if city and not city_code:
                     self.logger.warning(f"跳过未映射城市: {city}（智联城市码表仅含 {list(ZHILIAN_CITY_CODES)}）")
                     continue
-                url = f"{self.SEARCH_URL}?{self.build_query({'jl': city_code, 'kw': keyword, 'pn': 1})}"
-                yield self._make_playwright_request(
+                params = {"kw": keyword, "pn": 1}
+                if city_code:
+                    params["jl"] = city_code
+                url = f"{self.SEARCH_URL}?{self.build_query(params)}"
+                yield make_playwright_request(
                     url,
                     meta={"keyword": keyword, "city": city, "page": 1},
+                    selector=".joblist-box__item",
+                    wait_timeout=15000,
+                    scroll_times=1,
+                    scroll_wait_ms=0,
+                    headers=self._compliance_headers(),
                 )
 
     def _extract_publish_time_map(self, response: Response) -> dict:
@@ -211,13 +222,18 @@ class ZhilianSpider(BaseSpider):
             next_href = response.css(".next-page::attr(href), a.pageset[rel=next]::attr(href)").get()
             if next_href:
                 next_url = response.urljoin(next_href)
-                yield self._make_playwright_request(
+                yield make_playwright_request(
                     next_url,
                     meta={
                         "keyword": response.meta["keyword"],
                         "city": response.meta["city"],
                         "page": current_page + 1,
                     },
+                    selector=".joblist-box__item",
+                    wait_timeout=15000,
+                    scroll_times=1,
+                    scroll_wait_ms=0,
+                    headers=self._compliance_headers(),
                 )
 
     def _make_detail_request(self, url: str, job: dict):
@@ -282,20 +298,3 @@ class ZhilianSpider(BaseSpider):
             post_date=job["post_date"],
         )
 
-    def _make_playwright_request(self, url: str, meta: dict):
-        """构造 Playwright 渲染请求，等待列表卡片加载。"""
-        from scrapy.http import Request
-        return Request(
-            url,
-            callback=self.parse,
-            meta={
-                "playwright": True,
-                "playwright_page_methods": [
-                    PageMethod("wait_for_selector", ".joblist-box__item", timeout=15000),
-                    PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"),
-                ],
-                **meta,
-            },
-            headers=self._compliance_headers(),
-            dont_filter=True,
-        )

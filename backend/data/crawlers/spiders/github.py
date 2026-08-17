@@ -3,14 +3,16 @@
 策略：
 - 爬取 GitHub Search API（官方 API 条款允许程序化访问；trending 网页 robots
   Disallow: / 且无官方 API——用 search/repositories created:>窗口 sort=stars 近似）
+- 默认全局热度模式（08-16 用户决策）：不限语言，取窗口内 star 最高的 100 个
+  仓库；可通过 -a languages= 覆盖为按语言过滤（每语言 20 个）
 - 产出 CommunityTrendItem（trend_type=trending）
 
 合规：
 - 仅采集 API 返回的仓库元数据（full_name/描述/star/fork/language）
-- 无 token 限 10 req/min（5 语言 = 5 请求，请求间隔保留）
+- 无 token 限 10 req/min（全局模式 1 请求 / 语言模式 5 请求，请求间隔保留）
 
 运行：
-  scrapy crawl github -a languages=python,java,javascript -a since=daily -o output/github.jsonl
+  scrapy crawl github -a since=daily -o output/github.jsonl
   # 国际源，需代理
   $env:HTTPS_PROXY="http://127.0.0.1:7890"
 """
@@ -24,16 +26,17 @@ import json
 from urllib.parse import quote
 
 from crawlers.items import CommunityTrendItem
-from crawlers.settings import RATE_LIMIT
+from crawlers.settings import CRAWL_ITEMS_CAP, RATE_LIMIT
 
 
 GITHUB_SEARCH_API = "https://api.github.com/search/repositories"
 
-# 默认关注的技术方向（与项目 AI/大数据/全栈方向一致）
-DEFAULT_LANGUAGES = ["python", "java", "javascript", "typescript", "go"]
-
 # 默认时间窗口（daily/weekly/monthly）
 DEFAULT_SINCE = "daily"
+
+# 默认语言过滤：空 = 全局热度（不限语言，窗口内 star 最高 top 100）。
+# 传 -a languages=python,java 时按语言分别取热度（每语言 20，合计 ≤100）
+DEFAULT_LANGUAGES: list[str] = []
 
 
 class GithubSpider(Spider):
@@ -63,11 +66,29 @@ class GithubSpider(Spider):
             yield request
 
     def start_requests(self):
+        # since 语义 → created 窗口：daily=1 天 / weekly=7 天 / monthly=30 天
+        window = {"daily": 1, "weekly": 7, "monthly": 30}.get(self.since, 7)
+        created = (datetime.now(timezone(timedelta(hours=8))).date()
+                   - timedelta(days=window)).isoformat()
+
+        if not self.languages:
+            # 全局热度：不限语言，窗口内 star 最高的 100 个仓库（单次采集上限内）
+            query = f"created:>{created}"
+            url = f"{GITHUB_SEARCH_API}?q={quote(query)}&sort=stars&order=desc&per_page={min(CRAWL_ITEMS_CAP, 100)}"
+            self.logger.info(f"开始采集 GitHub 全局热门 (created>{created})")
+            yield Request(
+                url,
+                callback=self.parse,
+                meta={"language": "", "since": self.since, "dont_obey_robotstxt": True},
+                headers={
+                    "User-Agent": "zhigang-compass/1.0 (github-api)",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            return
+
         for lang in self.languages:
-            # since 语义 → created 窗口：daily=1 天 / weekly=7 天 / monthly=30 天
-            window = {"daily": 1, "weekly": 7, "monthly": 30}.get(self.since, 7)
-            created = (datetime.now(timezone(timedelta(hours=8))).date()
-                       - timedelta(days=window)).isoformat()
             query = f"language:{lang} created:>{created}"
             url = f"{GITHUB_SEARCH_API}?q={quote(query)}&sort=stars&order=desc&per_page=20"
             self.logger.info(f"开始采集 GitHub 热门: {lang} (created>{created})")

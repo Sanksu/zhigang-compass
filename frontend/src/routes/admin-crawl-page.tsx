@@ -22,6 +22,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiGet, apiPost, ApiError, getAccessToken } from '@/lib/api'
+import { formatDateTime } from '@/lib/utils'
 import type { components } from '@/types/api'
 import {
   Dialog,
@@ -86,16 +87,7 @@ interface MetricCardItem {
   hint: string
 }
 
-/** 平台切换时的默认搜索参数：海外源默认英文城市/英文关键词，国内源默认中文 */
-const PLATFORM_DEFAULTS: Record<string, { keyword: string; city: string }> = {
-  boss: { keyword: '高级前端', city: '北京' },
-  zhilian: { keyword: '高级前端', city: '北京' },
-  maimai: { keyword: '高级前端', city: '北京' },
-  monster: { keyword: 'Python', city: 'New York' },
-  indeed: { keyword: 'Python', city: 'New York' },
-  glassdoor: { keyword: 'Python', city: 'New York' },
-  linkedin: { keyword: 'Python', city: 'New York' },
-}
+// 08-16 用户决策：无平台默认关键词/城市——留空 = 平台热度/最新且不限城市
 
 const STATUS_META: Record<CrawlStatus, { variant: 'stable' | 'candidate' | 'archived'; label: string }> = {
   running: { variant: 'stable', label: '运行中' },
@@ -279,7 +271,7 @@ export function AdminCrawlPage() {
   const [form, setForm] = useState({
     platform: 'boss',
     keyword: '',
-    city: '北京',
+    city: '',
     maxPages: 30,
   })
   const [currentTask, setCurrentTask] = useState<CurrentTask | null>(null)
@@ -310,7 +302,7 @@ export function AdminCrawlPage() {
           res.items.map((h) => ({
             id: h.id,
             platformKey: h.platform,
-            time: h.created_at ? new Date(h.created_at).toLocaleString('zh-CN') : '—',
+            time: formatDateTime(h.created_at),
             platform: h.platform_name || h.platform || '—',
             keyword: h.keyword || '—',
             count: h.items,
@@ -336,22 +328,23 @@ export function AdminCrawlPage() {
             status: 'idle',
             todayCount: p.today_count ?? 0,
             totalCount: p.total_count,
-            lastRun: p.last_run ? new Date(p.last_run).toLocaleString('zh-CN') : '—',
+            lastRun: formatDateTime(p.last_run),
           })),
         )
         setMetrics([
-          { id: 'today', label: '今日采集量', value: res.metrics.today_count.toLocaleString(), delta: '今日新增', deltaColor: 'text-state-emerging', icon: Database, hint: '今日 output/*.jsonl 新增行数（CST）' },
-          { id: 'output', label: '累计采集量', value: res.metrics.output_total.toLocaleString(), delta: `+${res.platforms.length}源`, deltaColor: 'text-state-emerging', icon: Database, hint: 'output/*.jsonl 真实行数合计' },
-          { id: 'raw', label: 'DB 已入库', value: (res.metrics.raw.jd + res.metrics.raw.course).toLocaleString(), delta: `JD ${res.metrics.raw.jd}`, deltaColor: 'text-state-emerging', icon: Activity, hint: 'jd_raw + course_raw 真实计数' },
-          { id: 'files', label: '采集文件数', value: res.platforms.length.toLocaleString(), delta: `${res.platforms.length} 源`, deltaColor: 'text-ink-muted', icon: Gauge, hint: '有采集记录的平台数' },
+          { id: 'today', label: '今日采集量', value: res.metrics.today_count.toLocaleString(), delta: '今日新增', deltaColor: 'text-state-emerging', icon: Database, hint: '今日 DB 入库新增（CST）' },
+          // 累计采集量统一 DB 口径（08-15 用户决策）：与仪表盘一致的四表入库总量
+          { id: 'total', label: '累计采集量', value: (res.metrics.raw_total ?? 0).toLocaleString(), delta: `+${res.platforms.length}源`, deltaColor: 'text-state-emerging', icon: Database, hint: 'DB 入库总量（jd/course/paper/community）· 与仪表盘口径一致' },
+          { id: 'raw', label: 'JD/课程入库', value: (res.metrics.raw.jd + res.metrics.raw.course).toLocaleString(), delta: `JD ${res.metrics.raw.jd}`, deltaColor: 'text-state-emerging', icon: Activity, hint: 'jd_raw + course_raw 细分计数' },
+          { id: 'files', label: '有记录平台', value: res.platforms.length.toLocaleString(), delta: `${res.platforms.length} 源`, deltaColor: 'text-ink-muted', icon: Gauge, hint: '有采集记录的平台数' },
         ])
       })
       .catch(() => {
         setMetrics([
           { id: 'today', label: '今日采集量', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Database, hint: '状态加载失败' },
-          { id: 'output', label: '累计采集量', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Database, hint: '请确认后端服务已启动' },
-          { id: 'raw', label: 'DB 已入库', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Activity, hint: '—' },
-          { id: 'files', label: '采集文件数', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Gauge, hint: '—' },
+          { id: 'total', label: '累计采集量', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Database, hint: '请确认后端服务已启动' },
+          { id: 'raw', label: 'JD/课程入库', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Activity, hint: '—' },
+          { id: 'files', label: '有记录平台', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Gauge, hint: '—' },
         ])
       })
       .finally(() => setLoading(false))
@@ -363,16 +356,15 @@ export function AdminCrawlPage() {
   // 触发爬取 → 真实 POST /admin/crawl/trigger（ARQ 入队，202 返回 task_id）
   async function triggerCrawl(platform: string) {
     if (isBusy) return
-    const def = PLATFORM_DEFAULTS[platform]
-    const keyword = form.keyword?.trim() || def?.keyword || '高级前端'
-    if (!platform || !keyword) {
-      setNotice('请选择平台并填写关键词')
+    const keyword = form.keyword?.trim() ?? ''
+    if (!platform) {
+      setNotice('请选择平台')
       return
     }
     setCurrentTask({
       platform: platforms.find((p) => p.id === platform)?.name ?? platform,
       keyword,
-      city: form.city || def?.city || '北京',
+      city: form.city?.trim() || '',
       maxPages: form.maxPages || 30,
       status: 'queued',
       progress: 0,
@@ -536,16 +528,11 @@ export function AdminCrawlPage() {
                 <Select
                   value={form.platform}
                   onValueChange={(v) =>
-                    setForm((f) => {
-                      const def = PLATFORM_DEFAULTS[v]
-                      const prevDef = PLATFORM_DEFAULTS[f.platform]
-                      // 关键词/城市未手动输入（为空或仍为上一平台默认值）时，跟随新平台默认
-                      const keyword =
-                        def && (!f.keyword.trim() || f.keyword === prevDef?.keyword) ? def.keyword : f.keyword
-                      const city =
-                        def && (!f.city.trim() || f.city === prevDef?.city) ? def.city : f.city
-                      return { ...f, platform: v, keyword, city }
-                    })
+                    setForm((f) => ({
+                      // 关键词/城市均无平台默认（留空 = 热度/最新且不限城市，08-16 用户决策）
+                      ...f,
+                      platform: v,
+                    }))
                   }
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -561,7 +548,7 @@ export function AdminCrawlPage() {
                 <Input
                   value={form.keyword}
                   onChange={(e) => setForm((f) => ({ ...f, keyword: e.target.value }))}
-                  placeholder={PLATFORM_DEFAULTS[form.platform]?.keyword ?? '高级前端'}
+                  placeholder="留空则采集平台热度/最新内容"
                 />
               </div>
               <div className="space-y-1.5">
@@ -569,7 +556,7 @@ export function AdminCrawlPage() {
                 <Input
                   value={form.city}
                   onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
-                  placeholder={PLATFORM_DEFAULTS[form.platform]?.city ?? '北京'}
+                  placeholder="留空则不限城市"
                 />
               </div>
               <div className="space-y-1.5">

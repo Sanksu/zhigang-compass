@@ -449,6 +449,67 @@ def build_radar(
     }
 
 
+def _score_must(
+    position: PositionProfile,
+    candidate,
+    semantic=None,
+    sim_threshold: float | None = None,
+) -> tuple[float, int, list[str], list[str]]:
+    """must 维度评分：Σ(w×sim)/Σ(w)。
+
+    w = log(source_count+1)（跨源多的核心技能贡献/缺失惩罚均更重；source_count
+    默认 1 时等权，退化为优化前行为），别名级 sim=1.0，语义级 sim∈[threshold,1)；
+    Σ(w×sim)/Σ(w) 天然惩罚缺失，未注入语义时退化为布尔匹配。
+    返回 (score, must_total, matched_must, missing_must)。
+    """
+    must_total = len(position.must_skills)
+    must_weights = [_source_weight(req.source_count) for req in position.must_skills]
+    must_total_weight = sum(must_weights)
+    must_sims = [
+        _skill_similarity(req, candidate.skills, semantic, sim_threshold)
+        for req in position.must_skills
+    ]
+    matched_must = [
+        req.skill_name for req, sim in zip(position.must_skills, must_sims) if sim > 0
+    ]
+    missing_must = [
+        req.skill_name for req, sim in zip(position.must_skills, must_sims) if sim == 0
+    ]
+    score = (
+        1.0
+        if must_total_weight == 0
+        else sum(
+            w * sim for w, sim in zip(must_weights, must_sims)
+        ) / must_total_weight
+    )
+    return score, must_total, matched_must, missing_must
+
+
+def _score_nice(
+    position: PositionProfile,
+    candidate,
+    semantic=None,
+    sim_threshold: float | None = None,
+) -> float:
+    """nice 维度评分：Σ(sim×weight)/Σ(weight)，岗位无 nice 时取 1.0 不扣分。"""
+    nice_total_weight = sum(req.weight for req in position.nice_skills)
+    if nice_total_weight == 0:
+        return 1.0
+    return sum(
+        req.weight * _skill_similarity(req, candidate.skills, semantic, sim_threshold)
+        for req in position.nice_skills
+    ) / nice_total_weight
+
+
+def _score_exp(position: PositionProfile, candidate) -> float:
+    """经验维度评分：min(total_years / required_years, 1.0)，无年限要求时满分。"""
+    if position.required_years is None or position.required_years <= 0:
+        return 1.0
+    if candidate.total_years >= position.required_years:
+        return 1.0
+    return candidate.total_years / position.required_years
+
+
 def score_position(
     candidate,
     position: PositionProfile,
@@ -478,44 +539,11 @@ def score_position(
     w_must, w_nice, w_exp = weights or load_weights()
     position = apply_cii_correction(position)
 
-    must_total = len(position.must_skills)
-    # must 按 source_count 加权（log(source_count+1)）：跨源多的核心技能贡献/缺失
-    # 惩罚均更重；source_count 默认 1 时等权，退化为优化前行为（黄金集零回归）
-    must_weights = [_source_weight(req.source_count) for req in position.must_skills]
-    must_total_weight = sum(must_weights)
-    must_sims = [
-        _skill_similarity(req, candidate.skills, semantic, sim_threshold)
-        for req in position.must_skills
-    ]
-    matched_must = [
-        req.skill_name for req, sim in zip(position.must_skills, must_sims) if sim > 0
-    ]
-    missing_must = [
-        req.skill_name for req, sim in zip(position.must_skills, must_sims) if sim == 0
-    ]
-    must_score = (
-        1.0
-        if must_total_weight == 0
-        else sum(
-            w * sim for w, sim in zip(must_weights, must_sims)
-        ) / must_total_weight
+    must_score, must_total, matched_must, missing_must = _score_must(
+        position, candidate, semantic, sim_threshold
     )
-
-    nice_total_weight = sum(req.weight for req in position.nice_skills)
-    if nice_total_weight == 0:
-        nice_score = 1.0
-    else:
-        nice_score = sum(
-            req.weight * _skill_similarity(req, candidate.skills, semantic, sim_threshold)
-            for req in position.nice_skills
-        ) / nice_total_weight
-
-    if position.required_years is None or position.required_years <= 0:
-        exp_score = 1.0
-    elif candidate.total_years >= position.required_years:
-        exp_score = 1.0
-    else:
-        exp_score = candidate.total_years / position.required_years
+    nice_score = _score_nice(position, candidate, semantic, sim_threshold)
+    exp_score = _score_exp(position, candidate)
 
     base_total = must_score * w_must + nice_score * w_nice + exp_score * w_exp
 

@@ -126,6 +126,53 @@ class TestStopwordInterception:
         out = post_process(result)
         assert [s.name for s in out.skills] == ["模型对齐"]
 
+    def test_course_marketing_words_filtered(self):
+        # P7（08-15 用户要求）：课程营销/学历词被 LLM 误抽为技能时剔除——
+        # 专转本/专升本（学历提升课程主题）、小白/零基础（入门营销词）
+        result = JDExtractionResult(
+            position_name="",
+            skills=[
+                SkillExtracted(name="专转本"),
+                SkillExtracted(name="专升本"),
+                SkillExtracted(name="小白"),
+                SkillExtracted(name="零基础"),
+            ],
+        )
+        out = post_process(result)
+        assert out.skills == []
+
+    def test_course_marketing_compound_not_hit(self):
+        # 精确匹配不伤复合表达中的合法技能词（"零基础入门"中的入门课程）
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="零基础入门")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["零基础入门"]
+
+    def test_teaching_domain_words_filtered(self):
+        # P9（08-16 图谱治理）：教学法/教育主题词被课程文本误抽为技能时剔除
+        result = JDExtractionResult(
+            position_name="",
+            skills=[
+                SkillExtracted(name="项目化教学"),
+                SkillExtracted(name="教育信息化"),
+                SkillExtracted(name="教学反思"),
+                SkillExtracted(name="计算机二级考试"),
+            ],
+        )
+        out = post_process(result)
+        assert out.skills == []
+
+    def test_teaching_pattern_not_hit_real_skills(self):
+        # 精确匹配不伤真实技能（模式不含"学习"——机器学习/深度学习安全）
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="机器学习"), SkillExtracted(name="深度学习")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["机器学习", "深度学习"]
+
 
 class TestDedupSkills:
     def test_case_insensitive_dedup_keeps_first(self):

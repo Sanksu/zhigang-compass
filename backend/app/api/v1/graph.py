@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_optional_user, role_rank
 from app.core.database import get_db, neo4j_driver, redis_client
+from app.core.errors import ERR_INTERNAL, ERR_NOT_FOUND
 from app.models.business import SkillEmbedding
 from app.schemas.common import error, ok
 from app.services.graph_algorithms.config import load_graph_algo_config
@@ -18,7 +19,7 @@ from app.services.graph_algorithms.shortest_path import shortest_path
 from app.services.kg.skill_relations import graph_prerequisite_chain
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
-from app.services.matching.semantic import SkillEmbedder, SemanticUnavailableError
+from app.services.matching.semantic import SemanticUnavailableError, SkillEmbedder
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,11 @@ _inflight: dict[str, asyncio.Future] = {}
 # 节点详情缓存 TTL（设计文档 §11.3.5：position:{id} 5min，skill 同档）
 _NODE_CACHE_TTL = 300
 
-# 匿名/guest 可见的岗位状态（方案一：candidate 待审核不外宣，archived 已下线）
-_PUBLIC_POSITION_STATUSES = ("emerging", "stable", "declining")
+# 匿名/guest 可见的岗位状态（方案一：candidate 待审核不外宣，archived 已下线）。
+# 08-15 语义修正：图谱常态岗位为 active（import_jd/聚合产生），发现候选为
+# candidate（persist 镜像）。T-07 开放（08-15 用户决策：T-04 碎片治理两批
+# 完成后开放）——active 纳入公开态，匿名可见全部有 JD 支撑岗位。
+_PUBLIC_POSITION_STATUSES = ("active", "emerging", "stable", "declining")
 
 
 def _can_view_all_positions(user: Optional[dict]) -> bool:
@@ -47,6 +51,11 @@ def _can_view_all_positions(user: Optional[dict]) -> bool:
 def _position_scope(user: Optional[dict]) -> str:
     """缓存 key 的可见性维度：all=全量（user/admin），public=仅公开态。"""
     return "all" if _can_view_all_positions(user) else "public"
+
+
+def _status_clause(scope: str) -> str:
+    """岗位可见性过滤子句：public 时按公开状态过滤，否则不过滤（Cypher 插值）。"""
+    return "p.status IN $public_statuses" if scope == "public" else "true"
 
 
 async def _cache_get(key: str):
@@ -64,7 +73,7 @@ def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int
     """panorama 同步 Neo4j 查询（08-14 审查：原在 async 函数内同步阻塞事件循环，抽到线程池）。"""
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
     with neo4j_driver.session() as session:
         if focus:
             rows = session.run(
@@ -95,7 +104,7 @@ def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int
                 "id": p_id,
                 "name": p.get("name", p_id),
                 "type": "position",
-                "status": p.get("status", "candidate"),
+                "status": p.get("status", "active"),
             })
             nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
             edges.append({
@@ -432,7 +441,7 @@ async def skill_positions(
     cached = await _cache_get(cache_key)
     if cached is not None:
         return ok(data=cached)
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
     positions = await asyncio.to_thread(
         _query_skill_positions, skill_id, status_filter)
     data = {"skill_id": skill_id, "positions": positions}
@@ -497,7 +506,7 @@ async def skill_prerequisites(skill_id: str):
     """
     skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
     chain = await asyncio.to_thread(_query_prereq_chain, skill["name"])
     if not chain:
@@ -527,7 +536,7 @@ async def skill_courses(skill_id: str):
     """
     skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
     courses = await load_courses_for_skill(
         skill_id, skill["name"], top_k=None, semantic=_course_semantic())
@@ -562,7 +571,7 @@ def _load_position(id: str, user: Optional[dict] = None) -> dict | None:
     （视为不存在，避免待审核岗位外泄，见方案一）。
     """
     scope = _position_scope(user)
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
     with neo4j_driver.session() as session:
         rec = session.run(
             f"""
@@ -593,7 +602,7 @@ async def position_detail(
         return ok(data=cached)
     position = await asyncio.to_thread(_load_position, id, user)
     if position is None:
-        return error(4040, "岗位不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "岗位不存在", http_status=404)
 
     skills = await asyncio.to_thread(_query_position_skills_by_necessity, id)
 
@@ -619,10 +628,10 @@ async def position_skills(
 ):
     """[M4] 岗位技能列表（可按 necessity 过滤）。"""
     if await asyncio.to_thread(_load_position, id, user) is None:
-        return error(4040, "岗位不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "岗位不存在", http_status=404)
 
     scope = _position_scope(user)
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
     items = await asyncio.to_thread(
         _query_position_skills, id, necessity, status_filter)
 
@@ -638,7 +647,7 @@ async def skill_evidence(skill_id: str):
         return ok(data=cached)
     skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
     evidence = await asyncio.to_thread(_query_skill_evidence, skill_id)
 
@@ -666,7 +675,7 @@ async def skill_similar(
     """
     skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
     cache_key = f"graph:skill:similar:{skill_id}:{top_k}"
     cached = await _cache_get(cache_key)
@@ -706,7 +715,7 @@ async def skill_similar(
             await _cache_set(cache_key, data)
             return ok(data=data)
     except SemanticUnavailableError:
-        return error(5000, "语义模型不可用，无法计算相似技能", http_status=503)
+        return error(ERR_INTERNAL, "语义模型不可用，无法计算相似技能", http_status=503)
     except Exception as exc:
         # skill_embeddings 表缺失 / 向量维度不匹配等 → 降级回退内存扫描
         logger.warning("pgvector 技能相似查询降级回退内存扫描: %s", exc)
@@ -729,7 +738,7 @@ async def skill_similar(
     try:
         scores = await asyncio.to_thread(_sbert_scan)
     except SemanticUnavailableError:
-        return error(5000, "语义模型不可用，无法计算相似技能", http_status=503)
+        return error(ERR_INTERNAL, "语义模型不可用，无法计算相似技能", http_status=503)
 
     similar = sorted(
         (s for s in scores if s[2] >= 0.5),
@@ -764,9 +773,9 @@ async def skill_detail(
         return ok(data=cached)
     skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
     counts = await asyncio.to_thread(_query_skill_counts, skill_id, status_filter)
 
     courses = await load_courses_for_skill(
@@ -1030,7 +1039,7 @@ async def graph_shortest_path(
     path = await asyncio.to_thread(
         _query_shortest_path, from_skill, to_skill, statuses)
     if path is None:
-        return error(4040, "两技能间不存在 ≤6 跳的可达路径", http_status=404)
+        return error(ERR_NOT_FOUND, "两技能间不存在 ≤6 跳的可达路径", http_status=404)
     return ok(data={"from": from_skill, "to": to_skill, "path": path})
 
 
@@ -1054,7 +1063,7 @@ async def graph_view(
     if cached is not None:
         return ok(data=json.loads(cached))
 
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
 
     if view_type == "techStack":
         rows = await asyncio.to_thread(
@@ -1068,7 +1077,7 @@ async def graph_view(
                 "id": p_id,
                 "name": record.get("pname", p_id),
                 "type": "position",
-                "status": record.get("pstatus") or "candidate",
+                "status": record.get("pstatus") or "active",
             })
             edges.append({
                 "source": s_id,
@@ -1096,7 +1105,7 @@ async def graph_view(
                 "id": p_id,
                 "name": p.get("name", p_id),
                 "type": "position",
-                "status": p.get("status", "candidate"),
+                "status": p.get("status", "active"),
             })
             nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
             edges.append({

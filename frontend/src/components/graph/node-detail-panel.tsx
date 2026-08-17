@@ -69,6 +69,7 @@ interface NodeDetailPanelProps {
 }
 
 const STATUS_LABEL: Record<PositionStatus, string> = {
+  active: '活跃',
   candidate: '候选',
   emerging: '新兴',
   stable: '稳定',
@@ -77,6 +78,7 @@ const STATUS_LABEL: Record<PositionStatus, string> = {
 }
 
 const STATUS_CLASS: Record<PositionStatus, string> = {
+  active: 'bg-state-active/15 text-state-active border-state-active/30',
   candidate: 'bg-state-candidate/15 text-state-candidate border-state-candidate/30',
   emerging: 'bg-state-emerging/15 text-state-emerging border-state-emerging/30',
   stable: 'bg-state-stable/15 text-state-stable border-state-stable/30',

@@ -10,15 +10,15 @@
  * - GET /api/v1/evolution/position/{id}/evolution → 岗位演化历史
  * - GET /api/v1/evolution/state-machine → 岗位状态机流转（六态分布 + 人工审核记录）
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Calendar, GitBranch, TrendingUp, TrendingDown, Eye, Boxes } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PaginationBar } from '@/components/ui/pagination'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
@@ -28,7 +28,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { apiGet, ApiError } from '@/lib/api'
+import {apiGet, errMsg} from '@/lib/api'
 import type { components } from '@/types/api'
 
 // ===== Types =====
@@ -61,8 +61,6 @@ type EvolutionDiffNode = components['schemas']['EvolutionDiffNode']
 /** 后端 /evolution/diff 返回项 */
 type EvolutionDiff = components['schemas']['EvolutionDiff']
 
-/** 后端 /evolution/trends 返回项 */
-type EvolutionTrends = components['schemas']['EvolutionTrendsData']
 
 /** 后端 /evolution/signals 返回项（EvolutionSignal 序列化） */
 type EvolutionSignal = components['schemas']['EvolutionSignal']
@@ -78,6 +76,12 @@ type PositionEvolutionData = components['schemas']['PositionEvolutionData']
 /** 后端 /evolution/positions 返回项（默认岗位演化列表） */
 type PositionEvolutionListData = components['schemas']['PositionEvolutionListData']
 
+/** 后端 /evolution/skills 返回项 */
+type SkillEvolutionListData = components['schemas']['SkillEvolutionListData']
+
+/** 后端 /evolution/skills 列表项（含快照点） */
+type SkillEvolutionData = components['schemas']['SkillEvolutionData']
+
 // ===== SignalsView =====
 
 /** 新兴/衰退技能 Top-N（真实 GET /evolution/signals） */
@@ -88,7 +92,7 @@ function SignalsView() {
   useEffect(() => {
     apiGet<EvolutionSignalsData>('/evolution/signals?top_n=10')
       .then(setData)
-      .catch((e) => setError(e instanceof ApiError ? e.message : '信号加载失败'))
+      .catch((e) => setError(errMsg(e, '信号加载失败')))
   }, [])
 
   if (error) {
@@ -187,14 +191,178 @@ const SOURCE_LABEL: Record<string, string> = {
   stackoverflow: 'SO',
 }
 
+/** 可搜索下拉（08-16：岗位/技能/版本全量可搜索选择）
+ *
+ * options 为当前可选项；输入时先本地过滤，若提供 onSearch 则由父组件
+ * 防抖拉取后端匹配（positions/skills 走 q 参数；versions 仅本地过滤）。
+ */
+function SearchableSelect({
+  value,
+  placeholder,
+  options,
+  loading,
+  onSearch,
+  onSelect,
+  pageSize,
+}: {
+  value: string
+  placeholder: string
+  options: { value: string; label: string }[]
+  loading?: boolean
+  onSearch?: (q: string) => void
+  onSelect: (v: string) => void
+  /** 选项分页（10 项一页，08-16 用户决策：版本对比下拉翻页浏览） */
+  pageSize?: number
+}) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const [optionPage, setOptionPage] = useState(1)
+  const timerRef = useRef<number | null>(null)
+  const current = options.find((o) => o.value === value)
+  const ql = q.trim().toLowerCase()
+  const filtered = ql
+    ? options.filter((o) => o.label.toLowerCase().includes(ql))
+    : options
+  const totalPages = pageSize ? Math.max(1, Math.ceil(filtered.length / pageSize)) : 1
+  const visible = pageSize
+    ? filtered.slice((optionPage - 1) * pageSize, optionPage * pageSize)
+    : filtered
+
+  return (
+    <div className="relative">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-8 w-48 justify-start font-mono text-xs"
+        onClick={() => {
+          setOpen((v) => !v)
+          setQ('')
+          setOptionPage(1)
+        }}
+      >
+        <span className="truncate text-ink">{current?.label || placeholder}</span>
+      </Button>
+      {open && (
+        <>
+          {/* 点击外部关闭 */}
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute z-50 mt-1 w-64 rounded-md border border-border bg-elevated shadow-lg">
+            <div className="p-1.5">
+              <Input
+                autoFocus
+                value={q}
+                placeholder="输入名称搜索…"
+                className="h-7 text-xs"
+                onChange={(e) => {
+                  const v = e.target.value
+                  setQ(v)
+                  setOptionPage(1)
+                  if (!onSearch) return
+                  if (timerRef.current) window.clearTimeout(timerRef.current)
+                  timerRef.current = window.setTimeout(() => onSearch(v.trim()), 300)
+                }}
+              />
+            </div>
+            <div className="max-h-64 overflow-auto p-1">
+              {loading ? (
+                <p className="px-2 py-3 text-center text-xs text-ink-faint">搜索中…</p>
+              ) : visible.length === 0 ? (
+                <p className="px-2 py-3 text-center text-xs text-ink-faint">无匹配结果</p>
+              ) : (
+                visible.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    className={cn(
+                      'block w-full truncate rounded px-2 py-1.5 text-left text-xs hover:bg-subtle',
+                      o.value === value && 'bg-subtle font-medium',
+                    )}
+                    onClick={() => {
+                      onSelect(o.value)
+                      setOpen(false)
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))
+              )}
+            </div>
+            {/* 选项分页（10 项一页，08-16 用户决策） */}
+            {pageSize && totalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-border px-2 py-1.5">
+                <span className="text-[10px] text-ink-faint">
+                  第 {Math.min(optionPage, totalPages)} / {totalPages} 页 · 共 {filtered.length} 个
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[10px]"
+                    disabled={optionPage <= 1}
+                    onClick={() => setOptionPage((p) => Math.max(1, p - 1))}
+                  >
+                    上一页
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-[10px]"
+                    disabled={optionPage >= totalPages}
+                    onClick={() => setOptionPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    下一页
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function TechnologyWatchView() {
   const [data, setData] = useState<WatchItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // 08-16 翻页：观察池 10 项一页（GET /evolution/watch page/size）
+  const PAGE_SIZE = 10
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [pageLoading, setPageLoading] = useState(false)
 
+  // 请求共享：loadPage 与初始 effect 复用同一 fetch（08-17 收敛重复请求）
+  function fetchWatchPage(p: number) {
+    return apiGet<components['schemas']['WatchOverviewData']>(`/evolution/watch?page=${p}&size=${PAGE_SIZE}`)
+  }
+
+  function loadPage(p: number) {
+    setPageLoading(true)
+    fetchWatchPage(p)
+      .then((r) => {
+        setData(r.items)
+        setTotal(r.total)
+      })
+      .catch((e) => setError(errMsg(e, '技术热点加载失败')))
+      .finally(() => setPageLoading(false))
+  }
+
+  // 初始加载：setState 均在请求回调（异步）中，规避 effect 同步 setState 规则
   useEffect(() => {
-    apiGet<components['schemas']['WatchOverviewData']>('/evolution/watch?limit=20')
-      .then((r) => setData(r.items))
-      .catch((e) => setError(e instanceof ApiError ? e.message : '技术热点加载失败'))
+    let cancelled = false
+    fetchWatchPage(1)
+      .then((r) => {
+        if (cancelled) return
+        setData(r.items)
+        setTotal(r.total)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(errMsg(e, '技术热点加载失败'))
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   if (error) {
@@ -263,38 +431,119 @@ function TechnologyWatchView() {
             </TableBody>
           </Table>
         )}
+        {/* 观察池翻页（10 项一页，08-16） */}
+        {data && data.length > 0 && (
+          <PaginationBar
+            page={page}
+            total={total}
+            pageSize={PAGE_SIZE}
+            loading={pageLoading}
+            onPageChange={(p) => {
+              setPage(p)
+              loadPage(p)
+            }}
+          />
+        )}
       </CardContent>
     </Card>
   )
 }
 
-// ===== SkillTrendView =====
+// ===== SnapshotTimelineView =====
 
-/** 后端 /evolution/skills 返回项（默认技能演化列表） */
-type SkillEvolutionListData = components['schemas']['SkillEvolutionListData']
+/** 快照时间线通用视图（08-17：SkillTrendView/PositionEvolutionView 孪生组件收敛）。
 
-/** 技能频次趋势（默认展示 Top-8 技能，可下拉切换或输入 ID 查特定技能） */
-function SkillTrendView() {
-  const [skillId, setSkillId] = useState('')
-  const [data, setData] = useState<EvolutionTrends | null>(null)
+ * 两者共享：默认列表加载 + 可搜索下拉 + 手动 ID 查询 + 快照时间线
+ * 10 期/页翻页（最新在前）；差异（端点/字段/表格列）经配置参数化。
+ */
+interface SnapshotPoint {
+  date?: string | null
+  version?: string
+  freq?: number
+  present?: boolean
+}
+
+function SnapshotTimelineView<T extends { points?: SnapshotPoint[] }>({
+  icon: Icon,
+  title,
+  subtitle,
+  selectPlaceholder,
+  idPlaceholder,
+  idErrorMsg,
+  defaultErrorMsg,
+  loadErrorMsg,
+  noDataMsg,
+  emptyMsg,
+  loadingMsg,
+  listUrl,
+  searchUrl,
+  detailUrl,
+  idOf,
+  nameOf,
+  extractList,
+  extractPoints,
+  freqLabel,
+  extraColumns,
+}: {
+  icon: typeof TrendingUp
+  title: string
+  subtitle?: string
+  selectPlaceholder: string
+  idPlaceholder: string
+  idErrorMsg: string
+  defaultErrorMsg: string
+  loadErrorMsg: string
+  noDataMsg: string
+  emptyMsg: string
+  loadingMsg: string
+  listUrl: string
+  searchUrl: (q: string) => string
+  detailUrl: (id: string) => string
+  idOf: (d: T) => string
+  nameOf: (d: T) => string
+  extractList: (r: unknown) => T[]
+  extractPoints: (d: T) => SnapshotPoint[]
+  freqLabel: string
+  extraColumns?: (d: T, p: SnapshotPoint) => ReactNode
+}) {
+  const [idInput, setIdInput] = useState('')
+  const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // 默认技能列表（08-15：页面打开即有趋势，无需先查节点 ID）
-  const [defaults, setDefaults] = useState<components['schemas']['SkillEvolutionData'][] | null>(null)
-  const [selected, setSelected] = useState<components['schemas']['SkillEvolutionData'] | null>(null)
+  const [defaults, setDefaults] = useState<T[] | null>(null)
   const [defaultError, setDefaultError] = useState<string | null>(null)
+  // 08-16 用户决策：翻页针对快照时间线（10 期/页、最新在前），列表不翻页
+  const SNAPSHOT_PAGE_SIZE = 10
+  const [snapshotPage, setSnapshotPage] = useState(1)
+  const [searchLoading, setSearchLoading] = useState(false)
 
-  // 页面加载即拉取快照热度 Top-8 技能演化（GET /evolution/skills）
+  // 配置经 ref 传递，effect 仅首挂载执行（避免内联回调导致的重复请求）；
+  // ref 更新放 effect（render 中写 ref 违反 react-hooks/refs）
+  const cfgRef = useRef({ searchUrl, detailUrl, defaultErrorMsg, loadErrorMsg, idErrorMsg, listUrl, extractList })
+  useEffect(() => {
+    cfgRef.current = { searchUrl, detailUrl, defaultErrorMsg, loadErrorMsg, idErrorMsg, listUrl, extractList }
+  })
+
+  function search(q: string) {
+    setSearchLoading(true)
+    apiGet(cfgRef.current.searchUrl(q))
+      .then((r) => setDefaults(cfgRef.current.extractList(r)))
+      .catch(() => setDefaultError(cfgRef.current.defaultErrorMsg))
+      .finally(() => setSearchLoading(false))
+  }
+
+  // 页面加载即拉取 Top 列表（GET listUrl），默认选中首项
   useEffect(() => {
     let cancelled = false
-    apiGet<SkillEvolutionListData>('/evolution/skills?limit=8')
+    apiGet(cfgRef.current.listUrl)
       .then((r) => {
         if (cancelled) return
-        setDefaults(r.skills)
-        if (r.skills.length > 0) setSelected(r.skills[0])
+        const list = cfgRef.current.extractList(r)
+        setDefaults(list)
+        if (list.length > 0) setData(list[0])
       })
       .catch((e) => {
-        if (!cancelled) setDefaultError(e instanceof ApiError ? e.message : '默认技能加载失败')
+        if (!cancelled) setDefaultError(errMsg(e, cfgRef.current.defaultErrorMsg))
       })
     return () => {
       cancelled = true
@@ -302,66 +551,69 @@ function SkillTrendView() {
   }, [])
 
   function load() {
-    const id = skillId.trim()
+    const id = idInput.trim()
     if (!id) {
-      setError('请输入技能节点 ID（如 sk_xxxx）')
+      setError(cfgRef.current.idErrorMsg)
       return
     }
     setLoading(true)
     setError(null)
-    apiGet<EvolutionTrends>(`/evolution/trends?skill=${encodeURIComponent(id)}&window=90`)
-      .then((r) => setData(r))
+    apiGet(cfgRef.current.detailUrl(id))
+      .then((r) => {
+        setData(r as T)
+        setSnapshotPage(1)
+      })
       .catch((e) => {
         setData(null)
-        setError(e instanceof ApiError ? e.message : '趋势查询失败')
+        setError(errMsg(e, cfgRef.current.loadErrorMsg))
       })
       .finally(() => setLoading(false))
   }
 
-  // 当前展示：手动查询结果优先，否则默认选中技能
-  const points = data?.points ?? selected?.points ?? null
-  const title = data ? data.skill : (selected?.skill_name ?? null)
+  // 快照时间线：日期最新在前，按 10 期/页切片（08-16 用户决策）
+  const allPoints = (data ? extractPoints(data) : []).slice().sort((a, b) =>
+    (b.date ?? '').localeCompare(a.date ?? '') || (b.version ?? '').localeCompare(a.version ?? ''),
+  )
+  const pagePoints = allPoints.slice(
+    (snapshotPage - 1) * SNAPSHOT_PAGE_SIZE,
+    snapshotPage * SNAPSHOT_PAGE_SIZE,
+  )
 
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-sm">
           <span className="flex items-center gap-2">
-            <TrendingUp className="size-4" />
-            <span>技能频次趋势 · 最近 90 天</span>
+            <Icon className="size-4" />
+            <span>{title}</span>
+            {subtitle && <span className="text-[10px] font-normal text-ink-faint">{subtitle}</span>}
           </span>
           <div className="flex items-center gap-2">
             {defaults && defaults.length > 0 && (
-              <Select
-                value={selected?.skill_id ?? ''}
-                onValueChange={(v) => {
-                  const hit = defaults.find((d) => d.skill_id === v)
+              <SearchableSelect
+                value={data ? idOf(data) : ''}
+                placeholder={selectPlaceholder}
+                options={(defaults ?? []).map((d) => ({ value: idOf(d), label: nameOf(d) }))}
+                loading={searchLoading}
+                pageSize={10}
+                onSearch={(q) => search(q)}
+                onSelect={(v) => {
+                  const hit = defaults?.find((d) => idOf(d) === v)
                   if (hit) {
-                    setSelected(hit)
-                    setData(null)
+                    setData(hit)
+                    setSnapshotPage(1)
                     setError(null)
                   }
                 }}
-              >
-                <SelectTrigger className="h-8 w-48 text-xs">
-                  <SelectValue placeholder="选择技能" />
-                </SelectTrigger>
-                <SelectContent>
-                  {defaults.map((d) => (
-                    <SelectItem key={d.skill_id} value={d.skill_id} className="text-xs">
-                      {d.skill_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
             )}
             <Input
-              value={skillId}
-              onChange={(e) => setSkillId(e.target.value)}
+              value={idInput}
+              onChange={(e) => setIdInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') load()
               }}
-              placeholder="技能节点 ID（sk_xxxx）"
+              placeholder={idPlaceholder}
               className="h-8 w-56 font-mono text-xs"
             />
             <Button size="sm" variant="outline" className="h-8" onClick={load} disabled={loading}>
@@ -373,44 +625,51 @@ function SkillTrendView() {
       <CardContent>
         {defaultError && <p className="py-6 text-center text-xs text-state-archived">{defaultError}</p>}
         {!defaultError && defaults === null && !error && (
-          <p className="py-6 text-center text-xs text-ink-faint">加载默认技能趋势…</p>
+          <p className="py-6 text-center text-xs text-ink-faint">{loadingMsg}</p>
         )}
         {!defaultError && defaults !== null && defaults.length === 0 && !error && (
-          <p className="py-6 text-center text-xs text-ink-faint">
-            暂无技能快照数据（版本数据不足），可输入技能节点 ID 查询
-          </p>
+          <p className="py-6 text-center text-xs text-ink-faint">{noDataMsg}</p>
         )}
         {error && <p className="py-6 text-center text-xs text-state-archived">{error}</p>}
-        {!error && points && points.length === 0 && (
-          <p className="py-6 text-center text-xs text-ink-faint">该技能在各版本快照中无关联边</p>
+        {!error && data && allPoints.length === 0 && (
+          <p className="py-6 text-center text-xs text-ink-faint">{emptyMsg}</p>
         )}
-        {!error && points && points.length > 0 && (
+        {!error && data && allPoints.length > 0 && (
           <>
             <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
-              <span className="font-medium text-ink">{title}</span>
-              <span className="font-mono text-[10px] text-ink-faint">
-                {data?.skill ?? selected?.skill_id}
-              </span>
-              <span className="text-ink-faint">· 共 {points.length} 期快照</span>
+              <span className="font-medium text-ink">{nameOf(data)}</span>
+              <span className="font-mono text-[10px] text-ink-faint">{idOf(data)}</span>
+              <span className="text-ink-faint">· 共 {allPoints.length} 期快照</span>
             </div>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>快照日期</TableHead>
                   <TableHead>版本</TableHead>
-                  <TableHead className="text-right">关联岗位数</TableHead>
+                  <TableHead className="text-right">{freqLabel}</TableHead>
+                  {extraColumns && <TableHead className="text-right">快照中存在</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {points.map((p) => (
+                {pagePoints.map((p) => (
                   <TableRow key={p.version}>
                     <TableCell className="text-xs font-mono text-ink-muted">{p.date ?? '—'}</TableCell>
                     <TableCell className="font-mono text-xs text-ink-secondary">{p.version}</TableCell>
                     <TableCell className="text-right tabular-nums font-mono">{p.freq}</TableCell>
+                    {extraColumns?.(data, p)}
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+            {/* 快照时间线翻页（10 期/页、最新在前，08-16 用户决策） */}
+            {allPoints.length > SNAPSHOT_PAGE_SIZE && (
+              <PaginationBar
+                page={snapshotPage}
+                total={allPoints.length}
+                pageSize={SNAPSHOT_PAGE_SIZE}
+                onPageChange={setSnapshotPage}
+              />
+            )}
           </>
         )}
       </CardContent>
@@ -418,152 +677,65 @@ function SkillTrendView() {
   )
 }
 
-// ===== PositionEvolutionView =====
+// ===== 技能频次趋势 / 岗位演化历史（SnapshotTimelineView 配置） =====
 
-/** 岗位演化历史（默认展示 Top-8 岗位，可下拉切换或输入 ID 查特定岗位） */
-function PositionEvolutionView() {
-  const [positionId, setPositionId] = useState('')
-  const [data, setData] = useState<PositionEvolutionData | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  // 默认岗位列表（08-15：页面打开即有演化轨迹，无需先查节点 ID）
-  const [defaults, setDefaults] = useState<PositionEvolutionData[] | null>(null)
-  const [defaultError, setDefaultError] = useState<string | null>(null)
-
-  // 页面加载即拉取快照热度 Top-8 岗位演化（GET /evolution/positions）
-  useEffect(() => {
-    let cancelled = false
-    apiGet<PositionEvolutionListData>('/evolution/positions?limit=8')
-      .then((r) => {
-        if (cancelled) return
-        setDefaults(r.positions)
-        if (r.positions.length > 0) setData(r.positions[0])
-      })
-      .catch((e) => {
-        if (!cancelled) setDefaultError(e instanceof ApiError ? e.message : '默认岗位加载失败')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  function load() {
-    const id = positionId.trim()
-    if (!id) {
-      setError('请输入岗位节点 ID（如 pos_xxxx）')
-      return
-    }
-    setLoading(true)
-    setError(null)
-    apiGet<PositionEvolutionData>(`/evolution/position/${encodeURIComponent(id)}/evolution`)
-      .then((r) => setData(r))
-      .catch((e) => {
-        setData(null)
-        setError(e instanceof ApiError ? e.message : '演化历史查询失败')
-      })
-      .finally(() => setLoading(false))
-  }
-
+function SkillTrendView() {
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <span className="flex items-center gap-2">
-            <Boxes className="size-4" />
-            <span>岗位演化历史</span>
-            <span className="text-[10px] font-normal text-ink-faint">各版本快照中的存在性与关联技能边数</span>
-          </span>
-          <div className="flex items-center gap-2">
-            {defaults && defaults.length > 0 && (
-              <Select
-                value={data?.position_id ?? ''}
-                onValueChange={(v) => {
-                  const hit = defaults.find((d) => d.position_id === v)
-                  if (hit) {
-                    setData(hit)
-                    setError(null)
-                  }
-                }}
-              >
-                <SelectTrigger className="h-8 w-48 text-xs">
-                  <SelectValue placeholder="选择岗位" />
-                </SelectTrigger>
-                <SelectContent>
-                  {defaults.map((d) => (
-                    <SelectItem key={d.position_id} value={d.position_id} className="text-xs">
-                      {d.position_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            <Input
-              value={positionId}
-              onChange={(e) => setPositionId(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') load()
-              }}
-              placeholder="岗位节点 ID（pos_xxxx）"
-              className="h-8 w-56 font-mono text-xs"
-            />
-            <Button size="sm" variant="outline" className="h-8" onClick={load} disabled={loading}>
-              {loading ? '查询中…' : '查询'}
-            </Button>
-          </div>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {defaultError && <p className="py-6 text-center text-xs text-state-archived">{defaultError}</p>}
-        {!defaultError && defaults === null && !error && (
-          <p className="py-6 text-center text-xs text-ink-faint">加载默认岗位演化…</p>
-        )}
-        {!defaultError && defaults !== null && defaults.length === 0 && !error && (
-          <p className="py-6 text-center text-xs text-ink-faint">
-            暂无岗位快照数据（版本数据不足），可输入岗位节点 ID 查询
-          </p>
-        )}
-        {error && <p className="py-6 text-center text-xs text-state-archived">{error}</p>}
-        {!error && data && (
-          <>
-            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
-              <span className="font-medium text-ink">{data.position_name}</span>
-              <span className="font-mono text-[10px] text-ink-faint">{data.position_id}</span>
-              <span className="text-ink-faint">· 共 {data.points.length} 期快照</span>
-            </div>
-            {data.points.length === 0 ? (
-              <p className="py-6 text-center text-xs text-ink-faint">该岗位在各版本快照中均未出现</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>快照日期</TableHead>
-                    <TableHead>版本</TableHead>
-                    <TableHead className="text-right">关联技能边数</TableHead>
-                    <TableHead className="text-right">快照中存在</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {data.points.map((p) => (
-                    <TableRow key={p.version}>
-                      <TableCell className="text-xs font-mono text-ink-muted">{p.date ?? '—'}</TableCell>
-                      <TableCell className="font-mono text-xs text-ink-secondary">{p.version}</TableCell>
-                      <TableCell className="text-right tabular-nums font-mono">{p.freq}</TableCell>
-                      <TableCell className="text-right">
-                        {p.present ? (
-                          <Badge variant="outline" className="text-[10px] text-state-stable">存在</Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[10px] text-ink-faint">未收录</Badge>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
+    <SnapshotTimelineView<SkillEvolutionData>
+      icon={TrendingUp}
+      title="技能频次趋势 · 最近 90 天"
+      selectPlaceholder="选择技能"
+      idPlaceholder="技能节点 ID（sk_xxxx）"
+      idErrorMsg="请输入技能节点 ID（如 sk_xxxx）"
+      defaultErrorMsg="默认技能加载失败"
+      loadErrorMsg="趋势查询失败"
+      loadingMsg="加载默认技能趋势…"
+      noDataMsg="暂无技能快照数据（版本数据不足），可输入技能节点 ID 查询"
+      emptyMsg="该技能在各版本快照中无关联边"
+      listUrl="/evolution/skills?page=1&size=50"
+      searchUrl={(q) => `/evolution/skills?page=1&size=50&q=${encodeURIComponent(q)}`}
+      detailUrl={(id) => `/evolution/trends?skill=${encodeURIComponent(id)}&window=90`}
+      idOf={(d) => d.skill_id}
+      nameOf={(d) => (d as { skill_name?: string; skill?: string }).skill_name ?? (d as { skill?: string }).skill ?? d.skill_id}
+      extractList={(r) => (r as SkillEvolutionListData).skills}
+      extractPoints={(d) => d.points ?? []}
+      freqLabel="关联岗位数"
+    />
+  )
+}
+
+function PositionEvolutionView() {
+  return (
+    <SnapshotTimelineView<PositionEvolutionData>
+      icon={Boxes}
+      title="岗位演化历史"
+      subtitle="各版本快照中的存在性与关联技能边数"
+      selectPlaceholder="选择岗位"
+      idPlaceholder="岗位节点 ID（pos_xxxx）"
+      idErrorMsg="请输入岗位节点 ID（如 pos_xxxx）"
+      defaultErrorMsg="默认岗位加载失败"
+      loadErrorMsg="演化历史查询失败"
+      loadingMsg="加载默认岗位演化…"
+      noDataMsg="暂无岗位快照数据（版本数据不足），可输入岗位节点 ID 查询"
+      emptyMsg="该岗位在各版本快照中均未出现"
+      listUrl="/evolution/positions?page=1&size=50"
+      searchUrl={(q) => `/evolution/positions?page=1&size=50&q=${encodeURIComponent(q)}`}
+      detailUrl={(id) => `/evolution/position/${encodeURIComponent(id)}/evolution`}
+      idOf={(d) => d.position_id}
+      nameOf={(d) => d.position_name}
+      extractList={(r) => (r as PositionEvolutionListData).positions}
+      extractPoints={(d) => d.points ?? []}
+      freqLabel="关联技能边数"
+      extraColumns={(_d, p) => (
+        <TableCell className="text-right">
+          {p.present ? (
+            <Badge variant="outline" className="text-[10px] text-state-stable">存在</Badge>
+          ) : (
+            <Badge variant="outline" className="text-[10px] text-ink-faint">未收录</Badge>
+          )}
+        </TableCell>
+      )}
+    />
   )
 }
 
@@ -646,7 +818,8 @@ function VersionDiffView() {
   const [versions, setVersions] = useState<EvolutionVersion[]>([])
   const [v1, setV1] = useState<string>('')
   const [v2, setV2] = useState<string>('')
-  // diff 绑定请求时的版本对，渲染层据此判断当前结果是否仍有效（避免 effect 内同步 setState）
+  // 08-16 用户决策：版本下拉全量可搜索（保留 90 天 ≈ ≤90 个版本，一次拉全，
+  // 移除列表分页——原分页条在巨型 diff 表下方不可见且翻页后下拉选项不全）
   const [diff, setDiff] = useState<{
     v1: string
     v2: string
@@ -668,25 +841,34 @@ function VersionDiffView() {
     setDetailLoading(true)
     apiGet<EvolutionVersionDetail>(`/evolution/versions/${encodeURIComponent(id)}`)
       .then(setDetail)
-      .catch((e) => setDetailError(e instanceof ApiError ? e.message : '版本详情加载失败'))
+      .catch((e) => setDetailError(errMsg(e, '版本详情加载失败')))
       .finally(() => setDetailLoading(false))
   }
 
-  // 加载真实版本列表，默认对比最近两个版本
+  // 加载全量版本列表（size=100，覆盖 90 天保留期），默认对比最近两个版本。
+  // 初始加载不设 loading 态（effect 内同步 setState 违反 react-hooks/set-state-in-effect）
   useEffect(() => {
-    apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=30')
+    let cancelled = false
+    apiGet<components['schemas']['EvolutionVersionListData']>(`/evolution/versions?page=1&size=100`)
       .then((res) => {
+        if (cancelled) return
         // 快照可能在同一事务写入导致 created_at 相同，按 version_id（graph_vYYYYMMDD）降序保证稳定
         const items = [...res.items].sort((a, b) => b.version_id.localeCompare(a.version_id))
         setVersions(items)
-        if (items.length >= 2) {
-          setV1(items[1].version_id)
-          setV2(items[0].version_id)
-        } else if (items.length === 1) {
-          setV1(items[0].version_id)
+        // 默认对比最近两个版本（首次加载/尚未选择时）
+        if (!v1 && !v2) {
+          if (items.length >= 2) {
+            setV1(items[1].version_id)
+            setV2(items[0].version_id)
+          } else if (items.length === 1) {
+            setV1(items[0].version_id)
+          }
         }
       })
       .catch(() => setError('版本列表加载失败'))
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   // 版本对变化 → 拉取真实 diff（setState 均在异步回调内）
@@ -721,31 +903,21 @@ function VersionDiffView() {
             <span>版本快照对比</span>
           </span>
           <div className="flex items-center gap-1.5">
-            <Select value={v1} onValueChange={setV1} disabled={versions.length === 0}>
-              <SelectTrigger className="h-8 w-[150px] font-mono text-xs">
-                <SelectValue placeholder="选择版本" />
-              </SelectTrigger>
-              <SelectContent>
-                {versions.map((v) => (
-                  <SelectItem key={v.version_id} value={v.version_id} className="font-mono text-xs">
-                    {v.version_id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              value={v1}
+              placeholder="选择版本"
+              options={versions.map((v) => ({ value: v.version_id, label: v.version_id }))}
+              pageSize={10}
+              onSelect={setV1}
+            />
             <span className="text-xs text-ink-faint">vs</span>
-            <Select value={v2} onValueChange={setV2} disabled={versions.length === 0}>
-              <SelectTrigger className="h-8 w-[150px] font-mono text-xs">
-                <SelectValue placeholder="选择版本" />
-              </SelectTrigger>
-              <SelectContent>
-                {versions.map((v) => (
-                  <SelectItem key={v.version_id} value={v.version_id} className="font-mono text-xs">
-                    {v.version_id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              value={v2}
+              placeholder="选择版本"
+              options={versions.map((v) => ({ value: v.version_id, label: v.version_id }))}
+              pageSize={10}
+              onSelect={setV2}
+            />
             <Button
               size="sm"
               variant="ghost"
@@ -784,13 +956,13 @@ function VersionDiffView() {
                 <TabsTrigger value="changed" className="text-xs">共有 ({visibleDiff.changed.length})</TabsTrigger>
               </TabsList>
               <TabsContent value="added">
-                <DiffTable items={visibleDiff.added} />
+                <PaginatedDiffTable key={`${v1}:${v2}`} items={visibleDiff.added} />
               </TabsContent>
               <TabsContent value="removed">
-                <DiffTable items={visibleDiff.removed} />
+                <PaginatedDiffTable key={`${v1}:${v2}`} items={visibleDiff.removed} />
               </TabsContent>
               <TabsContent value="changed">
-                <DiffTable items={visibleDiff.changed} />
+                <PaginatedDiffTable key={`${v1}:${v2}`} items={visibleDiff.changed} />
               </TabsContent>
             </Tabs>
           </>
@@ -918,6 +1090,31 @@ function DiffTable({ items }: { items: VersionDiffItem[] }) {
         ))}
       </TableBody>
     </Table>
+  )
+}
+
+/** 版本 diff 表格分页（10 项一页，08-16 用户决策：新增/删除/共有三标签翻页）。
+ *
+ * 切换版本对时通过 key 重挂载重置页码；切换标签页时 Radix Tabs 卸载
+ * 非激活内容，页码同样归位。
+ */
+const DIFF_PAGE_SIZE = 10
+
+function PaginatedDiffTable({ items }: { items: VersionDiffItem[] }) {
+  const [page, setPage] = useState(1)
+  const slice = items.slice((page - 1) * DIFF_PAGE_SIZE, page * DIFF_PAGE_SIZE)
+  return (
+    <>
+      <DiffTable items={slice} />
+      {items.length > DIFF_PAGE_SIZE && (
+        <PaginationBar
+          page={page}
+          total={items.length}
+          pageSize={DIFF_PAGE_SIZE}
+          onPageChange={setPage}
+        />
+      )}
+    </>
   )
 }
 

@@ -23,11 +23,18 @@ rm -rf "${STAGE}" "${OUT}"
 # 暂存目录复制（保留符号链接）
 mkdir -p "${STAGE}"
 git archive HEAD | tar -x -C "${STAGE}"
-# git archive 不包含未跟踪文件（如 .env.example 之外的本地配置）——补充关键未跟踪物
+# git archive 不包含未跟踪文件（如 docs/m5 新产出、本地新增物料）——补充关键未跟踪物。
+# 注意：archive 已含同名目录（部分已跟踪文件）时不能跳过——`-e` 判断会漏掉
+# 该目录下的未跟踪新文件（08-15 审查：docs/m5 已入库后 extra 循环成死代码），
+# 必须合并复制（目录内容级拷贝，不覆盖 archive 已有内容）。
 for extra in docs/m5 docs/perf_baseline_20260815.md CHANGELOG.md glossary.md; do
-    if [ -e "${extra}" ] && ! [ -e "${STAGE}/${extra}" ]; then
+    if [ -e "${extra}" ]; then
         mkdir -p "${STAGE}/$(dirname "${extra}")"
-        cp -r "${extra}" "${STAGE}/${extra}"
+        if [ -d "${extra}" ]; then
+            cp -r "${extra}/." "${STAGE}/${extra}/"
+        else
+            cp -r "${extra}" "${STAGE}/${extra}"
+        fi
     fi
 done
 

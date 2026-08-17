@@ -21,10 +21,10 @@ import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
-import { skillLabelThreshold } from './graph-utils'
-import { enforceSpread, type EChartsModel } from './graph-layout'
+import { enforceSpread, hasPositionOverlap, type EChartsModel } from './graph-layout'
+import { COLOR_BY_STATUS, skillLabelThreshold } from './graph-utils'
 import { useGraphPan } from './use-graph-pan'
-import { escapeHtml } from '@/lib/utils'
+import { escapeHtml, isDark } from '@/lib/utils'
 
 /** ECharts 回调参数最小类型 — 覆盖本组件使用的 tooltip/label/select 回调字段 */
 interface EChartsParam {
@@ -66,20 +66,12 @@ const SYMBOL_BY_TYPE: Record<Exclude<NodeType, 'position'>, string> = {
 
 /** 岗位状态机 → 形状（色盲可读：衰退 rect、归档 roundRect 与正常态形状区分） */
 const SYMBOL_BY_STATUS: Record<PositionStatus, string> = {
+  active: 'circle',
   candidate: 'circle',
   emerging: 'triangle',
   stable: 'circle',
   declining: 'rect',
   archived: 'roundRect',
-}
-
-/** 岗位状态机 → 颜色（与 globals.css 中状态色对齐） */
-const COLOR_BY_STATUS: Record<PositionStatus, string> = {
-  candidate: '#71717a',
-  emerging: '#10b981',
-  stable: '#3b82f6',
-  declining: '#f59e0b',
-  archived: '#ef4444',
 }
 
 const COLOR_SKILL_LIGHT = '#09090b'
@@ -98,9 +90,11 @@ function colorOf(node: GraphNode, dark: boolean): string {
   return COLOR_EVIDENCE
 }
 
-/** value 映射到 symbolSize，范围 [16, 56]；技能/证据节点整体缩小，减少与岗位节点的视觉干扰 */
-function sizeOf(node: GraphNode): number {
-  const v = node.value ?? 30
+/** value 映射到 symbolSize，范围 [16, 56]；技能/证据节点整体缩小，减少与岗位节点的视觉干扰。
+ *  布局质量把岗位 value 固定为 1000（仅参与斥力），展示尺寸必须用原始 value（displayValue 兜底）——
+ *  否则固定大值会把岗位圆撑到 56px 封顶、与布局斥力语义脱节（2026-08-15）。 */
+function sizeOf(node: GraphNode, displayValue?: number): number {
+  const v = displayValue ?? node.value ?? 30
   // 岗位 > 技能 > 证据，基础大小不同
   const base = node.type === 'position' ? 36 : node.type === 'skill' ? 20 : 15
   const scaled = base + (v / 100) * 20
@@ -112,9 +106,17 @@ function weightToWidth(weight?: number): number {
   return 0.5 + weight * 2.5 // [0.5, 3]
 }
 
-/** 暗色模式判定 — 跟随 documentElement 上的 .dark 类 */
-function isDarkMode(): boolean {
-  return document.documentElement.classList.contains('dark')
+/** 窄屏判定（<640px）：力导向参数降档（外部全景图同款 isNarrow 适配） */
+function isNarrowScreen(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
+}
+
+/** #RRGGBB → rgba()（展开岗位高亮光晕用，跟随状态色生成半透明阴影） */
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return hex
+  const n = parseInt(m[1], 16)
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`
 }
 
 export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
@@ -123,10 +125,73 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
+  // 聚焦高亮降高亮定时器：组件卸载时清理，避免对已 dispose 实例 dispatchAction
+  const highlightTimerRef = useRef<number | null>(null)
+  /** 布局静止后是否已执行过自动适配（fitView 幂等标志，08-16） */
+  const fitDoneRef = useRef(false)
+  /** fitView 记录的适配后视角——resetView 的复位目标（08-16） */
+  const fittedViewRef = useRef<{ center: [number, number]; zoom: number } | null>(null)
   // 主题版本号：暗色切换时递增，触发数据 effect 完全重建确保颜色全量刷新
   const [themeVersion, setThemeVersion] = useState(0)
+  // 窄屏状态：跨 <640px 断点时触发数据 effect 重建（力导向参数降档，外部全景图同款适配）
+  const [isNarrow, setIsNarrow] = useState(() => isNarrowScreen())
   // 空白拖拽平移 hook：提供 group 访问、累计偏移、事件绑定
   const { panGroup, panOffset, bindPanEvents } = useGraphPan(chartRef)
+
+  // 重置视角：还原到初始视图（fitView 适配后视图）+ 清掉手动平移累积的 group 偏移。
+  // 不用 dispatchAction restore：restore 语义是 resetOption('recreate') 从最初 option
+  // 重建图表（丢 fitView 视角、重跑力导向布局且轮询兜底已退出），实测复位后视图失真。
+  // 声明在 init effect 之前，dblclick 空白复位与父组件 ref 调用共用
+  const resetView = useCallback(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    const v = fittedViewRef.current
+    chart.setOption({
+      series: [v ? { center: v.center, zoom: v.zoom } : { center: ['50%', '50%'], zoom: 1 }],
+    })
+    const group = panGroup()
+    if (group) {
+      group.x -= panOffset.current.x
+      group.y -= panOffset.current.y
+      group.dirty()
+    }
+    panOffset.current = { x: 0, y: 0 }
+    chart.getZr().refresh()
+  }, [panGroup, panOffset])
+
+  /** 自动适配画布（08-16 布局质量优化）：布局静止后按节点包围盒缩放居中。
+   *
+   * graph 系列 center 为相对画布坐标（0-1），zoom 为缩放系数；
+   * force 布局坐标空间近似画布像素，故包围盒中心/尺寸可直接换算。
+   * 实测校准：岗位中心/全景初始构图自动居中，节点不再散出画布外。
+   */
+  const fitView = useCallback(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    const seriesModel = (chart as unknown as { getModel(): EChartsModel }).getModel().getSeriesByIndex(0)
+    const list = seriesModel?.getData()
+    if (!list || list.count() === 0) return
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (let i = 0; i < list.count(); i++) {
+      const l = list.getItemLayout(i)
+      if (!l || l.length < 2) continue
+      if (l[0] < minX) minX = l[0]
+      if (l[1] < minY) minY = l[1]
+      if (l[0] > maxX) maxX = l[0]
+      if (l[1] > maxY) maxY = l[1]
+    }
+    if (!Number.isFinite(minX) || maxX <= minX || maxY <= minY) return
+    const w = chart.getWidth()
+    const h = chart.getHeight()
+    if (w === 0 || h === 0) return
+    const zoom = Math.min(1, Math.min(w / (maxX - minX), h / (maxY - minY)) * 0.9)
+    const center: [number, number] = [((minX + maxX) / 2) / w, ((minY + maxY) / 2) / h]
+    fittedViewRef.current = { center, zoom }
+    chart.setOption({ series: [{ center, zoom }] })
+  }, [])
 
   // 初始化 ECharts 实例（仅一次）
   useLayoutEffect(() => {
@@ -157,18 +222,24 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           name: d.name,
           type: d.type,
           status: d.status,
-          // 布局质量已把岗位 value 放大 3 倍，展示侧还原为原始 value（displayValue 兜底）
+          // 布局质量已把岗位 value 固定为 1000（仅参与斥力），展示侧还原为原始 value（displayValue 兜底）
           value: d.displayValue ?? d.value,
         })
       }
     })
 
-    // 节点双击 → 岗位展开/收起其技能
+    // 节点双击 → 岗位展开/收起其技能（chart 层仅在命中节点时派发，空白点击无 params）
     chart.on('dblclick', (params) => {
       if (params.dataType === 'node' && params.data) {
         const d = params.data as GraphNode
         if (d.type === 'position') onTogglePosition(d.id)
       }
+    })
+    // 空白区域双击 → 复位视角（08-16 交互优化）。
+    // 必须走 zr 层：ECharts chart.on 对空白点击不派发事件（params 为 undefined，
+    // 见 echarts _initEvents 仅在有命中元素时 trigger），zr 层 target 为空可判定空白。
+    chart.getZr().on('dblclick', (params) => {
+      if (!params.target) resetView()
     })
 
     // 画布空白点击 → 清空选中
@@ -183,10 +254,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const unbindPan = bindPanEvents(chart)
 
     // 布局收敛 → 强制分散重叠的岗位节点。
-    // 只用 forceLayoutEnd：finished 会在渲染动画期间多次触发，导致展开时强制分散被反复
-    // 执行、节点抖动；forceLayoutEnd 在力导向算法收敛后只触发一次，此时再推开重叠对。
+    // 双保险：forceLayoutEnd 事件（正常收敛路径）+ 数据 effect 的轮询静止检测
+    // （friction 较低/节点多时布局可能以非收敛路径停止，forceLayoutEnd 不派发，
+    // 实测岗位中心视图岗位中心距 42px 重叠——事件未触发，岗位分散从未执行）。
+    // maxIterations 20：岗位中心视图 107+ 岗位连环重叠，5 轮迭代推不干净。
+    // minGap 60（2026-08-15）：岗位圆边缘间距兜底（岗位直径上限 56，radius+minGap
+    // 中心距 ≥116px；96px 实测观感偏紧凑，调至 60 更舒展）。
     const onForceLayoutEnd = () => {
-      enforceSpread(chart, { minGap: 32, maxIterations: 5 })
+      enforceSpread(chart, { minGap: 60, maxIterations: 20, animate: true })
     }
     chart.on('forceLayoutEnd', onForceLayoutEnd)
 
@@ -198,11 +273,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     return () => {
       unbindPan()
       chart.off('forceLayoutEnd', onForceLayoutEnd)
+      if (highlightTimerRef.current !== null) {
+        window.clearTimeout(highlightTimerRef.current)
+        highlightTimerRef.current = null
+      }
       chart.dispose()
       chartRef.current = null
     }
     // bindPanEvents 为 useCallback 稳定引用；enforceSpread 为顶层工具函数
-  }, [onSelectNode, onTogglePosition, bindPanEvents])
+  }, [onSelectNode, onTogglePosition, bindPanEvents, resetView])
 
   // 容器尺寸变化 → resize
   useEffect(() => {
@@ -229,6 +308,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     return () => observer.disconnect()
   }, [])
 
+  // 窄屏断点监听 → 更新 isNarrow 状态（触发数据 effect 重建，见 ①）
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)')
+    const onChange = () => setIsNarrow(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
   // ============================================================
   // ① 数据渲染 effect — 仅 data 或 themeVersion 变化时重建
   //    不依赖 selectedId，避免点击节点触发 force 布局重算
@@ -237,7 +324,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const chart = chartRef.current
     if (!chart) return
 
-    const dark = isDarkMode()
+    const dark = isDark()
     const textColor = dark ? '#fafafa' : '#09090b'
     const mutedColor = dark ? '#a1a1aa' : '#71717a'
     const borderColor = dark ? '#27272a' : '#e4e4e7'
@@ -247,19 +334,33 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const nodes = data.nodes.map((n) => ({
       // 原始字段透传（含 id/name），供 ECharts 与 tooltip/click 回调使用
       ...n,
-      // 力导向布局质量（value 参与斥力计算，越大排斥越强）：岗位 ×3 放大布局权重，
-      // 让高频大岗位主动排斥远离，避免斥力不足时互相重叠（2026-08-11）。
+      // 力导向布局质量（value 参与斥力计算，越大排斥越强）：
+      // 岗位固定大值 1000——repulsion 数组按全节点 value 的 extent 线性映射，
+      // 若岗位用 degree 派生值，会被高频技能（degree 可达数百）压制在映射中段，
+      // 岗位拿不到最大斥力、被共享技能弹簧力拉拢而聚团重叠（2026-08-15 根因，
+      // 与阻尼/收敛无关）。固定 1000 > 技能 degree 上界 → 岗位全部映射到 repulsion
+      // 高端（对齐外部"岗位固定 value=30 拿最大斥力"语义）；技能保持 degree 映射低端。
       // 注意此 value 会覆盖透传的原始 value，tooltip/label 显示改用 displayValue 兜底。
-      value: n.type === 'position' ? (n.value ?? 0) * 3 : (n.value ?? 0),
+      value: n.type === 'position' ? 1000 : (n.value ?? 0),
       displayValue: n.value,
       symbol: symbolOf(n),
-      symbolSize: sizeOf(n),
+      // 展示尺寸用原始 value（布局放大值不撑大节点，见 sizeOf 注释）
+      symbolSize: sizeOf(n, n.value),
       category: n.type,
       itemStyle: {
         color: colorOf(n, dark),
         borderColor,
-        // 展开的岗位加粗描边，提示其技能当前可见（可点击收起）
-        borderWidth: expandedPositions?.has(n.id) ? 3 : 1,
+        // 展开的岗位高亮描边：亮色粗描边（暗色模式用浅色）+ 状态色增强光晕，
+        // 与未展开（1px 灰描边）明显区分，提示其技能当前可见（可点击收起）。
+        // 选中态由 dispatchAction select 样式覆盖（优先级更高），两者不冲突。
+        ...(n.type === 'position' && expandedPositions?.has(n.id)
+          ? {
+              borderColor: dark ? '#fafafa' : '#ffffff',
+              borderWidth: 3,
+              shadowBlur: isNarrow ? 14 : 22,
+              shadowColor: hexToRgba(colorOf(n, dark), 0.55),
+            }
+          : {}),
       },
       // 不在此处根据 selectedId 设置选中样式 — 选中高亮走 dispatchAction（②）
       label: {
@@ -294,6 +395,18 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 
     const option: echarts.EChartsCoreOption = {
       backgroundColor: 'transparent',
+      // 节点类型图例（08-16 视觉优化）：点击可开关岗位/技能/证据显示
+      legend: {
+        bottom: 8,
+        left: 'center',
+        itemWidth: 14,
+        itemHeight: 10,
+        itemGap: 16,
+        textStyle: { color: mutedColor, fontSize: 11 },
+        data: ['position', 'skill', 'evidence'],
+        formatter: (name: string) =>
+          name === 'position' ? '岗位' : name === 'skill' ? '技能' : '证据',
+      },
       tooltip: {
         trigger: 'item',
         backgroundColor: dark ? '#18181b' : '#ffffff',
@@ -322,26 +435,36 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           layout: 'force',
           roam: true,
           draggable: true,
+          // 节点悬停手型提示可交互（08-16 交互优化）
+          cursor: 'pointer',
+          // 标签防重叠：可见标签重叠时自动隐藏低优先级项（08-16 布局质量优化）
+          labelLayout: { hideOverlap: true },
           // 力导向布局动画开关：必须保持 true（异步逐帧），false 会让 ECharts 在
           // setOption 时同步递归跑完 ~511 步布局（friction 0.6 每步 ×0.992 到 0.01），
           // 主线程长时间阻塞 → 页面冻结（2026-08-08 实测 techStack 视图 10.8s）。
           // 动画时长由收敛步数决定（固定约 8s），节点数量影响每步成本。
           force: {
-            // 斥力/边长/重力调参（2026-08-11）：
+            // 斥力/边长/重力/阻尼调参（2026-08-15 按外部全景图校准 repulsion/edgeLength，
+            // 含窄屏降档）：
             // - repulsion 必须是数组 [low, high]：ECharts 用 linearMap(value, extent, [low,high])
-            //   按节点 value 线性映射斥力（固定值 350 对所有节点常数，岗位 value×3 布局放大无效）。
-            //   岗位 value×3 后分布在高端 → 斥力接近 high，技能在低端 → 接近 low。
-            // - gravity 调小，减弱向中心聚拢，避免高频大岗位堆在中央重叠。
-            repulsion: [150, 600],
-            edgeLength: [80, 240],
-            gravity: 0.04,
-            friction: 0.6,
+            //   按节点 value 线性映射斥力。岗位布局 value 固定 1000（见节点 map），
+            //   全部岗位映射到高端斥力；技能按 degree 映射低端。
+            // - friction 0.2 低阻尼：布局充分展开（岗位间距大）、收敛慢（30s+），
+            //   岗位防重叠由重叠驱动的兜底补齐（hasPositionOverlap 逐帧检测），
+            //   布局最终静止后连续 10 帧无重叠才停止，与 friction 取值无关。
+            // - 窄屏整体降档：斥力/边长缩小、重力增大，小画布上布局更快收敛不发散。
+            repulsion: isNarrow ? [160, 420] : [320, 1000],
+            edgeLength: isNarrow ? [70, 150] : [140, 300],
+            gravity: isNarrow ? 0.16 : 0.092,
+            friction: 0.2,
             layoutAnimation: true,
           },
           scaleLimit: { min: 0.3, max: 4 },
           emphasis: {
-            focus: 'adjacency',
-            lineStyle: { width: 3, opacity: 0.9 },
+            // 2026-08-15 去掉悬停强调：focus 'adjacency' 会在 hover 时把相邻边加粗高亮、
+            // 其余节点变淡，视觉干扰大；改 focus 'none' 后 hover 仅保留标签显示
+            // （低关联技能悬停可读名），不再有任何加粗/高亮效果
+            focus: 'none',
             label: { show: true },
           },
           selectedMode: 'single',
@@ -359,9 +482,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
             },
           },
           categories: [
-            { name: 'position' },
-            { name: 'skill' },
-            { name: 'evidence' },
+            // 图例代表色（节点实际色按状态/主题逐点计算）
+            { name: 'position', itemStyle: { color: '#3b82f6' } },
+            { name: 'skill', itemStyle: { color: dark ? '#fafafa' : '#09090b' } },
+            { name: 'evidence', itemStyle: { color: '#a1a1aa' } },
           ],
           data: nodes,
           links,
@@ -372,7 +496,62 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     // 默认 merge（不 replaceMerge）：ECharts 按 name diff 保留已有节点坐标，
     // 展开/收起时仅新增/移除技能节点，已有节点位置不被重置
     chart.setOption(option)
-  }, [data, themeVersion, expandedPositions])
+
+    // 布局岗位防重叠兜底（仅布局静止后执行）：
+    // 动画中执行 enforceSpread 无效且有害——force 布局弹簧力会把岗位拉回
+    // （推-拉循环 = 抖动 + 重叠残留，动画期间推开永远不生效）。
+    // 只在布局静止后严格兜底：连续 10 帧位移 <1px 判定静止 → 若有岗位重叠
+    // （边缘 <minGap 60）平滑推开一次（animate 300ms 过渡，force 已停不会拉回），
+    // 位移后重新静止判定，连续 10 帧无重叠才停止轮询。
+    let cleanFrames = 0
+    let stableFrames = 0
+    let lastPos: number[] = []
+    let rafId = 0
+    // animate 动画冷却截止时间：动画期间不触发新推开（防打断插值导致岗位停在半路）
+    let animatingUntil = 0
+    const checkOverlap = () => {
+      const seriesModel = (chart as unknown as { getModel(): EChartsModel | null }).getModel()?.getSeriesByIndex(0)
+      const list = seriesModel?.getData()
+      if (list) {
+        const count = Math.min(list.count(), 500)
+        const cur: number[] = new Array(count * 2)
+        for (let i = 0; i < count; i++) {
+          const l = list.getItemLayout(i)
+          cur[i * 2] = l?.[0] ?? 0
+          cur[i * 2 + 1] = l?.[1] ?? 0
+        }
+        let moved = 0
+        if (lastPos.length === cur.length) {
+          for (let i = 0; i < cur.length; i++) moved += Math.abs(cur[i] - lastPos[i])
+        }
+        lastPos = cur
+        stableFrames = moved < 1 ? stableFrames + 1 : 0
+      }
+      if (stableFrames >= 10 && performance.now() >= animatingUntil) {
+        if (hasPositionOverlap(chart, 60)) {
+          // 静止后仍有重叠 → 平滑推开一次（force 已停，不会被拉回）
+          enforceSpread(chart, { minGap: 60, maxIterations: 20, animate: true })
+          // 动画冷却：350ms 内不触发新推开，避免打断 animate 插值（否则岗位停在半路）
+          animatingUntil = performance.now() + 350
+          stableFrames = 0
+          cleanFrames = 0
+        } else {
+          cleanFrames += 1
+          if (cleanFrames >= 10) {
+            // 布局首次静止 → 自动适配画布（fitView 幂等，仅做一次）
+            if (!fitDoneRef.current) {
+              fitDoneRef.current = true
+              fitView()
+            }
+            return
+          }
+        }
+      }
+      rafId = requestAnimationFrame(checkOverlap)
+    }
+    rafId = requestAnimationFrame(checkOverlap)
+    return () => cancelAnimationFrame(rafId)
+  }, [data, themeVersion, expandedPositions, isNarrow, fitView])
 
   // ============================================================
   // ② 选中态高亮 effect — 仅 selectedId 变化时触发
@@ -424,28 +603,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       chart.getZr().refresh()
       // 高亮目标节点约 1.5s，提示用户已定位
       chart.dispatchAction({ type: 'highlight', seriesIndex: 0, name: node.name })
-      window.setTimeout(() => {
+      if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current)
+      highlightTimerRef.current = window.setTimeout(() => {
+        highlightTimerRef.current = null
         chart.dispatchAction({ type: 'downplay', seriesIndex: 0, name: node.name })
       }, 1500)
     },
     [data, panGroup, panOffset],
   )
-
-  const resetView = useCallback(() => {
-    const chart = chartRef.current
-    if (!chart) return
-    // 重置 ECharts roam 缩放/平移回初始视角
-    chart.dispatchAction({ type: 'restore' })
-    // 清掉手动平移累积的 group 偏移
-    const group = panGroup()
-    if (group) {
-      group.x -= panOffset.current.x
-      group.y -= panOffset.current.y
-      group.dirty()
-    }
-    panOffset.current = { x: 0, y: 0 }
-    chart.getZr().refresh()
-  }, [panGroup, panOffset])
 
   useImperativeHandle(ref, () => ({ focusNode, resetView }), [focusNode, resetView])
 

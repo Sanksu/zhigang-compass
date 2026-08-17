@@ -1,4 +1,4 @@
-import type { GraphNode } from './types'
+import type { GraphNode, PositionStatus } from './types'
 
 /** 技能标签显示阈值：低于全图技能节点 value 中位数的不常显标签（悬停/选中时经 emphasis 仍显示），
  *  避免技能全量渲染时标签叠字遮挡，同时减少 label 渲染开销 */
@@ -20,3 +20,14 @@ export function nodeRadius(node: GraphNode, selected: boolean, expanded: boolean
   else if (expanded && node.type === 'position') r *= 1.2
   return r
 }
+
+/** 岗位状态机 → 颜色（与 globals.css 中状态色对齐，设计令牌单一事实源；2D/3D 共用） */
+export const COLOR_BY_STATUS: Record<PositionStatus, string> = {
+  active: '#64748b',
+  candidate: '#71717a',
+  emerging: '#10b981',
+  stable: '#3b82f6',
+  declining: '#f59e0b',
+  archived: '#ef4444',
+}
+

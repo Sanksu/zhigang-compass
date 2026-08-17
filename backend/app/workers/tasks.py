@@ -26,7 +26,19 @@ from arq.cron import cron
 from arq.worker import func
 
 from app.core.config import settings
+from app.core import runtime_config
 from app.services.alerting import send_alert
+
+from sqlalchemy import or_, select
+from app.models.business import (
+    DiscoveryCandidate,
+    GraphVersion,
+    MatchResultRecord,
+    ResumeCache,
+    TaskStatus,
+    TechnologyWatch,
+)
+from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +100,6 @@ async def _update_crawl_task(task_id: str | None, **fields) -> None:
     if not task_id:
         return
     from app.core.database import async_session_factory
-    from app.models.business import TaskStatus
 
     async with async_session_factory() as s:
         task = await s.get(TaskStatus, task_id)
@@ -118,6 +129,13 @@ _CRAWL_TIMEOUT_SEC = 900
 # 单源超时上限（秒）。zhilian 详情补抓 8-15s/条限速，max_results=200 有界
 # 正常耗时约 1.6h（5760s）——超时须 > 正常耗时（防误杀），仍兜底挂死。
 _CRAWL_TIMEOUT_BY_SPIDER = {"zhilian": 7200}
+
+# 课程技能抽取（enrich_course_skills）失败重试配置（08-16 用户要求）：
+# 单课程 LLM 抽取失败后延迟 _ENRICH_RETRY_DELAY_SECONDS 秒再次进入队列
+# （下次 ETL 阶段 5.5 到期才重试，避免瞬时故障风暴下每次 ETL 全量重试）；
+# 累计失败达 _ENRICH_MAX_FAILS 次后放弃（写 skills_enriched，防无限重试）。
+_ENRICH_RETRY_DELAY_SECONDS = 3600   # 失败后延迟 1 小时重试
+_ENRICH_MAX_FAILS = 3                # 累计失败 3 次放弃
 
 
 def _crawl_timeout(spider_name: str) -> int:
@@ -271,8 +289,18 @@ async def crawl_platform(
             ),
             timeout=timeout,
         )
-        # gather 完成 = stdout/stderr 已 EOF，进程退出在即，wait 立即返回
-        returncode = await proc.wait()
+        # gather 完成 = stdout/stderr 已 EOF，进程退出在即；wait 仍套 10s 短超时兜底
+        # （子进程 spawn 孙进程/持有 fd 副本时 EOF 后可能不退出——08-15 审查回归，
+        #  原 H1 修复把 wait 移出 wait_for 丢失了超时保护，裸 wait 会永久挂起）
+        try:
+            returncode = await asyncio.wait_for(proc.wait(), timeout=10)
+        except asyncio.TimeoutError:
+            _kill_process_tree(proc)  # 同步函数（taskkill/killpg），勿 await
+            msg = f"爬虫 {spider_name} 输出流已关闭但进程未退出（wait 10s 超时），已强制终止"
+            print(f"[crawl_platform] 任务异常: task_id={task_id} {msg}", flush=True)
+            await _update_crawl_task(task_id, status="failed", error=msg[:500])
+            await send_alert("crawl_timeout", msg, spider=spider_name)
+            raise RuntimeError(msg)
     except asyncio.TimeoutError:
         _kill_process_tree(proc)  # 同步函数（taskkill/killpg），勿 await
         msg = f"爬虫 {spider_name} 超时（>{timeout}s），已强制终止"
@@ -456,12 +484,12 @@ def _graph_skill_first_seen(skills: Iterable[str]) -> dict[str, date]:
 def _position_skill_novelty(
     session, position_names: list[str], reference_days: int | None = None,
 ) -> dict[str, float | None]:
-    """岗位技能新颖度（§7.2.1 skill_novelty < 0.3，08-15 实现）。
+    """岗位技能新颖度（§7.2.1 skill_novelty < 0.2，08-15 需求调整 0.3→0.2）。
 
     数据源：Neo4j Skill.first_seen（实测 100% 覆盖）——岗位 REQUIRES 技能
     平均图谱年龄归一化：
         novelty = 1 - min(avg_age_days / reference_days, 1)
-    语义：岗位技能平均出现 ≥ reference_days×0.7 天（novelty < 0.3）视为
+    语义：岗位技能平均出现 ≥ reference_days×0.8 天（novelty < 0.2）视为
     技能成熟，才允许 stable（新技能驱动的岗位仍处演化期）。
 
     reference_days 默认自适应图谱生命周期（today - 图谱最早技能首见时间）：
@@ -580,10 +608,8 @@ async def validate_temporal(
     检测结果写回 `snapshot["validation"]`（含三类结果 + 叠加降权系数）；
     数据不足（无技能/无发布日期）的 JD 跳过，不做武断判定。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import JDRaw
     from app.services.data_quality.temporal_detector import (
         RECENT_WINDOW_DAYS,
         apply_temporal_decay,
@@ -720,10 +746,8 @@ async def detect_inflation(
     结果写回 `snapshot["inflation"]`（含四维分 / inflation_score / label / decay_weight）。
     缺岗位级别或经验解析失败的 JD 跳过，不做武断判定。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import JDRaw
     from app.services.data_quality.inflation_detector import compute_inflation_score
 
     async with async_session_factory() as session:
@@ -774,6 +798,85 @@ async def detect_inflation(
     return results
 
 
+def _purge_dup_import_residue(urls: list[str]) -> dict:
+    """清除已入图 SimHash 重复记录的图谱残留（08-15 核查后新增）。
+
+    重复记录在 canonical 名下入图即可，其独立入图残留 = 岗位节点 + 空权
+    REQUIRES 边（import_jd 写 necessity/level，聚合跳过重复记录 → 永不获
+    weight/source_count）。规则：
+    1. 删记录 Evidence 的 HAS_EVIDENCE（岗位）边；Evidence 被技能
+       EVIDENCED_BY 引用时保留节点（证据追溯链完整），否则连带删除；
+    2. 受影响岗位删除后无任何证据且 REQUIRES 均无 source_count → 纯重复
+       残留，DETACH DELETE（空权边一并清除）。
+
+    Returns:
+        {"has_edges_removed", "evidence_removed", "positions_removed"}
+    """
+    if not urls:
+        return {"has_edges_removed": 0, "evidence_removed": 0, "positions_removed": 0}
+    from app.core.database import neo4j_driver
+
+    with neo4j_driver.session() as session:
+        # 先收集受影响岗位（须在删证据边之前，删后无法回溯归属）
+        affected = session.run(
+            """
+            MATCH (p:Position)-[:HAS_EVIDENCE]->(e:Evidence)
+            WHERE e.source_url IN $urls
+            RETURN collect(DISTINCT p.name) AS names
+            """,
+            urls=urls,
+        ).single()["names"]
+        if not affected:
+            return {"has_edges_removed": 0, "evidence_removed": 0, "positions_removed": 0}
+
+        has_edges_removed = session.run(
+            """
+            MATCH (:Position)-[h:HAS_EVIDENCE]->(e:Evidence)
+            WHERE e.source_url IN $urls
+            RETURN count(h) AS n
+            """,
+            urls=urls,
+        ).single()["n"]
+        session.run(
+            """
+            MATCH (:Position)-[h:HAS_EVIDENCE]->(e:Evidence)
+            WHERE e.source_url IN $urls
+            DELETE h
+            """,
+            urls=urls,
+        )
+        evidence_removed = session.run(
+            """
+            MATCH (e:Evidence) WHERE e.source_url IN $urls
+            WITH e
+            OPTIONAL MATCH (sk:Skill)-[eb:EVIDENCED_BY]->(e)
+            WITH e, count(eb) AS refs
+            WHERE refs = 0
+            DETACH DELETE e
+            RETURN count(e) AS n
+            """,
+            urls=urls,
+        ).single()["n"]
+        positions_removed = session.run(
+            """
+            UNWIND $names AS name
+            MATCH (p:Position {name: name})
+            WHERE NOT EXISTS { MATCH (p)-[:HAS_EVIDENCE]->(:Evidence) }
+              AND NOT EXISTS {
+                  MATCH (p)-[r:REQUIRES]->(:Skill) WHERE r.source_count IS NOT NULL
+              }
+            DETACH DELETE p
+            RETURN count(p) AS n
+            """,
+            names=affected,
+        ).single()["n"]
+    return {
+        "has_edges_removed": has_edges_removed,
+        "evidence_removed": evidence_removed,
+        "positions_removed": positions_removed,
+    }
+
+
 async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     """SimHash 跨平台近似去重（设计文档 §4.2 消费方）。
 
@@ -784,10 +887,8 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     将后入库记录标记 `snapshot["_duplicate_of"]` = 先入库记录 id。
     聚合层（aggregation.build_aggregates）跳过被标记记录，避免重复 JD 虚高频次。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import JDRaw
     from app.services.data_quality.simhash import find_similar_pairs
     from app.services.embeddings.vector_store import load_jd_vectors_by_ids
     from app.services.matching.semantic import cosine_similarity
@@ -841,12 +942,220 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
                 marked += 1
         await session.commit()
 
+        # 入图残留对齐清理（08-15 新增）：去重标记可能晚于抽取入图（重复对
+        # 在后续轮次才发现），已入图的重复记录残留岗位节点 + 空权 REQUIRES 边。
+        # 与 rebuild_graph/聚合口径一致清除；已抽取记录才可能入过图，未抽取
+        # （跳过/失败）记录在图中无残留，无需处理。
+        dup_urls = [
+            (r.snapshot or {}).get("source_url") or r.source_url
+            for id_a, id_b in verified_pairs
+            if (r := id_map.get(id_b)) is not None
+            and (r.snapshot or {}).get("extraction")
+        ]
+        purge_stats: dict = {}
+        if dup_urls:
+            purge_stats = await asyncio.to_thread(_purge_dup_import_residue, dup_urls)
+
     return {
         "checked": len(records),
         "pairs": len(pairs),
         "skipped_emb": skipped_emb,
         "marked": marked,
+        "purged": purge_stats,
     }
+
+
+async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
+    """新采集课程技能标签补全（T-05，2026-08-15）。
+
+    背景：icourse163/edx 爬虫不产出 skills 字段（edx 写死空、icourse163 页面
+    无数据）→ 课程无 LEARNABLE_VIA 静态边（存量 974 门孤立课程，产品走
+    learning_path 语义兜底无功能缺陷）。本任务**仅处理新采集课程**
+    （crawled_at >= 最近 7 天，容错 ETL 失败重跑；存量孤立课程不动——
+    T-05 验收），LLM 从标题+描述抽取技能，门控（canonical + 停用词/白名单，
+    与 import_course 同口径，防 08-13 静态脏边问题）后写回
+    snapshot["skills"]；load_courses 阶段随之建 LEARNABLE_VIA 边。
+
+    LLM 不可用/解析失败静默降级（写 skills_enriched 标记防重复抽取，
+    不阻塞 ETL，与 RAG 接地同语义）。
+    """
+    from datetime import date, timedelta
+
+    from sqlalchemy import func, select
+
+    from app.core.database import async_session_factory
+    from app.services.extraction.course_skills import (
+        extract_course_skills,
+        filter_skill_tags,
+    )
+    from app.services.extraction.jd_extractor import JDExtractor
+
+    # 新采集窗口：最近 7 天（含 ETL 失败重跑容错；更早课程即存量孤立课程不处理）
+    since = (date.today() - timedelta(days=7)).isoformat()
+    # 延迟重试（08-16 用户要求）：LLM 抽取失败的课程延迟配置时间后再次入队，
+    # 避免每次 ETL 都立即重试全部失败课程（LLM 瞬时故障风暴）；累计失败
+    # 达上限后放弃（写 skills_enriched，防无限重试）
+    retry_delay = timedelta(seconds=_ENRICH_RETRY_DELAY_SECONDS)
+    retry_cutoff = datetime.now(timezone(timedelta(hours=8))) - retry_delay
+
+    async with async_session_factory() as session:
+        stmt = (
+            select(CourseRaw)
+            .where(
+                or_(
+                    CourseRaw.snapshot["skills"].astext.is_(None),
+                    func.jsonb_typeof(CourseRaw.snapshot["skills"]) != "array",
+                    func.jsonb_array_length(CourseRaw.snapshot["skills"]) == 0,
+                ),
+                CourseRaw.snapshot["skills_enriched"].astext.is_(None),
+                CourseRaw.crawled_at >= since,
+                # 延迟中跳过：skills_retry_at 未到（或缺失）才入选
+                or_(
+                    CourseRaw.snapshot["skills_retry_at"].astext.is_(None),
+                    CourseRaw.snapshot["skills_retry_at"].astext <= retry_cutoff.isoformat(),
+                ),
+            )
+            .order_by(CourseRaw.id.asc())
+        )
+        if limit:
+            stmt = stmt.limit(limit)
+        rows = (await session.scalars(stmt)).all()
+
+    llm = None
+    try:
+        llm = JDExtractor().llm
+    except Exception:
+        llm = None
+
+    enriched = 0
+    skipped_no_llm = 0
+    failed = 0
+    updates: dict[int, dict] = {}
+    for row in rows:
+        snap = dict(row.snapshot or {})
+        # 爬虫原始标签（如 coursera 段落解析）先过门控；仍有缺失才走 LLM
+        skills = filter_skill_tags(snap.get("skills") or [])
+        llm_errored = False
+        if not skills:
+            if llm is None:
+                skipped_no_llm += 1
+            else:
+                try:
+                    skills = extract_course_skills(
+                        llm, snap.get("title", ""), snap.get("description", "")
+                    )
+                except Exception:
+                    failed += 1
+                    llm_errored = True
+                    # 失败计数 + 延迟重试时间戳（下次 ETL 到期才重入队）
+                    fails = int(snap.get("skills_enrich_fails") or 0) + 1
+                    snap["skills_enrich_fails"] = fails
+                    if fails >= _ENRICH_MAX_FAILS:
+                        # 累计失败达上限：放弃（防无限重试），保留失败计数供排查
+                        snap["skills_enriched"] = True
+                    else:
+                        snap["skills_retry_at"] = (
+                            datetime.now(timezone(timedelta(hours=8))) + retry_delay
+                        ).isoformat()
+        if skills:
+            snap["skills"] = skills
+            enriched += 1
+            # 标记已处理，防每次 ETL 对同一课程重复调用 LLM
+            snap["skills_enriched"] = True
+        elif llm is None:
+            # LLM 不可用（skipped_no_llm）：不写标记——配置恢复后自动重试，
+            # 避免"LLM 缺失期间误标已处理"导致课程永久无标签
+            continue
+        elif llm_errored:
+            # 异常失败（未达放弃上限）：不写标记——retry_at 到期后重入队
+            pass
+        else:
+            # LLM 正常判定无技能（宁少勿滥空数组）：标记防重复调用
+            snap["skills_enriched"] = True
+        updates[row.id] = snap
+    if updates:
+        # 08-15 修复：此前在已关闭的 session 的 ORM 对象上改 snapshot 后于新
+        # session commit——detached 对象的修改不会落库，写回全部静默丢失
+        # （实测 PG 0 条）。重新加载本 session 的 ORM 对象再写回。
+        async with async_session_factory() as session:
+            objs = (
+                await session.scalars(
+                    select(CourseRaw).where(CourseRaw.id.in_(list(updates)))
+                )
+            ).all()
+            for o in objs:
+                o.snapshot = updates[o.id]
+            await session.commit()
+
+    return {
+        "checked": len(rows),
+        "enriched": enriched,
+        "skipped_no_llm": skipped_no_llm,
+        "failed": failed,
+    }
+
+
+async def graph_health_check(ctx: dict) -> dict:
+    """图谱健康巡检（08-15 全流程评估 P1）：每日 ETL 尾部自动检查。
+
+    把人工图谱扫描自动化——超限项 → webhook 告警（复用 _alert_llm 去重）：
+    1. 空权 REQUIRES 边（应为 0——#216 重复残留同源问题复发检测）
+    2. 孤立 Position（无任何关系——无名/僵尸节点）
+    3. candidate 状态岗位数（发现候选镜像，正常≈0）
+    4. 孤立 Course 覆盖率（>80% 提示课程标签链路异常；当前 ~70% 为
+       icourse163/edx 无标签数据源特性，非故障）
+    """
+    from app.core.database import neo4j_driver
+
+    def _query() -> dict:
+        with neo4j_driver.session() as s:
+            return {
+                "null_weight_edges": s.run(
+                    "MATCH ()-[r:REQUIRES]->(:Skill) "
+                    "WHERE r.weight IS NULL OR r.source_count IS NULL "
+                    "RETURN count(r) AS n"
+                ).single()["n"],
+                "isolated_positions": s.run(
+                    "MATCH (p:Position) WHERE NOT EXISTS { (p)--() } "
+                    "RETURN count(p) AS n"
+                ).single()["n"],
+                "candidate_positions": s.run(
+                    "MATCH (p:Position {status:'candidate'}) RETURN count(p) AS n"
+                ).single()["n"],
+                "total_courses": s.run("MATCH (c:Course) RETURN count(c) AS n").single()["n"],
+                "isolated_courses": s.run(
+                    "MATCH (c:Course) WHERE NOT EXISTS { (c)-[:LEARNABLE_VIA]-() } "
+                    "RETURN count(c) AS n"
+                ).single()["n"],
+            }
+
+    stats = await asyncio.to_thread(_query)
+    alerts: list[tuple[str, str]] = []
+    if stats["null_weight_edges"] > 0:
+        alerts.append((
+            "graph_null_weight_edges",
+            f"空权 REQUIRES 边 {stats['null_weight_edges']} 条（应为 0——重复残留或新写入口径漂移）",
+        ))
+    if stats["isolated_positions"] > 0:
+        alerts.append((
+            "graph_isolated_positions",
+            f"孤立 Position {stats['isolated_positions']} 个（无名/僵尸节点残留）",
+        ))
+    if stats["candidate_positions"] > 0:
+        alerts.append((
+            "graph_candidate_positions",
+            f"图谱 candidate 岗位 {stats['candidate_positions']} 个（发现候选镜像，正常≈0）",
+        ))
+    course_rate = stats["isolated_courses"] / stats["total_courses"] if stats["total_courses"] else 0.0
+    if course_rate > 0.8:
+        alerts.append((
+            "graph_course_coverage",
+            f"孤立课程覆盖率 {course_rate:.0%}（>80%，课程标签链路异常；数据源特性基线 ~70%）",
+        ))
+    alerted = {}
+    for event, msg in alerts:
+        alerted[event] = await _alert_llm(event, msg)
+    return {"stats": stats, "alerts": alerted}
 
 
 async def load_courses(ctx: dict) -> dict:
@@ -855,10 +1164,8 @@ async def load_courses(ctx: dict) -> dict:
     遍历 course_raw.snapshot 调 import_course（Neo4j MERGE 幂等，重复执行
     不产生重复节点）。单条失败不阻塞整体（批量语义）。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
-    from app.models.raw import CourseRaw
     from app.services.kg.kg_service import import_course
 
     async with async_session_factory() as session:
@@ -888,10 +1195,8 @@ async def evaluate_courses(ctx: dict) -> dict:
     遍历 course_raw 全量课程 → 六维加权质量评分 → 幂等写回
     `snapshot["quality"]`（覆盖更新）。返回推荐池统计，供学习路径取 Top-3。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import CourseRaw
     from app.services.data_quality.course_quality import (
         RECOMMEND_MIN_SCORE,
         evaluate_course,
@@ -923,10 +1228,8 @@ async def diversity_report(ctx: dict, top_n: int = 10) -> dict:
     聚合四类 raw 表多样性指标，写入 reports/diversity_{date}.json（幂等覆盖）。
     指标口径见 app/services/data_quality/diversity.py。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
     from app.services.data_quality.diversity import (
         course_diversity,
         dedup_stats,
@@ -997,10 +1300,8 @@ async def check_data_freshness(ctx: dict) -> dict:
     按来源聚合四类 raw 表最新抓取时间，判定平台级新鲜度（≤1 天），
     写入 reports/freshness_{date}.json。过期来源返回在结果中供告警。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
     from app.services.data_quality.update_status import platform_freshness
 
     async def _rows(model):
@@ -1049,10 +1350,8 @@ async def aggregate_positions(ctx: dict) -> dict:
     - Position.freq / required_years / last_updated
     - REQUIRES.weight / necessity / source_count
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
-    from app.models.raw import JDRaw
     from app.services.kg.aggregation import build_aggregates, write_aggregates
 
     async with async_session_factory() as session:
@@ -1080,10 +1379,8 @@ async def cross_validate_jds(ctx: dict, limit: int | None = None) -> dict:
     薪资异常、经验分歧、跨源置信度，结果写回 `snapshot["cross_validation"]`
     （幂等覆盖）。返回组级统计供管线审计。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import JDRaw
     from app.services.data_quality.cross_validate import (
         build_position_groups,
         validate_group,
@@ -1254,7 +1551,6 @@ async def _etl_limit(extracted: bool, default: int) -> int:
     from sqlalchemy import func, select
 
     from app.core.database import async_session_factory
-    from app.models.raw import JDRaw
 
     if extracted:
         predicate = JDRaw.snapshot["extraction"].astext.is_(None)
@@ -1355,6 +1651,14 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
         "detect_inflation", detect_inflation(ctx, jd_ids=[], limit=await _etl_limit(False, 200))
     )
 
+    # ── 阶段 5.5：新采集课程技能标签补全（T-05，08-15；须在入图前）──
+    # icourse163/edx 爬虫不产出 skills → 课程无 LEARNABLE_VIA 静态边；
+    # LLM 抽取 + 门控写回 snapshot["skills"]，load_courses 随之建边。
+    # 仅处理最近 7 天新采集课程（存量孤立课程不动，走语义兜底）。
+    results["stages"]["enrich_course_skills"] = await _run_stage(
+        "enrich_course_skills", enrich_course_skills(ctx)
+    )
+
     # ── 阶段 6：课程入图（course_raw → Course + LEARNABLE_VIA）──
     results["stages"]["load_courses"] = await _run_stage("load_courses", load_courses(ctx))
 
@@ -1409,6 +1713,11 @@ async def run_etl_pipeline(ctx: dict, run_date: str | None = None, skip_cdp: boo
     except Exception as e:
         results["stages"]["discovery"] = {"error": str(e)[:500]}
 
+    # ── 阶段 16：图谱健康巡检（08-15 P1：空权边/孤立节点/状态异常 → 告警）──
+    results["stages"]["graph_health_check"] = await _run_stage(
+        "graph_health_check", graph_health_check(ctx)
+    )
+
     return results
 
 
@@ -1424,10 +1733,8 @@ async def resume_parse(ctx: dict, file_path: str, task_id: str | None = None) ->
     - 任务状态经 TaskStatus 追踪（parse_resume 路由入队时携带 task_id）
     - 任一环节失败标记 task failed 并记录错误，不做假成功返回
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.business import ResumeCache, TaskStatus
     from app.services.resume.extractor import ResumeExtractor
     from app.services.resume.file_parser import extract_text
     from app.services.resume.pii_mask import mask_pii, restore_pii
@@ -1540,10 +1847,8 @@ async def match_recommend(
     """
     import uuid
 
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory, redis_client
-    from app.models.business import MatchResultRecord, ResumeCache, TaskStatus
     from app.services.matching.engine import RuleBasedMatcher
     from app.services.matching.loaders import build_candidate, load_positions_from_graph
     from app.services.matching.schemas import MatchMode, MatchRequest
@@ -1686,10 +1991,8 @@ async def batch_extract(
 
     全部失败时抛出，由 ARQ 重试机制兜底。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
-    from app.models.raw import JDRaw
     from app.services.extraction.jd_extractor import JDExtractor
     from app.services.kg.kg_service import import_jd
 
@@ -1713,7 +2016,7 @@ async def batch_extract(
         # 写 skipped 标记推进游标，否则 `extraction IS NULL` 游标永不推进
         # （短文本行/低质行堆积时正常 JD 饿死）
         valid: list[JDRaw] = []
-        results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": []}
+        results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": [], "skipped_dup": 0}
         for row in rows:
             snap = row.snapshot or {}
             if _is_jd_text_short(snap, row.raw_text or ""):
@@ -1773,6 +2076,17 @@ async def batch_extract(
                 f"[batch_extract] 处理 jd_id={row.id}（{i}/{total}，{i / total * 100:.0f}%）",
                 flush=True,
             )
+            # SimHash 重复记录不入图（与 rebuild_graph/聚合口径一致）：重复内容
+            # 已在 canonical 记录名下入图，此处再入会残留"聚合不覆盖"的空权
+            # REQUIRES 边（08-15 核查：7 岗位/115 空权边根因，见 project_memory）。
+            # 抽取结果仍落库——聚合/入图均已跳过该记录，落库仅为推进游标
+            # （`extraction IS NULL` 条件）避免下次批跑重复调用 LLM。
+            if (row.snapshot or {}).get("_duplicate_of"):
+                snap = dict(row.snapshot or {})
+                snap["extraction"] = extraction.model_dump()
+                row.snapshot = snap
+                results["skipped_dup"] += 1
+                continue
             try:
                 evidence = {
                     "source": row.source,
@@ -1850,10 +2164,8 @@ async def discovery_daily(ctx: dict) -> dict:
 
     幂等设计：按 position_name upsert，重复执行覆盖更新（同岗位不重复入池）。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.raw import CommunityRaw, JDRaw, PaperRaw
     from app.services.discovery.detector import DiscoveryDetector, DiscoveryInput
     from app.services.discovery.confidence import compute_confidence
     from app.services.extraction.dictionary import normalize_position_name
@@ -1922,7 +2234,6 @@ async def discovery_daily(ctx: dict) -> dict:
     # 从 graph_versions 快照序列重建岗位频次窗口，计算真实 Z-score /
     # 3 月移动平均 / 环比增长率，替代此前 history_days=1/z_score=None 硬编码
     # （否则正常 Z-score 门控永不触发，只能走冷启动）
-    from app.models.business import GraphVersion
     from app.services.discovery.state_machine import freq_z_scores, position_freq_windows
 
     async with async_session_factory() as session:
@@ -2017,7 +2328,7 @@ async def discovery_daily(ctx: dict) -> dict:
 
     llm = None
     try:
-        llm = JDExtractor()._llm
+        llm = JDExtractor().llm
     except Exception:
         llm = None
     async with async_session_factory() as session:
@@ -2076,11 +2387,8 @@ async def discovery_auto_transition(ctx: dict) -> dict:
 
     数据不足（jd_raw 无已抽取记录或岗位窗口序列 < 2）时跳过，不武断判定（冷启动）。
     """
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
-    from app.models.business import DiscoveryCandidate
-    from app.models.raw import JDRaw
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
     from app.services.discovery.state_machine import (
         WindowFreq, decline_rate, evaluate_auto_transition, freq_z_scores,
@@ -2163,7 +2471,6 @@ async def discovery_auto_transition(ctx: dict) -> dict:
                 rag_matched=row.rag_matched,
                 definition_draft=row.definition_draft,
             )
-            conf = float((row.confidence or {}).get("final_confidence", 0.0))
             # z_scores 由频次序列自身重建（freq_z_scores）：declining 岗位回升
             # 时最近 2 窗口 z > 0，触发 declining → stable 自动回迁
             windows = WindowFreq(freqs=freqs, z_scores=freq_z_scores(freqs))
@@ -2172,7 +2479,7 @@ async def discovery_auto_transition(ctx: dict) -> dict:
             # 标记非真实证据，全部候选只有 1 条）
             jd_count = sum(daily_freqs.get(name, {}).values())
             target = evaluate_auto_transition(
-                candidate, windows, confidence=conf, jd_count=jd_count,
+                candidate, windows, jd_count=jd_count,
                 skill_novelty=novelty_map.get(row.position_name),
             )
             _logger.info(
@@ -2222,8 +2529,6 @@ class _Provider:
 
 async def _upsert_candidate(session, cand) -> None:
     """按 position_name upsert 候选池（幂等：同岗位覆盖更新特征/状态）。"""
-    from app.models.business import DiscoveryCandidate
-    from sqlalchemy import select
 
     row = await session.scalar(
         select(DiscoveryCandidate).where(DiscoveryCandidate.position_name == cand.position_name)
@@ -2268,11 +2573,8 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
         run_date: 统计周期 YYYY-MM-DD（缺省用当天）
     """
     from datetime import date, timedelta
-    from sqlalchemy import select
 
     from app.core.database import async_session_factory
-    from app.models.business import TechnologyWatch
-    from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
     from app.services.discovery.watch_pool import (
         aggregate_weekly_freqs,
         anomaly_flags,
@@ -2335,7 +2637,6 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
         await session.commit()
 
         # ── 3. 提升候选：JD 源命中且该技能此前已在观察池（设计 §7.2.5 / 方案 §2）──
-        from app.models.business import DiscoveryCandidate
         from app.services.discovery.confidence import compute_confidence
         from app.services.discovery.watch_pool import promotable_skills
 
@@ -2401,12 +2702,46 @@ async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
 # ARQ Worker 注册
 # ============================================================
 
+_LLM_ALERT_DEDUP_TTL = 3600  # LLM 告警去重窗口（1 小时，防 5min cron 刷屏）
+
+
+async def _alert_llm(event: str, message: str) -> bool:
+    """LLM 异常告警（Redis SET NX 去重：同事件窗口内只发一次）。
+
+    Redis 不可用时不阻塞告警本身（去重失效可接受——webhook 幂等）。
+    """
+    from app.core.config import settings
+    from app.services.alerting import send_alert
+
+    # 08-16：管理后台可编辑 webhook（runtime_settings.json，重启生效）
+    webhook = runtime_config.get("alert_webhook_url") or settings.alert_webhook_url
+    if not webhook:
+        return False
+    key = f"alert:dedup:{event}"
+    try:
+        import redis as redis_sync
+
+        r = redis_sync.Redis.from_url(settings.redis_url, socket_timeout=3)
+        acquired = await asyncio.to_thread(
+            r.set, key, "1", nx=True, ex=_LLM_ALERT_DEDUP_TTL
+        )
+        r.close()
+        if not acquired:
+            return False  # 同事件已告警（窗口内）
+    except Exception:
+        pass
+    return await send_alert(event, message)
+
+
 async def check_llm_providers_health(ctx: dict) -> dict:
     """LLM provider 健康检查（设计文档 §6.5：每 5min 调 /models 端点）。
 
     遍历 enabled provider 探测 /models 可用性，结果写 Redis（llm:health:{name}），
     供调用链展示/运维排查。配置缺失（无 yaml）时跳过并返回原因，不触发
     ARQ 重试；单 provider 探测失败仅记 unhealthy，由熔断/退避机制在调用侧兜底。
+
+    08-15 事故教训（LLM 配置丢失静默降级无人发现）：配置缺失或全部 provider
+    不可用 → webhook 告警（1 小时去重），不再静默。
     """
     from app.services.extraction.llm_provider import (
         LLMConfigurationError,
@@ -2416,7 +2751,17 @@ async def check_llm_providers_health(ctx: dict) -> dict:
     try:
         checked = await asyncio.to_thread(health_check_all)
     except LLMConfigurationError as e:
-        return {"status": "skipped", "reason": str(e)}
+        alerted = await _alert_llm(
+            "llm_config_missing", f"LLM 配置缺失，全链路将降级规则抽取: {e}"
+        )
+        return {"status": "skipped", "reason": str(e), "alerted": alerted}
+    if checked and not any(checked.values()):
+        alerted = await _alert_llm(
+            "llm_providers_down",
+            f"全部 LLM provider 不可用（{len(checked)} 个），抽取将降级规则兜底",
+        )
+        print(f"[check_llm_providers_health] ALL DOWN {checked}", flush=True)
+        return {"status": "degraded", "healthy": checked, "alerted": alerted}
     print(f"[check_llm_providers_health] {checked}", flush=True)
     return {"status": "ok", "healthy": checked}
 
@@ -2464,6 +2809,7 @@ class WorkerSettings:
         resume_parse,
         match_recommend,
         batch_extract,
+        enrich_course_skills,
         load_courses,
         evaluate_courses,
         diversity_report,
@@ -2477,12 +2823,14 @@ class WorkerSettings:
         watch_signal_daily,
         snapshot_graph,
         check_llm_providers_health,
+        graph_health_check,
     ]
     on_startup = on_startup
     on_shutdown = on_shutdown
     redis_settings = RedisSettings.from_dsn(settings.arq_redis_url)
-    concurrency = settings.arq_concurrency
-    job_timeout = settings.arq_job_timeout
+    # 08-16：管理后台可编辑（runtime_settings.json，重启生效），未设置时回退 env
+    concurrency = runtime_config.get("arq_concurrency", settings.arq_concurrency)
+    job_timeout = runtime_config.get("arq_job_timeout", settings.arq_job_timeout)
     max_retries = 2
     retry_delay = 10
     # 定时任务（设计文档 §6.5）：每 5min 探测 provider 健康并写 Redis；

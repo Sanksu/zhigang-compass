@@ -50,8 +50,9 @@ _GRAY_ZONE_Q_MIN = 0.62
 # P1-1 课程级语义兜底阈值：无课技能直接对课程池标题匹配（08-13 实证）。
 # 可救案例：PostgreSQL→MySQL 课 0.601、服务器运维→网络技术 0.554、React→Advanced React 0.863；
 # 课程池缺课案例（Spark→0.469 高级英语、Docker→0.475 物流学、Gin→0.361 世界史）宁缺毋滥。
-# 0.55 介于门控 0.5 与技能级 fallback 0.7 之间。
-_COURSE_POOL_MATCH_THRESHOLD = 0.55
+# 08-16 对齐门控 0.5（course 0.85 收尾）：0.5-0.55 边缘课程进入标题门控与灰色带质量门控
+# 双把关（非直通），仅放宽初筛不放大误配。
+_COURSE_POOL_MATCH_THRESHOLD = 0.5
 
 # P1-1 低质课程过滤：icourse163 期末突击/复习资料类课程（标题特征，噪声不入推荐池）
 _LOW_QUALITY_TITLE_MARKERS = ("期末冲刺", "不挂科", "学霸笔记", "期末复习", "考前突击")
@@ -182,19 +183,56 @@ def _semantic_match_skill(
 
 
 def _lexical_hit(skill_name: str, title: str) -> bool:
-    """词面命中：长度 ≥3 的技能名包含在课程名中（缩写/短技能名校验）。
+    """强词面命中：技能名或其核心 token（≥3 字符）直接包含在课程名中。
 
     背景（08-13 AWS 补采实证）：SBERT 对 "AWS" vs "AWS Cloud Technical
     Essentials" 相似度仅 0.472——缩写技能名与长课程名语义相似度虚低，
-    纯语义匹配会漏掉词面明确相关的课程。词面命中视为相关（课程名含
-    技能名即说明课程围绕该技能）；"Go"/"C" 等短词词面会误配，豁免。
-    扩展（08-15）：技能中文名命中 _EN_SKILL_HINTS 时，课程英文标题含
-    任一英文关键词同样视为词面命中（中英跨语言短词 sim 虚低豁免）。
+    词面包含即证明课程围绕该技能（豁免 sim 阈值）；"Go"/"C" 等短词
+    词面会误配，豁免。
+    08-16 增强（课程语义 0.85 收尾）：带后缀/多词技能名整串子串不命中
+    （"Express.js" vs 课程名 "…Node.js and Express"、"RESTful API" vs
+    "…RESTful技术"）——按非字母数字拆分 token（≥3 字符），任一 token
+    命中课程名即词面相关；泛化 token（code/app/api/web 等，如
+    "Claude Code" 的 "code" ∈ "No-Code…" 实证误配）不做 token 命中。
     """
-    if len(skill_name) >= 3 and skill_name.lower() in title.lower():
+    low_skill = skill_name.lower()
+    low_title = title.lower()
+    if len(skill_name) >= 3 and low_skill in low_title:
         return True
+    tokens = re.split(r"[^a-z0-9\u4e00-\u9fff]+", low_skill)
+    return any(
+        len(t) >= 3 and t not in _GENERIC_LEXICAL_TOKENS and t in low_title
+        for t in tokens
+    )
+
+
+# 泛化 token（token 级词面不豁免）：单独命中不构成相关性信号
+# （"Claude Code"→"No-Code…"、"X API"→任意含 api 标题 实证误配）
+_GENERIC_LEXICAL_TOKENS = frozenset({
+    "code", "app", "api", "web", "data", "cloud", "tech", "ai", "ml", "dev", "sys",
+})
+
+
+def _lexical_hint_hit(skill_name: str, title: str) -> bool:
+    """弱词面命中：技能中文名命中 _EN_SKILL_HINTS 时课程英文标题含关键词。
+
+    中英跨语言短词 sim 虚低豁免（08-15）：豁免 sim 阈值但**保留质量底线**——
+    关键词宽泛（web/api/linux/etl），无质量门控直通会放大误配（08-15 审查）。
+    """
     low = title.lower()
     return any(h in low for h in _EN_SKILL_HINTS.get(skill_name, ()))
+
+
+def _quality_ok(r: dict, quality_map: dict | None) -> bool:
+    """课程质量分 ≥ 灰色带底线（_GRAY_ZONE_Q_MIN）；quality_map 缺失时通过。
+
+    quality_map=None（调用方未提供质量数据）保持纯规则链路不过滤，与
+    semantic=None 降级行为一致；传入空 dict 时视为全部质量缺失（宁缺毋滥）。
+    """
+    if quality_map is None:
+        return True
+    q = (quality_map.get((r.get("source"), r.get("source_id"))) or {}).get("quality_score")
+    return q is not None and q >= _GRAY_ZONE_Q_MIN
 
 
 def _filter_by_title_similarity(
@@ -215,6 +253,10 @@ def _filter_by_title_similarity(
     'Windsurf'↔'轮滑' 0.581 实证）——该带内仅保留质量分 ≥0.62 的课程
     （合理灰色带课程：Office→Excel 0.553/q0.658、推荐算法→ML 课 0.514/q0.703），
     低质课程宁缺毋滥过滤（避免误导学习路径）。
+
+    弱词面（_lexical_hint_hit，08-15 中英豁免扩展）仅豁免 sim 阈值，质量底线
+    仍生效——关键词宽泛（web/api/linux/etl），无质量门控直通会放大误配
+    （08-15 审查；强词面 _lexical_hit 课程名直接包含技能名，相关性自证）。
     """
     if not rows or semantic is None:
         return rows
@@ -231,11 +273,12 @@ def _filter_by_title_similarity(
         except Exception:
             continue
         if sim < title_threshold:
+            # 弱词面豁免 sim 阈值（中英跨语言短词 sim 虚低），质量底线仍生效
+            if _lexical_hint_hit(skill_name, title) and _quality_ok(r, quality_map):
+                kept.append(r)
             continue
-        if _GRAY_ZONE_SIM[0] <= sim < _GRAY_ZONE_SIM[1] and quality_map is not None:
-            q = (quality_map.get((r.get("source"), r.get("source_id"))) or {}).get("quality_score")
-            if q is None or q < _GRAY_ZONE_Q_MIN:
-                continue
+        if _GRAY_ZONE_SIM[0] <= sim < _GRAY_ZONE_SIM[1] and not _quality_ok(r, quality_map):
+            continue
         kept.append(r)
     return kept
 

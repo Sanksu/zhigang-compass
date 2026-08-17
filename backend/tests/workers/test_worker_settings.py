@@ -15,6 +15,7 @@ from app.workers.tasks import (
     batch_extract,
     check_data_freshness,
     check_llm_providers_health,
+    graph_health_check,
     crawl_platform,
     cross_validate_jds,
     dedup_simhash,
@@ -22,6 +23,7 @@ from app.workers.tasks import (
     discovery_auto_transition,
     discovery_daily,
     diversity_report,
+    enrich_course_skills,
     evaluate_courses,
     load_courses,
     match_recommend,
@@ -42,6 +44,7 @@ EXPECTED_FUNCTIONS = [
     resume_parse,
     match_recommend,
     batch_extract,
+    enrich_course_skills,
     load_courses,
     evaluate_courses,
     diversity_report,
@@ -55,6 +58,7 @@ EXPECTED_FUNCTIONS = [
     watch_signal_daily,
     snapshot_graph,
     check_llm_providers_health,
+    graph_health_check,
 ]
 
 

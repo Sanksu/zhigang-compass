@@ -19,7 +19,7 @@ from unittest.mock import patch
 from app.services.extraction.dictionary import SKILL_STOPWORDS
 from app.services.extraction.jd_extractor import JDExtractor
 from app.services.extraction.llm_provider import LLMConfigurationError, LLMExtractionError
-from app.services.extraction.post_processor import canonical_skill_name
+from app.services.extraction.post_processor import canonical_skill_name, post_process
 from app.services.extraction.schemas import (
     JDExtractionResult,
     SkillExtracted,
@@ -146,7 +146,8 @@ class TestJDLLMPathFiltering:
 
     def test_suffix_cleaned_and_deduped(self):
         # 后缀清洗 + 别名归一 + 大小写去重（保留首次）
-        out = self._post(JDExtractionResult(
+        # （直调 post_process：词面守卫属 extract 层，另有专项测试）
+        out = post_process(JDExtractionResult(
             position_name="",
             skills=[
                 SkillExtracted(name="Docker 技术"),

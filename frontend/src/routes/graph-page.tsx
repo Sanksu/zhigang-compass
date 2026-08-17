@@ -113,7 +113,9 @@ function toGraphData(raw: PanoramaData): GraphData {
   }
 }
 
-/** 非全景视图已由后端 /graph/view/{view_type} 提供（技术栈/级别/岗位中心均为服务端过滤）。 */
+/** 非全景视图已由后端 /graph/view/{view_type} 提供（技术栈/级别/岗位中心均为服务端过滤）；
+ *  画布岗位数上限（MAX_POSITIONS=30，见 visibleData）为前端展示层裁剪——高频岗位 Top-30
+ *  保底显示 + 已展开岗位必显示，低频岗位经搜索/详情面板触达（2026-08-15 画布容量限制）。 */
 
 /**
  * 能力图谱页 — 设计文档 §10.3
@@ -127,6 +129,9 @@ export function GraphPage() {
   const [mode, setMode] = useState<'2d' | '3d'>('2d')
   const [selected, setSelected] = useState<NodeDetail | null>(null)
   const [raw, setRaw] = useState<GraphData | null>(null)
+  // 视图数据缓存（session 级，08-16 性能优化）：同视图切换回来不重复请求/转换。
+  // 数据随每日 ETL 更新，session 内缓存可接受（页面刷新即失效）
+  const viewCacheRef = useRef<Map<GraphViewType, GraphData>>(new Map())
   const [loading, setLoading] = useState(true)
   // 错误含业务码（08-14 审查：此前仅存 message，4040 与后端未启动混淆归因）
   const [error, setError] = useState<{ code: number; message: string } | null>(null)
@@ -174,22 +179,32 @@ export function GraphPage() {
   // 控制画布规模在 ECharts force 布局可承受范围，避免主线程长时间阻塞（2026-08-08）
   useEffect(() => {
     let cancelled = false
+    // 数据到位后统一应用：设置数据 + 非技术栈视图自动展开 Top 岗位 + 结束 loading
+    const applyViewData = (g: GraphData) => {
+      setRaw(g)
+      setError(null)
+      if (view !== 'techStack') {
+        const top = g.nodes
+          .filter((n) => n.type === 'position')
+          .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+          .slice(0, AUTO_EXPAND_COUNT)
+          .map((n) => n.id)
+        setExpandedPositions(new Set(top))
+      }
+      setLoading(false)
+    }
+    const cached = viewCacheRef.current.get(view)
+    if (cached) {
+      // 命中缓存：跳过网络请求与转换（08-16 性能优化）
+      applyViewData(cached)
+      return
+    }
     apiGet<PanoramaData>(`/graph/view/${view}?limit=120`)
       .then((res) => {
         if (cancelled) return
         const g = toGraphData(res)
-        setRaw(g)
-        setError(null)
-        // 非技术栈视图首屏自动展开 Top 高频岗位，让"岗位-技能关系"直接可见；
-        // 技术栈视图已全量展示技能，无需展开。数据到达时一并重建，避免 effect 内同步 setState。
-        if (view !== 'techStack') {
-          const top = g.nodes
-            .filter((n) => n.type === 'position')
-            .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-            .slice(0, AUTO_EXPAND_COUNT)
-            .map((n) => n.id)
-          setExpandedPositions(new Set(top))
-        }
+        viewCacheRef.current.set(view, g)
+        applyViewData(g)
       })
       .catch((e) => {
         if (!cancelled) {
@@ -332,9 +347,28 @@ export function GraphPage() {
   // 画布可见数据：
   // - techStack（技能为中心）：全量展示技能+边，不做岗位过滤
   // - 岗位中心视图：展示岗位节点 + 已展开岗位的技能（单岗位技能数上限防重叠）
+  // 岗位显示数量限制（Top-30 按关联度降序 + 展开的岗位必显示，2026-08-15）：
+  // 岗位中心/技术栈视图岗位全量 100+，物理上放不下岗位防重叠所需间距
+  // （enforceSpread minGap 60 → 每岗位约 1.06 万 px²，画布仅 ~54 万 px² 容量 ~30 岗位），
+  // 且全量渲染节点爆炸不可读。低频岗位不显示，可在搜索/详情面板中触达。
+  const MAX_POSITIONS = 30
   const visibleData = useMemo<GraphData | null>(() => {
     if (!data) return null
-    if (view === 'techStack') return data
+
+    const keepPositions = new Set<string>()
+    data.nodes
+      .filter((n) => n.type === 'position')
+      .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      .slice(0, MAX_POSITIONS)
+      .forEach((p) => keepPositions.add(p.id))
+    expandedPositions.forEach((id) => keepPositions.add(id))
+
+    if (view === 'techStack') {
+      const nodes = data.nodes.filter((n) => n.type !== 'position' || keepPositions.has(n.id))
+      const nodeIds = new Set(nodes.map((n) => n.id))
+      const edges = data.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+      return { ...data, nodes, edges }
+    }
 
     // 每个展开岗位：按边权重取 Top-N 技能（多岗位共享技能去重）
     const perPositionSkills = new Map<string, string[]>()
@@ -351,11 +385,13 @@ export function GraphPage() {
       perPositionSkills.set(pid, skills)
     }
     const skillIds = new Set([...perPositionSkills.values()].flat())
-    const nodes = data.nodes.filter((n) => n.type === 'position' || skillIds.has(n.id))
-    // 只保留两端都可见的边（岗位-技能关系，且技能在展开上限内）
+    const nodes = data.nodes.filter((n) =>
+      n.type === 'position' ? keepPositions.has(n.id) : skillIds.has(n.id),
+    )
+    // 只保留两端都可见的边（岗位-技能关系，且岗位在显示集、技能在展开上限内）
     const edges = data.edges.filter((e) => {
-      const a = expandedPositions.has(e.source)
-      const b = expandedPositions.has(e.target)
+      const a = keepPositions.has(e.source)
+      const b = keepPositions.has(e.target)
       return (a && skillIds.has(e.target)) || (b && skillIds.has(e.source))
     })
     return { ...data, nodes, edges }
@@ -681,6 +717,9 @@ export function GraphPage() {
       {/* 图例：与画布实际渲染对齐（形状+颜色，支持色盲识别） */}
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-muted" role="list" aria-label="图谱图例">
         <span className="font-medium text-ink-secondary">图例：</span>
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span className="size-2.5 rounded-full bg-state-active" role="img" aria-label="活跃岗位：蓝灰圆形" /> 活跃
+        </span>
         <span className="flex items-center gap-1.5" role="listitem">
           <span className="size-2.5 rounded-full bg-state-stable" role="img" aria-label="稳定岗位：蓝色圆形" /> 稳定
         </span>

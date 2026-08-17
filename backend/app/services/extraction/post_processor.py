@@ -4,7 +4,7 @@
 """
 
 import re
-from app.services.extraction.schemas import JDExtractionResult, SkillExtracted
+from app.services.extraction.schemas import JDExtractionResult, REQUIRESRelation, SkillExtracted
 from app.services.extraction.dictionary import (
     SKILL_WHITELIST,
     SOFT_SKILL_NOISE,
@@ -14,6 +14,46 @@ from app.services.extraction.dictionary import (
     normalize_skill,
     normalize_tool_name,
 )
+from app.services.extraction.dictionary_data import SKILL_ALIAS
+
+# 别名反向索引（标准名 → 别名列表）：词面守卫豁免——正文用同义词/缩写时
+# （"LLM" vs "大语言模型"）技能名词面未出现但别名命中即保留
+_ALIAS_REV: dict[str, list[str]] = {}
+for _k, _v in SKILL_ALIAS.items():
+    _ALIAS_REV.setdefault(_v.lower(), []).append(_k.lower())
+
+
+def _text_has(low: str, name: str) -> bool:
+    """词边界检查技能名或其别名是否出现在正文（小写）。"""
+    n = name.lower()
+    if re.search(r"(?<![a-z0-9])" + re.escape(n) + r"(?![a-z0-9])", low):
+        return True
+    return any(a in low for a in _ALIAS_REV.get(n, []))
+
+
+def lexical_guard(result: JDExtractionResult, jd_text: str) -> JDExtractionResult:
+    """词面守卫（08-17 JD 解析收尾）：skills 中正文无词面（含别名豁免）的
+    技能降级到 requirements(nice)——LLM 演绎的"正文未出现"技能不作必备
+    （防噪音进 must 聚合）；正文语义推断词（"数据可视化" vs 正文职责表述）
+    同样降级——盲审若收录需靠 skills(must) 口径对齐（fn 可接受）。
+
+    仅作用于 LLM 路径结果（result.method == "llm"）：规则兜底 skills 来自
+    正文扫描，但清洗后技能名可能与原文不同（"C语言"→"C"），词面校验会
+    误伤——规则路径跳过守卫。
+    """
+    if result.method != "llm" or not result.skills or not jd_text:
+        return result
+    low = jd_text.lower()
+    kept = [s for s in result.skills if _text_has(low, s.name)]
+    demoted = [s.name for s in result.skills if not _text_has(low, s.name)]
+    if not demoted:
+        return result
+    result.skills = kept
+    existing = {r.skill_name for r in result.requirements}
+    for name in demoted:
+        if name not in existing:
+            result.requirements.append(REQUIRESRelation(skill_name=name, necessity="nice"))
+    return result
 
 # 需去除的中文后缀（按长度降序排列，优先匹配长后缀）。
 # 复用 dictionary._SKILL_MODIFIERS：normalize_skill 剥修饰词重查与 clean_skill_name
@@ -61,7 +101,7 @@ def dedup_skills(skills: list[SkillExtracted]) -> list[SkillExtracted]:
     return result
 
 
-def _is_valid_skill_name(name: str) -> bool:
+def is_valid_skill_name(name: str) -> bool:
     """技能名校验：白名单/别名标准名保护 + 泛词/碎片拦截。
 
     除 SKILL_STOPWORDS 黑名单与单字符碎片外，复用 is_noise_skill 的泛词判定
@@ -94,7 +134,7 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     result.skills = [
         SkillExtracted(name=_clean(s.name), category=s.category, description=s.description)
         for s in result.skills
-        if _is_valid_skill_name(_clean(s.name)) and not _is_soft_noise(_clean(s.name))
+        if is_valid_skill_name(_clean(s.name)) and not _is_soft_noise(_clean(s.name))
     ]
     result.skills = dedup_skills(result.skills)
 
@@ -120,7 +160,7 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     seen: set[tuple[str, str]] = set()
     for req in result.requirements:
         name = _clean(req.skill_name)
-        if not _is_valid_skill_name(name) or _is_soft_noise(name):
+        if not is_valid_skill_name(name) or _is_soft_noise(name):
             continue
         key = (name.lower(), req.necessity)
         if key in seen:

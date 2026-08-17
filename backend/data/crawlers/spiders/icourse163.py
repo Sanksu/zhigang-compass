@@ -16,9 +16,7 @@
   scrapy crawl icourse163 -a keywords=Python,机器学习,人工智能 -o output/icourse163.jsonl
 """
 
-import json
 import os
-import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -26,12 +24,13 @@ from datetime import datetime, timedelta, timezone
 from scrapy import Request, Spider
 from scrapy.http import Response
 
+from crawlers.base_spider import iter_jsonl, run_script
 from crawlers.items import CourseItem
-from crawlers.settings import RATE_LIMIT, SUBPROCESS_TIMEOUT
+from crawlers.settings import RATE_LIMIT
 
 
-# 默认搜索关键词（与项目 AI/大数据/全栈方向一致）
-DEFAULT_KEYWORDS = ["Python", "机器学习", "人工智能", "数据结构", "数据库"]
+# 默认搜索关键词：空 = 平台默认课程流（08-16 用户决策，不再内置定向词）
+DEFAULT_KEYWORDS: list[str] = []
 
 
 class Icourse163Spider(Spider):
@@ -86,10 +85,8 @@ class Icourse163Spider(Spider):
 
     async def parse(self, response: Response):
         """通过 subprocess 调用独立采集脚本，解析 JSONL 输出并 yield Item。"""
-        keywords = response.meta.get("keywords") or self.keywords
-        if not keywords:
-            self.logger.error("无采集关键词，请通过 -a keywords= 指定")
-            return
+        # 空关键词 = 平台默认课程流（08-16 用户决策）
+        keywords = (response.meta.get("keywords") or self.keywords) or [""]
 
         python_exe = sys.executable
         keyword_total = len(keywords)
@@ -104,46 +101,20 @@ class Icourse163Spider(Spider):
                 "--max-pages", str(self.max_pages),
             ]
 
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    cwd=os.path.dirname(self.crawler_script),
-                    env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
-                )
-            except Exception as e:
-                self.logger.error(f"启动采集脚本失败: {e}")
+            result = run_script(cmd, os.path.dirname(self.crawler_script), self.logger,
+                               f"[icourse163] 任务 {kw_idx + 1}/{keyword_total}")
+            if result is None:
                 continue
-
-            # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
-            try:
-                stdout, stderr_output = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                stdout, stderr_output = proc.communicate()
-                self.logger.error(f"[icourse163] 任务 {kw_idx + 1}/{keyword_total} 超时（>{SUBPROCESS_TIMEOUT}s），已终止")
-                continue
+            stdout, stderr_output, returncode = result
 
             count = 0
-            for line in stdout.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    item_data = json.loads(line)
-                except json.JSONDecodeError as e:
-                    self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
-                    continue
-
+            for item_data in iter_jsonl(stdout, self.logger):
                 yield self._make_item(item_data)
                 count += 1
 
-            if proc.returncode != 0:
+            if returncode != 0:
                 self.logger.error(
-                    f"采集脚本退出码 {proc.returncode}, stderr: {stderr_output[-300:]}"
+                    f"采集脚本退出码 {returncode}, stderr: {stderr_output[-300:]}"
                 )
             else:
                 # 把 stderr 的关键日志也转记一下（便于排错）

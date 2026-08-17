@@ -4,14 +4,13 @@
 （默认过滤 state=candidate），review 走状态机校验 + 图谱 status 同步 + 审计日志。
 """
 
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 import asyncio
 import json
 import logging
 import re
-import time
 import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,13 +19,15 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.common import iso, paged_ok, paginate, serialize_task, sse_task_events
 from app.api.deps import require_permission
 from app.core.arq_client import enqueue
 from app.core.database import get_db, redis_client
+from app.core.errors import ERR_CONFLICT, ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALIDATION
 from app.core.security import hash_password
 from app.models.business import AuditLog, RejectedChange, ResumeFile, TaskStatus, User
 from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
-from app.schemas.common import ok, error
+from app.schemas.common import error, ok
 from app.services.kg.id_generator import next_id
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_permission("admin:*"))])
@@ -67,9 +68,9 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ):
     """用户列表（分页）。"""
-    total = await db.scalar(select(func.count()).select_from(User))
-    rows = await db.scalars(
-        select(User).order_by(User.created_at.desc()).offset((page - 1) * size).limit(size)
+    stmt = select(User).order_by(User.created_at.desc())
+    rows, total = await paginate(
+        db, stmt, page, size, count_stmt=select(func.count()).select_from(User)
     )
     items = [
         {
@@ -77,12 +78,12 @@ async def list_users(
             "username": u.username,
             "role": u.role,
             "is_active": u.is_active,
-            "created_at": u.created_at.isoformat() if u.created_at else None,
-            "updated_at": u.updated_at.isoformat() if u.updated_at else None,
+            "created_at": iso(u.created_at),
+            "updated_at": iso(u.updated_at),
         }
         for u in rows
     ]
-    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+    return paged_ok(items, total, page, size)
 
 
 @router.post("/users", status_code=201)
@@ -92,12 +93,12 @@ async def create_user(req: dict, db: AsyncSession = Depends(get_db)):
     password = req.get("password") or ""
     role = req.get("role") or "user"
     if len(username) < 3 or len(password) < 6:
-        return error(4000, "用户名至少 3 字符，密码至少 6 字符")
+        return error(ERR_VALIDATION, "用户名至少 3 字符，密码至少 6 字符")
     if role not in ("admin", "user", "guest"):
-        return error(4000, "角色非法")
+        return error(ERR_VALIDATION, "角色非法")
     existing = await db.scalar(select(User).where(User.username == username))
     if existing is not None:
-        return error(4090, "用户名已存在")
+        return error(ERR_CONFLICT, "用户名已存在")
     user = User(username=username, password_hash=hash_password(password), role=role)
     db.add(user)
     await db.commit()
@@ -115,13 +116,13 @@ async def update_user(
     """更新用户角色 / 启用状态（M6 自保护：不可降级/禁用自己）。"""
     user = await db.get(User, user_id)
     if user is None:
-        return error(4040, "用户不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "用户不存在", http_status=404)
     # 自保护：当前登录管理员不允许降级自己的角色或禁用自己，避免后台锁死
     if user_id == current_user.get("sub"):
         if req.get("status") is not None and req["status"] != "active":
-            return error(4000, "不能禁用当前登录账户")
+            return error(ERR_VALIDATION, "不能禁用当前登录账户")
         if req.get("role") and req["role"] != "admin":
-            return error(4000, "不能降级当前登录账户")
+            return error(ERR_VALIDATION, "不能降级当前登录账户")
     if "role" in req and req["role"] in ("admin", "user", "guest"):
         user.role = req["role"]
     if "status" in req:
@@ -175,9 +176,8 @@ async def audit_logs(
         prefix = category.lower() + "%"
         stmt = stmt.where(AuditLog.action.like(prefix))
         count_stmt = count_stmt.where(AuditLog.action.like(prefix))
-    total = await db.scalar(count_stmt)
-    rows = await db.scalars(
-        stmt.order_by(AuditLog.created_at.desc()).offset((page - 1) * size).limit(size)
+    rows, total = await paginate(
+        db, stmt, page, size, count_stmt=count_stmt
     )
     items = [
         {
@@ -188,11 +188,11 @@ async def audit_logs(
             "resource_id": log.resource_id,
             "detail": log.detail,
             "ip_address": log.ip_address,
-            "created_at": log.created_at.isoformat() if log.created_at else None,
+            "created_at": iso(log.created_at),
         }
         for log in rows
     ]
-    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+    return paged_ok(items, total, page, size)
 
 
 # ============================================================
@@ -247,11 +247,11 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
         if not spider:
             continue
         pid = _SPIDER_TO_PLATFORM.get(spider, spider)
-        ts = t.created_at.isoformat() if t.created_at else None
+        ts = iso(t.created_at)
         if ts and (pid not in task_last_run or ts > task_last_run[pid]):
             task_last_run[pid] = ts
 
-    # 平台 → output/*.jsonl 文件数
+    # 平台 → output/*.jsonl 文件数（platforms[].files 字段，管理参考用）
     file_counts: dict[str, int] = {}
     if _OUTPUT_DIR.exists():
         for f in sorted(_OUTPUT_DIR.glob("*.jsonl")):
@@ -263,7 +263,7 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
     platforms = []
     for pid, meta in PLATFORM_META.items():
         st = raw_stats.get(pid, {"total": 0, "today": 0, "last": None})
-        last_run = st["last"].isoformat() if st["last"] else None
+        last_run = iso(st["last"])
         ts = task_last_run.get(pid)
         if ts and (last_run is None or ts > last_run):
             last_run = ts
@@ -286,7 +286,9 @@ async def crawl_status(db: AsyncSession = Depends(get_db)):
     return ok(data={
         "metrics": {
             "today_count": sum(s["today"] for s in raw_stats.values()),  # 今日（CST）入库新增
-            "output_total": sum(file_counts.values()),
+            # 累计采集量统一 DB 口径（08-15 用户决策）：与仪表盘一致的四表入库
+            # 总量；output jsonl 行数口径废弃（output 含未入库/重复记录，易误导）
+            "raw_total": raw_counts["jd"] + raw_counts["course"] + raw_counts["paper"] + raw_counts["community"],
             "raw": raw_counts,
         },
         "platforms": sorted(platforms, key=lambda x: (x["level"], x["id"])),
@@ -329,17 +331,15 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
 
     校验平台（PLATFORM_META 白名单）→ 建 TaskStatus(pending) → 入队 ARQ
     crawl_platform → 返回 task_id。队列不可用时标记任务 failed 并返回 500。
+    keyword 留空 = 采集平台热度/最新内容（08-16 用户决策）。
     """
     platform = (req.get("platform") or "").strip()
     keyword = (req.get("keyword") or "").strip()
     city = (req.get("city") or "").strip()
-    logger.info(f"[crawl/trigger] 收到触发请求: platform={platform} keyword={keyword} city={city or '(默认)'}")
+    logger.info(f"[crawl/trigger] 收到触发请求: platform={platform} keyword={keyword or '(空=热度/最新)'} city={city or '(默认)'}")
     if platform not in _PLATFORM_TO_SPIDER:
         logger.warning(f"[crawl/trigger] 未知平台: {platform}")
-        return error(4000, f"未知平台: {platform}（可选: {', '.join(sorted(PLATFORM_META))}）")
-    if not keyword:
-        logger.warning("[crawl/trigger] keyword 为空")
-        return error(4000, "keyword 不能为空")
+        return error(ERR_VALIDATION, f"未知平台: {platform}（可选: {', '.join(sorted(PLATFORM_META))}）")
 
     try:
         task = TaskStatus(
@@ -355,13 +355,13 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
             f"[crawl/trigger] 任务落库失败: platform={platform} keyword={keyword} city={city or '(默认)'} err={e}"
         )
         # 08-14 审查：异常详情仅入服务端日志，不随响应外泄（错误详情泄露漏网点）
-        return error(5000, "爬取任务落库失败，请稍后重试")
+        return error(ERR_INTERNAL, "爬取任务落库失败，请稍后重试")
     logger.info(f"[crawl/trigger] 任务已建: task_id={task.id} platform={platform} keyword={keyword} city={city or '(默认)'}")
 
     try:
         await _enqueue_crawl(
             _PLATFORM_TO_SPIDER[platform],
-            [keyword],
+            [keyword] if keyword else [],  # 空关键词 = 平台热度/最新采集（08-16 用户决策）
             cities=[city] if city else None,
             task_id=str(task.id),
         )
@@ -371,7 +371,7 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
         task.error = "任务入队失败"  # 固定文案：详情仅入日志，防经 /crawl/history 透传内部信息
         await db.commit()
         logger.error(f"[crawl/trigger] 任务入队失败: task_id={task.id} err={e}")
-        return error(5000, "爬取任务入队失败，请稍后重试")
+        return error(ERR_INTERNAL, "爬取任务入队失败，请稍后重试")
 
     return ok(data={"task_id": task.id, "platform": platform, "status": "pending"})
 
@@ -379,18 +379,6 @@ async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
 # ============================================================
 # 爬虫实时日志（SSE）：手动触发后逐行推送 scrapy 终端输出
 # ============================================================
-
-def _crawl_task_payload(task) -> dict:
-    """crawl 任务状态 → SSE data 载荷（TaskStatus ORM 对象不可直接 JSON 序列化）。"""
-    return {
-        "task_id": task.id,
-        "task_type": task.task_type,
-        "status": task.status,
-        "progress": task.progress,
-        "result": task.result,
-        "error": task.error,
-    }
-
 
 async def _crawl_log_events(
     task_uuid: str,
@@ -407,31 +395,31 @@ async def _crawl_log_events(
     error 后关闭。日志按 offset 增量拉取，避免重复推送。
     """
     offset = 0
-    deadline = time.monotonic() + timeout
-    while True:
+
+    async def _poll_logs() -> list[str]:
+        nonlocal offset
         try:
             lines = await get_logs(task_uuid, offset)
         except Exception:
             lines = []
-        for ln in lines:
-            yield f"event: log\ndata: {json.dumps({'line': ln}, ensure_ascii=False)}\n\n"
         offset += len(lines)
+        return [
+            f"event: log\ndata: {json.dumps({'line': ln}, ensure_ascii=False)}\n\n"
+            for ln in lines
+        ]
 
-        task = await get_task(task_uuid)
-        if task is None:
-            yield f"event: error\ndata: {json.dumps({'message': '任务不存在'}, ensure_ascii=False)}\n\n"
-            return
-        if task["status"] == "success":
-            yield f"event: done\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
-            return
-        if task["status"] == "failed":
-            yield f"event: error\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
-            return
-        yield f"event: progress\ndata: {json.dumps({'status': task['status'], 'progress': task['progress']}, ensure_ascii=False)}\n\n"
-        if time.monotonic() >= deadline:
-            yield f"event: error\ndata: {json.dumps({'message': '推送超时'}, ensure_ascii=False)}\n\n"
-            return
-        await asyncio.sleep(poll_interval)
+    def _progress(task) -> dict:
+        return {"status": task["status"], "progress": task["progress"]}
+
+    async for event in sse_task_events(
+        task_uuid,
+        get_task,
+        before_poll=_poll_logs,
+        progress_payload=_progress,
+        poll_interval=poll_interval,
+        timeout=timeout,
+    ):
+        yield event
 
 
 @router.get("/crawl/task/{task_id}/stream")
@@ -445,7 +433,7 @@ async def crawl_task_stream(task_id: str):
     try:
         task_uuid = str(uuid.UUID(task_id))
     except (ValueError, AttributeError):
-        return error(4000, "task_id 格式非法")
+        return error(ERR_VALIDATION, "task_id 格式非法")
 
     from app.core.arq_client import get_pool
 
@@ -455,7 +443,7 @@ async def crawl_task_stream(task_id: str):
 
         async with async_session_factory() as session:
             task = await session.get(TaskStatus, tid)
-        return _crawl_task_payload(task) if task is not None else None
+        return serialize_task(task) if task is not None else None
 
     async def _get_logs(tid: str, start: int) -> list[str]:
         # 复用模块级 ARQ 连接池（08-14 审查：此前每 0.5s 新建池，600s 轮询 ≈ 1200 次建连）
@@ -485,11 +473,10 @@ async def crawl_history(
     count_stmt = (
         select(func.count()).select_from(TaskStatus).where(TaskStatus.task_type == "crawl")
     )
-    total = await db.scalar(count_stmt) or 0
-    rows = await db.scalars(
-        stmt.order_by(TaskStatus.created_at.desc()).offset((page - 1) * size).limit(size)
+    rows, total = await paginate(
+        db, stmt.order_by(TaskStatus.created_at.desc()), page, size, count_stmt=count_stmt
     )
-    return ok(data={"items": [_history_row(t) for t in rows], "total": total, "page": page, "size": size})
+    return paged_ok([_history_row(t) for t in rows], total, page, size)
 
 
 def _history_row(task) -> dict:
@@ -504,7 +491,7 @@ def _history_row(task) -> dict:
         "status": task.status,
         "items": result.get("items") or 0,
         "error": task.error or "",
-        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "created_at": iso(task.created_at),
     }
 
 
@@ -526,7 +513,7 @@ async def _persist_rejected_change(
 
 @router.get("/positions/pending")
 async def positions_pending(
-    state: str | None = Query(default=None, pattern="^(candidate|emerging|stable|declining)$"),
+    state: str = Query(default="candidate", pattern="^(candidate|emerging|stable|declining)$"),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -534,6 +521,8 @@ async def positions_pending(
     """待审核岗位列表（新岗位发现候选池）。
 
     默认返回 candidate（待 admin 审核是否晋升 emerging），可切换状态过滤。
+    （08-15 修复：此前 state 缺省不过滤——摘要/徽标把已晋升 emerging/stable
+    计入"待审核"，29 条中真待办仅 2 条 candidate。）
     """
     from app.models.business import DiscoveryCandidate
 
@@ -542,11 +531,9 @@ async def positions_pending(
     if state:
         stmt = stmt.where(DiscoveryCandidate.state == state)
         count_stmt = count_stmt.where(DiscoveryCandidate.state == state)
-    total = await db.scalar(count_stmt)
-    rows = await db.scalars(
-        stmt.order_by(DiscoveryCandidate.detected_at.desc())
-        .offset((page - 1) * size)
-        .limit(size)
+    rows, total = await paginate(
+        db, stmt.order_by(DiscoveryCandidate.detected_at.desc()), page, size,
+        count_stmt=count_stmt,
     )
     items = [
         {
@@ -560,11 +547,11 @@ async def positions_pending(
             "rag_matched": c.rag_matched,
             "definition_draft": c.definition_draft,
             "detected_at": c.detected_at,
-            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            "updated_at": iso(c.updated_at),
         }
         for c in rows
     ]
-    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+    return paged_ok(items, total, page, size)
 
 
 @router.post("/positions/{candidate_id}/review")
@@ -589,15 +576,15 @@ async def review_position(
     action = req.get("action")
     reason = (req.get("reason") or "").strip()
     if action not in ("approve", "reject"):
-        return error(4000, "action 必须为 approve 或 reject")
+        return error(ERR_VALIDATION, "action 必须为 approve 或 reject")
     if not reason:
-        return error(4000, "审核必须填写 reason")
+        return error(ERR_VALIDATION, "审核必须填写 reason")
 
     cand_row = await db.get(DiscoveryCandidate, candidate_id)
     if cand_row is None:
-        return error(4040, "候选岗位不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "候选岗位不存在", http_status=404)
     if cand_row.state != "candidate":
-        return error(4090, f"候选岗位当前状态 {cand_row.state}，不可审核")
+        return error(ERR_CONFLICT, f"候选岗位当前状态 {cand_row.state}，不可审核")
 
     features = DiscoveryFeatures(**cand_row.features)
     candidate = CandidatePosition(
@@ -618,7 +605,7 @@ async def review_position(
 
         conf = cand_row.confidence or {}
         if not can_promote_to_emerging(candidate, confidence=float(conf.get("final_confidence", 0.0))):
-            return error(4000, "置信度 < 0.6 或独立源 < 2，不满足 emerging 晋升条件")
+            return error(ERR_VALIDATION, "置信度 < 0.6 或独立源 < 2，不满足 emerging 晋升条件")
 
     updated = await asyncio.to_thread(
         _persist_position_state,
@@ -667,11 +654,9 @@ async def evolution_pending(
     count_stmt = select(func.count()).select_from(DiscoveryCandidate).where(
         DiscoveryCandidate.state == "emerging"
     )
-    total = await db.scalar(count_stmt)
-    rows = await db.scalars(
-        stmt.order_by(DiscoveryCandidate.updated_at.desc())
-        .offset((page - 1) * size)
-        .limit(size)
+    rows, total = await paginate(
+        db, stmt.order_by(DiscoveryCandidate.updated_at.desc()), page, size,
+        count_stmt=count_stmt,
     )
     items = [
         {
@@ -684,11 +669,11 @@ async def evolution_pending(
             "rag_matched": c.rag_matched,
             "definition_draft": c.definition_draft,
             "detected_at": c.detected_at,
-            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            "updated_at": iso(c.updated_at),
         }
         for c in rows
     ]
-    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+    return paged_ok(items, total, page, size)
 
 
 @router.put("/evolution/{candidate_id}/review")
@@ -711,13 +696,13 @@ async def review_evolution(
 
     action = req.get("action")
     if action not in ("approve", "reject"):
-        return error(4000, "action 必须为 approve 或 reject")
+        return error(ERR_VALIDATION, "action 必须为 approve 或 reject")
 
     cand_row = await db.get(DiscoveryCandidate, candidate_id)
     if cand_row is None:
-        return error(4040, "候选岗位不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "候选岗位不存在", http_status=404)
     if cand_row.state != "emerging":
-        return error(4090, f"候选岗位当前状态 {cand_row.state}，仅 emerging 可执行演化审核")
+        return error(ERR_CONFLICT, f"候选岗位当前状态 {cand_row.state}，仅 emerging 可执行演化审核")
 
     candidate = CandidatePosition(
         candidate_id=cand_row.id,
@@ -774,11 +759,9 @@ async def positions_declining(
     count_stmt = select(func.count()).select_from(DiscoveryCandidate).where(
         DiscoveryCandidate.state == "declining"
     )
-    total = await db.scalar(count_stmt)
-    rows = await db.scalars(
-        stmt.order_by(DiscoveryCandidate.updated_at.desc())
-        .offset((page - 1) * size)
-        .limit(size)
+    rows, total = await paginate(
+        db, stmt.order_by(DiscoveryCandidate.updated_at.desc()), page, size,
+        count_stmt=count_stmt,
     )
     items = [
         {
@@ -788,11 +771,11 @@ async def positions_declining(
             "confidence": c.confidence,
             "evidence_refs": c.evidence_refs,
             "detected_at": c.detected_at,
-            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            "updated_at": iso(c.updated_at),
         }
         for c in rows
     ]
-    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+    return paged_ok(items, total, page, size)
 
 
 @router.put("/positions/{candidate_id}/archive")
@@ -813,13 +796,13 @@ async def archive_position(
 
     reason = (req.get("reason") or "").strip()
     if not reason:
-        return error(4000, "归档必须填写 reason")
+        return error(ERR_VALIDATION, "归档必须填写 reason")
 
     cand_row = await db.get(DiscoveryCandidate, candidate_id)
     if cand_row is None:
-        return error(4040, "候选岗位不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "候选岗位不存在", http_status=404)
     if cand_row.state != "declining":
-        return error(4090, f"候选岗位当前状态 {cand_row.state}，仅 declining 可归档")
+        return error(ERR_CONFLICT, f"候选岗位当前状态 {cand_row.state}，仅 declining 可归档")
 
     candidate = CandidatePosition(
         candidate_id=cand_row.id,
@@ -1102,7 +1085,7 @@ async def get_position_detail(position_name: str):
     """岗位详情（§12.2 岗位人工编辑：编辑前查看技能/学历/证书与文本定义）。"""
     detail = await asyncio.to_thread(_query_position_detail, position_name)
     if detail is None:
-        return error(4040, f"岗位不存在: {position_name}", http_status=404)
+        return error(ERR_NOT_FOUND, f"岗位不存在: {position_name}", http_status=404)
     return ok(data=detail)
 
 
@@ -1123,14 +1106,14 @@ async def update_position_definition(
     scenarios = req.get("scenarios")
     err = validate_position_edit(skills, core_duties, scenarios)
     if err:
-        return error(4000, err)
+        return error(ERR_VALIDATION, err)
 
     editor_id = current_user.get("sub") or current_user.get("user_id", "admin")
     result = await asyncio.to_thread(
         _edit_position_neo4j, position_name, editor_id, skills, core_duties, scenarios
     )
     if not result["exists"]:
-        return error(4040, f"岗位不存在: {position_name}", http_status=404)
+        return error(ERR_NOT_FOUND, f"岗位不存在: {position_name}", http_status=404)
     # 编辑已生效：失效岗位详情缓存（graph.py key 为 graph:position:{id}:{scope}，
     # all=全量可见，public=公开态），避免用户读到 5min 旧数据
     if result["id"]:
@@ -1266,7 +1249,7 @@ async def get_llm_config():
     try:
         cfg = load_llm_config(_LLM_CONFIG_PATH)
     except (OSError, yaml.YAMLError):
-        return error(5000, "LLM 配置读取失败")
+        return error(ERR_INTERNAL, "LLM 配置读取失败")
     cfg["providers"] = mask_providers(cfg.get("providers", []))
     return ok(data=cfg)
 
@@ -1278,11 +1261,52 @@ async def update_llm_config(req: dict):
     try:
         saved = save_llm_config(_LLM_CONFIG_PATH, providers)
     except ValueError as e:
-        return error(4000, str(e))
+        return error(ERR_VALIDATION, str(e))
     except (OSError, yaml.YAMLError):
-        return error(5000, "LLM 配置保存失败")
+        return error(ERR_INTERNAL, "LLM 配置保存失败")
     saved["providers"] = mask_providers(saved.get("providers", []))
     return ok(data=saved)
+
+
+# ============================================================
+# 运行时配置（08-16：管理后台 /admin/settings 可编辑、重启生效）
+# ============================================================
+
+@router.get("/runtime-config")
+async def get_runtime_config():
+    """读取运行时配置（非敏感运行参数；rate_limit 返回各源生效值）。"""
+    from app.core import runtime_config
+
+    data = runtime_config.load_all()
+    # rate_limit 展示"默认 + 覆盖"合并后的生效值（crawlers.settings 启动时已合并）
+    try:
+        from crawlers.settings import RATE_LIMIT as CRAWLER_RATE_LIMIT
+
+        data["rate_limit"] = {
+            src: {
+                "req_per_min": cfg.get("req_per_min", 4),
+                "delay_range": [int(cfg["delay_range"][0]), int(cfg["delay_range"][1])]
+                if cfg.get("delay_range") else None,
+            }
+            for src, cfg in CRAWLER_RATE_LIMIT.items()
+        }
+    except Exception:
+        pass  # 独立运行环境无 crawlers 包时仅返回文件内容
+    return ok(data=data)
+
+
+@router.put("/runtime-config")
+async def update_runtime_config(req: dict):
+    """校验并持久化运行时配置（runtime_settings.json，重启后生效）。"""
+    from app.core import runtime_config
+
+    try:
+        data = runtime_config.save(req)
+    except ValueError as e:
+        return error(ERR_VALIDATION, str(e))
+    except OSError:
+        return error(ERR_INTERNAL, "配置保存失败，请检查目录权限")
+    return ok(data=data)
 
 
 # ============================================================
@@ -1305,10 +1329,7 @@ async def list_technology_watch(
         stmt = stmt.where(TechnologyWatch.status == status)
     if source:
         stmt = stmt.where(TechnologyWatch.signal_source == source)
-    total = (await db.scalar(select(func.count()).select_from(stmt.subquery()))) or 0
-    rows = (await db.scalars(
-        stmt.offset((page - 1) * size).limit(size)
-    )).all()
+    rows, total = await paginate(db, stmt, page, size)
     items = [
         {
             "skill_name": r.skill_name,
@@ -1316,9 +1337,9 @@ async def list_technology_watch(
             "signal_value": r.signal_value,
             "period": r.period,
             "status": r.status,
-            "first_seen_at": r.first_seen_at.isoformat() if r.first_seen_at else None,
-            "last_signal_at": r.last_signal_at.isoformat() if r.last_signal_at else None,
+            "first_seen_at": iso(r.first_seen_at),
+            "last_signal_at": iso(r.last_signal_at),
         }
         for r in rows
     ]
-    return ok(data={"items": items, "total": total, "page": page, "size": size})
+    return paged_ok(items, total, page, size)

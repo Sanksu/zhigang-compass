@@ -631,14 +631,7 @@ paths:
     post:
       tags: [resume]
       summary: 上传简历触发解析（异步，含 PII 脱敏预处理）
-      schema:
-        type: object
-        properties:
-          code: { type: integer }
-          msg: { type: string }
-          data:
-            $ref: '#/components/schemas/ResumeListData'
-          trace_id: { type: string }
+      requestBody:
         required: true
         content:
           multipart/form-data:
@@ -1063,16 +1056,22 @@ paths:
   /api/v1/evolution/positions:
     get:
       tags: [evolution]
-      summary: 岗位演化列表（默认岗位 Top-N，按快照出现热度降序）
+      summary: 岗位演化列表（按快照出现热度降序分页）
+      description: 08-16：limit 改 page/size 分页，响应含 total
       parameters:
-        - name: limit
+        - name: page
           in: query
           required: false
-          schema: { type: integer, default: 8, minimum: 1, maximum: 20 }
-          description: 返回岗位数
+          schema: { type: integer, default: 1, minimum: 1 }
+          description: 页码（从 1 起）
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
+          description: 每页条数
       responses:
         '200':
-          description: 默认岗位演化列表
+          description: 岗位演化列表（data 含 positions/total/page/size）
           content:
             application/json:
               schema:
@@ -1086,16 +1085,22 @@ paths:
   /api/v1/evolution/skills:
     get:
       tags: [evolution]
-      summary: 技能演化列表（默认技能 Top-N，按快照出现热度降序）
+      summary: 技能演化列表（按快照出现热度降序分页）
+      description: 08-16：limit 改 page/size 分页，响应含 total
       parameters:
-        - name: limit
+        - name: page
           in: query
           required: false
-          schema: { type: integer, default: 8, minimum: 1, maximum: 20 }
-          description: 返回技能数
+          schema: { type: integer, default: 1, minimum: 1 }
+          description: 页码（从 1 起）
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
+          description: 每页条数
       responses:
         '200':
-          description: 默认技能演化列表
+          description: 技能演化列表（data 含 skills/total/page/size）
           content:
             application/json:
               schema:
@@ -1147,14 +1152,22 @@ paths:
   /api/v1/evolution/watch:
     get:
       tags: [evolution]
-      summary: 观察池公开摘要 + MLI 产业化拐点排名（前端看板）
+      summary: 观察池公开摘要 + MLI 产业化拐点排名（前端看板，分页）
+      description: 08-16：limit 改 page/size 分页
       parameters:
-        - name: limit
+        - name: page
           in: query
-          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+          required: false
+          schema: { type: integer, default: 1, minimum: 1 }
+          description: 页码（从 1 起）
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 10, minimum: 1, maximum: 100 }
+          description: 每页条数
       responses:
         '200':
-          description: 观察池摘要（data 含 items/total，item 含 mli/ready_to_industrialize）
+          description: 观察池摘要（data 含 items/total/page/size，item 含 mli/ready_to_industrialize）
           content:
             application/json:
               schema:
@@ -1251,10 +1264,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [platform, keyword]
+              required: [platform]
               properties:
                 platform: { type: string, description: "平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx" }
-                keyword: { type: string }
+                keyword: { type: string, description: "关键词（可选，留空则采集平台热度/最新内容，08-16 起爬虫不再内置默认关键词）" }
                 city: { type: string, description: "城市（可选，海外源默认英文城市）" }
       responses:
         '202':
@@ -1325,6 +1338,46 @@ paths:
             text/event-stream:
               schema:
                 type: string
+
+  /api/v1/admin/runtime-config:
+    get:
+      tags: [admin]
+      summary: 读取运行时配置（非敏感运行参数，admin only）
+      responses:
+        '200':
+          description: 当前生效配置（rate_limit 为各源生效值）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/RuntimeConfig'
+                  trace_id: { type: string }
+    put:
+      tags: [admin]
+      summary: 保存运行时配置（持久化 runtime_settings.json，重启后生效）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeConfig'
+      responses:
+        '200':
+          description: 保存成功（返回规范化后的配置）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/RuntimeConfig'
+                  trace_id: { type: string }
 
   /api/v1/admin/llm-config:
     get:
@@ -1461,6 +1514,16 @@ paths:
     get:
       tags: [admin]
       summary: 待审核岗位列表
+      description: 默认返回 candidate（待 admin 审核是否晋升 emerging），可切换状态过滤
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            default: candidate
+            enum: [candidate, emerging, stable, declining]
+          description: 候选池状态过滤（缺省 candidate——摘要/徽标计数的待审核口径）
       responses:
         '200':
           description: 待审核列表
@@ -1737,8 +1800,8 @@ components:
         type: { type: string, enum: [position, skill, evidence] }
         status:
           type: string
-          enum: [candidate, emerging, stable, declining, archived]
-          description: 岗位状态机（仅 position 节点）
+          enum: [active, candidate, emerging, stable, declining, archived]
+          description: 岗位状态机（仅 position 节点；active=图谱常态岗位，非发现状态机成员）
 
     GraphEdge:
       type: object
@@ -2076,6 +2139,7 @@ components:
         detail:
           type: object
           description: 动作详情（如 {username}），结构随 action 变化
+          additionalProperties: true
         ip_address: { type: string }
         created_at: { type: string, nullable: true, description: 时间 ISO8601 }
 
@@ -2107,10 +2171,10 @@ components:
     CrawlMetrics:
       type: object
       description: 爬取聚合指标（GET /admin/crawl/status）
-      required: [today_count, output_total, raw]
+      required: [today_count, raw_total, raw]
       properties:
-        today_count: { type: integer, description: 今日入库新增 }
-        output_total: { type: integer, description: output 文件总数 }
+        today_count: { type: integer, description: 今日入库新增（CST） }
+        raw_total: { type: integer, description: 累计采集量——四表 DB 入库总量（jd/course/paper/community，与仪表盘口径一致） }
         raw:
           type: object
           description: 各 raw 表累计条数
@@ -2286,6 +2350,29 @@ components:
         position_name: { type: string }
         updated: { type: boolean, description: 是否有实际变更（无变更不写编辑日志） }
         diff_summary: { type: string, description: 变更摘要（供展示/审计） }
+
+    RuntimeConfig:
+      type: object
+      description: 运行时配置（GET/PUT /admin/runtime-config，重启后生效）
+      properties:
+        arq_concurrency: { type: integer, description: ARQ 任务并发数（1-100） }
+        arq_job_timeout: { type: integer, description: ARQ 任务超时秒（60-86400） }
+        alert_webhook_url: { type: string, description: 告警 webhook（空=不告警） }
+        evolution_cache_ttl: { type: integer, description: 演化列表缓存 TTL 秒（5-3600） }
+        crawl_items_cap: { type: integer, description: 爬虫单次采集条数上限（10-1000） }
+        rate_limit:
+          type: object
+          description: 爬虫限频（source → {req_per_min, delay_range:[min,max] 秒}）
+          additionalProperties:
+            type: object
+            properties:
+              req_per_min: { type: integer, description: 每分钟请求数（1-600） }
+              delay_range:
+                type: array
+                items: { type: integer }
+                minItems: 2
+                maxItems: 2
+                description: 请求间隔 [min, max] 秒（1-300）
 
     LlmProviderConfig:
       type: object
@@ -2470,12 +2557,15 @@ components:
 
     PositionEvolutionListData:
       type: object
-      description: GET /evolution/positions 响应 data（默认岗位演化列表，按快照热度降序）
-      required: [positions]
+      description: GET /evolution/positions 响应 data（岗位演化列表，按快照热度降序分页）
+      required: [positions, total, page, size]
       properties:
         positions:
           type: array
           items: { $ref: '#/components/schemas/PositionEvolutionData' }
+        total: { type: integer, description: 全部岗位数（翻页计算用） }
+        page: { type: integer }
+        size: { type: integer }
 
     SkillEvolutionData:
       type: object
@@ -2490,12 +2580,15 @@ components:
 
     SkillEvolutionListData:
       type: object
-      description: GET /evolution/skills 响应 data（默认技能演化列表，按快照热度降序）
-      required: [skills]
+      description: GET /evolution/skills 响应 data（技能演化列表，按快照热度降序分页）
+      required: [skills, total, page, size]
       properties:
         skills:
           type: array
           items: { $ref: '#/components/schemas/SkillEvolutionData' }
+        total: { type: integer, description: 全部技能数（翻页计算用） }
+        page: { type: integer }
+        size: { type: integer }
 
     StateMachineTransition:
       type: object
@@ -2540,13 +2633,15 @@ components:
 
     WatchOverviewData:
       type: object
-      description: GET /evolution/watch 响应 data
-      required: [items, total]
+      description: GET /evolution/watch 响应 data（分页）
+      required: [items, total, page, size]
       properties:
         items:
           type: array
           items: { $ref: '#/components/schemas/WatchOverviewItem' }
         total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
 
     # ============================================================
     # 简历模块端点 data（08-14 契约补全）

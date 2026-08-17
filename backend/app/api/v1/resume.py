@@ -5,9 +5,7 @@
 → 入队 ARQ resume_parse 任务（PII 脱敏在任务内完成）。
 """
 
-import asyncio
 import hashlib
-import json
 import logging
 import uuid
 from pathlib import Path
@@ -18,11 +16,13 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import String, cast, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.common import iso, owns_resume, parse_uuid, serialize_task, sse_task_events
 from app.api.deps import require_role
 from app.core.arq_client import enqueue
 from app.core.database import async_session_factory, get_db
+from app.core.errors import ERR_FORBIDDEN, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import AuditLog, ResumeCache, ResumeFile, TaskStatus
-from app.schemas.common import ok, error
+from app.schemas.common import error, ok
 from app.services.resume.file_parser import SUPPORTED_EXTENSIONS
 
 router = APIRouter()
@@ -73,22 +73,12 @@ async def _persist_resume_file(
     )
 
 
-async def _owns_resume(db: AsyncSession, resume_id: str, user_id: str) -> bool:
-    """校验当前用户是否拥有该简历（resume_cache 无 user_id，归属记录在 resume_files）。"""
-    row = await db.scalar(
-        select(ResumeFile.id).where(
-            ResumeFile.resume_id == resume_id, ResumeFile.user_id == user_id
-        )
-    )
-    return row is not None
-
-
 async def _user_owns_task(db: AsyncSession, task: TaskStatus, user_id: str) -> bool:
     """任务归属校验：resume_parse 任务的 task_id 即 resume_id，按简历归属判定；
     其余任务类型（批量采集等系统任务）不向普通用户暴露。"""
     if task.task_type != "resume_parse":
         return False
-    return await _owns_resume(db, task.id, user_id)
+    return await owns_resume(db, task.id, user_id)
 
 
 @router.get("/list")
@@ -120,7 +110,7 @@ async def list_resumes(
             "skills": [s.get("name", s) if isinstance(s, dict) else s for s in skills],
             "total_years": parsed.get("total_years", 0),
             "education_level": parsed.get("education_level"),
-            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            "updated_at": iso(r.updated_at),
         })
     return ok(data={"items": items, "total": len(items)})
 
@@ -137,18 +127,18 @@ async def parse_resume(
     # 避免恶意超大流全量读入内存耗尽服务
     content_length = request.headers.get("content-length")
     if content_length and content_length.isdigit() and int(content_length) > MAX_UPLOAD_BYTES:
-        return error(4000, f"文件超过 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限", http_status=413)
+        return error(ERR_VALIDATION, f"文件超过 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限", http_status=413)
     content = await file.read()
     if not content:
-        return error(4000, "文件为空")
+        return error(ERR_VALIDATION, "文件为空")
     if len(content) > MAX_UPLOAD_BYTES:
-        return error(4000, f"文件超过 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限")
+        return error(ERR_VALIDATION, f"文件超过 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限")
 
     suffix = Path(file.filename or "resume").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         supported = "/".join(sorted(ext.lstrip(".") for ext in ALLOWED_EXTENSIONS))
         hint = "，.doc 请转存为 .docx" if suffix == ".doc" else ""
-        return error(4000, f"仅支持 {supported} 格式{hint}")
+        return error(ERR_VALIDATION, f"仅支持 {supported} 格式{hint}")
 
     file_hash = hashlib.sha256(content).hexdigest()
 
@@ -159,7 +149,7 @@ async def parse_resume(
     if cached is not None:
         # 缓存按内容哈希全局唯一；命中时补建当前用户归属记录，
         # 否则他人上传的文件复用后当前用户将无 ResumeFile 关联、无法访问
-        if not await _owns_resume(db, cached.id, user.get("sub", "")):
+        if not await owns_resume(db, cached.id, user.get("sub", "")):
             await _persist_resume_file(
                 db,
                 resume_id=cached.id,
@@ -222,32 +212,20 @@ async def task_status(task_id: str, db: AsyncSession = Depends(get_db), user: di
     try:
         task_uuid = str(uuid.UUID(task_id))
     except (ValueError, AttributeError):
-        return error(4000, "task_id 格式非法")
+        return error(ERR_VALIDATION, "task_id 格式非法")
     task = await db.get(TaskStatus, task_uuid)
     if task is None:
-        return error(4040, "任务不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "任务不存在", http_status=404)
     if not await _user_owns_task(db, task, user.get("sub", "")):
-        return error(4030, "无权查看该任务", http_status=403)
-    result = dict(task.result or {})
-    result.pop("file_path", None)  # 不向客户端暴露服务端绝对路径
-    return ok(data={
-        "task_id": task.id,
-        "task_type": task.task_type,
-        "status": task.status,
-        "progress": task.progress,
-        "result": result,
-        "error": task.error,
-        "created_at": task.created_at.isoformat() if task.created_at else None,
-        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
-    })
-
-
-def _parse_resume_id(resume_id: str) -> str | None:
-    """校验并规范化简历 UUID，非法返回 None。"""
-    try:
-        return str(uuid.UUID(resume_id))
-    except (ValueError, AttributeError, TypeError):
-        return None
+        return error(ERR_FORBIDDEN, "无权查看该任务", http_status=403)
+    return ok(data=serialize_task(
+        task,
+        strip_fields=("file_path",),  # 不向客户端暴露服务端绝对路径
+        extra={
+            "created_at": iso(task.created_at),
+            "updated_at": iso(task.updated_at),
+        },
+    ))
 
 
 def _merge_fields(parsed: dict, fields: dict) -> dict:
@@ -255,20 +233,6 @@ def _merge_fields(parsed: dict, fields: dict) -> dict:
     merged = dict(parsed)
     merged.update(fields)
     return merged
-
-
-def _sse_payload(task: TaskStatus) -> dict:
-    """任务状态 → SSE data 载荷（TaskStatus ORM 对象不可直接 JSON 序列化）。"""
-    result = dict(task.result or {})
-    result.pop("file_path", None)  # 不向客户端暴露服务端绝对路径
-    return {
-        "task_id": task.id,
-        "task_type": task.task_type,
-        "status": task.status,
-        "progress": task.progress,
-        "result": result,
-        "error": task.error,
-    }
 
 
 async def _task_stream_events(
@@ -280,49 +244,34 @@ async def _task_stream_events(
 ):
     """SSE 事件序列（可注入任务查询函数便于测试）。
 
-    get_task: async callable(task_uuid) -> dict | None（已序列化载荷，见 _sse_payload）。
+    get_task: async callable(task_uuid) -> dict | None（已序列化载荷，见 serialize_task）。
     事件流：progress 周期推送 → 终态 success/failed 推送 done/error 并结束；
     任务不存在 / 超时推送 error 后结束。
     """
-    import time
-
-    deadline = time.monotonic() + timeout
-    while True:
-        task = await get_task(task_uuid)
-        if task is None:
-            yield f"event: error\ndata: {json.dumps({'message': '任务不存在'}, ensure_ascii=False)}\n\n"
-            return
-        if task["status"] == "success":
-            yield f"event: done\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
-            return
-        if task["status"] == "failed":
-            yield f"event: error\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
-            return
-        yield f"event: progress\ndata: {json.dumps(task, ensure_ascii=False)}\n\n"
-        if time.monotonic() >= deadline:
-            yield f"event: error\ndata: {json.dumps({'message': '推送超时'}, ensure_ascii=False)}\n\n"
-            return
-        await asyncio.sleep(poll_interval)
+    async for event in sse_task_events(
+        task_uuid, get_task, poll_interval=poll_interval, timeout=timeout
+    ):
+        yield event
 
 
 @router.get("/{resume_id}")
 async def get_resume(resume_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("user"))):
     """简历解析详情（FE-M4-04 个人中心"查看"：完整画像）。"""
-    rid = _parse_resume_id(resume_id)
+    rid = parse_uuid(resume_id)
     if rid is None:
-        return error(4000, "resume_id 格式非法")
+        return error(ERR_VALIDATION, "resume_id 格式非法")
     resume = await db.get(ResumeCache, rid)
     if resume is None:
-        return error(4040, "简历不存在", http_status=404)
-    if not await _owns_resume(db, rid, user.get("sub", "")):
-        return error(4030, "无权访问该简历", http_status=403)
+        return error(ERR_NOT_FOUND, "简历不存在", http_status=404)
+    if not await owns_resume(db, rid, user.get("sub", "")):
+        return error(ERR_FORBIDDEN, "无权访问该简历", http_status=403)
     return ok(data={
         "id": resume.id,
         "file_name": resume.file_name,
         "parsed_data": resume.parsed_data if isinstance(resume.parsed_data, dict) else {},
         "version": resume.version,
-        "created_at": resume.created_at.isoformat() if resume.created_at else None,
-        "updated_at": resume.updated_at.isoformat() if resume.updated_at else None,
+        "created_at": iso(resume.created_at),
+        "updated_at": iso(resume.updated_at),
     })
 
 
@@ -339,18 +288,18 @@ async def update_resume(
     字段按顶层覆盖合并进 parsed_data（设计文档 §2.4.3），version 递增，
     写审计日志（登录用户）。端点要求 user+ 角色（设计文档 §2.4.3）。
     """
-    rid = _parse_resume_id(resume_id)
+    rid = parse_uuid(resume_id)
     if rid is None:
-        return error(4000, "resume_id 格式非法")
+        return error(ERR_VALIDATION, "resume_id 格式非法")
     resume = await db.get(ResumeCache, rid)
     if resume is None:
-        return error(4040, "简历不存在", http_status=404)
-    if not await _owns_resume(db, rid, user.get("sub", "")):
-        return error(4030, "无权修改该简历", http_status=403)
+        return error(ERR_NOT_FOUND, "简历不存在", http_status=404)
+    if not await owns_resume(db, rid, user.get("sub", "")):
+        return error(ERR_FORBIDDEN, "无权修改该简历", http_status=403)
 
     fields = req.get("fields")
     if not isinstance(fields, dict) or not fields:
-        return error(4000, "fields 必须为非空对象")
+        return error(ERR_VALIDATION, "fields 必须为非空对象")
 
     resume.parsed_data = _merge_fields(resume.parsed_data or {}, fields)
     resume.version += 1
@@ -369,7 +318,7 @@ async def update_resume(
         "file_name": resume.file_name,
         "parsed_data": resume.parsed_data,
         "version": resume.version,
-        "updated_at": resume.updated_at.isoformat() if resume.updated_at else None,
+        "updated_at": iso(resume.updated_at),
     })
 
 
@@ -384,7 +333,7 @@ async def task_stream(task_id: str, user: dict = Depends(require_role("user"))):
     try:
         task_uuid = str(uuid.UUID(task_id))
     except (ValueError, AttributeError):
-        return error(4000, "task_id 格式非法")
+        return error(ERR_VALIDATION, "task_id 格式非法")
 
     async def _get_task(tid: str) -> dict | None:
         async with async_session_factory() as session:
@@ -394,7 +343,7 @@ async def task_stream(task_id: str, user: dict = Depends(require_role("user"))):
             # SSE 与轮询端点同权：仅当前用户拥有的 resume_parse 任务可订阅
             if not await _user_owns_task(session, task, user.get("sub", "")):
                 return None
-            payload = _sse_payload(task)
+            payload = serialize_task(task, strip_fields=("file_path",))
         return payload
 
     async def _event_gen():
@@ -407,14 +356,14 @@ async def task_stream(task_id: str, user: dict = Depends(require_role("user"))):
 @router.delete("/{resume_id}", status_code=204)
 async def delete_resume(resume_id: str, db: AsyncSession = Depends(get_db), user: dict = Depends(require_role("user"))):
     """删除简历记录及落盘文件（FE-M4-04 个人中心）。"""
-    rid = _parse_resume_id(resume_id)
+    rid = parse_uuid(resume_id)
     if rid is None:
-        return error(4000, "resume_id 格式非法")
+        return error(ERR_VALIDATION, "resume_id 格式非法")
     resume = await db.get(ResumeCache, rid)
     if resume is None:
-        return error(4040, "简历不存在", http_status=404)
-    if not await _owns_resume(db, rid, user.get("sub", "")):
-        return error(4030, "无权删除该简历", http_status=403)
+        return error(ERR_NOT_FOUND, "简历不存在", http_status=404)
+    if not await owns_resume(db, rid, user.get("sub", "")):
+        return error(ERR_FORBIDDEN, "无权删除该简历", http_status=403)
 
     # 仅删除当前用户的归属记录；resume_cache 按内容哈希全局唯一，
     # 其他用户命中同一缓存时仍有归属，不得连坐删除
@@ -468,14 +417,14 @@ async def download_resume_file(
     注：starlette 1.3.1 的 FileResponse 仅支持真实文件路径，DB 字节下载用
     Response + 同格式 Content-Disposition 实现同等语义。
     """
-    rid = _parse_resume_id(resume_id)
+    rid = parse_uuid(resume_id)
     if rid is None:
-        return error(4000, "resume_id 格式非法")
+        return error(ERR_VALIDATION, "resume_id 格式非法")
     row = await _fetch_resume_file(db, rid)
     if row is None:
-        return error(4040, "简历文件不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "简历文件不存在", http_status=404)
     if row.user_id != user.get("sub", ""):
-        return error(4030, "无权下载该简历文件", http_status=403)
+        return error(ERR_FORBIDDEN, "无权下载该简历文件", http_status=403)
     return Response(
         content=row.content,
         media_type=row.content_type or "application/octet-stream",

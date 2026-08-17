@@ -86,10 +86,18 @@ services:
       # SBERT 模型（backend/models/sbert）挂载进容器：镜像内无模型文件，
       # 不挂载时 SkillEmbedder 会尝试从 HuggingFace 下载（外网受限挂起）
       - ./backend/models:/app/models:ro
-      # 上传文件共享卷（08-15 修复：resume_parse 任务在 worker 容器读 /app/uploads）
+      # LLM provider 配置（08-15 恢复）：.gitignore 不入镜像（含 api_key），
+      # 挂载宿主机文件——可写（管理后台 /admin/llm 写回持久化）
+      - ./backend/configs/llm_providers.yaml:/app/configs/llm_providers.yaml
+      # 运行时配置（08-16 管理后台 /admin/settings 可写；api/worker 共享宿主文件，重启后生效）
+      - ./backend/configs/runtime_settings.json:/app/configs/runtime_settings.json
+      # 爬虫输出目录（08-15 修复：累计采集量统计读 /app/data/crawlers/output，
+      # 此前 api 容器无挂载——容器内为空目录，爬取管理页累计采集量恒 0；
+      # worker 侧已有同款挂载，双向读写一致）
+      - ./backend/data/crawlers/output:/app/data/crawlers/output
+      # 上传文件共享卷（08-15 修复）：resume_parse 任务在 worker 容器读 /app/uploads——
+      # 此前 api 落盘 worker 读不到，任务 failed「文件不存在」
       - uploads_data:/app/uploads
-      # 上传文件共享卷（08-15 修复：resume_parse 任务在 worker 容器读
-      # /app/uploads——此前 api 落盘 worker 读不到，任务 failed「文件不存在」）
 
   # ARQ 异步任务 worker（BE-M3-04）：消费 resume_parse / run_etl_pipeline 等队列任务
   worker:
@@ -126,6 +134,11 @@ services:
       # HTTPS_PROXY 时优先（可覆盖）。
       HTTPS_PROXY: ${HTTPS_PROXY:-http://host.docker.internal:7890}
       HTTP_PROXY: ${HTTP_PROXY:-http://host.docker.internal:7890}
+      # 08-16 修复：CDP 就绪探测（urllib 访问 127.0.0.1:922x）必须绕过代理——
+      # 未设 NO_PROXY 时探测被路由到宿主机 Clash（CONNECT 宿主机自身端口）返回 502，
+      # ensure_cdp_chrome 恒失败 → maimai/boss/glassdoor 等 CDP 爬虫全部 0 产出
+      NO_PROXY: "127.0.0.1,localhost"
+      no_proxy: "127.0.0.1,localhost"
       # 容器无显示服务器：CDP 浏览器以无头模式运行（本地桌面保持有头以完成登录/验证）
       CDP_HEADLESS: "1"
       # CDP 浏览器代理（glassdoor 等国际源）：容器内经 host.docker.internal 指向宿主机 Clash
@@ -139,6 +152,11 @@ services:
       - ${USERPROFILE:-~}/.zhigang-compass/boss-cookies.json:/home/app/.zhigang-compass/boss-cookies.json
       # 上传文件共享卷（08-15 修复：resume_parse 任务在 worker 容器读 /app/uploads）
       - uploads_data:/app/uploads
+      # LLM provider 配置（08-15 恢复）：与 api 同款挂载，worker 的
+      # enrich_course_skills/爬虫登录后处理等 LLM 链路共用
+      - ./backend/configs/llm_providers.yaml:/app/configs/llm_providers.yaml
+      # 运行时配置（08-16 管理后台 /admin/settings 可写；api/worker 共享宿主文件，重启后生效）
+      - ./backend/configs/runtime_settings.json:/app/configs/runtime_settings.json
     depends_on:
       postgres:
         condition: service_healthy

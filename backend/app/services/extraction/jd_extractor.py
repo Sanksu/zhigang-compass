@@ -27,7 +27,7 @@ from app.services.extraction.prompts import (
     SYSTEM_PROMPT,
     TASK_TEMPLATE,
 )
-from app.services.extraction.post_processor import post_process
+from app.services.extraction.post_processor import lexical_guard, post_process
 
 # 批间限流缓冲（秒）：串行逐批调用 LLM 时降低突发频率，防 provider 429。
 # 设计文档 §6.5：_BATCH_REQUEST_INTERVAL 移到批之间（0.3s/条 → 批间 0.3s）。
@@ -45,6 +45,12 @@ class JDExtractor:
             # LLM 未配置（configs/llm_providers.yaml 缺失）：与调用期 LLM 失败同语义，
             # 降级纯规则抽取（见类 docstring「LLM 不可用时规则抽取兜底」）
             self._llm = None
+
+    @property
+    def llm(self) -> Optional[LLMProviderChain]:
+        """LLM 客户端公开访问点——tasks.py 课程技能补全等复用同一
+        provider 链（避免重复初始化/重复读配置），勿绕过本属性直取 _llm。"""
+        return self._llm
 
     def extract(self, jd_text: str, title_hint: str = "") -> JDExtractionResult:
         """从 JD 文本中抽取结构化实体。
@@ -77,7 +83,7 @@ class JDExtractor:
             except LLMExtractionError:
                 result = self._rule_based_extract(jd_text)
 
-        return post_process(result)
+        return lexical_guard(post_process(result), jd_text)
 
     def extract_batch(
         self,
@@ -153,7 +159,7 @@ class JDExtractor:
                 raise LLMExtractionError(
                     f"批量返回 {len(batch.results)} 条 ≠ 输入 {len(chunk)} 条，降级逐条"
                 )
-            return [post_process(r) for r in batch.results]
+            return [lexical_guard(post_process(r), t) for r, t in zip(batch.results, chunk)]
         except LLMExtractionError:
             # 整批失败（超时/校验/provider 全挂）→ 该批逐条抽取（单条有规则兜底）
             return [self.extract(text) for text in chunk]

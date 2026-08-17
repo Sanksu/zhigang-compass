@@ -22,6 +22,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Optional
+from app.services.kg.fulltext import sanitize_fulltext
 
 import yaml
 from pydantic import BaseModel
@@ -37,7 +38,6 @@ _SEEDS_PATH = Path(__file__).resolve().parents[3] / "configs" / "emerging_seeds.
 _MATCH_MIN_ALIAS_LEN = 3
 
 # Neo4j 全文查询（Lucene 语法）特殊字符：查询前剔除，避免语法异常
-_LUCENE_SPECIAL = frozenset('+-&|!(){}[]^"~*?:\\/')
 
 # ── 检索融合与缓存（2026-08-13 评审 P1-2 / P2）──
 # RRF 融合常数 k=60（业界默认）：跨源排序融合，消除语义余弦（0-1）与
@@ -55,9 +55,6 @@ def _norm(text: str) -> str:
     return (text or "").strip().lower()
 
 
-def _sanitize_fulltext(q: str) -> str:
-    """剔除 Neo4j 全文查询的 Lucene 特殊字符，空串视为无关键词命中。"""
-    return "".join(ch for ch in q if ch not in _LUCENE_SPECIAL).strip()
 
 
 def match_seed(position_name: str, seeds: list[dict]) -> Optional[dict]:
@@ -211,7 +208,7 @@ async def _neo4j_fulltext(neo4j, pos: str, limit: int) -> list[dict]:
     neo4j 为驱动对象（.session() 上下文）。查询前剔除 Lucene 特殊字符；
     任一异常返回 []（由调用方降级 PostgreSQL ILIKE）。
     """
-    q = _sanitize_fulltext(pos)
+    q = sanitize_fulltext(pos)
     if not q:
         return []
     try:

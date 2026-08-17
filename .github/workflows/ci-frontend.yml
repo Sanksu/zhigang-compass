@@ -1,16 +1,13 @@
 name: CI Frontend
 
+# 全量触发（无 paths 过滤）：分支保护将本 workflow 设为 develop 必过 check，
+# 若按 frontend/** 过滤，backend-only PR 永不触发本 workflow → 保护死锁
+# 无法合并（2026-08-16 重复岗位治理 PR #260 首次触发，临时放宽保护后修复）
 on:
   push:
     branches: [main, develop]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/ci-frontend.yml'
   pull_request:
     branches: [main, develop]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/ci-frontend.yml'
 
 defaults:
   run:

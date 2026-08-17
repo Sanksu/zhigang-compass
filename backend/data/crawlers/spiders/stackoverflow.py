@@ -22,17 +22,19 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 from scrapy import Request, Spider
+from scrapy.exceptions import CloseSpider
 from scrapy.http import Response
 
 from crawlers.items import CommunityTrendItem
-from crawlers.settings import RATE_LIMIT
+from crawlers.settings import CRAWL_ITEMS_CAP, RATE_LIMIT
 
 
 # Stack Exchange API 端点（site=stackoverflow）
 STACKEXCHANGE_API = "https://api.stackexchange.com/2.3/questions"
 
-# 默认关注的标签（覆盖项目 AI/大数据/全栈方向）
-DEFAULT_TAGS = ["python", "machine-learning", "java", "javascript", "sql"]
+# 默认标签：空 = 全局热度（08-16 用户决策，不限定标签，按投票数排序）；
+# 传 -a tags=python,machine-learning 时按标签分别采集
+DEFAULT_TAGS: list[str] = []
 
 # 单次请求条数上限（API 允许 100）
 PAGE_SIZE = 100
@@ -44,8 +46,12 @@ class StackoverflowSpider(Spider):
     name = "stackoverflow"
     platform = "stackoverflow"
 
+    # 单次采集总上限（多标签/多页合计，08-16 用户决策；后台可配置）
+    max_items_total = CRAWL_ITEMS_CAP
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._collected = 0  # 单次采集累计产出（跨标签合计）
         # -a tags=python,machine-learning 覆盖默认标签
         tags = kwargs.get("tags")
         self.tags = tags.split(",") if tags else DEFAULT_TAGS
@@ -62,8 +68,10 @@ class StackoverflowSpider(Spider):
             yield request
 
     def start_requests(self):
-        for tag in self.tags:
-            self.logger.info(f"开始采集 Stack Overflow 标签: {tag} (API)")
+        # 空标签 = 全局热度（08-16 用户决策，sort=votes 无 tagged）
+        tags = self.tags or [""]
+        for tag in tags:
+            self.logger.info(f"开始采集 Stack Overflow: {tag or '全局热度'} (API)")
             url = self._build_api_url(tag, 1)
             yield self._make_request(url, meta={"tag": tag, "page": 1})
 
@@ -82,9 +90,12 @@ class StackoverflowSpider(Spider):
         items = data.get("items", [])
         item_count = 0
         for it in items:
+            if self._collected >= self.max_items_total:
+                break
             item = self._api_item_to_item(it, response.meta)
             if item:
                 item_count += 1
+                self._collected += 1
                 yield item
 
         # 翻页：has_more 且未达 max_pages
@@ -92,6 +103,8 @@ class StackoverflowSpider(Spider):
         self.logger.info(
             f"[stackoverflow] tag={response.meta['tag']} 页={current_page} 产出 {item_count} 条"
         )
+        if self._collected >= self.max_items_total:
+            raise CloseSpider(f"达到单次采集上限 {self.max_items_total} 条")
         if data.get("has_more") and current_page < self.max_pages:
             tag = response.meta["tag"]
             next_url = self._build_api_url(tag, current_page + 1)
@@ -101,10 +114,16 @@ class StackoverflowSpider(Spider):
             )
 
     def _build_api_url(self, tag: str, page: int) -> str:
-        """构造 Stack Exchange 查询 URL（最新问题排序）。"""
+        """构造 Stack Exchange 查询 URL（最新问题排序；tag 空 = 全局热度按投票）。"""
+        if tag:
+            return (
+                f"{STACKEXCHANGE_API}?tagged={quote(tag)}&site=stackoverflow"
+                f"&sort=creation&order=desc&pagesize={PAGE_SIZE}&page={page}"
+            )
+        # 全局热度（08-16 用户决策）：无标签过滤，按投票数排序取热门问题
         return (
-            f"{STACKEXCHANGE_API}?tagged={quote(tag)}&site=stackoverflow"
-            f"&sort=creation&order=desc&pagesize={PAGE_SIZE}&page={page}"
+            f"{STACKEXCHANGE_API}?site=stackoverflow"
+            f"&sort=votes&order=desc&pagesize={PAGE_SIZE}&page={page}"
         )
 
     def _make_request(self, url: str, meta: dict):

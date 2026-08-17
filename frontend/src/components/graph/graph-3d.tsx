@@ -11,10 +11,11 @@
  * - 容器尺寸由 ResizeObserver 自动追踪
  */
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { isDark } from '@/lib/utils'
 import ForceGraph3D, { type ForceGraphMethods, type NodeObject } from 'react-force-graph-3d'
 import * as THREE from 'three'
-import type { GraphData, GraphNode, NodeDetail, PositionStatus } from './types'
-import { nodeRadius } from './graph-utils'
+import type { GraphData, GraphNode, NodeDetail } from './types'
+import { COLOR_BY_STATUS, nodeRadius } from './graph-utils'
 
 interface Graph3DProps {
   data: GraphData
@@ -34,15 +35,6 @@ interface Graph3DProps {
 export interface Graph3DHandle {
   focusNode: (id: string) => void
   resetView: () => void
-}
-
-/** 岗位状态机 → 颜色（与 Graph2D 一致） */
-const COLOR_BY_STATUS: Record<PositionStatus, string> = {
-  candidate: '#71717a',
-  emerging: '#10b981',
-  stable: '#3b82f6',
-  declining: '#f59e0b',
-  archived: '#ef4444',
 }
 
 const COLOR_EVIDENCE = '#a1a1aa'
@@ -135,10 +127,6 @@ function buildNodeObject(
   label.position.set(0, r + (fontSize + 6) / 24, 0)
   group.add(label)
   return group
-}
-
-function isDark(): boolean {
-  return document.documentElement.classList.contains('dark')
 }
 
 export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(

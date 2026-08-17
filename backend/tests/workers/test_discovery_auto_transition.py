@@ -13,6 +13,7 @@ emerging → stable 自动升级链路在真实任务函数内完整生效：
 """
 
 import pytest
+from tests.helpers import SeqResult
 import asyncio
 import unittest.mock as mock
 from datetime import datetime, timedelta, timezone
@@ -25,14 +26,6 @@ _TZ_CN = timezone(timedelta(hours=8))
 _END = datetime(2026, 8, 11, tzinfo=_TZ_CN)
 
 
-class _SeqResult:
-    """next_id 的 Counter 查询结果桩（single 返回 seq）。"""
-
-    def __init__(self, seq: int):
-        self._seq = seq
-
-    def single(self):
-        return {"seq": self._seq}
 
 
 def _jd_row(name: str, post_date: str) -> SimpleNamespace:
@@ -95,7 +88,7 @@ class _FakeTx:
         self._queries.append((query, params))
         # next_id 的 Counter 自增查询（08-14：persist 创建时补全 id/freq）
         if "Counter" in query:
-            return _SeqResult(1)
+            return SeqResult(1)
 
 
 class _FakeNeo4jSession:
@@ -232,6 +225,25 @@ class TestAutoTransitionTask:
         assert result["detail"] == []
         assert row.state == "emerging"
         # 08-15：novelty 批量查询执行（REQUIRES），但不迁移则无 persist 写入
+        assert all("MERGE" not in q for q, _ in driver.queries)
+
+    def test_jd_count_below_threshold_not_promoted(self):
+        """JD 总数 < 5（§7.2.1 jd_count 门槛）即使波动/源多样性全达标也不升级。
+
+        任务级对照：单测覆盖 =5 边界迁移，此处验证 <5 不迁移——3 窗口各 1 条
+        （jd_count=3，波动 0、decline 0），仅小基数门槛拦截。
+        """
+        name = "RAG"
+        jd_session = _FakeSession(_jd_rows_by_window(name, [1, 1, 1]))
+        row = _candidate_row(name)
+        cand_session = _FakeSession([row])
+        driver = _FakeDriver()
+
+        result = _run_task([jd_session, cand_session], driver)
+
+        assert result["transitions"] == 0
+        assert result["detail"] == []
+        assert row.state == "emerging"  # 未升级（jd_count=3 < 5）
         assert all("MERGE" not in q for q, _ in driver.queries)
 
     def test_recovery_from_declining_to_stable(self):

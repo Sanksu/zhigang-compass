@@ -179,20 +179,3 @@ class GraphVersionManager:
             or cur_nodes[nid].get("type") != prev_nodes[nid].get("type")
         )
         return added, removed, changed
-
-    def diff_versions(
-        self,
-        version_a: str,
-        version_b: str,
-    ) -> dict:
-        """对比两个版本快照的差异。
-
-        Returns:
-            {"nodes_added": [...], "nodes_removed": [...], "nodes_changed": [...],
-             "edges_added": [...], "edges_removed": [...]}
-        """
-        raise NotImplementedError("版本 Diff 已由 /evolution/diff 端点直接实现，无需走管理器")
-
-    def list_versions(self, limit: int = 30) -> list[GraphVersionMeta]:
-        """列出最近的图谱版本。"""
-        raise NotImplementedError("版本列表已由 /evolution/versions 端点直接实现，无需走管理器")

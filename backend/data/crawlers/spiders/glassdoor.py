@@ -17,15 +17,14 @@
 
 import json
 import os
-import subprocess
 import sys
 import time
 
 from scrapy import Request
 from scrapy.http import Response
 
-from crawlers.base_spider import BaseSpider
-from crawlers.settings import SUBPROCESS_TIMEOUT
+from crawlers.base_spider import BaseSpider, iter_jsonl, run_script
+from crawlers.settings import CRAWL_ITEMS_CAP
 from crawlers.setup_boss_chrome import ensure_cdp_chrome, platform_profile_dir
 
 
@@ -38,6 +37,9 @@ class GlassdoorSpider(BaseSpider):
 
     # Glassdoor 默认搜索美国城市
     cities = ["New York", "San Francisco", "Seattle", "Boston", "Remote"]
+
+    # 单次采集总上限（多关键词×城市任务合计，08-16 用户决策；后台可配置）
+    max_items_total = CRAWL_ITEMS_CAP
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -53,9 +55,12 @@ class GlassdoorSpider(BaseSpider):
 
     def start_requests(self):
         """构建采集任务，用占位 Request 触发 parse。"""
+        # 空关键词/空城市 = 按平台热度/最新且不限位置采集（08-16 用户决策）
+        keywords = self.keywords or [""]
+        cities = self.cities or [""]
         tasks = []
-        for keyword in self.keywords:
-            for city in self.cities:
+        for keyword in keywords:
+            for city in cities:
                 tasks.append({"keyword": keyword, "city": city})
 
         if not tasks:
@@ -90,9 +95,17 @@ class GlassdoorSpider(BaseSpider):
 
         task_total = len(tasks)
         _started = time.monotonic()
+        _collected = 0  # 单次采集累计产出（跨关键词×城市任务合计，上限 max_items_total）
         for task_idx, task in enumerate(tasks):
             keyword = task["keyword"]
             city = task["city"]
+            remaining = self.max_items_total - _collected
+            if remaining <= 0:
+                self.logger.info(
+                    f"[glassdoor] 已达单次采集上限 {self.max_items_total} 条，"
+                    f"跳过剩余 {task_total - task_idx} 个任务"
+                )
+                break
             self.logger.info(f"[glassdoor] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword} city={city}")
 
             cmd = [
@@ -103,41 +116,18 @@ class GlassdoorSpider(BaseSpider):
                 "--cdp-url", cdp_url,
             ]
 
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    cwd=os.path.dirname(CRAWLER_SCRIPT),
-                    env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
-                )
-            except Exception as e:
-                self.logger.error(f"启动 CDP 脚本失败: {e}")
+            result = run_script(cmd, os.path.dirname(CRAWLER_SCRIPT), self.logger,
+                               f"[glassdoor] 任务 {task_idx + 1}/{task_total}")
+            if result is None:
                 continue
-
-            # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
-            try:
-                stdout, stderr_output = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                stdout, stderr_output = proc.communicate()
-                self.logger.error(f"[glassdoor] 任务 {task_idx + 1}/{task_total} 超时（>{SUBPROCESS_TIMEOUT}s），已终止")
-                continue
+            stdout, stderr_output, returncode = result
 
             item_count = 0
-            for line in stdout.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    item_data = json.loads(line)
-                except json.JSONDecodeError as e:
-                    self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
-                    continue
-
+            for item_data in iter_jsonl(stdout, self.logger):
+                if _collected >= self.max_items_total:
+                    break
                 item_count += 1
+                _collected += 1
                 yield self.make_item(
                     source_id=str(item_data.get("id", "")),
                     source_url=item_data.get("url", ""),
@@ -154,12 +144,12 @@ class GlassdoorSpider(BaseSpider):
                     post_date=item_data.get("date_posted", ""),
                 )
 
-            if proc.returncode != 0 and not (stderr_output and stderr_output.strip().endswith("count=0")):
-                self.logger.warning(f"CDP 脚本退出码 {proc.returncode}")
+            if returncode != 0 and not (stderr_output and stderr_output.strip().endswith("count=0")):
+                self.logger.warning(f"CDP 脚本退出码 {returncode}")
             if stderr_output:
                 for line in stderr_output.strip().splitlines()[-5:]:
                     self.logger.info(f"[cdp] {line}")
-            self.logger.info(f"[glassdoor] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条")
+            self.logger.info(f"[glassdoor] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条（累计 {_collected}/{self.max_items_total}）")
 
     def _on_error(self, failure):
         """占位请求失败回调。"""

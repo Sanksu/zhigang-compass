@@ -21,3 +21,18 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
 }
+
+/**
+ * 时间戳 → 中文本地化显示（无效/缺省值显示占位符）。
+ */
+export function formatDateTime(value: string | number | Date | null | undefined): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN')
+}
+
+
+/** 暗色模式判定 — 跟随 documentElement 上的 .dark 类（08-17 收敛 4 处重复）。 */
+export function isDark(): boolean {
+  return document.documentElement.classList.contains('dark')
+}
