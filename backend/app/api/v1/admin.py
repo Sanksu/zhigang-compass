@@ -5,26 +5,21 @@
 """
 
 import asyncio
-import json
-import logging
 import re
-import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.common import iso, paged_ok, paginate, serialize_task, sse_task_events
+from app.api.common import iso, paged_ok, paginate
 from app.api.deps import require_permission
 from app.api.v1.admin_routes import accounts, audit, crawl
-from app.core.arq_client import enqueue
 from app.core.database import get_db, redis_client
 from app.core.errors import ERR_CONFLICT, ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALIDATION
-from app.models.business import RejectedChange, TaskStatus
+from app.models.business import RejectedChange
 from app.schemas.common import error, ok
 from app.services.kg.id_generator import next_id
 
@@ -33,191 +28,12 @@ router.include_router(accounts.router)
 router.include_router(audit.router)
 router.include_router(crawl.router)
 
-# 爬虫域私有符号 re-export（tests/admin/test_crawl_trigger 直连导入）
+# 爬虫域私有符号 re-export（tests/admin/* 直连导入）
 PLATFORM_META = crawl.PLATFORM_META
 _PLATFORM_TO_SPIDER = crawl._PLATFORM_TO_SPIDER
 _history_row = crawl._history_row
 _match_platform = crawl._match_platform
-
-logger = logging.getLogger(__name__)
-
-
-# ============================================================
-# 爬取管理（BE-M4-05）：手动触发爬取任务
-# ============================================================
-
-
-async def _enqueue_crawl(
-    spider: str,
-    keywords: list[str],
-    cities: list[str] | None = None,
-    task_id: str | None = None,
-) -> None:
-    """入队 ARQ crawl_platform 任务；队列不可用抛异常由调用方标记 failed。"""
-    logger.info(
-        f"[_enqueue_crawl] 准备入队: task_id={task_id} spider={spider} "
-        f"keywords={keywords} cities={cities or '(默认)'}"
-    )
-    # task_id 供 crawl_platform 实时写日志队列 + 更新任务状态（SSE 端点消费）
-    kwargs = {"spider_name": spider, "keywords": keywords, "task_id": task_id}
-    if cities:
-        kwargs["cities"] = cities
-    await enqueue("crawl_platform", **kwargs)
-    logger.info(f"[_enqueue_crawl] 入队成功: task_id={task_id} job=crawl_platform kwargs={kwargs}")
-
-
-@router.post("/crawl/trigger", status_code=202)
-async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
-    """触发爬取任务（BE-M4-05，契约 /admin/crawl/trigger）。
-
-    校验平台（PLATFORM_META 白名单）→ 建 TaskStatus(pending) → 入队 ARQ
-    crawl_platform → 返回 task_id。队列不可用时标记任务 failed 并返回 500。
-    keyword 留空 = 采集平台热度/最新内容（08-16 用户决策）。
-    """
-    platform = (req.get("platform") or "").strip()
-    keyword = (req.get("keyword") or "").strip()
-    city = (req.get("city") or "").strip()
-    logger.info(f"[crawl/trigger] 收到触发请求: platform={platform} keyword={keyword or '(空=热度/最新)'} city={city or '(默认)'}")
-    if platform not in _PLATFORM_TO_SPIDER:
-        logger.warning(f"[crawl/trigger] 未知平台: {platform}")
-        return error(ERR_VALIDATION, f"未知平台: {platform}（可选: {', '.join(sorted(PLATFORM_META))}）")
-
-    try:
-        task = TaskStatus(
-            task_type="crawl",
-            status="pending",
-            result={"platform": platform, "keyword": keyword, "city": city or None},
-        )
-        db.add(task)
-        await db.commit()
-        await db.refresh(task)
-    except Exception as e:
-        logger.exception(
-            f"[crawl/trigger] 任务落库失败: platform={platform} keyword={keyword} city={city or '(默认)'} err={e}"
-        )
-        # 08-14 审查：异常详情仅入服务端日志，不随响应外泄（错误详情泄露漏网点）
-        return error(ERR_INTERNAL, "爬取任务落库失败，请稍后重试")
-    logger.info(f"[crawl/trigger] 任务已建: task_id={task.id} platform={platform} keyword={keyword} city={city or '(默认)'}")
-
-    try:
-        await _enqueue_crawl(
-            _PLATFORM_TO_SPIDER[platform],
-            [keyword] if keyword else [],  # 空关键词 = 平台热度/最新采集（08-16 用户决策）
-            cities=[city] if city else None,
-            task_id=str(task.id),
-        )
-        logger.info(f"[crawl/trigger] 任务入队成功: task_id={task.id} spider={_PLATFORM_TO_SPIDER[platform]}")
-    except Exception as e:
-        task.status = "failed"
-        task.error = "任务入队失败"  # 固定文案：详情仅入日志，防经 /crawl/history 透传内部信息
-        await db.commit()
-        logger.error(f"[crawl/trigger] 任务入队失败: task_id={task.id} err={e}")
-        return error(ERR_INTERNAL, "爬取任务入队失败，请稍后重试")
-
-    return ok(data={"task_id": task.id, "platform": platform, "status": "pending"})
-
-
-# ============================================================
-# 爬虫实时日志（SSE）：手动触发后逐行推送 scrapy 终端输出
-# ============================================================
-
-async def _crawl_log_events(
-    task_uuid: str,
-    get_logs,
-    get_task,
-    *,
-    poll_interval: float = 0.5,
-    timeout: float = 600.0,
-):
-    """爬虫实时日志 SSE 事件序列（可注入日志/任务查询函数便于测试）。
-
-    事件流：log（每行 scrapy 输出）→ progress（周期心跳，含任务状态）→
-    终态 success 推送 done、failed 推送 error 后关闭；任务不存在/超时推送
-    error 后关闭。日志按 offset 增量拉取，避免重复推送。
-    """
-    offset = 0
-
-    async def _poll_logs() -> list[str]:
-        nonlocal offset
-        try:
-            lines = await get_logs(task_uuid, offset)
-        except Exception:
-            lines = []
-        offset += len(lines)
-        return [
-            f"event: log\ndata: {json.dumps({'line': ln}, ensure_ascii=False)}\n\n"
-            for ln in lines
-        ]
-
-    def _progress(task) -> dict:
-        return {"status": task["status"], "progress": task["progress"]}
-
-    async for event in sse_task_events(
-        task_uuid,
-        get_task,
-        before_poll=_poll_logs,
-        progress_payload=_progress,
-        poll_interval=poll_interval,
-        timeout=timeout,
-    ):
-        yield event
-
-
-@router.get("/crawl/task/{task_id}/stream")
-async def crawl_task_stream(task_id: str):
-    """SSE 实时推送爬虫终端日志（手动触发场景，BE-M4-05 扩展）。
-
-    日志来源为 crawl_platform 逐行写入 Redis 的 LIST（crawl:log:{task_id}，
-    TTL 1h），按 offset 增量拉取；任务状态由 TaskStatus 驱动终态
-    （success → done / failed → error）。任务不存在 / 推送超时（600s）结束。
-    """
-    try:
-        task_uuid = str(uuid.UUID(task_id))
-    except (ValueError, AttributeError):
-        return error(ERR_VALIDATION, "task_id 格式非法")
-
-    from app.core.arq_client import get_pool
-
-    async def _get_task(tid: str) -> dict | None:
-        from app.core.database import async_session_factory
-        from app.models.business import TaskStatus
-
-        async with async_session_factory() as session:
-            task = await session.get(TaskStatus, tid)
-        return serialize_task(task) if task is not None else None
-
-    async def _get_logs(tid: str, start: int) -> list[str]:
-        # 复用模块级 ARQ 连接池（08-14 审查：此前每 0.5s 新建池，600s 轮询 ≈ 1200 次建连）
-        pool = await get_pool()
-        raw = await pool.lrange(f"crawl:log:{tid}", start, -1)
-        return [ln.decode("utf-8", errors="replace") if isinstance(ln, bytes) else str(ln) for ln in raw]
-
-    async def _event_gen():
-        async for event in _crawl_log_events(task_uuid, _get_logs, _get_task):
-            yield event
-
-    return StreamingResponse(_event_gen(), media_type="text/event-stream")
-
-
-@router.get("/crawl/history")
-async def crawl_history(
-    page: int = Query(default=1, ge=1),
-    size: int = Query(default=20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
-):
-    """爬取历史（BE-M4-05 扩展）：task_status 中 crawl 任务列表，倒序分页。
-
-    字段来源 task.result（触发时写 platform/keyword，crawl_platform 合并写入
-    spider/output_file/items），status 为 pending/running/success/failed。
-    """
-    stmt = select(TaskStatus).where(TaskStatus.task_type == "crawl")
-    count_stmt = (
-        select(func.count()).select_from(TaskStatus).where(TaskStatus.task_type == "crawl")
-    )
-    rows, total = await paginate(
-        db, stmt.order_by(TaskStatus.created_at.desc()), page, size, count_stmt=count_stmt
-    )
-    return paged_ok([_history_row(t) for t in rows], total, page, size)
+_crawl_log_events = crawl._crawl_log_events
 
 
 # ============================================================
