@@ -12,7 +12,7 @@
 #
 # 设计说明（与团队启动指南/项目记忆一致）：
 #   - api 与 worker 是独立进程：api 用 `uv run python -m uvicorn`（坑 2：避免 uv trampoline），
-#     worker 用 `uv run python -m arq app.workers.tasks.WorkerSettings`
+#     worker 用 `uv run python -m arq app.workers.settings.WorkerSettings`
 #   - PYTHONPATH 需含 backend;backend\data（scrapy 爬虫模块在 data/crawlers，坑 15）
 #   - 日志写入 logs/（已 gitignore）：api.log / worker.log / frontend.log
 #   - 幂等：8000 被占用且未加 -Restart 时不重复启动；worker 已在跑时不重复启动
@@ -109,7 +109,7 @@ if ($worker -and -not $Restart) {
     }
     Write-Host "[3/4] 启动 worker（arq WorkerSettings）..." -ForegroundColor Cyan
     $workerProc = Start-Process -FilePath "uv" -ArgumentList @(
-        "run", "python", "-m", "arq", "app.workers.tasks.WorkerSettings"
+        "run", "python", "-m", "arq", "app.workers.settings.WorkerSettings"
     ) -WorkingDirectory $BackendDir -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $LogDir "worker.log") `
         -RedirectStandardError (Join-Path $LogDir "worker.err.log") -PassThru

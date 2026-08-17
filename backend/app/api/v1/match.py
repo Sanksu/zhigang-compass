@@ -35,7 +35,8 @@ from app.schemas.common import error, ok
 from app.services.embeddings.vector_store import PgvectorUnavailableError, load_project_vectors
 from app.services.learning_path.generator import LearningPathGenerator
 from app.services.matching.engine import RuleBasedMatcher
-from app.services.matching.loaders import build_candidate, load_positions_from_graph
+from app.services.matching.loaders import build_candidate
+from app.services.matching.shared_cache import load_positions_shared
 from app.services.matching.schemas import MatchMode, MatchRequest
 from app.services.matching.semantic import SkillEmbedder
 
@@ -287,11 +288,14 @@ async def compare(
         logger.warning("project_embeddings 查询失败，项目比对回退文本相似度")
         project_vectors = {}
 
+    # 岗位画像经 Redis 版本化共享缓存加载（跨进程单飞，避免 API/worker
+    # 每进程各自全量查图 + SBERT 预热；Redis 故障降级进程 TTL 加载）
+    positions = await load_positions_shared()
+
     def _compute():
         # 图谱加载 + SBERT 语义 + 规则匹配为 CPU/IO 密集，
         # 放线程池避免同步 Neo4j/SBERT 阻塞事件循环
         candidate = build_candidate(cache.parsed_data)
-        positions = load_positions_from_graph()
         target = next((p for p in positions if p.position_id == req.position_id), None)
         if target is None:
             return None
@@ -407,6 +411,78 @@ async def match_result_path(match_id: str, user: dict = Depends(require_role("us
     """[M4] 获取学习路径（compare 结果的 missing/weak 技能先修链 + 课程，仅限本人结果）。"""
     data = await _load_or_404(match_id, user)
     return ok(data={"match_id": match_id, "learning_path": data.get("learning_path", [])})
+
+
+@router.post("/result/{match_id}/diagnosis", status_code=202)
+async def request_match_diagnosis(
+    match_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
+):
+    """Create or reuse an asynchronous diagnosis task."""
+    user_id = user.get("sub", "")
+    data = await _load_match_result(match_id, user_id)
+    if data is None:
+        return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
+    if not data.get("gaps"):
+        return error(ERR_VALIDATION, "该匹配结果无差距数据，仅人岗比对可生成诊断报告")
+
+    cached = await redis_client.get(f"match:diagnosis:{match_id}")
+    if cached:
+        return ok(data={
+            "task_id": "",
+            "status": "success",
+            "match_id": match_id,
+            "report": json.loads(cached),
+            "error": "",
+        })
+
+    existing = await db.scalar(
+        select(TaskStatus)
+        .where(
+            TaskStatus.task_type == "generate_diagnosis",
+            TaskStatus.result["match_id"].astext == match_id,
+            TaskStatus.result["user_id"].astext == user_id,
+            TaskStatus.status.in_(["pending", "running"]),
+        )
+        .order_by(TaskStatus.created_at.desc())
+    )
+    if existing is not None:
+        return ok(data={
+            "task_id": existing.id,
+            "status": existing.status,
+            "match_id": match_id,
+            "report": None,
+            "error": existing.error or "",
+        })
+
+    task = TaskStatus(
+        task_type="generate_diagnosis",
+        status="pending",
+        result={"match_id": match_id, "user_id": user_id},
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    try:
+        await enqueue(
+            "generate_diagnosis",
+            match_id=match_id,
+            task_id=str(task.id),
+            user_id=user_id,
+        )
+    except Exception as exc:
+        task.status = "failed"
+        task.error = "任务入队失败"
+        await db.commit()
+        logger.error("诊断任务入队失败: task_id=%s err=%s", task.id, exc)
+    return ok(data={
+        "task_id": task.id,
+        "status": task.status,
+        "match_id": match_id,
+        "report": None,
+        "error": task.error or "",
+    })
 
 
 @router.get("/result/{match_id}/diagnosis")

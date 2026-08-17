@@ -85,18 +85,18 @@ def import_jd(
     # 传 skills 保证兜底族岗位（软件开发工程师/算法工程师等）按技能路由到细分族，
     # 与 batch_extract 快照、聚合链路口径一致；否则二次归一化会把合法路由结果
     # （如纯通用算法技能路由到的"算法工程师"）清空为不入图
-    extraction.position_name = normalize_position_name(
+    normalized_position = normalize_position_name(
         extraction.position_name,
         skills=[s.name for s in (extraction.skills or [])],
     )
     # Occupation 对齐也在事务外执行（语义嵌入耗时，避免长事务）；
     # 任何失败降级为无 occupation 边，不阻塞入图主链路。
     occupation: tuple[str, float] | None = None
-    if extraction.position_name:
+    if normalized_position:
         try:
             from app.services.kg.occupation_align import OccupationAligner
 
-            occupation = OccupationAligner.get().align(extraction.position_name)
+            occupation = OccupationAligner.get().align(normalized_position)
         except Exception:
             occupation = None
     return session.execute_write(_import_jd_tx, extraction, evidence, occupation)

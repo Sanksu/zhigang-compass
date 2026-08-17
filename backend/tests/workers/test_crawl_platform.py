@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.workers import tasks
+from app.workers import crawl
 
 
 class _FakeStream:
@@ -59,13 +59,13 @@ def _patch_env(monkeypatch, tmp_path) -> list[tuple[str, dict]]:
     async def _fake_update(task_id, **fields):
         updates.append((task_id, fields))
 
-    monkeypatch.setattr(tasks, "asyncio", _FakeAsyncio())
-    monkeypatch.setattr(tasks, "datetime", _FrozenDateTime)
-    monkeypatch.setattr(tasks, "_OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(crawl, "asyncio", _FakeAsyncio())
+    monkeypatch.setattr(crawl, "datetime", _FrozenDateTime)
+    monkeypatch.setattr(crawl, "_OUTPUT_DIR", tmp_path)
     # _CRAWLERS_DIR 用于 output 相对路径（relative_to），指向 tmp_path 的祖父目录
-    monkeypatch.setattr(tasks, "_CRAWLERS_DIR", tmp_path.parent.parent)
-    monkeypatch.setattr(tasks, "_push_crawl_log", _noop_log)
-    monkeypatch.setattr(tasks, "_update_crawl_task", _fake_update)
+    monkeypatch.setattr(crawl, "_CRAWLERS_DIR", tmp_path.parent.parent)
+    monkeypatch.setattr(crawl, "push_crawl_log", _noop_log)
+    monkeypatch.setattr(crawl, "update_crawl_task", _fake_update)
     return updates, cmd_calls
 
 
@@ -76,7 +76,7 @@ def test_zero_items_marks_failed(monkeypatch, tmp_path):
 
     async def run():
         with pytest.raises(RuntimeError, match="产出 0 条数据"):
-            await tasks.crawl_platform({}, "boss", task_id="t-zero")
+            await crawl.crawl_platform({}, "boss", task_id="t-zero")
 
     asyncio.run(run())
     assert updates[-1][0] == "t-zero"
@@ -92,7 +92,7 @@ def test_nonzero_items_marks_success(monkeypatch, tmp_path):
     )
 
     async def run():
-        return await tasks.crawl_platform({}, "boss", task_id="t-ok")
+        return await crawl.crawl_platform({}, "boss", task_id="t-ok")
 
     result = asyncio.run(run())
     assert result["items"] == 2
@@ -107,7 +107,7 @@ def test_cities_passed_to_scrapy_cmd(monkeypatch, tmp_path):
     (tmp_path / "indeed_20260803_120001.jsonl").write_text("{}\n", encoding="utf-8")
 
     async def run():
-        return await tasks.crawl_platform(
+        return await crawl.crawl_platform(
             {}, "indeed", keywords=["Python"], cities=["New York"], task_id="t-city"
         )
 
@@ -159,17 +159,17 @@ def test_timeout_kills_subprocess_and_marks_failed(monkeypatch, tmp_path):
         alerts.append(kind)
 
     alerts = []
-    monkeypatch.setattr(tasks, "asyncio", _SlowAsyncio())
-    monkeypatch.setattr(tasks, "datetime", _FrozenDateTime)
-    monkeypatch.setattr(tasks, "_OUTPUT_DIR", tmp_path)
-    monkeypatch.setattr(tasks, "_CRAWLERS_DIR", tmp_path.parent.parent)
-    monkeypatch.setattr(tasks, "_push_crawl_log", _noop_log)
-    monkeypatch.setattr(tasks, "_update_crawl_task", _fake_update)
-    monkeypatch.setattr(tasks, "send_alert", _fake_alert)
+    monkeypatch.setattr(crawl, "asyncio", _SlowAsyncio())
+    monkeypatch.setattr(crawl, "datetime", _FrozenDateTime)
+    monkeypatch.setattr(crawl, "_OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(crawl, "_CRAWLERS_DIR", tmp_path.parent.parent)
+    monkeypatch.setattr(crawl, "push_crawl_log", _noop_log)
+    monkeypatch.setattr(crawl, "update_crawl_task", _fake_update)
+    monkeypatch.setattr(crawl, "send_alert", _fake_alert)
 
     async def run():
         with pytest.raises(RuntimeError, match="超时"):
-            await tasks.crawl_platform({}, "zhilian", task_id="t-timeout")
+            await crawl.crawl_platform({}, "zhilian", task_id="t-timeout")
 
     asyncio.run(run())
     assert killed, "超时必须 kill 子进程"

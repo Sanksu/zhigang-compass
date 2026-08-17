@@ -30,7 +30,7 @@
 
 ### 行为说明
 
-- api 与 worker 是独立进程：api 用 `uv run python -m uvicorn`，worker 用 `uv run python -m arq app.workers.tasks.WorkerSettings`
+- api 与 worker 是独立进程：api 用 `uv run python -m uvicorn`，worker 用 `uv run python -m arq app.workers.settings.WorkerSettings`
 - PYTHONPATH 需含 `backend;backend\data`（scrapy 爬虫模块在 data/crawlers）
 - 日志写入 `logs/`（已 gitignore）：`api.log` / `worker.log` / `frontend.log`
 - 幂等：8000 被占用且未加 `-Restart` 时不重复启动；worker 已在跑时不重复启动

@@ -421,17 +421,24 @@ export function ResumeMatchPage() {
     }
   }
 
-  // 生成/刷新 AI 诊断报告（GET /match/result/{id}/diagnosis，LLM 配置不可用返回 503、超时返回 504，不阻断主流程）
+  // 创建异步诊断任务，完成后从兼容 GET 端点读取报告。
   async function loadDiagnosis() {
     if (!matchId || diagnosisLoading) return
     setDiagnosisLoading(true)
     setNotice(null)
     try {
-      // 诊断是 LLM 长时生成（多 provider 降级，可能 30s+），超时放宽到 120s，
-      // 覆盖默认 axios 30s 上限，避免"生成中"被误中断
+      const created = await apiPost<components['schemas']['DiagnosisTaskResponse']>(
+        `/match/result/${matchId}/diagnosis`,
+      )
+      if (created.report) {
+        setDiagnosis(created.report)
+        return
+      }
+      if (!created.task_id) throw new Error('诊断任务创建失败')
+      const task = await pollMatchTask(created.task_id, 120_000)
+      if (task.status === 'failed') throw new Error(task.error || '诊断任务执行失败')
       const report = await apiGet<BackendDiagnosisReport>(
         `/match/result/${matchId}/diagnosis`,
-        { timeout: 120_000 },
       )
       setDiagnosis(report)
     } catch (e) {

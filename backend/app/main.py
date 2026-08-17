@@ -49,7 +49,34 @@ async def lifespan(app: FastAPI):
             raise RuntimeError("ADMIN_PASSWORD 仍为默认弱口令，生产环境拒绝启动")
     await _prewarm_semantic()
     yield
-    # 关闭时 — 资源由各自模块管理
+    await _shutdown_resources()
+
+
+async def _shutdown_resources() -> None:
+    """关闭时释放连接资源（各自身 try/except 防单点失败阻断后续关闭）。
+
+    08-17 P2 迁移新增 async_neo4j_driver，一并纳入关闭路径；sync neo4j_driver
+    仍由停机遇期关闭（workers/脚本复用）。PostgreSQL asyncpg 连接池 dispose 常驻
+    服务关闭时回收（单元测试不跑 lifespan，不会影响测试套件）。
+    """
+    from app.core import database as _db
+
+    try:
+        await _db.async_neo4j_driver.close()
+    except Exception:
+        logger.exception("async_neo4j_driver 关闭失败")
+    try:
+        _db.neo4j_driver.close()
+    except Exception:
+        logger.exception("neo4j_driver 关闭失败")
+    try:
+        await _db.redis_client.aclose()
+    except Exception:
+        logger.exception("redis_client 关闭失败")
+    try:
+        await _db.engine.dispose()
+    except Exception:
+        logger.exception("PostgreSQL 连接池 dispose 失败")
 
 
 async def _prewarm_semantic() -> None:
@@ -66,11 +93,13 @@ async def _prewarm_semantic() -> None:
 
     try:
         await asyncio.to_thread(SkillEmbedder.get().preload)
-        # 预热岗位技能向量（08-15 修复：首次 compare 的 positions 加载 +
-        # 批量 encode 实测 16s——比模型加载更长，用户"比对详情白屏"主因）
-        from app.services.matching.loaders import load_positions_from_graph
+        # 预热岗位画像（08-15 修复：首次 compare 的 positions 加载 +
+        # 批量 encode 实测 16s——比模型加载更长，用户"比对详情白屏"主因）。
+        # P1 起走 Redis 版本化共享缓存：冷启动构建载荷并切指针，
+        # 其他进程/worker 直接读共享载荷，不再各自全量查图。
+        from app.services.matching.shared_cache import load_positions_shared
 
-        await asyncio.to_thread(load_positions_from_graph)
+        await load_positions_shared()
     except Exception:
         pass
 

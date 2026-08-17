@@ -1545,7 +1545,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 获取人岗比对诊断报告
+         * 获取人岗比对诊断报告（兼容同步生成）
          * @description LLM 基于结果快照（分数/差距/学习路径/证据）生成结构化诊断报告，结果缓存 24h
          */
         get: {
@@ -1604,7 +1604,48 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /** 异步生成或复用人岗比对诊断报告 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 诊断任务已创建或复用 */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["DiagnosisTaskResponse"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                /** @description 该匹配结果无差距数据 */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 匹配结果不存在或无权访问 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -3818,6 +3859,15 @@ export interface components {
             error?: string;
             /** @description 成功后附，供拉取结果 */
             match_id?: string;
+        };
+        /** @description POST /match/result/{match_id}/diagnosis 响应 data */
+        DiagnosisTaskResponse: {
+            task_id: string;
+            /** @enum {string} */
+            status: "pending" | "running" | "success" | "failed";
+            match_id?: string;
+            report?: components["schemas"]["DiagnosisReport"];
+            error?: string;
         };
         /** @description POST /match/recommend 响应 data（ARQ 入队） */
         RecommendTaskResult: {

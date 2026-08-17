@@ -13,7 +13,7 @@
     2. discovery_auto_transition：读 graph_versions 窗口序列 → emerging/stable/
        declining 自动流转判定 → Neo4j + 候选池幂等持久化
 
-依赖：Redis 已启动、ARQ Worker 已运行（arq app.workers.tasks.WorkerSettings）、
+依赖：Redis 已启动、ARQ Worker 已运行（arq app.workers.settings.WorkerSettings）、
 快照已发布（auto_transition 依赖快照参与窗口序列）。
 """
 

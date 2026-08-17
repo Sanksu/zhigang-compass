@@ -123,8 +123,9 @@ class TestImportFailureRetryable:
 
         assert result["succeeded"] == 1
         assert result["failed"] == []
-        # 岗位名经过 normalize_position_name 归一化（去空格等），断言归一化结果
-        assert rows[0].snapshot["extraction"]["position_name"] == "Python开发工程师"
+        # 保留模型原始岗位名用于审计，规范岗位名单独持久化供下游消费。
+        assert rows[0].snapshot["extraction"]["position_name"] == "Python 开发工程师"
+        assert rows[0].snapshot["normalized_position"] == "Python开发工程师"
         assert rows[0].snapshot["extraction"]["method"] == "llm"
 
     def test_partial_failure_only_marks_succeeded_rows(self):

@@ -140,15 +140,11 @@ def build_position_groups(records: list[dict]) -> dict[str, list[dict]]:
 
     返回 {归一化岗位名: [record, ...]}。岗位名归一化失败（空串）的记录丢弃。
     """
-    from app.services.extraction.dictionary import normalize_position_name
+    from app.services.extraction.position_normalization import normalized_position_from_snapshot
 
     groups: dict[str, list[dict]] = {}
     for rec in records:
-        ext = (rec.get("snapshot") or {}).get("extraction") or {}
-        pos = normalize_position_name(
-            ext.get("position_name") or "",
-            skills=[s.get("name", "") for s in (ext.get("skills") or []) if s.get("name")],
-        )
+        pos = normalized_position_from_snapshot(rec.get("snapshot"))
         if not pos:
             continue
         groups.setdefault(pos, []).append(rec)
