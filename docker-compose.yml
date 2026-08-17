@@ -105,7 +105,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: zhigang-worker
-    entrypoint: ["sh", "-c", "exec arq app.workers.tasks.WorkerSettings"]
+    entrypoint: ["sh", "-c", "exec arq app.workers.settings.WorkerSettings"]
     # 与 api 同源注入 backend/.env（SECRET_KEY / LLM_API_KEY 等），
     # environment 内联项会覆盖 env_file 同名变量
     env_file:

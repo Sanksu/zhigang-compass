@@ -18,7 +18,7 @@ r"""每日 ETL 调度入口（设计文档 §4.4）。
 幂等：同 run_date 仅允许一次入队（Redis SET NX 锁 arq:etl:run:{date}，24h TTL），
 重复触发直接跳过；失败重跑加 --force 覆盖。
 
-依赖：Redis 已启动、ARQ Worker 已运行（arq app.workers.tasks.WorkerSettings）
+依赖：Redis 已启动、ARQ Worker 已运行（arq app.workers.settings.WorkerSettings）
 """
 
 import asyncio

@@ -1,6 +1,6 @@
 """候选岗位 id 生成测试（08-14 审查：超长技能名截断碰撞修复）。"""
 
-from app.workers.tasks import _candidate_id
+from app.workers.discovery import _candidate_id
 
 
 class TestCandidateId:

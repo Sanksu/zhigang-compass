@@ -1,9 +1,16 @@
 """Scrapy subprocess worker implementation and crawl configuration."""
 
+import asyncio
 import os
+import platform
+import signal
 import subprocess
-from datetime import timedelta, timezone
+import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from app.services.alerting import send_alert
+from app.workers.utils import push_crawl_log, update_crawl_task
 
 # 子进程 stdout/stderr 强制 UTF-8（中文 Windows 默认 GBK 管道，按 UTF-8 解码会乱码）
 # 与 crawlers/spiders 下各 spider 调外部进程的模式一致
@@ -56,10 +63,6 @@ def _kill_process_tree(proc) -> None:
     Windows：taskkill /T /F（进程树）；POSIX：killpg（创建时 start_new_session
     进程组隔离）。
     """
-    import os
-    import platform
-    import signal
-
     if platform.system() == "Windows":
         try:
             result = subprocess.run(
@@ -88,8 +91,6 @@ async def crawl_platform(
     cities: list[str] | None = None,
     max_results: int | None = None,
     task_id: str | None = None,
-    *,
-    dependencies,
 ) -> dict:
     """触发单个 Scrapy 爬虫。
 
@@ -107,25 +108,9 @@ async def crawl_platform(
 
     输出：output/{spider}_{YYYYMMDD_HHMMSS}.jsonl
     """
-    # Resolve task-module dependencies at call time so legacy monkeypatch paths
-    # (app.workers.tasks.<name>) retain their historical behavior.
-    asyncio = dependencies.asyncio
-    datetime = dependencies.datetime
-    subprocess_module = dependencies.subprocess
-    sys_module = dependencies.sys
-    crawlers_dir = dependencies._CRAWLERS_DIR
-    output_dir = dependencies._OUTPUT_DIR
-    crawl_env = dependencies._CRAWL_ENV
-    max_results_supported = dependencies.MAX_RESULTS_SUPPORTED
-    crawl_timeout = dependencies._crawl_timeout
-    kill_process_tree = dependencies._kill_process_tree
-    push_crawl_log = dependencies._push_crawl_log
-    update_crawl_task = dependencies._update_crawl_task
-    alert = dependencies.send_alert
-
     timestamp = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S")
-    output_file = output_dir / f"{spider_name}_{timestamp}.jsonl"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = _OUTPUT_DIR / f"{spider_name}_{timestamp}.jsonl"
+    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     print(
         f"[crawl_platform] 任务开始: task_id={task_id} spider={spider_name} "
         f"keywords={keywords} cities={cities or '(默认)'} output={output_file}",
@@ -133,7 +118,7 @@ async def crawl_platform(
     )
 
     cmd = [
-        sys_module.executable, "-m", "scrapy", "crawl", spider_name,
+        sys.executable, "-m", "scrapy", "crawl", spider_name,
         "-o", str(output_file),
     ]
     if keywords:
@@ -142,7 +127,7 @@ async def crawl_platform(
         cmd.extend(["-a", f"cities={','.join(cities)}"])
     # max_results 仅 arxiv 等显式消费该参数的 spider 生效，其余忽略并提示（避免静默失效）
     if max_results:
-        if spider_name in max_results_supported:
+        if spider_name in MAX_RESULTS_SUPPORTED:
             cmd.extend(["-a", f"max_results={max_results}"])
         else:
             print(f"[crawl_platform] spider={spider_name} 不支持 max_results，参数已忽略", flush=True)
@@ -155,21 +140,21 @@ async def crawl_platform(
         result={"spider": spider_name, "output_file": str(output_file)},
     )
 
-    # cwd 设到 crawlers/ 让 scrapy.cfg 生效；env 强制 UTF-8 + PYTHONPATH（见 crawl_env）
+    # cwd 设到 crawlers/ 让 scrapy.cfg 生效；env 强制 UTF-8 + PYTHONPATH（见 _CRAWL_ENV）
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
-            cwd=str(crawlers_dir),
-            stdout=subprocess_module.PIPE,
-            stderr=subprocess_module.PIPE,
-            env=crawl_env,
+            cwd=str(_CRAWLERS_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=_CRAWL_ENV,
             start_new_session=True,  # POSIX 进程组隔离：超时 killpg 可连带子进程
         )
     except Exception as e:
         msg = f"启动爬虫子进程失败: {e}"
         print(f"[crawl_platform] {msg}", flush=True)
         await update_crawl_task(task_id, status="failed", error=msg[:500])
-        await alert("crawl_failed", msg, spider=spider_name)
+        await send_alert("crawl_failed", msg, spider=spider_name)
         raise RuntimeError(msg) from e
     print(f"[crawl_platform] 子进程已启动: task_id={task_id} pid={getattr(proc, 'pid', '?')}", flush=True)
 
@@ -192,7 +177,7 @@ async def crawl_platform(
     # 已写入 jsonl 保留（Scrapy 逐行落盘），后续 load 消费已产出数据
     # 08-15 审查 H1：drain 必须与 wait_for 同域——原实现 gather 在 wait_for 之前，
     # 子进程挂死且无输出时 readline 永不 EOF，wait_for 永不触发（kill 成摆设）
-    timeout = crawl_timeout(spider_name)
+    timeout = _crawl_timeout(spider_name)
     try:
         await asyncio.wait_for(
             asyncio.gather(
@@ -207,18 +192,18 @@ async def crawl_platform(
         try:
             returncode = await asyncio.wait_for(proc.wait(), timeout=10)
         except asyncio.TimeoutError:
-            kill_process_tree(proc)  # 同步函数（taskkill/killpg），勿 await
+            _kill_process_tree(proc)  # 同步函数（taskkill/killpg），勿 await
             msg = f"爬虫 {spider_name} 输出流已关闭但进程未退出（wait 10s 超时），已强制终止"
             print(f"[crawl_platform] 任务异常: task_id={task_id} {msg}", flush=True)
             await update_crawl_task(task_id, status="failed", error=msg[:500])
-            await alert("crawl_timeout", msg, spider=spider_name)
+            await send_alert("crawl_timeout", msg, spider=spider_name)
             raise RuntimeError(msg)
     except asyncio.TimeoutError:
-        kill_process_tree(proc)  # 同步函数（taskkill/killpg），勿 await
+        _kill_process_tree(proc)  # 同步函数（taskkill/killpg），勿 await
         msg = f"爬虫 {spider_name} 超时（>{timeout}s），已强制终止"
         print(f"[crawl_platform] 任务超时: task_id={task_id} {msg}", flush=True)
         await update_crawl_task(task_id, status="failed", error=msg[:500])
-        await alert("crawl_timeout", msg, spider=spider_name)
+        await send_alert("crawl_timeout", msg, spider=spider_name)
         raise RuntimeError(msg)
     print(f"[crawl_platform] 子进程退出: task_id={task_id} returncode={returncode}", flush=True)
 
@@ -227,7 +212,7 @@ async def crawl_platform(
         msg = f"爬虫 {spider_name} 退出码 {returncode}: {detail}"
         print(f"[crawl_platform] 任务失败: task_id={task_id} {msg[:300]}", flush=True)
         await update_crawl_task(task_id, status="failed", error=msg[:500])
-        await alert("crawl_failed", msg, spider=spider_name, exit_code=returncode)
+        await send_alert("crawl_failed", msg, spider=spider_name, exit_code=returncode)
         raise RuntimeError(msg)
 
     # 统计产出条数（按行数）
@@ -242,7 +227,7 @@ async def crawl_platform(
         msg = f"爬虫 {spider_name} 产出 0 条数据: {detail}"
         print(f"[crawl_platform] 任务失败（无产出）: task_id={task_id} {msg[:300]}", flush=True)
         await update_crawl_task(task_id, status="failed", error=msg[:500])
-        await alert("crawl_failed", msg, spider=spider_name, items=0)
+        await send_alert("crawl_failed", msg, spider=spider_name, items=0)
         raise RuntimeError(msg)
 
     print(f"[crawl_platform] 任务成功: task_id={task_id} spider={spider_name} items={line_count}", flush=True)
@@ -253,7 +238,7 @@ async def crawl_platform(
         progress=1.0,
         result={
             "spider": spider_name,
-            "output_file": str(output_file.relative_to(crawlers_dir.parent.parent)),
+            "output_file": str(output_file.relative_to(_CRAWLERS_DIR.parent.parent)),
             "items": line_count,
             "crawled_at": timestamp,
         },
@@ -261,7 +246,7 @@ async def crawl_platform(
 
     return {
         "spider": spider_name,
-        "output_file": str(output_file.relative_to(crawlers_dir.parent.parent)),
+        "output_file": str(output_file.relative_to(_CRAWLERS_DIR.parent.parent)),
         "items": line_count,
         "crawled_at": timestamp,
     }
