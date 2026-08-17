@@ -514,11 +514,17 @@ def main():
     assert len(primary) == 110, f"Expected 110 primary, got {len(primary)}"
     assert len(reserve) == 25, f"Expected 25 reserve, got {len(reserve)}"
     
-    # 3. 检查重复
+    # 3. 检查重复 (sample_id)
     primary_ids = set(r["sample_id"] for r in primary)
     reserve_ids = set(r["sample_id"] for r in reserve)
     overlap = primary_ids & reserve_ids
-    assert len(overlap) == 0, f"Primary and reserve overlap: {overlap}"
+    assert len(overlap) == 0, f"Primary and reserve sample_id overlap: {overlap}"
+    
+    # 3b. 检查重复 (source_id)
+    primary_source_ids = set(r["source_id"] for r in primary)
+    reserve_source_ids = set(r["source_id"] for r in reserve)
+    source_id_overlap = primary_source_ids & reserve_source_ids
+    assert len(source_id_overlap) == 0, f"Primary and reserve source_id overlap: {source_id_overlap}"
     
     # 4. 岗位分布
     print("\n[3] Primary 岗位分布:")

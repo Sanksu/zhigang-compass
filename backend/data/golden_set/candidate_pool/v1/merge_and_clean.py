@@ -1043,7 +1043,7 @@ def main():
    - **rejected**: 空正文 / 无URL / 无标题 / 精确重复 / 内容缺失
    - **review_required**: education_conflict / experience_conflict / low_information / approximate_duplicate
    - **accepted**: 通过所有检查，无冲突，无问题
-8. **已知局限**: `publish_time` 字段全部为空（智联招聘数据源共性）
+8. **已知局限**: `publish_time` 完整率仅 {field_rates.get('publish_time', '0%')}，大部分记录缺失发布时间（智联招聘数据源共性）
 
 ---
 
