@@ -1,7 +1,8 @@
-"""学习路径 30 案例专家评审（设计文档 §1.4「学习路径合理性 ≥ 80% / 30 案例专家评审」）。
+"""学习路径 50 案例专家评审（设计文档 §1.4「学习路径合理性 ≥ 80% / 案例专家评审」）。
 
 案例构造：简历黄金集 50 份（gold_skills → 候选人画像，熟练度默认熟悉）× 图谱真实
-Position（REQUIRES 边，must/nice/weight/proficiency 全量）按下标对齐组合 30 对。
+Position（REQUIRES 边，must/nice/weight/proficiency 全量）。缺省按下标对齐组合；
+2026-08-17 起推荐 --pairings 固化配对文件，图谱变更后重跑仍复现同一案例集。
 
 每案例跑 LearningPathGenerator（真实课程加载：Neo4j LEARNABLE_VIA + PG quality），
 输出结构化评审表 + 四维预评分（供专家复核定稿）：
@@ -11,12 +12,16 @@ Position（REQUIRES 边，must/nice/weight/proficiency 全量）按下标对齐�
   4. 学时合理性   每项平均学时（含先修链）：35-80h = 1.0；<35h = 0.4（默认 30h 低估）；
                   80-150h = 0.7；>150h = 0.5
 
-案例合理 = 四维平均 ≥ 0.8；整体达标 = 30 案例中 ≥ 80% 合理。
+案例合理 = 四维平均 ≥ 0.8；整体达标 = 案例中 ≥ 80% 合理。
 预评分供专家复核，非终审结论；专家修改后重跑统计（--re-score 读人工评分覆盖）。
 
 用法：
-    uv run -- python scripts/eval_learning_path.py              # 全量生成 + 预评分
-    uv run -- python scripts/eval_learning_path.py --limit 3    # 冒烟
+    uv run -- python scripts/eval_learning_path.py                # 全量生成 + 预评分（按下标对齐）
+    uv run -- python scripts/eval_learning_path.py --pairings data/golden_set/review/learning_path_pairings_50.json
+        # 按固化配对复现同一案例集（2026-08-17 起标准用法）
+    uv run -- python scripts/eval_learning_path.py --limit 3      # 冒烟
+    uv run -- python scripts/eval_learning_path.py --re-score data/golden_set/review/learning_path_eval_50_human.json
+        # 人工评审后定稿（需与 --pairings/缺省对齐方式一致，否则 case 错位）
 """
 
 from __future__ import annotations
@@ -40,7 +45,7 @@ from app.services.matching.schemas import (
     SkillRequirement,
 )
 
-_CASE_COUNT = 30
+_CASE_COUNT = 50
 
 
 def load_resume_candidates() -> list[CandidateProfile]:
@@ -137,7 +142,10 @@ async def amain() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=_CASE_COUNT, help="案例数（冒烟用）")
     parser.add_argument("--out", type=Path,
-                        default=ROOT / "data" / "golden_set" / "review" / "learning_path_eval_30.json")
+                        default=ROOT / "data" / "golden_set" / "review" / "learning_path_eval_50.json")
+    parser.add_argument("--pairings", type=Path, default=None,
+                        help="固化配对文件 {case_id: {candidate: resume_xxx, position: pos_xxx}}——"
+                             "图谱变更后重跑仍复现同一案例集（推荐）；缺省按下标对齐")
     parser.add_argument("--re-score", type=Path, default=None,
                         help="人工评分覆盖文件（{case_id: {prerequisite/course/hours: 分, note: 备注}}），"
                              "读入后重算 mean/reasonable/summary 并覆盖输出（completeness 为客观计算不覆盖）")
@@ -147,7 +155,22 @@ async def amain() -> int:
     positions = load_graph_positions()
     print(f"候选池: {len(candidates)} 份简历 | 图谱岗位池: {len(positions)} 个")
 
-    n = min(args.limit, len(candidates), len(positions))
+    if args.pairings:
+        pairings = json.loads(args.pairings.read_text(encoding="utf-8"))
+        cand_by_id = {c.user_id: c for c in candidates}
+        pos_by_id = {p.position_id: p for p in positions}
+        triples = []
+        for case_id, pr in pairings.items():
+            cand, pos = cand_by_id.get(pr["candidate"]), pos_by_id.get(pr["position"])
+            if cand is None or pos is None:
+                print(f"配对缺失: {case_id} candidate={pr['candidate']} position={pr['position']}")
+                return 1
+            triples.append((case_id, cand, pos))
+        print(f"按固化配对复现 {len(triples)} 案例")
+    else:
+        n = min(args.limit, len(candidates), len(positions))
+        triples = [(f"lp_{i + 1:02d}", candidates[i], positions[i]) for i in range(n)]
+
     gen = LearningPathGenerator()
     try:
         from app.services.matching.semantic import SkillEmbedder
@@ -158,8 +181,8 @@ async def amain() -> int:
         print(f"SBERT 不可用，降级纯规则: {exc}")
 
     cases = []
-    for i in range(n):
-        cand, pos = candidates[i], positions[i]
+    n = len(triples)
+    for case_id, cand, pos in triples:
         result = await gen.generate(cand, pos, semantic=semantic)
         missing = sum(1 for g in result.gaps if g.gap_type == GapType.MISSING)
         gap_total = sum(1 for g in result.gaps if g.gap_type in (GapType.MISSING, GapType.WEAK))
@@ -181,7 +204,7 @@ async def amain() -> int:
         }
         dims["mean"] = round(sum(dims.values()) / 4, 2)
         cases.append({
-            "case_id": f"lp_{i + 1:02d}",
+            "case_id": case_id,
             "candidate_id": cand.user_id,
             "position": f"{pos.name} ({pos.position_id})",
             "missing_skills": missing,
@@ -196,7 +219,7 @@ async def amain() -> int:
             "scores": dims,
             "reasonable": dims["mean"] >= 0.8,
         })
-        print(f"  [{i + 1}/{n}] {cases[-1]['case_id']} {pos.name}: missing={missing} "
+        print(f"  [{len(cases)}/{n}] {cases[-1]['case_id']} {pos.name}: missing={missing} "
               f"items={len(items)} mean={dims['mean']}")
 
     reasonable = sum(1 for c in cases if c["reasonable"])
