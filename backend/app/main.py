@@ -66,11 +66,13 @@ async def _prewarm_semantic() -> None:
 
     try:
         await asyncio.to_thread(SkillEmbedder.get().preload)
-        # 预热岗位技能向量（08-15 修复：首次 compare 的 positions 加载 +
-        # 批量 encode 实测 16s——比模型加载更长，用户"比对详情白屏"主因）
-        from app.services.matching.loaders import load_positions_from_graph
+        # 预热岗位画像（08-15 修复：首次 compare 的 positions 加载 +
+        # 批量 encode 实测 16s——比模型加载更长，用户"比对详情白屏"主因）。
+        # P1 起走 Redis 版本化共享缓存：冷启动构建载荷并切指针，
+        # 其他进程/worker 直接读共享载荷，不再各自全量查图。
+        from app.services.matching.shared_cache import load_positions_shared
 
-        await asyncio.to_thread(load_positions_from_graph)
+        await load_positions_shared()
     except Exception:
         pass
 
