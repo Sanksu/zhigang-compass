@@ -9,14 +9,13 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_optional_user, role_rank
+from app.api.deps import get_optional_user
 from app.core.database import get_db, neo4j_driver, redis_client
 from app.core.errors import ERR_INTERNAL, ERR_NOT_FOUND
 from app.models.business import SkillEmbedding
 from app.schemas.common import error, ok
+from app.services.graph import repository, visibility
 from app.services.graph_algorithms.config import load_graph_algo_config
-from app.services.graph_algorithms.shortest_path import shortest_path
-from app.services.kg.skill_relations import graph_prerequisite_chain
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
 from app.services.matching.semantic import SemanticUnavailableError, SkillEmbedder
@@ -36,26 +35,12 @@ _inflight: dict[str, asyncio.Future] = {}
 # 节点详情缓存 TTL（设计文档 §11.3.5：position:{id} 5min，skill 同档）
 _NODE_CACHE_TTL = 300
 
-# 匿名/guest 可见的岗位状态（方案一：candidate 待审核不外宣，archived 已下线）。
-# 08-15 语义修正：图谱常态岗位为 active（import_jd/聚合产生），发现候选为
-# candidate（persist 镜像）。T-07 开放（08-15 用户决策：T-04 碎片治理两批
-# 完成后开放）——active 纳入公开态，匿名可见全部有 JD 支撑岗位。
-_PUBLIC_POSITION_STATUSES = ("active", "emerging", "stable", "declining")
-
-
-def _can_view_all_positions(user: Optional[dict]) -> bool:
-    """user/admin 可见全部岗位；匿名/guest 只见 emerging/stable/declining。"""
-    return user is not None and role_rank(user) >= role_rank({"role": "user"})
-
-
-def _position_scope(user: Optional[dict]) -> str:
-    """缓存 key 的可见性维度：all=全量（user/admin），public=仅公开态。"""
-    return "all" if _can_view_all_positions(user) else "public"
-
-
-def _status_clause(scope: str) -> str:
-    """岗位可见性过滤子句：public 时按公开状态过滤，否则不过滤（Cypher 插值）。"""
-    return "p.status IN $public_statuses" if scope == "public" else "true"
+# 兼容别名：岗位可见性纯函数已迁至 services/graph/visibility.py（单一事实源），
+# graph.py 保留同名绑定——tests/graph/test_graph_visibility.py 直读此处。
+_PUBLIC_POSITION_STATUSES = visibility._PUBLIC_POSITION_STATUSES
+_can_view_all_positions = visibility._can_view_all_positions
+_position_scope = visibility._position_scope
+_status_clause = visibility._status_clause
 
 
 async def _cache_get(key: str):
@@ -71,314 +56,74 @@ async def _cache_set(key: str, data, ttl: int = _NODE_CACHE_TTL) -> None:
 
 def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int) -> tuple[dict, list]:
     """panorama 同步 Neo4j 查询（08-14 审查：原在 async 函数内同步阻塞事件循环，抽到线程池）。"""
-    nodes: dict[str, dict] = {}
-    edges: list[dict] = []
-    status_filter = _status_clause(scope)
-    with neo4j_driver.session() as session:
-        if focus:
-            rows = session.run(
-                f"""
-                MATCH (p:Position {{id: $focus}})-[r:REQUIRES]->(s:Skill)
-                WHERE {status_filter} AND r.weight >= $min_weight
-                RETURN p, s, r
-                """,
-                focus=focus, min_weight=min_weight, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-            )
-        else:
-            rows = session.run(
-                f"""
-                MATCH (p:Position)
-                WHERE {status_filter}
-                WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
-                MATCH (p)-[r:REQUIRES]->(s:Skill)
-                WHERE r.weight >= $min_weight
-                RETURN p, s, r
-                """,
-                limit=limit, min_weight=min_weight, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-            )
-        for record in rows:
-            p, s, r = record["p"], record["s"], record["r"]
-            p_id = p.get("id", "")
-            s_id = s.get("id", "")
-            nodes.setdefault(p_id, {
-                "id": p_id,
-                "name": p.get("name", p_id),
-                "type": "position",
-                "status": p.get("status", "active"),
-            })
-            nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
-            edges.append({
-                "source": p_id,
-                "target": s_id,
-                "weight": r.get("weight", 0.0),
-                "necessity": r.get("necessity", "must"),
-                "level": r.get("level", "中级"),
-            })
-    return nodes, edges
+    return repository.query_panorama(neo4j_driver, scope, focus, min_weight, limit)
 
 
 def _query_skill_positions(skill_id: str, status_filter: str) -> list[dict]:
     """skill_positions 同步 Neo4j 查询（线程池执行）。"""
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            f"""
-            MATCH (p:Position)-[r:REQUIRES]->(s:Skill {{id: $skill_id}})
-            WHERE {status_filter}
-            RETURN p.id AS position_id, p.name AS position_name,
-                   r.necessity AS necessity, r.weight AS weight, r.level AS level
-            ORDER BY r.weight DESC
-            """,
-            skill_id=skill_id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        )
-        return [
-            {
-                "position_id": rec["position_id"],
-                "position_name": rec.get("position_name", rec["position_id"]),
-                "necessity": rec.get("necessity", "must"),
-                "weight": rec.get("weight", 0.0),
-                "level": rec.get("level", "中级"),
-            }
-            for rec in rows
-        ]
+    return repository.query_skill_positions(neo4j_driver, skill_id, status_filter)
 
 
 def _query_fulltext_search(
     q: str, type_: str, status_clause: str, offset: int, size: int,
 ) -> tuple[list[dict], int]:
     """fulltext_search 同步 Neo4j 查询（线程池执行，08-14 审查）。"""
-    with neo4j_driver.session() as session:
-        if type_ in ("position", "skill"):
-            index = "position_search" if type_ == "position" else "skill_search"
-            result = session.run(
-                f"""
-                CALL db.index.fulltext.queryNodes('{index}', $q) YIELD node, score
-                {status_clause}
-                RETURN node.id AS id, node.name AS name, score
-                ORDER BY score DESC SKIP $offset LIMIT $size
-                """,
-                q=q, offset=offset, size=size,
-                public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
-            )
-            total_row = session.run(
-                f"""
-                CALL db.index.fulltext.queryNodes('{index}', $q) YIELD node
-                {status_clause}
-                RETURN count(node) AS c
-                """,
-                q=q,
-                public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
-            ).single()
-            total = total_row["c"] if total_row else 0
-        else:
-            try:
-                result = session.run(
-                    "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
-                    "YIELD node, score "
-                    "RETURN node.id AS id, node.source AS name, score "
-                    "ORDER BY score DESC SKIP $offset LIMIT $size",
-                    q=q, offset=offset, size=size,
-                )
-                total_row = session.run(
-                    "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
-                    "YIELD node RETURN count(node) AS c",
-                    q=q,
-                ).single()
-            except Exception:
-                result = session.run(
-                    """
-                    MATCH (e:Evidence)
-                    WHERE e.source CONTAINS $q OR e.raw_text CONTAINS $q
-                    RETURN e.id AS id, e.source AS name, 0.0 AS score
-                    ORDER BY id SKIP $offset LIMIT $size
-                    """,
-                    q=q, offset=offset, size=size,
-                )
-                total_row = session.run(
-                    """
-                    MATCH (e:Evidence)
-                    WHERE e.source CONTAINS $q OR e.raw_text CONTAINS $q
-                    RETURN count(e) AS c
-                    """,
-                    q=q,
-                ).single()
-            total = total_row["c"] if total_row else 0
-        items = [
-            {
-                "id": rec["id"],
-                "name": rec.get("name", rec["id"]),
-                "type": type_,
-                "score": round(rec["score"], 4),
-            }
-            for rec in result
-        ]
-    return items, total
+    return repository.query_fulltext_search(neo4j_driver, q, type_, status_clause, offset, size)
 
 
 def _query_position_skills_by_necessity(id: str) -> dict[str, dict]:
     """岗位技能（按 necessity 分组，线程池执行，08-14 审查）。"""
-    skills: dict[str, dict] = {}
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            """
-            MATCH (p:Position {id: $id})-[r:REQUIRES]->(s:Skill)
-            RETURN s.id AS skill_id, s.name AS skill_name,
-                   r.necessity AS necessity, r.weight AS weight,
-                   r.level AS level, r.source_count AS source_count
-            ORDER BY r.weight DESC
-            """,
-            id=id,
-        )
-        for rec in rows:
-            necessity = rec.get("necessity", "must")
-            skills.setdefault(necessity, []).append({
-                "skill_id": rec["skill_id"],
-                "skill_name": rec.get("skill_name", rec["skill_id"]),
-                "necessity": necessity,
-                "weight": rec.get("weight", 0.0),
-                "level": rec.get("level", "中级"),
-                "source_count": rec.get("source_count", 1),
-            })
-    return skills
+    return repository.query_position_skills_by_necessity(neo4j_driver, id)
 
 
 def _query_prereq_chain(skill_name: str) -> list[str]:
     """图谱先修链（线程池执行，08-14 审查）。"""
-    with neo4j_driver.session() as session:
-        return graph_prerequisite_chain(session, skill_name)
+    return repository.query_prereq_chain(neo4j_driver, skill_name)
 
 
 def _query_skill_ids(names: list[str]) -> dict[str, str]:
     """技能名 → 图谱 ID（线程池执行）。"""
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            "MATCH (s:Skill) WHERE s.name IN $names RETURN s.name AS name, s.id AS id",
-            names=names,
-        )
-        return {rec["name"]: rec["id"] for rec in rows}
+    return repository.query_skill_ids(neo4j_driver, names)
 
 
 def _query_position_skills(id: str, necessity: str | None, status_filter: str) -> list[dict]:
     """岗位技能（可按 necessity 过滤，线程池执行）。"""
-    query = f"""
-        MATCH (p:Position {{id: $id}})-[r:REQUIRES]->(s:Skill)
-        WHERE ({status_filter}) AND ($necessity IS NULL OR r.necessity = $necessity)
-        RETURN s.id AS skill_id, s.name AS skill_name,
-               r.necessity AS necessity, r.weight AS weight,
-               r.level AS level, r.source_count AS source_count
-        ORDER BY r.weight DESC
-    """
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            query, id=id, necessity=necessity,
-            public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        )
-        return [
-            {
-                "skill_id": rec["skill_id"],
-                "skill_name": rec.get("skill_name", rec["skill_id"]),
-                "necessity": rec.get("necessity", "must"),
-                "weight": rec.get("weight", 0.0),
-                "level": rec.get("level", "中级"),
-                "source_count": rec.get("source_count", 1),
-            }
-            for rec in rows
-        ]
+    return repository.query_position_skills(neo4j_driver, id, necessity, status_filter)
 
 
 def _query_all_skills() -> list[tuple[str, str]]:
     """全技能 (id, name)（线程池执行）。"""
-    with neo4j_driver.session() as session:
-        rows = session.run("MATCH (s:Skill) RETURN s.id AS id, s.name AS name")
-        return [(rec["id"], rec.get("name", rec["id"])) for rec in rows]
+    return repository.query_all_skills(neo4j_driver)
 
 
 def _query_skill_counts(skill_id: str, status_filter: str) -> dict:
     """技能关联计数（岗位/证据，线程池执行）。"""
-    with neo4j_driver.session() as session:
-        rec = session.run(
-            f"""
-            MATCH (s:Skill {{id: $skill_id}})
-            OPTIONAL MATCH (p:Position)-[r:REQUIRES]->(s)
-            OPTIONAL MATCH (s)-[:EVIDENCED_BY]->(e:Evidence)
-            WITH s, e, CASE WHEN {status_filter} THEN p ELSE null END AS visible_p
-            RETURN count(DISTINCT visible_p) AS positions_count, count(DISTINCT e) AS evidence_count
-            """,
-            skill_id=skill_id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        ).single()
-        return dict(rec) if rec else {}
+    return repository.query_skill_counts(neo4j_driver, skill_id, status_filter)
 
 
 def _query_graph_counts() -> dict:
     """图谱全量节点/边数（stats.total_*，线程池执行，08-14 契约补全）。"""
-    with neo4j_driver.session() as session:
-        n = session.run(
-            "MATCH (n) WHERE n:Skill OR n:Position RETURN count(n) AS c").single()["c"]
-        e = session.run("MATCH (:Skill)-[r:REQUIRES]->(:Position) RETURN count(r) AS c").single()["c"]
-        # 反向边（Position→Skill 是主方向，REQUIRES 可能双向存在，取 max 防重复口径）
-        e2 = session.run("MATCH (:Position)-[r:REQUIRES]->(:Skill) RETURN count(r) AS c").single()["c"]
-    return {"total_nodes": n, "total_edges": max(e, e2)}
+    return repository.query_graph_counts(neo4j_driver)
 
 
 def _query_skill_evidence(skill_id: str) -> list[dict]:
     """技能证据列表（线程池执行，08-14 低优先批次）。"""
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            """
-            MATCH (s:Skill {id: $skill_id})-[:EVIDENCED_BY]->(e:Evidence)
-            RETURN e.id AS id, e.source AS source, e.source_url AS source_url,
-                   e.crawled_at AS crawled_at
-            ORDER BY e.crawled_at DESC
-            """,
-            skill_id=skill_id,
-        )
-        return [
-            {
-                "id": rec["id"],
-                "source": rec.get("source", ""),
-                "source_url": rec.get("source_url", ""),
-                "crawled_at": rec.get("crawled_at"),
-            }
-            for rec in rows
-        ]
+    return repository.query_skill_evidence(neo4j_driver, skill_id)
 
 
 def _query_shortest_path(from_skill: str, to_skill: str, statuses) -> list | None:
     """最短路径查询（线程池执行）。"""
-    with neo4j_driver.session() as session:
-        return shortest_path(session, from_skill, to_skill, position_statuses=statuses)
+    return repository.query_shortest_path(neo4j_driver, from_skill, to_skill, statuses)
 
 
 def _query_view_techstack(limit: int, status_filter: str) -> list:
     """techStack 视图查询（线程池执行，08-14 低优先批次）。"""
-    with neo4j_driver.session() as session:
-        return list(session.run(
-            f"""
-            MATCH (s:Skill)<-[r:REQUIRES]-(p:Position)
-            WHERE {status_filter}
-            WITH s, count(p) AS heat
-            ORDER BY heat DESC LIMIT $limit
-            MATCH (s)<-[r:REQUIRES]-(p:Position)
-            WHERE {status_filter}
-            RETURN s.id AS sid, s.name AS sname, p.id AS pid, p.name AS pname,
-                   p.status AS pstatus, r
-            """,
-            limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        ))
+    return repository.query_view_techstack(neo4j_driver, limit, status_filter)
 
 
 def _query_view_main(limit: int, status_filter: str) -> list:
     """positionCenter/level/panorama 视图查询（线程池执行）。"""
-    with neo4j_driver.session() as session:
-        return list(session.run(
-            f"""
-            MATCH (p:Position)
-            WHERE {status_filter}
-            WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
-            MATCH (p)-[r:REQUIRES]->(s:Skill)
-            RETURN p, s, r
-            """,
-            limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        ))
+    return repository.query_view_main(neo4j_driver, limit, status_filter)
 
 
 @router.get("/panorama")
@@ -488,12 +233,7 @@ async def fulltext_search(
 
 def _load_skill(skill_id: str) -> dict | None:
     """按 ID 查询技能节点（id + name），不存在返回 None。"""
-    with neo4j_driver.session() as session:
-        rec = session.run(
-            "MATCH (s:Skill {id: $skill_id}) RETURN s.id AS id, s.name AS name",
-            skill_id=skill_id,
-        ).single()
-    return dict(rec) if rec else None
+    return repository.load_skill(neo4j_driver, skill_id)
 
 
 @router.get("/skill/{skill_id}/prerequisites")
@@ -570,20 +310,7 @@ def _load_position(id: str, user: Optional[dict] = None) -> dict | None:
     user/admin 可见全部岗位；匿名/guest 对 candidate/archived 岗位返回 None
     （视为不存在，避免待审核岗位外泄，见方案一）。
     """
-    scope = _position_scope(user)
-    status_filter = _status_clause(scope)
-    with neo4j_driver.session() as session:
-        rec = session.run(
-            f"""
-            MATCH (p:Position {{id: $id}})
-            WHERE {status_filter}
-            RETURN p.id AS id, p.name AS name, p.required_years AS required_years,
-                   p.required_education AS required_education, p.last_updated AS last_updated,
-                   p.status AS status, p.freq AS freq
-            """,
-            id=id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        ).single()
-    return dict(rec) if rec else None
+    return repository.load_position(neo4j_driver, id, user)
 
 
 @router.get("/position/{id}")
@@ -1072,12 +799,18 @@ async def graph_view(
         edges: list[dict] = []
         for record in rows:
             s_id, p_id = record["sid"], record["pid"]
-            nodes.setdefault(s_id, {"id": s_id, "name": record.get("sname", s_id), "type": "skill"})
+            nodes.setdefault(s_id, {
+                "id": s_id,
+                "name": record.get("sname", s_id),
+                "type": "skill",
+                "communityId": record.get("s_community"),
+            })
             nodes.setdefault(p_id, {
                 "id": p_id,
                 "name": record.get("pname", p_id),
                 "type": "position",
                 "status": record.get("pstatus") or "active",
+                "communityId": record.get("p_community"),
             })
             edges.append({
                 "source": s_id,
@@ -1106,8 +839,14 @@ async def graph_view(
                 "name": p.get("name", p_id),
                 "type": "position",
                 "status": p.get("status", "active"),
+                "communityId": p.get("community_id"),
             })
-            nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
+            nodes.setdefault(s_id, {
+                "id": s_id,
+                "name": s.get("name", s_id),
+                "type": "skill",
+                "communityId": s.get("community_id"),
+            })
             edges.append({
                 "source": p_id,
                 "target": s_id,
