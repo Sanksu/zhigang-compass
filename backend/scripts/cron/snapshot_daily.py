@@ -9,7 +9,7 @@ r"""每日图谱版本快照调度入口（设计文档 §7.1 T+1 版本管理�
     # Windows 计划任务（PowerShell，每日 05:00）
     cd backend; uv run python scripts/cron/snapshot_daily.py
 
-依赖：Redis 已启动、ARQ Worker 已运行（arq app.workers.tasks.WorkerSettings）
+依赖：Redis 已启动、ARQ Worker 已运行（arq app.workers.settings.WorkerSettings）
 """
 
 import asyncio

@@ -10,7 +10,7 @@
 # 前置条件：
 #   1. Redis 已启动（默认 redis://localhost:6379/1）
 #   2. ARQ Worker 已运行：
-#        Start-Process -WindowStyle Hidden -FilePath "uv" -ArgumentList "run","arq","app.workers.tasks.WorkerSettings"
+#        Start-Process -WindowStyle Hidden -FilePath "uv" -ArgumentList "run","arq","app.workers.settings.WorkerSettings"
 #   3. 国际源需配置 HTTPS_PROXY 环境变量（Clash/V2Ray Rule 模式）
 #
 # 注：Windows 计划任务时间按服务器本地时间（开发机建议设为 Asia/Shanghai）
@@ -111,4 +111,4 @@ Write-Host "已注册 $($Tasks.Count) 个计划任务，前缀: $TaskPrefix" -Fo
 Write-Host "日志目录: $LogDir" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "提示：ARQ Worker 需独立运行：" -ForegroundColor Yellow
-Write-Host "  Start-Process -WindowStyle Hidden -FilePath 'uv' -ArgumentList 'run','arq','app.workers.tasks.WorkerSettings'"
+Write-Host "  Start-Process -WindowStyle Hidden -FilePath 'uv' -ArgumentList 'run','arq','app.workers.settings.WorkerSettings'"
