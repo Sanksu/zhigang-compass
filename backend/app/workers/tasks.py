@@ -13,7 +13,6 @@
 import asyncio
 import json
 import logging
-import subprocess  # noqa: F401  # legacy crawl monkeypatch dependency
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -32,7 +31,7 @@ from app.workers.crawl import (
     _UTF8_ENV as _UTF8_ENV,
     _crawl_timeout as _crawl_timeout,
     _kill_process_tree as _kill_process_tree,
-    crawl_platform as _crawl_platform,
+    crawl_platform as crawl_platform,
 )
 from app.workers.diagnosis import generate_diagnosis as generate_diagnosis
 from app.workers.discovery import (
@@ -41,9 +40,9 @@ from app.workers.discovery import (
     _first_seen_date_of as _first_seen_date_of,
     _position_skill_novelty as _position_skill_novelty,
     _upsert_candidate as _upsert_candidate,
-    discovery_auto_transition as _discovery_auto_transition,
-    discovery_daily as _discovery_daily,
-    watch_signal_daily as _watch_signal_daily,
+    discovery_auto_transition as discovery_auto_transition,
+    discovery_daily as discovery_daily,
+    watch_signal_daily as watch_signal_daily,
 )
 from app.workers.etl import (
     _etl_limit as _etl_limit_impl,
@@ -70,43 +69,6 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # ETL 阶段任务
 # ============================================================
-
-async def discovery_daily(ctx: dict) -> dict:
-    """Compatibility entry point for daily discovery."""
-    return await _discovery_daily(ctx, dependencies=sys.modules[__name__])
-
-
-async def discovery_auto_transition(ctx: dict) -> dict:
-    """Compatibility entry point for automatic discovery transitions."""
-    return await _discovery_auto_transition(ctx, dependencies=sys.modules[__name__])
-
-
-async def watch_signal_daily(ctx: dict, run_date: str | None = None) -> dict:
-    """Compatibility entry point for technology-watch signals."""
-    return await _watch_signal_daily(
-        ctx, run_date=run_date, dependencies=sys.modules[__name__]
-    )
-
-
-async def crawl_platform(
-    ctx: dict,
-    spider_name: str,
-    keywords: list[str] | None = None,
-    cities: list[str] | None = None,
-    max_results: int | None = None,
-    task_id: str | None = None,
-) -> dict:
-    """Compatibility entry point delegating to the crawl worker module."""
-    return await _crawl_platform(
-        ctx,
-        spider_name,
-        keywords=keywords,
-        cities=cities,
-        max_results=max_results,
-        task_id=task_id,
-        dependencies=sys.modules[__name__],
-    )
-
 
 
 # 课程技能抽取（enrich_course_skills）失败重试配置（08-16 用户要求）：

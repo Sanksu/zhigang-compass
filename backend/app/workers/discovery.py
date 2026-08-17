@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import re
-import sys
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -123,7 +122,7 @@ def _first_seen_date_of(row) -> str:
     return row.created_at.astimezone(_TZ_CN).date().isoformat()
 
 
-async def discovery_daily(ctx: dict, *, dependencies=None) -> dict:
+async def discovery_daily(ctx: dict) -> dict:
     """每日新岗位发现（AL-M4-01，设计文档 7.2.3 节）。
 
     流程：聚合 jd_raw 已抽取记录 → 计算候选特征（freq/源多样性/Z-score）
@@ -132,11 +131,6 @@ async def discovery_daily(ctx: dict, *, dependencies=None) -> dict:
 
     幂等设计：按 position_name upsert，重复执行覆盖更新（同岗位不重复入池）。
     """
-
-    dependencies = dependencies or sys.modules[__name__]
-    first_seen_date_of = dependencies._first_seen_date_of
-    provider_type = dependencies._Provider
-    upsert_candidate = dependencies._upsert_candidate
 
     from app.core.database import async_session_factory
     from app.services.discovery.detector import DiscoveryDetector, DiscoveryInput
@@ -182,7 +176,7 @@ async def discovery_daily(ctx: dict, *, dependencies=None) -> dict:
                     stat["has_post_date"] = True
                 # 首次观测日：post_date 解析日优先（回爬老岗位靠发布日识别存量，
                 # 避免入库日被回爬当天掩盖），入库日兜底
-                fd = first_seen_date_of(row)
+                fd = _first_seen_date_of(row)
                 if stat.get("first_seen") is None or fd < stat["first_seen"]:
                     stat["first_seen"] = fd
                 # 采集首日：jd_raw 最早入库日（东八区日期）
@@ -270,7 +264,7 @@ async def discovery_daily(ctx: dict, *, dependencies=None) -> dict:
 
     # ── 3. 阶段一门控 + 阶段二 RAG 接地 ──
     detector = DiscoveryDetector()
-    candidates = detector.detect_candidates(provider_type(inputs))
+    candidates = detector.detect_candidates(_Provider(inputs))
 
     # ── 3.1 学术/社区异常信号（设计 §7.2.2 辅助加分特征，M4 接通观察池）──
     # paper_raw(arxiv) / community_raw(github) 过去 12 周聚合 → (技能,源) 周频次，
@@ -317,7 +311,7 @@ async def discovery_daily(ctx: dict, *, dependencies=None) -> dict:
             )
             c = c.model_copy(update={"confidence": conf})
             grounded.append(c)
-            await upsert_candidate(session, c)
+            await _upsert_candidate(session, c)
         await session.commit()
 
     # 注：自动态迁移（emerging→stable / declining 等）由 discovery_auto_transition
@@ -332,7 +326,7 @@ async def discovery_daily(ctx: dict, *, dependencies=None) -> dict:
     }
 
 
-async def discovery_auto_transition(ctx: dict, *, dependencies=None) -> dict:
+async def discovery_auto_transition(ctx: dict) -> dict:
     """自动状态流转（设计文档 7.2.1 状态机：emerging/stable/declining 自动迁移）。
 
     从 jd_raw 已抽取记录按 post_date 聚合岗位 30 天窗口 JD 发布频次（declining
@@ -356,10 +350,6 @@ async def discovery_auto_transition(ctx: dict, *, dependencies=None) -> dict:
 
     数据不足（jd_raw 无已抽取记录或岗位窗口序列 < 2）时跳过，不武断判定（冷启动）。
     """
-
-    dependencies = dependencies or sys.modules[__name__]
-    first_seen_date_of = dependencies._first_seen_date_of
-    position_skill_novelty = dependencies._position_skill_novelty
 
     from app.core.database import async_session_factory, neo4j_driver
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
@@ -386,7 +376,7 @@ async def discovery_auto_transition(ctx: dict, *, dependencies=None) -> dict:
         name = normalized_position_from_snapshot(row.snapshot)
         if not name:
             continue
-        day = first_seen_date_of(row)
+        day = _first_seen_date_of(row)
         day_counts = daily_freqs.setdefault(name, {})
         day_counts[day] = day_counts.get(day, 0) + 1
 
@@ -413,7 +403,7 @@ async def discovery_auto_transition(ctx: dict, *, dependencies=None) -> dict:
         try:
             with neo4j_driver.session() as neo4j_session:
                 novelty_map = await asyncio.to_thread(
-                    position_skill_novelty,
+                    _position_skill_novelty,
                     neo4j_session,
                     [row.position_name for row in rows],
                 )
@@ -532,7 +522,7 @@ async def _upsert_candidate(session, cand) -> None:
 # ============================================================
 
 async def watch_signal_daily(
-    ctx: dict, run_date: str | None = None, *, dependencies=None
+    ctx: dict, run_date: str | None = None
 ) -> dict:
     """每日技术热点信号监测（设计文档 7.2.5 观察池 + MLI 拐点）。
 
@@ -547,9 +537,6 @@ async def watch_signal_daily(
     Args:
         run_date: 统计周期 YYYY-MM-DD（缺省用当天）
     """
-    dependencies = dependencies or sys.modules[__name__]
-    candidate_id = dependencies._candidate_id
-
     from datetime import date, timedelta
 
     from app.core.database import async_session_factory
@@ -645,7 +632,7 @@ async def watch_signal_daily(
                 github_anomaly=flags["github"],
             )
             session.add(DiscoveryCandidate(
-                id=candidate_id(skill),
+                id=_candidate_id(skill),
                 position_name=skill,
                 state="candidate",
                 features=feat,  # 键与 DiscoveryFeatures schema 兼容
