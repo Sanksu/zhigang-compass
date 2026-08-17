@@ -8,6 +8,7 @@ import asyncio
 import inspect
 
 from app.workers.tasks import (
+    _run_limited_stage,
     _run_stage,
     WorkerSettings,
     aggregate_positions,
@@ -15,6 +16,7 @@ from app.workers.tasks import (
     batch_extract,
     check_data_freshness,
     check_llm_providers_health,
+    generate_diagnosis,
     graph_health_check,
     crawl_platform,
     cross_validate_jds,
@@ -43,6 +45,7 @@ EXPECTED_FUNCTIONS = [
     detect_inflation,
     resume_parse,
     match_recommend,
+    generate_diagnosis,
     batch_extract,
     enrich_course_skills,
     load_courses,
@@ -93,7 +96,7 @@ def test_etl_pipeline_stages_cover_all_quality_tasks():
                      "aggregate_positions", "cross_validate_jds",
                      "diversity_report", "check_data_freshness",
                      "snapshot_graph"):
-        assert (f"await {stage_fn}" in src or f"{stage_fn}(ctx" in src), f"run_etl_pipeline 缺少阶段 {stage_fn}"
+        assert stage_fn in src, f"run_etl_pipeline 缺少阶段 {stage_fn}"
 
 
 def test_worker_settings_has_redis_config():
@@ -139,3 +142,20 @@ def test_run_stage_failure_isolated():
     result = asyncio.run(_run_stage("t", _boom()))
     assert isinstance(result, dict) and "error" in result
     assert "ValueError" in result["error"]
+
+
+def test_limited_stage_isolates_limit_lookup_failure(monkeypatch):
+    """积压量查询失败也属于阶段失败，不得终止整条 ETL。"""
+    async def _limit(*args, **kwargs):
+        raise RuntimeError("数据库不可用")
+
+    async def _task(ctx, limit):
+        raise AssertionError("限额查询失败时不应执行任务")
+
+    monkeypatch.setattr("app.workers.tasks._etl_limit", _limit)
+    result = asyncio.run(
+        _run_limited_stage(
+            "limited", extracted=True, default=100, task=_task, ctx={}
+        )
+    )
+    assert "RuntimeError" in result["error"]
