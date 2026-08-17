@@ -197,7 +197,7 @@ def _inflation_stats(rows) -> tuple[dict[str, int], dict[str, int], dict[str, in
     岗位/源 → JD 总数 / 通胀 JD 数。跳过 _duplicate_of 与空岗位名，
     与 build_aggregates 主循环口径一致。
     """
-    from app.services.extraction.dictionary import normalize_position_name
+    from app.services.extraction.position_normalization import normalized_position_from_snapshot
 
     pos_total: Counter = Counter()
     pos_inflated: Counter = Counter()
@@ -207,15 +207,7 @@ def _inflation_stats(rows) -> tuple[dict[str, int], dict[str, int], dict[str, in
         snap = row.snapshot or {}
         if snap.get("_duplicate_of"):
             continue
-        ext = snap.get("extraction") or {}
-        pos = normalize_position_name(
-            (ext.get("position_name") or "").strip(),
-            skills=[
-                s.get("name", "")
-                for s in (ext.get("skills") or [])
-                if isinstance(s, dict) and s.get("name")
-            ],
-        )
+        pos = normalized_position_from_snapshot(snap)
         if not pos:
             continue
         source = row.source or ""
@@ -244,7 +236,7 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
       jd_count 不计，避免虚高 JD 污染岗位频次与技能边）
     - 平台级：源内通胀 JD 占比 >50% 时，该源全部 JD 额外降权 ×0.5
     """
-    from app.services.extraction.dictionary import normalize_position_name
+    from app.services.extraction.position_normalization import normalized_position_from_snapshot
 
     pos_total, pos_inflated, src_total, src_inflated = _inflation_stats(rows)
     agg: dict[str, PositionAgg] = defaultdict(PositionAgg)
@@ -255,14 +247,7 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
         if snap.get("_duplicate_of"):
             continue
         ext = snap.get("extraction") or {}
-        pos = normalize_position_name(
-            (ext.get("position_name") or "").strip(),
-            skills=[
-                s.get("name", "")
-                for s in (ext.get("skills") or [])
-                if isinstance(s, dict) and s.get("name")
-            ],
-        )
+        pos = normalized_position_from_snapshot(snap)
         if not pos:
             continue
         source = row.source or ""
