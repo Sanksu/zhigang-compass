@@ -19,7 +19,7 @@ import unittest.mock as mock
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from app.workers.tasks import discovery_auto_transition
+from app.workers.discovery import discovery_auto_transition
 
 _TZ_CN = timezone(timedelta(hours=8))
 # 窗口终点基准（jd_publish_windows 以数据最晚日为 end）
@@ -288,7 +288,7 @@ class TestPositionSkillNovelty:
     """_position_skill_novelty 计算（§7.2.1：Skill.first_seen 平均图谱年龄归一化）。"""
 
     def _run(self, position_rows, first_seen_rows, names=None, reference_days=None):
-        from app.workers.tasks import _position_skill_novelty
+        from app.workers.discovery import _position_skill_novelty
 
         class _S:
             def __init__(self, rows_by_query):
