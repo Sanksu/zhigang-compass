@@ -409,6 +409,78 @@ async def match_result_path(match_id: str, user: dict = Depends(require_role("us
     return ok(data={"match_id": match_id, "learning_path": data.get("learning_path", [])})
 
 
+@router.post("/result/{match_id}/diagnosis", status_code=202)
+async def request_match_diagnosis(
+    match_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
+):
+    """Create or reuse an asynchronous diagnosis task."""
+    user_id = user.get("sub", "")
+    data = await _load_match_result(match_id, user_id)
+    if data is None:
+        return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
+    if not data.get("gaps"):
+        return error(ERR_VALIDATION, "该匹配结果无差距数据，仅人岗比对可生成诊断报告")
+
+    cached = await redis_client.get(f"match:diagnosis:{match_id}")
+    if cached:
+        return ok(data={
+            "task_id": "",
+            "status": "success",
+            "match_id": match_id,
+            "report": json.loads(cached),
+            "error": "",
+        })
+
+    existing = await db.scalar(
+        select(TaskStatus)
+        .where(
+            TaskStatus.task_type == "generate_diagnosis",
+            TaskStatus.result["match_id"].astext == match_id,
+            TaskStatus.result["user_id"].astext == user_id,
+            TaskStatus.status.in_(["pending", "running"]),
+        )
+        .order_by(TaskStatus.created_at.desc())
+    )
+    if existing is not None:
+        return ok(data={
+            "task_id": existing.id,
+            "status": existing.status,
+            "match_id": match_id,
+            "report": None,
+            "error": existing.error or "",
+        })
+
+    task = TaskStatus(
+        task_type="generate_diagnosis",
+        status="pending",
+        result={"match_id": match_id, "user_id": user_id},
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    try:
+        await enqueue(
+            "generate_diagnosis",
+            match_id=match_id,
+            task_id=str(task.id),
+            user_id=user_id,
+        )
+    except Exception as exc:
+        task.status = "failed"
+        task.error = "任务入队失败"
+        await db.commit()
+        logger.error("诊断任务入队失败: task_id=%s err=%s", task.id, exc)
+    return ok(data={
+        "task_id": task.id,
+        "status": task.status,
+        "match_id": match_id,
+        "report": None,
+        "error": task.error or "",
+    })
+
+
 @router.get("/result/{match_id}/diagnosis")
 async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user"))):
     """[M4] 获取人岗比对诊断报告（LLM 生成，结果缓存 24h + 落库）。
