@@ -4,7 +4,6 @@
 （默认过滤 state=candidate），review 走状态机校验 + 图谱 status 同步 + 审计日志。
 """
 
-import asyncio
 import re
 from pathlib import Path
 
@@ -19,8 +18,7 @@ from app.api.v1.admin_routes import (
     position_edit,
     position_reviews,
 )
-from app.core.database import redis_client
-from app.core.errors import ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALIDATION
+from app.core.errors import ERR_INTERNAL, ERR_VALIDATION
 from app.schemas.common import error, ok
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_permission("admin:*"))])
@@ -47,77 +45,6 @@ validate_position_edit = position_edit.validate_position_edit
 position_edit_diff = position_edit.position_edit_diff
 _get_position_detail_tx = position_edit._get_position_detail_tx
 _edit_position_tx = position_edit._edit_position_tx
-
-
-# ============================================================
-# 岗位人工编辑（设计文档 12.2：审核员直接编辑岗位定义，改动写 PositionEditLog）
-# ============================================================
-
-def _query_position_detail(position_name: str) -> dict | None:
-    """岗位详情读取（Neo4j 同步驱动，线程池执行）。"""
-    from app.core.database import neo4j_driver
-
-    with neo4j_driver.session() as session:
-        return session.execute_read(_get_position_detail_tx, position_name)
-
-
-def _edit_position_neo4j(position_name: str, editor_id, skills, core_duties, scenarios) -> dict:
-    """岗位编辑写（Neo4j 同步驱动，线程池执行）。"""
-    from app.core.database import neo4j_driver
-
-    with neo4j_driver.session() as session:
-        return session.execute_write(
-            _edit_position_tx, position_name, editor_id, skills, core_duties, scenarios
-        )
-
-
-@router.get("/positions/{position_name}")
-async def get_position_detail(position_name: str):
-    """岗位详情（§12.2 岗位人工编辑：编辑前查看技能/学历/证书与文本定义）。"""
-    detail = await asyncio.to_thread(_query_position_detail, position_name)
-    if detail is None:
-        return error(ERR_NOT_FOUND, f"岗位不存在: {position_name}", http_status=404)
-    return ok(data=detail)
-
-
-@router.put("/positions/{position_name}")
-async def update_position_definition(
-    position_name: str,
-    req: dict,
-    current_user: dict = Depends(require_permission("admin:*")),
-):
-    """人工编辑岗位定义（§12.2），所有实际变更写入 PositionEditLog 节点。
-
-    请求体（均可选，无字段时为空操作返回"无变更"）：
-        skills: 技能列表全量替换，每项 {name, necessity: must|nice, weight: 0.0-1.0}
-        core_duties / scenarios: 字符串数组，更新 Position 节点属性
-    """
-    skills = req.get("skills")
-    core_duties = req.get("core_duties")
-    scenarios = req.get("scenarios")
-    err = validate_position_edit(skills, core_duties, scenarios)
-    if err:
-        return error(ERR_VALIDATION, err)
-
-    editor_id = current_user.get("sub") or current_user.get("user_id", "admin")
-    result = await asyncio.to_thread(
-        _edit_position_neo4j, position_name, editor_id, skills, core_duties, scenarios
-    )
-    if not result["exists"]:
-        return error(ERR_NOT_FOUND, f"岗位不存在: {position_name}", http_status=404)
-    # 编辑已生效：失效岗位详情缓存（graph.py key 为 graph:position:{id}:{scope}，
-    # all=全量可见，public=公开态），避免用户读到 5min 旧数据
-    if result["id"]:
-        await redis_client.delete(f"graph:position:{result['id']}:all")
-        await redis_client.delete(f"graph:position:{result['id']}:public")
-    return ok(
-        data={
-            "position_name": position_name,
-            "updated": result["updated"],
-            "diff_summary": result["diff_summary"],
-        },
-        msg="无变更" if not result["updated"] else "已保存编辑",
-    )
 
 
 # ============================================================
