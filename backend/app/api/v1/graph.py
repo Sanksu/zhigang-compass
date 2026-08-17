@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_optional_user
-from app.core.database import get_db, neo4j_driver, redis_client
+from app.core.database import async_neo4j_driver, get_db, neo4j_driver, redis_client
 from app.core.errors import ERR_INTERNAL, ERR_NOT_FOUND
 from app.models.business import SkillEmbedding
 from app.schemas.common import error, ok
@@ -54,21 +54,22 @@ async def _cache_set(key: str, data, ttl: int = _NODE_CACHE_TTL) -> None:
     await redis_client.set(key, json.dumps(data), ex=ttl)
 
 
-def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int) -> tuple[dict, list]:
-    """panorama 同步 Neo4j 查询（08-14 审查：原在 async 函数内同步阻塞事件循环，抽到线程池）。"""
-    return repository.query_panorama(neo4j_driver, scope, focus, min_weight, limit)
+async def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int) -> tuple[dict, list]:
+    """panorama 热路径查询（P2：async Neo4j 驱动直查，替代 to_thread 包 sync IO）。"""
+    return await repository.query_panorama_async(async_neo4j_driver, scope, focus, min_weight, limit)
 
 
-def _query_skill_positions(skill_id: str, status_filter: str) -> list[dict]:
-    """skill_positions 同步 Neo4j 查询（线程池执行）。"""
-    return repository.query_skill_positions(neo4j_driver, skill_id, status_filter)
+async def _query_skill_positions(skill_id: str, status_filter: str) -> list[dict]:
+    """skill_positions 热路径查询（P2：async Neo4j 驱动直查）。"""
+    return await repository.query_skill_positions_async(async_neo4j_driver, skill_id, status_filter)
 
 
-def _query_fulltext_search(
+async def _query_fulltext_search(
     q: str, type_: str, status_clause: str, offset: int, size: int,
 ) -> tuple[list[dict], int]:
-    """fulltext_search 同步 Neo4j 查询（线程池执行，08-14 审查）。"""
-    return repository.query_fulltext_search(neo4j_driver, q, type_, status_clause, offset, size)
+    """fulltext_search 热路径查询（P2：async Neo4j 驱动直查）。"""
+    return await repository.query_fulltext_search_async(
+        async_neo4j_driver, q, type_, status_clause, offset, size)
 
 
 def _query_position_skills_by_necessity(id: str) -> dict[str, dict]:
@@ -101,9 +102,9 @@ def _query_skill_counts(skill_id: str, status_filter: str) -> dict:
     return repository.query_skill_counts(neo4j_driver, skill_id, status_filter)
 
 
-def _query_graph_counts() -> dict:
-    """图谱全量节点/边数（stats.total_*，线程池执行，08-14 契约补全）。"""
-    return repository.query_graph_counts(neo4j_driver)
+async def _query_graph_counts() -> dict:
+    """图谱全量节点/边数（stats.total_*，P2：async Neo4j 驱动直查）。"""
+    return await repository.query_graph_counts_async(async_neo4j_driver)
 
 
 def _query_skill_evidence(skill_id: str) -> list[dict]:
@@ -116,14 +117,14 @@ def _query_shortest_path(from_skill: str, to_skill: str, statuses) -> list | Non
     return repository.query_shortest_path(neo4j_driver, from_skill, to_skill, statuses)
 
 
-def _query_view_techstack(limit: int, status_filter: str) -> list:
-    """techStack 视图查询（线程池执行，08-14 低优先批次）。"""
-    return repository.query_view_techstack(neo4j_driver, limit, status_filter)
+async def _query_view_techstack(limit: int, status_filter: str) -> list:
+    """techStack 视图热路径查询（P2：async Neo4j 驱动直查）。"""
+    return await repository.query_view_techstack_async(async_neo4j_driver, limit, status_filter)
 
 
-def _query_view_main(limit: int, status_filter: str) -> list:
-    """positionCenter/level/panorama 视图查询（线程池执行）。"""
-    return repository.query_view_main(neo4j_driver, limit, status_filter)
+async def _query_view_main(limit: int, status_filter: str) -> list:
+    """positionCenter/level/panorama 视图热路径查询（P2：async Neo4j 驱动直查）。"""
+    return await repository.query_view_main_async(async_neo4j_driver, limit, status_filter)
 
 
 @router.get("/panorama")
@@ -153,14 +154,13 @@ async def panorama(
     future = asyncio.get_running_loop().create_future()
     _inflight[cache_key] = future
     try:
-        nodes, edges = await asyncio.to_thread(
-            _query_panorama, scope, focus, min_weight, limit)
+        nodes, edges = await _query_panorama(scope, focus, min_weight, limit)
 
         data = {
             "nodes": list(nodes.values()),
             "edges": edges,
             "stats": {"nodes": len(nodes), "edges": len(edges),
-                      **await asyncio.to_thread(_query_graph_counts)},
+                      **await _query_graph_counts()},
         }
         await redis_client.set(cache_key, json.dumps(data), ex=PANORAMA_CACHE_TTL)
         future.set_result(data)
@@ -187,8 +187,7 @@ async def skill_positions(
     if cached is not None:
         return ok(data=cached)
     status_filter = _status_clause(scope)
-    positions = await asyncio.to_thread(
-        _query_skill_positions, skill_id, status_filter)
+    positions = await _query_skill_positions(skill_id, status_filter)
     data = {"skill_id": skill_id, "positions": positions}
     await _cache_set(cache_key, data)
     return ok(data=data)
@@ -224,8 +223,7 @@ async def fulltext_search(
         "WHERE node.status IN $public_statuses" if scope == "public" and type_ == "position" else ""
     )
 
-    items, total = await asyncio.to_thread(
-        _query_fulltext_search, q, type_, status_clause, offset, size)
+    items, total = await _query_fulltext_search(q, type_, status_clause, offset, size)
     await _cache_set(cache_key, {"items": items, "total": total, "page": page, "size": size}, ttl=60)
 
     return ok(data={"items": items, "total": total, "page": page, "size": size})
@@ -793,8 +791,7 @@ async def graph_view(
     status_filter = _status_clause(scope)
 
     if view_type == "techStack":
-        rows = await asyncio.to_thread(
-            _query_view_techstack, limit, status_filter)
+        rows = await _query_view_techstack(limit, status_filter)
         nodes: dict[str, dict] = {}
         edges: list[dict] = []
         for record in rows:
@@ -824,11 +821,10 @@ async def graph_view(
             "nodes": list(nodes.values()),
             "edges": edges,
             "stats": {"nodes": len(nodes), "edges": len(edges),
-                      **await asyncio.to_thread(_query_graph_counts)},
+                      **await _query_graph_counts()},
         }
     else:
-        rows = await asyncio.to_thread(
-            _query_view_main, limit, status_filter)
+        rows = await _query_view_main(limit, status_filter)
         nodes = {}
         edges = []
         for record in rows:
@@ -859,7 +855,7 @@ async def graph_view(
             "nodes": list(nodes.values()),
             "edges": edges,
             "stats": {"nodes": len(nodes), "edges": len(edges),
-                      **await asyncio.to_thread(_query_graph_counts)},
+                      **await _query_graph_counts()},
         }
 
     await redis_client.set(cache_key, json.dumps(data), ex=30)
