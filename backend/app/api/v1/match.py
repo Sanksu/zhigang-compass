@@ -35,7 +35,8 @@ from app.schemas.common import error, ok
 from app.services.embeddings.vector_store import PgvectorUnavailableError, load_project_vectors
 from app.services.learning_path.generator import LearningPathGenerator
 from app.services.matching.engine import RuleBasedMatcher
-from app.services.matching.loaders import build_candidate, load_positions_from_graph
+from app.services.matching.loaders import build_candidate
+from app.services.matching.shared_cache import load_positions_shared
 from app.services.matching.schemas import MatchMode, MatchRequest
 from app.services.matching.semantic import SkillEmbedder
 
@@ -287,11 +288,14 @@ async def compare(
         logger.warning("project_embeddings 查询失败，项目比对回退文本相似度")
         project_vectors = {}
 
+    # 岗位画像经 Redis 版本化共享缓存加载（跨进程单飞，避免 API/worker
+    # 每进程各自全量查图 + SBERT 预热；Redis 故障降级进程 TTL 加载）
+    positions = await load_positions_shared()
+
     def _compute():
         # 图谱加载 + SBERT 语义 + 规则匹配为 CPU/IO 密集，
         # 放线程池避免同步 Neo4j/SBERT 阻塞事件循环
         candidate = build_candidate(cache.parsed_data)
-        positions = load_positions_from_graph()
         target = next((p for p in positions if p.position_id == req.position_id), None)
         if target is None:
             return None

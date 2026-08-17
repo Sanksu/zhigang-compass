@@ -73,17 +73,12 @@ def build_candidate(parsed: dict) -> CandidateProfile:
     )
 
 
-def load_positions_from_graph() -> list[PositionProfile]:
-    """从图谱聚合岗位画像（进程级 TTL 缓存；加载时批量预热技能向量）。
+def _load_positions_uncached() -> list[PositionProfile]:
+    """从图谱聚合岗位画像（无进程缓存；加载时批量预热技能向量）。
 
     语义向量缓存到 SkillEmbedder，评分阶段全部 cache hit，
     避免首次匹配请求触发全量 embedding 计算（>30s 前端超时的主因）。
     """
-    now = time.monotonic()
-    cached = _positions_cache.get("positions")
-    if cached is not None and now - _positions_cache["ts"] < _POSITIONS_CACHE_TTL:
-        return cached
-
     positions: dict[str, PositionProfile] = {}
     with neo4j_driver.session() as session:
         rows = session.run(
@@ -156,6 +151,21 @@ def load_positions_from_graph() -> list[PositionProfile]:
     SkillEmbedder.get().warm(
         [s.skill_name for p in result for s in (*p.must_skills, *p.nice_skills)]
     )
+    return result
+
+
+def load_positions_from_graph() -> list[PositionProfile]:
+    """从图谱聚合岗位画像（进程级 TTL 缓存；加载时批量预热技能向量）。
+
+    P1 后 API/worker 主路径走 shared_cache.load_positions_shared（Redis 版本化
+    共享），本函数保留为：降级路径、集成测试与旧调用方兼容入口。
+    """
+    now = time.monotonic()
+    cached = _positions_cache.get("positions")
+    if cached is not None and now - _positions_cache["ts"] < _POSITIONS_CACHE_TTL:
+        return cached
+
+    result = _load_positions_uncached()
     _positions_cache["ts"] = now
     _positions_cache["positions"] = result
     return result

@@ -51,6 +51,19 @@ async def on_startup(ctx: dict) -> None:
 
     asyncio.create_task(warm_ocr())
 
+    async def warm_matching() -> None:
+        # 岗位画像共享缓存预热：首次 ARQ 匹配免冷加载（Redis 单飞构建载荷并切指针；
+        # 失败不阻塞 worker 启动，匹配请求走降级路径）
+        try:
+            from app.services.matching.shared_cache import load_positions_shared
+
+            await load_positions_shared()
+            print("[ARQ Worker] 岗位画像共享缓存预热完成")
+        except Exception as error:
+            print(f"[ARQ Worker] 岗位画像预热跳过: {str(error)[:100]}")
+
+    asyncio.create_task(warm_matching())
+
 
 async def on_shutdown(ctx: dict) -> None:
     """Log worker shutdown."""

@@ -131,12 +131,10 @@ async def match_recommend(
     """Recommend Top-N positions and persist the asynchronous task result."""
     from app.core.database import async_session_factory, redis_client
     from app.services.matching.engine import RuleBasedMatcher
-    from app.services.matching.loaders import (
-        build_candidate,
-        load_positions_from_graph,
-    )
+    from app.services.matching.loaders import build_candidate
     from app.services.matching.schemas import MatchMode, MatchRequest
     from app.services.matching.semantic import SkillEmbedder
+    from app.services.matching.shared_cache import load_positions_shared
 
     async with async_session_factory() as session:
         task = await session.get(TaskStatus, task_id) if task_id else None
@@ -162,10 +160,12 @@ async def match_recommend(
             from app.services.embeddings.vector_store import load_project_vectors
 
             project_vectors = await load_project_vectors(session, resume_id)
+            # 岗位画像走 Redis 版本化共享缓存（跨进程单飞；Redis 故障降级进程 TTL）
+            positions = await load_positions_shared()
 
             def _match():
                 matcher = RuleBasedMatcher(
-                    load_positions_from_graph(),
+                    positions,
                     semantic=SkillEmbedder.get(),
                 )
                 return matcher.match(

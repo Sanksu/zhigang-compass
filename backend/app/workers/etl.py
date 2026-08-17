@@ -169,6 +169,16 @@ async def run_etl_pipeline(
         "snapshot_graph",
         tasks_module.snapshot_graph(ctx, triggered_by="scheduled"),
     )
+
+    # 阶段 14.5：岗位画像共享缓存预构建（P1）——聚合与快照完成后重建
+    # 版本化载荷并切指针（先写载荷后切指针，旧版本保持可读；失败仅记审计，
+    # 不阻塞 ETL——匹配侧按指针读取或走降级路径）
+    from app.services.matching.shared_cache import load_positions_shared
+
+    results["stages"]["positions_cache_prebuild"] = await run_stage(
+        "positions_cache_prebuild",
+        load_positions_shared(),
+    )
     results["stages"]["discovery_daily"] = await run_stage(
         "discovery_daily",
         tasks_module.discovery_daily(ctx),
