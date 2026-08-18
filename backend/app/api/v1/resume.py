@@ -22,6 +22,7 @@ from app.core.arq_client import enqueue
 from app.core.database import async_session_factory, get_db
 from app.core.errors import ERR_FORBIDDEN, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import AuditLog, ResumeCache, ResumeFile, TaskStatus
+from app.schemas.business import ResumeUpdateRequest
 from app.schemas.common import error, ok
 from app.services.resume.file_parser import SUPPORTED_EXTENSIONS
 
@@ -278,7 +279,7 @@ async def get_resume(resume_id: str, db: AsyncSession = Depends(get_db), user: d
 @router.put("/{resume_id}")
 async def update_resume(
     resume_id: str,
-    req: dict,
+    req: ResumeUpdateRequest,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("user")),
 ):
@@ -297,8 +298,8 @@ async def update_resume(
     if not await owns_resume(db, rid, user.get("sub", "")):
         return error(ERR_FORBIDDEN, "无权修改该简历", http_status=403)
 
-    fields = req.get("fields")
-    if not isinstance(fields, dict) or not fields:
+    fields = req.fields
+    if not fields:
         return error(ERR_VALIDATION, "fields 必须为非空对象")
 
     resume.parsed_data = _merge_fields(resume.parsed_data or {}, fields)
