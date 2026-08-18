@@ -101,6 +101,7 @@ services:
       # 报告目录（08-18 压测核验）：freshness/diversity 等报告落容器内 /app/reports，
       # 无挂载则容器重建即丢失——与宿主机 backend/reports 共享持久化
       - ./backend/reports:/app/reports
+    restart: unless-stopped  # 08-18 观察：api 曾因引擎/资源事件被优雅停止且无重启策略而宕机，与 worker 对齐
 
   # ARQ 异步任务 worker（BE-M3-04）：消费 resume_parse / run_etl_pipeline 等队列任务
   worker:
