@@ -735,7 +735,8 @@ paths:
         required: true
         content:
           application/json:
-            schema: { type: object }
+            schema:
+              $ref: '#/components/schemas/ResumeUpdateRequest'
       responses:
         '200':
           description: 更新成功
@@ -2693,6 +2694,16 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ResumeSummaryItem' }
         total: { type: integer }
+
+    ResumeUpdateRequest:
+      type: object
+      description: PUT /resume/{resume_id} 请求体（编辑简历画像，fields 按顶层覆盖合并进 parsed_data）
+      required: [fields]
+      properties:
+        fields:
+          type: object
+          description: 待覆盖合并的画像字段（键为 parsed_data 顶层字段名）
+          additionalProperties: true
 
     ResumeParseTaskData:
       type: object
