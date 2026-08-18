@@ -33,7 +33,8 @@ from crawlers.spiders.zhilian import ZhilianSpider
 
 def _job_line(i: int) -> str:
     return json.dumps(
-        {"id": f"id-{i}", "title": f"Job {i}", "company": "ACME",
+        # 技术岗标题（08-18 LinkedIn 聚焦治理后非技术标题会被过滤）
+        {"id": f"id-{i}", "title": f"Software Engineer {i}", "company": "ACME",
          "job_url": f"https://example.com/job/{i}", "location": "New York",
          "salary_interval": "yearly", "min_amount": 100, "max_amount": 200,
          "currency": "USD"},
