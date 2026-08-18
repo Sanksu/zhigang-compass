@@ -31,7 +31,7 @@ LOG_DIR=/opt/zhigang-compass/logs
 0 23 * * * cd $BACKEND_DIR && uv run python scripts/cron/crawl_spider.py maimai 30 >> $LOG_DIR/crawl_maimai_$(date +\%Y\%m\%d).log 2>&1
 
 # ── 国际非招聘源（每日 UTC 0:00 = 北京时间 08:00）──
-0 8 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py linkedin_public 50 >> $LOG_DIR/crawl_linkedin_$(date +\%Y\%m\%d).log 2>&1
+0 8 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py linkedin_public 50 python,java,golang,react,devops,security,embedded,data,engineer,frontend,backend >> $LOG_DIR/crawl_linkedin_$(date +\%Y\%m\%d).log 2>&1
 
 # ── 课程平台每周日全量同步（UTC 2:00 = 北京时间 10:00）──
 0 10 * * 0 cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py coursera 100 >> $LOG_DIR/crawl_coursera_$(date +\%Y\%m\%d).log 2>&1
