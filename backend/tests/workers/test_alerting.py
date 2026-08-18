@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from app.services import alerting
-from app.workers import crawl, tasks
+from app.workers import crawl, quality, tasks
 
 
 class TestSendAlert:
@@ -144,7 +144,7 @@ class TestStaleDataAlert:
         def _factory():
             return _FakeSession()
 
-        monkeypatch.setattr(tasks, "send_alert", _fake_alert)
+        monkeypatch.setattr(quality, "send_alert", _fake_alert)
         monkeypatch.setattr("app.core.database.async_session_factory", _factory)
 
         result = asyncio.run(tasks.check_data_freshness({}))
@@ -178,7 +178,7 @@ class TestStaleDataAlert:
         def _factory():
             return _FakeSession()
 
-        monkeypatch.setattr(tasks, "send_alert", _fake_alert)
+        monkeypatch.setattr(quality, "send_alert", _fake_alert)
         monkeypatch.setattr("app.core.database.async_session_factory", _factory)
 
         asyncio.run(tasks.check_data_freshness({}))
