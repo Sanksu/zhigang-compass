@@ -6,6 +6,9 @@ import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
+
+from app.core.middleware import trace_id_var
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,6 +74,20 @@ async def invalidate_graph_caches() -> None:
     keys = [key async for key in redis_client.scan_iter(match="graph:*")]
     if keys:
         await redis_client.delete(*keys)
+
+
+def _panorama_json_response(data_json: str) -> Response:
+    """panorama 预序列化响应（08-18 压测尾部治理）。
+
+    缓存存 data JSON 串；命中/风暴等待者直接拼接统一信封返回，跳过
+    json.loads + FastAPI 二次序列化（577KB 载荷 × 风暴窗口 100+ 等待者
+    的事件循环积压是 P99 尾部放大器之一）。
+    """
+    body = (
+        '{"code":0,"msg":"ok","data":' + data_json
+        + ',"trace_id":' + json.dumps(trace_id_var.get("")) + "}"
+    )
+    return Response(content=body, media_type="application/json")
 
 
 async def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int) -> tuple[dict, list]:
@@ -163,12 +180,12 @@ async def panorama(
     cache_key = f"graph:panorama:{scope}:{limit}:{min_weight}:{focus or 'all'}"
     cached = await redis_client.get(cache_key)
     if cached is not None:
-        return ok(data=json.loads(cached))
+        return _panorama_json_response(cached)
 
     # single-flight：同 key 并发 miss 只放行一个查库，其余 await 同 future
     inflight = _inflight.get(cache_key)
     if inflight is not None:
-        return ok(data=await inflight)
+        return _panorama_json_response(await inflight)
 
     future = asyncio.get_running_loop().create_future()
     _inflight[cache_key] = future
@@ -181,9 +198,10 @@ async def panorama(
             "stats": {"nodes": len(nodes), "edges": len(edges),
                       **await _query_graph_counts()},
         }
-        await redis_client.set(cache_key, json.dumps(data), ex=PANORAMA_CACHE_TTL)
-        future.set_result(data)
-        return ok(data=data)
+        cached_str = json.dumps(data, ensure_ascii=False)
+        await redis_client.set(cache_key, cached_str, ex=PANORAMA_CACHE_TTL)
+        future.set_result(cached_str)
+        return _panorama_json_response(cached_str)
     except Exception as exc:
         future.set_exception(exc)
         raise
@@ -229,23 +247,36 @@ async def fulltext_search(
     scope = _position_scope(user)
     offset = (page - 1) * size
     # 全文检索缓存（08-15 压测扩容）：搜索词重复度高（真实用户/压测同词命中），
-    # 每次打 Neo4j 在 100 并发下排队严重；60s TTL 缓存大幅降 Neo4j 压力
+    # 每次打 Neo4j 在 100 并发下排队严重；300s TTL 缓存大幅降 Neo4j 压力。
+    # 08-18 TTL 治理补 single-flight：同 q 并发冷查合并为一次（此前无合并，
+    # 冷键被 2-5 并发同时打 Neo4j fulltext，压测 P99 尾部主因之一）。
     cache_key = f"graph:search:{scope}:{type_}:{q}:{page}:{size}"
     cached = await redis_client.get(cache_key)
     if cached is not None:
         return ok(data=json.loads(cached))
 
-    items: list[dict] = []
-    total = 0
-    # 匿名/guest 检索岗位时排除 candidate（全文索引 YIELD 的是完整节点，可直接过滤）
-    status_clause = (
-        "WHERE node.status IN $public_statuses" if scope == "public" and type_ == "position" else ""
-    )
+    inflight = _inflight.get(cache_key)
+    if inflight is not None:
+        return ok(data=await inflight)
 
-    items, total = await _query_fulltext_search(q, type_, status_clause, offset, size)
-    await _cache_set(cache_key, {"items": items, "total": total, "page": page, "size": size}, ttl=SEARCH_CACHE_TTL)
+    future = asyncio.get_running_loop().create_future()
+    _inflight[cache_key] = future
+    try:
+        # 匿名/guest 检索岗位时排除 candidate（全文索引 YIELD 的是完整节点，可直接过滤）
+        status_clause = (
+            "WHERE node.status IN $public_statuses" if scope == "public" and type_ == "position" else ""
+        )
 
-    return ok(data={"items": items, "total": total, "page": page, "size": size})
+        items, total = await _query_fulltext_search(q, type_, status_clause, offset, size)
+        data = {"items": items, "total": total, "page": page, "size": size}
+        await _cache_set(cache_key, data, ttl=SEARCH_CACHE_TTL)
+        future.set_result(data)
+        return ok(data=data)
+    except Exception as exc:
+        future.set_exception(exc)
+        raise
+    finally:
+        _inflight.pop(cache_key, None)
 
 
 def _load_skill(skill_id: str) -> dict | None:
