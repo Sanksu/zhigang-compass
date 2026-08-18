@@ -67,9 +67,10 @@ def test_label_type_mapping_covers_business_entities():
 
 def test_snapshot_graph_registered_as_arq_task():
     """snapshot_graph 已在 WorkerSettings 注册（入队后有 worker 消费）。"""
+    from app.workers import settings as ws
     from app.workers import tasks as t
 
-    assert t.snapshot_graph in t.WorkerSettings.functions
+    assert t.snapshot_graph in ws.WorkerSettings.functions
 
 
 def test_export_edges_include_relation_type():

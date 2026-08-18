@@ -1533,11 +1533,3 @@ async def on_shutdown(ctx: dict) -> None:
     """Worker 关闭钩子。"""
     print("[ARQ Worker] 关闭")
 
-
-def __getattr__(name: str):
-    """Lazily expose WorkerSettings without a settings/tasks import cycle."""
-    if name == "WorkerSettings":
-        from app.workers.settings import WorkerSettings
-
-        return WorkerSettings
-    raise AttributeError(name)

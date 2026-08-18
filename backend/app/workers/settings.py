@@ -73,8 +73,7 @@ async def on_shutdown(ctx: dict) -> None:
 class WorkerSettings:
     """ARQ worker configuration.
 
-    Start with ``arq app.workers.settings.WorkerSettings``. The legacy
-    ``app.workers.tasks.WorkerSettings`` import remains available.
+    Start with ``arq app.workers.settings.WorkerSettings``.
     """
 
     functions = [
