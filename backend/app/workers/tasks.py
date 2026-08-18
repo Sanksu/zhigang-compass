@@ -1,13 +1,20 @@
-"""ARQ 异步任务定义。
+"""ARQ 任务门面（facade）：WorkerSettings 注册与既有 import 的兼容入口。
 
-任务类型（对齐设计文档 §4.4 ETL 管线）：
-- ETL 编排：crawl_platform / run_etl_pipeline / validate_temporal / detect_inflation / snapshot_graph
-- 业务异步：resume_parse / batch_extract
+任务实现已按职责拆分至：
+- ``app.workers.etl_tasks`` — ETL 管线阶段任务 + JD 快照共享辅助函数
+- ``app.workers.courses`` — 课程任务（enrich_course_skills / load_courses / evaluate_courses）
+- ``app.workers.quality`` — 质量/运维任务（diversity_report / check_data_freshness / graph_health_check）
+- ``app.workers.etl`` — ETL 编排（run_etl_pipeline / _run_stage / _etl_limit）
 
-设计要点：
-- 爬虫通过 subprocess 调用 `scrapy crawl`，避免 Twisted reactor 与 asyncio loop 冲突
-- ETL 任务编排采用 fail-fast：任一阶段失败立即抛出，由 ARQ 重试机制兜底
-- 时滞/通胀检测 M2 仅交付框架，M3 LLM 抽取上线后接入真实数据
+本文件保留：
+- ETL 编排薄包装（_etl_limit / _run_limited_stage / run_etl_pipeline，转发 app.workers.etl，
+  供 test_worker_settings 的 monkeypatch 锚点与 etl 编排器 tasks_module 解析）
+- LLM 健康检查（_alert_llm / check_llm_providers_health，settings.py 的 5min cron 引用）
+- 全部任务的 re-export：ARQ 按函数 __qualname__ 匹配（WorkerSettings.functions 由此处导入），
+  任务名必须保持不变；既有 ``from app.workers.tasks import X`` 亦由此兼容。
+
+生命周期钩子 on_startup / on_shutdown 已移除——app.workers.settings 定义自己的
+钩子（warm_ocr / warm_matching）。
 """
 
 import asyncio
@@ -204,31 +211,4 @@ async def check_llm_providers_health(ctx: dict) -> dict:
         return {"status": "degraded", "healthy": checked, "alerted": alerted}
     print(f"[check_llm_providers_health] {checked}", flush=True)
     return {"status": "ok", "healthy": checked}
-
-
-async def on_startup(ctx: dict) -> None:
-    """Worker 启动钩子。
-
-    预热 OCR 引擎（PaddleOCR 懒加载首次调用约 24s，2026-08-09 扫描件 OCR
-    速度评测）：异步预加载到全局单例，使首次 resume_parse 免于 24s 冷加载。
-    模型不可用（未下载/依赖缺失）时预热失败不阻塞 worker 启动，后续
-    resume_parse 仍会按需懒加载并抛 ResumeParseError 由任务层处理。
-    """
-    print(f"[ARQ Worker] 启动，PID={ctx.get('worker_pid')}")
-
-    async def _warm_ocr():
-        try:
-            from app.services.resume import file_parser as _fp
-
-            _fp._ocr_engine()
-            print("[ARQ Worker] OCR 引擎预热完成")
-        except Exception as e:
-            print(f"[ARQ Worker] OCR 预热跳过（模型不可用）: {str(e)[:100]}")
-
-    asyncio.create_task(_warm_ocr())
-
-
-async def on_shutdown(ctx: dict) -> None:
-    """Worker 关闭钩子。"""
-    print("[ARQ Worker] 关闭")
 
