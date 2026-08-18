@@ -35,7 +35,7 @@ $Tasks = @(
     # 脉脉夜间合规窗口（23:00）
     @{ Name = "CrawlMaimai";    Time = "23:00"; Script = "crawl_spider.py"; Args = @("maimai", "30") },
     # 国际非招聘源（北京时间 08:00 = UTC 0:00）
-    @{ Name = "CrawlLinkedIn";  Time = "08:00"; Script = "crawl_spider.py"; Args = @("linkedin_public", "50"); Proxy = $true },
+    @{ Name = "CrawlLinkedIn";  Time = "08:00"; Script = "crawl_spider.py"; Args = @("linkedin_public", "50", "python,java,golang,react,devops,security,embedded,data,engineer,frontend,backend"); Proxy = $true  # 08-19 关键词轮询（技术岗聚焦） },
     # 课程平台每周日全量同步（北京时间 10:00 = UTC 2:00，对齐 crontab.example）
     @{ Name = "CrawlCoursera";   Time = "10:00"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("coursera", "100"); Proxy = $true },
     @{ Name = "CrawlEdx";        Time = "10:30"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("edx", "100"); Proxy = $true },
