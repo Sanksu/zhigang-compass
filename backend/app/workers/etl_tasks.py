@@ -922,3 +922,19 @@ async def backfill_embeddings(ctx: dict) -> dict:
             return await run_backfill(db, embedder)
     except SemanticUnavailableError:
         return {"detail": "语义模型不可用，回填跳过"}
+
+
+async def snapshot_graph(ctx: dict, triggered_by: str = "scheduled") -> dict:
+    """每日图谱版本快照（设计文档 §7.1 T+1 版本管理）。
+
+    流程：Neo4j 全量导出 {nodes, edges}（排除 Counter 内部标签）→
+    写入 PostgreSQL graph_versions（幂等：同日期版本覆盖更新）→
+    与上一版本 set 差集计算节点增减 → 90 天保留清理。
+
+    由外部 cron（scripts/cron/snapshot_daily.py）每日 05:00 前触发，
+    或作为 run_etl_pipeline 阶段 12 随 ETL 完成后自动发布。
+    """
+    from app.services.evolution.graph_version import GraphVersionManager
+
+    meta = await GraphVersionManager().create_snapshot(triggered_by=triggered_by)
+    return meta.model_dump()
