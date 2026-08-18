@@ -11,7 +11,6 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends
 
 from app.api.deps import require_permission
-from app.core.database import redis_client
 from app.core.errors import ERR_NOT_FOUND, ERR_VALIDATION
 from app.schemas.common import error, ok
 from app.services.kg.id_generator import next_id
@@ -279,11 +278,11 @@ async def update_position_definition(
     )
     if not result["exists"]:
         return error(ERR_NOT_FOUND, f"岗位不存在: {position_name}", http_status=404)
-    # 编辑已生效：失效岗位详情缓存（graph.py key 为 graph:position:{id}:{scope}，
-    # all=全量可见，public=公开态），避免用户读到 5min 旧数据
-    if result["id"]:
-        await redis_client.delete(f"graph:position:{result['id']}:all")
-        await redis_client.delete(f"graph:position:{result['id']}:public")
+    # 编辑已生效：失效图谱热路径缓存（08-18 TTL 治理：panorama/view/search/
+    # 节点详情一并失效），避免 300s TTL 窗口内用户读到旧岗位定义
+    from app.api.v1.graph import invalidate_graph_caches
+
+    await invalidate_graph_caches()
     return ok(
         data={
             "position_name": position_name,
