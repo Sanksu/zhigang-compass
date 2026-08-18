@@ -49,16 +49,21 @@ from app.workers.etl import (
     run_etl_pipeline as _run_etl_pipeline,
 )
 from app.workers.etl_tasks import (
+    _JD_TEXT_FIELDS as _JD_TEXT_FIELDS,
+    _JD_TEXT_MAX_CHARS as _JD_TEXT_MAX_CHARS,
     _QUALITY_LEVELS as _QUALITY_LEVELS,
+    _build_jd_text as _build_jd_text,
     _experience_years as _experience_years,
     _extraction_of as _extraction_of,
     _graph_skill_first_seen as _graph_skill_first_seen,
     _history_skill_sets as _history_skill_sets,
+    _is_jd_text_short as _is_jd_text_short,
     _publish_date as _publish_date,
     _purge_dup_import_residue as _purge_dup_import_residue,
     _skill_first_seen_days as _skill_first_seen_days,
     _skills_of as _skills_of,
     _snapshot_with_skip as _snapshot_with_skip,
+    batch_extract as batch_extract,
     dedup_simhash as dedup_simhash,
     detect_inflation as detect_inflation,
     validate_temporal as validate_temporal,
@@ -705,191 +710,6 @@ async def run_etl_pipeline(
         skip_cdp=skip_cdp,
         tasks_module=sys.modules[__name__],
     )
-
-
-# ============================================================
-# 业务异步任务（M3/M4 实现）
-# ============================================================
-
-# 参与 JD 正文拼接的 snapshot 字段（按此顺序，跳过来源无关的元数据）
-_JD_TEXT_FIELDS = (
-    "title", "company", "location", "salary", "experience",
-    "education", "description", "requirements",
-)
-
-
-# LLM 抽取输入上限（08-14：raw_text 去除 65535 入库截断后，超长 JD 需在输入侧
-# 裁剪防 context 溢出；JD 正文技能信息集中在前部，截尾损失可控）
-_JD_TEXT_MAX_CHARS = 20000
-
-
-def _build_jd_text(snapshot: dict, raw_text: str) -> str:
-    """拼装 JD 抽取正文。
-
-    优先 snapshot 的干净文本字段（raw_text 为原始 HTML/JSON 备份，不适合直接喂 LLM）；
-    但正文字段（description/requirements）缺失时拼接结果过短无法抽取，
-    此时回退 raw_text（黄金集等数据正文可能只存在 raw_text 中）。
-    统一裁剪至 _JD_TEXT_MAX_CHARS（入库不再截断，抽取输入侧兜底）。
-    """
-    body_fields = (snapshot.get("description"), snapshot.get("requirements"))
-    if not any(str(f or "").strip() for f in body_fields):
-        text = raw_text
-    else:
-        parts = [str(snapshot.get(f, "")).strip() for f in _JD_TEXT_FIELDS]
-        text = "\n".join(p for p in parts if p)
-    return text[:_JD_TEXT_MAX_CHARS]
-
-
-def _is_jd_text_short(snapshot: dict, raw_text: str) -> bool:
-    """JD 正文是否过短（<10 字符，无法抽取）。"""
-    return len((_build_jd_text(snapshot, raw_text) or "").strip()) < 10
-
-
-async def batch_extract(
-    ctx: dict,
-    jd_ids: list[int] | None = None,
-    limit: int = 100,
-) -> dict:
-    """LLM 批量实体抽取 + JD 入图（M3 实现，依赖 AL-M3-01）。
-
-    选取 jd_raw 中尚未抽取（snapshot 无 extraction 标记）的记录：
-    - 拼装 JD 正文 → JDExtractor.extract_batch（N 条/批一次 LLM 调用，设计文档 §6.5
-      批量抽取优化：批量输出 token 线性放大，走独立 batch_timeout；整批失败/条数
-      错位时该批降级逐条 extract，单条失败不阻塞整体）
-    - 抽取结果写回 jd_raw.snapshot["extraction"]（可审计、可重跑）
-    - kg_service.import_jd 入图（Neo4j MERGE 幂等，重复执行不产生重复节点）
-
-    全部失败时抛出，由 ARQ 重试机制兜底。
-    """
-
-    from app.core.database import async_session_factory, neo4j_driver
-    from app.services.extraction.jd_extractor import JDExtractor
-    from app.services.kg.kg_service import import_jd
-
-    extractor = JDExtractor()
-
-    async with async_session_factory() as session:
-        if jd_ids:
-            rows = (await session.scalars(
-                select(JDRaw).where(JDRaw.id.in_(jd_ids))
-            )).all()
-        else:
-            # 未抽取 = snapshot 无 extraction 键（JSONB 键缺失时为 SQL NULL）
-            rows = (await session.scalars(
-                select(JDRaw)
-                .where(JDRaw.snapshot["extraction"].astext.is_(None))
-                .order_by(JDRaw.id.asc())
-                .limit(limit)
-            )).all()
-
-        # 过滤过短正文（<10 字符无法抽取）与低质 JD（needs_review 人工复核标记）：
-        # 写 skipped 标记推进游标，否则 `extraction IS NULL` 游标永不推进
-        # （短文本行/低质行堆积时正常 JD 饿死）
-        valid: list[JDRaw] = []
-        results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": [], "skipped_dup": 0}
-        for row in rows:
-            snap = row.snapshot or {}
-            if _is_jd_text_short(snap, row.raw_text or ""):
-                snap = dict(snap)
-                snap["extraction"] = {"skipped": True, "reason": "JD 正文过短（<10 字符）"}
-                row.snapshot = snap
-                results["failed"].append({"jd_id": row.id, "error": "JD 正文过短（<10 字符），跳过"})
-            elif snap.get("needs_review"):
-                # 低质 JD（爬虫端质量评分 < 0.6 标记）：跳过 LLM 抽取，
-                # 写 skipped 标记推进游标，否则 `extraction IS NULL` 游标不推进
-                snap = dict(snap)
-                snap["extraction"] = {"skipped": True, "reason": "质量评分 < 0.6，需人工复核"}
-                row.snapshot = snap
-                results["failed"].append({"jd_id": row.id, "error": "质量评分 < 0.6，跳过"})
-            else:
-                valid.append(row)
-
-        # 批量抽取：一次调用处理全部有效 JD——组批（batch_size 条数 + max_batch_chars
-        # 文本总长双封顶）→ 每批一次 LLM 调用（独立 batch_timeout，设计文档 §6.5）→
-        # 拆条落库。返回顺序与 valid 一一对应（错位/失败批次已降级逐条）。
-        total = len(valid)
-        texts = [_build_jd_text(r.snapshot or {}, r.raw_text or "") for r in valid]
-        if texts:
-            # 同步 LLM 批量调用放线程池，避免阻塞 ARQ 事件循环（Redis 心跳超时崩溃根因）。
-            # concurrency=6 / batch_size=8：2026-08-07 用户确认提速（max_tokens 同步调至 4096）。
-            # LLM 生成时间由输出 token 总量决定，并发提吞吐；若触发 provider 429，退避期
-            # 整批降级逐条反而更慢，届时回调参数。
-            extractions = await asyncio.to_thread(
-                extractor.extract_batch,
-                texts,
-                batch_size=8,
-                batch_timeout=180,  # 批量输出 token 放大，独立超时
-                max_batch_chars=8000,
-                concurrency=6,
-            )
-        else:
-            extractions = []
-
-        # 规范岗位名单独写入快照，保留原始抽取 position_name 供审计和评测。
-        from app.services.extraction.dictionary import normalize_position_name
-
-        normalized_positions = [
-            normalize_position_name(
-                extraction.position_name,
-                skills=[s.name for s in (extraction.skills or [])],
-            )
-            for extraction in extractions
-        ]
-
-        for i, (row, extraction, normalized_position) in enumerate(
-            zip(valid, extractions, normalized_positions), start=1
-        ):
-            # 逐条打印 jd_id + 进度百分比：batch_extract 只在循环结束 commit，
-            # 中间进度 DB 不可见，靠此日志实时确认推进（worker.err.log）
-            print(
-                f"[batch_extract] 处理 jd_id={row.id}（{i}/{total}，{i / total * 100:.0f}%）",
-                flush=True,
-            )
-            # SimHash 重复记录不入图（与 rebuild_graph/聚合口径一致）：重复内容
-            # 已在 canonical 记录名下入图，此处再入会残留"聚合不覆盖"的空权
-            # REQUIRES 边（08-15 核查：7 岗位/115 空权边根因，见 project_memory）。
-            # 抽取结果仍落库——聚合/入图均已跳过该记录，落库仅为推进游标
-            # （`extraction IS NULL` 条件）避免下次批跑重复调用 LLM。
-            if (row.snapshot or {}).get("_duplicate_of"):
-                snap = dict(row.snapshot or {})
-                snap["extraction"] = extraction.model_dump()
-                snap["normalized_position"] = normalized_position
-                row.snapshot = snap
-                results["skipped_dup"] += 1
-                continue
-            try:
-                evidence = {
-                    "source": row.source,
-                    "source_url": row.source_url,
-                    "crawled_at": row.crawled_at,
-                    "raw_text": _build_jd_text(row.snapshot or {}, row.raw_text or ""),
-                }
-                with neo4j_driver.session() as neo4j_session:
-                    # 同步 Neo4j 写入放线程池，避免阻塞事件循环
-                    position_id = await asyncio.to_thread(
-                        import_jd, neo4j_session, extraction, evidence
-                    )
-                # 入图成功后才写 extraction 标记：先标记后入图会让失败记录
-                # extraction 落库，下次批跑 `extraction IS NULL` 不再选中，图数据永久缺失
-                snap = dict(row.snapshot or {})
-                snap["extraction"] = extraction.model_dump()
-                snap["normalized_position"] = normalized_position
-                row.snapshot = snap
-                results["processed"] += 1
-                results["succeeded"] += 1
-                results["positions"].append({"jd_id": row.id, "position_id": position_id})
-            except Exception as e:
-                # 入图失败：不写 extraction（保持 IS NULL 下次批跑重试），
-                # 错误写入 extraction_error 落库审计（failed 可追溯）
-                snap = dict(row.snapshot or {})
-                snap["extraction_error"] = str(e)[:500]
-                row.snapshot = snap
-                results["failed"].append({"jd_id": row.id, "error": str(e)[:500]})
-        await session.commit()
-
-    if results["processed"] > 0 and results["succeeded"] == 0:
-        raise RuntimeError(f"批量抽取全部失败: {results['failed'][:5]}")
-    return results
 
 
 async def snapshot_graph(ctx: dict, triggered_by: str = "scheduled") -> dict:
