@@ -25,9 +25,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # 全景查询缓存 TTL（设计文档 10.3：panorama 短 TTL 30s）
-PANORAMA_CACHE_TTL = 30
+# 08-18 TTL 风暴治理：30s → 300s——到期风暴频率降 10 倍（P99 尾部 6.6s→基线水平）。
+# 交互路径（管理端岗位编辑/审核/归档）经 invalidate_graph_caches() 即时失效，
+# 日常 ETL 聚合与自动流转变更接受 ≤5min 展示滞后（T+1 版本视图不受影响）。
+PANORAMA_CACHE_TTL = 300
 
-# 缓存穿透合并（08-15 压测扩容）：panorama 30s TTL 失效瞬间 100 并发同时
+# 全文检索缓存 TTL（同治理：60s → 300s）
+SEARCH_CACHE_TTL = 300
+
+# 缓存穿透合并（08-15 压测扩容）：panorama TTL 失效瞬间 100 并发同时
 # miss 打 Neo4j（to_thread 线程池饱和 → P95 20s 长尾根因）。in-flight 表让
 # 同 key 并发请求只放行 1 个查库，其余 await 同一 future 读缓存。
 _inflight: dict[str, asyncio.Future] = {}
@@ -52,6 +58,19 @@ async def _cache_get(key: str):
 async def _cache_set(key: str, data, ttl: int = _NODE_CACHE_TTL) -> None:
     """Redis 缓存写入（JSON 序列化）。"""
     await redis_client.set(key, json.dumps(data), ex=ttl)
+
+
+async def invalidate_graph_caches() -> None:
+    """图数据变更后失效全部图谱热路径缓存（panorama/view/search/节点详情）。
+
+    管理端岗位编辑与审核/归档状态变更后调用（交互路径即时可见）；
+    日常 ETL 聚合与自动流转变更由 TTL（300s）兜底。scan 前缀 graph:*
+    覆盖 graph:panorama/graph:view/graph:search/graph:position/graph:skill
+    全部键；匹配岗位共享缓存（matching:*）不受影响。
+    """
+    keys = [key async for key in redis_client.scan_iter(match="graph:*")]
+    if keys:
+        await redis_client.delete(*keys)
 
 
 async def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int) -> tuple[dict, list]:
@@ -134,7 +153,7 @@ async def panorama(
     focus: Optional[str] = Query(default=None),
     user: Optional[dict] = Depends(get_optional_user),
 ):
-    """图谱全景视图（匿名可读，30s Redis TTL 缓存，见设计文档 10.3）。
+    """图谱全景视图（匿名可读，300s Redis TTL 缓存 + 管理端写路径即时失效，见设计文档 10.3）。
 
     focus 缺省时返回 Top-N 高频岗位 + 关联技能；指定 focus 时以该岗位为中心展开。
     匿名/guest 仅返回 emerging/stable/declining 岗位（candidate 待审核不外宣），
@@ -224,7 +243,7 @@ async def fulltext_search(
     )
 
     items, total = await _query_fulltext_search(q, type_, status_clause, offset, size)
-    await _cache_set(cache_key, {"items": items, "total": total, "page": page, "size": size}, ttl=60)
+    await _cache_set(cache_key, {"items": items, "total": total, "page": page, "size": size}, ttl=SEARCH_CACHE_TTL)
 
     return ok(data={"items": items, "total": total, "page": page, "size": size})
 

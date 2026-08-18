@@ -132,8 +132,7 @@ async def review_position(
         if not can_promote_to_emerging(candidate, confidence=float(conf.get("final_confidence", 0.0))):
             return error(ERR_VALIDATION, "置信度 < 0.6 或独立源 < 2，不满足 emerging 晋升条件")
 
-    updated = await asyncio.to_thread(
-        _persist_position_state,
+    updated = await _persist_state_and_invalidate(
         candidate,
         target,
         db,
@@ -159,6 +158,21 @@ async def review_position(
 
 
 # 共享：岗位状态持久化（Neo4j 同步驱动 + 审计日志，线程池执行）
+
+async def _persist_state_and_invalidate(candidate, target, db, operator: str, reason: str):
+    """岗位状态持久化 + 图谱热路径缓存失效（08-18 TTL 治理）。
+
+    状态变更（晋升/归档/衰退）影响图谱可见性与聚合权重，持久化后立即
+    失效 panorama/view/search/节点详情缓存，避免 300s TTL 窗口内读到旧状态。
+    """
+    result = await asyncio.to_thread(
+        _persist_position_state, candidate, target, db, operator, reason
+    )
+    from app.api.v1.graph import invalidate_graph_caches
+
+    await invalidate_graph_caches()
+    return result
+
 
 def _persist_position_state(candidate, target, db, operator: str, reason: str):
     """岗位状态持久化（Neo4j 同步驱动 + 审计日志），线程池执行。
@@ -259,8 +273,7 @@ async def review_evolution(
     )
     target = PositionState.STABLE if action == "approve" else PositionState.DECLINING
 
-    updated = await asyncio.to_thread(
-        _persist_position_state,
+    updated = await _persist_state_and_invalidate(
         candidate,
         target,
         db,
@@ -361,8 +374,7 @@ async def archive_position(
         rag_matched=cand_row.rag_matched,
         definition_draft=cand_row.definition_draft,
     )
-    updated = await asyncio.to_thread(
-        _persist_position_state,
+    updated = await _persist_state_and_invalidate(
         candidate,
         PositionState.ARCHIVED,
         db,
