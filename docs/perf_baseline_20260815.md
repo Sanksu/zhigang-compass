@@ -59,3 +59,22 @@ cd backend
 uv run locust -f scripts/locustfile.py --host http://localhost:8000 \
     -u 100 -r 20 -t 3m --headless --csv reports/perf_20260815 GraphUser
 ```
+
+---
+
+## 08-18 治理后复测（#300~#302 性能治理）
+
+> 治理背景：100 并发压测对比发现 P99/P99.9 尾部劣化（panorama P99 910→5100ms vs 08-15 基线），
+> 根因为三层叠加：冷查询映射阻塞事件循环、30s/60s TTL 到期风暴、search 冷键无并发合并与
+> 大载荷序列化积压。治理修复见 PR #300（映射移出事件循环）/ #301（TTL 300s + 管理端写路径
+> 即时失效）/ #302（search single-flight + panorama 预序列化响应）。
+
+### 复测结果（2026-08-18，100 并发 / 3 分钟 / 全量热键预热 / 0 失败）
+
+| 场景 | P50 | P90 | P95 | P99 | P99.9 | Max |
+|---|---|---|---|---|---|---|
+| GET /graph/panorama | 5ms | 6ms | 8ms | 290ms | 390ms | 420ms |
+| GET /graph/search | 5ms | 6ms | 7ms | 250ms | 340ms | 378ms |
+
+- 吞吐 58.9 req/s（10567 请求）；对比 08-15 基线：**P95 430/390 → 8/7ms（约 55 倍），P99.9 3700 → 390/340ms（约 10 倍）**
+- 全面超越目标（P95 < 2s）与 08-15 基线；后续对比以此表为准
