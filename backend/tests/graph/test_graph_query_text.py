@@ -32,6 +32,9 @@ class _FakeResult:
     async def data(self):
         return list(self._rows)
 
+    async def fetch(self, number):
+        return list(self._rows[:number])
+
     async def single(self):
         return None
 

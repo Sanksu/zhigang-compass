@@ -46,6 +46,9 @@ class _FakeRows:
     async def data(self):
         return list(self._records)
 
+    async def fetch(self, number):
+        return [_FakeRecord(r) for r in self._records[:number]]
+
 
 class _FakeSession:
     def __init__(self, records: list[dict]):

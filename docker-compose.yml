@@ -98,6 +98,9 @@ services:
       # 上传文件共享卷（08-15 修复）：resume_parse 任务在 worker 容器读 /app/uploads——
       # 此前 api 落盘 worker 读不到，任务 failed「文件不存在」
       - uploads_data:/app/uploads
+      # 报告目录（08-18 压测核验）：freshness/diversity 等报告落容器内 /app/reports，
+      # 无挂载则容器重建即丢失——与宿主机 backend/reports 共享持久化
+      - ./backend/reports:/app/reports
 
   # ARQ 异步任务 worker（BE-M3-04）：消费 resume_parse / run_etl_pipeline 等队列任务
   worker:
@@ -157,6 +160,8 @@ services:
       - ./backend/configs/llm_providers.yaml:/app/configs/llm_providers.yaml
       # 运行时配置（08-16 管理后台 /admin/settings 可写；api/worker 共享宿主文件，重启后生效）
       - ./backend/configs/runtime_settings.json:/app/configs/runtime_settings.json
+      # 报告目录（08-18 压测核验）：与 api 同款挂载，容器重建不丢 freshness/diversity 报告
+      - ./backend/reports:/app/reports
     depends_on:
       postgres:
         condition: service_healthy
