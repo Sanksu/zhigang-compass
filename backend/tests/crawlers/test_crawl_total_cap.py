@@ -32,8 +32,12 @@ from crawlers.spiders.stackoverflow import StackoverflowSpider
 TOTAL_CAP = 100
 
 
-def _job_line(i: int, title: str = "Job") -> str:
-    """构造一条 JobSpy/CDP 风格的 JSONL 产出行。"""
+def _job_line(i: int, title: str = "Software Engineer") -> str:
+    """构造一条 JobSpy/CDP 风格的 JSONL 产出行。
+
+    默认标题用技术岗（08-18 LinkedIn 聚焦治理后：linkedin_public 产出前
+    按技术关键词白名单过滤，非技术标题会被丢弃导致上限语义测试失真）。
+    """
     return json.dumps(
         {"id": f"id-{i}", "title": f"{title} {i}", "company": "ACME",
          "job_url": f"https://example.com/job/{i}", "location": "New York",
