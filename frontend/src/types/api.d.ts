@@ -1223,7 +1223,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": Record<string, never>;
+                    "application/json": components["schemas"]["ResumeUpdateRequest"];
                 };
             };
             responses: {
@@ -3790,6 +3790,13 @@ export interface components {
         ResumeListData: {
             items: components["schemas"]["ResumeSummaryItem"][];
             total: number;
+        };
+        /** @description PUT /resume/{resume_id} 请求体（编辑简历画像，fields 按顶层覆盖合并进 parsed_data） */
+        ResumeUpdateRequest: {
+            /** @description 待覆盖合并的画像字段（键为 parsed_data 顶层字段名） */
+            fields: {
+                [key: string]: unknown;
+            };
         };
         /** @description POST /resume/parse 响应 data（异步解析任务入队） */
         ResumeParseTaskData: {
