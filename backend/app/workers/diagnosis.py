@@ -14,6 +14,9 @@ from app.models.business import (
 
 logger = logging.getLogger(__name__)
 _DIAGNOSIS_TTL = 24 * 60 * 60
+# 异步诊断 LLM 超时（08-18 E2E 联调）：同步 10s 契约在边缘延迟 provider
+# （实测 9-10s）下误杀；后台任务无同步阻塞约束，放宽至 30s + 多 provider 降级
+_DIAGNOSIS_LLM_TIMEOUT = 30
 
 
 async def generate_diagnosis(
@@ -72,7 +75,8 @@ async def generate_diagnosis(
             task.progress = 0.4
             await session.commit()
             report = await asyncio.to_thread(
-                generate_report, data, rag_chunks=rag_chunks
+                generate_report, data, rag_chunks=rag_chunks,
+                timeout=_DIAGNOSIS_LLM_TIMEOUT,
             )
             payload = {"match_id": match_id, **report.model_dump()}
             await redis_client.set(
