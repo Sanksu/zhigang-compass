@@ -211,7 +211,9 @@ async def query_view_techstack(session, limit: int, status_filter: str) -> list:
         """,
         limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
     )
-    return await result.data()
+    # 08-18 修复：与 panorama 同坑——async driver 的 data() 会把 Relationship
+    # 反序列化为 tuple，路由层 record["r"].get() 崩 500；fetch() 保留 Record
+    return await result.fetch(100000)
 
 
 async def query_view_main(session, limit: int, status_filter: str) -> list:
@@ -226,4 +228,5 @@ async def query_view_main(session, limit: int, status_filter: str) -> list:
         """,
         limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
     )
-    return await result.data()
+    # 08-18 修复：data() 的 tuple 关系会导致路由映射崩 500（同 panorama 坑）
+    return await result.fetch(100000)
