@@ -55,15 +55,68 @@ def load_prerequisite_config() -> dict:
     return data
 
 
+def _canonical_skill(name: str) -> str:
+    """技能规范名（同匹配引擎口径，剔别名/后缀/大小写差异）。
+
+    先修字典键名按规范中文名维护，而图谱岗位技能名可能带别名/
+    大小写/后缀差异（如 Graph 名 "Golang" vs 字典键 "Go"、"NSGs"
+    vs "网络安全"）。查找前先归一化，避免"图谱名 ↔ 字典键"键名
+    不一致导致先修链落空（AL-M5-06 先修字典键名一致性校验）。
+    """
+    from app.services.extraction.post_processor import canonical_skill_name
+
+    return canonical_skill_name(name).strip().lower()
+
+
+def _prereq_lookup_index() -> dict[str, str]:
+    """先修字典键的匹配索引：规范名 / 原键小写 → 原键。
+
+    同一规范名冲突时以配置中靠前的键为准（确定性）。索引缺失时才重建，
+    避免每次查询全量扫描。
+    """
+    global _prereq_index_cache
+    if _prereq_index_cache is not None:
+        return _prereq_index_cache
+    skills = (load_prerequisite_config().get("skills") or {})
+    built: dict[str, str] = {}
+    for key in skills:
+        built.setdefault(key.strip().lower(), key)
+        built.setdefault(_canonical_skill(key), key)
+    _prereq_index_cache = built
+    return built
+
+
+# 先修匹配索引缓存（配置变更需重启；valid 标记为空字典时也复用）
+_prereq_index_cache: dict[str, str] | None = None
+
+
+def _resolve_skill_key(skill_name: str) -> str | None:
+    """把请求的技能名解析为先修字典键（精确→小写→规范名逐级回退）。"""
+    if not skill_name:
+        return None
+    skills = load_prerequisite_config().get("skills") or {}
+    if skill_name in skills:
+        return skill_name
+    low = skill_name.strip().lower()
+    if low in _prereq_lookup_index():
+        return _prereq_lookup_index()[low]
+    canon = _canonical_skill(skill_name)
+    if canon in _prereq_lookup_index():
+        return _prereq_lookup_index()[canon]
+    return None
+
+
 def base_hours(skill_name: str) -> float:
     """技能基础学时（小时）：字典逐技能覆盖 > 白名单类别分层 > 配置默认值。
 
     分层动机（08-13 评审）：默认 30h 一刀切使学时维度系统性低估（hours 0.42）；
     未收录技能按白名单类别给合理基准（AI/算法 70h、语言/框架 55h、数据/软技能 40h）。
+    AL-M5-06：键名先经 _resolve_skill_key 归一（图谱名 ↔ 字典键一致性）。
     """
     cfg = load_prerequisite_config()
     default = float(cfg.get("default_hours_per_skill", _DEFAULT_HOURS_PER_SKILL))
-    entry = (cfg.get("skills") or {}).get(skill_name) or {}
+    key = _resolve_skill_key(skill_name) or skill_name
+    entry = (cfg.get("skills") or {}).get(key) or {}
     if "hours" in entry:
         return float(entry["hours"])
     category = _load_whitelist_categories().get(skill_name)
@@ -76,6 +129,7 @@ def prerequisite_chain(skill_name: str) -> list[str]:
     """展开技能先修链（拓扑序，先修在前，不含目标技能本身）。
 
     未收录技能返回空链；环引用通过 visited 集合防护；链深天然受字典深度约束。
+    AL-M5-06：键名先经 _resolve_skill_key 归一（图谱名 ↔ 字典键一致性）。
     """
     cfg = load_prerequisite_config()
     skills = cfg.get("skills") or {}
@@ -87,7 +141,8 @@ def prerequisite_chain(skill_name: str) -> list[str]:
         if name in visited:
             return
         visited.add(name)
-        for pre in (skills.get(name) or {}).get("prerequisites", []) or []:
+        key = _resolve_skill_key(name) or name
+        for pre in (skills.get(key) or {}).get("prerequisites", []) or []:
             visit(pre)
         if name != skill_name:
             result.append(name)

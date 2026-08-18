@@ -5,6 +5,9 @@
 
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
+### 2026-08-18
+- **AL-M5-06 学习路径先修字典键名校验收官**：`app/services/learning_path/prerequisites.py` 先修链/学时查找先经 `canonical_skill_name` 归一（图谱技能名 ↔ 字典键对齐，覆盖大小写/别名/NLP↔自然语言处理 等）；并发补 40+ 高频通用技能先修链（`configs/skill_prerequisites.yaml` 08-18 五/六轮）；30 案例学习路径评测 **prerequisite 0.77→0.92、hours 0.836→0.916、合理性 80%→90%，course 0.879 保持 ≥0.85**；`tests/learning_path` **51 passed**、ruff 干净
+
 ### 2026-08-15
 - **性能压测达标**（#194）：panorama P95 430ms / search P95 390ms（100 并发，<2s 目标）
   - 修复 panorama 路由装饰器错位（生产 bug，scope/focus 误暴露为必填 Query）
