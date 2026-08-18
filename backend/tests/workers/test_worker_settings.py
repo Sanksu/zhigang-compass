@@ -7,10 +7,10 @@
 import asyncio
 import inspect
 
+from app.workers.settings import WorkerSettings
 from app.workers.tasks import (
     _run_limited_stage,
     _run_stage,
-    WorkerSettings,
     aggregate_positions,
     backfill_embeddings,
     batch_extract,
