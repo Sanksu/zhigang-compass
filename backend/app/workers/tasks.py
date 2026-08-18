@@ -55,9 +55,11 @@ from app.workers.etl_tasks import (
     _graph_skill_first_seen as _graph_skill_first_seen,
     _history_skill_sets as _history_skill_sets,
     _publish_date as _publish_date,
+    _purge_dup_import_residue as _purge_dup_import_residue,
     _skill_first_seen_days as _skill_first_seen_days,
     _skills_of as _skills_of,
     _snapshot_with_skip as _snapshot_with_skip,
+    dedup_simhash as dedup_simhash,
     detect_inflation as detect_inflation,
     validate_temporal as validate_temporal,
 )
@@ -86,173 +88,6 @@ from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
 # 累计失败达 _ENRICH_MAX_FAILS 次后放弃（写 skills_enriched，防无限重试）。
 _ENRICH_RETRY_DELAY_SECONDS = 3600   # 失败后延迟 1 小时重试
 _ENRICH_MAX_FAILS = 3                # 累计失败 3 次放弃
-
-
-def _purge_dup_import_residue(urls: list[str]) -> dict:
-    """清除已入图 SimHash 重复记录的图谱残留（08-15 核查后新增）。
-
-    重复记录在 canonical 名下入图即可，其独立入图残留 = 岗位节点 + 空权
-    REQUIRES 边（import_jd 写 necessity/level，聚合跳过重复记录 → 永不获
-    weight/source_count）。规则：
-    1. 删记录 Evidence 的 HAS_EVIDENCE（岗位）边；Evidence 被技能
-       EVIDENCED_BY 引用时保留节点（证据追溯链完整），否则连带删除；
-    2. 受影响岗位删除后无任何证据且 REQUIRES 均无 source_count → 纯重复
-       残留，DETACH DELETE（空权边一并清除）。
-
-    Returns:
-        {"has_edges_removed", "evidence_removed", "positions_removed"}
-    """
-    if not urls:
-        return {"has_edges_removed": 0, "evidence_removed": 0, "positions_removed": 0}
-    from app.core.database import neo4j_driver
-
-    with neo4j_driver.session() as session:
-        # 先收集受影响岗位（须在删证据边之前，删后无法回溯归属）
-        affected = session.run(
-            """
-            MATCH (p:Position)-[:HAS_EVIDENCE]->(e:Evidence)
-            WHERE e.source_url IN $urls
-            RETURN collect(DISTINCT p.name) AS names
-            """,
-            urls=urls,
-        ).single()["names"]
-        if not affected:
-            return {"has_edges_removed": 0, "evidence_removed": 0, "positions_removed": 0}
-
-        has_edges_removed = session.run(
-            """
-            MATCH (:Position)-[h:HAS_EVIDENCE]->(e:Evidence)
-            WHERE e.source_url IN $urls
-            RETURN count(h) AS n
-            """,
-            urls=urls,
-        ).single()["n"]
-        session.run(
-            """
-            MATCH (:Position)-[h:HAS_EVIDENCE]->(e:Evidence)
-            WHERE e.source_url IN $urls
-            DELETE h
-            """,
-            urls=urls,
-        )
-        evidence_removed = session.run(
-            """
-            MATCH (e:Evidence) WHERE e.source_url IN $urls
-            WITH e
-            OPTIONAL MATCH (sk:Skill)-[eb:EVIDENCED_BY]->(e)
-            WITH e, count(eb) AS refs
-            WHERE refs = 0
-            DETACH DELETE e
-            RETURN count(e) AS n
-            """,
-            urls=urls,
-        ).single()["n"]
-        positions_removed = session.run(
-            """
-            UNWIND $names AS name
-            MATCH (p:Position {name: name})
-            WHERE NOT EXISTS { MATCH (p)-[:HAS_EVIDENCE]->(:Evidence) }
-              AND NOT EXISTS {
-                  MATCH (p)-[r:REQUIRES]->(:Skill) WHERE r.source_count IS NOT NULL
-              }
-            DETACH DELETE p
-            RETURN count(p) AS n
-            """,
-            names=affected,
-        ).single()["n"]
-    return {
-        "has_edges_removed": has_edges_removed,
-        "evidence_removed": evidence_removed,
-        "positions_removed": positions_removed,
-    }
-
-
-async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
-    """SimHash 跨平台近似去重（设计文档 §4.2 消费方）。
-
-    扫描 jd_raw 已入库记录的 snapshot->_simhash（CleaningPipeline 采集时写入，
-    基于脱敏后文本），批量 find_similar_pairs（汉明距 ≤ 3）找出近似重复 JD。
-    jd_embeddings 语义辅助（§11.4.3）：两记录的向量余弦 < 0.9 视为语义不相似，
-    不标记重复（降低 SimHash 误判）；向量缺失时保留 SimHash 判定。
-    将后入库记录标记 `snapshot["_duplicate_of"]` = 先入库记录 id。
-    聚合层（aggregation.build_aggregates）跳过被标记记录，避免重复 JD 虚高频次。
-    """
-
-    from app.core.database import async_session_factory
-    from app.services.data_quality.simhash import find_similar_pairs
-    from app.services.embeddings.vector_store import load_jd_vectors_by_ids
-    from app.services.matching.semantic import cosine_similarity
-
-    # JD 语义去重辅助阈值（§11.4.3 jd_embeddings Cosine）：低于该值不标记
-    _EMBED_DEDUP_THRESHOLD = 0.9
-
-    async with async_session_factory() as session:
-        # 只加载带 _simhash 的记录，避免全表拉取（审查 major：dedup_simhash 全表加载）
-        stmt = select(JDRaw).where(
-            JDRaw.snapshot["_simhash"].astext.isnot(None),
-        )
-        if limit:
-            stmt = stmt.limit(limit)
-        stmt = stmt.order_by(JDRaw.id.asc())
-        rows = (await session.scalars(stmt)).all()
-
-        records: list[tuple[str, int]] = []
-        for r in rows:
-            sh = (r.snapshot or {}).get("_simhash")
-            if isinstance(sh, int) and sh:
-                records.append((str(r.id), sh))
-
-        pairs = find_similar_pairs(records)
-
-        # 语义辅助：仅加载 pairs 涉及 jd 的向量（08-14 审查：此前全量加载
-        # jd_embeddings 入内存；pairs 通常远少于全量记录数）
-        pair_ids = sorted({i for p in pairs for i in p})
-        emb_map = await load_jd_vectors_by_ids(session, pair_ids)
-        verified_pairs: list[tuple[str, str]] = []
-        skipped_emb = 0
-        for id_a, id_b in pairs:
-            va, vb = emb_map.get(id_a), emb_map.get(id_b)
-            if va is not None and vb is not None:
-                if cosine_similarity(va, vb) < _EMBED_DEDUP_THRESHOLD:
-                    skipped_emb += 1
-                    continue  # 语义不相似，SimHash 误判，不标记重复
-            verified_pairs.append((id_a, id_b))
-
-        # pairs 顺序即 records 输入顺序（id 升序），先入库者保留，后入库者标记
-        id_map = {str(r.id): r for r in rows}
-        marked = 0
-        for id_a, id_b in verified_pairs:
-            dup = id_map.get(id_b)
-            if dup is None:
-                continue
-            snap = dict(dup.snapshot or {})
-            if snap.get("_duplicate_of") != id_a:
-                snap["_duplicate_of"] = id_a
-                dup.snapshot = snap
-                marked += 1
-        await session.commit()
-
-        # 入图残留对齐清理（08-15 新增）：去重标记可能晚于抽取入图（重复对
-        # 在后续轮次才发现），已入图的重复记录残留岗位节点 + 空权 REQUIRES 边。
-        # 与 rebuild_graph/聚合口径一致清除；已抽取记录才可能入过图，未抽取
-        # （跳过/失败）记录在图中无残留，无需处理。
-        dup_urls = [
-            (r.snapshot or {}).get("source_url") or r.source_url
-            for id_a, id_b in verified_pairs
-            if (r := id_map.get(id_b)) is not None
-            and (r.snapshot or {}).get("extraction")
-        ]
-        purge_stats: dict = {}
-        if dup_urls:
-            purge_stats = await asyncio.to_thread(_purge_dup_import_residue, dup_urls)
-
-    return {
-        "checked": len(records),
-        "pairs": len(pairs),
-        "skipped_emb": skipped_emb,
-        "marked": marked,
-        "purged": purge_stats,
-    }
 
 
 async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
