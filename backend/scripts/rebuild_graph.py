@@ -156,9 +156,9 @@ def main() -> None:
     #    重建只重放 import_jd，若不补跑这些阶段，课程/关系边/归一化/快照
     #    在重建后全部缺失（08-12 重建丢失 Course 与五类关系的根因）。
     async def _post_rebuild() -> dict:
+        from app.services.evolution.evolved_from import derive_evolved_from
         from app.workers.tasks import (
             aggregate_positions,
-            derive_evolved_from,
             load_courses,
             snapshot_graph,
             sync_skill_normalization,
