@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
+    "e2e:ci": "playwright test --config=playwright.ci.config.ts",
     "gen:api": "openapi-typescript ../backend/openapi/openapi.yaml -o src/types/api.d.ts",
     "lint": "eslint ."
   },
