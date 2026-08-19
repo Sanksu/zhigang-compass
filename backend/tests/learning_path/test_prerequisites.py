@@ -90,10 +90,6 @@ class TestBaseHours:
         assert set(skills["深度学习"]["prerequisites"]) >= {"机器学习", "Python"}
 
     def test_default_hours(self, monkeypatch):
-        monkeypatch.setattr(mod, "load_prerequisite_config", lambda: _config({}))
-        assert mod.base_hours("未知技能") == 30.0
-
-    def test_custom_default(self, monkeypatch):
         monkeypatch.setattr(mod, "load_prerequisite_config", lambda: _config({}, default_hours=40.0))
         assert mod.base_hours("任意") == 40.0
 
@@ -108,3 +104,44 @@ class TestBaseHours:
         assert mod.base_hours("机器学习") == 70.0
         # 白名单外技能回落配置默认值
         assert mod.base_hours("任意不存在技能XYZ") == 30.0
+
+
+class TestKeyNameConsistency:
+    """AL-M5-06 先修字典键名 vs 图谱规范名一致性校验。
+
+    图谱岗位技能名可能与字典键存在大小写/别名/后缀差异（如 "Golang" vs
+    "Go"、"NSGs" vs "网络安全"），查找前须归一化，否则先修链落空。
+    """
+
+    def test_lowercase_key_lookup(self, monkeypatch):
+        """大小写差异可解析到字典键（图谱名 "golang" → 键 "Go"）。"""
+        monkeypatch.setattr(mod, "_prereq_index_cache", None)
+        monkeypatch.setattr(
+            mod,
+            "load_prerequisite_config",
+            lambda: _config({"Go": {"prerequisites": ["计算机基础"]}}),
+        )
+        assert mod.prerequisite_chain("golang") == ["计算机基础"]
+
+    def test_canonical_alias_lookup(self, monkeypatch):
+        """规范名别名可解析（图谱名 "网络安全" → 字典键 "NSGs"）。"""
+        monkeypatch.setattr(mod, "_prereq_index_cache", None)
+        assert mod.prerequisite_chain("网络安全")  # 图谱中文名 → NSGs 规范名命中先修链
+        assert mod.prerequisite_chain("Nsgs")  # 大小写/别名变体同样命中
+
+    def test_unknown_skill_empty_chain(self):
+        """字典与白名单都无的技能 → 空链 + 默认学时（不崩）。"""
+        assert mod.prerequisite_chain("完全不存在的玄幻技能XYZ") == []
+        assert mod.base_hours("完全不存在的玄幻技能XYZ") == 30.0
+
+    def test_resolve_skill_key_exact_first(self, monkeypatch):
+        monkeypatch.setattr(mod, "_prereq_index_cache", None)
+        monkeypatch.setattr(
+            mod,
+            "load_prerequisite_config",
+            lambda: _config({"Go": {"hours": 40.0}}),
+        )
+        assert mod._resolve_skill_key("Go") == "Go"
+        assert mod._resolve_skill_key("GO") == "Go"
+        assert mod._resolve_skill_key("golang") == "Go"
+        assert mod._resolve_skill_key("不存在的技能") is None

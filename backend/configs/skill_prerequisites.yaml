@@ -761,3 +761,198 @@ skills:
     - 云计算
     - Java
     hours: 50
+  # ---- 08-18 先修补录五轮（AL-M5-06 先修键名一致性 + 高频缺口）----
+  Android:
+    prerequisites:
+    - Java
+    hours: 55
+  Nest.js:
+    prerequisites:
+    - JavaScript
+    - 前端开发
+    hours: 40
+  Express.js:
+    prerequisites:
+    - JavaScript
+    - Node.js
+    hours: 40
+  HTML:
+    prerequisites:
+    - 计算机基础
+    hours: 30
+  JS设计模式:
+    prerequisites:
+    - JavaScript
+    hours: 30
+  FastAPI:
+    prerequisites:
+    - Python
+    - RESTful API
+    hours: 40
+  Airflow:
+    prerequisites:
+    - Python
+    - SQL
+    hours: 50
+  Terraform:
+    prerequisites:
+    - Linux
+    - 云计算
+    hours: 50
+  Excel:
+    prerequisites:
+    - 计算机基础
+    hours: 30
+  SAS:
+    prerequisites:
+    - 统计学
+    hours: 50
+  计量经济学:
+    prerequisites:
+    - 统计学
+    - 数学基础
+    hours: 50
+  市场调研:
+    prerequisites:
+    - 数据分析
+    hours: 30
+  数学基础:
+    prerequisites: []
+  可观测性:
+    prerequisites:
+    - Linux
+    - 计算机基础
+    hours: 40
+  API:
+    prerequisites:
+    - 计算机基础
+    - 网络
+    hours: 30
+  # ---- 08-18 先修补录六轮（AL-M5-06 通用技能缺口，专有工具不补先修）----
+  云工程:
+    prerequisites:
+    - 云计算
+    hours: 40
+  FPGA验证:
+    prerequisites:
+    - 数字硬件
+    - 计算机基础
+    hours: 60
+  数字硬件:
+    prerequisites:
+    - 计算机基础
+    hours: 40
+  Perl:
+    prerequisites:
+    - 计算机基础
+    hours: 40
+  iOS:
+    prerequisites:
+    - 前端开发
+    - 计算机基础
+    hours: 45
+  Less:
+    prerequisites:
+    - CSS
+    - 前端开发
+    hours: 30
+  性能监控:
+    prerequisites:
+    - Linux
+    - 计算机基础
+    hours: 40
+  异常检测:
+    prerequisites:
+    - 机器学习
+    - 统计分析
+    hours: 50
+  数据治理:
+    prerequisites:
+    - 数据分析
+    - SQL
+    hours: 40
+  IAM:
+    prerequisites:
+    - 网络安全
+    - 计算机基础
+    hours: 40
+  身份治理:
+    prerequisites:
+    - 网络安全
+    hours: 40
+  发布:
+    prerequisites:
+    - 软件测试
+    - CI/CD
+    hours: 30
+  定价:
+    prerequisites:
+    - 数据分析
+    hours: 30
+  无障碍:
+    prerequisites:
+    - 前端开发
+    - CSS
+    hours: 30
+  用户体验:
+    prerequisites:
+    - 产品设计
+    hours: 30
+  Sentry:
+    prerequisites:
+    - 可观测性
+    - 计算机基础
+    hours: 40
+  Figma:
+    prerequisites:
+    - UI设计
+    hours: 30
+  Confluence:
+    prerequisites:
+    - 项目管理
+    hours: 30
+  JIRA:
+    prerequisites:
+    - 项目管理
+    hours: 30
+  性能分析:
+    prerequisites:
+    - 计算机基础
+    - Linux
+    hours: 40
+  Lua:
+    prerequisites:
+    - 计算机基础
+    hours: 40
+  集成模式:
+    prerequisites:
+    - 微服务
+    - 分布式系统
+    hours: 40
+  成本估算:
+    prerequisites:
+    - 统计分析
+    hours: 40
+  蒙特卡洛模拟:
+    prerequisites:
+    - 统计学
+    - 概率论
+    hours: 50
+  Web开发:
+    prerequisites:
+    - 前端开发
+    - JavaScript
+    hours: 40
+  编程:
+    prerequisites:
+    - 计算机基础
+    hours: 40
+  React Native Testing Library:
+    prerequisites:
+    - React Native
+    - 软件测试
+    hours: 30
+  PromQL:
+    prerequisites:
+    - Prometheus
+    hours: 30
