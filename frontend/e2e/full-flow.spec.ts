@@ -8,7 +8,7 @@ import { expect, test } from '@playwright/test'
  * playwright.config.ts 自动拉起；真实库含 admin 用户（bootstrap 口令 admin123）。
  */
 
-const ADMIN = { username: 'admin', password: 'admin123' }
+const ADMIN = { username: 'admin', password: 'mm2877417' }
 
 test('登录 → 图谱 → 匹配 → 后台 → 登出 全流程', async ({ page }) => {
   // ---- 登录页 ----
@@ -19,8 +19,8 @@ test('登录 → 图谱 → 匹配 → 后台 → 登出 全流程', async ({ pa
   await page.getByLabel('密码').fill(ADMIN.password)
   await page.getByRole('button', { name: '登录' }).click()
 
-  // ---- 登录成功 → 仪表盘（顶栏显示用户名） ----
-  await expect(page.getByText(ADMIN.username)).toBeVisible({ timeout: 20_000 })
+  // ---- 登录成功 → 仪表盘（顶栏 banner 显示用户名） ----
+  await expect(page.getByRole('banner').getByText('admin')).toBeVisible({ timeout: 20_000 })
 
   // ---- 能力图谱（真实 panorama 数据） ----
   await page.goto('/graph')
