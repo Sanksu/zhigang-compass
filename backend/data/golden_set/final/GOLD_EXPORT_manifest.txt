@@ -1,7 +1,8 @@
 source_file: jd_annotation_round1_110_A01_FINAL.xlsx
 source_sha256: e1d1982c8cef18e5e155e78ddd3f04b7140cf878e6dd308e65ef4f7440742a86
 export_file: jd_golden_110.jsonl
-export_sha256: ceedfa6987fee665ea53f17678e8f06cb197a632bc828f99c5b962615c508061
+export_sha256: 273351d990d4fa2df825b2292e7c9fdf363ca5528b361a32cd3bbfc8f1f40b5a
+export_sha256_note: 基于仓库内文件（LF 换行，git hash-object 可复现）；标注员原始导出为 CRLF 版本（391398 字节，SHA256 ceedfa6987fee665ea53f17678e8f06cb197a632bc828f99c5b962615c508061）
 export_rows: 110
 unique_sample_ids: 110
 first_sample_id: ANN-0001

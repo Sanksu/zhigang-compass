@@ -37,7 +37,7 @@
 | gold_bonus_skills | string[] | bonus原子技能数组（优先/加分/更佳项） | 否 | 是 | 空数组表示无bonus |
 | gold_experience | object|null | 形如 {"min_years":int, "max_years":int|null}；无明确经验且不适用最低准入时必须为 null | 否 | 是 | 正文+列表均无经验信息，不代表 0 年经验 |
 | gold_education | string|null | 枚举：大专/本科/硕士/博士/不限 之一；未知留 null，未在校学生≠不限 | 否 | 是 | 未知，不能视为不限；在校学生保留学历判断待澄清 |
-| gold_core_duties | string[] | 3～6条职责概括 JSON 真实字符串数组 | 否 | 是 | 空数组为异常 |
+| gold_core_duties | string[] | 2～8条职责概括（QA 实测范围，推荐 3～6 条）JSON 真实字符串数组 | 否 | 是 | 空数组为异常 |
 
 ## 11. OR / 至少N种关系
 技能数组 gold_skills / gold_bonus_skills 以平铺形式存在，不编码 OR / 数量逻辑关系。这类关系在人工审核过程中通过 review_note 判定后，最终以人工结论为准，平铺输出数组。如需关系信息，需结合同一 JSONL 行的 requirements / text_experience 与规则 1～14 做后处理重建。
