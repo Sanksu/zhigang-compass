@@ -1,0 +1,12 @@
+source_file: jd_annotation_round1_110_A01_FINAL.xlsx
+source_sha256: e1d1982c8cef18e5e155e78ddd3f04b7140cf878e6dd308e65ef4f7440742a86
+export_file: jd_golden_110.jsonl
+export_sha256: ceedfa6987fee665ea53f17678e8f06cb197a632bc828f99c5b962615c508061
+export_rows: 110
+unique_sample_ids: 110
+first_sample_id: ANN-0001
+last_sample_id: ANN-0110
+qa_status: FINAL_QA_PASS
+annotator_method: single_annotator_human_review_with_final_QA
+rules: 1-14
+export_time: 2026-08-18 22:54:14 北京时间
