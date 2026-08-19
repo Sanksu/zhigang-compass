@@ -628,3 +628,85 @@ class TestValidateRows:
         v = self._validate(rows)
         assert v["ready_for_real_run"] is False
         assert any(i["field"] == "review_gold_skills" for i in v["issues"])
+
+
+class TestGoldJsonlLoader:
+    """final gold JSONL 装载（_load_gold_jsonl，纯输入适配，不触发 LLM）。
+
+    PR #316 交付的 110 条 Round1 gold 以原生 JSON 值存放 gold_* 字段；装载器把它
+    映射回评测链消费的 review_gold_* 字符串列（指标口径与盲审 xlsx 路径一致）。
+    """
+
+    def _write_gold_jsonl(self, tmp_path, items):
+        import json
+
+        p = tmp_path / "gold.jsonl"
+        p.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in items) + "\n", encoding="utf-8")
+        return p
+
+    def _item(self, sample_id="ANN-0001"):
+        return {
+            "sample_id": sample_id,
+            "source": "zhilian",
+            "source_id": "S1",
+            "source_url": f"https://example.com/{sample_id}",
+            "job_title_raw": "Java开发工程师",
+            "detail_raw_text": "岗位职责：负责后端开发。任职要求：熟悉 Java、Spring。",
+            "gold_title": "Java开发工程师",
+            "gold_skills": ["Java", "Spring"],
+            "gold_bonus_skills": ["Docker"],
+            "gold_experience": {"min_years": 3, "max_years": 5},
+            "gold_education": "本科",
+            "gold_core_duties": ["负责后端开发", "性能调优"],
+        }
+
+    def test_maps_fields_and_serializes_arrays(self, tmp_path):
+        """字段名映射 + 数组/对象回序列化 + 标注员常量 A01。"""
+        import json
+
+        from tests.evaluate.run_manual_jd_eval import _load_gold_jsonl
+
+        p = self._write_gold_jsonl(tmp_path, [self._item()])
+        r = _load_gold_jsonl(p)[0]
+        assert r["sample_id"] == "ANN-0001"
+        assert r["review_gold_title"] == "Java开发工程师"
+        assert json.loads(r["review_gold_skills"]) == ["Java", "Spring"]
+        assert json.loads(r["review_gold_bonus_skills"]) == ["Docker"]
+        assert json.loads(r["review_gold_core_duties"]) == ["负责后端开发", "性能调优"]
+        assert json.loads(r["review_gold_experience"]) == {"min_years": 3, "max_years": 5}
+        assert r["review_gold_education"] == "本科"
+        assert r["annotator"] == "A01"
+        assert r["job_title_raw"] == "Java开发工程师"
+        assert r["detail_raw_text"] == "岗位职责：负责后端开发。任职要求：熟悉 Java、Spring。"
+
+    def test_null_experience_and_education_map_to_empty(self, tmp_path):
+        """gold_experience/gold_education 为 null 时映射为空串（无 gold 语义，见数据字典）。"""
+        from tests.evaluate.run_manual_jd_eval import _load_gold_jsonl
+
+        item = self._item()
+        item["gold_experience"] = None
+        item["gold_education"] = None
+        r = _load_gold_jsonl(self._write_gold_jsonl(tmp_path, [item]))[0]
+        assert r["review_gold_experience"] == ""
+        assert r["review_gold_education"] == ""
+
+    def test_real_110_gold_passes_preflight(self):
+        """仓库内 110 条 final gold：装载 110 行 + 预检 110/110 放行（不调用 LLM）。"""
+        import json
+
+        from tests.evaluate.run_manual_jd_eval import (
+            DEFAULT_GOLD_JSONL,
+            _load_gold_jsonl,
+            validate_rows,
+        )
+
+        assert DEFAULT_GOLD_JSONL.exists()
+        rows = _load_gold_jsonl(DEFAULT_GOLD_JSONL)
+        assert len(rows) == 110
+        v = validate_rows(rows)
+        assert v["issues"] == []
+        assert v["fully_valid_rows"] == 110
+        assert v["observed_annotators"] == ["A01"]
+        assert v["ready_for_real_run"] is True
+        # 空数组必须被有效解析（110 条均非空爬虫文本，stats 见导出报告）
+        assert all(json.loads(r["review_gold_skills"]) is not None for r in rows)
