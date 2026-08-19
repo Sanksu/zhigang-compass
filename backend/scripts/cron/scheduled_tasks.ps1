@@ -35,11 +35,12 @@ $Tasks = @(
     # 脉脉夜间合规窗口（23:00）
     @{ Name = "CrawlMaimai";    Time = "23:00"; Script = "crawl_spider.py"; Args = @("maimai", "30") },
     # 国际非招聘源（北京时间 08:00 = UTC 0:00）
-    @{ Name = "CrawlLinkedIn";  Time = "08:00"; Script = "crawl_spider.py"; Args = @("linkedin_public", "50", "python,java,golang,react,devops,security,embedded,data,engineer,frontend,backend"); Proxy = $true  # 08-19 关键词轮询（技术岗聚焦） },
-    # 课程平台每周日全量同步（北京时间 10:00 = UTC 2:00，对齐 crontab.example）
-    @{ Name = "CrawlCoursera";   Time = "10:00"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("coursera", "100"); Proxy = $true },
-    @{ Name = "CrawlEdx";        Time = "10:30"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("edx", "100"); Proxy = $true },
-    @{ Name = "CrawlIcourse163"; Time = "11:00"; DaysOfWeek = "Sunday"; Script = "crawl_spider.py"; Args = @("icourse163", "100") },
+    @{ Name = "CrawlLinkedIn";  Time = "08:00"; Script = "crawl_spider.py"; Args = @("linkedin_public", "50", "python,java,golang,react,devops,security,embedded,data,engineer,frontend,backend"); Proxy = $true },  # 08-19 关键词轮询（技术岗聚焦）
+    # 课程平台每日同步（北京时间 10:00/10:30/11:00 错峰；08-19 由周日改为每日——
+    # 此前任务注册后从未实际触发过（Last Run=never），改为每日保证课程源持续新鲜）
+    @{ Name = "CrawlCoursera";   Time = "10:00"; Script = "crawl_spider.py"; Args = @("coursera", "100"); Proxy = $true },
+    @{ Name = "CrawlEdx";        Time = "10:30"; Script = "crawl_spider.py"; Args = @("edx", "100"); Proxy = $true },
+    @{ Name = "CrawlIcourse163"; Time = "11:00"; Script = "crawl_spider.py"; Args = @("icourse163", "100") },
     # ETL 主管线（05:00；阶段 1 采集 + LLM 抽取 + 快照 + 发现/自动流转）
     @{ Name = "ETLDaily";       Time = "05:00"; Script = "etl_daily.py";    Args = @() },
     # 图谱健康治理（06:30，ETL 完成后；脏边/伪技能自动清理，备份 reports/graph_health_*）

@@ -18,7 +18,8 @@
     23:00  maimai（脉脉夜间合规窗口 ≤100 req/h）
     08:00  linkedin_public（关键词轮询）/ github / stackoverflow（国际非招聘源，= UTC 0:00）
     11:00  arxiv（= UTC 3:00）
-    周日 10:00  coursera / edx / icourse163（课程平台全量同步，= UTC 2:00）
+    每日 10:00  coursera / 10:30 edx / 11:00 icourse163（课程平台同步，= UTC 2:00；
+    08-19 由周日改每日，此前任务注册后从未触发过）
 """
 
 import asyncio
