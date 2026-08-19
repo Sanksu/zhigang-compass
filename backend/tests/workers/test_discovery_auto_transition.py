@@ -212,9 +212,14 @@ class TestAutoTransitionTask:
         assert cand_session.committed is False
 
     def test_volatile_windows_not_promoted(self):
-        """3 窗口发布频次波动大（> 25%）→ 判定不升级，transitions=0。"""
+        """3 窗口末窗显著萎缩（> 25%）→ 判定不升级，transitions=0。
+
+        08-19 口径修正：波动只惩罚萎缩（增长/首采接入不算不稳定），
+        故用萎缩序列 [10,9,6]（末窗 9→6 萎缩 33% > 25%，decline 40% 未
+        超 declining 门槛，留在 emerging）验证"不稳定不升级"。
+        """
         name = "RAG"
-        jd_session = _FakeSession(_jd_rows_by_window(name, [10, 6, 10]))
+        jd_session = _FakeSession(_jd_rows_by_window(name, [6, 10, 9]))  # [9,10,6]: 最近窗口 10→6 萎缩 40%>25%
         row = _candidate_row(name)
         cand_session = _FakeSession([row])
         driver = _FakeDriver()

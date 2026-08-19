@@ -47,10 +47,12 @@ def _candidate(
 
 class TestWindowHelpers:
     def test_volatility(self):
-        # [10,8,9] 最近 2 窗口为 [8,9] 波动 0.111（原断言 0.2 依赖 freqs[:n]
-        # 取最早窗口的 bug，已随窗口方向修复更正）
-        assert window_volatility(WindowFreq([10, 8, 9])) == pytest.approx(0.1111, abs=1e-3)
+        # [10,8,9] 最近 2 窗口为 [8,9]：末窗增长不构成波动 → 0.0
+        # （08-19 口径修正：波动=萎缩幅度 (prev-last)/prev，增长/首采接入不算不稳定）
+        assert window_volatility(WindowFreq([10, 8, 9])) == 0.0
         assert window_volatility(WindowFreq([0, 0])) == 0.0
+        # 萎缩保留：末窗相对前一窗口的下降比例
+        assert window_volatility(WindowFreq([10, 9, 6])) == pytest.approx(0.3333, abs=1e-3)
 
     def test_decline_rate(self):
         assert decline_rate(WindowFreq([10, 6, 5])) == pytest.approx(0.5)
@@ -71,7 +73,7 @@ class TestWindowHelpers:
         """波动率取最近 n 窗口（非最早 n 窗口）。
 
         回归：原实现 freqs[:n] 取最早窗口，freqs=[10,8,9,1] n=2 时
-        [:2]=[10,8] 波动 0.2，[-2:]=[9,1] 波动 0.889——最近窗口剧烈波动
+        [:2]=[10,8] 波动 0.2，[-2:]=[9,1] 波动 0.889——最近窗口剧烈萎缩
         才应触发降级判定。
         """
         assert window_volatility(WindowFreq([10, 8, 9, 1])) == pytest.approx(0.8889, abs=1e-3)
@@ -260,15 +262,22 @@ class TestAutoTransition:
         w = WindowFreq([10, 9, 10])
         assert evaluate_auto_transition(c, w, skill_novelty=None) == PositionState.STABLE
 
-    def test_emerging_stays_when_volatile(self):
+    def test_emerging_stays_when_shrinking(self):
+        """最近窗口相对前一窗口萎缩 >25% → 不晋 stable（波动护栏保留）。"""
         c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
-        w = WindowFreq([10, 5, 10])  # 波动 50% > 25%
+        w = WindowFreq([10, 9, 6])  # 最近 2 窗口 [9,6] 萎缩 33% > 25%
         assert evaluate_auto_transition(c, w) is None
 
+    def test_emerging_promoted_on_recent_growth(self):
+        """首采接入导致的增长不算波动 → 照常晋级 stable（08-19 口径修正）。"""
+        c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
+        w = WindowFreq([10, 5, 10])  # 最近 2 窗口 [5,10] 增长（旧对称波动 50% 曾误拦）
+        assert evaluate_auto_transition(c, w) == PositionState.STABLE
+
     def test_emerging_to_declining(self):
-        """下降趋势 + 最近窗口仍剧烈波动 → declining（波动 37.5% > 25% 不进 stable）。"""
+        """下降趋势 + 最近窗口仍显著萎缩 → declining（萎缩 37.5% > 25% 不进 stable）。"""
         c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.5)
-        w = WindowFreq([10, 8, 5])  # 最近 2 窗口 [8,5] 波动 37.5%，decline 50%
+        w = WindowFreq([10, 8, 5])  # 最近 2 窗口 [8,5] 萎缩 37.5%，decline 50%
         assert evaluate_auto_transition(c, w) == PositionState.DECLINING
 
     def test_stable_to_declining(self):
@@ -337,17 +346,33 @@ class TestAutoTransitionFromSnapshots:
         assert evaluate_auto_transition(c, WindowFreq(freqs=windows[name])) == PositionState.STABLE
 
     def test_emerging_not_promoted_when_window_unstable(self):
-        """3 期快照波动大（> 25%）→ 不升级。"""
+        """3 期快照最近窗口显著萎缩（>25%）→ 不升级 stable。"""
         name = "RAG 工程师"
         snaps = [
             self._snapshot(name, 10),
-            self._snapshot(name, 6),
-            self._snapshot(name, 10),
+            self._snapshot(name, 8),
+            self._snapshot(name, 4),
         ]
         windows = position_freq_windows(snaps, {name})
         c = _candidate(PositionState.EMERGING, source_diversity=3, confidence=0.9)
         target = evaluate_auto_transition(c, WindowFreq(freqs=windows[name]))
-        assert target is None
+        assert target != PositionState.STABLE
+
+    def test_emerging_to_stable_on_cold_start_growth(self):
+        """首采接入的增长型（后窗远大于前窗）应能晋级 stable（08-19 口径修正）。
+
+        回归：旧对称 (max-min)/max 把 08 首采批次导致的末窗爆发判为波动
+        ≈100%，使 25 个 emerging 全部无法晋级；新口径只惩罚萎缩。
+        """
+        name = "RAG 工程师"
+        snaps = [
+            self._snapshot(name, 2),
+            self._snapshot(name, 6),
+            self._snapshot(name, 50),
+        ]
+        windows = position_freq_windows(snaps, {name})
+        c = _candidate(PositionState.EMERGING, source_diversity=3, jd_count=8, confidence=0.9)
+        assert evaluate_auto_transition(c, WindowFreq(freqs=windows[name])) == PositionState.STABLE
 
     def test_declining_to_stable_recovery_across_snapshots(self):
         """4 期快照频次先降后升（最近 2 窗口 z > 0）→ declining 自动回迁 stable。

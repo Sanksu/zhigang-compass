@@ -155,11 +155,22 @@ def jd_publish_windows(
 
 
 def window_volatility(w: WindowFreq, n: int = 2) -> float:
-    """最近 n 个窗口的频次波动（(max-min)/max，0 频次时取 0）。"""
-    recent = w.freqs[-n:]
-    if not recent or max(recent) == 0:
+    """最近 n 窗口末窗相对前一窗口的"萎缩幅度"（不对称，0~1）。
+
+    只把需求萎缩视为波动：last 相对 prev 的下降比例 (prev-last)/prev；
+    增长（last > prev，如新源首采接入产生 JD 爆发）不构成波动——避免
+    观测冷启动期被误判为不稳定（08-19 诊断：25 个 emerging 全因对称
+    (max-min)/max 逼近 100% 而无法晋级 stable）。显著萎缩由 decline_rate
+    单独判为 declining。prev 为 0（前窗无数据）无萎缩可谈，取 0。
+
+    Note: n 参数保留以兼容既有调用（判定固定取最近 2 窗口）。
+    """
+    if len(w.freqs) < 2:
         return 0.0
-    return (max(recent) - min(recent)) / max(recent)
+    prev, last = w.freqs[-2], w.freqs[-1]
+    if prev <= 0:
+        return 0.0
+    return max(0.0, (prev - last) / prev)
 
 
 def decline_rate(w: WindowFreq, n: int = 3) -> float:
@@ -248,6 +259,9 @@ def evaluate_auto_transition(
         # 波动 < 25% + skill_novelty < 0.2（08-15 全量对齐：此前用
         # confidence ≥ 0.8 替代 jd_count 门槛——jd_count=3 时其他维度满分
         # 也能过 0.8，小基数岗位提前稳定）。
+        # 波动口径（08-19 修正）：window_volatility 只惩罚末窗相对前窗的萎缩
+        # （(prev-last)/prev），首采接入带来的增长 JD 爆发不再误判为不稳定——
+        # 诊断显示 25 个 emerging 全因旧对称 (max-min)/max≈100% 无法晋级。
         # jd_count 由任务层从 jd_raw 统计传入；skill_novelty 由任务层从
         # Skill.first_seen 平均图谱年龄归一化传入（None 不拦截）。
         jd = jd_count if jd_count is not None else len(candidate.evidence_refs)
