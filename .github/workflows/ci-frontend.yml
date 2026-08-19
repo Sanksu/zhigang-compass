@@ -57,7 +57,9 @@ jobs:
   e2e-mock:
     name: E2E (mock API)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 首次运行须下载 Playwright 浏览器（已加缓存，后续同 lockfile 快速），
+    # 10min 曾超时被取消；20min 预留安装/下载抖动余量
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -73,6 +75,12 @@ jobs:
           node-version: 20
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
