@@ -5,12 +5,14 @@
 - zhilian：空关键词 → kw='' 平台默认推荐列表
 - arxiv：空分类 → 全局最新（无 search_query）
 - stackoverflow：空标签 → 全局热度（sort=votes，无 tagged）
-- coursera/edx：空关键词 → 浏览页（无 query/q 参数）
+- coursera：空关键词 → 浏览页（无 query/q 参数）；
+- edx：空关键词 → sitemap 全量课程索引（2026-08-19 数据面重写：改走 sitemap→详情页 JSON-LD）
 - icourse163：空关键词 → 单次默认课程流请求（--keyword 传空串）
 """
 
 import asyncio
 import json
+import logging
 import subprocess
 import sys
 from pathlib import Path
@@ -148,19 +150,21 @@ class TestCourseEmptyKeywords:
         assert requests[0].url == "https://www.coursera.org/browse"
         assert "query=" not in requests[0].url
 
-    def test_edx_empty_keywords_browse(self):
+    def test_edx_empty_keywords_browse(self, monkeypatch):
+        """新数据面：空关键词 → 请求 sitemap.xml（课程 URL 索引）。"""
         spider = EdxSpider.__new__(EdxSpider)
         spider.name = "edx"
         spider.platform = "edx"
         spider.keywords = []
-        spider.max_pages = 3
+        spider.limit = 100
         spider.download_delay = 15
+        # Spider.logger 为只读 property，monkeypatch 类属性覆写
+        monkeypatch.setattr(EdxSpider, "logger", logging.getLogger("test.edx"))
 
         requests = list(spider.start_requests())
 
         assert len(requests) == 1
-        assert requests[0].url == "https://www.edx.org/search"
-        assert "q=" not in requests[0].url
+        assert requests[0].url == "https://www.edx.org/sitemap.xml"
 
 
 class TestIcourse163EmptyKeywords:
