@@ -1,9 +1,14 @@
 """Evaluate independently reviewed JD records through the current JDExtractor.
 
 This is an evaluation-only entry point.  It never writes the source workbook or
-golden-set JSONL.  A real run is deliberately blocked unless the blind-review
-labels pass strict format checks; this prevents rule-based fallback or malformed
-human labels from being reported as an LLM extraction baseline.
+golden-set JSONL.  A real run is deliberately blocked unless the gold labels pass
+strict format checks; this prevents rule-based fallback or malformed human labels
+from being reported as an LLM extraction baseline.
+
+支持两种 gold 输入源（指标口径一致，仅输入层不同）：
+- 盲审 xlsx（默认，--xlsx/--sheet）
+- final gold JSONL（--gold-jsonl），即 data/golden_set/final/jd_golden_110.jsonl
+  （PR #316 交付的 110 条 Round1 人工标注；`--run` 前同上做预检拦截）
 """
 
 from __future__ import annotations
@@ -25,6 +30,10 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_XLSX = ROOT / "data" / "golden_set" / "review" / "jd_manual_review_round1.xlsx"
 DEFAULT_OUTPUT = ROOT / "data" / "golden_set" / "review" / "evaluation"
 DEFAULT_REPORT_DIR = ROOT / "reports"
+# final gold 权威源（PR #316，见 data/golden_set/final/ 数据字典与导出报告）
+DEFAULT_GOLD_JSONL = ROOT / "data" / "golden_set" / "final" / "jd_golden_110.jsonl"
+# final gold 为单标注员 A01 + 最终 QA（数据字典声明，不得描述为双人独立标注）
+_GOLD_ANNOTATOR = "A01"
 # 与 scripts/evaluate.py 目标阈值一致（设计文档 §13.3：JD 解析 ≥ 90%）
 JD_LLM_TARGET_F1 = 0.90
 NS = {
@@ -107,6 +116,42 @@ def _load_round1_blind_rows(path: Path, sheet_name: str) -> list[dict[str, str]]
         {headers.get(column, column): values.get(column, "") for column in headers}
         for values in rows[1:]
     ]
+
+
+def _load_gold_jsonl(path: Path) -> list[dict[str, str]]:
+    """Read the final golden-set JSONL into the same eval-row schema as the blind-review xlsx.
+
+    final gold（data/golden_set/final/jd_golden_110.jsonl）以原生 JSON 值存放 gold_*
+    字段；本评测链（`run_real_eval`）消费的是 review_gold_* 字符串列，因此这里只做
+    字段名映射 + 数组/对象回序列化，指标口径与 xlsx 路径完全一致（纯输入源适配）。
+    标注方式按数据字典声明为单标注员 A01（single_annotator_human_review_with_final_QA）。
+    """
+    rows: list[dict[str, str]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        experience = item.get("gold_experience")
+        rows.append({
+            "sample_id": str(item.get("sample_id") or ""),
+            "source": str(item.get("source") or ""),
+            "source_id": str(item.get("source_id") or ""),
+            "source_url": str(item.get("source_url") or ""),
+            "job_title_raw": str(item.get("job_title_raw") or ""),
+            "detail_raw_text": str(item.get("detail_raw_text") or ""),
+            "review_gold_title": str(item.get("gold_title") or ""),
+            "review_gold_skills": json.dumps(item.get("gold_skills") or [], ensure_ascii=False),
+            "review_gold_bonus_skills": json.dumps(item.get("gold_bonus_skills") or [], ensure_ascii=False),
+            "review_gold_education": str(item.get("gold_education") or ""),
+            "review_gold_core_duties": json.dumps(item.get("gold_core_duties") or [], ensure_ascii=False),
+            # 经验无明确信息（含最低准入未给出）在 final gold 中为 null，
+            # 评测侧视为"无 gold"，与盲审 xlsx 的空字符串语义一致
+            "review_gold_experience": (
+                json.dumps(experience, ensure_ascii=False) if isinstance(experience, dict) else ""
+            ),
+            "annotator": _GOLD_ANNOTATOR,
+        })
+    return rows
 
 
 def _json_array(value: str) -> tuple[list[str] | None, str | None]:
@@ -674,35 +719,49 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--xlsx", type=Path, default=DEFAULT_XLSX)
     parser.add_argument("--sheet", default="Round1盲标")
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--gold-jsonl", type=Path, default=None,
+        help=(
+            "从 final gold JSONL（data/golden_set/final/jd_golden_110.jsonl）读取 gold；"
+            "优先于 --xlsx/--sheet。未指定 --output-dir 时默认输出到 review/evaluation_110。"
+        ),
+    )
+    parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--run", action="store_true", help="Only after preflight succeeds, call the real LLM chain.")
     args = parser.parse_args()
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    rows = _load_round1_blind_rows(args.xlsx, args.sheet)
+    if args.gold_jsonl is not None:
+        rows = _load_gold_jsonl(args.gold_jsonl)
+        source_desc: Path = args.gold_jsonl
+        output_dir: Path = args.output_dir or ROOT / "data" / "golden_set" / "review" / "evaluation_110"
+    else:
+        rows = _load_round1_blind_rows(args.xlsx, args.sheet)
+        source_desc = args.xlsx
+        output_dir = args.output_dir or DEFAULT_OUTPUT
+    output_dir.mkdir(parents=True, exist_ok=True)
     validation = validate_rows(rows)
-    validation_write_warning = write_validation(args.output_dir, validation)
+    validation_write_warning = write_validation(output_dir, validation)
     if validation_write_warning:
         print(f"WARNING: could not update validation summary: {validation_write_warning}")
     if not validation["ready_for_real_run"]:
-        write_blocker_report(args.output_dir, validation, args.xlsx)
-        print("BLOCKED: blind-review labels did not pass preflight; no LLM call was made.")
+        write_blocker_report(output_dir, validation, source_desc)
+        print("BLOCKED: gold labels did not pass preflight; no LLM call was made.")
         return 2
     if not args.run:
         print("READY: preflight passed. Re-run with --run to call the real LLM chain.")
         return 0
     try:
-        metrics = run_real_eval(rows, args.output_dir)
+        metrics = run_real_eval(rows, output_dir)
     except Exception as exc:
         validation["runtime_blocker"] = _safe_exception_summary(exc)
-        validation_write_warning = write_validation(args.output_dir, validation)
+        validation_write_warning = write_validation(output_dir, validation)
         if validation_write_warning:
             validation["validation_write_warning"] = validation_write_warning
         try:
-            write_blocker_report(args.output_dir, validation, args.xlsx)
+            write_blocker_report(output_dir, validation, source_desc)
         except OSError as report_exc:
             print(f"WARNING: could not update blocker report: {type(report_exc).__name__}: {report_exc}")
             try:
-                write_runtime_blocker_fallback(args.output_dir, validation, validation["runtime_blocker"])
+                write_runtime_blocker_fallback(output_dir, validation, validation["runtime_blocker"])
             except OSError as fallback_exc:
                 print(f"WARNING: could not write runtime blocker fallback: {type(fallback_exc).__name__}: {fallback_exc}")
         print(f"BLOCKED: {_safe_exception_summary(exc)}")
