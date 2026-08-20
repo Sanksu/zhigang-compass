@@ -259,6 +259,52 @@ def _metric(tp: int, fp: int, fn: int) -> dict[str, float | int]:
     return {"tp": tp, "fp": fp, "fn": fn, "precision": p, "recall": r, "f1": 2 * p * r / (p + r) if p + r else 0.0}
 
 
+def _norm_duty(text: str) -> str:
+    """职责规整：去空白/标点、统一小写（core_duties 词面 containment 用）。"""
+    return re.sub(r"[\s，,。；;、.!?！？:：/\\\-–—()（）\[\]]+", "", text or "").lower()
+
+
+def experience_overlap(gold: dict | None, pred: dict | None) -> bool:
+    """经验区间重叠判定（L1-1 D1-A 确认口径）。
+
+    双 null → 命中（都不声明）；单 null → 未命中；区间相交 → 命中。
+    """
+    if gold is None and pred is None:
+        return True
+    if gold is None or pred is None:
+        return False
+    lo = max((gold.get("min_years") or 0), (pred.get("min_years") or 0))
+    hi = min(
+        (gold.get("max_years") if gold.get("max_years") is not None else 10 ** 6),
+        (pred.get("max_years") if pred.get("max_years") is not None else 10 ** 6),
+    )
+    return lo <= hi
+
+
+def core_duties_compare(gold: list[str], pred: list[str]) -> dict:
+    """core_duties 词面 containment（L1-1 D2-A 确认口径，微平均）。
+
+    gold 每条与预测每条双向子串命中；返回与 _compare_set 同构的 tp/fp/fn/f1。
+    """
+    g = [x for x in (_norm_duty(s) for s in gold) if x]
+    p = [x for x in (_norm_duty(s) for s in pred) if x]
+
+    def hits(hay: list[str], needles: list[str]) -> set[int]:
+        return {i for i, h in enumerate(hay) if any(n in h or h in n for n in needles)}
+
+    gold_hit = hits(g, p)
+    pred_hit = hits(p, g)
+    tp = len(gold_hit)
+    fn = len(g) - tp
+    fp = len(p) - len(pred_hit)
+    m = _metric(tp, fp, fn)
+    return {
+        "tp": tp, "fp": fp, "fn": fn,
+        "precision": m["precision"], "recall": m["recall"], "f1": m["f1"],
+        "gold_hit": sorted(gold_hit), "pred_hit": sorted(pred_hit),
+    }
+
+
 # 评测侧补漏的全文字典扫描（08-17）：白名单词 + 别名键（规范写法）、
 # 词边界匹配、过滤软技能与技能停用词——与 scripts/rebuild_gold_by_text_scan
 # 同口径（该脚本是段落扫描，此处为全文）
@@ -359,6 +405,9 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
     title_raw_hits = 0
     title_count = 0
     education_hits = 0
+    experience_hits = 0
+    experience_compared = 0
+    duties_total: Counter[str] = Counter()
     skills_total: Counter[str] = Counter()
     bonus_total: Counter[str] = Counter()
     sample_skill_f1: list[float] = []
@@ -436,6 +485,17 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         predicted_education = (result.education.level if result.education else None) or None
         education_match = gold_education == predicted_education
         education_hits += int(education_match)
+        # L1-1 六维补齐：经验区间重叠（D1-A）+ core_duties 词面 containment（D2-A，张恺天确认口径）
+        gold_exp, _ = _json_object_or_empty(row.get("review_gold_experience", ""))
+        gold_duties, _ = _json_array(row.get("review_gold_core_duties", ""))
+        pred_exp = result.experience_range.model_dump() if result.experience_range else None
+        pred_duties = result.core_duties or []
+        exp_match = experience_overlap(gold_exp, pred_exp)
+        duties_cmp = core_duties_compare(gold_duties, pred_duties)
+        experience_compared += 1
+        experience_hits += int(exp_match)
+        for key in ("tp", "fp", "fn"):
+            duties_total[key] += duties_cmp[key]
         predictions.append({
             "sample_id": row["sample_id"], "source": row["source"], "source_id": row["source_id"],
             "source_url": row["source_url"], "job_title_raw": row["job_title_raw"],
@@ -455,12 +515,12 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
                     "pred_bonus_matches_gold_required": sorted(set(predicted_bonus) & set(normalized_gold_skills)),
                 },
                 "conditional_text_marker": any(marker in row["detail_raw_text"] for marker in ("优先", "一项或多项", "一项或", "任一", "或者")),
-                "experience": "Schema coverage gap: JDExtractionResult has no experience_range field",
+                "experience": {"match": exp_match, "gold": gold_exp, "pred": pred_exp},
                 "education_gold": gold_education,
                 "education_prediction": predicted_education,
                 "education_raw_exact": education_match,
                 "education_empty_gold_is_null": gold_education is None,
-                "core_duties": "Schema coverage gap: JDExtractionResult has no core_duties field",
+                "core_duties": duties_cmp,
             },
         })
     success_count = len([p for p in predictions if p["execution_status"] == "real_llm_success"])
@@ -510,8 +570,9 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         "bonus_skills_micro": _metric(**bonus_total),
         "bonus_skills_average_sample_f1": sum(sample_bonus_f1) / success_count,
         "education_raw_exact_accuracy": education_hits / success_count,
-        "experience": "Schema coverage gap: current JDExtractionResult schema has no experience_range field",
-        "core_duties": "Schema coverage gap: current JDExtractionResult schema has no core_duties field",
+        "experience_accuracy": (experience_hits / experience_compared) if experience_compared else None,
+        "experience_compared": experience_compared,
+        "core_duties_micro": _metric(**duties_total),
         # 归档展示用（写入 reports/eval_jd_llm_*.json，不影响 report.md 既有字段）
         "per_sample_skills_f1": [round(x, 4) for x in sample_skill_f1],
         "per_sample_bonus_f1": [round(x, 4) for x in sample_bonus_f1],
@@ -528,13 +589,13 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
                 writer.writerow({"sample_id": item["sample_id"], "execution_status": item["execution_status"], "job_title_raw": item["job_title_raw"], "fallback_or_failure_reason": item.get("fallback_reason") or item.get("failure_reason", "")})
                 continue
             cmp = item["comparison"]
-            writer.writerow({"sample_id": item["sample_id"], "execution_status": item["execution_status"], "job_title_raw": item["job_title_raw"], "gold_title": item["human_gold"]["review_gold_title"], "predicted_title": item["model_normalized_output"]["position_name"], "title_raw_exact": cmp["title_raw_exact"], "title_normalized_match": cmp["title_normalized_match"], "skills_tp": "|".join(cmp["skills"]["tp"]), "skills_fp": "|".join(cmp["skills"]["fp"]), "skills_fn": "|".join(cmp["skills"]["fn"]), "skills_f1": cmp["skills"]["f1"], "bonus_tp": "|".join(cmp["bonus_skills"]["tp"]), "bonus_fp": "|".join(cmp["bonus_skills"]["fp"]), "bonus_fn": "|".join(cmp["bonus_skills"]["fn"]), "bonus_f1": cmp["bonus_skills"]["f1"], "education_gold": cmp["education_gold"], "education_prediction": cmp["education_prediction"], "education_raw_exact": cmp["education_raw_exact"], "experience_note": cmp["experience"], "core_duties_note": cmp["core_duties"]})
+            writer.writerow({"sample_id": item["sample_id"], "execution_status": item["execution_status"], "job_title_raw": item["job_title_raw"], "gold_title": item["human_gold"]["review_gold_title"], "predicted_title": item["model_normalized_output"]["position_name"], "title_raw_exact": cmp["title_raw_exact"], "title_normalized_match": cmp["title_normalized_match"], "skills_tp": "|".join(cmp["skills"]["tp"]), "skills_fp": "|".join(cmp["skills"]["fp"]), "skills_fn": "|".join(cmp["skills"]["fn"]), "skills_f1": cmp["skills"]["f1"], "bonus_tp": "|".join(cmp["bonus_skills"]["tp"]), "bonus_fp": "|".join(cmp["bonus_skills"]["fp"]), "bonus_fn": "|".join(cmp["bonus_skills"]["fn"]), "bonus_f1": cmp["bonus_skills"]["f1"], "education_gold": cmp["education_gold"], "education_prediction": cmp["education_prediction"], "education_raw_exact": cmp["education_raw_exact"], "experience_note": "match" if cmp["experience"]["match"] else "miss", "core_duties_note": f"F1={cmp['core_duties']['f1']:.4f}"})
     (output_dir / "manual_jd_eval_report.md").write_text(
         "# A01 人工 JD 集端到端评测报告\n\n"
         "本报告只把 `real_llm_success` 行计入指标；`fallback` 和 `failed` 行保留在逐条结果中，但绝不计入指标。\n\n"
         "## 当前真实链路\n\n`JDExtractor.extract` → `LLMProviderChain.extract_structured` → `post_process`。岗位名归一化只用于评测侧的 `normalize_position_name` 对照；`PositionAligner`（Neo4j/SBERT）不在 `JDExtractor.extract` 内。\n\n"
         f"## 指标\n\n```json\n{json.dumps(metrics, ensure_ascii=False, indent=2)}\n```\n\n"
-        "空学历 gold 以 `null / No explicit education requirement` 参与 raw exact 对比：模型同样未输出学历即为正确，凭空输出学历即为错误。经验与核心职责没有对应的 `JDExtractionResult` 字段，属于 Schema coverage gap，不会伪造预测或准确率。`skills` 与 `requirements[nice]` 分别作为必备技能和加分技能的可观测输出；该映射应在后续算法评审中确认。历史 0.6112 未参与本报告。\n",
+        "空学历 gold 以 `null / No explicit education requirement` 参与 raw exact 对比：模型同样未输出学历即为正确，凭空输出学历即为错误。经验按**区间重叠判定**（双 null=命中、单 null=未命中）、核心职责按**词面 containment**（D1-A/D2-A，L1-1 张恺天确认口径，2026-08-20）参与对比。`skills` 与 `requirements[nice]` 分别作为必备技能和加分技能的可观测输出；该映射应在后续算法评审中确认。历史 0.6112 未参与本报告。\n",
         encoding="utf-8",
     )
     lowest = sorted(success_predictions, key=lambda p: p["comparison"]["skills"]["f1"])[:3]
@@ -579,8 +640,15 @@ def _archive_result(metrics: dict[str, Any]) -> dict[str, Any]:
         "per_sample_skills_f1": metrics.get("per_sample_skills_f1", []),
         "per_sample_bonus_f1": metrics.get("per_sample_bonus_f1", []),
         "error_types": metrics.get("error_types", []),
-        "experience_gap": metrics["experience"],
-        "core_duties_gap": metrics["core_duties"],
+        "experience_accuracy": round(metrics.get("experience_accuracy") or 0, 4),
+        "experience_compared": metrics.get("experience_compared", 0),
+        "core_duties_micro": {
+            k: (round(v, 4) if isinstance(v, float) else v)
+            for k, v in (metrics.get("core_duties_micro") or {}).items()
+        },
+        # 兼容旧消费者（evaluate.py HTML 缺口提示）：六维已启用后 gap 字段恒为 None
+        "experience_gap": metrics.get("experience_gap"),
+        "core_duties_gap": metrics.get("core_duties_gap"),
     }
 
 

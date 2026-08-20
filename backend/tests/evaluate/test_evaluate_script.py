@@ -710,3 +710,103 @@ class TestGoldJsonlLoader:
         assert v["ready_for_real_run"] is True
         # 空数组必须被有效解析（110 条均非空爬虫文本，stats 见导出报告）
         assert all(json.loads(r["review_gold_skills"]) is not None for r in rows)
+
+
+class TestSixDimCompare:
+    """六维评测补齐（L1-1）比较函数单测：experience 区间重叠（D1-A）+ core_duties 词面 containment（D2-A）。"""
+
+    def test_experience_both_null_is_match(self):
+        from tests.evaluate.run_manual_jd_eval import experience_overlap
+
+        assert experience_overlap(None, None) is True
+
+    def test_experience_single_null_is_miss(self):
+        from tests.evaluate.run_manual_jd_eval import experience_overlap
+
+        assert experience_overlap({"min_years": 3, "max_years": 5}, None) is False
+        assert experience_overlap(None, {"min_years": 3, "max_years": 5}) is False
+
+    def test_experience_overlap_match(self):
+        from tests.evaluate.run_manual_jd_eval import experience_overlap
+
+        # 3-5 vs 4-6 相交
+        assert experience_overlap({"min_years": 3, "max_years": 5}, {"min_years": 4, "max_years": 6}) is True
+        # 3-5 vs 5+（开放）端点相接
+        assert experience_overlap({"min_years": 3, "max_years": 5}, {"min_years": 5, "max_years": None}) is True
+        # 1-2 vs 5+ 不相交
+        assert experience_overlap({"min_years": 1, "max_years": 2}, {"min_years": 5, "max_years": None}) is False
+
+    def test_core_duties_containment(self):
+        from tests.evaluate.run_manual_jd_eval import core_duties_compare
+
+        gold = ["负责平台核心模块开发", "主导数据治理与ETL开发", "代码评审与性能调优"]
+        pred = ["负责平台核心模块开发与性能调优", "主导数据治理与ETL开发"]
+        r = core_duties_compare(gold, pred)
+        assert r["tp"] == 2 and r["fn"] == 1  # 第三条 gold 未命中
+        assert r["fp"] == 0  # 预测两条均命中某 gold
+        assert 0.0 < r["f1"] < 1.0
+
+    def test_core_duties_empty_pred(self):
+        """预测未产出 core_duties → 全部 fn，F1=0（诚实报低，不伪造）。"""
+        from tests.evaluate.run_manual_jd_eval import core_duties_compare
+
+        r = core_duties_compare(["负责系统开发"], [])
+        assert r["tp"] == 0 and r["fn"] == 1 and r["fp"] == 0
+        assert r["f1"] == 0.0
+
+    def test_core_duties_exact_and_substring(self):
+        from tests.evaluate.run_manual_jd_eval import core_duties_compare
+
+        assert core_duties_compare(["系统开发"], ["负责系统开发"])["tp"] == 1
+        assert core_duties_compare(["系统开发"], ["系统开发"])["tp"] == 1
+
+
+class TestJdLlmReportSixDim:
+    """evaluate.py HTML 渲染：六维启用后显示经验/核心职责列与口径说明，旧归档仍显示缺口。"""
+
+    def _archive(self, with_gap=True):
+        return {
+            "task": "jd_llm",
+            "method": "真实抽取（LLM + 规则兜底，2 条人工盲审）",
+            "samples": 2,
+            "fallback_samples": 0,
+            "failed_samples": 0,
+            "precision": 0.9,
+            "recall": 0.9,
+            "f1": 0.9,
+            "target_f1": 0.90,
+            "target_met": True,
+            "confusion": {"tp": 9, "fp": 1, "fn": 1},
+            "bonus": {"fp": 0, "fn": 0, "tp": 0, "precision": 1.0, "recall": 1.0, "f1": 1.0},
+            "title_raw_exact_accuracy": 1.0,
+            "title_normalized_accuracy": 1.0,
+            "education_raw_exact_accuracy": 1.0,
+            "skills_average_sample_f1": 0.9,
+            "per_sample_skills_f1": [0.9, 0.9],
+            "per_sample_bonus_f1": [],
+            "error_types": [],
+            "experience_accuracy": 0.5,
+            "experience_compared": 2,
+            "core_duties_micro": {"tp": 4, "fp": 1, "fn": 1, "precision": 0.8, "recall": 0.8, "f1": 0.8},
+            "experience_gap": ("Schema coverage gap" if with_gap else None),
+            "core_duties_gap": ("Schema coverage gap" if with_gap else None),
+        }
+
+    def test_new_archive_shows_six_dim_metrics(self):
+        import scripts.evaluate as ev
+
+        report = {"generated_at": "x", "target": "y", "results": [self._archive(with_gap=False)]}
+        html = ev.generate_html_report(report)
+        assert "经验（区间重叠）" in html
+        assert "核心职责 F1" in html
+        assert "0.5000" in html  # experience_accuracy
+        assert "0.8000" in html  # core_duties f1
+        assert "六维已启用" in html
+        assert "Schema 缺口" not in html
+
+    def test_legacy_archive_still_shows_gap_note(self):
+        import scripts.evaluate as ev
+
+        report = {"generated_at": "x", "target": "y", "results": [self._archive(with_gap=True)]}
+        html = ev.generate_html_report(report)
+        assert "Schema 缺口" in html
