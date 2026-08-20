@@ -14,11 +14,21 @@ class GapType(str, Enum):
     MATCHED = "matched"
 
 
+class MatchEvidenceItem(BaseModel):
+    """单条评分/差距证据（数据溯源，task 2.2）。"""
+
+    role: str = Field(description="来源：jd（岗位要求）/ resume（简历现状）")
+    text: str = Field(description="证据描述文本")
+
+
 class GapSkill(BaseModel):
     """单个技能差距项（设计文档 §9.5）。
 
     差距优先级按 skill_weight DESC + gap_type（missing > weak）排序，
     matched 仅用于展示（绿色高亮），不进入学习路径。
+
+    demand/trend/roi/high_roi/evidence 为数据升级可选字段：前端已有 mock
+    兜底，后端回填后自动生效（字段均为 Optional，缺省不参与输出）。
     """
 
     skill: str = Field(description="技能名")
@@ -32,6 +42,13 @@ class GapSkill(BaseModel):
     )
     required_proficiency: Optional[str] = Field(
         default=None, description="岗位期望熟练度：初级/中级/高级/专家"
+    )
+    demand: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="市场需求度 0-1")
+    trend: Optional[float] = Field(default=None, ge=-1.0, le=1.0, description="需求趋势 -1..1")
+    roi: Optional[float] = Field(default=None, description="ROI 指标 = (demand×trend)/cost")
+    high_roi: Optional[bool] = Field(default=None, description="是否高杠杆缺口（Top3 ROI）")
+    evidence: list[MatchEvidenceItem] = Field(
+        default_factory=list, description="评分/差距证据（JD 要求 vs 简历现状）"
     )
 
 
@@ -53,6 +70,9 @@ class LearningPathItem(BaseModel):
     """单技能学习路径项（甘特图格式，设计文档 §9.5）。
 
     输出结构：{skill, prerequisites[], courses[], estimated_hours, priority}。
+
+    status/demand/trend/roi/evidence 为双轨制数据升级可选字段（前端 mock 兜底，
+    后端回填后生效；Optional 缺省不参与输出）。
     """
 
     skill: str = Field(description="目标技能名")
@@ -61,6 +81,13 @@ class LearningPathItem(BaseModel):
     courses: list[CourseRecommendation] = Field(default_factory=list, description="推荐课程 Top-3")
     estimated_hours: float = Field(description="预计学习学时（先修链 + 目标技能基础学时之和）")
     priority: str = Field(description="优先级：high / medium / low")
+    status: Optional[str] = Field(default=None, description="学习状态：done / doing / locked")
+    demand: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="市场需求度 0-1")
+    trend: Optional[float] = Field(default=None, ge=-1.0, le=1.0, description="需求趋势 -1..1")
+    roi: Optional[float] = Field(default=None, description="ROI 指标 = (demand×trend)/cost")
+    evidence: list[MatchEvidenceItem] = Field(
+        default_factory=list, description="学习/评分证据"
+    )
 
 
 class LearningPathResult(BaseModel):
