@@ -17,7 +17,7 @@ from app.core import runtime_config
 from app.api.deps import require_role
 from app.core.database import get_db, redis_client
 from app.core.errors import ERR_NOT_FOUND
-from app.models.business import GraphVersion
+from app.models.business import EvolutionEvent, GraphVersion
 from app.schemas.common import error, ok
 
 router = APIRouter()
@@ -191,6 +191,41 @@ async def version_detail(
             for n in nodes if isinstance(n, dict)
         ],
     })
+
+
+@router.get("/events")
+async def evolution_events(
+    version_id: str | None = Query(default=None, description="按版本过滤；缺省返回全部（最新在前）"),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
+):
+    """谱系事件流（机制补强② born/merged/ended 落库数据）。
+
+    由 derive_evolved_from 在快照演化时写入 evolution_events；本端点只读。
+    """
+    stmt = select(EvolutionEvent).order_by(EvolutionEvent.id.desc()).limit(limit)
+    if version_id:
+        stmt = (
+            select(EvolutionEvent)
+            .where(EvolutionEvent.version_id == version_id)
+            .order_by(EvolutionEvent.id.desc())
+            .limit(limit)
+        )
+    rows = (await db.scalars(stmt)).all()
+    items = [
+        {
+            "id": e.id,
+            "version_id": e.version_id,
+            "event_type": e.event_type,
+            "from_name": e.from_name,
+            "to_name": e.to_name,
+            "created_at": iso(e.created_at),
+            "detail": e.detail,
+        }
+        for e in rows
+    ]
+    return ok(data={"items": items})
 
 
 def _build_snapshot_indexes(snapshots: list) -> list[dict]:

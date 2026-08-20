@@ -1006,6 +1006,33 @@ paths:
                   data:
                     $ref: '#/components/schemas/EvolutionVersionDetail'
                   trace_id: { type: string }
+  /api/v1/evolution/events:
+    get:
+      tags: [evolution]
+      summary: 谱系事件流（born/merged/ended）
+      parameters:
+        - name: version_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: 按版本过滤；缺省返回全部
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: 事件列表（最新在前）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/EvolutionEventListData'
+                  trace_id: { type: string }
   /api/v1/evolution/diff:
     get:
       tags: [evolution]
@@ -2579,6 +2606,31 @@ components:
           type: array
           items: { $ref: '#/components/schemas/EvolutionDiffNode' }
           description: 快照节点列表（不含边）
+
+    EvolutionEvent:
+      type: object
+      description: 谱系事件（机制补强② born/merged/ended，GET /evolution/events）
+      required: [id, version_id, event_type]
+      properties:
+        id: { type: integer }
+        version_id: { type: string }
+        event_type: { type: string, enum: [born, merged, ended] }
+        from_name: { type: string, nullable: true, description: 旧名（ended/merged） }
+        to_name: { type: string, nullable: true, description: 新名（born/merged） }
+        created_at: { type: string, nullable: true }
+        detail:
+          type: object
+          nullable: true
+          description: 附加结构（如 merged 的 from_names 数组）
+
+    EvolutionEventListData:
+      type: object
+      description: GET /evolution/events 响应 data
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/EvolutionEvent' }
 
     PositionEvolutionPoint:
       type: object

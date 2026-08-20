@@ -18,10 +18,12 @@
 """
 
 
-from sqlalchemy import select
+from collections import Counter
+
+from sqlalchemy import delete, select
 
 from app.core.database import async_session_factory
-from app.models.business import GraphVersion
+from app.models.business import EvolutionEvent, GraphVersion
 
 
 def _name_containment(new: str, old: str) -> bool:
@@ -45,6 +47,37 @@ def _shared_segments(new: str, old: str, seg_len: int = 2) -> int:
     new_segments = {new[i : i + seg_len] for i in range(len(new) - seg_len + 1)}
     shared = new_segments & old_segments
     return len(shared - _GENERIC_NAME_SEGMENTS)
+
+
+def classify_evolution_events(
+    new_names: set[str],
+    gone_names: set[str],
+    matched_gone_by_new: dict[str, list[str]],
+    suppress_ended: bool = False,
+) -> list[dict]:
+    """谱系事件分类（机制补强②，PR #334 张恺天确认）：born / merged / ended。
+
+    - merged：一个 new 同时 rename/split 匹配到多个 old（"新名含多旧名"归并）
+    - born：new_names 中未配对任何 old（无演化来源的新岗位涌现）
+    - ended：gone_names 中未配对任何 new（岗位消失）；suppress_ended=True（当前版本
+      命中样本量告警 data_warning，采集量异常）时不产出 ended——防"采集停摆被误报为岗位消亡"
+    """
+    events: list[dict] = []
+    matched_gones = {g for olds in matched_gone_by_new.values() for g in olds}
+    for new, olds in sorted(matched_gone_by_new.items()):
+        if len(olds) >= 2:
+            events.append({
+                "event_type": "merged",
+                "from_name": ",".join(sorted(olds)),
+                "to_name": new,
+                "detail": {"from_names": sorted(olds)},
+            })
+    for new in sorted(new_names - set(matched_gone_by_new)):
+        events.append({"event_type": "born", "from_name": None, "to_name": new, "detail": {}})
+    if not suppress_ended:
+        for old in sorted(gone_names - matched_gones):
+            events.append({"event_type": "ended", "from_name": old, "to_name": None, "detail": {}})
+    return events
 
 
 def _position_nodes(snapshot: dict) -> dict[str, str]:
@@ -91,6 +124,7 @@ async def derive_evolved_from(dry_run: bool = False) -> dict:
 
     edges = 0
     skipped = 0
+    matched_gone_by_new: dict[str, list[str]] = {}
     for new in new_names:
         new_id = cur_name_to_id.get(new)
         if new_id is None:
@@ -107,6 +141,8 @@ async def derive_evolved_from(dry_run: bool = False) -> dict:
             if old_id is None:
                 skipped += 1
                 continue
+            # 记录该 new 已配对哪些 old（机制补强②：merged 判定 + born/ended 排除）
+            matched_gone_by_new.setdefault(new, []).append(old)
             if dry_run:
                 edges += 1
                 continue
@@ -136,10 +172,39 @@ async def derive_evolved_from(dry_run: bool = False) -> dict:
                 ).single()
                 edges += int(result["covered"]) if result else 0
 
+    # 机制补强②：谱系事件 born/merged/ended 落库（D4：当前版本命中样本量告警 data_warning
+    # → 抑制 ended，防"采集停摆被误报为岗位消亡"——与机制补强①联动）
+    # getattr 兼容既有测试的 SimpleNamespace mock（生产 ORM 带 data_warning 属性）
+    suppress_ended = bool(getattr(versions[-1], "data_warning", None))
+    events = classify_evolution_events(
+        new_names, gone_names, matched_gone_by_new, suppress_ended=suppress_ended
+    )
+    event_counts = Counter(e["event_type"] for e in events)
+    if not dry_run and events:
+        async with async_session_factory() as session:
+            await session.execute(
+                delete(EvolutionEvent).where(EvolutionEvent.version_id == cur_version)
+            )
+            session.add_all([
+                EvolutionEvent(
+                    version_id=cur_version,
+                    event_type=e["event_type"],
+                    from_name=e["from_name"],
+                    to_name=e["to_name"],
+                    detail=e["detail"],
+                )
+                for e in events
+            ])
+            await session.commit()
+
     return {
         "versions": [versions[-2].id, cur_version],
         "edges": edges,
         "skipped": skipped,
         "new_positions": len(new_names),
         "gone_positions": len(gone_names),
+        "events": dict(event_counts),
+        # dry_run 输出明细供人工抽检（含 suppress_ended 语境）
+        "events_detail": events if dry_run else None,
+        "ended_suppressed": suppress_ended,
     }
