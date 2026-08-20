@@ -91,7 +91,7 @@ export interface LearningPathItem {
   /** 先修技能 */
   prerequisites: string[]
   /** 推荐课程 */
-  courses: { title: string; platform: string; hours: number }[]
+  courses: { title: string; platform: string; hours: number; url?: string }[]
   /** 优先级 */
   priority: 'high' | 'medium' | 'low'
   // ── 学习路径双轨制新增（后端暂未直接返回，均为可选，缺失由 UI 兜底）──

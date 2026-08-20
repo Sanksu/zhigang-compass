@@ -117,6 +117,7 @@ function toLearningPath(items: BackendLearningPathItem[]): MatchResult['learning
         title: c.title,
         platform: c.platform,
         hours: c.hours ?? 0,
+        url: c.source_url ?? undefined,
       })),
       priority: item.priority,
       // 契约 #341 后装字段透传（后端回填后覆盖前端 mock 兜底）
@@ -1036,7 +1037,12 @@ export function ResumeMatchPage() {
                       completedSkills={matchResult.skill_matrix
                         .filter((s) => s.match === 'full')
                         .map((s) => s.skill)}
-                      onGoToLearn={(task) => setNotice(`已标记开始学习：${task.skill}（可在此集成课程跳转）`)}
+                      onGoToLearn={(task) => {
+                        // 接入课程：跳转该技能首门推荐课程（新标签）
+                        const url = task.courses?.find((c) => c.url)?.url
+                        if (url) window.open(url, '_blank', 'noreferrer')
+                        else setNotice(`「${task.skill}」暂无推荐课程，可先补充相关课程后再学习`)
+                      }}
                     />
                   ) : (
                     <p className="text-xs text-ink-faint py-10 text-center">

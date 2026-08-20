@@ -32,6 +32,8 @@ export interface TimelineTask {
   priority: LearningPathItem['priority']
   /** 可选：ROI 指标（供高杠杆缺口打标复用） */
   roi?: number
+  /** 推荐课程（含跳转链接，接入课程） */
+  courses?: { title: string; platform: string; hours: number; url?: string }[]
 }
 
 /** 时间轴中的一个阶段（拓扑层） */
@@ -154,6 +156,12 @@ export function buildTimelineMilestones(
         prerequisites: it.prerequisites,
         priority: it.priority,
         roi: it.roi,
+        courses: it.courses?.map((c) => ({
+          title: c.title,
+          platform: c.platform,
+          hours: c.hours ?? 0,
+          url: c.url,
+        })),
       }))
       .sort(
         (a, b) =>
@@ -319,6 +327,36 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
                               <span className="truncate">先修：{task.prerequisites.join('、')}</span>
                             )}
                           </div>
+
+                          {/* 接入课程：doing 任务展示首门推荐课程（可点击跳转） */}
+                          {!isDone && !isLocked && task.courses && task.courses.length > 0 && (
+                            <div className="mt-1.5 space-y-1">
+                              {task.courses.slice(0, 2).map((c, ci) =>
+                                c.url ? (
+                                  <a
+                                    key={ci}
+                                    href={c.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[10px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle/60"
+                                  >
+                                    <BookOpen className="size-3 shrink-0 text-primary" />
+                                    <span className="truncate">{c.title}</span>
+                                    <span className="ml-auto shrink-0 text-ink-faint">{c.platform}</span>
+                                  </a>
+                                ) : (
+                                  <span
+                                    key={ci}
+                                    className="flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[10px] text-ink-secondary"
+                                  >
+                                    <BookOpen className="size-3 shrink-0 text-primary" />
+                                    <span className="truncate">{c.title}</span>
+                                    <span className="ml-auto shrink-0 text-ink-faint">{c.platform}</span>
+                                  </span>
+                                ),
+                              )}
+                            </div>
+                          )}
                         </div>
 
                         {/* CTA */}
@@ -337,7 +375,14 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
                           ) : (
                             <button
                               type="button"
-                              onClick={() => onGoToLearn?.(task)}
+                              onClick={() => {
+                                // 优先回调（页面可自定义跳转/标记）；缺省跳首门课程链接
+                                if (onGoToLearn) onGoToLearn(task)
+                                else {
+                                  const url = task.courses?.find((c) => c.url)?.url
+                                  if (url) window.open(url, '_blank', 'noreferrer')
+                                }
+                              }}
                               className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[10px] font-medium text-canvas transition-opacity hover:opacity-90"
                             >
                               前往学习 <ArrowRight className="size-3" />
