@@ -24,13 +24,14 @@ type RateLimitEntry = NonNullable<RuntimeConfig['rate_limit']>[string]
 
 type Feedback = { type: 'ok' | 'err'; text: string } | null
 
-/** 配置分区（08-16：不同配置项放不同页面） */
-export type SettingsSection = 'tasks' | 'crawl' | 'evolution'
+/** 配置分区（08-16：不同配置项放不同页面；08-21：新增 ETL 队列） */
+export type SettingsSection = 'tasks' | 'crawl' | 'evolution' | 'etl'
 
 const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   tasks: { title: '任务与告警', desc: 'ARQ 任务并发/超时与告警 Webhook · 重启后生效' },
   crawl: { title: '采集与限频', desc: '单次采集上限与各源请求限频 · 重启后生效' },
   evolution: { title: '演化与缓存', desc: '演化看板缓存 TTL · 重启后生效' },
+  etl: { title: 'ETL 队列', desc: 'ETL 批次与调度时间（容器内 ARQ cron）· 重启 worker 后生效' },
 }
 
 /** 任务与告警字段 */
@@ -49,6 +50,28 @@ const TASK_DEFAULTS: Record<string, string> = {
   arq_concurrency: '10',
   arq_job_timeout: '1800',
   alert_webhook_url: '',
+}
+
+/** ETL 队列字段（08-21：批次 + 容器内 ARQ cron 调度时间） */
+const ETL_FIELDS: {
+  key: 'etl_batch_cap' | 'etl_structure_load_default' | 'etl_validate_temporal_default' | 'etl_run_hour' | 'etl_run_minute'
+  label: string
+  placeholder: string
+  hint: string
+}[] = [
+  { key: 'etl_batch_cap', label: 'ETL 批次上限', placeholder: '2000', hint: '积压缩放封顶（100-5000）' },
+  { key: 'etl_structure_load_default', label: '结构化加载默认批次', placeholder: '500', hint: 'batch_extract 默认批（100-1000）' },
+  { key: 'etl_validate_temporal_default', label: '时滞/通胀检测默认批次', placeholder: '200', hint: 'validate_temporal / detect_inflation（100-500）' },
+  { key: 'etl_run_hour', label: '调度小时', placeholder: '5', hint: '容器内 ARQ cron（0-23）' },
+  { key: 'etl_run_minute', label: '调度分钟', placeholder: '0', hint: '容器内 ARQ cron（0-59）' },
+]
+
+const ETL_DEFAULTS: Record<string, string> = {
+  etl_batch_cap: '2000',
+  etl_structure_load_default: '500',
+  etl_validate_temporal_default: '200',
+  etl_run_hour: '5',
+  etl_run_minute: '0',
 }
 
 export function AdminSettingsPage({ section }: { section: SettingsSection }) {
@@ -70,8 +93,14 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
         } else if (section === 'crawl') {
           next.crawl_items_cap = String(cfg.crawl_items_cap ?? 100)
           setRateLimit(cfg.rate_limit ?? {})
-        } else {
+        } else if (section === 'evolution') {
           next.evolution_cache_ttl = String(cfg.evolution_cache_ttl ?? 60)
+        } else {
+          next.etl_batch_cap = String(cfg.etl_batch_cap ?? 2000)
+          next.etl_structure_load_default = String(cfg.etl_structure_load_default ?? 500)
+          next.etl_validate_temporal_default = String(cfg.etl_validate_temporal_default ?? 200)
+          next.etl_run_hour = String(cfg.etl_run_hour ?? 5)
+          next.etl_run_minute = String(cfg.etl_run_minute ?? 0)
         }
         setScalars(next)
       })
@@ -99,8 +128,17 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
     } else if (section === 'crawl') {
       payload.crawl_items_cap = Number(scalars.crawl_items_cap) || 100
       payload.rate_limit = rateLimit
-    } else {
+    } else if (section === 'evolution') {
       payload.evolution_cache_ttl = Number(scalars.evolution_cache_ttl) || 60
+    } else {
+      payload.etl_batch_cap = Number(scalars.etl_batch_cap) || 2000
+      payload.etl_structure_load_default = Number(scalars.etl_structure_load_default) || 500
+      payload.etl_validate_temporal_default = Number(scalars.etl_validate_temporal_default) || 200
+      // 0 是合法取值（0 点），不能用 || 兜底
+      const hour = Number(scalars.etl_run_hour)
+      payload.etl_run_hour = hour >= 0 && hour <= 23 ? hour : 5
+      const minute = Number(scalars.etl_run_minute)
+      payload.etl_run_minute = minute >= 0 && minute <= 59 ? minute : 0
     }
     return payload
   }
@@ -120,8 +158,16 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
       } else if (section === 'crawl') {
         setScalars({ crawl_items_cap: String(saved.crawl_items_cap ?? 100) })
         setRateLimit(saved.rate_limit ?? {})
-      } else {
+      } else if (section === 'evolution') {
         setScalars({ evolution_cache_ttl: String(saved.evolution_cache_ttl ?? 60) })
+      } else {
+        setScalars({
+          etl_batch_cap: String(saved.etl_batch_cap ?? 2000),
+          etl_structure_load_default: String(saved.etl_structure_load_default ?? 500),
+          etl_validate_temporal_default: String(saved.etl_validate_temporal_default ?? 200),
+          etl_run_hour: String(saved.etl_run_hour ?? 5),
+          etl_run_minute: String(saved.etl_run_minute ?? 0),
+        })
       }
       setFeedback({ type: 'ok', text: '已保存，重启 api/worker 容器后生效' })
     } catch (e) {
@@ -137,8 +183,10 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
     } else if (section === 'crawl') {
       setScalars({ crawl_items_cap: '100' })
       setRateLimit({})
-    } else {
+    } else if (section === 'evolution') {
       setScalars({ evolution_cache_ttl: '60' })
+    } else {
+      setScalars({ ...ETL_DEFAULTS })
     }
     setFeedback(null)
   }
@@ -305,6 +353,76 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
                   className="h-8 text-xs font-mono"
                 />
                 <p className="text-[10px] text-ink-faint">演化看板列表缓存（5-3600）</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {section === 'etl' && (
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Settings2 className="size-4" />
+              ETL 批次配置
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <p className="py-6 text-center text-xs text-ink-faint">加载配置…</p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {ETL_FIELDS.slice(0, 3).map((f) => (
+                  <div key={f.key} className="space-y-1.5">
+                    <Label className="text-xs">{f.label}</Label>
+                    <Input
+                      value={scalars[f.key] ?? ''}
+                      onChange={(e) => setScalars((s) => ({ ...s, [f.key]: e.target.value }))}
+                      placeholder={f.placeholder}
+                      className="h-8 text-xs font-mono"
+                    />
+                    <p className="text-[10px] text-ink-faint">{f.hint}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {section === 'etl' && (
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Settings2 className="size-4" />
+              调度时间（容器内 ARQ cron）
+              <Badge variant="outline" className="text-[10px] ml-auto font-mono">
+                替代外部计划任务 · 重启 worker 后生效
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <p className="py-6 text-center text-xs text-ink-faint">加载配置…</p>
+            ) : (
+              <div className="max-w-sm space-y-1.5">
+                <Label className="text-xs">每日执行时间（时:分）</Label>
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    value={scalars.etl_run_hour ?? ''}
+                    onChange={(e) => setScalars((s) => ({ ...s, etl_run_hour: e.target.value }))}
+                    placeholder="5"
+                    className="h-8 w-20 text-xs font-mono"
+                  />
+                  <span className="text-xs text-ink-faint">:</span>
+                  <Input
+                    value={scalars.etl_run_minute ?? ''}
+                    onChange={(e) => setScalars((s) => ({ ...s, etl_run_minute: e.target.value }))}
+                    placeholder="0"
+                    className="h-8 w-20 text-xs font-mono"
+                  />
+                </div>
+                <p className="text-[10px] text-ink-faint">ETL 主管线每日在此时入队执行（小时 0-23，分钟 0-59）</p>
               </div>
             )}
           </CardContent>

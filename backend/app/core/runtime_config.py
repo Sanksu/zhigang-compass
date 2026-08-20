@@ -4,7 +4,8 @@
 生效方式：各消费点在启动/import 时经 get() 读取——api/worker 容器重启后生效。
 
 安全边界：仅暴露非敏感运行参数（任务并发/超时、告警 webhook、演化缓存 TTL、
-采集上限、爬虫限频）；密钥/连接串/认证类配置不入此文件（保持 env 唯一事实源）。
+采集上限、爬虫限频、ETL 批次与调度时间）；密钥/连接串/认证类配置不入此文件
+（保持 env 唯一事实源）。
 """
 
 import json
@@ -24,6 +25,12 @@ DEFAULTS: dict = {
     "evolution_cache_ttl": 60,      # 演化列表缓存 TTL 秒
     "crawl_items_cap": 100,         # 爬虫单次采集条数上限（可超量源）
     "rate_limit": {},               # 爬虫限频覆盖：source -> {req_per_min, delay_range:[min,max]}
+    # ETL 队列（08-21 配置中心新增：批次上限/默认批次 + 容器内 ARQ cron 调度时间）
+    "etl_batch_cap": 2000,              # ETL 批次上限（积压缩放封顶，etl.py _etl_limit）
+    "etl_structure_load_default": 500,  # 结构化加载默认批次（batch_extract）
+    "etl_validate_temporal_default": 200,  # 时滞/通胀检测默认批次
+    "etl_run_hour": 5,                  # ETL 调度小时（0-23，容器内 ARQ cron）
+    "etl_run_minute": 0,                # ETL 调度分钟（0-59）
 }
 
 _VALIDATORS = {
@@ -32,6 +39,11 @@ _VALIDATORS = {
     "alert_webhook_url": lambda v: isinstance(v, str) and (not v or v.startswith(("http://", "https://"))),
     "evolution_cache_ttl": lambda v: isinstance(v, int) and 5 <= v <= 3600,
     "crawl_items_cap": lambda v: isinstance(v, int) and 10 <= v <= 1000,
+    "etl_batch_cap": lambda v: isinstance(v, int) and 100 <= v <= 5000,
+    "etl_structure_load_default": lambda v: isinstance(v, int) and 100 <= v <= 1000,
+    "etl_validate_temporal_default": lambda v: isinstance(v, int) and 100 <= v <= 500,
+    "etl_run_hour": lambda v: isinstance(v, int) and 0 <= v <= 23,
+    "etl_run_minute": lambda v: isinstance(v, int) and 0 <= v <= 59,
 }
 
 
