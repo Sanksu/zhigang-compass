@@ -227,7 +227,7 @@ def test_crawl_scheduler_skips_nonmatching(monkeypatch):
         "zhilian": {"hour": 7, "minute": 30},
         "github": {"enabled": True},  # 无独立时间 → 跳过（并入主管线）
     }, now=datetime(2026, 8, 3, 8, 0, tzinfo=timezone(timedelta(hours=8))))
-    result = asyncio.run(crawl.crawl_scheduler({}))
+    asyncio.run(crawl.crawl_scheduler({}))
     assert triggered == []  # 8:00 不匹配 7:30；github 无 hour/minute
 
 
