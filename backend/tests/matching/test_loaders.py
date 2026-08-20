@@ -231,3 +231,36 @@ def test_load_positions_soft_skill_dedup(monkeypatch):
     # 同名技能只出现一次（软技能并入前检查重复）
     names = [s.skill_name for s in pos.nice_skills]
     assert names.count("团队协作") == 1
+
+
+def test_load_positions_filters_edge_positions(monkeypatch):
+    """岗位画像加载查询须剔除边缘岗位（freq<3 或 status=legacy，08-20 修复）。
+
+    过滤器固化的 DB（Neo4j）侧，单元测试无法注入行来模拟，故此处断言
+    发出的 REQUIRES 查询包含过滤谓词，防止后续改动误删把噪声岗位重新放回候选。
+    """
+    req_rows = [_req_row("p1", "后端工程师", "s1", "Java", "must")]
+    soft_rows = [{"pid": "p1", "soft": []}]
+    cap = _CapturingSession(req_rows, soft_rows)
+    monkeypatch.setattr("app.services.matching.loaders.neo4j_driver",
+                        _FakeDriver(cap))
+    monkeypatch.setattr("app.services.matching.loaders.SkillEmbedder",
+                        type("SE", (), {"get": staticmethod(lambda: _FakeEmbedder())}))
+
+    load_positions_from_graph()
+    primary = cap.primary_query
+    assert "p.freq" in primary and "p.freq >= 3" in primary
+    assert "coalesce(p.status" in primary and "'legacy'" in primary
+
+
+class _CapturingSession(_FakeSession):
+    """捕获主查询文本的会话桩。"""
+
+    def __init__(self, req_rows, soft_rows):
+        super().__init__(req_rows, soft_rows)
+        self.primary_query = ""
+
+    def run(self, query, **params):
+        if "soft_skills" not in query:
+            self.primary_query = query
+        return super().run(query, **params)

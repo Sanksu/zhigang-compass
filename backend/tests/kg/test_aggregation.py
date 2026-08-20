@@ -44,9 +44,21 @@ class TestMustJudgment:
         assert _is_must(self._sa(hit=6, must_count=3), jd_count=10) is False
 
     def test_low_hit_protection_is_nice(self):
-        # hit=1/2（样本不足），即使全标 must 也判 nice，防单条 JD 虚高
-        assert _is_must(self._sa(hit=1, must_count=1), jd_count=2) is False
+        # hit≥3 样本保护线：jd_count=3 但 hit=2（样本不足）→ 防虚高判 nice
+        assert _is_must(self._sa(hit=1, must_count=1), jd_count=3) is False
         assert _is_must(self._sa(hit=2, must_count=2), jd_count=3) is False
+
+    def test_small_position_inherits_extraction_must(self):
+        # 单源/少源岗位兜底（08-20 修复）：jd_count≤2 样本不足以做跨 JD 表决，
+        # 任一 JD 标 must（must_count>0）即继承 must，不再因 hit<3 全压成 nice
+        assert _is_must(self._sa(hit=1, must_count=1), jd_count=1) is True
+        assert _is_must(self._sa(hit=2, must_count=2), jd_count=2) is True
+        assert _is_must(self._sa(hit=2, must_count=1), jd_count=2) is True
+
+    def test_small_position_no_must_stays_nice(self):
+        # 单源岗位如果技能未标 must（must_count=0）保持 nice
+        assert _is_must(self._sa(hit=1, must_count=0), jd_count=1) is False
+        assert _is_must(self._sa(hit=2, must_count=0), jd_count=2) is False
 
     def test_zero_jd_count_is_nice(self):
         # jd_count=0 防御：不判 must
