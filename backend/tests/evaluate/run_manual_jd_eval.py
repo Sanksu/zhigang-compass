@@ -36,6 +36,9 @@ DEFAULT_GOLD_JSONL = ROOT / "data" / "golden_set" / "final" / "jd_golden_110.jso
 _GOLD_ANNOTATOR = "A01"
 # 与 scripts/evaluate.py 目标阈值一致（设计文档 §13.3：JD 解析 ≥ 90%）
 JD_LLM_TARGET_F1 = 0.90
+# 评测侧单 provider LLM 超时（秒）：L1-1 六维后抽取更重，30s 生产默认偶发超时（打样 10/110 被排除），
+# 评测显式放宽到 60s；生产默认 ASYNC_TIMEOUT_SECONDS=30 保持不变（见 jd_extractor.extract timeout 参数）
+_EVAL_LLM_TIMEOUT_SECONDS = 60
 NS = {
     "m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
     "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -419,8 +422,11 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         try:
             # title_hint=job_title_raw：评测输入对齐生产链路（_build_jd_text 首行
             # 含 title），岗位名优先采用招聘标题（08-14 title 失配根因修复）
+            # timeout=60：L1-1 六维后抽取更重，30s 默认偶发超时致 10/110 被排除（打样 08-20）
             result = JDExtractor(llm=tracker).extract(
-                row["detail_raw_text"], title_hint=row.get("job_title_raw", "")
+                row["detail_raw_text"],
+                title_hint=row.get("job_title_raw", ""),
+                timeout=_EVAL_LLM_TIMEOUT_SECONDS,
             )
         except Exception as exc:
             failed_samples += 1

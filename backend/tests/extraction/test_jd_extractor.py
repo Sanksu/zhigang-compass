@@ -22,9 +22,11 @@ class _FakeLLM:
     def __init__(self, result: JDExtractionResult):
         self.result = result
         self.calls = 0
+        self.last_kwargs = None
 
     def extract_structured(self, prompt, response_model, **kwargs):
         self.calls += 1
+        self.last_kwargs = kwargs
         return self.result
 
 
@@ -57,6 +59,17 @@ class TestExtract:
         assert out.position_name == "Python 开发工程师"
         # P1-2：LLM 路径 method=llm（默认）
         assert out.method == "llm"
+
+    def test_extract_forwards_timeout(self):
+        """extract 的 timeout 参数透传给 provider 链（评测 30s→60s 依赖此转发）。"""
+        raw = JDExtractionResult(position_name="Java 开发工程师")
+        fake = _FakeLLM(raw)
+        out = JDExtractor(llm=fake).extract(
+            "这是一个足够长的 JD 文本，用于验证 timeout 透传，熟悉 Java",
+            timeout=60,
+        )
+        assert fake.last_kwargs.get("timeout") == 60
+        assert out.position_name == "Java 开发工程师"
 
     def test_lexical_guard_demotes_not_in_text(self):
         """词面守卫（08-17）：LLM 路径 skills 中正文无词面的技能降级 nice。"""

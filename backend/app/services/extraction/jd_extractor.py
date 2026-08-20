@@ -52,7 +52,7 @@ class JDExtractor:
         provider 链（避免重复初始化/重复读配置），勿绕过本属性直取 _llm。"""
         return self._llm
 
-    def extract(self, jd_text: str, title_hint: str = "") -> JDExtractionResult:
+    def extract(self, jd_text: str, title_hint: str = "", timeout: Optional[int] = None) -> JDExtractionResult:
         """从 JD 文本中抽取结构化实体。
 
         LLM 抽取 → 词典过滤 → 后缀清洗 → 去重；LLM 不可用时规则抽取兜底。
@@ -62,6 +62,10 @@ class JDExtractor:
         prompt 首行标题规则即生效——岗位名优先采用招聘标题，正文职责/技术栈
         不得改写（盲审 08-14：评测链路此前丢标题，title 失配 14/32 中
         7 条为"标题明确但正文带偏"）。
+
+        timeout：单 provider LLM 超时（秒），缺省走 provider 异步默认（30s）。
+        L1-1 六维补齐（#328）后抽取输出更重，重 JD 偶发 >30s；
+        评测侧显式传 60s，生产默认不变。
         """
         if not jd_text or len(jd_text.strip()) < 10:
             return JDExtractionResult(position_name="")
@@ -78,7 +82,7 @@ class JDExtractor:
                 # 分层 Prompt：system 角色（SYSTEM_PROMPT）+ Few-Shot + 任务输入（§6.2）
                 system_prompt = SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES
                 result = self._llm.extract_structured(
-                    prompt, JDExtractionResult, system_prompt=system_prompt
+                    prompt, JDExtractionResult, system_prompt=system_prompt, timeout=timeout
                 )
             except LLMExtractionError:
                 result = self._rule_based_extract(jd_text)
