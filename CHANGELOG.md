@@ -7,6 +7,7 @@
 
 ### 2026-08-21
 - **ETL 队列接入配置中心 + 调度迁移容器内 ARQ cron**（#348）：前端配置中心新增「ETL 队列」分区（`/admin/settings/etl`，批次上限/默认批次 + 每日调度时间）；`runtime_config` 新增 `etl_batch_cap`/`etl_structure_load_default`/`etl_validate_temporal_default`/`etl_run_hour`/`etl_run_minute`（openapi 契约 + 前端类型重生成）；`etl.py` 批次上限与阶段默认批次改读配置，新增 `run_etl_pipeline_scheduled` 容器内 cron 入口（当日幂等 Redis 锁，与 `etl_daily` 同语义），`settings.py` 注册 ETL cron（时间取配置，重启生效），替代外部 Windows 计划任务调度；后端 20 单测 + 前端 170 测试/lint/typecheck 通过
+- **停用外部 05:00 ETL 计划任务 + 部署说明更新**（#349）：`scheduled_tasks.ps1` 移除 `ETLDaily` 任务（顺带修复 `$Tasks` 数组缺失逗号语法）、`crontab.example` 注释停用 `0 5 * * * etl_daily.py` 行；DEPLOY.md 新增 §6.1 ETL 调度说明（容器内 ARQ cron + 配置中心时间 + 幂等 + 重启 worker 生效）；团队启动指南/冷启动指南同步；本机已注销 `ZhigangETL_ETLDaily`（`etl_daily.py` 保留供 `--force` 手动重跑）
 
 ### 2026-08-20
 - **必备技能单源兜底 + 匹配候选边缘过滤**（#338，已合入）：`aggregation._is_must` 对 `jd_count≤2` 单源/少源岗位直接继承抽取层 must 标注（此前 hit<3 样本保护使单源岗位必备技能全判 nice，前端多数岗位无必备技能）；`matching/loaders` 匹配候选剔除 `freq<3 / status=legacy` 边缘岗位（GSBOA/Clay/TeamCenter基础设施管理员 等单源噪声不再进推荐）；候选 116→43；在线图重聚合后含必备技能岗位 38→82
