@@ -463,7 +463,10 @@ class TestJdLlmArchive:
             "failed_samples": 0,
             "title_raw_exact_accuracy": 0.4545454545,
             "title_normalized_accuracy": 0.8181818181,
-            "skills_micro": {"tp": 100, "fp": 20, "fn": 10, "precision": 0.8333, "recall": 0.9091, "f1": 0.8696},
+            # skills_micro_aligned = 方案 A 达标口径（PR #330）；skills_micro = raw 精选口径参照
+            "skills_micro_aligned": {"tp": 100, "fp": 20, "fn": 10, "precision": 0.8333, "recall": 0.9091, "f1": 0.8696},
+            "skills_micro": {"tp": 100, "fp": 40, "fn": 10, "precision": 0.7143, "recall": 0.9091, "f1": 0.8},
+            "hallucinated_fp": {"K8s": 1},
             "skills_average_sample_f1": 0.85,
             "bonus_skills_micro": {"tp": 5, "fp": 8, "fn": 20, "precision": 0.3846, "recall": 0.2, "f1": 0.2632},
             "bonus_skills_average_sample_f1": 0.2,
@@ -500,7 +503,7 @@ class TestJdLlmArchive:
         from tests.evaluate.run_manual_jd_eval import archive_metrics
 
         m = self._metrics_fixture()
-        m["skills_micro"]["f1"] = 0.9001
+        m["skills_micro_aligned"]["f1"] = 0.9001
         r = json.loads(archive_metrics(m, report_dir=tmp_path).read_text(encoding="utf-8"))["results"][0]
         assert r["target_met"] is True
 
@@ -810,3 +813,30 @@ class TestJdLlmReportSixDim:
         report = {"generated_at": "x", "target": "y", "results": [self._archive(with_gap=True)]}
         html = ev.generate_html_report(report)
         assert "Schema 缺口" in html
+
+
+class TestAlignedFp:
+    """方案 A 词面真值对齐（PR #330）：FP 拆分为 词面豁免 / 非词面幻觉。"""
+
+    def test_word_in_text_exempted(self):
+        from tests.evaluate.run_manual_jd_eval import split_fp_aligned
+
+        fp = ["Docker", "Kubernetes", "Selenium"]
+        text = "熟悉 Docker、Kubernetes 容器编排，负责平台开发".lower()
+        in_text, halluc = split_fp_aligned(fp, text)
+        assert in_text == ["Docker", "Kubernetes"]
+        assert halluc == ["Selenium"]  # 正文无此技能 → 幻觉
+
+    def test_all_exempted_when_grounded(self):
+        from tests.evaluate.run_manual_jd_eval import split_fp_aligned
+
+        in_text, halluc = split_fp_aligned(["Java"], "岗位要求熟悉 Java 开发".lower())
+        assert in_text == ["Java"] and halluc == []
+
+    def test_english_word_boundary_halluc(self):
+        """词边界：'system' 不命中 'systematic' → 仍计幻觉（防子串误豁免）。"""
+        from tests.evaluate.run_manual_jd_eval import split_fp_aligned
+
+        in_text, halluc = split_fp_aligned(["system"], "需要 systematic testing 经验".lower())
+        assert "system" in halluc
+        assert "system" not in in_text
