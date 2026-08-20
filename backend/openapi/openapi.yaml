@@ -2438,6 +2438,17 @@ components:
         node_added: { type: integer }
         node_removed: { type: integer }
         node_changed: { type: integer }
+        data_warning:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: object
+            description: 机制补强①样本量告警（evidence 量比上版本萎缩<50%/膨胀>200%）
+            properties:
+              prev: { type: integer }
+              cur: { type: integer }
+              ratio: { type: number }
+              direction: { type: string, enum: [shrunk, surged] }
 
     EvolutionVersionListData:
       type: object
@@ -2543,6 +2554,17 @@ components:
         node_added: { type: integer }
         node_removed: { type: integer }
         node_changed: { type: integer }
+        data_warning:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: object
+            description: 机制补强①样本量告警（evidence 量比上版本萎缩<50%/膨胀>200%）
+            properties:
+              prev: { type: integer }
+              cur: { type: integer }
+              ratio: { type: number }
+              direction: { type: string, enum: [shrunk, surged] }
         stats:
           type: object
           description: 快照统计

@@ -149,6 +149,11 @@ class GraphVersion(Base):
     node_added: Mapped[int] = mapped_column(Integer, default=0)
     node_removed: Mapped[int] = mapped_column(Integer, default=0)
     node_changed: Mapped[int] = mapped_column(Integer, default=0)
+    # 机制补强 ①：样本量对比告警（evidence 量比上版本萎缩<50%/膨胀>200% 时非空 JSONB）
+    data_warning: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True, default=None,
+        comment="样本量对比告警（机制补强①，阈值 50%/200%）",
+    )
 
 
 class Occupation(Base):

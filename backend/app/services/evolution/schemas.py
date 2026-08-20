@@ -51,3 +51,5 @@ class GraphVersionMeta(BaseModel):
     node_added: int = 0
     node_removed: int = 0
     node_changed: int = 0
+    # 机制补强 ①：样本量对比告警（evidence 量比上版本萎缩 <50%/膨胀 >200% 时非空）
+    data_warning: Optional[dict] = None

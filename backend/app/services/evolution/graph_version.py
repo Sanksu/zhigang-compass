@@ -37,6 +37,51 @@ VERSION_RETENTION_DAYS = 90
 # 快照创建时区（T+1 版本号按 CST 日期）
 _CST = timezone(timedelta(hours=8))
 
+# 样本量对比告警阈值（机制补强 ①，PR #334 张恺天确认 D2：50%/200%）
+_DATA_WARNING_LOWER_RATIO = 0.5
+_DATA_WARNING_UPPER_RATIO = 2.0
+
+
+def compute_data_warning(
+    prev_nodes: list[dict],
+    cur_nodes: list[dict],
+    prev_edges: list[dict],
+    cur_edges: list[dict],
+) -> dict | None:
+    """样本量对比告警（机制补强 ①，阈值 50%/200%）。
+
+    任一证据量（Position 岗位数 / REQUIRES 边数）与上一版本相比萎缩 <50% 或
+    膨胀 >200% → 返回告警对象；无上一版本（首个快照）或未越界 → None。
+    目的：防"采集量波动被误判为能力变化"——Z-score 信号在证据量不足时失真，
+    主动告警是"动态演化"的防御性设计。
+    """
+    prev_s = _evidence_stats(prev_nodes, prev_edges)
+    cur_s = _evidence_stats(cur_nodes, cur_edges)
+    if not any(prev_s.values()):
+        return None
+    issues: dict[str, dict] = {}
+    for metric, prev_val in prev_s.items():
+        cur_val = cur_s[metric]
+        if prev_val <= 0:
+            continue
+        ratio = cur_val / prev_val
+        if ratio < _DATA_WARNING_LOWER_RATIO or ratio > _DATA_WARNING_UPPER_RATIO:
+            issues[metric] = {
+                "prev": prev_val,
+                "cur": cur_val,
+                "ratio": round(ratio, 3),
+                "direction": "shrunk" if ratio < _DATA_WARNING_LOWER_RATIO else "surged",
+            }
+    return issues or None
+
+
+def _evidence_stats(nodes: list[dict], edges: list[dict]) -> dict:
+    """快照证据量：Position 岗位数（jd 覆盖代理）+ REQUIRES 边数（岗位-技能关系）。"""
+    return {
+        "positions": sum(1 for n in nodes if n.get("type") == "position"),
+        "requires_edges": sum(1 for e in edges if e.get("relation") == "REQUIRES"),
+    }
+
 
 class GraphVersionManager:
     """图谱版本管理器。
@@ -73,6 +118,10 @@ class GraphVersionManager:
                 .order_by(GraphVersion.created_at.desc())
             )
             added, removed, changed = self._diff_node_sets(previous, nodes)
+            # 机制补强 ①：与上一版本对比证据量，萎缩/膨胀越界 → data_warning（防采集波动误判能力变化）
+            prev_nodes = (previous.snapshot_json or {}).get("nodes", []) if previous else []
+            prev_edges = (previous.snapshot_json or {}).get("edges", []) if previous else []
+            data_warning = compute_data_warning(prev_nodes, nodes, prev_edges, edges)
 
             await session.execute(
                 delete(GraphVersion).where(GraphVersion.id == version_id)
@@ -86,6 +135,7 @@ class GraphVersionManager:
                     node_added=added,
                     node_removed=removed,
                     node_changed=changed,
+                    data_warning=data_warning,
                 )
             )
 
@@ -104,6 +154,7 @@ class GraphVersionManager:
             node_added=added,
             node_removed=removed,
             node_changed=changed,
+            data_warning=data_warning,
         )
         return meta
 
