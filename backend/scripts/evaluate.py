@@ -365,6 +365,14 @@ def generate_html_report(report: dict) -> str:
         ) or "<tr><td colspan='2'>无自动可分类错误</td></tr>"
         lowest_f1 = sorted(jd_llm.get("per_sample_skills_f1", []))[:3]
         lowest_html = "、".join(f"{x:.4f}" for x in lowest_f1) or "—"
+        # L1-1 六维已启用：旧归档带 gap 串（缺口提示）→ 仍渲染缺口；新归档显示口径说明
+        if jd_llm.get("experience_gap") or jd_llm.get("core_duties_gap"):
+            gap_note = (
+                f"Schema 缺口（未评测维度）：{esc(jd_llm.get('experience_gap', ''))}；"
+                f"{esc(jd_llm.get('core_duties_gap', ''))}"
+            )
+        else:
+            gap_note = "六维已启用：经验按区间重叠判定（D1-A）、核心职责按词面 containment（D2-A，L1-1 张恺天确认口径，2026-08-20）。"
         jd_llm_section = f"""
         <div class="card">
             <h2>JD 解析评测详情 · LLM 盲审（归档 {esc(jd_llm.get('archive', '?'))}）</h2>
@@ -375,10 +383,11 @@ def generate_html_report(report: dict) -> str:
             </table>
             <h3>分维度</h3>
             <table>
-                <tr><th>岗位名（原文对齐）</th><th>岗位名（归一化后）</th><th>学历</th><th>加分技能 F1</th><th>样本平均技能 F1</th></tr>
+                <tr><th>岗位名（原文对齐）</th><th>岗位名（归一化后）</th><th>学历</th><th>加分技能 F1</th><th>样本平均技能 F1</th><th>经验（区间重叠）</th><th>核心职责 F1</th></tr>
                 <tr><td>{jd_llm.get('title_raw_exact_accuracy', 0):.4f}</td><td>{jd_llm.get('title_normalized_accuracy', 0):.4f}</td>
                 <td>{jd_llm.get('education_raw_exact_accuracy', 0):.4f}</td><td>{bonus.get('f1', 0):.4f}</td>
-                <td>{jd_llm.get('skills_average_sample_f1', 0):.4f}</td></tr>
+                <td>{jd_llm.get('skills_average_sample_f1', 0):.4f}</td><td>{jd_llm.get('experience_accuracy', 0):.4f}（n={jd_llm.get('experience_compared', 0)}）</td>
+                <td>{jd_llm.get('core_duties_micro', {}).get('f1', 0):.4f}</td></tr>
             </table>
             <h3>混淆矩阵（必备技能多标签：TP / FP / FN）</h3>
             <table>
@@ -392,7 +401,7 @@ def generate_html_report(report: dict) -> str:
                 <tr><th>错误类型</th><th>条数</th></tr>
                 {err_rows}
             </table>
-            <p class="note">Schema 缺口（未评测维度）：{esc(jd_llm.get('experience_gap', ''))}；{esc(jd_llm.get('core_duties_gap', ''))}</p>
+            {gap_note}
         </div>"""
 
     # --- 简历详情 ---
