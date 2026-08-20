@@ -5,6 +5,11 @@
 
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
+### 2026-08-20
+- **必备技能单源兜底 + 匹配候选边缘过滤**（#338，待合入）：`aggregation._is_must` 对 `jd_count≤2` 单源/少源岗位直接继承抽取层 must 标注（此前 hit<3 样本保护使单源岗位必备技能全判 nice，前端多数岗位无必备技能）；`matching/loaders` 匹配候选剔除 `freq<3 / status=legacy` 边缘岗位（GSBOA/Clay/TeamCenter基础设施管理员 等单源噪声不再进推荐）；候选 116→43；在线图重聚合后含必备技能岗位 38→82
+- **学习路径双轨制 + 差距分析数据升级**（#340，待合入）：新增学习时间轴（`learning-timeline.tsx`，先修拓扑分层 → 阶段/任务卡）+ 宏观 DAG 视图（`graph-2d`，lr 分层 + 状态配色 + 有向箭头）+ 导学面板升级（`node-detail-panel`，为什么学/如何开始）+ 差距分析双轨对齐条/证据溯源/高 ROI 核心突破点打标（`resume-match-page`）；前端 155 tests 通过
+- **匹配/学习路径契约字段 + 后端测算回填**（#341，待合入）：openapi `GapSkill`/`LearningPathItem` 增加可选 `demand/trend/roi/high_roi/evidence/status` + 新增 `MatchEvidenceItem`（契约优先）；后端 `gap.py` 回填 demand=source_count/20 归一化、trend=岗位扩散+跨源扩散连续信号（替代失效的 EVOLVED_FROM 演化信号，技能维度无演化边）、roi=(demand×(trend+1))/cost、evidence=JD 要求/简历现状、high_roi=真缺口 ROI Top3；`generator.py` 回填 status=doing；learning_path+matching 183 passed
+
 ### 2026-08-18
 - **AL-M5-06 学习路径先修字典键名校验收官**：`app/services/learning_path/prerequisites.py` 先修链/学时查找先经 `canonical_skill_name` 归一（图谱技能名 ↔ 字典键对齐，覆盖大小写/别名/NLP↔自然语言处理 等）；并发补 40+ 高频通用技能先修链（`configs/skill_prerequisites.yaml` 08-18 五/六轮）；30 案例学习路径评测 **prerequisite 0.77→0.92、hours 0.836→0.916、合理性 80%→90%，course 0.879 保持 ≥0.85**；`tests/learning_path` **51 passed**、ruff 干净
 
