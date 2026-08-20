@@ -76,6 +76,12 @@ type PositionEvolutionData = components['schemas']['PositionEvolutionData']
 /** 后端 /evolution/positions 返回项（默认岗位演化列表） */
 type PositionEvolutionListData = components['schemas']['PositionEvolutionListData']
 
+/** 后端 /evolution/events 返回的谱系事件项 */
+type EvolutionEvent = components['schemas']['EvolutionEvent']
+
+/** 后端 /evolution/events 返回项 */
+type EvolutionEventListData = components['schemas']['EvolutionEventListData']
+
 /** 后端 /evolution/skills 返回项 */
 type SkillEvolutionListData = components['schemas']['SkillEvolutionListData']
 
@@ -1226,6 +1232,146 @@ function StateMachineView() {
   )
 }
 
+// ===== EvolutionEventsView =====
+
+/** 谱系事件流（真实 GET /evolution/events，机制补强② born/merged/ended） */
+const EVENT_META: Record<
+  string,
+  { label: string; tone: string; badge: BadgeProps['variant']; desc: string }
+> = {
+  born: { label: '新增', tone: 'bg-state-emerging', badge: 'emerging', desc: '主键改名/新实体出现' },
+  merged: { label: '合并', tone: 'bg-state-active', badge: 'outline', desc: '多个实体归一' },
+  ended: { label: '终结', tone: 'bg-state-declining', badge: 'declining', desc: '实体消亡/弃用' },
+}
+
+/** 谱系事件流（新增/合并/终结）——真实 GET /evolution/events */
+function EvolutionEventsView() {
+  const [data, setData] = useState<EvolutionEvent[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    apiGet<EvolutionEventListData>('/evolution/events?limit=50')
+      .then((r) => {
+        if (!cancelled) setData(r.items)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(errMsg(e, '谱系事件加载失败'))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Boxes className="size-4" />
+          <span>谱系事件流</span>
+          <span className="text-[10px] font-normal text-ink-faint">
+            实体新增 / 合并 / 终结 · 自动流转不写人工审计（见后端说明）
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {error && <p className="py-6 text-center text-xs text-state-archived">{error}</p>}
+        {!error && data === null && (
+          <p className="py-6 text-center text-xs text-ink-faint">加载谱系事件…</p>
+        )}
+        {!error && data !== null && data.length === 0 && (
+          <p className="py-6 text-center text-xs text-ink-faint">暂无谱系事件（版本足够多时自动产生）</p>
+        )}
+        {!error && data !== null && data.length > 0 && (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[140px]">时间</TableHead>
+                <TableHead>类型</TableHead>
+                <TableHead>变更</TableHead>
+                <TableHead className="w-[170px]">版本</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.map((ev) => {
+                const meta = EVENT_META[ev.event_type] ?? null
+                const target = ev.to_name || ev.from_name || '—'
+                const source = ev.from_name
+                return (
+                  <TableRow key={ev.id}>
+                    <TableCell className="text-xs font-mono text-ink-muted whitespace-nowrap">
+                      {ev.created_at ? ev.created_at.replace('T', ' ').slice(0, 16) : '—'}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={meta?.badge ?? 'outline'}
+                        className="text-[10px] inline-flex items-center gap-1"
+                      >
+                        <span className={`size-1.5 rounded-full ${meta?.tone ?? ''}`} />
+                        {meta?.label ?? ev.event_type}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      <span className="text-ink font-medium">{target}</span>
+                      {source && (
+                        <span className="text-ink-faint">
+                          {' '}（原 {source}）
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="font-mono text-[10px] text-ink-faint">{ev.version_id}</TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ===== DataWarningBanner =====
+
+type DataWarningEntry = NonNullable<EvolutionVersion['data_warning']>[string]
+
+const WARNING_DIM_LABEL: Record<string, string> = {
+  positions: '岗位样本量',
+  requires_edges: 'REQUIRES 关系量',
+}
+
+/** 样本量对比告警（机制补强①：岗位/关系量比上版萎缩 <50% 或膨胀 >200%） */
+function DataWarningBanner({ warning }: { warning: NonNullable<EvolutionVersion['data_warning']> }) {
+  const entries = Object.entries(warning).map(([dim, w]: [string, DataWarningEntry]) => ({
+    dim,
+    label: WARNING_DIM_LABEL[dim] ?? dim,
+    ...w,
+  }))
+  if (entries.length === 0) return null
+  return (
+    <div className="mb-4 flex flex-col gap-2 rounded-md border border-state-declining/40 bg-state-declining/10 p-3">
+      <div className="flex items-center gap-2 text-xs font-medium text-state-declining">
+        <TrendingDown className="size-4" />
+        <span>样本量波动告警</span>
+        <span className="font-normal text-ink-faint">与上一版本比萎缩 &lt;50% 或膨胀 &gt;200%，Z-score 信号可能失真，请人工核对采集</span>
+      </div>
+      <ul className="space-y-1 text-xs text-ink-secondary">
+        {entries.map((e) => (
+          <li key={e.dim} className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-ink">{e.label}</span>
+            <Badge variant={e.direction === 'shrunk' ? 'declining' : 'emerging'} className="text-[10px]">
+              {e.direction === 'shrunk' ? '萎缩' : '激增'}
+            </Badge>
+            <span className="font-mono text-ink-faint">
+              {e.prev ?? '—'} → {e.cur ?? '—'}（较上版 {e.ratio != null ? `${Math.round((1 - e.ratio) * 100)}%` : '—'}）
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 // ===== Page =====
 
 export function EvolutionPage() {
@@ -1263,7 +1409,9 @@ export function EvolutionPage() {
         }
       />
 
-      {/* 顶部指标卡（真实版本派生） */}
+      {/* 样本量波动告警 + 顶部指标卡（真实版本派生） */}
+      {versions[0]?.data_warning && <DataWarningBanner warning={versions[0].data_warning} />}
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         {metrics.map((m) => (
           <MetricCard key={m.key} metric={m} />
@@ -1293,6 +1441,11 @@ export function EvolutionPage() {
 
       {/* 岗位状态机流转（真实 /evolution/state-machine） */}
       <StateMachineView />
+
+      {/* 谱系事件流（真实 /evolution/events，新增/合并/终结） */}
+      <div className="mt-4">
+        <EvolutionEventsView />
+      </div>
     </>
   )
 }

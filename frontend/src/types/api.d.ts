@@ -1786,6 +1786,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/evolution/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 谱系事件流（born/merged/ended） */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 按版本过滤；缺省返回全部 */
+                    version_id?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 事件列表（最新在前） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["EvolutionEventListData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/evolution/diff": {
         parameters: {
             query?: never;
@@ -3618,6 +3663,15 @@ export interface components {
             node_added: number;
             node_removed: number;
             node_changed: number;
+            data_warning?: {
+                [key: string]: {
+                    prev?: number;
+                    cur?: number;
+                    ratio?: number;
+                    /** @enum {string} */
+                    direction?: "shrunk" | "surged";
+                };
+            } | null;
         };
         /** @description GET /evolution/versions 响应 data（分页） */
         EvolutionVersionListData: {
@@ -3687,6 +3741,15 @@ export interface components {
             node_added: number;
             node_removed: number;
             node_changed: number;
+            data_warning?: {
+                [key: string]: {
+                    prev?: number;
+                    cur?: number;
+                    ratio?: number;
+                    /** @enum {string} */
+                    direction?: "shrunk" | "surged";
+                };
+            } | null;
             /** @description 快照统计 */
             stats: {
                 nodes?: number;
@@ -3698,6 +3761,24 @@ export interface components {
             };
             /** @description 快照节点列表（不含边） */
             nodes: components["schemas"]["EvolutionDiffNode"][];
+        };
+        /** @description 谱系事件（机制补强② born/merged/ended，GET /evolution/events） */
+        EvolutionEvent: {
+            id: number;
+            version_id: string;
+            /** @enum {string} */
+            event_type: "born" | "merged" | "ended";
+            /** @description 旧名（ended/merged） */
+            from_name?: string | null;
+            /** @description 新名（born/merged） */
+            to_name?: string | null;
+            created_at?: string | null;
+            /** @description 附加结构（如 merged 的 from_names 数组） */
+            detail?: Record<string, never> | null;
+        };
+        /** @description GET /evolution/events 响应 data */
+        EvolutionEventListData: {
+            items: components["schemas"]["EvolutionEvent"][];
         };
         /** @description 岗位演化采样点 */
         PositionEvolutionPoint: {
