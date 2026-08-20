@@ -10,6 +10,7 @@
 合规：
 - 仅采集 API 返回的仓库元数据（full_name/描述/star/fork/language）
 - 无 token 限 10 req/min（全局模式 1 请求 / 语言模式 5 请求，请求间隔保留）
+- 可选 GITHUB_TOKEN 提升配额并消除按 IP 二次限制（env 配置，缺省匿名）
 
 运行：
   scrapy crawl github -a since=daily -o output/github.jsonl
@@ -23,6 +24,7 @@ from scrapy import Request, Spider
 from scrapy.http import Response
 
 import json
+import os
 from urllib.parse import quote
 
 from crawlers.items import CommunityTrendItem
@@ -80,11 +82,7 @@ class GithubSpider(Spider):
                 url,
                 callback=self.parse,
                 meta={"language": "", "since": self.since, "dont_obey_robotstxt": True},
-                headers={
-                    "User-Agent": "zhigang-compass/1.0 (github-api)",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
+                headers=self._api_headers(),
             )
             return
 
@@ -98,12 +96,26 @@ class GithubSpider(Spider):
                 # API 例外（08-14 用户确认 B 方案）：api.github.com 官方 API 条款
                 # 允许合理程序化访问（robots 保守规则不适用 API 端点）
                 meta={"language": lang, "since": self.since, "dont_obey_robotstxt": True},
-                headers={
-                    "User-Agent": "zhigang-compass/1.0 (github-api)",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
+                headers=self._api_headers(),
             )
+
+    def _api_headers(self) -> dict:
+        """GitHub Search API 请求头（可选 GITHUB_TOKEN 提升限流配额）。
+
+        匿名无 token 时按 IP 10 req/min（Search 二次限制 10/min）；共享出口
+        IP 下易触发 403 限流。环境变量 GITHUB_TOKEN 存在时附 Authorization
+        提升到 30/min 并消除二次限制；未配置时维持匿名（不阻塞采集）。
+        采集端设置：宿主机/容器 env 设 GITHUB_TOKEN 即可（compose 已透传）。
+        """
+        headers = {
+            "User-Agent": "zhigang-compass/1.0 (github-api)",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        token = os.environ.get("GITHUB_TOKEN", "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     def parse(self, response: Response):
         """解析 GitHub Search API 响应（JSON），产出 CommunityTrendItem。"""
