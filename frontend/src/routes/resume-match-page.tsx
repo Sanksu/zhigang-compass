@@ -1028,7 +1028,7 @@ export function ResumeMatchPage() {
                       <RefreshCw className="size-3 mr-1" />刷新
                     </Button>
                   </CardTitle>
-                  <CardDescription>按先修关系分阶段的学习时间轴（下一步 / 未解锁 / 已掌握）</CardDescription>
+                  <CardDescription>按先修关系分阶段的学习时间轴（学时 / 推荐课程 / 前往学习）</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {matchResult.learning_path.length > 0 ? (
