@@ -31,6 +31,7 @@ from app.workers.tasks import (
     match_recommend,
     resume_parse,
     run_etl_pipeline,
+    run_etl_pipeline_scheduled,
     snapshot_graph,
     sync_skill_normalization,
     validate_temporal,
@@ -40,6 +41,7 @@ from app.workers.tasks import (
 EXPECTED_FUNCTIONS = [
     crawl_platform,
     run_etl_pipeline,
+    run_etl_pipeline_scheduled,
     dedup_simhash,
     validate_temporal,
     detect_inflation,
@@ -124,6 +126,31 @@ def test_etl_pipeline_has_per_function_timeout():
     )
     assert etl.timeout_s == 10800
     assert etl.max_tries == 1
+
+
+def test_etl_scheduled_has_per_function_timeout():
+    """容器内 ETL cron 入口同样按 3h 超时（主管线可跑数小时）。"""
+    etl = next(
+        f
+        for f in WorkerSettings.functions
+        if _name(f) == run_etl_pipeline_scheduled.__qualname__
+    )
+    assert etl.timeout_s == 10800
+    assert etl.max_tries == 1
+
+
+def test_worker_cron_jobs_register_etl_schedule():
+    """WorkerSettings.cron_jobs 注册 ETL 主管线 cron（时间来自 runtime_config）。"""
+    from app.core import runtime_config as rc
+    from arq.cron import CronJob
+
+    etl_cron = next(
+        c for c in WorkerSettings.cron_jobs if c.coroutine == run_etl_pipeline_scheduled
+    )
+    assert isinstance(etl_cron, CronJob)
+    assert etl_cron.hour == rc.get("etl_run_hour", 5)
+    assert etl_cron.minute == rc.get("etl_run_minute", 0)
+    assert etl_cron.run_at_startup is False
 
 
 # ── _run_stage 阶段隔离（08-14 修复：evolved_from 崩溃拖垮 ETL 实证）──

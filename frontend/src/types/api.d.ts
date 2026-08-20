@@ -3664,6 +3664,16 @@ export interface components {
                     delay_range?: number[];
                 };
             };
+            /** @description ETL 批次上限（积压缩放封顶，100-5000） */
+            etl_batch_cap?: number;
+            /** @description 结构化加载默认批次（100-1000） */
+            etl_structure_load_default?: number;
+            /** @description 时滞/通胀检测默认批次（100-500） */
+            etl_validate_temporal_default?: number;
+            /** @description ETL 调度小时（0-23，容器内 ARQ cron） */
+            etl_run_hour?: number;
+            /** @description ETL 调度分钟（0-59） */
+            etl_run_minute?: number;
         };
         /** @description LLM provider 配置项（GET/PUT /admin/llm-config） */
         LlmProviderConfig: {

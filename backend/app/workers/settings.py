@@ -29,6 +29,7 @@ from app.workers.tasks import (
     match_recommend,
     resume_parse,
     run_etl_pipeline,
+    run_etl_pipeline_scheduled,
     snapshot_graph,
     sync_skill_normalization,
     validate_temporal,
@@ -79,6 +80,7 @@ class WorkerSettings:
     functions = [
         crawl_platform,
         func(run_etl_pipeline, timeout=10800, max_tries=1),
+        func(run_etl_pipeline_scheduled, timeout=10800, max_tries=1),
         dedup_simhash,
         validate_temporal,
         detect_inflation,
@@ -116,4 +118,13 @@ class WorkerSettings:
             run_at_startup=True,
         ),
         cron(watch_signal_daily, hour=6, minute=0),
+        # ETL 主管线（08-21 容器内调度，替代外部计划任务 etl_daily.py）：
+        # 执行时间来自配置中心 runtime_config.etl_run_hour/minute，重启后生效；
+        # 当日幂等由 run_etl_pipeline_scheduled 内部 Redis 锁保证。
+        cron(
+            run_etl_pipeline_scheduled,
+            hour=runtime_config.get("etl_run_hour", 5),
+            minute=runtime_config.get("etl_run_minute", 0),
+            run_at_startup=False,
+        ),
     ]

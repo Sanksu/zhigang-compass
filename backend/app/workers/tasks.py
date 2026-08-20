@@ -57,6 +57,7 @@ from app.workers.etl import (
     _run_limited_stage as _run_limited_stage_impl,
     _run_stage as _run_stage,
     run_etl_pipeline as _run_etl_pipeline,
+    run_etl_pipeline_scheduled as _run_etl_pipeline_scheduled,
 )
 from app.workers.etl_tasks import (
     _JD_TEXT_FIELDS as _JD_TEXT_FIELDS,
@@ -141,6 +142,14 @@ async def run_etl_pipeline(
         ctx,
         run_date=run_date,
         skip_cdp=skip_cdp,
+        tasks_module=sys.modules[__name__],
+    )
+
+
+async def run_etl_pipeline_scheduled(ctx: dict) -> dict:
+    """容器内 ARQ cron 调度入口（当日幂等锁 + 转发主管线，见 app.workers.etl）。"""
+    return await _run_etl_pipeline_scheduled(
+        ctx,
         tasks_module=sys.modules[__name__],
     )
 

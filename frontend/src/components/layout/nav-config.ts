@@ -12,6 +12,7 @@ import {
   Timer,
   Gauge,
   Database,
+  Workflow,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/constants'
@@ -82,6 +83,7 @@ export const adminNavGroups: AdminNavGroup[] = [
       { label: '任务与告警', to: '/admin/settings/tasks', icon: Timer, requireRole: ['admin'] },
       { label: '采集与限频', to: '/admin/settings/crawl', icon: Gauge, requireRole: ['admin'] },
       { label: '演化与缓存', to: '/admin/settings/evolution', icon: Database, requireRole: ['admin'] },
+      { label: 'ETL 队列', to: '/admin/settings/etl', icon: Workflow, requireRole: ['admin'] },
     ],
   },
 ]

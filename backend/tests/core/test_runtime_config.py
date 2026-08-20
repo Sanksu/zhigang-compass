@@ -29,6 +29,11 @@ class TestLoad:
         assert data["evolution_cache_ttl"] == 60
         assert data["crawl_items_cap"] == 100
         assert data["rate_limit"] == {}
+        assert data["etl_batch_cap"] == 2000
+        assert data["etl_structure_load_default"] == 500
+        assert data["etl_validate_temporal_default"] == 200
+        assert data["etl_run_hour"] == 5
+        assert data["etl_run_minute"] == 0
 
     def test_corrupt_file_returns_defaults(self, _isolated_config):
         _isolated_config.write_text("{not-json", encoding="utf-8")
@@ -50,15 +55,25 @@ class TestSave:
             "evolution_cache_ttl": 120,
             "crawl_items_cap": 200,
             "rate_limit": {"zhilian": {"req_per_min": 3, "delay_range": [5, 10]}},
+            "etl_batch_cap": 3000,
+            "etl_structure_load_default": 600,
+            "etl_validate_temporal_default": 300,
+            "etl_run_hour": 3,
+            "etl_run_minute": 30,
         })
         assert data["arq_concurrency"] == 4
         assert data["crawl_items_cap"] == 200
+        assert data["etl_batch_cap"] == 3000
+        assert data["etl_run_hour"] == 3
+        assert data["etl_run_minute"] == 30
         # 持久化落盘
         on_disk = json.loads(_isolated_config.read_text(encoding="utf-8"))
         assert on_disk["arq_job_timeout"] == 900
         assert on_disk["rate_limit"]["zhilian"]["delay_range"] == [5, 10]
+        assert on_disk["etl_structure_load_default"] == 600
         # 缓存同步
         assert rc.get("crawl_items_cap") == 200
+        assert rc.get("etl_validate_temporal_default") == 300
 
     def test_save_invalid_scalar_rejected(self, _isolated_config):
         with pytest.raises(ValueError):
@@ -69,6 +84,18 @@ class TestSave:
             rc.save({"alert_webhook_url": "ftp://bad"})
         with pytest.raises(ValueError):
             rc.save({"evolution_cache_ttl": 1})
+
+    def test_save_invalid_etl_rejected(self, _isolated_config):
+        with pytest.raises(ValueError):
+            rc.save({"etl_batch_cap": 50})  # < 100
+        with pytest.raises(ValueError):
+            rc.save({"etl_structure_load_default": 5000})  # > 1000
+        with pytest.raises(ValueError):
+            rc.save({"etl_validate_temporal_default": "200"})
+        with pytest.raises(ValueError):
+            rc.save({"etl_run_hour": 24})
+        with pytest.raises(ValueError):
+            rc.save({"etl_run_minute": -1})
 
     def test_save_invalid_rate_limit_rejected(self, _isolated_config):
         with pytest.raises(ValueError):
