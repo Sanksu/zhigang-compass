@@ -92,6 +92,12 @@ function toGapItem(g: BackendGapItem): GapItem {
     priority: g.priority,
     current_level: g.current_proficiency ?? '未掌握',
     required_level: g.required_proficiency ?? '不限',
+    // 契约 #341 后装字段透传（后端回填后自动覆盖 mock 兜底）
+    demand: g.demand,
+    trend: g.trend,
+    roi: g.roi,
+    high_roi: g.high_roi,
+    evidence: g.evidence?.map((e) => ({ role: e.role, text: e.text })),
   }
 }
 
@@ -113,6 +119,11 @@ function toLearningPath(items: BackendLearningPathItem[]): MatchResult['learning
         hours: c.hours ?? 0,
       })),
       priority: item.priority,
+      // 契约 #341 后装字段透传（后端回填后覆盖前端 mock 兜底）
+      status: item.status,
+      demand: item.demand,
+      trend: item.trend,
+      roi: item.roi,
     }
   })
 }

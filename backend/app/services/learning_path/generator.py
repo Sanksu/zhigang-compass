@@ -71,6 +71,9 @@ class LearningPathGenerator:
             # P1-2：weak 技能已具备部分基础，学时减半（评审排期：weak 与 missing 学时同价为低估根因）
             if gap.gap_type == GapType.WEAK:
                 hours *= 0.5
+            # 双轨制 status（task 1.2）：path 项仅 missing/weak → 均非 done；
+            # missing 未掌握 → doing（下一步）；weak 已具基础 → doing（需提升熟练度）。
+            # 学习路径项全部为待学技能，status 统一 doing（done 由前端 matched_must 推导）。
             items.append(
                 LearningPathItem(
                     skill=gap.skill,
@@ -79,6 +82,10 @@ class LearningPathGenerator:
                     courses=courses,
                     estimated_hours=round(hours, 1),
                     priority=gap.priority,
+                    status="doing",
+                    demand=gap.demand,
+                    trend=gap.trend,
+                    roi=gap.roi,
                 )
             )
 

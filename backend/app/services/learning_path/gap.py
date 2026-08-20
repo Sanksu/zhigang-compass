@@ -4,15 +4,49 @@ missing：候选人不包含该技能；weak：包含但熟练度不达标；mat
 排序口径（设计文档 §9.5 原文「按 skill_weight DESC, gap_type (missing > weak) 排序」）：
 skill_weight DESC 优先，权重相同再按 gap_type（missing > weak > matched）。
 熟练度判定复用匹配引擎 `_skill_similarity` 的同义匹配口径，保证匹配与差距分析一致。
+
+数据升级（task 2.x，契约 #341）：
+- demand：岗位侧 source_count（独立 JD 源数，聚合层预计算）归一化 → 真实需求度；
+- trend：技能图谱 EVOLVED_FROM 演化信号（有后续演化方向 +，否则中性）；
+- roi：(demand × (trend+1)) / cost（cost = base_hours × 熟练度缺口，weak 减半）；
+- evidence：JD 要求 / 简历现状 溯源（来自岗位要求 + 候选人画像）。
 """
 
-from app.services.learning_path.schemas import GapSkill, GapType
+from app.services.learning_path.schemas import GapSkill, GapType, MatchEvidenceItem
 from app.services.matching.engine import _canonical_name
 from app.services.matching.weights import load_sim_threshold
 
 # 岗位期望熟练度 → 候选人熟练度下限（候选人熟练度：1 了解 / 2 熟悉 / 3 精通）
 _LEVEL_MIN_PROFICIENCY = {"初级": 1, "中级": 2, "高级": 3, "专家": 3}
 _PROFICIENCY_NAMES = {1: "了解", 2: "熟悉", 3: "精通"}
+
+# 数据升级：需求归一化基准（source_count=20 源视为需求度 1.0）
+_DEMAND_NORM = 20.0
+# cost 基础学时来源（复用先修字典学时分层；避免与 generator 重复计算）
+from app.services.learning_path.prerequisites import base_hours
+
+
+def _demand_from_source(source_count: int | None) -> float:
+    """需求度：独立 JD 源数归一化（min(1, source_count/20)），缺失按 1 源。"""
+    return min(1.0, (source_count or 1) / _DEMAND_NORM)
+
+
+def _evolved_signal(skill_id: str | None) -> float:
+    """技能演进信号：图谱有 (s2)-[:EVOLVED_FROM]->(s) 时 +0.3（有后续演化方向），否则中性。"""
+    if not skill_id:
+        return 0.0
+    try:
+        from app.core.database import neo4j_driver
+
+        with neo4j_driver.session() as session:
+            rec = session.run(
+                "MATCH (s:Skill {id: $id})<-[e:EVOLVED_FROM]-() RETURN count(e) AS n",
+                id=skill_id,
+            ).single()
+            return 0.3 if (rec and rec["n"] > 0) else 0.0
+    except Exception:
+        # 图谱不可用不阻断差距分析（demand/trend 缺省，前端 mock 兜底）
+        return 0.0
 
 
 def _priority(gap_type: GapType, necessity: str) -> str:
@@ -86,6 +120,26 @@ def analyze_gaps(candidate, position, semantic=None, sim_threshold: float | None
                 gap_type = GapType.MATCHED
             current = _PROFICIENCY_NAMES.get(matched_skill.proficiency) if matched_skill else None
 
+        # ── 数据升级（task 2.x）──
+        demand = _demand_from_source(req.source_count)
+        trend = _evolved_signal(req.skill_id)
+        # cost：base_hours × 熟练度缺口（missing 全量，weak 减半——与 generator 学时口径一致）
+        cost = base_hours(req.skill_name)
+        if gap_type == GapType.WEAK:
+            cost *= 0.5
+        roi = (demand * (trend + 1)) / max(cost, 1e-6)
+        evidence: list[MatchEvidenceItem] = [
+            MatchEvidenceItem(role="jd", text=f"JD 要求：{req.proficiency or '—'}"),
+            MatchEvidenceItem(
+                role="resume",
+                text=(
+                    f"简历：已具备（{current}）"
+                    if gap_type == GapType.MATCHED and current
+                    else "简历：未标注/缺失" if gap_type == GapType.MISSING else f"简历：{current or '—'}"
+                ),
+            ),
+        ]
+
         gaps.append(
             GapSkill(
                 skill=req.skill_name,
@@ -96,10 +150,20 @@ def analyze_gaps(candidate, position, semantic=None, sim_threshold: float | None
                 priority=_priority(gap_type, req.necessity.value),
                 current_proficiency=current,
                 required_proficiency=req.proficiency,
+                demand=demand,
+                trend=trend,
+                roi=roi,
+                evidence=evidence,
             )
         )
 
     order = {GapType.MISSING: 0, GapType.WEAK: 1, GapType.MATCHED: 2}
     # 设计文档 §9.5：weight DESC 优先，再按 gap_type（missing > weak > matched）
     gaps.sort(key=lambda g: (-g.weight, order[g.gap_type]))
+    # 高杠杆缺口打标（task 2.3）：真缺口（missing/weak）按 ROI 降序 Top3
+    top3 = set(g.skill for g in sorted(
+        (g for g in gaps if g.gap_type != GapType.MATCHED), key=lambda g: g.roi or 0, reverse=True
+    )[:3])
+    for g in gaps:
+        g.high_roi = g.gap_type != GapType.MATCHED and g.skill in top3
     return gaps

@@ -96,6 +96,9 @@ async def test_generate_missing_skill_with_chain_and_courses(monkeypatch):
     # + Python 55 + 线性代数 40，白名单类别基准）
     assert item.estimated_hours == 235.0
     assert item.priority == "high"
+    # 双轨制数据升级（task 1.2）：path 项均为待学 → status=doing，携带 demand/trend/roi
+    assert item.status == "doing"
+    assert item.demand is not None and item.roi is not None
 
 
 @pytest.mark.asyncio
