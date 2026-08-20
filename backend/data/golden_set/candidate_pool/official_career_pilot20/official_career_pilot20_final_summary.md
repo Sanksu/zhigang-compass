@@ -78,7 +78,7 @@
 | `source_company + source_id` 精确 | **0** |
 | `source_url` 精确 | **0** |
 | `_sha256` 精确 | **0** |
-| 正文 SimHash Hamming ≤ 3（近似） | **0** |
+| 正文 SimHash Hamming ≤ 6 且 Jaccard ≥ 0.6（近似） | **0** |
 
 > 完全重复 = 0，近似重复 = 0，重复 sample_id = 无
 
@@ -132,28 +132,25 @@ _sha256 = lowercase_hex( SHA256( UTF8( responsibilities + "\n" + requirements ) 
 
 后续是否进入新的 Gold 集由人工另行决定。
 
-## 12. 仓库保护声明（强制）
+## 12. 仓库边界声明（强制）
 
 - ❌ 未修改 `zhigang-compass/` 下任何生产代码（`backend/app` / `frontend` / `Prompt` / 算法 / Gold 目录）
 - ❌ 未修改 `develop` / `main` 分支
-- ❌ 在最初 Pilot 归档阶段未 commit
-- ❌ 在最初 Pilot 归档阶段未 push
-- ❌ 在最初 Pilot 归档阶段未创建 PR
+- ❌ 在最初 Pilot 归档阶段未 commit / push / 创建 PR（归档产出现经 PR #325 提交本目录）
+- ✅ 本归档经 git **commit + PR #325** 提交（仅新增 `candidate_pool/official_career_pilot20/` 一个目录）
 
-## 13. 正式归档文件清单
-
-归档根目录：`D:\du_yan\jiebang_guashuai_jingsai\第二招聘源_企业官网_Pilot20\`
+## 13. 正式归档文件清单（本 PR 实际入库）
 
 | 文件 / 目录 | 说明 |
 |---|---|
 | `official_career_pilot20_raw.jsonl` | 原始解析 20 条，保留内部辅助字段 |
-| `official_career_pilot20_clean.jsonl` | 去重后有效 20 条（标准 17 字段） |
+| `official_career_pilot20_clean.jsonl` | 去重后有效 20 条（当前与 raw 同源同构、保留内部字段，精修见 README 已知限制） |
 | `official_career_pilot20_quality_report.md` | 详细质量统计报告 |
 | `official_career_pilot20_duplicate_report.md` | 内部/跨源去重详细报告 |
 | `official_career_pilot20_final_summary.md` | 本文件（最终归档摘要） |
-| `adapters/` | `base.py` + `tencent_adapter.py` + `bytedance_adapter.py` + `router.py` + `__init__.py` |
-| `snapshots/` | 20 条 JD 原始正文快照 + `_index.json`（可用于回溯/重跑 Adapter） |
-| `url_list.json`（保留待人工确认） | 采集计划（20 URL + postId/19 位 ID + 方向标签），建议保留 |
+| `adapters/` | `base.py` + `router.py` + `tencent_adapter.py` + `bytedance_adapter.py` + `__init__.py` 字段解析器 |
+
+> 生成脚本（`pilot20_official_process.py`）、原始快照（`snapshots/`）、采集计划（`url_list.json`）为归档规划、**未随本 PR 入库**；数据可追溯性以 `adapters/` 解析器 + 上述清单为准。
 
 ## 14. 最终结论
 
@@ -165,4 +162,9 @@ _sha256 = lowercase_hex( SHA256( UTF8( responsibilities + "\n" + requirements ) 
 - 内部精确/近似重复均为 0
 - Adapter 静态核验 PASS，无单条硬编码
 - 访问限制为 0，具备批量扩源基础
-- 仓库保护绿，未破坏生产代码、未进 Gold、未 commit/push
+- 仓库边界绿：未破坏生产代码、未进 Gold；本归档经 PR #325 提交（仅新增数据与适配器）
+
+## 15. 可复现性与数据来源声明
+
+- 20 条 JSONL 由外部 pilot 采集/解析管线产生（原始快照与生成脚本未随本 PR 入库）；`adapters/` 为本 PR 提交的企业官网公开 JD 字段解析器（静态核验 PASS），**未在本 PR 内以 20 条 JSONL 逐字段回测**，个别字段（如字节 `source_id_method`、`company_name` 全称）以 `adapters/` 解析器输出为准
+- 每行含 9 个内部辅助字段（`_adapter_parse_success/_direction/_display_position_id/_job_category_raw/_rid/_sha256/_simhash64/_visit_status` 等），共 24 key；"标准 17 字段"表述不成立，已更正

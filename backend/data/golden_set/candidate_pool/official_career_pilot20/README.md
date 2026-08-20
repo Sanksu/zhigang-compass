@@ -14,7 +14,7 @@
 状态：
 
 PILOT_PASS
-ARCHIVE_FINAL_PASS
+ARCHIVE_PASS
 
 source统一：
 
@@ -41,3 +41,9 @@ official_career_site
 Adapter：
 
 仅用于企业官网公开JD页面字段解析。
+
+已知限制 / 可复现性：
+
+- clean 与 raw 当前为**同源同构**（逐字节相同、均保留内部辅助字段）；"clean" 语义的精修（去内部字段、过滤页脚噪声如"相关职位/投递/申请岗位"）待后续清洗管线完成
+- 数据由外部 pilot 采集/解析管线生成；本 PR **未包含**其生成脚本与原始快照（`pilot20_official_process.py`、`snapshots/`、`url_list.json` 为归档规划、未入库），字段解析以 `adapters/` 为准
+- 与智联 Gold 的跨源"疑似重复 0"仅覆盖可访问的 **14/110** 条子集，完整 110 条比对待数据整合阶段执行
