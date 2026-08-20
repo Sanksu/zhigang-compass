@@ -174,7 +174,7 @@ export function buildTimelineMilestones(
   return milestones
 }
 
-/* ── 宏观 DAG 视图数据（task 1.1，与时间轴共用分层/状态口径） ── */
+/* ── 宏观 DAG 视图数据（task T2，与时间轴共用分层/状态口径） ── */
 
 /** DAG 节点（学习路径技能） */
 export interface DagSkillNode {
