@@ -5,7 +5,7 @@
  *  - 空输入/单根/链式先修/fan-out/未知先修
  *  - done(done)/doing/doing(locked) 推导
  *  - 学时兜底（duration_days×8）与 coursesCount
- *  - 阶段分层（depth）与层内排序（doing 优先、高优优先）
+ *  - 阶段分层（depth）与层内排序（高优优先、名称）
  */
 import { describe, expect, it } from 'vitest'
 import { buildTimelineMilestones, buildDagGraph, type TimelineMilestone } from './learning-timeline'
@@ -111,13 +111,12 @@ describe('buildTimelineMilestones', () => {
     expect(ms[0].tasks[0].coursesCount).toBe(2)
   })
 
-  it('层内排序：doing 优先，其次高优优先', () => {
+  it('层内排序：高优优先，其次名称', () => {
     const low = item({ skill: 'Z', priority: 'low' })
     const high = item({ skill: 'A', priority: 'high' })
-    // 都无先修（阶段1）：A(high)、Z(low)。首个未掌握为 doing → A 排前
+    // 同层无先修：A(high) 优先于 Z(low) → 排序 ['A', 'Z']
     const ms = buildTimelineMilestones([low, high])
     expect(ms[0].tasks.map((t) => t.skill)).toEqual(['A', 'Z'])
-    expect(ms[0].tasks[0].status).toBe('doing')
   })
 })
 

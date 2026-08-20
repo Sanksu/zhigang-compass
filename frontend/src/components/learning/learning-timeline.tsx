@@ -3,7 +3,7 @@
  *
  * 目标：把力导向"毛球"结构性平铺为可行动的纵向 Stepper：
  *  - 通过先修关系做拓扑分层 → 拆成若干「阶段（Milestone）」；
- *  - 阶段下渲染「任务卡（Task Card）」：学习状态图标 + 预计学时 + 课程数 + 前往学习。
+ *  - 阶段下渲染「任务卡（Task Card）」：预计学时 + 课程数 + 推荐课程 + 前往学习。
  *
  * 数据源：后端 /match/.../path 的 LearningPathItem 数组（status/estimatedHours/roi
  * 后端未直接返回 → 类型已按可选扩展，此处由 `buildTimelineMilestones` 兜底推导）。
@@ -12,7 +12,7 @@
  * 保证两视图口径一致）。
  */
 import { useMemo } from 'react'
-import { ArrowRight, BookOpen, CheckCircle2, Clock, Lock, PlayCircle } from 'lucide-react'
+import { ArrowRight, BookOpen, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { LearningPathItem } from '@/components/match/types'
 
@@ -55,25 +55,6 @@ interface LearningTimelineProps {
 
 /* ── 展示口径常量 ─────────────────────────────── */
 const PRIORITY_RANK: Record<LearningPathItem['priority'], number> = { high: 0, medium: 1, low: 2 }
-const STATUS_RANK: Record<LearningStatus, number> = { doing: 0, locked: 1, done: 2 }
-
-const STATUS_META: Record<LearningStatus, { label: string; badge: string; Icon: typeof CheckCircle2 }> = {
-  done: {
-    label: '已掌握',
-    badge: 'text-state-stable bg-state-stable/10 border-state-stable/30',
-    Icon: CheckCircle2,
-  },
-  doing: {
-    label: '下一步',
-    badge: 'text-primary bg-primary/10 border-primary/30',
-    Icon: PlayCircle,
-  },
-  locked: {
-    label: '未解锁',
-    badge: 'text-ink-faint bg-subtle border-border/60',
-    Icon: Lock,
-  },
-}
 
 const PRIORITY_LABEL: Record<LearningPathItem['priority'], string> = { high: '高优', medium: '中优', low: '低优' }
 
@@ -144,7 +125,7 @@ export function buildTimelineMilestones(
     statusBySkill.set(it.skill, doneSet.has(it.skill) ? 'done' : it.skill === doingSkill ? 'doing' : 'locked')
   }
 
-  // 4. 组装 Milestone（层内排序：doing → locked → done，再按优先级、名称）
+  // 4. 组装 Milestone（层内排序：优先级、名称）
   const milestones: TimelineMilestone[] = []
   for (let d = 1; d <= layers.size; d++) {
     const tasks = (layers.get(d) ?? [])
@@ -165,7 +146,6 @@ export function buildTimelineMilestones(
       }))
       .sort(
         (a, b) =>
-          STATUS_RANK[a.status] - STATUS_RANK[b.status] ||
           PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] ||
           a.skill.localeCompare(b.skill, 'zh'),
       )
@@ -217,12 +197,11 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
   // 重拓扑分层 + 状态推导：数据量小时仍是纯计算，量级上来后用 useMemo 缓存避免每次重渲染重排
   const milestones = useMemo(() => buildTimelineMilestones(items, completedSkills), [items, completedSkills])
 
-  // 汇总：总任务 / 总学时 / 已掌握（用于表头，轻量常驻）
+  // 汇总：总任务 / 总学时（用于表头，轻量常驻）
   const summary = useMemo(() => {
     const totalTasks = items.length
-    const done = milestones.reduce((n, m) => n + m.tasks.filter((t) => t.status === 'done').length, 0)
     const hours = milestones.reduce((n, m) => n + m.tasks.reduce((s, t) => s + t.estimatedHours, 0), 0)
-    return { totalTasks, done, hours }
+    return { totalTasks, hours }
   }, [items, milestones])
 
   if (milestones.length === 0) {
@@ -241,10 +220,6 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
         <span className="text-ink-faint">·</span>
         <span className="flex items-center gap-1">
           <Clock className="size-3.5" />约 {summary.hours} 学时
-        </span>
-        <span className="text-ink-faint">·</span>
-        <span className="flex items-center gap-1">
-          <CheckCircle2 className="size-3.5 text-state-stable" />已掌握 {summary.done}
         </span>
       </div>
 
@@ -265,50 +240,20 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
                 {/* 阶段标题 */}
                 <div className="mb-2 flex items-baseline gap-2">
                   <span className="text-sm font-semibold text-ink">{ms.label}</span>
-                  <span className="text-[10px] text-ink-faint">
-                    {ms.tasks.length} 项 · {ms.tasks.reduce((n, t) => n + (t.status === 'done' ? 1 : 0), 0)} 已掌握
-                  </span>
+                  <span className="text-[10px] text-ink-faint">{ms.tasks.length} 项</span>
                 </div>
 
                 {/* 任务卡列表 */}
                 <div className="space-y-2">
                   {ms.tasks.map((task) => {
-                    const meta = STATUS_META[task.status]
-                    const isDone = task.status === 'done'
-                    const isLocked = task.status === 'locked'
-                    const isDoing = task.status === 'doing'
                     return (
                       <div
                         key={task.skill}
-                        className={cn(
-                          'flex items-start gap-3 rounded-lg border border-border bg-canvas p-2.5 transition-colors',
-                          isDone && 'opacity-60',
-                          isDoing && 'border-primary/40 bg-primary/5',
-                        )}
+                        className="flex items-start gap-3 rounded-lg border border-border bg-canvas p-2.5 transition-colors"
                       >
-                        <span
-                          className={cn(
-                            'mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border',
-                            meta.badge,
-                          )}
-                          title={meta.label}
-                        >
-                          <meta.Icon className="size-3.5" />
-                        </span>
-
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <span
-                              className={cn(
-                                'truncate text-sm font-medium',
-                                isLocked ? 'text-ink-muted' : 'text-ink',
-                              )}
-                            >
-                              {task.skill}
-                            </span>
-                            <span className={cn('rounded-full border px-1.5 py-0 text-[10px]', meta.badge)}>
-                              {meta.label}
-                            </span>
+                            <span className="truncate text-sm font-medium text-ink">{task.skill}</span>
                             {task.priority === 'high' && (
                               <span className="rounded-full border border-state-archived/30 bg-state-archived/10 px-1.5 py-0 text-[10px] text-state-archived">
                                 {PRIORITY_LABEL.high}
@@ -323,13 +268,13 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
                             <span className="flex items-center gap-1">
                               <BookOpen className="size-3" />{task.coursesCount} 门课程
                             </span>
-                            {task.prerequisites.length > 0 && !isDone && (
+                            {task.prerequisites.length > 0 && (
                               <span className="truncate">先修：{task.prerequisites.join('、')}</span>
                             )}
                           </div>
 
-                          {/* 接入课程：doing 任务展示首门推荐课程（可点击跳转） */}
-                          {!isDone && !isLocked && task.courses && task.courses.length > 0 && (
+                          {/* 推荐课程（可点击跳转） */}
+                          {task.courses && task.courses.length > 0 && (
                             <div className="mt-1.5 space-y-1">
                               {task.courses.slice(0, 2).map((c, ci) =>
                                 c.url ? (
@@ -361,33 +306,20 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
 
                         {/* CTA */}
                         <div className="shrink-0">
-                          {isDone ? (
-                            <span className="inline-flex items-center gap-1 rounded-md bg-state-stable/10 px-2 py-1 text-[10px] text-state-stable">
-                              <CheckCircle2 className="size-3" />已掌握
-                            </span>
-                          ) : isLocked ? (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[10px] text-ink-faint"
-                              title="先完成前置技能后可学习"
-                            >
-                              <Lock className="size-3" />未解锁
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                // 优先回调（页面可自定义跳转/标记）；缺省跳首门课程链接
-                                if (onGoToLearn) onGoToLearn(task)
-                                else {
-                                  const url = task.courses?.find((c) => c.url)?.url
-                                  if (url) window.open(url, '_blank', 'noreferrer')
-                                }
-                              }}
-                              className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[10px] font-medium text-canvas transition-opacity hover:opacity-90"
-                            >
-                              前往学习 <ArrowRight className="size-3" />
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              // 优先回调（页面可自定义跳转/标记）；缺省跳首门课程链接
+                              if (onGoToLearn) onGoToLearn(task)
+                              else {
+                                const url = task.courses?.find((c) => c.url)?.url
+                                if (url) window.open(url, '_blank', 'noreferrer')
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[10px] font-medium text-canvas transition-opacity hover:opacity-90"
+                          >
+                            前往学习 <ArrowRight className="size-3" />
+                          </button>
                         </div>
                       </div>
                     )
