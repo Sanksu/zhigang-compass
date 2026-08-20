@@ -20,6 +20,8 @@ import {
   type SkillPositionItem,
 } from '@/components/graph/node-detail-panel'
 import type { GraphData, GraphEdge, GraphNode, GraphViewType, NodeDetail } from '@/components/graph/types'
+import type { LearningPathItem } from '@/components/match/types'
+import type { LearningStatus } from '@/components/learning/learning-timeline'
 import { apiGet, ApiError } from '@/lib/api'
 import type { components } from '@/types/api'
 
@@ -282,6 +284,48 @@ export function GraphPage() {
         ? skillDetail
         : { skill_id: '', positions: [], prerequisites: [], courses: [], loading: true }
       : null
+
+  // ── 双轨制接入（task 1.1/1.3）：选中技能 → 由先修链派生学习路径 DAG + 导学面板增强 ──
+  // 数据源为真实先修链（GET /graph/skill/{id}/prerequisites）：目标技能 ← 直接先修（并联），
+  // 更深层链条未知故不自造边（宁缺毋滥）。无先修或非技能节点时不启用 DAG。
+  const learningPath = useMemo<LearningPathItem[] | undefined>(() => {
+    if (!selected || selected.type !== 'skill') return undefined
+    const prereqs = skillDetailView?.prerequisites ?? []
+    if (prereqs.length === 0) return undefined
+    const depthOne = prereqs.filter((p) => p.depth === 1).map((p) => p.name)
+    const items: LearningPathItem[] = prereqs.map((p) => ({
+      skill: p.name,
+      duration_days: 1,
+      start_offset: 0,
+      prerequisites: [],
+      courses: [],
+      priority: 'medium',
+    }))
+    items.push({
+      skill: selected.name,
+      duration_days: 1,
+      start_offset: 0,
+      prerequisites: depthOne,
+      courses: [],
+      priority: 'high',
+    })
+    return items
+  }, [selected, skillDetailView])
+  // 图谱页无候选人上下文：已掌握技能集为空（如何开始按"前置未掌握"预警展示）
+  const learnedSkills = useMemo(() => new Set<string>(), [])
+  // 选中技能的学习状态：有前置 → 未解锁（需先学前置）；无前置 → 下一步（可直接学）
+  const skillLearningStatus = useMemo<LearningStatus | undefined>(() => {
+    if (!selected || selected.type !== 'skill') return undefined
+    return (skillDetailView?.prerequisites ?? []).length > 0 ? 'locked' : 'doing'
+  }, [selected, skillDetailView])
+  // 需求/趋势：确定性 mock（按技能名哈希，避免每次渲染跳动）
+  const skillDemandTrend = useMemo(() => {
+    if (!selected) return {}
+    const key = selected.id || selected.name || 'skill'
+    let h = 0
+    for (const c of key) h = (h * 31 + c.charCodeAt(0)) >>> 0
+    return { demand: 0.5 + (h % 100) / 200, trend: ((h % 100) / 100) * 0.8 - 0.1 }
+  }, [selected])
 
   // 全文检索（设计文档 §5.4 cjk 全文索引）
   // 搜索序号：连续搜索时旧请求响应作废，避免慢响应覆盖新结果
@@ -611,6 +655,8 @@ export function GraphPage() {
               focusRequest={focusRequest}
               onSelectNode={setSelected}
               onTogglePosition={togglePosition}
+              learningPath={learningPath}
+              completedSkills={[]}
               className="h-full w-full"
             />
           ) : (
@@ -701,6 +747,10 @@ export function GraphPage() {
                 onTogglePosition={togglePosition}
                 onSelectSkill={focusSkill}
                 onClose={() => setSelected(null)}
+                learningStatus={skillLearningStatus}
+                demand={skillDemandTrend.demand}
+                trend={skillDemandTrend.trend}
+                learnedSkills={learnedSkills}
               />
             </TabsContent>
             <TabsContent value="analysis" className="flex-1 overflow-y-auto mt-0 px-0 py-0">

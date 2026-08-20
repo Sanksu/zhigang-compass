@@ -23,9 +23,13 @@ import {
   Target,
   ChevronRight,
   MapPin,
+  Sparkles,
+  Route,
+  AlertTriangle,
 } from 'lucide-react'
 import type { components } from '@/types/api'
 import type { NodeDetail, PositionStatus } from './types'
+import type { LearningStatus } from '@/components/learning/learning-timeline'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
@@ -79,6 +83,14 @@ interface NodeDetailPanelProps {
   similarSkills?: SimilarSkillItem[]
   onSelectSkill?: (id: string, name: string) => void
   onClose?: () => void
+  // ── 导学面板（task 1.3）可选增强 ──
+  learningStatus?: LearningStatus
+  /** 市场需求度 0-1（Why to Learn） */
+  demand?: number
+  /** 需求趋势 -1..1（Why to Learn） */
+  trend?: number
+  /** 已掌握技能集（How to Start 判断前置是否就绪） */
+  learnedSkills?: Set<string>
 }
 
 const STATUS_LABEL: Record<PositionStatus, string> = {
@@ -111,6 +123,13 @@ const TYPE_ICON: Record<NodeDetail['type'], typeof Network> = {
   evidence: FileText,
 }
 
+// 导学面板学习状态（task 1.3）：绿=已掌握 / 蓝=下一步 / 灰=未解锁
+const LEARNING_STATUS_META: Record<LearningStatus, { label: string; className: string }> = {
+  done: { label: '已掌握', className: 'bg-state-stable/10 text-state-stable border-state-stable/30' },
+  doing: { label: '下一步', className: 'bg-primary/10 text-primary border-primary/30' },
+  locked: { label: '未解锁', className: 'bg-subtle text-ink-faint border-border/60' },
+}
+
 export function NodeDetailPanel({
   node,
   stats,
@@ -122,6 +141,10 @@ export function NodeDetailPanel({
   onTogglePosition,
   onSelectSkill,
   onClose,
+  learningStatus,
+  demand,
+  trend,
+  learnedSkills,
 }: NodeDetailPanelProps) {
   const Icon = node ? TYPE_ICON[node.type] : Network
 
@@ -155,6 +178,14 @@ export function NodeDetailPanel({
                   {node.type === 'skill' && node.level && (
                     <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                       {node.level}
+                    </Badge>
+                  )}
+                  {node.type === 'skill' && learningStatus && (
+                    <Badge
+                      variant="outline"
+                      className={`px-1.5 py-0 text-[10px] ${LEARNING_STATUS_META[learningStatus].className}`}
+                    >
+                      {LEARNING_STATUS_META[learningStatus].label}
                     </Badge>
                   )}
                 </div>
@@ -325,6 +356,83 @@ export function NodeDetailPanel({
             {/* 技能详情 */}
             {node.type === 'skill' && skillDetail && (
               <>
+                {/* 导学面板（task 1.3）：为什么学 → 目标/需求对齐 */}
+                <section className="space-y-2">
+                  <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    <Sparkles className="size-3" />
+                    为什么学
+                  </h4>
+                  {demand != null && (
+                    <div className="flex items-center gap-2">
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-border/80">
+                        <div
+                          className="h-full rounded-full bg-state-emerging transition-all duration-500"
+                          style={{ width: `${Math.round(Math.min(1, Math.max(0, demand)) * 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] font-mono text-ink-muted tabular-nums">
+                        需求 {Math.round(Math.min(1, Math.max(0, demand)) * 100)}
+                      </span>
+                    </div>
+                  )}
+                  {trend != null && (
+                    <p className="text-xs text-ink-muted">
+                      市场趋势
+                      <span className={`ml-1 font-mono ${trend >= 0 ? 'text-state-emerging' : 'text-state-archived'}`}>
+                        {trend >= 0 ? '↑' : '↓'} {Math.round(Math.abs(trend) * 100)}
+                      </span>
+                    </p>
+                  )}
+                  <p className="text-xs leading-relaxed text-ink-secondary">
+                    {skillDetail.positions.length > 0
+                      ? `当前有 ${skillDetail.positions.length} 个岗位要求该技能，掌握后直接提升必备匹配分。`
+                      : '暂无岗位直接要求，作为先修链基础可解锁后续技能。'}
+                  </p>
+                </section>
+
+                {/* 导学面板（task 1.3）：如何开始 → 前置就绪检查 */}
+                <section className="space-y-2">
+                  <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    <Route className="size-3" />
+                    如何开始
+                  </h4>
+                  {(() => {
+                    const prereqs = skillDetail.prerequisites ?? []
+                    const missing = learnedSkills
+                      ? prereqs.filter((p) => !learnedSkills.has(p.name))
+                      : prereqs
+                    const ready = prereqs.length === 0 || missing.length === 0
+                    return ready ? (
+                      <div className="rounded-md border border-state-stable/30 bg-state-stable/5 px-2.5 py-2 text-xs text-state-stable">
+                        前置已就绪，可直接开始学习
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-state-archived/30 bg-state-archived/5 px-2.5 py-2">
+                        <div className="flex items-center gap-1.5 text-xs text-state-archived">
+                          <AlertTriangle className="size-3.5 shrink-0" />
+                          尚有 {missing.length} 个前置技能未掌握
+                        </div>
+                        {missing.length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {missing.map((p) => (
+                              <button
+                                key={`${p.name}-${p.depth}`}
+                                onClick={() => onSelectSkill?.(p.skill_id ?? p.name, p.name)}
+                                className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle/60"
+                                title={`先学习 ${p.name}`}
+                              >
+                                {p.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {learningStatus === 'locked' && (
+                          <p className="mt-1.5 text-[10px] text-ink-faint">先完成前置技能后可解锁学习</p>
+                        )}
+                      </div>
+                    )
+                  })()}
+                </section>
                 <section className="space-y-2">
                   <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
                     <Briefcase className="size-3" />
