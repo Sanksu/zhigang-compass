@@ -102,6 +102,7 @@ async def list_versions(
             "node_added": v.node_added,
             "node_removed": v.node_removed,
             "node_changed": v.node_changed,
+            "data_warning": v.data_warning,
         }
         for v in rows
     ]
@@ -183,6 +184,7 @@ async def version_detail(
         "node_added": v.node_added,
         "node_removed": v.node_removed,
         "node_changed": v.node_changed,
+        "data_warning": v.data_warning,
         "stats": {"nodes": len(nodes), "edges": len(edges), "by_type": by_type},
         "nodes": [
             {"id": n.get("id"), "name": n.get("name", n.get("id")), "type": n.get("type")}
