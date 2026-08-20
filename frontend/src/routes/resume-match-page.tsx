@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw, FileText, ThumbsUp, ThumbsDown, RefreshCw, Sparkles, ChevronDown } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -170,7 +170,7 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
   }
 }
 
-// ── 差距分析数据升级（task 2.x）：双轨对齐 + ROI 打标 + 证据溯源 ──
+// ── 差距分析数据升级（task T3）：双轨对齐 + ROI 打标 + 证据溯源 ──
 
 const GAP_COST: Record<GapItem['gap_type'], number> = {
   missing_must: 2,
@@ -277,9 +277,9 @@ export function ResumeMatchPage() {
   const [resumeList, setResumeList] = useState<ResumeSummary[]>([])
   const [activeResumeId, setActiveResumeId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  // 差距展开溯源（task 2.2）：被展开的技能集
+  // 差距展开溯源（task T3）：被展开的技能集
   const [expandedGaps, setExpandedGaps] = useState<Set<string>>(() => new Set())
-  // 差距数据升级派生（task 2.x）：补充 ROI/需求/趋势/证据/核心突破点
+  // 差距数据升级派生（task T3）：补充 ROI/需求/趋势/证据/核心突破点
   const gapRows = useMemo(() => (matchResult ? decorateGaps(matchResult) : []), [matchResult])
 
   // 载入已解析简历列表（后端 /resume/list）
@@ -953,29 +953,58 @@ export function ResumeMatchPage() {
                                   )}
                                   <span className={`ml-auto text-[9px] font-mono ${relClass}`}>{relLabel(rel)}</span>
                                 </div>
-                                {/* 双轨对齐条：目标基线(刻度) vs 现状(填充) */}
-                                <div className="mt-1.5 flex items-center gap-2">
-                                  <div className="relative h-2 flex-1 rounded-full bg-border/60">
-                                    <div
-                                      className="absolute inset-y-[-2px] w-0.5 rounded bg-ink/50"
-                                      style={{ left: `${(target / 4) * 100}%` }}
-                                      title={`岗位要求 ${target}/4`}
-                                    />
-                                    <div
-                                      className={`absolute inset-y-0 left-0 rounded-full ${relBar}`}
-                                      style={{ width: `${(actual / 4) * 100}%` }}
-                                    />
+                                {/* 双轨对比基线（task T3）：上轨=目标期望基线，下轨=实际掌握度 */}
+                                {/* 上轨：期望达到段（0→target 淡色承托）+ 目标刻度；下轨：现状填充，溢出段高亮 */}
+                                <div className="mt-2 space-y-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-8 shrink-0 text-right text-[9px] text-ink-faint">要求</span>
+                                    <div className="relative h-2 flex-1 rounded-full bg-border/40">
+                                      <div
+                                        className={`absolute inset-y-0 left-0 rounded-l-full ${rel === 'gap' ? 'bg-state-archived/20' : 'bg-state-stable/20'}`}
+                                        style={{ width: `${(target / 4) * 100}%` }}
+                                      />
+                                      <div
+                                        className="absolute inset-y-[-3px] w-[3px] rounded bg-ink/70"
+                                        style={{ left: `${(target / 4) * 100}%` }}
+                                        title={`岗位要求 ${target}/4`}
+                                      />
+                                    </div>
+                                    <span className="w-6 shrink-0 text-[9px] font-mono text-ink-muted tabular-nums">
+                                      {target}/4
+                                    </span>
                                   </div>
-                                  <span className="shrink-0 font-mono text-[10px] text-ink-muted tabular-nums">
-                                    目标 {target} / 现状 {actual}
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-8 shrink-0 text-right text-[9px] text-ink-faint">现状</span>
+                                    <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-border/40">
+                                      <div
+                                        className={`absolute inset-y-0 left-0 rounded-full ${relBar}`}
+                                        style={{ width: `${(actual / 4) * 100}%` }}
+                                      />
+                                      {/* 能力溢出段（surplus）：目标刻度后绿色延伸 */}
+                                      {rel === 'surplus' && (
+                                        <div
+                                          className="absolute inset-y-0 rounded-r-full bg-state-emerging"
+                                          style={{
+                                            left: `${(target / 4) * 100}%`,
+                                            width: `${((actual - target) / 4) * 100}%`,
+                                          }}
+                                        />
+                                      )}
+                                    </div>
+                                    <span className="w-6 shrink-0 text-[9px] font-mono text-ink-muted tabular-nums">
+                                      {actual}/4
+                                    </span>
+                                  </div>
+                                  <span className="flex items-center gap-1 text-[9px] text-ink-faint">
+                                    <span className={`font-mono ${relClass}`}>{relLabel(rel)}</span>
+                                    <ChevronDown
+                                      className={`size-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                                    />
                                   </span>
-                                  <ChevronDown
-                                    className={`size-3.5 shrink-0 text-ink-faint transition-transform ${expanded ? 'rotate-180' : ''}`}
-                                  />
                                 </div>
                               </div>
                             </button>
-                            {/* 展开：ROI 明细 + 证据溯源（task 2.2/2.3） */}
+                            {/* 展开：ROI 明细 + 证据溯源（task T3） */}
                             {expanded && (
                               <div className="mt-2 space-y-2 border-t border-border pt-2">
                                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-muted">
@@ -992,17 +1021,38 @@ export function ResumeMatchPage() {
                                     ROI <b className="text-ink">{((gap.roi ?? 0)).toFixed(2)}</b>
                                   </span>
                                 </div>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {(gap.evidence ?? []).map((ev, j) => (
-                                    <Badge
-                                      key={j}
-                                      variant="outline"
-                                      className={`text-[10px] ${ev.role === 'resume' ? 'bg-ink text-canvas' : ''}`}
-                                    >
-                                      {ev.text}
-                                    </Badge>
-                                  ))}
-                                </div>
+                                {/* 数据溯源（task T3）：一条 JD 要求 ↔ 对应简历特征，逐条成对展示，打破算法黑盒 */}
+                                {(() => {
+                                  // 按 role 交替配对：每条 JD 要求对应同位置的简历特征
+                                  const jd = (gap.evidence ?? []).filter((e) => e.role === 'jd')
+                                  const resume = (gap.evidence ?? []).filter((e) => e.role === 'resume')
+                                  const rows = Math.max(1, Math.max(jd.length, resume.length))
+                                  const pairs: ReactElement[] = []
+                                  for (let k = 0; k < rows; k++) {
+                                    const j = jd[k]?.text ?? '—'
+                                    const r = resume[k]?.text ?? '未标注/缺失'
+                                    pairs.push(
+                                      <div
+                                        key={k}
+                                        className="grid grid-cols-2 gap-2 rounded-md border border-border/60 p-2"
+                                      >
+                                        <div>
+                                          <div className="mb-0.5 flex items-center gap-1 text-[9px] font-medium text-state-archived">
+                                            <FileText className="size-3" />JD 要求原文
+                                          </div>
+                                          <p className="text-[10px] leading-relaxed text-ink-secondary">{j}</p>
+                                        </div>
+                                        <div>
+                                          <div className="mb-0.5 flex items-center gap-1 text-[9px] font-medium text-state-stable">
+                                            <CheckCircle2 className="size-3" />简历提取特征
+                                          </div>
+                                          <p className="text-[10px] leading-relaxed text-ink-secondary">{r}</p>
+                                        </div>
+                                      </div>,
+                                    )
+                                  }
+                                  return <div className="space-y-1.5">{pairs}</div>
+                                })()}
                               </div>
                             )}
                           </div>

@@ -68,7 +68,29 @@ const COLOR_SKILL_LIGHT = '#09090b'
 const COLOR_SKILL_DARK = '#fafafa'
 const COLOR_EVIDENCE = '#a1a1aa'
 
-// 宏观 DAG 学习状态编码（task 1.1）：绿=已掌握 / 蓝=下一步 / 灰=未解锁
+// ── 聚光灯 (Focus + Context) 参数（task T1）──────────────────────
+// 悬停/选中节点时，背景节点与边透明度压到该值，制造"聚焦当前邻域"的对比，
+// 缓解毛线球效应导致的认知过载。0.10 ≈ 仅留极淡的上下文轮廓。
+const BLUR_OPACITY = 0.1
+// 悬停邻域内边与节点的强调透明度（相对全不透明前的保留度）
+const FOCUS_BRIGHTEN = 0.9
+
+// ── 语义缩放 (LOD) 档位参数（task T1）───────────────────────────
+// zoom 级别低于该阈值仅显示岗位标签
+const LOD_ZOOM_POSITIONS_ONLY = 0.55
+// zoom 级别达到该阈值才同时显示高权重技能标签
+const LOD_ZOOM_SKILLS = 1.2
+// label 显示的 zoom 档位（0=仅岗位 / 1=岗位+高权技能 / 2=全量）
+type LODBand = 0 | 1 | 2
+
+/** zoom 值 → LOD 标签档位（档位边界即 label 显隐切换点） */
+function bandOfZoom(zoom: number): LODBand {
+  if (zoom < LOD_ZOOM_POSITIONS_ONLY) return 0
+  if (zoom < LOD_ZOOM_SKILLS) return 1
+  return 2
+}
+
+// 宏观 DAG 学习状态编码（task T2）：绿=已掌握 / 蓝=下一步 / 灰=未解锁
 const DAG_COLOR_BY_STATUS: Record<string, string> = {
   done: '#22c55e',
   doing: '#2563eb',
@@ -233,11 +255,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   const [themeVersion, setThemeVersion] = useState(0)
   const [isNarrow, setIsNarrow] = useState(() => isNarrowScreen())
   const [minWeight, setMinWeight] = useState(0)
+  // 语义缩放 (LOD)：当前 zoom 档位（0=仅岗位 / 1=岗位+高权技能 / 2=全量）
+  const [lodBand, setLodBand] = useState<LODBand>(1)
+  // 实况 zoom（roam 过程中高频变化，用 ref 避免每帧 setState；band 变化才触发重渲）
+  const zoomRef = useRef(1)
   // B2: 隐藏的岗位状态集合（空集 = 全显示）
   const [hiddenStatuses, setHiddenStatuses] = useState<Set<import('./types').PositionStatus>>(() => new Set())
   // B2: 仅显示 must（必备）边
   const [showOnlyMustEdges, setShowOnlyMustEdges] = useState(false)
-  // task 1.1: 视图模式 — dag=宏观学习路径 DAG；graph=全局力导向图谱（提供 learningPath 时可用）
+  // task T2: 视图模式 — dag=宏观学习路径 DAG；graph=全局力导向图谱（提供 learningPath 时可用）
   const dagEnabled: boolean = !!learningPath && learningPath.length > 0
   const [viewMode, setViewMode] = useState<'graph' | 'dag'>(dagEnabled ? 'dag' : 'graph')
   // 尺寸版本：容器尺寸变化时重排 DAG（layout:'none' 不自动 reposition）
@@ -280,11 +306,19 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     }
   }, [data, minWeight, hiddenStatuses, showOnlyMustEdges])
 
+  // 语义缩放 (LOD)：仅当 zoom 跨越档位边界时才更新 band，避免 roam 每帧重绘
+  const applyLodBand = useCallback((zoom: number) => {
+    const band = bandOfZoom(zoom)
+    zoomRef.current = zoom
+    setLodBand((prev) => (prev === band ? prev : band))
+  }, [])
+
   const resetView = useCallback(() => {
     const chart = chartRef.current
     if (!chart) return
     chart.setOption({ series: [{ center: ['50%', '50%'], zoom: 1 }] })
-  }, [])
+    applyLodBand(1)
+  }, [applyLodBand])
 
   const focusNode = useCallback(
     (id: string) => {
@@ -308,8 +342,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       chart.setOption({
         series: [{ zoom: targetZoom, center: [centerX, centerY], animationDurationUpdate: 0 }],
       })
+      // 编程式聚焦放大也会改变 zoom 档位——同步 LOD（前端聚焦到 2.4 → 全量标签）
+      applyLodBand(targetZoom)
     },
-    [data.nodes],
+    [data.nodes, applyLodBand],
   )
 
   useImperativeHandle(ref, () => ({ focusNode, resetView }), [focusNode, resetView])
@@ -349,6 +385,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       if (!params.target) resetView()
     })
 
+    // ── 语义缩放 (LOD)：监听 roam（平移/缩放）更新标签档位 ──
+    // roam 事件参数含 zoom（缩放级别），档位变化时才触发重绘
+    const onRoam = (params: unknown) => {
+      const zoom = (params as { zoom?: number })?.zoom
+      if (typeof zoom === 'number') applyLodBand(zoom)
+    }
+    chart.on('roam', onRoam)
+
     chart.getZr().on('click', (params) => {
       if (!params.target) onSelectNode(null)
     })
@@ -359,7 +403,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       chart.dispose()
       chartRef.current = null
     }
-  }, [onSelectNode, onTogglePosition, resetView])
+  }, [onSelectNode, onTogglePosition, resetView, applyLodBand])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -396,7 +440,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const chart = chartRef.current
     if (!chart) return
 
-    // 宏观 DAG 视图（task 1.1）：提供 learningPath 且选用 DAG 时，用分层拓扑渲染
+    // 宏观 DAG 视图（task T2）：提供 learningPath 且选用 DAG 时，用分层拓扑渲染
     if (dagData && viewMode === 'dag') {
       const W = chart.getWidth() || 640
       const H = chart.getHeight() || 480
@@ -432,7 +476,16 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           : {}),
       },
       label: {
-        show: n.type === 'position' || (n.type === 'skill' && (n.value ?? 0) >= labelThreshold),
+        // 语义缩放 (LOD)：标签显隐由 zoom 档位驱动
+        // - band 0（zoom<0.55）：仅岗位
+        // - band 1（0.55≤zoom<1.2）：岗位 + 高权重技能（≥中位阈值）
+        // - band 2（zoom≥1.2）：全量（含低权技能）
+        show:
+          n.type === 'position'
+            ? lodBand >= 0
+            : n.type === 'skill'
+              ? lodBand === 2 || (lodBand >= 1 && (n.value ?? 0) >= labelThreshold)
+              : false,
         position: 'right',
         color: textColor,
         fontSize: 11,
@@ -451,6 +504,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         itemStyle: {
           shadowBlur: 24,
           shadowColor: colorOf(n, dark),
+          opacity: FOCUS_BRIGHTEN,
         },
         label: { show: true },
       },
@@ -535,6 +589,13 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           emphasis: {
             focus: 'adjacency',
             blurScope: 'coordinateSystem',
+            // 聚光灯 (Focus + Context)：悬停/选中时无关节点与边压到 10% 透明度，
+            // 仅保留"当前节点 + 一阶邻居"的清晰对比，缓解毛线球认知过载
+            blur: {
+              itemStyle: { opacity: BLUR_OPACITY },
+              lineStyle: { opacity: BLUR_OPACITY },
+              label: { opacity: 0.1 },
+            },
           },
           selectedMode: 'single',
           select: {
@@ -559,7 +620,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     }
 
     chart.setOption(option)
-  }, [filteredData, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size])
+  }, [filteredData, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand])
 
   useEffect(() => {
     const chart = chartRef.current
@@ -567,10 +628,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     if (selectedId) {
       const idx = filteredData.nodes.findIndex((n) => n.id === selectedId)
       if (idx >= 0) {
+        // select 负责选中项描边；highlight 触发 focus:adjacency + blur，使"点击/选中态"
+        // 同样把无关节点与边压到 10%（聚光灯对悬停与点击都生效，task T1）
         chart.dispatchAction({ type: 'select', seriesIndex: 0, dataIndex: idx })
+        chart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: idx })
       }
     } else {
       chart.dispatchAction({ type: 'unselect', seriesIndex: 0 })
+      chart.dispatchAction({ type: 'downplay', seriesIndex: 0 })
     }
   }, [selectedId, filteredData.nodes])
 
@@ -580,7 +645,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 
   return (
     <div className={`relative h-full w-full ${className ?? ''}`}>
-      {/* task 1.1: 学习路径可用时提供 宏观 DAG / 全局图谱 切换 */}
+      {/* task T2: 学习路径可用时提供 宏观 DAG / 全局图谱 切换 */}
       {dagEnabled && (
         <div className="absolute right-3 top-3 z-20 flex overflow-hidden rounded-md border border-border bg-canvas/90 shadow-sm text-[10px]">
           {(

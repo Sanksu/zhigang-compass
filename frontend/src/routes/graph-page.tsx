@@ -9,6 +9,7 @@ import { Graph2D, type Graph2DHandle } from '@/components/graph/graph-2d'
 import type { Graph3DHandle } from '@/components/graph/graph-3d'
 import { GraphAnalysisPanel } from '@/components/graph/graph-analysis-panel'
 import { GraphCommunityTree } from '@/components/graph/graph-community-tree'
+import { GraphDetailRail } from '@/components/graph/graph-detail-rail'
 import {
   NodeDetailPanel,
   type PositionDetail,
@@ -724,44 +725,40 @@ export function GraphPage() {
           </div>
         </Card>
 
-        {/* 节点详情面板 + 图谱算法分析：用 Tab 分隔，避免信息过载 */}
-        <Tabs value={rightTab} onValueChange={(v) => setRightTab(v as 'detail' | 'analysis')} className="flex flex-col h-[640px]">
-          <Card className="flex flex-col h-full overflow-hidden">
-            <TabsList className="mx-3 mt-3 grid w-auto grid-cols-2">
-              <TabsTrigger value="detail" className="text-xs">
-                节点详情
-              </TabsTrigger>
-              <TabsTrigger value="analysis" className="text-xs">
-                算法分析
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="detail" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
-              <NodeDetailPanel
-                node={selected}
-                stats={detailStats}
-                skillDetail={skillDetailView}
-                positionDetail={selected?.type === 'position' && positionDetail && positionDetail.id === selected.id ? positionDetail : null}
-                skillEvidence={selected && skillDetail && skillDetail.skill_id === selected.id ? skillEvidence : []}
-                similarSkills={selected && skillDetail && skillDetail.skill_id === selected.id ? similarSkills : []}
-                positionExpanded={selected?.type === 'position' ? expandedPositions.has(selected.id) : false}
-                onTogglePosition={togglePosition}
-                onSelectSkill={focusSkill}
-                onClose={() => setSelected(null)}
-                learningStatus={skillLearningStatus}
-                demand={skillDemandTrend.demand}
-                trend={skillDemandTrend.trend}
-                learnedSkills={learnedSkills}
-              />
-            </TabsContent>
-            <TabsContent value="analysis" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
-              <GraphAnalysisPanel
-                skills={data.nodes.filter((n) => n.type === 'skill').map((n) => ({ id: n.id, name: n.name }))}
-                onFocusSkill={focusSkill}
-              />
-              <GraphCommunityTree className="mt-3" />
-            </TabsContent>
-          </Card>
-        </Tabs>
+        {/* 节点详情面板 + 图谱算法分析：桌面=右侧边栏；移动端=底部抽屉（task T4） */}
+        <GraphDetailRail
+          rightTab={rightTab}
+          onRightTabChange={setRightTab}
+          ready={!!selected}
+          onClose={() => setSelected(null)}
+          className="h-[640px]"
+        >
+          <TabsContent value="detail" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
+            <NodeDetailPanel
+              node={selected}
+              stats={detailStats}
+              skillDetail={skillDetailView}
+              positionDetail={selected?.type === 'position' && positionDetail && positionDetail.id === selected.id ? positionDetail : null}
+              skillEvidence={selected && skillDetail && skillDetail.skill_id === selected.id ? skillEvidence : []}
+              similarSkills={selected && skillDetail && skillDetail.skill_id === selected.id ? similarSkills : []}
+              positionExpanded={selected?.type === 'position' ? expandedPositions.has(selected.id) : false}
+              onTogglePosition={togglePosition}
+              onSelectSkill={focusSkill}
+              onClose={() => setSelected(null)}
+              learningStatus={skillLearningStatus}
+              demand={skillDemandTrend.demand}
+              trend={skillDemandTrend.trend}
+              learnedSkills={learnedSkills}
+            />
+          </TabsContent>
+          <TabsContent value="analysis" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
+            <GraphAnalysisPanel
+              skills={data.nodes.filter((n) => n.type === 'skill').map((n) => ({ id: n.id, name: n.name }))}
+              onFocusSkill={focusSkill}
+            />
+            <GraphCommunityTree className="mt-3" />
+          </TabsContent>
+        </GraphDetailRail>
       </div>
 
       {/* 图例：与画布实际渲染对齐（形状+颜色，支持色盲识别） */}
