@@ -76,6 +76,17 @@ docker compose ps             # 全部 healthy 即就绪
 | 更新代码 | 重新 `docker compose up -d --build api worker` |
 | 数据备份 | `pg_dump`（PostgreSQL）+ `neo4j-admin dump`（Neo4j）；数据卷：`pg_data` / `neo4j_data` / `neo4j_logs` / `redis_data` |
 
+### 6.1 ETL 调度（容器内 ARQ cron，08-21 #348）
+
+ETL 主管线（采集 → 去重 → LLM 抽取 → 时滞/通胀 → 入图 → 快照 → 发现/自动流转）由 **worker 容器内 ARQ cron** 触发，不再依赖外部计划任务：
+
+- 执行时间在**配置中心 →「ETL 队列」页**配置（`etl_run_hour` / `etl_run_minute`，默认 05:00），持久化到 `backend/configs/runtime_settings.json`
+- 修改后需 **重启 worker** 生效：`docker compose restart worker`
+- 当日幂等：`run_etl_pipeline_scheduled` 内部 Redis 锁（`arq:etl:run:{date}`，24h TTL），重复触发自动跳过
+- 已验证：`docker logs zhigang-worker` 可见 ARQ cron 注册与 ETL 入队/执行日志
+
+> 历史外部任务（Windows `scheduled_tasks.ps1` 的 `ETLDaily` / Linux `crontab.example` 的 `0 5 * * *`）已停用；`scripts/cron/etl_daily.py` 保留，供手动重跑（`--force`）。其余外部任务（maimai/linkedin/课程源、GraphHealth、PositionDup）不变。
+
 ## 7. 常见问题
 
 ### 7.1 api 容器 Exited（fail-fast 门禁）

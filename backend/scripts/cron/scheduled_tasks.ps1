@@ -1,4 +1,4 @@
-﻿# 智岗罗盘 ETL 调度 Windows 计划任务示例（开发环境）
+# 智岗罗盘 ETL 调度 Windows 计划任务示例（开发环境）
 #
 # 部署（管理员 PowerShell）：
 #   cd backend
@@ -27,7 +27,10 @@ $TaskPrefix = "ZhigangETL_"
 # 调度任务定义（对齐设计文档 §4.4）
 # 采集责任划分：
 #   - boss/zhilian/indeed/glassdoor/arxiv/github/stackoverflow 由 ETL 主管线
-#     （05:00）阶段 1 统一采集，不再单独调度（避免同一平台每日重复采集）；
+#     阶段 1 统一采集，不再单独调度（避免同一平台每日重复采集）；
+#   - ETL 主管线自 08-21（#348）起由容器内 ARQ cron 调度，执行时间在配置中心
+#     「ETL 队列」页配置（runtime_config.etl_run_hour/minute，默认 05:00），
+#     重启 worker 后生效——本文件不再注册 ETLDaily 外部计划任务；
 #   - maimai 为夜间合规窗口（23:00 - 06:00，≤100 req/h），保持独立调度；
 #   - linkedin_public / 课程平台不在 ETL 采集列表内，保持独立调度；
 #   - 新岗位发现 + 自动流转已链入 ETL 阶段 15（快照发布之后），无需独立任务。
@@ -41,10 +44,8 @@ $Tasks = @(
     @{ Name = "CrawlCoursera";   Time = "10:00"; Script = "crawl_spider.py"; Args = @("coursera", "100"); Proxy = $true },
     @{ Name = "CrawlEdx";        Time = "10:30"; Script = "crawl_spider.py"; Args = @("edx", "100"); Proxy = $true },
     @{ Name = "CrawlIcourse163"; Time = "11:00"; Script = "crawl_spider.py"; Args = @("icourse163", "100") },
-    # ETL 主管线（05:00；阶段 1 采集 + LLM 抽取 + 快照 + 发现/自动流转）
-    @{ Name = "ETLDaily";       Time = "05:00"; Script = "etl_daily.py";    Args = @() },
     # 图谱健康治理（06:30，ETL 完成后；脏边/伪技能自动清理，备份 reports/graph_health_*）
-    @{ Name = "GraphHealth";    Time = "06:30"; Script = "graph_health_daily.py"; Args = @() }
+    @{ Name = "GraphHealth";    Time = "06:30"; Script = "graph_health_daily.py"; Args = @() },
     # 岗位重复对治理（06:45，GraphHealth 之后；变体合并/语义提议，备份 reports/position_duplicates_*）
     @{ Name = "PositionDup";    Time = "06:45"; Script = "position_dup_daily.py"; Args = @() }
 )
