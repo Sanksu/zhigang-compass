@@ -131,21 +131,30 @@ class TestGapDataUpgrade:
 
     def test_demand_normalized_from_source_count(self, monkeypatch):
         """demand = min(1, source_count/20)；无源按 1。"""
-        monkeypatch.setattr("app.services.learning_path.gap._evolved_signal", lambda sid: 0.0)
+        monkeypatch.setattr("app.services.learning_path.gap._trend_signal", lambda sid, sc: 0.0)
         gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 20)]))
         assert gaps[0].demand == 1.0
         gaps = analyze_gaps(_candidate([]), _position([self._req_src("Go", 5)]))
         assert gaps[0].demand == 0.25
 
-    def test_evolved_signal_positive_when_has_successor(self, monkeypatch):
-        """图谱有 EVOLVED_FROM 后继 → trend=+0.3。"""
-        monkeypatch.setattr("app.services.learning_path.gap._evolved_signal", lambda sid: 0.3)
+    def test_trend_is_continuous_diffusion(self, monkeypatch):
+        """trend 连续值：岗位扩散 + 跨源扩散等权合成（非两档）。"""
+        # 无关联岗位（_position_count→0）仅跨源项：source_count=10 → 0.5×0+0.5×0.5=0.25
+        monkeypatch.setattr("app.services.learning_path.gap._position_count", lambda sid: 0)
         gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 10)]))
-        assert gaps[0].trend == 0.3
+        assert gaps[0].trend == 0.25
+        # 关联 10 岗位 + 20 源 → 0.5×1 + 0.5×1 = 1.0
+        monkeypatch.setattr("app.services.learning_path.gap._position_count", lambda sid: 10)
+        gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 20)]))
+        assert gaps[0].trend == 1.0
+        # 关联 5 岗位 + 5 源 → 0.5×0.5 + 0.5×0.25 = 0.375
+        monkeypatch.setattr("app.services.learning_path.gap._position_count", lambda sid: 5)
+        gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 5)]))
+        assert gaps[0].trend == 0.375
 
     def test_roi_and_high_roi_top3(self, monkeypatch):
         """roi=(demand×(trend+1))/cost；真缺口按 ROI 取 Top3 打标，matched 不打标。"""
-        monkeypatch.setattr("app.services.learning_path.gap._evolved_signal", lambda sid: 0.0)
+        monkeypatch.setattr("app.services.learning_path.gap._trend_signal", lambda sid, sc: 0.0)
         # 高 cost 技能 ROI 低
         cand = _candidate([("Python", 3), ("Go", 3)])
         pos = _position(

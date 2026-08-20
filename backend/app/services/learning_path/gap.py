@@ -7,12 +7,15 @@ skill_weight DESC 优先，权重相同再按 gap_type（missing > weak > matche
 
 数据升级（task 2.x，契约 #341）：
 - demand：岗位侧 source_count（独立 JD 源数，聚合层预计算）归一化 → 真实需求度；
-- trend：技能图谱 EVOLVED_FROM 演化信号（有后续演化方向 +，否则中性）；
+- trend：技能扩散连续值 = 0.5×min(1,关联岗位数/10) + 0.5×min(1,source_count/20)；
+  （替代此前失效的 EVOLVED_FROM 演化信号——技能维度无演化边，改用
+  "被更多岗位采用 + 跨更多源"的可解释扩散信号，与 demand 互补）
 - roi：(demand × (trend+1)) / cost（cost = base_hours × 熟练度缺口，weak 减半）；
 - evidence：JD 要求 / 简历现状 溯源（来自岗位要求 + 候选人画像）。
 """
 
 from app.services.learning_path.schemas import GapSkill, GapType, MatchEvidenceItem
+from app.services.learning_path.prerequisites import base_hours
 from app.services.matching.engine import _canonical_name
 from app.services.matching.weights import load_sim_threshold
 
@@ -20,10 +23,9 @@ from app.services.matching.weights import load_sim_threshold
 _LEVEL_MIN_PROFICIENCY = {"初级": 1, "中级": 2, "高级": 3, "专家": 3}
 _PROFICIENCY_NAMES = {1: "了解", 2: "熟悉", 3: "精通"}
 
-# 数据升级：需求归一化基准（source_count=20 源视为需求度 1.0）
+# 数据升级：需求/扩散归一化基准（source_count=20 源或关联岗位=10 视为 1.0）
 _DEMAND_NORM = 20.0
-# cost 基础学时来源（复用先修字典学时分层；避免与 generator 重复计算）
-from app.services.learning_path.prerequisites import base_hours
+_POSITION_DIFFUSION_NORM = 10.0
 
 
 def _demand_from_source(source_count: int | None) -> float:
@@ -31,22 +33,36 @@ def _demand_from_source(source_count: int | None) -> float:
     return min(1.0, (source_count or 1) / _DEMAND_NORM)
 
 
-def _evolved_signal(skill_id: str | None) -> float:
-    """技能演进信号：图谱有 (s2)-[:EVOLVED_FROM]->(s) 时 +0.3（有后续演化方向），否则中性。"""
+def _position_count(skill_id: str | None) -> int:
+    """技能关联岗位数：图谱 (sk:Skill {id})<-[:REQUIRES]-(p:Position) 计数。"""
     if not skill_id:
-        return 0.0
+        return 0
     try:
         from app.core.database import neo4j_driver
 
         with neo4j_driver.session() as session:
             rec = session.run(
-                "MATCH (s:Skill {id: $id})<-[e:EVOLVED_FROM]-() RETURN count(e) AS n",
+                "MATCH (s:Skill {id: $id})<-[:REQUIRES]-(p:Position) RETURN count(p) AS n",
                 id=skill_id,
             ).single()
-            return 0.3 if (rec and rec["n"] > 0) else 0.0
+            return int(rec["n"]) if rec else 0
     except Exception:
-        # 图谱不可用不阻断差距分析（demand/trend 缺省，前端 mock 兜底）
-        return 0.0
+        # 图谱不可用不阻断差距分析（trend 退化为纯 source_count 项）
+        return 0
+
+
+def _trend_signal(skill_id: str | None, source_count: int | None) -> float:
+    """需求趋势连续值（0~1）：技能扩散信号。
+
+    由两项等权合成（全用现有真实数据，可解释）：
+    - 岗位扩散：被多少岗位 REQUIRES（≥10 岗位封顶 0.5）
+    - 跨源扩散：被多少独立 JD 源要求（source_count，≥20 源封顶 0.5）
+    技能被更多岗位采用且跨更多源 → 需求向上（trend 高）。
+    """
+    pos = _position_count(skill_id)
+    return 0.5 * min(1.0, pos / _POSITION_DIFFUSION_NORM) + 0.5 * min(
+        1.0, (source_count or 1) / _DEMAND_NORM
+    )
 
 
 def _priority(gap_type: GapType, necessity: str) -> str:
@@ -122,7 +138,7 @@ def analyze_gaps(candidate, position, semantic=None, sim_threshold: float | None
 
         # ── 数据升级（task 2.x）──
         demand = _demand_from_source(req.source_count)
-        trend = _evolved_signal(req.skill_id)
+        trend = _trend_signal(req.skill_id, req.source_count)
         # cost：base_hours × 熟练度缺口（missing 全量，weak 减半——与 generator 学时口径一致）
         cost = base_hours(req.skill_name)
         if gap_type == GapType.WEAK:
