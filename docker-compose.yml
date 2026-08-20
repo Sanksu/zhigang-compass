@@ -149,6 +149,9 @@ services:
       CDP_PROXY: http://host.docker.internal:7890
       # boss 登录态文件（宿主机经 export-cookies 导出；采集从文件读 cookies，无浏览器依赖）
       BOSS_COOKIES_FILE: /home/app/.zhigang-compass/boss-cookies.json
+      # 可选 GitHub API token（提升无 token 的 10 req/min 按 IP 限流配额，消除二次限制）；
+      # 未配置时 github 爬虫维持匿名采集（偶发 403 由 BackoffRetryMiddleware 退避重试兜底）
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
       # 爬虫输出持久化：容器重建不丢 JSONL
       - ./backend/data/crawlers/output:/app/data/crawlers/output

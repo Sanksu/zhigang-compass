@@ -39,19 +39,42 @@ class UARotationMiddleware:
 _BACKOFF_START = 30
 _BACKOFF_MAX = 300
 
+# 尊重 Retry-After 的天花板（与退避封顶一致，防服务端异常/恶意长建议拖住任务）
+_RETRY_AFTER_CAP = 300
+
 
 def backoff_delay(retries: int) -> int:
     """第 retries 次退避重试前的等待秒数（30×2^n，3 次起封顶 300s）。"""
     return _BACKOFF_MAX if retries >= 3 else _BACKOFF_START * (2 ** retries)
 
 
+def retry_after_seconds(response) -> int | None:
+    """从 429/403 响应头读取 Retry-After（秒数）；缺失/非法返回 None。
+
+    GitHub 等 API 限流常带该头（如 60s），遵循服务端建议比固定指数退避
+    更精确——避免"等服务就绪"的限流因重试过早而空跑满 RETRY_TIMES。
+    """
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    raw = headers.get("Retry-After")
+    if raw is None:
+        return None
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("ascii", "ignore")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 class BackoffRetryMiddleware:
     """429/403 指数退避重试（设计文档 §4 失败处理）。
 
-    收到 429/403 后按 30s→60s→120s→300s 指数退避重新调度原请求
-    （reactor.callLater 延迟调度，不阻塞事件循环）；
-    同一请求累计重试达 RETRY_TIMES 次仍失败则置 dont_retry 交给
-    内置 RetryMiddleware 收尾，避免即时重试叠加。
+    收到 429/403 后优先遵循响应头 Retry-After（封顶 300s），缺失时按
+    30s→60s→120s→300s 指数退避重新调度原请求（reactor.callLater 延迟调度，
+    不阻塞事件循环）；同一请求累计重试达 RETRY_TIMES 次仍失败则置
+    dont_retry 交给内置 RetryMiddleware 收尾，避免即时重试叠加。
 
     注：单日单源"连续失败当日停止并告警"需跨请求状态，未纳入本中间件；
     当前为请求级退避上限，更激进的源级熔断留待后续（如 Arq 任务失败计数）。
@@ -76,11 +99,13 @@ class BackoffRetryMiddleware:
             )
             return response
 
-        delay = backoff_delay(retries)
+        retry_after = retry_after_seconds(response)
+        delay = min(retry_after, _RETRY_AFTER_CAP) if retry_after is not None else backoff_delay(retries)
         retry_request = request.replace(dont_filter=True)
         retry_request.meta = {**request.meta, "backoff_count": retries + 1}
         spider.logger.warning(
-            f"[退避] {spider.name} 收到 {response.status}，指数退避 {delay}s 后重试 {request.url}"
+            f"[退避] {spider.name} 收到 {response.status}，"
+            f"{('遵循 Retry-After ' + str(retry_after) + 's') if retry_after is not None else f'指数退避 {delay}s'} 后重试 {request.url}"
         )
         try:
             reactor.callLater(delay, self.crawler.engine.schedule, retry_request, spider)

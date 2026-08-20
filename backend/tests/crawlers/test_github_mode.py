@@ -62,3 +62,19 @@ class TestGithubMode:
         req = list(spider.start_requests())[0]
 
         assert "created:>20" in self._query(req)
+
+    def test_no_token_no_auth_header(self, monkeypatch):
+        """未配置 GITHUB_TOKEN 时请求不带 Authorization（维持匿名）。"""
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        spider = _make_spider()
+
+        for req in spider.start_requests():
+            assert req.headers.get("Authorization") is None
+
+    def test_token_adds_auth_header(self, monkeypatch):
+        """配置 GITHUB_TOKEN 时请求带 Bearer Authorization（提升限流配额）。"""
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_test_123")
+        spider = _make_spider()
+
+        for req in spider.start_requests():
+            assert req.headers.get("Authorization") == b"Bearer ghp_test_123"

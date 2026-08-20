@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "data"))
 
 import crawlers.middlewares as mw
-from crawlers.middlewares import BackoffRetryMiddleware, backoff_delay
+from crawlers.middlewares import BackoffRetryMiddleware, backoff_delay, retry_after_seconds
 
 
 # ── 退避序列 ──
@@ -42,8 +42,9 @@ class _FakeRequest:
 
 
 class _FakeResponse:
-    def __init__(self, status):
+    def __init__(self, status, headers=None):
         self.status = status
+        self.headers = headers or {}
 
 
 class _FakeSpider:
@@ -135,4 +136,42 @@ def test_403_also_backoffs(monkeypatch):
     mw_inst, _, calls = _make_mw(monkeypatch)
     spider = _FakeSpider()
     mw_inst.process_response(_FakeRequest(), _FakeResponse(403), spider)
+    assert calls[0][0] == 30
+
+
+def test_retry_after_seconds_parser():
+    """Retry-After 头解析：秒数 / 缺失 / 非法值。"""
+    assert retry_after_seconds(_FakeResponse(429, headers={"Retry-After": b"45"})) == 45
+    assert retry_after_seconds(_FakeResponse(429)) is None
+    assert retry_after_seconds(_FakeResponse(429, headers={"Retry-After": b"abc"})) is None
+    assert retry_after_seconds(_FakeResponse(429, headers={"Other": b"60"})) is None
+
+
+def test_honors_retry_after(monkeypatch):
+    """403/429 带 Retry-After 时按其建议退避（而非固定指数 30s）。"""
+    mw_inst, crawler, calls = _make_mw(monkeypatch)
+    spider = _FakeSpider()
+    resp = _FakeResponse(429, headers={"Retry-After": b"60"})
+    out = mw_inst.process_response(_FakeRequest(), resp, spider)
+    assert out is None
+    assert len(calls) == 1
+    assert calls[0][0] == 60
+    assert calls[0][1] == crawler.engine.schedule
+
+
+def test_retry_after_capped(monkeypatch):
+    """Retry-After 超长时封顶到退避上限（300s），防服务端异常建议拖住任务。"""
+    mw_inst, _, calls = _make_mw(monkeypatch)
+    spider = _FakeSpider()
+    resp = _FakeResponse(403, headers={"Retry-After": b"99999"})
+    mw_inst.process_response(_FakeRequest(), resp, spider)
+    assert calls[0][0] == 300
+
+
+def test_missing_retry_after_falls_back_to_backoff(monkeypatch):
+    """无 Retry-After 头时维持既有指数退避（30s 起步）。"""
+    mw_inst, _, calls = _make_mw(monkeypatch)
+    spider = _FakeSpider()
+    out = mw_inst.process_response(_FakeRequest(), _FakeResponse(429), spider)
+    assert out is None
     assert calls[0][0] == 30
