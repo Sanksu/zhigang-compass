@@ -107,12 +107,24 @@ async def run_etl_pipeline(
             if platform not in tasks_module.CDP_SPIDERS
         ]
 
+    # 每爬虫采集配置（08-21）：enabled=false 停用该源；max_results 传 crawler 层
+    # （仅 arxiv/zhilian 显式消费，其余源忽略——crawl.py MAX_RESULTS_SUPPORTED）
+    crawler_cfg = runtime_config.get("crawlers") or {}
+
     results: dict = {"run_date": run_date, "stages": {}}
 
     crawl_results = []
     for spider in crawl_platforms:
+        cfg = crawler_cfg.get(spider) or {}
+        if cfg.get("enabled") is False:
+            crawl_results.append({"spider": spider, "skipped": "disabled_by_config"})
+            continue
         try:
-            crawl_results.append(await tasks_module.crawl_platform(ctx, spider))
+            crawl_results.append(
+                await tasks_module.crawl_platform(
+                    ctx, spider, max_results=cfg.get("max_results")
+                )
+            )
         except Exception as error:
             crawl_results.append({"spider": spider, "error": str(error)})
     results["stages"]["crawl"] = crawl_results

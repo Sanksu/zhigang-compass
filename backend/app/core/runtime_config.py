@@ -31,6 +31,8 @@ DEFAULTS: dict = {
     "etl_validate_temporal_default": 200,  # 时滞/通胀检测默认批次
     "etl_run_hour": 5,                  # ETL 调度小时（0-23，容器内 ARQ cron）
     "etl_run_minute": 0,                # ETL 调度分钟（0-59）
+    # 每爬虫采集配置（08-21）：spider -> {enabled, max_results}；缺省启用、按源默认数量
+    "crawlers": {},
 }
 
 _VALIDATORS = {
@@ -107,6 +109,35 @@ def _validate_rate_limit(value) -> dict:
     return cleaned
 
 
+def _validate_crawlers(value) -> dict:
+    """校验每爬虫采集配置：spider -> {enabled, max_results}。
+
+    - value 必须是对象（spider 名 → 配置）；
+    - enabled 布尔；max_results 10-1000 整数（缺失=按源默认）。
+    返回规范化后的 dict（仅含有效字段）。
+    """
+    if not isinstance(value, dict):
+        raise ValueError("crawlers 必须是对象")
+    cleaned = {}
+    for spider, cfg in value.items():
+        if not isinstance(cfg, dict):
+            raise ValueError(f"crawlers.{spider} 必须是对象")
+        if not isinstance(spider, str) or not spider.strip():
+            raise ValueError("crawlers 键（spider 名）不能为空")
+        entry = {}
+        if "enabled" in cfg:
+            if not isinstance(cfg["enabled"], bool):
+                raise ValueError(f"crawlers.{spider}.enabled 必须是布尔值")
+            entry["enabled"] = cfg["enabled"]
+        if "max_results" in cfg:
+            mr = cfg["max_results"]
+            if not isinstance(mr, int) or not 10 <= mr <= 1000:
+                raise ValueError(f"crawlers.{spider}.max_results 须为 10-1000 的整数")
+            entry["max_results"] = mr
+        cleaned[spider.strip()] = entry
+    return cleaned
+
+
 def save(values: dict) -> dict:
     """校验并持久化；返回规范化后的完整配置（校验失败抛 ValueError）。
 
@@ -121,6 +152,8 @@ def save(values: dict) -> dict:
             v = values[key]
             if key == "rate_limit":
                 data[key] = _validate_rate_limit(v)
+            elif key == "crawlers":
+                data[key] = _validate_crawlers(v)
             else:
                 validator = _VALIDATORS[key]
                 if not validator(v):
