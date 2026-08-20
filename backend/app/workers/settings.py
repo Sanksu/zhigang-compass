@@ -15,6 +15,7 @@ from app.workers.tasks import (
     check_data_freshness,
     check_llm_providers_health,
     crawl_platform,
+    crawl_scheduler,
     cross_validate_jds,
     dedup_simhash,
     detect_inflation,
@@ -71,6 +72,23 @@ async def on_shutdown(ctx: dict) -> None:
     print("[ARQ Worker] 关闭")
 
 
+def _crawler_cron_jobs() -> list:
+    """每爬虫独立触发时间的 cron 注册（08-21b）。
+
+    arq cron 无法给任务传参，故注册**单个每分钟 cron** 调用 crawl_scheduler；
+    crawl_scheduler 内部按"当前 HH:MM == 配置 hour/minute"匹配到点的爬虫并触发。
+    未配置独立时间的爬虫由 ETL 主管线统一触发（crawl_scheduler 内跳过，防双跑）。
+    worker 重启后生效（与其余运行时配置一致）。
+    """
+    return [
+        cron(
+            crawl_scheduler,
+            minute=set(range(0, 60)),
+            run_at_startup=False,
+        )
+    ]
+
+
 class WorkerSettings:
     """ARQ worker configuration.
 
@@ -79,6 +97,7 @@ class WorkerSettings:
 
     functions = [
         crawl_platform,
+        func(crawl_scheduler, timeout=7200, max_tries=1),
         func(run_etl_pipeline, timeout=10800, max_tries=1),
         func(run_etl_pipeline_scheduled, timeout=10800, max_tries=1),
         dedup_simhash,
@@ -127,4 +146,7 @@ class WorkerSettings:
             minute=runtime_config.get("etl_run_minute", 0),
             run_at_startup=False,
         ),
+        # 每爬虫独立 cron（08-21b）：仅配置了 hour+minute 的启用爬虫注册；
+        # 未配置独立时间的爬虫由 ETL 主管线统一触发（防双跑）。
+        *_crawler_cron_jobs(),
     ]

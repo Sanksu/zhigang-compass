@@ -9,6 +9,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from app.core import runtime_config
 from app.services.alerting import send_alert
 from app.workers.utils import push_crawl_log, update_crawl_task
 
@@ -250,3 +251,84 @@ async def crawl_platform(
         "items": line_count,
         "crawled_at": timestamp,
     }
+
+
+# 单爬虫独立调度当日幂等锁 TTL：覆盖最长爬虫执行窗口（zhilian 40min 上限）
+_CRAWL_RUN_LOCK_TTL = 60 * 60 * 24
+
+
+async def _crawl_run_lock_acquire(spider_name: str, run_date: str) -> bool:
+    """单爬虫当日幂等锁（Redis SET NX，24h TTL）。返回 True=首次获得可执行。
+
+    与 ETL 主管线锁（etl.py _etl_run_lock_acquire）同语义，但按 spider 隔离，
+    避免独立 cron 触发与主管线同日重复跑同一爬虫。
+    """
+    from arq import create_pool
+    from arq.connections import RedisSettings
+
+    from app.core.config import settings
+
+    client = await create_pool(RedisSettings.from_dsn(settings.arq_redis_url))
+    try:
+        acquired = await client.set(
+            f"arq:crawl:run:{spider_name}:{run_date}",
+            "1",
+            nx=True,
+            ex=_CRAWL_RUN_LOCK_TTL,
+        )
+        return bool(acquired)
+    finally:
+        await client.close()
+
+
+async def _run_spider_if_scheduled(
+    ctx: dict, spider: str, cfg: dict, run_date: str
+) -> dict:
+    """按单爬虫配置判断并触发（供 crawl_scheduler 每分钟调度复用）。
+
+    - enabled=false → 跳过；
+    - 未配置 hour/minute → 跳过（并入 ETL 主管线，不单独跑，防双跑）；
+    - 当日已跑过 → 跳过（幂等锁）；
+    - 否则按配置 max_results 触发 crawl_platform。
+    """
+    if cfg.get("enabled") is False:
+        return {"spider": spider, "skipped": "disabled_by_config"}
+    if "hour" not in cfg or "minute" not in cfg:
+        return {"spider": spider, "skipped": "no_individual_schedule"}
+    if not await _crawl_run_lock_acquire(spider, run_date):
+        return {
+            "spider": spider,
+            "skipped": "duplicate_day_lock",
+            "msg": f"当日 {spider} 已执行/在队列中，跳过重复触发",
+        }
+    return await crawl_platform(
+        ctx,
+        spider,
+        max_results=cfg.get("max_results"),
+    )
+
+
+async def crawl_scheduler(ctx: dict) -> dict:
+    """每爬虫独立 ARQ cron 入口（08-21b 每爬虫独立触发时间）。
+
+    settings.cron_jobs 注册为每分钟 cron；此处按"当前 HH:MM == 配置 hour/minute"
+    匹配到点的爬虫并触发。未配置独立时间的爬虫由 ETL 主管线统一触发，
+    不在此重复——防双跑。当日幂等锁按 spider 隔离（_crawl_run_lock_acquire）。
+
+    手动触发（/admin/crawl/trigger）仍走 crawl_platform 本体，不受本调度影响。
+    """
+    crawlers = runtime_config.get("crawlers") or {}
+    if not isinstance(crawlers, dict):
+        return {"run_date": None, "triggered": []}
+    now = datetime.now(timezone(timedelta(hours=8)))
+    current = (now.hour, now.minute)
+    run_date = now.strftime("%Y-%m-%d")
+
+    results: list[dict] = []
+    for spider, cfg in crawlers.items():
+        if not isinstance(cfg, dict):
+            continue
+        if (cfg.get("hour"), cfg.get("minute")) != current:
+            continue
+        results.append(await _run_spider_if_scheduled(ctx, spider, cfg, run_date))
+    return {"run_date": run_date, "triggered": results}

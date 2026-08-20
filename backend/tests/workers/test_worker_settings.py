@@ -19,6 +19,7 @@ from app.workers.tasks import (
     generate_diagnosis,
     graph_health_check,
     crawl_platform,
+    crawl_scheduler,
     cross_validate_jds,
     dedup_simhash,
     detect_inflation,
@@ -40,6 +41,7 @@ from app.workers.tasks import (
 
 EXPECTED_FUNCTIONS = [
     crawl_platform,
+    crawl_scheduler,
     run_etl_pipeline,
     run_etl_pipeline_scheduled,
     dedup_simhash,

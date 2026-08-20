@@ -31,7 +31,7 @@ const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   tasks: { title: '任务与告警', desc: 'ARQ 任务并发/超时与告警 Webhook · 重启后生效' },
   crawl: { title: '采集与限频', desc: '单次采集上限与各源请求限频 · 重启后生效' },
   evolution: { title: '演化与缓存', desc: '演化看板缓存 TTL · 重启后生效' },
-  etl: { title: 'ETL 队列', desc: 'ETL 批次/调度时间 + 每爬虫开关与采集数量（容器内 ARQ cron）· 重启 worker 后生效' },
+  etl: { title: 'ETL 队列', desc: 'ETL 批次/调度时间 + 每爬虫开关/采集数量/独立触发时间（容器内 ARQ cron）· 重启 worker 后生效' },
 }
 
 /** 任务与告警字段 */
@@ -115,13 +115,15 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
           next.etl_validate_temporal_default = String(cfg.etl_validate_temporal_default ?? 200)
           next.etl_run_hour = String(cfg.etl_run_hour ?? 5)
           next.etl_run_minute = String(cfg.etl_run_minute ?? 0)
-          // 每爬虫配置：缺省全启用 + 按源默认数量（空串=不覆盖）
+          // 每爬虫配置：缺省全启用 + 按源默认数量 + 无独立触发时间（空=并入主管线）
           const saved = cfg.crawlers ?? {}
           const init: Record<string, CrawlerConfig> = {}
           for (const s of CRAWLER_SPIDERS) {
             init[s.name] = {
               enabled: saved[s.name]?.enabled ?? true,
               max_results: saved[s.name]?.max_results,
+              hour: saved[s.name]?.hour,
+              minute: saved[s.name]?.minute,
             }
           }
           setCrawlers(init)
@@ -163,12 +165,16 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
       payload.etl_run_hour = hour >= 0 && hour <= 23 ? hour : 5
       const minute = Number(scalars.etl_run_minute)
       payload.etl_run_minute = minute >= 0 && minute <= 59 ? minute : 0
-      // 每爬虫配置：enabled 全量提交；max_results 仅提交非空（空=按源默认，不覆盖）
+      // 每爬虫配置：enabled 全量提交；max_results 仅提交非空；hour/minute 成对提交
       const cleaned: Record<string, CrawlerConfig> = {}
       for (const s of CRAWLER_SPIDERS) {
         const c = crawlers[s.name] ?? {}
         const entry: CrawlerConfig = { enabled: c.enabled ?? true }
         if (c.max_results != null && c.max_results > 0) entry.max_results = c.max_results
+        if (c.hour != null && c.minute != null && c.hour >= 0 && c.hour <= 23 && c.minute >= 0 && c.minute <= 59) {
+          entry.hour = c.hour
+          entry.minute = c.minute
+        }
         cleaned[s.name] = entry
       }
       payload.crawlers = cleaned
@@ -207,6 +213,8 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
           init[s.name] = {
             enabled: savedCrawlers[s.name]?.enabled ?? true,
             max_results: savedCrawlers[s.name]?.max_results,
+            hour: savedCrawlers[s.name]?.hour,
+            minute: savedCrawlers[s.name]?.minute,
           }
         }
         setCrawlers(init)
@@ -481,7 +489,7 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
               <Settings2 className="size-4" />
               每爬虫采集配置
               <Badge variant="outline" className="text-[10px] ml-auto font-mono">
-                开关 + 采集数量 · 关键词暂未支持
+                开关 + 采集数量 + 独立触发时间
               </Badge>
             </CardTitle>
           </CardHeader>
@@ -494,7 +502,8 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
                   <TableRow>
                     <TableHead className="w-[140px]">爬虫</TableHead>
                     <TableHead className="w-[80px]">启用</TableHead>
-                    <TableHead className="w-[160px]">单次采集上限</TableHead>
+                    <TableHead className="w-[150px]">单次采集上限</TableHead>
+                    <TableHead className="w-[170px]">独立触发时间</TableHead>
                     <TableHead>说明</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -543,6 +552,48 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
                             }
                             className="h-7 w-24 text-xs font-mono"
                           />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="number"
+                              disabled={disabled}
+                              value={c.hour ?? ''}
+                              placeholder="–"
+                              min={0}
+                              max={23}
+                              onChange={(e) =>
+                                setCrawlers((prev) => ({
+                                  ...prev,
+                                  [s.name]: {
+                                    ...(prev[s.name] ?? {}),
+                                    hour: e.target.value ? Number(e.target.value) : undefined,
+                                  },
+                                }))
+                              }
+                              className="h-7 w-14 text-xs font-mono"
+                            />
+                            <span className="text-xs text-ink-faint">:</span>
+                            <Input
+                              type="number"
+                              disabled={disabled}
+                              value={c.minute ?? ''}
+                              placeholder="–"
+                              min={0}
+                              max={59}
+                              onChange={(e) =>
+                                setCrawlers((prev) => ({
+                                  ...prev,
+                                  [s.name]: {
+                                    ...(prev[s.name] ?? {}),
+                                    minute: e.target.value ? Number(e.target.value) : undefined,
+                                  },
+                                }))
+                              }
+                              className="h-7 w-14 text-xs font-mono"
+                            />
+                          </div>
+                          <p className="mt-0.5 text-[9px] text-ink-faint">留空=并入主管线</p>
                         </TableCell>
                         <TableCell className="text-[10px] text-ink-faint">{s.note}</TableCell>
                       </TableRow>

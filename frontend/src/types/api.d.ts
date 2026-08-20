@@ -3674,13 +3674,17 @@ export interface components {
             etl_run_hour?: number;
             /** @description ETL 调度分钟（0-59） */
             etl_run_minute?: number;
-            /** @description 每爬虫采集配置（spider → {enabled, max_results}）；缺省启用、按源默认数量 */
+            /** @description 每爬虫采集配置（spider → {enabled, max_results, hour, minute}）；缺省启用、按源默认数量 */
             crawlers?: {
                 [key: string]: {
                     /** @description 是否参与 ETL 调度（false=停用） */
                     enabled?: boolean;
                     /** @description 单次采集条数上限（仅 arxiv/zhilian 消费；10-1000） */
                     max_results?: number;
+                    /** @description 独立触发小时（0-23；配置后该爬虫单独 cron 触发，缺省并入主管线） */
+                    hour?: number;
+                    /** @description 独立触发分钟（0-59；与 hour 成对） */
+                    minute?: number;
                 };
             };
         };
