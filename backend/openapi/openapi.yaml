@@ -2449,6 +2449,15 @@ components:
         etl_validate_temporal_default: { type: integer, description: 时滞/通胀检测默认批次（100-500） }
         etl_run_hour: { type: integer, description: ETL 调度小时（0-23，容器内 ARQ cron） }
         etl_run_minute: { type: integer, description: ETL 调度分钟（0-59） }
+        # ── 每爬虫采集配置（08-21：开关 + 采集数量；关键词暂未支持）──
+        crawlers:
+          type: object
+          description: 每爬虫采集配置（spider → {enabled, max_results}）；缺省启用、按源默认数量
+          additionalProperties:
+            type: object
+            properties:
+              enabled: { type: boolean, description: 是否参与 ETL 调度（false=停用） }
+              max_results: { type: integer, description: 单次采集条数上限（仅 arxiv/zhilian 消费；10-1000） }
 
     LlmProviderConfig:
       type: object

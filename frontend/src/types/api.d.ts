@@ -3674,6 +3674,15 @@ export interface components {
             etl_run_hour?: number;
             /** @description ETL 调度分钟（0-59） */
             etl_run_minute?: number;
+            /** @description 每爬虫采集配置（spider → {enabled, max_results}）；缺省启用、按源默认数量 */
+            crawlers?: {
+                [key: string]: {
+                    /** @description 是否参与 ETL 调度（false=停用） */
+                    enabled?: boolean;
+                    /** @description 单次采集条数上限（仅 arxiv/zhilian 消费；10-1000） */
+                    max_results?: number;
+                };
+            };
         };
         /** @description LLM provider 配置项（GET/PUT /admin/llm-config） */
         LlmProviderConfig: {

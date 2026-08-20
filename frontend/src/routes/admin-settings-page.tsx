@@ -31,7 +31,7 @@ const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   tasks: { title: '任务与告警', desc: 'ARQ 任务并发/超时与告警 Webhook · 重启后生效' },
   crawl: { title: '采集与限频', desc: '单次采集上限与各源请求限频 · 重启后生效' },
   evolution: { title: '演化与缓存', desc: '演化看板缓存 TTL · 重启后生效' },
-  etl: { title: 'ETL 队列', desc: 'ETL 批次与调度时间（容器内 ARQ cron）· 重启 worker 后生效' },
+  etl: { title: 'ETL 队列', desc: 'ETL 批次/调度时间 + 每爬虫开关与采集数量（容器内 ARQ cron）· 重启 worker 后生效' },
 }
 
 /** 任务与告警字段 */
@@ -74,9 +74,23 @@ const ETL_DEFAULTS: Record<string, string> = {
   etl_run_minute: '0',
 }
 
+/** ETL 主调度爬虫（对齐 backend workers/etl.py crawl_platforms：国内+国际+趋势） */
+const CRAWLER_SPIDERS = [
+  { name: 'zhilian', label: '智联招聘', note: '国内 · 支持数量上限' },
+  { name: 'indeed', label: 'Indeed', note: '国际 · 数量上限未生效' },
+  { name: 'glassdoor', label: 'Glassdoor', note: '国际 CDP · 数量上限未生效' },
+  { name: 'arxiv', label: 'arXiv', note: '论文 · 支持数量上限' },
+  { name: 'github', label: 'GitHub', note: '社区 · 数量上限未生效' },
+  { name: 'stackoverflow', label: 'StackOverflow', note: '社区 · 数量上限未生效' },
+] as const
+
+type CrawlerConfig = NonNullable<RuntimeConfig['crawlers']>[string]
+
 export function AdminSettingsPage({ section }: { section: SettingsSection }) {
   const [scalars, setScalars] = useState<Record<string, string>>({})
   const [rateLimit, setRateLimit] = useState<Record<string, RateLimitEntry>>({})
+  // 每爬虫采集配置：spider -> {enabled, max_results}（空=按源默认）
+  const [crawlers, setCrawlers] = useState<Record<string, CrawlerConfig>>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [feedback, setFeedback] = useState<Feedback>(null)
@@ -101,6 +115,16 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
           next.etl_validate_temporal_default = String(cfg.etl_validate_temporal_default ?? 200)
           next.etl_run_hour = String(cfg.etl_run_hour ?? 5)
           next.etl_run_minute = String(cfg.etl_run_minute ?? 0)
+          // 每爬虫配置：缺省全启用 + 按源默认数量（空串=不覆盖）
+          const saved = cfg.crawlers ?? {}
+          const init: Record<string, CrawlerConfig> = {}
+          for (const s of CRAWLER_SPIDERS) {
+            init[s.name] = {
+              enabled: saved[s.name]?.enabled ?? true,
+              max_results: saved[s.name]?.max_results,
+            }
+          }
+          setCrawlers(init)
         }
         setScalars(next)
       })
@@ -139,6 +163,15 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
       payload.etl_run_hour = hour >= 0 && hour <= 23 ? hour : 5
       const minute = Number(scalars.etl_run_minute)
       payload.etl_run_minute = minute >= 0 && minute <= 59 ? minute : 0
+      // 每爬虫配置：enabled 全量提交；max_results 仅提交非空（空=按源默认，不覆盖）
+      const cleaned: Record<string, CrawlerConfig> = {}
+      for (const s of CRAWLER_SPIDERS) {
+        const c = crawlers[s.name] ?? {}
+        const entry: CrawlerConfig = { enabled: c.enabled ?? true }
+        if (c.max_results != null && c.max_results > 0) entry.max_results = c.max_results
+        cleaned[s.name] = entry
+      }
+      payload.crawlers = cleaned
     }
     return payload
   }
@@ -168,6 +201,15 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
           etl_run_hour: String(saved.etl_run_hour ?? 5),
           etl_run_minute: String(saved.etl_run_minute ?? 0),
         })
+        const savedCrawlers = saved.crawlers ?? {}
+        const init: Record<string, CrawlerConfig> = {}
+        for (const s of CRAWLER_SPIDERS) {
+          init[s.name] = {
+            enabled: savedCrawlers[s.name]?.enabled ?? true,
+            max_results: savedCrawlers[s.name]?.max_results,
+          }
+        }
+        setCrawlers(init)
       }
       setFeedback({ type: 'ok', text: '已保存，重启 api/worker 容器后生效' })
     } catch (e) {
@@ -187,6 +229,9 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
       setScalars({ evolution_cache_ttl: '60' })
     } else {
       setScalars({ ...ETL_DEFAULTS })
+      const reset: Record<string, CrawlerConfig> = {}
+      for (const s of CRAWLER_SPIDERS) reset[s.name] = { enabled: true }
+      setCrawlers(reset)
     }
     setFeedback(null)
   }
@@ -424,6 +469,87 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
                 </div>
                 <p className="text-[10px] text-ink-faint">ETL 主管线每日在此时入队执行（小时 0-23，分钟 0-59）</p>
               </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {section === 'etl' && (
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Settings2 className="size-4" />
+              每爬虫采集配置
+              <Badge variant="outline" className="text-[10px] ml-auto font-mono">
+                开关 + 采集数量 · 关键词暂未支持
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <p className="py-6 text-center text-xs text-ink-faint">加载配置…</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[140px]">爬虫</TableHead>
+                    <TableHead className="w-[80px]">启用</TableHead>
+                    <TableHead className="w-[160px]">单次采集上限</TableHead>
+                    <TableHead>说明</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {CRAWLER_SPIDERS.map((s) => {
+                    const c = crawlers[s.name] ?? {}
+                    const disabled = c.enabled === false
+                    return (
+                      <TableRow key={s.name}>
+                        <TableCell>
+                          <span className="text-xs font-medium text-ink">{s.label}</span>
+                          <span className="ml-1.5 font-mono text-[10px] text-ink-faint">{s.name}</span>
+                        </TableCell>
+                        <TableCell>
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!disabled}
+                              onChange={(e) =>
+                                setCrawlers((prev) => ({
+                                  ...prev,
+                                  [s.name]: { ...(prev[s.name] ?? {}), enabled: e.target.checked },
+                                }))
+                              }
+                              className="size-3.5 accent-[var(--color-primary)]"
+                            />
+                            <span className="text-[10px] text-ink-muted">{disabled ? '停用' : '启用'}</span>
+                          </label>
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            disabled={disabled}
+                            value={c.max_results ?? ''}
+                            placeholder="源默认"
+                            min={10}
+                            max={1000}
+                            onChange={(e) =>
+                              setCrawlers((prev) => ({
+                                ...prev,
+                                [s.name]: {
+                                  ...(prev[s.name] ?? {}),
+                                  max_results: e.target.value ? Number(e.target.value) : undefined,
+                                },
+                              }))
+                            }
+                            className="h-7 w-24 text-xs font-mono"
+                          />
+                        </TableCell>
+                        <TableCell className="text-[10px] text-ink-faint">{s.note}</TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
             )}
           </CardContent>
         </Card>

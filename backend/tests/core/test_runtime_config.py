@@ -116,3 +116,50 @@ class TestSave:
         assert data["arq_concurrency"] == 8
         assert data["crawl_items_cap"] == 200  # 未被覆盖
         assert data["arq_job_timeout"] == 1800
+
+
+class TestSaveCrawlers:
+    """每爬虫采集配置（08-21）：enabled/max_results 校验与规范化。"""
+
+    def test_save_crawlers_valid(self, _isolated_config):
+        data = rc.save({
+            "crawlers": {
+                "zhilian": {"enabled": False, "max_results": 150},
+                "arxiv": {"max_results": 50},
+                "github": {"enabled": True},
+            },
+        })
+        crawlers = data["crawlers"]
+        assert crawlers["zhilian"] == {"enabled": False, "max_results": 150}
+        assert crawlers["arxiv"] == {"max_results": 50}
+        assert crawlers["github"] == {"enabled": True}
+        on_disk = json.loads(_isolated_config.read_text(encoding="utf-8"))
+        assert on_disk["crawlers"]["zhilian"]["max_results"] == 150
+
+    def test_save_crawlers_defaults_when_missing_file(self, _isolated_config):
+        assert rc.load_all()["crawlers"] == {}
+
+    def test_save_crawlers_invalid_rejected(self, _isolated_config):
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": {"zhilian": {"enabled": "yes"}}})
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": {"zhilian": {"max_results": 5}}})  # < 10
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": {"zhilian": {"max_results": 2000}}})  # > 1000
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": {"zhilian": "not-object"}})
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": []})
+
+    def test_save_crawlers_full_replace(self, _isolated_config):
+        """整体覆盖语义（与 rate_limit 一致）：再次 save 会替换整个 crawlers 对象。"""
+        rc.save({"crawlers": {"zhilian": {"enabled": False}}})
+        data = rc.save({"crawlers": {"arxiv": {"max_results": 80}}})
+        assert "zhilian" not in data["crawlers"]  # 整体替换，非增量
+        assert data["crawlers"]["arxiv"]["max_results"] == 80
+
+    def test_save_crawlers_empty_resets(self, _isolated_config):
+        """清空 crawlers：提交空对象即全部恢复默认（全启用）。"""
+        rc.save({"crawlers": {"zhilian": {"enabled": False}}})
+        data = rc.save({"crawlers": {}})
+        assert data["crawlers"] == {}
