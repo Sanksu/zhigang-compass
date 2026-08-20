@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
-import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw, FileText, ThumbsUp, ThumbsDown, RefreshCw, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw, FileText, ThumbsUp, ThumbsDown, RefreshCw, Sparkles, ChevronDown } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ResumeUploader } from '@/components/resume/resume-uploader'
-import { ScoreRing, RadarChart, SkillHeatmap, GanttChart } from '@/components/match/charts'
+import { ScoreRing, RadarChart, SkillHeatmap } from '@/components/match/charts'
+import { LearningTimeline } from '@/components/learning/learning-timeline'
 import {
   type BackendDiagnosisReport,
   type BackendGapItem,
@@ -43,12 +44,10 @@ const STATUS_CLASS: Record<PositionStatus | 'low', string> = {
   low: 'border-ink-faint/30 text-ink-muted bg-subtle',
 }
 
-const PRIORITY_LABEL = { high: '高', medium: '中', low: '低' } as const
-const PRIORITY_CLASS = {
-  high: 'border-state-archived/30 text-state-archived bg-state-archived/10',
-  medium: 'border-state-declining/30 text-state-declining bg-state-declining/10',
-  low: 'border-ink-faint/30 text-ink-muted bg-subtle',
-} as const
+const REL_LABEL = { gap: '缺口', fit: '达标', surplus: '超出' } as const
+function relLabel(rel: keyof typeof REL_LABEL): string {
+  return REL_LABEL[rel]
+}
 
 const GAP_TYPE_LABEL = {
   missing_must: '必备缺失',
@@ -159,6 +158,78 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
   }
 }
 
+// ── 差距分析数据升级（task 2.x）：双轨对齐 + ROI 打标 + 证据溯源 ──
+
+const GAP_COST: Record<GapItem['gap_type'], number> = {
+  missing_must: 2,
+  level_gap: 1.4,
+  missing_nice: 3,
+  matched: 99,
+}
+const PROF_NUM: Record<string, number> = {
+  专家: 4,
+  高级: 3,
+  熟练: 3,
+  掌握: 2,
+  中级: 2,
+  初级: 1,
+  了解: 1,
+  未掌握: 0,
+}
+/** 熟练度文本 → 0-4 数值（双轨对齐用；无要求/无法识别回退 fallback） */
+function profNum(text: string | undefined, fallback: number): number {
+  const s = (text ?? '').trim()
+  if (!s || s === '不限') return fallback
+  return PROF_NUM[s] ?? 2
+}
+/** 技能名确定性哈希 → 稳定 mock 需求/趋势（避免每次渲染随机跳动） */
+function hashNum(s: string): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
+  return h
+}
+
+/** 为差距数据补充 demand/trend/roi/high_roi/evidence（ROI=(demand×trend)/cost，Top3 打标核心突破点） */
+function decorateGaps(mr: MatchResult): GapItem[] {
+  const evMap = new Map<string, MatchResult['evidence_refs']>()
+  for (const e of mr.evidence_refs ?? []) {
+    const arr = evMap.get(e.skill) ?? []
+    arr.push(e)
+    evMap.set(e.skill, arr)
+  }
+
+  const decorated: GapItem[] = mr.gaps.map((g) => {
+    const demand = g.demand ?? 0.5 + (hashNum(g.skill) % 100) / 200 // 0.5-1.0
+    const trend = g.trend ?? ((hashNum(`${g.skill}:t`) % 100) / 100) * 1.5 - 0.5 // -0.5..1
+    const roi = (demand * (trend + 1)) / GAP_COST[g.gap_type]
+    const refs = evMap.get(g.skill) ?? []
+    const evidence: GapItem['evidence'] = [
+      { role: 'jd', text: `JD 要求：${g.required_level || '—'}` },
+      {
+        role: 'resume',
+        text:
+          g.gap_type === 'matched'
+            ? `简历：已具备${g.current_level ? `（${g.current_level}）` : ''}`
+            : `简历：${g.current_level && g.current_level !== '未掌握' ? g.current_level : '未标注/缺失'}`,
+      },
+    ]
+    if (refs.length > 0) {
+      evidence.push({ role: 'jd', text: `来源：${refs.slice(0, 2).map((r) => r.source).join('、')}` })
+    }
+    return { ...g, demand, trend, roi, evidence }
+  })
+
+  // Top3 ROI（仅真缺口，不含已匹配项）
+  const top3 = new Set(
+    decorated
+      .filter((g) => g.gap_type !== 'matched')
+      .sort((a, b) => (b.roi ?? 0) - (a.roi ?? 0))
+      .slice(0, 3)
+      .map((g) => g.skill),
+  )
+  return decorated.map((g) => ({ ...g, high_roi: g.gap_type !== 'matched' && top3.has(g.skill) }))
+}
+
 function toCandidate(s: ResumeSummary): CandidateProfile {
   return {
     name: s.file_name.replace(/\.(pdf|docx?|png|jpe?g)$/i, ''),
@@ -194,6 +265,10 @@ export function ResumeMatchPage() {
   const [resumeList, setResumeList] = useState<ResumeSummary[]>([])
   const [activeResumeId, setActiveResumeId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // 差距展开溯源（task 2.2）：被展开的技能集
+  const [expandedGaps, setExpandedGaps] = useState<Set<string>>(() => new Set())
+  // 差距数据升级派生（task 2.x）：补充 ROI/需求/趋势/证据/核心突破点
+  const gapRows = useMemo(() => (matchResult ? decorateGaps(matchResult) : []), [matchResult])
 
   // 载入已解析简历列表（后端 /resume/list）
   function loadResumeList() {
@@ -476,6 +551,7 @@ export function ResumeMatchPage() {
     setFeedback(null)
     setActiveResumeId(null)
     setNotice(null)
+    setExpandedGaps(new Set())
   }
 
   // ===== 上传阶段 =====
@@ -809,50 +885,114 @@ export function ResumeMatchPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {matchResult.gaps.length === 0 ? (
+                  {gapRows.length === 0 ? (
                     <p className="text-xs text-ink-faint py-6 text-center">
                       无必备技能缺口，岗位要求全部满足
                     </p>
                   ) : (
                     <div className="space-y-2">
-                      {matchResult.gaps.map((gap, i) => {
-                        const Icon =
-                          gap.gap_type === 'missing_must'
-                            ? XCircle
-                            : gap.gap_type === 'level_gap'
-                              ? AlertCircle
-                              : CheckCircle2
+                      {gapRows.map((gap) => {
+                        const expanded = expandedGaps.has(gap.skill)
+                        // 双轨对齐：目标(岗位要求) vs 现状(候选人) 的 0-4 熟练度
+                        const target = Math.max(0, Math.min(4, profNum(gap.required_level, 3)))
+                        const actual = Math.max(0, Math.min(4, profNum(gap.current_level, 0)))
+                        const rel = actual < target ? 'gap' : actual === target ? 'fit' : 'surplus'
+                        const GAP_ICON =
+                          gap.gap_type === 'missing_must' ? XCircle : gap.gap_type === 'level_gap' ? AlertCircle : CheckCircle2
+                        const relClass =
+                          rel === 'gap' ? 'text-state-archived' : rel === 'surplus' ? 'text-state-emerging' : 'text-state-stable'
+                        const relBar =
+                          rel === 'gap' ? 'bg-state-archived' : rel === 'surplus' ? 'bg-state-emerging' : 'bg-state-stable'
                         const iconColor =
                           gap.gap_type === 'missing_must'
                             ? 'text-state-archived'
                             : gap.gap_type === 'level_gap'
                               ? 'text-state-declining'
-                              : gap.gap_type === 'matched'
-                                ? 'text-state-stable'
-                                : 'text-ink-faint'
+                              : 'text-state-stable'
                         return (
                           <div
-                            key={i}
-                            className="flex items-center gap-3 rounded-md border border-border p-2.5"
+                            key={gap.skill}
+                            className={`rounded-md border p-2.5 ${expanded ? 'border-border-strong' : 'border-border'}`}
                           >
-                            <Icon className={`size-4 shrink-0 ${iconColor}`} />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-ink">{gap.skill}</span>
-                                <Badge variant="outline" className="text-[10px]">
-                                  {GAP_TYPE_LABEL[gap.gap_type]}
-                                </Badge>
-                              </div>
-                              <p className="text-xs text-ink-muted mt-0.5">
-                                当前: {gap.current_level} → 要求: {gap.required_level}
-                              </p>
-                            </div>
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] ${PRIORITY_CLASS[gap.priority]}`}
+                            {/* 头部：技能 + 类型/ROI 徽标 + 对齐状态（点击展开溯源） */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedGaps((prev) => {
+                                  const n = new Set(prev)
+                                  if (n.has(gap.skill)) n.delete(gap.skill)
+                                  else n.add(gap.skill)
+                                  return n
+                                })
+                              }
+                              className="flex w-full items-center gap-3 text-left"
                             >
-                              {PRIORITY_LABEL[gap.priority]}优
-                            </Badge>
+                              <GAP_ICON className={`size-4 shrink-0 ${iconColor}`} />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="text-sm font-medium text-ink">{gap.skill}</span>
+                                  <Badge variant="outline" className="text-[10px]">
+                                    {GAP_TYPE_LABEL[gap.gap_type]}
+                                  </Badge>
+                                  {gap.high_roi && (
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-state-emerging/40 bg-state-emerging/10 px-1.5 py-0 text-[10px] font-medium text-state-emerging">
+                                      <Sparkles className="size-3" />核心突破点 · 高 ROI
+                                    </span>
+                                  )}
+                                  <span className={`ml-auto text-[9px] font-mono ${relClass}`}>{relLabel(rel)}</span>
+                                </div>
+                                {/* 双轨对齐条：目标基线(刻度) vs 现状(填充) */}
+                                <div className="mt-1.5 flex items-center gap-2">
+                                  <div className="relative h-2 flex-1 rounded-full bg-border/60">
+                                    <div
+                                      className="absolute inset-y-[-2px] w-0.5 rounded bg-ink/50"
+                                      style={{ left: `${(target / 4) * 100}%` }}
+                                      title={`岗位要求 ${target}/4`}
+                                    />
+                                    <div
+                                      className={`absolute inset-y-0 left-0 rounded-full ${relBar}`}
+                                      style={{ width: `${(actual / 4) * 100}%` }}
+                                    />
+                                  </div>
+                                  <span className="shrink-0 font-mono text-[10px] text-ink-muted tabular-nums">
+                                    目标 {target} / 现状 {actual}
+                                  </span>
+                                  <ChevronDown
+                                    className={`size-3.5 shrink-0 text-ink-faint transition-transform ${expanded ? 'rotate-180' : ''}`}
+                                  />
+                                </div>
+                              </div>
+                            </button>
+                            {/* 展开：ROI 明细 + 证据溯源（task 2.2/2.3） */}
+                            {expanded && (
+                              <div className="mt-2 space-y-2 border-t border-border pt-2">
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-muted">
+                                  <span>
+                                    需求 <b className="text-ink">{Math.round((gap.demand ?? 0) * 100)}</b>
+                                  </span>
+                                  <span>
+                                    趋势{' '}
+                                    <b className={((gap.trend ?? 0) >= 0 ? 'text-state-emerging' : 'text-state-archived')}>
+                                      {(gap.trend ?? 0) >= 0 ? '↑' : '↓'} {Math.round(Math.abs(gap.trend ?? 0) * 100)}
+                                    </b>
+                                  </span>
+                                  <span>
+                                    ROI <b className="text-ink">{((gap.roi ?? 0)).toFixed(2)}</b>
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {(gap.evidence ?? []).map((ev, j) => (
+                                    <Badge
+                                      key={j}
+                                      variant="outline"
+                                      className={`text-[10px] ${ev.role === 'resume' ? 'bg-ink text-canvas' : ''}`}
+                                    >
+                                      {ev.text}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )
                       })}
@@ -861,7 +1001,7 @@ export function ResumeMatchPage() {
                 </CardContent>
               </Card>
 
-              {/* 学习路径甘特图（先修链 + 推荐课程 Top-3，后端 compare 返回） */}
+              {/* 学习路径规划（双轨制：先修拓扑分层 → 阶段时间轴；已匹配技能标记已掌握） */}
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm flex items-center gap-2">
@@ -876,11 +1016,17 @@ export function ResumeMatchPage() {
                       <RefreshCw className="size-3 mr-1" />刷新
                     </Button>
                   </CardTitle>
-                  <CardDescription>基于课程图谱的补足路径（先修链 + 推荐课程）</CardDescription>
+                  <CardDescription>按先修关系分阶段的学习时间轴（下一步 / 未解锁 / 已掌握）</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {matchResult.learning_path.length > 0 ? (
-                    <GanttChart data={matchResult.learning_path} />
+                    <LearningTimeline
+                      items={matchResult.learning_path}
+                      completedSkills={matchResult.skill_matrix
+                        .filter((s) => s.match === 'full')
+                        .map((s) => s.skill)}
+                      onGoToLearn={(task) => setNotice(`已标记开始学习：${task.skill}（可在此集成课程跳转）`)}
+                    />
                   ) : (
                     <p className="text-xs text-ink-faint py-10 text-center">
                       无需要补足的技能差距，岗位要求已全部满足

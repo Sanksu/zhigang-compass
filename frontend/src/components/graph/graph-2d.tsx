@@ -16,8 +16,10 @@ import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 import type { EChartsModel } from './graph-layout'
 import { COLOR_BY_STATUS, skillLabelThreshold } from './graph-utils'
+import { buildDagGraph, type DagSkillLink, type DagSkillNode } from '@/components/learning/learning-timeline'
+import type { LearningPathItem } from '@/components/match/types'
 import { GraphFilterPanel } from './graph-filter-panel'
-import { escapeHtml, isDark } from '@/lib/utils'
+import { escapeHtml, isDark, cn } from '@/lib/utils'
 
 /** ECharts 回调参数最小类型 */
 interface EChartsParam {
@@ -36,6 +38,10 @@ interface Graph2DProps {
   focusRequest?: { id: string; ts: number } | null
   onSelectNode: (node: NodeDetail | null) => void
   onTogglePosition: (id: string) => void
+  /** 学习路径（提供时启用"宏观 DAG"视图；缺省保持原力导向全局图谱） */
+  learningPath?: LearningPathItem[]
+  /** 已掌握技能集（DAG 节点灰/蓝/绿编码依据） */
+  completedSkills?: string[]
   className?: string
 }
 
@@ -61,6 +67,18 @@ const SYMBOL_BY_STATUS: Record<PositionStatus, string> = {
 const COLOR_SKILL_LIGHT = '#09090b'
 const COLOR_SKILL_DARK = '#fafafa'
 const COLOR_EVIDENCE = '#a1a1aa'
+
+// 宏观 DAG 学习状态编码（task 1.1）：绿=已掌握 / 蓝=下一步 / 灰=未解锁
+const DAG_COLOR_BY_STATUS: Record<string, string> = {
+  done: '#22c55e',
+  doing: '#2563eb',
+  locked: '#a1a1aa',
+}
+const DAG_STATUS_LABEL: Record<string, string> = {
+  done: '已掌握',
+  doing: '下一步',
+  locked: '未解锁',
+}
 
 function symbolOf(node: GraphNode): string {
   if (node.type === 'position') return SYMBOL_BY_STATUS[node.status ?? 'candidate']
@@ -96,8 +114,118 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`
 }
 
+/** 宏观 DAG option：按拓扑层做分层定位 + 状态配色 + 先修有向箭头（lr 布局） */
+function buildDagOption(
+  dagNodes: DagSkillNode[],
+  dagLinks: DagSkillLink[],
+  dark: boolean,
+  width: number,
+  height: number,
+): echarts.EChartsCoreOption {
+  // 分层：x 由层号决定（左→右），层内 y 均分并居中
+  const byLayer = new Map<number, DagSkillNode[]>()
+  let maxLayer = 1
+  for (const n of dagNodes) {
+    if (!byLayer.has(n.layer)) byLayer.set(n.layer, [])
+    byLayer.get(n.layer)!.push(n)
+    maxLayer = Math.max(maxLayer, n.layer)
+  }
+  const marginX = 120
+  const marginY = 46
+  const stepX = (width - marginX * 2) / Math.max(1, maxLayer - 1)
+  const pos = new Map<string, [number, number]>()
+  for (const [layer, arr] of byLayer) {
+    const stepY = Math.min((height - marginY * 2) / Math.max(1, arr.length), 84)
+    arr.forEach((n, j) => {
+      pos.set(n.id, [marginX + (layer - 1) * stepX, height / 2 + (j - (arr.length - 1) / 2) * stepY])
+    })
+  }
+
+  const textColor = dark ? '#fafafa' : '#09090b'
+  const mutedColor = dark ? '#a1a1aa' : '#71717a'
+  const lineColor = dark ? '#52525b' : '#d4d4d8'
+
+  const data = dagNodes.map((n) => {
+    const [x, y] = pos.get(n.id) ?? [0, 0]
+    return {
+      id: n.id,
+      name: n.name,
+      x,
+      y,
+      symbolSize: 34,
+      category: n.status,
+      itemStyle: { color: DAG_COLOR_BY_STATUS[n.status] ?? '#a1a1aa' },
+      label: { show: true, position: 'right', color: textColor, fontSize: 11, formatter: n.name },
+      emphasis: { focus: 'adjacency' },
+    }
+  })
+  const links = dagLinks.map((l) => ({
+    source: l.source,
+    target: l.target,
+    lineStyle: { color: lineColor, curveness: 0.2 },
+    emphasis: { lineStyle: { color: '#3b82f6', width: 2 } },
+  }))
+
+  return {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: dark ? '#18181b' : '#ffffff',
+      borderColor: dark ? '#3f3f46' : '#d4d4d8',
+      textStyle: { color: textColor, fontSize: 12 },
+      formatter: (params: EChartsParam) => {
+        const d = params.data as { name?: string; category?: string } | undefined
+        const label = DAG_STATUS_LABEL[(d?.category ?? '')] ?? ''
+        return `<b>${escapeHtml(d?.name ?? '')}</b>${label ? `<br/><span style="color:${mutedColor};font-size:11px">${label}</span>` : ''}`
+      },
+    },
+    legend: {
+      bottom: 8,
+      left: 'center',
+      itemWidth: 14,
+      itemHeight: 8,
+      itemGap: 16,
+      textStyle: { color: mutedColor, fontSize: 11 },
+      data: ['done', 'doing', 'locked'],
+      formatter: (name: string) => DAG_STATUS_LABEL[name] ?? name,
+    },
+    series: [
+      {
+        type: 'graph',
+        layout: 'none',
+        roam: true,
+        draggable: true,
+        cursor: 'pointer',
+        scaleLimit: { min: 0.4, max: 3 },
+        // 有向箭头：先修 → 目标（edgeSymbol 首项 none、末项 arrow）
+        edgeSymbol: ['none', 'arrow'],
+        edgeSymbolSize: 7,
+        data,
+        links,
+        lineStyle: { curveness: 0.2, opacity: 0.85 },
+        labelLayout: { hideOverlap: true },
+        categories: [
+          { name: 'done', itemStyle: { color: '#22c55e' } },
+          { name: 'doing', itemStyle: { color: '#2563eb' } },
+          { name: 'locked', itemStyle: { color: '#a1a1aa' } },
+        ],
+      },
+    ],
+  }
+}
+
 export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
-  { data, selectedId, expandedPositions, focusRequest, onSelectNode, onTogglePosition, className },
+  {
+    data,
+    selectedId,
+    expandedPositions,
+    focusRequest,
+    onSelectNode,
+    onTogglePosition,
+    learningPath,
+    completedSkills,
+    className,
+  },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -109,6 +237,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   const [hiddenStatuses, setHiddenStatuses] = useState<Set<import('./types').PositionStatus>>(() => new Set())
   // B2: 仅显示 must（必备）边
   const [showOnlyMustEdges, setShowOnlyMustEdges] = useState(false)
+  // task 1.1: 视图模式 — dag=宏观学习路径 DAG；graph=全局力导向图谱（提供 learningPath 时可用）
+  const dagEnabled: boolean = !!learningPath && learningPath.length > 0
+  const [viewMode, setViewMode] = useState<'graph' | 'dag'>(dagEnabled ? 'dag' : 'graph')
+  // 尺寸版本：容器尺寸变化时重排 DAG（layout:'none' 不自动 reposition）
+  const [size, setSize] = useState(0)
+  const dagData = useMemo(
+    () => (learningPath && learningPath.length > 0 ? buildDagGraph(learningPath, completedSkills) : null),
+    [learningPath, completedSkills],
+  )
 
   const toggleStatus = useCallback((s: import('./types').PositionStatus) => {
     setHiddenStatuses((prev) => {
@@ -226,7 +363,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 
   useEffect(() => {
     if (!containerRef.current) return
-    const ro = new ResizeObserver(() => chartRef.current?.resize())
+    const ro = new ResizeObserver(() => {
+      chartRef.current?.resize()
+      setSize((s) => s + 1)
+    })
     ro.observe(containerRef.current)
     return () => ro.disconnect()
   }, [])
@@ -255,6 +395,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
+
+    // 宏观 DAG 视图（task 1.1）：提供 learningPath 且选用 DAG 时，用分层拓扑渲染
+    if (dagData && viewMode === 'dag') {
+      const W = chart.getWidth() || 640
+      const H = chart.getHeight() || 480
+      chart.setOption(buildDagOption(dagData.nodes, dagData.links, isDark(), W, H))
+      return
+    }
 
     const dark = isDark()
     const textColor = dark ? '#fafafa' : '#09090b'
@@ -411,7 +559,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     }
 
     chart.setOption(option)
-  }, [filteredData, themeVersion, expandedPositions, isNarrow])
+  }, [filteredData, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size])
 
   useEffect(() => {
     const chart = chartRef.current
@@ -432,6 +580,29 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 
   return (
     <div className={`relative h-full w-full ${className ?? ''}`}>
+      {/* task 1.1: 学习路径可用时提供 宏观 DAG / 全局图谱 切换 */}
+      {dagEnabled && (
+        <div className="absolute right-3 top-3 z-20 flex overflow-hidden rounded-md border border-border bg-canvas/90 shadow-sm text-[10px]">
+          {(
+            [
+              ['dag', '宏观 DAG'],
+              ['graph', '全局图谱'],
+            ] as const
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setViewMode(mode)}
+              className={cn(
+                'px-2.5 py-1 font-medium transition-colors',
+                viewMode === mode ? 'bg-ink text-canvas' : 'text-ink-muted hover:bg-subtle hover:text-ink',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {/* B2: 传入岗位状态过滤 + must/nice 边过滤 props */}
       <GraphFilterPanel
         minWeight={minWeight}

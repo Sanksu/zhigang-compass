@@ -68,6 +68,17 @@ export interface GapItem {
   priority: 'high' | 'medium' | 'low'
   current_level: string
   required_level: string
+  // ── 差距分析数据升级新增（后端暂未直接返回，均为可选，缺省由 UI 推导/mock）──
+  /** 市场需求度 0-1 */
+  demand?: number
+  /** 需求趋势 -1..1 */
+  trend?: number
+  /** ROI 指标 = (demand × trend) / cost，用于高杠杆缺口打标 */
+  roi?: number
+  /** 该技能是否高杠杆缺口（Top3 ROI） */
+  high_roi?: boolean
+  /** 评分/差距证据（供点击展开溯源） */
+  evidence?: { role: 'jd' | 'resume'; text: string }[]
 }
 
 /** 学习路径项（甘特图） */
@@ -83,6 +94,19 @@ export interface LearningPathItem {
   courses: { title: string; platform: string; hours: number }[]
   /** 优先级 */
   priority: 'high' | 'medium' | 'low'
+  // ── 学习路径双轨制新增（后端暂未直接返回，均为可选，缺失由 UI 兜底）──
+  /** 学习状态（done=已掌握 / doing=下一步 / locked=未解锁），后端未返回时前端按拓扑推导 */
+  status?: 'done' | 'doing' | 'locked'
+  /** 预计学时（小时）。缺省由 duration_days×8 推导 */
+  estimatedHours?: number
+  /** 市场需求度 0-1（可选，供 ROI 打标） */
+  demand?: number
+  /** 需求趋势 -1..1（可选，供 ROI 打标） */
+  trend?: number
+  /** ROI 指标 = (demand × trend) / cost（可选，供高杠杆缺口复用） */
+  roi?: number
+  /** 评分/差距证据（可选，供数据溯源展开） */
+  evidence?: string[]
 }
 
 /** 完整匹配结果（人岗比对） */
