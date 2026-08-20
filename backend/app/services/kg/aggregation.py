@@ -14,6 +14,8 @@
 - REQUIRES.weight         = must=0.8 / nice=0.4（沿用图谱现有两档约定）
 - REQUIRES.necessity      = P2-D 三重条件判 must：hit≥3 样本保护 + JD 覆盖率
                             （hit/jd_count）≥15% + must 标注占比（must_count/hit）>1/2；
+                            单源/少源岗位（jd_count≤2）样本不足，继承抽取层 must 标注
+                            （08-20 修复，避免必备技能全被压成加分）；
                             大岗位（jd_count≥10）hit<2 的一次性噪声边不生成
 - REQUIRES.source_count   = 命中该技能的独立招聘源数
 
@@ -52,6 +54,10 @@ _WEIGHT_NICE = 0.4
 _MUST_THRESHOLD = 0.5
 _COVERAGE_THRESHOLD = 0.15
 _MIN_HIT_FOR_MUST = 3
+# 单源/少源岗位兜底（08-20 修复）：jd_count ≤ 2 时岗位 JD 样本不足以做
+# 跨 JD 多数表决（任何技能 hit≤jd_count≤2 <3，三重条件必然判 nice），
+# 直接继承抽取层的 must 标注（must_count>0 即 must），避免必备技能全被压成加分
+_SMALL_JD_THRESHOLD = 2
 # P2-D 低频边过滤：jd_count≥10 的岗位，hit<2 的边视为一次性噪声不生成
 # （jd_count<10 的小岗位样本不足，全量保留）
 _MIN_HIT_EDGE = 2
@@ -59,13 +65,22 @@ _MIN_JD_FOR_FILTER = 10
 
 
 def _is_must(sa: SkillAgg, jd_count: int) -> bool:
-    """技能边是否判 must（P2-D 聚合口径）。
+    """技能边是否判 must（P2-D 聚合口径 + 单源岗位兜底）。
 
-    must 判定三重条件：
+    样本充分时（jd_count > _SMALL_JD_THRESHOLD）沿用三重条件：
     1. hit ≥ 3：样本保护，防 1-2 次出现的技能因单条 JD 标注虚高判 must
     2. hit/jd_count ≥ 15%：技能须在该岗位足够比例的 JD 中出现（普适要求）
     3. must_count/hit > 50%：出现该技能的 JD 中超半数标 must
+
+    单源/少源岗位兜底（08-20 修复）：jd_count ≤ _SMALL_JD_THRESHOLD 时，
+    岗位 JD 样本不足以做跨 JD 多数表决（任何技能 hit≤jd_count≤2 <3，
+    三重条件必然判 nice），直接继承抽取层的 must 标注——该岗位任一 JD
+    将技能标 must（must_count > 0）即判 must，否则 nice。
     """
+    if jd_count <= 0:
+        return False
+    if jd_count <= _SMALL_JD_THRESHOLD:
+        return sa.must_count > 0
     if sa.hit < _MIN_HIT_FOR_MUST:
         return False
     coverage = sa.hit / jd_count if jd_count else 0

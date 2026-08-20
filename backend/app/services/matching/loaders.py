@@ -84,7 +84,13 @@ def _load_positions_uncached() -> list[PositionProfile]:
         rows = session.run(
             """
             MATCH (p:Position)-[r:REQUIRES]->(s:Skill)
-            RETURN p.id AS pid, p.name AS pname,
+            // 边缘岗位过滤（08-20）：剔除单/低频岗位（freq<3，多为 1 条 JD 支撑的
+            // 噪声岗位，如 GSBOA/Clay/TeamCenter基础设施管理员）与 legacy 状态岗位，
+            // 避免"文本相关但证据薄弱"的边缘岗位混入匹配推荐
+            WHERE p.freq IS NOT NULL AND p.freq >= 3
+              AND coalesce(p.status, '') <> 'legacy'
+            RETURN p.id AS pid,
+                   p.name AS pname,
                    p.required_years AS req_years, p.last_updated AS last_updated,
                    p.industry AS industry,
                    s.id AS sid, s.name AS sname,
