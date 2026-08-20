@@ -308,6 +308,19 @@ def core_duties_compare(gold: list[str], pred: list[str]) -> dict:
     }
 
 
+def split_fp_aligned(fp_list: list[str], low_text: str) -> tuple[list[str], list[str]]:
+    """方案 A（0.90 达标口径，PR #330 张恺天确认）：FP 拆成 词面命中（豁免）与非词面（幻觉）。
+
+    词面命中 = 归一化技能名在正文词面出现（_text_has），视为"预测全收 vs gold 精选"的
+    评测口径不对等而非错误，不计 FP；非词面 FP 为真实幻觉，单列监控（打样非词面 1/254=0.4%）。
+    """
+    from app.services.extraction.post_processor import _text_has
+
+    in_text = [s for s in fp_list if _text_has(low_text, s)]
+    halluc = [s for s in fp_list if not _text_has(low_text, s)]
+    return in_text, halluc
+
+
 # 评测侧补漏的全文字典扫描（08-17）：白名单词 + 别名键（规范写法）、
 # 词边界匹配、过滤软技能与技能停用词——与 scripts/rebuild_gold_by_text_scan
 # 同口径（该脚本是段落扫描，此处为全文）
@@ -411,6 +424,9 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
     experience_hits = 0
     experience_compared = 0
     duties_total: Counter[str] = Counter()
+    # 方案 A 词面真值对齐（0.90 达标口径，PR #330）：非幻觉 FP 豁免后的技能微平均 + 幻觉单列
+    skills_total_a: Counter[str] = Counter()
+    hallucinated_total: Counter[str] = Counter()
     skills_total: Counter[str] = Counter()
     bonus_total: Counter[str] = Counter()
     sample_skill_f1: list[float] = []
@@ -477,6 +493,17 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         for key in ("tp", "fp", "fn"):
             skills_total[key] += len(skills_cmp[key])
             bonus_total[key] += len(bonus_cmp[key])
+        # —— 方案 A 词面真值对齐（0.90 达标口径，PR #330 张恺天确认）：——
+        # FP 豁免：预测额外技能归一化词面命中正文 → 不计 FP（与 R 侧确定性补漏对称）；
+        # 非词面 FP = 幻觉，单列监控（打样非词面 1/254 = 0.4%）
+        _, halluc_fp = split_fp_aligned(
+            skills_cmp["fp"], (row.get("detail_raw_text") or "").lower()
+        )
+        for key in ("tp", "fn"):
+            skills_total_a[key] += len(skills_cmp[key])
+        skills_total_a["fp"] += len(halluc_fp)
+        for s in halluc_fp:
+            hallucinated_total[s] += 1
         gold_title_raw = row["review_gold_title"] or ""
         has_gold_title = bool(gold_title_raw.strip())
         # gold 缺失（盲审标注未填 title）不计入 title 准确率——非模型错误
@@ -572,6 +599,8 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         "title_raw_exact_accuracy": (title_raw_hits / title_count) if title_count else None,
         "title_normalized_accuracy": (title_hits / title_count) if title_count else None,
         "skills_micro": _metric(**skills_total),
+        "skills_micro_aligned": _metric(**skills_total_a),
+        "hallucinated_fp": dict(hallucinated_total),
         "skills_average_sample_f1": sum(sample_skill_f1) / success_count,
         "bonus_skills_micro": _metric(**bonus_total),
         "bonus_skills_average_sample_f1": sum(sample_bonus_f1) / success_count,
@@ -623,12 +652,18 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
 
 
 def _archive_result(metrics: dict[str, Any]) -> dict[str, Any]:
-    """把盲审 metrics 归一为 reports/eval_*.json 标准结果结构（与 evaluate.py 同构）。"""
-    skills = metrics["skills_micro"]
+    """把盲审 metrics 归一为 reports/eval_*.json 标准结果结构（与 evaluate.py 同构）。
+
+    PR #330（0.90 达标口径，张恺天确认）：主指标 f1/confusion 采用方案 A 词面真值对齐口径
+    （正文词面明确的额外技能豁免 FP）；raw 口径（精选对照）与幻觉单列随 skills_micro_raw /
+    hallucinated_fp 保留供透明度核对。
+    """
+    skills = metrics["skills_micro_aligned"]
+    skills_raw = metrics["skills_micro"]
     bonus = metrics["bonus_skills_micro"]
     return {
         "task": "jd_llm",
-        "method": f"真实抽取（LLM + 规则兜底，{metrics['total_samples']} 条人工盲审）",
+        "method": f"真实抽取（LLM + 规则兜底，{metrics['total_samples']} 条人工盲审；技能达标口径=词面真值对齐 PR #330）",
         "samples": metrics["real_llm_success_samples"],
         "fallback_samples": metrics["fallback_samples"],
         "failed_samples": metrics["failed_samples"],
@@ -638,6 +673,9 @@ def _archive_result(metrics: dict[str, Any]) -> dict[str, Any]:
         "target_f1": JD_LLM_TARGET_F1,
         "target_met": skills["f1"] >= JD_LLM_TARGET_F1,
         "confusion": {"tp": skills["tp"], "fp": skills["fp"], "fn": skills["fn"]},
+        # 精选项对照（豁免前 raw 微平均）与幻觉单列（非词面 FP，技能→次数）
+        "skills_micro_raw": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in skills_raw.items()},
+        "hallucinated_fp": metrics.get("hallucinated_fp", {}),
         "bonus": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in bonus.items()},
         "title_raw_exact_accuracy": round(metrics["title_raw_exact_accuracy"], 4),
         "title_normalized_accuracy": round(metrics["title_normalized_accuracy"], 4),
