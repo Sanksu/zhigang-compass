@@ -163,3 +163,28 @@ class TestSaveCrawlers:
         rc.save({"crawlers": {"zhilian": {"enabled": False}}})
         data = rc.save({"crawlers": {}})
         assert data["crawlers"] == {}
+
+    def test_save_crawlers_with_schedule(self, _isolated_config):
+        """hour/minute 成对保存（独立触发时间）。"""
+        data = rc.save({
+            "crawlers": {"zhilian": {"hour": 7, "minute": 30, "max_results": 200}},
+        })
+        assert data["crawlers"]["zhilian"]["hour"] == 7
+        assert data["crawlers"]["zhilian"]["minute"] == 30
+        assert data["crawlers"]["zhilian"]["max_results"] == 200
+
+    def test_save_crawlers_schedule_must_be_paired(self, _isolated_config):
+        """hour/minute 必须成对，仅配置其一非法。"""
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": {"zhilian": {"hour": 7}}})
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": {"zhilian": {"minute": 30}}})
+
+    def test_save_crawlers_schedule_range(self, _isolated_config):
+        """hour 0-23 / minute 0-59 越界拒绝。"""
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": {"zhilian": {"hour": 24, "minute": 0}}})
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": {"zhilian": {"hour": 7, "minute": 60}}})
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": {"zhilian": {"hour": -1, "minute": 0}}})

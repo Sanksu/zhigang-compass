@@ -110,10 +110,11 @@ def _validate_rate_limit(value) -> dict:
 
 
 def _validate_crawlers(value) -> dict:
-    """校验每爬虫采集配置：spider -> {enabled, max_results}。
+    """校验每爬虫采集配置：spider -> {enabled, max_results, hour, minute}。
 
     - value 必须是对象（spider 名 → 配置）；
-    - enabled 布尔；max_results 10-1000 整数（缺失=按源默认）。
+    - enabled 布尔；max_results 10-1000 整数；hour 0-23 / minute 0-59（独立触发时间，
+      必须成对配置，仅配置其一视为非法）。
     返回规范化后的 dict（仅含有效字段）。
     """
     if not isinstance(value, dict):
@@ -134,6 +135,18 @@ def _validate_crawlers(value) -> dict:
             if not isinstance(mr, int) or not 10 <= mr <= 1000:
                 raise ValueError(f"crawlers.{spider}.max_results 须为 10-1000 的整数")
             entry["max_results"] = mr
+        has_hour = "hour" in cfg
+        has_minute = "minute" in cfg
+        if has_hour != has_minute:
+            raise ValueError(f"crawlers.{spider}.hour/minute 必须成对配置")
+        if has_hour:
+            hour, minute = cfg["hour"], cfg["minute"]
+            if not isinstance(hour, int) or not 0 <= hour <= 23:
+                raise ValueError(f"crawlers.{spider}.hour 须为 0-23 的整数")
+            if not isinstance(minute, int) or not 0 <= minute <= 59:
+                raise ValueError(f"crawlers.{spider}.minute 须为 0-59 的整数")
+            entry["hour"] = hour
+            entry["minute"] = minute
         cleaned[spider.strip()] = entry
     return cleaned
 

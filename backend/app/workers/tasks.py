@@ -33,6 +33,7 @@ from app.workers.crawl import (
     _crawl_timeout as _crawl_timeout,
     _kill_process_tree as _kill_process_tree,
     crawl_platform as crawl_platform,
+    crawl_scheduler as crawl_scheduler,
 )
 from app.workers.courses import (
     _ENRICH_MAX_FAILS as _ENRICH_MAX_FAILS,

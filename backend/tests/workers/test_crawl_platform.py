@@ -176,3 +176,79 @@ def test_timeout_kills_subprocess_and_marks_failed(monkeypatch, tmp_path):
     assert updates[-1][0] == "t-timeout"
     assert updates[-1][1]["status"] == "failed"
     assert alerts == ["crawl_timeout"]
+
+
+# ============================================================
+# crawl_scheduler（08-21b 每爬虫独立触发时间）
+# ============================================================
+
+
+def _patch_scheduler(monkeypatch, crawlers_cfg: dict, now=None):
+    """替换 runtime_config / crawl_platform / 锁，固定当前时间。"""
+    triggered: list[str] = []
+
+    async def _fake_crawl_platform(ctx, spider, **kwargs):
+        triggered.append(spider)
+        return {"spider": spider, "items": 1}
+
+    async def _fake_lock(spider, run_date):
+        return True  # 默认放行
+
+    if now is None:
+        now = datetime(2026, 8, 3, 7, 30, tzinfo=timezone(timedelta(hours=8)))
+
+    class _FrozenNow:
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(crawl, "runtime_config", type("RC", (), {"get": staticmethod(lambda k, d=None: crawlers_cfg if k == "crawlers" else d)})())
+    monkeypatch.setattr(crawl, "crawl_platform", _fake_crawl_platform)
+    monkeypatch.setattr(crawl, "_crawl_run_lock_acquire", _fake_lock)
+    monkeypatch.setattr(crawl, "datetime", _FrozenNow)
+    return triggered
+
+
+def test_crawl_scheduler_triggers_matching_spider(monkeypatch):
+    """当前 HH:MM 匹配配置的爬虫被触发。"""
+    triggered = _patch_scheduler(monkeypatch, {
+        "zhilian": {"hour": 7, "minute": 30},
+        "arxiv": {"hour": 6, "minute": 0},
+    }, now=datetime(2026, 8, 3, 7, 30, tzinfo=timezone(timedelta(hours=8))))
+    result = asyncio.run(crawl.crawl_scheduler({}))
+    assert triggered == ["zhilian"]
+    assert result["run_date"] == "2026-08-03"
+    assert result["triggered"][0]["spider"] == "zhilian"
+
+
+def test_crawl_scheduler_skips_nonmatching(monkeypatch):
+    """未到点/未配置时间的爬虫均不触发。"""
+    triggered = _patch_scheduler(monkeypatch, {
+        "zhilian": {"hour": 7, "minute": 30},
+        "github": {"enabled": True},  # 无独立时间 → 跳过（并入主管线）
+    }, now=datetime(2026, 8, 3, 8, 0, tzinfo=timezone(timedelta(hours=8))))
+    result = asyncio.run(crawl.crawl_scheduler({}))
+    assert triggered == []  # 8:00 不匹配 7:30；github 无 hour/minute
+
+
+def test_crawl_scheduler_skips_disabled(monkeypatch):
+    """enabled=false 且时间匹配也跳过。"""
+    triggered = _patch_scheduler(monkeypatch, {
+        "zhilian": {"hour": 7, "minute": 30, "enabled": False},
+    }, now=datetime(2026, 8, 3, 7, 30, tzinfo=timezone(timedelta(hours=8))))
+    asyncio.run(crawl.crawl_scheduler({}))
+    assert triggered == []
+
+
+def test_crawl_scheduler_respects_day_lock(monkeypatch):
+    """当日幂等锁命中 → 跳过（防重触发）。"""
+    triggered = _patch_scheduler(monkeypatch, {
+        "zhilian": {"hour": 7, "minute": 30},
+    }, now=datetime(2026, 8, 3, 7, 30, tzinfo=timezone(timedelta(hours=8))))
+    async def _locked(spider, run_date):
+        return False  # 锁命中
+
+    monkeypatch.setattr(crawl, "_crawl_run_lock_acquire", _locked)
+    result = asyncio.run(crawl.crawl_scheduler({}))
+    assert triggered == []
+    assert result["triggered"][0]["skipped"] == "duplicate_day_lock"
