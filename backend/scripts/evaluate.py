@@ -373,6 +373,17 @@ def generate_html_report(report: dict) -> str:
             )
         else:
             gap_note = "六维已启用：经验按区间重叠判定（D1-A）、核心职责按词面 containment（D2-A，L1-1 张恺天确认口径，2026-08-20）。"
+        # 0.90 技能达标口径（PR #330 张恺天确认，方案 A 词面真值对齐）：新归档含 skills_micro_raw
+        # → 展示 达标(对齐)/精选(raw) 对照 + 幻觉(非词面 FP) 数；旧归档无该字段则空
+        if jd_llm.get("skills_micro_raw"):
+            _raw_f1 = jd_llm["skills_micro_raw"].get("f1", 0)
+            _halls = sum((jd_llm.get("hallucinated_fp") or {}).values())
+            aligned_note = (
+                f"技能达标口径=词面真值对齐（PR #330）：达标 F1 {jd_llm['f1']:.4f}（目标 ≥0.90）；"
+                f"精选对照(raw) F1 {_raw_f1:.4f}；幻觉(非词面 FP) {_halls} 个"
+            )
+        else:
+            aligned_note = ""
         jd_llm_section = f"""
         <div class="card">
             <h2>JD 解析评测详情 · LLM 盲审（归档 {esc(jd_llm.get('archive', '?'))}）</h2>
@@ -402,6 +413,7 @@ def generate_html_report(report: dict) -> str:
                 {err_rows}
             </table>
             {gap_note}
+            {aligned_note and f'<p class="note">{esc(aligned_note)}</p>' or ''}
         </div>"""
 
     # --- 简历详情 ---

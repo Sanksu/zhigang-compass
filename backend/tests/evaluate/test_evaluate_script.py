@@ -815,6 +815,19 @@ class TestJdLlmReportSixDim:
         assert "Schema 缺口" in html
 
 
+    def test_new_archive_shows_aligned_metric_note(self):
+        """新归档（含 skills_micro_raw/hallucinated_fp）渲染 达标(对齐)/精选(raw)/幻觉 对照说明。"""
+        import scripts.evaluate as ev
+
+        a = self._archive(with_gap=False)
+        a["skills_micro_raw"] = {"tp": 9, "fp": 3, "fn": 1, "precision": 0.75, "recall": 0.9, "f1": 0.8182}
+        a["hallucinated_fp"] = {"ETL": 1}
+        html = ev.generate_html_report({"generated_at": "x", "target": "y", "results": [a]})
+        assert "词面真值对齐" in html
+        assert "精选对照(raw) F1 0.8182" in html
+        assert "幻觉(非词面 FP) 1 个" in html
+
+
 class TestAlignedFp:
     """方案 A 词面真值对齐（PR #330）：FP 拆分为 词面豁免 / 非词面幻觉。"""
 
