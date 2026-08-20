@@ -3263,6 +3263,26 @@ export interface components {
             current_proficiency?: string | null;
             /** @description 岗位期望熟练度 */
             required_proficiency?: string | null;
+            /** @description 市场需求度 0-1 */
+            demand?: number;
+            /** @description 需求趋势 -1..1 */
+            trend?: number;
+            /** @description ROI 指标 = demand×trend/cost */
+            roi?: number;
+            /** @description 是否高杠杆缺口（Top3 ROI） */
+            high_roi?: boolean;
+            /** @description 评分/差距证据（JD 要求 vs 简历现状） */
+            evidence?: components["schemas"]["MatchEvidenceItem"][];
+        };
+        /** @description 单条评分/差距证据（数据溯源，task 2.2） */
+        MatchEvidenceItem: {
+            /**
+             * @description 来源：JD 要求 / 简历现状
+             * @enum {string}
+             */
+            role: "jd" | "resume";
+            /** @description 证据描述文本 */
+            text: string;
         };
         /** @description 学习课程推荐（质量分 Top-3，设计文档 §4.6） */
         CourseRecommendation: {
@@ -3288,6 +3308,19 @@ export interface components {
             estimated_hours: number;
             /** @enum {string} */
             priority: "high" | "medium" | "low";
+            /**
+             * @description 学习状态：已掌握/下一步/未解锁
+             * @enum {string}
+             */
+            status?: "done" | "doing" | "locked";
+            /** @description 市场需求度 0-1 */
+            demand?: number;
+            /** @description 需求趋势 -1..1 */
+            trend?: number;
+            /** @description ROI 指标 = demand×trend/cost */
+            roi?: number;
+            /** @description 学习/评分证据 */
+            evidence?: components["schemas"]["MatchEvidenceItem"][];
         };
         /** @description 技能反向查询岗位项（GET /graph/skill/{id}/positions） */
         SkillPositionItem: {

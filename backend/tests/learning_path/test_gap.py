@@ -118,3 +118,65 @@ class TestGapSorting:
         )
         gaps = analyze_gaps(cand, pos)
         assert [g.skill for g in gaps] == ["Go", "Java", "Python"]
+
+
+class TestGapDataUpgrade:
+    """数据升级（task 2.x）：demand/trend/roi/evidence/high_roi。"""
+
+    def _req_src(self, name: str, source_count: int, **kw):
+        return SkillRequirement(
+            skill_id=name, skill_name=name, necessity=Necessity.MUST,
+            weight=1.0, source_count=source_count, **kw,
+        )
+
+    def test_demand_normalized_from_source_count(self, monkeypatch):
+        """demand = min(1, source_count/20)；无源按 1。"""
+        monkeypatch.setattr("app.services.learning_path.gap._trend_signal", lambda sid, sc: 0.0)
+        gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 20)]))
+        assert gaps[0].demand == 1.0
+        gaps = analyze_gaps(_candidate([]), _position([self._req_src("Go", 5)]))
+        assert gaps[0].demand == 0.25
+
+    def test_trend_is_continuous_diffusion(self, monkeypatch):
+        """trend 连续值：岗位扩散 + 跨源扩散等权合成（非两档）。"""
+        # 无关联岗位（_position_count→0）仅跨源项：source_count=10 → 0.5×0+0.5×0.5=0.25
+        monkeypatch.setattr("app.services.learning_path.gap._position_count", lambda sid: 0)
+        gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 10)]))
+        assert gaps[0].trend == 0.25
+        # 关联 10 岗位 + 20 源 → 0.5×1 + 0.5×1 = 1.0
+        monkeypatch.setattr("app.services.learning_path.gap._position_count", lambda sid: 10)
+        gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 20)]))
+        assert gaps[0].trend == 1.0
+        # 关联 5 岗位 + 5 源 → 0.5×0.5 + 0.5×0.25 = 0.375
+        monkeypatch.setattr("app.services.learning_path.gap._position_count", lambda sid: 5)
+        gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 5)]))
+        assert gaps[0].trend == 0.375
+
+    def test_roi_and_high_roi_top3(self, monkeypatch):
+        """roi=(demand×(trend+1))/cost；真缺口按 ROI 取 Top3 打标，matched 不打标。"""
+        monkeypatch.setattr("app.services.learning_path.gap._trend_signal", lambda sid, sc: 0.0)
+        # 高 cost 技能 ROI 低
+        cand = _candidate([("Python", 3), ("Go", 3)])
+        pos = _position(
+            musts=[
+                self._req_src("Python", 20),  # matched → 不打标
+                self._req_src("Java", 5),     # missing
+                self._req_src("Rust", 5),     # missing
+                self._req_src("Kotlin", 5),   # missing
+            ]
+        )
+        gaps = analyze_gaps(cand, pos)
+        high = [g.skill for g in gaps if g.high_roi]
+        assert len(high) == 3  # 仅缺口的 Top3
+        assert "Python" not in high  # matched 不打标
+        # matched 项 roi 已算（供展示），high_roi=False
+        python = next(g for g in gaps if g.skill == "Python")
+        assert python.roi is not None and python.high_roi is False
+
+    def test_evidence_role_and_text(self):
+        """evidence 含 JD 要求 + 简历现状。"""
+        cand = _candidate([("Python", 1)])
+        gaps = analyze_gaps(cand, _position([_req("Python", proficiency="中级")]))
+        roles = [(e.role, e.text) for e in gaps[0].evidence]
+        assert roles[0] == ("jd", "JD 要求：中级")
+        assert roles[1][0] == "resume" and "简历" in roles[1][1]
