@@ -475,3 +475,25 @@ class TechnologyWatch(Base):
         # 幂等 upsert 约束：同一技能同源同周期仅一行
         UniqueConstraint("skill_name", "signal_source", "period", name="uq_technology_watch_skill_period"),
     )
+
+
+class EvolutionEvent(Base):
+    """岗位演化事件（机制补强②：born/merged/ended 可展示事实，PR #334 确认）。
+
+    Neo4j EVOLVED_FROM 边（rename/split）保持不变；本表承载"岗位诞生/归并/消亡"
+    三类可答辩事件的 PG 落库，供 /evolution/events 查询与前端事件流。
+    """
+
+    __tablename__ = "evolution_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version_id: Mapped[str] = mapped_column(
+        String(64), index=True, nullable=False  # 归属版本，如 graph_v20260820
+    )
+    event_type: Mapped[str] = mapped_column(String(20), nullable=False)  # born / merged / ended
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    from_name: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)  # 旧名（ended/merged）
+    to_name: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)  # 新名（born/merged）
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)  # 附加（如 merged 的多个 from_names）
