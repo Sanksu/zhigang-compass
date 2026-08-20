@@ -21,7 +21,7 @@ DISPLAYID_RE2 = re.compile(r"职位ID[::：]\s*([A-Za-z0-9]+)")
 class BytedanceCareerAdapter(BaseCareerAdapter):
     adapter_name = "bytedance_careers"
     source_company_canonical = "ByteDance"
-    source_id_method_default = "page_DOM_job_id | URL_path_job_id"
+    source_id_method_default = "URL_path_job_id | page_DOM_job_id"
 
     RESP_LABELS = ("职位描述", "岗位职责", "工作职责", "工作内容", "岗位描述")
     REQ_LABELS = ("职位要求", "任职要求", "岗位要求", "任职资格", "职位任职要求")
@@ -37,9 +37,10 @@ class BytedanceCareerAdapter(BaseCareerAdapter):
           - URL contains /position/<19-digit> (path_id, 19 chars numeric)
           - DOM snapshot displays "职位 ID： A12345" etc. (display_id — alphanum,
             usually starts with A/K and 6-8 chars)
-        The Pilot stores source_id = display_id when present (because it
-        matches external job-board postings), with source_id_method noting
-        that the dual-id exists.
+        Canonical source_id policy: 19-digit path_id is PREFERRED (primary)
+        because it is stable, reproducible from the official URL, and can
+        rebuild the detail page via build_detail_url(); display_id is used
+        ONLY as a fallback when path_id cannot be extracted.
         """
         display_id = None
         path_id = None
@@ -197,14 +198,15 @@ class BytedanceCareerAdapter(BaseCareerAdapter):
             result.http_or_struct_error = f"missing core (title={bool(title)}, raw_text_len={len(detail_raw_text or '')}) / lines_scanned={len(lines)} resp_idx={resp_idx} req_idx={req_idx}"
             return result
 
-        source_id = display_id or path_id
-        # Method: if we have both say dual.
-        if display_id and path_id:
-            method = f"page_DOM_job_id (display {display_id}) | URL_path_job_id (19-digit {path_id})"
-        elif display_id:
-            method = "page_DOM_job_id"
-        else:
+        source_id = path_id or display_id
+        # Canonical source_id priority: URL path 19-digit path_id preferred;
+        # display_id as fallback only when path_id is unavailable.
+        if path_id and display_id:
+            method = f"URL_path_job_id (19-digit {path_id}) | page_DOM_job_id (display {display_id})"
+        elif path_id:
             method = "URL_path_job_id"
+        else:
+            method = "page_DOM_job_id"
         record: Dict[str, Any] = {
             "source": "official_career_site",
             "source_company": self.source_company_canonical,

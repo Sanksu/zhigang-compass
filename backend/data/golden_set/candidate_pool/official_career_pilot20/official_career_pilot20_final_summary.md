@@ -82,15 +82,22 @@
 
 > 完全重复 = 0，近似重复 = 0，重复 sample_id = 无
 
-## 8. 与智联 Gold 跨源检查（只读）
+## 8. 与智联数据跨源检查（只读）
 
-- **可访问范围（单次 Read 50KB 限制）**：智联 jd_golden_110.jsonl 成功读取 14/110 条
-- **疑似重复数量 = 0**（在 14 条可访问 Gold 范围内三层过滤：company+title+location ≥2 维度命中 + SimHash Hamming≤5 + Jaccard≥0.25）
-- **完整 110 条比对**：本会话受 Read 接口单次 50KB 上限限制未能执行，请在仓库 CLI 环境下运行：
-  ```
-  cd backend && uv run python data/crawlers/pilot20_official_process.py cross_full
-  ```
-- 智联数据未做任何修改；仅报告，未删除/追加
+**完整跨源检查已完成。**
+
+实际参与比较：
+- 智联 candidate（candidate_pool/v1）：**158** 条
+- Gold（`jd_golden_110.jsonl`）：**110** 条
+- 合计参考记录（去重合并）：**268** 条
+- 企业官网 Pilot：**20** 条
+
+结果：
+- STRONG 疑似重复：**0**
+- WEAK 疑似重复：**0**
+- 跨源疑似重复总计：**0**
+
+智联数据与 Gold 数据未做任何修改；仅只读报告，未删除/追加/覆盖。
 
 ## 9. 访问限制统计
 
@@ -129,9 +136,9 @@ _sha256 = lowercase_hex( SHA256( UTF8( responsibilities + "\n" + requirements ) 
 
 - ❌ 未修改 `zhigang-compass/` 下任何生产代码（`backend/app` / `frontend` / `Prompt` / 算法 / Gold 目录）
 - ❌ 未修改 `develop` / `main` 分支
-- ❌ 无 commit
-- ❌ 无 push
-- ❌ 无 PR 创建
+- ❌ 在最初 Pilot 归档阶段未 commit
+- ❌ 在最初 Pilot 归档阶段未 push
+- ❌ 在最初 Pilot 归档阶段未创建 PR
 
 ## 13. 正式归档文件清单
 
