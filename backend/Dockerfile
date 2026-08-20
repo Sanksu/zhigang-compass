@@ -46,15 +46,6 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 WORKDIR /app
 
-# 项目代码
-COPY app/ ./app/
-COPY alembic/ ./alembic/
-COPY alembic.ini .
-COPY keys/ ./keys/
-COPY configs/ ./configs/
-# 爬虫项目（crawl_platform 以 data/crawlers 为 cwd 调 scrapy crawl）
-COPY data/crawlers/ ./data/crawlers/
-
 # 非 root 用户 + CDP 浏览器 profile 根目录（playwright chown 依赖 app 用户先存在）
 RUN useradd -m -u 1000 app && chown -R app:app /app && \
     mkdir -p /home/app/.zhigang-compass && chown app:app /home/app/.zhigang-compass
@@ -85,7 +76,8 @@ RUN ln -sf $(ls -d /ms-playwright/chromium-*/chrome-linux64/chrome | head -1) /u
 ENV HTTPS_PROXY=
 ENV HTTP_PROXY=
 
-# 项目代码（最后 COPY：应用层变更只重建自身层）
+# 项目代码（唯一 COPY：应用层变更只重建自身层——08-18 曾误留 playwright 前
+# 的旧 COPY 块，使 app 变更仍触发 playwright/apt 层重跑，08-21 已移除）
 COPY app/ ./app/
 COPY alembic/ ./alembic/
 COPY alembic.ini .
