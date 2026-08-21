@@ -1,7 +1,8 @@
 """SimHash 64-bit 近似去重（设计文档 §4.2 去重）。
 
 跨平台相同岗位的语义去重：精确去重（source+source_id）之外，
-对 title/company/city 文本计算 SimHash 指纹，汉明距 ≤ 3 判定为近似重复。
+对 title/company/city 文本计算 SimHash 指纹，汉明距 ≤ 运行时阈值
+（configs/data_quality_thresholds.json，默认 3）判定为近似重复。
 去重准确率目标 ≥ 95%（设计文档 §4.2 指标）。
 
 中文无需分词器：英文单词/数字按词提取，中文按连续片段（≥2 字）提取，
@@ -62,29 +63,44 @@ def hamming_distance(a: int, b: int) -> int:
 
 
 
-def is_duplicate(a: int, b: int, threshold: int = DEFAULT_HAMMING_THRESHOLD) -> bool:
-    """判定两个指纹是否近似重复（汉明距 ≤ threshold）。"""
-    return hamming_distance(a, b) <= threshold
+def _resolve_threshold(threshold: int | None) -> int:
+    """未显式传阈值时读取运行时配置（configs/data_quality_thresholds.json）。"""
+    if threshold is None:
+        from app.services.data_quality.thresholds import load_hamming_threshold
+
+        return load_hamming_threshold()
+    return threshold
+
+
+def is_duplicate(a: int, b: int, threshold: int | None = None) -> bool:
+    """判定两个指纹是否近似重复（汉明距 ≤ threshold，缺省取运行时配置）。
+
+    去重判定是防劣质爬虫数据污染检索池的第一道闸：threshold 由
+    ``configs/data_quality_thresholds.json`` 驱动，可运行时收紧（见该文件 _comment）。
+    """
+    return hamming_distance(a, b) <= _resolve_threshold(threshold)
 
 
 def find_similar_pairs(
     records: list[tuple[str, int]],
-    threshold: int = DEFAULT_HAMMING_THRESHOLD,
+    threshold: int | None = None,
 ) -> list[tuple[str, str]]:
     """批量查找近似重复对（分桶索引，避免全量 O(n²) 两两比较）。
 
-    抽屉原理：64-bit 指纹分 4 块（各 16 bit），汉明距 ≤ threshold(3) 的两指纹
+    抽屉原理：64-bit 指纹分 4 块（各 16 bit），汉明距 ≤ threshold 的两指纹
     必然在至少一个 16-bit 块上完全相同（若每块都不同则 ≥ 4 位不同）。
     故按 (块号, 块值) 分桶，仅比较同桶内的候选对；记录量级为万级时
     比较量从 O(n²) 降为近 O(n·k)。
 
     Args:
         records: [(record_id, simhash), ...]
-        threshold: 汉明距阈值（>16 时抽屉原理不成立，退化为全量比较）
+        threshold: 汉明距阈值（None 取运行时配置；>16 时抽屉原理不成立，
+            退化为全量比较）
 
     Returns:
         近似重复记录 ID 对列表 [(id_a, id_b)]（a < b 顺序）
     """
+    threshold = _resolve_threshold(threshold)
     if len(records) < 2:
         return []
 
@@ -128,7 +144,7 @@ class SimHashIndex:
 
       - ``add(record_id, fingerprint)`` 增量入桶。分块抽屉原理与
         ``find_similar_pairs`` 同源：64-bit 指纹分 4 块（各 16 bit），
-        汉明距 ≤ 3 的两指纹必然共享至少一个 16-bit 块；
+        汉明距 ≤ 运行时阈值的两指纹必然共享至少一个 16-bit 块；
       - ``find_near(record_id, fingerprint)`` 仅查查询指纹命中的候选桶，
         候选再做汉明距校验，返回索引中与其近似重复的已入库记录 ID。
 
@@ -139,9 +155,10 @@ class SimHashIndex:
 
     def __init__(
         self,
-        threshold: int = DEFAULT_HAMMING_THRESHOLD,
+        threshold: int | None = None,
         block_count: int = 4,
     ) -> None:
+        threshold = _resolve_threshold(threshold)
         if threshold >= _BITS // block_count:
             raise ValueError(
                 f"threshold({threshold}) must be < block_bits({_BITS // block_count}) "
@@ -198,7 +215,7 @@ class SimHashIndex:
     def from_items(
         cls,
         items: Iterable[tuple[str, int]],
-        threshold: int = DEFAULT_HAMMING_THRESHOLD,
+        threshold: int | None = None,
         block_count: int = 4,
     ) -> "SimHashIndex":
         """从持久化条目恢复索引。"""

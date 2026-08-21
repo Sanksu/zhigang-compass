@@ -1,0 +1,12 @@
+{
+  "hamming_threshold": 3,
+  "embed_dedup_threshold": 0.9,
+  "sai_stale_threshold": 1.5,
+  "sai_obsolete_threshold": 2.0,
+  "recent_window_days": 90,
+  "zombie_jaccard_threshold": 0.95,
+  "zombie_sai_threshold": 1.5,
+  "zombie_consecutive_periods": 4,
+  "plagiarism_days": 90,
+  "_comment": "数据质量过滤阈值（设计文档 §4.2/§4.7）。修改后 ≤30s 生效（TTL 缓存）。防劣质爬虫数据污染检索池的收紧方向：hamming_threshold 上调（如 4）→ 跨平台近似重复更激进合并；embed_dedup_threshold 下调（如 0.85）→ 语义辅助更宽松放行 SimHash 判定；sai_stale/zombie_jaccard 下调 → 更快标记陈旧/僵尸 JD。属算法红线，收紧需以黄金集（backend/tests/evaluate）校准为准。"
+}
