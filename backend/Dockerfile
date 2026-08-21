@@ -91,6 +91,10 @@ COPY data/crawlers/ ./data/crawlers/
 # PostgresPipeline 的 import app.* 需要项目根在 sys.path 上
 ENV PYTHONPATH=/app:/app/data
 
+# dict-guard 运行时需在 configs/ 下创建 skill_filters_dynamic.json（COPY 产物
+# 默认 root 属主，app 用户不可写）——目录属主预先让渡给 app 用户
+RUN mkdir -p /app/configs /app/reports && chown -R app:app /app/configs /app/reports
+
 USER app
 
 EXPOSE 8000
