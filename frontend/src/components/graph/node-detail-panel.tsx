@@ -32,22 +32,7 @@ import type { NodeDetail, PositionStatus } from './types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-
-/** B3: 骨架屏行组件 — 纯 CSS pulse 动画，无额外依赖 */
-function SkeletonLine({ className }: { className?: string }) {
-  return <div className={`h-7 rounded-lg bg-subtle animate-pulse ${className ?? ''}`} />
-}
-
-/** B3: 骨架屏列表（3行） */
-function SkeletonList() {
-  return (
-    <div className="space-y-2">
-      <SkeletonLine className="w-full" />
-      <SkeletonLine className="w-4/5" />
-      <SkeletonLine className="w-3/5" />
-    </div>
-  )
-}
+import { SkeletonList } from '@/components/ui/skeleton'
 
 type Schema = components['schemas']
 

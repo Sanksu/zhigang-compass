@@ -36,3 +36,8 @@ export function formatDateTime(value: string | number | Date | null | undefined)
 export function isDark(): boolean {
   return document.documentElement.classList.contains('dark')
 }
+
+/** 用户偏好减少动效 — 动画类 UI（打字机/骨架 shimmer/阶段轮播）应退化为静态呈现。 */
+export function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
