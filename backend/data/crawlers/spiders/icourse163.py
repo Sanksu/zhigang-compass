@@ -25,6 +25,7 @@ from scrapy import Request, Spider
 from scrapy.http import Response
 
 from crawlers.base_spider import iter_jsonl, run_script
+from crawlers.icourse163_crawler import _safe_float, _safe_int
 from crawlers.items import CourseItem
 from crawlers.settings import RATE_LIMIT
 
@@ -141,8 +142,8 @@ class Icourse163Spider(Spider):
         item["platform"] = "icourse163"
         item["category"] = data.get("category", "")
         item["description"] = data.get("description", "")
-        item["rating"] = float(data.get("rating", 0.0))
-        item["enrollment"] = int(data.get("enrollment", 0))
+        item["rating"] = _safe_float(data.get("rating", 0.0))
+        item["enrollment"] = _safe_int(data.get("enrollment", 0))
         item["duration"] = data.get("duration", "")
         item["start_date"] = data.get("start_date", "")
         item["skills"] = data.get("skills", [])

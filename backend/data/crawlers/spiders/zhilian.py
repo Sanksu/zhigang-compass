@@ -10,7 +10,6 @@
 """
 
 import json
-import re
 from datetime import datetime, timedelta, timezone
 
 from scrapy.exceptions import CloseSpider
@@ -33,6 +32,50 @@ BACKFILL_MAX_PAGES = 50
 
 # 东八区
 _CST = timezone(timedelta(hours=8))
+
+
+def _extract_initial_state(text: str) -> dict | None:
+    """从 script 文本提取 __INITIAL_STATE__ 后的完整 JSON 对象（H4 修复）。
+
+    从 `__INITIAL_STATE__=` 之后的第一个 `{` 开始做花括号配平（跳过字符串内
+    的花括号），直到配平的 `}` 结束，再 json.loads。相比贪婪正则（匹配 `{...}`
+    到行尾）：script 内 JSON 后仍跟其它 JS 内容时不会被误吞，嵌套对象也正确。
+
+    找不到 / 解析失败返回 None。
+    """
+    marker = "__INITIAL_STATE__"
+    idx = text.find(marker)
+    if idx == -1:
+        return None
+    start = text.find("{", idx)
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = text[start : i + 1]
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    return None
+    return None
 
 
 def _is_older_than_days(post_date: str, days: int) -> bool:
@@ -105,19 +148,18 @@ class ZhilianSpider(BaseSpider):
 
         智联列表页 DOM 不渲染发布日期，但 SSR 数据含 publishTime 字段。
         """
-        # 提取 __INITIAL_STATE__ 的 JSON 内容
         script_text = response.css("script:not([src])::text").getall()
         publish_map = {}
         for text in script_text:
             if "__INITIAL_STATE__" not in text or "publishTime" not in text:
                 continue
-            # __INITIAL_STATE__={...} 格式，截取 JSON 部分（非贪婪 + 尾部锚定，避免贪婪吞掉后续 JS）
-            match = re.search(r"__INITIAL_STATE__\s*=\s*(\{.*\})\s*;?\s*$", text, re.DOTALL)
-            if not match:
-                continue
-            try:
-                data = json.loads(match.group(1))
-            except json.JSONDecodeError:
+            # __INITIAL_STATE__={...} 格式：用括号配平从第一个 { 提取完整 JSON 对象
+            # （H4 修复 08-21b：原贪婪正则 `\{.*\}` 在 script 内 JSON 后仍有其它 JS
+            # 时吞到文件尾导致 json 解析失败 → publish_map 恒空 → 全部 post_date 落空，
+            # 直接影响 history_days 截断与新鲜度口径）。括号配平同时跳过字符串内的
+            # 花括号，对嵌套对象也正确。
+            data = _extract_initial_state(text)
+            if data is None:
                 continue
             # 遍历 jobList 提取 number → publishTime
             self._walk_for_publish_time(data, publish_map)
