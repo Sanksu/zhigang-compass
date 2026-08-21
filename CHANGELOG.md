@@ -6,6 +6,9 @@
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
 ### 2026-08-21
+- **答辩演示优化五连**（#367/#369/#371/#372/#374）：图谱筛选改压暗式打标（`computeFilterMarks` 打标不剔除，布局与镜头稳定，顺带修复滑筛选条镜头跳回存量问题）；2D/3D 演示视角书签 `flyTo`（600ms 缓动飞行，锚定具名岗位簇，节点缺失自动隐藏）；简历匹配页两处裸 spinner 换 AI 生成感加载（`AiThinkingCard` 骨架+分阶段文案轮播 + overall_summary 打字机，reduced-motion 退化）；岗位级「已人工校验」Badge（契约 `PositionEditDetail.has_edit_log` 只读透出 PositionEditLog 存在性 + 审核草案「AI 生成」标注，人机协同可视化）；图谱大屏演示模式（focusMode 隐藏顶导/侧栏、画布 Card 同树切 fixed 不重挂载、详情栏转浮层、Esc 退出 + 浏览器 Fullscreen，新增 mock E2E 用例）
+- **审查 P2 批次 + M4 收尾**（#376/#377/#378）：mockLogin 第三处硬编码口令改 env 注入+中性占位（M4 漏网之鱼）；删 use-graph-pan 死代码 + match/types 注释回流（L-14/L-15）；workers 23 处 print→logging + ETL 阶段失败聚合 send_alert + crawl running 态路径泄露源头修复 + CI rc==5 不再放行（L-5/L-6/L-9/L-16）+ discovery docstring 对齐实际晋升条件（A-3）；**连带修复**：归一化门禁裸调 send_alert 协程被静默丢弃（同步线程上下文）→ alerting 新增 `send_alert_sync`；M4 部署侧口令轮换已执行（backend/.env + 库内哈希同步重置，旧泄露口令实测 401 失效）
+- **算法条目裁决闭环**（#381/#382，Issue #380 关闭）：项目负责人按建议方案裁决六项——**H5=B 口径对齐**（设计文档创新点表现状化：「计算+写回+展示已实现，硬门控为路线图」；**答辩话术同步此口径**）；A-2① skill_novelty 降级补 send_alert_sync 外送告警；A-4① 设计文档三处对齐 #318 不对称萎缩口径；A-6① 评测 FP 豁免拆分独立 `_eval_literal_hit` 纯词面判定（统计对守卫失灵恢复敏感）；L-13① 契约 trend 描述改 0..1 需求扩散度 + UI「扩散 N」中性标签去方向性暗示；裁决单六栏回填归档
 - **第四轮全项目代码审查 P0/P1 修复三连**（#364/#365/#366）：基于《全项目代码审查报告_20260821.md》修复 5 项高危中的 5 项 P0/P1(除移交算法的 H5):
   - **#364 安全修复（H1/H2/M4/M8）**：简历解析缓存编辑改 copy-on-write（同字节文件共享时按用户 fork 独立 parsed_data，杜绝跨用户越权，H1）；生产 fail-fast 补 `debug=false 强制 + cors_origins≠["*"]`（SQL echo 不再泄 PII，H2）；E2E 凭据轮换为环境变量注入（M4）；语义模型预热失败降级时告警日志（M8）
   - **#365 前端数据诚实（H3/H4/M7）**：图谱节点详情删除哈希编造的需求%/趋势（H3）；匹配页删除 decorateGaps/GAP_COST 无条件重算，ROI/evidence/high_roi 直透后端 #341 契约字段（H4）；E2E mock 对齐 openapi 必需字段口径（M7）
