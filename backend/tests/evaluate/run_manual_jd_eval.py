@@ -267,6 +267,30 @@ def _norm_duty(text: str) -> str:
     return re.sub(r"[\s，,。；;、.!?！？:：/\\\-–—()（）\[\]]+", "", text or "").lower()
 
 
+# D2-A 实施细化（08-21 迭代）：整串子串对「同义换措辞/词序重排/插入修饰」脆弱
+# （110 条实测 376 条未命中 gold 中 70 条为近失变体）。补丁稿候选② Rouge-L 族的
+# 确定性词面实现：子串 ∪ 字符 bigram 包含度 ≥ τ。τ=0.7 敏感性扫描见 PR #362。
+CORE_DUTIES_FUZZY_TAU = 0.7
+
+
+def _bigrams(s: str) -> set[str]:
+    return {s[i : i + 2] for i in range(len(s) - 1)} if len(s) > 1 else ({s} if s else set())
+
+
+def duty_surface_hit(a: str, b: str, tau: float = CORE_DUTIES_FUZZY_TAU) -> bool:
+    """职责词面命中：双向子串，或短侧字符 bigram 落入长侧的比例 ≥ tau。
+
+    仍为纯词面确定性判定（无 LLM、无语义模型），bigram 包含度即 Rouge-L
+    召回率的等价简化，仅用于容忍措辞变体；阈值取 0.7（近失分界，见错误分析）。
+    """
+    if a in b or b in a:
+        return True
+    ba, bb = _bigrams(a), _bigrams(b)
+    if not ba or not bb:
+        return False
+    return len(ba & bb) / min(len(ba), len(bb)) >= tau
+
+
 def experience_overlap(gold: dict | None, pred: dict | None) -> bool:
     """经验区间重叠判定（L1-1 D1-A 确认口径）。
 
@@ -287,13 +311,14 @@ def experience_overlap(gold: dict | None, pred: dict | None) -> bool:
 def core_duties_compare(gold: list[str], pred: list[str]) -> dict:
     """core_duties 词面 containment（L1-1 D2-A 确认口径，微平均）。
 
-    gold 每条与预测每条双向子串命中；返回与 _compare_set 同构的 tp/fp/fn/f1。
+    gold 每条与预测每条按 duty_surface_hit 双向命中（子串 ∪ bigram 包含度）；
+    返回与 _compare_set 同构的 tp/fp/fn/f1。
     """
     g = [x for x in (_norm_duty(s) for s in gold) if x]
     p = [x for x in (_norm_duty(s) for s in pred) if x]
 
     def hits(hay: list[str], needles: list[str]) -> set[int]:
-        return {i for i, h in enumerate(hay) if any(n in h or h in n for n in needles)}
+        return {i for i, h in enumerate(hay) if any(duty_surface_hit(h, n) for n in needles)}
 
     gold_hit = hits(g, p)
     pred_hit = hits(p, g)

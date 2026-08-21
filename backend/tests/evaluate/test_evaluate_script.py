@@ -763,6 +763,30 @@ class TestSixDimCompare:
         assert core_duties_compare(["系统开发"], ["负责系统开发"])["tp"] == 1
         assert core_duties_compare(["系统开发"], ["系统开发"])["tp"] == 1
 
+    def test_core_duties_fuzzy_rephrase_hits(self):
+        """D2-A 细化（08-21）：措辞变体（词序重排/插入修饰）按 bigram 包含度命中。"""
+        from tests.evaluate.run_manual_jd_eval import core_duties_compare, duty_surface_hit
+
+        # 词序重排 + 动词前缀差异（纯子串不命中，实测近失对）
+        assert duty_surface_hit(
+            "跨团队协作推动项目交付", "主导跨团队协作与项目交付管理"
+        ) is True
+
+        r = core_duties_compare(
+            ["跨团队协作推动项目交付"], ["主导跨团队协作与项目交付管理"]
+        )
+        assert r["tp"] == 1 and r["fn"] == 0 and r["fp"] == 0
+
+    def test_core_duties_fuzzy_rejects_partial_relation(self):
+        """边界护栏：部分相关但语义不同的职责不得被模糊匹配吞掉（防指标虚高）。"""
+        from tests.evaluate.run_manual_jd_eval import duty_surface_hit
+
+        # "数据分析平台" vs "数据平台"：分析维度缺失，属不同职责
+        assert duty_surface_hit(
+            "数据分析平台建设", "负责公司级数据平台的建设与后续运维"
+        ) is False
+        assert duty_surface_hit("负责前端开发", "负责数据库运维") is False
+
 
 class TestJdLlmReportSixDim:
     """evaluate.py HTML 渲染：六维启用后显示经验/核心职责列与口径说明，旧归档仍显示缺口。"""
