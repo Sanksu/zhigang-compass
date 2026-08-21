@@ -127,6 +127,10 @@ backend/configs/llm_providers.yaml
 backend/configs/runtime_settings.json
 !backend/configs/runtime_settings.json.example
 
+# 动态过滤层（dict-guard 运行时落盘，变更审计于 DictChangeLog 表；模板保留）
+backend/configs/skill_filters_dynamic.json
+!backend/configs/skill_filters_dynamic.json.example
+
 # ---------- 数据库 ----------
 *.sqlite3
 *.sqlite3-journal
