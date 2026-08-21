@@ -595,7 +595,9 @@ async def watch_signal_daily(
         aggregate_weekly_freqs,
         anomaly_flags,
         build_signals,
+        drop_unhealthy_weeks,
         promotion_features,
+        unhealthy_week_keys,
     )
 
     period = run_date or date.today().isoformat()
@@ -622,6 +624,9 @@ async def watch_signal_daily(
         return {"signals": 0, "detail": f"{period} 无 raw 数据"}
 
     freqs = aggregate_weekly_freqs(all_rows)
+    # 平台健康守卫（抗波动补强）：剔除采集故障周的样本，防爬虫宕机污染信号基线
+    unhealthy = unhealthy_week_keys(freqs)
+    freqs = drop_unhealthy_weeks(freqs, unhealthy)
     signals = build_signals(freqs, period)
     # 学术/社区源周频次（§7.2.2 辅助加分特征，提升候选置信度加分用）
     academic_freqs = aggregate_weekly_freqs([*paper_rows, *community_rows])

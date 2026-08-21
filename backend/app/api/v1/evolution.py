@@ -124,6 +124,26 @@ async def version_diff(
     return ok(data=_diff_snapshots(va.snapshot_json, vb.snapshot_json))
 
 
+def _annotate_anti_fluctuation(
+    rows: list,
+    snapshots: list[dict],
+    signals: list,
+) -> None:
+    """抗波动补强：给信号打 warning 标 + 附 freq_ratio 展示口径（打标不剔除）。
+
+    - warning：解读期（最近两期快照）任一命中 data_warning → 所有信号打标
+      （z 的 current 与紧邻历史窗口都落在解读期内，证据量异常时读数不可靠）；
+    - freq_ratio：当期频次 / 当期 REQUIRES 总边数（分母 0 → None）。
+    """
+    interpretation_warning = any(v.data_warning for v in rows[-2:])
+    requires_total = sum(
+        1 for e in snapshots[-1].get("edges", []) if e.get("relation") == "REQUIRES"
+    ) if snapshots else 0
+    for s in signals:
+        s.warning = interpretation_warning
+        s.freq_ratio = round(s.current_freq / requires_total, 4) if requires_total else None
+
+
 @router.get("/signals")
 async def evolution_signals(
     top_n: int = Query(default=10, ge=1, le=50),
@@ -135,10 +155,13 @@ async def evolution_signals(
     从 graph_versions 快照序列重建技能频次窗口 → EvolutionDetector 计算
     Z-score → 按 confidence 降序取 emerging（z>2.0）/ declining（z<-1.5）。
     快照不足 2 期（冷启动）时返回空列表，不武断判定。
+
+    打标不剔除：解读期（最近两期快照）任一命中 data_warning 时
+    warnings 透出全序列告警明细，信号照常输出仅打 warning 标。
     """
-    rows = await db.scalars(
+    rows = list(await db.scalars(
         select(GraphVersion).order_by(GraphVersion.created_at.asc())
-    )
+    ))
     snapshots = [v.snapshot_json or {} for v in rows]
 
     from app.services.evolution.trend_service import detect_signals_from_snapshots, rank_signals
@@ -146,11 +169,23 @@ async def evolution_signals(
     signals = detect_signals_from_snapshots(snapshots)
     emerging = rank_signals(signals, "emerging", top_n)
     declining = rank_signals(signals, "declining", top_n)
+    _annotate_anti_fluctuation(rows, snapshots, [*emerging, *declining])
+
+    warnings = [
+        {
+            "version_id": v.id,
+            "created_at": iso(v.created_at),
+            "warning": v.data_warning,
+        }
+        for v in reversed(rows)
+        if v.data_warning
+    ]
 
     return ok(data={
         "window_count": len(snapshots),
         "emerging": [s.model_dump() for s in emerging],
         "declining": [s.model_dump() for s in declining],
+        "warnings": warnings,
     })
 
 

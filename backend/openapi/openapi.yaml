@@ -2958,10 +2958,29 @@ components:
         evidence_refs:
           type: array
           items: { type: string }
+        warning:
+          type: boolean
+          description: 证据量异常期标记（打标不剔除）：信号解读期（最近两期快照）
+            任一命中 data_warning 时为 true，信号照常输出、提示谨慎解读
+        freq_ratio:
+          type: number
+          nullable: true
+          description: 归一化展示口径 = 当期技能频次 / 当期 REQUIRES 总边数（不参与 Z-score 判定）
+
+    EvolutionVersionWarning:
+      type: object
+      description: 命中样本量对比告警的图谱版本（供 signals 响应透出）
+      required: [version_id, warning]
+      properties:
+        version_id: { type: string }
+        created_at: { type: string, nullable: true }
+        warning:
+          type: object
+          description: compute_data_warning 产出（positions/requires_edges 各含 prev/cur/ratio/direction）
 
     EvolutionSignalsData:
       type: object
-      description: GET /evolution/signals 响应 data
+      description: GET /api/v1/evolution/signals 响应 data
       required: [window_count, emerging, declining]
       properties:
         window_count: { type: integer, description: 参与计算的快照窗口数 }
@@ -2971,6 +2990,10 @@ components:
         declining:
           type: array
           items: { $ref: '#/components/schemas/EvolutionSignal' }
+        warnings:
+          type: array
+          description: 全序列命中 data_warning 的版本明细（最新在前）
+          items: { $ref: '#/components/schemas/EvolutionVersionWarning' }
 
     EvolutionVersionDetail:
       type: object
