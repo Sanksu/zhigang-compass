@@ -141,6 +141,19 @@ def test_etl_scheduled_has_per_function_timeout():
     assert etl.max_tries == 1
 
 
+def test_crawl_platform_has_per_function_timeout():
+    """crawl_platform 显式放宽超时 2h（H2 修复）。
+
+    回归：全局 job_timeout=1800s 会在 zhilian 独立触发合法采集（最长 7200s）
+    完成前 kill 掉 ARQ 任务；crawl_platform 需按 per-function timeout 放宽。
+    """
+    cp = next(
+        f for f in WorkerSettings.functions if _name(f) == crawl_platform.__qualname__
+    )
+    assert cp.timeout_s == 7200
+    assert cp.max_tries == 1
+
+
 def test_worker_cron_jobs_register_etl_schedule():
     """WorkerSettings.cron_jobs 注册 ETL 主管线 cron（时间来自 runtime_config）。"""
     from app.core import runtime_config as rc

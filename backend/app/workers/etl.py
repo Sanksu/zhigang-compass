@@ -109,6 +109,8 @@ async def run_etl_pipeline(
 
     # 每爬虫采集配置（08-21）：enabled=false 停用该源；max_results 传 crawler 层
     # （仅 arxiv/zhilian 显式消费，其余源忽略——crawl.py MAX_RESULTS_SUPPORTED）
+    # 08-21b 修复（H1 防双跑）：已配置独立 hour/minute 的爬虫由 crawl_scheduler
+    # 单独触发，主管线跳过——否则每日主管线 + 独立 cron 会重复爬取同一源。
     crawler_cfg = runtime_config.get("crawlers") or {}
 
     results: dict = {"run_date": run_date, "stages": {}}
@@ -118,6 +120,11 @@ async def run_etl_pipeline(
         cfg = crawler_cfg.get(spider) or {}
         if cfg.get("enabled") is False:
             crawl_results.append({"spider": spider, "skipped": "disabled_by_config"})
+            continue
+        if "hour" in cfg and "minute" in cfg:
+            crawl_results.append(
+                {"spider": spider, "skipped": "independent_schedule"}
+            )
             continue
         try:
             crawl_results.append(

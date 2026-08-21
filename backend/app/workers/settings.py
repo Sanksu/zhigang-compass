@@ -96,7 +96,10 @@ class WorkerSettings:
     """
 
     functions = [
-        crawl_platform,
+        # crawl_platform 显式放宽超时（H2 修复）：全局 job_timeout=1800s 会
+        # 在 zhilian 独立触发合法采集（最长 7200s）完成前 kill 掉 ARQ 任务。
+        # 7200s 对齐 _CRAWL_TIMEOUT_BY_SPIDER["zhilian"]；其余源内部 900s 兜底。
+        func(crawl_platform, timeout=7200, max_tries=1),
         func(crawl_scheduler, timeout=7200, max_tries=1),
         func(run_etl_pipeline, timeout=10800, max_tries=1),
         func(run_etl_pipeline_scheduled, timeout=10800, max_tries=1),
