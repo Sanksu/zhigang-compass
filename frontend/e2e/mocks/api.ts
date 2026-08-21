@@ -139,11 +139,12 @@ export function installApiMock(page: Page): void {
   })
 }
 
-/** 在 mock 环境下完成 admin 登录（installApiMock 之后调用；登录前须先在登录页）。 */
+/** 在 mock 环境下完成 admin 登录（installApiMock 之后调用；登录前须先在登录页）。
+ *  M4：mock 模式下 /api/v1 全部被拦截、凭据不参与校验——占位口令不得复用任何真实口令。 */
 export async function mockLogin(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: '登录' })).toBeVisible()
   await page.getByLabel('用户名').fill('admin')
-  await page.getByLabel('密码').fill('mm2877417')
+  await page.getByLabel('密码').fill(process.env.E2E_ADMIN_PASSWORD ?? 'mock-password')
   await page.getByRole('button', { name: '登录' }).click()
   // 登录成功 → 跳转首页仪表盘（"真实 API 已接入"徽章，mock 数据已注入）
   await expect(page.getByText('真实 API 已接入')).toBeVisible({ timeout: 20_000 })
