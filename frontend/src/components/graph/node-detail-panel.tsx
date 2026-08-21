@@ -26,13 +26,17 @@ import {
   Sparkles,
   Route,
   AlertTriangle,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import type { components } from '@/types/api'
 import type { NodeDetail, PositionStatus } from './types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { SkeletonList } from '@/components/ui/skeleton'
+import { apiGet } from '@/lib/api'
 
 type Schema = components['schemas']
 
@@ -51,6 +55,39 @@ export interface SkillDetail {
   courses: SkillCourseItem[]
   loading: boolean
 }
+
+/** 技能演化趋势徽标数据源：/evolution/signals 模块级缓存（60s TTL）。
+
+ * 图谱页多面板共享一次拉取；技能按名称匹配（大小写不敏感），
+ * 信号端点本身有 Redis 缓存，重复请求成本低。失败静默降级为无徽标。 */
+type TrendSets = { at: number; emerging: Set<string>; declining: Set<string> }
+let trendSetsCache: TrendSets | null = null
+let trendSetsPromise: Promise<TrendSets | null> | null = null
+function loadTrendSets(): Promise<TrendSets | null> {
+  const now = Date.now()
+  if (trendSetsCache && now - trendSetsCache.at < 60_000) {
+    return Promise.resolve(trendSetsCache)
+  }
+  if (trendSetsPromise) return trendSetsPromise
+  trendSetsPromise = apiGet<components['schemas']['EvolutionSignalsData']>(
+    '/evolution/signals?top_n=50',
+  )
+    .then((r): TrendSets => {
+      trendSetsCache = {
+        at: now,
+        emerging: new Set(r.emerging.map((s) => s.skill_name.toLowerCase())),
+        declining: new Set(r.declining.map((s) => s.skill_name.toLowerCase())),
+      }
+      return trendSetsCache
+    })
+    .catch(() => null)
+    .finally(() => {
+      trendSetsPromise = null
+    })
+  return trendSetsPromise
+}
+
+type SkillTrendBadge = 'emerging' | 'declining' | null
 
 interface NodeDetailPanelProps {
   node: NodeDetail | null
@@ -127,6 +164,30 @@ export function NodeDetailPanel({
 }: NodeDetailPanelProps) {
   const Icon = node ? TYPE_ICON[node.type] : Network
 
+  // 技能节点：拉取演化信号（模块级缓存）匹配 emerging/declining 徽标
+  const [skillTrend, setSkillTrend] = useState<SkillTrendBadge>(null)
+  useEffect(() => {
+    let cancelled = false
+    if (!node || node.type !== 'skill') {
+      setSkillTrend(null)
+      return
+    }
+    const key = node.name.toLowerCase()
+    loadTrendSets().then((sets) => {
+      if (cancelled || !sets) return
+      setSkillTrend(
+        sets.declining.has(key)
+          ? 'declining'
+          : sets.emerging.has(key)
+            ? 'emerging'
+            : null,
+      )
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [node])
+
   return (
     <div className="flex h-full w-full flex-col bg-background">
       {!node ? (
@@ -157,6 +218,18 @@ export function NodeDetailPanel({
                   {node.type === 'skill' && node.level && (
                     <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                       {node.level}
+                    </Badge>
+                  )}
+                  {node.type === 'skill' && skillTrend === 'emerging' && (
+                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] bg-state-emerging/15 text-state-emerging border-state-emerging/30">
+                      <TrendingUp className="mr-0.5 size-3" />
+                      需求上升
+                    </Badge>
+                  )}
+                  {node.type === 'skill' && skillTrend === 'declining' && (
+                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] bg-state-declining/15 text-state-declining border-state-declining/30">
+                      <TrendingDown className="mr-0.5 size-3" />
+                      需求衰退预警
                     </Badge>
                   )}
                   {node.type === 'skill' && learningStatus && (
@@ -349,6 +422,19 @@ export function NodeDetailPanel({
                       ? `当前有 ${skillDetail.positions.length} 个岗位要求该技能，掌握后直接提升必备匹配分。`
                       : '暂无岗位直接要求，作为先修链基础可解锁后续技能。'}
                   </p>
+                  {skillTrend === 'declining' && (
+                    <div className="flex items-start gap-1.5 rounded-md border border-state-declining/30 bg-state-declining/5 px-2.5 py-2 text-xs text-state-declining">
+                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                      演化信号显示该技能需求呈衰退趋势（Z-score &lt; -1.5），建议在学习路径中关注
+                      相邻的新兴替代技能，降低单一技能贬值风险。
+                    </div>
+                  )}
+                  {skillTrend === 'emerging' && (
+                    <div className="flex items-start gap-1.5 rounded-md border border-state-emerging/30 bg-state-emerging/5 px-2.5 py-2 text-xs text-state-emerging">
+                      <TrendingUp className="mt-0.5 size-3.5 shrink-0" />
+                      演化信号显示该技能需求快速上升（Z-score &gt; 2.0），是当前窗口内的热门技能。
+                    </div>
+                  )}
                 </section>
 
                 {/* 导学面板（task 1.3）：如何开始 → 前置就绪检查 */}
