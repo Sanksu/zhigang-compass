@@ -16,6 +16,7 @@ from app.api.v1.admin_routes import (
     audit,
     config,
     crawl,
+    dict_guard,
     lineage,
     position_edit,
     position_reviews,
@@ -29,6 +30,7 @@ router.include_router(lineage.router)
 router.include_router(position_reviews.router)
 router.include_router(position_edit.router)
 router.include_router(config.router)
+router.include_router(dict_guard.router)
 
 # 爬虫域私有符号 re-export（tests/admin/* 直连导入）
 PLATFORM_META = crawl.PLATFORM_META

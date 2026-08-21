@@ -128,6 +128,9 @@ async def dict_guard_daily(ctx: dict) -> dict:
         decisions.append(decision)
 
     # ---- 3/4. 门禁 → 影响面 → 分级 → 生效/提案 ----
+    # 候选证据随提案持久化（PR-C 审批执行依赖：静态停用词 remove 需从证据
+    # 解析「受影响技能」落地为动态 protect）
+    cand_evidence = {c["term"]: (c.get("evidence") or {}) for c in candidates}
     auto_applied: list[dict] = []
     proposal_count = 0
     skipped: list[dict] = []
@@ -167,7 +170,11 @@ async def dict_guard_daily(ctx: dict) -> dict:
             session.add(DictProposal(
                 term=dec.term, action=dec.action, status="pending",
                 reason=dec.reason, llm_confidence=dec.confidence,
-                evidence=[], impact_stats=impact, run_date=run_date,
+                evidence=[
+                    {"label": k, "value": v}
+                    for k, v in cand_evidence.get(dec.term, {}).items()
+                ],
+                impact_stats=impact, run_date=run_date,
             ))
             proposal_count += 1
         await session.commit()

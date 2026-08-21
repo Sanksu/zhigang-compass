@@ -3263,10 +3263,324 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/dict-guard/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 字典守卫待审提案列表
+         * @description dict-guard 每日评估产出的调整提案（remove/protect/超阈值 add），默认返回 pending
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 提案状态过滤 */
+                    status?: "pending" | "approved" | "rejected";
+                    page?: number;
+                    size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 提案分页列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: {
+                                items?: components["schemas"]["DictProposalItem"][];
+                                total?: number;
+                                page?: number;
+                                size?: number;
+                            };
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/dict-guard/proposals/{id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 审核字典调整提案（批准执行 / 驳回）
+         * @description approve 按提案 action 执行动态过滤层变更并写 DictChangeLog(source=manual) + AuditLog： add_stopword=动态 blocked 即时生效并清理同名 Skill；remove_stopword 对动态条目移除、 对静态停用词以受影响技能的动态 protect 落地（不动 git 词表）；protect_whitelist=动态 protected。 reject 仅置状态无副作用。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        action: "approve" | "reject";
+                        /** @description 审核理由（必填） */
+                        reason: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description 审核完成 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 参数不合法 */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 提案不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 状态不可审核 / 静态停用词移除缺少受影响技能 */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/dict-guard/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 字典变更审计列表 */
+        get: {
+            parameters: {
+                query?: {
+                    page?: number;
+                    size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 变更分页列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: {
+                                items?: components["schemas"]["DictChangeLogItem"][];
+                                total?: number;
+                                page?: number;
+                                size?: number;
+                            };
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/dict-guard/changes/{id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 回滚字典变更
+         * @description 按变更记录反向操作动态过滤层（blocked→移除 / protected→解除），写 source=rollback 审计；同一记录防重复回滚
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 回滚完成 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 变更记录不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 已是回滚记录或已回滚过 */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/dict-guard/report/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 最近一次字典守卫巡检报告 */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 报告原文（run_date/candidates/evaluated/auto_applied/proposals 等） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 暂无巡检报告 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        DictProposalItem: {
+            id?: string;
+            /** @description 动作作用的目标词 */
+            term?: string;
+            /** @enum {string} */
+            action?: "add_stopword" | "remove_stopword" | "protect_whitelist";
+            /** @enum {string} */
+            status?: "pending" | "approved" | "rejected";
+            /** @description LLM 判定理由 */
+            reason?: string;
+            /** @description LLM 置信度 0~1 */
+            llm_confidence?: number | null;
+            /** @description 候选证据（图谱引用数/语料命中/受影响技能等） */
+            evidence?: Record<string, never>[] | null;
+            /** @description 影响面模拟：图谱同名节点数 + 命中 JD 数 */
+            impact_stats?: Record<string, never>;
+            /** @description 评估批次日期 */
+            run_date?: string;
+            reviewed_by?: string;
+            review_reason?: string;
+            reviewed_at?: string | null;
+            created_at?: string;
+        };
+        DictChangeLogItem: {
+            id?: string;
+            term?: string;
+            /** @description 变更动作（含 rollback） */
+            action?: string;
+            /** @enum {string} */
+            source?: "auto" | "manual" | "rollback";
+            /**
+             * @description 动态层条目类型
+             * @enum {string}
+             */
+            kind?: "blocked" | "protected";
+            proposal_id?: string | null;
+            reason?: string;
+            detail?: Record<string, never>;
+            impact_stats?: Record<string, never>;
+            applied_by?: string;
+            created_at?: string;
+        };
         ApiResponse: {
             /**
              * @description 0=成功，非 0=业务错误码（设计文档 §2.4.7）：4000 参数校验 / 4010 未认证 /
