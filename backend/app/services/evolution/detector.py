@@ -35,6 +35,18 @@ def compute_zscore(current: float, mean: float, std: float) -> float:
     return (current - mean) / std
 
 
+def _window_value(w: SkillFrequencyWindow) -> float:
+    """窗口参与 Z-score 的数值：占比口径优先，抗采集总量波动。
+
+    total_requires > 0 时返回 frequency/total_requires（该技能在当期全部
+    岗位-技能关系中的占比）——爬虫宕机导致全技能频次齐跌时占比不变，
+    不再批量误判 declining；分母未知（0）时退回原始计数（兼容旧数据）。
+    """
+    if w.total_requires > 0:
+        return w.frequency / w.total_requires
+    return float(w.frequency)
+
+
 def classify_trend(
     z_score: float,
     current_freq: int,
@@ -104,6 +116,8 @@ class EvolutionDetector:
             historical_windows: 历史窗口列表（≥1 个即可计算 Z-score 与环比）
         """
         freqs = [w.frequency for w in historical_windows]
+        # Z-score 序列用占比口径（total_requires>0 时），输出字段仍用原始计数
+        hist_values = [_window_value(w) for w in historical_windows]
 
         if not freqs:
             # 无历史窗口：无法计算 Z-score/MoM，保守标记为稳定观察基线
@@ -119,9 +133,9 @@ class EvolutionDetector:
                 confidence=0.0,
             )
 
-        mean = sum(freqs) / len(freqs)
-        std = statistics.stdev(freqs) if len(freqs) > 1 else 0.0
-        z = compute_zscore(float(current_window.frequency), mean, std)
+        mean = sum(hist_values) / len(hist_values)
+        std = statistics.stdev(hist_values) if len(hist_values) > 1 else 0.0
+        z = compute_zscore(_window_value(current_window), mean, std)
         trend = classify_trend(z, current_window.frequency)
 
         # 小基数保护：z 不对外输出（schemas 约定保护态 z=None）

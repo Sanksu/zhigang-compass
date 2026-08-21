@@ -26,6 +26,8 @@ class SkillFrequencyWindow(BaseModel):
     window_end: str = Field(description="窗口结束日期 ISO8601")
     frequency: int = Field(description="窗口内 JD 出现频次")
     source_count: int = Field(default=1, description="独立 JD 源数")
+    # 归一化分母：当期快照 REQUIRES 总边数（0=未知，退回原始计数参与计算）
+    total_requires: int = Field(default=0, description="当期快照 REQUIRES 总边数（归一化分母）")
 
 
 class EvolutionSignal(BaseModel):

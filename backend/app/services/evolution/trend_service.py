@@ -29,8 +29,11 @@ def _skill_freq_windows(snapshots: list[dict]) -> dict[str, list[SkillFrequencyW
     windows: dict[str, list[SkillFrequencyWindow]] = {}
     for snap in snapshots:
         names = _skill_name_by_id(snap)
+        edges = snap.get("edges", [])
+        # 归一化分母：当期 REQUIRES 总边数（占比口径，抗采集总量波动）
+        total_requires = sum(1 for e in edges if e.get("relation") == "REQUIRES")
         freq: dict[str, int] = {}
-        for e in snap.get("edges", []):
+        for e in edges:
             target = e.get("target")
             if str(target).startswith("sk_"):
                 freq[target] = freq.get(target, 0) + 1
@@ -42,6 +45,7 @@ def _skill_freq_windows(snapshots: list[dict]) -> dict[str, list[SkillFrequencyW
                     window_start=snap.get("version_id", ""),
                     window_end=snap.get("version_id", ""),
                     frequency=count,
+                    total_requires=total_requires,
                 )
             )
     return windows
