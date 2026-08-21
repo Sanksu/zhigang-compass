@@ -6,7 +6,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ResumeUploader } from '@/components/resume/resume-uploader'
 import { ScoreRing, RadarChart, SkillHeatmap } from '@/components/match/charts'
+import { AiThinkingCard } from '@/components/match/ai-thinking-card'
 import { LearningTimeline } from '@/components/learning/learning-timeline'
+import { useTypewriter } from '@/hooks/use-typewriter'
 import {
   type BackendDiagnosisReport,
   type BackendGapItem,
@@ -22,6 +24,7 @@ import {
 } from '@/components/match/types'
 import type { PositionStatus } from '@/components/graph/types'
 import {apiGet, apiPost, getAccessToken, errMsg} from '@/lib/api'
+import { prefersReducedMotion } from '@/lib/utils'
 import type { components } from '@/types/api'
 
 const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
@@ -218,6 +221,10 @@ export function ResumeMatchPage() {
   // AI 诊断报告（GET /match/result/{id}/diagnosis，LLM 生成 + Redis 缓存 24h）
   const [diagnosis, setDiagnosis] = useState<BackendDiagnosisReport | null>(null)
   const [diagnosisLoading, setDiagnosisLoading] = useState(false)
+  // 总体匹配度解读打字机呈现（reduced-motion 直接整段渲染；新报告到达自动重播）
+  const typedSummary = useTypewriter(diagnosis?.overall_summary ?? '', 60)
+  // 动效偏好（挂载时判定一次，驱动打字机光标显隐）
+  const reducedMotion = useMemo(() => prefersReducedMotion(), [])
   // 用户反馈（1=有用 / -1=没用，POST /match/feedback）
   const [feedback, setFeedback] = useState<number | null>(null)
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
@@ -715,9 +722,11 @@ export function ResumeMatchPage() {
 
           {selectedPosition && loadingDetail && (
             <Card className="border-dashed">
-              <CardContent className="flex flex-col items-center justify-center py-20 text-center">
-                <div className="size-8 rounded-full border-2 border-ink border-t-transparent animate-spin mb-3" />
-                <p className="text-sm text-ink-muted">加载比对详情…</p>
+              <CardContent>
+                <AiThinkingCard
+                  stages={['正在运行人岗匹配引擎…', '正在计算三维得分与技能矩阵…', '正在生成比对详情…']}
+                  rows={4}
+                />
               </CardContent>
             </Card>
           )}
@@ -1074,16 +1083,26 @@ export function ResumeMatchPage() {
                 </CardHeader>
                 <CardContent>
                   {diagnosisLoading ? (
-                    <div className="flex flex-col items-center justify-center py-10 text-center">
-                      <div className="size-6 rounded-full border-2 border-ink border-t-transparent animate-spin mb-3" />
-                      <p className="text-xs text-ink-muted">诊断报告生成中（LLM 推理约需 1 分钟，多通道自动切换）…</p>
-                    </div>
+                    <AiThinkingCard
+                      stages={[
+                        'AI 正在汇总匹配结果与关键差距…',
+                        'AI 正在生成岗位能力诊断报告…',
+                        'AI 正在撰写改进建议与路径解读…',
+                      ]}
+                      rows={4}
+                      hint="LLM 推理约需 1 分钟，多通道自动切换，结果缓存 24h"
+                    />
                   ) : diagnosis ? (
                     <div className="space-y-4">
-                      {/* 总体匹配度解读 */}
+                      {/* 总体匹配度解读（打字机呈现；reduced-motion 直接整段） */}
                       <div>
                         <h4 className="text-xs font-medium text-ink mb-1">总体匹配度解读</h4>
-                        <p className="text-sm text-ink-muted leading-relaxed">{diagnosis.overall_summary}</p>
+                        <p className="text-sm text-ink-muted leading-relaxed">
+                          {typedSummary}
+                          {!reducedMotion && typedSummary.length < (diagnosis.overall_summary?.length ?? 0) && (
+                            <span className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-ink/70 align-text-bottom" />
+                          )}
+                        </p>
                       </div>
                       {/* 三维雷达图解读 */}
                       <div>
