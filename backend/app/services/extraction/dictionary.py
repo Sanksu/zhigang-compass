@@ -1200,3 +1200,60 @@ def is_noise_skill(name: str) -> bool:
 # 白名单词小写 → 标准写法映射（normalize_skill 用于大小写统一）
 _SKILL_WHITELIST_LOWER: dict[str, str] = {w.lower(): w for w in SKILL_WHITELIST}
 
+
+# ── 灰名单验证区（技能生命周期，2026-08-21 新岗位发现优化 ②）──
+# 白名单对新兴技术存在滞后：新技能出现早于人工补录。白名单未命中且非噪音的
+# 技能不静默丢弃，而是注册进灰名单验证区（内存计数），供观测池/置信度模型
+# 定向复核；满足证据门槛后可人工 graduation 补录进 configs/skill_whitelist.yaml。
+# 内存态：进程内窗口统计，不落库（白名单扩充候选由 scripts/expand_skill_whitelist.py
+# 的离线挖掘路径承担，本注册表只做在线侧"漏召回"兜底标记）。
+_GREY_SKILL_HITS: dict[str, int] = {}
+_GREY_SKILL_GRADUATED: set[str] = set()
+
+
+def register_grey_skill(name: str) -> None:
+    """注册灰名单技能：白名单未命中且非噪音的新技能，进入验证区。
+
+    供抽取链路对"白名单外保留技能"计数；已是白名单/已毕业/停用词的技能
+    不注册（重复调用幂等累加）。在线侧只做标记，不改变保留与否的语义——
+    消费方据此决定是否降权或路由到人工复核。
+    """
+    if not name:
+        return
+    if name in SKILL_WHITELIST or name in _GREY_SKILL_GRADUATED or name in SKILL_STOPWORDS:
+        return
+    _GREY_SKILL_HITS[name] = _GREY_SKILL_HITS.get(name, 0) + 1
+
+
+def grey_skills(min_hits: int = 1) -> list[tuple[str, int]]:
+    """灰名单验证区快照：[(技能名, 出现次数)]，按次数降序。
+
+    min_hits 过滤低频噪声（默认 ≥1 全部列出；观测池/复核消费方可按频次截断）。
+    """
+    return sorted(
+        ((k, v) for k, v in _GREY_SKILL_HITS.items() if v >= min_hits),
+        key=lambda kv: kv[1],
+        reverse=True,
+    )
+
+
+def is_grey_skill(name: str) -> bool:
+    """技能是否在灰名单验证区（白名单外、已注册、未毕业）。"""
+    return name in _GREY_SKILL_HITS
+
+
+def graduate_grey_skill(name: str) -> None:
+    """技能从灰名单毕业（人工补录白名单后调用）：移除验证区并豁免重复注册。
+
+    毕业技能即使尚未在 SKILL_WHITELIST 生效（配置热加载前），也不再被
+    灰名单反复跟踪——避免人工已确认的技能仍在验证区挂起。
+    """
+    _GREY_SKILL_HITS.pop(name, None)
+    _GREY_SKILL_GRADUATED.add(name)
+
+
+def clear_grey_skills() -> None:
+    """清空灰名单验证区（窗口轮换 / 测试隔离用）。"""
+    _GREY_SKILL_HITS.clear()
+    _GREY_SKILL_GRADUATED.clear()
+

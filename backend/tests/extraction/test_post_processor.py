@@ -373,3 +373,82 @@ class TestPostProcess:
         )
         out = post_process(result)
         assert [s.name for s in out.skills] == ["可靠性测试", "Python"]
+
+
+class TestGreySkillRegistration:
+    """灰名单验证区：白名单未命中但非噪音技能自动注册（新岗位发现优化 ②）。"""
+
+    def setup_method(self):
+        from app.services.extraction.dictionary import clear_grey_skills
+        clear_grey_skills()
+
+    def teardown_method(self):
+        from app.services.extraction.dictionary import clear_grey_skills
+        clear_grey_skills()
+
+    def test_non_whitelist_valid_skill_registered(self):
+        """白名单外、非噪音技能（新兴技术）自动注册进灰名单。"""
+        from app.services.extraction.dictionary import grey_skills, is_grey_skill
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="量子计算")],
+        )
+        post_process(result)
+        assert is_grey_skill("量子计算")
+        assert ("量子计算", 1) in grey_skills()
+
+    def test_whitelist_skill_not_registered(self):
+        """白名单技能不进入灰名单（非漏召回）。"""
+        from app.services.extraction.dictionary import is_grey_skill
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="Redis")],
+        )
+        post_process(result)
+        assert not is_grey_skill("Redis")
+
+    def test_noise_skill_not_registered(self):
+        """泛词噪音不注册（is_valid_skill_name 已拦截，不进入灰名单）。"""
+        from app.services.extraction.dictionary import grey_skills
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="熟悉"), SkillExtracted(name="框架")],
+        )
+        post_process(result)
+        assert grey_skills() == []
+
+    def test_hit_count_accumulates(self):
+        """同一技能多次出现计数累加（供观测池按频次截断）。"""
+        from app.services.extraction.dictionary import grey_skills
+        for _ in range(3):
+            result = JDExtractionResult(
+                position_name="",
+                skills=[SkillExtracted(name="量子计算")],
+            )
+            post_process(result)
+        assert ("量子计算", 3) in grey_skills()
+
+    def test_requirements_registered_too(self):
+        """requirements 中的白名单外技能同样注册。"""
+        from app.services.extraction.dictionary import is_grey_skill
+        result = JDExtractionResult(
+            position_name="",
+            requirements=[REQUIRESRelation(skill_name="量子计算", necessity="must")],
+        )
+        post_process(result)
+        assert is_grey_skill("量子计算")
+
+    def test_graduate_exempts_further_registration(self):
+        """人工毕业（补录白名单）后不再反复挂起在验证区。"""
+        from app.services.extraction.dictionary import (
+            clear_grey_skills,
+            graduate_grey_skill,
+            grey_skills,
+        )
+        graduate_grey_skill("量子计算")
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="量子计算")],
+        )
+        post_process(result)
+        assert grey_skills() == []
