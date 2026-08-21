@@ -47,10 +47,32 @@ const CRAWL_STATUS = {
   platforms: [{ id: 'zhilian', name: '智联招聘', level: 'A', total_count: 6267 }],
 }
 
-const RESUME_LIST = { items: [{ id: 'r-1' }], total: 1 }
+// M7 修复:fixture 对齐契约 required 字段(ResumeSummaryItem 需 file_name/skills/
+// total_years;EvolutionVersion 需 node_added/node_removed/node_changed)。原"最小
+// 渲染集"落后于契约,后端收紧校验时 mock 不报警。补全 required 避免双轨漂移。
+const RESUME_LIST = {
+  items: [
+    {
+      id: 'r-1',
+      file_name: 'test-resume.pdf',
+      skills: ['Python', 'TypeScript'],
+      total_years: 5,
+    },
+  ],
+  total: 1,
+}
 
 const EVOLUTION_VERSIONS = {
-  items: [{ version_id: 'v-001', created_at: '2026-08-19T08:00:00Z', change_summary: '测试版本快照' }],
+  items: [
+    {
+      version_id: 'v-001',
+      created_at: '2026-08-19T08:00:00Z',
+      change_summary: '测试版本快照',
+      node_added: 3,
+      node_removed: 1,
+      node_changed: 5,
+    },
+  ],
   total: 1,
 }
 

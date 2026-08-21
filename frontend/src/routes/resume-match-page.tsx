@@ -170,14 +170,8 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
   }
 }
 
-// ── 差距分析数据升级（task T3）：双轨对齐 + ROI 打标 + 证据溯源 ──
+// ── 差距分析数据升级（task T3）：双轨对齐用熟练度数值 ──
 
-const GAP_COST: Record<GapItem['gap_type'], number> = {
-  missing_must: 2,
-  level_gap: 1.4,
-  missing_nice: 3,
-  matched: 99,
-}
 const PROF_NUM: Record<string, number> = {
   专家: 4,
   高级: 3,
@@ -193,53 +187,6 @@ function profNum(text: string | undefined, fallback: number): number {
   const s = (text ?? '').trim()
   if (!s || s === '不限') return fallback
   return PROF_NUM[s] ?? 2
-}
-/** 技能名确定性哈希 → 稳定 mock 需求/趋势（避免每次渲染随机跳动） */
-function hashNum(s: string): number {
-  let h = 0
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
-  return h
-}
-
-/** 为差距数据补充 demand/trend/roi/high_roi/evidence（ROI=(demand×trend)/cost，Top3 打标核心突破点） */
-function decorateGaps(mr: MatchResult): GapItem[] {
-  const evMap = new Map<string, MatchResult['evidence_refs']>()
-  for (const e of mr.evidence_refs ?? []) {
-    const arr = evMap.get(e.skill) ?? []
-    arr.push(e)
-    evMap.set(e.skill, arr)
-  }
-
-  const decorated: GapItem[] = mr.gaps.map((g) => {
-    const demand = g.demand ?? 0.5 + (hashNum(g.skill) % 100) / 200 // 0.5-1.0
-    const trend = g.trend ?? ((hashNum(`${g.skill}:t`) % 100) / 100) * 1.5 - 0.5 // -0.5..1
-    const roi = (demand * (trend + 1)) / GAP_COST[g.gap_type]
-    const refs = evMap.get(g.skill) ?? []
-    const evidence: GapItem['evidence'] = [
-      { role: 'jd', text: `JD 要求：${g.required_level || '—'}` },
-      {
-        role: 'resume',
-        text:
-          g.gap_type === 'matched'
-            ? `简历：已具备${g.current_level ? `（${g.current_level}）` : ''}`
-            : `简历：${g.current_level && g.current_level !== '未掌握' ? g.current_level : '未标注/缺失'}`,
-      },
-    ]
-    if (refs.length > 0) {
-      evidence.push({ role: 'jd', text: `来源：${refs.slice(0, 2).map((r) => r.source).join('、')}` })
-    }
-    return { ...g, demand, trend, roi, evidence }
-  })
-
-  // Top3 ROI（仅真缺口，不含已匹配项）
-  const top3 = new Set(
-    decorated
-      .filter((g) => g.gap_type !== 'matched')
-      .sort((a, b) => (b.roi ?? 0) - (a.roi ?? 0))
-      .slice(0, 3)
-      .map((g) => g.skill),
-  )
-  return decorated.map((g) => ({ ...g, high_roi: g.gap_type !== 'matched' && top3.has(g.skill) }))
 }
 
 function toCandidate(s: ResumeSummary): CandidateProfile {
@@ -279,8 +226,11 @@ export function ResumeMatchPage() {
   const [notice, setNotice] = useState<string | null>(null)
   // 差距展开溯源（task T3）：被展开的技能集
   const [expandedGaps, setExpandedGaps] = useState<Set<string>>(() => new Set())
-  // 差距数据升级派生（task T3）：补充 ROI/需求/趋势/证据/核心突破点
-  const gapRows = useMemo(() => (matchResult ? decorateGaps(matchResult) : []), [matchResult])
+  // 差距数据升级派生（task T3）. H4 修复:直接消费后端 gaps(删除 decorateGaps 前端
+  // ROI 覆盖与 evidence 重建)。toGapItem 已透传契约 #341 后装字段 demand/trend/
+  // roi/high_roi/evidence——前端 GAP_COST 常量公式与后端成本口径(base_hours×熟练度
+  // 缺口)不一致,曾推翻后端 high_roi 标记。后端字段缺失时已由后端回填,前端不再 mock 兜底。
+  const gapRows = useMemo(() => (matchResult ? matchResult.gaps : []), [matchResult])
 
   // 载入已解析简历列表（后端 /resume/list）
   function loadResumeList() {
