@@ -20,7 +20,7 @@ RAG 接地是"辅助确认"而非"硬门控"：未命中权威库/种子的 cand
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from app.services.kg.fulltext import sanitize_fulltext
