@@ -72,7 +72,7 @@ export interface GapItem {
   //    前端不再本地推导/mock；对应契约 GapSkill schema）──
   /** 市场需求度 0-1 */
   demand?: number
-  /** 需求趋势 -1..1（契约描述；实现现口径为 0..1 扩散度，见审查报告 L-13 待裁决） */
+  /** 需求扩散度 0..1（岗位扩散×跨源扩散等权合成，非方向性趋势；L-13 裁决①已对齐契约） */
   trend?: number
   /** ROI 指标 = (demand × trend) / cost，用于高杠杆缺口打标 */
   roi?: number

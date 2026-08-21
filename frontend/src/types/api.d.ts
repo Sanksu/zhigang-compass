@@ -3375,7 +3375,7 @@ export interface components {
             required_proficiency?: string | null;
             /** @description 市场需求度 0-1 */
             demand?: number;
-            /** @description 需求趋势 -1..1 */
+            /** @description 需求扩散度 0..1（岗位扩散×跨源扩散等权合成，非方向性趋势；L-13 口径对齐） */
             trend?: number;
             /** @description ROI 指标 = demand×trend/cost */
             roi?: number;
@@ -3425,7 +3425,7 @@ export interface components {
             status?: "done" | "doing" | "locked";
             /** @description 市场需求度 0-1 */
             demand?: number;
-            /** @description 需求趋势 -1..1 */
+            /** @description 需求扩散度 0..1（岗位扩散×跨源扩散等权合成，非方向性趋势；L-13 口径对齐） */
             trend?: number;
             /** @description ROI 指标 = demand×trend/cost */
             roi?: number;
