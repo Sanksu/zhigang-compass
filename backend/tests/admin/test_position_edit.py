@@ -70,6 +70,7 @@ def _position_row(**overrides) -> dict:
         "scenarios": ["数据中台"],
         "created_at": "2026-08-01T10:00:00+08:00",
         "updated_at": "2026-08-01T10:00:00+08:00",
+        "has_edit_log": False,
     }
     row.update(overrides)
     return row
@@ -208,6 +209,24 @@ class TestGetPositionDetailTx:
         })
         assert _get_position_detail_tx(tx, "数据分析师")["skills"][0]["weight"] == 0.0
 
+    def test_has_edit_log_true_when_edit_log_exists(self):
+        """存在 PositionEditLog → has_edit_log=True（「已人工校验」标识）。"""
+        tx = _FakeTx({
+            "RETURN p.id AS id": [_position_row(has_edit_log=True)],
+            "AS kind": [],
+        })
+        detail = _get_position_detail_tx(tx, "数据分析师")
+        assert detail["has_edit_log"] is True
+        # 查询经 count 聚合，多条日志不会导致详情行重复
+        assert "count(l)" in tx.queries[0][0]
+
+    def test_has_edit_log_false_when_never_edited(self):
+        tx = _FakeTx({
+            "RETURN p.id AS id": [_position_row(has_edit_log=False)],
+            "AS kind": [],
+        })
+        assert _get_position_detail_tx(tx, "数据分析师")["has_edit_log"] is False
+
     def test_position_not_found_returns_none(self):
         tx = _FakeTx()
         assert _get_position_detail_tx(tx, "不存在的岗位") is None
@@ -288,7 +307,8 @@ class TestEditPositionTx:
         )
         # id 供路由层失效岗位详情缓存（graph:position:{id}）
         assert result == {"exists": True, "updated": False, "diff_summary": "", "id": "pos_0001"}
-        assert not any("PositionEditLog" in q for q, _ in tx.queries)
+        # 无编辑日志写入（读详情查询含 PositionEditLog 存在性检查，属合法只读）
+        assert not any("CREATE (l:PositionEditLog" in q for q, _ in tx.queries)
         assert not any("MERGE (p)-[r:REQUIRES]" in q for q, _ in tx.queries)
         assert not any("SET p." in q for q, _ in tx.queries)
 

@@ -2373,7 +2373,7 @@ components:
 
     PositionEditDetail:
       type: object
-      required: [id, name, level, industry, salary_range, status, core_duties, scenarios, skills, education, certifications]
+      required: [id, name, level, industry, salary_range, status, core_duties, scenarios, skills, education, certifications, has_edit_log]
       description: 岗位人工编辑详情（GET /admin/positions/{position_name}）
       properties:
         id: { type: string }
@@ -2382,6 +2382,9 @@ components:
         industry: { type: string }
         salary_range: { type: string }
         status: { type: string }
+        has_edit_log:
+          type: boolean
+          description: 是否存在人工编辑记录（PositionEditLog 节点）——「已人工校验」标识
         core_duties:
           type: array
           items: { type: string }
