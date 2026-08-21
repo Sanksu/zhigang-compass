@@ -164,14 +164,14 @@ export function NodeDetailPanel({
 }: NodeDetailPanelProps) {
   const Icon = node ? TYPE_ICON[node.type] : Network
 
-  // 技能节点：拉取演化信号（模块级缓存）匹配 emerging/declining 徽标
+  // 技能节点：拉取演化信号（模块级缓存）匹配 emerging/declining 徽标。
+  // setState 全部在异步回调内（effect 体内同步 setState 触发
+  // react-hooks 级联渲染 lint 错误）；徽标仅技能节点渲染，非技能节点
+  // 无需显式清空（下次技能节点命中时会重算）。
   const [skillTrend, setSkillTrend] = useState<SkillTrendBadge>(null)
   useEffect(() => {
     let cancelled = false
-    if (!node || node.type !== 'skill') {
-      setSkillTrend(null)
-      return
-    }
+    if (!node || node.type !== 'skill') return
     const key = node.name.toLowerCase()
     loadTrendSets().then((sets) => {
       if (cancelled || !sets) return
