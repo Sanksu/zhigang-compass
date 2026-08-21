@@ -93,14 +93,21 @@ def position_edit_diff(current: dict, skills, core_duties, scenarios) -> str:
 
 
 def _get_position_detail_tx(tx, position_name: str) -> dict | None:
-    """读岗位详情（Position 属性 + REQUIRES 技能/学历/证书），岗位不存在返回 None。"""
+    """读岗位详情（Position 属性 + REQUIRES 技能/学历/证书），岗位不存在返回 None。
+
+    has_edit_log：是否存在该岗位的 PositionEditLog 节点（人工编辑过至少一次），
+    供前端展示「已人工校验」标识；count 聚合避免多条日志导致行重复。
+    """
     pos = tx.run(
         """
         MATCH (p:Position {name: $name})
+        OPTIONAL MATCH (l:PositionEditLog {position_name: $name})
+        WITH p, count(l) AS edit_log_count
         RETURN p.id AS id, p.name AS name, p.level AS level, p.industry AS industry,
                p.salary_range AS salary_range, p.status AS status,
                p.core_duties AS core_duties, p.scenarios AS scenarios,
-               p.created_at AS created_at, p.updated_at AS updated_at
+               p.created_at AS created_at, p.updated_at AS updated_at,
+               edit_log_count > 0 AS has_edit_log
         """,
         name=position_name,
     ).single()
@@ -114,6 +121,7 @@ def _get_position_detail_tx(tx, position_name: str) -> dict | None:
         "industry": pos["industry"] or "",
         "salary_range": pos["salary_range"] or "",
         "status": pos["status"] or "",
+        "has_edit_log": bool(pos["has_edit_log"]),
         "core_duties": pos["core_duties"] or [],
         "scenarios": pos["scenarios"] or [],
         "created_at": pos["created_at"] or "",

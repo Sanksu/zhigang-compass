@@ -149,6 +149,11 @@ export function PositionEditorTab() {
               <CardTitle className="text-sm flex items-center justify-between">
                 <span>{detail.name}</span>
                 <div className="flex items-center gap-2">
+                  {detail.has_edit_log && (
+                    <Badge variant="verified" className="text-[10px]" title="该岗位存在人工编辑记录（PositionEditLog）">
+                      已人工校验
+                    </Badge>
+                  )}
                   <Badge variant={statusVariant(detail.status)} className="text-[10px]">{detail.status}</Badge>
                   <Badge variant="outline" className="text-[10px]">{detail.level || '—'}</Badge>
                   <Badge variant="outline" className="text-[10px]">{detail.industry || '—'}</Badge>

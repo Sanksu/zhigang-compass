@@ -235,7 +235,12 @@ export function CandidateReviewTab() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">岗位定义草案</CardTitle>
+              <CardTitle className="text-sm flex items-center gap-1.5">
+                岗位定义草案
+                <Badge variant="ai" className="text-[10px]" title="由 LLM 聚合生成的定义草案，经人工审核后生效">
+                  AI 生成
+                </Badge>
+              </CardTitle>
             </CardHeader>
             <CardContent>
               {reviewTarget ? (

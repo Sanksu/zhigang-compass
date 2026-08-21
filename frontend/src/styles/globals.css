@@ -41,6 +41,9 @@
   --color-state-declining: #f59e0b;  /* 衰退 — 橙，警示 */
   --color-state-archived: #ef4444;   /* 归档 — 红，终止 */
 
+  /* AI 来源标识 — 紫，标记 LLM 抽取/生成的内容（人机协同可视化，非岗位状态色） */
+  --color-ai: #8b5cf6;
+
   /* 圆角 — 小圆角匹配技术工具气质 */
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -71,6 +74,8 @@
 
   --color-accent: #fafafa;
   --color-accent-foreground: #09090b;
+
+  --color-ai: #a78bfa;
 
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.30);
   --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.40), 0 2px 6px -2px rgb(0 0 0 / 0.30);

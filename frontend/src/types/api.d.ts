@@ -3617,6 +3617,8 @@ export interface components {
             industry: string;
             salary_range: string;
             status: string;
+            /** @description 是否存在人工编辑记录（PositionEditLog 节点）——「已人工校验」标识 */
+            has_edit_log: boolean;
             core_duties: string[];
             scenarios: string[];
             created_at?: string;
