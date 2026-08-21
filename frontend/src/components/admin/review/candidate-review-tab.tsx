@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Clock,
   FileText,
+  ShieldAlert,
   ShieldCheck,
   XCircle,
 } from 'lucide-react'
@@ -10,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { CitationGroup } from '@/components/ui/citation-badge'
 import {
   Dialog,
   DialogContent,
@@ -28,6 +30,9 @@ import {
 import { apiGet, apiPost, errMsg } from '@/lib/api'
 import {
   confidenceOf,
+  evidenceScoreOf,
+  needsReview,
+  REVIEW_BLOCK_THRESHOLD,
   CONFIDENCE_TONE,
   type Schema,
   type ReviewItem,
@@ -52,7 +57,12 @@ export function CandidateReviewTab() {
 
   const loadQueue = () => {
     apiGet<Schema['DiscoveryCandidateData']>('/admin/positions/pending')
-      .then((res) => setQueue(res.items))
+      .then((res) =>
+        // P1 置信度阻断复核：低置信度（conf < 0.75）候选排前，优先人工复核
+        setQueue([...res.items].sort(
+          (a, b) => Number(needsReview(b)) - Number(needsReview(a))
+        )),
+      )
       .catch(() => setError('审核队列加载失败'))
       .finally(() => setLoading(false))
   }
@@ -93,7 +103,7 @@ export function CandidateReviewTab() {
       )}
 
       {/* 统计卡（真实：待审核=队列长度；状态机分布由后端候选池状态聚合） */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <Card>
           <CardContent className="py-4">
             <div className="flex items-center justify-between mb-2">
@@ -102,6 +112,18 @@ export function CandidateReviewTab() {
             </div>
             <div className="text-2xl font-semibold tracking-tight tabular-nums">{queue.length}</div>
             <div className="text-xs text-ink-muted mt-1">待审核（真实）</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between mb-2">
+              <ShieldAlert className="size-4 text-state-archived" />
+              <Badge variant="archived" className="text-[10px]">需复核</Badge>
+            </div>
+            <div className="text-2xl font-semibold tracking-tight tabular-nums">
+              {queue.filter((q) => needsReview(q)).length}
+            </div>
+            <div className="text-xs text-ink-muted mt-1">conf &lt; {Math.round(REVIEW_BLOCK_THRESHOLD * 100)}% 阻断</div>
           </CardContent>
         </Card>
         <Card>
@@ -178,9 +200,23 @@ export function CandidateReviewTab() {
                       </TableCell>
                       <TableCell className="text-xs font-mono text-ink-muted">{item.detected_at}</TableCell>
                       <TableCell>
-                        <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
-                          {Math.round(confidenceOf(item) * 100)}%
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}
+                            title={`证据距离 ${Math.round(evidenceScoreOf(item) * 100)}%`}
+                          >
+                            {Math.round(confidenceOf(item) * 100)}%
+                          </span>
+                          {needsReview(item) && (
+                            <Badge
+                              variant="archived"
+                              className="text-[10px]"
+                              title={`final_confidence < ${Math.round(REVIEW_BLOCK_THRESHOLD * 100)}%，证据不足，已阻断并需人工复核`}
+                            >
+                              需复核
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
@@ -244,9 +280,21 @@ export function CandidateReviewTab() {
             </CardHeader>
             <CardContent>
               {reviewTarget ? (
-                <p className="max-h-40 overflow-auto text-xs text-ink-secondary leading-relaxed">
-                  {reviewTarget.definition_draft || '（无定义草案）'}
-                </p>
+                <div className="space-y-2">
+                  <p className="max-h-40 overflow-auto text-xs text-ink-secondary leading-relaxed">
+                    {reviewTarget.definition_draft || '（无定义草案）'}
+                  </p>
+                  {reviewTarget.evidence_refs.length > 0 && (
+                    <CitationGroup
+                      className="border-t border-border pt-2"
+                      max={5}
+                      items={reviewTarget.evidence_refs.map((ref) => ({
+                        source: ref,
+                        title: `证据引用：${ref}`,
+                      }))}
+                    />
+                  )}
+                </div>
               ) : (
                 <p className="text-xs text-ink-faint py-6 text-center border border-dashed border-border rounded-md">
                   选中队列中的岗位后展示其定义草案与审核操作
@@ -267,15 +315,30 @@ export function CandidateReviewTab() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            {reviewTarget && needsReview(reviewTarget) && (
+              <div className="flex items-start gap-2 rounded-md border border-state-archived/30 bg-state-archived/5 px-3 py-2 text-xs text-state-archived">
+                <ShieldAlert className="size-3.5 mt-0.5 shrink-0" />
+                <span>
+                  置信度 {Math.round(confidenceOf(reviewTarget) * 100)}% &lt;{' '}
+                  {Math.round(REVIEW_BLOCK_THRESHOLD * 100)}%（证据距离{' '}
+                  {Math.round(evidenceScoreOf(reviewTarget) * 100)}%），该候选已被阻断，
+                  请核对定义草案与证据引用后谨慎批准晋升。
+                </span>
+              </div>
+            )}
             <div className="rounded-md bg-subtle p-3 text-xs text-ink-secondary">
               <div className="mb-1 font-medium text-ink">定义草案</div>
               <p className="leading-relaxed">{reviewTarget?.definition_draft || '（无定义草案）'}</p>
               {reviewTarget && reviewTarget.evidence_refs.length > 0 && (
                 <div className="mt-2">
-                  <div className="mb-0.5 font-medium text-ink">证据引用</div>
-                  <p className="font-mono text-[10px] text-ink-faint break-all">
-                    {reviewTarget.evidence_refs.join('、')}
-                  </p>
+                  <div className="mb-1 font-medium text-ink">证据引用</div>
+                  <CitationGroup
+                    max={6}
+                    items={reviewTarget.evidence_refs.map((ref) => ({
+                      source: ref,
+                      title: `证据引用：${ref}`,
+                    }))}
+                  />
                 </div>
               )}
             </div>

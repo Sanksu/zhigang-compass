@@ -29,5 +29,27 @@ export function confidenceOf(item: ReviewItem): number {
   return 0.5
 }
 
+/**
+ * P1 置信度标量化阻断复核阈值：final_confidence < 0.75 的候选标记"需复核"。
+ * 与后端 confidence.py REVIEW_BLOCK_THRESHOLD 同步（证据距离优先：低证据候选
+ * 自动进入审核队列阻断，人工复核后方可晋升）。
+ */
+export const REVIEW_BLOCK_THRESHOLD = 0.75
+
+/** 是否需人工复核（低置信度候选自动标记阻断） */
+export function needsReview(item: ReviewItem): boolean {
+  return confidenceOf(item) < REVIEW_BLOCK_THRESHOLD
+}
+
+/** 证据距离综合分（P1：图谱证据距离×0.5 + LLM Logprob×0.5，缺省中性 0.5） */
+export function evidenceScoreOf(item: ReviewItem): number {
+  const c = item.confidence
+  if (c && typeof c === 'object') {
+    const score = (c as Record<string, unknown>).evidence_score
+    if (typeof score === 'number') return score
+  }
+  return 0.5
+}
+
 export const CONFIDENCE_TONE = (c: number) =>
   c >= 0.8 ? 'text-state-emerging' : c >= 0.7 ? 'text-state-stable' : 'text-state-declining'

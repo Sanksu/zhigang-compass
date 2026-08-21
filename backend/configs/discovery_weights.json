@@ -2,5 +2,6 @@
   "w_count": 0.4,
   "w_source": 0.3,
   "w_growth": 0.3,
-  "_comment": "新岗位发现置信度权重（设计文档 7.2.4 节）。w_count=频次, w_source=源多样性, w_growth=增长率。"
+  "w_evidence": 0.15,
+  "_comment": "新岗位发现置信度权重（设计文档 7.2.4 节）。w_count=频次, w_source=源多样性, w_growth=增长率, w_evidence=证据距离校准（P1：图谱证据距离×0.5 + LLM Logprob×0.5，中性 0.5 不偏移阈值）。"
 }

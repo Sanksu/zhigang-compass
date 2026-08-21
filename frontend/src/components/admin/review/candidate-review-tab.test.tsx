@@ -131,4 +131,26 @@ describe('CandidateReviewTab 候选晋升审核', () => {
     )
     expect(await screen.findByText(/已驳回（rejected）：提示词工程师/)).toBeInTheDocument()
   })
+
+  it('P1 置信度标量化：低置信度（conf<0.75）标记需复核并显示阻断统计', async () => {
+    mockApiGet.mockResolvedValue(
+      pendingData(
+        makeItem({ id: 'pos_high', confidence: { final_confidence: 0.82, evidence_score: 0.9 } }),
+        makeItem({
+          id: 'pos_low',
+          position_name: 'AI 产品经理',
+          confidence: { final_confidence: 0.52, evidence_score: 0.3 },
+        }),
+      ),
+    )
+    render(<CandidateReviewTab />)
+    await screen.findByText('提示词工程师')
+    // 低置信度项渲染"需复核"徽标（统计卡 1 处 + 低置信度行 1 处 = 2；高置信度行无）
+    expect(screen.getAllByText('需复核')).toHaveLength(2)
+    // 阻断统计卡文案（conf < 75% 阻断）
+    expect(screen.getByText(/75% 阻断/)).toBeInTheDocument()
+    // 审核弹窗对低置信度候选展示阻断警告（阻断项排前，首个"审核"即低置信度行）
+    fireEvent.click(screen.getAllByRole('button', { name: '审核' })[0])
+    expect(await screen.findByText(/该候选已被阻断/)).toBeInTheDocument()
+  })
 })
