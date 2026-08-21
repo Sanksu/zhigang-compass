@@ -12,13 +12,13 @@ describe('nav-config 与设计文档 §10.2 路由表对齐', () => {
     expect(mainNav.find((i) => i.to === '/resume-match')?.requireRole).toEqual(['user', 'admin'])
   })
 
-  it('管理导航两组：管理 + 配置中心，共 9 项全部仅 admin（08-16 层级化，08-21 加 ETL 队列）', () => {
+  it('管理导航两组：管理 + 配置中心，共 10 项全部仅 admin（08-16 层级化，08-21 加 ETL 队列与数据血缘）', () => {
     const adminNav = adminNavGroups.flatMap((g) => g.items)
     expect(adminNavGroups.map((g) => g.label)).toEqual(['管理', '配置中心'])
-    expect(adminNav).toHaveLength(9)
+    expect(adminNav).toHaveLength(10)
     expect(adminNav.every((i) => i.requireRole?.includes('admin'))).toBe(true)
     expect(adminNav.map((i) => i.to)).toEqual([
-      '/admin', '/admin/users', '/admin/crawl', '/admin/review',
+      '/admin', '/admin/users', '/admin/crawl', '/admin/review', '/admin/lineage',
       '/admin/llm',
       '/admin/settings/tasks', '/admin/settings/crawl', '/admin/settings/evolution',
       '/admin/settings/etl',

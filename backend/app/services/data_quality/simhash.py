@@ -10,6 +10,7 @@
 
 import hashlib
 import re
+from typing import Iterable
 
 # 指纹位数与近似判定阈值（设计文档 §4.2：SimHash 64-bit，汉明距 ≤ 3）
 _BITS = 64
@@ -116,3 +117,92 @@ def find_similar_pairs(
                 if hamming_distance(records[a][1], records[b][1]) <= threshold:
                     pairs.append((records[a][0], records[b][0]))
     return pairs
+
+
+class SimHashIndex:
+    """增量式 SimHash 近邻索引（P12 流式去重性能优化）。
+
+    对比每次全量 ``find_similar_pairs``：流式数据持续写入时，历史记录每轮
+    都被重复加载并两两比较，近邻比较量随数据量增长退化（接近 O(n²) 量级）。
+    本索引只对**新增**记录做近邻检索：
+
+      - ``add(record_id, fingerprint)`` 增量入桶。分块抽屉原理与
+        ``find_similar_pairs`` 同源：64-bit 指纹分 4 块（各 16 bit），
+        汉明距 ≤ 3 的两指纹必然共享至少一个 16-bit 块；
+      - ``find_near(record_id, fingerprint)`` 仅查查询指纹命中的候选桶，
+        候选再做汉明距校验，返回索引中与其近似重复的已入库记录 ID。
+
+    近邻比较量从"每轮全量两两比较"降为"每新增一条仅比较同桶候选"，
+    桶内候选数远小于全量记录数，索引随数据增长保持亚线性查询。
+    索引条目可经 ``items()`` 导出持久化（如 Redis），``from_items`` 恢复。
+    """
+
+    def __init__(
+        self,
+        threshold: int = DEFAULT_HAMMING_THRESHOLD,
+        block_count: int = 4,
+    ) -> None:
+        if threshold >= _BITS // block_count:
+            raise ValueError(
+                f"threshold({threshold}) must be < block_bits({_BITS // block_count}) "
+                "for the drawer-principle guarantee"
+            )
+        self.threshold = threshold
+        self.block_bits = _BITS // block_count
+        self._block_count = block_count
+        self._fingerprints: dict[str, int] = {}  # record_id -> fingerprint
+        self._buckets: dict[tuple[int, int], list[str]] = {}
+
+    def __len__(self) -> int:
+        return len(self._fingerprints)
+
+    def _bucket_keys(self, fingerprint: int) -> list[tuple[int, int]]:
+        return [
+            (b, (fingerprint >> (b * self.block_bits)) & ((1 << self.block_bits) - 1))
+            for b in range(self._block_count)
+        ]
+
+    def add(self, record_id: str, fingerprint: int) -> None:
+        """增量插入一条指纹到索引（重复 record_id 覆盖，保证重跑幂等）。"""
+        rid = str(record_id)
+        self._fingerprints[rid] = fingerprint
+        for key in self._bucket_keys(fingerprint):
+            bucket = self._buckets.setdefault(key, [])
+            if rid not in bucket:
+                bucket.append(rid)
+
+    def find_near(self, record_id: str, fingerprint: int) -> list[str]:
+        """返回索引中与给定指纹汉明距 ≤ threshold 的已入库记录 ID（不含自身）。
+
+        仅检查查询指纹命中的候选桶（抽屉原理保证真近邻必在候选内），
+        桶内候选做汉明距校验，避免全量扫描。
+        """
+        rid = str(record_id)
+        candidates: set[str] = set()
+        for key in self._bucket_keys(fingerprint):
+            candidates.update(self._buckets.get(key, ()))
+        candidates.discard(rid)
+
+        near: list[str] = []
+        for cid in candidates:
+            stored = self._fingerprints.get(cid)
+            if stored is not None and hamming_distance(fingerprint, stored) <= self.threshold:
+                near.append(cid)
+        return near
+
+    def items(self) -> list[tuple[str, int]]:
+        """导出 [(record_id, fingerprint)]，供持久化/重启恢复。"""
+        return [(rid, fp) for rid, fp in self._fingerprints.items()]
+
+    @classmethod
+    def from_items(
+        cls,
+        items: Iterable[tuple[str, int]],
+        threshold: int = DEFAULT_HAMMING_THRESHOLD,
+        block_count: int = 4,
+    ) -> "SimHashIndex":
+        """从持久化条目恢复索引。"""
+        index = cls(threshold=threshold, block_count=block_count)
+        for rid, fp in items:
+            index.add(str(rid), int(fp))
+        return index
