@@ -2,13 +2,14 @@
  * 图谱渲染纯函数单测 — 覆盖本轮显示逻辑优化新增的核心行为：
  * - graph-2d：技能标签密度阈值（中位数截断，低关联技能不常显）
  * - graph-3d：节点视觉半径（类型基础差 + 选中/展开放大）
+ * - graph-utils：过滤打标（computeFilterMarks——压暗而非剔除，筛选时布局稳定）
  * - graph-layout：岗位防重叠（hasPositionOverlap 判定 + enforceSpread 强制分散，
  *   2026-08-15 重叠修复双保险的纯函数部分）
  */
 import { describe, expect, it, vi } from 'vitest'
-import { skillLabelThreshold, nodeRadius } from './graph-utils'
+import { computeFilterMarks, skillLabelThreshold, nodeRadius } from './graph-utils'
 import { enforceSpread, hasPositionOverlap } from './graph-layout'
-import type { GraphNode } from './types'
+import type { GraphEdge, GraphNode, PositionStatus } from './types'
 
 function skill(id: string, value?: number): GraphNode {
   return { id, name: id, type: 'skill', value }
@@ -109,6 +110,76 @@ describe('nodeRadius', () => {
     const small = skill('s1', 0)
     const big = skill('s2', 100)
     expect(nodeRadius(big, false, false)).toBeGreaterThan(nodeRadius(small, false, false))
+  })
+})
+
+describe('computeFilterMarks', () => {
+  const edges: GraphEdge[] = [
+    { source: 'p1', target: 's1', necessity: 'must', weight: 0.8 },
+    { source: 'p1', target: 's2', necessity: 'nice', weight: 0.4 },
+    { source: 'p2', target: 's3', necessity: 'must', weight: 0.8 },
+  ]
+
+  it('无过滤时全部可见（打标为空）', () => {
+    const nodes = [position('p1', 50), skill('s1', 10)]
+    const marks = computeFilterMarks(nodes, edges, {
+      minWeight: 0,
+      hiddenStatuses: new Set(),
+      showOnlyMustEdges: false,
+    })
+    expect(marks.dimNodeIds.size).toBe(0)
+    expect(marks.dimEdgeFlags).toEqual([false, false, false])
+    expect(marks.visibleNodes).toBe(2)
+    expect(marks.visibleEdges).toBe(3)
+  })
+
+  it('权重低于阈值的节点被压暗（打标而非剔除，保持布局稳定）', () => {
+    const nodes = [position('p1', 50), position('p2', 5), skill('s1', 30), skill('s3', 2)]
+    const marks = computeFilterMarks(nodes, [], { minWeight: 10, hiddenStatuses: new Set(), showOnlyMustEdges: false })
+    expect(marks.dimNodeIds.has('p2')).toBe(true)
+    expect(marks.dimNodeIds.has('s3')).toBe(true)
+    expect(marks.dimNodeIds.has('p1')).toBe(false)
+    expect(marks.visibleNodes).toBe(2)
+  })
+
+  it('被隐藏状态的岗位压暗；技能节点不受状态过滤影响', () => {
+    const nodes = [
+      { id: 'p1', name: 'p1', type: 'position' as const, value: 50, status: 'archived' as PositionStatus },
+      { id: 'p2', name: 'p2', type: 'position' as const, value: 50, status: 'stable' as PositionStatus },
+      skill('s1', 50),
+    ]
+    const marks = computeFilterMarks(nodes, [], {
+      minWeight: 0,
+      hiddenStatuses: new Set<PositionStatus>(['archived']),
+      showOnlyMustEdges: false,
+    })
+    expect(marks.dimNodeIds.has('p1')).toBe(true)
+    expect(marks.dimNodeIds.has('p2')).toBe(false)
+    expect(marks.dimNodeIds.has('s1')).toBe(false)
+  })
+
+  it('端点被压暗的边一并压暗（按 edges 同序标记）', () => {
+    const nodes = [position('p1', 50), position('p2', 1), skill('s1', 30), skill('s3', 2)]
+    const localEdges: GraphEdge[] = [
+      { source: 'p1', target: 's1', necessity: 'must' },
+      { source: 'p2', target: 's3', necessity: 'must' },
+    ]
+    // p2(1)、s3(2) 低于阈值压暗 → 其边压暗；p1-s1 两端可见保留
+    const marks = computeFilterMarks(nodes, localEdges, { minWeight: 10, hiddenStatuses: new Set(), showOnlyMustEdges: false })
+    expect(marks.dimEdgeFlags).toEqual([false, true])
+    expect(marks.visibleEdges).toBe(1)
+  })
+
+  it('仅看必备关系时 nice 边压暗（must 边保留）', () => {
+    const nodes = [position('p1', 50), position('p2', 50), skill('s1'), skill('s2'), skill('s3')]
+    const marks = computeFilterMarks(nodes, edges, { minWeight: 0, hiddenStatuses: new Set(), showOnlyMustEdges: true })
+    expect(marks.dimEdgeFlags).toEqual([false, true, false])
+    expect(marks.visibleEdges).toBe(2)
+  })
+
+  it('value 缺失的节点按 0 参与权重过滤', () => {
+    const marks = computeFilterMarks([skill('s1')], [], { minWeight: 1, hiddenStatuses: new Set(), showOnlyMustEdges: false })
+    expect(marks.dimNodeIds.has('s1')).toBe(true)
   })
 })
 

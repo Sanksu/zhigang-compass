@@ -1,4 +1,4 @@
-import type { GraphNode, PositionStatus } from './types'
+import type { GraphEdge, GraphNode, PositionStatus } from './types'
 
 /** 技能标签显示阈值：低于全图技能节点 value 中位数的不常显标签（悬停/选中时经 emphasis 仍显示），
  *  避免技能全量渲染时标签叠字遮挡，同时减少 label 渲染开销 */
@@ -29,5 +29,63 @@ export const COLOR_BY_STATUS: Record<PositionStatus, string> = {
   stable: '#3b82f6',
   declining: '#f59e0b',
   archived: '#ef4444',
+}
+
+/** 过滤面板三控件的状态快照 */
+export interface FilterOptions {
+  minWeight: number
+  /** 被隐藏的岗位状态集合（空集 = 全显示） */
+  hiddenStatuses: Set<PositionStatus>
+  /** true = 仅看 must（必备）边 */
+  showOnlyMustEdges: boolean
+}
+
+/** 过滤打标结果：节点/边不从图中剔除，仅标记压暗 */
+export interface FilterMarks {
+  /** 被压暗的节点 id 集合 */
+  dimNodeIds: Set<string>
+  /** 与 edges 同序的压暗标记 */
+  dimEdgeFlags: boolean[]
+  visibleNodes: number
+  visibleEdges: number
+}
+
+/**
+ * 计算图谱过滤打标（纯函数）：权重低于阈值、或岗位状态被隐藏的节点压暗；
+ * 端点被压暗的边、"仅看必备关系"下的非 must 边一并压暗。
+ *
+ * 打标而非剔除——ECharts 力导向在节点集合与顺序不变时保留既有布局坐标，
+ * 筛选只改透明度不触发全图重新收敛，避免布局跳变（演示时镜头稳定）。
+ */
+export function computeFilterMarks(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  opts: FilterOptions,
+): FilterMarks {
+  const dimNodeIds = new Set<string>()
+  for (const n of nodes) {
+    if ((n.value ?? 0) < opts.minWeight) {
+      dimNodeIds.add(n.id)
+      continue
+    }
+    if (n.type === 'position' && n.status && opts.hiddenStatuses.has(n.status)) {
+      dimNodeIds.add(n.id)
+    }
+  }
+  let visibleEdges = 0
+  const dimEdgeFlags = edges.map((e) => {
+    const dim =
+      dimNodeIds.has(e.source) ||
+      dimNodeIds.has(e.target) ||
+      (opts.showOnlyMustEdges && e.necessity !== 'must')
+    if (!dim) visibleEdges += 1
+    return dim
+  })
+  return {
+    dimNodeIds,
+    dimEdgeFlags,
+    visibleNodes: nodes.length - dimNodeIds.size,
+    visibleEdges,
+  }
 }
 

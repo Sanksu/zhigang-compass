@@ -18,6 +18,10 @@ interface GraphFilterPanelProps {
   /** B2: true = 仅显示 must（必备）边，false = 显示全部 */
   showOnlyMustEdges?: boolean
   onToggleMustEdges?: (v: boolean) => void
+  /** 压暗式过滤：未被压暗的节点数（提供 hiddenCount 时显示统计行） */
+  visibleCount?: number
+  /** 被压暗淡出的节点数 */
+  hiddenCount?: number
 }
 
 export function GraphFilterPanel({
@@ -27,6 +31,8 @@ export function GraphFilterPanel({
   onToggleStatus,
   showOnlyMustEdges = false,
   onToggleMustEdges,
+  visibleCount,
+  hiddenCount,
 }: GraphFilterPanelProps) {
   return (
     <div className="absolute left-4 top-4 z-10 w-52 rounded-xl border border-white/10 bg-white/75 p-3.5 shadow-xl backdrop-blur-md dark:border-white/5 dark:bg-black/55">
@@ -34,6 +40,13 @@ export function GraphFilterPanel({
         <SlidersHorizontal className="size-3.5" />
         图谱过滤
       </div>
+
+      {/* 压暗式过滤统计：被过滤节点仍留在画布上（淡出为背景），仅不再响应交互 */}
+      {hiddenCount != null && hiddenCount > 0 && typeof visibleCount === 'number' && (
+        <div className="mb-3 rounded-md bg-subtle/70 px-2 py-1 text-[10px] text-ink-secondary">
+          显示 {visibleCount} · 淡出 {hiddenCount}
+        </div>
+      )}
 
       {/* 最小权重 */}
       <div className="mb-3">

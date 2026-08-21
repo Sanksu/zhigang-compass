@@ -4,7 +4,7 @@
  * 保留能力：
  * - 力导向布局 + 原生 roam/拖拽
  * - 悬停 Focus+Context（emphasis.focus: 'adjacency'）
- * - 左上角悬浮权重过滤面板
+ * - 左上角悬浮过滤面板：筛选命中项压暗而非剔除（布局与镜头稳定，不重收敛）
  * - 单击选中 / 双击展开 / 空白取消
  * - dispatchAction 选中高亮（不重绘布局）
  */
@@ -15,7 +15,7 @@ import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 import type { EChartsModel } from './graph-layout'
-import { COLOR_BY_STATUS, skillLabelThreshold } from './graph-utils'
+import { COLOR_BY_STATUS, computeFilterMarks, skillLabelThreshold } from './graph-utils'
 import { buildDagGraph, type DagSkillLink, type DagSkillNode } from '@/components/learning/learning-timeline'
 import type { LearningPathItem } from '@/components/match/types'
 import { GraphFilterPanel } from './graph-filter-panel'
@@ -74,6 +74,14 @@ const COLOR_EVIDENCE = '#a1a1aa'
 const BLUR_OPACITY = 0.1
 // 悬停邻域内边与节点的强调透明度（相对全不透明前的保留度）
 const FOCUS_BRIGHTEN = 0.9
+
+// ── 过滤压暗参数 ─────────────────────────────────────────────
+// 被过滤节点/边不从 series.data 中剔除（剔除会改变图拓扑，力导向整体重新
+// 收敛导致布局跳变），而是压暗为近乎不可见的"星空背景"：节点集合与顺序
+// 不变时 ECharts 保留既有布局坐标，筛选只改透明度，镜头与布局完全稳定。
+// 压暗项同时置 silent，悬停/点击不再响应（避免对"已隐藏"节点产生交互）。
+const FILTER_DIM_OPACITY = 0.08
+const FILTER_DIM_EDGE_OPACITY = 0.04
 
 // ── 语义缩放 (LOD) 档位参数（task T1）───────────────────────────
 // zoom 级别低于该阈值仅显示岗位标签
@@ -282,29 +290,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     })
   }, [])
 
-  const filteredData = useMemo(() => {
-    const allowed = new Set<string>()
-    const nodes = data.nodes.filter((n) => {
-      const w = n.value ?? 0
-      if (w < minWeight) return false
-      // B2: 隐藏指定状态的岗位节点
-      if (n.type === 'position' && n.status && hiddenStatuses.has(n.status as import('./types').PositionStatus)) return false
-      allowed.add(n.id)
-      return true
-    })
-    const edges = data.edges.filter((e) => {
-      if (!allowed.has(e.source) || !allowed.has(e.target)) return false
-      // B2: 仅保留 must 边
-      if (showOnlyMustEdges && e.necessity !== 'must') return false
-      return true
-    })
-    return {
-      ...data,
-      nodes,
-      edges,
-      stats: { ...data.stats, returnedNodes: nodes.length, totalEdges: edges.length },
-    }
-  }, [data, minWeight, hiddenStatuses, showOnlyMustEdges])
+  // 过滤打标（而非剔除）：布局与镜头在筛选过程中保持稳定
+  const filterMarks = useMemo(
+    () => computeFilterMarks(data.nodes, data.edges, { minWeight, hiddenStatuses, showOnlyMustEdges }),
+    [data, minWeight, hiddenStatuses, showOnlyMustEdges],
+  )
+  // 首次渲染或 DAG↔图谱切换时才把镜头重置回中心；其余重建（主题/LOD/筛选）
+  // 不携带 center，保留用户当前视角，避免滑动筛选条时镜头跳回
+  const builtRef = useRef(false)
+  const prevViewModeRef = useRef<'graph' | 'dag'>(viewMode)
 
   // 语义缩放 (LOD)：仅当 zoom 跨越档位边界时才更新 band，避免 roam 每帧重绘
   const applyLodBand = useCallback((zoom: number) => {
@@ -440,11 +434,17 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const chart = chartRef.current
     if (!chart) return
 
+    // 镜头保持：仅首次渲染或 DAG↔图谱切换时才重置镜头中心（filterMarks 等
+    // 触发的重建不携带 center，用户当前视角不动）
+    const resetCamera = !builtRef.current || prevViewModeRef.current !== viewMode
+    prevViewModeRef.current = viewMode
+
     // 宏观 DAG 视图（task T2）：提供 learningPath 且选用 DAG 时，用分层拓扑渲染
     if (dagData && viewMode === 'dag') {
       const W = chart.getWidth() || 640
       const H = chart.getHeight() || 480
       chart.setOption(buildDagOption(dagData.nodes, dagData.links, isDark(), W, H))
+      builtRef.current = true
       return
     }
 
@@ -452,77 +452,86 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const textColor = dark ? '#fafafa' : '#09090b'
     const mutedColor = dark ? '#a1a1aa' : '#71717a'
     const borderColor = dark ? '#27272a' : '#e4e4e7'
-    const labelThreshold = skillLabelThreshold(filteredData.nodes)
+    const labelThreshold = skillLabelThreshold(data.nodes)
 
-    const nodes = filteredData.nodes.map((n) => ({
-      ...n,
-      value: n.type === 'position' ? 1000 : (n.value ?? 0),
-      displayValue: n.value,
-      symbol: symbolOf(n),
-      symbolSize: sizeOf(n, n.value),
-      category: n.type,
-      itemStyle: {
-        color: colorOf(n, dark),
-        borderColor,
-        borderWidth: 1,
-        opacity: 0.95,
-        ...(n.type === 'position' && expandedPositions?.has(n.id)
-          ? {
-              borderColor: dark ? '#fafafa' : '#ffffff',
-              borderWidth: 3,
-              shadowBlur: isNarrow ? 14 : 22,
-              shadowColor: hexToRgba(colorOf(n, dark), 0.55),
-            }
-          : {}),
-      },
-      label: {
-        // 语义缩放 (LOD)：标签显隐由 zoom 档位驱动
-        // - band 0（zoom<0.55）：仅岗位
-        // - band 1（0.55≤zoom<1.2）：岗位 + 高权重技能（≥中位阈值）
-        // - band 2（zoom≥1.2）：全量（含低权技能）
-        show:
-          n.type === 'position'
-            ? lodBand >= 0
-            : n.type === 'skill'
-              ? lodBand === 2 || (lodBand >= 1 && (n.value ?? 0) >= labelThreshold)
-              : false,
-        position: 'right',
-        color: textColor,
-        fontSize: 11,
-        fontWeight: n.type === 'position' ? 600 : 400,
-        backgroundColor: dark ? 'rgba(24,24,27,0.65)' : 'rgba(255,255,255,0.7)',
-        borderRadius: 4,
-        padding: [2, 6],
-        formatter: n.type === 'position' ? `{a|${n.name}}` : n.name,
-        rich: {
-          a: { fontWeight: 600, fontSize: 12 },
-        },
-      },
-      emphasis: {
-        focus: 'adjacency',
-        blurScope: 'coordinateSystem',
+    const nodes = data.nodes.map((n) => {
+      const dimmed = filterMarks.dimNodeIds.has(n.id)
+      return {
+        ...n,
+        value: n.type === 'position' ? 1000 : (n.value ?? 0),
+        displayValue: n.value,
+        symbol: symbolOf(n),
+        symbolSize: sizeOf(n, n.value),
+        category: n.type,
         itemStyle: {
-          shadowBlur: 24,
-          shadowColor: colorOf(n, dark),
-          opacity: FOCUS_BRIGHTEN,
+          color: colorOf(n, dark),
+          borderColor,
+          borderWidth: 1,
+          opacity: 0.95,
+          ...(n.type === 'position' && expandedPositions?.has(n.id)
+            ? {
+                borderColor: dark ? '#fafafa' : '#ffffff',
+                borderWidth: 3,
+                shadowBlur: isNarrow ? 14 : 22,
+                shadowColor: hexToRgba(colorOf(n, dark), 0.55),
+              }
+            : {}),
+          ...(dimmed ? { opacity: FILTER_DIM_OPACITY } : {}),
         },
-        label: { show: true },
-      },
-    }))
+        label: {
+          // 语义缩放 (LOD)：标签显隐由 zoom 档位驱动
+          // - band 0（zoom<0.55）：仅岗位
+          // - band 1（0.55≤zoom<1.2）：岗位 + 高权重技能（≥中位阈值）
+          // - band 2（zoom≥1.2）：全量（含低权技能）
+          show: dimmed
+            ? false
+            : n.type === 'position'
+              ? lodBand >= 0
+              : n.type === 'skill'
+                ? lodBand === 2 || (lodBand >= 1 && (n.value ?? 0) >= labelThreshold)
+                : false,
+          position: 'right',
+          color: textColor,
+          fontSize: 11,
+          fontWeight: n.type === 'position' ? 600 : 400,
+          backgroundColor: dark ? 'rgba(24,24,27,0.65)' : 'rgba(255,255,255,0.7)',
+          borderRadius: 4,
+          padding: [2, 6],
+          formatter: n.type === 'position' ? `{a|${n.name}}` : n.name,
+          rich: {
+            a: { fontWeight: 600, fontSize: 12 },
+          },
+        },
+        // 压暗项不响应悬停/点击（星空背景，避免对"已隐藏"节点产生交互）
+        silent: dimmed,
+        emphasis: {
+          focus: 'adjacency',
+          blurScope: 'coordinateSystem',
+          itemStyle: {
+            shadowBlur: 24,
+            shadowColor: colorOf(n, dark),
+            opacity: FOCUS_BRIGHTEN,
+          },
+          label: { show: true },
+        },
+      }
+    })
 
     // C1: 深色模式提升边对比度（#27272a×0.3 → #52525b×0.45，WCAG AA）
     // C1: must（必备）实线全宽；nice（加分）虚线 60% 宽度，视觉区分两种边关系
-    const links = filteredData.edges.map((e) => {
+    const links = data.edges.map((e, i) => {
       const isMust = e.necessity !== 'nice'
+      const dimmed = filterMarks.dimEdgeFlags[i]
       return {
         source: e.source,
         target: e.target,
         value: e.weight,
+        silent: dimmed,
         lineStyle: {
           width: isMust ? weightToWidth(e.weight) : Math.max(0.5, weightToWidth(e.weight) * 0.6),
           type: isMust ? 'solid' : 'dashed',
           color: dark ? '#52525b' : borderColor,
-          opacity: dark ? 0.45 : 0.3,
+          opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : dark ? 0.45 : 0.3,
           curveness: 0,
         },
         emphasis: {
@@ -573,7 +582,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           roam: true,
           draggable: true,
           cursor: 'pointer',
-          center: ['50%', '50%'],
+          // 镜头保持：仅首建/视图切换时重置中心，其余重建不动当前视角
+          ...(resetCamera ? { center: ['50%', '50%'] as [string, string] } : {}),
           labelLayout: { hideOverlap: true },
           animation: false,
           animationDuration: 0,
@@ -620,13 +630,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     }
 
     chart.setOption(option)
-  }, [filteredData, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand])
+    builtRef.current = true
+  }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand])
 
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
     if (selectedId) {
-      const idx = filteredData.nodes.findIndex((n) => n.id === selectedId)
+      const idx = data.nodes.findIndex((n) => n.id === selectedId)
       if (idx >= 0) {
         // select 负责选中项描边；highlight 触发 focus:adjacency + blur，使"点击/选中态"
         // 同样把无关节点与边压到 10%（聚光灯对悬停与点击都生效，task T1）
@@ -637,7 +648,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       chart.dispatchAction({ type: 'unselect', seriesIndex: 0 })
       chart.dispatchAction({ type: 'downplay', seriesIndex: 0 })
     }
-  }, [selectedId, filteredData.nodes])
+  }, [selectedId, data.nodes])
 
   useEffect(() => {
     if (focusRequest) focusNode(focusRequest.id)
@@ -668,7 +679,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           ))}
         </div>
       )}
-      {/* B2: 传入岗位状态过滤 + must/nice 边过滤 props */}
+      {/* B2: 传入岗位状态过滤 + must/nice 边过滤 props；压暗式过滤的可见统计 */}
       <GraphFilterPanel
         minWeight={minWeight}
         onMinWeightChange={setMinWeight}
@@ -676,6 +687,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         onToggleStatus={toggleStatus}
         showOnlyMustEdges={showOnlyMustEdges}
         onToggleMustEdges={setShowOnlyMustEdges}
+        visibleCount={filterMarks.visibleNodes}
+        hiddenCount={data.nodes.length - filterMarks.visibleNodes}
       />
       <div ref={containerRef} className="h-full w-full" />
     </div>
