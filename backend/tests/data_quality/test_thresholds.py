@@ -8,8 +8,6 @@
 
 import json
 
-import pytest
-
 from app.services.data_quality.simhash import SimHashIndex, is_duplicate, simhash64
 from app.services.data_quality.thresholds import (
     _CONFIG_PATH,
