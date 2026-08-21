@@ -1,6 +1,6 @@
 """技能关联岗位动态变迁桑基图数据构建（_build_skill_flow）纯函数测试。"""
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
