@@ -68,10 +68,11 @@ export interface GapItem {
   priority: 'high' | 'medium' | 'low'
   current_level: string
   required_level: string
-  // ── 差距分析数据升级新增（后端暂未直接返回，均为可选，缺省由 UI 推导/mock）──
+  // ── 契约扩展字段（#341 起后端全量返回，可选——图谱不可用时后端回填补齐，
+  //    前端不再本地推导/mock；对应契约 GapSkill schema）──
   /** 市场需求度 0-1 */
   demand?: number
-  /** 需求趋势 -1..1 */
+  /** 需求趋势 -1..1（契约描述；实现现口径为 0..1 扩散度，见审查报告 L-13 待裁决） */
   trend?: number
   /** ROI 指标 = (demand × trend) / cost，用于高杠杆缺口打标 */
   roi?: number
@@ -94,8 +95,9 @@ export interface LearningPathItem {
   courses: { title: string; platform: string; hours: number; url?: string }[]
   /** 优先级 */
   priority: 'high' | 'medium' | 'low'
-  // ── 学习路径双轨制新增（后端暂未直接返回，均为可选，缺失由 UI 兜底）──
-  /** 学习状态（done=已掌握 / doing=下一步 / locked=未解锁），后端未返回时前端按拓扑推导 */
+  // ── 契约字段（对应契约 LearningPathItem schema：status/estimated_hours
+  //    后端返回；本接口沿用驼峰命名由 toLearningPath 映射）──
+  /** 学习状态（done=已掌握 / doing=下一步 / locked=未解锁） */
   status?: 'done' | 'doing' | 'locked'
   /** 预计学时（小时）。缺省由 duration_days×8 推导 */
   estimatedHours?: number
