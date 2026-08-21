@@ -3540,13 +3540,13 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         DictProposalItem: {
-            id?: string;
+            id: string;
             /** @description 动作作用的目标词 */
-            term?: string;
+            term: string;
             /** @enum {string} */
-            action?: "add_stopword" | "remove_stopword" | "protect_whitelist";
+            action: "add_stopword" | "remove_stopword" | "protect_whitelist";
             /** @enum {string} */
-            status?: "pending" | "approved" | "rejected";
+            status: "pending" | "approved" | "rejected";
             /** @description LLM 判定理由 */
             reason?: string;
             /** @description LLM 置信度 0~1 */
@@ -3556,30 +3556,30 @@ export interface components {
             /** @description 影响面模拟：图谱同名节点数 + 命中 JD 数 */
             impact_stats?: Record<string, never>;
             /** @description 评估批次日期 */
-            run_date?: string;
+            run_date: string;
             reviewed_by?: string;
             review_reason?: string;
             reviewed_at?: string | null;
-            created_at?: string;
+            created_at: string;
         };
         DictChangeLogItem: {
-            id?: string;
-            term?: string;
+            id: string;
+            term: string;
             /** @description 变更动作（含 rollback） */
-            action?: string;
+            action: string;
             /** @enum {string} */
-            source?: "auto" | "manual" | "rollback";
+            source: "auto" | "manual" | "rollback";
             /**
              * @description 动态层条目类型
              * @enum {string}
              */
-            kind?: "blocked" | "protected";
+            kind: "blocked" | "protected";
             proposal_id?: string | null;
             reason?: string;
             detail?: Record<string, never>;
             impact_stats?: Record<string, never>;
-            applied_by?: string;
-            created_at?: string;
+            applied_by: string;
+            created_at: string;
         };
         ApiResponse: {
             /**
