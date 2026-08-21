@@ -6,6 +6,10 @@
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
 ### 2026-08-21
+- **第四轮全项目代码审查 P0/P1 修复三连**（#364/#365/#366）：基于《全项目代码审查报告_20260821.md》修复 5 项高危中的 5 项 P0/P1(除移交算法的 H5):
+  - **#364 安全修复（H1/H2/M4/M8）**：简历解析缓存编辑改 copy-on-write（同字节文件共享时按用户 fork 独立 parsed_data，杜绝跨用户越权，H1）；生产 fail-fast 补 `debug=false 强制 + cors_origins≠["*"]`（SQL echo 不再泄 PII，H2）；E2E 凭据轮换为环境变量注入（M4）；语义模型预热失败降级时告警日志（M8）
+  - **#365 前端数据诚实（H3/H4/M7）**：图谱节点详情删除哈希编造的需求%/趋势（H3）；匹配页删除 decorateGaps/GAP_COST 无条件重算，ROI/evidence/high_roi 直透后端 #341 契约字段（H4）；E2E mock 对齐 openapi 必需字段口径（M7）
+  - **#366 测试与审计（M1/M5/M6）**：`tests/integration` 补 `pytest.mark.integration` marker 默认排除（杜绝本地 docker 数据耦合拉起，M1）；admin accounts 域四端点补 AuditLog（M5）；补 `test:coverage` 脚本并接入 CI，使 80/80/70/80 覆盖率门禁真正生效（M6，修正 README 宣称 95% 与阈值不一致）
 - **匹配权重 BT v3：调优目标与验收口径对齐**（#363）：v2 权重由 Optuna 以 Spearman 为目标调出，与 Acc 验收口径（阈值 0.5 二分类）错位；以 Acc 为目标重搜（150+400 试验收敛同一最优），`configs/match_weights.json` 更新为 w=(0.669, 0.044, 0.287)/sim_threshold=0.938——384 对 v2 黄金集 **Acc 0.8281→0.8906**（fp 66→42、fn 恒 0）、Spearman 0.7642→0.7407；v1 300 对回归 Acc 0.9167→0.96；4 折按岗位分组 CV 一致。待决策（张恺天）：分类截断 0.5→0.58 可再达 0.9141（口径变更）；无 nice 技能岗位 nice_score 默认 1.0 的结构性白送分
 - **core_duties 匹配器升级**（#362）：D2-A 整串子串对措辞变体脆弱（376 未命中 gold 中 70 条近失），命中判定升级为双向子串 ∪ 短侧字符 bigram 包含度 ≥0.7（补丁稿候选② Rouge-L 族确定性实现）；同批预测确定性重算微 F1 **0.2457→0.6017**；边界护栏单测防部分相关职责被吞
 - **evaluation_110 归档刷新**（#361）：08-20 终跑误用早于 #328/#331 的过期 worktree 代码（归档含已删除的 Schema coverage gap 标记、缺六维/对齐口径）；以现行 develop 单跑重测刷新——skills raw F1 0.8825 / 对齐口径 **0.9629 达标口径有产物实证** / experience_accuracy 0.8889 / core_duties F1 0.2457（迭代前口径）
