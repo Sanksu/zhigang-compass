@@ -239,6 +239,13 @@ async def run_etl_pipeline(
         tasks_module.graph_health_check(ctx),
     )
 
+    # 阶段 16：dict-guard 每日字典守卫（聚合/快照之后评估图谱形态；
+    # 分级自动生效或进审核池，失败不阻塞管线——见 workers/dict_guard.py）
+    results["stages"]["dict_guard"] = await run_stage(
+        "dict_guard",
+        tasks_module.dict_guard_daily(ctx),
+    )
+
     # L-9：阶段隔离吞错继续跑（防单阶段失败拖垮全线）不等于无声——聚合各阶段
     # error 一次性外发告警并落 error 日志，结束"管线永远成功"的可观测盲区。
     # crawl 阶段为 list[dict]（每爬虫一项），其余阶段为 dict。

@@ -497,3 +497,68 @@ class EvolutionEvent(Base):
     from_name: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)  # 旧名（ended/merged）
     to_name: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)  # 新名（born/merged）
     detail: Mapped[dict] = mapped_column(JSONB, default=dict)  # 附加（如 merged 的多个 from_names）
+
+
+class DictProposal(Base):
+    """技能字典调整提案（dict-guard 每日评估产出，人工审批通道）。
+
+    分级自动策略（技能字典自治守卫方案 §4）：仅低风险 add_stopword
+    （过硬门禁 + 影响面 ≤ 阈值 + LLM 置信度达标）自动生效并落 DictChangeLog，
+    不建本表行；remove_stopword / protect_whitelist / 超影响面 / 低置信度
+    一律进本表 pending，admin 审批后生效——字典是幻觉防控第三道防线载体，
+    高风险变更不自动写（对齐岗位名 LLM 审查方案"不自动写规则库"原则）。
+    """
+
+    __tablename__ = "dict_proposals"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    term: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    action: Mapped[str] = mapped_column(
+        String(30), nullable=False  # add_stopword / remove_stopword / protect_whitelist
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", index=True, nullable=False  # pending / approved / rejected
+    )
+    reason: Mapped[str] = mapped_column(Text, default="", nullable=False)  # LLM 判定理由
+    llm_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    evidence: Mapped[list] = mapped_column(JSONB, default=list)  # JD 样例/命中统计
+    impact_stats: Mapped[dict] = mapped_column(JSONB, default=dict)  # {graph_nodes, jd_snapshots}
+    run_date: Mapped[str] = mapped_column(String(10), index=True, nullable=False)  # 评估批次日期
+    reviewed_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    review_reason: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class DictChangeLog(Base):
+    """字典变更审计（动态过滤层每次变更一行：自动生效/人工审批/回滚）。
+
+    与 configs/skill_filters_dynamic.json 一一对应：JSON 文件是运行时生效态，
+    本表是完整审计链（谁/何时/何词/何动作/何理由/影响面），回滚依据。
+    """
+
+    __tablename__ = "dict_change_logs"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    term: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    action: Mapped[str] = mapped_column(String(30), nullable=False)  # 同 DictProposal.action + rollback
+    source: Mapped[str] = mapped_column(
+        String(20), nullable=False  # auto（守卫自动）/ manual（人工审批）/ rollback
+    )
+    kind: Mapped[str] = mapped_column(
+        String(20), nullable=False  # 动态层条目类型：blocked / protected
+    )
+    proposal_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 关联提案
+    reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)  # {operator, evidence 摘要等}
+    impact_stats: Mapped[dict] = mapped_column(JSONB, default=dict)
+    applied_by: Mapped[str] = mapped_column(String(64), default="system", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

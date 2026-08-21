@@ -57,6 +57,7 @@ def test_etl_pipeline_skips_independent_schedule(monkeypatch):
         discovery_daily = staticmethod(_stub_task)
         discovery_auto_transition = staticmethod(_stub_task)
         graph_health_check = staticmethod(_stub_task)
+        dict_guard_daily = staticmethod(_stub_task)
 
     # zhilian 配独立 hour/minute → 主管线跳过；arxiv 未配 → 主管线执行
     # 注意：runtime_config.get("crawlers") 直接返回爬虫配置 dict（无外层 crawlers 键）
