@@ -8,6 +8,7 @@ import {
   Users,
   Bot,
   CheckSquare,
+  GitFork,
   Cpu,
   Timer,
   Gauge,
@@ -74,6 +75,7 @@ export const adminNavGroups: AdminNavGroup[] = [
       { label: '账户管理', to: '/admin/users', icon: Users, requireRole: ['admin'] },
       { label: '爬取管理', to: '/admin/crawl', icon: Bot, requireRole: ['admin'] },
       { label: '岗位审核', to: '/admin/review', icon: CheckSquare, requireRole: ['admin'] },
+      { label: '数据血缘', to: '/admin/lineage', icon: GitFork, requireRole: ['admin'] },
     ],
   },
   {

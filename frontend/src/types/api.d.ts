@@ -3153,6 +3153,116 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/lineage/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 数据血缘岗位列表（跨源校验汇总 + 血缘总览统计）
+         * @description 将 jd_raw 已抽取记录按归一化岗位名分组，输出每组的跨源交叉验证
+         *     （技能 ≥2 源印证 / 薪资异常 / 经验分歧 / 跨源置信度）与血缘总览
+         *     统计。与 ETL cross_validate_jds 同口径，供管理端直观查看此前仅
+         *     留存于管线日志的溯源结果。
+         */
+        get: {
+            parameters: {
+                query?: {
+                    q?: string;
+                    verified?: boolean;
+                    below_confidence?: boolean;
+                    page?: number;
+                    size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 血缘岗位分页列表 + 总览统计 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["LineagePositionsData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/lineage/positions/{position_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 单个岗位的数据血缘详情（证据 JD 血缘链明细）
+         * @description 返回单个岗位的组级跨源校验 + 血缘链明细（组内每条证据 JD：
+         *     source / source_url / crawled_at / city / salary / skills /
+         *     是否 SimHash 去重标记），溯源到原始招聘来源。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    position_name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 岗位血缘详情 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["LineageDetail"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                /** @description 岗位不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3552,6 +3662,132 @@ export interface components {
             task_id: string;
             platform: string;
             status: string;
+        };
+        /**
+         * @description 数据血缘链中的单条来源 JD 记录（岗位 ← 证据 JD ← 采集源）。
+         *     溯源方向：图谱岗位/技能声明 ← 抽取证据（extraction）← 原始 JD 记录
+         *     （jd_raw，含 source / source_url / crawled_at）。
+         */
+        LineageRecordItem: {
+            /** @description jd_raw 记录 id */
+            jd_id: number;
+            /** @description 采集源（boss/zhilian/indeed/glassdoor...） */
+            source: string;
+            /** @description 原始 JD URL（溯源跳转） */
+            source_url?: string;
+            /** @description 采集时间 ISO8601 */
+            crawled_at?: string;
+            /** @description 城市（location 提取） */
+            city?: string;
+            /** @description 原始薪资文本 */
+            salary?: string;
+            /** @description 抽取技能名 */
+            skills?: string[];
+            /** @description SimHash 跨源去重标记（被标记记录不参与图谱聚合） */
+            is_duplicate?: boolean;
+        };
+        /**
+         * @description 单个岗位的数据血缘溯源详情（列表项：跨源校验汇总，不含证据 JD 明细）。
+         *     与 ETL cross_validate_jds 同口径，按归一化岗位名分组。
+         */
+        LineagePositionItem: {
+            /** @description 归一化岗位名（组标识） */
+            position_name: string;
+            /** @description 组内 JD 条数 */
+            jd_count: number;
+            /** @description 独立数据源数 */
+            source_count: number;
+            /** @description 来源列表（去重） */
+            sources?: string[];
+            /** @description 组内城市集合 */
+            cities?: string[];
+            /** @description ≥2 独立源印证（技能级跨源验证通过） */
+            verified: boolean;
+            /**
+             * Format: float
+             * @description 跨源置信度（0-1）
+             */
+            confidence: number;
+            /**
+             * Format: float
+             * @description ≥2 源技能占比（跨源一致性）
+             */
+            verified_skill_ratio: number;
+            /** @description 单源技能（未达 2 源印证，待人工审核） */
+            unverified_skills?: string[];
+            /**
+             * Format: float
+             * @description 同岗位月薪中位数（元/月，跨城市平滑后市场口径）
+             */
+            salary_median?: number | null;
+            /** @description 多平台薪资中位数差异 >50% */
+            salary_outlier?: boolean;
+            /**
+             * Format: float
+             * @description 经验要求跨平台分歧度（0-1，1=完全分歧）
+             */
+            experience_divergence: number;
+        };
+        /** @description 单个岗位的数据血缘溯源详情（组级跨源校验 + 证据 JD 血缘链明细） */
+        LineageDetail: {
+            /** @description 归一化岗位名（组标识） */
+            position_name: string;
+            /** @description 组内 JD 条数 */
+            jd_count: number;
+            /** @description 独立数据源数 */
+            source_count: number;
+            /** @description 来源列表（去重） */
+            sources?: string[];
+            /** @description 组内城市集合 */
+            cities?: string[];
+            /** @description ≥2 独立源印证（技能级跨源验证通过） */
+            verified: boolean;
+            /**
+             * Format: float
+             * @description 跨源置信度（0-1）
+             */
+            confidence: number;
+            /**
+             * Format: float
+             * @description ≥2 源技能占比（跨源一致性）
+             */
+            verified_skill_ratio: number;
+            /** @description 单源技能（未达 2 源印证，待人工审核） */
+            unverified_skills?: string[];
+            /**
+             * Format: float
+             * @description 同岗位月薪中位数（元/月，跨城市平滑后市场口径）
+             */
+            salary_median?: number | null;
+            /** @description 多平台薪资中位数差异 >50% */
+            salary_outlier?: boolean;
+            /**
+             * Format: float
+             * @description 经验要求跨平台分歧度（0-1，1=完全分歧）
+             */
+            experience_divergence: number;
+            /** @description 血缘链明细（组内证据 JD，溯源到原始来源） */
+            records?: components["schemas"]["LineageRecordItem"][];
+        };
+        /** @description GET /admin/lineage/positions 响应 data（血缘岗位分页 + 总览统计） */
+        LineagePositionsData: {
+            items: components["schemas"]["LineagePositionItem"][];
+            total: number;
+            page: number;
+            size: number;
+            /** @description 血缘总览汇总 */
+            summary: {
+                /** @description 岗位分组数 */
+                groups: number;
+                /** @description 覆盖 JD 数 */
+                jd_count: number;
+                /** @description ≥2 独立源分组数 */
+                multi_source: number;
+                /** @description 已验证分组数 */
+                verified: number;
+                /** @description 低置信（<0.6）分组数 */
+                below_confidence: number;
+            };
         };
         /**
          * @description 岗位审核候选池项（GET /admin/positions/pending、/admin/evolution/pending、

@@ -100,6 +100,9 @@ class CrossValidationResult(BaseModel):
     jd_count: int = Field(description="组内 JD 条数")
     source_count: int = Field(description="独立数据源数")
     sources: list[str] = Field(default_factory=list, description="来源列表（去重）")
+    cities: list[str] = Field(
+        default_factory=list, description="组内城市集合（薪资跨城市平滑用）"
+    )
     verified: bool = Field(description="≥2 独立源印证（技能级跨源验证通过）")
     confidence: float = Field(ge=0.0, le=1.0, description="跨源置信度（数据源数/一致性/时效加权）")
     verified_skill_ratio: float = Field(
@@ -116,4 +119,56 @@ class CrossValidationResult(BaseModel):
     )
     experience_divergence: float = Field(
         default=0.0, ge=0.0, le=1.0, description="经验要求跨平台分歧度（0-1，1=完全分歧）"
+    )
+
+
+class LineageRecordItem(BaseModel):
+    """数据血缘链中的单条来源 JD 记录（岗位 ← 证据 JD ← 采集源）。
+
+    溯源方向：图谱岗位/技能声明 ← 抽取证据（extraction）← 原始 JD 记录
+    （jd_raw，含 source / source_url / crawled_at）。管理端据此逐条追溯
+    每条声明对应的真实来源，定位到原始招聘页。
+    """
+
+    jd_id: int = Field(description="jd_raw 记录 id")
+    source: str = Field(description="采集源（boss/zhilian/indeed/glassdoor...）")
+    source_url: str = Field(default="", description="原始 JD URL（溯源跳转）")
+    crawled_at: str = Field(default="", description="采集时间 ISO8601")
+    city: str = Field(default="", description="城市（location 提取）")
+    salary: str = Field(default="", description="原始薪资文本")
+    skills: list[str] = Field(default_factory=list, description="抽取技能名")
+    is_duplicate: bool = Field(
+        default=False, description="SimHash 跨源去重标记（被标记记录不参与图谱聚合）"
+    )
+
+
+class LineageDetail(BaseModel):
+    """单个岗位的数据血缘溯源详情。
+
+    组级跨源校验（同 CrossValidationResult）+ 血缘链明细（组内每条证据 JD）。
+    交叉验证与溯源复用同一聚合口径：`normalize_position_name(岗位名)` 分组。
+    """
+
+    position_name: str = Field(description="归一化岗位名（组标识）")
+    jd_count: int = Field(description="组内 JD 条数")
+    source_count: int = Field(description="独立数据源数")
+    sources: list[str] = Field(default_factory=list, description="来源列表（去重）")
+    cities: list[str] = Field(default_factory=list, description="组内城市集合")
+    verified: bool = Field(description="≥2 独立源印证（技能级跨源验证通过）")
+    confidence: float = Field(ge=0.0, le=1.0, description="跨源置信度（数据源数/一致性/时效加权）")
+    verified_skill_ratio: float = Field(
+        ge=0.0, le=1.0, description="≥2 源技能占比（跨源一致性）"
+    )
+    unverified_skills: list[str] = Field(
+        default_factory=list, description="单源技能（未达 2 源印证，待人工审核）"
+    )
+    salary_median: float | None = Field(
+        default=None, description="同岗位月薪中位数（元/月，跨城市平滑后市场口径）"
+    )
+    salary_outlier: bool = Field(default=False, description="多平台薪资中位数差异 >50%")
+    experience_divergence: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="经验要求跨平台分歧度（0-1，1=完全分歧）"
+    )
+    records: list[LineageRecordItem] = Field(
+        default_factory=list, description="血缘链明细（组内证据 JD，溯源到原始来源）"
     )

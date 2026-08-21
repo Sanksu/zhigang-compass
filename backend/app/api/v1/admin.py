@@ -16,6 +16,7 @@ from app.api.v1.admin_routes import (
     audit,
     config,
     crawl,
+    lineage,
     position_edit,
     position_reviews,
 )
@@ -24,6 +25,7 @@ router = APIRouter(prefix="/admin", dependencies=[Depends(require_permission("ad
 router.include_router(accounts.router)
 router.include_router(audit.router)
 router.include_router(crawl.router)
+router.include_router(lineage.router)
 router.include_router(position_reviews.router)
 router.include_router(position_edit.router)
 router.include_router(config.router)

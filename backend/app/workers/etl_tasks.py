@@ -462,26 +462,56 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     """SimHash 跨平台近似去重（设计文档 §4.2 消费方）。
 
     扫描 jd_raw 已入库记录的 snapshot->_simhash（CleaningPipeline 采集时写入，
-    基于脱敏后文本），批量 find_similar_pairs（汉明距 ≤ 3）找出近似重复 JD。
-    jd_embeddings 语义辅助（§11.4.3）：两记录的向量余弦 < 0.9 视为语义不相似，
-    不标记重复（降低 SimHash 误判）；向量缺失时保留 SimHash 判定。
-    将后入库记录标记 `snapshot["_duplicate_of"]` = 先入库记录 id。
-    聚合层（aggregation.build_aggregates）跳过被标记记录，避免重复 JD 虚高频次。
+    基于脱敏后文本）。**增量式近邻检索（P12 性能优化）**：SimHashIndex 分块
+    索引持久化在 Redis（``simhash:idx:v1`` + 游标 ``simhash:idx:v1:cursor``），
+    每轮只加载游标之后的**新增**记录、对索引做近邻检索（汉明距 ≤ 3），不再
+    每轮全量两两比较历史记录，流式持续写入下近邻比较量不随数据量整体退化。
+    索引只保留记录指纹（轻量 int），历史 jd_raw 的 JSONB 快照不再重复回读。
+
+    去重标记语义同前：后入库记录标记 `snapshot["_duplicate_of"]` = 同簇中
+    最早的已入库记录 id（先入库者保留）。jd_embeddings 语义辅助（§11.4.3）：
+    候选对向量余弦 < 0.9 视为语义不相似不标记（降低 SimHash 误判）；向量
+    缺失时保留 SimHash 判定。聚合层跳过被标记记录，避免重复 JD 虚高频次。
+
+    Redis 不可用时降级：游标归零、索引在进程内重建，本轮全量增量扫描
+    （保留去重能力，性能回退但正确性不受影响），不丢任何去重标记。
     """
 
-    from app.core.database import async_session_factory
-    from app.services.data_quality.simhash import find_similar_pairs
+    import logging
+
+    from app.core.database import async_session_factory, redis_client
+    from app.services.data_quality.simhash import SimHashIndex
     from app.services.embeddings.vector_store import load_jd_vectors_by_ids
     from app.services.matching.semantic import cosine_similarity
 
+    logger = logging.getLogger(__name__)
+
     # JD 语义去重辅助阈值（§11.4.3 jd_embeddings Cosine）：低于该值不标记
     _EMBED_DEDUP_THRESHOLD = 0.9
+    _INDEX_KEY = "simhash:idx:v1"
+    _CURSOR_KEY = "simhash:idx:v1:cursor"
 
     async with async_session_factory() as session:
-        # 只加载带 _simhash 的记录，避免全表拉取（审查 major：dedup_simhash 全表加载）
+        # 读取增量索引与游标；Redis 不可用时降级（全量增量扫描，进程内索引）
+        use_redis = True
+        try:
+            cursor = int((await redis_client.get(_CURSOR_KEY)) or 0)
+            stored = await redis_client.hgetall(_INDEX_KEY)
+            index = SimHashIndex.from_items(
+                (rid, int(fp)) for rid, fp in stored.items() if fp.isdigit()
+            )
+        except Exception:
+            logger.warning("dedup_simhash: Redis 不可用，降级为全量增量扫描（进程内索引）")
+            use_redis = False
+            cursor = 0
+            index = SimHashIndex()
+
+        # 只加载带 _simhash 的记录；增量模式下仅取游标之后的新增（避免全表拉取）
         stmt = select(JDRaw).where(
             JDRaw.snapshot["_simhash"].astext.isnot(None),
         )
+        if use_redis:
+            stmt = stmt.where(JDRaw.id > cursor)
         if limit:
             stmt = stmt.limit(limit)
         stmt = stmt.order_by(JDRaw.id.asc())
@@ -493,35 +523,55 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
             if isinstance(sh, int) and sh:
                 records.append((str(r.id), sh))
 
-        pairs = find_similar_pairs(records)
+        # 增量近邻检索：每条新增记录对既有索引 find_near，随后入索引供后续比较
+        near_of: dict[str, list[str]] = {}
+        for rid, fp in records:
+            candidates = index.find_near(rid, fp)
+            if candidates:
+                near_of[rid] = sorted(candidates)  # 升序 → 最早入库者优先
+            index.add(rid, fp)
 
-        # 语义辅助：仅加载 pairs 涉及 jd 的向量（08-14 审查：此前全量加载
-        # jd_embeddings 入内存；pairs 通常远少于全量记录数）
-        pair_ids = sorted({i for p in pairs for i in p})
-        emb_map = await load_jd_vectors_by_ids(session, pair_ids)
-        verified_pairs: list[tuple[str, str]] = []
+        # 语义辅助：仅加载涉及近邻的 jd 向量（含新记录与其候选）
+        involved = set()
+        for rid, cands in near_of.items():
+            involved.add(rid)
+            involved.update(cands)
+        emb_map = await load_jd_vectors_by_ids(session, sorted(involved))
+        verified_pairs: list[tuple[str, str]] = []  # (新记录, 最早通过语义校验的候选)
         skipped_emb = 0
-        for id_a, id_b in pairs:
-            va, vb = emb_map.get(id_a), emb_map.get(id_b)
-            if va is not None and vb is not None:
-                if cosine_similarity(va, vb) < _EMBED_DEDUP_THRESHOLD:
+        for rid, cands in near_of.items():
+            for cid in cands:
+                va, vb = emb_map.get(rid), emb_map.get(cid)
+                if va is not None and vb is not None and cosine_similarity(va, vb) < _EMBED_DEDUP_THRESHOLD:
                     skipped_emb += 1
                     continue  # 语义不相似，SimHash 误判，不标记重复
-            verified_pairs.append((id_a, id_b))
+                verified_pairs.append((rid, cid))
+                break
 
         # pairs 顺序即 records 输入顺序（id 升序），先入库者保留，后入库者标记
         id_map = {str(r.id): r for r in rows}
         marked = 0
-        for id_a, id_b in verified_pairs:
-            dup = id_map.get(id_b)
+        for rid_new, rid_dup in verified_pairs:
+            dup = id_map.get(rid_new)
             if dup is None:
                 continue
             snap = dict(dup.snapshot or {})
-            if snap.get("_duplicate_of") != id_a:
-                snap["_duplicate_of"] = id_a
+            if snap.get("_duplicate_of") != rid_dup:
+                snap["_duplicate_of"] = rid_dup
                 dup.snapshot = snap
                 marked += 1
         await session.commit()
+
+        # 增量索引持久化（游标推进到本轮最大 id）；失败不阻塞去重（下轮幂等重放）
+        if use_redis and records:
+            try:
+                pipe = redis_client.pipeline()
+                for rid, fp in records:
+                    pipe.hset(_INDEX_KEY, rid, fp)
+                pipe.set(_CURSOR_KEY, max(int(rid) for rid, _ in records))
+                await pipe.execute()
+            except Exception:
+                logger.warning("dedup_simhash: 索引持久化失败，下轮将幂等重放")
 
         # 入图残留对齐清理（08-15 新增）：去重标记可能晚于抽取入图（重复对
         # 在后续轮次才发现），已入图的重复记录残留岗位节点 + 空权 REQUIRES 边。
@@ -529,8 +579,8 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
         # （跳过/失败）记录在图中无残留，无需处理。
         dup_urls = [
             (r.snapshot or {}).get("source_url") or r.source_url
-            for id_a, id_b in verified_pairs
-            if (r := id_map.get(id_b)) is not None
+            for rid_new, _ in verified_pairs
+            if (r := id_map.get(rid_new)) is not None
             and (r.snapshot or {}).get("extraction")
         ]
         purge_stats: dict = {}
@@ -539,10 +589,12 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
 
     return {
         "checked": len(records),
-        "pairs": len(pairs),
+        "pairs": sum(len(v) for v in near_of.values()),
         "skipped_emb": skipped_emb,
         "marked": marked,
         "purged": purge_stats,
+        "incremental": use_redis,
+        "cursor": max((int(rid) for rid, _ in records), default=cursor),
     }
 
 
