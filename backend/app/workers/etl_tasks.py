@@ -92,8 +92,6 @@ def _graph_skill_first_seen(skills: Iterable[str]) -> dict[str, date]:
     图谱不可达时返回空 dict（回退 jd_raw 推算）：validate_temporal 原本为
     纯 PG 依赖，不因本次加读图而引入 Neo4j 强依赖（backfill 脚本可独立运行）。
     """
-    import logging
-
     from app.core.database import neo4j_driver
     from app.services.extraction.post_processor import canonical_skill_name
 
@@ -478,8 +476,6 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     Redis 不可用时降级：游标归零、索引在进程内重建，本轮全量增量扫描
     （保留去重能力，性能回退但正确性不受影响），不丢任何去重标记。
     """
-
-    import logging
 
     from app.core.database import async_session_factory, redis_client
     from app.services.data_quality.simhash import SimHashIndex

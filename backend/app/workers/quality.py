@@ -15,11 +15,12 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
 from sqlalchemy import select
 
 from app.services.alerting import send_alert
 from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
+
+logger = logging.getLogger(__name__)
 
 
 async def graph_health_check(ctx: dict) -> dict:
