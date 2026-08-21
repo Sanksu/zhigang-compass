@@ -9,9 +9,17 @@
 
 基础设施不可达时由 conftest 统一 skip。链路中某数据源为空（如无技能先修）
 时用「链路通 + 结构合法」断言，不绑定固定数值，避免基础设施演化导致脆测。
+
+M1 修复:补 pytest.mark.integration marker(原仅 conftest 端口探测兜底,
+普通 pytest 在 docker 在跑时会拉起集成用例,marker 与 conftest 双保险)。
 """
 
 import httpx
+
+import pytest
+
+# M1 修复:打 integration marker,普通 pytest 默认排除(需 -m integration 显式跑)
+pytestmark = pytest.mark.integration
 
 
 class TestHealth:
