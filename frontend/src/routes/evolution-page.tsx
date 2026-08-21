@@ -209,6 +209,61 @@ function SignalsView() {
   )
 }
 
+// ===== SkillDeclineWarningCard =====
+
+/** C 端技能衰退预警摘要卡（风险治理引导）：declining Top-N 一眼可见。
+
+ * 数据复用 /evolution/signals（Redis 缓存 60s），衰退技能以橙徽标 + Z-score
+ * 悬浮提示呈现；无信号不渲染（不留占位）。 */
+function SkillDeclineWarningCard() {
+  const [declining, setDeclining] = useState<EvolutionSignal[] | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    apiGet<EvolutionSignalsData>('/evolution/signals?top_n=8')
+      .then((r) => {
+        if (!cancelled) setDeclining(r.declining)
+      })
+      .catch(() => {
+        if (!cancelled) setDeclining([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (!declining || declining.length === 0) return null
+  return (
+    <Card className="mb-4 border-state-declining/30 bg-state-declining/5">
+      <CardHeader className="pb-1">
+        <CardTitle className="flex items-center gap-2 text-sm text-state-declining">
+          <TrendingDown className="size-4" />
+          <span>技能衰退预警 · {declining.length} 项</span>
+          <span className="text-[10px] font-normal text-ink-faint">
+            以下技能需求呈衰退信号（Z &lt; -1.5），求职者请关注学习路径中的替代技能
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-wrap gap-1.5">
+        {declining.map((s) => (
+          <Badge
+            key={s.skill_id}
+            variant="outline"
+            className="bg-state-declining/10 text-[11px] text-state-declining"
+            title={
+              s.warning
+                ? `${s.skill_name}：Z=${s.z_score?.toFixed(2) ?? '—'}（证据量异常期，谨慎解读）`
+                : `${s.skill_name}：Z=${s.z_score?.toFixed(2) ?? '—'} · 频次 ${s.current_freq}`
+            }
+          >
+            {s.skill_name}
+          </Badge>
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
+
 // ===== TechnologyWatchView =====
 
 /** 技术热点观察池（真实 GET /evolution/watch，MLI 产业化拐点排名） */
@@ -1738,6 +1793,9 @@ export function EvolutionPage() {
 
       {/* 样本量波动告警 + 顶部指标卡（真实版本派生） */}
       {versions[0]?.data_warning && <DataWarningBanner warning={versions[0].data_warning} />}
+
+      {/* C 端技能衰退预警摘要（真实 /evolution/signals declining） */}
+      <SkillDeclineWarningCard />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         {metrics.map((m) => (
