@@ -3375,7 +3375,7 @@ export interface components {
             required_proficiency?: string | null;
             /** @description 市场需求度 0-1 */
             demand?: number;
-            /** @description 需求扩散度 0..1（岗位扩散×跨源扩散等权合成，非方向性趋势；L-13 口径对齐） */
+            /** @description 需求趋势 -1..1 */
             trend?: number;
             /** @description ROI 指标 = demand×trend/cost */
             roi?: number;
@@ -3425,7 +3425,7 @@ export interface components {
             status?: "done" | "doing" | "locked";
             /** @description 市场需求度 0-1 */
             demand?: number;
-            /** @description 需求扩散度 0..1（岗位扩散×跨源扩散等权合成，非方向性趋势；L-13 口径对齐） */
+            /** @description 需求趋势 -1..1 */
             trend?: number;
             /** @description ROI 指标 = demand×trend/cost */
             roi?: number;
@@ -4231,6 +4231,16 @@ export interface components {
             gaps: components["schemas"]["GapSkill"][];
             /** @description missing/weak 技能先修链 + 课程 Top-3 */
             learning_path: components["schemas"]["LearningPathItem"][];
+            /**
+             * @description 学习路径是否因领域跨簇语义黑名单拦截（P1：跨域诱导组合拒绝生成）
+             * @default false
+             */
+            learning_path_blocked: boolean;
+            /**
+             * @description 拦截原因（命中的岗位行业 × 候选人领域对），未拦截为 null
+             * @default null
+             */
+            learning_path_block_reason: string | null;
             evidence_refs: components["schemas"]["EvidenceRef"][];
         };
         /** @description 匹配任务状态（GET /match/task/{task_id}） */
@@ -4271,6 +4281,16 @@ export interface components {
         MatchPathData: {
             match_id: string;
             learning_path: components["schemas"]["LearningPathItem"][];
+            /**
+             * @description 学习路径是否因领域跨簇语义黑名单拦截（P1：跨域诱导组合拒绝生成）
+             * @default false
+             */
+            learning_path_blocked: boolean;
+            /**
+             * @description 拦截原因（命中的岗位行业 × 候选人领域对），未拦截为 null
+             * @default null
+             */
+            learning_path_block_reason: string | null;
         };
         /** @description 诊断报告差距建议项（evidence_id 可点击追溯） */
         GapAdvice: {

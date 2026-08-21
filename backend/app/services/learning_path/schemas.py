@@ -95,3 +95,10 @@ class LearningPathResult(BaseModel):
 
     gaps: list[GapSkill] = Field(default_factory=list, description="差距分析（三态全量，按优先级排序）")
     items: list[LearningPathItem] = Field(default_factory=list, description="学习路径项（仅 missing / weak）")
+    blocked: bool = Field(
+        default=False,
+        description="是否因领域跨簇语义黑名单拦截（P1 演示：跨域诱导组合拒绝生成学习路径）",
+    )
+    block_reason: Optional[str] = Field(
+        default=None, description="拦截原因（命中的岗位行业 × 候选人领域对）"
+    )

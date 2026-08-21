@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { ResumeUploader } from '@/components/resume/resume-uploader'
 import { ScoreRing, RadarChart, SkillHeatmap } from '@/components/match/charts'
 import { AiThinkingCard } from '@/components/match/ai-thinking-card'
+import { CitationBadge } from '@/components/ui/citation-badge'
 import { LearningTimeline } from '@/components/learning/learning-timeline'
 import { useTypewriter } from '@/hooks/use-typewriter'
 import {
@@ -168,6 +169,9 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
     skill_matrix: skill_matrix,
     gaps,
     learning_path: toLearningPath(r.learning_path ?? []),
+    // P1 领域跨簇黑名单拦截状态透传（compare / 结果快照共用）
+    learning_path_blocked: r.learning_path_blocked ?? false,
+    learning_path_block_reason: r.learning_path_block_reason ?? null,
     // 证据引用：技能 → 原始 JD（图谱 MENTIONED_IN 链路，后端 compare 返回）
     evidence_refs: r.evidence_refs ?? [],
   }
@@ -458,7 +462,16 @@ export function ResumeMatchPage() {
     if (!matchId) return
     try {
       const res = await apiGet<components['schemas']['MatchPathData']>(`/match/result/${matchId}/path`)
-      setMatchResult((prev) => (prev ? { ...prev, learning_path: toLearningPath(res.learning_path) } : prev))
+      setMatchResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              learning_path: toLearningPath(res.learning_path),
+              learning_path_blocked: res.learning_path_blocked ?? false,
+              learning_path_block_reason: res.learning_path_block_reason ?? null,
+            }
+          : prev,
+      )
       setNotice('学习路径已从快照刷新')
     } catch (e) {
       setNotice(errMsg(e, '学习路径刷新失败'))
@@ -970,8 +983,11 @@ export function ResumeMatchPage() {
                                   <span>
                                     需求 <b className="text-ink">{Math.round((gap.demand ?? 0) * 100)}</b>
                                   </span>
-                                  <span title="需求扩散度：岗位扩散×跨源扩散等权合成（0-100，越高越广；非方向性趋势）">
-                                    扩散 <b className="text-ink">{Math.round((gap.trend ?? 0) * 100)}</b>
+                                  <span>
+                                    趋势{' '}
+                                    <b className={((gap.trend ?? 0) >= 0 ? 'text-state-emerging' : 'text-state-archived')}>
+                                      {(gap.trend ?? 0) >= 0 ? '↑' : '↓'} {Math.round(Math.abs(gap.trend ?? 0) * 100)}
+                                    </b>
                                   </span>
                                   <span>
                                     ROI <b className="text-ink">{((gap.roi ?? 0)).toFixed(2)}</b>
@@ -1037,7 +1053,16 @@ export function ResumeMatchPage() {
                   <CardDescription>按先修关系分阶段的学习时间轴（学时 / 推荐课程 / 前往学习）</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {matchResult.learning_path.length > 0 ? (
+                  {matchResult.learning_path_blocked ? (
+                    // P1 演示：领域跨簇语义黑名单拦截（跨域诱导组合拒绝生成）
+                    <div className="flex items-start gap-3 rounded-md border border-state-archived/40 bg-state-archived/5 px-4 py-3">
+                      <AlertCircle className="size-4 mt-0.5 shrink-0 text-state-archived" />
+                      <div className="text-xs text-ink-strong leading-relaxed">
+                        <p className="font-medium mb-1">学习路径已拒绝生成（领域语义黑名单拦截）</p>
+                        <p className="text-ink-faint">{matchResult.learning_path_block_reason ?? '检测到跨领域诱导组合，已停止规划。'}</p>
+                      </div>
+                    </div>
+                  ) : matchResult.learning_path.length > 0 ? (
                     <LearningTimeline
                       items={matchResult.learning_path}
                       completedSkills={matchResult.skill_matrix
@@ -1190,21 +1215,15 @@ export function ResumeMatchPage() {
                       {matchResult.evidence_refs.map((ev, i) => (
                         <div
                           key={i}
-                          className="flex items-center gap-3 text-xs rounded-md border border-border p-2"
+                          className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs rounded-md border border-border p-2"
                         >
                           <span className="font-medium text-ink w-24 truncate">{ev.skill}</span>
-                          <Badge variant="outline" className="text-[10px]">{ev.source}</Badge>
-                          <span className="text-ink-muted font-mono">
-                            置信度 {(ev.confidence * 100).toFixed(0)}%
-                          </span>
-                          <a
-                            href={ev.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="ml-auto text-ink-muted hover:text-ink underline"
-                          >
-                            查看原文
-                          </a>
+                          <CitationBadge
+                            source={ev.source}
+                            confidence={ev.confidence}
+                            url={ev.url}
+                            title={`技能「${ev.skill}」溯源至 ${ev.source}`}
+                          />
                         </div>
                       ))}
                     </div>

@@ -131,3 +131,17 @@ def load_domain_sem_blocklist() -> frozenset:
         return frozenset(pairs_set) if pairs_set else frozenset(frozenset(p) for p in DOMAIN_BLOCKLIST_DEFAULT)
     except (TypeError, ValueError):
         return frozenset(frozenset(p) for p in DOMAIN_BLOCKLIST_DEFAULT)
+
+
+def domain_blocklist_pair(industry: str, domain: str) -> bool:
+    """判断 岗位行业 × 候选人领域 是否命中领域跨簇语义黑名单。
+
+    无序对等价（"量子计算"×"占星术" 与 "占星术"×"量子计算" 均命中），
+    空串/词面命中不受影响。供匹配引擎与学习路径生成器共用（P1 演示：
+    跨域诱导组合如"量子计算占星术"被拒绝生成学习路径）。
+    """
+    ind = (industry or "").strip().lower()
+    dom = (domain or "").strip().lower()
+    if not ind or not dom:
+        return False
+    return frozenset({ind, dom}) in load_domain_sem_blocklist()
