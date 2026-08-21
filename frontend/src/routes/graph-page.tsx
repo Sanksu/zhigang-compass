@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Box, Loader2, Network, RotateCcw, Search, X } from 'lucide-react'
+import { Box, Crosshair, Loader2, Network, RotateCcw, Search, X } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -79,6 +79,18 @@ function isValidStatus(s?: string): s is NonNullable<GraphNode['status']> {
 const AUTO_EXPAND_COUNT = 6
 /** 单个岗位展开的技能数上限（防止高频岗位技能全量涌入画布造成重叠） */
 const MAX_SKILLS_PER_POSITION = 12
+
+/**
+ * 演示视角书签（答辩用）：点击后镜头平滑飞行到锚定岗位，避免现场手动拖拽找簇。
+ * 力导向每次布局坐标不同，故只存节点名/ id，坐标由画布运行时解析；
+ * 当前视图数据中不存在的锚点对应按钮自动隐藏。
+ * 注意：name 须与图谱数据中的岗位 name 完全一致——赛前按最新数据核对一次。
+ */
+const DEMO_BOOKMARKS: { label: string; nodeName: string }[] = [
+  { label: '算法簇', nodeName: '算法工程师' },
+  { label: '前端簇', nodeName: '前端开发工程师' },
+  { label: '数据簇', nodeName: '数据分析师' },
+]
 
 /** 后端 panorama → 前端 GraphData（岗位状态取自后端，缺省 candidate；边关系 requires） */
 function toGraphData(raw: PanoramaData): GraphData {
@@ -458,6 +470,24 @@ export function GraphPage() {
     }
   }, [selected, data])
 
+  // 演示视角书签：仅展示当前视图中存在的锚点岗位；点击后按当前模式镜头飞行
+  const visibleBookmarks = useMemo(
+    () =>
+      visibleData
+        ? DEMO_BOOKMARKS.filter((b) => visibleData.nodes.some((n) => n.id === b.nodeName || n.name === b.nodeName))
+        : [],
+    [visibleData],
+  )
+  const flyToBookmark = useCallback(
+    (nodeName: string) => {
+      const node = visibleData?.nodes.find((n) => n.id === nodeName || n.name === nodeName)
+      if (!node) return
+      if (mode === '3d') graph3dRef.current?.flyTo(node.id)
+      else graphRef.current?.flyTo(node.id)
+    },
+    [visibleData, mode],
+  )
+
   // 加载 / 错误 / 空态
   if (loading) {
     return (
@@ -639,6 +669,25 @@ export function GraphPage() {
             <RotateCcw className="size-3 mr-1" />
             重置视角
           </Button>
+          {/* 演示视角书签：镜头平滑飞行到锚定岗位簇（仅展示当前视图中存在的锚点；
+              右下角避开顶部操作提示与底部视图说明） */}
+          {visibleBookmarks.length > 0 && (
+            <div className="absolute bottom-10 right-2 z-10 flex flex-col items-end gap-1">
+              {visibleBookmarks.map((b) => (
+                <Button
+                  key={b.nodeName}
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => flyToBookmark(b.nodeName)}
+                  className="h-7 px-2 text-xs text-ink-muted hover:text-ink"
+                  title={`镜头飞至${b.label}（${b.nodeName}）`}
+                >
+                  <Crosshair className="size-3 mr-1" />
+                  {b.label}
+                </Button>
+              ))}
+            </div>
+          )}
           {mode === '2d' ? (
             <Graph2D
               ref={graphRef}
