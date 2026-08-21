@@ -501,6 +501,79 @@ async def skill_trends(
     return ok(data={"skill": skill, "window": window, "points": points})
 
 
+def _build_skill_flow(
+    snapshots: list, skill_id: str, top_n: int
+) -> dict:
+    """从快照序列构建技能关联岗位动态变迁桑基图数据。
+
+    逐期统计各岗位对该技能的 REQUIRES 频次，取 Top-N 岗位入列；
+    相邻期次同名岗位连线（值=左侧期次频次）——纵向看单岗位持续需求厚度，
+    横向看关联岗位的进出（无连线的期次即新进入/已离开 Top 榜）。
+    """
+    periods: list[str | None] = []
+    per_period: list[tuple[Counter, dict]] = []  # (岗位→频次, id→名称)
+    skill_name = skill_id
+    for v in snapshots:
+        snap = v.snapshot_json or {}
+        nodes = {n.get("id"): n.get("name") for n in snap.get("nodes", []) if isinstance(n, dict)}
+        freq = Counter(
+            e.get("source")
+            for e in snap.get("edges", [])
+            if e.get("target") == skill_id
+        )
+        if skill_id in nodes and nodes[skill_id]:
+            skill_name = nodes[skill_id]
+        periods.append(v.created_at.date().isoformat() if v.created_at else None)
+        per_period.append((freq, nodes))
+
+    flow_nodes: list[dict] = []
+    flow_links: list[dict] = []
+    for i, (freq, names) in enumerate(per_period):
+        for pid, f in freq.most_common(top_n):
+            flow_nodes.append({
+                "id": f"{pid}::{i}",
+                "name": names.get(pid) or pid,
+                "period_index": i,
+                "freq": f,
+            })
+    node_ids = {n["id"] for n in flow_nodes}
+    for i in range(len(per_period) - 1):
+        for pid, f in per_period[i][0].most_common(top_n):
+            cur, nxt = f"{pid}::{i}", f"{pid}::{i + 1}"
+            if cur in node_ids and nxt in node_ids:
+                flow_links.append({"source": cur, "target": nxt, "value": f})
+
+    return {
+        "skill_id": skill_id,
+        "skill_name": skill_name,
+        "periods": periods,
+        "top": top_n,
+        "nodes": flow_nodes,
+        "links": flow_links,
+    }
+
+
+@router.get("/skill/{id}/flow")
+async def skill_flow(
+    id: str,
+    top: int = Query(default=8, ge=1, le=20, description="每期取频次 Top-N 岗位"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
+):
+    """技能关联岗位动态变迁桑基图（列=快照期次，节点=Top-N 岗位，连线=相邻期同名岗位）。"""
+    cache_key = f"evolution:flow:{id}:{top}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+
+    snapshots = await _load_snapshots(db)
+    if snapshots is None:
+        return error(ERR_NOT_FOUND, "无图谱版本数据", http_status=404)
+    data = _build_skill_flow(snapshots, id, top)
+    await _cache_set_json(cache_key, data)
+    return ok(data=data)
+
+
 @router.get("/state-machine")
 async def state_machine_overview(
     db: AsyncSession = Depends(get_db),
