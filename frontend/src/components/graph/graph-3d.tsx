@@ -41,10 +41,12 @@ interface Graph3DProps {
   className?: string
 }
 
-/** 父组件可调用的 3D 画布方法（聚焦节点 / 重置视角） */
+/** 父组件可调用的 3D 画布方法（聚焦节点 / 重置视角 / 演示书签飞行） */
 export interface Graph3DHandle {
   focusNode: (id: string) => void
   resetView: () => void
+  /** 演示书签：镜头平滑飞行到指定节点（dist 为取景距离，缺省 28；布局未静止时自动重试） */
+  flyTo: (id: string, dist?: number) => void
 }
 
 const COLOR_EVIDENCE = '#a1a1aa'
@@ -337,30 +339,40 @@ export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
     [dark, selectedId, expandedPositions],
   )
 
-  // 聚焦节点：相机移动到节点斜上方，看向节点（node 位置为 force 引擎在 fgData 节点上写入的实时坐标）
-  const focusNode = useCallback(
-    (id: string) => {
-      const fg = fgRef.current
-      if (!fg) return
-      const node = fgData.nodes.find((n) => n.id === id) as NodeObject<GraphNode> | undefined
-      if (!node || typeof node.x !== 'number' || typeof node.y !== 'number' || typeof node.z !== 'number') return
-      // 取景距离：节点视觉半径最大约 10，28 单位距离可完整框住节点 + 文字标签
-      const dist = 28
-      fg.cameraPosition(
-        { x: node.x + dist, y: node.y + dist * 0.35, z: node.z + dist * 0.6 },
-        { x: node.x, y: node.y, z: node.z },
-        600,
-      )
+  // 镜头飞行到节点：相机移动到节点斜上方，看向节点（node 位置为 force 引擎在
+  // fgData 节点上写入的实时坐标）。力导向未静止时坐标可能取不到，短间隔重试
+  // 至多 3 次；focusNode（搜索定位）与演示书签 flyTo 共用本实现。
+  const flyTo = useCallback(
+    (id: string, dist = 28) => {
+      let attempts = 0
+      const tryFly = () => {
+        const fg = fgRef.current
+        if (!fg) return
+        const node = fgData.nodes.find((n) => n.id === id) as NodeObject<GraphNode> | undefined
+        if (node && typeof node.x === 'number' && typeof node.y === 'number' && typeof node.z === 'number') {
+          // 取景距离：节点视觉半径最大约 10，28 单位距离可完整框住节点 + 文字标签
+          fg.cameraPosition(
+            { x: node.x + dist, y: node.y + dist * 0.35, z: node.z + dist * 0.6 },
+            { x: node.x, y: node.y, z: node.z },
+            600,
+          )
+          return
+        }
+        if (++attempts < 3) window.setTimeout(tryFly, 250)
+      }
+      tryFly()
     },
     [fgData],
   )
+
+  const focusNode = useCallback((id: string) => flyTo(id, 28), [flyTo])
 
   // 重置视角：缩放到全图可见（zoomToFit 以原点为取景中心，图被 center 力约束在原点附近）
   const resetView = useCallback(() => {
     fgRef.current?.zoomToFit(600, 40)
   }, [])
 
-  useImperativeHandle(ref, () => ({ focusNode, resetView }), [focusNode, resetView])
+  useImperativeHandle(ref, () => ({ focusNode, resetView, flyTo }), [focusNode, resetView, flyTo])
 
   // 定位请求 → 聚焦相机（依赖 data：展开岗位后节点才入画布，数据到位后再聚焦）
   useEffect(() => {

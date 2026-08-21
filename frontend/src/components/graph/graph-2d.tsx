@@ -48,6 +48,8 @@ interface Graph2DProps {
 export interface Graph2DHandle {
   focusNode: (id: string) => void
   resetView: () => void
+  /** 演示书签：镜头平滑飞行到指定节点（zoom 缺省 2.4；布局未静止时自动重试） */
+  flyTo: (id: string, zoom?: number) => void
 }
 
 const SYMBOL_BY_TYPE: Record<Exclude<NodeType, 'position'>, string> = {
@@ -82,6 +84,12 @@ const FOCUS_BRIGHTEN = 0.9
 // 压暗项同时置 silent，悬停/点击不再响应（避免对"已隐藏"节点产生交互）。
 const FILTER_DIM_OPACITY = 0.08
 const FILTER_DIM_EDGE_OPACITY = 0.04
+
+// ── 演示书签飞行参数 ─────────────────────────────────────────
+// 镜头平滑过渡时长（与 3D cameraPosition 的 600ms 对齐，观感一致）
+const FLY_DURATION_MS = 600
+// 布局未静止时坐标解析的重试上限（每次间隔 250ms）
+const FLY_MAX_ATTEMPTS = 3
 
 // ── 语义缩放 (LOD) 档位参数（task T1）───────────────────────────
 // zoom 级别低于该阈值仅显示岗位标签
@@ -314,35 +322,80 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     applyLodBand(1)
   }, [applyLodBand])
 
+  /** 解析节点当前布局坐标并换算目标 center（节点不存在或布局未就绪返回 null） */
+  const resolveCenter = useCallback(
+    (id: string, targetZoom: number): [number, number] | null => {
+      const chart = chartRef.current
+      if (!chart) return null
+      const node = data.nodes.find((n) => n.id === id)
+      if (!node) return null
+      const seriesModel = (chart as unknown as { getModel(): EChartsModel }).getModel().getSeriesByIndex(0)
+      const list = seriesModel?.getData()
+      if (!list) return null
+      const idx = list.indexOfName(node.name)
+      if (idx < 0) return null
+      const layout = list.getItemLayout(idx)
+      if (!layout || layout.length < 2) return null
+      const [x, y] = layout
+      const W = chart.getWidth()
+      const H = chart.getHeight()
+      return [0.5 - (x * targetZoom) / W, 0.5 - (y * targetZoom) / H]
+    },
+    [data.nodes],
+  )
+
   const focusNode = useCallback(
     (id: string) => {
       const chart = chartRef.current
       if (!chart) return
-      const node = data.nodes.find((n) => n.id === id)
-      if (!node) return
-      const seriesModel = (chart as unknown as { getModel(): EChartsModel }).getModel().getSeriesByIndex(0)
-      const list = seriesModel?.getData()
-      if (!list) return
-      const idx = list.indexOfName(node.name)
-      if (idx < 0) return
-      const layout = list.getItemLayout(idx)
-      if (!layout || layout.length < 2) return
-      const [x, y] = layout
-      const W = chart.getWidth()
-      const H = chart.getHeight()
-      const targetZoom = 2.4
-      const centerX = 0.5 - (x * targetZoom) / W
-      const centerY = 0.5 - (y * targetZoom) / H
+      const center = resolveCenter(id, 2.4)
+      if (!center) return
       chart.setOption({
-        series: [{ zoom: targetZoom, center: [centerX, centerY], animationDurationUpdate: 0 }],
+        series: [{ zoom: 2.4, center, animationDurationUpdate: 0 }],
       })
       // 编程式聚焦放大也会改变 zoom 档位——同步 LOD（前端聚焦到 2.4 → 全量标签）
-      applyLodBand(targetZoom)
+      applyLodBand(2.4)
     },
-    [data.nodes, applyLodBand],
+    [resolveCenter, applyLodBand],
   )
 
-  useImperativeHandle(ref, () => ({ focusNode, resetView }), [focusNode, resetView])
+  // 演示书签飞行：带缓动的镜头过渡（全局 animation:false 需按次临时开启）。
+  // 力导向未静止时坐标可能取不到，短间隔重试至多 3 次；LOD 档位在落点后同步，
+  // 避免飞行途中触发全量重建打断动画。历史坑：一律 setOption merge，禁用 restore。
+  const flyTo = useCallback(
+    (id: string, zoom?: number) => {
+      const targetZoom = zoom ?? 2.4
+      let attempts = 0
+      const tryFly = () => {
+        const chart = chartRef.current
+        if (!chart) return
+        const center = resolveCenter(id, targetZoom)
+        if (center) {
+          chart.setOption({
+            series: [
+              {
+                zoom: targetZoom,
+                center,
+                animation: true,
+                animationDurationUpdate: FLY_DURATION_MS,
+                animationEasingUpdate: 'cubicInOut',
+              },
+            ],
+          })
+          window.setTimeout(() => {
+            chartRef.current?.setOption({ series: [{ animation: false, animationDurationUpdate: 0 }] })
+            applyLodBand(targetZoom)
+          }, FLY_DURATION_MS + 50)
+          return
+        }
+        if (++attempts < FLY_MAX_ATTEMPTS) window.setTimeout(tryFly, 250)
+      }
+      tryFly()
+    },
+    [resolveCenter, applyLodBand],
+  )
+
+  useImperativeHandle(ref, () => ({ focusNode, resetView, flyTo }), [focusNode, resetView, flyTo])
 
   useLayoutEffect(() => {
     if (!containerRef.current) return
