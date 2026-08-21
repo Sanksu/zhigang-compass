@@ -18,6 +18,7 @@
 """
 
 import asyncio
+import logging
 import sys
 
 from app.core import runtime_config
@@ -99,6 +100,8 @@ from app.workers.utils import (
     push_crawl_log as _push_crawl_log,  # noqa: F401  # legacy monkeypatch path
     update_crawl_task as _update_crawl_task,  # noqa: F401  # legacy monkeypatch path
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def _etl_limit(extracted: bool, default: int) -> int:
@@ -217,8 +220,8 @@ async def check_llm_providers_health(ctx: dict) -> dict:
             "llm_providers_down",
             f"全部 LLM provider 不可用（{len(checked)} 个），抽取将降级规则兜底",
         )
-        print(f"[check_llm_providers_health] ALL DOWN {checked}", flush=True)
+        logger.error("LLM provider 全部不可用: %s", checked)
         return {"status": "degraded", "healthy": checked, "alerted": alerted}
-    print(f"[check_llm_providers_health] {checked}", flush=True)
+    logger.info("LLM provider 健康检查: %s", checked)
     return {"status": "ok", "healthy": checked}
 

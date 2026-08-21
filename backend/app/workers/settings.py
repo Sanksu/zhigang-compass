@@ -1,6 +1,7 @@
 """ARQ worker registration and lifecycle settings."""
 
 import asyncio
+import logging
 
 from arq.connections import RedisSettings
 from arq.cron import cron
@@ -38,18 +39,21 @@ from app.workers.tasks import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 async def on_startup(ctx: dict) -> None:
     """Preload the OCR engine without blocking worker startup."""
-    print(f"[ARQ Worker] 启动，PID={ctx.get('worker_pid')}")
+    logger.info("ARQ worker 启动，PID=%s", ctx.get("worker_pid"))
 
     async def warm_ocr() -> None:
         try:
             from app.services.resume import file_parser
 
             file_parser._ocr_engine()
-            print("[ARQ Worker] OCR 引擎预热完成")
+            logger.info("OCR 引擎预热完成")
         except Exception as error:
-            print(f"[ARQ Worker] OCR 预热跳过（模型不可用）: {str(error)[:100]}")
+            logger.warning("OCR 预热跳过（模型不可用）: %s", str(error)[:100])
 
     asyncio.create_task(warm_ocr())
 
@@ -60,16 +64,16 @@ async def on_startup(ctx: dict) -> None:
             from app.services.matching.shared_cache import load_positions_shared
 
             await load_positions_shared()
-            print("[ARQ Worker] 岗位画像共享缓存预热完成")
+            logger.info("岗位画像共享缓存预热完成")
         except Exception as error:
-            print(f"[ARQ Worker] 岗位画像预热跳过: {str(error)[:100]}")
+            logger.warning("岗位画像预热跳过: %s", str(error)[:100])
 
     asyncio.create_task(warm_matching())
 
 
 async def on_shutdown(ctx: dict) -> None:
     """Log worker shutdown."""
-    print("[ARQ Worker] 关闭")
+    logger.info("ARQ worker 关闭")
 
 
 def _crawler_cron_jobs() -> list:
