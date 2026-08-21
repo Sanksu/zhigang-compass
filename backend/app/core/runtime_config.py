@@ -34,6 +34,11 @@ DEFAULTS: dict = {
     # 每爬虫采集配置（08-21）：spider -> {enabled, max_results, max_empty_retries}；
     # 缺省启用、按源默认数量；max_empty_retries=0 关闭页面级空列表退避重试（默认 3）
     "crawlers": {},
+    # dict-guard 字典守卫（技能字典自治守卫方案）：每日评估图谱数据分级调整字典过滤
+    "dict_guard_enabled": True,             # 总开关（false 时 ETL 阶段直接跳过）
+    "dict_guard_auto_impact_threshold": 50,  # 自动生效影响面上限（图谱节点数，超过转人工）
+    "dict_guard_min_confidence": 0.8,        # 自动生效最低 LLM 置信度
+    "dict_guard_max_candidates": 20,         # 每类候选上限（控制每日 LLM 成本）
 }
 
 _VALIDATORS = {
@@ -47,6 +52,9 @@ _VALIDATORS = {
     "etl_validate_temporal_default": lambda v: isinstance(v, int) and 100 <= v <= 500,
     "etl_run_hour": lambda v: isinstance(v, int) and 0 <= v <= 23,
     "etl_run_minute": lambda v: isinstance(v, int) and 0 <= v <= 59,
+    "dict_guard_auto_impact_threshold": lambda v: isinstance(v, int) and 1 <= v <= 1000,
+    "dict_guard_min_confidence": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0,
+    "dict_guard_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
 }
 
 

@@ -20,6 +20,7 @@ from app.workers.tasks import (
     cross_validate_jds,
     dedup_simhash,
     detect_inflation,
+    dict_guard_daily,
     discovery_auto_transition,
     discovery_daily,
     diversity_report,
@@ -127,6 +128,7 @@ class WorkerSettings:
         discovery_auto_transition,
         watch_signal_daily,
         snapshot_graph,
+        dict_guard_daily,
         check_llm_providers_health,
         graph_health_check,
     ]
