@@ -73,7 +73,11 @@ lint.select = ["F", "E401", "E402"]
 testpaths = ["tests"]
 addopts = ["-m", "not integration"]
 markers = [
-    "integration: 真实 LLM API 集成测试（产生费用，需有效 api_key，默认不跑，显式 -m integration 执行）",
+    # M1 修复:marker 语义从"真实 LLM API"扩为"需外部基础设施或真实 LLM API",
+    # 覆盖 tests/integration/ 目录下依赖 docker-compose(Neo4j/PG/Redis)的端到端
+    # 用例——本地 docker 在跑时普通 pytest 会拉起这些用例,且数据演化后断言易脆,
+    # 一并默认排除,需显式 -m integration 执行
+    "integration: 集成测试（需 docker-compose 基础设施或真实 LLM API；默认不跑，显式 -m integration 执行）",
 ]
 
 [tool.coverage.run]

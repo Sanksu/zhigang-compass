@@ -13,7 +13,7 @@ from app.api.deps import require_permission
 from app.core.database import get_db
 from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
 from app.core.security import hash_password
-from app.models.business import ResumeFile, User
+from app.models.business import AuditLog, ResumeFile, User
 from app.schemas.common import error, ok
 
 router = APIRouter()
@@ -24,12 +24,22 @@ async def list_users(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
 ):
     """用户列表（分页）。"""
     stmt = select(User).order_by(User.created_at.desc())
     rows, total = await paginate(
         db, stmt, page, size, count_stmt=select(func.count()).select_from(User)
     )
+    # M5 修复：管理域四端点全量审计（合规留痕，低频管理动作可接受）
+    db.add(AuditLog(
+        user_id=current_user.get("sub", ""),
+        action="admin.user.list",
+        resource="user",
+        resource_id="*",
+        detail={"page": page, "size": size},
+    ))
+    await db.commit()
     items = [
         {
             "id": u.id,
@@ -45,7 +55,11 @@ async def list_users(
 
 
 @router.post("/users", status_code=201)
-async def create_user(req: dict, db: AsyncSession = Depends(get_db)):
+async def create_user(
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
     """创建用户（管理员代建）。"""
     username = (req.get("username") or "").strip()
     password = req.get("password") or ""
@@ -59,6 +73,14 @@ async def create_user(req: dict, db: AsyncSession = Depends(get_db)):
         return error(ERR_CONFLICT, "用户名已存在")
     user = User(username=username, password_hash=hash_password(password), role=role)
     db.add(user)
+    # M5 修复：用户创建属敏感管理操作，补审计（含目标用户与被授予角色）
+    db.add(AuditLog(
+        user_id=current_user.get("sub", ""),
+        action="admin.user.create",
+        resource="user",
+        resource_id=username,
+        detail={"role": role},
+    ))
     await db.commit()
     await db.refresh(user)
     return ok(data={"id": user.id, "username": user.username, "role": user.role, "is_active": user.is_active})
@@ -85,6 +107,14 @@ async def update_user(
         user.role = req["role"]
     if "status" in req:
         user.is_active = req["status"] == "active"
+    # M5 修复：改角色/禁用属提权与锁账号敏感操作，补审计（记录本次变更明细）
+    db.add(AuditLog(
+        user_id=current_user.get("sub", ""),
+        action="admin.user.update",
+        resource="user",
+        resource_id=user_id,
+        detail={"role": req.get("role"), "status": req.get("status")},
+    ))
     await db.commit()
     return ok(data={"id": user.id, "username": user.username, "role": user.role, "is_active": user.is_active})
 
@@ -110,6 +140,14 @@ async def disable_user(
         raise HTTPException(status_code=404, detail="用户不存在")
     # 清理该用户的简历原文归属（含文件字节）；resume_cache 共享缓存不连坐
     await db.execute(sa_delete(ResumeFile).where(ResumeFile.user_id == user_id))
+    # M5 修复：GDPR/PIPL 物理删除是最敏感操作，补审计（删除前记录目标用户信息）
+    db.add(AuditLog(
+        user_id=current_user.get("sub", ""),
+        action="admin.user.delete",
+        resource="user",
+        resource_id=user_id,
+        detail={"username": user.username, "role": user.role},
+    ))
     await db.delete(user)
     await db.commit()
     return None

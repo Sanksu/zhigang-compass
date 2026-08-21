@@ -45,8 +45,12 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # M6 修复:coverage 阈值 80/80/70/80 此前从未执行(门禁纸面化,vite.config
+      # thresholds 只在带 --coverage 时生效)。改用 test:coverage 使阈值真正落地,
+      # 覆盖率不达标即 CI 红。tests/README 宣称的"前端核心 ≥95%"与阈值 80/80/70/80
+      # 不符——以实际阈值 80/80/70/80 为准(README 文案另 PR 校正)。
       - name: Test
-        run: pnpm test
+        run: pnpm test:coverage
 
       - name: Build
         run: pnpm build

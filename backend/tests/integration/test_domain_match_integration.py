@@ -12,14 +12,18 @@ DOMAIN_SEM_THRESHOLD=0.5 + 命中日志）在**真实图谱**上的效果：
 断言采用「链路通 + 结构合法」稳健口径，不绑定具体岗位 id/行业值，
 避免图谱数据演化导致脆测。
 
-注：不使用 integration marker（其语义为"真实 LLM API 费用测试"，见
-pyproject.toml），本用例仅依赖本地图谱与本地 SBERT，属默认集合，由
-Neo4j bolt 可达性控制是否执行。
+M1 修复:此前注释称"不使用 integration marker",但 marker 语义已扩为
+"需 docker-compose 基础设施或真实 LLM API"(见 pyproject.toml),
+本用例依赖真实 Neo4j 图谱,故纳入 marker 范围,默认与 LLM API 测试
+一并排除,避免本地 docker 在跑时被普通 pytest 拉起导致数据耦合失败。
 """
 
 import socket
 
 import pytest
+
+# M1 修复:打 integration marker(原仅 Neo4j bolt 探测兜底)
+pytestmark = pytest.mark.integration
 
 from app.services.matching.engine import RuleBasedMatcher
 from app.services.matching.loaders import load_positions_from_graph
