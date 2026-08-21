@@ -19,6 +19,12 @@
 - **匹配评测 v2 口径可复现**（#360）：`evaluate.py --task match` 增 `--match-golden` 参数，生产 BT v2 权重在 384 对黄金集的数字首次有独立评测产物（此前仅 CHANGELOG/配置注释）
 - **ETL 队列接入配置中心 + 调度迁移容器内 ARQ cron**（#348）：前端配置中心新增「ETL 队列」分区（`/admin/settings/etl`，批次上限/默认批次 + 每日调度时间）；`runtime_config` 新增 `etl_batch_cap`/`etl_structure_load_default`/`etl_validate_temporal_default`/`etl_run_hour`/`etl_run_minute`（openapi 契约 + 前端类型重生成）；`etl.py` 批次上限与阶段默认批次改读配置，新增 `run_etl_pipeline_scheduled` 容器内 cron 入口（当日幂等 Redis 锁，与 `etl_daily` 同语义），`settings.py` 注册 ETL cron（时间取配置，重启生效），替代外部 Windows 计划任务调度；后端 20 单测 + 前端 170 测试/lint/typecheck 通过
 - **停用外部 05:00 ETL 计划任务 + 部署说明更新**（#349）：`scheduled_tasks.ps1` 移除 `ETLDaily` 任务（顺带修复 `$Tasks` 数组缺失逗号语法）、`crontab.example` 注释停用 `0 5 * * * etl_daily.py` 行；DEPLOY.md 新增 §6.1 ETL 调度说明（容器内 ARQ cron + 配置中心时间 + 幂等 + 重启 worker 生效）；团队启动指南/冷启动指南同步；本机已注销 `ZhigangETL_ETLDaily`（`etl_daily.py` 保留供 `--force` 手动重跑）
+- **幻觉评测基座 + Grounding 防线消融（P0）**（#383/#384）：`grounding.py` 接入跨文档 NLI 矛盾检测（`nli_guard.py`，entailment/neutral/contradiction 三分类启发式 + 软门控），大模型生成解析与图谱检索发生蕴含冲突时强制重采样/回退；配套消融评测框架（`tests/evaluate/run_grounding_ablation.py`，确定性幻觉黄金标准覆盖全 NLI 信号类型）输出「无 Grounding 控制 vs 开启完整防线」拦截率对比，纯 Python 生成瀑布图 `data/evaluate/ablation_waterfall.svg`（免 matplotlib 依赖，答辩素材）
+- **置信度标量化：证据距离优先 + 阈值校准（P1）**（#385）：`confidence.py` 在三维基础置信（JD 数/源多样性/增长率 + 学术社区加成 + Wilson 冷启动兜底）之上融合图谱接地距离 `graph_grounding_score` 与 LLM Logprob（信号缺失以中性 0.5 兜底），输出 0-1 标量；低于 0.75 自动流转 `candidate-review-tab` 阻断并复核（「需复核」Badge + 低分优先排序）；新增 `citation-badge.tsx` 可视化引用溯源角标组件
+- **灰名单验证区：新兴技能漏召回兜底（P1）**（#386）：`dictionary.py` 新增运行时内存注册表——白名单未命中且非噪音的新技能进入验证区（命中频次积累 + 人工 graduate），缓解白名单对新兴技术反应滞后导致的漏召回
+- **演示准备：领域语义黑名单扩充 + 学习路径拦截（P1）**（#387）：`domain_sem_blocklist.json` 扩充跨域黑名单对（量子计算×占星术 / 人工智能×占星术 / 金融×命理 / 医疗×玄学）；学习路径生成命中即拒绝并返回 `block_reason`（openapi 契约 + 前端 `resume-match-page` 展示阻断警告）
+- **数据质量阈值配置化**（#388）：simhash / temporal_detector / embedding 语义去重阈值集中到 `data_quality/thresholds.py` 配置加载（运行时调整，不再改码）
+- **dict-guard PR-B：技能字典自治守卫**（#390）：LLM 每日评估图谱数据（`dict_guard` 表 + worker + 每日 cron），分级调整技能字典过滤
 
 ### 2026-08-20
 - **必备技能单源兜底 + 匹配候选边缘过滤**（#338，已合入）：`aggregation._is_must` 对 `jd_count≤2` 单源/少源岗位直接继承抽取层 must 标注（此前 hit<3 样本保护使单源岗位必备技能全判 nice，前端多数岗位无必备技能）；`matching/loaders` 匹配候选剔除 `freq<3 / status=legacy` 边缘岗位（GSBOA/Clay/TeamCenter基础设施管理员 等单源噪声不再进推荐）；候选 116→43；在线图重聚合后含必备技能岗位 38→82
