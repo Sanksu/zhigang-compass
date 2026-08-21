@@ -5,8 +5,12 @@ type Theme = 'light' | 'dark'
 interface UIState {
   sidebarOpen: boolean
   theme: Theme
+  /** 大屏演示模式：隐藏顶导与侧栏，内容区占满视口（图谱页答辩/录屏用） */
+  focusMode: boolean
   toggleSidebar: () => void
   closeSidebar: () => void
+  toggleFocusMode: () => void
+  closeFocusMode: () => void
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
 }
@@ -31,6 +35,7 @@ export const useUIStore = create<UIState>((set) => {
   return {
     sidebarOpen: false,
     theme: initial,
+    focusMode: false,
     toggleSidebar: () => set((s) => {
       const next = !s.sidebarOpen
       // 打开时锁 body 滚动
@@ -42,6 +47,8 @@ export const useUIStore = create<UIState>((set) => {
       document.body.style.overflow = ''
       return { sidebarOpen: false }
     }),
+    toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
+    closeFocusMode: () => set({ focusMode: false }),
     setTheme: (theme) => {
       applyTheme(theme)
       set({ theme })

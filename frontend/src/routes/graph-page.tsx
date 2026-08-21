@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Box, Crosshair, Loader2, Network, RotateCcw, Search, X } from 'lucide-react'
+import { Box, Crosshair, Loader2, Maximize2, Minimize2, Network, RotateCcw, Search, X } from 'lucide-react'
+import { useUIStore } from '@/store/ui'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -24,6 +25,7 @@ import type { GraphData, GraphEdge, GraphNode, GraphViewType, NodeDetail } from 
 import type { LearningPathItem } from '@/components/match/types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
 import { apiGet, ApiError } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import type { components } from '@/types/api'
 
 /** 3D 图谱懒加载 — Three.js 约 1.4MB，仅在用户点击"3D"时按需加载 */
@@ -488,6 +490,20 @@ export function GraphPage() {
     [visibleData, mode],
   )
 
+  // 大屏演示模式（答辩/录屏）：AppShell 按 focusMode 裁掉顶导与侧栏，画布撑满
+  // 视口、详情栏转浮层。进入时尝试浏览器全屏（被拒/被浏览器退出均静默降级为页内全屏）
+  const focusMode = useUIStore((s) => s.focusMode)
+  const toggleFocusMode = useUIStore((s) => s.toggleFocusMode)
+  const closeFocusMode = useUIStore((s) => s.closeFocusMode)
+  const enterFocus = useCallback(() => {
+    toggleFocusMode()
+    document.documentElement.requestFullscreen?.().catch(() => {})
+  }, [toggleFocusMode])
+  const exitFocus = useCallback(() => {
+    closeFocusMode()
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
+  }, [closeFocusMode])
+
   // 加载 / 错误 / 空态
   if (loading) {
     return (
@@ -655,20 +671,34 @@ export function GraphPage() {
         </div>
       </Tabs>
 
-      {/* 画布 + 详情面板：画布占 70-75%，详情占 25-30% */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
-        <Card className="relative overflow-hidden h-[640px]">
-          {/* 重置视角（roam 平移/缩放后一键回初始视角；3D 模式对应缩放到全图） */}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => (mode === '3d' ? graph3dRef.current?.resetView() : graphRef.current?.resetView())}
-            className="absolute right-2 top-2 z-10 h-7 px-2 text-xs text-ink-muted hover:text-ink"
-            title="重置视角"
-          >
-            <RotateCcw className="size-3 mr-1" />
-            重置视角
-          </Button>
+      {/* 画布 + 详情面板：画布占 70-75%，详情占 25-30%。
+          大屏演示模式（focusMode）：画布 Card 转为 fixed 全屏（同树仅切类名，
+          组件不重挂载、力导向布局不重算），详情栏转为右侧浮层 */}
+      <div className={focusMode ? 'relative' : 'grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4'}>
+        <Card className={cn('relative overflow-hidden', focusMode ? 'fixed inset-0 z-40' : 'h-[640px]')}>
+          {/* 画布操作组：重置视角 + 大屏演示切换（答辩/录屏用，Esc 退出） */}
+          <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => (mode === '3d' ? graph3dRef.current?.resetView() : graphRef.current?.resetView())}
+              className="h-7 px-2 text-xs text-ink-muted hover:text-ink"
+              title="重置视角"
+            >
+              <RotateCcw className="size-3 mr-1" />
+              重置视角
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={focusMode ? exitFocus : enterFocus}
+              className="h-7 px-2 text-xs text-ink-muted hover:text-ink"
+              title={focusMode ? '退出大屏演示（Esc）' : '大屏演示（隐藏导航，画布占满屏幕）'}
+            >
+              {focusMode ? <Minimize2 className="size-3 mr-1" /> : <Maximize2 className="size-3 mr-1" />}
+              {focusMode ? '退出演示' : '大屏演示'}
+            </Button>
+          </div>
           {/* 演示视角书签：镜头平滑飞行到锚定岗位簇（仅展示当前视图中存在的锚点；
               右下角避开顶部操作提示与底部视图说明） */}
           {visibleBookmarks.length > 0 && (
@@ -766,38 +796,43 @@ export function GraphPage() {
           </div>
         </Card>
 
-        {/* 节点详情面板 + 图谱算法分析：桌面=右侧边栏；移动端=底部抽屉（task T4） */}
-        <GraphDetailRail
-          rightTab={rightTab}
-          onRightTabChange={setRightTab}
-          ready={!!selected}
-          onClose={() => setSelected(null)}
-          className="h-[640px]"
-        >
-          <TabsContent value="detail" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
-            <NodeDetailPanel
-              node={selected}
-              stats={detailStats}
-              skillDetail={skillDetailView}
-              positionDetail={selected?.type === 'position' && positionDetail && positionDetail.id === selected.id ? positionDetail : null}
-              skillEvidence={selected && skillDetail && skillDetail.skill_id === selected.id ? skillEvidence : []}
-              similarSkills={selected && skillDetail && skillDetail.skill_id === selected.id ? similarSkills : []}
-              positionExpanded={selected?.type === 'position' ? expandedPositions.has(selected.id) : false}
-              onTogglePosition={togglePosition}
-              onSelectSkill={focusSkill}
+        {/* 节点详情面板 + 图谱算法分析：桌面=右侧边栏；移动端=底部抽屉（task T4）。
+            大屏演示模式：转为右侧浮层（z 高于全屏画布），选中节点时出现 */}
+        {!(focusMode && !selected) && (
+          <div className={focusMode ? 'fixed bottom-3 right-3 top-3 z-50 w-[380px]' : 'contents'}>
+            <GraphDetailRail
+              rightTab={rightTab}
+              onRightTabChange={setRightTab}
+              ready={!!selected}
               onClose={() => setSelected(null)}
-              learningStatus={skillLearningStatus}
-              learnedSkills={learnedSkills}
-            />
-          </TabsContent>
-          <TabsContent value="analysis" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
-            <GraphAnalysisPanel
-              skills={data.nodes.filter((n) => n.type === 'skill').map((n) => ({ id: n.id, name: n.name }))}
-              onFocusSkill={focusSkill}
-            />
-            <GraphCommunityTree className="mt-3" />
-          </TabsContent>
-        </GraphDetailRail>
+              className={focusMode ? 'h-full shadow-lg' : 'h-[640px]'}
+            >
+              <TabsContent value="detail" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
+                <NodeDetailPanel
+                  node={selected}
+                  stats={detailStats}
+                  skillDetail={skillDetailView}
+                  positionDetail={selected?.type === 'position' && positionDetail && positionDetail.id === selected.id ? positionDetail : null}
+                  skillEvidence={selected && skillDetail && skillDetail.skill_id === selected.id ? skillEvidence : []}
+                  similarSkills={selected && skillDetail && skillDetail.skill_id === selected.id ? similarSkills : []}
+                  positionExpanded={selected?.type === 'position' ? expandedPositions.has(selected.id) : false}
+                  onTogglePosition={togglePosition}
+                  onSelectSkill={focusSkill}
+                  onClose={() => setSelected(null)}
+                  learningStatus={skillLearningStatus}
+                  learnedSkills={learnedSkills}
+                />
+              </TabsContent>
+              <TabsContent value="analysis" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
+                <GraphAnalysisPanel
+                  skills={data.nodes.filter((n) => n.type === 'skill').map((n) => ({ id: n.id, name: n.name }))}
+                  onFocusSkill={focusSkill}
+                />
+                <GraphCommunityTree className="mt-3" />
+              </TabsContent>
+            </GraphDetailRail>
+          </div>
+        )}
       </div>
 
       {/* 图例：与画布实际渲染对齐（形状+颜色，支持色盲识别） */}
