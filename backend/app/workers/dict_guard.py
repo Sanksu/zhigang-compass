@@ -228,7 +228,9 @@ async def _load_recent_corpus() -> str:
     from app.core.database import async_session_factory
     from app.models.raw import JDRaw
 
-    since = (datetime.now(timezone.utc) - timedelta(days=_MISUSE_WINDOW_DAYS)).strftime("%Y-%m-%d")
+    # 传 datetime 对象（created_at 为 timestamptz）——字符串字面量会被
+    # asyncpg 严格类型拒绝（operator does not exist: timestamptz >= varchar）
+    since = datetime.now(timezone.utc) - timedelta(days=_MISUSE_WINDOW_DAYS)
     async with async_session_factory() as session:
         rows = await session.scalars(
             select(JDRaw.raw_text)
