@@ -4,6 +4,7 @@ from app.services.matching import weights
 from app.services.matching.weights import (
     DOMAIN_BLOCKLIST_DEFAULT,
     DEFAULT_WEIGHTS,
+    domain_blocklist_pair,
     load_domain_sem_blocklist,
     load_sim_threshold,
     load_weights,
@@ -119,3 +120,32 @@ class TestLoadDomainBlocklist:
             '{"pairs": [["制造业", "电商"], ["只有一项"], 123, ["a", "b", "c"]]}',
         )
         assert load_domain_sem_blocklist() == frozenset({frozenset({"制造业", "电商"})})
+
+
+class TestDomainBlocklistPair:
+    def test_hit_both_orders(self, tmp_path, monkeypatch):
+        """黑名单对无序等价命中（P1 演示：量子计算×占星术 双向命中）。"""
+        _write_blocklist(tmp_path, monkeypatch, '{"pairs": [["量子计算", "占星术"]]}')
+        assert domain_blocklist_pair("量子计算", "占星术")
+        assert domain_blocklist_pair("占星术", "量子计算")
+
+    def test_case_insensitive(self, tmp_path, monkeypatch):
+        _write_blocklist(tmp_path, monkeypatch, '{"pairs": [["量子计算", "占星术"]]}')
+        assert domain_blocklist_pair("量子计算", "占星术")
+
+    def test_no_hit_outside_pair(self, tmp_path, monkeypatch):
+        _write_blocklist(tmp_path, monkeypatch, '{"pairs": [["量子计算", "占星术"]]}')
+        assert not domain_blocklist_pair("量子计算", "机器学习")
+
+    def test_empty_never_hits(self, tmp_path, monkeypatch):
+        _write_blocklist(tmp_path, monkeypatch, '{"pairs": [["量子计算", "占星术"]]}')
+        assert not domain_blocklist_pair("", "占星术")
+        assert not domain_blocklist_pair("量子计算", "")
+
+    def test_missing_config_uses_default(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.matching.weights._BLOCKLIST_PATH",
+            tmp_path / "not_exist.json",
+        )
+        assert domain_blocklist_pair("制造业", "电商")
+        assert not domain_blocklist_pair("量子计算", "占星术")

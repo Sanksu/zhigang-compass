@@ -72,7 +72,7 @@ export interface GapItem {
   //    前端不再本地推导/mock；对应契约 GapSkill schema）──
   /** 市场需求度 0-1 */
   demand?: number
-  /** 需求扩散度 0..1（岗位扩散×跨源扩散等权合成，非方向性趋势；L-13 裁决①已对齐契约） */
+  /** 需求趋势 -1..1（契约描述；实现现口径为 0..1 扩散度，见审查报告 L-13 待裁决） */
   trend?: number
   /** ROI 指标 = (demand × trend) / cost，用于高杠杆缺口打标 */
   roi?: number
@@ -124,6 +124,10 @@ export interface MatchResult {
   skill_matrix: SkillMatrixItem[]
   gaps: GapItem[]
   learning_path: LearningPathItem[]
+  /** 学习路径是否因领域跨簇语义黑名单拦截（P1：跨域诱导组合拒绝生成） */
+  learning_path_blocked?: boolean
+  /** 拦截原因（命中的岗位行业 × 候选人领域对），未拦截为 null/undefined */
+  learning_path_block_reason?: string | null
   /** 证据引用（设计文档要求 100% 覆盖率） */
   evidence_refs: { skill: string; source: string; url: string; confidence: number }[]
 }

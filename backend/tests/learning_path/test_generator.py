@@ -154,3 +154,34 @@ async def test_course_loader_receives_skill_id_and_top_k(monkeypatch):
     pos = _position([_req("Java")])
     await LearningPathGenerator(course_loader=spy_loader).generate(cand, pos)
     assert received == {"skill_id": "Java", "top_k": 3}
+
+
+@pytest.mark.asyncio
+async def test_generate_blocked_by_domain_blacklist(monkeypatch):
+    """P1 演示：岗位行业×候选人领域命中黑名单（量子计算×占星术）→ 拒绝生成并返回拦截原因。"""
+    monkeypatch.setattr(mod, "load_prerequisite_config", lambda: {"default_hours_per_skill": 30.0, "skills": {}})
+    cand = CandidateProfile(user_id="u1", skills=[], domain_experience=["占星术"])
+    pos = PositionProfile(
+        position_id="p1", name="量子计算工程师",
+        must_skills=[_req("Python")], industry="量子计算",
+    )
+    result = await LearningPathGenerator(course_loader=_FakeCourseLoader({})).generate(cand, pos)
+    assert result.blocked is True
+    assert "量子计算" in result.block_reason and "占星术" in result.block_reason
+    # 拦截时输出空差距/空路径（跨域诱导请求拒绝生成）
+    assert result.items == [] and result.gaps == []
+
+
+@pytest.mark.asyncio
+async def test_generate_not_blocked_without_domain_hit(monkeypatch):
+    """未命中黑名单（正常行业）→ 正常生成学习路径。"""
+    monkeypatch.setattr(mod, "load_prerequisite_config", lambda: {"default_hours_per_skill": 30.0, "skills": {}})
+    cand = CandidateProfile(user_id="u1", skills=[], domain_experience=["机器学习"])
+    pos = PositionProfile(
+        position_id="p1", name="p1",
+        must_skills=[_req("Java")], industry="人工智能",
+    )
+    result = await LearningPathGenerator(course_loader=_FakeCourseLoader({})).generate(cand, pos)
+    assert result.blocked is False
+    assert result.block_reason is None
+    assert len(result.items) == 1

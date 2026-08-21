@@ -324,6 +324,8 @@ async def compare(
         **result.model_dump(),
         "gaps": [g.model_dump() for g in path.gaps],
         "learning_path": [item.model_dump() for item in path.items],
+        "learning_path_blocked": path.blocked,
+        "learning_path_block_reason": path.block_reason,
         "evidence_refs": await asyncio.to_thread(_load_evidence_for_position, req.position_id),
     }
     await _persist_match_result(match_id, data)
@@ -410,7 +412,14 @@ async def match_result_gap(match_id: str, user: dict = Depends(require_role("use
 async def match_result_path(match_id: str, user: dict = Depends(require_role("user"))):
     """[M4] 获取学习路径（compare 结果的 missing/weak 技能先修链 + 课程，仅限本人结果）。"""
     data = await _load_or_404(match_id, user)
-    return ok(data={"match_id": match_id, "learning_path": data.get("learning_path", [])})
+    return ok(
+        data={
+            "match_id": match_id,
+            "learning_path": data.get("learning_path", []),
+            "learning_path_blocked": bool(data.get("learning_path_blocked")),
+            "learning_path_block_reason": data.get("learning_path_block_reason"),
+        }
+    )
 
 
 @router.post("/result/{match_id}/diagnosis", status_code=202)

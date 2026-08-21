@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import logging
 from typing import Awaitable, Callable
 
 from app.services.learning_path.courses import load_courses_for_skill
@@ -17,6 +18,9 @@ from app.services.learning_path.schemas import (
     LearningPathItem,
     LearningPathResult,
 )
+from app.services.matching.weights import domain_blocklist_pair
+
+logger = logging.getLogger(__name__)
 
 _TOP_COURSES = 3
 # 学习路径项上限（设计文档 §9.5：差距按优先级 Top-5 作为重点改进项）
@@ -40,6 +44,24 @@ class LearningPathGenerator:
     def __init__(self, course_loader: CourseLoader | None = None):
         self._course_loader = course_loader or load_courses_for_skill
 
+    @staticmethod
+    def _domain_block_reason(candidate, position) -> str | None:
+        """领域跨簇黑名单命中检查：返回拦截原因文本，未命中返回 None。
+
+        与匹配引擎拦截口径一致：仅当岗位行业与候选人某条领域经验构成
+        黑名单无序对时拦截（词面命中/无行业/无领域经验不拦截）。
+        """
+        industry = (position.industry or "").strip()
+        if not industry:
+            return None
+        for dom in candidate.domain_experience or []:
+            if domain_blocklist_pair(industry, dom):
+                return (
+                    f"检测到跨领域诱导组合：岗位行业「{industry}」× 候选人领域「{dom}」"
+                    f"命中领域语义黑名单，已拒绝生成学习路径。"
+                )
+        return None
+
     async def generate(
         self,
         candidate,
@@ -55,6 +77,14 @@ class LearningPathGenerator:
             semantic: Sentence-BERT 相似度器（与匹配引擎共用）
             sim_threshold: 语义命中阈值，None 时从 configs/match_weights.json 读取
         """
+        # P1 演示：领域跨簇语义黑名单拦截——岗位行业 × 候选人领域经验命中
+        # 跨域诱导组合（如"量子计算"×"占星术"）时拒绝生成学习路径，返回
+        # 空结果 + 拦截原因，由前端展示警告（与匹配引擎拦截口径一致）。
+        block_reason = self._domain_block_reason(candidate, position)
+        if block_reason:
+            logger.warning("学习路径黑名单拦截：%s", block_reason)
+            return LearningPathResult(gaps=[], items=[], blocked=True, block_reason=block_reason)
+
         # 差距分析为同步函数，内部可能调用同步 SBERT similarity，放线程池避免阻塞事件循环
         gaps = await asyncio.to_thread(analyze_gaps, candidate, position, semantic, sim_threshold)
         path_gaps = [
