@@ -218,6 +218,7 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
           init[s.name] = {
             enabled: savedCrawlers[s.name]?.enabled ?? true,
             max_results: savedCrawlers[s.name]?.max_results,
+            max_empty_retries: savedCrawlers[s.name]?.max_empty_retries,
             hour: savedCrawlers[s.name]?.hour,
             minute: savedCrawlers[s.name]?.minute,
           }
