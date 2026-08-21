@@ -1340,6 +1340,13 @@ const WARNING_DIM_LABEL: Record<string, string> = {
   requires_edges: 'REQUIRES 关系量',
 }
 
+/** 较上版变化幅度（ratio = cur/prev）：萎缩显示 -N%，激增显示 +N% */
+function warningDeltaPct(e: DataWarningEntry): string {
+  if (e.ratio == null) return '—'
+  const pct = Math.round(Math.abs(1 - e.ratio) * 100)
+  return `${e.direction === 'surged' ? '+' : '-'}${pct}%`
+}
+
 /** 样本量对比告警（机制补强①：岗位/关系量比上版萎缩 <50% 或膨胀 >200%） */
 function DataWarningBanner({ warning }: { warning: NonNullable<EvolutionVersion['data_warning']> }) {
   const entries = Object.entries(warning).map(([dim, w]: [string, DataWarningEntry]) => ({
@@ -1363,7 +1370,7 @@ function DataWarningBanner({ warning }: { warning: NonNullable<EvolutionVersion[
               {e.direction === 'shrunk' ? '萎缩' : '激增'}
             </Badge>
             <span className="font-mono text-ink-faint">
-              {e.prev ?? '—'} → {e.cur ?? '—'}（较上版 {e.ratio != null ? `${Math.round((1 - e.ratio) * 100)}%` : '—'}）
+              {e.prev ?? '—'} → {e.cur ?? '—'}（较上版 {warningDeltaPct(e)}）
             </span>
           </li>
         ))}
