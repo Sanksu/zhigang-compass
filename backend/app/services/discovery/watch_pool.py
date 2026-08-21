@@ -297,3 +297,70 @@ def anomaly_flags(
             if sig is not None and sig[1]:
                 flags[source] = True
     return flags
+
+
+# ============================================================
+# 平台健康守卫（抗波动补强：防爬虫故障周污染信号基线）
+# ============================================================
+
+# 历史周总量相对自身基线中位数骤降该比例以上 → 判定采集故障周
+PLATFORM_WEEK_DROP_RATIO = 0.5
+# 健康评估所需最少历史周数（不足则不评估，避免小样本误判）
+_MIN_HEALTH_WEEKS = 3
+
+
+def platform_weekly_totals(
+    freqs: dict[tuple[str, str], dict[str, int]],
+) -> dict[str, dict[str, int]]:
+    """(技能, 源)→周频次 聚合为 源→周总抓取量（采集健康度代理）。"""
+    totals: dict[str, dict[str, int]] = {}
+    for (_skill, source), weekly in freqs.items():
+        bucket = totals.setdefault(source, {})
+        for week, count in weekly.items():
+            bucket[week] = bucket.get(week, 0) + count
+    return totals
+
+
+def unhealthy_week_keys(
+    freqs: dict[tuple[str, str], dict[str, int]],
+    drop_ratio: float = PLATFORM_WEEK_DROP_RATIO,
+) -> set[tuple[str, str]]:
+    """识别采集故障周，返回 (source, week_key) 集合。
+
+    判定：某源某历史周总抓取量 < 该源历史周（非零）中位数 × drop_ratio。
+    只评估历史周（排除最新周——任务运行当周未满，总量天然偏低）；
+    历史不足 _MIN_HEALTH_WEEKS 周或无非零基线时不评估。
+    故障周样本从信号基线中剔除，防"爬虫宕机 → 全技能频次齐跌 → 伪趋势"。
+    """
+    unhealthy: set[tuple[str, str]] = set()
+    for source, weeks in platform_weekly_totals(freqs).items():
+        ordered = sorted(weeks)
+        history = ordered[:-1]
+        if len(history) < _MIN_HEALTH_WEEKS:
+            continue
+        baseline_vals = [weeks[w] for w in history if weeks[w] > 0]
+        if len(baseline_vals) < 2:
+            continue
+        baseline = statistics.median(baseline_vals)
+        for w in history:
+            if weeks[w] < drop_ratio * baseline:
+                unhealthy.add((source, w))
+    return unhealthy
+
+
+def drop_unhealthy_weeks(
+    freqs: dict[tuple[str, str], dict[str, int]],
+    unhealthy: set[tuple[str, str]],
+) -> dict[tuple[str, str], dict[str, int]]:
+    """从频次聚合中剔除采集故障周的样本（无故障周时原样返回）。
+
+    剔除后全空的 (技能, 源) 条目一并移除（无有效样本不参与判定）。
+    """
+    if not unhealthy:
+        return freqs
+    out: dict[tuple[str, str], dict[str, int]] = {}
+    for key, weekly in freqs.items():
+        kept = {w: c for w, c in weekly.items() if (key[1], w) not in unhealthy}
+        if kept:
+            out[key] = kept
+    return out

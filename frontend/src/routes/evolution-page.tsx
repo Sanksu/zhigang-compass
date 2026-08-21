@@ -135,6 +135,7 @@ function SignalsView() {
             <TableHead>技能</TableHead>
             <TableHead className="text-right">Z-score</TableHead>
             <TableHead className="text-right">当期频次</TableHead>
+            <TableHead className="text-right">占比口径</TableHead>
             <TableHead className="text-right">置信度</TableHead>
           </TableRow>
         </TableHeader>
@@ -142,11 +143,24 @@ function SignalsView() {
           {items.map((s, i) => (
             <TableRow key={s.skill_id}>
               <TableCell className="text-xs font-mono text-ink-faint">{i + 1}</TableCell>
-              <TableCell className="font-medium text-ink">{s.skill_name}</TableCell>
+              <TableCell className="font-medium text-ink">
+                {s.skill_name}
+                {s.warning && (
+                  <span
+                    title="证据量异常期（样本量对比告警命中），信号读数受采集波动影响，谨慎解读"
+                    className="ml-1.5 inline-flex items-center rounded-sm border border-state-declining/40 bg-state-declining/10 px-1 text-[10px] font-normal text-state-declining"
+                  >
+                    ⚠ 证据量异常
+                  </span>
+                )}
+              </TableCell>
               <TableCell className={cn('text-right font-mono tabular-nums', toneColor)}>
                 {s.z_score != null ? s.z_score.toFixed(2) : '—'}
               </TableCell>
               <TableCell className="text-right font-mono tabular-nums text-ink-secondary">{s.current_freq}</TableCell>
+              <TableCell className="text-right font-mono tabular-nums text-ink-faint">
+                {s.freq_ratio != null ? `${(s.freq_ratio * 100).toFixed(1)}%` : '—'}
+              </TableCell>
               <TableCell className="text-right font-mono tabular-nums text-ink-muted">
                 {(s.confidence * 100).toFixed(0)}%
               </TableCell>
@@ -158,27 +172,38 @@ function SignalsView() {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <TrendingUp className="size-4 text-state-emerging" />
-            <span>新兴技能 Top-10</span>
-            <span className="text-[10px] font-normal text-ink-faint">z &gt; 2.0</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>{renderList(data.emerging, 'emerging', data.window_count)}</CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <TrendingDown className="size-4 text-state-declining" />
-            <span>衰退技能 Top-10</span>
-            <span className="text-[10px] font-normal text-ink-faint">z &lt; -1.5</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>{renderList(data.declining, 'declining', data.window_count)}</CardContent>
-      </Card>
+    <div className="mb-4">
+      {(data.warnings?.length ?? 0) > 0 && (
+        <Card className="mb-4 border-state-declining/30 bg-state-declining/5">
+          <CardContent className="py-3 text-xs text-state-declining">
+            ⚠ 采样窗口内 {data.warnings!.length} 个图谱版本命中样本量对比告警
+            （证据量萎缩 &lt;50% 或膨胀 &gt;200%，见版本列表）；信号已打「证据量异常」标，
+            判定口径不受影响，解读时请注意采集波动。
+          </CardContent>
+        </Card>
+      )}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <TrendingUp className="size-4 text-state-emerging" />
+              <span>新兴技能 Top-10</span>
+              <span className="text-[10px] font-normal text-ink-faint">z &gt; 2.0</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>{renderList(data.emerging, 'emerging', data.window_count)}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <TrendingDown className="size-4 text-state-declining" />
+              <span>衰退技能 Top-10</span>
+              <span className="text-[10px] font-normal text-ink-faint">z &lt; -1.5</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>{renderList(data.declining, 'declining', data.window_count)}</CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

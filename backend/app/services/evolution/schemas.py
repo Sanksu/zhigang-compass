@@ -40,6 +40,11 @@ class EvolutionSignal(BaseModel):
     trend: SkillEvolutionTrend
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     evidence_refs: list[str] = Field(default_factory=list, description="证据 JD 的 evidence_id 列表")
+    # 抗波动补强（打标不剔除）：信号解读期证据量异常时打标，不改变判定结果
+    warning: bool = Field(default=False, description="解读期（最近两期）任一命中 data_warning")
+    freq_ratio: Optional[float] = Field(
+        default=None, description="归一化展示口径：当期频次 / 当期 REQUIRES 总边数"
+    )
 
 
 class GraphVersionMeta(BaseModel):
