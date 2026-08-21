@@ -1084,6 +1084,33 @@ paths:
                   data:
                     $ref: '#/components/schemas/EvolutionTrendsData'
                   trace_id: { type: string }
+  /api/v1/evolution/skill/{id}/flow:
+    get:
+      tags: [evolution]
+      summary: 技能关联岗位动态变迁桑基图数据
+      description: 从图谱版本快照序列构建该技能的岗位变迁桑基图——列为各版本期，
+        节点为该期与该技能共现的 Top-N 岗位（REQUIRES 边频次），相邻期次同名
+        岗位连线（值=左侧期次频次），直观展示关联岗位的进出与持续需求厚度
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: top
+          in: query
+          schema: { type: integer, default: 8, minimum: 1, maximum: 20, description: 每期取频次 Top-N 岗位 }
+      responses:
+        '200':
+          description: 桑基图节点与连线
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/SkillFlowData'
+                  trace_id: { type: string }
+        '404':
+          description: 无图谱版本数据
   /api/v1/evolution/position/{id}/evolution:
     get:
       tags: [evolution]
@@ -2942,6 +2969,44 @@ components:
         points:
           type: array
           items: { $ref: '#/components/schemas/EvolutionTrendPoint' }
+
+    SkillFlowNode:
+      type: object
+      description: 桑基图节点（岗位×期次，id 全局唯一）
+      required: [id, name, period_index, freq]
+      properties:
+        id: { type: string, description: "岗位节点 ID@期次序号，如 pos_abc::3" }
+        name: { type: string, description: 岗位名称 }
+        period_index: { type: integer, description: 所在期次序号（0 起升序） }
+        freq: { type: integer, description: 该期该技能在此岗位的 REQUIRES 频次 }
+
+    SkillFlowLink:
+      type: object
+      required: [source, target, value]
+      properties:
+        source: { type: string, description: 左侧期次节点 id }
+        target: { type: string, description: 右侧期次节点 id（同名岗位相邻期） }
+        value: { type: integer, description: 左侧期次频次 }
+
+    SkillFlowData:
+      type: object
+      description: GET /evolution/skill/{id}/flow 响应 data（桑基图三元组）
+      required: [skill_id, skill_name, periods, nodes, links]
+      properties:
+        skill_id: { type: string }
+        skill_name: { type: string, description: 快照中最近出现的技能名 }
+        periods:
+          type: array
+          description: 期次标签（快照日期 ISO，升序，与 period_index 对齐）
+          items: { type: string, nullable: true }
+        top: { type: integer, description: 每期 Top-N 岗位截断 }
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/SkillFlowNode' }
+        links:
+          type: array
+          items: { $ref: '#/components/schemas/SkillFlowLink' }
+
 
     EvolutionSignal:
       type: object

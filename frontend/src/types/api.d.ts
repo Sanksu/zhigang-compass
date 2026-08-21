@@ -1919,6 +1919,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/evolution/skill/{id}/flow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 技能关联岗位动态变迁桑基图数据
+         * @description 从图谱版本快照序列构建该技能的岗位变迁桑基图——列为各版本期， 节点为该期与该技能共现的 Top-N 岗位（REQUIRES 边频次），相邻期次同名 岗位连线（值=左侧期次频次），直观展示关联岗位的进出与持续需求厚度
+         */
+        get: {
+            parameters: {
+                query?: {
+                    top?: number;
+                };
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 桑基图节点与连线 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillFlowData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                /** @description 无图谱版本数据 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/evolution/position/{id}/evolution": {
         parameters: {
             query?: never;
@@ -4318,6 +4373,37 @@ export interface components {
             skill: string;
             window: number;
             points: components["schemas"]["EvolutionTrendPoint"][];
+        };
+        /** @description 桑基图节点（岗位×期次，id 全局唯一） */
+        SkillFlowNode: {
+            /** @description 岗位节点 ID@期次序号，如 pos_abc::3 */
+            id: string;
+            /** @description 岗位名称 */
+            name: string;
+            /** @description 所在期次序号（0 起升序） */
+            period_index: number;
+            /** @description 该期该技能在此岗位的 REQUIRES 频次 */
+            freq: number;
+        };
+        SkillFlowLink: {
+            /** @description 左侧期次节点 id */
+            source: string;
+            /** @description 右侧期次节点 id（同名岗位相邻期） */
+            target: string;
+            /** @description 左侧期次频次 */
+            value: number;
+        };
+        /** @description GET /evolution/skill/{id}/flow 响应 data（桑基图三元组） */
+        SkillFlowData: {
+            skill_id: string;
+            /** @description 快照中最近出现的技能名 */
+            skill_name: string;
+            /** @description 期次标签（快照日期 ISO，升序，与 period_index 对齐） */
+            periods: (string | null)[];
+            /** @description 每期 Top-N 岗位截断 */
+            top?: number;
+            nodes: components["schemas"]["SkillFlowNode"][];
+            links: components["schemas"]["SkillFlowLink"][];
         };
         /** @description 技能演化信号（GET /evolution/signals，设计文档 §7.1 Z-score） */
         EvolutionSignal: {
