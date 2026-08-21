@@ -15,10 +15,32 @@ from datetime import datetime, timedelta, timezone
 
 from scrapy.exceptions import CloseSpider
 from scrapy.http import Response
+from twisted.internet import reactor
 
 from crawlers.base_spider import make_playwright_request, BaseSpider
+from crawlers.middlewares import backoff_delay
 from crawlers.settings import CRAWL_ITEMS_CAP
 from crawlers.zhilian_detail import extract_job_detail
+
+# 页面级空列表退避重试（08-21c zhilian 反爬加固）：列表页 200 但无岗位卡片时，
+# 判定为智联临时风控/跳验证页——现有 BackoffRetry 只处理 HTTP 429/403，不覆盖
+# 渲染后空列表场景。此处按 max_empty_retries（默认 3）指数退避（30/60/120s，
+# 复用 crawlers.middlewares.backoff_delay）重发同一搜索 URL；0=关闭。
+DEFAULT_MAX_EMPTY_RETRIES = 3
+
+
+def _max_empty_retries() -> int:
+    """读取爬虫级 max_empty_retries 配置（0=关闭），失败回退默认 3。"""
+    try:
+        from app.core import runtime_config
+
+        cfg = runtime_config.get("crawlers") or {}
+        mer = (cfg.get("zhilian") or {}).get("max_empty_retries")
+        if mer is None:
+            return DEFAULT_MAX_EMPTY_RETRIES
+        return mer
+    except Exception:
+        return DEFAULT_MAX_EMPTY_RETRIES
 
 # 智联城市代码映射
 ZHILIAN_CITY_CODES = {
@@ -63,6 +85,11 @@ class ZhilianSpider(BaseSpider):
         # 孤儿爬虫仍残留；条数上限在源头截断，与页数上限/900s 超时三重保险）
         self._max_results = int(kwargs.get("max_results") or CRAWL_ITEMS_CAP)
         self._items_collected = 0
+        # 页面级空列表退避重试（08-21c）：0=关闭；>0 时列表页 200 但无卡片按
+        # 指数退避重发（防智联临时风控/跳验证页）。计数跨列表页累计，防单次
+        # 采集被"每页都空列表"无限重试拖长运行。
+        self._max_empty_retries = _max_empty_retries()
+        self._empty_retries_used = 0
 
     def _bump_items(self):
         """产出计数：达到 max_results 上限即关闭爬虫（CloseSpider 停止新调度）。"""
@@ -151,6 +178,34 @@ class ZhilianSpider(BaseSpider):
         cards = response.css(".joblist-box__item")
 
         if not cards:
+            # 页面级空列表退避重试（08-21c）：200 但无卡片 = 智联临时风控/跳验证页。
+            # 未用尽重试额度时按 backoff_delay 延迟重发同一搜索 URL（reactor 调度、
+            # 不阻塞事件循环）；用尽则记录并按原逻辑跳过。
+            if self._max_empty_retries > 0 and self._empty_retries_used < self._max_empty_retries:
+                retry_n = self._empty_retries_used
+                self._empty_retries_used += 1
+                delay = backoff_delay(retry_n)
+                self.logger.warning(
+                    f"[zhilian] 列表页无岗位卡片（kw={response.meta.get('keyword')} "
+                    f"页={response.meta.get('page')}），指数退避 {delay}s 后重试 "
+                    f"（{self._empty_retries_used}/{self._max_empty_retries}）",
+                )
+                retry_request = make_playwright_request(
+                    response.url,
+                    meta={
+                        "keyword": response.meta.get("keyword"),
+                        "city": response.meta.get("city"),
+                        "page": response.meta.get("page", 1),
+                    },
+                    selector=".joblist-box__item",
+                    wait_timeout=15000,
+                    scroll_times=1,
+                    scroll_wait_ms=0,
+                    headers=self._compliance_headers(),
+                )
+                # make_playwright_request 已设 dont_filter=True，重发同一 URL 不会被去重
+                reactor.callLater(delay, self.crawler.engine.schedule, retry_request, self)
+                return
             self.logger.warning(
                 f"[zhilian] 列表页无岗位卡片（kw={response.meta.get('keyword')} 页={response.meta.get('page')}），"
                 f"页面标题: {response.css('title::text').get(default='')}"

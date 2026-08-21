@@ -122,6 +122,7 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
             init[s.name] = {
               enabled: saved[s.name]?.enabled ?? true,
               max_results: saved[s.name]?.max_results,
+              max_empty_retries: saved[s.name]?.max_empty_retries,
               hour: saved[s.name]?.hour,
               minute: saved[s.name]?.minute,
             }
@@ -165,12 +166,16 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
       payload.etl_run_hour = hour >= 0 && hour <= 23 ? hour : 5
       const minute = Number(scalars.etl_run_minute)
       payload.etl_run_minute = minute >= 0 && minute <= 59 ? minute : 0
-      // 每爬虫配置：enabled 全量提交；max_results 仅提交非空；hour/minute 成对提交
+      // 每爬虫配置：enabled 全量提交；max_results 仅提交非空；hour/minute 成对提交；
+      // max_empty_retries 仅 zhilian 消费（其他源后端忽略），提交非空值
       const cleaned: Record<string, CrawlerConfig> = {}
       for (const s of CRAWLER_SPIDERS) {
         const c = crawlers[s.name] ?? {}
         const entry: CrawlerConfig = { enabled: c.enabled ?? true }
         if (c.max_results != null && c.max_results > 0) entry.max_results = c.max_results
+        if (s.name === 'zhilian' && c.max_empty_retries != null && c.max_empty_retries >= 0) {
+          entry.max_empty_retries = c.max_empty_retries
+        }
         if (c.hour != null && c.minute != null && c.hour >= 0 && c.hour <= 23 && c.minute >= 0 && c.minute <= 59) {
           entry.hour = c.hour
           entry.minute = c.minute
@@ -503,6 +508,7 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
                     <TableHead className="w-[140px]">爬虫</TableHead>
                     <TableHead className="w-[80px]">启用</TableHead>
                     <TableHead className="w-[150px]">单次采集上限</TableHead>
+                    <TableHead className="w-[120px]">空列表重试</TableHead>
                     <TableHead className="w-[170px]">独立触发时间</TableHead>
                     <TableHead>说明</TableHead>
                   </TableRow>
@@ -552,6 +558,33 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
                             }
                             className="h-7 w-24 text-xs font-mono"
                           />
+                        </TableCell>
+                        <TableCell>
+                          {s.name === 'zhilian' ? (
+                            <>
+                              <Input
+                                type="number"
+                                disabled={disabled}
+                                value={c.max_empty_retries ?? ''}
+                                placeholder="默认3"
+                                min={0}
+                                max={10}
+                                onChange={(e) =>
+                                  setCrawlers((prev) => ({
+                                    ...prev,
+                                    [s.name]: {
+                                      ...(prev[s.name] ?? {}),
+                                      max_empty_retries: e.target.value ? Number(e.target.value) : undefined,
+                                    },
+                                  }))
+                                }
+                                className="h-7 w-16 text-xs font-mono"
+                              />
+                              <p className="mt-0.5 text-[9px] text-ink-faint">0=关闭 · 1-10次</p>
+                            </>
+                          ) : (
+                            <span className="text-[10px] text-ink-faint">–</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">

@@ -31,7 +31,8 @@ DEFAULTS: dict = {
     "etl_validate_temporal_default": 200,  # 时滞/通胀检测默认批次
     "etl_run_hour": 5,                  # ETL 调度小时（0-23，容器内 ARQ cron）
     "etl_run_minute": 0,                # ETL 调度分钟（0-59）
-    # 每爬虫采集配置（08-21）：spider -> {enabled, max_results}；缺省启用、按源默认数量
+    # 每爬虫采集配置（08-21）：spider -> {enabled, max_results, max_empty_retries}；
+    # 缺省启用、按源默认数量；max_empty_retries=0 关闭页面级空列表退避重试（默认 3）
     "crawlers": {},
 }
 
@@ -110,10 +111,11 @@ def _validate_rate_limit(value) -> dict:
 
 
 def _validate_crawlers(value) -> dict:
-    """校验每爬虫采集配置：spider -> {enabled, max_results, hour, minute}。
+    """校验每爬虫采集配置：spider -> {enabled, max_results, max_empty_retries, hour, minute}。
 
     - value 必须是对象（spider 名 → 配置）；
-    - enabled 布尔；max_results 10-1000 整数；hour 0-23 / minute 0-59（独立触发时间，
+    - enabled 布尔；max_results 10-1000 整数；max_empty_retries 0-10 整数（0=关闭
+      页面级空列表退避重试，spider 端读取）；hour 0-23 / minute 0-59（独立触发时间，
       必须成对配置，仅配置其一视为非法）。
     返回规范化后的 dict（仅含有效字段）。
     """
@@ -135,6 +137,11 @@ def _validate_crawlers(value) -> dict:
             if not isinstance(mr, int) or not 10 <= mr <= 1000:
                 raise ValueError(f"crawlers.{spider}.max_results 须为 10-1000 的整数")
             entry["max_results"] = mr
+        if "max_empty_retries" in cfg:
+            mer = cfg["max_empty_retries"]
+            if not isinstance(mer, int) or not 0 <= mer <= 10:
+                raise ValueError(f"crawlers.{spider}.max_empty_retries 须为 0-10 的整数")
+            entry["max_empty_retries"] = mer
         has_hour = "hour" in cfg
         has_minute = "minute" in cfg
         if has_hour != has_minute:
