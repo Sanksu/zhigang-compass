@@ -74,14 +74,28 @@ const ETL_DEFAULTS: Record<string, string> = {
   etl_run_minute: '0',
 }
 
-/** ETL 主调度爬虫（对齐 backend workers/etl.py crawl_platforms：国内+国际+趋势） */
+/** 全部可配置爬虫（对齐 backend admin_routes/crawl.py PLATFORM_META + etl.py crawl_platforms）。
+ *  前 6 源为 ETL 主管线源（国内+国际+趋势，每日 clock 入队）；
+ *  CDP/课程源不在主管线 crawl 阶段，配了独立触发时间（hour/minute）后由
+ *  crawl_scheduler 单独触发，否则仅供手动触发（/admin/crawl）。
+ */
 const CRAWLER_SPIDERS = [
+  // ── ETL 主管线源 ──
   { name: 'zhilian', label: '智联招聘', note: '国内 · 支持数量上限' },
   { name: 'indeed', label: 'Indeed', note: '国际 · 数量上限未生效' },
   { name: 'glassdoor', label: 'Glassdoor', note: '国际 CDP · 数量上限未生效' },
   { name: 'arxiv', label: 'arXiv', note: '论文 · 支持数量上限' },
   { name: 'github', label: 'GitHub', note: '社区 · 数量上限未生效' },
   { name: 'stackoverflow', label: 'StackOverflow', note: '社区 · 数量上限未生效' },
+  // ── CDP 招聘源（需浏览器登录态 9222；配独立时间才自动采集）──
+  { name: 'boss', label: 'BOSS直聘', note: 'CDP 登录态 · 独立时间触发' },
+  { name: 'monster', label: 'Monster', note: 'CDP 登录态 · 独立时间触发' },
+  { name: 'maimai', label: '脉脉', note: 'CDP 登录态 · 独立时间触发' },
+  { name: 'linkedin_public', label: 'LinkedIn', note: 'CDP 登录态 · 独立时间触发' },
+  // ── 课程源（经 load_courses 消费；配独立时间才自动采集）──
+  { name: 'icourse163', label: '中国大学MOOC', note: '课程 · 独立时间触发' },
+  { name: 'coursera', label: 'Coursera', note: '课程 · 独立时间触发' },
+  { name: 'edx', label: 'edX', note: '课程 · 独立时间触发' },
 ] as const
 
 type CrawlerConfig = NonNullable<RuntimeConfig['crawlers']>[string]
@@ -478,6 +492,20 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
                 <p className="text-[10px] text-ink-faint">ETL 主管线每日在此时入队执行（小时 0-23，分钟 0-59）</p>
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {section === 'etl' && (
+        <Card className="mb-4 border-dashed">
+          <CardContent className="py-3 text-[11px] text-ink-muted space-y-1">
+            <p className="font-medium text-ink">默认配置说明</p>
+            <ul className="list-disc pl-4 space-y-0.5">
+              <li>启用开关：默认全部启用（enabled=true）；关闭后该源不参与 ETL 主管线与独立调度。</li>
+              <li>单次采集上限：仅 <code className="font-mono">zhilian / arxiv</code> 生效，其余源按源默认数量（留空=源默认）。</li>
+              <li>独立触发时间：留空（–）表示并入 ETL 主管线（每日 <code className="font-mono">etl_run_hour:etl_run_minute</code> 统一入队）；配置时:分后该源改由 crawl_scheduler 到点单独触发，主管线自动跳过（防双跑）。</li>
+              <li>CDP 源（BOSS/Monster/脉脉/LinkedIn）与课程源（中国大学MOOC/Coursera/edX）不在主管线 crawl 阶段：必须配置独立触发时间才会自动采集，否则仅供手动触发（/admin/crawl）。</li>
+            </ul>
           </CardContent>
         </Card>
       )}
