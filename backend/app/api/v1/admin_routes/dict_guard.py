@@ -1,0 +1,269 @@
+"""管理后台字典守卫域路由：提案审核 / 变更审计与回滚 / 巡检报告（RBAC admin only）。
+
+对齐契约 /api/v1/admin/dict-guard/*（技能字典自治守卫方案 §7）。approve 执行
+语义（§5 风险不对称原则）：动态过滤层操作即时生效；**静态停用词的 remove 以
+受影响技能的动态 protect 落地**（git 词表走固化流程，运行时不动）；全部变更写
+DictChangeLog(source="manual"/"rollback") + AuditLog，回滚按记录反向操作并防复滚。
+"""
+
+import asyncio
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.common import iso, ok, paged_ok, paginate
+from app.api.deps import require_permission
+from app.core.database import get_db
+from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
+from app.models.business import AuditLog, DictChangeLog, DictProposal
+from app.schemas.common import error
+from app.services.extraction import dynamic_filters as dyn
+from app.services.extraction.dictionary import SKILL_STOPWORDS
+
+router = APIRouter()
+
+# 巡检报告目录（backend/reports，与 workers/dict_guard.py 写入侧同约定；
+# 模块级便于测试注入 tmp_path）
+_REPORT_DIR = Path(__file__).resolve().parents[4] / "reports"
+
+
+def _cleanup_skill_nodes(term: str) -> int:
+    """scoped 清理：删除与停用词同名的 Skill 节点（与 auto 路径 workers/dict_guard 同语义）。"""
+    from app.core.database import neo4j_driver
+
+    with neo4j_driver.session() as session:
+        record = session.run(
+            "MATCH (s:Skill {name: $term}) DETACH DELETE s RETURN count(s) AS n",
+            term=term,
+        ).single()
+        return record["n"] if record else 0
+
+
+def _victim_of(evidence: list | dict | None) -> str:
+    """从提案证据解析「受影响技能」（停用词误杀检测写入的成对证据）。"""
+    items = evidence if isinstance(evidence, list) else []
+    for e in items:
+        if isinstance(e, dict) and e.get("label") == "受影响技能":
+            return str(e.get("value") or "").strip()
+    return ""
+
+
+@router.get("/dict-guard/proposals")
+async def list_proposals(
+    status: str = Query(default="pending", pattern="^(pending|approved|rejected)$"),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """字典守卫待审提案列表（默认 pending——审核池待办口径）。"""
+    stmt = select(DictProposal)
+    count_stmt = select(func.count()).select_from(DictProposal)
+    if status:
+        stmt = stmt.where(DictProposal.status == status)
+        count_stmt = count_stmt.where(DictProposal.status == status)
+    rows, total = await paginate(
+        db, stmt.order_by(DictProposal.created_at.desc()), page, size,
+        count_stmt=count_stmt,
+    )
+    return paged_ok(
+        data=[
+            {
+                "id": r.id,
+                "term": r.term,
+                "action": r.action,
+                "status": r.status,
+                "reason": r.reason,
+                "llm_confidence": r.llm_confidence,
+                "evidence": r.evidence or [],
+                "impact_stats": r.impact_stats or {},
+                "run_date": r.run_date,
+                "reviewed_by": r.reviewed_by,
+                "review_reason": r.review_reason,
+                "reviewed_at": iso(r.reviewed_at),
+                "created_at": iso(r.created_at),
+            }
+            for r in rows
+        ],
+        total=total, page=page, size=size,
+    )
+
+
+@router.post("/dict-guard/proposals/{proposal_id}/review")
+async def review_proposal(
+    proposal_id: str,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """审核提案：approve 按动作执行动态层变更 / reject 仅置状态。
+
+    approve 执行语义（方案 §5）：
+    - add_stopword：动态 blocked 即时生效 + scoped 清理同名 Skill（与 auto 一致）
+    - remove_stopword：动态条目直接移除；静态停用词以「受影响技能」的动态
+      protect 落地（git 词表走固化流程），证据缺失时拒绝并提示改用 protect
+    - protect_whitelist：为具体技能名加动态保护
+    """
+    action = req.get("action")
+    reason = (req.get("reason") or "").strip()
+    if action not in ("approve", "reject"):
+        return error(ERR_VALIDATION, "action 必须为 approve 或 reject")
+    if not reason:
+        return error(ERR_VALIDATION, "审核必须填写 reason")
+
+    row = await db.get(DictProposal, proposal_id)
+    if row is None:
+        return error(ERR_NOT_FOUND, "提案不存在", http_status=404)
+    if row.status != "pending":
+        return error(ERR_CONFLICT, f"提案当前状态 {row.status}，不可审核")
+
+    operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    effect_term = row.term
+
+    if action == "approve":
+        if row.action == "add_stopword":
+            dyn.add_entry("blocked", row.term, reason=reason, source="dict_guard_review")
+            effect_kind = "blocked"
+            removed = await asyncio.to_thread(_cleanup_skill_nodes, row.term)
+            row.impact_stats = {**(row.impact_stats or {}), "removed_nodes": removed}
+        elif row.action == "remove_stopword":
+            if dyn.is_dynamically_blocked(row.term):
+                dyn.remove_entry("blocked", row.term)
+                effect_kind = "blocked"
+            elif row.term in SKILL_STOPWORDS:
+                victim = _victim_of(row.evidence)
+                if not victim:
+                    return error(
+                        ERR_CONFLICT,
+                        "静态停用词移除需走 git 固化流程；请在提案证据中指明受影响技能"
+                        "后改用 protect_whitelist",
+                    )
+                # 静态词不动，保护受影响的真实技能使其穿透停用词
+                dyn.add_entry("protected", victim, reason=reason, source="dict_guard_review")
+                effect_kind = "protected"
+                effect_term = victim
+            else:
+                return error(ERR_CONFLICT, "目标不是现行停用词，无需移除")
+        else:  # protect_whitelist
+            dyn.add_entry("protected", row.term, reason=reason, source="dict_guard_review")
+            effect_kind = "protected"
+
+    row.status = "approved" if action == "approve" else "rejected"
+    row.reviewed_by = operator
+    row.review_reason = reason
+    row.reviewed_at = datetime.now(timezone(timedelta(hours=8)))
+
+    if action == "approve":
+        db.add(DictChangeLog(
+            term=effect_term, action=row.action, source="manual", kind=effect_kind,
+            proposal_id=row.id, reason=reason,
+            detail={"operator": operator},
+            impact_stats=row.impact_stats or {},
+        ))
+    db.add(AuditLog(
+        user_id=operator,
+        action=f"admin.dict_guard.{action}",
+        resource="dict_proposal",
+        resource_id=row.id,
+        detail={"term": row.term, "proposal_action": row.action, "reason": reason},
+    ))
+    await db.commit()
+
+    return ok(
+        data={"id": row.id, "term": row.term, "action": row.action, "status": row.status},
+        msg=f"已{'批准执行' if action == 'approve' else '驳回'}: {row.term}",
+    )
+
+
+@router.get("/dict-guard/changes")
+async def list_changes(
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """字典变更审计列表（auto/manual/rollback 全量，倒序）。"""
+    stmt = select(DictChangeLog).order_by(DictChangeLog.created_at.desc())
+    count_stmt = select(func.count()).select_from(DictChangeLog)
+    rows, total = await paginate(db, stmt, page, size, count_stmt=count_stmt)
+    return paged_ok(
+        data=[
+            {
+                "id": r.id,
+                "term": r.term,
+                "action": r.action,
+                "source": r.source,
+                "kind": r.kind,
+                "proposal_id": r.proposal_id,
+                "reason": r.reason,
+                "detail": r.detail or {},
+                "impact_stats": r.impact_stats or {},
+                "applied_by": r.applied_by,
+                "created_at": iso(r.created_at),
+            }
+            for r in rows
+        ],
+        total=total, page=page, size=size,
+    )
+
+
+@router.post("/dict-guard/changes/{change_id}/rollback")
+async def rollback_change(
+    change_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """回滚变更：blocked→移除 / protected→解除，反向写 source=rollback 审计。"""
+    row = await db.get(DictChangeLog, change_id)
+    if row is None:
+        return error(ERR_NOT_FOUND, "变更记录不存在", http_status=404)
+    if row.action == "rollback":
+        return error(ERR_CONFLICT, "回滚记录不可再次回滚")
+    re_rolled = await db.scalar(
+        select(func.count()).select_from(DictChangeLog).where(
+            DictChangeLog.source == "rollback",
+            DictChangeLog.detail["original_id"].astext == row.id,
+        )
+    )
+    if re_rolled:
+        return error(ERR_CONFLICT, "该变更已回滚过（防复滚）")
+
+    operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    if row.kind == "blocked":
+        removed = dyn.remove_entry("blocked", row.term)
+        if not removed:
+            return error(ERR_CONFLICT, "动态停用词中已无该词条（可能已被移除）")
+    elif row.kind == "protected":
+        removed = dyn.remove_entry("protected", row.term)
+        if not removed:
+            return error(ERR_CONFLICT, "动态保护中已无该词条（可能已被解除）")
+    else:
+        return error(ERR_CONFLICT, f"未知条目类型 {row.kind}，无法回滚")
+
+    db.add(DictChangeLog(
+        term=row.term, action="rollback", source="rollback", kind=row.kind,
+        proposal_id=row.proposal_id, reason=f"回滚变更 {row.id}",
+        detail={"original_id": row.id, "operator": operator},
+        impact_stats=row.impact_stats or {}, applied_by=operator,
+    ))
+    db.add(AuditLog(
+        user_id=operator,
+        action="admin.dict_guard.rollback",
+        resource="dict_change_log",
+        resource_id=row.id,
+        detail={"term": row.term, "kind": row.kind},
+    ))
+    await db.commit()
+
+    return ok(data={"id": row.id, "term": row.term, "kind": row.kind}, msg=f"已回滚: {row.term}")
+
+
+@router.get("/dict-guard/report/latest")
+async def latest_report():
+    """最近一次字典守卫巡检报告（reports/dict_guard_{date}.json 取最新）。"""
+    files = sorted(_REPORT_DIR.glob("dict_guard_*.json")) if _REPORT_DIR.exists() else []
+    if not files:
+        return error(ERR_NOT_FOUND, "暂无巡检报告", http_status=404)
+    return ok(data=json.loads(files[-1].read_text(encoding="utf-8")))
