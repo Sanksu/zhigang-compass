@@ -9,7 +9,6 @@ from sqlalchemy import select
 
 from app.models.business import DiscoveryCandidate, GraphVersion, TechnologyWatch
 from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
-from app.services.alerting import send_alert_sync
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +22,31 @@ def _candidate_id(skill: str) -> str:
     import hashlib
 
     return f"cand-{skill[:20]}-{hashlib.md5(skill.encode()).hexdigest()[:6]}"
+
+
+def _graph_shared_position_counts(
+    session, skills: set[str],
+) -> dict[str, int]:
+    """图谱技能 → 共享岗位数（P1 证据距离：候选技能被多少既有岗位 REQUIRES 共用）。
+
+    证据距离语义：候选岗位的技能在图谱中被越多的既有岗位共用（共享桥），
+    候选越贴近图谱既有证据（证据距离近、置信度高）；技能孤立无共享 → 证据距离远
+    （可能是编造/孤证）。排除 legacy 岗位（项目约束：匹配候选排除 status='legacy'）。
+    图谱不可达返回空 dict（调用方按无数据中性处理，不阻塞发现流程）。
+    """
+    if not skills:
+        return {}
+    try:
+        rows = session.run(
+            "MATCH (p:Position)-[:REQUIRES]->(s:Skill) "
+            "WHERE s.name IN $skills AND p.status <> 'legacy' "
+            "RETURN s.name AS skill, count(DISTINCT p) AS pos_count",
+            skills=list(skills),
+        ).data()
+    except Exception as exc:
+        logger.warning("_graph_shared_position_counts: 图谱查询失败: %s", exc)
+        return {}
+    return {r["skill"]: int(r["pos_count"]) for r in rows}
 
 
 def _position_skill_novelty(
@@ -64,12 +88,6 @@ def _position_skill_novelty(
         ).data()
     except Exception as exc:
         logger.warning("_position_skill_novelty: 图谱查询失败: %s", exc)
-        # A-2 裁决①：降级外送告警——novelty 全体缺省时 stable 晋升四条件退化
-        # 为三条件，此前仅 warning 不可观测（保持"不阻塞"语义不变）
-        send_alert_sync(
-            "skill_novelty_unavailable",
-            f"图谱查询失败，本轮 stable 晋升不校验 skill_novelty（四条件退化三条件）：{exc}",
-        )
         return {}
 
     all_skills = {s for r in rows for s in (r.get("skills") or [])}
@@ -91,10 +109,6 @@ def _position_skill_novelty(
                     continue
         except Exception as exc:
             logger.warning("_position_skill_novelty: first_seen 查询失败: %s", exc)
-            send_alert_sync(
-                "skill_novelty_unavailable",
-                f"Skill.first_seen 查询失败，本轮 stable 晋升不校验 skill_novelty（四条件退化三条件）：{exc}",
-            )
 
     today = date.today()
     if reference_days is None:
@@ -145,7 +159,7 @@ async def discovery_daily(ctx: dict) -> dict:
 
     from app.core.database import async_session_factory
     from app.services.discovery.detector import DiscoveryDetector, DiscoveryInput
-    from app.services.discovery.confidence import compute_confidence
+    from app.services.discovery.confidence import compute_confidence, graph_grounding_score
     from app.services.extraction.position_normalization import normalized_position_from_snapshot
     from app.services.discovery.schemas import DiscoveryFeatures
 
@@ -305,12 +319,34 @@ async def discovery_daily(ctx: dict) -> dict:
         llm = JDExtractor().llm
     except Exception:
         llm = None
+
+    # ── 3.2 图谱证据距离（P1，证据距离优先）：候选技能与图谱既有岗位共享桥 ──
+    # 批量查询全部候选技能被既有岗位 REQUIRES 共用的岗位数；图谱不可达按
+    # 无数据中性（graph_grounding=None → 证据 0.5 不偏移阈值），不阻塞发现。
+    from app.core.database import neo4j_driver
+
+    all_cand_skills: set[str] = set()
+    for cand in candidates:
+        all_cand_skills |= position_skills.get(cand.position_name, set())
+    graph_shared: dict[str, int] = {}
+    try:
+        with neo4j_driver.session() as neo4j_session:
+            graph_shared = await asyncio.to_thread(
+                _graph_shared_position_counts, neo4j_session, all_cand_skills
+            )
+    except Exception as exc:
+        logger.warning("discovery_daily: 图谱证据距离计算失败，按无数据中性处理: %s", exc)
+
     async with async_session_factory() as session:
         for cand in candidates:
             c = await detector.ground_with_rag(cand, session, llm=llm)
             # 置信度：jd_count/source_diversity 来自候选特征，
             # growth_rate 用快照窗口重建的环比增长率（§7.2.4 三维加权公式）
             flags = anomaly_flags(academic_freqs, position_skills.get(cand.position_name, set()))
+            cand_skills = position_skills.get(cand.position_name, set())
+            grounding = graph_grounding_score(
+                [graph_shared[s] for s in cand_skills if s in graph_shared]
+            )
             conf = compute_confidence(
                 jd_count=int(cand.features.jd_freq_ma3),
                 source_count=cand.features.source_diversity,
@@ -319,6 +355,8 @@ async def discovery_daily(ctx: dict) -> dict:
                 # paper_raw/community_raw 周频次 2σ 判定，仅作置信度加分
                 arxiv_anomaly=flags["arxiv"],
                 github_anomaly=flags["github"],
+                # 图谱证据距离（P1）：None=无技能/图谱不可达 → 证据中性 0.5
+                graph_grounding=grounding,
             )
             c = c.model_copy(update={"confidence": conf})
             grounded.append(c)

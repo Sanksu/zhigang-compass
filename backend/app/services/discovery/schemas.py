@@ -44,12 +44,29 @@ class DiscoveryFeatures(BaseModel):
 
 
 class ConfidenceScore(BaseModel):
-    """综合置信度（设计文档 7.2.4 节）。"""
+    """综合置信度（设计文档 7.2.4 节 + P1 证据距离标量化）。
+
+    final_confidence 为 0-1 标量：三维加权基础分 + 学术/社区加分 +
+    证据距离校准项（graph_grounding 与 llm_logprob 各占 0.5 加权，中性 0.5）。
+    低于 REVIEW_BLOCK_THRESHOLD=0.75 的候选在前端审核队列标记"需复核"。
+    """
     base_confidence: float = Field(ge=0.0, le=1.0, description="三维加权基础置信度")
     arxiv_anomaly: bool = Field(default=False, description="arXiv 论文数 δ > 2σ")
     github_anomaly: bool = Field(default=False, description="GitHub Star 增速 δ > 2σ")
     bonus: float = Field(default=0.0, description="学术/社区加分（+0.10 单异常 / +0.15 双异常）")
-    final_confidence: float = Field(ge=0.0, le=1.0, description="封顶后的最终置信度")
+    graph_grounding: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="图谱证据距离分（P1）：候选技能与图谱既有岗位共享桥归一化，None=未计算/无技能",
+    )
+    llm_logprob: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="LLM 输出 token 概率归一化（P1，当前未采集缺省 None=中性）",
+    )
+    evidence_score: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="证据距离综合分 = 0.5×graph_grounding + 0.5×llm_logprob（中性 0.5）",
+    )
+    final_confidence: float = Field(ge=0.0, le=1.0, description="封顶后的最终置信度（0-1 标量）")
 
 
 class CandidatePosition(BaseModel):
@@ -78,3 +95,11 @@ class RagGroundingResult(BaseModel):
     matched_name: str = Field(default="", description="命中的权威岗位名（英文）或种子名")
     occupation_code: str = Field(default="", description="命中的 O*NET-SOC 代码，种子命中时为空")
     definition: str = Field(default="", description="岗位定义草案（LLM 生成或权威库原文兜底）")
+    definition_source: str = Field(
+        default="reference",
+        description="定义草案产出来源：llm=LLM 生成；occupation/seed=参考原文兜底",
+    )
+    nli_contradicted: bool = Field(
+        default=False,
+        description="NLI 矛盾检测软门控是否触发：LLM 草案与参考基座冲突，截断回退参考原文",
+    )
