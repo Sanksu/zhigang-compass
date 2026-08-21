@@ -441,7 +441,6 @@ class TestGreySkillRegistration:
     def test_graduate_exempts_further_registration(self):
         """人工毕业（补录白名单）后不再反复挂起在验证区。"""
         from app.services.extraction.dictionary import (
-            clear_grey_skills,
             graduate_grey_skill,
             grey_skills,
         )
