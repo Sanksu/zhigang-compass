@@ -188,3 +188,19 @@ class TestSaveCrawlers:
             rc.save({"crawlers": {"zhilian": {"hour": 7, "minute": 60}}})
         with pytest.raises(ValueError):
             rc.save({"crawlers": {"zhilian": {"hour": -1, "minute": 0}}})
+
+    def test_save_crawlers_max_empty_retries_valid(self, _isolated_config):
+        """max_empty_retries 0-10 可保存；0=关闭页面级空列表重试。"""
+        data = rc.save({"crawlers": {"zhilian": {"max_empty_retries": 0}}})
+        assert data["crawlers"]["zhilian"]["max_empty_retries"] == 0
+        data = rc.save({"crawlers": {"zhilian": {"max_empty_retries": 3}}})
+        assert data["crawlers"]["zhilian"]["max_empty_retries"] == 3
+
+    def test_save_crawlers_max_empty_retries_invalid(self, _isolated_config):
+        """max_empty_retries 越界/非整数拒绝（负值、>10、字符串）。"""
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": {"zhilian": {"max_empty_retries": -1}}})
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": {"zhilian": {"max_empty_retries": 11}}})
+        with pytest.raises(ValueError):
+            rc.save({"crawlers": {"zhilian": {"max_empty_retries": "3"}}})
