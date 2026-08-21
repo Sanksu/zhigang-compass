@@ -2014,6 +2014,7 @@ components:
   schemas:
     DictProposalItem:
       type: object
+      required: [id, term, action, status, run_date, created_at]
       properties:
         id: { type: string }
         term: { type: string, description: 动作作用的目标词 }
@@ -2035,6 +2036,7 @@ components:
 
     DictChangeLogItem:
       type: object
+      required: [id, term, action, source, kind, applied_by, created_at]
       properties:
         id: { type: string }
         term: { type: string }
