@@ -6,6 +6,10 @@
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
 ### 2026-08-21
+- **匹配权重 BT v3：调优目标与验收口径对齐**（#363）：v2 权重由 Optuna 以 Spearman 为目标调出，与 Acc 验收口径（阈值 0.5 二分类）错位；以 Acc 为目标重搜（150+400 试验收敛同一最优），`configs/match_weights.json` 更新为 w=(0.669, 0.044, 0.287)/sim_threshold=0.938——384 对 v2 黄金集 **Acc 0.8281→0.8906**（fp 66→42、fn 恒 0）、Spearman 0.7642→0.7407；v1 300 对回归 Acc 0.9167→0.96；4 折按岗位分组 CV 一致。待决策（张恺天）：分类截断 0.5→0.58 可再达 0.9141（口径变更）；无 nice 技能岗位 nice_score 默认 1.0 的结构性白送分
+- **core_duties 匹配器升级**（#362）：D2-A 整串子串对措辞变体脆弱（376 未命中 gold 中 70 条近失），命中判定升级为双向子串 ∪ 短侧字符 bigram 包含度 ≥0.7（补丁稿候选② Rouge-L 族确定性实现）；同批预测确定性重算微 F1 **0.2457→0.6017**；边界护栏单测防部分相关职责被吞
+- **evaluation_110 归档刷新**（#361）：08-20 终跑误用早于 #328/#331 的过期 worktree 代码（归档含已删除的 Schema coverage gap 标记、缺六维/对齐口径）；以现行 develop 单跑重测刷新——skills raw F1 0.8825 / 对齐口径 **0.9629 达标口径有产物实证** / experience_accuracy 0.8889 / core_duties F1 0.2457（迭代前口径）
+- **匹配评测 v2 口径可复现**（#360）：`evaluate.py --task match` 增 `--match-golden` 参数，生产 BT v2 权重在 384 对黄金集的数字首次有独立评测产物（此前仅 CHANGELOG/配置注释）
 - **ETL 队列接入配置中心 + 调度迁移容器内 ARQ cron**（#348）：前端配置中心新增「ETL 队列」分区（`/admin/settings/etl`，批次上限/默认批次 + 每日调度时间）；`runtime_config` 新增 `etl_batch_cap`/`etl_structure_load_default`/`etl_validate_temporal_default`/`etl_run_hour`/`etl_run_minute`（openapi 契约 + 前端类型重生成）；`etl.py` 批次上限与阶段默认批次改读配置，新增 `run_etl_pipeline_scheduled` 容器内 cron 入口（当日幂等 Redis 锁，与 `etl_daily` 同语义），`settings.py` 注册 ETL cron（时间取配置，重启生效），替代外部 Windows 计划任务调度；后端 20 单测 + 前端 170 测试/lint/typecheck 通过
 - **停用外部 05:00 ETL 计划任务 + 部署说明更新**（#349）：`scheduled_tasks.ps1` 移除 `ETLDaily` 任务（顺带修复 `$Tasks` 数组缺失逗号语法）、`crontab.example` 注释停用 `0 5 * * * etl_daily.py` 行；DEPLOY.md 新增 §6.1 ETL 调度说明（容器内 ARQ cron + 配置中心时间 + 幂等 + 重启 worker 生效）；团队启动指南/冷启动指南同步；本机已注销 `ZhigangETL_ETLDaily`（`etl_daily.py` 保留供 `--force` 手动重跑）
 
