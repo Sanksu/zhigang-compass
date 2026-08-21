@@ -13,12 +13,15 @@ identical to preserve ARQ job matching.
 """
 
 import asyncio
+import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable
 
 from sqlalchemy import select
 
 from app.models.raw import JDRaw
+
+logger = logging.getLogger(__name__)
 
 # 与 extraction/schemas.py REQUIRESRelation.level 对齐的岗位级别集合
 _QUALITY_LEVELS = {"初级", "中级", "高级", "资深", "专家"}
@@ -89,12 +92,9 @@ def _graph_skill_first_seen(skills: Iterable[str]) -> dict[str, date]:
     图谱不可达时返回空 dict（回退 jd_raw 推算）：validate_temporal 原本为
     纯 PG 依赖，不因本次加读图而引入 Neo4j 强依赖（backfill 脚本可独立运行）。
     """
-    import logging
-
     from app.core.database import neo4j_driver
     from app.services.extraction.post_processor import canonical_skill_name
 
-    logger = logging.getLogger(__name__)
     names = {canonical_skill_name(s) for s in skills if canonical_skill_name(s)}
     if not names:
         logger.info("_graph_skill_first_seen: 无有效技能名，跳过读图（空映射，回退 jd_raw）")
@@ -477,14 +477,10 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     （保留去重能力，性能回退但正确性不受影响），不丢任何去重标记。
     """
 
-    import logging
-
     from app.core.database import async_session_factory, redis_client
     from app.services.data_quality.simhash import SimHashIndex
     from app.services.embeddings.vector_store import load_jd_vectors_by_ids
     from app.services.matching.semantic import cosine_similarity
-
-    logger = logging.getLogger(__name__)
 
     # JD 语义去重辅助阈值（§11.4.3 jd_embeddings Cosine）：低于该值不标记
     _EMBED_DEDUP_THRESHOLD = 0.9
@@ -730,11 +726,11 @@ async def batch_extract(
         for i, (row, extraction, normalized_position) in enumerate(
             zip(valid, extractions, normalized_positions), start=1
         ):
-            # 逐条打印 jd_id + 进度百分比：batch_extract 只在循环结束 commit，
+            # 逐条记 jd_id + 进度百分比：batch_extract 只在循环结束 commit，
             # 中间进度 DB 不可见，靠此日志实时确认推进（worker.err.log）
-            print(
-                f"[batch_extract] 处理 jd_id={row.id}（{i}/{total}，{i / total * 100:.0f}%）",
-                flush=True,
+            logger.info(
+                "batch_extract 处理 jd_id=%s（%s/%s，%.0f%%）",
+                row.id, i, total, i / total * 100,
             )
             # SimHash 重复记录不入图（与 rebuild_graph/聚合口径一致）：重复内容
             # 已在 canonical 记录名下入图，此处再入会残留"聚合不覆盖"的空权
@@ -907,10 +903,12 @@ async def sync_skill_normalization(ctx: dict) -> dict:
             guard_cluster_distribution(normalized)  # 门禁校验：异常直接抛 ValueError 拦截
         except ValueError as e:
             msg = f"技能归一化门禁拦截：{e}"
-            print(f"[sync_skill_normalization] {msg}", flush=True)
-            from app.services.alerting import send_alert
+            logger.warning("%s", msg)
+            from app.services.alerting import send_alert_sync
 
-            send_alert("normalization_blocked", msg)
+            # 本处位于线程池同步上下文（_run）：用同步版告警——此前裸调
+            # send_alert 协程被静默丢弃，告警从未真正发出
+            send_alert_sync("normalization_blocked", msg)
             return {
                 "skills": len(names),
                 "normalized": 0,

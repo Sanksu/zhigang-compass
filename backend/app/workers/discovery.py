@@ -342,7 +342,9 @@ async def discovery_auto_transition(ctx: dict) -> dict:
     注意：自动流转 operator="system"，不写 AuditLog（audit_logs.user_id 为
     users 外键，system 无对应用户）。人工流转记录见 /evolution/state-machine。
 
-    emerging → stable: confidence ≥ 0.8 AND 连续 2 窗口波动 < 25% AND 源 ≥ 2
+    emerging → stable: jd_count ≥ 5 AND 连续 2 窗口波动 < 25%（不对称萎缩口径，
+    增长不惩罚，#318）AND source_diversity ≥ 2 AND skill_novelty ≤ 0.2
+    （§7.2.1；skill_novelty 在图谱不可达时降级为仅 warning，四条件退化三条件）
     emerging/stable → declining: 连续 3 窗口频次下降 > 40%
     declining → stable: 连续 2 窗口 z_score > 0（回升）
 

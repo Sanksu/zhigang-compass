@@ -23,11 +23,20 @@ async def send_alert(event: str, message: str, **extra) -> bool:
         message: 人类可读的告警描述
         **extra: 附加结构化字段（源名、日期等，便于机器人卡片透传）
     """
+    return await asyncio.to_thread(send_alert_sync, event, message, **extra)
+
+
+def send_alert_sync(event: str, message: str, **extra) -> bool:
+    """send_alert 的同步版——供线程池/同步上下文直接调用（如 ETL _run()）。
+
+    此前同步上下文里裸调 send_alert 协程会被静默丢弃、告警从未发出；
+    webhook 调用失败仍仅记日志，不阻塞主流程。
+    """
     if not settings.alert_webhook_url:
         logger.warning("[alert] 未配置 ALERT_WEBHOOK_URL，跳过告警 %s: %s", event, message)
         return False
     payload = json.dumps({"event": event, "message": message, **extra}, ensure_ascii=False)
-    return await asyncio.to_thread(_post_webhook, payload)
+    return _post_webhook(payload)
 
 
 def _post_webhook(payload: str) -> bool:

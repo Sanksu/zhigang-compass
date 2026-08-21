@@ -11,6 +11,7 @@ graph_health_check reuses ``_alert_llm`` from the facade ``app.workers.tasks``
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,6 +19,8 @@ from sqlalchemy import select
 
 from app.services.alerting import send_alert
 from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
+
+logger = logging.getLogger(__name__)
 
 
 async def graph_health_check(ctx: dict) -> dict:
@@ -154,7 +157,7 @@ async def diversity_report(ctx: dict, top_n: int = 10) -> dict:
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / f"diversity_{datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d')}.json"
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[diversity_report] 报告已写入: {report_path}", flush=True)
+    logger.info("diversity 报告已写入: %s", report_path)
     return {"report_path": str(report_path)}
 
 
@@ -203,5 +206,5 @@ async def check_data_freshness(ctx: dict) -> dict:
             stale_sources=stale,
             report_path=str(report_path),
         )
-    print(f"[check_data_freshness] 报告已写入: {report_path} 过期来源: {stale}", flush=True)
+    logger.info("数据新鲜度报告已写入: %s 过期来源: %s", report_path, stale)
     return {"report_path": str(report_path), "stale_sources": stale}

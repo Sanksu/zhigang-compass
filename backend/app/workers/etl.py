@@ -1,10 +1,13 @@
 """ETL orchestration helpers and the complete pipeline ARQ task."""
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
 from app.core import runtime_config
 from app.models.raw import JDRaw
+
+logger = logging.getLogger(__name__)
 
 _ETL_LIMIT_CAP = 2000  # 默认批次上限（可经 runtime_config.etl_batch_cap 覆盖）
 
@@ -235,6 +238,33 @@ async def run_etl_pipeline(
         "graph_health_check",
         tasks_module.graph_health_check(ctx),
     )
+
+    # L-9：阶段隔离吞错继续跑（防单阶段失败拖垮全线）不等于无声——聚合各阶段
+    # error 一次性外发告警并落 error 日志，结束"管线永远成功"的可观测盲区。
+    # crawl 阶段为 list[dict]（每爬虫一项），其余阶段为 dict。
+    stage_errors: list[str] = []
+    for stage_name, stage_result in results["stages"].items():
+        entries = (
+            stage_result
+            if isinstance(stage_result, list)
+            else [stage_result]
+            if isinstance(stage_result, dict)
+            else []
+        )
+        for entry in entries:
+            if isinstance(entry, dict) and isinstance(entry.get("error"), str):
+                stage_errors.append(f"{stage_name}: {entry['error'][:120]}")
+    if stage_errors:
+        logger.error("ETL 完成，但 %d 个阶段项失败：\n%s", len(stage_errors), "\n".join(stage_errors))
+        from app.services.alerting import send_alert
+
+        try:
+            await send_alert(
+                "etl_stage_errors",
+                f"ETL 阶段失败聚合（{len(stage_errors)} 项）：\n" + "\n".join(stage_errors[:20]),
+            )
+        except Exception:
+            logger.warning("ETL 阶段失败告警外发异常", exc_info=True)
     return results
 
 

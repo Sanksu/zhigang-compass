@@ -42,13 +42,10 @@ jobs:
         env:
           APP_ENV: test
         # 覆盖率门禁：--cov=app 启用测量，fail_under=60 阈值由 pyproject.toml
-        # [tool.coverage.report] 声明式配置（设计文档 §15.3 验收 ≥60%）；
-        # 返回码 5 = 未收集到测试用例（允许通过），其余失败置红
-        run: |
-          uv run pytest -q --cov=app --cov-report=term-missing
-          rc=$?
-          if [ $rc -eq 5 ]; then exit 0; fi
-          exit $rc
+        # [tool.coverage.report] 声明式配置（设计文档 §15.3 验收 ≥60%）。
+        # L-16：返回码 5（未收集到测试用例）同样置红——collection 清空（如
+        # conftest 报错、marker 误排除全部用例）曾是假绿通道
+        run: uv run pytest -q --cov=app --cov-report=term-missing
 
       - name: Import smoke check
         # 验证核心模块可正常 import（捕获循环依赖、缺失依赖等）
