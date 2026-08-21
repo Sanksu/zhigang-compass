@@ -99,3 +99,92 @@ async def test_shutdown_continues_after_single_failure(monkeypatch):
     assert sync_driver.closed
     assert redis.closed
     assert engine.disposed
+
+
+# ── H2 修复：生产姿态 fail-fast 校验 ──
+
+class _PatchableSettings:
+    """模拟 settings：暴露 lifespan 校验读到的字段，便于 monkeypatch 单点翻转。"""
+
+    def __init__(self, *, app_env, debug, secret_key, admin_password, cors_origins):
+        self.app_env = app_env
+        self.debug = debug
+        self.secret_key = secret_key
+        self.admin_password = admin_password
+        self.cors_origins = cors_origins
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env == "production"
+
+
+@pytest.mark.asyncio
+async def test_lifespan_production_fails_fast_on_debug(monkeypatch):
+    """生产环境 DEBUG=True 时应拒绝启动（SQL echo 泄 PII 至日志，H2）。"""
+    from app import main as main_mod
+
+    settings = _PatchableSettings(
+        app_env="production",
+        debug=True,  # 违规
+        secret_key="not-default",
+        admin_password="not-default",
+        cors_origins=["https://app.example.com"],
+    )
+    monkeypatch.setattr(main_mod, "settings", settings)
+    # 跳过重量级预热，仅验证启动校验
+    async def _noop_prewarm():
+        return None
+
+    monkeypatch.setattr(main_mod, "_prewarm_semantic", _noop_prewarm)
+
+    with pytest.raises(RuntimeError, match="DEBUG=True"):
+        async with main_mod.lifespan(None):  # type: ignore[arg-type]
+            pass  # launch
+
+
+@pytest.mark.asyncio
+async def test_lifespan_production_fails_fast_on_cors_wildcard(monkeypatch):
+    """生产环境 CORS 通配 * 时应拒绝启动（任意站点跨域携凭据，H2）。"""
+    from app import main as main_mod
+
+    settings = _PatchableSettings(
+        app_env="production",
+        debug=False,
+        secret_key="not-default",
+        admin_password="not-default",
+        cors_origins=["*"],  # 违规
+    )
+    monkeypatch.setattr(main_mod, "settings", settings)
+
+    async def _noop_prewarm():
+        return None
+
+    monkeypatch.setattr(main_mod, "_prewarm_semantic", _noop_prewarm)
+
+    with pytest.raises(RuntimeError, match="通配 \\*"):
+        async with main_mod.lifespan(None):  # type: ignore[arg-type]
+            pass  # launch
+
+
+@pytest.mark.asyncio
+async def test_lifespan_production_missing_preamble_secrets(monkeypatch):
+    """生产环境未换 SECRET_KEY/ADMIN_PASSWORD 仍应拒绝启动（既有校验回归）。"""
+    from app import main as main_mod
+
+    settings = _PatchableSettings(
+        app_env="production",
+        debug=False,
+        secret_key="change-me-in-production",  # 违规默认值
+        admin_password="not-default",
+        cors_origins=["https://app.example.com"],
+    )
+    monkeypatch.setattr(main_mod, "settings", settings)
+
+    async def _noop_prewarm():
+        return None
+
+    monkeypatch.setattr(main_mod, "_prewarm_semantic", _noop_prewarm)
+
+    with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        async with main_mod.lifespan(None):  # type: ignore[arg-type]
+            pass  # launch
