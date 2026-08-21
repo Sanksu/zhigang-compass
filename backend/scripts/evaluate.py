@@ -7,7 +7,8 @@
 - jd_llm  JD 解析：真实 LLM 盲审评测（读取 tests/evaluate/run_manual_jd_eval.py --run 的
           最近归档 reports/eval_jd_llm_*.json；只读不重跑，避免重复消耗 LLM 额度）
 - match   人岗匹配：total_score 与人工标注的 Spearman 秩相关 + 分类准确率 + Top-3 推荐准确率
-          （黄金集 data/golden_set/golden_set_match.jsonl，权重来自 configs/match_weights.json）
+          （默认黄金集 data/golden_set/golden_set_match.jsonl；生产权重口径传
+          --match-golden data/golden_set/golden_set_match_v2.jsonl，权重来自 configs/match_weights.json）
 - resume  简历提取：真实抽取（LLM + 规则兜底）vs 简历黄金集 F1
           （黄金集 data/golden_set/golden_set_resume.jsonl；未交付时跳过并注明）
 
@@ -22,6 +23,8 @@
     uv run python scripts/evaluate.py --task jd_llm     # 读最近 LLM 盲审归档
     uv run python scripts/evaluate.py --task resume
     uv run python scripts/evaluate.py --task match --semantic   # 匹配项注入 SBERT 语义增强
+    uv run python scripts/evaluate.py --task match --semantic \
+        --match-golden data/golden_set/golden_set_match_v2.jsonl   # 生产权重口径（BT v2 384 对）
 """
 
 import argparse
@@ -221,10 +224,11 @@ def _top3_accuracy(pairs: list[dict], scores: list[float]) -> tuple[float | None
     return (hits / total if total > 0 else None), total
 
 
-def eval_match(semantic: bool) -> dict:
+def eval_match(semantic: bool, golden: Path | None = None) -> dict:
     """人岗匹配评测：Spearman 秩相关 + 分类准确率 + Top-3 推荐准确率 + 混淆矩阵。"""
-    if not _MATCH_GOLDEN.exists():
-        return {"task": "match", "skipped": True, "reason": f"黄金集缺失: {_MATCH_GOLDEN.relative_to(_BACKEND_DIR)}"}
+    golden = golden or _MATCH_GOLDEN
+    if not golden.exists():
+        return {"task": "match", "skipped": True, "reason": f"黄金集缺失: {golden.relative_to(_BACKEND_DIR)}"}
     from app.services.matching.weights import load_sim_threshold, load_weights
 
     weights = load_weights()
@@ -236,7 +240,7 @@ def eval_match(semantic: bool) -> dict:
 
         sem = SkillEmbedder.get()
         method = "规则 + SBERT 语义增强"
-    pairs = load_pairs(_MATCH_GOLDEN)
+    pairs = load_pairs(golden)
     result = evaluate_pairs(pairs, weights, sem, threshold)
     scores = result["scores"]
     labels = result["labels"]
@@ -267,6 +271,7 @@ def eval_match(semantic: bool) -> dict:
         "task": "match",
         "skipped": False,
         "method": method,
+        "golden_set": golden.name,
         "spearman": round(result["spearman"], 4),
         "accuracy": round(result["accuracy"], 4),
         "target_accuracy": _MATCH_TARGET,
@@ -519,6 +524,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="准确率评测统一入口（设计文档 §13.3）")
     parser.add_argument("--task", choices=["jd", "jd_llm", "resume", "match", "all"], default="all")
     parser.add_argument("--semantic", action="store_true", help="匹配评测注入 SBERT 语义增强")
+    parser.add_argument(
+        "--match-golden",
+        type=Path,
+        default=None,
+        help="匹配黄金集路径（默认 v1 golden_set_match.jsonl；生产权重口径传 v2）",
+    )
     args = parser.parse_args()
 
     results = []
@@ -529,7 +540,7 @@ def main() -> None:
     if args.task in ("resume", "all"):
         results.append(eval_resume())
     if args.task in ("match", "all"):
-        results.append(eval_match(args.semantic))
+        results.append(eval_match(args.semantic, args.match_golden))
 
     report = {
         "generated_at": _now(),
