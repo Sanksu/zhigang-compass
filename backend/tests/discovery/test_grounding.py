@@ -128,7 +128,9 @@ class TestGenerateDefinition:
             "definition": "Design and develop software systems.",
         }
         draft = self._run(_generate_definition("推荐算法工程师", None, occupation, llm))
-        assert draft == "负责开发与维护推荐系统算法。"
+        assert draft.text == "负责开发与维护推荐系统算法。"
+        assert draft.source == "llm"
+        assert draft.nli_contradicted is False
         assert llm.calls == 1  # LLM 真实参与
 
     def test_llm_failure_falls_back_to_original(self):
@@ -139,20 +141,23 @@ class TestGenerateDefinition:
             "definition": "Design and develop software systems.",
         }
         draft = self._run(_generate_definition("软件开发工程师", None, occupation, self._FailingLLM()))
-        assert draft == "Design and develop software systems."
+        assert draft.text == "Design and develop software systems."
+        assert draft.source == "occupation"
+        assert draft.nli_contradicted is False
 
     def test_seed_description_used_without_occupation(self):
         """仅种子命中时用种子描述作基座（LLM 可用则生成）。"""
         llm = self._FakeLLM(text="负责检索增强生成系统构建。")
         seed = {"name": "RAG 工程师", "description": "专注 RAG 系统构建"}
         draft = self._run(_generate_definition("RAG 工程师", seed, None, llm))
-        assert draft == "负责检索增强生成系统构建。"
+        assert draft.text == "负责检索增强生成系统构建。"
+        assert draft.source == "llm"
 
     def test_no_reference_returns_empty(self):
         """无权威库/种子参考时返回空串（不触发 LLM）。"""
         llm = self._FakeLLM()
         draft = self._run(_generate_definition("未知岗位", None, None, llm))
-        assert draft == ""
+        assert draft.text == ""
         assert llm.calls == 0
 
     def test_no_llm_falls_back_to_reference(self):
@@ -163,7 +168,99 @@ class TestGenerateDefinition:
             "definition": "Design and develop software systems.",
         }
         draft = self._run(_generate_definition("软件开发工程师", None, occupation, None))
-        assert draft == "Design and develop software systems."
+        assert draft.text == "Design and develop software systems."
+        assert draft.source == "occupation"
+
+    def test_nli_contradiction_triggers_resample_then_fallback(self):
+        """NLI 矛盾软门控：首稿含否定断言（可疑级）→ 触发重采样；重采样后
+        仍可疑 → 截断回退参考原文 + 打标（幻觉防控核心闭环）。"""
+        reference = "负责大数据平台架构设计与集群性能优化，要求熟悉分布式系统。"
+        occupation = {"code": "15-1252.00", "name": "ML", "definition": reference}
+
+        # 首稿含否定断言且与基座低重合（可疑级），重采样稿仍否定 → 回退原文 + 打标
+        class _ContradictoryLLM:
+            def __init__(self):
+                self.calls = 0
+
+            def extract_structured(self, prompt, response_model, system_prompt=None, **kwargs):
+                self.calls += 1
+                return response_model(text="该岗位无需任何编程能力。")
+
+        llm = _ContradictoryLLM()
+        draft = self._run(_generate_definition("ML", None, occupation, llm))
+        assert draft.text == reference          # 截断回退参考原文
+        assert draft.source == "occupation"
+        assert draft.nli_contradicted is True   # 打标
+        assert llm.calls == 2                   # 首稿 + 重采样各一次
+
+    def test_nli_confirmed_contradiction_truncates_without_resample(self):
+        """确认级矛盾（同主题否定极性翻转）→ 直接截断回退，不重采样。"""
+        reference = "岗位要求具备 Python 编程能力，负责推荐系统开发。"
+        occupation = {"code": "15-1252.00", "name": "ML", "definition": reference}
+
+        class _ConfirmedContradictionLLM:
+            def __init__(self):
+                self.calls = 0
+
+            def extract_structured(self, prompt, response_model, system_prompt=None, **kwargs):
+                self.calls += 1
+                return response_model(text="该岗位不需要 Python 编程能力。")
+
+        llm = _ConfirmedContradictionLLM()
+        draft = self._run(_generate_definition("ML", None, occupation, llm))
+        assert draft.text == reference
+        assert draft.nli_contradicted is True
+        assert llm.calls == 1  # 确认矛盾直接截断，无重采样
+
+    def test_nli_resample_recovers_clean_draft(self):
+        """重采样后恢复为无矛盾草案 → 放行重采样文本（不截断）。"""
+        reference = "岗位要求具备 Python 编程能力。"
+        occupation = {"code": "15-1252.00", "name": "ML", "definition": reference}
+
+        class _ResampleRecoveringLLM:
+            def __init__(self):
+                self.calls = 0
+
+            def extract_structured(self, prompt, response_model, system_prompt=None, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    return response_model(text="岗位不需要编程技能。")
+                return response_model(text="负责 Python 编程与系统开发。")
+
+        llm = _ResampleRecoveringLLM()
+        draft = self._run(_generate_definition("ML", None, occupation, llm))
+        assert draft.text == "负责 Python 编程与系统开发。"  # 重采样稿放行
+        assert draft.source == "llm"
+        assert draft.nli_contradicted is False
+        assert llm.calls == 2
+
+    def test_nli_degree_conflict_triggers_fallback(self):
+        """学历量级冲突（参考本科，草案称高中）判为矛盾 → 回退参考原文。"""
+        reference = "要求本科及以上学历，精通推荐算法。"
+        occupation = {"code": "15-1252.00", "name": "ML", "definition": reference}
+
+        class _DegreeConflictLLM:
+            def __init__(self):
+                self.calls = 0
+
+            def extract_structured(self, prompt, response_model, system_prompt=None, **kwargs):
+                self.calls += 1
+                return response_model(text="高中毕业即可，无需任何算法经验。")
+
+        llm = _DegreeConflictLLM()
+        draft = self._run(_generate_definition("ML", None, occupation, llm))
+        assert draft.text == reference
+        assert draft.nli_contradicted is True
+
+    def test_nli_clean_draft_passes_no_resample(self):
+        """与参考一致的中文凝练稿（含"系统"等重叠词）→ 无矛盾信号直接放行。"""
+        reference = "负责推荐系统的设计与开发。"
+        occupation = {"code": "15-1252.00", "name": "ML", "definition": reference}
+        llm = self._FakeLLM(text="负责推荐系统的开发与落地。")
+        draft = self._run(_generate_definition("ML", None, occupation, llm))
+        assert draft.text == "负责推荐系统的开发与落地。"
+        assert draft.nli_contradicted is False
+        assert llm.calls == 1  # 未触发重采样
 
 
 class _FakeEmbedder:

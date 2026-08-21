@@ -20,6 +20,7 @@ RAG 接地是"辅助确认"而非"硬门控"：未命中权威库/种子的 cand
 
 import asyncio
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 from app.services.kg.fulltext import sanitize_fulltext
@@ -29,6 +30,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.discovery.nli_guard import (
+    SUSPICIOUS_THRESHOLD,
+    detect_contradiction,
+)
 from app.services.discovery.schemas import RagGroundingResult
 
 _SEEDS_PATH = Path(__file__).resolve().parents[3] / "configs" / "emerging_seeds.yaml"
@@ -418,45 +423,94 @@ class _DefinitionDraft(BaseModel):
     text: str
 
 
+@dataclass
+class _DefinitionResult:
+    """定义草案生成结果。
+
+    text: 最终定义草案
+    source: 产出来源（llm=LLM 生成；occupation/seed=参考原文兜底）
+    nli_contradicted: 是否因 NLI 矛盾检测被截断回退参考原文（软门控打标）
+    """
+
+    text: str
+    source: str = "reference"
+    nli_contradicted: bool = False
+
+
+# NLI 软门控重采样指令：首稿被 NLI 判为可疑/矛盾时，要求 LLM 严格对齐
+# 参考信息重写（不引入参考中不存在的否定表述或降级的学历/经验要求）
+_RESAMPLE_SYSTEM_PROMPT = """你是岗位定义专家。你上次生成的岗位定义草案与参考信息
+存在矛盾，请重新基于参考信息改写，忠实反映参考内容：不要引入参考信息中不存在的
+否定表述，不得降低参考中的学历/经验要求，也不要添加参考未提及的硬性门槛。
+只输出定义本身，不要前缀如"岗位定义："。"""
+
+
 async def _generate_definition(
     position_name: str,
     seed: Optional[dict],
     occupation: Optional[dict],
     llm,
-) -> str:
-    """生成岗位定义草案。
+) -> _DefinitionResult:
+    """生成岗位定义草案（含 NLI 矛盾检测软门控，P0）。
 
-    优先级：LLM 聚合生成（可配置）→ 权威库定义原文 → 种子描述。
-    LLM 失败静默回退，不阻塞接地判定（RAG 接地是"辅助确认"而非硬门控）。
+    流程：LLM 生成（可配置）→ NLI 检测 vs 参考基座（图谱/权威库检索结果）
+    → 无矛盾放行 / 可疑触发一次重采样（对齐参考重写）→ 确认矛盾或重采样
+    后仍可疑 → 截断回退参考原文 + 打标 nli_contradicted。
+    LLM 失败静默回退原文，不阻塞接地判定（RAG 接地是"辅助确认"而非硬门控）。
     """
     reference = ""
+    source = "reference"
     if occupation and occupation.get("definition"):
         reference = occupation["definition"]
+        source = "occupation"
     elif seed and seed.get("description"):
         reference = seed["description"]
+        source = "seed"
 
     if not reference:
-        return ""
+        return _DefinitionResult(text="", source="")
 
     if llm is not None:
-        try:
-            # LLM 参与定义草案生成：英文 O*NET 定义 → 中文凝练
-            draft = await asyncio.to_thread(
-                llm.extract_structured,
-                _DEFINITION_TASK_TEMPLATE.format(
-                    position_name=position_name, reference=reference
-                ),
-                _DefinitionDraft,
-                system_prompt=_DEFINITION_SYSTEM_PROMPT,
-            )
-            if draft.text and draft.text.strip():
-                return draft.text.strip()
-        except Exception:
-            # LLM 失败静默回退到原文，不阻塞接地判定
-            pass
+        # 首稿 + 重采样至多各一次：NLI 软门控触发重采样（不重复调用，防放大成本）
+        for attempt in range(2):
+            try:
+                draft = await asyncio.to_thread(
+                    llm.extract_structured,
+                    _DEFINITION_TASK_TEMPLATE.format(
+                        position_name=position_name, reference=reference
+                    ),
+                    _DefinitionDraft,
+                    system_prompt=(
+                        _DEFINITION_SYSTEM_PROMPT
+                        if attempt == 0
+                        else _RESAMPLE_SYSTEM_PROMPT
+                    ),
+                )
+                text = (draft.text or "").strip()
+                if not text:
+                    break
+                result = detect_contradiction(reference, text)
+                if result.label == "contradiction":
+                    # 确认矛盾 → 强制截断回退参考原文 + 打标（软门控，不再重采样）
+                    return _DefinitionResult(
+                        text=reference, source=source, nli_contradicted=True
+                    )
+                if result.score < SUSPICIOUS_THRESHOLD:
+                    # 无矛盾信号（entailment/neutral）→ 放行
+                    return _DefinitionResult(text=text, source="llm")
+                if attempt == 0:
+                    # 可疑（未达确认级）→ 触发一次重采样（软门控第一级）
+                    continue
+                # 重采样后仍可疑 → 截断回退参考原文 + 打标（软门控第二级）
+                return _DefinitionResult(
+                    text=reference, source=source, nli_contradicted=True
+                )
+            except Exception:
+                # LLM 失败静默回退到原文，不阻塞接地判定
+                break
 
     # 回退：权威库定义原文（英文）或种子描述
-    return reference
+    return _DefinitionResult(text=reference, source=source)
 
 
 async def ground_with_rag(
@@ -508,7 +562,9 @@ async def ground_with_rag(
         rag_matched=occupation is not None,
         matched_name=(occupation or seed or {}).get("name", ""),
         occupation_code=(occupation or {}).get("code", ""),
-        definition=definition,
+        definition=definition.text,
+        definition_source=definition.source,
+        nli_contradicted=definition.nli_contradicted,
     )
 
 
