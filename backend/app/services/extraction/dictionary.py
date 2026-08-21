@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 from app.services.extraction.dictionary_data import SKILL_ALIAS, SKILL_STOPWORDS
+from app.services.extraction.dynamic_filters import is_dynamically_blocked, is_dynamically_protected
 
 
 # 白名单 yaml 路径（dictionary.py 位于 backend/app/services/extraction/，
@@ -1164,7 +1165,15 @@ def is_noise_skill(name: str) -> bool:
     用于观察池 JD 信号过滤（LLM 误抽"算法工程师""熟悉Redis"等非技能词）与
     白名单扩充候选挖掘。白名单词与别名标准名整体保护（如"嵌入式开发"不以
     "开发"后缀退化判噪），其余按泛词/岗位名/经验碎片规则判定。
+
+    动态过滤层（dict-guard）叠加语义：
+    1. 动态保护最先判定——静态停用词误伤真实技能时（"微" vs "微信小程序"），
+       审批通过的保护条目在此放行，优先于一切停用词与启发式；
+    2. 动态停用词在白名单/别名保护之后——即使写入侧硬门禁被绕过，白名单词
+       也不会被动态拦截误杀（纵深防御；正常路径由 dict-guard 门禁保证互斥）。
     """
+    if is_dynamically_protected(name):
+        return False
     # SKILL_STOPWORDS 优先于白名单保护：显式停用词（含白名单基础词）一律判噪
     # （08-14 盲审迭代：消息队列/数据结构 等上位泛词是 gold 口径不收的，
     # LLM 高频误抽；路由依赖词如计算机视觉/图像处理/统计学保留白名单保护，
@@ -1173,6 +1182,8 @@ def is_noise_skill(name: str) -> bool:
         return True
     if name in SKILL_WHITELIST or name in _ALIAS_STANDARDS:
         return False
+    if is_dynamically_blocked(name):
+        return True
     if name in _GENERIC_NOISE:
         return True
     if len(name) < 2 or name.isdigit():
