@@ -85,10 +85,6 @@ interface NodeDetailPanelProps {
   onClose?: () => void
   // ── 导学面板（task 1.3）可选增强 ──
   learningStatus?: LearningStatus
-  /** 市场需求度 0-1（Why to Learn） */
-  demand?: number
-  /** 需求趋势 -1..1（Why to Learn） */
-  trend?: number
   /** 已掌握技能集（How to Start 判断前置是否就绪） */
   learnedSkills?: Set<string>
 }
@@ -142,8 +138,6 @@ export function NodeDetailPanel({
   onSelectSkill,
   onClose,
   learningStatus,
-  demand,
-  trend,
   learnedSkills,
 }: NodeDetailPanelProps) {
   const Icon = node ? TYPE_ICON[node.type] : Network
@@ -356,33 +350,15 @@ export function NodeDetailPanel({
             {/* 技能详情 */}
             {node.type === 'skill' && skillDetail && (
               <>
-                {/* 导学面板（task 1.3）：为什么学 → 目标/需求对齐 */}
+                {/* 导学面板（task 1.3）：为什么学 → 目标/需求对齐
+                    H3 修复:删除按技能名哈希编造的"需求%/市场趋势"展示——契约中
+                    demand/trend 仅存在于 GapSkill/LearningPathItem,图谱五个钻取
+                    端点均无此字段。改为按岗位命中数叙事。 */}
                 <section className="space-y-2">
                   <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
                     <Sparkles className="size-3" />
                     为什么学
                   </h4>
-                  {demand != null && (
-                    <div className="flex items-center gap-2">
-                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-border/80">
-                        <div
-                          className="h-full rounded-full bg-state-emerging transition-all duration-500"
-                          style={{ width: `${Math.round(Math.min(1, Math.max(0, demand)) * 100)}%` }}
-                        />
-                      </div>
-                      <span className="text-[10px] font-mono text-ink-muted tabular-nums">
-                        需求 {Math.round(Math.min(1, Math.max(0, demand)) * 100)}
-                      </span>
-                    </div>
-                  )}
-                  {trend != null && (
-                    <p className="text-xs text-ink-muted">
-                      市场趋势
-                      <span className={`ml-1 font-mono ${trend >= 0 ? 'text-state-emerging' : 'text-state-archived'}`}>
-                        {trend >= 0 ? '↑' : '↓'} {Math.round(Math.abs(trend) * 100)}
-                      </span>
-                    </p>
-                  )}
                   <p className="text-xs leading-relaxed text-ink-secondary">
                     {skillDetail.positions.length > 0
                       ? `当前有 ${skillDetail.positions.length} 个岗位要求该技能，掌握后直接提升必备匹配分。`

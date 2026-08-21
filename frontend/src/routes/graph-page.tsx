@@ -319,14 +319,6 @@ export function GraphPage() {
     if (!selected || selected.type !== 'skill') return undefined
     return (skillDetailView?.prerequisites ?? []).length > 0 ? 'locked' : 'doing'
   }, [selected, skillDetailView])
-  // 需求/趋势：确定性 mock（按技能名哈希，避免每次渲染跳动）
-  const skillDemandTrend = useMemo(() => {
-    if (!selected) return {}
-    const key = selected.id || selected.name || 'skill'
-    let h = 0
-    for (const c of key) h = (h * 31 + c.charCodeAt(0)) >>> 0
-    return { demand: 0.5 + (h % 100) / 200, trend: ((h % 100) / 100) * 0.8 - 0.1 }
-  }, [selected])
 
   // 全文检索（设计文档 §5.4 cjk 全文索引）
   // 搜索序号：连续搜索时旧请求响应作废，避免慢响应覆盖新结果
@@ -746,8 +738,6 @@ export function GraphPage() {
               onSelectSkill={focusSkill}
               onClose={() => setSelected(null)}
               learningStatus={skillLearningStatus}
-              demand={skillDemandTrend.demand}
-              trend={skillDemandTrend.trend}
               learnedSkills={learnedSkills}
             />
           </TabsContent>
