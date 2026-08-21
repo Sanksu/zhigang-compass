@@ -192,13 +192,13 @@ async def validate_temporal(
 
     from app.core.database import async_session_factory
     from app.services.data_quality.temporal_detector import (
-        RECENT_WINDOW_DAYS,
         apply_temporal_decay,
         classify_sai,
         compute_sai,
         detect_plagiarism,
         detect_zombie_jd,
     )
+    from app.services.data_quality.thresholds import load_recent_window_days
     from app.services.data_quality.schemas import JDSkillSet
 
     today = date.today()
@@ -274,7 +274,7 @@ async def validate_temporal(
             recent_ages = [
                 age
                 for _, pdate, gs in group
-                if (today - pdate).days <= RECENT_WINDOW_DAYS
+                if (today - pdate).days <= load_recent_window_days()
                 for age in _skill_first_seen_days(group, gs, today, graph_first_seen)
             ]
             sai = classify_sai(compute_sai(skill_ages, recent_ages))
@@ -464,8 +464,9 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     扫描 jd_raw 已入库记录的 snapshot->_simhash（CleaningPipeline 采集时写入，
     基于脱敏后文本）。**增量式近邻检索（P12 性能优化）**：SimHashIndex 分块
     索引持久化在 Redis（``simhash:idx:v1`` + 游标 ``simhash:idx:v1:cursor``），
-    每轮只加载游标之后的**新增**记录、对索引做近邻检索（汉明距 ≤ 3），不再
-    每轮全量两两比较历史记录，流式持续写入下近邻比较量不随数据量整体退化。
+    每轮只加载游标之后的**新增**记录、对索引做近邻检索（汉明距 ≤ 运行时
+    阈值，默认 3），不再每轮全量两两比较历史记录，流式持续写入下近邻
+    比较量不随数据量整体退化。
     索引只保留记录指纹（轻量 int），历史 jd_raw 的 JSONB 快照不再重复回读。
 
     去重标记语义同前：后入库记录标记 `snapshot["_duplicate_of"]` = 同簇中
@@ -482,8 +483,11 @@ async def dedup_simhash(ctx: dict, limit: int | None = None) -> dict:
     from app.services.embeddings.vector_store import load_jd_vectors_by_ids
     from app.services.matching.semantic import cosine_similarity
 
-    # JD 语义去重辅助阈值（§11.4.3 jd_embeddings Cosine）：低于该值不标记
-    _EMBED_DEDUP_THRESHOLD = 0.9
+    # JD 语义去重辅助阈值（§11.4.3 jd_embeddings Cosine）：低于该值不标记。
+    # 值取运行时配置 configs/data_quality_thresholds.json（embed_dedup_threshold）。
+    from app.services.data_quality.thresholds import load_embed_dedup_threshold
+
+    _EMBED_DEDUP_THRESHOLD = load_embed_dedup_threshold()
     _INDEX_KEY = "simhash:idx:v1"
     _CURSOR_KEY = "simhash:idx:v1:cursor"
 
