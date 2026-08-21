@@ -13,6 +13,7 @@ from app.services.extraction.dictionary import (
     is_noise_skill,
     normalize_skill,
     normalize_tool_name,
+    register_grey_skill,
 )
 from app.services.extraction.dictionary_data import SKILL_ALIAS
 
@@ -131,12 +132,18 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     def _clean(name: str) -> str:
         return canonical_skill_name(name)
 
-    result.skills = [
-        SkillExtracted(name=_clean(s.name), category=s.category, description=s.description)
-        for s in result.skills
-        if is_valid_skill_name(_clean(s.name)) and not _is_soft_noise(_clean(s.name))
-    ]
-    result.skills = dedup_skills(result.skills)
+    kept_skills: list[SkillExtracted] = []
+    for s in result.skills:
+        name = _clean(s.name)
+        if not is_valid_skill_name(name) or _is_soft_noise(name):
+            continue
+        kept_skills.append(
+            SkillExtracted(name=name, category=s.category, description=s.description)
+        )
+        # 白名单未命中但非噪音的技能进入灰名单验证区（新兴技术漏召回兜底，
+        # 供观测池/置信度模型定向复核，白名单/停用词在 register_grey_skill 内豁免）
+        register_grey_skill(name)
+    result.skills = dedup_skills(kept_skills)
 
     # 软技能：仅保留岗位本体白名单（LLM 越界输出在此拦截，防非白名单词入岗位本体）
     seen_soft: set[str] = set()
@@ -168,6 +175,8 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
         seen.add(key)
         req.skill_name = name
         cleaned_reqs.append(req)
+        # requirements 亦为 JD 技能来源：白名单外技能同步注册灰名单验证区
+        register_grey_skill(name)
     result.requirements = cleaned_reqs
 
     return result
