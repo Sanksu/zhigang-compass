@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
-from sqlalchemy import String, cast, delete, select
+from sqlalchemy import String, cast, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.common import iso, owns_resume, parse_uuid, serialize_task, sse_task_events
@@ -288,6 +288,14 @@ async def update_resume(
     LLM 抽取可能有误，允许用户手动修正。请求体 `{"fields": {...}}` 中的
     字段按顶层覆盖合并进 parsed_data（设计文档 §2.4.3），version 递增，
     写审计日志（登录用户）。端点要求 user+ 角色（设计文档 §2.4.3）。
+
+    共享缓存 copy-on-write（H1 修复）：ResumeCache 按内容哈希全局唯一,
+    同字节文件多用户共享同一行。若直接合并人工修正,会越权污染他人视图。
+    故当存在其他用户共享此 ResumeCache 时,为当前用户克隆独立行(新 id +
+    独有 file_hash = sha256(原 hash + user_id)),其 ResumeFile 归属指向
+    新行;原 ResumeCache 行不动,其余用户仍看 LLM 原始解析。唯一属主
+    时直接 mutate(无共享风险)。fork 行的 file_hash 在文件哈希空间内
+    唯一(与原 hash 不同),不影响后续同文件上传命中原缓存。
     """
     rid = parse_uuid(resume_id)
     if rid is None:
@@ -297,29 +305,67 @@ async def update_resume(
         return error(ERR_NOT_FOUND, "简历不存在", http_status=404)
     if not await owns_resume(db, rid, user.get("sub", "")):
         return error(ERR_FORBIDDEN, "无权修改该简历", http_status=403)
-
     fields = req.fields
     if not fields:
         return error(ERR_VALIDATION, "fields 必须为非空对象")
 
-    resume.parsed_data = _merge_fields(resume.parsed_data or {}, fields)
-    resume.version += 1
+    merged_parsed = _merge_fields(resume.parsed_data or {}, fields)
+
+    # 是否存在其他用户共享此 ResumeCache(同字节文件被多人上传)
+    other_owners = await db.scalar(
+        select(func.count()).select_from(ResumeFile).where(
+            ResumeFile.resume_id == rid,
+            ResumeFile.user_id != user.get("sub", ""),
+        )
+    )
+    if other_owners and other_owners > 0:
+        # 共享场景:fork 独立行避免越权污染
+        fork_hash = hashlib.sha256(
+            f"{resume.file_hash}:{user.get('sub', '')}".encode()
+        ).hexdigest()
+        new_resume = ResumeCache(
+            file_hash=fork_hash,
+            file_name=resume.file_name,
+            parsed_data=merged_parsed,
+            version=1,
+        )
+        db.add(new_resume)
+        await db.flush()  # 拿到 new_resume.id
+        # 当前用户 ResumeFile 归属切到新 fork 行(其余用户归属不动,仍指向原 ResumeCache)
+        await db.execute(
+            update(ResumeFile)
+            .where(
+                ResumeFile.resume_id == rid,
+                ResumeFile.user_id == user.get("sub", ""),
+            )
+            .values(resume_id=new_resume.id)
+        )
+        target_resume = new_resume
+    else:
+        # 唯一属主:直接 mutate(无共享风险)
+        resume.parsed_data = merged_parsed
+        resume.version += 1
+        target_resume = resume
 
     db.add(AuditLog(
         user_id=user.get("sub", ""),
         action="resume.update",
         resource="resume_cache",
-        resource_id=rid,
-        detail={"fields": list(fields.keys()), "version": resume.version},
+        resource_id=target_resume.id,
+        detail={
+            "fields": list(fields.keys()),
+            "version": target_resume.version,
+            "forked": target_resume.id != rid,
+        },
     ))
     await db.commit()
 
     return ok(data={
-        "id": resume.id,
-        "file_name": resume.file_name,
-        "parsed_data": resume.parsed_data,
-        "version": resume.version,
-        "updated_at": iso(resume.updated_at),
+        "id": target_resume.id,
+        "file_name": target_resume.file_name,
+        "parsed_data": target_resume.parsed_data,
+        "version": target_resume.version,
+        "updated_at": iso(target_resume.updated_at),
     })
 
 
@@ -390,9 +436,27 @@ async def delete_resume(resume_id: str, db: AsyncSession = Depends(get_db), user
     return Response(status_code=204)
 
 
-async def _fetch_resume_file(db: AsyncSession, resume_id: str) -> ResumeFile | None:
-    """按 resume_id 查询原始文件行（resume_id 已校验为 UUID）。"""
-    return await db.scalar(select(ResumeFile).where(ResumeFile.resume_id == resume_id))
+async def _fetch_resume_file(
+    db: AsyncSession, resume_id: str, user_id: str
+) -> ResumeFile | None:
+    """按 (resume_id, user_id) 查询当前用户的原始文件行。
+
+    L-1 修复:同字节文件多用户共享同一 resume_cache,ResumeFile 也会有多行
+    (每用户一行)。原实现仅按 resume_id 取首行,首行属主未必是当前用户 →
+    合法属主被误判 403。改为按 (resume_id, user_id) 精确取当前用户行。
+    """
+    return await db.scalar(
+        select(ResumeFile).where(
+            ResumeFile.resume_id == resume_id,
+            ResumeFile.user_id == user_id,
+        )
+    )
+
+
+async def _any_resume_file_exists(db: AsyncSession, resume_id: str) -> bool:
+    """是否存在任意用户的 ResumeFile 行(用于 404/403 区分,不泄露资源存在性)。"""
+    row = await db.scalar(select(ResumeFile).where(ResumeFile.resume_id == resume_id))
+    return row is not None
 
 
 def _download_disposition(filename: str) -> str:
@@ -421,13 +485,19 @@ async def download_resume_file(
     rid = parse_uuid(resume_id)
     if rid is None:
         return error(ERR_VALIDATION, "resume_id 格式非法")
-    row = await _fetch_resume_file(db, rid)
-    if row is None:
-        return error(ERR_NOT_FOUND, "简历文件不存在", http_status=404)
-    if row.user_id != user.get("sub", ""):
+    user_id = user.get("sub", "")
+    row = await _fetch_resume_file(db, rid, user_id)
+    if row is not None:
+        # 二次校验 user_id 防 FakeDb 不按 WHERE 过滤的边界(FakeDb.scalar 返回
+        # rows[0] 而非真实过滤结果),与真实 DB 行为等价
+        if row.user_id == user_id:
+            return Response(
+                content=row.content,
+                media_type=row.content_type or "application/octet-stream",
+                headers={"Content-Disposition": _download_disposition(row.file_name)},
+            )
+    # 当前用户无归属行:区分"该 resume_id 完全无任何行"与"存在他人行"
+    # (保持 404/403 语义:不泄露资源存在性,但鉴权失败仍按 403 反馈)
+    if await _any_resume_file_exists(db, rid):
         return error(ERR_FORBIDDEN, "无权下载该简历文件", http_status=403)
-    return Response(
-        content=row.content,
-        media_type=row.content_type or "application/octet-stream",
-        headers={"Content-Disposition": _download_disposition(row.file_name)},
-    )
+    return error(ERR_NOT_FOUND, "简历文件不存在", http_status=404)

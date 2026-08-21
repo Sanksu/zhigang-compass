@@ -6,9 +6,15 @@ import { expect, test } from '@playwright/test'
  * 覆盖：登录 → 仪表盘 → 能力图谱（真实 panorama）→ 简历匹配 → 管理后台 → 登出。
  * 前置：docker compose 基础设施 + webServer（后端 8000 / 前端 5173）由
  * playwright.config.ts 自动拉起；真实库含 admin 用户（bootstrap 口令 admin123）。
+ *
+ * M4 修复:口令改 env 注入,不再硬编码疑似真实管理员口令。本地默认走
+ * bootstrap 弱口令 admin123(development 兼容);CI/生产通过 E2E_ADMIN_PASSWORD
+ * 环境变量注入(见 playwright.config.ts/CI secrets),原硬编码口令已泄露须轮换。
  */
-
-const ADMIN = { username: 'admin', password: 'mm2877417' }
+const ADMIN = {
+  username: process.env.E2E_ADMIN_USERNAME ?? 'admin',
+  password: process.env.E2E_ADMIN_PASSWORD ?? 'admin123',
+}
 
 test('登录 → 图谱 → 匹配 → 后台 → 登出 全流程', async ({ page }) => {
   // ---- 登录页 ----

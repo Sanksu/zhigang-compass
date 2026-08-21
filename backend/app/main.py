@@ -47,6 +47,18 @@ async def lifespan(app: FastAPI):
             raise RuntimeError("SECRET_KEY 未修改，生产环境拒绝启动")
         if settings.admin_password == "admin123":
             raise RuntimeError("ADMIN_PASSWORD 仍为默认弱口令，生产环境拒绝启动")
+        # H2 修复:生产姿态校验补全。debug=True 默认值会让 asyncpg echo 把含
+        # 简历 PII/密码哈希列的 SQL 全量打进日志(§六 H2);CORS 通配 * 允许任意
+        # 站点跨域携带凭据访问。两项漏配时 fail-fast 拒绝启动。
+        if settings.debug:
+            raise RuntimeError(
+                "生产环境禁止 DEBUG=True（SQL echo 将泄露 PII 至日志），"
+                "请显式设置 DEBUG=false"
+            )
+        if "*" in settings.cors_origins:
+            raise RuntimeError(
+                "生产环境禁止 CORS 通配 *，请显式配置 cors_origins 白名单"
+            )
     await _prewarm_semantic()
     yield
     await _shutdown_resources()
@@ -86,6 +98,9 @@ async def _prewarm_semantic() -> None:
     编码），用户感知"加载比对详情…白屏一段时间"。改为启动阶段同步等待
     （实测 16s 在 healthcheck start_period 窗口内），用户请求永不感知加载。
     失败静默（语义不可用时匹配自动降级纯规则，见 semantic.SemanticUnavailableError）。
+
+    M8 修复:静默语义保留,但补 warning 日志恢复可观测——SBERT 加载失败
+    唯一症状是线上匹配莫名变弱,无日志则排障无线索。
     """
     import asyncio
 
@@ -101,7 +116,10 @@ async def _prewarm_semantic() -> None:
 
         await load_positions_shared()
     except Exception:
-        pass
+        logger.warning(
+            "语义模型预热失败,匹配已降级为纯规则模式(详见 SemanticUnavailableError)",
+            exc_info=True,
+        )
 
 
 app = FastAPI(
