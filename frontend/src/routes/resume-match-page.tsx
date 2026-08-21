@@ -970,11 +970,8 @@ export function ResumeMatchPage() {
                                   <span>
                                     需求 <b className="text-ink">{Math.round((gap.demand ?? 0) * 100)}</b>
                                   </span>
-                                  <span>
-                                    趋势{' '}
-                                    <b className={((gap.trend ?? 0) >= 0 ? 'text-state-emerging' : 'text-state-archived')}>
-                                      {(gap.trend ?? 0) >= 0 ? '↑' : '↓'} {Math.round(Math.abs(gap.trend ?? 0) * 100)}
-                                    </b>
+                                  <span title="需求扩散度：岗位扩散×跨源扩散等权合成（0-100，越高越广；非方向性趋势）">
+                                    扩散 <b className="text-ink">{Math.round((gap.trend ?? 0) * 100)}</b>
                                   </span>
                                   <span>
                                     ROI <b className="text-ink">{((gap.roi ?? 0)).toFixed(2)}</b>

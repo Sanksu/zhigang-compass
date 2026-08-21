@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.models.business import DiscoveryCandidate, GraphVersion, TechnologyWatch
 from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
+from app.services.alerting import send_alert_sync
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,12 @@ def _position_skill_novelty(
         ).data()
     except Exception as exc:
         logger.warning("_position_skill_novelty: 图谱查询失败: %s", exc)
+        # A-2 裁决①：降级外送告警——novelty 全体缺省时 stable 晋升四条件退化
+        # 为三条件，此前仅 warning 不可观测（保持"不阻塞"语义不变）
+        send_alert_sync(
+            "skill_novelty_unavailable",
+            f"图谱查询失败，本轮 stable 晋升不校验 skill_novelty（四条件退化三条件）：{exc}",
+        )
         return {}
 
     all_skills = {s for r in rows for s in (r.get("skills") or [])}
@@ -84,6 +91,10 @@ def _position_skill_novelty(
                     continue
         except Exception as exc:
             logger.warning("_position_skill_novelty: first_seen 查询失败: %s", exc)
+            send_alert_sync(
+                "skill_novelty_unavailable",
+                f"Skill.first_seen 查询失败，本轮 stable 晋升不校验 skill_novelty（四条件退化三条件）：{exc}",
+            )
 
     today = date.today()
     if reference_days is None:

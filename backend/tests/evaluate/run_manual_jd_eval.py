@@ -333,16 +333,25 @@ def core_duties_compare(gold: list[str], pred: list[str]) -> dict:
     }
 
 
+def _eval_literal_hit(low: str, name: str) -> bool:
+    """评测侧独立的词面命中判定（A-6 裁决①，08-21 拆分）。
+
+    与生产守卫 post_processor._text_has 刻意解耦：只用词边界正则、不查生产
+    别名表——若守卫（含别名表）误放行，幻觉清单会如实浮现，统计对守卫
+    失灵保持敏感；两侧口径漂移属预期（评测=纯词面，生产=词面+别名）。
+    """
+    return re.search(r"(?<![a-z0-9])" + re.escape(name.lower()) + r"(?![a-z0-9])", low) is not None
+
+
 def split_fp_aligned(fp_list: list[str], low_text: str) -> tuple[list[str], list[str]]:
     """方案 A（0.90 达标口径，PR #330 张恺天确认）：FP 拆成 词面命中（豁免）与非词面（幻觉）。
 
-    词面命中 = 归一化技能名在正文词面出现（_text_has），视为"预测全收 vs gold 精选"的
-    评测口径不对等而非错误，不计 FP；非词面 FP 为真实幻觉，单列监控（打样非词面 1/254=0.4%）。
+    词面命中 = 归一化技能名在正文词面出现（本文件 _eval_literal_hit，独立于
+    生产守卫），视为"预测全收 vs gold 精选"的评测口径不对等而非错误，不计 FP；
+    非词面 FP 为真实幻觉，单列监控（打样非词面 1/254=0.4%）。
     """
-    from app.services.extraction.post_processor import _text_has
-
-    in_text = [s for s in fp_list if _text_has(low_text, s)]
-    halluc = [s for s in fp_list if not _text_has(low_text, s)]
+    in_text = [s for s in fp_list if _eval_literal_hit(low_text, s)]
+    halluc = [s for s in fp_list if not _eval_literal_hit(low_text, s)]
     return in_text, halluc
 
 
