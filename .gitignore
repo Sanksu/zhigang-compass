@@ -192,5 +192,10 @@ reference/
 # ---------- 临时文件 ----------
 temp/
 
+# ---------- AI 会话产物（根目录验证截图 / Playwright MCP / pytest basetemp） ----------
+/*.png
+.playwright-mcp/
+backend/.pytest_tmp_*/
+
 # ---------- 工具本地目录（ZCode 计划文件等，不入版本控制） ----------
 .zcode/
