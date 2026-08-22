@@ -23,11 +23,11 @@ test('登录 → 仪表盘渲染 mock 统计 → 图谱渲染 → 登出', async
   // 图谱节点卡 value=stats.nodes=7、delta="5 边"（mock fixture 注入证明）
   await expect(page.getByText('5 边', { exact: true })).toBeVisible()
 
-  // ---- 图谱：panorama 渲染（节点/边统计行） ----
+  // ---- 图谱：panorama 渲染（Career Atlas 工作台重构后独立计数行并入图例） ----
   await page.goto('/graph')
   await expect(page.getByRole('heading', { name: '能力图谱' })).toBeVisible()
-  await expect(page.getByText('节点', { exact: true })).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByText('边', { exact: true })).toBeVisible()
+  // 以图例整体可见作 panorama 渲染成功的锚点（含较长等待容忍首屏数据加载）
+  await expect(page.locator('[aria-label="图谱图例"]')).toBeVisible({ timeout: 20_000 })
   // 软技能/技术栈区分（fixture sk-4 沟通能力=软技能）：HTML 图例含「软技能」项
   await expect(
     page.locator('[aria-label="图谱图例"]').getByText('软技能'),
