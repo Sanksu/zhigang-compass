@@ -136,6 +136,24 @@ class TestComputeConfidence:
         assert conf.llm_logprob == 0.4
         assert abs(conf.evidence_score - 0.5) < 1e-9  # 0.5×0.6 + 0.5×0.4
 
+    def test_zero_inputs_with_far_evidence_clamped_to_zero(self, monkeypatch, tmp_path):
+        """全零输入 + 孤立技能（证据 0.25）→ 钳制 0.0，不产负值（第五轮审查 P1-6 回归）。
+
+        无钳制时 final = 0.15×(0.25−0.5)×2 = −0.075，被
+        ConfidenceScore.final_confidence 的 Field(ge=0.0) 拒绝而崩 discovery
+        worker；#388 后 w_evidence 运行时可调（0.4 即深负），故必须下界钳制。
+        monkeypatch 配置路径强制默认权重，保证断言确定性。
+        """
+        monkeypatch.setattr(
+            "app.services.discovery.confidence._CONFIG_PATH",
+            tmp_path / "not_exists.json",
+        )
+        conf = compute_confidence(
+            jd_count=0, source_count=0, growth_rate=0, graph_grounding=0.0,
+        )
+        assert conf.evidence_score == 0.25
+        assert conf.final_confidence == 0.0
+
     def test_block_threshold_documented(self):
         """P1 阻断复核阈值恒为 0.75（与前端 REVIEW_BLOCK_THRESHOLD 同步）。"""
         assert REVIEW_BLOCK_THRESHOLD == 0.75
