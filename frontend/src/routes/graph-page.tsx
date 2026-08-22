@@ -40,7 +40,8 @@ const VIEW_LABEL: Record<GraphViewType, string> = {
 }
 
 const VIEW_DESC: Record<GraphViewType, string> = {
-  panorama: 'Top-N 高频岗位及其关联技能',
+  // 08-22 域聚合下钻（#412）：panorama 不再是 Top-N 裁剪，全部岗位以域超节点常驻
+  panorama: '全岗位按职能域聚合常驻 · 双击域展开岗位，双击岗位展开技能',
   techStack: 'Top 高频技能及其关联岗位（技能为中心）',
   level: '按级别（如中级）过滤的岗位-技能关系子图',
   positionCenter: '以高频岗位为中心展开岗位-技能关系',
@@ -390,15 +391,20 @@ export function GraphPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  // 域聚合（panorama 专用）：全部岗位按 domain_id 分组为超节点 + 域间共享技能边
+  const domainAgg = useMemo(() => (data ? aggregateByDomain(data) : null), [data])
+
   // 点击搜索结果 / 相似技能 / 岗位必备技能 → 选中技能节点 + 定位画布
-  // 岗位中心视图下技能需先展开其所属岗位（从全量数据边中找一个关联岗位展开），
+  // 岗位中心视图下技能需先展开其所属岗位（取权重最高的关联岗位，即该技能最核心的簇），
   // 再触发 Graph2D.focusNode 居中高亮；技术栈视图技能已全量展示，直接聚焦。
   const focusSkill = useCallback(
     (id: string, name: string) => {
       setSelected({ id, name, type: 'skill' })
       if (view !== 'techStack' && data) {
-        const edge = data.edges.find((e) => e.source === id || e.target === id)
-        const pid = edge ? (edge.source === id ? edge.target : edge.source) : undefined
+        const top = data.edges
+          .filter((e) => e.source === id || e.target === id)
+          .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))[0]
+        const pid = top ? (top.source === id ? top.target : top.source) : undefined
         if (pid) {
           setExpandedPositions((prev) => {
             if (prev.has(pid)) return prev
@@ -406,11 +412,24 @@ export function GraphPage() {
             next.add(pid)
             return next
           })
+          // panorama 聚合模式：岗位仅在其所属域展开时才上画布（buildDomainView 过滤），
+          // 不同步展开域则技能节点不渲染、focusNode 解析不到坐标——搜索/相似技能定位静默失效
+          if (view === 'panorama' && domainAgg) {
+            const dom = domainAgg.domainOfPosition.get(pid)
+            if (dom && !expandedDomains.has(dom)) {
+              setExpandedDomains((prev) => {
+                if (prev.has(dom)) return prev
+                const next = new Set(prev)
+                next.add(dom)
+                return next
+              })
+            }
+          }
         }
       }
       setFocusRequest((prev) => ({ id, ts: (prev?.ts ?? 0) + 1 }))
     },
-    [view, data],
+    [view, data, domainAgg, expandedDomains],
   )
 
   // 画布可见数据：
@@ -428,8 +447,6 @@ export function GraphPage() {
   // panorama 视图 08-22 起改域聚合下钻（全岗位以超节点常驻，见 domainAgg），
   // 本裁剪仅作用于 level/positionCenter 视图。
   const MAX_POSITIONS = 30
-  // 域聚合（panorama 专用）：全部岗位按 domain_id 分组为超节点 + 域间共享技能边
-  const domainAgg = useMemo(() => (data ? aggregateByDomain(data) : null), [data])
   const visibleData = useMemo<GraphData | null>(() => {
     if (!data) return null
 
@@ -818,6 +835,7 @@ export function GraphPage() {
                     <li>滚轮缩放 · 拖拽空白旋转视角</li>
                     <li>拖拽节点调整位置</li>
                     <li>单击节点查看详情</li>
+                    <li>双击职能域展开/收起岗位</li>
                     <li>双击岗位展开/收起技能</li>
                   </>
                 ) : (
@@ -825,6 +843,7 @@ export function GraphPage() {
                     <li>滚轮缩放 · 拖拽空白平移</li>
                     <li>拖拽节点调整位置</li>
                     <li>单击节点查看详情</li>
+                    <li>双击职能域展开/收起岗位</li>
                     <li>双击岗位展开/收起技能</li>
                   </>
                 )}
@@ -839,7 +858,9 @@ export function GraphPage() {
             </p>
             {view !== 'techStack' && (
               <p className="text-[11px] text-ink-muted bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
-                已展开 {expandedPositions.size} 个岗位
+                {view === 'panorama'
+                  ? `已展开 ${expandedDomains.size} 域 · ${expandedPositions.size} 岗位`
+                  : `已展开 ${expandedPositions.size} 个岗位`}
               </p>
             )}
             {mode3dLocked && (
@@ -896,9 +917,17 @@ export function GraphPage() {
         )}
       </div>
 
-      {/* 图例：与画布实际渲染对齐（形状+颜色，支持色盲识别） */}
+      {/* 图例：与画布实际渲染对齐（形状+颜色，支持色盲识别）。
+          职能域超节点（#412 域聚合下钻的视觉锚，靛蓝大圆）置于首位 */}
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-muted" role="list" aria-label="图谱图例">
         <span className="font-medium text-ink-secondary">图例：</span>
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span
+            className="size-3 rounded-full bg-[#4f46e5] dark:bg-[#818cf8]"
+            role="img"
+            aria-label="职能域超节点：靛蓝色大圆，尺寸随成员岗位数"
+          /> 职能域
+        </span>
         <span className="flex items-center gap-1.5" role="listitem">
           <span className="size-2.5 rounded-full bg-state-active" role="img" aria-label="活跃岗位：蓝灰圆形" /> 活跃
         </span>
