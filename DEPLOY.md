@@ -18,7 +18,13 @@
 ```bash
 # 1. 复制模板并填写
 cp backend/.env.example backend/.env
+
+# 2. 预建 dict-guard 动态过滤空层（compose 单文件挂载要求宿主文件先存在；
+#    缺失时 Docker 会创建同名目录，写入永久失败须重建容器）
+printf '{\n  "version": 0,\n  "blocked": [],\n  "protected": []\n}\n' > backend/configs/skill_filters_dynamic.json
 ```
+
+> 注意：不要 `cp` `skill_filters_dynamic.json.example`——其中示例条目（示例噪音词/示例保护词）会被当作真实动态层生效。运行后该文件由 dict-guard 每日评估与管理端审批自动维护，api/worker ≤30s 热同步。
 
 **必改项**（production 下 fail-fast 强校验，不满足则 api 拒绝启动）：
 

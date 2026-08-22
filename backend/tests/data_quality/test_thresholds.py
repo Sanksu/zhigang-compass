@@ -150,3 +150,36 @@ class TestConfigFallback:
 
         assert load_hamming_threshold() == 3
         assert load_embed_dedup_threshold() == 0.9
+
+    def test_bad_value_falls_back_per_key(self, monkeypatch, tmp_path):
+        """单键坏值（null/非数字/数组）仅该键回退默认，不炸检测管线（P1-7 回归）。
+
+        此前 int()/float() 在 load_* 包装层裸抛 TypeError：#388 后配置运行时
+        可改，管理员写坏一个键即停摆 SimHash/时滞检测全链。
+        """
+        cfg = tmp_path / "bad_values.json"
+        cfg.write_text(
+            json.dumps({
+                "hamming_threshold": None,
+                "embed_dedup_threshold": "abc",
+                "sai_stale_threshold": [1.5],
+            }),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("app.services.data_quality.thresholds._CONFIG_PATH", cfg)
+
+        assert load_hamming_threshold() == 3
+        assert load_embed_dedup_threshold() == 0.9
+        assert load_sai_stale_threshold() == 1.5
+
+    def test_numeric_string_still_converted(self, monkeypatch, tmp_path):
+        """字符串数字按默认值类型转换生效（与既有包装层行为一致，合法值不受容错影响）。"""
+        cfg = tmp_path / "string_numbers.json"
+        cfg.write_text(
+            json.dumps({"hamming_threshold": "4", "embed_dedup_threshold": "0.85"}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("app.services.data_quality.thresholds._CONFIG_PATH", cfg)
+
+        assert load_hamming_threshold() == 4
+        assert load_embed_dedup_threshold() == 0.85

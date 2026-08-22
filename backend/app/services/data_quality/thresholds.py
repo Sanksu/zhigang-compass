@@ -52,9 +52,17 @@ def _load_config_cached() -> dict:
 
 
 def _get(key: str, default: float | int) -> float | int:
-    data = _load_config_cached()
+    """读取阈值并按默认值类型转换；键缺失或坏值（null/非数字）回退默认。
+
+    转换必须在此兜底：#388 后该 JSON 运行时可改，单键写坏曾令 int()/float()
+    在 load_* 包装层裸抛 TypeError 停摆 SimHash/时滞检测（第五轮审查 P1-7
+    实证），违背「缺失不阻断」承诺。
+    """
+    value = _load_config_cached().get(key)
+    if value is None:
+        return default
     try:
-        return data.get(key, default)
+        return int(value) if isinstance(default, int) else float(value)
     except (TypeError, ValueError):
         return default
 

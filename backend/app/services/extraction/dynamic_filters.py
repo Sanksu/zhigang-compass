@@ -20,7 +20,6 @@ runtime_settings.json 同模式；每次变更全量审计于 DictChangeLog 表�
 
 import json
 import logging
-import os
 import time
 from pathlib import Path
 
@@ -97,13 +96,17 @@ def get_dynamic_terms() -> dict[str, list[dict]]:
 
 
 def _write(data: dict) -> None:
-    """原子写盘（临时文件 + os.replace）并失效本进程缓存。"""
+    """直接覆写并失效本进程缓存。
+
+    不用 tmp+os.replace 原子替换：生产以单文件 bind mount 共享宿主文件
+    （docker-compose P1-1 修复），rename 覆盖挂载点会 EBUSY，与
+    runtime_config.py 的 runtime_settings.json 写入同口径。写入中途被读的
+    窗口由 _load 的损坏兜底承接（按空层处理，≤30s TTL 自愈）。
+    """
     _FILTERS_PATH.parent.mkdir(parents=True, exist_ok=True)
     data["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     data["version"] = int(data.get("version", 0)) + 1
-    tmp = _FILTERS_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, _FILTERS_PATH)
+    _FILTERS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     invalidate_cache()
 
 

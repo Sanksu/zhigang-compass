@@ -151,7 +151,9 @@ def compute_confidence(
     # 证据中性（0.5）时该项为 0，不偏移既有阈值；证据 1.0 → +w_evidence，0.0 → -w_evidence
     evidence_delta = w_evidence * (ev - 0.5) * 2
 
-    final = min(base + bonus + evidence_delta, 1.0)
+    # 下界钳制：全零输入 + 证据 0.0 时 evidence_delta = -w_evidence，可拉成负值，
+    # 会被 ConfidenceScore 的 Field(ge=0.0) 拒绝（第五轮审查 P1-6 实证崩溃路径）
+    final = max(0.0, min(base + bonus + evidence_delta, 1.0))
 
     return ConfidenceScore(
         base_confidence=base,
