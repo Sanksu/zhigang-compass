@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -36,16 +37,41 @@ def _load_records(rows) -> list[dict]:
     ]
 
 
+# 血缘全集短期缓存：全量加载 9522+ 行 snapshot 并分组校验约 6s（实测），
+# 列表翻页/过滤、详情每次请求都依赖整份 details，属只读聚合结果。
+# 数据由 ETL 周期性写入，TTL 60s 内热点请求复用同份结果，避免每请求重算。
+_LINEAGE_CACHE_TTL = 60  # 秒
+_lineage_cache_details: list | None = None
+_lineage_cache_at = 0.0
+_lineage_cache_lock = asyncio.Lock()
+
+
 async def _all_lineage(db: AsyncSession) -> list:
-    """加载已抽取记录并生成全量血缘详情（CPU 分组校验放线程池）。"""
-    rows = (
-        await db.scalars(
-            select(JDRaw)
-            .where(JDRaw.snapshot["extraction"].astext.isnot(None))
-            .order_by(JDRaw.id.asc())
-        )
-    ).all()
-    return await asyncio.to_thread(build_lineage, _load_records(rows))
+    """加载已抽取记录并生成全量血缘详情（CPU 分组校验放线程池）。
+
+    结果按 TTL 缓存（含 records 证据链），列表/详情共用，过滤与分页在
+    缓存的 details 上进行切片，命中时几乎零开销。
+    """
+    global _lineage_cache_details, _lineage_cache_at
+    now = time.monotonic()
+    if _lineage_cache_details is not None and now - _lineage_cache_at < _LINEAGE_CACHE_TTL:
+        return _lineage_cache_details
+    async with _lineage_cache_lock:
+        # 双检：获取锁后可能已有他处刷新完成
+        now = time.monotonic()
+        if _lineage_cache_details is not None and now - _lineage_cache_at < _LINEAGE_CACHE_TTL:
+            return _lineage_cache_details
+        rows = (
+            await db.scalars(
+                select(JDRaw)
+                .where(JDRaw.snapshot["extraction"].astext.isnot(None))
+                .order_by(JDRaw.id.asc())
+            )
+        ).all()
+        details = await asyncio.to_thread(build_lineage, _load_records(rows))
+        _lineage_cache_details = details
+        _lineage_cache_at = time.monotonic()
+        return details
 
 
 @router.get("/lineage/positions")
