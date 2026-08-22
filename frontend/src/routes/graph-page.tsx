@@ -692,7 +692,10 @@ export function GraphPage() {
       <Tabs
         value={view}
         onValueChange={(v) => {
-          // 视图切换：同步清空展开的岗位/域（新视图技能集不同），再切换数据
+          // 视图切换：同步清空展开的岗位/域（新视图技能集不同）与选中态
+          // （P0-1：选中残留会让详情面板指向画布外节点，且 Graph2D 对仍在
+          // 数据中的旧节点 dispatch highlight → adjacency blur 把全图压暗到 10%）
+          setSelected(null)
           setExpandedPositions(new Set())
           setExpandedDomains(new Set())
           setView(v as GraphViewType)
