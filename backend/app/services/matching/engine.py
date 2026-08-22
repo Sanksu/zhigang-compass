@@ -511,11 +511,14 @@ def _score_nice(
     """nice 维度评分：Top-K 覆盖率 Σ(w×sim)/Σ(w)（K=NICE_TOP_K，跨源数降序）。
 
     岗位无 nice 时取 1.0 不扣分；Top-K 截断见 NICE_TOP_K 注释（长尾愿望清单
-    不稀释分数），岗位 nice 池不足 K 条时退化为全量口径。
+    不稀释分数），岗位 nice 池不足 K 条时退化为全量口径。source_count 平局按
+    skill_name 升序截断（图谱返回序无保证，确定性边界便于复现与排查）。
     """
     if not position.nice_skills:
         return 1.0
-    pool = sorted(position.nice_skills, key=lambda r: r.source_count, reverse=True)[:NICE_TOP_K]
+    pool = sorted(
+        position.nice_skills, key=lambda r: (-r.source_count, r.skill_name)
+    )[:NICE_TOP_K]
     nice_total_weight = sum(req.weight for req in pool)
     if nice_total_weight == 0:
         return 1.0

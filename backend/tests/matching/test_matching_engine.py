@@ -249,6 +249,22 @@ class TestScorePosition:
         result = score_position(_candidate(["Python", "a"]), pos, weights=W)
         assert result.nice_score == pytest.approx(0.5)
 
+    def test_nice_topk_tiebreak_deterministic(self):
+        """B1 边角：source_count 平局按 skill_name 升序截断，Top-K 组成确定。
+
+        12 条 sc=1（插入序把 zz 开头放最前）：字典序前 10 条入围、zz 两条被
+        截断——不随图谱返回序漂移（小样本岗 sc 全为 1 时尤其重要）。
+        """
+        names = [f"zz{i}" for i in range(2)] + [f"a{i:02d}" for i in range(10)]
+        nices = [_req(n, Necessity.NICE, weight=1.0, source_count=1) for n in names]
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST)], nices=nices)
+
+        hit_truncated = score_position(_candidate(["Python", "zz0"]), pos, weights=W)
+        assert hit_truncated.nice_score == 0.0
+
+        hit_kept = score_position(_candidate(["Python", "a00"]), pos, weights=W)
+        assert hit_kept.nice_score == pytest.approx(0.1)
+
     def test_staleness_mild_and_strong(self):
         """时效衰减：>180d → 0.95，>365d → 0.85，新鲜 → 1.0。"""
         today = date(2026, 8, 1)
