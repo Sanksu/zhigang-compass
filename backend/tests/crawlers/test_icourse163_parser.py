@@ -36,7 +36,7 @@ def _entry(entry_type: int, course_id: str, name: str) -> dict:
                     "endTime": 0,
                     "enrollCount": 100,
                 },
-                "schoolPanel": {"name": "测试大学"},
+                "schoolPanel": {"name": "测试大学", "shortName": "TESTU"},
             }
         },
     }
@@ -100,3 +100,24 @@ def test_parse_skips_exam_cram_course():
     }
     items = parse_course_list(api_data, "Python")
     assert [i["title"] for i in items] == ["Python程序设计基础"]
+
+
+def test_source_url_includes_school_short_name():
+    """课程 URL 带学校简称前缀：/course/{shortName}-{courseId}。
+
+    修复背景（08-22）：纯数字路径 /course/{courseId} 服务端 404 →
+    commonError.htm 错误页，存量 891 门链接全部不可访问。
+    """
+    api_data = {"result": {"list": [_entry(301, "1001", "C语言程序设计")]}}
+    items = parse_course_list(api_data, "C")
+    assert items[0]["source_url"] == "https://www.icourse163.org/course/TESTU-1001"
+
+
+def test_source_url_falls_back_without_short_name():
+    """schoolPanel.shortName 缺失时回退纯数字 URL（不可访问但保留数据）。"""
+    import crawlers.icourse163_crawler as m
+
+    entry = _entry(301, "1001", "C语言程序设计")
+    entry["mocCourseCard"]["mocCourseCardDto"]["schoolPanel"] = {"name": "测试大学"}
+    items = m.parse_course_list({"result": {"list": [entry]}}, "C")
+    assert items[0]["source_url"] == "https://www.icourse163.org/course/1001"

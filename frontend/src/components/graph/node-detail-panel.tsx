@@ -576,14 +576,9 @@ export function NodeDetailPanel({
                     <p className="py-1 text-xs text-ink-faint">暂无推荐课程</p>
                   ) : (
                     <ul className="space-y-1.5">
-                      {skillDetail.courses.map((c) => (
-                        <li key={c.course_id}>
-                          <a
-                            href={c.source_url || undefined}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="block rounded-lg border border-border px-2.5 py-2 transition-colors hover:border-border-strong"
-                          >
+                      {skillDetail.courses.map((c) => {
+                        const content = (
+                          <>
                             <span className="block text-xs font-medium leading-snug text-ink">{c.title}</span>
                             <span className="mt-1 flex items-center gap-2 text-[10px] text-ink-faint">
                               <span>{c.platform}</span>
@@ -592,9 +587,26 @@ export function NodeDetailPanel({
                                 <span>· 质量 {(c.quality_score * 100).toFixed(0)}</span>
                               )}
                             </span>
-                          </a>
-                        </li>
-                      ))}
+                          </>
+                        )
+                        // 无有效链接（source_url 空）渲染纯文本卡，不显示跳转链接
+                        return (
+                          <li key={c.course_id}>
+                            {c.source_url ? (
+                              <a
+                                href={c.source_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block rounded-lg border border-border px-2.5 py-2 transition-colors hover:border-border-strong"
+                              >
+                                {content}
+                              </a>
+                            ) : (
+                              <div className="rounded-lg border border-border px-2.5 py-2">{content}</div>
+                            )}
+                          </li>
+                        )
+                      })}
                     </ul>
                   )}
                 </section>

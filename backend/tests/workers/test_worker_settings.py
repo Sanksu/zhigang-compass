@@ -32,6 +32,7 @@ from app.workers.tasks import (
     load_courses,
     match_recommend,
     resume_parse,
+    run_etl_job_manual,
     run_etl_pipeline,
     run_etl_pipeline_scheduled,
     snapshot_graph,
@@ -45,6 +46,7 @@ EXPECTED_FUNCTIONS = [
     crawl_scheduler,
     run_etl_pipeline,
     run_etl_pipeline_scheduled,
+    run_etl_job_manual,
     dedup_simhash,
     validate_temporal,
     detect_inflation,
@@ -138,6 +140,17 @@ def test_etl_scheduled_has_per_function_timeout():
         f
         for f in WorkerSettings.functions
         if _name(f) == run_etl_pipeline_scheduled.__qualname__
+    )
+    assert etl.timeout_s == 10800
+    assert etl.max_tries == 1
+
+
+def test_etl_job_manual_has_per_function_timeout():
+    """管理端手动触发包装按 3h 超时（run_etl_pipeline 白名单目标可跑数小时）。"""
+    etl = next(
+        f
+        for f in WorkerSettings.functions
+        if _name(f) == run_etl_job_manual.__qualname__
     )
     assert etl.timeout_s == 10800
     assert etl.max_tries == 1

@@ -1363,6 +1363,61 @@ paths:
                     $ref: '#/components/schemas/CrawlTriggerResult'
                   trace_id: { type: string }
 
+  /api/v1/admin/etl/trigger:
+    post:
+      tags: [admin]
+      summary: 手动触发 ETL 任务（快捷操作面板：数据清洗/聚合入图/完整管线）
+      description: |
+        白名单任务经统一包装 run_etl_job_manual 入队：先建 TaskStatus(pending)
+        再投递 ARQ，worker 回写 running→success/failed；GET /admin/etl/task/{task_id}
+        轮询状态。dedup_simhash=SimHash 近似去重清洗；
+        aggregate_positions=岗位-技能频次与 REQUIRES 边幂等覆盖写回 Neo4j（入图）；
+        run_etl_pipeline=完整管线（采集→清洗→结构化→聚合入图→快照全阶段）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [job]
+              properties:
+                job: { type: string, enum: [dedup_simhash, aggregate_positions, run_etl_pipeline], description: "任务标识" }
+      responses:
+        '202':
+          description: 任务已触发（data 含 task_id/status=pending）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/EtlTriggerResult'
+                  trace_id: { type: string }
+
+  /api/v1/admin/etl/task/{task_id}:
+    get:
+      tags: [admin]
+      summary: ETL 任务状态查询（前端轮询）
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 任务当前状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/EtlTaskStatus'
+                  trace_id: { type: string }
+        '404':
+          description: 任务不存在
+
   /api/v1/admin/crawl/status:
     get:
       tags: [admin]
@@ -2565,6 +2620,29 @@ components:
         task_id: { type: string }
         platform: { type: string }
         status: { type: string }
+
+    EtlTriggerResult:
+      type: object
+      description: POST /admin/etl/trigger 响应 data（ARQ 入队结果）
+      required: [task_id, job, status]
+      properties:
+        task_id: { type: string }
+        job: { type: string }
+        status: { type: string }
+
+    EtlTaskStatus:
+      type: object
+      description: GET /admin/etl/task/{task_id} 响应 data（TaskStatus 序列化）
+      required: [task_id, task_type, status, progress]
+      properties:
+        task_id: { type: string }
+        task_type: { type: string }
+        status: { type: string, enum: [pending, running, success, failed] }
+        progress: { type: number }
+        result: { type: object, additionalProperties: true }
+        error: { type: string }
+        created_at: { type: string, nullable: true }
+        updated_at: { type: string, nullable: true }
 
     LineageRecordItem:
       type: object
