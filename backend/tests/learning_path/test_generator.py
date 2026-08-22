@@ -27,14 +27,18 @@ def _candidate(skills: list[tuple[str, int]]) -> CandidateProfile:
     )
 
 
-def _req(name: str, necessity: Necessity = Necessity.MUST, weight: float = 1.0, proficiency=None):
+def _req(name: str, necessity: Necessity = Necessity.MUST, weight: float = 1.0, proficiency=None, is_soft: bool = False):
     return SkillRequirement(
-        skill_id=name, skill_name=name, necessity=necessity, weight=weight, proficiency=proficiency
+        skill_id=name, skill_name=name, necessity=necessity, weight=weight,
+        proficiency=proficiency, is_soft=is_soft,
     )
 
 
-def _position(musts: list, nices: list | None = None) -> PositionProfile:
-    return PositionProfile(position_id="p1", name="p1", must_skills=musts, nice_skills=nices or [])
+def _position(musts: list, nices: list | None = None, softs: list | None = None) -> PositionProfile:
+    return PositionProfile(
+        position_id="p1", name="p1", must_skills=musts,
+        nice_skills=nices or [], soft_requirements=softs or [],
+    )
 
 
 class _FakeCourseLoader:
@@ -154,6 +158,32 @@ async def test_course_loader_receives_skill_id_and_top_k(monkeypatch):
     pos = _position([_req("Java")])
     await LearningPathGenerator(course_loader=spy_loader).generate(cand, pos)
     assert received == {"skill_id": "Java", "top_k": 3}
+
+
+@pytest.mark.asyncio
+async def test_soft_skill_gap_skips_course_matching(monkeypatch):
+    """软技能缺口不走课程匹配（2026-08-22 拍板）：只留在差距列表展示，
+    不生成学习路径项、不触发课程加载（课程池为技术课，软素质命中即误配）。"""
+    monkeypatch.setattr(mod, "load_prerequisite_config", lambda: {"default_hours_per_skill": 30.0, "skills": {}})
+
+    requested_skills: list[str] = []
+
+    async def spy_loader(skill_id: str, skill_name: str, top_k: int, semantic=None, sim_threshold=None):
+        requested_skills.append(skill_name)
+        return []
+
+    cand = _candidate([])
+    pos = _position(
+        [_req("Java")],
+        softs=[_req("沟通能力", necessity=Necessity.NICE, weight=0.4, is_soft=True)],
+    )
+    result = await LearningPathGenerator(course_loader=spy_loader).generate(cand, pos)
+
+    # 差距列表保留软技能（展示用，is_soft 打标），但路径项与课程匹配只有技术缺口
+    gap_by_name = {g.skill: g for g in result.gaps}
+    assert gap_by_name["沟通能力"].is_soft is True
+    assert {i.skill for i in result.items} == {"Java"}
+    assert requested_skills == ["Java"]
 
 
 @pytest.mark.asyncio

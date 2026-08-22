@@ -8,14 +8,17 @@
  * 全部岗位以超节点形式常驻画布（替代 08-15 的 MAX_POSITIONS=30 度数裁剪），
  * 每层渲染规模：~14 超节点 + 展开域的岗位数 + 展开岗位 × Top-12 技能。
  */
-import type { GraphData, GraphEdge, GraphNode } from './types'
+import type { DisplayGraphEdge, GraphData, GraphNode } from './types'
 
-/** 未回填 domain_id 的岗位兜底桶（零边/新增未同步岗位） */
+/** 未回填 domain_id 的岗位兜底桶（零边/新增未同步岗位）。
+ *  08-22 视觉治理：改名「待归类岗位」弱化"未分类=垃圾簇"观感，画布侧配虚线描边降透明度 */
 export const UNCATEGORIZED_DOMAIN_ID = 'dom_uncategorized'
-export const UNCATEGORIZED_DOMAIN_NAME = '未分类岗位'
+export const UNCATEGORIZED_DOMAIN_NAME = '待归类岗位'
 
 /** 域间边保留阈值：共享技能 < 3 的域对不连线（去毛线球噪声） */
 const MIN_DOMAIN_EDGE_WEIGHT = 3
+/** 每个域最多保留的最强域间关系，避免 14 域形成中央全连接灰网 */
+const MAX_DOMAIN_EDGES_PER_NODE = 3
 
 /** 域超节点 ↔ 成员岗位的隶属边权重（实线粗边，视觉锚定域内聚团） */
 const DOMAIN_MEMBER_EDGE_WEIGHT = 3
@@ -24,7 +27,7 @@ export interface DomainAggregate {
   /** 域超节点列表（按成员数降序，全部岗位都在某个域里） */
   supernodes: GraphNode[]
   /** 域-域共享技能边（weight=共享技能数，≥MIN_DOMAIN_EDGE_WEIGHT） */
-  domainEdges: GraphEdge[]
+  domainEdges: DisplayGraphEdge[]
   /** domain_id → 成员岗位节点 */
   positionsByDomain: Map<string, GraphNode[]>
   /** position_id → domain_id（书签/定位反查） */
@@ -52,6 +55,8 @@ export function aggregateByDomain(data: GraphData): DomainAggregate {
       name: repName,
       type: 'position',
       isDomain: true,
+      // 待归类桶弱化标记：画布侧虚线描边+降透明度，不与实域抢视觉权重
+      isUncategorized: dom === UNCATEGORIZED_DOMAIN_ID,
       memberCount: members.length,
       // value 驱动斥力/尺寸：域规模（成员数），供布局与 label 权重使用
       value: members.length,
@@ -78,11 +83,20 @@ export function aggregateByDomain(data: GraphData): DomainAggregate {
       }
     }
   }
-  const domainEdges: GraphEdge[] = [...pairWeight.entries()]
+  // 先按共享技能数排序，再以两端域的度数做双向 Top-K 截断。
+  // 这样保留最有解释力的跨域关系，同时避免弱关系在中心叠成灰色毛线球。
+  const domainDegree = new Map<string, number>()
+  const domainEdges: DisplayGraphEdge[] = [...pairWeight.entries()]
     .filter(([, w]) => w >= MIN_DOMAIN_EDGE_WEIGHT)
-    .map(([key, w]) => {
+    .sort(([, wa], [, wb]) => wb - wa)
+    .flatMap(([key, w]) => {
       const [a, b] = key.split('|')
-      return { source: a, target: b, weight: w, necessity: 'nice' }
+      const degreeA = domainDegree.get(a) ?? 0
+      const degreeB = domainDegree.get(b) ?? 0
+      if (degreeA >= MAX_DOMAIN_EDGES_PER_NODE || degreeB >= MAX_DOMAIN_EDGES_PER_NODE) return []
+      domainDegree.set(a, degreeA + 1)
+      domainDegree.set(b, degreeB + 1)
+      return [{ source: a, target: b, weight: w, necessity: 'nice' as const, isDomainEdge: true }]
     })
 
   return { supernodes, domainEdges, positionsByDomain: byDomain, domainOfPosition: domainOf }
@@ -106,7 +120,7 @@ export function buildDomainView(
   opts: DomainViewOptions,
 ): GraphData {
   const nodes: GraphNode[] = [...agg.supernodes]
-  const edges: GraphEdge[] = agg.domainEdges.filter(
+  const edges: DisplayGraphEdge[] = agg.domainEdges.filter(
     (e) => agg.positionsByDomain.has(e.source) && agg.positionsByDomain.has(e.target),
   )
 
@@ -114,8 +128,14 @@ export function buildDomainView(
   for (const dom of opts.expandedDomains) {
     const members = agg.positionsByDomain.get(dom)
     if (!members) continue
+    const supernode = agg.supernodes.find((s) => s.id === dom)
+    const repName = supernode?.name ?? dom
+    const isUncategorized = dom === UNCATEGORIZED_DOMAIN_ID
     for (const p of members) {
-      nodes.push(p)
+      // 域成员与域名同名时（代表岗名 = domain_name）追加后缀，消除同屏歧义
+      const displayName =
+        !isUncategorized && p.name === repName ? `${p.name}（岗）` : p.name
+      nodes.push({ ...p, name: displayName })
       visiblePositions.add(p.id)
       edges.push({
         source: dom,

@@ -30,10 +30,14 @@ export type GraphNode = components['schemas']['GraphNode'] & {
   isDomain?: boolean
   /** 域内岗位数（仅域超节点） */
   memberCount?: number
+  /** 待归类桶标记（前端派生：未回填 domain_id 的兜底域，画布弱化样式依据） */
+  isUncategorized?: boolean
 }
 
 /** 契约 GraphEdge（source/target/weight/necessity/level） */
 export type GraphEdge = components['schemas']['GraphEdge']
+/** 前端派生边标记：域-域共享关系与岗位/技能边使用不同降噪样式 */
+export type DisplayGraphEdge = GraphEdge & { isDomainEdge?: boolean }
 
 /** 前端图统计容器（由后端 GraphViewStats 契约映射，total_* 为图谱全量） */
 export interface GraphStats {
@@ -49,7 +53,7 @@ export interface GraphStats {
 /** 前端图数据容器（由契约 GraphViewData 映射而来） */
 export interface GraphData {
   nodes: GraphNode[]
-  edges: GraphEdge[]
+  edges: DisplayGraphEdge[]
   stats: GraphStats
 }
 

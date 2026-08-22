@@ -3445,6 +3445,8 @@ export interface paths {
                 query?: {
                     /** @description 提案状态过滤 */
                     status?: "pending" | "approved" | "rejected";
+                    /** @description 治理对象类型过滤（skill=技能字典 / position=岗位节点 / course=课程节点或脏边） */
+                    entity_type?: "skill" | "position" | "course";
                     page?: number;
                     size?: number;
                 };
@@ -3701,25 +3703,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/dict-guard/trigger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 手动触发一次字典守卫巡检
+         * @description 入队 dict_guard_daily（复跑 ETL 阶段 16），非实时；运行结果落 reports/dict_guard_{date}.json
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 已提交（等待 worker 执行） */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 任务入队失败 */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         DictProposalItem: {
             id: string;
-            /** @description 动作作用的目标词 */
+            /**
+             * @description 治理对象类型
+             * @enum {string}
+             */
+            entity_type?: "skill" | "position" | "course";
+            /** @description 动作作用的目标词（岗位/课程时为目标节点名） */
             term: string;
             /** @enum {string} */
-            action: "add_stopword" | "remove_stopword" | "protect_whitelist";
+            action: "add_stopword" | "remove_stopword" | "protect_whitelist" | "remove_node" | "remove_edge";
             /** @enum {string} */
             status: "pending" | "approved" | "rejected";
             /** @description LLM 判定理由 */
             reason?: string;
             /** @description LLM 置信度 0~1 */
             llm_confidence?: number | null;
-            /** @description 候选证据（图谱引用数/语料命中/受影响技能等） */
+            /** @description 候选证据（图谱引用数/语料命中/受影响技能/孤立度等） */
             evidence?: Record<string, never>[] | null;
-            /** @description 影响面模拟：图谱同名节点数 + 命中 JD 数 */
+            /** @description 影响面模拟：图谱节点数 + 引用 JD 数 */
             impact_stats?: Record<string, never>;
             /** @description 评估批次日期 */
             run_date: string;
@@ -3730,16 +3783,21 @@ export interface components {
         };
         DictChangeLogItem: {
             id: string;
+            /**
+             * @description 治理对象类型
+             * @enum {string}
+             */
+            entity_type?: "skill" | "position" | "course";
             term: string;
             /** @description 变更动作（含 rollback） */
             action: string;
             /** @enum {string} */
             source: "auto" | "manual" | "rollback";
             /**
-             * @description 动态层条目类型
+             * @description 变更类型（skill=动态层条目，position/course=图谱节点/边清理）
              * @enum {string}
              */
-            kind: "blocked" | "protected";
+            kind: "blocked" | "protected" | "node" | "edge";
             proposal_id?: string | null;
             reason?: string;
             detail?: Record<string, never>;

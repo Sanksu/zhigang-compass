@@ -29,6 +29,8 @@ class PositionProfile(BaseModel):
     """岗位画像（设计文档 9.2 节）。
 
     must_skills / nice_skills 由图谱聚合层预计算，匹配引擎直接消费聚合值。
+    soft_requirements 是软技能独立通道（2026-08-22 拍板）：不进 must/nice
+    评分池，仅供差距分析展示（is_soft 打标）——匹配评分只算技术栈能力。
     """
     position_id: str
     name: str
@@ -38,6 +40,10 @@ class PositionProfile(BaseModel):
     required_education: Optional[str] = Field(default=None, description="学历要求")
     required_certs: list[str] = Field(default_factory=list, description="证书要求")
     soft_skills: list[str] = Field(default_factory=list, description="软技能白名单")
+    soft_requirements: list[SkillRequirement] = Field(
+        default_factory=list,
+        description="软技能要求独立通道（不参与评分，仅差距展示；来源=REQUIRES 边软技能类目 + Position.soft_skills）",
+    )
     typical_scenarios: list[str] = Field(default_factory=list, description="典型项目场景，用于项目 Embedding 比对")
     industry: Optional[str] = Field(default=None, description="行业（JD 抽取 industry，图谱 Position.industry）")
     last_updated: Optional[str] = Field(default=None, description="岗位聚合最近更新时间 ISO8601，用于时效衰减")

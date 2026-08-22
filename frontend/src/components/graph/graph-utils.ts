@@ -3,15 +3,21 @@ import { graphColors } from './graph-visual-tokens'
 
 export { GRAPH_COLOR_BY_STATUS as COLOR_BY_STATUS } from './graph-visual-tokens'
 
-/** 技能标签显示阈值：低于全图技能节点 value 中位数的不常显标签（悬停/选中时经 emphasis 仍显示），
- *  避免技能全量渲染时标签叠字遮挡，同时减少 label 渲染开销 */
+/** 稠密图判定阈值：技能数超过该值时 band1 标签改用 75 分位（视觉评审 P0-3） */
+const DENSE_SKILL_COUNT = 60
+
+/** 技能标签显示阈值：低于该 value 的技能不常显标签（悬停/选中时经 emphasis 仍显示），
+ *  避免技能全量渲染时标签叠字遮挡，同时减少 label 渲染开销。
+ *  稀疏图（≤60 技能）取中位数（上中位）；稠密图（>60，技术栈视图 100+ 技能同画布）
+ *  取 75 分位——band1 只亮头部分位技能标签，缓解中心毛发球标签压盖（08-22 视觉评审） */
 export function skillLabelThreshold(nodes: GraphNode[]): number {
   const values = nodes
     .filter((n) => n.type === 'skill')
     .map((n) => n.value ?? 0)
     .sort((a, b) => a - b)
   if (values.length === 0) return 0
-  return values[Math.floor(values.length / 2)]
+  const q = values.length > DENSE_SKILL_COUNT ? 0.75 : 0.5
+  return values[Math.min(values.length - 1, Math.floor(values.length * q))]
 }
 
 /** 节点视觉半径：岗位 > 技能 > 证据；展开的岗位与选中节点放大（3D 画布使用） */

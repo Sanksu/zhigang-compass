@@ -76,6 +76,12 @@ describe('skillLabelThreshold', () => {
     const nodes = [skill('s1'), skill('s2', 8)]
     expect(skillLabelThreshold(nodes)).toBe(8)
   })
+
+  it('稠密图（>60 技能）取 75 分位——band1 只亮头部技能标签（P0-3 毛发球治理）', () => {
+    // 80 个技能 value 1..80：75 分位 = 61（中位数口径则会是 41，放出一半标签）
+    const nodes = Array.from({ length: 80 }, (_, i) => skill(`s${i}`, i + 1))
+    expect(skillLabelThreshold(nodes)).toBe(61)
+  })
 })
 
 describe('nodeRadius', () => {

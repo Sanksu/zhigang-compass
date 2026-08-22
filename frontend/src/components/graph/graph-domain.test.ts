@@ -71,6 +71,27 @@ describe('aggregateByDomain', () => {
     expect(agg.positionsByDomain.get(UNCATEGORIZED_DOMAIN_ID)?.[0].name).toBe('孤岛岗')
   })
 
+  it('未分类桶改名「待归类岗位」并带弱化标记（P1-2）', () => {
+    const agg = aggregateByDomain(baseData())
+    const unc = agg.supernodes.find((n) => n.id === UNCATEGORIZED_DOMAIN_ID)
+    expect(unc?.name).toBe('待归类岗位')
+    expect(unc?.isUncategorized).toBe(true)
+    // 实域超节点不带弱化标记
+    expect(agg.supernodes.find((n) => n.id === 'dom_fe')?.isUncategorized).toBe(false)
+  })
+
+  it('域成员与域名同名时追加（岗）后缀消歧（P1-2）', () => {
+    const agg = aggregateByDomain(baseData())
+    const view = buildDomainView(baseData(), agg, {
+      expandedDomains: new Set(['dom_fe']),
+      expandedPositions: new Set(),
+      maxSkillsPerPosition: 12,
+    })
+    // p1「前端开发工程师」与域名同名 → 加后缀；p2 不同名 → 原名
+    expect(view.nodes.find((n) => n.id === 'p1')?.name).toBe('前端开发工程师（岗）')
+    expect(view.nodes.find((n) => n.id === 'p2')?.name).toBe('Vue前端开发工程师')
+  })
+
   it('域间边按共享技能计数，低于阈值过滤', () => {
     const agg = aggregateByDomain(baseData())
     // fe×fin 仅共享 Python（1 < 3）→ 无域间边
@@ -84,7 +105,7 @@ describe('aggregateByDomain', () => {
     data.edges.push({ source: 'p3', target: 'TS', weight: 0.4, necessity: 'nice' })
     const agg2 = aggregateByDomain(data)
     expect(agg2.domainEdges).toEqual([
-      { source: 'dom_fe', target: 'dom_fin', weight: 3, necessity: 'nice' },
+      { source: 'dom_fe', target: 'dom_fin', weight: 3, necessity: 'nice', isDomainEdge: true },
     ])
   })
 })

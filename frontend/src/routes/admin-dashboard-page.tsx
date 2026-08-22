@@ -110,6 +110,7 @@ export const QUICK_ACTIONS: {
   { id: 'etl-graph', label: '聚合入图', icon: Network, desc: '岗位-技能图写回 Neo4j' },
   { id: 'etl-full', label: '完整 ETL 管线', icon: Workflow, desc: '采集→清洗→入图→快照全阶段' },
   { id: 'goto-review', label: '前往岗位审核', icon: ClipboardCheck, desc: '处理候选晋升 / 驳回', to: '/admin/review' },
+  { id: 'goto-dictguard', label: '字典守卫', icon: Shield, desc: '技能/岗位/课程 LLM 自动治理 · 手动巡检', to: '/admin/review?tab=dict' },
   { id: 'goto-crawl', label: '爬取管理', icon: Globe, desc: '单源触发 · 任务状态 · 输出查看', to: '/admin/crawl' },
   { id: 'goto-llm', label: 'LLM 配置', icon: Bot, desc: '多 Provider 重试链 · 健康检查', to: '/admin/llm' },
   { id: 'goto-settings', label: '系统配置', icon: Settings2, desc: '运行时参数 · 重启生效', to: '/admin/settings/tasks' },

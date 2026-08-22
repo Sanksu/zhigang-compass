@@ -21,6 +21,7 @@ import app.api.v1.admin_routes.dict_guard as dg
 def _proposal(**kw):
     base = dict(
         id="p1", term="低代码平台搭建", action="add_stopword", status="pending",
+        entity_type="skill",
         reason="噪音词条", llm_confidence=0.6, evidence=[],
         impact_stats={"graph_nodes": 3, "jd_snapshots": 5}, run_date="2026-08-21",
         reviewed_by="", review_reason="", reviewed_at=None, created_at=None,
@@ -32,6 +33,7 @@ def _proposal(**kw):
 def _changelog(**kw):
     base = dict(
         id="c1", term="低代码平台搭建", action="add_stopword", source="auto",
+        entity_type="skill",
         kind="blocked", proposal_id=None, reason="噪音词条", detail={},
         impact_stats={}, applied_by="system", created_at=None,
     )
@@ -204,6 +206,36 @@ async def test_rollback_blocked_missing_entry_conflict(dyn_spy):
     db = _FakeDB(_changelog(), scalar_values=[0])
     resp = await dg.rollback_change("c1", db, _ADMIN)
     assert json.loads(resp.body)["code"] == 4090
+
+
+# ── 提案列表 / 变更审计（回归：paged_ok 首参为位置参数 items，非 data）───
+
+@pytest.mark.asyncio
+async def test_list_proposals_returns_paged_items(monkeypatch):
+    rows = [_proposal(id="p1", term="微", action="remove_stopword", status="pending")]
+
+    async def _paginate(db, stmt, page, size, **kw):
+        return rows, 1
+
+    monkeypatch.setattr(dg, "paginate", _paginate)
+    resp = await dg.list_proposals(status="pending", page=1, size=20, db=_FakeDB())
+    assert resp.code == 0
+    assert resp.data["total"] == 1
+    assert [it["id"] for it in resp.data["items"]] == ["p1"]
+
+
+@pytest.mark.asyncio
+async def test_list_changes_returns_paged_items(monkeypatch):
+    rows = [_changelog(id="c1", term="微")]
+
+    async def _paginate(db, stmt, page, size, **kw):
+        return rows, 1
+
+    monkeypatch.setattr(dg, "paginate", _paginate)
+    resp = await dg.list_changes(page=1, size=20, db=_FakeDB())
+    assert resp.code == 0
+    assert resp.data["total"] == 1
+    assert resp.data["items"][0]["id"] == "c1"
 
 
 # ── 报告 ─────────────────────────────────────────────────────────

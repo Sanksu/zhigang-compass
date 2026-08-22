@@ -11,12 +11,12 @@ import { describe, expect, it } from 'vitest'
 import { ETL_ACTION_JOBS, QUICK_ACTIONS } from './admin-dashboard-page'
 
 describe('QUICK_ACTIONS 快捷操作面板', () => {
-  it('补全为 9 项：4 触发 + 5 导航', () => {
-    expect(QUICK_ACTIONS).toHaveLength(9)
+  it('补全为 10 项：4 触发 + 6 导航', () => {
+    expect(QUICK_ACTIONS).toHaveLength(10)
     const triggers = QUICK_ACTIONS.filter((a) => !a.to)
     const navs = QUICK_ACTIONS.filter((a) => a.to)
     expect(triggers).toHaveLength(4)
-    expect(navs).toHaveLength(5)
+    expect(navs).toHaveLength(6)
     expect(triggers.map((t) => t.id)).toEqual(
       expect.arrayContaining(['crawl', 'etl-clean', 'etl-graph', 'etl-full']),
     )
@@ -30,7 +30,7 @@ describe('QUICK_ACTIONS 快捷操作面板', () => {
   it('导航目标均为已注册的管理路由', () => {
     const navs = QUICK_ACTIONS.filter((a) => a.to).map((a) => a.to)
     expect(navs).toEqual(
-      expect.arrayContaining(['/admin/review', '/admin/crawl', '/admin/llm', '/admin/users', '/admin/settings/tasks']),
+      expect.arrayContaining(['/admin/review', '/admin/review?tab=dict', '/admin/crawl', '/admin/llm', '/admin/users', '/admin/settings/tasks']),
     )
   })
 

@@ -451,8 +451,9 @@ def build_radar(
 
     五维构成（§9.2 六类特征中实现可达的五维）：must（必备技能）/ nice（加分技能）/
     experience（经验）/ education（学历）/ projects（项目），另加 skill_level
-    （熟练度满足度，仅展示）与 domain（领域匹配，仅展示）。软技能已并入
-    must/nice（low_confidence 降权 ×0.5），证书维度当前图谱侧 required_certs
+    （熟练度满足度，仅展示）与 domain（领域匹配，仅展示）。软技能不参与评分
+    （2026-08-22 拍板：独立通道 soft_requirements 仅差距展示；评分池纯技术栈，
+    low_confidence 候选技能降权 ×0.5 仍生效），证书维度当前图谱侧 required_certs
     数据稀疏暂不入雷达。education/projects/domain/skill_level 为保守近似：
     无数据返回 None 不参与总分；无必备门槛岗位 must 同为 None（A1 口径）。
     """

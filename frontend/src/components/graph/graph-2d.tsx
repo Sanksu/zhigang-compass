@@ -45,6 +45,8 @@ interface Graph2DProps {
   learningPath?: LearningPathItem[]
   /** 已掌握技能集（DAG 节点灰/蓝/绿编码依据） */
   completedSkills?: string[]
+  /** 演化时间轴标记（P0-2）：本版新增绿环 / 消亡橙虚线（打标不剔除） */
+  evolutionMarks?: { addedIds: Set<string>; removedIds: Set<string> } | null
   className?: string
 }
 
@@ -268,6 +270,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     onToggleDomain,
     learningPath,
     completedSkills,
+    evolutionMarks,
     className,
   },
   ref,
@@ -559,6 +562,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
                 shadowColor: hexToRgba(colorOf(n, dark), 0.38),
               }
             : {}),
+          // 待归类桶弱化（P1-2）：虚线描边 + 降透明度，兜底域不与实域抢视觉权重
+          ...(n.isUncategorized && !dimmed ? { borderType: 'dashed' as const, borderWidth: 2, opacity: 0.6 } : {}),
+          // 演化时间轴打标（P0-2）：本版新增绿环高亮 / 消亡橙虚线（打标不剔除）
+          ...(evolutionMarks?.addedIds.has(n.id) && !dimmed
+            ? { borderColor: '#22c55e', borderWidth: 3, shadowBlur: 18, shadowColor: 'rgba(34,197,94,0.7)' }
+            : {}),
+          ...(evolutionMarks?.removedIds.has(n.id) && !dimmed
+            ? { borderColor: '#f97316', borderWidth: 2, borderType: 'dashed' as const }
+            : {}),
           ...(dimmed ? { opacity: FILTER_DIM_OPACITY } : {}),
         },
         label: {
@@ -566,11 +578,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           // - band 0（zoom<0.55）：仅岗位
           // - band 1（0.55≤zoom<1.2）：岗位 + 高权重技能（≥中位阈值）
           // - band 2（zoom≥1.2）：全量（含低权技能）
+          // 演化打标节点标签强制显示（不受 LOD 压制——时间轴叙事主角）
           show: dimmed
             ? false
-            : n.isDomain || n.type === 'position'
-              ? lodBand >= 0
-              : n.type === 'skill'
+            : evolutionMarks && (evolutionMarks.addedIds.has(n.id) || evolutionMarks.removedIds.has(n.id))
+              ? true
+              : n.isDomain || n.type === 'position'
+                ? lodBand >= 0
+                : n.type === 'skill'
                 ? lodBand === 2 || (lodBand >= 1 && (n.value ?? 0) >= labelThreshold)
                 : false,
           position: 'right',
@@ -646,6 +661,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           const lines: string[] = [`<b>${escapeHtml(d.name)}</b>`]
           lines.push(`类型: ${escapeHtml(isSoftSkill(d) ? '软技能' : d.type)}`)
           if (d.type === 'position' && d.status) lines.push(`状态: ${escapeHtml(d.status)}`)
+          if (evolutionMarks?.addedIds.has(d.id))
+            lines.push('<span style="color:#22c55e;font-size:11px">● 本版新增</span>')
+          else if (evolutionMarks?.removedIds.has(d.id))
+            lines.push('<span style="color:#f97316;font-size:11px">◌ 本版消亡</span>')
           if (d.type === 'skill' && d.skill_category && !isSoftSkill(d)) {
             lines.push(`类目: ${escapeHtml(d.skill_category)}`)
           }
@@ -718,7 +737,36 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 
     chart.setOption(option)
     builtRef.current = true
-  }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand])
+  }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand, evolutionMarks])
+
+  // 新兴岗位脉冲光晕（视觉评审 P1-3）：emerging 节点 shadowBlur 呼吸动画
+  // （~1.6s 周期），让"哪里在变热"一眼可见。按 id 局部 setOption merge
+  // （节点数少，100ms 步进对 60fps 画布无压力）；主 option 重建会复位
+  // itemStyle，下一 tick 自动重涂。DAG 视图/无新兴节点时不启动。
+  const emergingNodes = useMemo(
+    () => data.nodes.filter((n) => n.type === 'position' && n.status === 'emerging'),
+    [data],
+  )
+  useEffect(() => {
+    if (viewMode !== 'graph' || emergingNodes.length === 0) return
+    const dark = isDark()
+    let phase = 0
+    const timer = window.setInterval(() => {
+      phase = (phase + 1) % 16
+      const glow = 8 + ((Math.sin((phase / 16) * Math.PI * 2) + 1) / 2) * 16
+      chartRef.current?.setOption({
+        series: [
+          {
+            data: emergingNodes.map((n) => ({
+              id: n.id,
+              itemStyle: { shadowBlur: glow, shadowColor: colorOf(n, dark) },
+            })),
+          },
+        ],
+      })
+    }, 100)
+    return () => window.clearInterval(timer)
+  }, [emergingNodes, viewMode, themeVersion])
 
   useEffect(() => {
     const chart = chartRef.current

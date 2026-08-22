@@ -114,10 +114,12 @@ def analyze_gaps(candidate, position, semantic=None, sim_threshold: float | None
         sim_threshold: 语义命中阈值，None 时从 configs/match_weights.json 读取
 
     Returns:
-        差距列表，按 (weight DESC, missing > weak > matched) 排序。
+        差距列表，按 (weight DESC, missing > weak > matched) 排序。软技能独立
+        通道（soft_requirements，不参与评分）同样进入差距列表供展示（is_soft
+        打标），但不触发学习路径课程匹配（generator 侧过滤）。
     """
     gaps: list[GapSkill] = []
-    for req in [*position.must_skills, *position.nice_skills]:
+    for req in [*position.must_skills, *position.nice_skills, *position.soft_requirements]:
         sim, matched_skill = _best_matching_skill(
             req, candidate.skills, semantic, sim_threshold
         )

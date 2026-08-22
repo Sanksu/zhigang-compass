@@ -13,6 +13,7 @@ import { GraphCommunityTree } from '@/components/graph/graph-community-tree'
 import { GraphDetailRail } from '@/components/graph/graph-detail-rail'
 import { toGraphData } from '@/components/graph/graph-adapter'
 import { aggregateByDomain, buildDomainView } from '@/components/graph/graph-domain'
+import { EvolutionTimeline, type EvolutionMarks } from '@/components/graph/evolution-timeline'
 import {
   NodeDetailPanel,
   type PositionDetail,
@@ -123,6 +124,8 @@ export function GraphPage() {
   const [expandedPositions, setExpandedPositions] = useState<Set<string>>(() => new Set())
   // 展开的职能域 id 集合（panorama 聚合下钻第二级）：双击域超节点展开域内岗位
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(() => new Set())
+  // 演化时间轴标记（P0-2）：滑到某版本 → 本版新增/消亡节点画布打标
+  const [evolutionMarks, setEvolutionMarks] = useState<EvolutionMarks | null>(null)
   // 定位请求：搜索/相似技能点击后聚焦画布节点（含时间戳，连续点击同一技能也生效）
   const [focusRequest, setFocusRequest] = useState<{ id: string; ts: number } | null>(null)
   // 2D 画布命令句柄（重置视角）
@@ -611,6 +614,10 @@ export function GraphPage() {
       <Tabs
         value={view}
         onValueChange={(value) => {
+          // 视图切换：同步清空展开的岗位/域（新视图技能集不同）与选中态
+          // （P0-1：选中残留会让详情面板指向画布外节点，且 Graph2D 对仍在
+          // 数据中的旧节点 dispatch highlight → adjacency blur 把全图压暗到 10%）
+          setSelected(null)
           setExpandedPositions(new Set())
           setExpandedDomains(new Set())
           setView(value as GraphViewType)
@@ -693,6 +700,7 @@ export function GraphPage() {
               onToggleDomain={toggleDomain}
               learningPath={learningPath}
               completedSkills={[]}
+              evolutionMarks={evolutionMarks}
               className="h-full w-full"
             />
           ) : (
@@ -804,6 +812,9 @@ export function GraphPage() {
         )}
       </div>
 
+      {/* 演化时间轴（P0-2）：版本快照滑轨 + 增删打标（接口失败静默隐藏） */}
+      <EvolutionTimeline onMarksChange={setEvolutionMarks} className="mt-3" />
+
       <div className="mt-4 grid gap-3 rounded-lg border border-atlas-grid bg-subtle/60 p-3 text-xs text-ink-muted lg:grid-cols-[1.15fr_1fr_1.2fr]" role="list" aria-label="图谱图例">
         <div className="space-y-2" role="listitem">
           <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">MAP FEATURES / 实体</p>
@@ -813,6 +824,8 @@ export function GraphPage() {
             <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-graph-skill" role="img" aria-label="技术技能节点" /> 技术技能</span>
             <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full border-2 border-graph-soft-skill" role="img" aria-label="软技能节点：粉色空心圆" /> 软技能</span>
             <span className="flex items-center gap-1.5"><span className="size-0 border-x-4 border-b-[7px] border-x-transparent border-b-graph-evidence" /> 证据地标</span>
+            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#22c55e]" role="img" aria-label="演化时间轴：本版新增节点绿环" /> 本版新增<span className="text-ink-faint">（时间轴）</span></span>
+            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full border-2 border-dashed border-state-declining" role="img" aria-label="演化时间轴：本版消亡节点橙色虚线圈" /> 本版消亡<span className="text-ink-faint">（时间轴）</span></span>
           </div>
         </div>
         <div className="space-y-2" role="listitem">
@@ -833,8 +846,7 @@ export function GraphPage() {
             <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-declining" />衰退</span>
             <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-archived" />归档</span>
           </div>
-        </div>
-      </div>
+        </div>      </div>
     </>
   )
 }

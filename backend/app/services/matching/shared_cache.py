@@ -29,7 +29,9 @@ from app.services.matching.schemas import PositionProfile
 
 logger = logging.getLogger(__name__)
 
-_SCHEMA_REVISION = "v2"
+# v3（2026-08-22）：软技能退出评分池（soft_requirements 独立通道），画像
+# schema 变更——读路径校验 schema_revision，旧 v2 载荷（软技能仍在 nice）不供
+_SCHEMA_REVISION = "v3"
 _POINTER_KEY = "matching:positions:current"
 _PAYLOAD_PREFIX = "matching:positions:v2:"
 _BUILD_LOCK_PREFIX = "matching:positions:build:"
@@ -127,7 +129,7 @@ def _warm_async(positions: list[PositionProfile]) -> None:
     names = [
         s.skill_name
         for p in positions
-        for s in (*p.must_skills, *p.nice_skills)
+        for s in (*p.must_skills, *p.nice_skills, *p.soft_requirements)
     ]
     try:
         SkillEmbedder.get().warm(names)
@@ -153,7 +155,7 @@ async def _load_from_payload(redis, key: str) -> list[PositionProfile] | None:
 
 
 async def _read_pointer(redis, weights_rev: str) -> list[PositionProfile] | None:
-    """指针命中且权重版本一致 → 载荷；否则 None。"""
+    """指针命中且 schema/权重版本一致 → 载荷；否则 None。"""
     raw = await redis.get(_POINTER_KEY)
     if raw is None:
         return None
@@ -162,7 +164,11 @@ async def _read_pointer(redis, weights_rev: str) -> list[PositionProfile] | None
     except (json.JSONDecodeError, TypeError):
         return None
     key = meta.get("key", "") if isinstance(meta, dict) else ""
-    if not key or meta.get("weights_revision") != weights_rev:
+    if (
+        not key
+        or meta.get("schema_revision") != _SCHEMA_REVISION
+        or meta.get("weights_revision") != weights_rev
+    ):
         return None
     positions = await _load_from_payload(redis, key)
     if positions is None:

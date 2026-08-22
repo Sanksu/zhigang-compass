@@ -87,8 +87,11 @@ class LearningPathGenerator:
 
         # 差距分析为同步函数，内部可能调用同步 SBERT similarity，放线程池避免阻塞事件循环
         gaps = await asyncio.to_thread(analyze_gaps, candidate, position, semantic, sim_threshold)
+        # 软技能缺口不走课程匹配（2026-08-22 拍板）：课程池为技术课，
+        # "沟通能力"等软素质缺口命中课程是语义误配（#407 教训），只留在差距列表展示
         path_gaps = [
-            g for g in gaps if g.gap_type in (GapType.MISSING, GapType.WEAK)
+            g for g in gaps
+            if g.gap_type in (GapType.MISSING, GapType.WEAK) and not g.is_soft
         ][:_MAX_PATH_ITEMS]
 
         items: list[LearningPathItem] = []

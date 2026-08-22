@@ -31,6 +31,14 @@ const ACTION_LABEL: Record<string, string> = {
   add_stopword: '加入停用词',
   remove_stopword: '移除停用词',
   protect_whitelist: '加白保护',
+  remove_node: '删除节点',
+  remove_edge: '删除脏边',
+}
+
+const ENTITY_LABEL: Record<string, string> = {
+  skill: '技能',
+  position: '岗位',
+  course: '课程',
 }
 
 /** 提案证据里的受影响技能（静态停用词 remove 审批的落地目标） */
@@ -75,6 +83,7 @@ export function DictGuardTab() {
   const [reviewAction, setReviewAction] = useState<'approve' | 'reject'>('approve')
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [triggering, setTriggering] = useState(false)
 
   const PAGE_SIZE = 20
 
@@ -146,6 +155,21 @@ export function DictGuardTab() {
     }
   }
 
+  async function manualTrigger() {
+    setTriggering(true)
+    setNotice(null)
+    try {
+      await apiPost('/admin/dict-guard/trigger', {})
+      setNotice('字典守卫巡检已提交，等待 worker 执行；稍后可查看报告')
+      setReport(null) // 触发后清空旧摘要，提示即将重跑
+      loadReport()
+    } catch (e) {
+      setNotice(errMsg(e, '触发失败，请重试'))
+    } finally {
+      setTriggering(false)
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(proposalTotal / PAGE_SIZE))
   const changeTotalPages = Math.max(1, Math.ceil(changeTotal / PAGE_SIZE))
 
@@ -157,21 +181,34 @@ export function DictGuardTab() {
         </div>
       )}
 
-      {/* 最近巡检报告摘要 */}
+      {/* 最近巡检报告摘要 + 手动触发 */}
       <Card>
-        <CardContent className="py-4">
-          {report ? (
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-ink-muted">
-              <span className="font-medium text-ink">最近巡检 {report.run_date}</span>
-              <span>候选 <b className="font-mono text-ink">{report.candidates ?? 0}</b></span>
-              <span>已评估 <b className="font-mono text-ink">{report.evaluated ?? 0}</b></span>
-              <span>LLM 失败 <b className="font-mono text-ink">{report.llm_failed ?? 0}</b></span>
-              <span>自动生效 <b className="font-mono text-ink">{report.auto_applied?.length ?? 0}</b></span>
-              <span>转人工 <b className="font-mono text-ink">{report.proposals ?? 0}</b></span>
+        <CardContent className="py-3 px-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs text-ink-muted">
+              {report ? (
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                  <span className="font-medium text-ink">最近巡检 {report.run_date}</span>
+                  <span>候选 <b className="font-mono text-ink">{report.candidates ?? 0}</b></span>
+                  <span>已评估 <b className="font-mono text-ink">{report.evaluated ?? 0}</b></span>
+                  <span>LLM 失败 <b className="font-mono text-ink">{report.llm_failed ?? 0}</b></span>
+                  <span>自动生效 <b className="font-mono text-ink">{report.auto_applied?.length ?? 0}</b></span>
+                  <span>转人工 <b className="font-mono text-ink">{report.proposals ?? 0}</b></span>
+                </div>
+              ) : (
+                <p>暂无巡检报告（依赖每日 ETL 阶段 16 字典守卫任务）</p>
+              )}
             </div>
-          ) : (
-            <p className="text-xs text-ink-faint">暂无巡检报告（依赖每日 ETL 阶段 16 字典守卫任务）</p>
-          )}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs"
+              disabled={triggering}
+              onClick={manualTrigger}
+            >
+              {triggering ? '提交中…' : '手动巡检'}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -211,6 +248,7 @@ export function DictGuardTab() {
               <TableHeader>
                 <TableRow>
                   <TableHead>词条</TableHead>
+                  <TableHead>对象</TableHead>
                   <TableHead>动作</TableHead>
                   <TableHead>理由</TableHead>
                   <TableHead>置信度</TableHead>
@@ -225,6 +263,11 @@ export function DictGuardTab() {
                   return (
                     <TableRow key={pr.id}>
                       <TableCell className="font-medium text-ink">{pr.term}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[10px] font-mono">
+                          {ENTITY_LABEL[pr.entity_type ?? 'skill'] ?? pr.entity_type ?? 'skill'}
+                        </Badge>
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="text-[10px]">
                           {ACTION_LABEL[pr.action] ?? pr.action}
@@ -334,7 +377,15 @@ export function DictGuardTab() {
                     </TableCell>
                     <TableCell>
                       <Badge variant={c.kind === 'blocked' ? 'archived' : 'emerging'} className="text-[10px]">
-                        {c.kind === 'blocked' ? '拦截' : '保护'}
+                        {c.kind === 'blocked'
+                          ? '拦截'
+                          : c.kind === 'protected'
+                            ? '保护'
+                            : c.kind === 'node'
+                              ? '节点'
+                              : c.kind === 'edge'
+                                ? '脏边'
+                                : c.kind}
                       </Badge>
                     </TableCell>
                     <TableCell className="max-w-[200px] truncate text-xs text-ink-muted">{c.reason || '—'}</TableCell>
@@ -343,7 +394,7 @@ export function DictGuardTab() {
                       {c.created_at ? String(c.created_at).slice(0, 16).replace('T', ' ') : '—'}
                     </TableCell>
                     <TableCell className="text-right">
-                      {c.action !== 'rollback' && (
+                      {c.action !== 'rollback' && c.kind !== 'node' && c.kind !== 'edge' && (
                         <Button
                           size="sm" variant="ghost" className="h-7 px-2 text-xs text-ink-muted hover:text-ink"
                           onClick={() => rollback(c)}

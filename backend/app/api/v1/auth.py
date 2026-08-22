@@ -41,15 +41,29 @@ router = APIRouter()
 REFRESH_COOKIE_NAME = "refresh_token"
 
 
-def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+def _is_https(request: Request) -> bool:
+    """按当前请求的实际传输协议判定是否加密链路。
+
+    之前以 `settings.is_production` 一刀切：API 通过 HTTPS 反向代理
+    暴露时为安全，但对 http 直连（如本机管理端 http://localhost:8000）
+    会写入 Secure Cookie，浏览器在 http 下拒绝持久化，整页刷新后
+    refresh_token 丢失、会话无法静默恢复。改为跟随请求 scheme——
+    https 部署仍加 Secure，http 则不加，保证刷新不掉登录。
+    """
+    return request.url.scheme == "https"
+
+
+def _set_refresh_cookie(
+    response: Response, refresh_token: str, *, secure: bool = True
+) -> None:
     """将 refresh_token 写入 httpOnly Cookie（刷新页面后会话可自动恢复）。"""
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
         value=refresh_token,
         max_age=settings.jwt_refresh_token_expire_days * 86400,
         httponly=True,
-        # 生产走 HTTPS 时启用 Secure；本地开发 http 场景不加
-        secure=settings.is_production,
+        # 仅加密链路（HTTPS）加 Secure，见 _is_https 说明
+        secure=secure,
         samesite="lax",
         path="/",
     )
@@ -127,7 +141,7 @@ async def login(
     access_token = create_access_token(user.id, user.role)
     refresh_token = create_refresh_token(user.id, user.role)
     # refresh_token 写入 httpOnly Cookie（刷新页面后自动恢复会话）
-    _set_refresh_cookie(response, refresh_token)
+    _set_refresh_cookie(response, refresh_token, secure=_is_https(request))
     # 写审计日志（登录成功，便于管理后台 /admin/audit/logs 追踪）
     db.add(AuditLog(
         user_id=user.id,
@@ -189,7 +203,7 @@ async def refresh_token(
         )
     new_access = create_access_token(user_id, user.role)
     new_refresh = create_refresh_token(user_id, user.role)
-    _set_refresh_cookie(response, new_refresh)
+    _set_refresh_cookie(response, new_refresh, secure=_is_https(request))
     return ok(data={
         "access_token": new_access,
         "refresh_token": new_refresh,
