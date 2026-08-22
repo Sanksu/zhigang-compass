@@ -8,6 +8,7 @@ DictChangeLog(source="manual"/"rollback") + AuditLog，回滚按记录反向操�
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,13 +19,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.common import iso, ok, paged_ok, paginate
 from app.api.deps import require_permission
 from app.core.database import get_db
-from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
+from app.core.errors import ERR_CONFLICT, ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import AuditLog, DictChangeLog, DictProposal
 from app.schemas.common import error
 from app.services.extraction import dynamic_filters as dyn
 from app.services.extraction.dictionary import SKILL_STOPWORDS
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 # 巡检报告目录（backend/reports，与 workers/dict_guard.py 写入侧同约定；
 # 模块级便于测试注入 tmp_path）
@@ -43,6 +46,57 @@ def _cleanup_skill_nodes(term: str) -> int:
         return record["n"] if record else 0
 
 
+def _cleanup_position_node(term: str) -> int:
+    """删除脏岗位节点（DETACH 连带 REQUIRES 等边）。"""
+    from app.core.database import neo4j_driver
+
+    with neo4j_driver.session() as session:
+        record = session.run(
+            "MATCH (p:Position {name: $term}) DETACH DELETE p RETURN count(p) AS n",
+            term=term,
+        ).single()
+        return record["n"] if record else 0
+
+
+def _cleanup_course_node(term: str) -> int:
+    """删除孤立脏课程节点（DETACH 连带 LEARNABLE_VIA 等边）。"""
+    from app.core.database import neo4j_driver
+
+    with neo4j_driver.session() as session:
+        record = session.run(
+            "MATCH (c:Course {name: $term}) DETACH DELETE c RETURN count(c) AS n",
+            term=term,
+        ).single()
+        return record["n"] if record else 0
+
+
+def _cleanup_course_edge(term: str) -> int:
+    """删除课程脏边『技能→课程』（LEARNABLE_VIA，不删课程节点）。"""
+    from app.core.database import neo4j_driver
+
+    source, target = term.split("→", 1) if "→" in term else (term, "")
+    with neo4j_driver.session() as session:
+        record = session.run(
+            "MATCH (s:Skill {name: $source})-[r:LEARNABLE_VIA]->(c:Course {name: $target}) "
+            "DELETE r RETURN count(r) AS n",
+            source=source, target=target,
+        ).single()
+        return record["n"] if record else 0
+
+
+def _cleanup_by_proposal(row) -> tuple[str, int]:
+    """按提案 action/entity_type 分派清理动作；返回 (kind, 受影响单元数)。"""
+    if row.action == "add_stopword":
+        return "blocked", _cleanup_skill_nodes(row.term)
+    if row.action == "remove_node":
+        if row.entity_type == "position":
+            return "node", _cleanup_position_node(row.term)
+        return "node", _cleanup_course_node(row.term)
+    if row.action == "remove_edge":
+        return "edge", _cleanup_course_edge(row.term)
+    return "blocked", 0
+
+
 def _victim_of(evidence: list | dict | None) -> str:
     """从提案证据解析「受影响技能」（停用词误杀检测写入的成对证据）。"""
     items = evidence if isinstance(evidence, list) else []
@@ -55,6 +109,7 @@ def _victim_of(evidence: list | dict | None) -> str:
 @router.get("/dict-guard/proposals")
 async def list_proposals(
     status: str = Query(default="pending", pattern="^(pending|approved|rejected)$"),
+    entity_type: str = Query(default="", pattern="^(skill|position|course)?$"),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -65,6 +120,9 @@ async def list_proposals(
     if status:
         stmt = stmt.where(DictProposal.status == status)
         count_stmt = count_stmt.where(DictProposal.status == status)
+    if entity_type:
+        stmt = stmt.where(DictProposal.entity_type == entity_type)
+        count_stmt = count_stmt.where(DictProposal.entity_type == entity_type)
     rows, total = await paginate(
         db, stmt.order_by(DictProposal.created_at.desc()), page, size,
         count_stmt=count_stmt,
@@ -73,6 +131,7 @@ async def list_proposals(
         data=[
             {
                 "id": r.id,
+                "entity_type": r.entity_type,
                 "term": r.term,
                 "action": r.action,
                 "status": r.status,
@@ -106,6 +165,8 @@ async def review_proposal(
     - remove_stopword：动态条目直接移除；静态停用词以「受影响技能」的动态
       protect 落地（git 词表走固化流程），证据缺失时拒绝并提示改用 protect
     - protect_whitelist：为具体技能名加动态保护
+    - remove_node/remove_edge（position/course）：直接删除对应岗位/课程节点或
+      课程脏边（无动态层变更），图谱删除不可回滚，approved 后立即生效
     """
     action = req.get("action")
     reason = (req.get("reason") or "").strip()
@@ -147,9 +208,18 @@ async def review_proposal(
                 effect_term = victim
             else:
                 return error(ERR_CONFLICT, "目标不是现行停用词，无需移除")
-        else:  # protect_whitelist
+        elif row.action == "protect_whitelist":
             dyn.add_entry("protected", row.term, reason=reason, source="dict_guard_review")
             effect_kind = "protected"
+        elif row.action in ("remove_node", "remove_edge"):
+            if row.entity_type not in ("position", "course"):
+                return error(ERR_CONFLICT, "图谱删除提案的 entity_type 必须为 position/course")
+            effect_kind, removed = await asyncio.to_thread(_cleanup_by_proposal, row)
+            row.impact_stats = {
+                **(row.impact_stats or {}), "removed_units": removed, "kind": effect_kind,
+            }
+        else:
+            return error(ERR_CONFLICT, f"未知提案动作: {row.action}")
 
     row.status = "approved" if action == "approve" else "rejected"
     row.reviewed_by = operator
@@ -159,7 +229,7 @@ async def review_proposal(
     if action == "approve":
         db.add(DictChangeLog(
             term=effect_term, action=row.action, source="manual", kind=effect_kind,
-            proposal_id=row.id, reason=reason,
+            proposal_id=row.id, reason=reason, entity_type=getattr(row, "entity_type", "skill"),
             detail={"operator": operator},
             impact_stats=row.impact_stats or {},
         ))
@@ -192,6 +262,7 @@ async def list_changes(
         data=[
             {
                 "id": r.id,
+                "entity_type": r.entity_type,
                 "term": r.term,
                 "action": r.action,
                 "source": r.source,
@@ -267,3 +338,23 @@ async def latest_report():
     if not files:
         return error(ERR_NOT_FOUND, "暂无巡检报告", http_status=404)
     return ok(data=json.loads(files[-1].read_text(encoding="utf-8")))
+
+
+@router.post("/dict-guard/trigger", status_code=202)
+async def trigger_dict_guard(
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """手动立即触发一次字典守卫巡检（复跑 ETL 阶段 16 的 dict_guard_daily）。
+
+    前端「手动巡检」开关入口；入队到 ARQ（依赖 worker 消费）。运行结果落
+    reports/dict_guard_{date}.json，可在面板刷新查看，非实时阻塞。
+    """
+    from app.core.arq_client import enqueue
+
+    try:
+        await enqueue("dict_guard_daily")
+    except Exception:
+        logger.exception("字典守卫手动触发入队失败")
+        return error(ERR_INTERNAL, "任务入队失败，请稍后重试")
+    logger.info("字典守卫手动触发已入队 operator=%s", current_user.get("sub", "admin"))
+    return ok(msg="字典守卫巡检已提交，等待 worker 执行")

@@ -7,12 +7,16 @@ import pytest
 from app.core import runtime_config
 from app.services.extraction.dict_guard import (
     _ALIAS_STANDARDS,
+    DictGuardDecision,
     hard_gate,
+    select_dirty_course_edges,
+    select_dirty_positions,
+    select_isolated_courses,
     select_stopword_misuse,
     select_suspect_skills,
     tier_for,
 )
-from app.services.extraction.dictionary import SKILL_STOPWORDS, SKILL_WHITELIST
+from app.services.extraction.dictionary import SKILL_STOPWORDS, SKILL_WHITELIST, _POSITION_WHITELIST
 
 
 def _pure_stopword() -> str:
@@ -124,3 +128,119 @@ class TestSelectStopwordMisuse:
     def test_short_stopword_skipped(self):
         misuses = select_stopword_misuse("自动化测试", {"测"}, {"自动化测试"})
         assert misuses == []
+
+
+class TestDecisionSchema:
+    def test_defaults_to_skill_entity(self):
+        dec = DictGuardDecision(action="add_stopword", term="某词", reason="r", confidence=0.9)
+        assert dec.entity_type == "skill"
+
+    def test_position_remove_node_ok(self):
+        dec = DictGuardDecision(
+            entity_type="position", action="remove_node", term="SailPoint",
+            reason="产品名", confidence=0.9,
+        )
+        assert dec.action == "remove_node"
+        assert dec.entity_type == "position"
+
+    def test_invalid_action_rejected(self):
+        with pytest.raises(Exception):
+            DictGuardDecision(entity_type="course", action="rename", term="x")
+
+
+class TestNodeHardGate:
+    def test_position_remove_vetoes_whitelist(self):
+        sample = next(iter(_POSITION_WHITELIST))
+        ok, reason = hard_gate("remove_node", sample, entity_type="position")
+        assert ok is False
+        assert "岗位白名单" in reason
+
+    def test_position_remove_accepts_dirty(self):
+        ok, reason = hard_gate("remove_node", "某英文产品名", entity_type="position")
+        assert ok is True
+
+    def test_course_remove_node_accepts(self):
+        ok, _ = hard_gate("remove_node", "某孤立课程", entity_type="course")
+        assert ok is True
+
+    def test_remove_vetoes_skill_whitelist(self):
+        sample = next(iter(SKILL_WHITELIST))
+        assert hard_gate("remove_node", sample, entity_type="position")[0] is False
+
+    def test_remove_edge_requires_pair_format(self):
+        assert hard_gate("remove_edge", "前端→Python课程", entity_type="course")[0] is True
+        ok, reason = hard_gate("remove_edge", "没有箭头的词", entity_type="course")
+        assert ok is False
+        assert "技能→课程" in reason
+
+
+class TestNodeTierFor:
+    @pytest.fixture(autouse=True)
+    def _default_config(self, monkeypatch):
+        monkeypatch.setattr(
+            runtime_config, "get",
+            lambda k, d=None: {
+                "dict_guard_auto_impact_threshold": 50,
+                "dict_guard_min_confidence": 0.8,
+            }.get(k, d),
+        )
+
+    def test_remove_node_low_impact_high_conf_auto(self):
+        assert tier_for("remove_node", True, 1, 0.9) == "auto"
+        assert tier_for("remove_edge", True, 1, 0.9) == "auto"
+
+    def test_remove_high_impact_demotes_to_proposal(self):
+        assert tier_for("remove_node", True, 100, 0.9) == "proposal"
+
+    def test_remove_low_conf_demotes_to_proposal(self):
+        assert tier_for("remove_edge", True, 1, 0.5) == "proposal"
+
+    def test_remove_gate_fail_skips(self):
+        assert tier_for("remove_node", False, 0, 0.99) == "skip"
+
+
+class TestSelectDirtyPositions:
+    def test_zero_ref_and_empty_normalize_becomes_candidate(self):
+        rows = [
+            {"name": "技术", "req_count": 0, "first_seen": "2026-08-01"},  # 泛词，归一化空
+            {"name": "技术", "req_count": 5, "first_seen": "2026-08-01"},  # 有引用，跳过
+            {"name": next(iter(_POSITION_WHITELIST)), "req_count": 0, "first_seen": "2026-08-01"},  # 白名单
+            {"name": "软件工程师", "req_count": 0, "first_seen": "2026-08-01"},  # 合法岗（可归一化）
+        ]
+        dirty = select_dirty_positions(rows)
+        terms = [c["term"] for c in dirty]
+        assert ["技术"] == terms
+        assert dirty[0]["entity_type"] == "position"
+
+
+class TestSelectIsolatedCourses:
+    def test_isolated_courses_emitted(self):
+        rows = [
+            {"name": "某孤立课程", "edge_count": 0, "platform": "icourse163", "title": "标题"},
+            {"name": "x", "edge_count": 0},  # 过短，跳过
+            {"name": "发音打卡", "edge_count": 0, "platform": "", "title": ""},
+        ]
+        c = select_isolated_courses(rows)
+        assert [x["term"] for x in c] == ["某孤立课程", "发音打卡"]
+        assert c[0]["entity_type"] == "course"
+
+
+class TestSelectDirtyCourseEdges:
+    def _semantic(self):
+        class _S:
+            def similarity(self, a, b):
+                return {"前端→垃圾课程": 0.1, "Python→Python入门": 0.9,
+                        "前端→EnglishCourse": 0.2, "java→Java基础": 0.6}.get(f"{a}→{b}", 0.1)
+        return _S()
+
+    def test_low_sim_same_language_candidate(self):
+        rows = [{"skill": "前端", "course": "垃圾课程", "rel_id": "1"},
+                {"skill": "Python", "course": "Python入门", "rel_id": "2"},
+                {"skill": "前端", "course": "EnglishCourse", "rel_id": "3"},  # 跨语言，跳过
+                {"skill": "java", "course": "Java基础", "rel_id": "4"}]  # sim≥0.3，跳过
+        dirty = select_dirty_course_edges(rows, self._semantic())
+        assert [d["term"] for d in dirty] == ["前端→垃圾课程"]
+        assert dirty[0]["entity_type"] == "course"
+
+    def test_none_semantic_returns_empty(self):
+        assert select_dirty_course_edges([{"skill": "a", "course": "b"}], None) == []
