@@ -394,6 +394,7 @@ export function AdminLineagePage() {
                 <div className="text-xs text-ink-muted mb-2">
                   证据 JD 血缘链（{(detail.records ?? []).length} 条，按入库序）
                 </div>
+                <div className="max-h-[45vh] overflow-auto rounded-md border border-border">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -454,6 +455,7 @@ export function AdminLineagePage() {
                     )}
                   </TableBody>
                 </Table>
+                </div>
               </div>
             </div>
           ) : null}

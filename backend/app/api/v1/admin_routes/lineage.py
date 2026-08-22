@@ -106,12 +106,16 @@ async def lineage_positions(
     )
 
 
-@router.get("/lineage/positions/{position_name}")
+@router.get("/lineage/positions/{position_name:path}")
 async def lineage_position_detail(
     position_name: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """单个岗位的血缘详情（组级校验 + 证据 JD 血缘链明细）。"""
+    """单个岗位的血缘详情（组级校验 + 证据 JD 血缘链明细）。
+
+    岗位名可含 `/`（如 AI/ML、云/AI），故用 path 转换器承接；前端
+    encodeURIComponent 将 `/` 编码为 %2F，服务端解码后按整段匹配。
+    """
     details = await _all_lineage(db)
     for detail in details:
         if detail.position_name == position_name:
