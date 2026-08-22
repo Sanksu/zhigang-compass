@@ -6,6 +6,9 @@ lineage_summary 总览统计，以及 admin lineage 路由的分页/过滤/详�
 
 import asyncio
 
+from fastapi import FastAPI
+from starlette.testclient import TestClient
+
 from app.api.v1.admin_routes import lineage as lineage_router
 from app.services.data_quality.lineage import build_lineage, lineage_summary
 from app.services.data_quality.schemas import LineageDetail
@@ -196,3 +199,20 @@ class TestLineageRoutes:
             assert getattr(exc, "status_code", None) == 404
             return
         raise AssertionError("岗位不存在应 404")
+
+    def test_detail_route_matches_slash_position_name(self):
+        """含 `/` 的岗位名详情须整段匹配（回归：前端显示「详情加载失败」）。"""
+        row = _FakeRow(_rec(9, "boss", "AI/ML", ["Python"], location="北京"))
+        row.snapshot = {**row.snapshot, "normalized_position": "AI/ML"}
+        db = _FakeDB(_FakeRows([row]))
+
+        app = FastAPI()
+        app.include_router(lineage_router.router)
+
+        async def _override_db():
+            yield db
+
+        app.dependency_overrides[lineage_router.get_db] = _override_db
+        resp = TestClient(app).get("/lineage/positions/AI/ML")
+        assert resp.status_code == 200
+        assert resp.json()["data"]["position_name"] == "AI/ML"

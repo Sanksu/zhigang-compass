@@ -127,7 +127,7 @@ describe('AdminLineagePage 数据血缘', () => {
     mockApiGet
       .mockResolvedValueOnce(positionsData(makePos()))
       .mockResolvedValueOnce(detailData)
-    render(<AdminLineagePage />)
+    const { container } = render(<AdminLineagePage />)
     await screen.findByText('提示词工程师')
     fireEvent.click(screen.getByRole('button', { name: '溯源' }))
     // 详情弹窗：组级摘要 + 证据记录（薪资/来源/去重标记/溯源链接）
@@ -135,6 +135,14 @@ describe('AdminLineagePage 数据血缘', () => {
     expect(screen.getByText('25-35K·14薪')).toBeInTheDocument()
     expect(screen.getByText('重复')).toBeInTheDocument()
     expect(screen.getByText('原始 JD ↗')).toHaveAttribute('href', 'https://boss.example/jd/1')
+    // 多个证据时证据链表格可滚动（max-h + overflow-auto；DialogContent 经 portal 渲染到 body）
+    const hasScroll = Array.from(document.querySelectorAll('div')).some(
+      (d) =>
+        typeof d.className === 'string' &&
+        d.className.includes('max-h-') &&
+        d.className.includes('overflow-auto'),
+    )
+    expect(hasScroll).toBe(true)
   })
 
   it('详情加载失败展示错误文案', async () => {
