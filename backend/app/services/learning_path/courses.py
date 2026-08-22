@@ -47,11 +47,21 @@ _COURSE_TITLE_SIM_THRESHOLD = 0.5
 _GRAY_ZONE_SIM = (0.5, 0.62)
 _GRAY_ZONE_Q_MIN = 0.62
 
+# 跨语言无词面交集门控（08-22 实证收紧）：技能名为纯 ASCII 且课程标题含中文、
+# 双方无词面交集时，sim 需 ≥ 此阈值才保留。实证误配：Airflow↔航空气象学
+# 0.6632（专有名词字面 air+flow 与"航空"系跨语言虚高，超灰色带上限直通）、
+# PostgreSQL↔新编数据库技术—MySQL 0.548（隔壁技术栈误导）；真实相关配对中
+# 技能专名几乎必然出现在课程标题里（Docker↔Docker容器技术 词面命中豁免），
+# 故无交集 + <0.75 的跨语言命中按误配处理——宁可无课不可误导。
+_CROSS_LANG_NO_OVERLAP_SIM = 0.75
+
 # P1-1 课程级语义兜底阈值：无课技能直接对课程池标题匹配（08-13 实证）。
-# 可救案例：PostgreSQL→MySQL 课 0.601、服务器运维→网络技术 0.554、React→Advanced React 0.863；
+# 可救案例：服务器运维→网络技术 0.554、React→Advanced React 0.863；
 # 课程池缺课案例（Spark→0.469 高级英语、Docker→0.475 物流学、Gin→0.361 世界史）宁缺毋滥。
 # 08-16 对齐门控 0.5（course 0.85 收尾）：0.5-0.55 边缘课程进入标题门控与灰色带质量门控
 # 双把关（非直通），仅放宽初筛不放大误配。
+# 08-22 口径变更：原"可救案例"PostgreSQL→MySQL 课（0.548-0.601）经用户裁决属误导
+# （隔壁技术栈），由 _CROSS_LANG_NO_OVERLAP_SIM 跨语言门控拦截——无一致课程宁缺毋滥。
 _COURSE_POOL_MATCH_THRESHOLD = 0.5
 
 # P1-1 低质课程过滤：icourse163 期末突击/复习资料类课程（标题特征，噪声不入推荐池）
@@ -235,6 +245,20 @@ def _quality_ok(r: dict, quality_map: dict | None) -> bool:
     return q is not None and q >= _GRAY_ZONE_Q_MIN
 
 
+def _is_cross_lang_no_overlap(skill_name: str, title: str) -> bool:
+    """跨语言无词面交集配对：技能名纯 ASCII 且标题含中文、双方无词面交集。
+
+    词面交集复用 _lexical_hit（整串或 token ≥3 字符包含，泛化 token 不计）；
+    该判定为真时命中走 _CROSS_LANG_NO_OVERLAP_SIM 加严阈值（08-22 实证
+    Airflow↔航空气象学 0.6632 / PostgreSQL↔MySQL 课 0.548 误配族）。
+    """
+    if not skill_name.isascii():
+        return False
+    if not any("\u4e00" <= ch <= "\u9fff" for ch in title):
+        return False
+    return not _lexical_hit(skill_name, title)
+
+
 def _filter_by_title_similarity(
     rows: list[dict], skill_name: str, semantic, title_threshold: float,
     quality_map: dict[tuple[str, str], dict] | None = None,
@@ -257,6 +281,10 @@ def _filter_by_title_similarity(
     弱词面（_lexical_hint_hit，08-15 中英豁免扩展）仅豁免 sim 阈值，质量底线
     仍生效——关键词宽泛（web/api/linux/etl），无质量门控直通会放大误配
     （08-15 审查；强词面 _lexical_hit 课程名直接包含技能名，相关性自证）。
+
+    跨语言无词面交集门控（08-22）：技能名纯 ASCII × 标题含中文且无词面交集时，
+    sim 需 ≥ _CROSS_LANG_NO_OVERLAP_SIM（0.75）才保留，质量分不豁免——
+    Airflow↔航空气象学 0.6632、PostgreSQL↔MySQL 课 0.548 误配族实证。
     """
     if not rows or semantic is None:
         return rows
@@ -271,6 +299,10 @@ def _filter_by_title_similarity(
         try:
             sim = semantic.similarity(skill_name, title)
         except Exception:
+            continue
+        if _is_cross_lang_no_overlap(skill_name, title) and sim < _CROSS_LANG_NO_OVERLAP_SIM:
+            # 跨语言无词面交集：加严阈值之下按误配处理，质量分/弱词面均不豁免
+            # （Airflow↔航空气象学 0.6632 高质量分也拦——宁缺毋滥，08-22）
             continue
         if sim < title_threshold:
             # 弱词面豁免 sim 阈值（中英跨语言短词 sim 虚低），质量底线仍生效
