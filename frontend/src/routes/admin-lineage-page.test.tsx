@@ -127,7 +127,7 @@ describe('AdminLineagePage 数据血缘', () => {
     mockApiGet
       .mockResolvedValueOnce(positionsData(makePos()))
       .mockResolvedValueOnce(detailData)
-    const { container } = render(<AdminLineagePage />)
+    render(<AdminLineagePage />)
     await screen.findByText('提示词工程师')
     fireEvent.click(screen.getByRole('button', { name: '溯源' }))
     // 详情弹窗：组级摘要 + 证据记录（薪资/来源/去重标记/溯源链接）
