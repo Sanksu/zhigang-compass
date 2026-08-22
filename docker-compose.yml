@@ -91,6 +91,10 @@ services:
       - ./backend/configs/llm_providers.yaml:/app/configs/llm_providers.yaml
       # 运行时配置（08-16 管理后台 /admin/settings 可写；api/worker 共享宿主文件，重启后生效）
       - ./backend/configs/runtime_settings.json:/app/configs/runtime_settings.json
+      # dict-guard 动态过滤层（第五轮审查 P1-1 修复）：worker 每日评估 auto 拦截与
+      # 管理端审批写入、api 的 is_noise_skill 热路径读取——此前未挂载，跨容器互不可见；
+      # 宿主文件须先于 compose up 创建（见 DEPLOY.md），缺失时 Docker 会建同名目录
+      - ./backend/configs/skill_filters_dynamic.json:/app/configs/skill_filters_dynamic.json
       # 爬虫输出目录（08-15 修复：累计采集量统计读 /app/data/crawlers/output，
       # 此前 api 容器无挂载——容器内为空目录，爬取管理页累计采集量恒 0；
       # worker 侧已有同款挂载，双向读写一致）
@@ -164,6 +168,9 @@ services:
       - ./backend/configs/llm_providers.yaml:/app/configs/llm_providers.yaml
       # 运行时配置（08-16 管理后台 /admin/settings 可写；api/worker 共享宿主文件，重启后生效）
       - ./backend/configs/runtime_settings.json:/app/configs/runtime_settings.json
+      # dict-guard 动态过滤层（第五轮审查 P1-1 修复）：与 api 同款挂载，ETL 阶段16
+      # auto 拦截写入后 api ≤30s 热感知——此前未挂载，auto 档在标准部署下断链
+      - ./backend/configs/skill_filters_dynamic.json:/app/configs/skill_filters_dynamic.json
       # 报告目录（08-18 压测核验）：与 api 同款挂载，容器重建不丢 freshness/diversity 报告
       - ./backend/reports:/app/reports
     depends_on:
