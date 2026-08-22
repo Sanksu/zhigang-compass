@@ -3331,7 +3331,7 @@ components:
           items: { type: string }
           description: 缺失的必备技能名
         summary: { type: string, description: 匹配摘要 }
-        unqualified: { type: boolean, description: 必备技能全缺失（或无门槛岗位加分技能全未命中）判零 }
+        unqualified: { type: boolean, description: "必备技能全缺失（或无门槛岗位加分技能 Top-K 命中率 <20%）判零" }
         radar:
           type: object
           description: 人岗比对五维雷达（§9.5），无数据维度为 null

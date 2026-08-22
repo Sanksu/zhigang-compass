@@ -187,7 +187,25 @@ class TestScorePosition:
         result = score_position(cand, pos, weights=W)
         assert result.total_score == 0.0
         assert result.unqualified is True
-        assert "加分技能全未命中" in result.summary
+        assert "命中不足" in result.summary
+
+    def test_no_must_nice_below_floor_unqualified(self):
+        """O1：无门槛岗位 Top-10 命中不足 2 条（nice<0.2）→ 判零。
+
+        10 条 nice 命中 1 条 = 0.1 < 0.2 → unqualified；命中 2 条 = 0.2 达门槛。
+        （freq=3 小样本岗重归一后 exp 占 86.7%，1 条命中曾得 0.88 倒挂真匹配岗）
+        """
+        nices = [_req(f"s{i}", Necessity.NICE, weight=1.0) for i in range(10)]
+        pos = _position("p1", musts=[], nices=nices)
+
+        one_hit = score_position(_candidate(["s0"]), pos, weights=W)
+        assert one_hit.nice_score == pytest.approx(0.1)
+        assert one_hit.unqualified is True
+        assert one_hit.total_score == 0.0
+
+        two_hits = score_position(_candidate(["s0", "s1"]), pos, weights=W)
+        assert two_hits.nice_score == pytest.approx(0.2)
+        assert two_hits.unqualified is False
 
     def test_nice_score_is_weighted_average(self):
         """nice_score = 命中技能权重和 / 总权重。"""

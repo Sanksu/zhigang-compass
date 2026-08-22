@@ -46,6 +46,13 @@ SOFT_SKILL_DOWNWEIGHT = 0.5
 # source_count（跨源多的核心加分技能优先），分数反映"最想要的加分项满足几成"。
 NICE_TOP_K = 10
 
+# 无门槛岗位（must 为空）推荐门槛（08-22 O1 裁决）：nice Top-K 命中率下限。
+# 无门槛岗位重归一后 exp 占 86.7% 权重（0.287/0.331），req_years 缺失时恒满分，
+# 唯一有效技能信号是 nice——实测 freq=3 小样本岗（AI基础设施工程师）前端候选
+# 仅命中 Top-10 中 1 条 TypeScript（nice=0.1）即得 0.88，倒挂真前端岗 0.63-0.70。
+# 命中率不足 20%（Top-10 少于 2 条）判 unqualified 不纳入推荐。
+NO_MUST_NICE_FLOOR = 0.2
+
 
 def _soft_multiplier(cs) -> float:
     """候选技能置信度乘数：LLM 推断软技能 ×0.5，显式技能 ×1.0。"""
@@ -232,7 +239,7 @@ def _build_summary(
 ) -> str:
     if unqualified:
         if must_score is None:
-            return f"{position_name}：加分技能全未命中，未达门槛"
+            return f"{position_name}：无必备门槛但加分技能命中不足 20%，未达门槛"
         return f"{position_name}：必备技能全缺失，未达门槛"
     if must_score is None:
         return f"{position_name}：无必备技能门槛，加分项命中 {nice_score:.0%}"
@@ -546,8 +553,10 @@ def score_position(
     - nice_score = Top-K 覆盖率 Σ(sim×weight) / Σ(weight)（K=NICE_TOP_K，
       跨源数降序；岗位无 nice 时取 1.0 不扣分）
     - exp_score = min(total_years / required_years, 1.0)，无年限要求时满分
-    必备技能全缺失判零（unqualified=True）；无门槛岗位加分技能全未命中
-    同样判零（A3：防完全不相关候选占推荐位）。两者均不纳入推荐排序。
+    必备技能全缺失判零（unqualified=True）；无门槛岗位加分技能 Top-K 命中率
+    < NO_MUST_NICE_FLOOR（20%，即前 10 条核心加分项命中不足 2 条）同样判零
+    （A3/O1：无门槛岗位唯一技能信号是 nice，命中不足不推荐）。两者均不纳入
+    推荐排序。
 
     Args:
         candidate: 候选人画像
@@ -572,7 +581,7 @@ def score_position(
         base_total = must_score * w_must + nice_score * w_nice + exp_score * w_exp
 
     if (must_total > 0 and must_score == 0.0) or (
-        must_total == 0 and nice_score == 0.0
+        must_total == 0 and nice_score < NO_MUST_NICE_FLOOR
     ):
         total = 0.0
         unqualified = True
