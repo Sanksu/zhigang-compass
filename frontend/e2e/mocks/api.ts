@@ -29,8 +29,9 @@ const GRAPH_VIEW = {
   view_type: 'panorama',
   stats: { nodes: 5, edges: 4, total_nodes: 5, total_edges: 4 },
   nodes: [
-    { id: 'pos-1', name: '前端开发工程师', type: 'position', status: 'stable' },
-    { id: 'pos-2', name: '算法工程师', type: 'position', status: 'stable' },
+    // domain_id/domain_name：域聚合下钻契约字段（两岗位分属不同域）
+    { id: 'pos-1', name: '前端开发工程师', type: 'position', status: 'stable', domain_id: 'dom_fe', domain_name: '前端开发工程师' },
+    { id: 'pos-2', name: '算法工程师', type: 'position', status: 'stable', domain_id: 'dom_general', domain_name: '通用与其他岗位' },
     { id: 'sk-1', name: 'React', type: 'skill' },
     { id: 'sk-2', name: 'TypeScript', type: 'skill' },
     { id: 'sk-3', name: 'Python', type: 'skill' },

@@ -38,6 +38,8 @@ interface Graph2DProps {
   focusRequest?: { id: string; ts: number } | null
   onSelectNode: (node: NodeDetail | null) => void
   onTogglePosition: (id: string) => void
+  /** 域超节点双击展开/收起（panorama 聚合下钻第二级；缺省域节点不可展开） */
+  onToggleDomain?: (id: string) => void
   /** 学习路径（提供时启用"宏观 DAG"视图；缺省保持原力导向全局图谱） */
   learningPath?: LearningPathItem[]
   /** 已掌握技能集（DAG 节点灰/蓝/绿编码依据） */
@@ -118,18 +120,25 @@ const DAG_STATUS_LABEL: Record<string, string> = {
   locked: '未解锁',
 }
 
+/** 域超节点配色：职能域聚合下钻的视觉锚（与状态色/技能色区分） */
+const COLOR_DOMAIN_DARK = '#818cf8'
+const COLOR_DOMAIN_LIGHT = '#4f46e5'
+
 function symbolOf(node: GraphNode): string {
   if (node.type === 'position') return SYMBOL_BY_STATUS[node.status ?? 'candidate']
   return SYMBOL_BY_TYPE[node.type]
 }
 
 function colorOf(node: GraphNode, dark: boolean): string {
+  if (node.isDomain) return dark ? COLOR_DOMAIN_DARK : COLOR_DOMAIN_LIGHT
   if (node.type === 'position') return COLOR_BY_STATUS[node.status ?? 'candidate']
   if (node.type === 'skill') return dark ? COLOR_SKILL_DARK : COLOR_SKILL_LIGHT
   return COLOR_EVIDENCE
 }
 
 function sizeOf(node: GraphNode, displayValue?: number): number {
+  // 域超节点：尺寸随成员数（3~20 岗 → 44~72px），显著大于岗位节点
+  if (node.isDomain) return Math.min(72, 44 + (node.memberCount ?? 1) * 1.4)
   const v = displayValue ?? node.value ?? 30
   const base = node.type === 'position' ? 36 : node.type === 'skill' ? 20 : 15
   const scaled = base + (v / 100) * 20
@@ -260,6 +269,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     focusRequest,
     onSelectNode,
     onTogglePosition,
+    onToggleDomain,
     learningPath,
     completedSkills,
     className,
@@ -417,6 +427,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           type: d.type,
           status: d.status,
           value: d.displayValue ?? d.value,
+          isDomain: d.isDomain,
+          memberCount: d.memberCount,
         })
       }
     })
@@ -424,7 +436,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     chart.on('dblclick', (params) => {
       if (params.dataType === 'node' && params.data) {
         const d = params.data as GraphNode
-        if (d.type === 'position') onTogglePosition(d.id)
+        if (d.isDomain) onToggleDomain?.(d.id)
+        else if (d.type === 'position') onTogglePosition(d.id)
       }
     })
 
@@ -450,7 +463,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       chart.dispose()
       chartRef.current = null
     }
-  }, [onSelectNode, onTogglePosition, resetView, applyLodBand])
+  }, [onSelectNode, onTogglePosition, onToggleDomain, resetView, applyLodBand])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -511,7 +524,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       const dimmed = filterMarks.dimNodeIds.has(n.id)
       return {
         ...n,
-        value: n.type === 'position' ? 1000 : (n.value ?? 0),
+        // 斥力权重：域超节点按成员规模锚定聚团（岗位固定 1000 的既有口径不变）
+        value: n.isDomain ? Math.min(2000, 600 + (n.memberCount ?? 0) * 30)
+          : n.type === 'position' ? 1000 : (n.value ?? 0),
         displayValue: n.value,
         symbol: symbolOf(n),
         symbolSize: sizeOf(n, n.value),
@@ -538,7 +553,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           // - band 2（zoom≥1.2）：全量（含低权技能）
           show: dimmed
             ? false
-            : n.type === 'position'
+            : n.isDomain || n.type === 'position'
               ? lodBand >= 0
               : n.type === 'skill'
                 ? lodBand === 2 || (lodBand >= 1 && (n.value ?? 0) >= labelThreshold)
@@ -546,11 +561,16 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           position: 'right',
           color: textColor,
           fontSize: 11,
-          fontWeight: n.type === 'position' ? 600 : 400,
+          fontWeight: n.isDomain || n.type === 'position' ? 600 : 400,
           backgroundColor: dark ? 'rgba(24,24,27,0.65)' : 'rgba(255,255,255,0.7)',
           borderRadius: 4,
           padding: [2, 6],
-          formatter: n.type === 'position' ? `{a|${n.name}}` : n.name,
+          formatter:
+            n.isDomain
+              ? `{a|${n.name} · ${n.memberCount ?? 0} 岗}`
+              : n.type === 'position'
+                ? `{a|${n.name}}`
+                : n.name,
           rich: {
             a: { fontWeight: 600, fontSize: 12 },
           },
@@ -623,7 +643,12 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           if (d.type === 'position' && d.status) lines.push(`状态: ${escapeHtml(d.status)}`)
           const displayValue = d.displayValue ?? d.value
           if (typeof displayValue === 'number') lines.push(`权重: ${displayValue}`)
-          const hint = d.type === 'position' ? '单击查看详情 · 双击展开/收起技能' : '单击查看详情'
+          const hint =
+            d.isDomain
+              ? `职能域 · ${d.memberCount ?? 0} 个岗位：双击展开/收起`
+              : d.type === 'position'
+                ? '单击查看详情 · 双击展开/收起技能'
+                : '单击查看详情'
           lines.push(`<span style="color:${mutedColor};font-size:11px">${hint}</span>`)
           return lines.join('<br/>')
         },
