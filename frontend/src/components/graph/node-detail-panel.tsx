@@ -192,7 +192,7 @@ export function NodeDetailPanel({
   }, [node])
 
   return (
-    <div className="flex h-full w-full flex-col bg-background">
+    <div className="flex h-full w-full flex-col bg-atlas-surface">
       {!node ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-ink-faint">
           <Network className="size-10 opacity-40" />
@@ -202,13 +202,14 @@ export function NodeDetailPanel({
       ) : (
         <>
           {/* 头部 */}
-          <div className="flex items-start justify-between gap-3 border-b border-border/60 p-4">
+          <div className="flex items-start justify-between gap-3 border-b border-atlas-grid bg-canvas/85 p-4 backdrop-blur-xl">
             <div className="flex items-start gap-3 min-w-0">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                <Icon className="size-4 text-primary" />
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-atlas-grid bg-atlas-ocean/10">
+                <Icon className="size-4 text-atlas-ocean" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-ink truncate">{node.name}</h3>
+                <p className="font-mono text-[9px] tracking-[0.16em] text-atlas-muted">NODE DOSSIER / {TYPE_LABEL[node.type]}</p>
+                <h3 className="mt-1 text-sm font-semibold text-ink truncate">{node.name}</h3>
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                     {TYPE_LABEL[node.type]}
