@@ -294,3 +294,83 @@ async def run_etl_pipeline_scheduled(ctx: dict, *, tasks_module=None) -> dict:
             "msg": "当日 ETL 已在队列/执行中，跳过重复触发",
         }
     return await tasks_module.run_etl_pipeline(ctx, run_date=run_date)
+
+
+# 管理端手动触发白名单（快捷操作面板，契约 /admin/etl/trigger）：
+# job 标识 → tasks 门面上的函数名。与 api/v1/admin_routes/etl.py 的
+# ETL_JOB_LABELS 同步维护（白名单双写点）。
+_MANUAL_JOBS: dict[str, str] = {
+    "dedup_simhash": "dedup_simhash",
+    "aggregate_positions": "aggregate_positions",
+    "run_etl_pipeline": "run_etl_pipeline",
+}
+
+
+def _jsonable_or_summary(result) -> dict:
+    """阶段返回值 → JSONB 可存 dict（不可序列化时降级字符串摘要）。"""
+    import json as _json
+
+    if not isinstance(result, dict):
+        return {"summary": str(result)}
+    try:
+        _json.dumps(result, ensure_ascii=False, default=str)
+        return result
+    except (TypeError, ValueError):
+        return {"summary": str(result)[:2000]}
+
+
+async def run_etl_job_manual(
+    ctx: dict,
+    job_name: str,
+    task_id: str,
+    *,
+    tasks_module=None,
+) -> dict:
+    """管理端手动触发的 ETL 任务统一入口（快捷操作面板数据清洗/入图按钮）。
+
+    白名单校验在 API 层完成；本包装维护 TaskStatus 生命周期
+    pending→running→success/failed——管线/阶段函数为纯计算编排不追踪
+    任务状态，与 crawl_platform 的 task_id 直写模式不同。错误详情仅入
+    服务端日志，TaskStatus.error 固定文案（防经状态查询端点透传内部信息）。
+    """
+    import json
+
+    if tasks_module is None:
+        from app.workers import tasks as tasks_module
+    from app.core.database import async_session_factory
+    from app.models.business import TaskStatus
+
+    target = _MANUAL_JOBS.get(job_name)
+    fn = getattr(tasks_module, target, None) if target else None
+
+    async with async_session_factory() as session:
+        task = await session.get(TaskStatus, task_id)
+        if task is None:
+            logger.error("手动 ETL 任务缺少 TaskStatus 行: job=%s task_id=%s", job_name, task_id)
+            return {"status": "failed", "error": "task 不存在"}
+        if fn is None:
+            task.status = "failed"
+            task.error = "未知任务类型"
+            await session.commit()
+            return {"status": "failed", "error": "未知 job"}
+
+        task.status = "running"
+        task.progress = 0.05
+        await session.commit()
+        try:
+            result = await fn(ctx)
+        except Exception:
+            logger.exception("手动 ETL 任务执行失败: job=%s task_id=%s", job_name, task_id)
+            task.status = "failed"
+            task.error = "任务执行失败"
+            await session.commit()
+            return {"status": "failed", "error": "任务执行失败"}
+
+        task.status = "success"
+        task.progress = 1.0
+        payload = {"job": job_name, **_jsonable_or_summary(result)}
+        json.dumps(payload, ensure_ascii=False, default=str)  # 写库前自证可序列化
+        task.result = payload
+        await session.commit()
+        logger.info("手动 ETL 任务完成: job=%s task_id=%s", job_name, task_id)
+        return {"status": "success"}

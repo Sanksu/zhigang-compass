@@ -61,6 +61,7 @@ from app.workers.etl import (
     _etl_limit as _etl_limit_impl,
     _run_limited_stage as _run_limited_stage_impl,
     _run_stage as _run_stage,
+    run_etl_job_manual as _run_etl_job_manual,
     run_etl_pipeline as _run_etl_pipeline,
     run_etl_pipeline_scheduled as _run_etl_pipeline_scheduled,
 )
@@ -157,6 +158,16 @@ async def run_etl_pipeline_scheduled(ctx: dict) -> dict:
     """容器内 ARQ cron 调度入口（当日幂等锁 + 转发主管线，见 app.workers.etl）。"""
     return await _run_etl_pipeline_scheduled(
         ctx,
+        tasks_module=sys.modules[__name__],
+    )
+
+
+async def run_etl_job_manual(ctx: dict, job_name: str, task_id: str) -> dict:
+    """管理端手动触发统一入口（快捷操作面板，白名单+生命周期见 app.workers.etl）。"""
+    return await _run_etl_job_manual(
+        ctx,
+        job_name,
+        task_id,
         tasks_module=sys.modules[__name__],
     )
 
