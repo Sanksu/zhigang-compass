@@ -25,18 +25,33 @@ def _skill_freq_windows(snapshots: list[dict]) -> dict[str, list[SkillFrequencyW
 
     每期快照：该技能作为 REQUIRES 目标边（target=技能）的计数即当期频次；
     快照创建时间不可用时用序号占位（仅影响展示，不影响 Z-score）。
+
+    分子与分母同边集（均仅 REQUIRES）：BELONGS_TO/ALTERNATIVE_OF 等
+    技能→技能边的 target 同样是 sk_ 前缀，混入分子会令占比可 >1 且口径
+    与 state_machine 的 REQUIRES 过滤约定相悖（评审 A-1 负责人拍板①，
+    与桑基 P1-2 同根）。旧快照边无 relation 标注则整体按历史口径兼容：
+    分子全计、分母记 0（由 detector 整序列退回计数口径）。
     """
     windows: dict[str, list[SkillFrequencyWindow]] = {}
     for snap in snapshots:
         names = _skill_name_by_id(snap)
         edges = snap.get("edges", [])
+        # 快照级判定是否携带关系标注（新旧快照形态不混布于同一版本）
+        has_relations = any(e.get("relation") for e in edges)
         # 归一化分母：当期 REQUIRES 总边数（占比口径，抗采集总量波动）
-        total_requires = sum(1 for e in edges if e.get("relation") == "REQUIRES")
+        total_requires = (
+            sum(1 for e in edges if e.get("relation") == "REQUIRES")
+            if has_relations
+            else 0
+        )
         freq: dict[str, int] = {}
         for e in edges:
             target = e.get("target")
-            if str(target).startswith("sk_"):
-                freq[target] = freq.get(target, 0) + 1
+            if not str(target).startswith("sk_"):
+                continue
+            if has_relations and e.get("relation") != "REQUIRES":
+                continue
+            freq[target] = freq.get(target, 0) + 1
         for skill_id, count in freq.items():
             windows.setdefault(skill_id, []).append(
                 SkillFrequencyWindow(
@@ -51,8 +66,20 @@ def _skill_freq_windows(snapshots: list[dict]) -> dict[str, list[SkillFrequencyW
     return windows
 
 
-def detect_signals_from_snapshots(snapshots: list[dict]) -> list[EvolutionSignal]:
-    """从快照序列检测全部技能演化信号（Emerging/Declining/Rising/Stable/Protected）。"""
+def detect_signals_from_snapshots(
+    snapshots: list[dict],
+    degraded_flags: list[bool] | None = None,
+) -> list[EvolutionSignal]:
+    """从快照序列检测全部技能演化信号（Emerging/Declining/Rising/Stable/Protected）。
+
+    degraded_flags 与 snapshots 等长对齐：命中 data_warning（证据量较上期
+    萎缩 <50% / 膨胀 >200%）的快照整期剔除——部分采集源故障时总量骤变会
+    反向放大其余技能占比产生伪 emerging，此类窗口既不作为 current 也不进入
+    μ/σ（评审 A-3 负责人拍板①；端点侧「打标不剔除」注解层不受影响）。
+    剔除后不足 2 期返回空（数据不足不武断判定）。
+    """
+    if degraded_flags is not None:
+        snapshots = [s for s, bad in zip(snapshots, degraded_flags) if not bad]
     if len(snapshots) < 2:
         return []
 

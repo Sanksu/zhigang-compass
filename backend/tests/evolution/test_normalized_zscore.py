@@ -93,3 +93,81 @@ def test_snapshots_with_relation_use_ratio():
     )
     by_id = {s.skill_id: s for s in signals}
     assert by_id["sk_x"].trend != SkillEvolutionTrend.DECLINING
+
+
+# ── 评审三确认项修复回归（负责人拍板 A-1①/A-2①/A-3①，08-22）──
+
+
+def test_mixed_caliber_series_falls_back_to_counts_whole_series():
+    """A-2① 回归：新旧口径混排序列整列退回计数口径。
+
+    历史为计数口径（无分母），当前窗口有占比分母——逐窗口独立 fallback 时
+    current 取占比 0.09 而历史均值 ~61，z ≈ −60 批量伪 declining；整列同
+    口径后全序列用计数，真实上升仍判 emerging。
+    """
+    detector = EvolutionDetector()
+    signal = detector.detect_skill("sk_x", _win(90, 1000), [_win(60), _win(62), _win(61)])
+    assert signal.trend == SkillEvolutionTrend.EMERGING
+
+
+def test_numerator_counts_requires_edges_only():
+    """A-1① 回归：分子仅计 REQUIRES 边，BELONGS_TO 等技能→技能边不混入。
+
+    分母本就只数 REQUIRES；分子若混入 BELONGS_TO 则占比可 >1，且与
+    state_machine 的 REQUIRES 过滤约定相悖。
+    """
+    from app.services.evolution.trend_service import _skill_freq_windows
+
+    snap = {
+        "nodes": [{"id": "sk_x", "name": "X", "type": "skill"}],
+        "edges": (
+            [{"source": f"pos_{i}", "target": "sk_x", "relation": "REQUIRES"} for i in range(3)]
+            + [{"source": f"sk_p{i}", "target": "sk_x", "relation": "BELONGS_TO"} for i in range(5)]
+        ),
+        "version_id": "v1",
+    }
+    seq = _skill_freq_windows([snap])["sk_x"]
+    assert seq[0].frequency == 3
+    assert seq[0].total_requires == 3
+
+
+def _ratio_snap(version: str, freq: int, other: int) -> dict:
+    edges = [{"source": f"pos_{i}", "target": "sk_x", "relation": "REQUIRES"} for i in range(freq)]
+    edges += [
+        {"source": f"q_{i}", "target": f"sk_o{i}", "relation": "REQUIRES"} for i in range(other)
+    ]
+    return {
+        "nodes": [{"id": "sk_x", "name": "X", "type": "skill"}],
+        "edges": edges,
+        "version_id": version,
+    }
+
+
+def test_degraded_snapshot_excluded_no_reverse_pseudo_emerging():
+    """A-3① 回归：命中 data_warning 的快照整期剔除。
+
+    第三期部分源故障（REQUIRES 总量 1060→160，compute_data_warning 必然
+    告警）：技能频次未降而占比翻数倍，不剔除时伪 emerging；剔除后该期
+    既不作 current 也不进 μ/σ。
+    """
+    snaps = [
+        _ratio_snap("v1", 58, 1000),
+        _ratio_snap("v2", 62, 1000),
+        _ratio_snap("v3", 60, 100),  # 总量骤降、sk_x 计数不变 → 占比虚高
+    ]
+
+    unsuppressed = detect_signals_from_snapshots(snaps)
+    by_id = {s.skill_id: s for s in unsuppressed}
+    assert by_id["sk_x"].trend == SkillEvolutionTrend.EMERGING  # 前提锚点：确为伪信号
+
+    suppressed = detect_signals_from_snapshots(snaps, degraded_flags=[False, False, True])
+    by_id = {s.skill_id: s for s in suppressed}
+    assert by_id["sk_x"].trend == SkillEvolutionTrend.STABLE  # 只剩两期同况快照 → z=0
+
+
+def test_all_snapshots_degraded_returns_empty():
+    """A-3① 边界：全部快照被剔除 → 数据不足返回空，不武断判定。"""
+    assert detect_signals_from_snapshots(
+        [_ratio_snap("v1", 60, 1000), _ratio_snap("v2", 62, 1000)],
+        degraded_flags=[True, True],
+    ) == []
