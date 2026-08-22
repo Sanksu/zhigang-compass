@@ -92,10 +92,12 @@ def generate_diagnosis(
         全部 provider 失败（诊断是增强功能，多 provider 降级后仍失败时向上传播）
     """
     chain = llm or LLMProviderChain()
+    # must_score 可空（A1 口径：无必备门槛岗位为 None），预格式化避免误导性"必备 0.00"
+    must_raw = data.get("must_score")
     prompt = DIAGNOSIS_TASK_TEMPLATE.format(
         position_name=data.get("position_name", ""),
         total_score=float(data.get("total_score", 0)),
-        must_score=float(data.get("must_score", 0)),
+        must_score=f"{float(must_raw):.2f}" if must_raw is not None else "无门槛",
         nice_score=float(data.get("nice_score", 0)),
         exp_score=float(data.get("exp_score", 0)),
         matched="、".join(data.get("matched_must") or []) or "无",

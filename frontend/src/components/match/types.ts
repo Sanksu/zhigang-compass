@@ -29,7 +29,8 @@ export interface RecommendItem {
   position_id: string
   position_name: string
   total_score: number
-  must_score: number
+  /** 岗位无必备技能门槛时为 null（A1 口径：无信息不判分，总分重归一） */
+  must_score: number | null
   nice_score: number
   exp_score: number
   summary: string
@@ -116,7 +117,8 @@ export interface MatchResult {
   position_id: string
   position_name: string
   total_score: number
-  must_score: number
+  /** 岗位无必备技能门槛时为 null（A1 口径：无信息不判分，总分重归一） */
+  must_score: number | null
   nice_score: number
   exp_score: number
   summary: string

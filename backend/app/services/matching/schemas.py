@@ -93,13 +93,19 @@ class MatchResult(BaseModel):
     position_id: str
     position_name: str
     total_score: float = Field(ge=0.0, le=1.0)
-    must_score: float = Field(ge=0.0, le=1.0)
+    must_score: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="必备技能匹配分；岗位无必备技能门槛时为 None（无信息不判分，总分重归一）",
+    )
     nice_score: float = Field(ge=0.0, le=1.0)
     exp_score: float = Field(ge=0.0, le=1.0)
     matched_must: list[str] = Field(default_factory=list, description="已匹配的必备技能名")
     missing_must: list[str] = Field(default_factory=list, description="缺失的必备技能名")
     summary: str = Field(default="", description="匹配摘要，供前端展示")
-    unqualified: bool = Field(default=False, description="必备技能全缺失判零时为 True")
+    unqualified: bool = Field(
+        default=False,
+        description="必备技能全缺失（或无门槛岗位加分技能全未命中）判零时为 True",
+    )
     radar: dict = Field(
         default_factory=dict,
         description="人岗比对五维雷达（§9.5）：must/nice/experience/education/projects，"
