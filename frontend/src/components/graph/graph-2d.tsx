@@ -741,33 +741,41 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand, evolutionMarks])
 
   // 新兴岗位脉冲光晕（视觉评审 P1-3）：emerging 节点 shadowBlur 呼吸动画
-  // （~1.6s 周期），让"哪里在变热"一眼可见。按 id 局部 setOption merge
-  // （节点数少，100ms 步进对 60fps 画布无压力）；主 option 重建会复位
-  // itemStyle，下一 tick 自动重涂。DAG 视图/无新兴节点时不启动。
-  const emergingNodes = useMemo(
-    () => data.nodes.filter((n) => n.type === 'position' && n.status === 'emerging'),
+  // （~1.6s 周期），让"哪里在变热"一眼可见。⚠️ 不可经
+  // setOption({series:[{data:[…]}]}) 做局部更新——data 数组在 merge 模式下是
+  // 全量替换语义，只传 emerging 节点会把其余节点全部判删、画布坍缩成几个点
+  // （"多次点击后图缩成一个小点"的根因）。改为直接改写节点图形元素的 shadow
+  // 属性（零 data diff、不重启力导向）；主 option 重建会生成新元素复位样式，
+  // 下一 tick 自动重涂。DAG 视图/无新兴节点时不启动。
+  const emergingIdx = useMemo(
+    () =>
+      data.nodes
+        .map((n, i) => (n.type === 'position' && n.status === 'emerging' ? i : -1))
+        .filter((i) => i >= 0),
     [data],
   )
   useEffect(() => {
-    if (viewMode !== 'graph' || emergingNodes.length === 0) return
+    if (viewMode !== 'graph' || emergingIdx.length === 0) return
     const dark = isDark()
     let phase = 0
     const timer = window.setInterval(() => {
       phase = (phase + 1) % 16
       const glow = 8 + ((Math.sin((phase / 16) * Math.PI * 2) + 1) / 2) * 16
-      chartRef.current?.setOption({
-        series: [
-          {
-            data: emergingNodes.map((n) => ({
-              id: n.id,
-              itemStyle: { shadowBlur: glow, shadowColor: colorOf(n, dark) },
-            })),
-          },
-        ],
-      })
+      const chart = chartRef.current
+      if (!chart) return
+      const list = (chart as unknown as { getModel(): EChartsModel }).getModel().getSeriesByIndex(0)?.getData()
+      if (!list) return
+      for (const idx of emergingIdx) {
+        const el = list.getItemGraphicEl(idx)
+        if (el) {
+          el.shadowBlur = glow
+          el.shadowColor = colorOf(data.nodes[idx], dark)
+          el.dirty()
+        }
+      }
     }, 100)
     return () => window.clearInterval(timer)
-  }, [emergingNodes, viewMode, themeVersion])
+  }, [emergingIdx, data, viewMode, themeVersion])
 
   useEffect(() => {
     const chart = chartRef.current
