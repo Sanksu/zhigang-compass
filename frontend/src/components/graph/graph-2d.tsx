@@ -340,9 +340,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     applyLodBand(1)
   }, [applyLodBand])
 
-  /** 解析节点当前布局坐标并换算目标 center（节点不存在或布局未就绪返回 null） */
-  const resolveCenter = useCallback(
-    (id: string, targetZoom: number): [number, number] | null => {
+  /** 解析节点当前布局坐标（节点不存在或布局未就绪返回 null） */
+  const resolveNodePoint = useCallback(
+    (id: string): [number, number] | null => {
       const chart = chartRef.current
       if (!chart) return null
       const node = data.nodes.find((n) => n.id === id)
@@ -354,27 +354,28 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       if (idx < 0) return null
       const layout = list.getItemLayout(idx)
       if (!layout || layout.length < 2) return null
-      const [x, y] = layout
-      const W = chart.getWidth()
-      const H = chart.getHeight()
-      return [0.5 - (x * targetZoom) / W, 0.5 - (y * targetZoom) / H]
+      return [layout[0], layout[1]]
     },
     [data.nodes],
   )
 
+  // view 坐标系的 center 语义是「缩放锚点的图坐标」（Number 按 pixel 解析，非画布
+  // 百分比），锚点会被平移到画布中心——聚焦节点须直接传节点布局坐标。历史坑：
+  // 曾按 screen = center%×W + zoom×point 语义换算出 0.x 量级小数传入，被
+  // parsePercent 当作 0.x 像素，镜头每次都锚到图原点外，全图被推出画布外。
   const focusNode = useCallback(
     (id: string) => {
       const chart = chartRef.current
       if (!chart) return
-      const center = resolveCenter(id, 2.4)
-      if (!center) return
+      const point = resolveNodePoint(id)
+      if (!point) return
       chart.setOption({
-        series: [{ zoom: 2.4, center, animationDurationUpdate: 0 }],
+        series: [{ zoom: 2.4, center: point, animationDurationUpdate: 0 }],
       })
       // 编程式聚焦放大也会改变 zoom 档位——同步 LOD（前端聚焦到 2.4 → 全量标签）
       applyLodBand(2.4)
     },
-    [resolveCenter, applyLodBand],
+    [resolveNodePoint, applyLodBand],
   )
 
   // 演示书签飞行：带缓动的镜头过渡（全局 animation:false 需按次临时开启）。
@@ -387,15 +388,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       const tryFly = () => {
         const chart = chartRef.current
         if (!chart) return
-        const center = resolveCenter(id, targetZoom)
-        if (center) {
+        const point = resolveNodePoint(id)
+        if (point) {
           const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
           const duration = reduceMotion ? 0 : FLY_DURATION_MS
           chart.setOption({
             series: [
               {
                 zoom: targetZoom,
-                center,
+                center: point,
                 animation: duration > 0,
                 animationDurationUpdate: duration,
                 animationEasingUpdate: 'cubicInOut',
@@ -412,7 +413,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       }
       tryFly()
     },
-    [resolveCenter, applyLodBand],
+    [resolveNodePoint, applyLodBand],
   )
 
   useImperativeHandle(ref, () => ({ focusNode, resetView, flyTo }), [focusNode, resetView, flyTo])
