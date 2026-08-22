@@ -1,17 +1,13 @@
 import { ChevronDown, RotateCcw, SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
 import type { PositionStatus } from './types'
-import { COLOR_SOFT_LIGHT } from './graph-utils'
+import { GRAPH_STATUS_META, GRAPH_STATUS_ORDER } from './graph-visual-tokens'
 import { cn } from '@/lib/utils'
 
-const ALL_STATUSES: { value: PositionStatus; label: string; color: string }[] = [
-  { value: 'active', label: '活跃', color: '#64748b' },
-  { value: 'stable', label: '稳定', color: '#3b82f6' },
-  { value: 'emerging', label: '新兴', color: '#10b981' },
-  { value: 'candidate', label: '候选', color: '#71717a' },
-  { value: 'declining', label: '衰退', color: '#f59e0b' },
-  { value: 'archived', label: '归档', color: '#ef4444' },
-]
+const ALL_STATUSES: { value: PositionStatus; label: string; color: string }[] = GRAPH_STATUS_ORDER.map((value) => ({
+  value,
+  ...GRAPH_STATUS_META[value],
+}))
 
 interface GraphFilterPanelProps {
   minWeight: number
@@ -112,7 +108,7 @@ export function GraphFilterPanel({
               {onToggleSoftSkills && (
                 <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-ink-secondary hover:bg-subtle">
                   <input type="checkbox" checked={!hideSoftSkills} onChange={(event) => onToggleSoftSkills(!event.target.checked)} className="size-3 rounded accent-primary" aria-label="显示软技能" />
-                  <span className="size-2 rounded-full" style={{ backgroundColor: COLOR_SOFT_LIGHT }} />
+                  <span className="size-2 rounded-full bg-graph-soft-skill" />
                   显示软技能
                 </label>
               )}

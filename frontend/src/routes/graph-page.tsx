@@ -817,7 +817,7 @@ export function GraphPage() {
         <span className="font-medium text-ink-secondary">图例：</span>
         <span className="flex items-center gap-1.5" role="listitem">
           <span
-            className="size-3 rounded-full bg-[#4f46e5] dark:bg-[#818cf8]"
+            className="size-3 rounded-full bg-graph-domain"
             role="img"
             aria-label="职能域超节点：靛蓝色大圆，尺寸随成员岗位数"
           /> 职能域
@@ -846,11 +846,11 @@ export function GraphPage() {
           <span className="size-2.5 rounded-md bg-state-archived" role="img" aria-label="归档岗位：红色圆角矩形" /> 归档
         </span>
         <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-full bg-[#09090b] dark:bg-[#fafafa]" role="img" aria-label="技术技能节点" /> 技术技能
+          <span className="size-2.5 rounded-full bg-graph-skill" role="img" aria-label="技术技能节点" /> 技术技能
         </span>
         <span className="flex items-center gap-1.5" role="listitem">
           <span
-            className="size-2.5 rounded-full bg-[#ec4899] dark:bg-[#f472b6]"
+            className="size-2.5 rounded-full bg-graph-soft-skill"
             role="img"
             aria-label="软技能节点：粉色圆形（责任心/沟通能力等软素质）"
           />{' '}

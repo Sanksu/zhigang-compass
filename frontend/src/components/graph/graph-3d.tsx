@@ -19,7 +19,8 @@ import { isDark } from '@/lib/utils'
 import ForceGraph3D, { type ForceGraphMethods, type NodeObject } from 'react-force-graph-3d'
 import * as THREE from 'three'
 import type { GraphData, GraphNode, NodeDetail } from './types'
-import { COLOR_BY_STATUS, COLOR_SOFT_DARK, COLOR_SOFT_LIGHT, isSoftSkill, nodeRadius } from './graph-utils'
+import { isSoftSkill, nodeRadius } from './graph-utils'
+import { graphColors, graphNodeColor } from './graph-visual-tokens'
 
 /** react-force-graph-3d 类型定义未暴露的 d3 力模拟参数方法（A2 帧率保障用）。 */
 type ForceGraphD3Params = ForceGraphMethods<NodeObject<GraphNode>> & {
@@ -51,17 +52,13 @@ export interface Graph3DHandle {
   flyTo: (id: string, dist?: number) => void
 }
 
-const COLOR_EVIDENCE = '#a1a1aa'
-
-function skillColor(dark: boolean): string {
-  return dark ? '#fafafa' : '#09090b'
-}
-
 function nodeColor(node: GraphNode, dark: boolean): string {
-  if (node.type === 'position') return COLOR_BY_STATUS[node.status ?? 'candidate']
-  if (isSoftSkill(node)) return dark ? COLOR_SOFT_DARK : COLOR_SOFT_LIGHT
-  if (node.type === 'skill') return skillColor(dark)
-  return COLOR_EVIDENCE
+  const theme = dark ? 'dark' : 'light'
+  if (node.isDomain) return graphNodeColor(theme, 'domain')
+  if (node.type === 'position') return graphNodeColor(theme, 'position', node.status ?? 'candidate')
+  if (isSoftSkill(node)) return graphNodeColor(theme, 'softSkill')
+  if (node.type === 'skill') return graphNodeColor(theme, 'skill')
+  return graphNodeColor(theme, 'evidence')
 }
 
 /** 节点布局质量（影响力导向布局，与视觉尺寸无关——视觉尺寸由 buildNodeObject 控制） */
@@ -84,11 +81,12 @@ function makeTextSprite(text: string, dark: boolean, fontSize = 14): THREE.Sprit
   const h = fontSize + 10
   canvas.width = w
   canvas.height = h
+  const colors = graphColors(dark ? 'dark' : 'light')
   ctx.beginPath()
   ctx.roundRect(0, 0, w, h, 5)
-  ctx.fillStyle = dark ? 'rgba(9,9,11,0.72)' : 'rgba(255,255,255,0.82)'
+  ctx.fillStyle = colors.labelSurface
   ctx.fill()
-  ctx.fillStyle = dark ? '#fafafa' : '#09090b'
+  ctx.fillStyle = colors.ink
   ctx.font = font
   ctx.textBaseline = 'middle'
   ctx.fillText(text, pad, h / 2)
@@ -126,7 +124,7 @@ function buildNodeObject(
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(r * 1.15, r * 1.5, 32),
       new THREE.MeshBasicMaterial({
-        color: '#ffffff',
+        color: graphColors(dark ? 'dark' : 'light').selectionRing,
         transparent: true,
         opacity: 0.65,
         side: THREE.DoubleSide,
@@ -268,8 +266,9 @@ export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
     [data],
   )
 
-  const bgColor = dark ? '#09090b' : '#ffffff'
-  const linkColor = dark ? '#52525b' : '#a1a1aa'
+  const colors = graphColors(dark ? 'dark' : 'light')
+  const bgColor = colors.canvas
+  const linkColor = colors.edge
 
   // 单击 → 选中；双击岗位 → 展开/收起其技能（ForceGraph3D 无原生双击，用点击间隔检测）
   const lastClickRef = useRef<{ id: string; ts: number }>({ id: '', ts: 0 })

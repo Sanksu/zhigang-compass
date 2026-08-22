@@ -15,7 +15,8 @@ import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 import type { EChartsModel } from './graph-layout'
-import { COLOR_BY_STATUS, COLOR_SOFT_DARK, COLOR_SOFT_LIGHT, computeFilterMarks, isSoftSkill, skillLabelThreshold } from './graph-utils'
+import { COLOR_BY_STATUS, computeFilterMarks, isSoftSkill, skillLabelThreshold } from './graph-utils'
+import { graphColors, graphNodeColor, GRAPH_OPACITY } from './graph-visual-tokens'
 import { buildDagGraph, type DagSkillLink, type DagSkillNode } from '@/components/learning/learning-timeline'
 import type { LearningPathItem } from '@/components/match/types'
 import { GraphFilterPanel } from './graph-filter-panel'
@@ -68,9 +69,6 @@ const SYMBOL_BY_STATUS: Record<PositionStatus, string> = {
   archived: 'roundRect',
 }
 
-const COLOR_SKILL_LIGHT = '#09090b'
-const COLOR_SKILL_DARK = '#fafafa'
-const COLOR_EVIDENCE = '#a1a1aa'
 
 // ── 聚光灯 (Focus + Context) 参数（task T1）──────────────────────
 // 悬停/选中节点时，背景节点与边透明度压到该值，制造"聚焦当前邻域"的对比，
@@ -120,21 +118,18 @@ const DAG_STATUS_LABEL: Record<string, string> = {
   locked: '未解锁',
 }
 
-/** 域超节点配色：职能域聚合下钻的视觉锚（与状态色/技能色区分） */
-const COLOR_DOMAIN_DARK = '#818cf8'
-const COLOR_DOMAIN_LIGHT = '#4f46e5'
-
 function symbolOf(node: GraphNode): string {
   if (node.type === 'position') return SYMBOL_BY_STATUS[node.status ?? 'candidate']
   return SYMBOL_BY_TYPE[node.type]
 }
 
 function colorOf(node: GraphNode, dark: boolean): string {
-  if (node.isDomain) return dark ? COLOR_DOMAIN_DARK : COLOR_DOMAIN_LIGHT
-  if (node.type === 'position') return COLOR_BY_STATUS[node.status ?? 'candidate']
-  if (isSoftSkill(node)) return dark ? COLOR_SOFT_DARK : COLOR_SOFT_LIGHT
-  if (node.type === 'skill') return dark ? COLOR_SKILL_DARK : COLOR_SKILL_LIGHT
-  return COLOR_EVIDENCE
+  const theme = dark ? 'dark' : 'light'
+  if (node.isDomain) return graphNodeColor(theme, 'domain')
+  if (node.type === 'position') return graphNodeColor(theme, 'position', node.status ?? 'candidate')
+  if (isSoftSkill(node)) return graphNodeColor(theme, 'softSkill')
+  if (node.type === 'skill') return graphNodeColor(theme, 'skill')
+  return graphNodeColor(theme, 'evidence')
 }
 
 function sizeOf(node: GraphNode, displayValue?: number): number {
@@ -527,9 +522,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     }
 
     const dark = isDark()
-    const textColor = dark ? '#fafafa' : '#09090b'
-    const mutedColor = dark ? '#a1a1aa' : '#71717a'
-    const borderColor = dark ? '#27272a' : '#e4e4e7'
+    const colors = graphColors(dark ? 'dark' : 'light')
+    const textColor = colors.ink
+    const mutedColor = colors.muted
+    const borderColor = colors.border
     const labelThreshold = skillLabelThreshold(data.nodes)
 
     const nodes = data.nodes.map((n) => {
@@ -548,7 +544,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           color: colorOf(n, dark),
           borderColor,
           borderWidth: 1,
-          opacity: 0.95,
+          opacity: GRAPH_OPACITY.node,
           ...(n.type === 'position' && expandedPositions?.has(n.id)
             ? {
                 borderColor: dark ? '#c7d2fe' : '#ffffff',
@@ -575,7 +571,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           color: textColor,
           fontSize: 11,
           fontWeight: n.isDomain || n.type === 'position' ? 600 : 400,
-          backgroundColor: dark ? 'rgba(9,9,11,0.48)' : 'rgba(255,255,255,0.58)',
+          backgroundColor: colors.labelSurface,
           borderRadius: 3,
           padding: [2, 5],
           formatter:
@@ -616,15 +612,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         lineStyle: {
           width: isMust ? Math.max(0.6, weightToWidth(e.weight) * 0.72) : Math.max(0.45, weightToWidth(e.weight) * 0.42),
           type: isMust ? 'solid' : 'dashed',
-          color: dark ? '#3f3f46' : borderColor,
-          opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : dark ? 0.26 : 0.2,
+          color: colors.edge,
+          opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : GRAPH_OPACITY.edge[dark ? 'dark' : 'light'],
           curveness: 0,
         },
         emphasis: {
           lineStyle: {
             opacity: 0.95,
             width: weightToWidth(e.weight) * 1.8,
-            color: isMust ? '#3b82f6' : '#10b981',
+            color: isMust ? colors.edgeStrong : colors.edgeOptional,
           },
         },
       }
@@ -634,8 +630,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       backgroundColor: 'transparent',
       tooltip: {
         trigger: 'item',
-        backgroundColor: dark ? '#18181b' : '#ffffff',
-        borderColor: dark ? '#3f3f46' : '#d4d4d8',
+        backgroundColor: colors.tooltip,
+        borderColor: colors.tooltipBorder,
         borderWidth: 1,
         textStyle: { color: textColor, fontSize: 12 },
         formatter: (params: EChartsParam) => {
@@ -705,10 +701,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           links,
           lineStyle: { opacity: 0.3, curveness: 0 },
           categories: [
-            { name: 'position', itemStyle: { color: '#3b82f6' } },
-            { name: 'skill', itemStyle: { color: dark ? '#fafafa' : '#09090b' } },
-            { name: 'soft', itemStyle: { color: dark ? COLOR_SOFT_DARK : COLOR_SOFT_LIGHT } },
-            { name: 'evidence', itemStyle: { color: '#a1a1aa' } },
+            { name: 'position', itemStyle: { color: COLOR_BY_STATUS.candidate } },
+            { name: 'skill', itemStyle: { color: colors.skill } },
+            { name: 'soft', itemStyle: { color: colors.softSkill } },
+            { name: 'evidence', itemStyle: { color: colors.evidence } },
           ],
         },
       ],
