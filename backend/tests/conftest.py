@@ -4,6 +4,11 @@
 - _use_tmp_keys：全局注入临时密钥路径（create/decode_token 均经 settings 读取）
 """
 
+import asyncio
+import inspect
+import sys
+from collections.abc import Awaitable, Callable
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -44,3 +49,46 @@ def _use_tmp_keys(tmp_rsa_keys):
     with patch.object(settings, "jwt_private_key_path", priv), \
          patch.object(settings, "jwt_public_key_path", pub):
         yield
+
+
+async def _close_database_resources(database: Any) -> list[tuple[str, Exception]]:
+    """按应用生命周期语义关闭数据库模块中的已创建资源。"""
+    closers: tuple[tuple[str, Callable[[], Awaitable[None] | None]], ...] = (
+        ("async_neo4j_driver", database.async_neo4j_driver.close),
+        ("neo4j_driver", database.neo4j_driver.close),
+        ("redis_client", database.redis_client.aclose),
+        ("engine", database.engine.dispose),
+    )
+    errors: list[tuple[str, Exception]] = []
+
+    for resource_name, close in closers:
+        try:
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+        except Exception as error:
+            errors.append((resource_name, error))
+
+    return errors
+
+
+def _report_cleanup_failures(session: pytest.Session, errors: list[tuple[str, Exception]]) -> None:
+    """将所有清理错误输出至终端，并保留原有的失败退出状态。"""
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        for resource_name, error in errors:
+            reporter.write_line(f"ERROR: failed to close {resource_name}: {error!r}")
+
+    if session.exitstatus == pytest.ExitCode.OK:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
+    """关闭已加载数据库模块的资源，并将清理失败计入测试会话结果。"""
+    database = sys.modules.get("app.core.database")
+    if database is None:
+        return
+
+    errors = asyncio.run(_close_database_resources(database))
+    if errors:
+        _report_cleanup_failures(session, errors)

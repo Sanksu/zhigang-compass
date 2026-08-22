@@ -6,14 +6,15 @@
 - script-src / worker-src / img-src 保持既有限制（设计文档 §11.4 契约）
 """
 
+import httpx
+import pytest
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
-from starlette.testclient import TestClient
 
 from app.core.middleware import SecurityHeadersMiddleware
 
 
-def _client():
+def _app():
     app = Starlette()
     app.add_middleware(SecurityHeadersMiddleware)
 
@@ -21,23 +22,32 @@ def _client():
         return PlainTextResponse("ok")
 
     app.add_route("/", _root)
-    return TestClient(app)
+    return app
 
 
 class TestCSPHeaders:
-    def test_tooltip_inline_style_allowed(self):
+    @pytest.mark.asyncio
+    async def test_tooltip_inline_style_allowed(self):
         """ECharts tooltip 内联样式放行（style-src 'unsafe-inline'）。"""
-        csp = _client().get("/").headers["content-security-policy"]
+        transport = httpx.ASGITransport(app=_app())
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            csp = (await client.get("/")).headers["content-security-policy"]
         assert "style-src 'self' 'unsafe-inline'" in csp
 
-    def test_inline_font_allowed(self):
+    @pytest.mark.asyncio
+    async def test_inline_font_allowed(self):
         """base64 内联字体放行（font-src data:）。"""
-        csp = _client().get("/").headers["content-security-policy"]
+        transport = httpx.ASGITransport(app=_app())
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            csp = (await client.get("/")).headers["content-security-policy"]
         assert "font-src 'self' data:" in csp
 
-    def test_script_worker_img_restrictions_kept(self):
+    @pytest.mark.asyncio
+    async def test_script_worker_img_restrictions_kept(self):
         """既有脚本/worker/图片限制不回退 default-src。"""
-        csp = _client().get("/").headers["content-security-policy"]
+        transport = httpx.ASGITransport(app=_app())
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            csp = (await client.get("/")).headers["content-security-policy"]
         assert "script-src 'self' 'unsafe-inline'" in csp
         assert "worker-src 'self' blob:" in csp
         assert "img-src 'self' data: https:" in csp
