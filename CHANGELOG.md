@@ -5,6 +5,10 @@
 
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
+### 2026-08-22
+- **第五轮全项目代码审查立即修批次**：基于《全项目代码审查报告_20260822.md》（develop 8f0f3d6 增量 +10,256 行，总评 B+）拍板清单 #1/#2 三处 P1——**P1-1** dict-guard 动态过滤跨容器断链修复（compose api/worker 补 `skill_filters_dynamic.json` 单文件挂载；`dynamic_filters._write` 弃 tmp+os.replace 改直接覆写——单文件 bind mount 上 rename 覆盖挂载点 EBUSY，与 runtime_settings 同口径，损坏由 `_load` 空层兜底；DEPLOY.md 补宿主空层文件预建引导）；**P1-6** `compute_confidence` 下界钳制（全零输入+孤立技能曾产出 −0.075 被 Schema `ge=0.0` 拒绝崩 discovery worker，实证路径）；**P1-7** `thresholds._get` 坏值按键回退默认（null/非数字单键曾致 int()/float() 裸抛 TypeError 停摆 SimHash/时滞检测全链，实证路径）。连带修 **dict_guard_gate 非确定性取样**（`next(iter(SKILL_STOPWORDS))` 随 PYTHONHASHSEED 抽中「微」/白名单重叠词致 CI 偶发红，改排序筛选纯停用词）。幻觉防控域改动按红线留痕：负责人拍板 + 张恺天知会
+- **第五轮全项目代码审查报告落档**（#402）：docs/reviews/ 全项目代码审查报告_20260822.md，总评 B+/P1×7/Z-score 分支三条必须确认待张恺天裁决/拍板清单 12 项
+
 ### 2026-08-21
 - **答辩演示优化五连**（#367/#369/#371/#372/#374）：图谱筛选改压暗式打标（`computeFilterMarks` 打标不剔除，布局与镜头稳定，顺带修复滑筛选条镜头跳回存量问题）；2D/3D 演示视角书签 `flyTo`（600ms 缓动飞行，锚定具名岗位簇，节点缺失自动隐藏）；简历匹配页两处裸 spinner 换 AI 生成感加载（`AiThinkingCard` 骨架+分阶段文案轮播 + overall_summary 打字机，reduced-motion 退化）；岗位级「已人工校验」Badge（契约 `PositionEditDetail.has_edit_log` 只读透出 PositionEditLog 存在性 + 审核草案「AI 生成」标注，人机协同可视化）；图谱大屏演示模式（focusMode 隐藏顶导/侧栏、画布 Card 同树切 fixed 不重挂载、详情栏转浮层、Esc 退出 + 浏览器 Fullscreen，新增 mock E2E 用例）
 - **审查 P2 批次 + M4 收尾**（#376/#377/#378）：mockLogin 第三处硬编码口令改 env 注入+中性占位（M4 漏网之鱼）；删 use-graph-pan 死代码 + match/types 注释回流（L-14/L-15）；workers 23 处 print→logging + ETL 阶段失败聚合 send_alert + crawl running 态路径泄露源头修复 + CI rc==5 不再放行（L-5/L-6/L-9/L-16）+ discovery docstring 对齐实际晋升条件（A-3）；**连带修复**：归一化门禁裸调 send_alert 协程被静默丢弃（同步线程上下文）→ alerting 新增 `send_alert_sync`；M4 部署侧口令轮换已执行（backend/.env + 库内哈希同步重置，旧泄露口令实测 401 失效）
