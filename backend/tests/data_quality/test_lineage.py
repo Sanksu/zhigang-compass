@@ -6,12 +6,24 @@ lineage_summary 总览统计，以及 admin lineage 路由的分页/过滤/详�
 
 import asyncio
 
+import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from app.api.v1.admin_routes import lineage as lineage_router
 from app.services.data_quality.lineage import build_lineage, lineage_summary
 from app.services.data_quality.schemas import LineageDetail
+
+
+@pytest.fixture(autouse=True)
+def _reset_lineage_cache():
+    """隔离 #424 引入的进程级血缘缓存：各用例桩数据不同，
+    前一用例填充的缓存会让后续路由用例查不到数据（伪 404）。"""
+    lineage_router._lineage_cache_details = None
+    lineage_router._lineage_cache_at = 0.0
+    yield
+    lineage_router._lineage_cache_details = None
+    lineage_router._lineage_cache_at = 0.0
 
 
 def _rec(
