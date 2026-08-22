@@ -38,6 +38,8 @@ interface Graph3DProps {
   onSelectNode: (node: NodeDetail | null) => void
   /** 双击岗位 → 展开/收起其技能（与 2D 交互一致） */
   onTogglePosition?: (id: string) => void
+  /** 域超节点双击展开/收起（panorama 聚合下钻，与 Graph2D 对齐） */
+  onToggleDomain?: (id: string) => void
   className?: string
 }
 
@@ -165,7 +167,7 @@ function disposeObject3D(obj: THREE.Object3D): void {
 }
 
 export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
-  { data, expandedPositions, selectedId, focusRequest, onSelectNode, onTogglePosition, className },
+  { data, expandedPositions, selectedId, focusRequest, onSelectNode, onTogglePosition, onToggleDomain, className },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -274,9 +276,10 @@ export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
     (node: GraphNode) => {
       const now = Date.now()
       if (node.id === lastClickRef.current.id && now - lastClickRef.current.ts < 300) {
-        // 双击：岗位展开/收起；非岗位不处理
+        // 双击：域超节点展开/收起域内岗位；普通岗位展开/收起技能；非两者不处理
         lastClickRef.current = { id: '', ts: 0 }
-        if (node.type === 'position') onTogglePosition?.(node.id)
+        if (node.isDomain) onToggleDomain?.(node.id)
+        else if (node.type === 'position') onTogglePosition?.(node.id)
         return
       }
       lastClickRef.current = { id: node.id, ts: now }
@@ -286,9 +289,11 @@ export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
         type: node.type,
         status: node.status,
         value: node.value,
+        isDomain: node.isDomain,
+        memberCount: node.memberCount,
       })
     },
-    [onSelectNode, onTogglePosition],
+    [onSelectNode, onTogglePosition, onToggleDomain],
   )
 
   // 点击空白区域清除选中

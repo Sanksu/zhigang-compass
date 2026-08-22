@@ -99,6 +99,8 @@ interface NodeDetailPanelProps {
   }
   positionExpanded?: boolean
   onTogglePosition?: (id: string) => void
+  /** 域超节点双击等价的展开按钮（panorama 聚合下钻；缺省不渲染） */
+  onToggleDomain?: (id: string) => void
   skillDetail?: SkillDetail | null
   positionDetail?: PositionDetail | null
   skillEvidence?: SkillEvidenceItem[]
@@ -157,6 +159,7 @@ export function NodeDetailPanel({
   similarSkills,
   positionExpanded,
   onTogglePosition,
+  onToggleDomain,
   onSelectSkill,
   onClose,
   learningStatus,
@@ -210,9 +213,14 @@ export function NodeDetailPanel({
                   <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                     {TYPE_LABEL[node.type]}
                   </Badge>
-                  {node.type === 'position' && node.status && (
+                  {node.type === 'position' && node.status && !node.isDomain && (
                     <Badge variant="outline" className={`px-1.5 py-0 text-[10px] ${STATUS_CLASS[node.status]}`}>
                       {STATUS_LABEL[node.status]}
+                    </Badge>
+                  )}
+                  {node.isDomain && (
+                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] bg-primary/10 text-primary border-primary/30">
+                      职能域 · {node.memberCount ?? 0} 岗
                     </Badge>
                   )}
                   {node.type === 'skill' && node.level && (
@@ -280,8 +288,14 @@ export function NodeDetailPanel({
               </section>
             )}
 
-            {/* 岗位：展开/收起技能 */}
-            {node.type === 'position' && onTogglePosition && (
+            {/* 岗位：展开/收起技能；域超节点：展开/收起域内岗位 */}
+            {node.type === 'position' && node.isDomain && onToggleDomain && (
+              <Button variant="outline" className="w-full text-xs" onClick={() => onToggleDomain(node.id)}>
+                <UnfoldVertical className="mr-1.5 size-3" />
+                {positionExpanded ? '收起画布中的域内岗位' : '在画布中展开域内岗位'}
+              </Button>
+            )}
+            {node.type === 'position' && !node.isDomain && onTogglePosition && (
               <Button variant="outline" className="w-full text-xs" onClick={() => onTogglePosition(node.id)}>
                 <UnfoldVertical className="mr-1.5 size-3" />
                 {positionExpanded ? '收起画布中的技能' : '在画布中展开技能'}
@@ -332,7 +346,7 @@ export function NodeDetailPanel({
             )}
 
             {/* 岗位详情 */}
-            {node.type === 'position' && positionDetail && (
+            {node.type === 'position' && !node.isDomain && positionDetail && (
               <>
                 {(positionDetail.required_years != null || positionDetail.required_education) && (
                   <section className="space-y-1.5">

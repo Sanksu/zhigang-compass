@@ -26,6 +26,10 @@ export type GraphViewType = components['schemas']['GraphViewType']
 export type GraphNode = components['schemas']['GraphNode'] & {
   /** 节点度数（toGraphData 由 edges 统计，驱动布局斥力/大小） */
   value?: number
+  /** 域超节点标记（前端派生：panorama 聚合下钻，type 仍为 'position' 复用交互） */
+  isDomain?: boolean
+  /** 域内岗位数（仅域超节点） */
+  memberCount?: number
 }
 
 /** 契约 GraphEdge（source/target/weight/necessity/level） */
@@ -55,6 +59,9 @@ export interface NodeDetail {
   name: string
   type: NodeType
   status?: PositionStatus
+  /** 域超节点（isDomain 时不走 /graph/position/{id} 详情，本地渲染域信息） */
+  isDomain?: boolean
+  memberCount?: number
   /** 技能级别（后端 view 端点未返回，面板预留展示） */
   level?: string
   /** 证据来源（后端 view 端点未返回，面板预留展示） */

@@ -24,13 +24,16 @@ const USER = {
   bio: null,
 }
 
-/** 图谱 panorama fixture（契约 GraphViewData：2 岗位 + 3 技能 + 4 边） */
+/** 图谱 panorama fixture（契约 GraphViewData：3 岗位 + 3 技能 + 4 边） */
 const GRAPH_VIEW = {
   view_type: 'panorama',
-  stats: { nodes: 5, edges: 4, total_nodes: 5, total_edges: 4 },
+  stats: { nodes: 6, edges: 4, total_nodes: 6, total_edges: 4 },
   nodes: [
-    { id: 'pos-1', name: '前端开发工程师', type: 'position', status: 'stable' },
-    { id: 'pos-2', name: '算法工程师', type: 'position', status: 'stable' },
+    // domain_id/domain_name：域聚合下钻契约字段（两岗位分属不同域）
+    { id: 'pos-1', name: '前端开发工程师', type: 'position', status: 'stable', domain_id: 'dom_fe', domain_name: '前端开发工程师' },
+    { id: 'pos-2', name: '算法工程师', type: 'position', status: 'stable', domain_id: 'dom_general', domain_name: '通用与其他岗位' },
+    // 未回填岗位发 JSON null（契约 nullable 形态）——前端落「未分类岗位」兜底桶
+    { id: 'pos-3', name: '数据录入员', type: 'position', status: 'active', domain_id: null, domain_name: null },
     { id: 'sk-1', name: 'React', type: 'skill' },
     { id: 'sk-2', name: 'TypeScript', type: 'skill' },
     { id: 'sk-3', name: 'Python', type: 'skill' },
