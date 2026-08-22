@@ -11,6 +11,7 @@ import type { Graph3DHandle } from '@/components/graph/graph-3d'
 import { GraphAnalysisPanel } from '@/components/graph/graph-analysis-panel'
 import { GraphCommunityTree } from '@/components/graph/graph-community-tree'
 import { GraphDetailRail } from '@/components/graph/graph-detail-rail'
+import { toGraphData } from '@/components/graph/graph-adapter'
 import { aggregateByDomain, buildDomainView } from '@/components/graph/graph-domain'
 import {
   NodeDetailPanel,
@@ -22,7 +23,7 @@ import {
   type SkillEvidenceItem,
   type SkillPositionItem,
 } from '@/components/graph/node-detail-panel'
-import type { GraphData, GraphEdge, GraphNode, GraphViewType, NodeDetail } from '@/components/graph/types'
+import type { GraphData, GraphViewType, NodeDetail } from '@/components/graph/types'
 import type { LearningPathItem } from '@/components/match/types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
 import { apiGet, ApiError } from '@/lib/api'
@@ -67,18 +68,6 @@ function isWebGL2Available(): boolean {
  */
 type PanoramaData = components['schemas']['GraphViewData']
 
-const POSITION_STATUSES: GraphNode['status'][] = [
-  'candidate',
-  'emerging',
-  'stable',
-  'declining',
-  'archived',
-]
-
-function isValidStatus(s?: string): s is NonNullable<GraphNode['status']> {
-  return !!s && POSITION_STATUSES.includes(s as NonNullable<GraphNode['status']>)
-}
-
 /** 岗位中心视图自动展开的 Top 岗位数（首屏即呈现岗位-技能关系） */
 const AUTO_EXPAND_COUNT = 6
 /** 单个岗位展开的技能数上限（防止高频岗位技能全量涌入画布造成重叠） */
@@ -95,44 +84,6 @@ const DEMO_BOOKMARKS: { label: string; nodeName: string }[] = [
   { label: '前端簇', nodeName: '前端开发工程师' },
   { label: '数据簇', nodeName: '数据分析师' },
 ]
-
-/** 后端 panorama → 前端 GraphData（岗位状态取自后端，缺省 candidate；边关系 requires；
- *  domain_id/domain_name 契约字段透传——域聚合下钻消费，未回填为 null 走未分类桶） */
-function toGraphData(raw: PanoramaData): GraphData {
-  const degree = new Map<string, number>()
-  raw.edges.forEach((e) => {
-    degree.set(e.source, (degree.get(e.source) ?? 0) + 1)
-    degree.set(e.target, (degree.get(e.target) ?? 0) + 1)
-  })
-
-  const nodes: GraphNode[] = raw.nodes.map((n) => ({
-    id: n.id,
-    name: n.name,
-    type: n.type === 'skill' ? 'skill' : 'position',
-    value: degree.get(n.id) ?? 0,
-    status: n.type === 'position' ? (isValidStatus(n.status) ? n.status : 'candidate') : undefined,
-    ...(n.type === 'position' ? { domain_id: n.domain_id ?? undefined, domain_name: n.domain_name ?? undefined } : {}),
-  }))
-  const edges: GraphEdge[] = raw.edges.map((e) => ({
-    source: e.source,
-    target: e.target,
-    necessity: e.necessity === 'nice' ? 'nice' : 'must',
-    weight: e.weight,
-  }))
-  return {
-    nodes,
-    edges,
-    stats: {
-      totalPositions: nodes.filter((n) => n.type === 'position').length,
-      totalSkills: nodes.filter((n) => n.type === 'skill').length,
-      totalEdges: edges.length,
-      returnedNodes: nodes.length,
-      // 08-14 契约修复：全量节点数取后端 total_nodes（此前恒等于返回数，
-      // 「已截断采样」提示为死代码）；后端未返回时回落返回数
-      totalNodesInGraph: raw.stats?.total_nodes ?? nodes.length,
-    },
-  }
-}
 
 /** 非全景视图已由后端 /graph/view/{view_type} 提供（技术栈/级别/岗位中心均为服务端过滤）；
  *  画布岗位数上限（MAX_POSITIONS=30，见 visibleData）为前端展示层裁剪——高频岗位 Top-30

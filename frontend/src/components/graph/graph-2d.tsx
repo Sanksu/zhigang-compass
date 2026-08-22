@@ -311,6 +311,13 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     })
   }, [])
 
+  const resetFilters = useCallback(() => {
+    setMinWeight(0)
+    setHiddenStatuses(new Set())
+    setShowOnlyMustEdges(false)
+    setHideSoftSkills(false)
+  }, [])
+
   // 过滤打标（而非剔除）：布局与镜头在筛选过程中保持稳定
   const filterMarks = useMemo(
     () => computeFilterMarks(data.nodes, data.edges, { minWeight, hiddenStatuses, showOnlyMustEdges, hideSoftSkills }),
@@ -384,13 +391,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         if (!chart) return
         const center = resolveCenter(id, targetZoom)
         if (center) {
+          const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          const duration = reduceMotion ? 0 : FLY_DURATION_MS
           chart.setOption({
             series: [
               {
                 zoom: targetZoom,
                 center,
-                animation: true,
-                animationDurationUpdate: FLY_DURATION_MS,
+                animation: duration > 0,
+                animationDurationUpdate: duration,
                 animationEasingUpdate: 'cubicInOut',
               },
             ],
@@ -398,7 +407,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           window.setTimeout(() => {
             chartRef.current?.setOption({ series: [{ animation: false, animationDurationUpdate: 0 }] })
             applyLodBand(targetZoom)
-          }, FLY_DURATION_MS + 50)
+          }, duration + 50)
           return
         }
         if (++attempts < FLY_MAX_ATTEMPTS) window.setTimeout(tryFly, 250)
@@ -542,10 +551,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           opacity: 0.95,
           ...(n.type === 'position' && expandedPositions?.has(n.id)
             ? {
-                borderColor: dark ? '#fafafa' : '#ffffff',
-                borderWidth: 3,
-                shadowBlur: isNarrow ? 14 : 22,
-                shadowColor: hexToRgba(colorOf(n, dark), 0.55),
+                borderColor: dark ? '#c7d2fe' : '#ffffff',
+                borderWidth: 2,
+                shadowBlur: isNarrow ? 8 : 12,
+                shadowColor: hexToRgba(colorOf(n, dark), 0.38),
               }
             : {}),
           ...(dimmed ? { opacity: FILTER_DIM_OPACITY } : {}),
@@ -566,9 +575,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           color: textColor,
           fontSize: 11,
           fontWeight: n.isDomain || n.type === 'position' ? 600 : 400,
-          backgroundColor: dark ? 'rgba(24,24,27,0.65)' : 'rgba(255,255,255,0.7)',
-          borderRadius: 4,
-          padding: [2, 6],
+          backgroundColor: dark ? 'rgba(9,9,11,0.48)' : 'rgba(255,255,255,0.58)',
+          borderRadius: 3,
+          padding: [2, 5],
           formatter:
             n.isDomain
               ? `{a|${n.name} · ${n.memberCount ?? 0} 岗}`
@@ -605,10 +614,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         value: e.weight,
         silent: dimmed,
         lineStyle: {
-          width: isMust ? weightToWidth(e.weight) : Math.max(0.5, weightToWidth(e.weight) * 0.6),
+          width: isMust ? Math.max(0.6, weightToWidth(e.weight) * 0.72) : Math.max(0.45, weightToWidth(e.weight) * 0.42),
           type: isMust ? 'solid' : 'dashed',
-          color: dark ? '#52525b' : borderColor,
-          opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : dark ? 0.45 : 0.3,
+          color: dark ? '#3f3f46' : borderColor,
+          opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : dark ? 0.26 : 0.2,
           curveness: 0,
         },
         emphasis: {
@@ -623,17 +632,6 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 
     const option: echarts.EChartsCoreOption = {
       backgroundColor: 'transparent',
-      legend: {
-        bottom: 8,
-        left: 'center',
-        itemWidth: 14,
-        itemHeight: 10,
-        itemGap: 16,
-        textStyle: { color: mutedColor, fontSize: 11 },
-        data: ['position', 'skill', 'soft', 'evidence'],
-        formatter: (name: string) =>
-          name === 'position' ? '岗位' : name === 'skill' ? '技术技能' : name === 'soft' ? '软技能' : '证据',
-      },
       tooltip: {
         trigger: 'item',
         backgroundColor: dark ? '#18181b' : '#ffffff',
@@ -776,6 +774,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         onToggleMustEdges={setShowOnlyMustEdges}
         hideSoftSkills={hideSoftSkills}
         onToggleSoftSkills={setHideSoftSkills}
+        onReset={resetFilters}
         visibleCount={filterMarks.visibleNodes}
         hiddenCount={data.nodes.length - filterMarks.visibleNodes}
       />
