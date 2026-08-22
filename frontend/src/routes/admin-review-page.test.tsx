@@ -7,6 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { AdminReviewPage } from './admin-review-page'
 
 vi.mock('@/components/admin/review/candidate-review-tab', () => ({
@@ -21,12 +22,23 @@ vi.mock('@/components/admin/review/position-editor-tab', () => ({
 vi.mock('@/components/admin/review/technology-watch-tab', () => ({
   TechnologyWatchTab: () => <div>technology-watch-tab-mock</div>,
 }))
+vi.mock('@/components/admin/review/dict-guard-tab', () => ({
+  DictGuardTab: () => <div>dict-tab-mock</div>,
+}))
+
+/** AdminReviewPage 依赖 useSearchParams，需 Router 上下文（并入快捷操作 ?tab= 直达用） */
+const renderPage = (entry = '/admin/review') =>
+  render(
+    <MemoryRouter initialEntries={[entry]}>
+      <AdminReviewPage />
+    </MemoryRouter>,
+  )
 
 afterEach(cleanup)
 
 describe('AdminReviewPage 路由壳', () => {
   it('渲染四个 Tab 标签', () => {
-    render(<AdminReviewPage />)
+    renderPage()
     expect(screen.getByText('候选晋升审核')).toBeInTheDocument()
     expect(screen.getByText('演化审核（emerging）')).toBeInTheDocument()
     expect(screen.getByText('岗位人工编辑')).toBeInTheDocument()
@@ -34,7 +46,7 @@ describe('AdminReviewPage 路由壳', () => {
   })
 
   it('默认挂载候选晋升 Tab，切换时挂载对应子组件（仅激活 Tab 渲染）', () => {
-    render(<AdminReviewPage />)
+    renderPage()
     // 默认 candidate 激活
     expect(screen.getByText('candidate-tab-mock')).toBeInTheDocument()
     expect(screen.queryByText('evolution-tab-mock')).not.toBeInTheDocument()
@@ -53,5 +65,11 @@ describe('AdminReviewPage 路由壳', () => {
     fireEvent.mouseDown(screen.getByText('候选晋升审核'))
     expect(screen.getByText('candidate-tab-mock')).toBeInTheDocument()
     expect(screen.queryByText('technology-watch-tab-mock')).not.toBeInTheDocument()
+  })
+
+  it('快捷操作直达：?tab=dict 激活字典守卫 Tab', () => {
+    renderPage('/admin/review?tab=dict')
+    expect(screen.getByText('dict-tab-mock')).toBeInTheDocument()
+    expect(screen.queryByText('candidate-tab-mock')).not.toBeInTheDocument()
   })
 })
