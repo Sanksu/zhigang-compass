@@ -15,6 +15,9 @@ name: CD (images)
 on:
   push:
     branches: [develop]
+    paths:
+      - backend/**
+      - .github/workflows/cd-images.yml
   workflow_dispatch: {}
 
 # 多个 PR 连续合入 develop 时只允许最新提交发布 :develop 标签；否则旧 run
