@@ -206,6 +206,36 @@ async def test_rollback_blocked_missing_entry_conflict(dyn_spy):
     assert json.loads(resp.body)["code"] == 4090
 
 
+# ── 提案列表 / 变更审计（回归：paged_ok 首参为位置参数 items，非 data）───
+
+@pytest.mark.asyncio
+async def test_list_proposals_returns_paged_items(monkeypatch):
+    rows = [_proposal(id="p1", term="微", action="remove_stopword", status="pending")]
+
+    async def _paginate(db, stmt, page, size, **kw):
+        return rows, 1
+
+    monkeypatch.setattr(dg, "paginate", _paginate)
+    resp = await dg.list_proposals(status="pending", page=1, size=20, db=_FakeDB())
+    assert resp.code == 0
+    assert resp.data["total"] == 1
+    assert [it["id"] for it in resp.data["items"]] == ["p1"]
+
+
+@pytest.mark.asyncio
+async def test_list_changes_returns_paged_items(monkeypatch):
+    rows = [_changelog(id="c1", term="微")]
+
+    async def _paginate(db, stmt, page, size, **kw):
+        return rows, 1
+
+    monkeypatch.setattr(dg, "paginate", _paginate)
+    resp = await dg.list_changes(page=1, size=20, db=_FakeDB())
+    assert resp.code == 0
+    assert resp.data["total"] == 1
+    assert resp.data["items"][0]["id"] == "c1"
+
+
 # ── 报告 ─────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
