@@ -30,6 +30,8 @@ export interface EChartsModel {
       count(): number
       /** 原始数据项（含自定义字段如 symbolSize） */
       getRawDataItem(idx: number): Record<string, unknown> | undefined
+      /** 节点图形元素（新兴岗位脉冲直改 shadow 用；元素随主 option 重建换代，每 tick 重取） */
+      getItemGraphicEl(idx: number): { shadowBlur: number; shadowColor: string; dirty(): void } | null
     }
   } | null
 }

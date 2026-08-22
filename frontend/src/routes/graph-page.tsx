@@ -334,12 +334,14 @@ export function GraphPage() {
       })
   }
 
-  // 搜索下拉：点击外部关闭
+  // 搜索下拉：点击外部关闭。下拉面板渲染在搜索框容器（searchBoxRef）内部，
+  // contains 判定须覆盖整个容器——否则点击结果项的 mousedown 先卸载下拉，
+  // click 落空，搜索定位（focusSkill）永远不触发
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
-        setSearchResults([])
-      }
+      const t = e.target as Node
+      if (searchBoxRef.current?.contains(t)) return
+      setSearchResults([])
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
