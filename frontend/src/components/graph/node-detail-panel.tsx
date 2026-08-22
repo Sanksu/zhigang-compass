@@ -99,6 +99,8 @@ interface NodeDetailPanelProps {
   }
   positionExpanded?: boolean
   onTogglePosition?: (id: string) => void
+  /** 域超节点双击等价的展开按钮（panorama 聚合下钻；缺省不渲染） */
+  onToggleDomain?: (id: string) => void
   skillDetail?: SkillDetail | null
   positionDetail?: PositionDetail | null
   skillEvidence?: SkillEvidenceItem[]
@@ -157,6 +159,7 @@ export function NodeDetailPanel({
   similarSkills,
   positionExpanded,
   onTogglePosition,
+  onToggleDomain,
   onSelectSkill,
   onClose,
   learningStatus,
@@ -210,9 +213,14 @@ export function NodeDetailPanel({
                   <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                     {TYPE_LABEL[node.type]}
                   </Badge>
-                  {node.type === 'position' && node.status && (
+                  {node.type === 'position' && node.status && !node.isDomain && (
                     <Badge variant="outline" className={`px-1.5 py-0 text-[10px] ${STATUS_CLASS[node.status]}`}>
                       {STATUS_LABEL[node.status]}
+                    </Badge>
+                  )}
+                  {node.isDomain && (
+                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] bg-primary/10 text-primary border-primary/30">
+                      职能域 · {node.memberCount ?? 0} 岗
                     </Badge>
                   )}
                   {node.type === 'skill' && node.level && (
@@ -280,8 +288,14 @@ export function NodeDetailPanel({
               </section>
             )}
 
-            {/* 岗位：展开/收起技能 */}
-            {node.type === 'position' && onTogglePosition && (
+            {/* 岗位：展开/收起技能；域超节点：展开/收起域内岗位 */}
+            {node.type === 'position' && node.isDomain && onToggleDomain && (
+              <Button variant="outline" className="w-full text-xs" onClick={() => onToggleDomain(node.id)}>
+                <UnfoldVertical className="mr-1.5 size-3" />
+                {positionExpanded ? '收起画布中的域内岗位' : '在画布中展开域内岗位'}
+              </Button>
+            )}
+            {node.type === 'position' && !node.isDomain && onTogglePosition && (
               <Button variant="outline" className="w-full text-xs" onClick={() => onTogglePosition(node.id)}>
                 <UnfoldVertical className="mr-1.5 size-3" />
                 {positionExpanded ? '收起画布中的技能' : '在画布中展开技能'}
@@ -332,7 +346,7 @@ export function NodeDetailPanel({
             )}
 
             {/* 岗位详情 */}
-            {node.type === 'position' && positionDetail && (
+            {node.type === 'position' && !node.isDomain && positionDetail && (
               <>
                 {(positionDetail.required_years != null || positionDetail.required_education) && (
                   <section className="space-y-1.5">
@@ -562,14 +576,9 @@ export function NodeDetailPanel({
                     <p className="py-1 text-xs text-ink-faint">暂无推荐课程</p>
                   ) : (
                     <ul className="space-y-1.5">
-                      {skillDetail.courses.map((c) => (
-                        <li key={c.course_id}>
-                          <a
-                            href={c.source_url || undefined}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="block rounded-lg border border-border px-2.5 py-2 transition-colors hover:border-border-strong"
-                          >
+                      {skillDetail.courses.map((c) => {
+                        const content = (
+                          <>
                             <span className="block text-xs font-medium leading-snug text-ink">{c.title}</span>
                             <span className="mt-1 flex items-center gap-2 text-[10px] text-ink-faint">
                               <span>{c.platform}</span>
@@ -578,9 +587,26 @@ export function NodeDetailPanel({
                                 <span>· 质量 {(c.quality_score * 100).toFixed(0)}</span>
                               )}
                             </span>
-                          </a>
-                        </li>
-                      ))}
+                          </>
+                        )
+                        // 无有效链接（source_url 空）渲染纯文本卡，不显示跳转链接
+                        return (
+                          <li key={c.course_id}>
+                            {c.source_url ? (
+                              <a
+                                href={c.source_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="block rounded-lg border border-border px-2.5 py-2 transition-colors hover:border-border-strong"
+                              >
+                                {content}
+                              </a>
+                            ) : (
+                              <div className="rounded-lg border border-border px-2.5 py-2">{content}</div>
+                            )}
+                          </li>
+                        )
+                      })}
                     </ul>
                   )}
                 </section>

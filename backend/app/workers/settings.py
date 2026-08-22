@@ -31,6 +31,7 @@ from app.workers.tasks import (
     load_courses,
     match_recommend,
     resume_parse,
+    run_etl_job_manual,
     run_etl_pipeline,
     run_etl_pipeline_scheduled,
     snapshot_graph,
@@ -108,6 +109,8 @@ class WorkerSettings:
         func(crawl_scheduler, timeout=7200, max_tries=1),
         func(run_etl_pipeline, timeout=10800, max_tries=1),
         func(run_etl_pipeline_scheduled, timeout=10800, max_tries=1),
+        # 管理端手动触发包装（快捷操作面板）：完整管线最长窗口对齐主管线
+        func(run_etl_job_manual, timeout=10800, max_tries=1),
         dedup_simhash,
         validate_temporal,
         detect_inflation,

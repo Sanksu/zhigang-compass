@@ -92,3 +92,60 @@ def load_skill_cooccurrence(
         # 图谱不可达：返回空结构，调用方展示空结果而非 500
         return {}, {}
     return graph, name_map
+
+
+# 岗位投影边权重：两岗位共享 must 技能是强同域信号，共享 nice 只作弱信号
+_PROJ_MUST_SHARED = 1.0
+_PROJ_NICE_SHARED = 0.3
+
+
+def load_position_projection(
+    session: Neo4jSessionLike,
+    min_shared: int = 2,
+) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
+    """从 Neo4j 读取岗位-岗位投影图（岗位域 Leiden 数据源，08-22）。
+
+    技能共现图聚的是技能域，岗位 community_id 靠技能社区继承会被跨域技能
+    （Python 出现在所有域）拉错桶，且 min_weight 过滤后仅 7% 技能有社区——
+    金融类岗位技能边全 nice（因子 0.2）整域被滤出图外。岗位投影直接以
+    "共享技能"连接岗位：边权 = Σ(共享技能必要性因子)（must 共享 1.0 /
+    nice 共享 0.3），对准"岗位职能域"语义。
+
+    Args:
+        session: Neo4j Session（测试桩）
+        min_shared: 共享技能数下限（<2 视为噪声边；1 个共享技能的岗位对
+            多为巧合共词，实测 1972 边中滤掉约半数弱连接）
+
+    Returns:
+        (graph, name_map)：graph 为 position_id → {相邻 position_id: 权重}；
+        name_map 为 position_id → position_name。
+    """
+    graph: dict[str, dict[str, float]] = {}
+    name_map: dict[str, str] = {}
+    try:
+        rows = session.run(
+            """
+            MATCH (a:Position)-[r1:REQUIRES]->(sk:Skill)<-[r2:REQUIRES]-(b:Position)
+            WHERE a.id < b.id
+              AND a.status IN ['active', 'emerging', 'stable', 'declining']
+              AND b.status IN ['active', 'emerging', 'stable', 'declining']
+            RETURN a.id AS aid, a.name AS aname,
+                   b.id AS bid, b.name AS bname,
+                   count(sk) AS shared,
+                   sum(CASE WHEN r1.necessity = 'must' AND r2.necessity = 'must'
+                            THEN $w_must ELSE $w_nice END) AS w
+            """,
+            w_must=_PROJ_MUST_SHARED, w_nice=_PROJ_NICE_SHARED,
+        )
+        for rec in rows:
+            if int(rec["shared"] or 0) < min_shared:
+                continue
+            a, b = rec["aid"], rec["bid"]
+            graph.setdefault(a, {})[b] = float(rec["w"] or 0.0)
+            graph.setdefault(b, {})[a] = float(rec["w"] or 0.0)
+            name_map.setdefault(a, rec.get("aname") or a)
+            name_map.setdefault(b, rec.get("bname") or b)
+    except Exception:
+        # 图谱不可达：返回空结构，与 load_skill_cooccurrence 降级语义一致
+        return {}, {}
+    return graph, name_map

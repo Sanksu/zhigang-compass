@@ -11,6 +11,7 @@ import type { Graph3DHandle } from '@/components/graph/graph-3d'
 import { GraphAnalysisPanel } from '@/components/graph/graph-analysis-panel'
 import { GraphCommunityTree } from '@/components/graph/graph-community-tree'
 import { GraphDetailRail } from '@/components/graph/graph-detail-rail'
+import { aggregateByDomain, buildDomainView } from '@/components/graph/graph-domain'
 import {
   NodeDetailPanel,
   type PositionDetail,
@@ -94,7 +95,8 @@ const DEMO_BOOKMARKS: { label: string; nodeName: string }[] = [
   { label: '数据簇', nodeName: '数据分析师' },
 ]
 
-/** 后端 panorama → 前端 GraphData（岗位状态取自后端，缺省 candidate；边关系 requires） */
+/** 后端 panorama → 前端 GraphData（岗位状态取自后端，缺省 candidate；边关系 requires；
+ *  domain_id/domain_name 契约字段透传——域聚合下钻消费，未回填为 null 走未分类桶） */
 function toGraphData(raw: PanoramaData): GraphData {
   const degree = new Map<string, number>()
   raw.edges.forEach((e) => {
@@ -108,6 +110,7 @@ function toGraphData(raw: PanoramaData): GraphData {
     type: n.type === 'skill' ? 'skill' : 'position',
     value: degree.get(n.id) ?? 0,
     status: n.type === 'position' ? (isValidStatus(n.status) ? n.status : 'candidate') : undefined,
+    ...(n.type === 'position' ? { domain_id: n.domain_id ?? undefined, domain_name: n.domain_name ?? undefined } : {}),
   }))
   const edges: GraphEdge[] = raw.edges.map((e) => ({
     source: e.source,
@@ -166,6 +169,8 @@ export function GraphPage() {
   const [positionDetail, setPositionDetail] = useState<PositionDetail | null>(null)
   // 展开的岗位 id 集合：点击岗位展开其技能（再点收起），多岗位独立展开
   const [expandedPositions, setExpandedPositions] = useState<Set<string>>(() => new Set())
+  // 展开的职能域 id 集合（panorama 聚合下钻第二级）：双击域超节点展开域内岗位
+  const [expandedDomains, setExpandedDomains] = useState<Set<string>>(() => new Set())
   // 定位请求：搜索/相似技能点击后聚焦画布节点（含时间戳，连续点击同一技能也生效）
   const [focusRequest, setFocusRequest] = useState<{ id: string; ts: number } | null>(null)
   // 2D 画布命令句柄（重置视角）
@@ -189,6 +194,15 @@ export function GraphPage() {
     })
   }, [])
 
+  const toggleDomain = useCallback((id: string) => {
+    setExpandedDomains((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
   // 视图切换 → 真实后端过滤（GET /graph/view/{view_type}），初始 panorama 同样走后端视图端点。
   // 切换视图不清 loading，数据到达后原子替换，避免闪屏。
   // 展开状态在 Tabs 事件回调中同步清空（effect 内 setState 会触发 cascading renders）
@@ -196,11 +210,15 @@ export function GraphPage() {
   // 控制画布规模在 ECharts force 布局可承受范围，避免主线程长时间阻塞（2026-08-08）
   useEffect(() => {
     let cancelled = false
-    // 数据到位后统一应用：设置数据 + 非技术栈视图自动展开 Top 岗位 + 结束 loading
+    // 数据到位后统一应用：设置数据 + 首屏自动展开 + 结束 loading
     const applyViewData = (g: GraphData) => {
       setRaw(g)
       setError(null)
-      if (view !== 'techStack') {
+      if (view === 'panorama') {
+        // 聚合下钻：全部岗位以域超节点常驻；首屏自动展开最大域呈现岗位层
+        const agg = aggregateByDomain(g)
+        if (agg.supernodes[0]) setExpandedDomains(new Set([agg.supernodes[0].id]))
+      } else if (view !== 'techStack') {
         const top = g.nodes
           .filter((n) => n.type === 'position')
           .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
@@ -277,7 +295,7 @@ export function GraphPage() {
   // 非 position 节点时不清空 positionDetail：渲染处按 selected 类型 + id 匹配派生过滤，
   // 避免 effect 内同步 setState（react-hooks/set-state-in-effect）。
   useEffect(() => {
-    if (!selected || selected.type !== 'position') return
+    if (!selected || selected.type !== 'position' || selected.isDomain) return
     let cancelled = false
     const pid = encodeURIComponent(selected.id)
     apiGet<PositionDetail>(`/graph/position/${pid}`)
@@ -398,13 +416,31 @@ export function GraphPage() {
   // 画布可见数据：
   // - techStack（技能为中心）：全量展示技能+边，不做岗位过滤
   // - 岗位中心视图：展示岗位节点 + 已展开岗位的技能（单岗位技能数上限防重叠）
+  // 展开态高亮集合：展开的岗位 ∪ 展开的域超节点（画布共用白边+辉光视觉）
+  const expandedUnion = useMemo(
+    () => new Set([...expandedPositions, ...expandedDomains]),
+    [expandedPositions, expandedDomains],
+  )
   // 岗位显示数量限制（Top-30 按关联度降序 + 展开的岗位必显示，2026-08-15）：
   // 岗位中心/技术栈视图岗位全量 100+，物理上放不下岗位防重叠所需间距
   // （enforceSpread minGap 60 → 每岗位约 1.06 万 px²，画布仅 ~54 万 px² 容量 ~30 岗位），
   // 且全量渲染节点爆炸不可读。低频岗位不显示，可在搜索/详情面板中触达。
+  // panorama 视图 08-22 起改域聚合下钻（全岗位以超节点常驻，见 domainAgg），
+  // 本裁剪仅作用于 level/positionCenter 视图。
   const MAX_POSITIONS = 30
+  // 域聚合（panorama 专用）：全部岗位按 domain_id 分组为超节点 + 域间共享技能边
+  const domainAgg = useMemo(() => (data ? aggregateByDomain(data) : null), [data])
   const visibleData = useMemo<GraphData | null>(() => {
     if (!data) return null
+
+    // panorama：三级下钻——域超节点（全部岗位可见）→ 展开域 → 展开岗位技能
+    if (view === 'panorama' && domainAgg) {
+      return buildDomainView(data, domainAgg, {
+        expandedDomains,
+        expandedPositions,
+        maxSkillsPerPosition: MAX_SKILLS_PER_POSITION,
+      })
+    }
 
     const keepPositions = new Set<string>()
     data.nodes
@@ -446,7 +482,7 @@ export function GraphPage() {
       return (a && skillIds.has(e.target)) || (b && skillIds.has(e.source))
     })
     return { ...data, nodes, edges }
-  }, [data, view, expandedPositions])
+  }, [data, view, expandedPositions, expandedDomains, domainAgg])
   // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
   const webgl2Available = useMemo(() => isWebGL2Available(), [])
   // 触控设备（移动/平板，粗指针）固定 2D 模式（设计文档 §6.3：平板/移动端固定 2D）
@@ -472,22 +508,37 @@ export function GraphPage() {
     }
   }, [selected, data])
 
-  // 演示视角书签：仅展示当前视图中存在的锚点岗位；点击后按当前模式镜头飞行
+  // 演示视角书签：锚点以全量数据判定存在（聚合模式下岗位可能在未展开域内）；
+  // 点击时若锚点岗位尚未上画布，先展开其所属域，待布局启动后再镜头飞行
   const visibleBookmarks = useMemo(
     () =>
-      visibleData
-        ? DEMO_BOOKMARKS.filter((b) => visibleData.nodes.some((n) => n.id === b.nodeName || n.name === b.nodeName))
+      data
+        ? DEMO_BOOKMARKS.filter((b) => data.nodes.some((n) => n.id === b.nodeName || n.name === b.nodeName))
         : [],
-    [visibleData],
+    [data],
   )
   const flyToBookmark = useCallback(
     (nodeName: string) => {
-      const node = visibleData?.nodes.find((n) => n.id === nodeName || n.name === nodeName)
-      if (!node) return
-      if (mode === '3d') graph3dRef.current?.flyTo(node.id)
-      else graphRef.current?.flyTo(node.id)
+      const fly = () => {
+        const node = visibleData?.nodes.find((n) => n.id === nodeName || n.name === nodeName)
+        if (!node) return
+        if (mode === '3d') graph3dRef.current?.flyTo(node.id)
+        else graphRef.current?.flyTo(node.id)
+      }
+      const onCanvas = visibleData?.nodes.some((n) => n.id === nodeName || n.name === nodeName)
+      if (onCanvas) {
+        fly()
+        return
+      }
+      // 锚点岗位在未展开域内：展开所属域（聚合模式），450ms 后飞行（布局启动）
+      if (view === 'panorama' && domainAgg && data) {
+        const target = data.nodes.find((n) => n.id === nodeName || n.name === nodeName)
+        const dom = target ? domainAgg.domainOfPosition.get(target.id) : undefined
+        if (dom && !expandedDomains.has(dom)) toggleDomain(dom)
+        window.setTimeout(fly, 450)
+      }
     },
-    [visibleData, mode],
+    [visibleData, mode, view, domainAgg, data, expandedDomains, toggleDomain],
   )
 
   // 大屏演示模式（答辩/录屏）：AppShell 按 focusMode 裁掉顶导与侧栏，画布撑满
@@ -624,8 +675,9 @@ export function GraphPage() {
       <Tabs
         value={view}
         onValueChange={(v) => {
-          // 视图切换：同步清空展开的岗位（新视图技能集不同），再切换数据
+          // 视图切换：同步清空展开的岗位/域（新视图技能集不同），再切换数据
           setExpandedPositions(new Set())
+          setExpandedDomains(new Set())
           setView(v as GraphViewType)
         }}
       >
@@ -722,11 +774,12 @@ export function GraphPage() {
             <Graph2D
               ref={graphRef}
               data={visibleData!}
-              expandedPositions={expandedPositions}
+              expandedPositions={expandedUnion}
               selectedId={selected?.id ?? null}
               focusRequest={focusRequest}
               onSelectNode={setSelected}
               onTogglePosition={togglePosition}
+              onToggleDomain={toggleDomain}
               learningPath={learningPath}
               completedSkills={[]}
               className="h-full w-full"
@@ -736,11 +789,12 @@ export function GraphPage() {
               <Graph3D
                 ref={graph3dRef}
                 data={visibleData!}
-                expandedPositions={expandedPositions}
+                expandedPositions={expandedUnion}
                 selectedId={selected?.id ?? null}
                 focusRequest={focusRequest}
                 onSelectNode={setSelected}
                 onTogglePosition={togglePosition}
+                onToggleDomain={toggleDomain}
                 className="h-full w-full"
               />
             </Suspense>
@@ -815,8 +869,15 @@ export function GraphPage() {
                   positionDetail={selected?.type === 'position' && positionDetail && positionDetail.id === selected.id ? positionDetail : null}
                   skillEvidence={selected && skillDetail && skillDetail.skill_id === selected.id ? skillEvidence : []}
                   similarSkills={selected && skillDetail && skillDetail.skill_id === selected.id ? similarSkills : []}
-                  positionExpanded={selected?.type === 'position' ? expandedPositions.has(selected.id) : false}
+                  positionExpanded={
+                    selected?.isDomain
+                      ? expandedDomains.has(selected.id)
+                      : selected?.type === 'position'
+                        ? expandedPositions.has(selected.id)
+                        : false
+                  }
                   onTogglePosition={togglePosition}
+                  onToggleDomain={toggleDomain}
                   onSelectSkill={focusSkill}
                   onClose={() => setSelected(null)}
                   learningStatus={skillLearningStatus}

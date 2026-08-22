@@ -12,7 +12,6 @@ from app.services.learning_path.courses import (
     parse_duration_hours,
 )
 
-
 class _FakeSemantic:
     """按 (a, b) 对返回预设相似度的假语义器，warm 为无操作。"""
 
@@ -139,6 +138,66 @@ class TestTitleSimilarityGate:
         rows = [_row("c1", "任意课程")]
         kept = _filter_by_title_similarity(rows, "技能", None, _COURSE_TITLE_SIM_THRESHOLD)
         assert len(kept) == 1
+
+
+class TestCrossLangNoOverlapGate:
+    """08-22 跨语言无词面交集门控（Airflow↔航空气象学 / PostgreSQL↔MySQL 误配族）。"""
+
+    def test_airflow_aviation_meteorology_filtered(self):
+        """实证误配：Airflow↔航空气象学 sim=0.6632，超灰带上限但 <0.75 → 拦截。
+
+        旧门控下该配对直通（灰色带 [0.5,0.62) 之外无防线），质量分 0.55 也不拦。
+        """
+        rows = [_row("c1", "航空气象学", source="icourse163")]
+        semantic = _FakeSemantic({("Airflow", "航空气象学"): 0.6632})
+        quality = {("icourse163", "c1"): {"quality_score": 0.55}}
+        kept = _filter_by_title_similarity(
+            rows, "Airflow", semantic, _COURSE_TITLE_SIM_THRESHOLD, quality)
+        assert kept == []
+
+    def test_postgresql_mysql_course_filtered(self):
+        """实证误配：PostgreSQL↔MySQL 课 sim=0.548 → 拦截（原 P1-1 可救案例口径废除）。"""
+        rows = [_row("c1", "新编数据库技术—MySQL", source="icourse163")]
+        semantic = _FakeSemantic({("PostgreSQL", "新编数据库技术—MySQL"): 0.548})
+        quality = {("icourse163", "c1"): {"quality_score": 0.635}}
+        kept = _filter_by_title_similarity(
+            rows, "PostgreSQL", semantic, _COURSE_TITLE_SIM_THRESHOLD, quality)
+        assert kept == []
+
+    def test_cross_lang_high_sim_kept(self):
+        """跨语言无交集但 sim ≥0.75 → 保留（语义强相关的翻译配对）。"""
+        rows = [_row("c1", "机器学习")]
+        semantic = _FakeSemantic({("Machine Learning", "机器学习"): 0.939})
+        kept = _filter_by_title_similarity(
+            rows, "Machine Learning", semantic, _COURSE_TITLE_SIM_THRESHOLD)
+        assert len(kept) == 1
+
+    def test_lexical_overlap_exempt_from_cross_lang_gate(self):
+        """词面交集豁免：Docker↔Docker容器技术（token 命中）不受 0.75 加严约束。"""
+        rows = [_row("c1", "Docker容器技术")]
+        # sim 虚低（跨语言短词）但词面命中 → 直接保留
+        semantic = _FakeSemantic({("Docker", "Docker容器技术"): 0.48})
+        kept = _filter_by_title_similarity(
+            rows, "Docker", semantic, _COURSE_TITLE_SIM_THRESHOLD)
+        assert len(kept) == 1
+
+    def test_ascii_title_not_affected(self):
+        """英文课程标题（无中文）不走跨语言门控，维持原 0.5/灰带逻辑。"""
+        rows = [_row("c1", "Databases and SQL for Data Science")]
+        semantic = _FakeSemantic({("PostgreSQL", "Databases and SQL for Data Science"): 0.55})
+        kept = _filter_by_title_similarity(
+            rows, "PostgreSQL", semantic, _COURSE_TITLE_SIM_THRESHOLD)
+        assert len(kept) == 1
+
+    def test_cjk_skill_not_affected(self):
+        """技能名含中文（非纯 ASCII）不走跨语言门控（微服务等 hint 链路保持）。"""
+        rows = [_row("c1", "高级英语")]
+        semantic = _FakeSemantic({("多线程", "高级英语"): 0.558})
+        quality = {("edx", "c1"): {"quality_score": 0.41}}
+        # 与既有灰带测试同参数：走灰带质量门控拦截（而非跨语言 0.75 直拦）
+        kept = _filter_by_title_similarity(
+            rows, "多线程", semantic, _COURSE_TITLE_SIM_THRESHOLD, quality)
+        assert kept == []
 
 
 class TestParseDurationHours:

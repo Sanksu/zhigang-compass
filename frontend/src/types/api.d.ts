@@ -2163,7 +2163,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 新兴/衰退技能 Top-N（快照序列 Z-score 信号） */
+        /**
+         * 新兴/衰退技能 Top-N（快照序列 Z-score 信号）
+         * @description 占比口径归一化（抗采集总量波动）：Z-score 序列全窗口有分母时按 频次/当期 REQUIRES 总边数计算，任一窗口缺分母（旧快照）整序列退回计数； 检测侧命中 data_warning 的快照整期剔除，展示侧打标不剔除
+         */
         get: {
             parameters: {
                 query?: {
@@ -2435,6 +2438,114 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/etl/trigger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 手动触发 ETL 任务（快捷操作面板：数据清洗/聚合入图/完整管线）
+         * @description 白名单任务经统一包装 run_etl_job_manual 入队：先建 TaskStatus(pending)
+         *     再投递 ARQ，worker 回写 running→success/failed；GET /admin/etl/task/{task_id}
+         *     轮询状态。dedup_simhash=SimHash 近似去重清洗；
+         *     aggregate_positions=岗位-技能频次与 REQUIRES 边幂等覆盖写回 Neo4j（入图）；
+         *     run_etl_pipeline=完整管线（采集→清洗→结构化→聚合入图→快照全阶段）。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * @description 任务标识
+                         * @enum {string}
+                         */
+                        job: "dedup_simhash" | "aggregate_positions" | "run_etl_pipeline";
+                    };
+                };
+            };
+            responses: {
+                /** @description 任务已触发（data 含 task_id/status=pending） */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["EtlTriggerResult"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/etl/task/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** ETL 任务状态查询（前端轮询） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 任务当前状态 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["EtlTaskStatus"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                /** @description 任务不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3667,6 +3778,10 @@ export interface components {
              * @enum {string}
              */
             status?: "active" | "candidate" | "emerging" | "stable" | "declining" | "archived";
+            /** @description 岗位职能域 ID（仅 position；岗位投影 Leiden 社区，sync_position_domains 回填，未回填为 null） */
+            domain_id?: string | null;
+            /** @description 岗位职能域显示名（域代表岗位名，仅 position；未回填为 null） */
+            domain_name?: string | null;
         };
         /** @description 图谱边（REQUIRES 关系） */
         GraphEdge: {
@@ -4031,6 +4146,26 @@ export interface components {
             task_id: string;
             platform: string;
             status: string;
+        };
+        /** @description POST /admin/etl/trigger 响应 data（ARQ 入队结果） */
+        EtlTriggerResult: {
+            task_id: string;
+            job: string;
+            status: string;
+        };
+        /** @description GET /admin/etl/task/{task_id} 响应 data（TaskStatus 序列化） */
+        EtlTaskStatus: {
+            task_id: string;
+            task_type: string;
+            /** @enum {string} */
+            status: "pending" | "running" | "success" | "failed";
+            progress: number;
+            result?: {
+                [key: string]: unknown;
+            };
+            error?: string;
+            created_at?: string | null;
+            updated_at?: string | null;
         };
         /**
          * @description 数据血缘链中的单条来源 JD 记录（岗位 ← 证据 JD ← 采集源）。
@@ -4411,16 +4546,18 @@ export interface components {
             skill_name: string;
             /** @description Z-score（小基数保护态为 null） */
             z_score?: number | null;
-            /** @description 环比增长率 */
+            /** @description 环比增长率（原始计数口径） */
             mom_growth?: number | null;
             current_freq: number;
+            /** @description 历史窗口均值 μ（Z-score 序列口径：全序列有占比分母时为 占比，否则整序列退回原始计数；与 current_freq/mom_growth 的计数口径并存） */
             historical_mean?: number | null;
+            /** @description 历史窗口标准差 σ（口径同 historical_mean） */
             historical_std?: number | null;
             /** @enum {string} */
             trend: "emerging" | "rising" | "stable" | "declining" | "protected";
             confidence: number;
             evidence_refs: string[];
-            /** @description 证据量异常期标记（打标不剔除）：信号解读期（最近两期快照） 任一命中 data_warning 时为 true，信号照常输出、提示谨慎解读 */
+            /** @description 证据量异常期标记（双层抗波动）：命中 data_warning 的快照 已在检测侧整期剔除；此标记为展示侧打标不剔除——信号解读期 （最近两期快照）任一命中时为 true，信号照常输出、提示谨慎解读 */
             warning?: boolean;
             /** @description 归一化展示口径 = 当期技能频次 / 当期 REQUIRES 总边数（不参与 Z-score 判定） */
             freq_ratio?: number | null;

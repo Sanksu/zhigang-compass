@@ -26,6 +26,8 @@ class SkillFrequencyWindow(BaseModel):
     window_end: str = Field(description="窗口结束日期 ISO8601")
     frequency: int = Field(description="窗口内 JD 出现频次")
     source_count: int = Field(default=1, description="独立 JD 源数")
+    # 归一化分母：当期快照 REQUIRES 总边数（0=未知，退回原始计数参与计算）
+    total_requires: int = Field(default=0, description="当期快照 REQUIRES 总边数（归一化分母）")
 
 
 class EvolutionSignal(BaseModel):
@@ -33,10 +35,12 @@ class EvolutionSignal(BaseModel):
     skill_id: str
     skill_name: str
     z_score: Optional[float] = Field(default=None, description="标准分，小基数保护时为 None")
-    mom_growth: Optional[float] = Field(default=None, description="环比增长率")
+    mom_growth: Optional[float] = Field(default=None, description="环比增长率（原始计数口径）")
     current_freq: int
-    historical_mean: Optional[float] = Field(default=None, description="历史窗口均值 μ")
-    historical_std: Optional[float] = Field(default=None, description="历史窗口标准差 σ")
+    # μ/σ 为 Z-score 序列口径：全序列有分母时为占比（频次/当期 REQUIRES 总边数），
+    # 否则整序列退回原始计数——与 z 同口径，与 mom_growth/current_freq 的计数口径并存
+    historical_mean: Optional[float] = Field(default=None, description="历史窗口均值 μ（Z-score 序列口径：占比或计数，见模块说明）")
+    historical_std: Optional[float] = Field(default=None, description="历史窗口标准差 σ（Z-score 序列口径：占比或计数）")
     trend: SkillEvolutionTrend
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     evidence_refs: list[str] = Field(default_factory=list, description="证据 JD 的 evidence_id 列表")

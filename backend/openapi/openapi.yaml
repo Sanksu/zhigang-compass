@@ -1209,6 +1209,9 @@ paths:
     get:
       tags: [evolution]
       summary: 新兴/衰退技能 Top-N（快照序列 Z-score 信号）
+      description: 占比口径归一化（抗采集总量波动）：Z-score 序列全窗口有分母时按
+        频次/当期 REQUIRES 总边数计算，任一窗口缺分母（旧快照）整序列退回计数；
+        检测侧命中 data_warning 的快照整期剔除，展示侧打标不剔除
       parameters:
         - name: top_n
           in: query
@@ -1359,6 +1362,61 @@ paths:
                   data:
                     $ref: '#/components/schemas/CrawlTriggerResult'
                   trace_id: { type: string }
+
+  /api/v1/admin/etl/trigger:
+    post:
+      tags: [admin]
+      summary: 手动触发 ETL 任务（快捷操作面板：数据清洗/聚合入图/完整管线）
+      description: |
+        白名单任务经统一包装 run_etl_job_manual 入队：先建 TaskStatus(pending)
+        再投递 ARQ，worker 回写 running→success/failed；GET /admin/etl/task/{task_id}
+        轮询状态。dedup_simhash=SimHash 近似去重清洗；
+        aggregate_positions=岗位-技能频次与 REQUIRES 边幂等覆盖写回 Neo4j（入图）；
+        run_etl_pipeline=完整管线（采集→清洗→结构化→聚合入图→快照全阶段）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [job]
+              properties:
+                job: { type: string, enum: [dedup_simhash, aggregate_positions, run_etl_pipeline], description: "任务标识" }
+      responses:
+        '202':
+          description: 任务已触发（data 含 task_id/status=pending）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/EtlTriggerResult'
+                  trace_id: { type: string }
+
+  /api/v1/admin/etl/task/{task_id}:
+    get:
+      tags: [admin]
+      summary: ETL 任务状态查询（前端轮询）
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 任务当前状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/EtlTaskStatus'
+                  trace_id: { type: string }
+        '404':
+          description: 任务不存在
 
   /api/v1/admin/crawl/status:
     get:
@@ -2113,6 +2171,8 @@ components:
           type: string
           enum: [active, candidate, emerging, stable, declining, archived]
           description: 岗位状态机（仅 position 节点；active=图谱常态岗位，非发现状态机成员）
+        domain_id: { type: string, nullable: true, description: "岗位职能域 ID（仅 position；岗位投影 Leiden 社区，sync_position_domains 回填，未回填为 null）" }
+        domain_name: { type: string, nullable: true, description: "岗位职能域显示名（域代表岗位名，仅 position；未回填为 null）" }
 
     GraphEdge:
       type: object
@@ -2560,6 +2620,29 @@ components:
         task_id: { type: string }
         platform: { type: string }
         status: { type: string }
+
+    EtlTriggerResult:
+      type: object
+      description: POST /admin/etl/trigger 响应 data（ARQ 入队结果）
+      required: [task_id, job, status]
+      properties:
+        task_id: { type: string }
+        job: { type: string }
+        status: { type: string }
+
+    EtlTaskStatus:
+      type: object
+      description: GET /admin/etl/task/{task_id} 响应 data（TaskStatus 序列化）
+      required: [task_id, task_type, status, progress]
+      properties:
+        task_id: { type: string }
+        task_type: { type: string }
+        status: { type: string, enum: [pending, running, success, failed] }
+        progress: { type: number }
+        result: { type: object, additionalProperties: true }
+        error: { type: string }
+        created_at: { type: string, nullable: true }
+        updated_at: { type: string, nullable: true }
 
     LineageRecordItem:
       type: object
@@ -3016,10 +3099,17 @@ components:
         skill_id: { type: string }
         skill_name: { type: string }
         z_score: { type: number, nullable: true, description: Z-score（小基数保护态为 null） }
-        mom_growth: { type: number, nullable: true, description: 环比增长率 }
+        mom_growth: { type: number, nullable: true, description: 环比增长率（原始计数口径） }
         current_freq: { type: integer }
-        historical_mean: { type: number, nullable: true }
-        historical_std: { type: number, nullable: true }
+        historical_mean:
+          type: number
+          nullable: true
+          description: 历史窗口均值 μ（Z-score 序列口径：全序列有占比分母时为
+            占比，否则整序列退回原始计数；与 current_freq/mom_growth 的计数口径并存）
+        historical_std:
+          type: number
+          nullable: true
+          description: 历史窗口标准差 σ（口径同 historical_mean）
         trend: { type: string, enum: [emerging, rising, stable, declining, protected] }
         confidence: { type: number }
         evidence_refs:
@@ -3027,8 +3117,9 @@ components:
           items: { type: string }
         warning:
           type: boolean
-          description: 证据量异常期标记（打标不剔除）：信号解读期（最近两期快照）
-            任一命中 data_warning 时为 true，信号照常输出、提示谨慎解读
+          description: 证据量异常期标记（双层抗波动）：命中 data_warning 的快照
+            已在检测侧整期剔除；此标记为展示侧打标不剔除——信号解读期
+            （最近两期快照）任一命中时为 true，信号照常输出、提示谨慎解读
         freq_ratio:
           type: number
           nullable: true

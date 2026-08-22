@@ -33,6 +33,10 @@ COURSERA_BASE = "https://www.coursera.org"
 # 08-14 合规修复：coursera robots.txt 明确 Disallow /search（搜索页禁止爬取），
 # /browse 路径未禁（实测 200 + ProductCard 结构一致）——改用 browse 页 + query 过滤
 # （仍为公开课程元数据，符合 robots 规则）
+# 08-22 实证：/browse 服务端**无视 query 参数**（带/不带 query SSR 返回同一批热门课），
+# "query 过滤"只能本地做——定向采集必须按关键词过滤卡片，否则会把无关热门课全量入库。
+# 覆盖面局限：browse 目录是热门/目录子集，长尾技能（Airflow/PostgreSQL 等）大概率
+# 无命中（宁空勿噪），定向补采以 edx sitemap 关键词过滤为主力。
 COURSERA_SEARCH_URL = "https://www.coursera.org/browse?query={keyword}"
 
 # 默认搜索关键词：空 = browse 热门课全量（08-16 用户决策，不再内置定向词）
@@ -111,6 +115,12 @@ class CourseraSpider(Spider):
         self.logger.info(
             f"[coursera] kw={response.meta['keyword']} 页={current_page} 产出 {item_count} 条"
         )
+        if current_page == 1 and response.meta.get("keyword") and item_count == 0:
+            # browse 目录不含该定向词属预期（热门子集），宁空勿噪
+            self.logger.info(
+                f"[coursera] kw={response.meta['keyword']} browse 目录无相关课程，"
+                f"定向补采请改用 edx/icourse163"
+            )
         if current_page < self.max_pages:
             # Coursera 用 page=N 翻页（浏览页无 query 参数，须用 ? 而非 &）
             keyword = response.meta["keyword"]
@@ -193,6 +203,12 @@ class CourseraSpider(Spider):
         skills_text = card.css(".cds-CommonCard-bodyContent p::text").getall()
         skills = self._parse_skills(skills_text)
 
+        # 关键词本地过滤（08-22）：/browse 无视 query 参数，定向采集时只有
+        # 标题/院校/技能命中关键词的卡片才入库——否则热门课全量误入（当日实证）
+        keyword = str(meta.get("keyword") or "")
+        if keyword and not self._keyword_hit(keyword, title, institution, *skills):
+            return None
+
         # 用搜索关键词作为分类补充
         if not category:
             category = meta.get("keyword", "")
@@ -234,6 +250,22 @@ class CourseraSpider(Spider):
         # 兜底：取 URL 最后一段（取不到稳定 ID 时返回 None，由调用方跳过）
         fallback = href.rstrip("/").split("/")[-1].split("?")[0]
         return (fallback, course_url) if fallback else (None, None)
+
+    @staticmethod
+    def _keyword_hit(keyword: str, *fields: str) -> bool:
+        """关键词相关性判定：ASCII 词用词边界匹配，其余（CJK/含符号）子串匹配。
+
+        词边界防子串误命中（"air" ⊂ "hair"）；空关键词 = 全通过（热门课全量模式）。
+        """
+        if not keyword:
+            return True
+        hay = " ".join(f for f in fields if f).lower()
+        if not hay:
+            return False
+        kw = keyword.strip().lower()
+        if kw.isascii() and re.fullmatch(r"[a-z0-9][a-z0-9\s-]*", kw):
+            return re.search(rf"\b{re.escape(kw)}\b", hay) is not None
+        return kw in hay
 
     @staticmethod
     def _parse_rating(text: str) -> float:
