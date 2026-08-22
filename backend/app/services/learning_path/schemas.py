@@ -35,6 +35,7 @@ class GapSkill(BaseModel):
     skill_id: Optional[str] = Field(default=None, description="图谱技能 ID（sk_xxxx）")
     necessity: str = Field(description="must / nice")
     gap_type: GapType = Field(description="差距类型：missing / weak / matched")
+    is_soft: Optional[bool] = Field(default=None, description="软技能标记（透传 SkillRequirement.is_soft，仅展示）")
     weight: float = Field(description="技能权重（REQUIRES.weight，聚合层预计算）")
     priority: str = Field(description="优先级：high / medium / low")
     current_proficiency: Optional[str] = Field(

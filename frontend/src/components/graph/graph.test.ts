@@ -7,7 +7,7 @@
  *   2026-08-15 重叠修复双保险的纯函数部分）
  */
 import { describe, expect, it, vi } from 'vitest'
-import { computeFilterMarks, skillLabelThreshold, nodeRadius } from './graph-utils'
+import { computeFilterMarks, isSoftSkill, skillLabelThreshold, nodeRadius } from './graph-utils'
 import { enforceSpread, hasPositionOverlap } from './graph-layout'
 import type { GraphEdge, GraphNode, PositionStatus } from './types'
 
@@ -186,6 +186,38 @@ describe('computeFilterMarks', () => {
   it('value 缺失的节点按 0 参与权重过滤', () => {
     const marks = computeFilterMarks([skill('s1')], [], { minWeight: 1, hiddenStatuses: new Set(), showOnlyMustEdges: false })
     expect(marks.dimNodeIds.has('s1')).toBe(true)
+  })
+
+  it('hideSoftSkills 压暗软技能节点，技术栈技能不受影响', () => {
+    const nodes = [
+      position('p1', 50),
+      { id: 's1', name: '沟通能力', type: 'skill' as const, value: 30, skill_category: '软技能' },
+      { id: 's2', name: 'Python', type: 'skill' as const, value: 30, skill_category: '编程语言' },
+      skill('s3', 30), // 类目缺失（未分类）不视为软技能
+    ]
+    const marks = computeFilterMarks(nodes, [], { minWeight: 0, hiddenStatuses: new Set(), showOnlyMustEdges: false, hideSoftSkills: true })
+    expect(marks.dimNodeIds.has('s1')).toBe(true)
+    expect(marks.dimNodeIds.has('s2')).toBe(false)
+    expect(marks.dimNodeIds.has('s3')).toBe(false)
+    expect(marks.visibleNodes).toBe(3)
+  })
+
+  it('hideSoftSkills 缺省（不隐藏）时软技能节点保持可见', () => {
+    const nodes = [{ id: 's1', name: '责任心', type: 'skill' as const, value: 30, skill_category: '软技能' }]
+    const marks = computeFilterMarks(nodes, [], { minWeight: 0, hiddenStatuses: new Set(), showOnlyMustEdges: false })
+    expect(marks.dimNodeIds.size).toBe(0)
+  })
+})
+
+describe('isSoftSkill', () => {
+  it('skill 节点且类目为「软技能」→ true', () => {
+    expect(isSoftSkill({ id: 's1', name: '沟通能力', type: 'skill', skill_category: '软技能' })).toBe(true)
+  })
+
+  it('技术类目 / 类目缺失 / 非技能节点 → false', () => {
+    expect(isSoftSkill({ id: 's1', name: 'Python', type: 'skill', skill_category: '编程语言' })).toBe(false)
+    expect(isSoftSkill({ id: 's2', name: 'PyTorch', type: 'skill' })).toBe(false)
+    expect(isSoftSkill({ id: 'p1', name: '岗位', type: 'position', status: 'stable' })).toBe(false)
   })
 })
 

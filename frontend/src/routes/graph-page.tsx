@@ -955,7 +955,15 @@ export function GraphPage() {
           <span className="size-2.5 rounded-md bg-state-archived" role="img" aria-label="归档岗位：红色圆角矩形" /> 归档
         </span>
         <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-full bg-[#09090b] dark:bg-[#fafafa]" role="img" aria-label="技能节点" /> 技能
+          <span className="size-2.5 rounded-full bg-[#09090b] dark:bg-[#fafafa]" role="img" aria-label="技术技能节点" /> 技术技能
+        </span>
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span
+            className="size-2.5 rounded-full bg-[#ec4899] dark:bg-[#f472b6]"
+            role="img"
+            aria-label="软技能节点：粉色圆形（责任心/沟通能力等软素质）"
+          />{' '}
+          软技能
         </span>
         <span className="flex items-center gap-1.5" role="listitem">
           <span className="w-4 h-0.5 bg-ink/60" aria-hidden="true" />

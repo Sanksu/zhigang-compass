@@ -127,6 +127,17 @@ class TestViewStatusFilter:
         assert params["public_statuses"] == list(graph_api._PUBLIC_POSITION_STATUSES)
 
 
+class TestSkillCategoryExposure:
+    """techStack 视图 Cypher 须带回技能类目（软技能/技术栈区分展示的数据来源）。"""
+
+    @pytest.mark.asyncio
+    async def test_techstack_query_returns_category(self, monkeypatch):
+        driver = _install(monkeypatch)
+        await graph_api._query_view_techstack(50, "p.status IN $public_statuses")
+        query, _ = driver.sessions[0].queries[0]
+        assert "s.category AS s_category" in query
+
+
 class TestFulltextStatusFilter:
     @pytest.mark.asyncio
     async def test_position_public_scope_filters_status(self, monkeypatch):

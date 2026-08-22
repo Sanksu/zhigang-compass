@@ -37,13 +37,27 @@ export const COLOR_BY_STATUS: Record<PositionStatus, string> = {
   archived: '#ef4444',
 }
 
-/** 过滤面板三控件的状态快照 */
+/** 软技能类目值（与后端 skill_whitelist.yaml 的 category 命名一致） */
+export const SOFT_SKILL_CATEGORY = '软技能'
+
+/** 软技能配色（粉色系，与六态状态色/域紫/技能黑白均区分；2D/3D 共用） */
+export const COLOR_SOFT_LIGHT = '#ec4899'
+export const COLOR_SOFT_DARK = '#f472b6'
+
+/** 软技能判定：skill 节点且类目为「软技能」（责任心/沟通能力等软素质，与技术栈技能区分展示） */
+export function isSoftSkill(node: GraphNode): boolean {
+  return node.type === 'skill' && node.skill_category === SOFT_SKILL_CATEGORY
+}
+
+/** 过滤面板的状态快照 */
 export interface FilterOptions {
   minWeight: number
   /** 被隐藏的岗位状态集合（空集 = 全显示） */
   hiddenStatuses: Set<PositionStatus>
   /** true = 仅看 must（必备）边 */
   showOnlyMustEdges: boolean
+  /** true = 压暗软技能节点（与技术栈技能分开查看） */
+  hideSoftSkills?: boolean
 }
 
 /** 过滤打标结果：节点/边不从图中剔除，仅标记压暗 */
@@ -57,8 +71,8 @@ export interface FilterMarks {
 }
 
 /**
- * 计算图谱过滤打标（纯函数）：权重低于阈值、或岗位状态被隐藏的节点压暗；
- * 端点被压暗的边、"仅看必备关系"下的非 must 边一并压暗。
+ * 计算图谱过滤打标（纯函数）：权重低于阈值、岗位状态被隐藏、或软技能被
+ * 隐藏的节点压暗；端点被压暗的边、"仅看必备关系"下的非 must 边一并压暗。
  *
  * 打标而非剔除——ECharts 力导向在节点集合与顺序不变时保留既有布局坐标，
  * 筛选只改透明度不触发全图重新收敛，避免布局跳变（演示时镜头稳定）。
@@ -75,6 +89,10 @@ export function computeFilterMarks(
       continue
     }
     if (n.type === 'position' && n.status && opts.hiddenStatuses.has(n.status)) {
+      dimNodeIds.add(n.id)
+      continue
+    }
+    if (opts.hideSoftSkills && isSoftSkill(n)) {
       dimNodeIds.add(n.id)
     }
   }

@@ -96,6 +96,7 @@ function toGapItem(g: BackendGapItem): GapItem {
     priority: g.priority,
     current_level: g.current_proficiency ?? '未掌握',
     required_level: g.required_proficiency ?? '不限',
+    is_soft: g.is_soft,
     // 契约 #341 后装字段透传（后端回填后自动覆盖 mock 兜底）
     demand: g.demand,
     trend: g.trend,
@@ -922,6 +923,11 @@ export function ResumeMatchPage() {
                                   <Badge variant="outline" className="text-[10px]">
                                     {GAP_TYPE_LABEL[gap.gap_type]}
                                   </Badge>
+                                  {gap.is_soft && (
+                                    <span className="inline-flex items-center rounded-full border border-[#ec4899]/40 bg-[#ec4899]/5 px-1.5 py-0 text-[10px] font-medium text-[#ec4899] dark:text-[#f472b6]">
+                                      软技能
+                                    </span>
+                                  )}
                                   {gap.high_roi && (
                                     <span className="inline-flex items-center gap-1 rounded-full border border-state-emerging/40 bg-state-emerging/10 px-1.5 py-0 text-[10px] font-medium text-state-emerging">
                                       <Sparkles className="size-3" />核心突破点 · 高 ROI

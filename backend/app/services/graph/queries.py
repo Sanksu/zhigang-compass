@@ -61,6 +61,7 @@ def query_panorama(session, scope: str, focus: str | None, min_weight: float, li
             "name": s.get("name", s_id),
             "type": "skill",
             "communityId": s.get("community_id"),
+            "skill_category": s.get("category"),
         })
         edges.append({
             "source": p_id,
@@ -175,7 +176,8 @@ def query_position_skills_by_necessity(session, id: str) -> dict[str, dict]:
         MATCH (p:Position {id: $id})-[r:REQUIRES]->(s:Skill)
         RETURN s.id AS skill_id, s.name AS skill_name,
                r.necessity AS necessity, r.weight AS weight,
-               r.level AS level, r.source_count AS source_count
+               r.level AS level, r.source_count AS source_count,
+               s.category AS skill_category
         ORDER BY r.weight DESC
         """,
         id=id,
@@ -189,6 +191,7 @@ def query_position_skills_by_necessity(session, id: str) -> dict[str, dict]:
             "weight": rec.get("weight", 0.0),
             "level": rec.get("level", "中级"),
             "source_count": rec.get("source_count", 1),
+            "skill_category": rec.get("skill_category"),
         })
     return skills
 
@@ -214,7 +217,8 @@ def query_position_skills(session, id: str, necessity: str | None, status_filter
         WHERE ({status_filter}) AND ($necessity IS NULL OR r.necessity = $necessity)
         RETURN s.id AS skill_id, s.name AS skill_name,
                r.necessity AS necessity, r.weight AS weight,
-               r.level AS level, r.source_count AS source_count
+               r.level AS level, r.source_count AS source_count,
+               s.category AS skill_category
         ORDER BY r.weight DESC
     """
     rows = session.run(
@@ -229,6 +233,7 @@ def query_position_skills(session, id: str, necessity: str | None, status_filter
             "weight": rec.get("weight", 0.0),
             "level": rec.get("level", "中级"),
             "source_count": rec.get("source_count", 1),
+            "skill_category": rec.get("skill_category"),
         }
         for rec in rows
     ]
@@ -303,6 +308,7 @@ def query_view_techstack(session, limit: int, status_filter: str) -> list:
         MATCH (s)<-[r:REQUIRES]-(p:Position)
         WHERE {status_filter}
         RETURN s.id AS sid, s.name AS sname, s.community_id AS s_community,
+               s.category AS s_category,
                p.id AS pid, p.name AS pname, p.status AS pstatus, p.community_id AS p_community, r
         """,
         limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
@@ -324,9 +330,10 @@ def query_view_main(session, limit: int, status_filter: str) -> list:
 
 
 def load_skill(session, skill_id: str) -> dict | None:
-    """按 ID 查询技能节点（id + name），不存在返回 None。"""
+    """按 ID 查询技能节点（id + name + category），不存在返回 None。"""
     rec = session.run(
-        "MATCH (s:Skill {id: $skill_id}) RETURN s.id AS id, s.name AS name",
+        "MATCH (s:Skill {id: $skill_id}) "
+        "RETURN s.id AS id, s.name AS name, s.category AS category",
         skill_id=skill_id,
     ).single()
     return dict(rec) if rec else None
@@ -346,7 +353,7 @@ def load_position(session, id: str, user=None) -> dict | None:
         WHERE {status_filter}
         RETURN p.id AS id, p.name AS name, p.required_years AS required_years,
                p.required_education AS required_education, p.last_updated AS last_updated,
-               p.status AS status, p.freq AS freq
+               p.status AS status, p.freq AS freq, p.soft_skills AS soft_skills
         """,
         id=id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
     ).single()

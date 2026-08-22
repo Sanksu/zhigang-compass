@@ -1,5 +1,6 @@
 import { SlidersHorizontal } from 'lucide-react'
 import type { PositionStatus } from './types'
+import { COLOR_SOFT_LIGHT } from './graph-utils'
 
 const ALL_STATUSES: { value: PositionStatus; label: string; color: string }[] = [
   { value: 'emerging', label: '新兴', color: '#10b981' },
@@ -18,6 +19,9 @@ interface GraphFilterPanelProps {
   /** B2: true = 仅显示 must（必备）边，false = 显示全部 */
   showOnlyMustEdges?: boolean
   onToggleMustEdges?: (v: boolean) => void
+  /** true = 压暗软技能节点（与技术栈技能分开查看） */
+  hideSoftSkills?: boolean
+  onToggleSoftSkills?: (v: boolean) => void
   /** 压暗式过滤：未被压暗的节点数（提供 hiddenCount 时显示统计行） */
   visibleCount?: number
   /** 被压暗淡出的节点数 */
@@ -31,6 +35,8 @@ export function GraphFilterPanel({
   onToggleStatus,
   showOnlyMustEdges = false,
   onToggleMustEdges,
+  hideSoftSkills = false,
+  onToggleSoftSkills,
   visibleCount,
   hiddenCount,
 }: GraphFilterPanelProps) {
@@ -94,6 +100,26 @@ export function GraphFilterPanel({
               )
             })}
           </div>
+        </div>
+      )}
+
+      {/* 技能分组：软技能（责任心/沟通能力等软素质）压暗开关 */}
+      {onToggleSoftSkills && (
+        <div className="mb-3">
+          <p className="mb-1.5 text-[11px] font-medium text-ink-muted">技能分组</p>
+          <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[11px] text-ink-secondary hover:bg-subtle/60">
+            <input
+              type="checkbox"
+              checked={!hideSoftSkills}
+              onChange={(e) => onToggleSoftSkills(!e.target.checked)}
+              className="size-3 rounded accent-primary"
+            />
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ backgroundColor: COLOR_SOFT_LIGHT }}
+            />
+            软技能
+          </label>
         </div>
       )}
 
