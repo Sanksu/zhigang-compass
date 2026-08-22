@@ -21,6 +21,7 @@ import app.api.v1.admin_routes.dict_guard as dg
 def _proposal(**kw):
     base = dict(
         id="p1", term="低代码平台搭建", action="add_stopword", status="pending",
+        entity_type="skill",
         reason="噪音词条", llm_confidence=0.6, evidence=[],
         impact_stats={"graph_nodes": 3, "jd_snapshots": 5}, run_date="2026-08-21",
         reviewed_by="", review_reason="", reviewed_at=None, created_at=None,
@@ -32,6 +33,7 @@ def _proposal(**kw):
 def _changelog(**kw):
     base = dict(
         id="c1", term="低代码平台搭建", action="add_stopword", source="auto",
+        entity_type="skill",
         kind="blocked", proposal_id=None, reason="噪音词条", detail={},
         impact_stats={}, applied_by="system", created_at=None,
     )
