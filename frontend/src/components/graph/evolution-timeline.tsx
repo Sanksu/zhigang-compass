@@ -8,8 +8,11 @@
  * 绿环高亮、消亡节点橙虚线标记（仅画布上存在的节点可标记），滑轨下方
  * 常显增删摘要条（新增/消亡名称 chips）——节点不在画布上时故事仍完整。
  * 播放键自动步进（1.5s/版）复刻演化历程；数据缺失/接口失败时整条静默隐藏。
+ *
+ * 状态范式：marks 为渲染期派生值（index + 已拉取 diff 缓存），effect 体内
+ * 仅发起请求、setState 一律走异步回调（react-hooks/set-state-in-effect 严规）。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Pause, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { apiGet } from '@/lib/api'
@@ -60,6 +63,15 @@ export function toEvolutionMarks(
   }
 }
 
+/** diff 拉取失败的兜底（空集 = 该版无标记，摘要条仍显示版本说明） */
+const EMPTY_DIFF: EvolutionDiff = {
+  nodes_added: [],
+  nodes_removed: [],
+  nodes_changed: [],
+  edges_added: [],
+  edges_removed: [],
+}
+
 /** 摘要 chips 上限（超出折叠为 +N） */
 const CHIP_LIMIT = 6
 /** 播放步进间隔（ms）——比常规交互慢，便于观看（演示视频口径） */
@@ -73,11 +85,10 @@ export function EvolutionTimeline({
   className?: string
 }) {
   const [versions, setVersions] = useState<EvolutionVersion[] | null>(null)
+  /** 版本对 diff 缓存（仅经异步回调写入） */
+  const [diffs, setDiffs] = useState<Record<string, EvolutionDiff>>({})
   const [index, setIndex] = useState(0)
-  const [marks, setMarks] = useState<EvolutionMarks | null>(null)
   const [playing, setPlaying] = useState(false)
-  // 相邻版本 diff 缓存（滑回旧版本不重复请求）
-  const diffCacheRef = useRef<Map<string, EvolutionDiff>>(new Map())
 
   // 版本列表（失败静默隐藏整条时间轴）
   useEffect(() => {
@@ -96,66 +107,57 @@ export function EvolutionTimeline({
     }
   }, [])
 
-  // 滑到版本 i → 取相邻 diff（i-1 → i）生成标记上抛；i=0（起点）无标记
+  // 当前停靠的相邻版本对（index=0 为起点，无 diff）
+  const from = versions && index > 0 ? versions[index - 1] : null
+  const to = versions && index > 0 ? versions[index] : null
+  const pairKey = from && to ? `${from.version_id}|${to.version_id}` : null
+
+  // 缓存的 diff 才驱动打标；缺缓存时拉取（结果仅异步写入）
   useEffect(() => {
-    if (!versions || versions.length < 2) return
-    if (index <= 0) {
-      setMarks(null)
-      onMarksChange(null)
-      return
-    }
-    const from = versions[index - 1]
-    const to = versions[index]
-    const key = `${from.version_id}|${to.version_id}`
-    const cached = diffCacheRef.current.get(key)
-    if (cached) {
-      const m = toEvolutionMarks(to, cached)
-      setMarks(m)
-      onMarksChange(m)
-      return
-    }
+    if (!pairKey || !from || !to || diffs[pairKey]) return
     let cancelled = false
     apiGet<EvolutionDiff>(
       `/evolution/diff?from=${encodeURIComponent(from.version_id)}&to=${encodeURIComponent(to.version_id)}`,
     )
       .then((d) => {
-        if (cancelled) return
-        diffCacheRef.current.set(key, d)
-        const m = toEvolutionMarks(to, d)
-        setMarks(m)
-        onMarksChange(m)
+        if (!cancelled) setDiffs((prev) => ({ ...prev, [pairKey]: d }))
       })
       .catch(() => {
-        if (!cancelled) {
-          setMarks(null)
-          onMarksChange(null)
-        }
+        if (!cancelled) setDiffs((prev) => ({ ...prev, [pairKey]: EMPTY_DIFF }))
       })
     return () => {
       cancelled = true
     }
-  }, [versions, index, onMarksChange])
+  }, [pairKey, from, to, diffs])
 
-  // 播放：步进到末版自动停
+  // 演化标记为派生值：起点/未拉到 diff → null（无标记）
+  const marks = useMemo(
+    () =>
+      pairKey && from && to && diffs[pairKey]
+        ? toEvolutionMarks(to, diffs[pairKey])
+        : null,
+    [pairKey, from, to, diffs],
+  )
+
+  // 同步给父级（graph-2d 画布打标）——外部系统同步
   useEffect(() => {
-    if (!playing || !versions) return
-    if (index >= versions.length - 1) {
-      setPlaying(false)
-      return
-    }
+    onMarksChange(marks)
+  }, [marks, onMarksChange])
+
+  // 播放：有效播放态派生（到末版自动视为停），步进仅在定时回调里 setState
+  const effectivePlaying = playing && versions != null && index < versions.length - 1
+  useEffect(() => {
+    if (!effectivePlaying) return
     const timer = window.setTimeout(() => setIndex((i) => i + 1), PLAY_STEP_MS)
     return () => window.clearTimeout(timer)
-  }, [playing, index, versions])
-
-  const stop = useCallback(() => setPlaying((p) => !p), [])
+  }, [effectivePlaying, index])
 
   if (!versions || versions.length < 2) return null
 
   const current = versions[index]
   const chips = (names: string[]) => {
     const shown = names.slice(0, CHIP_LIMIT)
-    const rest = names.length - shown.length
-    return { shown, rest }
+    return { shown, rest: names.length - shown.length }
   }
   const added = marks ? chips(marks.addedNames) : null
   const removed = marks ? chips(marks.removedNames) : null
@@ -172,12 +174,13 @@ export function EvolutionTimeline({
         <Button
           size="sm"
           variant="outline"
-          onClick={stop}
+          onClick={() => setPlaying((p) => !p)}
+          disabled={index >= versions.length - 1}
           className="h-7 shrink-0 px-2 text-xs"
           title={playing ? '暂停自动演示' : '自动播放演化历程（1.5s/版）'}
         >
-          {playing ? <Pause className="size-3" /> : <Play className="size-3" />}
-          {playing ? '暂停' : '播放'}
+          {effectivePlaying ? <Pause className="size-3" /> : <Play className="size-3" />}
+          {effectivePlaying ? '暂停' : '播放'}
         </Button>
         <input
           type="range"
