@@ -1930,6 +1930,11 @@ paths:
           required: false
           schema: { type: string, default: pending, enum: [pending, approved, rejected] }
           description: 提案状态过滤
+        - name: entity_type
+          in: query
+          required: false
+          schema: { type: string, enum: [skill, position, course] }
+          description: 治理对象类型过滤（skill=技能字典 / position=岗位节点 / course=课程节点或脏边）
         - name: page
           in: query
           schema: { type: integer, minimum: 1, default: 1 }
@@ -2044,6 +2049,19 @@ paths:
               schema: { $ref: '#/components/schemas/ApiResponse' }
         '404': { description: 暂无巡检报告 }
 
+  /api/v1/admin/dict-guard/trigger:
+    post:
+      tags: [admin]
+      summary: 手动触发一次字典守卫巡检
+      description: 入队 dict_guard_daily（复跑 ETL 阶段 16），非实时；运行结果落 reports/dict_guard_{date}.json
+      responses:
+        '202':
+          description: 已提交（等待 worker 执行）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
+        '500': { description: 任务入队失败 }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -2102,8 +2120,9 @@ components:
       required: [id, term, action, status, run_date, created_at]
       properties:
         id: { type: string }
-        term: { type: string, description: 动作作用的目标词 }
-        action: { type: string, enum: [add_stopword, remove_stopword, protect_whitelist] }
+        entity_type: { type: string, enum: [skill, position, course], description: 治理对象类型 }
+        term: { type: string, description: 动作作用的目标词（岗位/课程时为目标节点名） }
+        action: { type: string, enum: [add_stopword, remove_stopword, protect_whitelist, remove_node, remove_edge] }
         status: { type: string, enum: [pending, approved, rejected] }
         reason: { type: string, description: LLM 判定理由 }
         llm_confidence: { type: number, nullable: true, description: LLM 置信度 0~1 }
@@ -2111,8 +2130,8 @@ components:
           type: array
           nullable: true
           items: { type: object }
-          description: 候选证据（图谱引用数/语料命中/受影响技能等）
-        impact_stats: { type: object, description: "影响面模拟：图谱同名节点数 + 命中 JD 数" }
+          description: 候选证据（图谱引用数/语料命中/受影响技能/孤立度等）
+        impact_stats: { type: object, description: "影响面模拟：图谱节点数 + 引用 JD 数" }
         run_date: { type: string, description: 评估批次日期 }
         reviewed_by: { type: string }
         review_reason: { type: string }
@@ -2124,10 +2143,11 @@ components:
       required: [id, term, action, source, kind, applied_by, created_at]
       properties:
         id: { type: string }
+        entity_type: { type: string, enum: [skill, position, course], description: 治理对象类型 }
         term: { type: string }
         action: { type: string, description: 变更动作（含 rollback） }
         source: { type: string, enum: [auto, manual, rollback] }
-        kind: { type: string, enum: [blocked, protected], description: 动态层条目类型 }
+        kind: { type: string, enum: [blocked, protected, node, edge], description: 变更类型（skill=动态层条目，position/course=图谱节点/边清理） }
         proposal_id: { type: string, nullable: true }
         reason: { type: string }
         detail: { type: object }
