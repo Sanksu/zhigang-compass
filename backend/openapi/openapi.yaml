@@ -2173,6 +2173,7 @@ components:
           description: 岗位状态机（仅 position 节点；active=图谱常态岗位，非发现状态机成员）
         domain_id: { type: string, nullable: true, description: "岗位职能域 ID（仅 position；岗位投影 Leiden 社区，sync_position_domains 回填，未回填为 null）" }
         domain_name: { type: string, nullable: true, description: "岗位职能域显示名（域代表岗位名，仅 position；未回填为 null）" }
+        skill_category: { type: string, nullable: true, description: "技能类目（仅 skill 节点；来自 skill_whitelist.yaml 的 category，白名单外未写入为 null，「软技能」=软素质类）" }
 
     GraphEdge:
       type: object
@@ -2254,6 +2255,7 @@ components:
         skill_id: { type: string, nullable: true, description: 图谱技能 ID }
         necessity: { type: string, enum: [must, nice] }
         gap_type: { type: string, enum: [missing, weak, matched] }
+        is_soft: { type: boolean, description: 是否软技能（岗位侧 Position.soft_skills 并入或 Skill.category=「软技能」；仅展示打标，不影响评分） }
         weight: { type: number, description: 技能权重 }
         priority: { type: string, enum: [high, medium, low] }
         current_proficiency: { type: string, nullable: true, description: 候选人当前熟练度 }
@@ -2340,6 +2342,7 @@ components:
         weight: { type: number }
         level: { type: string }
         source_count: { type: integer }
+        skill_category: { type: string, nullable: true, description: "技能类目（skill_whitelist.yaml 的 category，「软技能」=软素质类，白名单外为 null）" }
 
     PositionDetail:
       type: object
@@ -2358,6 +2361,10 @@ components:
         nice_skills:
           type: array
           items: { $ref: '#/components/schemas/PositionSkillItem' }
+        soft_skills:
+          type: array
+          items: { type: string }
+          description: 岗位软素质（20 项白名单封闭集，聚合层按频次降序写回；与技术栈技能分离展示）
 
     PositionSkillsData:
       type: object
@@ -2449,6 +2456,7 @@ components:
       properties:
         id: { type: string }
         name: { type: string }
+        category: { type: string, nullable: true, description: "技能类目（skill_whitelist.yaml 的 category，「软技能」=软素质类，白名单外为 null）" }
         positions_count: { type: integer, description: 要求该技能的岗位数 }
         evidence_count: { type: integer, description: 证据条数 }
         courses_count: { type: integer, description: 关联课程数 }

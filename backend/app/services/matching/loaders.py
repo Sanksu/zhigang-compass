@@ -25,6 +25,9 @@ _positions_cache: dict = {"ts": 0.0, "positions": None}
 # 岗位侧软技能并入 nice 时的权重（与聚合层 nice 两档中的低档一致）
 _SOFT_SKILL_WEIGHT = 0.4
 
+# 软技能类目值（与 configs/skill_whitelist.yaml 中 category 命名一致，仅展示打标）
+SOFT_SKILL_CATEGORY = "软技能"
+
 
 def build_candidate(parsed: dict) -> CandidateProfile:
     """从简历解析结果构建候选人画像。
@@ -93,7 +96,7 @@ def _load_positions_uncached() -> list[PositionProfile]:
                    p.name AS pname,
                    p.required_years AS req_years, p.last_updated AS last_updated,
                    p.industry AS industry,
-                   s.id AS sid, s.name AS sname,
+                   s.id AS sid, s.name AS sname, s.category AS category,
                    r.necessity AS necessity, r.weight AS weight,
                    r.level AS level, r.source_count AS source_count
             """
@@ -118,6 +121,7 @@ def _load_positions_uncached() -> list[PositionProfile]:
                 weight=float(rec.get("weight", 1.0) or 1.0),
                 proficiency=rec.get("level"),
                 source_count=int(rec.get("source_count", 1) or 1),
+                is_soft=rec.get("category") == SOFT_SKILL_CATEGORY,
             )
             if skill.necessity == Necessity.MUST:
                 pos.must_skills.append(skill)
@@ -149,6 +153,7 @@ def _load_positions_uncached() -> list[PositionProfile]:
                     skill_name=name,
                     necessity=Necessity.NICE,
                     weight=_SOFT_SKILL_WEIGHT,
+                    is_soft=True,
                 ))
                 existing.add(name)
 

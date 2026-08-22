@@ -22,6 +22,7 @@ class SkillRequirement(BaseModel):
     weight: float = Field(default=1.0, description="技能权重，由聚合层预计算")
     proficiency: Optional[str] = Field(default=None, description="期望熟练度：初级/中级/高级/专家")
     source_count: int = Field(default=1, description="命中该技能的独立 JD 源数")
+    is_soft: bool = Field(default=False, description="软技能标记（Position.soft_skills 并入或 Skill.category=软技能；仅展示打标，不影响评分）")
 
 
 class PositionProfile(BaseModel):
