@@ -4,12 +4,15 @@ import {
   Activity,
   Bot,
   ClipboardCheck,
-  Settings2,
   Database,
+  Filter,
   Globe,
+  Network,
   RefreshCw,
+  Settings2,
   Shield,
   Users,
+  Workflow,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -103,12 +106,22 @@ export const QUICK_ACTIONS: {
   to?: string
 }[] = [
   { id: 'crawl', label: '触发全量爬取', icon: RefreshCw, desc: '重新采集所有数据源' },
+  { id: 'etl-clean', label: '数据清洗', icon: Filter, desc: 'SimHash 近似去重 · 立即执行' },
+  { id: 'etl-graph', label: '聚合入图', icon: Network, desc: '岗位-技能图写回 Neo4j' },
+  { id: 'etl-full', label: '完整 ETL 管线', icon: Workflow, desc: '采集→清洗→入图→快照全阶段' },
   { id: 'goto-review', label: '前往岗位审核', icon: ClipboardCheck, desc: '处理候选晋升 / 驳回', to: '/admin/review' },
   { id: 'goto-crawl', label: '爬取管理', icon: Globe, desc: '单源触发 · 任务状态 · 输出查看', to: '/admin/crawl' },
   { id: 'goto-llm', label: 'LLM 配置', icon: Bot, desc: '多 Provider 重试链 · 健康检查', to: '/admin/llm' },
   { id: 'goto-settings', label: '系统配置', icon: Settings2, desc: '运行时参数 · 重启生效', to: '/admin/settings/tasks' },
   { id: 'goto-users', label: '用户管理', icon: Users, desc: '账号 · 角色 · 状态', to: '/admin/users' },
 ]
+
+/** ETL 触发型快捷操作 → 后端白名单 job（契约 POST /admin/etl/trigger） */
+export const ETL_ACTION_JOBS: Record<string, string> = {
+  'etl-clean': 'dedup_simhash',
+  'etl-graph': 'aggregate_positions',
+  'etl-full': 'run_etl_pipeline',
+}
 
 const LEVEL_VARIANT: Record<string, SourceItem['levelVariant']> = {
   A: 'default',
@@ -192,6 +205,39 @@ export function AdminDashboardPage() {
     }
   }, [])
 
+  /** 按钮下方一次性提示（ttlMs 后自动清除；0 = 常驻直至下次更新） */
+  function flashAction(id: string, text: string, ttlMs = 4000) {
+    setActionMessages((prev) => new Map(prev).set(id, text))
+    if (ttlMs > 0) {
+      setTimeout(() => {
+        setActionMessages((prev) => {
+          const next = new Map(prev)
+          next.delete(id)
+          return next
+        })
+      }, ttlMs)
+    }
+  }
+
+  /** ETL 任务状态轮询：3s 间隔至终态（完整管线最长窗口 3h，400 次 ≈ 20min
+   * 后不再阻塞提示，任务仍在后台由 worker 继续执行） */
+  async function trackEtlTask(id: string, taskId: string) {
+    for (let i = 0; i < 400; i++) {
+      await new Promise((r) => setTimeout(r, 3000))
+      try {
+        const t = await apiGet<components['schemas']['EtlTaskStatus']>(
+          `/admin/etl/task/${taskId}`,
+        )
+        if (t.status === 'success') return flashAction(id, '执行完成')
+        if (t.status === 'failed') return flashAction(id, '执行失败（详情见服务端日志）')
+      } catch (e) {
+        console.error(`[quick-action] ETL 状态查询失败: ${id}`, e)
+        return flashAction(id, '状态查询中断，请稍后刷新查看')
+      }
+    }
+    flashAction(id, '仍在执行，请稍后刷新查看')
+  }
+
   async function handleQuickAction(id: string) {
     if (runningActions.has(id)) return
     setRunningActions((prev) => new Set(prev).add(id))
@@ -201,29 +247,31 @@ export function AdminDashboardPage() {
       return next
     })
     try {
+      const job = ETL_ACTION_JOBS[id]
+      if (job) {
+        // ETL 触发型（数据清洗/聚合入图/完整管线）：入队即释放按钮，
+        // 由 trackEtlTask 轮询终态更新提示——管线可长达小时级，不占用按钮态
+        const res = await apiPost<components['schemas']['EtlTriggerResult']>('/admin/etl/trigger', { job })
+        flashAction(id, '已入队 · 执行中…', 0)
+        void trackEtlTask(id, res.task_id)
+        return
+      }
       // 真实触发：对每个平台入队 crawl_platform 任务（POST /admin/crawl/trigger）
       // 不传 keyword：留空走平台热度/最新采集（08-16 起爬虫无默认关键词，契约 keyword 可选）
       const res = await apiGet<CrawlStatusData>('/admin/crawl/status')
       for (const p of res.platforms) {
         await apiPost('/admin/crawl/trigger', { platform: p.id })
       }
-      setActionMessages((prev) => new Map(prev).set(id, `已入队 ${res.platforms.length} 个平台`))
+      flashAction(id, `已入队 ${res.platforms.length} 个平台`)
     } catch (e) {
       console.error(`[quick-action] 失败: ${id}`, e)
-      setActionMessages((prev) => new Map(prev).set(id, '触发失败'))
+      flashAction(id, '触发失败')
     } finally {
       setRunningActions((prev) => {
         const next = new Set(prev)
         next.delete(id)
         return next
       })
-      setTimeout(() => {
-        setActionMessages((prev) => {
-          const next = new Map(prev)
-          next.delete(id)
-          return next
-        })
-      }, 4000)
     }
   }
 
