@@ -109,7 +109,10 @@ def _no_real_reactor(monkeypatch):
         return r
 
     monkeypatch.setattr(zhilian_mod, "make_playwright_request", _fake_request)
-    monkeypatch.setattr(zhilian_mod.reactor, "callLater", lambda d, fn, req, sp: requests.append((d, fn, req)))
+    # patch 真实 reactor 实例（spider 已改函数内局部导入，模块级 reactor 属性不复存在）
+    from twisted.internet import reactor
+
+    monkeypatch.setattr(reactor, "callLater", lambda d, fn, req, sp: requests.append((d, fn, req)))
     yield requests
 
 

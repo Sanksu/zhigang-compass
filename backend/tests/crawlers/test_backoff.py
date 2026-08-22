@@ -9,7 +9,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "data"))
 
-import crawlers.middlewares as mw
 from crawlers.middlewares import BackoffRetryMiddleware, backoff_delay, retry_after_seconds
 
 
@@ -73,7 +72,11 @@ class _FakeCrawler:
 
 
 def _make_mw(monkeypatch):
-    """构造中间件并接管 reactor.callLater（记录延迟与回调，不真等待）。"""
+    """构造中间件并接管 reactor.callLater（记录延迟与回调，不真等待）。
+
+    patch 真实 reactor 实例的 callLater 而非本模块属性：退避调度为规避
+    AsyncCrawlerProcess 启动校验崩溃已改为函数内局部导入，模块级补丁不再生效。
+    """
     crawler = _FakeCrawler()
     mw_inst = BackoffRetryMiddleware(crawler)
     calls = []
@@ -83,7 +86,9 @@ def _make_mw(monkeypatch):
         def callLater(delay, func, *args):
             calls.append((delay, func, args))
 
-    monkeypatch.setattr(mw, "reactor", _FakeReactor())
+    from twisted.internet import reactor
+
+    monkeypatch.setattr(reactor, "callLater", _FakeReactor.callLater)
     return mw_inst, crawler, calls
 
 
