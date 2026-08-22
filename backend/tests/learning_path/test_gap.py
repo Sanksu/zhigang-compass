@@ -21,14 +21,39 @@ def _candidate(skills: list[tuple[str, int]]) -> CandidateProfile:
     )
 
 
-def _req(name: str, necessity: Necessity = Necessity.MUST, weight: float = 1.0, proficiency=None):
+def _req(name: str, necessity: Necessity = Necessity.MUST, weight: float = 1.0, proficiency=None, is_soft: bool = False):
     return SkillRequirement(
-        skill_id=name, skill_name=name, necessity=necessity, weight=weight, proficiency=proficiency
+        skill_id=name, skill_name=name, necessity=necessity, weight=weight,
+        proficiency=proficiency, is_soft=is_soft,
     )
 
 
 def _position(musts: list, nices: list | None = None) -> PositionProfile:
     return PositionProfile(position_id="p1", name="p1", must_skills=musts, nice_skills=nices or [])
+
+
+class TestSoftSkillTag:
+    """软技能打标透传（SkillRequirement.is_soft → GapSkill.is_soft，仅展示不影响三态判定）。"""
+
+    def test_is_soft_passthrough(self):
+        cand = _candidate([])
+        gaps = analyze_gaps(
+            cand,
+            _position([_req("PyTorch"), _req("沟通能力", necessity=Necessity.NICE, is_soft=True)]),
+        )
+        by_name = {g.skill: g for g in gaps}
+        assert by_name["沟通能力"].is_soft is True
+        assert by_name["PyTorch"].is_soft is False
+
+    def test_is_soft_not_affect_gap_type(self):
+        """软技能缺失仍按 necessity 定优先级（nice → medium），不因打标改变三态。"""
+        cand = _candidate([])
+        gaps = analyze_gaps(
+            cand, _position([], nices=[_req("责任心", necessity=Necessity.NICE, is_soft=True)])
+        )
+        assert len(gaps) == 1
+        assert gaps[0].gap_type == GapType.MISSING
+        assert gaps[0].priority == "medium"
 
 
 class TestGapTypes:

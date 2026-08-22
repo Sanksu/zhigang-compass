@@ -76,6 +76,7 @@ async def query_panorama(session, scope: str, focus: str | None, min_weight: flo
                 "name": s.get("name", s_id),
                 "type": "skill",
                 "communityId": s.get("community_id"),
+                "skill_category": s.get("category"),
             })
             edges.append({
                 "source": p_id,
@@ -209,6 +210,7 @@ async def query_view_techstack(session, limit: int, status_filter: str) -> list:
         MATCH (s)<-[r:REQUIRES]-(p:Position)
         WHERE {status_filter}
         RETURN s.id AS sid, s.name AS sname, s.community_id AS s_community,
+               s.category AS s_category,
                p.id AS pid, p.name AS pname, p.status AS pstatus, p.community_id AS p_community, r
         """,
         limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),

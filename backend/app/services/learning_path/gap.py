@@ -162,6 +162,7 @@ def analyze_gaps(candidate, position, semantic=None, sim_threshold: float | None
                 skill_id=req.skill_id,
                 necessity=req.necessity.value,
                 gap_type=gap_type,
+                is_soft=req.is_soft,
                 weight=req.weight,
                 priority=_priority(gap_type, req.necessity.value),
                 current_proficiency=current,

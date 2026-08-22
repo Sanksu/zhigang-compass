@@ -15,7 +15,7 @@ import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 import type { EChartsModel } from './graph-layout'
-import { COLOR_BY_STATUS, computeFilterMarks, skillLabelThreshold } from './graph-utils'
+import { COLOR_BY_STATUS, COLOR_SOFT_DARK, COLOR_SOFT_LIGHT, computeFilterMarks, isSoftSkill, skillLabelThreshold } from './graph-utils'
 import { buildDagGraph, type DagSkillLink, type DagSkillNode } from '@/components/learning/learning-timeline'
 import type { LearningPathItem } from '@/components/match/types'
 import { GraphFilterPanel } from './graph-filter-panel'
@@ -134,6 +134,7 @@ function symbolOf(node: GraphNode): string {
 function colorOf(node: GraphNode, dark: boolean): string {
   if (node.isDomain) return dark ? COLOR_DOMAIN_DARK : COLOR_DOMAIN_LIGHT
   if (node.type === 'position') return COLOR_BY_STATUS[node.status ?? 'candidate']
+  if (isSoftSkill(node)) return dark ? COLOR_SOFT_DARK : COLOR_SOFT_LIGHT
   if (node.type === 'skill') return dark ? COLOR_SKILL_DARK : COLOR_SKILL_LIGHT
   return COLOR_EVIDENCE
 }
@@ -292,6 +293,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   const [hiddenStatuses, setHiddenStatuses] = useState<Set<import('./types').PositionStatus>>(() => new Set())
   // B2: 仅显示 must（必备）边
   const [showOnlyMustEdges, setShowOnlyMustEdges] = useState(false)
+  // 软技能压暗开关（与技术栈技能分开查看）
+  const [hideSoftSkills, setHideSoftSkills] = useState(false)
   // task T2: 视图模式 — dag=宏观学习路径 DAG；graph=全局力导向图谱（提供 learningPath 时可用）
   const dagEnabled: boolean = !!learningPath && learningPath.length > 0
   const [viewMode, setViewMode] = useState<'graph' | 'dag'>(dagEnabled ? 'dag' : 'graph')
@@ -313,8 +316,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 
   // 过滤打标（而非剔除）：布局与镜头在筛选过程中保持稳定
   const filterMarks = useMemo(
-    () => computeFilterMarks(data.nodes, data.edges, { minWeight, hiddenStatuses, showOnlyMustEdges }),
-    [data, minWeight, hiddenStatuses, showOnlyMustEdges],
+    () => computeFilterMarks(data.nodes, data.edges, { minWeight, hiddenStatuses, showOnlyMustEdges, hideSoftSkills }),
+    [data, minWeight, hiddenStatuses, showOnlyMustEdges, hideSoftSkills],
   )
   // 首次渲染或 DAG↔图谱切换时才把镜头重置回中心；其余重建（主题/LOD/筛选）
   // 不携带 center，保留用户当前视角，避免滑动筛选条时镜头跳回
@@ -533,7 +536,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         displayValue: n.value,
         symbol: symbolOf(n),
         symbolSize: sizeOf(n, n.value),
-        category: n.type,
+        // 软技能独立 category：图例「软技能」项可单独开关（其余按节点类型）
+        category: isSoftSkill(n) ? 'soft' : n.type,
         itemStyle: {
           color: colorOf(n, dark),
           borderColor,
@@ -641,8 +645,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         itemHeight: 10,
         itemGap: 16,
         textStyle: { color: mutedColor, fontSize: 11 },
-        data: ['position', 'skill', 'evidence'],
-        formatter: (name: string) => (name === 'position' ? '岗位' : name === 'skill' ? '技能' : '证据'),
+        data: ['position', 'skill', 'soft', 'evidence'],
+        formatter: (name: string) =>
+          name === 'position' ? '岗位' : name === 'skill' ? '技术技能' : name === 'soft' ? '软技能' : '证据',
       },
       tooltip: {
         trigger: 'item',
@@ -654,12 +659,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           if (params.dataType !== 'node' || !params.data) return ''
           const d = params.data as unknown as GraphNode & { displayValue?: number }
           const lines: string[] = [`<b>${escapeHtml(d.name)}</b>`]
-          lines.push(`类型: ${escapeHtml(d.type)}`)
+          lines.push(`类型: ${escapeHtml(isSoftSkill(d) ? '软技能' : d.type)}`)
           if (d.type === 'position' && d.status) lines.push(`状态: ${escapeHtml(d.status)}`)
           if (evolutionMarks?.addedIds.has(d.id))
             lines.push('<span style="color:#22c55e;font-size:11px">● 本版新增</span>')
           else if (evolutionMarks?.removedIds.has(d.id))
             lines.push('<span style="color:#f97316;font-size:11px">◌ 本版消亡</span>')
+          if (d.type === 'skill' && d.skill_category && !isSoftSkill(d)) {
+            lines.push(`类目: ${escapeHtml(d.skill_category)}`)
+          }
           const displayValue = d.displayValue ?? d.value
           if (typeof displayValue === 'number') lines.push(`权重: ${displayValue}`)
           const hint =
@@ -720,6 +728,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           categories: [
             { name: 'position', itemStyle: { color: '#3b82f6' } },
             { name: 'skill', itemStyle: { color: dark ? '#fafafa' : '#09090b' } },
+            { name: 'soft', itemStyle: { color: dark ? COLOR_SOFT_DARK : COLOR_SOFT_LIGHT } },
             { name: 'evidence', itemStyle: { color: '#a1a1aa' } },
           ],
         },
@@ -813,6 +822,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         onToggleStatus={toggleStatus}
         showOnlyMustEdges={showOnlyMustEdges}
         onToggleMustEdges={setShowOnlyMustEdges}
+        hideSoftSkills={hideSoftSkills}
+        onToggleSoftSkills={setHideSoftSkills}
         visibleCount={filterMarks.visibleNodes}
         hiddenCount={data.nodes.length - filterMarks.visibleNodes}
       />

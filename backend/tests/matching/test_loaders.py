@@ -80,10 +80,10 @@ def test_build_candidate_empty_and_defaults():
 
 # ── load_positions_from_graph ──────────────────────────────────────
 
-def _req_row(pid, pname, sid, sname, necessity, weight=0.8, level=None, sc=1):
+def _req_row(pid, pname, sid, sname, necessity, weight=0.8, level=None, sc=1, category=None):
     return {
         "pid": pid, "pname": pname, "req_years": 3, "last_updated": None,
-        "industry": "互联网", "sid": sid, "sname": sname,
+        "industry": "互联网", "sid": sid, "sname": sname, "category": category,
         "necessity": necessity, "weight": weight, "level": level,
         "source_count": sc,
     }
@@ -231,6 +231,30 @@ def test_load_positions_soft_skill_dedup(monkeypatch):
     # 同名技能只出现一次（软技能并入前检查重复）
     names = [s.skill_name for s in pos.nice_skills]
     assert names.count("团队协作") == 1
+
+
+def test_load_positions_is_soft_tagging(monkeypatch):
+    """软技能打标（仅展示元数据，评分口径不变）：
+    - REQUIRES 边上 Skill.category=「软技能」→ is_soft=True；技术类目 → False
+    - Position.soft_skills 并入 nice 的条目 → is_soft=True
+    """
+    req_rows = [
+        _req_row("p1", "算法工程师", "s1", "PyTorch", "must", category="AI·机器学习"),
+        _req_row("p1", "算法工程师", "s2", "沟通能力", "nice", weight=0.4, category="软技能"),
+    ]
+    soft_rows = [{"pid": "p1", "soft": ["责任心"]}]
+    monkeypatch.setattr("app.services.matching.loaders.neo4j_driver",
+                        _FakeDriver(_FakeSession(req_rows, soft_rows)))
+    monkeypatch.setattr("app.services.matching.loaders.SkillEmbedder",
+                        type("SE", (), {"get": staticmethod(lambda: _FakeEmbedder())}))
+
+    pos = load_positions_from_graph()[0]
+    assert pos.must_skills[0].skill_name == "PyTorch"
+    assert pos.must_skills[0].is_soft is False  # 技术栈技能不打标
+    edge_soft = next(s for s in pos.nice_skills if s.skill_name == "沟通能力")
+    assert edge_soft.is_soft is True  # REQUIRES 边上的软技能类目
+    merged_soft = next(s for s in pos.nice_skills if s.skill_name == "责任心")
+    assert merged_soft.is_soft is True  # Position.soft_skills 并入条目
 
 
 def test_load_positions_filters_edge_positions(monkeypatch):

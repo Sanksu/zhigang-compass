@@ -390,6 +390,7 @@ async def position_detail(
         "status": position.get("status"),
         "must_skills": skills.get("must", []),
         "nice_skills": skills.get("nice", []),
+        "soft_skills": position.get("soft_skills") or [],
     }
     await _cache_set(cache_key, data)
     return ok(data=data)
@@ -558,6 +559,7 @@ async def skill_detail(
     data = {
         "id": skill_id,
         "name": skill["name"],
+        "category": skill.get("category"),
         "positions_count": counts.get("positions_count", 0),
         "evidence_count": counts.get("evidence_count", 0),
         "courses_count": len(courses),
@@ -851,6 +853,7 @@ async def graph_view(
                 "name": record.get("sname", s_id),
                 "type": "skill",
                 "communityId": record.get("s_community"),
+                "skill_category": record.get("s_category"),
             })
             nodes.setdefault(p_id, {
                 "id": p_id,
@@ -894,6 +897,7 @@ async def graph_view(
                 "name": s.get("name", s_id),
                 "type": "skill",
                 "communityId": s.get("community_id"),
+                "skill_category": s.get("category"),
             })
             edges.append({
                 "source": p_id,

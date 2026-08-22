@@ -69,6 +69,8 @@ export interface GapItem {
   priority: 'high' | 'medium' | 'low'
   current_level: string
   required_level: string
+  /** 软技能标记（责任心/沟通能力等软素质，仅展示打标不影响评分） */
+  is_soft?: boolean
   // ── 契约扩展字段（#341 起后端全量返回，可选——图谱不可用时后端回填补齐，
   //    前端不再本地推导/mock；对应契约 GapSkill schema）──
   /** 市场需求度 0-1 */
