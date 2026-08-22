@@ -304,23 +304,26 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
                           )}
                         </div>
 
-                        {/* CTA */}
-                        <div className="shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              // 优先回调（页面可自定义跳转/标记）；缺省跳首门课程链接
-                              if (onGoToLearn) onGoToLearn(task)
-                              else {
-                                const url = task.courses?.find((c) => c.url)?.url
-                                if (url) window.open(url, '_blank', 'noreferrer')
-                              }
-                            }}
-                            className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[10px] font-medium text-canvas transition-opacity hover:opacity-90"
-                          >
-                            前往学习 <ArrowRight className="size-3" />
-                          </button>
-                        </div>
+                        {/* CTA：无一致课程（无可跳转链接）且页面未自定义回调时不渲染，
+                            避免死按钮（08-22 门控收紧后无课技能宁缺毋滥） */}
+                        {(onGoToLearn || task.courses?.some((c) => c.url)) && (
+                          <div className="shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // 优先回调（页面可自定义跳转/标记）；缺省跳首门课程链接
+                                if (onGoToLearn) onGoToLearn(task)
+                                else {
+                                  const url = task.courses?.find((c) => c.url)?.url
+                                  if (url) window.open(url, '_blank', 'noreferrer')
+                                }
+                              }}
+                              className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[10px] font-medium text-canvas transition-opacity hover:opacity-90"
+                            >
+                              前往学习 <ArrowRight className="size-3" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )
                   })}
