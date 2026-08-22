@@ -374,6 +374,16 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       })
       // 编程式聚焦放大也会改变 zoom 档位——同步 LOD（前端聚焦到 2.4 → 全量标签）
       applyLodBand(2.4)
+      // 定位目标常随岗位/域刚展开上画布，力导向仍在迭代、坐标持续漂移——
+      // 800ms 后按最新坐标校正一次镜头（漂移 ≤8px 视为已静止，不重设）
+      window.setTimeout(() => {
+        const settled = resolveNodePoint(id)
+        if (!settled || !chartRef.current) return
+        if (Math.abs(settled[0] - point[0]) <= 8 && Math.abs(settled[1] - point[1]) <= 8) return
+        chartRef.current.setOption({
+          series: [{ zoom: 2.4, center: settled, animationDurationUpdate: 0 }],
+        })
+      }, 800)
     },
     [resolveNodePoint, applyLodBand],
   )
