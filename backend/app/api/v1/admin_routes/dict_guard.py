@@ -128,7 +128,7 @@ async def list_proposals(
         count_stmt=count_stmt,
     )
     return paged_ok(
-        data=[
+        [
             {
                 "id": r.id,
                 "entity_type": r.entity_type,
@@ -259,7 +259,7 @@ async def list_changes(
     count_stmt = select(func.count()).select_from(DictChangeLog)
     rows, total = await paginate(db, stmt, page, size, count_stmt=count_stmt)
     return paged_ok(
-        data=[
+        [
             {
                 "id": r.id,
                 "entity_type": r.entity_type,
