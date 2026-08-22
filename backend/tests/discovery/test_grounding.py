@@ -547,3 +547,67 @@ class TestDualPathRetrieval:
 
         asyncio.run(_run())
 
+
+
+class TestDegradationObservability:
+    """降级路径必须留下计数与 warning（第五轮审查 P1-5：静默降级可在生产潜伏数周）。"""
+
+    def test_neo4j_fulltext_failure_counts_and_warns(self, monkeypatch, caplog):
+        from app.services.discovery import grounding
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("neo4j down")
+
+        monkeypatch.setattr(grounding, "_query_fulltext", _boom)
+
+        async def _run():
+            with caplog.at_level("WARNING", logger="app.services.discovery.grounding"):
+                return await grounding._neo4j_fulltext(object(), "算法工程师", 10)
+
+        before = grounding.degradation_counts["neo4j_fulltext"]
+        assert asyncio.run(_run()) == []
+        assert grounding.degradation_counts["neo4j_fulltext"] - before == 1
+        assert any("neo4j_fulltext" in r.getMessage() for r in caplog.records)
+
+    def test_semantic_failure_counts_and_still_returns_keyword(self, monkeypatch):
+        from app.services.discovery import grounding
+
+        async def _boom(*args, **kwargs):
+            raise RuntimeError("embedder down")
+
+        monkeypatch.setattr(grounding, "_semantic_search", _boom)
+
+        async def _run():
+            db = _FakeDb(rows=[_occ(name="软件开发")])
+            return await search_authoritative("软件开发", db, embedder=_FakeEmbedder())
+
+        before = grounding.degradation_counts["semantic_search"]
+        hits = asyncio.run(_run())
+        assert len(hits) == 1
+        assert hits[0]["source"] == "keyword"
+        assert grounding.degradation_counts["semantic_search"] - before == 1
+
+    def test_redis_cache_failure_counts(self, monkeypatch):
+        import app.core.database as database
+        from app.services.discovery import grounding
+
+        class _BrokenRedis:
+            async def get(self, *args, **kwargs):
+                raise RuntimeError("redis down")
+
+            async def set(self, *args, **kwargs):
+                raise RuntimeError("redis down")
+
+        monkeypatch.setattr(database, "redis_client", _BrokenRedis())
+        monkeypatch.setattr(grounding, "_CACHE_ENABLED", True)
+
+        async def _run():
+            got = await grounding._cache_get("软件开发", 10)
+            await grounding._cache_set("软件开发", 10, [{"code": "c1"}])
+            return got
+
+        before_get = grounding.degradation_counts["redis_cache_get"]
+        before_set = grounding.degradation_counts["redis_cache_set"]
+        assert asyncio.run(_run()) is None
+        assert grounding.degradation_counts["redis_cache_get"] - before_get == 1
+        assert grounding.degradation_counts["redis_cache_set"] - before_set == 1
