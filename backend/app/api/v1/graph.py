@@ -886,6 +886,8 @@ async def graph_view(
                 "type": "position",
                 "status": p.get("status", "active"),
                 "communityId": p.get("community_id"),
+                "domain_id": p.get("domain_id"),
+                "domain_name": p.get("domain_name"),
             })
             nodes.setdefault(s_id, {
                 "id": s_id,
