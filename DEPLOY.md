@@ -52,6 +52,33 @@ docker compose ps             # 全部 healthy 即就绪
 - api 容器 ENTRYPOINT **自动执行 `alembic upgrade head`**（无需手动迁移）
 - 首次启动约 40–60s（镜像构建另计；healthcheck start-period 10s）
 
+### 3.1 日常更新部署（⚠️ 合并 ≠ 部署）
+
+develop 合入 PR 后，**运行中的栈不会自动更新**——api/worker 的代码在镜像里（worker 无任何代码挂载，镜像即代码），前端在 `frontend/dist` 只读挂载。08-22 曾因「#404 修复已合 develop 但镜像未重建」导致三课程源爬虫全灭，同日软技能合入后也漏跑过存量回填。每次合并后按此清单部署：
+
+```bash
+git checkout develop && git pull
+
+# ① 后端有改动（app/ alembic/ configs/ pyproject）→ 重建镜像，否则 worker 仍跑旧代码
+docker compose -f docker-compose.yml build api worker
+
+# ② 前端有改动 → 重建 dist（bind mount 只读挂载，up 即生效，无需重建容器）
+cd frontend && pnpm install && pnpm build && cd ..
+
+# ③ compose 挂载的宿主文件必须先存在（Docker 对缺失的挂载源会建同名目录，写入永久失败）
+ls -la backend/configs/skill_filters_dynamic.json   # 应为文件而非目录
+
+# ④ 起栈（显式 -f 排除本地开发 override——override 会把 backend/app 挂载进 api，
+#    掩盖镜像与工作区的代码差异，08-22 部署教训）
+docker compose -f docker-compose.yml up -d
+docker compose ps                                    # 全部 healthy
+curl http://localhost:8000/health
+```
+
+- **回填脚本检查**：CHANGELOG 对应条目若标注存量回填（如 `backfill_skill_category.py`），部署后在容器内执行一次（幂等）：`docker exec zhigang-api python scripts/backfill_xxx.py`
+- **迁移**：api ENTRYPOINT 自动执行，无需手动；但镜像必须包含新迁移文件（见 ①，迁移缺失=部署后启动失败）
+- 可选加速：`CD (images)` workflow 在每次 develop 合并后把后端镜像推到 GHCR（`ghcr.io/sanksu/zhigang-compass-api|worker`，公开仓库免认证拉取），可 `docker pull` + `docker tag` 为本地镜像名（`zhigang-compass-api:latest` / `zhigang-compass-worker:latest`）替代 ① 的本地构建
+
 ## 4. 初始化
 
 - **数据库迁移**：自动（见上）
@@ -79,7 +106,7 @@ docker compose ps             # 全部 healthy 即就绪
 | 停止（保留数据） | `docker compose down`（数据卷不删；`-v` 才删卷） |
 | 查看日志 | `docker compose logs -f api` / `-f worker` |
 | 重启单服务 | `docker compose restart api` |
-| 更新代码 | 重新 `docker compose up -d --build api worker` |
+| 更新代码 | 见 **§3.1 合并 ≠ 部署清单**（pull → build → 前置检查 → up） |
 | 数据备份 | `pg_dump`（PostgreSQL）+ `neo4j-admin dump`（Neo4j）；数据卷：`pg_data` / `neo4j_data` / `neo4j_logs` / `redis_data` |
 
 ### 6.1 ETL 调度（容器内 ARQ cron，08-21 #348）
