@@ -71,3 +71,25 @@ def test_flow_missing_skill_returns_empty_graph():
     assert data["nodes"] == []
     assert data["links"] == []
     assert data["skill_name"] == "Python"
+
+
+def test_flow_ignores_non_requires_edges():
+    """P1-2 回归：BELONGS_TO/PREREQUISITE_OF 等技能→技能边不得以「岗位」身份入列。"""
+    snap = _snapshot("v1", "2026-08-01T05:00:00+08:00", "Python", {"后端开发": 10})
+    snap.snapshot_json["edges"].extend([
+        {"source": "sk_ml", "target": "sk_py", "relation": "PREREQUISITE_OF"},
+        {"source": "sk_py", "target": "pos_后端开发", "relation": "BELONGS_TO"},
+    ])
+    data = _build_skill_flow([snap], "sk_py", top_n=8)
+    names = {n["name"] for n in data["nodes"]}
+    assert names == {"后端开发"}  # sk_ml 不入岗位列；BELONGS_TO 不增频次
+    assert data["nodes"][0]["freq"] == 10
+
+
+def test_flow_legacy_snapshot_without_relation_keeps_all_edges():
+    """旧快照（边无 relation 字段）保持历史口径：全部 target 边计入频次。"""
+    snap = _snapshot("v1", "2026-08-01T05:00:00+08:00", "Python", {"后端开发": 3})
+    for e in snap.snapshot_json["edges"]:
+        del e["relation"]
+    data = _build_skill_flow([snap], "sk_py", top_n=8)
+    assert data["nodes"][0]["freq"] == 3

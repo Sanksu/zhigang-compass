@@ -2444,6 +2444,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/etl/trigger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 手动触发 ETL 任务（快捷操作面板：数据清洗/聚合入图/完整管线）
+         * @description 白名单任务经统一包装 run_etl_job_manual 入队：先建 TaskStatus(pending)
+         *     再投递 ARQ，worker 回写 running→success/failed；GET /admin/etl/task/{task_id}
+         *     轮询状态。dedup_simhash=SimHash 近似去重清洗；
+         *     aggregate_positions=岗位-技能频次与 REQUIRES 边幂等覆盖写回 Neo4j（入图）；
+         *     run_etl_pipeline=完整管线（采集→清洗→结构化→聚合入图→快照全阶段）。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * @description 任务标识
+                         * @enum {string}
+                         */
+                        job: "dedup_simhash" | "aggregate_positions" | "run_etl_pipeline";
+                    };
+                };
+            };
+            responses: {
+                /** @description 任务已触发（data 含 task_id/status=pending） */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["EtlTriggerResult"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/etl/task/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** ETL 任务状态查询（前端轮询） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 任务当前状态 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["EtlTaskStatus"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                /** @description 任务不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/crawl/status": {
         parameters: {
             query?: never;
@@ -4038,6 +4146,26 @@ export interface components {
             task_id: string;
             platform: string;
             status: string;
+        };
+        /** @description POST /admin/etl/trigger 响应 data（ARQ 入队结果） */
+        EtlTriggerResult: {
+            task_id: string;
+            job: string;
+            status: string;
+        };
+        /** @description GET /admin/etl/task/{task_id} 响应 data（TaskStatus 序列化） */
+        EtlTaskStatus: {
+            task_id: string;
+            task_type: string;
+            /** @enum {string} */
+            status: "pending" | "running" | "success" | "failed";
+            progress: number;
+            result?: {
+                [key: string]: unknown;
+            };
+            error?: string;
+            created_at?: string | null;
+            updated_at?: string | null;
         };
         /**
          * @description 数据血缘链中的单条来源 JD 记录（岗位 ← 证据 JD ← 采集源）。
