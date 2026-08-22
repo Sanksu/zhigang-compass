@@ -17,6 +17,12 @@ on:
     branches: [develop]
   workflow_dispatch: {}
 
+# 多个 PR 连续合入 develop 时只允许最新提交发布 :develop 标签；否则旧 run
+# 可能晚于新 run 完成并把浮动标签回退到旧镜像。
+concurrency:
+  group: cd-images-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write
