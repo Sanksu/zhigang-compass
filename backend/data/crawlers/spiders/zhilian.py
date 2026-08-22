@@ -27,6 +27,13 @@ from crawlers.zhilian_detail import extract_job_detail
 DEFAULT_MAX_EMPTY_RETRIES = 3
 
 
+def _call_later(delay, callback, *args, **kwargs):
+    """延迟调度回调；仅在实际重试时加载 Twisted reactor。"""
+    from twisted.internet import reactor
+
+    return reactor.callLater(delay, callback, *args, **kwargs)
+
+
 def _max_empty_retries() -> int:
     """读取爬虫级 max_empty_retries 配置（0=关闭），失败回退默认 3。"""
     try:
@@ -244,12 +251,10 @@ class ZhilianSpider(BaseSpider):
                     scroll_wait_ms=0,
                     headers=self._compliance_headers(),
                 )
-                # make_playwright_request 已设 dont_filter=True，重发同一 URL 不会被去重
-                # 局部导入：模块级导入 reactor 会在 AsyncCrawlerProcess 构造期被
-                # SpiderLoader 预加载时提前安装默认 reactor，启动校验即崩
-                from twisted.internet import reactor
-
-                reactor.callLater(delay, self.crawler.engine.schedule, retry_request, self)
+                # make_playwright_request 已设 dont_filter=True，重发同一 URL 不会被去重。
+                # _call_later 仅在实际重试时才加载 reactor，避免 SpiderLoader 预加载时
+                # 安装默认 reactor；不捕获调度异常，保持其向调用方传播。
+                _call_later(delay, self.crawler.engine.schedule, retry_request, self)
                 return
             self.logger.warning(
                 f"[zhilian] 列表页无岗位卡片（kw={response.meta.get('keyword')} 页={response.meta.get('page')}），"

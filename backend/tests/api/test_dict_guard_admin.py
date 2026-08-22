@@ -20,8 +20,7 @@ import app.api.v1.admin_routes.dict_guard as dg
 
 def _proposal(**kw):
     base = dict(
-        id="p1", term="低代码平台搭建", action="add_stopword", status="pending",
-        entity_type="skill",
+        id="p1", entity_type="skill", term="低代码平台搭建", action="add_stopword", status="pending",
         reason="噪音词条", llm_confidence=0.6, evidence=[],
         impact_stats={"graph_nodes": 3, "jd_snapshots": 5}, run_date="2026-08-21",
         reviewed_by="", review_reason="", reviewed_at=None, created_at=None,
@@ -32,8 +31,7 @@ def _proposal(**kw):
 
 def _changelog(**kw):
     base = dict(
-        id="c1", term="低代码平台搭建", action="add_stopword", source="auto",
-        entity_type="skill",
+        id="c1", entity_type="skill", term="低代码平台搭建", action="add_stopword", source="auto",
         kind="blocked", proposal_id=None, reason="噪音词条", detail={},
         impact_stats={}, applied_by="system", created_at=None,
     )
@@ -221,7 +219,13 @@ async def test_list_proposals_returns_paged_items(monkeypatch):
     resp = await dg.list_proposals(status="pending", page=1, size=20, db=_FakeDB())
     assert resp.code == 0
     assert resp.data["total"] == 1
-    assert [it["id"] for it in resp.data["items"]] == ["p1"]
+    assert resp.data["items"] == [{
+        "id": "p1", "entity_type": "skill", "term": "微", "action": "remove_stopword",
+        "status": "pending", "reason": "噪音词条", "llm_confidence": 0.6,
+        "evidence": [], "impact_stats": {"graph_nodes": 3, "jd_snapshots": 5},
+        "run_date": "2026-08-21", "reviewed_by": "", "review_reason": "",
+        "reviewed_at": None, "created_at": None,
+    }]
 
 
 @pytest.mark.asyncio
@@ -235,7 +239,11 @@ async def test_list_changes_returns_paged_items(monkeypatch):
     resp = await dg.list_changes(page=1, size=20, db=_FakeDB())
     assert resp.code == 0
     assert resp.data["total"] == 1
-    assert resp.data["items"][0]["id"] == "c1"
+    assert resp.data["items"] == [{
+        "id": "c1", "entity_type": "skill", "term": "微", "action": "add_stopword",
+        "source": "auto", "kind": "blocked", "proposal_id": None, "reason": "噪音词条",
+        "detail": {}, "impact_stats": {}, "applied_by": "system", "created_at": None,
+    }]
 
 
 # ── 报告 ─────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@
 
 import sys
 from pathlib import Path
+from types import ModuleType
 
 _BACKEND = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_BACKEND))
@@ -27,19 +28,39 @@ def test_etl_pipeline_skips_independent_schedule(monkeypatch):
         calls.append(spider)
         return {"spider": spider}
 
-    async def _stub_stage(*a, **k):
-        return {"stub": True}
+    async def _stub_stage(_name, awaitable):
+        """消费编排器传入的 awaitable，避免未 await 的 coroutine 警告。"""
+        return await awaitable
 
-    def _stub_task(*a, **k):
-        # 同步返回 dict：避免 async stub 产生的 coroutine 未被 await 的警告
+    async def _stub_limited_stage(_name, *, task, ctx, task_kwargs=None, **_kwargs):
+        return await task(ctx, **(task_kwargs or {}))
+
+    async def _stub_task(*a, **k):
         return {}
+
+    class _FakeNeo4jSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class _FakeNeo4jDriver:
+        def session(self):
+            return _FakeNeo4jSession()
+
+    async def _stub_derive_evolved_from():
+        return {}
+
+    async def _stub_load_positions_shared():
+        return []
 
     # 后续阶段任务全部桩掉（run_etl_pipeline 会引用 tasks_module.<stage>）
     class _FakeTasks:
         CDP_SPIDERS = set()
         crawl_platform = staticmethod(_fake_crawl)
         _run_stage = staticmethod(_stub_stage)
-        _run_limited_stage = staticmethod(_stub_stage)
+        _run_limited_stage = staticmethod(_stub_limited_stage)
         dedup_simhash = staticmethod(_stub_task)
         batch_extract = staticmethod(_stub_task)
         validate_temporal = staticmethod(_stub_task)
@@ -75,6 +96,20 @@ def test_etl_pipeline_skips_independent_schedule(monkeypatch):
     )
     # monkeypatch 生效自检：crawlers 读取应返回带独立时间的 zhilian 配置
     assert etl.runtime_config.get("crawlers")["zhilian"].get("hour") == 4
+
+    # 编排器内直接导入的阶段也必须隔离，保证本测试不触发图数据库、演化或缓存副作用。
+    database_stub = ModuleType("app.core.database")
+    database_stub.neo4j_driver = _FakeNeo4jDriver()
+    skill_relations_stub = ModuleType("app.services.kg.skill_relations")
+    skill_relations_stub.sync_skill_relations = lambda session: {}
+    evolved_from_stub = ModuleType("app.services.evolution.evolved_from")
+    evolved_from_stub.derive_evolved_from = _stub_derive_evolved_from
+    shared_cache_stub = ModuleType("app.services.matching.shared_cache")
+    shared_cache_stub.load_positions_shared = _stub_load_positions_shared
+    monkeypatch.setitem(sys.modules, "app.core.database", database_stub)
+    monkeypatch.setitem(sys.modules, "app.services.kg.skill_relations", skill_relations_stub)
+    monkeypatch.setitem(sys.modules, "app.services.evolution.evolved_from", evolved_from_stub)
+    monkeypatch.setitem(sys.modules, "app.services.matching.shared_cache", shared_cache_stub)
 
     result = asyncio.run(
         etl.run_etl_pipeline({}, run_date="2026-08-21", tasks_module=_FakeTasks)

@@ -48,13 +48,26 @@ def _all_routes() -> list[tuple[str, object]]:
 
 
 class _FakeRedis:
-    """Redis 桩：全缓存未命中，写忽略（冒烟只验证路由挂载与响应结构）。"""
+    """内存 Redis 桩：支持图谱缓存和限流的 SET NX EX / INCR 路径。"""
+
+    def __init__(self):
+        self.values: dict[str, int | str] = {}
+        self.set_calls: list[tuple[str, int | str, bool, int | None]] = []
 
     async def get(self, key):
-        return None
+        return self.values.get(key)
 
-    async def set(self, key, value, ex=None):
-        return None
+    async def set(self, key, value, nx=False, ex=None):
+        self.set_calls.append((key, value, nx, ex))
+        if nx and key in self.values:
+            return None
+        self.values[key] = value
+        return True
+
+    async def incr(self, key):
+        value = int(self.values.get(key, 0)) + 1
+        self.values[key] = value
+        return value
 
 
 def test_api_routes_collected_and_unique():
@@ -102,6 +115,7 @@ def test_panorama_bound_to_async_endpoint():
 async def test_panorama_smoke_mocked(monkeypatch):
     """panorama 端点冒烟：全 mock 下 200 + {nodes, edges, stats} 契约结构。"""
     from app.api.v1 import graph as graph_mod
+    from app.core import middleware as middleware_mod
 
     async def _mock_panorama(scope, focus, min_weight, limit):
         return (
@@ -112,7 +126,9 @@ async def test_panorama_smoke_mocked(monkeypatch):
     async def _mock_graph_counts():
         return {"total_nodes": 2, "total_edges": 1}
 
-    monkeypatch.setattr(graph_mod, "redis_client", _FakeRedis())
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(graph_mod, "redis_client", fake_redis)
+    monkeypatch.setattr(middleware_mod, "redis_client", fake_redis)
     monkeypatch.setattr(graph_mod, "_query_panorama", _mock_panorama)
     monkeypatch.setattr(graph_mod, "_query_graph_counts", _mock_graph_counts)
 
@@ -125,12 +141,14 @@ async def test_panorama_smoke_mocked(monkeypatch):
     assert body["data"]["nodes"][0]["id"] == "pos_1"
     assert body["data"]["edges"][0]["source"] == "pos_1"
     assert body["data"]["stats"]["total_nodes"] == 2
+    assert fake_redis.set_calls[0] == ("rate:127.0.0.1:graph", 1, True, 60)
 
 
 @pytest.mark.asyncio
 async def test_skill_positions_smoke_mocked(monkeypatch):
     """skill/{id}/positions 冒烟：匿名可见性过滤不破坏响应结构。"""
     from app.api.v1 import graph as graph_mod
+    from app.core import middleware as middleware_mod
 
     async def _mock_skill_positions(skill_id, status_filter):
         return [
@@ -138,7 +156,9 @@ async def test_skill_positions_smoke_mocked(monkeypatch):
              "necessity": "must", "weight": 0.8, "level": "中级"},
         ]
 
-    monkeypatch.setattr(graph_mod, "redis_client", _FakeRedis())
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(graph_mod, "redis_client", fake_redis)
+    monkeypatch.setattr(middleware_mod, "redis_client", fake_redis)
     monkeypatch.setattr(graph_mod, "_query_skill_positions", _mock_skill_positions)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -147,12 +167,14 @@ async def test_skill_positions_smoke_mocked(monkeypatch):
     body = resp.json()
     assert body["code"] == 0
     assert body["data"]["positions"][0]["position_id"] == "pos_1"
+    assert fake_redis.set_calls[0] == ("rate:127.0.0.1:graph", 1, True, 60)
 
 
 @pytest.mark.asyncio
 async def test_graph_view_smoke_mocked(monkeypatch):
     """view/{view_type} 冒烟：视图端点挂载 + 契约结构。"""
     from app.api.v1 import graph as graph_mod
+    from app.core import middleware as middleware_mod
 
     async def _mock_view_main(limit, status_filter):
         return [
@@ -164,7 +186,9 @@ async def test_graph_view_smoke_mocked(monkeypatch):
     async def _mock_graph_counts():
         return {"total_nodes": 2, "total_edges": 1}
 
-    monkeypatch.setattr(graph_mod, "redis_client", _FakeRedis())
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(graph_mod, "redis_client", fake_redis)
+    monkeypatch.setattr(middleware_mod, "redis_client", fake_redis)
     monkeypatch.setattr(graph_mod, "_query_view_main", _mock_view_main)
     monkeypatch.setattr(graph_mod, "_query_graph_counts", _mock_graph_counts)
 
@@ -175,6 +199,7 @@ async def test_graph_view_smoke_mocked(monkeypatch):
     body = resp.json()
     assert body["data"]["view_type"] == "level"
     assert body["data"]["nodes"][0]["id"] == "pos_1"
+    assert fake_redis.set_calls[0] == ("rate:127.0.0.1:graph", 1, True, 60)
 
 
 def test_panorama_hotpath_no_to_thread_for_neo4j():
