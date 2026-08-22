@@ -15,6 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from neo4j.exceptions import GqlError
 
 from app.core.config import settings
+from app.core.security import ensure_jwt_keys
 from app.core.errors import (
     ERR_INTERNAL,
     ERR_NEO4J,
@@ -42,6 +43,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动时
+    # JWT RS256 密钥预加载（所有环境）：密钥经 compose 挂载注入而非入镜像，
+    # 挂载缺失时懒加载会把 FileNotFoundError 暴露成运行时 500（登录/refresh
+    # 报「服务器内部错误」，2026-08-22 事故）——启动即校验并给出修复指引
+    ensure_jwt_keys()
     if settings.is_production:
         if settings.secret_key == "change-me-in-production":
             raise RuntimeError("SECRET_KEY 未修改，生产环境拒绝启动")

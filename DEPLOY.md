@@ -26,6 +26,10 @@ printf '{\n  "version": 0,\n  "blocked": [],\n  "protected": []\n}\n' > backend/
 
 > 注意：不要 `cp` `skill_filters_dynamic.json.example`——其中示例条目（示例噪音词/示例保护词）会被当作真实动态层生效。运行后该文件由 dict-guard 每日评估与管理端审批自动维护，api/worker ≤30s 热同步。
 
+> ⚠️ **JWT 签名密钥**（`backend/keys/private.pem` + `public.pem`，git 不入库）经 compose 挂载 `./backend/keys:/app/keys` 注入，**不入镜像**。api 启动时 fail-fast 校验（2026-08-22 登录「服务器内部错误」事故：容器按旧 compose 创建、缺该挂载，refresh 全线 500）。密钥缺失时 api 拒绝启动并提示 `docker compose up -d --force-recreate api worker`。
+
+> ⚠️ **compose 挂载/环境变更后必须 `docker compose up -d --force-recreate`**：`up -d` 对已存在且配置未变 hash 的容器不会重建；若曾在其他分支/旧配置下 up 过，配置回不来也不会自动补挂载（keys/reports/configs 等注入全部失效且无提示）。跨分支操作后统一 `--force-recreate` 一次最稳。
+
 **必改项**（production 下 fail-fast 强校验，不满足则 api 拒绝启动）：
 
 | 键 | 要求 | 缺省后果 |

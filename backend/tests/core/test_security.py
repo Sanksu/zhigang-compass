@@ -3,10 +3,16 @@
 RSA 密钥：fixture 收敛于 tests/conftest.py（临时密钥对注入 settings）。
 """
 
+from unittest.mock import patch
+
+import pytest
+
+from app.core.config import settings
 from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    ensure_jwt_keys,
     has_permission,
     hash_password,
     verify_password,
@@ -69,3 +75,19 @@ class TestTokens:
         a = decode_token(create_access_token("u1", "user"))
         r = decode_token(create_refresh_token("u1"))
         assert a["jti"] != r["jti"]
+
+
+class TestEnsureJwtKeys:
+    """启动 fail-fast 预加载（2026-08-22 登录 refresh 500：容器缺 keys 挂载）。"""
+
+    def test_keys_present_passes(self):
+        """密钥存在（conftest 临时密钥对）→ 启动校验静默通过。"""
+        ensure_jwt_keys()
+
+    def test_missing_key_fails_fast_with_fix_hint(self, tmp_path):
+        """密钥缺失 → RuntimeError 指向 compose 挂载修复动作，而非运行时 FileNotFoundError→500。"""
+        missing = str(tmp_path / "no-such-dir" / "private.pem")
+        with patch.object(settings, "jwt_private_key_path", missing):
+            with pytest.raises(RuntimeError, match="backend/keys") as exc_info:
+                ensure_jwt_keys()
+        assert "force-recreate" in str(exc_info.value)
