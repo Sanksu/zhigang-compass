@@ -107,10 +107,17 @@ function buildNodeObject(
   selected: boolean,
   expanded: boolean,
 ): THREE.Object3D {
-  const r = nodeRadius(node, selected, expanded)
+  const r = node.isDomain ? Math.max(7, nodeRadius(node, selected, expanded) * 1.45) : nodeRadius(node, selected, expanded)
   const group = new THREE.Group()
+  const geometry = node.isDomain
+    ? new THREE.OctahedronGeometry(r, 1)
+    : node.type === 'position'
+      ? new THREE.BoxGeometry(r * 1.55, r * 1.05, r * 0.72)
+      : node.type === 'evidence'
+        ? new THREE.ConeGeometry(r * 0.85, r * 1.8, 3)
+        : new THREE.SphereGeometry(r, 20, 20)
   const sphere = new THREE.Mesh(
-    new THREE.SphereGeometry(r, 20, 20),
+    geometry,
     new THREE.MeshBasicMaterial({
       color: nodeColor(node, dark),
       transparent: true,
@@ -134,11 +141,14 @@ function buildNodeObject(
     group.add(ring)
   }
 
-  // 岗位标签字号更大（主节点），技能/证据小字号
-  const fontSize = node.type === 'position' ? 14 : 11
-  const label = makeTextSprite(node.name, dark, fontSize)
-  label.position.set(0, r + (fontSize + 6) / 24, 0)
-  group.add(label)
+  // 域与岗位作为主地标常显；技能和证据在选中后才展开标注，降低 3D 标签噪声。
+  const showLabel = node.isDomain || node.type === 'position' || selected
+  if (showLabel) {
+    const fontSize = node.isDomain ? 15 : node.type === 'position' ? 13 : 11
+    const label = makeTextSprite(node.name, dark, fontSize)
+    label.position.set(0, r + (fontSize + 6) / 24, 0)
+    group.add(label)
+  }
   return group
 }
 
@@ -268,7 +278,10 @@ export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
 
   const colors = graphColors(dark ? 'dark' : 'light')
   const bgColor = colors.canvas
-  const linkColor = colors.edge
+  const linkColor = (rawLink: unknown) => {
+    const link = rawLink as { necessity?: 'must' | 'nice' }
+    return link.necessity === 'nice' ? colors.edgeOptional : colors.edgeStrong
+  }
 
   // 单击 → 选中；双击岗位 → 展开/收起其技能（ForceGraph3D 无原生双击，用点击间隔检测）
   const lastClickRef = useRef<{ id: string; ts: number }>({ id: '', ts: 0 })
@@ -395,7 +408,7 @@ export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
           backgroundColor={bgColor}
           nodeVal={(node: unknown) => nodeVal(node as GraphNode)}
           nodeThreeObject={getNodeObject}
-          linkColor={() => linkColor}
+          linkColor={linkColor}
           linkWidth={0.5}
           linkDirectionalParticles={2}
           linkDirectionalParticleWidth={2}
