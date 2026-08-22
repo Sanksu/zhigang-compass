@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.common import iso, ok, paged_ok, paginate
 from app.api.deps import require_permission
 from app.core.database import get_db
-from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
+from app.core.errors import ERR_CONFLICT, ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import AuditLog, DictChangeLog, DictProposal
 from app.schemas.common import error
 from app.services.extraction import dynamic_filters as dyn
