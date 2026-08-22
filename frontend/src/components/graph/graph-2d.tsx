@@ -544,6 +544,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
                 shadowColor: hexToRgba(colorOf(n, dark), 0.55),
               }
             : {}),
+          // 待归类桶弱化（P1-2）：虚线描边 + 降透明度，兜底域不与实域抢视觉权重
+          ...(n.isUncategorized && !dimmed ? { borderType: 'dashed' as const, borderWidth: 2, opacity: 0.6 } : {}),
           ...(dimmed ? { opacity: FILTER_DIM_OPACITY } : {}),
         },
         label: {
@@ -710,6 +712,35 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     chart.setOption(option)
     builtRef.current = true
   }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand])
+
+  // 新兴岗位脉冲光晕（视觉评审 P1-3）：emerging 节点 shadowBlur 呼吸动画
+  // （~1.6s 周期），让"哪里在变热"一眼可见。按 id 局部 setOption merge
+  // （节点数少，100ms 步进对 60fps 画布无压力）；主 option 重建会复位
+  // itemStyle，下一 tick 自动重涂。DAG 视图/无新兴节点时不启动。
+  const emergingNodes = useMemo(
+    () => data.nodes.filter((n) => n.type === 'position' && n.status === 'emerging'),
+    [data],
+  )
+  useEffect(() => {
+    if (viewMode !== 'graph' || emergingNodes.length === 0) return
+    const dark = isDark()
+    let phase = 0
+    const timer = window.setInterval(() => {
+      phase = (phase + 1) % 16
+      const glow = 8 + ((Math.sin((phase / 16) * Math.PI * 2) + 1) / 2) * 16
+      chartRef.current?.setOption({
+        series: [
+          {
+            data: emergingNodes.map((n) => ({
+              id: n.id,
+              itemStyle: { shadowBlur: glow, shadowColor: colorOf(n, dark) },
+            })),
+          },
+        ],
+      })
+    }, 100)
+    return () => window.clearInterval(timer)
+  }, [emergingNodes, viewMode, themeVersion])
 
   useEffect(() => {
     const chart = chartRef.current

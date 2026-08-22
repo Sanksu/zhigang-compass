@@ -10,9 +10,10 @@
  */
 import type { GraphData, GraphEdge, GraphNode } from './types'
 
-/** 未回填 domain_id 的岗位兜底桶（零边/新增未同步岗位） */
+/** 未回填 domain_id 的岗位兜底桶（零边/新增未同步岗位）。
+ *  08-22 视觉治理：改名「待归类岗位」弱化"未分类=垃圾簇"观感，画布侧配虚线描边降透明度 */
 export const UNCATEGORIZED_DOMAIN_ID = 'dom_uncategorized'
-export const UNCATEGORIZED_DOMAIN_NAME = '未分类岗位'
+export const UNCATEGORIZED_DOMAIN_NAME = '待归类岗位'
 
 /** 域间边保留阈值：共享技能 < 3 的域对不连线（去毛线球噪声） */
 const MIN_DOMAIN_EDGE_WEIGHT = 3
@@ -52,6 +53,8 @@ export function aggregateByDomain(data: GraphData): DomainAggregate {
       name: repName,
       type: 'position',
       isDomain: true,
+      // 待归类桶弱化标记：画布侧虚线描边+降透明度，不与实域抢视觉权重
+      isUncategorized: dom === UNCATEGORIZED_DOMAIN_ID,
       memberCount: members.length,
       // value 驱动斥力/尺寸：域规模（成员数），供布局与 label 权重使用
       value: members.length,
@@ -114,8 +117,14 @@ export function buildDomainView(
   for (const dom of opts.expandedDomains) {
     const members = agg.positionsByDomain.get(dom)
     if (!members) continue
+    const supernode = agg.supernodes.find((s) => s.id === dom)
+    const repName = supernode?.name ?? dom
+    const isUncategorized = dom === UNCATEGORIZED_DOMAIN_ID
     for (const p of members) {
-      nodes.push(p)
+      // 域成员与域名同名时（代表岗名 = domain_name）追加后缀，消除同屏歧义
+      const displayName =
+        !isUncategorized && p.name === repName ? `${p.name}（岗）` : p.name
+      nodes.push({ ...p, name: displayName })
       visiblePositions.add(p.id)
       edges.push({
         source: dom,

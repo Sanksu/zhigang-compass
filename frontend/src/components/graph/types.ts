@@ -30,6 +30,8 @@ export type GraphNode = components['schemas']['GraphNode'] & {
   isDomain?: boolean
   /** 域内岗位数（仅域超节点） */
   memberCount?: number
+  /** 待归类桶标记（前端派生：未回填 domain_id 的兜底域，画布弱化样式依据） */
+  isUncategorized?: boolean
 }
 
 /** 契约 GraphEdge（source/target/weight/necessity/level） */
