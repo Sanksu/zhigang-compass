@@ -173,7 +173,14 @@ def parse_course_list(api_data: dict, keyword: str) -> list:
             logger.warning(f"  跳过培训/应试类课程: {course_name[:50]}")
             continue
 
-        source_url = f"https://www.icourse163.org/course/{course_id}"
+        # 课程页 URL 必须带学校简称前缀（/course/{shortName}-{courseId}），
+        # 纯数字路径 404 → commonError.htm 错误页（08-22 实测 891 门存量全坏）
+        school_short = school.get("shortName") or ""
+        if school_short:
+            source_url = f"https://www.icourse163.org/course/{school_short}-{course_id}"
+        else:
+            logger.warning(f"  缺 schoolPanel.shortName，URL 回退纯数字（不可访问）: {course_name[:50]}")
+            source_url = f"https://www.icourse163.org/course/{course_id}"
         source_id = course_id
 
         # 讲师
