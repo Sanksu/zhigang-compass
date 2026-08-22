@@ -12,6 +12,7 @@ import { GraphAnalysisPanel } from '@/components/graph/graph-analysis-panel'
 import { GraphCommunityTree } from '@/components/graph/graph-community-tree'
 import { GraphDetailRail } from '@/components/graph/graph-detail-rail'
 import { aggregateByDomain, buildDomainView } from '@/components/graph/graph-domain'
+import { EvolutionTimeline, type EvolutionMarks } from '@/components/graph/evolution-timeline'
 import {
   NodeDetailPanel,
   type PositionDetail,
@@ -172,6 +173,8 @@ export function GraphPage() {
   const [expandedPositions, setExpandedPositions] = useState<Set<string>>(() => new Set())
   // 展开的职能域 id 集合（panorama 聚合下钻第二级）：双击域超节点展开域内岗位
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(() => new Set())
+  // 演化时间轴标记（P0-2）：滑到某版本 → 本版新增/消亡节点画布打标
+  const [evolutionMarks, setEvolutionMarks] = useState<EvolutionMarks | null>(null)
   // 定位请求：搜索/相似技能点击后聚焦画布节点（含时间戳，连续点击同一技能也生效）
   const [focusRequest, setFocusRequest] = useState<{ id: string; ts: number } | null>(null)
   // 2D 画布命令句柄（重置视角）
@@ -802,6 +805,7 @@ export function GraphPage() {
               onToggleDomain={toggleDomain}
               learningPath={learningPath}
               completedSkills={[]}
+              evolutionMarks={evolutionMarks}
               className="h-full w-full"
             />
           ) : (
@@ -920,6 +924,9 @@ export function GraphPage() {
         )}
       </div>
 
+      {/* 演化时间轴（P0-2）：版本快照滑轨 + 增删打标（接口失败静默隐藏） */}
+      <EvolutionTimeline onMarksChange={setEvolutionMarks} className="mt-3" />
+
       {/* 图例：与画布实际渲染对齐（形状+颜色，支持色盲识别）。
           职能域超节点（#412 域聚合下钻的视觉锚，靛蓝大圆）置于首位 */}
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-muted" role="list" aria-label="图谱图例">
@@ -962,8 +969,20 @@ export function GraphPage() {
           岗位-技能
         </span>
         <span className="flex items-center gap-1.5" role="listitem">
-          <span className="w-4 h-1 bg-ink/60" aria-hidden="true" />
+          <span className="w-4 h-0.5 bg-ink/60" aria-hidden="true" />
           关联强度
+        </span>
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span className="size-2.5 rounded-full bg-[#22c55e]" role="img" aria-label="演化时间轴：本版新增节点绿环" />
+          本版新增<span className="text-ink-faint">（时间轴）</span>
+        </span>
+        <span className="flex items-center gap-1.5" role="listitem">
+          <span
+            className="size-2.5 rounded-full border-2 border-dashed border-state-declining"
+            role="img"
+            aria-label="演化时间轴：本版消亡节点橙色虚线圈"
+          />
+          本版消亡<span className="text-ink-faint">（时间轴）</span>
         </span>
       </div>
     </>
