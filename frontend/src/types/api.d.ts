@@ -2163,7 +2163,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 新兴/衰退技能 Top-N（快照序列 Z-score 信号） */
+        /**
+         * 新兴/衰退技能 Top-N（快照序列 Z-score 信号）
+         * @description 占比口径归一化（抗采集总量波动）：Z-score 序列全窗口有分母时按 频次/当期 REQUIRES 总边数计算，任一窗口缺分母（旧快照）整序列退回计数； 检测侧命中 data_warning 的快照整期剔除，展示侧打标不剔除
+         */
         get: {
             parameters: {
                 query?: {
@@ -4411,16 +4414,18 @@ export interface components {
             skill_name: string;
             /** @description Z-score（小基数保护态为 null） */
             z_score?: number | null;
-            /** @description 环比增长率 */
+            /** @description 环比增长率（原始计数口径） */
             mom_growth?: number | null;
             current_freq: number;
+            /** @description 历史窗口均值 μ（Z-score 序列口径：全序列有占比分母时为 占比，否则整序列退回原始计数；与 current_freq/mom_growth 的计数口径并存） */
             historical_mean?: number | null;
+            /** @description 历史窗口标准差 σ（口径同 historical_mean） */
             historical_std?: number | null;
             /** @enum {string} */
             trend: "emerging" | "rising" | "stable" | "declining" | "protected";
             confidence: number;
             evidence_refs: string[];
-            /** @description 证据量异常期标记（打标不剔除）：信号解读期（最近两期快照） 任一命中 data_warning 时为 true，信号照常输出、提示谨慎解读 */
+            /** @description 证据量异常期标记（双层抗波动）：命中 data_warning 的快照 已在检测侧整期剔除；此标记为展示侧打标不剔除——信号解读期 （最近两期快照）任一命中时为 true，信号照常输出、提示谨慎解读 */
             warning?: boolean;
             /** @description 归一化展示口径 = 当期技能频次 / 当期 REQUIRES 总边数（不参与 Z-score 判定） */
             freq_ratio?: number | null;

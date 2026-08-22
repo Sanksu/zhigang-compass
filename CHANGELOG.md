@@ -6,6 +6,7 @@
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
 ### 2026-08-22
+- **Z-score 占比口径归一化：评审三确认项闭环**：第五轮审查算法条目 A-1/A-2/A-3 经负责人拍板（①方案）随分支落地——**A-1①** 演化信号分子与分母同边集（均仅 REQUIRES，BELONGS_TO 等技能→技能边不再混入分子，占比可>1 问题消除，与 state_machine 过滤约定对齐；旧快照无边标签按历史口径兼容）；**A-2①** Z-score 序列整列同口径（全部窗口有占比分母才用占比，任一窗口缺分母整序列退回计数——堵住新旧口径混排致批量伪 declining 复活）；**A-3①** 检测侧消费 `GraphVersion.data_warning`（证据量萎缩<50%/膨胀>200% 的快照整期剔除，不作为 current 也不进 μ/σ，堵部分源故障反向伪 emerging；展示侧打标不剔除不变）。附三个评审指出的测试缺口回归（混合口径序列/部分源故障反向/非 REQUIRES 分子）；设计文档 §7.1、openapi EvolutionSignal 描述同步口径（SSOT），前端类型再生成。幻觉防控/演化算法红线留痕：负责人拍板 + 张恺天知会
 - **第五轮全项目代码审查立即修批次**：基于《全项目代码审查报告_20260822.md》（develop 8f0f3d6 增量 +10,256 行，总评 B+）拍板清单 #1/#2 三处 P1——**P1-1** dict-guard 动态过滤跨容器断链修复（compose api/worker 补 `skill_filters_dynamic.json` 单文件挂载；`dynamic_filters._write` 弃 tmp+os.replace 改直接覆写——单文件 bind mount 上 rename 覆盖挂载点 EBUSY，与 runtime_settings 同口径，损坏由 `_load` 空层兜底；DEPLOY.md 补宿主空层文件预建引导）；**P1-6** `compute_confidence` 下界钳制（全零输入+孤立技能曾产出 −0.075 被 Schema `ge=0.0` 拒绝崩 discovery worker，实证路径）；**P1-7** `thresholds._get` 坏值按键回退默认（null/非数字单键曾致 int()/float() 裸抛 TypeError 停摆 SimHash/时滞检测全链，实证路径）。连带修 **dict_guard_gate 非确定性取样**（`next(iter(SKILL_STOPWORDS))` 随 PYTHONHASHSEED 抽中「微」/白名单重叠词致 CI 偶发红，改排序筛选纯停用词）。幻觉防控域改动按红线留痕：负责人拍板 + 张恺天知会
 - **第五轮全项目代码审查报告落档**（#402）：docs/reviews/ 全项目代码审查报告_20260822.md，总评 B+/P1×7/Z-score 分支三条必须确认待张恺天裁决/拍板清单 12 项
 

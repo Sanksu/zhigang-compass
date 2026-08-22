@@ -156,8 +156,9 @@ async def evolution_signals(
     Z-score → 按 confidence 降序取 emerging（z>2.0）/ declining（z<-1.5）。
     快照不足 2 期（冷启动）时返回空列表，不武断判定。
 
-    打标不剔除：解读期（最近两期快照）任一命中 data_warning 时
-    warnings 透出全序列告警明细，信号照常输出仅打 warning 标。
+    双层抗波动：检测侧命中 data_warning 的快照整期剔除（不作为判定输入，
+    防总量骤变反向伪信号）；展示侧打标不剔除——解读期（最近两期快照）
+    任一命中时 warnings 透出全序列告警明细，信号照常输出仅打 warning 标。
     """
     rows = list(await db.scalars(
         select(GraphVersion).order_by(GraphVersion.created_at.asc())
@@ -166,7 +167,11 @@ async def evolution_signals(
 
     from app.services.evolution.trend_service import detect_signals_from_snapshots, rank_signals
 
-    signals = detect_signals_from_snapshots(snapshots)
+    # 检测侧抑制：命中 data_warning 的快照整期剔除（部分源故障的总量骤变
+    # 会反向放大占比产生伪 emerging，不作为判定输入）；展示侧仍打标不剔除
+    signals = detect_signals_from_snapshots(
+        snapshots, degraded_flags=[bool(v.data_warning) for v in rows],
+    )
     emerging = rank_signals(signals, "emerging", top_n)
     declining = rank_signals(signals, "declining", top_n)
     _annotate_anti_fluctuation(rows, snapshots, [*emerging, *declining])
