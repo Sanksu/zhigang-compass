@@ -4,6 +4,7 @@
 T+1 全量快照（设计文档 7.1）。
 """
 
+import asyncio
 import json
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -44,6 +45,48 @@ async def _cache_set_json(key: str, data, ttl: int = EVOLUTION_CACHE_TTL) -> Non
         await redis_client.set(key, json.dumps(data), ex=ttl)
     except Exception:
         pass
+
+
+# 快照全量加载单飞（沿袭 graph.py in-flight 表）：演化看板一次并发拉起
+# 4-5 个端点，各自全量加载快照建索引（每期 ~20k 节点+60k 边）会复制同量级
+# 副本并叠加 PG 传输——同进程并发 miss 合流，跟随者 await 首个加载结果
+# （08-15 演化看板 30s 超时/TTL 风暴教训在新模块的回归，第五轮审查 P1-3）
+_snapshots_inflight: dict[str, asyncio.Future] = {}
+
+
+async def _load_snapshots(db: AsyncSession) -> list | None:
+    """加载全部版本快照（时间升序）；无数据返回 None（调用方 404）。"""
+    inflight = _snapshots_inflight.get("all")
+    if inflight is not None:
+        return await inflight
+
+    future = asyncio.get_running_loop().create_future()
+    _snapshots_inflight["all"] = future
+    try:
+        rows = list(await db.scalars(
+            select(GraphVersion).order_by(GraphVersion.created_at.asc())
+        ))
+        snapshots = rows or None
+        future.set_result(snapshots)
+        return snapshots
+    except Exception as exc:
+        if not future.done():
+            future.set_exception(exc)
+        raise
+    finally:
+        _snapshots_inflight.pop("all", None)
+
+
+def _requires_edges(edges: list) -> list:
+    """REQUIRES 边集过滤（岗位→技能口径统一，与 trend_service A-1① 同约定）。
+
+    BELONGS_TO/ALTERNATIVE_OF/PREREQUISITE_OF/EVOLVED_FROM 等技能→技能边的
+    target 同为 sk_ 前缀，不过滤会混入「岗位」列/频次统计；旧快照边无
+    relation 标注则整体放行（历史口径兼容）。
+    """
+    if any(e.get("relation") for e in edges):
+        return [e for e in edges if e.get("relation") == "REQUIRES"]
+    return edges
 
 
 def _diff_snapshots(a: dict, b: dict) -> dict:
@@ -160,6 +203,13 @@ async def evolution_signals(
     防总量骤变反向伪信号）；展示侧打标不剔除——解读期（最近两期快照）
     任一命中时 warnings 透出全序列告警明细，信号照常输出仅打 warning 标。
     """
+    # 全量快照重建窗口 + 逐技能 Z-score 是看板最重路径，此前无缓存每次
+    # 轮询都全量重算（第五轮审查 P1-3）；快照每日一更，TTL 缓存即可
+    cache_key = f"evolution:signals:{top_n}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+
     rows = list(await db.scalars(
         select(GraphVersion).order_by(GraphVersion.created_at.asc())
     ))
@@ -186,12 +236,14 @@ async def evolution_signals(
         if v.data_warning
     ]
 
-    return ok(data={
+    payload = {
         "window_count": len(snapshots),
         "emerging": [s.model_dump() for s in emerging],
         "declining": [s.model_dump() for s in declining],
         "warnings": warnings,
-    })
+    }
+    await _cache_set_json(cache_key, payload)
+    return ok(data=payload)
 
 
 @router.get("/versions/{version_id}")
@@ -479,10 +531,15 @@ async def skill_trends(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("guest")),
 ):
-    """技能频次趋势：从图谱版本快照序列统计该技能关联边数。
+    """技能频次趋势：从图谱版本快照序列统计该技能关联 REQUIRES 边数。
 
     skill 参数为技能节点 ID（sk_xxxx），由图谱 ID 生成器产出。
     """
+    cache_key = f"evolution:trends:{skill}:{window}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+
     # created_at 为 DateTime(timezone=True)，须用带时区的东八区 now 比较，否则偏移 8h
     since = datetime.now(timezone(timedelta(hours=8))) - timedelta(days=window)
     rows = await db.scalars(
@@ -493,7 +550,8 @@ async def skill_trends(
 
     points = []
     for v in rows:
-        edges = (v.snapshot_json or {}).get("edges", [])
+        # 仅 REQUIRES 边（P1-2 同根）：趋势曲线喂给桑基时间轴内嵌图，口径须一致
+        edges = _requires_edges((v.snapshot_json or {}).get("edges", []))
         freq = sum(
             1 for e in edges if e.get("target") == skill
         )
@@ -503,7 +561,9 @@ async def skill_trends(
             "freq": freq,
         })
 
-    return ok(data={"skill": skill, "window": window, "points": points})
+    data = {"skill": skill, "window": window, "points": points}
+    await _cache_set_json(cache_key, data)
+    return ok(data=data)
 
 
 def _build_skill_flow(
@@ -521,9 +581,11 @@ def _build_skill_flow(
     for v in snapshots:
         snap = v.snapshot_json or {}
         nodes = {n.get("id"): n.get("name") for n in snap.get("nodes", []) if isinstance(n, dict)}
+        # 仅 REQUIRES 边（P1-2）：技能→技能边 target 同为 sk_ 前缀，不过滤会
+        # 以「岗位」身份混入桑基图，与 docstring/前端文案「REQUIRES 频次」不符
         freq = Counter(
             e.get("source")
-            for e in snap.get("edges", [])
+            for e in _requires_edges(snap.get("edges", []))
             if e.get("target") == skill_id
         )
         if skill_id in nodes and nodes[skill_id]:
