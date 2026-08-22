@@ -123,6 +123,7 @@ body {
 }
 
 .atlas-surface {
+  isolation: isolate;
   background-color: var(--color-atlas-surface);
   background-image:
     linear-gradient(to right, color-mix(in srgb, var(--color-atlas-grid) 62%, transparent) 1px, transparent 1px),

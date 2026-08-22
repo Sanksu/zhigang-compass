@@ -754,7 +754,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       )}
       {/* task T2: 学习路径可用时提供 宏观 DAG / 全局图谱 切换 */}
       {dagEnabled && (
-        <div className="absolute right-3 top-3 z-20 flex overflow-hidden rounded-md border border-border bg-canvas/90 shadow-sm text-[10px]">
+        <div className="absolute left-1/2 top-3 z-30 flex -translate-x-1/2 overflow-hidden rounded-md border border-atlas-grid bg-canvas/90 shadow-sm text-[10px]">
           {(
             [
               ['dag', '宏观 DAG'],

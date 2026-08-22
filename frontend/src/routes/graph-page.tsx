@@ -638,9 +638,9 @@ export function GraphPage() {
           大屏演示模式（focusMode）：画布 Card 转为 fixed 全屏（同树仅切类名，
           组件不重挂载、力导向布局不重算），详情栏转为右侧浮层 */}
       <div className={focusMode ? 'relative' : 'grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4'}>
-        <Card className={cn('relative overflow-hidden', focusMode ? 'fixed inset-0 z-40' : 'h-[640px]')}>
+        <Card className={cn('relative overflow-hidden border-atlas-grid bg-atlas-surface', focusMode ? 'fixed inset-0 z-40' : 'h-[min(720px,calc(100dvh-210px))] min-h-[560px]')}>
           {/* 画布操作组：重置视角 + 大屏演示切换（答辩/录屏用，Esc 退出） */}
-          <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+          <div className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded-md border border-atlas-grid bg-canvas/90 p-1 shadow-md backdrop-blur-xl">
             <Button
               size="sm"
               variant="ghost"
@@ -665,18 +665,18 @@ export function GraphPage() {
           {/* 演示视角书签：镜头平滑飞行到锚定岗位簇（仅展示当前视图中存在的锚点；
               右下角避开顶部操作提示与底部视图说明） */}
           {visibleBookmarks.length > 0 && (
-            <div className="absolute bottom-10 right-2 z-10 flex flex-col items-end gap-1">
-              {visibleBookmarks.map((b) => (
+            <div className="absolute bottom-12 right-3 z-20 hidden items-center gap-1 rounded-md border border-atlas-grid bg-canvas/90 p-1 shadow-sm backdrop-blur-xl sm:flex" aria-label="演示镜头书签">
+              <Crosshair className="mx-1 size-3 text-atlas-muted" />
+              {visibleBookmarks.map((bookmark) => (
                 <Button
-                  key={b.nodeName}
+                  key={bookmark.nodeName}
                   size="sm"
                   variant="ghost"
-                  onClick={() => flyToBookmark(b.nodeName)}
-                  className="h-7 px-2 text-xs text-ink-muted hover:text-ink"
-                  title={`镜头飞至${b.label}（${b.nodeName}）`}
+                  onClick={() => flyToBookmark(bookmark.nodeName)}
+                  className="h-7 px-2 text-[10px] text-ink-muted hover:text-ink"
+                  title={`镜头飞至${bookmark.label}（${bookmark.nodeName}）`}
                 >
-                  <Crosshair className="size-3 mr-1" />
-                  {b.label}
+                  {bookmark.label}
                 </Button>
               ))}
             </div>
@@ -746,22 +746,15 @@ export function GraphPage() {
           )}
 
           {/* 视图说明 */}
-          <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-3 pointer-events-none">
-            <p className="text-[11px] text-ink-muted bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
-              {VIEW_DESC[view]}
-            </p>
-            {view !== 'techStack' && (
-              <p className="text-[11px] text-ink-muted bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
-                {view === 'panorama'
-                  ? `已展开 ${expandedDomains.size} 域 · ${expandedPositions.size} 岗位`
-                  : `已展开 ${expandedPositions.size} 个岗位`}
-              </p>
-            )}
-            {mode3dLocked && (
-              <p className="text-[10px] text-ink-faint bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
-                {isCoarsePointer ? '触控设备固定 2D 模式' : 'WebGL2 不可用，已降级 2D 模式'}
-              </p>
-            )}
+          <div className="pointer-events-none absolute bottom-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2 rounded-md border border-atlas-grid bg-canvas/88 px-3 py-2 shadow-sm backdrop-blur-xl">
+            <div className="min-w-0">
+              <p className="font-mono text-[9px] tracking-[0.16em] text-atlas-muted">CURRENT BEARING / {VIEW_LABEL[view]}</p>
+              <p className="truncate text-[11px] text-ink-muted">{VIEW_DESC[view]}</p>
+            </div>
+            <div className="flex items-center gap-2 font-mono text-[10px] text-atlas-muted">
+              {view !== 'techStack' && <span>{view === 'panorama' ? `${expandedDomains.size} 域 · ${expandedPositions.size} 岗位` : `${expandedPositions.size} 岗位`}</span>}
+              {mode3dLocked && <span>{isCoarsePointer ? '触控设备 / 2D' : 'WebGL2 不可用'}</span>}
+            </div>
           </div>
         </Card>
 
@@ -811,59 +804,36 @@ export function GraphPage() {
         )}
       </div>
 
-      {/* 图例：与画布实际渲染对齐（形状+颜色，支持色盲识别）。
-          职能域超节点（#412 域聚合下钻的视觉锚，靛蓝大圆）置于首位 */}
-      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-muted" role="list" aria-label="图谱图例">
-        <span className="font-medium text-ink-secondary">图例：</span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span
-            className="size-3 rounded-full bg-graph-domain"
-            role="img"
-            aria-label="职能域超节点：靛蓝色大圆，尺寸随成员岗位数"
-          /> 职能域
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-full bg-state-active" role="img" aria-label="活跃岗位：蓝灰圆形" /> 活跃
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-full bg-state-stable" role="img" aria-label="稳定岗位：蓝色圆形" /> 稳定
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span
-            className="size-2.5 bg-state-emerging"
-            style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
-            role="img"
-            aria-label="新兴岗位：绿色三角形"
-          /> 新兴
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-full bg-state-candidate" role="img" aria-label="候选岗位：灰色圆形" /> 候选
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 bg-state-declining" role="img" aria-label="衰退岗位：橙色矩形" /> 衰退
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-md bg-state-archived" role="img" aria-label="归档岗位：红色圆角矩形" /> 归档
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-full bg-graph-skill" role="img" aria-label="技术技能节点" /> 技术技能
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span
-            className="size-2.5 rounded-full bg-graph-soft-skill"
-            role="img"
-            aria-label="软技能节点：粉色圆形（责任心/沟通能力等软素质）"
-          />{' '}
-          软技能
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="w-4 h-0.5 bg-ink/60" aria-hidden="true" />
-          岗位-技能
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="w-4 h-1 bg-ink/60" aria-hidden="true" />
-          关联强度
-        </span>
+      <div className="mt-4 grid gap-3 rounded-lg border border-atlas-grid bg-subtle/60 p-3 text-xs text-ink-muted lg:grid-cols-[1.15fr_1fr_1.2fr]" role="list" aria-label="图谱图例">
+        <div className="space-y-2" role="listitem">
+          <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">MAP FEATURES / 实体</p>
+          <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+            <span className="flex items-center gap-1.5"><span className="size-3 rotate-45 bg-graph-domain" /> 职能域</span>
+            <span className="flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-sm border border-atlas-ocean bg-state-stable" /> 岗位</span>
+            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-graph-skill" role="img" aria-label="技术技能节点" /> 技术技能</span>
+            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full border-2 border-graph-soft-skill" role="img" aria-label="软技能节点：粉色空心圆" /> 软技能</span>
+            <span className="flex items-center gap-1.5"><span className="size-0 border-x-4 border-b-[7px] border-x-transparent border-b-graph-evidence" /> 证据地标</span>
+          </div>
+        </div>
+        <div className="space-y-2" role="listitem">
+          <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">RELATION SURVEY / 关系</p>
+          <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+            <span className="flex items-center gap-1.5"><span className="h-0.5 w-5 bg-atlas-ocean" /> 必备关系</span>
+            <span className="flex items-center gap-1.5"><span className="w-5 border-t border-dashed border-atlas-muted" /> 加分关系</span>
+            <span className="flex items-center gap-1.5"><span className="w-5 border-t border-dotted border-atlas-muted" /> 共享能力关联</span>
+          </div>
+        </div>
+        <div className="space-y-2" role="listitem">
+          <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">POSITION STATUS / 岗位状态色</p>
+          <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-active" />活跃</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-stable" />稳定</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-emerging" />新兴</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-candidate" />候选</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-declining" />衰退</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-archived" />归档</span>
+          </div>
+        </div>
       </div>
     </>
   )
