@@ -105,7 +105,7 @@ describe('aggregateByDomain', () => {
     data.edges.push({ source: 'p3', target: 'TS', weight: 0.4, necessity: 'nice' })
     const agg2 = aggregateByDomain(data)
     expect(agg2.domainEdges).toEqual([
-      { source: 'dom_fe', target: 'dom_fin', weight: 3, necessity: 'nice' },
+      { source: 'dom_fe', target: 'dom_fin', weight: 3, necessity: 'nice', isDomainEdge: true },
     ])
   })
 })

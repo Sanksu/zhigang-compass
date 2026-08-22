@@ -36,6 +36,8 @@ export type GraphNode = components['schemas']['GraphNode'] & {
 
 /** 契约 GraphEdge（source/target/weight/necessity/level） */
 export type GraphEdge = components['schemas']['GraphEdge']
+/** 前端派生边标记：域-域共享关系与岗位/技能边使用不同降噪样式 */
+export type DisplayGraphEdge = GraphEdge & { isDomainEdge?: boolean }
 
 /** 前端图统计容器（由后端 GraphViewStats 契约映射，total_* 为图谱全量） */
 export interface GraphStats {
@@ -51,7 +53,7 @@ export interface GraphStats {
 /** 前端图数据容器（由契约 GraphViewData 映射而来） */
 export interface GraphData {
   nodes: GraphNode[]
-  edges: GraphEdge[]
+  edges: DisplayGraphEdge[]
   stats: GraphStats
 }
 

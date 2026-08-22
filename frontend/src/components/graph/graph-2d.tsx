@@ -613,6 +613,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     // C1: must（必备）实线全宽；nice（加分）虚线 60% 宽度，视觉区分两种边关系
     const links = data.edges.map((e, i) => {
       const isMust = e.necessity !== 'nice'
+      const isDomainEdge = e.isDomainEdge === true
       const dimmed = filterMarks.dimEdgeFlags[i]
       return {
         source: e.source,
@@ -620,17 +621,18 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         value: e.weight,
         silent: dimmed,
         lineStyle: {
-          width: isMust ? weightToWidth(e.weight) : Math.max(0.5, weightToWidth(e.weight) * 0.6),
-          type: isMust ? 'solid' : 'dashed',
-          color: dark ? '#52525b' : borderColor,
-          opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : dark ? 0.45 : 0.3,
-          curveness: 0,
+          // 域间共享边不是主叙事：细、低透明度、轻微弯曲，避免中央灰网抢过岗位-技能关系
+          width: isDomainEdge ? Math.min(1.2, weightToWidth(e.weight) * 0.45) : isMust ? weightToWidth(e.weight) : Math.max(0.5, weightToWidth(e.weight) * 0.6),
+          type: isDomainEdge ? 'dashed' : isMust ? 'solid' : 'dashed',
+          color: isDomainEdge ? (dark ? '#71717a' : '#a1a1aa') : dark ? '#52525b' : borderColor,
+          opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : isDomainEdge ? (dark ? 0.16 : 0.12) : dark ? 0.45 : 0.3,
+          curveness: isDomainEdge ? 0.18 : 0,
         },
         emphasis: {
           lineStyle: {
-            opacity: 0.95,
-            width: weightToWidth(e.weight) * 1.8,
-            color: isMust ? '#3b82f6' : '#10b981',
+            opacity: isDomainEdge ? 0.55 : 0.95,
+            width: isDomainEdge ? 1.8 : weightToWidth(e.weight) * 1.8,
+            color: isDomainEdge ? '#818cf8' : isMust ? '#3b82f6' : '#10b981',
           },
         },
       }
