@@ -15,7 +15,8 @@ import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 import type { EChartsModel } from './graph-layout'
-import { COLOR_BY_STATUS, COLOR_SOFT_DARK, COLOR_SOFT_LIGHT, computeFilterMarks, isSoftSkill, skillLabelThreshold } from './graph-utils'
+import { COLOR_BY_STATUS, computeFilterMarks, isSoftSkill, skillLabelThreshold } from './graph-utils'
+import { graphColors, graphNodeColor, GRAPH_OPACITY } from './graph-visual-tokens'
 import { buildDagGraph, type DagSkillLink, type DagSkillNode } from '@/components/learning/learning-timeline'
 import type { LearningPathItem } from '@/components/match/types'
 import { GraphFilterPanel } from './graph-filter-panel'
@@ -70,9 +71,6 @@ const SYMBOL_BY_STATUS: Record<PositionStatus, string> = {
   archived: 'roundRect',
 }
 
-const COLOR_SKILL_LIGHT = '#09090b'
-const COLOR_SKILL_DARK = '#fafafa'
-const COLOR_EVIDENCE = '#a1a1aa'
 
 // ── 聚光灯 (Focus + Context) 参数（task T1）──────────────────────
 // 悬停/选中节点时，背景节点与边透明度压到该值，制造"聚焦当前邻域"的对比，
@@ -122,30 +120,27 @@ const DAG_STATUS_LABEL: Record<string, string> = {
   locked: '未解锁',
 }
 
-/** 域超节点配色：职能域聚合下钻的视觉锚（与状态色/技能色区分） */
-const COLOR_DOMAIN_DARK = '#818cf8'
-const COLOR_DOMAIN_LIGHT = '#4f46e5'
-
 function symbolOf(node: GraphNode): string {
   if (node.type === 'position') return SYMBOL_BY_STATUS[node.status ?? 'candidate']
   return SYMBOL_BY_TYPE[node.type]
 }
 
 function colorOf(node: GraphNode, dark: boolean): string {
-  if (node.isDomain) return dark ? COLOR_DOMAIN_DARK : COLOR_DOMAIN_LIGHT
-  if (node.type === 'position') return COLOR_BY_STATUS[node.status ?? 'candidate']
-  if (isSoftSkill(node)) return dark ? COLOR_SOFT_DARK : COLOR_SOFT_LIGHT
-  if (node.type === 'skill') return dark ? COLOR_SKILL_DARK : COLOR_SKILL_LIGHT
-  return COLOR_EVIDENCE
+  const theme = dark ? 'dark' : 'light'
+  if (node.isDomain) return graphNodeColor(theme, 'domain')
+  if (node.type === 'position') return graphNodeColor(theme, 'position', node.status ?? 'candidate')
+  if (isSoftSkill(node)) return graphNodeColor(theme, 'softSkill')
+  if (node.type === 'skill') return graphNodeColor(theme, 'skill')
+  return graphNodeColor(theme, 'evidence')
 }
 
 function sizeOf(node: GraphNode, displayValue?: number): number {
-  // 域超节点：尺寸随成员数（3~20 岗 → 44~72px），显著大于岗位节点
-  if (node.isDomain) return Math.min(72, 44 + (node.memberCount ?? 1) * 1.4)
-  const v = displayValue ?? node.value ?? 30
-  const base = node.type === 'position' ? 36 : node.type === 'skill' ? 20 : 15
-  const scaled = base + (v / 100) * 20
-  return Math.min(56, Math.max(16, scaled))
+  // 职能域是测绘锚点：比岗位更大，并以成员数编码区域规模。
+  if (node.isDomain) return Math.min(78, 48 + (node.memberCount ?? 1) * 1.5)
+  const value = displayValue ?? node.value ?? 30
+  const base = node.type === 'position' ? 34 : node.type === 'skill' ? 18 : 14
+  const scaled = base + (value / 100) * 18
+  return Math.min(54, Math.max(14, scaled))
 }
 
 function weightToWidth(weight?: number): number {
@@ -314,6 +309,13 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     })
   }, [])
 
+  const resetFilters = useCallback(() => {
+    setMinWeight(0)
+    setHiddenStatuses(new Set())
+    setShowOnlyMustEdges(false)
+    setHideSoftSkills(false)
+  }, [])
+
   // 过滤打标（而非剔除）：布局与镜头在筛选过程中保持稳定
   const filterMarks = useMemo(
     () => computeFilterMarks(data.nodes, data.edges, { minWeight, hiddenStatuses, showOnlyMustEdges, hideSoftSkills }),
@@ -387,13 +389,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         if (!chart) return
         const center = resolveCenter(id, targetZoom)
         if (center) {
+          const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          const duration = reduceMotion ? 0 : FLY_DURATION_MS
           chart.setOption({
             series: [
               {
                 zoom: targetZoom,
                 center,
-                animation: true,
-                animationDurationUpdate: FLY_DURATION_MS,
+                animation: duration > 0,
+                animationDurationUpdate: duration,
                 animationEasingUpdate: 'cubicInOut',
               },
             ],
@@ -401,7 +405,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           window.setTimeout(() => {
             chartRef.current?.setOption({ series: [{ animation: false, animationDurationUpdate: 0 }] })
             applyLodBand(targetZoom)
-          }, FLY_DURATION_MS + 50)
+          }, duration + 50)
           return
         }
         if (++attempts < FLY_MAX_ATTEMPTS) window.setTimeout(tryFly, 250)
@@ -521,9 +525,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     }
 
     const dark = isDark()
-    const textColor = dark ? '#fafafa' : '#09090b'
-    const mutedColor = dark ? '#a1a1aa' : '#71717a'
-    const borderColor = dark ? '#27272a' : '#e4e4e7'
+    const colors = graphColors(dark ? 'dark' : 'light')
+    const textColor = colors.ink
+    const mutedColor = colors.muted
+    const borderColor = colors.border
     const labelThreshold = skillLabelThreshold(data.nodes)
 
     const nodes = data.nodes.map((n) => {
@@ -540,15 +545,21 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         category: isSoftSkill(n) ? 'soft' : n.type,
         itemStyle: {
           color: colorOf(n, dark),
-          borderColor,
-          borderWidth: 1,
-          opacity: 0.95,
+          borderColor: n.isDomain ? colors.edgeStrong : borderColor,
+          borderWidth: n.isDomain ? 3 : 1,
+          opacity: GRAPH_OPACITY.node,
+          ...(n.isDomain
+            ? {
+                shadowBlur: 22,
+                shadowColor: hexToRgba(colors.domain, 0.3),
+              }
+            : {}),
           ...(n.type === 'position' && expandedPositions?.has(n.id)
             ? {
-                borderColor: dark ? '#fafafa' : '#ffffff',
-                borderWidth: 3,
-                shadowBlur: isNarrow ? 14 : 22,
-                shadowColor: hexToRgba(colorOf(n, dark), 0.55),
+                borderColor: dark ? '#c7d2fe' : '#ffffff',
+                borderWidth: 2,
+                shadowBlur: isNarrow ? 8 : 12,
+                shadowColor: hexToRgba(colorOf(n, dark), 0.38),
               }
             : {}),
           // 待归类桶弱化（P1-2）：虚线描边 + 降透明度，兜底域不与实域抢视觉权重
@@ -581,9 +592,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           color: textColor,
           fontSize: 11,
           fontWeight: n.isDomain || n.type === 'position' ? 600 : 400,
-          backgroundColor: dark ? 'rgba(24,24,27,0.65)' : 'rgba(255,255,255,0.7)',
-          borderRadius: 4,
-          padding: [2, 6],
+          backgroundColor: colors.labelSurface,
+          borderRadius: 3,
+          padding: [2, 5],
           formatter:
             n.isDomain
               ? `{a|${n.name} · ${n.memberCount ?? 0} 岗}`
@@ -609,52 +620,39 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       }
     })
 
-    // C1: 深色模式提升边对比度（#27272a×0.3 → #52525b×0.45，WCAG AA）
-    // C1: must（必备）实线全宽；nice（加分）虚线 60% 宽度，视觉区分两种边关系
-    const links = data.edges.map((e, i) => {
-      const isMust = e.necessity !== 'nice'
-      const isDomainEdge = e.isDomainEdge === true
-      const dimmed = filterMarks.dimEdgeFlags[i]
+    // 关系分层：域隶属=细虚线，域间共享=弱弧线，must=海图蓝实线，nice=灰蓝虚线。
+    const nodeById = new Map(data.nodes.map((node) => [node.id, node]))
+    const links = data.edges.map((edge, index) => {
+      const source = nodeById.get(edge.source)
+      const target = nodeById.get(edge.target)
+      const touchesDomain = source?.isDomain || target?.isDomain
+      const domainToDomain = source?.isDomain && target?.isDomain
+      const isMust = edge.necessity !== 'nice'
+      const dimmed = filterMarks.dimEdgeFlags[index]
+      const kind = domainToDomain ? 'shared' : touchesDomain ? 'membership' : isMust ? 'must' : 'nice'
+      const baseStyle = kind === 'membership'
+        ? { width: 0.8, type: 'dotted', color: colors.edge, curveness: 0.08 }
+        : kind === 'shared'
+          ? { width: 0.7, type: 'dashed', color: colors.edge, curveness: 0.22 }
+          : kind === 'must'
+            ? { width: Math.max(0.7, weightToWidth(edge.weight) * 0.72), type: 'solid', color: colors.edgeStrong, curveness: 0 }
+            : { width: Math.max(0.5, weightToWidth(edge.weight) * 0.42), type: 'dashed', color: colors.edgeOptional, curveness: 0 }
       return {
-        source: e.source,
-        target: e.target,
-        value: e.weight,
+        source: edge.source,
+        target: edge.target,
+        value: edge.weight,
         silent: dimmed,
-        lineStyle: {
-          // 域间共享边不是主叙事：细、低透明度、轻微弯曲，避免中央灰网抢过岗位-技能关系
-          width: isDomainEdge ? Math.min(1.2, weightToWidth(e.weight) * 0.45) : isMust ? weightToWidth(e.weight) : Math.max(0.5, weightToWidth(e.weight) * 0.6),
-          type: isDomainEdge ? 'dashed' : isMust ? 'solid' : 'dashed',
-          color: isDomainEdge ? (dark ? '#71717a' : '#a1a1aa') : dark ? '#52525b' : borderColor,
-          opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : isDomainEdge ? (dark ? 0.16 : 0.12) : dark ? 0.45 : 0.3,
-          curveness: isDomainEdge ? 0.18 : 0,
-        },
-        emphasis: {
-          lineStyle: {
-            opacity: isDomainEdge ? 0.55 : 0.95,
-            width: isDomainEdge ? 1.8 : weightToWidth(e.weight) * 1.8,
-            color: isDomainEdge ? '#818cf8' : isMust ? '#3b82f6' : '#10b981',
-          },
-        },
+        lineStyle: { ...baseStyle, opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : kind === 'membership' || kind === 'shared' ? 0.45 : GRAPH_OPACITY.edge[dark ? 'dark' : 'light'] + 0.18 },
+        emphasis: { lineStyle: { opacity: 0.95, width: weightToWidth(edge.weight) * 1.8, color: kind === 'nice' ? colors.edgeOptional : colors.edgeStrong } },
       }
     })
 
     const option: echarts.EChartsCoreOption = {
       backgroundColor: 'transparent',
-      legend: {
-        bottom: 8,
-        left: 'center',
-        itemWidth: 14,
-        itemHeight: 10,
-        itemGap: 16,
-        textStyle: { color: mutedColor, fontSize: 11 },
-        data: ['position', 'skill', 'soft', 'evidence'],
-        formatter: (name: string) =>
-          name === 'position' ? '岗位' : name === 'skill' ? '技术技能' : name === 'soft' ? '软技能' : '证据',
-      },
       tooltip: {
         trigger: 'item',
-        backgroundColor: dark ? '#18181b' : '#ffffff',
-        borderColor: dark ? '#3f3f46' : '#d4d4d8',
+        backgroundColor: colors.tooltip,
+        borderColor: colors.tooltipBorder,
         borderWidth: 1,
         textStyle: { color: textColor, fontSize: 12 },
         formatter: (params: EChartsParam) => {
@@ -728,10 +726,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           links,
           lineStyle: { opacity: 0.3, curveness: 0 },
           categories: [
-            { name: 'position', itemStyle: { color: '#3b82f6' } },
-            { name: 'skill', itemStyle: { color: dark ? '#fafafa' : '#09090b' } },
-            { name: 'soft', itemStyle: { color: dark ? COLOR_SOFT_DARK : COLOR_SOFT_LIGHT } },
-            { name: 'evidence', itemStyle: { color: '#a1a1aa' } },
+            { name: 'position', itemStyle: { color: COLOR_BY_STATUS.candidate } },
+            { name: 'skill', itemStyle: { color: colors.skill } },
+            { name: 'soft', itemStyle: { color: colors.softSkill } },
+            { name: 'evidence', itemStyle: { color: colors.evidence } },
           ],
         },
       ],
@@ -792,10 +790,19 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   }, [focusRequest, focusNode])
 
   return (
-    <div className={`relative h-full w-full ${className ?? ''}`}>
+    <div className={`${viewMode === 'graph' ? 'atlas-surface' : ''} relative h-full w-full overflow-hidden ${className ?? ''}`}>
+      {viewMode === 'graph' && (
+        <div className="pointer-events-none absolute inset-0 z-0 font-mono text-[9px] tracking-[0.18em] text-atlas-muted/75" aria-hidden="true">
+          <span className="absolute left-1/2 top-3 -translate-x-1/2">N / 市场</span>
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 [writing-mode:vertical-rl]">E / 技术</span>
+          <span className="absolute bottom-3 left-1/2 -translate-x-1/2">S / 组织</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 [writing-mode:vertical-rl]">W / 业务</span>
+          <span className="absolute bottom-3 left-3 text-[8px] text-atlas-muted/70">核心岗位 · 能力与证据</span>
+        </div>
+      )}
       {/* task T2: 学习路径可用时提供 宏观 DAG / 全局图谱 切换 */}
       {dagEnabled && (
-        <div className="absolute right-3 top-3 z-20 flex overflow-hidden rounded-md border border-border bg-canvas/90 shadow-sm text-[10px]">
+        <div className="absolute left-1/2 top-3 z-30 flex -translate-x-1/2 overflow-hidden rounded-md border border-atlas-grid bg-canvas/90 shadow-sm text-[10px]">
           {(
             [
               ['dag', '宏观 DAG'],
@@ -826,6 +833,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         onToggleMustEdges={setShowOnlyMustEdges}
         hideSoftSkills={hideSoftSkills}
         onToggleSoftSkills={setHideSoftSkills}
+        onReset={resetFilters}
         visibleCount={filterMarks.visibleNodes}
         hiddenCount={data.nodes.length - filterMarks.visibleNodes}
       />

@@ -44,6 +44,15 @@
   /* AI 来源标识 — 紫，标记 LLM 抽取/生成的内容（人机协同可视化，非岗位状态色） */
   --color-ai: #8b5cf6;
 
+  /* 职业测绘台 — 地图表面、测绘网格与关系层 */
+  --color-atlas-surface: #f4f7fa;
+  --color-atlas-grid: #dce5ef;
+  --color-atlas-ink: #172033;
+  --color-atlas-muted: #66758a;
+  --color-atlas-ocean: #315c8c;
+  --color-atlas-domain: #4f46e5;
+  --color-atlas-soft: #d9468d;
+
   /* 圆角 — 小圆角匹配技术工具气质 */
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -77,6 +86,14 @@
 
   --color-ai: #a78bfa;
 
+  --color-atlas-surface: #0b1524;
+  --color-atlas-grid: #1d3045;
+  --color-atlas-ink: #e7eef7;
+  --color-atlas-muted: #9aa9bc;
+  --color-atlas-ocean: #78a5d6;
+  --color-atlas-domain: #8b8af8;
+  --color-atlas-soft: #f58fbc;
+
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.30);
   --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.40), 0 2px 6px -2px rgb(0 0 0 / 0.30);
   --shadow-lg: 0 12px 32px -4px rgb(0 0 0 / 0.50), 0 4px 12px -2px rgb(0 0 0 / 0.40);
@@ -103,6 +120,35 @@ body {
   color: var(--color-ink);
   margin: 0;
   min-height: 100vh;
+}
+
+.atlas-surface {
+  isolation: isolate;
+  background-color: var(--color-atlas-surface);
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--color-atlas-grid) 62%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--color-atlas-grid) 62%, transparent) 1px, transparent 1px),
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--color-atlas-domain) 7%, transparent), transparent 52%);
+  background-size: 32px 32px, 32px 32px, auto;
+}
+
+.atlas-surface::before,
+.atlas-surface::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  inset: 18px;
+  border: 1px solid color-mix(in srgb, var(--color-atlas-grid) 78%, transparent);
+}
+
+.atlas-surface::before {
+  border-radius: 50%;
+  inset: 13% 22%;
+}
+
+.atlas-surface::after {
+  border-width: 1px 0;
+  inset: 50% 10%;
 }
 
 /* 滚动条 — 细线样式 */

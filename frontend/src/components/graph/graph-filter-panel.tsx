@@ -1,30 +1,25 @@
-import { SlidersHorizontal } from 'lucide-react'
+import { ChevronDown, RotateCcw, SlidersHorizontal } from 'lucide-react'
+import { useState } from 'react'
 import type { PositionStatus } from './types'
-import { COLOR_SOFT_LIGHT } from './graph-utils'
+import { GRAPH_STATUS_META, GRAPH_STATUS_ORDER } from './graph-visual-tokens'
+import { cn } from '@/lib/utils'
 
-const ALL_STATUSES: { value: PositionStatus; label: string; color: string }[] = [
-  { value: 'emerging', label: '新兴', color: '#10b981' },
-  { value: 'stable', label: '稳定', color: '#3b82f6' },
-  { value: 'candidate', label: '候选', color: '#71717a' },
-  { value: 'declining', label: '衰退', color: '#f59e0b' },
-  { value: 'archived', label: '归档', color: '#ef4444' },
-]
+const ALL_STATUSES: { value: PositionStatus; label: string; color: string }[] = GRAPH_STATUS_ORDER.map((value) => ({
+  value,
+  ...GRAPH_STATUS_META[value],
+}))
 
 interface GraphFilterPanelProps {
   minWeight: number
-  onMinWeightChange: (v: number) => void
-  /** B2: 隐藏的岗位状态集合（勾选 = 显示，去勾 = 隐藏） */
+  onMinWeightChange: (value: number) => void
   hiddenStatuses?: Set<PositionStatus>
-  onToggleStatus?: (s: PositionStatus) => void
-  /** B2: true = 仅显示 must（必备）边，false = 显示全部 */
+  onToggleStatus?: (status: PositionStatus) => void
   showOnlyMustEdges?: boolean
-  onToggleMustEdges?: (v: boolean) => void
-  /** true = 压暗软技能节点（与技术栈技能分开查看） */
+  onToggleMustEdges?: (value: boolean) => void
   hideSoftSkills?: boolean
-  onToggleSoftSkills?: (v: boolean) => void
-  /** 压暗式过滤：未被压暗的节点数（提供 hiddenCount 时显示统计行） */
+  onToggleSoftSkills?: (value: boolean) => void
+  onReset?: () => void
   visibleCount?: number
-  /** 被压暗淡出的节点数 */
   hiddenCount?: number
 }
 
@@ -37,107 +32,107 @@ export function GraphFilterPanel({
   onToggleMustEdges,
   hideSoftSkills = false,
   onToggleSoftSkills,
+  onReset,
   visibleCount,
   hiddenCount,
 }: GraphFilterPanelProps) {
+  const [expanded, setExpanded] = useState(false)
+  const activeFilterCount = Number(minWeight > 0) + hiddenStatuses.size + Number(showOnlyMustEdges) + Number(hideSoftSkills)
+
   return (
-    <div className="absolute left-4 top-4 z-10 w-52 rounded-xl border border-white/10 bg-white/75 p-3.5 shadow-xl backdrop-blur-md dark:border-white/5 dark:bg-black/55">
-      <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-ink">
-        <SlidersHorizontal className="size-3.5" />
-        图谱过滤
-      </div>
-
-      {/* 压暗式过滤统计：被过滤节点仍留在画布上（淡出为背景），仅不再响应交互 */}
-      {hiddenCount != null && hiddenCount > 0 && typeof visibleCount === 'number' && (
-        <div className="mb-3 rounded-md bg-subtle/70 px-2 py-1 text-[10px] text-ink-secondary">
-          显示 {visibleCount} · 淡出 {hiddenCount}
-        </div>
-      )}
-
-      {/* 最小权重 */}
-      <div className="mb-3">
-        <div className="mb-1.5 flex items-center justify-between">
-          <label className="text-[11px] font-medium text-ink-muted">最小权重</label>
-          <span className="rounded bg-subtle px-1.5 py-0.5 text-[10px] font-mono text-ink-secondary">
-            {minWeight}
+    <section className="absolute left-3 top-3 z-20 w-[calc(100%-1.5rem)] max-w-64 overflow-hidden rounded-lg border border-border/80 bg-canvas/90 shadow-md backdrop-blur-xl sm:left-4 sm:top-4 sm:w-56" aria-label="图层探索器">
+      <button
+        type="button"
+        className="flex min-h-10 w-full items-center gap-2 px-3 text-left hover:bg-subtle/80"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+        aria-controls="graph-layer-controls"
+      >
+        <SlidersHorizontal className="size-3.5 text-ink-muted" />
+        <span className="flex-1 text-xs font-semibold text-ink">图层探索器</span>
+        {activeFilterCount > 0 && (
+          <span className="rounded-full bg-ink px-1.5 py-0.5 font-mono text-[9px] text-canvas" aria-label={`${activeFilterCount} 个过滤条件已启用`}>
+            {activeFilterCount}
           </span>
-        </div>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={minWeight}
-          onChange={(e) => onMinWeightChange(Number(e.target.value))}
-          className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-border accent-primary outline-none"
-        />
-      </div>
+        )}
+        {typeof visibleCount === 'number' && <span className="font-mono text-[10px] text-ink-faint">{visibleCount} 可见</span>}
+        <ChevronDown className={cn('size-3.5 text-ink-faint transition-transform', expanded && 'rotate-180')} />
+      </button>
 
-      {/* B2: 岗位状态过滤 */}
-      {onToggleStatus && (
-        <div className="mb-3">
-          <p className="mb-1.5 text-[11px] font-medium text-ink-muted">岗位状态</p>
-          <div className="space-y-1">
-            {ALL_STATUSES.map((s) => {
-              const visible = !hiddenStatuses.has(s.value)
-              return (
-                <label
-                  key={s.value}
-                  className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[11px] text-ink-secondary hover:bg-subtle/60"
-                >
-                  <input
-                    type="checkbox"
-                    checked={visible}
-                    onChange={() => onToggleStatus(s.value)}
-                    className="size-3 rounded accent-primary"
-                  />
-                  <span
-                    className="size-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: s.color }}
-                  />
-                  {s.label}
+      {expanded && (
+        <div id="graph-layer-controls" className="max-h-[min(70vh,480px)] space-y-4 overflow-y-auto border-t border-border/70 px-3 py-3">
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label htmlFor="graph-min-weight" className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">关系强度</label>
+              <span className="font-mono text-[10px] text-ink-secondary">≥ {minWeight}</span>
+            </div>
+            <input
+              id="graph-min-weight"
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={minWeight}
+              onChange={(event) => onMinWeightChange(Number(event.target.value))}
+              className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-border accent-primary outline-none"
+            />
+          </div>
+
+          {onToggleStatus && (
+            <fieldset>
+              <legend className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">岗位状态</legend>
+              <div className="grid grid-cols-2 gap-1">
+                {ALL_STATUSES.map((status) => {
+                  const visible = !hiddenStatuses.has(status.value)
+                  return (
+                    <label key={status.value} className={cn('flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-[11px] transition-colors', visible ? 'border-border bg-canvas text-ink-secondary' : 'border-transparent bg-subtle text-ink-faint line-through')}>
+                      <input
+                        type="checkbox"
+                        checked={visible}
+                        onChange={() => onToggleStatus(status.value)}
+                        className="sr-only"
+                        aria-label={`显示${status.label}岗位`}
+                      />
+                      <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: status.color }} />
+                      {status.label}
+                    </label>
+                  )
+                })}
+              </div>
+            </fieldset>
+          )}
+
+          <fieldset>
+            <legend className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-muted">技能与关系</legend>
+            <div className="space-y-1">
+              {onToggleSoftSkills && (
+                <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-ink-secondary hover:bg-subtle">
+                  <input type="checkbox" checked={!hideSoftSkills} onChange={(event) => onToggleSoftSkills(!event.target.checked)} className="size-3 rounded accent-primary" aria-label="显示软技能" />
+                  <span className="size-2 rounded-full bg-graph-soft-skill" />
+                  显示软技能
                 </label>
-              )
-            })}
+              )}
+              {onToggleMustEdges && (
+                <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[11px] text-ink-secondary hover:bg-subtle">
+                  <input type="checkbox" checked={showOnlyMustEdges} onChange={(event) => onToggleMustEdges(event.target.checked)} className="size-3 rounded accent-primary" />
+                  <span className="h-0.5 w-4 bg-ink/60" aria-hidden="true" />
+                  仅看必备关系
+                </label>
+              )}
+            </div>
+          </fieldset>
+
+          <div className="flex items-center justify-between border-t border-border/70 pt-2">
+            <span className="text-[10px] text-ink-faint">
+              {hiddenCount ? `淡出 ${hiddenCount} 个节点` : '全部图层可见'}
+            </span>
+            <button type="button" onClick={onReset} disabled={activeFilterCount === 0} className="flex items-center gap-1 rounded px-1.5 py-1 text-[10px] font-medium text-ink-muted hover:bg-subtle hover:text-ink disabled:cursor-default disabled:opacity-35">
+              <RotateCcw className="size-3" />
+              重置
+            </button>
           </div>
         </div>
       )}
-
-      {/* 技能分组：软技能（责任心/沟通能力等软素质）压暗开关 */}
-      {onToggleSoftSkills && (
-        <div className="mb-3">
-          <p className="mb-1.5 text-[11px] font-medium text-ink-muted">技能分组</p>
-          <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[11px] text-ink-secondary hover:bg-subtle/60">
-            <input
-              type="checkbox"
-              checked={!hideSoftSkills}
-              onChange={(e) => onToggleSoftSkills(!e.target.checked)}
-              className="size-3 rounded accent-primary"
-            />
-            <span
-              className="size-2 shrink-0 rounded-full"
-              style={{ backgroundColor: COLOR_SOFT_LIGHT }}
-            />
-            软技能
-          </label>
-        </div>
-      )}
-
-      {/* B2: 边关系过滤（must 必备 / nice 加分） */}
-      {onToggleMustEdges && (
-        <div>
-          <p className="mb-1.5 text-[11px] font-medium text-ink-muted">边关系</p>
-          <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[11px] text-ink-secondary hover:bg-subtle/60">
-            <input
-              type="checkbox"
-              checked={showOnlyMustEdges}
-              onChange={(e) => onToggleMustEdges(e.target.checked)}
-              className="size-3 rounded accent-primary"
-            />
-            仅显示必备关系
-          </label>
-        </div>
-      )}
-    </div>
+    </section>
   )
 }

@@ -1,4 +1,7 @@
 import type { GraphEdge, GraphNode, PositionStatus } from './types'
+import { graphColors } from './graph-visual-tokens'
+
+export { GRAPH_COLOR_BY_STATUS as COLOR_BY_STATUS } from './graph-visual-tokens'
 
 /** 稠密图判定阈值：技能数超过该值时 band1 标签改用 75 分位（视觉评审 P0-3） */
 const DENSE_SKILL_COUNT = 60
@@ -27,22 +30,12 @@ export function nodeRadius(node: GraphNode, selected: boolean, expanded: boolean
   return r
 }
 
-/** 岗位状态机 → 颜色（与 globals.css 中状态色对齐，设计令牌单一事实源；2D/3D 共用） */
-export const COLOR_BY_STATUS: Record<PositionStatus, string> = {
-  active: '#64748b',
-  candidate: '#71717a',
-  emerging: '#10b981',
-  stable: '#3b82f6',
-  declining: '#f59e0b',
-  archived: '#ef4444',
-}
-
 /** 软技能类目值（与后端 skill_whitelist.yaml 的 category 命名一致） */
 export const SOFT_SKILL_CATEGORY = '软技能'
 
-/** 软技能配色（粉色系，与六态状态色/域紫/技能黑白均区分；2D/3D 共用） */
-export const COLOR_SOFT_LIGHT = '#ec4899'
-export const COLOR_SOFT_DARK = '#f472b6'
+/** 软技能配色（与岗位生命周期和技术技能层级区分） */
+export const COLOR_SOFT_LIGHT = graphColors('light').softSkill
+export const COLOR_SOFT_DARK = graphColors('dark').softSkill
 
 /** 软技能判定：skill 节点且类目为「软技能」（责任心/沟通能力等软素质，与技术栈技能区分展示） */
 export function isSoftSkill(node: GraphNode): boolean {

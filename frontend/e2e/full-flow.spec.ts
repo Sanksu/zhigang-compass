@@ -31,9 +31,8 @@ test('登录 → 图谱 → 匹配 → 后台 → 登出 全流程', async ({ pa
   // ---- 能力图谱（真实 panorama 数据） ----
   await page.goto('/graph')
   await expect(page.getByRole('heading', { name: '能力图谱' })).toBeVisible()
-  // 数据规模指示渲染真实数据（节点/边统计非空）
-  await expect(page.getByText('节点', { exact: true })).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByText('边', { exact: true })).toBeVisible()
+  // 图例整体可见 = panorama 渲染成功（Career Atlas 重构后独立计数行并入图例）
+  await expect(page.locator('[aria-label="图谱图例"]')).toBeVisible({ timeout: 20_000 })
 
   // ---- 简历匹配页 ----
   await page.goto('/resume-match')

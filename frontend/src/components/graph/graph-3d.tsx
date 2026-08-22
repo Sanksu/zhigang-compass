@@ -19,7 +19,8 @@ import { isDark } from '@/lib/utils'
 import ForceGraph3D, { type ForceGraphMethods, type NodeObject } from 'react-force-graph-3d'
 import * as THREE from 'three'
 import type { GraphData, GraphNode, NodeDetail } from './types'
-import { COLOR_BY_STATUS, COLOR_SOFT_DARK, COLOR_SOFT_LIGHT, isSoftSkill, nodeRadius } from './graph-utils'
+import { isSoftSkill, nodeRadius } from './graph-utils'
+import { graphColors, graphNodeColor } from './graph-visual-tokens'
 
 /** react-force-graph-3d 类型定义未暴露的 d3 力模拟参数方法（A2 帧率保障用）。 */
 type ForceGraphD3Params = ForceGraphMethods<NodeObject<GraphNode>> & {
@@ -51,17 +52,13 @@ export interface Graph3DHandle {
   flyTo: (id: string, dist?: number) => void
 }
 
-const COLOR_EVIDENCE = '#a1a1aa'
-
-function skillColor(dark: boolean): string {
-  return dark ? '#fafafa' : '#09090b'
-}
-
 function nodeColor(node: GraphNode, dark: boolean): string {
-  if (node.type === 'position') return COLOR_BY_STATUS[node.status ?? 'candidate']
-  if (isSoftSkill(node)) return dark ? COLOR_SOFT_DARK : COLOR_SOFT_LIGHT
-  if (node.type === 'skill') return skillColor(dark)
-  return COLOR_EVIDENCE
+  const theme = dark ? 'dark' : 'light'
+  if (node.isDomain) return graphNodeColor(theme, 'domain')
+  if (node.type === 'position') return graphNodeColor(theme, 'position', node.status ?? 'candidate')
+  if (isSoftSkill(node)) return graphNodeColor(theme, 'softSkill')
+  if (node.type === 'skill') return graphNodeColor(theme, 'skill')
+  return graphNodeColor(theme, 'evidence')
 }
 
 /** 节点布局质量（影响力导向布局，与视觉尺寸无关——视觉尺寸由 buildNodeObject 控制） */
@@ -84,11 +81,12 @@ function makeTextSprite(text: string, dark: boolean, fontSize = 14): THREE.Sprit
   const h = fontSize + 10
   canvas.width = w
   canvas.height = h
+  const colors = graphColors(dark ? 'dark' : 'light')
   ctx.beginPath()
   ctx.roundRect(0, 0, w, h, 5)
-  ctx.fillStyle = dark ? 'rgba(9,9,11,0.72)' : 'rgba(255,255,255,0.82)'
+  ctx.fillStyle = colors.labelSurface
   ctx.fill()
-  ctx.fillStyle = dark ? '#fafafa' : '#09090b'
+  ctx.fillStyle = colors.ink
   ctx.font = font
   ctx.textBaseline = 'middle'
   ctx.fillText(text, pad, h / 2)
@@ -109,10 +107,17 @@ function buildNodeObject(
   selected: boolean,
   expanded: boolean,
 ): THREE.Object3D {
-  const r = nodeRadius(node, selected, expanded)
+  const r = node.isDomain ? Math.max(7, nodeRadius(node, selected, expanded) * 1.45) : nodeRadius(node, selected, expanded)
   const group = new THREE.Group()
+  const geometry = node.isDomain
+    ? new THREE.OctahedronGeometry(r, 1)
+    : node.type === 'position'
+      ? new THREE.BoxGeometry(r * 1.55, r * 1.05, r * 0.72)
+      : node.type === 'evidence'
+        ? new THREE.ConeGeometry(r * 0.85, r * 1.8, 3)
+        : new THREE.SphereGeometry(r, 20, 20)
   const sphere = new THREE.Mesh(
-    new THREE.SphereGeometry(r, 20, 20),
+    geometry,
     new THREE.MeshBasicMaterial({
       color: nodeColor(node, dark),
       transparent: true,
@@ -126,7 +131,7 @@ function buildNodeObject(
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(r * 1.15, r * 1.5, 32),
       new THREE.MeshBasicMaterial({
-        color: '#ffffff',
+        color: graphColors(dark ? 'dark' : 'light').selectionRing,
         transparent: true,
         opacity: 0.65,
         side: THREE.DoubleSide,
@@ -136,11 +141,14 @@ function buildNodeObject(
     group.add(ring)
   }
 
-  // 岗位标签字号更大（主节点），技能/证据小字号
-  const fontSize = node.type === 'position' ? 14 : 11
-  const label = makeTextSprite(node.name, dark, fontSize)
-  label.position.set(0, r + (fontSize + 6) / 24, 0)
-  group.add(label)
+  // 域与岗位作为主地标常显；技能和证据在选中后才展开标注，降低 3D 标签噪声。
+  const showLabel = node.isDomain || node.type === 'position' || selected
+  if (showLabel) {
+    const fontSize = node.isDomain ? 15 : node.type === 'position' ? 13 : 11
+    const label = makeTextSprite(node.name, dark, fontSize)
+    label.position.set(0, r + (fontSize + 6) / 24, 0)
+    group.add(label)
+  }
   return group
 }
 
@@ -268,8 +276,12 @@ export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
     [data],
   )
 
-  const bgColor = dark ? '#09090b' : '#ffffff'
-  const linkColor = dark ? '#52525b' : '#a1a1aa'
+  const colors = graphColors(dark ? 'dark' : 'light')
+  const bgColor = colors.canvas
+  const linkColor = (rawLink: unknown) => {
+    const link = rawLink as { necessity?: 'must' | 'nice' }
+    return link.necessity === 'nice' ? colors.edgeOptional : colors.edgeStrong
+  }
 
   // 单击 → 选中；双击岗位 → 展开/收起其技能（ForceGraph3D 无原生双击，用点击间隔检测）
   const lastClickRef = useRef<{ id: string; ts: number }>({ id: '', ts: 0 })
@@ -396,7 +408,7 @@ export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
           backgroundColor={bgColor}
           nodeVal={(node: unknown) => nodeVal(node as GraphNode)}
           nodeThreeObject={getNodeObject}
-          linkColor={() => linkColor}
+          linkColor={linkColor}
           linkWidth={0.5}
           linkDirectionalParticles={2}
           linkDirectionalParticleWidth={2}

@@ -3,7 +3,7 @@ import { Box, Crosshair, Loader2, Maximize2, Minimize2, Network, RotateCcw, Sear
 import { useUIStore } from '@/store/ui'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Graph2D, type Graph2DHandle } from '@/components/graph/graph-2d'
@@ -11,6 +11,7 @@ import type { Graph3DHandle } from '@/components/graph/graph-3d'
 import { GraphAnalysisPanel } from '@/components/graph/graph-analysis-panel'
 import { GraphCommunityTree } from '@/components/graph/graph-community-tree'
 import { GraphDetailRail } from '@/components/graph/graph-detail-rail'
+import { toGraphData } from '@/components/graph/graph-adapter'
 import { aggregateByDomain, buildDomainView } from '@/components/graph/graph-domain'
 import { EvolutionTimeline, type EvolutionMarks } from '@/components/graph/evolution-timeline'
 import {
@@ -23,7 +24,7 @@ import {
   type SkillEvidenceItem,
   type SkillPositionItem,
 } from '@/components/graph/node-detail-panel'
-import type { GraphData, GraphEdge, GraphNode, GraphViewType, NodeDetail } from '@/components/graph/types'
+import type { GraphData, GraphViewType, NodeDetail } from '@/components/graph/types'
 import type { LearningPathItem } from '@/components/match/types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
 import { apiGet, ApiError } from '@/lib/api'
@@ -68,18 +69,6 @@ function isWebGL2Available(): boolean {
  */
 type PanoramaData = components['schemas']['GraphViewData']
 
-const POSITION_STATUSES: GraphNode['status'][] = [
-  'candidate',
-  'emerging',
-  'stable',
-  'declining',
-  'archived',
-]
-
-function isValidStatus(s?: string): s is NonNullable<GraphNode['status']> {
-  return !!s && POSITION_STATUSES.includes(s as NonNullable<GraphNode['status']>)
-}
-
 /** 岗位中心视图自动展开的 Top 岗位数（首屏即呈现岗位-技能关系） */
 const AUTO_EXPAND_COUNT = 6
 /** 单个岗位展开的技能数上限（防止高频岗位技能全量涌入画布造成重叠） */
@@ -96,44 +85,6 @@ const DEMO_BOOKMARKS: { label: string; nodeName: string }[] = [
   { label: '前端簇', nodeName: '前端开发工程师' },
   { label: '数据簇', nodeName: '数据分析师' },
 ]
-
-/** 后端 panorama → 前端 GraphData（岗位状态取自后端，缺省 candidate；边关系 requires；
- *  domain_id/domain_name 契约字段透传——域聚合下钻消费，未回填为 null 走未分类桶） */
-function toGraphData(raw: PanoramaData): GraphData {
-  const degree = new Map<string, number>()
-  raw.edges.forEach((e) => {
-    degree.set(e.source, (degree.get(e.source) ?? 0) + 1)
-    degree.set(e.target, (degree.get(e.target) ?? 0) + 1)
-  })
-
-  const nodes: GraphNode[] = raw.nodes.map((n) => ({
-    id: n.id,
-    name: n.name,
-    type: n.type === 'skill' ? 'skill' : 'position',
-    value: degree.get(n.id) ?? 0,
-    status: n.type === 'position' ? (isValidStatus(n.status) ? n.status : 'candidate') : undefined,
-    ...(n.type === 'position' ? { domain_id: n.domain_id ?? undefined, domain_name: n.domain_name ?? undefined } : {}),
-  }))
-  const edges: GraphEdge[] = raw.edges.map((e) => ({
-    source: e.source,
-    target: e.target,
-    necessity: e.necessity === 'nice' ? 'nice' : 'must',
-    weight: e.weight,
-  }))
-  return {
-    nodes,
-    edges,
-    stats: {
-      totalPositions: nodes.filter((n) => n.type === 'position').length,
-      totalSkills: nodes.filter((n) => n.type === 'skill').length,
-      totalEdges: edges.length,
-      returnedNodes: nodes.length,
-      // 08-14 契约修复：全量节点数取后端 total_nodes（此前恒等于返回数，
-      // 「已截断采样」提示为死代码）；后端未返回时回落返回数
-      totalNodesInGraph: raw.stats?.total_nodes ?? nodes.length,
-    },
-  }
-}
 
 /** 非全景视图已由后端 /graph/view/{view_type} 提供（技术栈/级别/岗位中心均为服务端过滤）；
  *  画布岗位数上限（MAX_POSITIONS=30，见 visibleData）为前端展示层裁剪——高频岗位 Top-30
@@ -608,140 +559,84 @@ export function GraphPage() {
     <>
       <PageHeader
         title="能力图谱"
-        description="岗位-技能关系可视化 · 默认 2D 力导向图便于分析，3D 模式用于沉浸式浏览"
+        description="从职能域进入岗位，再沿技能关系定位能力要求与演化信号"
+        className="flex-col pb-4 sm:flex-row sm:items-center"
         actions={
-          <div className="flex items-center gap-2">
-            {/* 技能全文检索（真实 /graph/search） */}
-            <div ref={searchBoxRef} className="relative w-64">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+            <div ref={searchBoxRef} className="relative min-w-0 flex-1 sm:w-72 sm:flex-none">
               <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
               <Input
                 value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value)
-                  if (!e.target.value.trim()) {
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  if (!event.target.value.trim()) {
                     setSearchResults([])
                     setSearchDone(false)
                   }
                 }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') doSearch(query)
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') doSearch(query)
+                  if (event.key === 'Escape') {
+                    setSearchResults([])
+                    setSearchDone(false)
+                  }
                 }}
-                placeholder="搜索技能（如 Python）"
-                className="h-8 pl-8 pr-16 text-xs"
+                placeholder="搜索技能并定位关系"
+                className="h-9 pl-8 pr-16 text-xs"
+                role="combobox"
+                aria-label="搜索图谱技能"
+                aria-expanded={searchResults.length > 0 || (searchDone && !searching && !!query.trim())}
+                aria-controls="graph-search-results"
+                aria-autocomplete="list"
               />
-              <Button
-                size="sm"
-                variant="ghost"
-                className="absolute right-0.5 top-0.5 h-7 px-2 text-xs"
-                onClick={() => doSearch(query)}
-                disabled={searching}
-              >
-                {searching ? <Loader2 className="size-3 animate-spin" /> : '搜索'}
+              <Button size="sm" variant="ghost" className="absolute right-0.5 top-1 h-7 px-2 text-xs" onClick={() => doSearch(query)} disabled={searching}>
+                {searching ? <Loader2 className="size-3 animate-spin" /> : '定位'}
               </Button>
+              {(searchResults.length > 0 || (searchDone && !searching && query.trim())) && (
+                <div id="graph-search-results" role="listbox" className="absolute right-0 top-11 z-40 w-full overflow-hidden rounded-lg border border-border bg-canvas p-1 shadow-lg">
+                  {searchResults.length > 0 ? searchResults.map((result) => (
+                    <button key={result.id} type="button" role="option" aria-selected="false" onClick={() => focusSkill(result.id, result.name)} className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs hover:bg-subtle">
+                      <span className="font-medium text-ink">{result.name}</span>
+                      <span className="font-mono text-[10px] text-ink-faint">相关度 {(result.score * 100).toFixed(0)}</span>
+                    </button>
+                  )) : <p className="px-2.5 py-2 text-xs text-ink-muted">未找到与“{query.trim()}”相关的技能</p>}
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-              <Button
-                size="sm"
-                variant={mode === '2d' ? 'default' : 'ghost'}
-                onClick={() => setMode('2d')}
-                className="h-7 px-2.5 text-xs"
-              >
-                2D
-              </Button>
-              <Button
-                size="sm"
-                variant={mode === '3d' ? 'default' : 'ghost'}
-                onClick={() => setMode('3d')}
-                disabled={mode3dLocked}
-                title={isCoarsePointer ? '触控设备固定 2D 模式（设计文档 §6.3）' : !webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : '3D 沉浸式浏览（节点带空间纵深，适合展示整体结构）'}
-                className="h-7 px-2.5 text-xs"
-              >
-                3D
-              </Button>
+            <div className="flex shrink-0 items-center rounded-lg border border-border bg-subtle/60 p-0.5" aria-label="图谱维度">
+              <Button size="sm" variant={mode === '2d' ? 'default' : 'ghost'} onClick={() => setMode('2d')} className="h-8 px-3 text-xs" aria-label="2D">2D 分析</Button>
+              <Button size="sm" variant={mode === '3d' ? 'default' : 'ghost'} onClick={() => setMode('3d')} disabled={mode3dLocked} aria-label="3D" title={isCoarsePointer ? '触控设备固定 2D 模式（设计文档 §6.3）' : !webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : '3D 沉浸式浏览'} className="h-8 px-3 text-xs">3D 浏览</Button>
             </div>
           </div>
         }
       />
 
-      {/* 搜索结果下拉 */}
-      {(searchResults.length > 0 || (searchDone && !searching && query.trim())) && (
-        <Card className="mb-3">
-          <CardContent className="p-2">
-            {searchResults.length > 0 ? (
-              <ul className="divide-y divide-border">
-                {searchResults.map((r) => (
-                  <li key={r.id}>
-                    <button
-                      onClick={() => focusSkill(r.id, r.name)}
-                      className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-subtle"
-                    >
-                      <span className="font-medium text-ink">{r.name}</span>
-                      <span className="flex items-center gap-2 text-[10px] text-ink-faint">
-                        <span className="rounded bg-subtle px-1 py-0.5 font-mono">技能</span>
-                        <span className="font-mono">{(r.score * 100).toFixed(0)}</span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="px-2 py-2 text-xs text-ink-muted">未找到与“{query.trim()}”相关的技能</p>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* 视图切换 tabs */}
       <Tabs
         value={view}
-        onValueChange={(v) => {
+        onValueChange={(value) => {
           // 视图切换：同步清空展开的岗位/域（新视图技能集不同）与选中态
           // （P0-1：选中残留会让详情面板指向画布外节点，且 Graph2D 对仍在
           // 数据中的旧节点 dispatch highlight → adjacency blur 把全图压暗到 10%）
           setSelected(null)
           setExpandedPositions(new Set())
           setExpandedDomains(new Set())
-          setView(v as GraphViewType)
+          setView(value as GraphViewType)
         }}
       >
-        <div className="flex items-center justify-between gap-4 mb-3">
-          <TabsList>
-            {(Object.keys(VIEW_LABEL) as GraphViewType[]).map((v) => (
-              <TabsTrigger key={v} value={v} className="text-xs" title={VIEW_DESC[v]}>
-                {VIEW_LABEL[v]}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {/* 数据规模指示 */}
-          <div className="flex items-center gap-3 text-xs text-ink-muted">
-            <span className="flex items-center gap-1" title="当前视图节点数 / 图谱总节点数">
-              <Network className="size-3" />
-              <span className="font-mono tabular-nums">{data.stats.returnedNodes}</span>
-              <span className="text-ink-faint">/ {data.stats.totalNodesInGraph}</span>
-              <span className="text-ink-faint">节点</span>
-            </span>
-            <span className="flex items-center gap-1" title="当前视图边数">
-              <Box className="size-3" />
-              <span className="font-mono tabular-nums">{data.stats.totalEdges}</span>
-              <span className="text-ink-faint">边</span>
-            </span>
-            {visibleData && (
-              <span className="hidden sm:flex items-center gap-1" title="当前视图节点构成">
-                <span className="font-mono tabular-nums">
-                  {visibleData.nodes.filter((n) => n.type === 'position').length}
-                </span>
-                <span className="text-ink-faint">岗位</span>
-                <span className="text-ink-faint">·</span>
-                <span className="font-mono tabular-nums">
-                  {visibleData.nodes.filter((n) => n.type === 'skill').length}
-                </span>
-                <span className="text-ink-faint">技能</span>
-              </span>
-            )}
-            {data.stats.returnedNodes < data.stats.totalNodesInGraph && (
-              <span className="text-ink-faint text-[10px]">已截断采样</span>
-            )}
+        <div className="mb-3 flex flex-col gap-3 rounded-xl border border-border bg-subtle/40 px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+            <TabsList className="h-auto w-full justify-start overflow-x-auto bg-canvas p-1 sm:w-auto">
+              {(Object.keys(VIEW_LABEL) as GraphViewType[]).map((item) => (
+                <TabsTrigger key={item} value={item} className="whitespace-nowrap px-3 text-xs" title={VIEW_DESC[item]}>{VIEW_LABEL[item]}</TabsTrigger>
+              ))}
+            </TabsList>
+            <p className="truncate text-[11px] text-ink-muted" title={VIEW_DESC[view]}>{VIEW_DESC[view]}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-ink-muted" aria-label="当前图谱规模">
+            <span className="flex items-center gap-1" title="当前视图节点数 / 图谱总节点数"><Network className="size-3" /><b className="font-mono font-medium text-ink-secondary">{data.stats.returnedNodes}</b><span>/ {data.stats.totalNodesInGraph} 节点</span></span>
+            <span className="flex items-center gap-1"><Box className="size-3" /><b className="font-mono font-medium text-ink-secondary">{data.stats.totalEdges}</b><span>边</span></span>
+            {visibleData && <span><b className="font-mono font-medium text-ink-secondary">{visibleData.nodes.filter((node) => node.type === 'position').length}</b> 岗位 · <b className="font-mono font-medium text-ink-secondary">{visibleData.nodes.filter((node) => node.type === 'skill').length}</b> 技能</span>}
+            {data.stats.returnedNodes < data.stats.totalNodesInGraph && <span className="rounded bg-elevated px-1.5 py-0.5">采样视图</span>}
           </div>
         </div>
       </Tabs>
@@ -750,9 +645,9 @@ export function GraphPage() {
           大屏演示模式（focusMode）：画布 Card 转为 fixed 全屏（同树仅切类名，
           组件不重挂载、力导向布局不重算），详情栏转为右侧浮层 */}
       <div className={focusMode ? 'relative' : 'grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4'}>
-        <Card className={cn('relative overflow-hidden', focusMode ? 'fixed inset-0 z-40' : 'h-[640px]')}>
+        <Card className={cn('relative overflow-hidden border-atlas-grid bg-atlas-surface', focusMode ? 'fixed inset-0 z-40' : 'h-[min(720px,calc(100dvh-210px))] min-h-[560px]')}>
           {/* 画布操作组：重置视角 + 大屏演示切换（答辩/录屏用，Esc 退出） */}
-          <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+          <div className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded-md border border-atlas-grid bg-canvas/90 p-1 shadow-md backdrop-blur-xl">
             <Button
               size="sm"
               variant="ghost"
@@ -777,18 +672,18 @@ export function GraphPage() {
           {/* 演示视角书签：镜头平滑飞行到锚定岗位簇（仅展示当前视图中存在的锚点；
               右下角避开顶部操作提示与底部视图说明） */}
           {visibleBookmarks.length > 0 && (
-            <div className="absolute bottom-10 right-2 z-10 flex flex-col items-end gap-1">
-              {visibleBookmarks.map((b) => (
+            <div className="absolute bottom-12 right-3 z-20 hidden items-center gap-1 rounded-md border border-atlas-grid bg-canvas/90 p-1 shadow-sm backdrop-blur-xl sm:flex" aria-label="演示镜头书签">
+              <Crosshair className="mx-1 size-3 text-atlas-muted" />
+              {visibleBookmarks.map((bookmark) => (
                 <Button
-                  key={b.nodeName}
+                  key={bookmark.nodeName}
                   size="sm"
                   variant="ghost"
-                  onClick={() => flyToBookmark(b.nodeName)}
-                  className="h-7 px-2 text-xs text-ink-muted hover:text-ink"
-                  title={`镜头飞至${b.label}（${b.nodeName}）`}
+                  onClick={() => flyToBookmark(bookmark.nodeName)}
+                  className="h-7 px-2 text-[10px] text-ink-muted hover:text-ink"
+                  title={`镜头飞至${bookmark.label}（${bookmark.nodeName}）`}
                 >
-                  <Crosshair className="size-3 mr-1" />
-                  {b.label}
+                  {bookmark.label}
                 </Button>
               ))}
             </div>
@@ -859,22 +754,15 @@ export function GraphPage() {
           )}
 
           {/* 视图说明 */}
-          <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-3 pointer-events-none">
-            <p className="text-[11px] text-ink-muted bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
-              {VIEW_DESC[view]}
-            </p>
-            {view !== 'techStack' && (
-              <p className="text-[11px] text-ink-muted bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
-                {view === 'panorama'
-                  ? `已展开 ${expandedDomains.size} 域 · ${expandedPositions.size} 岗位`
-                  : `已展开 ${expandedPositions.size} 个岗位`}
-              </p>
-            )}
-            {mode3dLocked && (
-              <p className="text-[10px] text-ink-faint bg-canvas/80 backdrop-blur px-2 py-1 rounded border border-border">
-                {isCoarsePointer ? '触控设备固定 2D 模式' : 'WebGL2 不可用，已降级 2D 模式'}
-              </p>
-            )}
+          <div className="pointer-events-none absolute bottom-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2 rounded-md border border-atlas-grid bg-canvas/88 px-3 py-2 shadow-sm backdrop-blur-xl">
+            <div className="min-w-0">
+              <p className="font-mono text-[9px] tracking-[0.16em] text-atlas-muted">CURRENT BEARING / {VIEW_LABEL[view]}</p>
+              <p className="truncate text-[11px] text-ink-muted">{VIEW_DESC[view]}</p>
+            </div>
+            <div className="flex items-center gap-2 font-mono text-[10px] text-atlas-muted">
+              {view !== 'techStack' && <span>{view === 'panorama' ? `${expandedDomains.size} 域 · ${expandedPositions.size} 岗位` : `${expandedPositions.size} 岗位`}</span>}
+              {mode3dLocked && <span>{isCoarsePointer ? '触控设备固定 2D 模式' : 'WebGL2 不可用，已降级 2D 模式'}</span>}
+            </div>
           </div>
         </Card>
 
@@ -927,72 +815,38 @@ export function GraphPage() {
       {/* 演化时间轴（P0-2）：版本快照滑轨 + 增删打标（接口失败静默隐藏） */}
       <EvolutionTimeline onMarksChange={setEvolutionMarks} className="mt-3" />
 
-      {/* 图例：与画布实际渲染对齐（形状+颜色，支持色盲识别）。
-          职能域超节点（#412 域聚合下钻的视觉锚，靛蓝大圆）置于首位 */}
-      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-muted" role="list" aria-label="图谱图例">
-        <span className="font-medium text-ink-secondary">图例：</span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span
-            className="size-3 rounded-full bg-[#4f46e5] dark:bg-[#818cf8]"
-            role="img"
-            aria-label="职能域超节点：靛蓝色大圆，尺寸随成员岗位数"
-          /> 职能域
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-full bg-state-active" role="img" aria-label="活跃岗位：蓝灰圆形" /> 活跃
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-full bg-state-stable" role="img" aria-label="稳定岗位：蓝色圆形" /> 稳定
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span
-            className="size-2.5 bg-state-emerging"
-            style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
-            role="img"
-            aria-label="新兴岗位：绿色三角形"
-          /> 新兴
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-full bg-state-candidate" role="img" aria-label="候选岗位：灰色圆形" /> 候选
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 bg-state-declining" role="img" aria-label="衰退岗位：橙色矩形" /> 衰退
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-md bg-state-archived" role="img" aria-label="归档岗位：红色圆角矩形" /> 归档
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-full bg-[#09090b] dark:bg-[#fafafa]" role="img" aria-label="技术技能节点" /> 技术技能
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span
-            className="size-2.5 rounded-full bg-[#ec4899] dark:bg-[#f472b6]"
-            role="img"
-            aria-label="软技能节点：粉色圆形（责任心/沟通能力等软素质）"
-          />{' '}
-          软技能
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="w-4 h-0.5 bg-ink/60" aria-hidden="true" />
-          岗位-技能
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="w-4 h-0.5 bg-ink/60" aria-hidden="true" />
-          关联强度
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span className="size-2.5 rounded-full bg-[#22c55e]" role="img" aria-label="演化时间轴：本版新增节点绿环" />
-          本版新增<span className="text-ink-faint">（时间轴）</span>
-        </span>
-        <span className="flex items-center gap-1.5" role="listitem">
-          <span
-            className="size-2.5 rounded-full border-2 border-dashed border-state-declining"
-            role="img"
-            aria-label="演化时间轴：本版消亡节点橙色虚线圈"
-          />
-          本版消亡<span className="text-ink-faint">（时间轴）</span>
-        </span>
-      </div>
+      <div className="mt-4 grid gap-3 rounded-lg border border-atlas-grid bg-subtle/60 p-3 text-xs text-ink-muted lg:grid-cols-[1.15fr_1fr_1.2fr]" role="list" aria-label="图谱图例">
+        <div className="space-y-2" role="listitem">
+          <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">MAP FEATURES / 实体</p>
+          <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+            <span className="flex items-center gap-1.5"><span className="size-3 rotate-45 bg-graph-domain" /> 职能域</span>
+            <span className="flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-sm border border-atlas-ocean bg-state-stable" /> 岗位</span>
+            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-graph-skill" role="img" aria-label="技术技能节点" /> 技术技能</span>
+            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full border-2 border-graph-soft-skill" role="img" aria-label="软技能节点：粉色空心圆" /> 软技能</span>
+            <span className="flex items-center gap-1.5"><span className="size-0 border-x-4 border-b-[7px] border-x-transparent border-b-graph-evidence" /> 证据地标</span>
+            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#22c55e]" role="img" aria-label="演化时间轴：本版新增节点绿环" /> 本版新增<span className="text-ink-faint">（时间轴）</span></span>
+            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full border-2 border-dashed border-state-declining" role="img" aria-label="演化时间轴：本版消亡节点橙色虚线圈" /> 本版消亡<span className="text-ink-faint">（时间轴）</span></span>
+          </div>
+        </div>
+        <div className="space-y-2" role="listitem">
+          <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">RELATION SURVEY / 关系</p>
+          <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+            <span className="flex items-center gap-1.5"><span className="h-0.5 w-5 bg-atlas-ocean" /> 必备关系</span>
+            <span className="flex items-center gap-1.5"><span className="w-5 border-t border-dashed border-atlas-muted" /> 加分关系</span>
+            <span className="flex items-center gap-1.5"><span className="w-5 border-t border-dotted border-atlas-muted" /> 共享能力关联</span>
+          </div>
+        </div>
+        <div className="space-y-2" role="listitem">
+          <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">POSITION STATUS / 岗位状态色</p>
+          <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-active" />活跃</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-stable" />稳定</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-emerging" />新兴</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-candidate" />候选</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-declining" />衰退</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-archived" />归档</span>
+          </div>
+        </div>      </div>
     </>
   )
 }
