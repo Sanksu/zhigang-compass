@@ -908,7 +908,12 @@ class TestSoftSkillDownweight:
         assert result.must_score == 0.0
 
     def test_soft_skill_nice_requirement_scored(self):
-        """岗位侧 soft_skills 并入 nice 后，推断软技能命中按 ×0.5 计入 nice_score。"""
+        """引擎对评分池内要求按 low_confidence ×0.5 计分（机制回归）。
+
+        生产链路软技能已退出评分池（soft_requirements 独立通道，2026-08-22
+        拍板）——本例直接构造含软技能名的 nice 池，验证引擎对 low_confidence
+        候选技能的降权机制本身不因通道拆分回归。
+        """
         cand = self._soft_candidate("团队协作")
         pos = _position(
             "p1",

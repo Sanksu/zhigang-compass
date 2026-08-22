@@ -155,7 +155,7 @@ def _reset_cache():
 
 
 def test_load_positions_must_nice_grouping(monkeypatch):
-    """must/nice 技能正确分组，软技能并入 nice。"""
+    """must/nice 技术栈正确分组；软技能走独立通道不进评分池。"""
     req_rows = [
         _req_row("p1", "后端工程师", "s1", "Java", "must", weight=0.9),
         _req_row("p1", "后端工程师", "s2", "Docker", "nice", weight=0.4),
@@ -174,13 +174,14 @@ def test_load_positions_must_nice_grouping(monkeypatch):
     assert [s.skill_name for s in pos.must_skills] == ["Java"]
     nice_names = [s.skill_name for s in pos.nice_skills]
     assert "Docker" in nice_names
-    assert "沟通能力" in nice_names  # 软技能并入 nice
+    assert "沟通能力" not in nice_names  # 软技能不进 nice 评分池（独立通道）
     assert pos.soft_skills == ["沟通能力"]
-    # 软技能 weight = 0.4
-    soft = next(s for s in pos.nice_skills if s.skill_name == "沟通能力")
-    assert soft.weight == _SOFT_SKILL_WEIGHT
-    assert soft.necessity == Necessity.NICE
-    # 预热包含全部技能名
+    # 软技能在独立通道：展示权重 0.4、is_soft 打标
+    soft_req = next(s for s in pos.soft_requirements if s.skill_name == "沟通能力")
+    assert soft_req.weight == _SOFT_SKILL_WEIGHT
+    assert soft_req.necessity == Necessity.NICE
+    assert soft_req.is_soft is True
+    # 预热包含全部技能名（含独立通道——差距分析对软技能做语义匹配）
     assert "Java" in fake.warmed and "沟通能力" in fake.warmed
 
 
@@ -217,9 +218,9 @@ def test_load_positions_cache_expiry(monkeypatch):
 
 
 def test_load_positions_soft_skill_dedup(monkeypatch):
-    """软技能与 REQUIRES nice 同名时去重（不重复并入）。"""
+    """REQUIRES 软技能边与 Position.soft_skills 同名去重（独立通道内不重复）。"""
     req_rows = [
-        _req_row("p1", "后端工程师", "s1", "团队协作", "nice", weight=0.4),
+        _req_row("p1", "后端工程师", "s1", "团队协作", "nice", weight=0.4, category="软技能"),
     ]
     soft_rows = [{"pid": "p1", "soft": ["团队协作"]}]
     monkeypatch.setattr("app.services.matching.loaders.neo4j_driver",
@@ -228,19 +229,23 @@ def test_load_positions_soft_skill_dedup(monkeypatch):
                         type("SE", (), {"get": staticmethod(lambda: _FakeEmbedder())}))
 
     pos = load_positions_from_graph()[0]
-    # 同名技能只出现一次（软技能并入前检查重复）
-    names = [s.skill_name for s in pos.nice_skills]
-    assert names.count("团队协作") == 1
+    # 独立通道内同名只出现一次（边版本带 skill_id/source_count 优先）
+    soft_channel = [s.skill_name for s in pos.soft_requirements]
+    assert soft_channel.count("团队协作") == 1
+    # 评分池不含软技能
+    assert not any(s.skill_name == "团队协作" for s in pos.nice_skills)
 
 
 def test_load_positions_is_soft_tagging(monkeypatch):
-    """软技能打标（仅展示元数据，评分口径不变）：
-    - REQUIRES 边上 Skill.category=「软技能」→ is_soft=True；技术类目 → False
-    - Position.soft_skills 并入 nice 的条目 → is_soft=True
+    """软技能独立通道路由（2026-08-22 拍板：退出评分池）：
+    - REQUIRES 边上 Skill.category=「软技能」→ 独立通道（must 标注也不例外）
+    - Position.soft_skills 属性 → 独立通道（与边同名去重）
+    - 技术类目技能照旧进 must/nice，is_soft=False
     """
     req_rows = [
         _req_row("p1", "算法工程师", "s1", "PyTorch", "must", category="AI·机器学习"),
         _req_row("p1", "算法工程师", "s2", "沟通能力", "nice", weight=0.4, category="软技能"),
+        _req_row("p1", "算法工程师", "s3", "责任心", "must", weight=0.8, category="软技能"),
     ]
     soft_rows = [{"pid": "p1", "soft": ["责任心"]}]
     monkeypatch.setattr("app.services.matching.loaders.neo4j_driver",
@@ -249,12 +254,14 @@ def test_load_positions_is_soft_tagging(monkeypatch):
                         type("SE", (), {"get": staticmethod(lambda: _FakeEmbedder())}))
 
     pos = load_positions_from_graph()[0]
-    assert pos.must_skills[0].skill_name == "PyTorch"
-    assert pos.must_skills[0].is_soft is False  # 技术栈技能不打标
-    edge_soft = next(s for s in pos.nice_skills if s.skill_name == "沟通能力")
-    assert edge_soft.is_soft is True  # REQUIRES 边上的软技能类目
-    merged_soft = next(s for s in pos.nice_skills if s.skill_name == "责任心")
-    assert merged_soft.is_soft is True  # Position.soft_skills 并入条目
+    # 评分池纯技术栈：must 仅 PyTorch（must 边软技能「责任心」也不计入），nice 为空
+    assert [s.skill_name for s in pos.must_skills] == ["PyTorch"]
+    assert pos.must_skills[0].is_soft is False
+    assert pos.nice_skills == []
+    # 独立通道：nice 边软技能 + must 边软技能 + 属性并入（同名去重）
+    soft_channel = [s.skill_name for s in pos.soft_requirements]
+    assert soft_channel == ["沟通能力", "责任心"]
+    assert all(s.is_soft for s in pos.soft_requirements)
 
 
 def test_load_positions_filters_edge_positions(monkeypatch):
