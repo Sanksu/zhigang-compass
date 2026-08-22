@@ -6,12 +6,27 @@
 import pytest
 from app.core import runtime_config
 from app.services.extraction.dict_guard import (
+    _ALIAS_STANDARDS,
     hard_gate,
     select_stopword_misuse,
     select_suspect_skills,
     tier_for,
 )
 from app.services.extraction.dictionary import SKILL_STOPWORDS, SKILL_WHITELIST
+
+
+def _pure_stopword() -> str:
+    """确定性取「纯」停用词样本（≥2 字符且不与白名单/别名标准名重叠）。
+
+    SKILL_STOPWORDS 含单字符「微」（硬门禁按词条过短拒绝）与白名单重叠
+    成员（如「缓存」「数据库」，protect 场景按已受保护拒绝）；set 迭代序
+    随 PYTHONHASHSEED 漂移，next(iter(...)) 取样在 CI 偶发抽中致断言失败。
+    """
+    return sorted(
+        w
+        for w in SKILL_STOPWORDS
+        if len(w) >= 2 and w not in SKILL_WHITELIST and w not in _ALIAS_STANDARDS
+    )[0]
 
 
 class TestHardGate:
@@ -37,12 +52,12 @@ class TestHardGate:
         assert "过短" in reason
 
     def test_remove_stopword_requires_current_stopword(self):
-        sample = next(iter(SKILL_STOPWORDS))
+        sample = _pure_stopword()
         assert hard_gate("remove_stopword", sample)[0] is True
         assert hard_gate("remove_stopword", "不是停用词的词")[0] is False
 
     def test_protect_requires_blocked_target(self):
-        sample = next(iter(SKILL_STOPWORDS))
+        sample = _pure_stopword()
         assert hard_gate("protect_whitelist", sample)[0] is True
         whitelist_sample = next(iter(SKILL_WHITELIST))
         assert hard_gate("protect_whitelist", whitelist_sample)[0] is False

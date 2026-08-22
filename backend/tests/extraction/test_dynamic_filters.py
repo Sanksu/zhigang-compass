@@ -123,6 +123,14 @@ class TestEntryManagement:
         assert data["protected"][0]["term"] == "某保护词"
         assert data["protected"][0]["source"] == "dict_guard"
 
+    def test_write_leaves_no_tmp_artifact(self, filters_path):
+        """直写模式不留临时文件（P1-1 同批改造：生产单文件 bind mount 下
+        os.replace 覆盖挂载点会 EBUSY，与 runtime_settings 同口径直接覆写）。"""
+        df.add_entry("blocked", "临时验证词", reason="r", source="manual")
+        assert not list(filters_path.parent.glob("*.tmp"))
+        # 直写后文件仍是合法 JSON（读取方损坏兜底不被常态化触发）
+        assert json.loads(filters_path.read_text(encoding="utf-8"))["blocked"]
+
 
 class TestTtlCache:
     def test_same_process_write_visible_immediately(self, filters_path):
