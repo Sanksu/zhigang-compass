@@ -13,6 +13,7 @@ from app.services.matching.schemas import Necessity, PositionProfile, SkillRequi
 from app.services.matching.shared_cache import (
     _PAYLOAD_PREFIX,
     _POINTER_KEY,
+    _SCHEMA_REVISION,
     _parse_payload,
     _serialize,
     load_positions_shared,
@@ -91,15 +92,23 @@ def _reset_state(monkeypatch):
     yield {"warmed": warmed}
 
 
-def _seed_payload(redis: _FakeRedis, profiles=None, schema_rev: str = "v2") -> str:
-    """预置指针 + 载荷，返回载荷键。"""
+def _seed_payload(redis: _FakeRedis, profiles=None, schema_rev: str | None = None) -> str:
+    """预置指针 + 载荷，返回载荷键。
+
+    schema_rev 缺省跟随模块当前版本（真实命中路径）；显式传旧版本模拟
+    跨版本部署残留（载荷与指针均改写为该版本，验证拒绝重建）。
+    """
+    if schema_rev is None:
+        schema_rev = _SCHEMA_REVISION
     profiles = profiles if profiles is not None else _profiles()
     graph_rev = "g-rev-1"
     weights_rev = "w-rev-1"
     key = f"{_PAYLOAD_PREFIX}{graph_rev}:{weights_rev}"
     payload = _serialize(profiles, graph_rev, weights_rev)
-    if schema_rev != "v2":
-        payload = payload.replace('"schema_revision":"v2"', f'"schema_revision":"{schema_rev}"')
+    if schema_rev != _SCHEMA_REVISION:
+        payload = payload.replace(
+            f'"schema_revision":"{_SCHEMA_REVISION}"', f'"schema_revision":"{schema_rev}"'
+        )
     redis.store[key] = payload
     redis.store[_POINTER_KEY] = (
         '{"key":"%s","schema_revision":"%s","graph_revision":"%s",'

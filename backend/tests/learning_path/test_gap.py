@@ -28,8 +28,11 @@ def _req(name: str, necessity: Necessity = Necessity.MUST, weight: float = 1.0, 
     )
 
 
-def _position(musts: list, nices: list | None = None) -> PositionProfile:
-    return PositionProfile(position_id="p1", name="p1", must_skills=musts, nice_skills=nices or [])
+def _position(musts: list, nices: list | None = None, softs: list | None = None) -> PositionProfile:
+    return PositionProfile(
+        position_id="p1", name="p1", must_skills=musts,
+        nice_skills=nices or [], soft_requirements=softs or [],
+    )
 
 
 class TestSoftSkillTag:
@@ -44,6 +47,20 @@ class TestSoftSkillTag:
         by_name = {g.skill: g for g in gaps}
         assert by_name["沟通能力"].is_soft is True
         assert by_name["PyTorch"].is_soft is False
+
+    def test_soft_channel_enters_gaps(self):
+        """独立通道 soft_requirements（不参与评分）同样进入差距列表供展示。"""
+        cand = _candidate([])
+        gaps = analyze_gaps(
+            cand,
+            _position(
+                [_req("PyTorch")],
+                softs=[_req("沟通能力", necessity=Necessity.NICE, weight=0.4, is_soft=True)],
+            ),
+        )
+        by_name = {g.skill: g for g in gaps}
+        assert by_name["沟通能力"].is_soft is True
+        assert by_name["沟通能力"].gap_type == GapType.MISSING
 
     def test_is_soft_not_affect_gap_type(self):
         """软技能缺失仍按 necessity 定优先级（nice → medium），不因打标改变三态。"""
