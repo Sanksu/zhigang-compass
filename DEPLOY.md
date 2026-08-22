@@ -81,7 +81,7 @@ curl http://localhost:8000/health
 
 - **回填脚本检查**：CHANGELOG 对应条目若标注存量回填（如 `backfill_skill_category.py`），部署后在容器内执行一次（幂等）：`docker exec zhigang-api python scripts/backfill_xxx.py`
 - **迁移**：api ENTRYPOINT 自动执行，无需手动；但镜像必须包含新迁移文件（见 ①，迁移缺失=部署后启动失败）
-- 可选加速：`CD (images)` workflow 在每次 develop 合并后把后端镜像推到 GHCR（`ghcr.io/sanksu/zhigang-compass-api|worker`，公开仓库免认证拉取），可 `docker pull` + `docker tag` 为本地镜像名（`zhigang-compass-api:latest` / `zhigang-compass-worker:latest`）替代 ① 的本地构建
+- 可选加速：`CD (images)` workflow 在 develop 的**后端相关改动**合入后把镜像推到 GHCR（`ghcr.io/sanksu/zhigang-compass-api|worker`，公开仓库免认证拉取；纯前端/文档合并不构建 12.7GB 后端镜像），可 `docker pull` + `docker tag` 为本地镜像名（`zhigang-compass-api:latest` / `zhigang-compass-worker:latest`）替代 ① 的本地构建
 
 ## 4. 初始化
 
