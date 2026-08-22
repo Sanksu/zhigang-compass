@@ -503,9 +503,16 @@ class TestProficiencyFactor:
     def test_missing_candidate_no_penalty(self):
         assert _proficiency_factor("高级", None) == 1.0
 
-    def test_unknown_level_falls_back_no_penalty(self):
-        """未知档位（数据异常）不武断惩罚。"""
-        assert _proficiency_factor("未知", 1) == 1.0
+    def test_aliases_normalize_to_existing_matrix_rows(self):
+        # 规范化只改变输入口径，不改变既定评分矩阵。
+        assert _proficiency_factor("熟悉", 1) == pytest.approx(0.85)
+        assert _proficiency_factor("掌握", 1) == pytest.approx(0.60)
+        assert _proficiency_factor("精通", 2) == pytest.approx(0.60)
+        assert _proficiency_factor("资深", 3) == pytest.approx(1.0)
+
+    def test_unknown_level_is_not_full_credit(self):
+        """非空未知等级不能被静默当作 1.0 完全满足。"""
+        assert _proficiency_factor("未知", 1) == 0.0
 
 
 class TestSourceWeight:

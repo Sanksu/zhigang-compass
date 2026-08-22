@@ -12,20 +12,24 @@ import { LearningTimeline } from '@/components/learning/learning-timeline'
 import { useTypewriter } from '@/hooks/use-typewriter'
 import {
   type BackendDiagnosisReport,
-  type BackendGapItem,
   type BackendLearningPathItem,
   type BackendMatchResult,
   type CandidateProfile,
-  type GapItem,
   type MatchResult,
   type RadarDimension,
   type RecommendItem,
   type ResumeSummary,
-  type SkillMatrixItem,
 } from '@/components/match/types'
 import type { PositionStatus } from '@/components/graph/types'
 import {apiGet, apiPost, getAccessToken, errMsg} from '@/lib/api'
 import { prefersReducedMotion } from '@/lib/utils'
+import {
+  completedSkillsFromMatrix,
+  proficiencyNumber,
+  toGapItem,
+  toSkillMatrixItem,
+  withRefreshedGaps,
+} from './resume-match-adapters'
 import type { components } from '@/types/api'
 
 const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
@@ -48,7 +52,7 @@ const STATUS_CLASS: Record<PositionStatus | 'low', string> = {
   low: 'border-ink-faint/30 text-ink-muted bg-subtle',
 }
 
-const REL_LABEL = { gap: '缺口', fit: '达标', surplus: '超出' } as const
+const REL_LABEL = { missing: '缺失', weak: '待提升', matched: '达标' } as const
 function relLabel(rel: keyof typeof REL_LABEL): string {
   return REL_LABEL[rel]
 }
@@ -77,32 +81,6 @@ function toRecommendItem(r: BackendMatchResult): RecommendItem {
     summary: r.summary,
     status,
     key_gaps: r.missing_must.slice(0, 3),
-  }
-}
-
-function toGapItem(g: BackendGapItem): GapItem {
-  // 后端三态（missing/weak/matched）→ 前端四态；matched 是已匹配而非缺失
-  const gap_type =
-    g.gap_type === 'matched'
-      ? 'matched'
-      : g.gap_type === 'weak'
-        ? 'level_gap'
-        : g.necessity === 'must'
-          ? 'missing_must'
-          : 'missing_nice'
-  return {
-    skill: g.skill,
-    gap_type,
-    priority: g.priority,
-    current_level: g.current_proficiency ?? '未掌握',
-    required_level: g.required_proficiency ?? '不限',
-    is_soft: g.is_soft,
-    // 契约 #341 后装字段透传（后端回填后自动覆盖 mock 兜底）
-    demand: g.demand,
-    trend: g.trend,
-    roi: g.roi,
-    high_roi: g.high_roi,
-    evidence: g.evidence?.map((e) => ({ role: e.role, text: e.text })),
   }
 }
 
@@ -135,22 +113,18 @@ function toLearningPath(items: BackendLearningPathItem[]): MatchResult['learning
 }
 
 function toMatchResult(r: BackendMatchResult): MatchResult {
-  const skill_matrix: SkillMatrixItem[] = [
-    ...r.matched_must.map((s) => ({
-      skill: s, candidate_level: 1, required_level: 2, necessity: 'must' as const, match: 'full' as const,
-    })),
-    ...r.missing_must.map((s) => ({
-      skill: s, candidate_level: 0, required_level: 2, necessity: 'must' as const, match: 'missing' as const,
-    })),
-  ]
-  const gaps: GapItem[] = (r.gaps ?? []).map(toGapItem)
-  // 五维雷达全量消费后端 radar（08-14 审查：此前学历/项目硬编码占位；education/projects
-  // 为保守近似分，无数据维度剔除不占位；must 无必备门槛时同为 null 剔除，A1 口径）
+  const gaps = (r.gaps ?? []).map(toGapItem)
+  const skill_matrix = (r.gaps ?? []).map(toSkillMatrixItem)
+  // 五维雷达消费后端 radar；无数据维度不展示。
   const radar = r.radar
   const radarDims: RadarDimension[] = []
   const mustVal = radar?.must ?? r.must_score
   if (mustVal != null) {
     radarDims.push({ name: '必备技能', candidate: Math.round(mustVal * 100), required: 100 })
+  }
+  const skillLevel = radar?.skill_level
+  if (skillLevel != null) {
+    radarDims.push({ name: '熟练度', candidate: Math.round(skillLevel * 100), required: 100 })
   }
   radarDims.push(
     { name: '加分技能', candidate: Math.round((radar?.nice ?? r.nice_score) * 100), required: 80 },
@@ -180,25 +154,6 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
     // 证据引用：技能 → 原始 JD（图谱 MENTIONED_IN 链路，后端 compare 返回）
     evidence_refs: r.evidence_refs ?? [],
   }
-}
-
-// ── 差距分析数据升级（task T3）：双轨对齐用熟练度数值 ──
-
-const PROF_NUM: Record<string, number> = {
-  专家: 4,
-  高级: 3,
-  熟练: 3,
-  掌握: 2,
-  中级: 2,
-  初级: 1,
-  了解: 1,
-  未掌握: 0,
-}
-/** 熟练度文本 → 0-4 数值（双轨对齐用；无要求/无法识别回退 fallback） */
-function profNum(text: string | undefined, fallback: number): number {
-  const s = (text ?? '').trim()
-  if (!s || s === '不限') return fallback
-  return PROF_NUM[s] ?? 2
 }
 
 function toCandidate(s: ResumeSummary): CandidateProfile {
@@ -455,7 +410,7 @@ export function ResumeMatchPage() {
     if (!matchId) return
     try {
       const res = await apiGet<components['schemas']['MatchGapData']>(`/match/result/${matchId}/gap`)
-      setMatchResult((prev) => (prev ? { ...prev, gaps: res.gaps.map(toGapItem) } : prev))
+      setMatchResult((prev) => (prev ? withRefreshedGaps(prev, res.gaps) : prev))
       setNotice('差距分析已从快照刷新')
     } catch (e) {
       setNotice(errMsg(e, '差距刷新失败'))
@@ -830,8 +785,8 @@ export function ResumeMatchPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm">五维能力对比</CardTitle>
-                    <CardDescription>候选人 vs 岗位要求（后端雷达评分，无数据维度不展示：education/projects 缺数据、must 无必备门槛）</CardDescription>
+                    <CardTitle className="text-sm">能力对比</CardTitle>
+                    <CardDescription>候选人 vs 岗位要求（直接消费后端雷达评分；包含后端提供的熟练度满足度）</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <RadarChart data={matchResult.radar} />
@@ -841,7 +796,7 @@ export function ResumeMatchPage() {
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm">技能矩阵</CardTitle>
-                    <CardDescription>必备技能命中情况（真实 matched/missing_must）</CardDescription>
+                    <CardDescription>候选人与岗位要求的真实熟练度及后端差距状态</CardDescription>
                   </CardHeader>
                   <CardContent>
                     {matchResult.skill_matrix.length > 0 ? (
@@ -883,15 +838,16 @@ export function ResumeMatchPage() {
                       {gapRows.map((gap) => {
                         const expanded = expandedGaps.has(gap.skill)
                         // 双轨对齐：目标(岗位要求) vs 现状(候选人) 的 0-4 熟练度
-                        const target = Math.max(0, Math.min(4, profNum(gap.required_level, 3)))
-                        const actual = Math.max(0, Math.min(4, profNum(gap.current_level, 0)))
-                        const rel = actual < target ? 'gap' : actual === target ? 'fit' : 'surplus'
+                        const target = Math.max(0, Math.min(4, proficiencyNumber(gap.required_level, 'requirement', 3)))
+                        const actual = Math.max(0, Math.min(4, proficiencyNumber(gap.current_level, 'candidate', 0)))
+                        // 两侧刻度的语义不同，不能以数字比较重判匹配结果；沿用后端权威三态。
+                        const rel = gap.match_status
                         const GAP_ICON =
                           gap.gap_type === 'missing_must' ? XCircle : gap.gap_type === 'level_gap' ? AlertCircle : CheckCircle2
                         const relClass =
-                          rel === 'gap' ? 'text-state-archived' : rel === 'surplus' ? 'text-state-emerging' : 'text-state-stable'
+                          rel === 'missing' ? 'text-state-archived' : rel === 'weak' ? 'text-state-declining' : 'text-state-stable'
                         const relBar =
-                          rel === 'gap' ? 'bg-state-archived' : rel === 'surplus' ? 'bg-state-emerging' : 'bg-state-stable'
+                          rel === 'missing' ? 'bg-state-archived' : rel === 'weak' ? 'bg-state-declining' : 'bg-state-stable'
                         const iconColor =
                           gap.gap_type === 'missing_must'
                             ? 'text-state-archived'
@@ -942,7 +898,7 @@ export function ResumeMatchPage() {
                                     <span className="w-8 shrink-0 text-right text-[9px] text-ink-faint">要求</span>
                                     <div className="relative h-2 flex-1 rounded-full bg-border/40">
                                       <div
-                                        className={`absolute inset-y-0 left-0 rounded-l-full ${rel === 'gap' ? 'bg-state-archived/20' : 'bg-state-stable/20'}`}
+                                        className={`absolute inset-y-0 left-0 rounded-l-full ${rel === 'missing' ? 'bg-state-archived/20' : rel === 'weak' ? 'bg-state-declining/20' : 'bg-state-stable/20'}`}
                                         style={{ width: `${(target / 4) * 100}%` }}
                                       />
                                       <div
@@ -962,16 +918,6 @@ export function ResumeMatchPage() {
                                         className={`absolute inset-y-0 left-0 rounded-full ${relBar}`}
                                         style={{ width: `${(actual / 4) * 100}%` }}
                                       />
-                                      {/* 能力溢出段（surplus）：目标刻度后绿色延伸 */}
-                                      {rel === 'surplus' && (
-                                        <div
-                                          className="absolute inset-y-0 rounded-r-full bg-state-emerging"
-                                          style={{
-                                            left: `${(target / 4) * 100}%`,
-                                            width: `${((actual - target) / 4) * 100}%`,
-                                          }}
-                                        />
-                                      )}
                                     </div>
                                     <span className="w-6 shrink-0 text-[9px] font-mono text-ink-muted tabular-nums">
                                       {actual}/4
@@ -1075,9 +1021,7 @@ export function ResumeMatchPage() {
                   ) : matchResult.learning_path.length > 0 ? (
                     <LearningTimeline
                       items={matchResult.learning_path}
-                      completedSkills={matchResult.skill_matrix
-                        .filter((s) => s.match === 'full')
-                        .map((s) => s.skill)}
+                      completedSkills={completedSkillsFromMatrix(matchResult.skill_matrix)}
                       onGoToLearn={(task) => {
                         // 接入课程：跳转该技能首门推荐课程（新标签）
                         const url = task.courses?.find((c) => c.url)?.url

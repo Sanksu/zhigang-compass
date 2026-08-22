@@ -105,6 +105,25 @@ class TestGapTypes:
         gaps = analyze_gaps(cand, _position([_req("Python", proficiency="中级")]))
         assert gaps[0].gap_type == GapType.MATCHED
 
+    def test_alias_requirement_uses_same_semantics_as_scoring(self):
+        # 精通规范为高级：候选人“熟悉”(2) 不足，须显示 weak。
+        cand = _candidate([("Python", 2)])
+        gaps = analyze_gaps(cand, _position([_req("Python", proficiency="精通")]))
+        assert gaps[0].gap_type == GapType.WEAK
+        assert gaps[0].required_proficiency == "精通"
+
+    def test_expert_margin_matches_scoring_matrix(self):
+        # 既定矩阵中“专家 × 精通”=0.85，gap 应同样显示 weak。
+        cand = _candidate([("Python", 3)])
+        gaps = analyze_gaps(cand, _position([_req("Python", proficiency="专家")]))
+        assert gaps[0].gap_type == GapType.WEAK
+
+    def test_unknown_requirement_is_weak_not_silently_matched(self):
+        """非空未知等级不得在 gap 中被视为完全满足。"""
+        cand = _candidate([("Python", 3)])
+        gaps = analyze_gaps(cand, _position([_req("Python", proficiency="未知")]))
+        assert gaps[0].gap_type == GapType.WEAK
+
     def test_no_required_level_is_not_weak(self):
         """岗位未声明期望熟练度 → 不判 weak。"""
         cand = _candidate([("Python", 1)])

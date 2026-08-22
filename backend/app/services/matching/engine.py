@@ -17,6 +17,7 @@ from app.services.matching.schemas import (
     PositionProfile,
 )
 from app.services.matching.weights import load_domain_sem_blocklist, load_sim_threshold, load_weights
+from app.services.proficiency import proficiency_factor
 
 logger = logging.getLogger(__name__)
 
@@ -59,28 +60,9 @@ def _soft_multiplier(cs) -> float:
     return SOFT_SKILL_DOWNWEIGHT if cs.low_confidence else 1.0
 
 
-# 熟练度满足度矩阵（方案 A，对齐设计文档 9.2"期望熟练度"匹配）：
-# 岗位期望熟练度（聚合层 REQUIRES.level：初级/中级/高级/专家）× 候选人熟练度
-# （1 了解 / 2 熟悉 / 3 精通）→ 系数。候选人熟练度 ≥ 岗位期望 → 1.0（不惩罚），
-# 低一档 ×0.6、低两档 ×0.3；"了解"对"初级"岗容忍基础接触 ×0.85，
-# "精通"对"专家"岗留 ×0.85 余量（避免要求堆到极值把分压到 0）。
-_PROFICIENCY_FACTORS: dict[str, dict[int, float]] = {
-    "初级": {1: 0.85, 2: 1.0, 3: 1.0},
-    "中级": {1: 0.60, 2: 1.0, 3: 1.0},
-    "高级": {1: 0.30, 2: 0.60, 3: 1.0},
-    "专家": {1: 0.30, 2: 0.60, 3: 0.85},
-}
-
-
 def _proficiency_factor(required: str | None, candidate: int | None) -> float:
-    """熟练度满足度系数：候选人熟练度 ≥ 岗位期望 → 1.0，低一档 0.6，低两档 0.3。
-
-    岗位期望缺失（聚合层未写 level / 黄金集构造未传）或候选人熟练度缺失 → 1.0，
-    不武断惩罚（黄金集评测零回归的关键默认）。
-    """
-    if not required or candidate is None:
-        return 1.0
-    return _PROFICIENCY_FACTORS.get(required, {}).get(candidate, 1.0)
+    """兼容匹配引擎内部调用的共享熟练度评分入口。"""
+    return proficiency_factor(required, candidate)
 
 
 def _source_weight(source_count: int | None) -> float:

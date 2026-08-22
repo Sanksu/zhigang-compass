@@ -60,24 +60,37 @@ _REVIEWED_STATES = (
 
 
 async def _restore_reviewed_statuses() -> int:
-    """重建后按候选池回写审核状态（08-16 审查：审核列表 ↔ 图谱对应，风险 A）。
+    """迁移候选键后，按候选池回写审核状态。
 
     图谱重建把全部岗位置为 active；已审核岗位（emerging/stable/declining/
     archived/rejected）的状态存于 discovery_candidates，重放完成后恢复
-    Position.status——否则"已归档/已驳回"岗位重建后复活为公开 active，且
-    审核列表与图谱显示不一致。仅更新重建后确实存在的节点（MATCH），无 JD
-    支撑的已审核岗位不创建孤儿节点。返回回写岗位数。
+    Position.status。归一化版本升级时先以 JD 快照建立旧→新名称映射；仅一对一
+    映射自动改候选键，一对多或目标键冲突均保留旧键并记录告警，避免静默丢失
+    状态。仅更新重建后确实存在的节点（MATCH），无 JD 支撑的已审核岗位不创建
+    孤儿节点。返回回写岗位数。
     """
     from datetime import datetime, timedelta, timezone
 
     from app.models.business import DiscoveryCandidate
+    from app.services.extraction.position_normalization import candidate_position_rename_plan
 
     async with async_session_factory() as s:
-        rows = (await s.scalars(
-            select(DiscoveryCandidate).where(
-                DiscoveryCandidate.state.in_(_REVIEWED_STATES)
-            )
+        candidates = (await s.scalars(select(DiscoveryCandidate))).all()
+        jd_rows = (await s.scalars(
+            select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
         )).all()
+        by_name = {row.position_name: row for row in candidates}
+        renames, ambiguous = candidate_position_rename_plan(
+            set(by_name), [row.snapshot or {} for row in jd_rows],
+        )
+        for old_name, new_name in renames.items():
+            by_name[old_name].position_name = new_name
+            logger.info("重建前迁移候选岗位键: %s -> %s", old_name, new_name)
+        for old_name, targets in ambiguous.items():
+            logger.warning("候选键一对多/冲突，保留旧名称等待人工处理: %s -> %s", old_name, sorted(targets))
+        if renames:
+            await s.commit()
+        rows = [row for row in candidates if row.state in _REVIEWED_STATES]
     pairs = [(r.position_name, r.state) for r in rows]
     if not pairs:
         return 0
@@ -145,7 +158,7 @@ def main() -> None:
                 "raw_text": (row.snapshot or {}).get("raw_text", "") or row.raw_text or "",
             }
             try:
-                import_jd(session, extraction, evidence)
+                import_jd(session, extraction, evidence, row.snapshot)
             except Exception as e:
                 logger.exception("  [%s] 入图失败: %s %s", i, row.id, str(e)[:150])
             if i % 100 == 0:

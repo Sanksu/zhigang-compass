@@ -22,7 +22,8 @@ from datetime import datetime, timedelta, timezone
 
 from neo4j import Session
 
-from app.services.extraction.dictionary import normalize_position_name, skill_category
+from app.services.extraction.dictionary import skill_category
+from app.services.extraction.position_normalization import normalized_position_from_snapshot
 from app.services.extraction.post_processor import is_valid_skill_name, canonical_skill_name
 from app.services.extraction.schemas import JDExtractionResult
 from app.services.kg.id_generator import PREFIX_MAP, next_id
@@ -53,6 +54,7 @@ def import_jd(
     session: Session,
     extraction: JDExtractionResult,
     evidence: dict,
+    snapshot: dict | None = None,
 ) -> str:
     """JD 抽取结果入图。
 
@@ -73,21 +75,20 @@ def import_jd(
         session: Neo4j Session
         extraction: LLM 抽取结果（JDExtractionResult）
         evidence: 原始 JD 元数据 dict，需含 source/source_url/crawled_at/raw_text
+        snapshot: 可选 JD 快照。当前版本的持久化规范名优先；缺失或过期时
+            由共享归一化入口按 extraction 受控回退。
 
     返回：
         Position 节点 ID（如 pos_0001）
     """
-    # 岗位名归一化（纯规则）在事务外执行，避免嵌套 Neo4j 会话。与聚合链路共用
-    # normalize_position_name，保证入图/聚合岗位名口径一致（修复：语义兜底对齐
-    # 结果与聚合规则不一致，导致聚合写回 MATCH 不上图节点）。
-    from app.services.extraction.dictionary import normalize_position_name
-
-    # 传 skills 保证兜底族岗位（软件开发工程师/算法工程师等）按技能路由到细分族，
-    # 与 batch_extract 快照、聚合链路口径一致；否则二次归一化会把合法路由结果
-    # （如纯通用算法技能路由到的"算法工程师"）清空为不入图
-    normalized_position = normalize_position_name(
-        extraction.position_name,
-        skills=[s.name for s in (extraction.skills or [])],
+    # 岗位名在事务外通过共享快照入口读取：优先当前版本持久化值，只有缺失/过期
+    # 快照才使用 extraction 受控回退，确保图谱导入与聚合、发现消费同一口径。
+    normalized_position = normalized_position_from_snapshot(
+        snapshot
+        if snapshot is not None
+        else {
+            "extraction": extraction.model_dump(),
+        }
     )
     # Occupation 对齐也在事务外执行（语义嵌入耗时，避免长事务）；
     # 任何失败降级为无 occupation 边，不阻塞入图主链路。
@@ -99,7 +100,9 @@ def import_jd(
             occupation = OccupationAligner.get().align(normalized_position)
         except Exception:
             occupation = None
-    return session.execute_write(_import_jd_tx, extraction, evidence, occupation)
+    return session.execute_write(
+        _import_jd_tx, extraction, evidence, occupation, normalized_position
+    )
 
 
 def _upsert_skill_node(tx, skill_name: str, now: str) -> None:
@@ -200,15 +203,11 @@ def _import_jd_tx(
     extraction: JDExtractionResult,
     evidence: dict,
     occupation: tuple[str, float] | None = None,
+    normalized_position: str = "",
 ) -> str:
     now = _now()
-    # 岗位名归一化：合并同义重复岗位（如"前端开发/前端工程师" → "前端开发工程师"）。
-    # 传 skills：兜底族岗位二次归一化（batch_extract 已带 skills 路由一次）保持
-    # 路由结果稳定——纯通用算法技能路由到的"算法工程师"不会被清空
-    position_name = normalize_position_name(
-        extraction.position_name,
-        skills=[s.name for s in (extraction.skills or [])],
-    )
+    # 不在事务内重复执行归一化。该值已由 import_jd 的共享快照入口决定。
+    position_name = normalized_position
     if not position_name:
         # 空抽取（正文质量差导致无岗位名）不入图，避免产生空岗位节点
         return ""

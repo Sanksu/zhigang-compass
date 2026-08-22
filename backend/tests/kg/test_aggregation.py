@@ -134,6 +134,15 @@ class TestMostCommonLevel:
     def test_tie_keeps_first_seen(self):
         assert _most_common_level(["高级", "初级", "初级", "高级"]) == "高级"
 
+    def test_normalizes_aliases_before_mode(self):
+        # 同义输入先归一化再众数：精通/资深均归为高级，不能分票。
+        assert _most_common_level(["精通", "资深", "中级"]) == "高级"
+
+    def test_invalid_levels_filtered_before_mode(self):
+        # 非法等级不参与众数，避免写回无法由匹配层解释的 REQUIRES.level。
+        assert _most_common_level(["未知", "中级", "随便写"]) == "中级"
+        assert _most_common_level(["未知", "随便写"]) == ""
+
 
 class TestBuildAggregatesLevel:
     def _row(self, position: str, source: str, level: str | None):
@@ -159,6 +168,15 @@ class TestBuildAggregatesLevel:
         pa = agg["Java开发工程师"]
         assert pa.skills["Java"].levels == ["高级", "中级"]
         assert pa.skills["Java"].hit == 3
+
+    def test_invalid_levels_filtered_before_aggregation_mode(self):
+        rows = [
+            self._row("Java开发工程师", "boss", "精通"),
+            self._row("Java开发工程师", "zhilian", "未知"),
+            self._row("Java开发工程师", "lagou", "随便写"),
+        ]
+        agg = build_aggregates(rows)
+        assert agg["Java开发工程师"].skills["Java"].levels == ["高级"]
 
     def test_skills_outside_requirements_counted(self):
         # P4 聚合级：requirements 之外 skills 补入的技能计入 hit/来源，
