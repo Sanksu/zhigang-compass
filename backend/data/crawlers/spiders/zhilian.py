@@ -14,7 +14,6 @@ from datetime import datetime, timedelta, timezone
 
 from scrapy.exceptions import CloseSpider
 from scrapy.http import Response
-from twisted.internet import reactor
 
 from crawlers.base_spider import make_playwright_request, BaseSpider
 from crawlers.middlewares import backoff_delay
@@ -246,6 +245,10 @@ class ZhilianSpider(BaseSpider):
                     headers=self._compliance_headers(),
                 )
                 # make_playwright_request 已设 dont_filter=True，重发同一 URL 不会被去重
+                # 局部导入：模块级导入 reactor 会在 AsyncCrawlerProcess 构造期被
+                # SpiderLoader 预加载时提前安装默认 reactor，启动校验即崩
+                from twisted.internet import reactor
+
                 reactor.callLater(delay, self.crawler.engine.schedule, retry_request, self)
                 return
             self.logger.warning(

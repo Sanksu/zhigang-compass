@@ -7,7 +7,6 @@ from threading import Lock
 from urllib.parse import urlsplit
 
 import requests
-from twisted.internet import reactor
 
 from crawlers.settings import (
     DEFAULT_PROXY,
@@ -107,6 +106,11 @@ class BackoffRetryMiddleware:
             f"[退避] {spider.name} 收到 {response.status}，"
             f"{('遵循 Retry-After ' + str(retry_after) + 's') if retry_after is not None else f'指数退避 {delay}s'} 后重试 {request.url}"
         )
+        # 局部导入：模块级导入 reactor 会在 AsyncCrawlerProcess 构造期被
+        # SpiderLoader 预加载 spider（zhilian 等 import 本模块）时提前安装
+        # 默认 reactor，启动校验即崩
+        from twisted.internet import reactor
+
         try:
             reactor.callLater(delay, self.crawler.engine.schedule, retry_request, spider)
         except Exception as e:
