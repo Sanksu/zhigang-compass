@@ -3670,6 +3670,10 @@ export interface components {
              * @enum {string}
              */
             status?: "active" | "candidate" | "emerging" | "stable" | "declining" | "archived";
+            /** @description 岗位职能域 ID（仅 position；岗位投影 Leiden 社区，sync_position_domains 回填，未回填为 null） */
+            domain_id?: string;
+            /** @description 岗位职能域显示名（域代表岗位名，仅 position） */
+            domain_name?: string;
         };
         /** @description 图谱边（REQUIRES 关系） */
         GraphEdge: {

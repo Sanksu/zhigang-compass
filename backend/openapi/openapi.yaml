@@ -2116,6 +2116,8 @@ components:
           type: string
           enum: [active, candidate, emerging, stable, declining, archived]
           description: 岗位状态机（仅 position 节点；active=图谱常态岗位，非发现状态机成员）
+        domain_id: { type: string, description: "岗位职能域 ID（仅 position；岗位投影 Leiden 社区，sync_position_domains 回填，未回填为 null）" }
+        domain_name: { type: string, description: "岗位职能域显示名（域代表岗位名，仅 position）" }
 
     GraphEdge:
       type: object
