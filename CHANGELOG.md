@@ -5,6 +5,9 @@
 
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
+### 2026-08-22
+- **匹配引擎退化场景修复：无 must 白送分 + nice 长尾稀释**（A1+A3+B1，负责人拍板直施、算法红线留痕待张恺天复核）：实测 43 个在营岗位（freq≥3 非 legacy）中 **7 个（16.3%）零 must**（`_is_must` 三重条件对金融/分析类 JD 标注稀疏一条不过），旧口径 `must_total_weight==0 → 1.0` 使其对任意候选人保底送 w_must×1.0（v3 权重=总分 66.9%），前端开发候选的推荐 Top-10 被 7 个零 must 岗位占据且永越 0.5 匹配阈值；nice 池为聚合层全量倾倒（中位 36 / p90 271 / max 348），全量 Σ/Σ 占比使资深前端命中 30/348 仅得 0.012。修复三件套——**A1** 无 must 时 `must_score=None`（契约可空、雷达维度不展示、总分 `(nice×w_nice+exp×w_exp)/(w_nice+w_exp)` 重归一）；**A3** 无门槛岗位加分技能全未命中同样判零（防无关候选占位）；**B1** nice 改 Top-K=10 覆盖率（跨源数降序，nice 边权重统一 0.4 无区分度故用 source_count 排序），分数反映"最想要的前 10 个加分项满足几成"。真实图谱前后对比（纯规则口径）：前端开发候选 Top-10 零 must 岗位 **7→1**、前端开发工程师 nice 0.012→0.160、真前端岗（Vue/React/前端开发）全部回到榜单头部；无关候选对零 must 岗位由 0.956 分落榜变 unqualified。BT 黄金集回归**逐位零变化**（v1 300 对 Acc 0.9600/Spearman 0.8821、v2 384 对 Acc 0.8906/Spearman 0.7404——黄金集构造保证 must 非空且 nice≤1，结构性不受影响）；诊断 prompt must 可空防崩 + "无门槛"文案；前端 must=null 雷达剔维/条形图空条/数值"—"；后端 138+32 测试、前端 202 测试与 build 通过
+
 ### 2026-08-21
 - **答辩演示优化五连**（#367/#369/#371/#372/#374）：图谱筛选改压暗式打标（`computeFilterMarks` 打标不剔除，布局与镜头稳定，顺带修复滑筛选条镜头跳回存量问题）；2D/3D 演示视角书签 `flyTo`（600ms 缓动飞行，锚定具名岗位簇，节点缺失自动隐藏）；简历匹配页两处裸 spinner 换 AI 生成感加载（`AiThinkingCard` 骨架+分阶段文案轮播 + overall_summary 打字机，reduced-motion 退化）；岗位级「已人工校验」Badge（契约 `PositionEditDetail.has_edit_log` 只读透出 PositionEditLog 存在性 + 审核草案「AI 生成」标注，人机协同可视化）；图谱大屏演示模式（focusMode 隐藏顶导/侧栏、画布 Card 同树切 fixed 不重挂载、详情栏转浮层、Esc 退出 + 浏览器 Fullscreen，新增 mock E2E 用例）
 - **审查 P2 批次 + M4 收尾**（#376/#377/#378）：mockLogin 第三处硬编码口令改 env 注入+中性占位（M4 漏网之鱼）；删 use-graph-pan 死代码 + match/types 注释回流（L-14/L-15）；workers 23 处 print→logging + ETL 阶段失败聚合 send_alert + crawl running 态路径泄露源头修复 + CI rc==5 不再放行（L-5/L-6/L-9/L-16）+ discovery docstring 对齐实际晋升条件（A-3）；**连带修复**：归一化门禁裸调 send_alert 协程被静默丢弃（同步线程上下文）→ alerting 新增 `send_alert_sync`；M4 部署侧口令轮换已执行（backend/.env + 库内哈希同步重置，旧泄露口令实测 401 失效）

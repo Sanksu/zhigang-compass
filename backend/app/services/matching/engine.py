@@ -39,6 +39,13 @@ ROUGH_SELECT_K = 200
 # 推断来源（项目角色/经历）置信度低于文本直述，同技能命中计一半分。
 SOFT_SKILL_DOWNWEIGHT = 0.5
 
+# nice 维度 Top-K 覆盖口径（08-22 B1 裁决）：聚合层 nice 池是全量关联技能倾倒
+# （实测 43 岗位中位 36 / p90 271 / max 348），全量 Σ(w×sim)/Σ(w) 占比使分数随
+# 愿望清单长度稀释（资深前端命中 30/348 ≈ 0.09，而短清单岗位 4/10 = 0.4）。
+# 只考核跨源数最高的前 K 条加分项：nice 边权重统一 0.4 无区分度，排序键用
+# source_count（跨源多的核心加分技能优先），分数反映"最想要的加分项满足几成"。
+NICE_TOP_K = 10
+
 
 def _soft_multiplier(cs) -> float:
     """候选技能置信度乘数：LLM 推断软技能 ×0.5，显式技能 ×1.0。"""
@@ -219,11 +226,16 @@ def _build_summary(
     position_name: str,
     matched_must: list[str],
     missing_must: list[str],
-    must_score: float,
+    must_score: float | None,
+    nice_score: float,
     unqualified: bool,
 ) -> str:
     if unqualified:
+        if must_score is None:
+            return f"{position_name}：加分技能全未命中，未达门槛"
         return f"{position_name}：必备技能全缺失，未达门槛"
+    if must_score is None:
+        return f"{position_name}：无必备技能门槛，加分项命中 {nice_score:.0%}"
     parts = [f"{position_name}：必备技能命中 {must_score:.0%}"]
     if matched_must:
         parts.append("已具备 " + "、".join(matched_must[:5]))
@@ -420,7 +432,7 @@ def _domain_score(candidate, position: PositionProfile, semantic=None) -> float 
 
 
 def build_radar(
-    must_score: float,
+    must_score: float | None,
     nice_score: float,
     exp_score: float,
     candidate,
@@ -434,12 +446,12 @@ def build_radar(
     experience（经验）/ education（学历）/ projects（项目），另加 skill_level
     （熟练度满足度，仅展示）与 domain（领域匹配，仅展示）。软技能已并入
     must/nice（low_confidence 降权 ×0.5），证书维度当前图谱侧 required_certs
-    数据稀疏暂不入雷达。
-    education/projects/domain/skill_level 为保守近似：无数据返回 None，不参与总分。
+    数据稀疏暂不入雷达。education/projects/domain/skill_level 为保守近似：
+    无数据返回 None 不参与总分；无必备门槛岗位 must 同为 None（A1 口径）。
     """
     skill_level = _skill_level_score(position, candidate.skills)
     return {
-        "must": round(must_score, 4),
+        "must": round(must_score, 4) if must_score is not None else None,
         "nice": round(nice_score, 4),
         "experience": round(exp_score, 4),
         "education": _education_score(position.required_education, candidate.education_level),
@@ -454,8 +466,8 @@ def _score_must(
     candidate,
     semantic=None,
     sim_threshold: float | None = None,
-) -> tuple[float, int, list[str], list[str]]:
-    """must 维度评分：Σ(w×sim)/Σ(w)。
+) -> tuple[float | None, int, list[str], list[str]]:
+    """must 维度评分：Σ(w×sim)/Σ(w)；岗位无必备技能 → None（无门槛不判分）。
 
     w = log(source_count+1)（跨源多的核心技能贡献/缺失惩罚均更重；source_count
     默认 1 时等权，退化为优化前行为），别名级 sim=1.0，语义级 sim∈[threshold,1)；
@@ -475,12 +487,10 @@ def _score_must(
     missing_must = [
         req.skill_name for req, sim in zip(position.must_skills, must_sims) if sim == 0
     ]
+    if must_total_weight == 0:
+        return None, must_total, matched_must, missing_must
     score = (
-        1.0
-        if must_total_weight == 0
-        else sum(
-            w * sim for w, sim in zip(must_weights, must_sims)
-        ) / must_total_weight
+        sum(w * sim for w, sim in zip(must_weights, must_sims)) / must_total_weight
     )
     return score, must_total, matched_must, missing_must
 
@@ -491,13 +501,20 @@ def _score_nice(
     semantic=None,
     sim_threshold: float | None = None,
 ) -> float:
-    """nice 维度评分：Σ(sim×weight)/Σ(weight)，岗位无 nice 时取 1.0 不扣分。"""
-    nice_total_weight = sum(req.weight for req in position.nice_skills)
+    """nice 维度评分：Top-K 覆盖率 Σ(w×sim)/Σ(w)（K=NICE_TOP_K，跨源数降序）。
+
+    岗位无 nice 时取 1.0 不扣分；Top-K 截断见 NICE_TOP_K 注释（长尾愿望清单
+    不稀释分数），岗位 nice 池不足 K 条时退化为全量口径。
+    """
+    if not position.nice_skills:
+        return 1.0
+    pool = sorted(position.nice_skills, key=lambda r: r.source_count, reverse=True)[:NICE_TOP_K]
+    nice_total_weight = sum(req.weight for req in pool)
     if nice_total_weight == 0:
         return 1.0
     return sum(
         req.weight * _skill_similarity(req, candidate.skills, semantic, sim_threshold)
-        for req in position.nice_skills
+        for req in pool
     ) / nice_total_weight
 
 
@@ -523,10 +540,14 @@ def score_position(
 
     - must_score = Σ(w×sim) / Σ(w)（w = log(source_count+1)，别名级 sim=1.0，
       语义级 sim∈[threshold,1)；Σ(w×sim)/Σ(w) 天然惩罚缺失，未注入语义时退化为
-      布尔匹配；source_count 默认 1 时等权退化）
-    - nice_score = Σ(sim×weight) / Σ(weight)，岗位无 nice 时取 1.0 不扣分
+      布尔匹配；source_count 默认 1 时等权退化）；岗位无必备技能 → None，
+      总分在 nice/exp 上权重重归一（A1：无门槛岗位不再白得 w_must 满分贡献，
+      08-22 前实测 43 岗位中 7 个零 must 对任意候选保底送 66.9% 总分）
+    - nice_score = Top-K 覆盖率 Σ(sim×weight) / Σ(weight)（K=NICE_TOP_K，
+      跨源数降序；岗位无 nice 时取 1.0 不扣分）
     - exp_score = min(total_years / required_years, 1.0)，无年限要求时满分
-    必备技能全缺失判零（unqualified=True），不纳入推荐排序。
+    必备技能全缺失判零（unqualified=True）；无门槛岗位加分技能全未命中
+    同样判零（A3：防完全不相关候选占推荐位）。两者均不纳入推荐排序。
 
     Args:
         candidate: 候选人画像
@@ -545,9 +566,14 @@ def score_position(
     nice_score = _score_nice(position, candidate, semantic, sim_threshold)
     exp_score = _score_exp(position, candidate)
 
-    base_total = must_score * w_must + nice_score * w_nice + exp_score * w_exp
+    if must_score is None:
+        base_total = (nice_score * w_nice + exp_score * w_exp) / (w_nice + w_exp)
+    else:
+        base_total = must_score * w_must + nice_score * w_nice + exp_score * w_exp
 
-    if must_total > 0 and must_score == 0.0:
+    if (must_total > 0 and must_score == 0.0) or (
+        must_total == 0 and nice_score == 0.0
+    ):
         total = 0.0
         unqualified = True
     else:
@@ -558,12 +584,12 @@ def score_position(
         position_id=position.position_id,
         position_name=position.name,
         total_score=round(total, 4),
-        must_score=round(must_score, 4),
+        must_score=round(must_score, 4) if must_score is not None else None,
         nice_score=round(nice_score, 4),
         exp_score=round(exp_score, 4),
         matched_must=matched_must,
         missing_must=missing_must,
-        summary=_build_summary(position.name, matched_must, missing_must, must_score, unqualified),
+        summary=_build_summary(position.name, matched_must, missing_must, must_score, nice_score, unqualified),
         unqualified=unqualified,
         radar=build_radar(
             must_score, nice_score, exp_score, candidate, position, semantic, project_vectors

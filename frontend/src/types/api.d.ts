@@ -4612,7 +4612,9 @@ export interface components {
             position_name: string;
             /** @description 综合得分 [0,1] */
             total_score: number;
-            must_score: number;
+            /** @description 必备技能匹配分 [0,1]；岗位无必备技能门槛时为 null（无信息不判分，总分在 nice/exp 上重归一） */
+            must_score: number | null;
+            /** @description 加分技能匹配分 [0,1]，Top-K 覆盖口径（考核跨源数最高的前 10 条加分项） */
             nice_score: number;
             exp_score: number;
             /** @description 已匹配的必备技能名 */
@@ -4621,11 +4623,11 @@ export interface components {
             missing_must: string[];
             /** @description 匹配摘要 */
             summary: string;
-            /** @description 必备技能全缺失判零 */
+            /** @description 必备技能全缺失（或无门槛岗位加分技能全未命中）判零 */
             unqualified: boolean;
             /** @description 人岗比对五维雷达（§9.5），无数据维度为 null */
             radar?: {
-                /** @description 必备技能匹配分 [0,1] */
+                /** @description 必备技能匹配分 [0,1]，岗位无必备门槛时为 null */
                 must: number | null;
                 /** @description 加分技能匹配分 [0,1] */
                 nice: number | null;

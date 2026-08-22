@@ -144,13 +144,17 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
   ]
   const gaps: GapItem[] = (r.gaps ?? []).map(toGapItem)
   // 五维雷达全量消费后端 radar（08-14 审查：此前学历/项目硬编码占位；education/projects
-  // 为保守近似分，无数据维度剔除不占位）
+  // 为保守近似分，无数据维度剔除不占位；must 无必备门槛时同为 null 剔除，A1 口径）
   const radar = r.radar
-  const radarDims: RadarDimension[] = [
-    { name: '必备技能', candidate: Math.round((radar?.must ?? r.must_score) * 100), required: 100 },
+  const radarDims: RadarDimension[] = []
+  const mustVal = radar?.must ?? r.must_score
+  if (mustVal != null) {
+    radarDims.push({ name: '必备技能', candidate: Math.round(mustVal * 100), required: 100 })
+  }
+  radarDims.push(
     { name: '加分技能', candidate: Math.round((radar?.nice ?? r.nice_score) * 100), required: 80 },
     { name: '工作经验', candidate: Math.round((radar?.experience ?? r.exp_score) * 100), required: 85 },
-  ]
+  )
   if (radar?.education != null) {
     radarDims.push({ name: '学历背景', candidate: Math.round(radar.education * 100), required: 100 })
   }
@@ -697,7 +701,7 @@ export function ResumeMatchPage() {
                     <span className="text-[10px] text-ink-faint font-mono">{rec.position_id}</span>
                   </div>
                   <p className="text-xs text-ink-muted line-clamp-2">{rec.summary}</p>
-                  {/* 三维分数 mini bar */}
+                  {/* 三维分数 mini bar（无必备门槛岗位 must=null 显示空条） */}
                   <div className="flex items-center gap-1.5 mt-2">
                     {[
                       { label: '必', val: rec.must_score, color: 'bg-ink' },
@@ -709,7 +713,7 @@ export function ResumeMatchPage() {
                         <div className="flex-1 h-1 rounded-full bg-subtle overflow-hidden">
                           <div
                             className={`h-full rounded-full ${d.color}`}
-                            style={{ width: `${d.val * 100}%` }}
+                            style={{ width: `${(d.val ?? 0) * 100}%` }}
                           />
                         </div>
                       </div>
@@ -804,11 +808,11 @@ export function ResumeMatchPage() {
                           <div className="flex-1 h-2 rounded-full bg-subtle overflow-hidden">
                             <div
                               className="h-full rounded-full bg-ink"
-                              style={{ width: `${d.score * 100}%` }}
+                              style={{ width: `${(d.score ?? 0) * 100}%` }}
                             />
                           </div>
                           <span className="text-xs font-mono text-ink tabular-nums w-12 text-right">
-                            {(d.score * 100).toFixed(0)}
+                            {d.score == null ? '—' : (d.score * 100).toFixed(0)}
                           </span>
                           <span className="text-[10px] text-ink-faint w-8">w={d.weight}</span>
                         </div>
@@ -826,7 +830,7 @@ export function ResumeMatchPage() {
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm">五维能力对比</CardTitle>
-                    <CardDescription>候选人 vs 岗位要求（后端雷达评分，education/projects 无数据维度不展示）</CardDescription>
+                    <CardDescription>候选人 vs 岗位要求（后端雷达评分，无数据维度不展示：education/projects 缺数据、must 无必备门槛）</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <RadarChart data={matchResult.radar} />
