@@ -134,21 +134,23 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
   }
 
   return (
-    <Card className={className}>
-      <CardHeader className="pb-2">
+    <Card className={`overflow-hidden ${className ?? ''}`}>
+      <CardHeader className="border-b border-atlas-grid bg-subtle/50 px-4 py-3">
         <CardTitle className="text-sm flex items-center gap-2">
-          <BarChart2 className="size-4 text-ink-faint" />
-          图谱算法分析
+          <BarChart2 className="size-4 text-atlas-ocean" />
+          算法工作台
         </CardTitle>
-        <CardDescription className="text-[11px]">技能重要性 · 技能簇 · 最短路径（设计文档 §7.1）</CardDescription>
+        <CardDescription className="font-mono text-[10px] tracking-[0.08em]">ALGORITHM WORKBENCH / 结构洞察与路径探测</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-0 p-4">
         {/* ── PageRank 技能重要性 ── */}
-        <section>
-          <h4 className="text-xs font-medium text-ink mb-1.5 flex items-center gap-1.5">
+        <section className="border-b border-border/60 pb-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="font-mono text-[10px] text-atlas-ocean">01</span>
             <GitBranch className="size-3 text-ink-faint" />
-            技能重要性 Top-20
-          </h4>
+            <h4 className="text-xs font-semibold text-ink">影响力地图</h4>
+            <span className="text-[10px] text-ink-muted">PageRank Top-20</span>
+          </div>
           {pagerankLoading ? (
             <div className="flex items-center gap-2 py-3 text-xs text-ink-muted">
               <Loader2 className="size-3 animate-spin" />
@@ -157,7 +159,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
           ) : !pagerank || pagerank.length === 0 ? (
             <p className="py-2 text-xs text-ink-faint">暂无 PageRank 数据</p>
           ) : (
-            <ol className="space-y-1 max-h-48 overflow-y-auto pr-1">
+            <ol className="max-h-48 divide-y divide-border/50 overflow-y-auto rounded-lg border border-border/60 bg-canvas pr-1">
               {pagerank.map((s, i) => (
                 <li key={s.id}>
                   <button
@@ -175,11 +177,12 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
         </section>
 
         {/* ── Louvain 技能簇 ── */}
-        <section>
-          <h4 className="text-xs font-medium text-ink mb-1.5 flex items-center gap-1.5">
+        <section className="border-b border-border/60 py-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="font-mono text-[10px] text-atlas-ocean">02</span>
             <Boxes className="size-3 text-ink-faint" />
-            技能簇（技术栈聚类）
-          </h4>
+            <h4 className="text-xs font-semibold text-ink">技术栈社区</h4>
+          </div>
           {levels && levels.length > 1 && (
             <div className="mb-1.5">
               <Label htmlFor="cluster-level-select" className="text-[10px] text-ink-faint">
@@ -267,8 +270,13 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
         </section>
 
         {/* ── 最短路径 ── */}
-        <section>
-          <h4 className="text-xs font-medium text-ink mb-1.5">技能最短路径</h4>
+        <section className="pt-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="font-mono text-[10px] text-atlas-ocean">03</span>
+            <GitBranch className="size-3 text-ink-faint" />
+            <h4 className="text-xs font-semibold text-ink">路径探测器</h4>
+            <span className="text-[10px] text-ink-muted">验证技能间连接</span>
+          </div>
           <div className="space-y-1.5">
             <div>
               <Label className="text-[10px] text-ink-faint">起点技能</Label>

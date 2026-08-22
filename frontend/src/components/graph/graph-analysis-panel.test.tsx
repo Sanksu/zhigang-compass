@@ -225,7 +225,7 @@ describe('GraphAnalysisPanel', () => {
       />,
     )
     // 等待面板就绪后选择起止技能（两个 select 为 combobox，按顺序取）
-    await waitFor(() => expect(screen.getByText('技能重要性 Top-20')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('PageRank Top-20')).toBeInTheDocument())
     const [fromSelect, toSelect] = screen.getAllByRole('combobox')
     fireEvent.change(fromSelect, { target: { value: 'sk_1' } })
     fireEvent.change(toSelect, { target: { value: 'sk_2' } })
@@ -254,7 +254,7 @@ describe('GraphAnalysisPanel', () => {
         onFocusSkill={vi.fn()}
       />,
     )
-    await waitFor(() => expect(screen.getByText('技能重要性 Top-20')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('PageRank Top-20')).toBeInTheDocument())
     const [fromSelect, toSelect] = screen.getAllByRole('combobox')
     fireEvent.change(fromSelect, { target: { value: 'sk_1' } })
     fireEvent.change(toSelect, { target: { value: 'sk_9' } })

@@ -753,7 +753,7 @@ export function GraphPage() {
             </div>
             <div className="flex items-center gap-2 font-mono text-[10px] text-atlas-muted">
               {view !== 'techStack' && <span>{view === 'panorama' ? `${expandedDomains.size} 域 · ${expandedPositions.size} 岗位` : `${expandedPositions.size} 岗位`}</span>}
-              {mode3dLocked && <span>{isCoarsePointer ? '触控设备 / 2D' : 'WebGL2 不可用'}</span>}
+              {mode3dLocked && <span>{isCoarsePointer ? '触控设备固定 2D 模式' : 'WebGL2 不可用，已降级 2D 模式'}</span>}
             </div>
           </div>
         </Card>
