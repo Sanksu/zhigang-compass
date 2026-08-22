@@ -19,7 +19,7 @@ import { isDark } from '@/lib/utils'
 import ForceGraph3D, { type ForceGraphMethods, type NodeObject } from 'react-force-graph-3d'
 import * as THREE from 'three'
 import type { GraphData, GraphNode, NodeDetail } from './types'
-import { COLOR_BY_STATUS, nodeRadius } from './graph-utils'
+import { COLOR_BY_STATUS, COLOR_SOFT_DARK, COLOR_SOFT_LIGHT, isSoftSkill, nodeRadius } from './graph-utils'
 
 /** react-force-graph-3d 类型定义未暴露的 d3 力模拟参数方法（A2 帧率保障用）。 */
 type ForceGraphD3Params = ForceGraphMethods<NodeObject<GraphNode>> & {
@@ -59,6 +59,7 @@ function skillColor(dark: boolean): string {
 
 function nodeColor(node: GraphNode, dark: boolean): string {
   if (node.type === 'position') return COLOR_BY_STATUS[node.status ?? 'candidate']
+  if (isSoftSkill(node)) return dark ? COLOR_SOFT_DARK : COLOR_SOFT_LIGHT
   if (node.type === 'skill') return skillColor(dark)
   return COLOR_EVIDENCE
 }

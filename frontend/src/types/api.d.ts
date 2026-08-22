@@ -3782,6 +3782,8 @@ export interface components {
             domain_id?: string | null;
             /** @description 岗位职能域显示名（域代表岗位名，仅 position；未回填为 null） */
             domain_name?: string | null;
+            /** @description 技能类目（仅 skill 节点；来自 skill_whitelist.yaml 的 category，白名单外未写入为 null，「软技能」=软素质类） */
+            skill_category?: string | null;
         };
         /** @description 图谱边（REQUIRES 关系） */
         GraphEdge: {
@@ -3849,6 +3851,8 @@ export interface components {
             necessity: "must" | "nice";
             /** @enum {string} */
             gap_type: "missing" | "weak" | "matched";
+            /** @description 是否软技能（岗位侧 Position.soft_skills 并入或 Skill.category=「软技能」；仅展示打标，不影响评分） */
+            is_soft?: boolean;
             /** @description 技能权重 */
             weight: number;
             /** @enum {string} */
@@ -3939,6 +3943,8 @@ export interface components {
             weight: number;
             level: string;
             source_count: number;
+            /** @description 技能类目（skill_whitelist.yaml 的 category，「软技能」=软素质类，白名单外为 null） */
+            skill_category?: string | null;
         };
         /** @description 岗位节点详情（GET /graph/position/{id}） */
         PositionDetail: {
@@ -3952,6 +3958,8 @@ export interface components {
             status?: "candidate" | "emerging" | "stable" | "declining" | "archived";
             must_skills: components["schemas"]["PositionSkillItem"][];
             nice_skills: components["schemas"]["PositionSkillItem"][];
+            /** @description 岗位软素质（20 项白名单封闭集，聚合层按频次降序写回；与技术栈技能分离展示） */
+            soft_skills?: string[];
         };
         /** @description GET /graph/position/{id}/skills 响应 data */
         PositionSkillsData: {
@@ -4010,6 +4018,8 @@ export interface components {
         SkillDetail: {
             id: string;
             name: string;
+            /** @description 技能类目（skill_whitelist.yaml 的 category，「软技能」=软素质类，白名单外为 null） */
+            category?: string | null;
             /** @description 要求该技能的岗位数 */
             positions_count: number;
             /** @description 证据条数 */
@@ -4760,7 +4770,7 @@ export interface components {
             missing_must: string[];
             /** @description 匹配摘要 */
             summary: string;
-            /** @description 必备技能全缺失（或无门槛岗位加分技能全未命中）判零 */
+            /** @description 必备技能全缺失（或无门槛岗位加分技能 Top-K 命中率 <20%）判零 */
             unqualified: boolean;
             /** @description 人岗比对五维雷达（§9.5），无数据维度为 null */
             radar?: {

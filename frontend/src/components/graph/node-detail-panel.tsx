@@ -416,6 +416,29 @@ export function NodeDetailPanel({
                     </div>
                   </section>
                 )}
+
+                {/* 软素质（Position.soft_skills 白名单，聚合层按频次降序写回）：
+                    不走 REQUIRES 边、多为非图谱节点，纯文本胶囊 + 粉色调与画布一致 */}
+                {(positionDetail.soft_skills?.length ?? 0) > 0 && (
+                  <section className="space-y-2">
+                    <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                      <Briefcase className="size-3" />
+                      软素质
+                      <span className="ml-auto font-mono text-[10px]">{positionDetail.soft_skills?.length}</span>
+                    </h4>
+                    <div className="flex flex-wrap gap-1.5">
+                      {positionDetail.soft_skills?.map((name) => (
+                        <span
+                          key={name}
+                          className="rounded-full border border-[#ec4899]/40 bg-[#ec4899]/5 px-2.5 py-1 text-[10px] text-ink-secondary"
+                        >
+                          {name}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-ink-faint">责任心/沟通能力等软性要求，与技术栈技能区分统计</p>
+                  </section>
+                )}
               </>
             )}
 
