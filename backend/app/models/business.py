@@ -515,8 +515,12 @@ class DictProposal(Base):
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
     )
     term: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    entity_type: Mapped[str] = mapped_column(
+        String(20), default="skill", index=True, nullable=False
+        # 治理对象类型: skill（技能字典）/ position（岗位节点清理）/ course（课程脏边或孤立课程节点）
+    )
     action: Mapped[str] = mapped_column(
-        String(30), nullable=False  # add_stopword / remove_stopword / protect_whitelist
+        String(30), nullable=False  # skill: add/remove_stopword/protect_whitelist；position/course: remove_node/remove_edge
     )
     status: Mapped[str] = mapped_column(
         String(20), default="pending", index=True, nullable=False  # pending / approved / rejected
@@ -547,12 +551,16 @@ class DictChangeLog(Base):
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
     )
     term: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    entity_type: Mapped[str] = mapped_column(
+        String(20), default="skill", index=True, nullable=False
+        # 与 DictProposal.entity_type 同语义；skill=动态层变更，position/course=图谱清理
+    )
     action: Mapped[str] = mapped_column(String(30), nullable=False)  # 同 DictProposal.action + rollback
     source: Mapped[str] = mapped_column(
         String(20), nullable=False  # auto（守卫自动）/ manual（人工审批）/ rollback
     )
     kind: Mapped[str] = mapped_column(
-        String(20), nullable=False  # 动态层条目类型：blocked / protected
+        String(20), nullable=False  # skill=blocked/protected；position/course=node/edge
     )
     proposal_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 关联提案
     reason: Mapped[str] = mapped_column(Text, default="", nullable=False)

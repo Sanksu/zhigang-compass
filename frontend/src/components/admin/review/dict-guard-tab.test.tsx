@@ -176,4 +176,17 @@ describe('DictGuardTab 字典守卫', () => {
     expect(mockApiPost).not.toHaveBeenCalled()
     confirmSpy.mockRestore()
   })
+
+  it('手动巡检按钮触发一次字典守卫任务并重载报告', async () => {
+    setupApiGet()
+    mockApiPost.mockResolvedValue({})
+    render(<DictGuardTab />)
+    await screen.findByText('最近巡检 2026-08-21')
+
+    fireEvent.click(screen.getByRole('button', { name: '手动巡检' }))
+    await waitFor(() =>
+      expect(mockApiPost).toHaveBeenCalledWith('/admin/dict-guard/trigger', {}),
+    )
+    expect(screen.getByText('字典守卫巡检已提交，等待 worker 执行；稍后可查看报告')).toBeInTheDocument()
+  })
 })

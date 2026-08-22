@@ -83,6 +83,8 @@ services:
         condition: service_healthy
     volumes:
       - ./frontend/dist:/app/frontend-dist:ro
+      # JWT 签名密钥（backend/keys，.gitignore）：注入而非 COPY 进镜像，重建镜像不失效已有 token
+      - ./backend/keys:/app/keys
       # SBERT 模型（backend/models/sbert）挂载进容器：镜像内无模型文件，
       # 不挂载时 SkillEmbedder 会尝试从 HuggingFace 下载（外网受限挂起）
       - ./backend/models:/app/models:ro
@@ -157,6 +159,8 @@ services:
       # 未配置时 github 爬虫维持匿名采集（偶发 403 由 BackoffRetryMiddleware 退避重试兜底）
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
+      # JWT 密钥（与 api 同款挂载，对称校验/续签任务用）
+      - ./backend/keys:/app/keys
       # 爬虫输出持久化：容器重建不丢 JSONL
       - ./backend/data/crawlers/output:/app/data/crawlers/output
       # boss 登录态文件（导出: cd backend/data/crawlers && python boss_cdp_crawler.py --export-cookies ~/.zhigang-compass/boss-cookies.json）
