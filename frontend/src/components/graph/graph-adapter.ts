@@ -26,7 +26,7 @@ export function toGraphData(raw: GraphViewData): GraphData {
   const nodes: GraphNode[] = raw.nodes.map((node) => ({
     id: node.id,
     name: node.name,
-    type: node.type === 'skill' ? 'skill' : 'position',
+    type: node.type,
     value: degree.get(node.id) ?? 0,
     status: node.type === 'position' ? (isValidStatus(node.status) ? node.status : 'candidate') : undefined,
     ...(node.type === 'position'

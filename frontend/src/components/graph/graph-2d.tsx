@@ -133,12 +133,12 @@ function colorOf(node: GraphNode, dark: boolean): string {
 }
 
 function sizeOf(node: GraphNode, displayValue?: number): number {
-  // 域超节点：尺寸随成员数（3~20 岗 → 44~72px），显著大于岗位节点
-  if (node.isDomain) return Math.min(72, 44 + (node.memberCount ?? 1) * 1.4)
-  const v = displayValue ?? node.value ?? 30
-  const base = node.type === 'position' ? 36 : node.type === 'skill' ? 20 : 15
-  const scaled = base + (v / 100) * 20
-  return Math.min(56, Math.max(16, scaled))
+  // 职能域是测绘锚点：比岗位更大，并以成员数编码区域规模。
+  if (node.isDomain) return Math.min(78, 48 + (node.memberCount ?? 1) * 1.5)
+  const value = displayValue ?? node.value ?? 30
+  const base = node.type === 'position' ? 34 : node.type === 'skill' ? 18 : 14
+  const scaled = base + (value / 100) * 18
+  return Math.min(54, Math.max(14, scaled))
 }
 
 function weightToWidth(weight?: number): number {
@@ -542,9 +542,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         category: isSoftSkill(n) ? 'soft' : n.type,
         itemStyle: {
           color: colorOf(n, dark),
-          borderColor,
-          borderWidth: 1,
+          borderColor: n.isDomain ? colors.edgeStrong : borderColor,
+          borderWidth: n.isDomain ? 3 : 1,
           opacity: GRAPH_OPACITY.node,
+          ...(n.isDomain
+            ? {
+                shadowBlur: 22,
+                shadowColor: hexToRgba(colors.domain, 0.3),
+              }
+            : {}),
           ...(n.type === 'position' && expandedPositions?.has(n.id)
             ? {
                 borderColor: dark ? '#c7d2fe' : '#ffffff',
@@ -599,30 +605,30 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       }
     })
 
-    // C1: 深色模式提升边对比度（#27272a×0.3 → #52525b×0.45，WCAG AA）
-    // C1: must（必备）实线全宽；nice（加分）虚线 60% 宽度，视觉区分两种边关系
-    const links = data.edges.map((e, i) => {
-      const isMust = e.necessity !== 'nice'
-      const dimmed = filterMarks.dimEdgeFlags[i]
+    // 关系分层：域隶属=细虚线，域间共享=弱弧线，must=海图蓝实线，nice=灰蓝虚线。
+    const nodeById = new Map(data.nodes.map((node) => [node.id, node]))
+    const links = data.edges.map((edge, index) => {
+      const source = nodeById.get(edge.source)
+      const target = nodeById.get(edge.target)
+      const touchesDomain = source?.isDomain || target?.isDomain
+      const domainToDomain = source?.isDomain && target?.isDomain
+      const isMust = edge.necessity !== 'nice'
+      const dimmed = filterMarks.dimEdgeFlags[index]
+      const kind = domainToDomain ? 'shared' : touchesDomain ? 'membership' : isMust ? 'must' : 'nice'
+      const baseStyle = kind === 'membership'
+        ? { width: 0.8, type: 'dotted', color: colors.edge, curveness: 0.08 }
+        : kind === 'shared'
+          ? { width: 0.7, type: 'dashed', color: colors.edge, curveness: 0.22 }
+          : kind === 'must'
+            ? { width: Math.max(0.7, weightToWidth(edge.weight) * 0.72), type: 'solid', color: colors.edgeStrong, curveness: 0 }
+            : { width: Math.max(0.5, weightToWidth(edge.weight) * 0.42), type: 'dashed', color: colors.edgeOptional, curveness: 0 }
       return {
-        source: e.source,
-        target: e.target,
-        value: e.weight,
+        source: edge.source,
+        target: edge.target,
+        value: edge.weight,
         silent: dimmed,
-        lineStyle: {
-          width: isMust ? Math.max(0.6, weightToWidth(e.weight) * 0.72) : Math.max(0.45, weightToWidth(e.weight) * 0.42),
-          type: isMust ? 'solid' : 'dashed',
-          color: colors.edge,
-          opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : GRAPH_OPACITY.edge[dark ? 'dark' : 'light'],
-          curveness: 0,
-        },
-        emphasis: {
-          lineStyle: {
-            opacity: 0.95,
-            width: weightToWidth(e.weight) * 1.8,
-            color: isMust ? colors.edgeStrong : colors.edgeOptional,
-          },
-        },
+        lineStyle: { ...baseStyle, opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : kind === 'membership' || kind === 'shared' ? 0.45 : GRAPH_OPACITY.edge[dark ? 'dark' : 'light'] + 0.18 },
+        emphasis: { lineStyle: { opacity: 0.95, width: weightToWidth(edge.weight) * 1.8, color: kind === 'nice' ? colors.edgeOptional : colors.edgeStrong } },
       }
     })
 
@@ -736,7 +742,16 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   }, [focusRequest, focusNode])
 
   return (
-    <div className={`relative h-full w-full ${className ?? ''}`}>
+    <div className={`${viewMode === 'graph' ? 'atlas-surface' : ''} relative h-full w-full overflow-hidden ${className ?? ''}`}>
+      {viewMode === 'graph' && (
+        <div className="pointer-events-none absolute inset-0 z-0 font-mono text-[9px] tracking-[0.18em] text-atlas-muted/75" aria-hidden="true">
+          <span className="absolute left-1/2 top-3 -translate-x-1/2">N / 市场</span>
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 [writing-mode:vertical-rl]">E / 技术</span>
+          <span className="absolute bottom-3 left-1/2 -translate-x-1/2">S / 组织</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 [writing-mode:vertical-rl]">W / 业务</span>
+          <span className="absolute bottom-3 left-3 text-[8px] text-atlas-muted/70">核心岗位 · 能力与证据</span>
+        </div>
+      )}
       {/* task T2: 学习路径可用时提供 宏观 DAG / 全局图谱 切换 */}
       {dagEnabled && (
         <div className="absolute right-3 top-3 z-20 flex overflow-hidden rounded-md border border-border bg-canvas/90 shadow-sm text-[10px]">

@@ -27,6 +27,15 @@ describe('toGraphData', () => {
     expect(data.stats.totalNodesInGraph).toBe(18)
   })
 
+  it('保留 evidence 节点类型，供证据地标渲染使用', () => {
+    const data = toGraphData(graphView([
+      { id: 'pos-active', name: '数据运营', type: 'position', status: 'active' },
+      { id: 'skill-soft', name: '报告证据', type: 'evidence' },
+    ]))
+
+    expect(data.nodes[1]).toMatchObject({ type: 'evidence', value: 1 })
+  })
+
   it('未知岗位状态回退为 candidate，技能不携带岗位状态', () => {
     const data = toGraphData(graphView([
       { id: 'pos-active', name: '未知岗位', type: 'position', status: 'unknown' as 'active' },
