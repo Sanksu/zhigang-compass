@@ -3,7 +3,7 @@ import { Box, Crosshair, Loader2, Maximize2, Minimize2, Network, RotateCcw, Sear
 import { useUIStore } from '@/store/ui'
 import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Graph2D, type Graph2DHandle } from '@/components/graph/graph-2d'
@@ -556,137 +556,80 @@ export function GraphPage() {
     <>
       <PageHeader
         title="能力图谱"
-        description="岗位-技能关系可视化 · 默认 2D 力导向图便于分析，3D 模式用于沉浸式浏览"
+        description="从职能域进入岗位，再沿技能关系定位能力要求与演化信号"
+        className="flex-col pb-4 sm:flex-row sm:items-center"
         actions={
-          <div className="flex items-center gap-2">
-            {/* 技能全文检索（真实 /graph/search） */}
-            <div ref={searchBoxRef} className="relative w-64">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+            <div ref={searchBoxRef} className="relative min-w-0 flex-1 sm:w-72 sm:flex-none">
               <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
               <Input
                 value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value)
-                  if (!e.target.value.trim()) {
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  if (!event.target.value.trim()) {
                     setSearchResults([])
                     setSearchDone(false)
                   }
                 }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') doSearch(query)
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') doSearch(query)
+                  if (event.key === 'Escape') {
+                    setSearchResults([])
+                    setSearchDone(false)
+                  }
                 }}
-                placeholder="搜索技能（如 Python）"
-                className="h-8 pl-8 pr-16 text-xs"
+                placeholder="搜索技能并定位关系"
+                className="h-9 pl-8 pr-16 text-xs"
+                role="combobox"
+                aria-label="搜索图谱技能"
+                aria-expanded={searchResults.length > 0 || (searchDone && !searching && !!query.trim())}
+                aria-controls="graph-search-results"
+                aria-autocomplete="list"
               />
-              <Button
-                size="sm"
-                variant="ghost"
-                className="absolute right-0.5 top-0.5 h-7 px-2 text-xs"
-                onClick={() => doSearch(query)}
-                disabled={searching}
-              >
-                {searching ? <Loader2 className="size-3 animate-spin" /> : '搜索'}
+              <Button size="sm" variant="ghost" className="absolute right-0.5 top-1 h-7 px-2 text-xs" onClick={() => doSearch(query)} disabled={searching}>
+                {searching ? <Loader2 className="size-3 animate-spin" /> : '定位'}
               </Button>
+              {(searchResults.length > 0 || (searchDone && !searching && query.trim())) && (
+                <div id="graph-search-results" role="listbox" className="absolute right-0 top-11 z-40 w-full overflow-hidden rounded-lg border border-border bg-canvas p-1 shadow-lg">
+                  {searchResults.length > 0 ? searchResults.map((result) => (
+                    <button key={result.id} type="button" role="option" aria-selected="false" onClick={() => focusSkill(result.id, result.name)} className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs hover:bg-subtle">
+                      <span className="font-medium text-ink">{result.name}</span>
+                      <span className="font-mono text-[10px] text-ink-faint">相关度 {(result.score * 100).toFixed(0)}</span>
+                    </button>
+                  )) : <p className="px-2.5 py-2 text-xs text-ink-muted">未找到与“{query.trim()}”相关的技能</p>}
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-              <Button
-                size="sm"
-                variant={mode === '2d' ? 'default' : 'ghost'}
-                onClick={() => setMode('2d')}
-                className="h-7 px-2.5 text-xs"
-              >
-                2D
-              </Button>
-              <Button
-                size="sm"
-                variant={mode === '3d' ? 'default' : 'ghost'}
-                onClick={() => setMode('3d')}
-                disabled={mode3dLocked}
-                title={isCoarsePointer ? '触控设备固定 2D 模式（设计文档 §6.3）' : !webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : '3D 沉浸式浏览（节点带空间纵深，适合展示整体结构）'}
-                className="h-7 px-2.5 text-xs"
-              >
-                3D
-              </Button>
+            <div className="flex shrink-0 items-center rounded-lg border border-border bg-subtle/60 p-0.5" aria-label="图谱维度">
+              <Button size="sm" variant={mode === '2d' ? 'default' : 'ghost'} onClick={() => setMode('2d')} className="h-8 px-3 text-xs" aria-label="2D">2D 分析</Button>
+              <Button size="sm" variant={mode === '3d' ? 'default' : 'ghost'} onClick={() => setMode('3d')} disabled={mode3dLocked} aria-label="3D" title={isCoarsePointer ? '触控设备固定 2D 模式（设计文档 §6.3）' : !webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : '3D 沉浸式浏览'} className="h-8 px-3 text-xs">3D 浏览</Button>
             </div>
           </div>
         }
       />
 
-      {/* 搜索结果下拉 */}
-      {(searchResults.length > 0 || (searchDone && !searching && query.trim())) && (
-        <Card className="mb-3">
-          <CardContent className="p-2">
-            {searchResults.length > 0 ? (
-              <ul className="divide-y divide-border">
-                {searchResults.map((r) => (
-                  <li key={r.id}>
-                    <button
-                      onClick={() => focusSkill(r.id, r.name)}
-                      className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-subtle"
-                    >
-                      <span className="font-medium text-ink">{r.name}</span>
-                      <span className="flex items-center gap-2 text-[10px] text-ink-faint">
-                        <span className="rounded bg-subtle px-1 py-0.5 font-mono">技能</span>
-                        <span className="font-mono">{(r.score * 100).toFixed(0)}</span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="px-2 py-2 text-xs text-ink-muted">未找到与“{query.trim()}”相关的技能</p>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* 视图切换 tabs */}
       <Tabs
         value={view}
-        onValueChange={(v) => {
-          // 视图切换：同步清空展开的岗位/域（新视图技能集不同），再切换数据
+        onValueChange={(value) => {
           setExpandedPositions(new Set())
           setExpandedDomains(new Set())
-          setView(v as GraphViewType)
+          setView(value as GraphViewType)
         }}
       >
-        <div className="flex items-center justify-between gap-4 mb-3">
-          <TabsList>
-            {(Object.keys(VIEW_LABEL) as GraphViewType[]).map((v) => (
-              <TabsTrigger key={v} value={v} className="text-xs" title={VIEW_DESC[v]}>
-                {VIEW_LABEL[v]}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {/* 数据规模指示 */}
-          <div className="flex items-center gap-3 text-xs text-ink-muted">
-            <span className="flex items-center gap-1" title="当前视图节点数 / 图谱总节点数">
-              <Network className="size-3" />
-              <span className="font-mono tabular-nums">{data.stats.returnedNodes}</span>
-              <span className="text-ink-faint">/ {data.stats.totalNodesInGraph}</span>
-              <span className="text-ink-faint">节点</span>
-            </span>
-            <span className="flex items-center gap-1" title="当前视图边数">
-              <Box className="size-3" />
-              <span className="font-mono tabular-nums">{data.stats.totalEdges}</span>
-              <span className="text-ink-faint">边</span>
-            </span>
-            {visibleData && (
-              <span className="hidden sm:flex items-center gap-1" title="当前视图节点构成">
-                <span className="font-mono tabular-nums">
-                  {visibleData.nodes.filter((n) => n.type === 'position').length}
-                </span>
-                <span className="text-ink-faint">岗位</span>
-                <span className="text-ink-faint">·</span>
-                <span className="font-mono tabular-nums">
-                  {visibleData.nodes.filter((n) => n.type === 'skill').length}
-                </span>
-                <span className="text-ink-faint">技能</span>
-              </span>
-            )}
-            {data.stats.returnedNodes < data.stats.totalNodesInGraph && (
-              <span className="text-ink-faint text-[10px]">已截断采样</span>
-            )}
+        <div className="mb-3 flex flex-col gap-3 rounded-xl border border-border bg-subtle/40 px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+            <TabsList className="h-auto w-full justify-start overflow-x-auto bg-canvas p-1 sm:w-auto">
+              {(Object.keys(VIEW_LABEL) as GraphViewType[]).map((item) => (
+                <TabsTrigger key={item} value={item} className="whitespace-nowrap px-3 text-xs" title={VIEW_DESC[item]}>{VIEW_LABEL[item]}</TabsTrigger>
+              ))}
+            </TabsList>
+            <p className="truncate text-[11px] text-ink-muted" title={VIEW_DESC[view]}>{VIEW_DESC[view]}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-ink-muted" aria-label="当前图谱规模">
+            <span className="flex items-center gap-1" title="当前视图节点数 / 图谱总节点数"><Network className="size-3" /><b className="font-mono font-medium text-ink-secondary">{data.stats.returnedNodes}</b><span>/ {data.stats.totalNodesInGraph} 节点</span></span>
+            <span className="flex items-center gap-1"><Box className="size-3" /><b className="font-mono font-medium text-ink-secondary">{data.stats.totalEdges}</b><span>边</span></span>
+            {visibleData && <span><b className="font-mono font-medium text-ink-secondary">{visibleData.nodes.filter((node) => node.type === 'position').length}</b> 岗位 · <b className="font-mono font-medium text-ink-secondary">{visibleData.nodes.filter((node) => node.type === 'skill').length}</b> 技能</span>}
+            {data.stats.returnedNodes < data.stats.totalNodesInGraph && <span className="rounded bg-elevated px-1.5 py-0.5">采样视图</span>}
           </div>
         </div>
       </Tabs>
