@@ -375,15 +375,6 @@ def _rebuild_position_evolution(
     return {"position_id": position_id, "position_name": name, "points": points}
 
 
-async def _load_snapshots(db: AsyncSession) -> list | None:
-    """加载全部版本快照（时间升序）；无数据返回 None（调用方 404）。"""
-    rows = await db.scalars(
-        select(GraphVersion).order_by(GraphVersion.created_at.asc())
-    )
-    snapshots = [v for v in rows]
-    return snapshots or None
-
-
 def _top_nodes_by_heat(
     indexes: list[dict], node_kind: str, id_prefix: str, edge_side: str
 ) -> list[tuple[str, str]]:
