@@ -3,15 +3,30 @@
 对齐契约 /api/v1/admin/llm-config 与 /runtime-config。LLM provider 持久化
 到 configs/llm_providers.yaml（api_key 打码不回显，明文才更新，文件头注释
 保留）；运行时配置持久化 runtime_settings.json，重启后生效。
+
+安全设计（AGENTS.md §4.1 安全红线，变更须人工逐行审查）：
+- PUT 请求体经 Pydantic 强类型校验（失败由全局 RequestValidationError
+  处理器映射 422/4000，与统一错误码表一致）
+- 写路径持进程内锁串行化（read-modify-write 竞态防护）；直写不改名，
+  兼容单文件 bind mount 场景（os.replace 会 EBUSY）
+- 每次保存写 AuditLog(admin.llm_config.update)，detail 仅含非敏感快照
+  （name/priority/enabled/model/base_url），绝不落 api_key
 """
 
 import re
+import threading
 from pathlib import Path
+from typing import Any
 
 import yaml
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_permission
+from app.core.database import get_db
 from app.core.errors import ERR_INTERNAL, ERR_VALIDATION
+from app.models.business import AuditLog
 from app.schemas.common import error, ok
 
 router = APIRouter()
@@ -21,6 +36,9 @@ router = APIRouter()
 # ============================================================
 
 _LLM_CONFIG_PATH = Path(__file__).resolve().parents[4] / "configs" / "llm_providers.yaml"
+
+# read-modify-write 串行锁：admin PUT 并发保存同一 yaml 时防止互相覆盖
+_CONFIG_WRITE_LOCK = threading.Lock()
 
 
 def mask_secret(value: str) -> str:
@@ -87,47 +105,78 @@ def save_llm_config(path: Path, providers: list) -> dict:
 
     api_key 为空白或含掩码（*）时保持原值，明文才更新；
     写回保留原文件头部注释（到顶层键 providers 之前）。
+    进程内锁串行化，防并发 PUT 的 read-modify-write 竞态互相覆盖。
     """
     err = validate_providers(providers)
     if err:
         raise ValueError(err)
 
-    text = Path(path).read_text(encoding="utf-8")
-    data = yaml.safe_load(text) or {}
-    old = {
-        p["name"]: p for p in data.get("providers", [])
-        if isinstance(p, dict) and p.get("name")
-    }
-
-    clean = []
-    for p in providers:
-        name = (p.get("name") or "").strip()
-        api_key = (p.get("api_key") or "").strip()
-        if not api_key or "*" in api_key:
-            api_key = (old.get(name) or {}).get("api_key", "")
-        entry = {
-            "name": name,
-            "priority": int(p["priority"]),
-            "base_url": (p.get("base_url") or "").strip(),
-            "api_key": api_key,
-            "model": (p.get("model") or "").strip(),
-            "supports_function_calling": bool(p.get("supports_function_calling", True)),
-            "enabled": bool(p.get("enabled", True)),
+    with _CONFIG_WRITE_LOCK:
+        text = Path(path).read_text(encoding="utf-8")
+        data = yaml.safe_load(text) or {}
+        old = {
+            p["name"]: p for p in data.get("providers", [])
+            if isinstance(p, dict) and p.get("name")
         }
-        # provider 特定请求参数（如 deepseek 关闭思考模式 thinking.type=disabled），非 dict 忽略
-        extra_body = p.get("extra_body")
-        if isinstance(extra_body, dict) and extra_body:
-            entry["extra_body"] = extra_body
-        clean.append(entry)
-    data["providers"] = clean
 
-    # 保留原文件头部注释块（到顶层键 providers: 为止），rest 由 dump 生成
-    parts = re.split(r"^providers:\s*$", text, maxsplit=1, flags=re.M)
-    header = parts[0] if len(parts) == 2 else ""
-    body = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
-    Path(path).write_text(header + body, encoding="utf-8")
+        clean = []
+        for p in providers:
+            name = (p.get("name") or "").strip()
+            api_key = (p.get("api_key") or "").strip()
+            if not api_key or "*" in api_key:
+                api_key = (old.get(name) or {}).get("api_key", "")
+            entry = {
+                "name": name,
+                "priority": int(p["priority"]),
+                "base_url": (p.get("base_url") or "").strip(),
+                "api_key": api_key,
+                "model": (p.get("model") or "").strip(),
+                "supports_function_calling": bool(p.get("supports_function_calling", True)),
+                "enabled": bool(p.get("enabled", True)),
+            }
+            # provider 特定请求参数（如 deepseek 关闭思考模式 thinking.type=disabled），非 dict 忽略
+            extra_body = p.get("extra_body")
+            if isinstance(extra_body, dict) and extra_body:
+                entry["extra_body"] = extra_body
+            clean.append(entry)
+        data["providers"] = clean
 
-    return yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+        # 保留原文件头部注释块（到顶层键 providers: 为止），rest 由 dump 生成。
+        # 直写不改名：单文件 bind mount 下 os.replace 会 EBUSY（runtime 断点）
+        parts = re.split(r"^providers:\s*$", text, maxsplit=1, flags=re.M)
+        header = parts[0] if len(parts) == 2 else ""
+        body = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
+        Path(path).write_text(header + body, encoding="utf-8")
+
+        return yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+
+
+class LlmProviderIn(BaseModel):
+    """PUT /admin/llm-config 单个 provider（契约 LlmProviderConfig）。"""
+
+    name: str = Field(description="provider 唯一标识")
+    base_url: str = Field(description="OpenAI 兼容 API 地址")
+    model: str = Field(min_length=1, description="模型名")
+    priority: int = Field(ge=1, description="尝试优先级，1 最高，列表内唯一")
+    enabled: bool = Field(default=True)
+    supports_function_calling: bool = Field(default=True)
+    api_key: str = Field(default="", description="留空或含掩码保持原值；明文才更新")
+    extra_body: dict[str, Any] | None = Field(default=None)
+
+
+class LlmConfigIn(BaseModel):
+    """PUT /admin/llm-config 请求体。"""
+
+    providers: list[LlmProviderIn] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check_business_rules(self) -> "LlmConfigIn":
+        # 业务规则单一事实源仍是 validate_providers（纯函数层同样把关），
+        # 此处委托复用：违规 → ValidationError → 全局处理器映射 422/4000
+        err = validate_providers([p.model_dump() for p in self.providers])
+        if err:
+            raise ValueError(err)
+        return self
 
 
 @router.get("/llm-config")
@@ -142,15 +191,48 @@ async def get_llm_config():
 
 
 @router.put("/llm-config")
-async def update_llm_config(req: dict):
-    """保存 LLM provider 配置（持久化到 yaml，api_key 留空/掩码保持原值）。"""
-    providers = req.get("providers")
+async def update_llm_config(
+    req: LlmConfigIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """保存 LLM provider 配置（持久化到 yaml，api_key 留空/掩码保持原值）。
+
+    请求体经 LlmConfigIn 强校验（422/4000）；保存成功写审计日志，
+    detail 只含非敏感快照，绝不记录 api_key。
+    """
+    operator = current_user.get("sub") or current_user.get("user_id", "admin")
     try:
-        saved = save_llm_config(_LLM_CONFIG_PATH, providers)
+        saved = save_llm_config(
+            _LLM_CONFIG_PATH,
+            [p.model_dump(exclude_none=True) for p in req.providers],
+        )
     except ValueError as e:
         return error(ERR_VALIDATION, str(e))
     except (OSError, yaml.YAMLError):
         return error(ERR_INTERNAL, "LLM 配置保存失败")
+
+    # 审计留痕（ADMIN 类）：仅非敏感字段快照，api_key 永不入日志
+    db.add(AuditLog(
+        user_id=operator,
+        action="admin.llm_config.update",
+        resource="llm_providers",
+        detail={
+            "providers": [
+                {
+                    "name": p.name,
+                    "priority": p.priority,
+                    "enabled": p.enabled,
+                    "model": p.model,
+                    "base_url": p.base_url,
+                    "key_updated": bool(p.api_key) and "*" not in p.api_key,
+                }
+                for p in req.providers
+            ],
+        },
+    ))
+    await db.commit()
+
     saved["providers"] = mask_providers(saved.get("providers", []))
     return ok(data=saved)
 
