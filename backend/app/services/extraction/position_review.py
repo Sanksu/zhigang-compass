@@ -155,3 +155,27 @@ def extraction_skills(skills: list, requirements: list) -> list[str]:
         if name and name not in out:
             out.append(name)
     return out
+
+
+def select_experiment_candidates(
+    rows: list[dict], limit: int = 50
+) -> list[str]:
+    """M1 实验抽样（§6 阶段一）：图谱低频非标准岗位名 → 待人工核对清单。
+
+    rows 来自 Neo4j（name/req_count，已按引用升序）——与线上 should_review
+    触发门同口径：归一化非空、不在规则白名单、引用数 < REVIEW_FREQ_MAX。
+    """
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for r in rows:
+        name = (r.get("name") or "").strip()
+        if len(name) < 2 or name in seen:
+            continue
+        norm = normalize_position_name(name)
+        if not should_review(norm, frequency=int(r.get("req_count") or 0)):
+            continue
+        seen.add(name)
+        candidates.append(name)
+        if len(candidates) >= limit:
+            break
+    return candidates
