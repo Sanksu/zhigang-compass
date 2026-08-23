@@ -19,7 +19,10 @@ import unittest.mock as mock
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from app.workers.discovery import discovery_auto_transition
+from app.workers.discovery import (
+    _rename_candidates_for_current_normalization,
+    discovery_auto_transition,
+)
 
 _TZ_CN = timezone(timedelta(hours=8))
 # 窗口终点基准（jd_publish_windows 以数据最晚日为 end）
@@ -406,3 +409,107 @@ class TestAutoTransitionTaskNoveltyGate:
 
         assert result["transitions"] == 0
         assert row.state == "emerging"  # 未升级
+
+
+class TestCandidateNormalizationMigration:
+    """候选池键随岗位归一化升级的受控迁移。"""
+
+    @staticmethod
+    def _snapshot(old_name: str, raw_name: str) -> dict:
+        return {
+            "normalized_position": old_name,
+            "normalized_position_meta": {"version": "2026-08-22.1"},
+            "extraction": {"position_name": raw_name, "skills": []},
+        }
+
+    def test_renames_candidate_for_unambiguous_old_to_new_mapping(self):
+        row = _candidate_row("前端工程师")
+        snapshot = self._snapshot("前端工程师", "React 前端工程师")
+
+        with mock.patch(
+            "app.services.extraction.position_normalization.normalize_position_name",
+            return_value="React 前端工程师",
+        ):
+            renames, ambiguous = _rename_candidates_for_current_normalization([row], [snapshot])
+
+        assert renames == {"前端工程师": "React 前端工程师"}
+        assert ambiguous == {}
+        assert row.position_name == "React 前端工程师"
+
+    def test_preserves_candidate_when_old_name_splits_to_multiple_current_names(self):
+        row = _candidate_row("前端工程师")
+        snapshots = [
+            self._snapshot("前端工程师", "React 前端工程师"),
+            self._snapshot("前端工程师", "Vue 前端工程师"),
+        ]
+        with mock.patch(
+            "app.services.extraction.position_normalization.normalize_position_name",
+            side_effect=["React 前端工程师", "Vue 前端工程师"],
+        ):
+            renames, ambiguous = _rename_candidates_for_current_normalization([row], snapshots)
+
+        assert renames == {}
+        assert ambiguous == {"前端工程师": {"React 前端工程师", "Vue 前端工程师"}}
+        assert row.position_name == "前端工程师"
+
+    def test_preserves_candidate_when_new_key_already_exists(self):
+        legacy = _candidate_row("前端工程师")
+        current = _candidate_row("React 前端工程师")
+        snapshot = self._snapshot("前端工程师", "React 前端工程师")
+        with mock.patch(
+            "app.services.extraction.position_normalization.normalize_position_name",
+            return_value="React 前端工程师",
+        ):
+            renames, ambiguous = _rename_candidates_for_current_normalization(
+                [legacy, current], [snapshot],
+            )
+
+        assert renames == {}
+        assert ambiguous == {"前端工程师": {"React 前端工程师"}}
+        assert legacy.position_name == "前端工程师"
+        assert current.position_name == "React 前端工程师"
+
+    def test_preserves_all_candidates_when_multiple_old_names_converge_on_new_key(self):
+        """A→C、B→C 且 C 初始不存在时不触发唯一键冲突。"""
+        first = _candidate_row("旧岗位 A")
+        second = _candidate_row("旧岗位 B")
+        snapshots = [
+            self._snapshot("旧岗位 A", "新岗位 C"),
+            self._snapshot("旧岗位 B", "新岗位 C"),
+        ]
+        with mock.patch(
+            "app.services.extraction.position_normalization.normalize_position_name",
+            return_value="新岗位 C",
+        ):
+            renames, ambiguous = _rename_candidates_for_current_normalization(
+                [first, second], snapshots,
+            )
+
+        assert renames == {}
+        assert ambiguous == {"旧岗位 A": {"新岗位 C"}, "旧岗位 B": {"新岗位 C"}}
+        assert first.position_name == "旧岗位 A"
+        assert second.position_name == "旧岗位 B"
+
+    def test_transition_uses_current_frequency_window_after_rename(self):
+        """一对一迁移后，旧候选使用新版岗位名的 JD 窗口完成状态流转。"""
+        old_name = "前端工程师"
+        current_name = "React 前端工程师"
+        jd_rows = _jd_rows_by_window(current_name, [11, 10, 11, 10])
+        for row in jd_rows:
+            row.snapshot["normalized_position"] = old_name
+            row.snapshot["normalized_position_meta"] = {"version": "2026-08-22.1"}
+        candidate = _candidate_row(old_name)
+        jd_session = _FakeSession(jd_rows)
+        candidate_session = _FakeSession([candidate])
+        driver = _FakeDriver()
+
+        with mock.patch(
+            "app.services.extraction.position_normalization.normalize_position_name",
+            return_value=current_name,
+        ):
+            result = _run_task([jd_session, candidate_session], driver)
+
+        assert result["transitions"] == 1
+        assert candidate.position_name == current_name
+        assert candidate.state == "stable"
+        assert driver.queries[-1][1]["name"] == current_name

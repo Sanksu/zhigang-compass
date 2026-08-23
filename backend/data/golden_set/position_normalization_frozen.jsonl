@@ -1,0 +1,6 @@
+{"id":"zh_frontend","category":"中文","position_name":"前端开发工程师","skills":[],"expected":"前端开发工程师"}
+{"id":"en_frontend","category":"英文","position_name":"Frontend Engineer","skills":[],"expected":"前端开发工程师"}
+{"id":"mixed_react_frontend","category":"混合","position_name":"React 前端开发工程师","skills":["React"],"expected":"React前端开发工程师"}
+{"id":"techstack_paren","category":"技术栈","position_name":"前端开发工程师（React）","skills":["React"],"expected":"React前端开发工程师"}
+{"id":"generic_skill_route","category":"泛化路由","position_name":"Software Engineer","skills":["Python","Django"],"expected":"后端开发工程师"}
+{"id":"reject_skill_as_position","category":"拒绝","position_name":"SQL","skills":[],"expected":""}

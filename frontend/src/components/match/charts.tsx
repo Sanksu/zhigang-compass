@@ -252,15 +252,17 @@ interface SkillHeatmapProps {
   className?: string
 }
 
-// 三态语义（08-14 审查：此前按虚构熟练度 4 档渲染；现为真实二态判定）
-// 0=缺失（候选人未具备）、1=具备（候选人已具备）、2=必备（岗位要求）
-const LEVEL_LABEL = ['缺失', '具备', '必备']
+const GAP_STATUS_LABEL: Record<SkillMatrixItem['status'], string> = {
+  missing: '缺失',
+  weak: '熟练度不足',
+  matched: '已匹配',
+}
 
 export function SkillHeatmap({ data, className }: SkillHeatmapProps) {
   const dark = useDarkMode()
   const mutedColor = dark ? '#a1a1aa' : '#71717a'
 
-  // 构造热力图数据：x 轴=技能，y 轴=[候选人, 岗位要求]，值=具备/缺失（候选人）/必备（岗位）
+  // 构造热力图数据：x 轴=技能，y 轴=[候选人, 岗位要求]，值=后端 GapSkill 的真实熟练度数值。
   const skills = data.map((d) => d.skill)
   const categories = ['候选人', '岗位要求']
   const heatData: [number, number, number][] = []
@@ -277,7 +279,8 @@ export function SkillHeatmap({ data, className }: SkillHeatmapProps) {
           const [xi, yi, val] = params.value as [number, number, number]
           const item = data[xi]
           const who = categories[yi]
-          return `<b>${escapeHtml(skills[xi])}</b><br/>${who}: ${LEVEL_LABEL[val]}<br/>必要性: ${escapeHtml(item.necessity)}`
+          const proficiency = yi === 0 ? item.candidate_label : item.required_label
+          return `<b>${escapeHtml(skills[xi])}</b><br/>${who}: ${escapeHtml(proficiency)} (${val}/4)<br/>状态: ${GAP_STATUS_LABEL[item.status]}<br/>必要性: ${escapeHtml(item.necessity)}`
         },
       },
       grid: { left: 70, right: 20, top: 20, bottom: 90 },
@@ -295,7 +298,7 @@ export function SkillHeatmap({ data, className }: SkillHeatmapProps) {
       },
       visualMap: {
         min: 0,
-        max: 2,
+        max: 4,
         calculable: false,
         orient: 'horizontal',
         left: 'center',
@@ -303,8 +306,8 @@ export function SkillHeatmap({ data, className }: SkillHeatmapProps) {
         itemWidth: 12,
         itemHeight: 80,
         textStyle: { color: mutedColor, fontSize: 10 },
-        inRange: { color: ['#e4e4e7', '#71717a', '#09090b'] },
-        text: ['必备', '缺失'],
+        inRange: { color: ['#e4e4e7', '#d4d4d8', '#a1a1aa', '#52525b', '#09090b'] },
+        text: ['专家', '未掌握'],
       },
       series: [
         {
@@ -312,8 +315,12 @@ export function SkillHeatmap({ data, className }: SkillHeatmapProps) {
           data: heatData,
           label: {
             show: true,
-            formatter: (p: EChartsParam) => LEVEL_LABEL[(p.value as number[])[2] ?? ''] ?? '',
-            color: (p: EChartsParam) => ((p.value as number[])[2] >= 2 ? '#fafafa' : '#09090b'),
+            formatter: (p: EChartsParam) => {
+              const [xi, yi] = p.value as [number, number, number]
+              const item = data[xi]
+              return yi === 0 ? item.candidate_label : item.required_label
+            },
+            color: (p: EChartsParam) => ((p.value as number[])[2] >= 3 ? '#fafafa' : '#09090b'),
             fontSize: 10,
           },
           emphasis: {

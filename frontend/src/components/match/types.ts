@@ -49,23 +49,28 @@ export interface RadarDimension {
   required: number
 }
 
-/** 技能矩阵热力图项 */
+/** 技能矩阵热力图项（直接映射后端 GapSkill） */
 export interface SkillMatrixItem {
   skill: string
-  /** 候选人熟练度 0-3（0=未掌握） */
+  /** 候选人熟练度数值（0-4，用于热力图色阶） */
   candidate_level: number
-  /** 岗位要求熟练度 0-3 */
+  /** 岗位要求熟练度数值（0-4，用于热力图色阶） */
   required_level: number
+  /** 后端返回的熟练度展示值 */
+  candidate_label: string
+  required_label: string
   /** 必要性 */
   necessity: 'must' | 'nice'
-  /** 匹配状态 */
-  match: 'full' | 'partial' | 'missing'
+  /** 后端差距状态 */
+  status: 'missing' | 'weak' | 'matched'
 }
 
 /** 差距分析项 */
 export interface GapItem {
   skill: string
   gap_type: 'missing_must' | 'level_gap' | 'missing_nice' | 'matched'
+  /** 后端权威差距状态，前端不得根据展示刻度重新判定 */
+  match_status: 'missing' | 'weak' | 'matched'
   priority: 'high' | 'medium' | 'low'
   current_level: string
   required_level: string

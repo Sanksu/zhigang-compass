@@ -43,6 +43,7 @@ from app.services.extraction.dictionary import (
     skill_category,
 )
 from app.services.extraction.post_processor import is_valid_skill_name, canonical_skill_name
+from app.services.proficiency import normalize_proficiency_level
 
 # 图谱 weight 两档约定
 _WEIGHT_MUST = 0.8
@@ -103,11 +104,15 @@ def _is_cross_domain(pos: str, skill_name: str) -> bool:
 
 
 
-def _most_common_level(levels: list[str]) -> str:
-    """熟练度众数（并列取出现最早的一档）；无 level 返回空串。"""
-    if not levels:
+def _most_common_level(levels: list[object]) -> str:
+    """规范熟练度的众数（并列取出现最早的一档）；无有效等级返回空串。"""
+    normalized_levels = [
+        normalized for level in levels
+        if (normalized := normalize_proficiency_level(level)) is not None
+    ]
+    if not normalized_levels:
         return ""
-    return Counter(levels).most_common(1)[0][0]
+    return Counter(normalized_levels).most_common(1)[0][0]
 
 
 class SkillAgg:
@@ -300,8 +305,9 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
             sa = pa.skills[skill]
             sa.hit += jd_weight
             sa.sources.add(source)
-            if level:
-                sa.levels.append(level)
+            normalized_level = normalize_proficiency_level(level)
+            if normalized_level is not None:
+                sa.levels.append(normalized_level)
             if necessity == "must":
                 sa.must_count += jd_weight
         # 软技能：仅统计岗位本体白名单（JD 抽取已过滤，此处兜底再校验）

@@ -147,6 +147,32 @@ def _first_seen_date_of(row) -> str:
     return row.created_at.astimezone(_TZ_CN).date().isoformat()
 
 
+def _rename_candidates_for_current_normalization(rows, snapshots: list[dict]) -> tuple[dict[str, str], dict[str, set[str]]]:
+    """Rename only unambiguous legacy candidate keys; preserve collisions/splits.
+
+    `DiscoveryCandidate.position_name` is the join key for both JD frequency
+    windows and graph status recovery.  A normalization upgrade may turn an old
+    key into multiple names, so automatic migration is intentionally limited to
+    one old → one new mapping.  Existing target candidates are not merged:
+    their state/evidence may differ and must be resolved by an operator.
+    """
+    from app.services.extraction.position_normalization import candidate_position_rename_plan
+
+    by_name = {row.position_name: row for row in rows}
+    planned, ambiguous = candidate_position_rename_plan(set(by_name), snapshots)
+    renames: dict[str, str] = {}
+    for old_name, new_name in planned.items():
+        by_name[old_name].position_name = new_name
+        renames[old_name] = new_name
+        logger.info("岗位归一化候选键迁移: %s -> %s", old_name, new_name)
+    for old_name, targets in ambiguous.items():
+        logger.warning(
+            "岗位归一化一对多/冲突，保留候选旧名称等待人工处理: %s -> %s",
+            old_name, sorted(targets),
+        )
+    return renames, ambiguous
+
+
 async def discovery_daily(ctx: dict) -> dict:
     """每日新岗位发现（AL-M4-01，设计文档 7.2.3 节）。
 
@@ -408,7 +434,6 @@ async def discovery_auto_transition(ctx: dict) -> dict:
         WindowFreq, decline_rate, evaluate_auto_transition, freq_z_scores,
         PositionStateMachine, jd_publish_windows, window_volatility,
     )
-    from app.services.extraction.dictionary import normalize_position_name
     from app.services.extraction.position_normalization import normalized_position_from_snapshot
 
     import logging
@@ -439,13 +464,18 @@ async def discovery_auto_transition(ctx: dict) -> dict:
     machine = PositionStateMachine()
     transitions: list[dict] = []
     async with async_session_factory() as session:
-        rows = (await session.scalars(
-            select(DiscoveryCandidate).where(
-                DiscoveryCandidate.state.in_(
-                    [PositionState.EMERGING.value, PositionState.STABLE.value, PositionState.DECLINING.value]
-                )
-            )
-        )).all()
+        all_rows = (await session.scalars(select(DiscoveryCandidate))).all()
+        _rename_candidates_for_current_normalization(
+            all_rows, [row.snapshot or {} for row in jd_rows],
+        )
+        rows = [
+            row for row in all_rows
+            if row.state in {
+                PositionState.EMERGING.value,
+                PositionState.STABLE.value,
+                PositionState.DECLINING.value,
+            }
+        ]
 
         # ── 2.5 skill_novelty（§7.2.1，08-15）：批量查询岗位技能新颖度 ──
         # 数据源：Neo4j Skill.first_seen（100% 覆盖）——岗位 REQUIRES 技能
@@ -462,9 +492,7 @@ async def discovery_auto_transition(ctx: dict) -> dict:
             _logger.warning("auto_transition: skill_novelty 查询失败，本次不拦截: %s", exc)
 
         for row in rows:
-            name = normalize_position_name(row.position_name)
-            if not name:
-                continue
+            name = row.position_name
             freqs = freq_windows.get(name, [])
             if len(freqs) < 2:
                 _logger.info(

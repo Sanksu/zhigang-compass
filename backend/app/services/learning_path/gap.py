@@ -18,9 +18,8 @@ from app.services.learning_path.schemas import GapSkill, GapType, MatchEvidenceI
 from app.services.learning_path.prerequisites import base_hours
 from app.services.matching.engine import _canonical_name
 from app.services.matching.weights import load_sim_threshold
+from app.services.proficiency import proficiency_is_weak
 
-# 岗位期望熟练度 → 候选人熟练度下限（候选人熟练度：1 了解 / 2 熟悉 / 3 精通）
-_LEVEL_MIN_PROFICIENCY = {"初级": 1, "中级": 2, "高级": 3, "专家": 3}
 _PROFICIENCY_NAMES = {1: "了解", 2: "熟悉", 3: "精通"}
 
 # 数据升级：需求/扩散归一化基准（source_count=20 源或关联岗位=10 视为 1.0）
@@ -127,11 +126,9 @@ def analyze_gaps(candidate, position, semantic=None, sim_threshold: float | None
             gap_type = GapType.MISSING
             current = None
         else:
-            required_min = _LEVEL_MIN_PROFICIENCY.get(req.proficiency or "")
-            if (
-                required_min is not None
-                and matched_skill is not None
-                and matched_skill.proficiency < required_min
+            if proficiency_is_weak(
+                req.proficiency,
+                matched_skill.proficiency if matched_skill is not None else None,
             ):
                 gap_type = GapType.WEAK
             else:

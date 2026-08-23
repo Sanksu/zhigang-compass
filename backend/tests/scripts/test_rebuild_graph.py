@@ -27,10 +27,11 @@ class _Result:
 
 
 class _FakePGSession:
-    """模拟 async_session_factory 会话：scalars 返回预置行。"""
+    """模拟 async_session_factory 会话：scalars 按查询顺序返回预置行。"""
 
-    def __init__(self, rows):
-        self._rows = rows
+    def __init__(self, *results):
+        self._results = list(results)
+        self.committed = False
 
     async def __aenter__(self):
         return self
@@ -39,7 +40,10 @@ class _FakePGSession:
         return False
 
     async def scalars(self, stmt):
-        return _Result(self._rows)
+        return _Result(self._results.pop(0))
+
+    async def commit(self):
+        self.committed = True
 
 
 class _FakeNeo4j:
@@ -72,7 +76,7 @@ async def test_restores_only_reviewed_statuses(monkeypatch):
 
     # async_sessionmaker() 同步返回 AsyncSession（async with 消费），fake 同构
     def _factory():
-        return _FakePGSession(rows)
+        return _FakePGSession(rows, [])
 
     neo4j = _FakeNeo4j()
     monkeypatch.setattr("scripts.rebuild_graph.async_session_factory", _factory)
@@ -98,7 +102,7 @@ async def test_no_reviewed_rows_skips_neo4j(monkeypatch):
 
     # async_sessionmaker() 同步返回 AsyncSession（async with 消费），fake 同构
     def _factory():
-        return _FakePGSession(rows)
+        return _FakePGSession(rows, [])
 
     neo4j = _FakeNeo4j()
     monkeypatch.setattr("scripts.rebuild_graph.async_session_factory", _factory)
@@ -108,6 +112,94 @@ async def test_no_reviewed_rows_skips_neo4j(monkeypatch):
 
     assert count == 0
     assert neo4j.calls == []
+
+
+@pytest.mark.asyncio
+async def test_renames_reviewed_candidate_before_restoring_status(monkeypatch):
+    """一对一旧→新映射先迁候选键，回写命中新图谱 Position。"""
+    candidate = _Row("前端工程师", "archived")
+    jd_row = _Row("", "")
+    jd_row.snapshot = {
+        "normalized_position": "前端工程师",
+        "normalized_position_meta": {"version": "2026-08-22.1"},
+        "extraction": {"position_name": "React 前端工程师", "skills": []},
+    }
+    pg = _FakePGSession([candidate], [jd_row])
+    neo4j = _FakeNeo4j()
+    monkeypatch.setattr("scripts.rebuild_graph.async_session_factory", lambda: pg)
+    monkeypatch.setattr("scripts.rebuild_graph.neo4j_driver", neo4j)
+    monkeypatch.setattr(
+        "app.services.extraction.position_normalization.normalize_position_name",
+        lambda raw, skills: "React 前端工程师",
+    )
+
+    count = await _restore_reviewed_statuses()
+
+    assert count == 1
+    assert pg.committed is True
+    assert candidate.position_name == "React 前端工程师"
+    assert neo4j.calls[0][1]["name"] == "React 前端工程师"
+
+
+@pytest.mark.asyncio
+async def test_preserves_reviewed_candidate_for_one_to_many_mapping(monkeypatch):
+    """一对多升级不猜测目标岗位，仍以旧键回写，杜绝静默状态丢失。"""
+    candidate = _Row("前端工程师", "archived")
+    jd_rows = []
+    for current_name in ("React 前端工程师", "Vue 前端工程师"):
+        row = _Row("", "")
+        row.snapshot = {
+            "normalized_position": "前端工程师",
+            "normalized_position_meta": {"version": "2026-08-22.1"},
+            "extraction": {"position_name": current_name, "skills": []},
+        }
+        jd_rows.append(row)
+    pg = _FakePGSession([candidate], jd_rows)
+    neo4j = _FakeNeo4j()
+    monkeypatch.setattr("scripts.rebuild_graph.async_session_factory", lambda: pg)
+    monkeypatch.setattr("scripts.rebuild_graph.neo4j_driver", neo4j)
+    from unittest.mock import Mock
+    monkeypatch.setattr(
+        "app.services.extraction.position_normalization.normalize_position_name",
+        Mock(side_effect=["React 前端工程师", "Vue 前端工程师"]),
+    )
+
+    count = await _restore_reviewed_statuses()
+
+    assert count == 1
+    assert pg.committed is False
+    assert candidate.position_name == "前端工程师"
+    assert neo4j.calls[0][1]["name"] == "前端工程师"
+
+
+@pytest.mark.asyncio
+async def test_preserves_all_candidates_when_multiple_old_names_converge_on_new_key(monkeypatch):
+    """A→C、B→C 且 C 初始不存在时全部保留，避免候选键唯一约束冲突。"""
+    candidates = [_Row("旧岗位 A", "archived"), _Row("旧岗位 B", "stable")]
+    jd_rows = []
+    for old_name in ("旧岗位 A", "旧岗位 B"):
+        row = _Row("", "")
+        row.snapshot = {
+            "normalized_position": old_name,
+            "normalized_position_meta": {"version": "2026-08-22.1"},
+            "extraction": {"position_name": "新岗位 C", "skills": []},
+        }
+        jd_rows.append(row)
+    pg = _FakePGSession(candidates, jd_rows)
+    neo4j = _FakeNeo4j()
+    monkeypatch.setattr("scripts.rebuild_graph.async_session_factory", lambda: pg)
+    monkeypatch.setattr("scripts.rebuild_graph.neo4j_driver", neo4j)
+    monkeypatch.setattr(
+        "app.services.extraction.position_normalization.normalize_position_name",
+        lambda raw, skills: "新岗位 C",
+    )
+
+    count = await _restore_reviewed_statuses()
+
+    assert count == 2
+    assert pg.committed is False
+    assert [row.position_name for row in candidates] == ["旧岗位 A", "旧岗位 B"]
+    assert [call[1]["name"] for call in neo4j.calls] == ["旧岗位 A", "旧岗位 B"]
 
 
 def test_reviewed_states_exclude_candidate_and_active():

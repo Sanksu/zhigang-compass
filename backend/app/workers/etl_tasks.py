@@ -717,18 +717,18 @@ async def batch_extract(
             extractions = []
 
         # 规范岗位名单独写入快照，保留原始抽取 position_name 供审计和评测。
-        from app.services.extraction.dictionary import normalize_position_name
+        # 所有写入均通过版本化单一入口，保证下游只消费当前规则版本的快照值。
+        from app.services.extraction.position_normalization import persist_normalized_position
 
-        normalized_positions = [
-            normalize_position_name(
-                extraction.position_name,
-                skills=[s.name for s in (extraction.skills or [])],
+        normalized_snapshots = [
+            persist_normalized_position(
+                {**(row.snapshot or {}), "extraction": extraction.model_dump()}
             )
-            for extraction in extractions
+            for row, extraction in zip(valid, extractions)
         ]
 
-        for i, (row, extraction, normalized_position) in enumerate(
-            zip(valid, extractions, normalized_positions), start=1
+        for i, (row, extraction, normalized_snapshot) in enumerate(
+            zip(valid, extractions, normalized_snapshots), start=1
         ):
             # 逐条记 jd_id + 进度百分比：batch_extract 只在循环结束 commit，
             # 中间进度 DB 不可见，靠此日志实时确认推进（worker.err.log）
@@ -742,10 +742,7 @@ async def batch_extract(
             # 抽取结果仍落库——聚合/入图均已跳过该记录，落库仅为推进游标
             # （`extraction IS NULL` 条件）避免下次批跑重复调用 LLM。
             if (row.snapshot or {}).get("_duplicate_of"):
-                snap = dict(row.snapshot or {})
-                snap["extraction"] = extraction.model_dump()
-                snap["normalized_position"] = normalized_position
-                row.snapshot = snap
+                row.snapshot = normalized_snapshot
                 results["skipped_dup"] += 1
                 continue
             try:
@@ -758,14 +755,11 @@ async def batch_extract(
                 with neo4j_driver.session() as neo4j_session:
                     # 同步 Neo4j 写入放线程池，避免阻塞事件循环
                     position_id = await asyncio.to_thread(
-                        import_jd, neo4j_session, extraction, evidence
+                        import_jd, neo4j_session, extraction, evidence, normalized_snapshot
                     )
                 # 入图成功后才写 extraction 标记：先标记后入图会让失败记录
                 # extraction 落库，下次批跑 `extraction IS NULL` 不再选中，图数据永久缺失
-                snap = dict(row.snapshot or {})
-                snap["extraction"] = extraction.model_dump()
-                snap["normalized_position"] = normalized_position
-                row.snapshot = snap
+                row.snapshot = normalized_snapshot
                 results["processed"] += 1
                 results["succeeded"] += 1
                 results["positions"].append({"jd_id": row.id, "position_id": position_id})

@@ -1,0 +1,7 @@
+{"id":"alias_basic","level":"基础","candidate_level":1,"expected_level":"初级","expected_weak":true}
+{"id":"alias_familiar","level":"熟悉","candidate_level":2,"expected_level":"初级","expected_weak":false}
+{"id":"canonical_intermediate","level":"中级","candidate_level":1,"expected_level":"中级","expected_weak":true}
+{"id":"alias_proficient","level":"精通","candidate_level":3,"expected_level":"高级","expected_weak":false}
+{"id":"canonical_expert","level":"专家","candidate_level":3,"expected_level":"专家","expected_weak":true}
+{"id":"undeclared","level":"","candidate_level":1,"expected_level":null,"expected_weak":false}
+{"id":"invalid","level":"大师","candidate_level":3,"expected_level":null,"expected_weak":true}

@@ -5,6 +5,7 @@
 Position-[:REQUIRES {necessity: 'must'}] 关系，且同名实体重复导入 ID 稳定（MERGE 幂等）。
 """
 
+from app.services.extraction.position_normalization import POSITION_NORMALIZATION_VERSION
 from app.services.extraction.schemas import (
     CertificationExtracted,
     EducationExtracted,
@@ -126,6 +127,35 @@ class TestImportJdEducationCertification:
         import_jd(_FakeSession(tx), ext, _evidence())
         assert not any("Education" in q for q, _ in tx.queries)
         assert not any("Certification" in q for q, _ in tx.queries)
+
+
+class TestImportJdPositionNormalization:
+    def test_current_snapshot_name_is_used_for_graph_import(self):
+        tx = _FakeTx()
+        snapshot = {
+            "normalized_position": "人工审核岗位",
+            "normalized_position_meta": {"version": POSITION_NORMALIZATION_VERSION},
+            "extraction": _extraction().model_dump(),
+        }
+
+        import_jd(_FakeSession(tx), _extraction(), _evidence(), snapshot)
+
+        positions = [p for q, p in tx.queries if "MERGE (p:Position" in q]
+        assert positions[0]["name"] == "人工审核岗位"
+
+    def test_stale_snapshot_name_uses_current_rules(self):
+        tx = _FakeTx()
+        snapshot = {
+            "normalized_position": "旧规则岗位",
+            "normalized_position_meta": {"version": "2026-08-01.1"},
+            "extraction": {"position_name": "前端开发", "skills": []},
+        }
+        extraction = JDExtractionResult(position_name="前端开发")
+
+        import_jd(_FakeSession(tx), extraction, _evidence(), snapshot)
+
+        positions = [p for q, p in tx.queries if "MERGE (p:Position" in q]
+        assert positions[0]["name"] == "前端开发工程师"
 
 
 class TestImportJdSkillNormalization:
