@@ -202,14 +202,13 @@ export function NodeDetailPanel({
       ) : (
         <>
           {/* 头部 */}
-          <div className="flex items-start justify-between gap-3 border-b border-border bg-canvas p-4">
+          <div className="flex items-start justify-between gap-3 border-b border-border bg-subtle/50 p-4">
             <div className="flex items-start gap-3 min-w-0">
               <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-subtle">
-                <Icon className="size-4 text-primary" />
+                <Icon className="size-4 text-ink-muted" />
               </div>
               <div className="min-w-0">
-                <p className="text-[10px] font-medium tracking-wide text-ink-muted">节点详情 · {TYPE_LABEL[node.type]}</p>
-                <h3 className="mt-1 text-sm font-semibold text-ink truncate">{node.name}</h3>
+                <h3 className="text-sm font-semibold text-ink truncate">{node.name}</h3>
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                     {TYPE_LABEL[node.type]}
