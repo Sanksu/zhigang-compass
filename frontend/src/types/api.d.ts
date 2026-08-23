@@ -652,7 +652,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 全景视图（Neo4j 直接查询，无缓存） */
+        /**
+         * 全景视图（已弃用——统一迁移至 /graph/view/panorama）
+         * @deprecated
+         * @description 已弃用（08-23 闭环收敛）：前端图谱页/仪表盘已统一消费 /api/v1/graph/view/{view_type}。本端点因 focus（岗位中心展开）与 min_weight 参数暂无 view 端点等价物而保留，待语义迁移后移除。 新消费方禁止接入本端点。
+         */
         get: {
             parameters: {
                 query?: {
@@ -1545,8 +1549,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 获取人岗比对诊断报告（兼容同步生成）
-         * @description LLM 基于结果快照（分数/差距/学习路径/证据）生成结构化诊断报告，结果缓存 24h
+         * 获取人岗比对诊断报告（只读）
+         * @description 读取已生成的诊断报告：24h Redis 缓存优先，过期后从 PostgreSQL DiagnosisReportRecord 耐久记录回读并回填缓存。生成一律走 POST 异步任务（worker 唯一执行路径），本端点不再同步调用 LLM； 缓存与落库皆无时返回 404，客户端应先 POST 创建生成任务。
          */
         get: {
             parameters: {
@@ -1580,22 +1584,8 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description 匹配结果不存在或已过期 */
+                /** @description 匹配结果不存在或已过期；或诊断报告尚未生成（需先 POST 创建生成任务） */
                 404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description 诊断报告生成失败（LLM 未配置可用 provider 或全部 provider 调用失败，错误码 503） */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description LLM 调用超时（错误码 5003，前端可据此提示稍后重试） */
-                504: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -2795,13 +2785,17 @@ export interface paths {
                             name: string;
                             /** Format: uri */
                             base_url: string;
-                            /** @description 留空或 **** 表示保持原值；明文才更新 */
+                            /** @description 留空或 **** 表示保持原值；明文才更新。推荐改用 api_key_env */
                             api_key?: string;
+                            /** @description 密钥环境变量名：key 经 env 注入不落盘（推荐方式） */
+                            api_key_env?: string;
                             model: string;
                             /** @description 数字越小优先级越高，列表内唯一 */
                             priority: number;
                             enabled: boolean;
                             supports_function_calling?: boolean;
+                            /** @description provider 特定请求参数（如 deepseek 关闭思考模式），编辑时须保留 */
+                            extra_body?: Record<string, never>;
                         }[];
                     };
                 };
@@ -4509,6 +4503,8 @@ export interface components {
             base_url: string;
             /** @description 回显时打码（*）；提交空白/含掩码保持原值 */
             api_key?: string;
+            /** @description 密钥环境变量名（推荐）：key 经 env 注入不落盘；设置后 api_key 明文不再回捞 */
+            api_key_env?: string;
             model: string;
             supports_function_calling?: boolean;
             enabled: boolean;

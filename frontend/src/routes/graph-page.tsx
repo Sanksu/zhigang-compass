@@ -60,7 +60,7 @@ function isWebGL2Available(): boolean {
 }
 
 // ============================================================
-// 真实 API 数据适配：后端 /graph/panorama → GraphData
+// 真实 API 数据适配：后端 /graph/view/{view_type} → GraphData
 // ============================================================
 
 /**
@@ -93,9 +93,9 @@ const DEMO_BOOKMARKS: { label: string; nodeName: string }[] = [
 /**
  * 能力图谱页 — 设计文档 §10.3
  *
- * 数据来源：真实 API /api/v1/graph/panorama（Neo4j 聚合 + Redis 30s 缓存），
- * 视图切换在真实数据上本地派生（techStack/positionCenter 取首个岗位为中心子图）。
- * 已实现：2D ECharts 力导向图、四种视图切换、节点点击 + 详情面板、暗色模式。
+ * 数据来源：真实 API /api/v1/graph/view/{view_type}（Neo4j 聚合 + Redis 缓存，
+ * 四种视图均为服务端过滤）。已实现：2D ECharts 力导向图、四种视图切换、
+ * 节点点击 + 详情面板、暗色模式。
  */
 export function GraphPage() {
   const [view, setView] = useState<GraphViewType>('panorama')

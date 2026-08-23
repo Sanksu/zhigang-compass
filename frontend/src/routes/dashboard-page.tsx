@@ -51,7 +51,7 @@ const QUICK_LINKS = [
  * 仪表盘 — 系统总览
  *
  * 数据来源：真实后端 API
- * - /graph/panorama → 图谱节点统计
+ * - /graph/view/panorama → 图谱节点统计（与图谱页共用统一视图端点）
  * - /admin/crawl/status → 采集量 + 数据源
  * - /resume/list → 已解析简历数
  * - /evolution/versions + /admin/audit/logs → 最近活动流
@@ -67,8 +67,9 @@ export function DashboardPage() {
   useEffect(() => {
     let cancelled = false
     Promise.allSettled([
-      // panorama 供「图谱节点」指标卡（节点/边数）；签名区移除后仍是唯一数据源
-      apiGet<components['schemas']['GraphViewData']>('/graph/panorama?limit=200&min_weight=0.3'),
+      // panorama 视图供「图谱节点」指标卡（节点/边数）——与图谱页共用 /graph/view
+      // 统一端点（08-23 闭环收敛：消除 /graph/panorama 与 view 双链路分叉）
+      apiGet<components['schemas']['GraphViewData']>('/graph/view/panorama?limit=200'),
       // 采集统计需 admin 权限：游客 401 时静默降级，不触发全局登出
       apiGet<components['schemas']['CrawlStatusData']>('/admin/crawl/status', { skipAuthRedirect: true }),
       // 简历/采集/审计统计均需认证：游客 401 时静默降级，不触发全局登出

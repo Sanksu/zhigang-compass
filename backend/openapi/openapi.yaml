@@ -400,7 +400,13 @@ paths:
     get:
       tags: [graph]
       security: []
-      summary: 全景视图（Neo4j 直接查询，无缓存）
+      deprecated: true
+      summary: 全景视图（已弃用——统一迁移至 /graph/view/panorama）
+      description: >
+        已弃用（08-23 闭环收敛）：前端图谱页/仪表盘已统一消费
+        /api/v1/graph/view/{view_type}。本端点因 focus（岗位中心展开）与
+        min_weight 参数暂无 view 端点等价物而保留，待语义迁移后移除。
+        新消费方禁止接入本端点。
       parameters:
         - name: limit
           in: query
@@ -916,8 +922,12 @@ paths:
           description: 匹配结果不存在或无权访问
     get:
       tags: [match]
-      summary: 获取人岗比对诊断报告（兼容同步生成）
-      description: LLM 基于结果快照（分数/差距/学习路径/证据）生成结构化诊断报告，结果缓存 24h
+      summary: 获取人岗比对诊断报告（只读）
+      description: >
+        读取已生成的诊断报告：24h Redis 缓存优先，过期后从 PostgreSQL
+        DiagnosisReportRecord 耐久记录回读并回填缓存。生成一律走 POST
+        异步任务（worker 唯一执行路径），本端点不再同步调用 LLM；
+        缓存与落库皆无时返回 404，客户端应先 POST 创建生成任务。
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -936,11 +946,7 @@ paths:
         '400':
           description: 该匹配结果无差距数据（仅人岗比对可生成诊断报告）
         '404':
-          description: 匹配结果不存在或已过期
-        '503':
-          description: 诊断报告生成失败（LLM 未配置可用 provider 或全部 provider 调用失败，错误码 503）
-        '504':
-          description: LLM 调用超时（错误码 5003，前端可据此提示稍后重试）
+          description: 匹配结果不存在或已过期；或诊断报告尚未生成（需先 POST 创建生成任务）
 
   /api/v1/match/feedback:
     post:
