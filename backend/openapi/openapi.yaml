@@ -1551,7 +1551,8 @@ paths:
                     properties:
                       name: { type: string, description: provider 标识（英文短横线） }
                       base_url: { type: string, format: uri }
-                      api_key: { type: string, description: "留空或 **** 表示保持原值；明文才更新" }
+                      api_key: { type: string, description: "留空或 **** 表示保持原值；明文才更新。推荐改用 api_key_env" }
+                      api_key_env: { type: string, pattern: "^[A-Za-z_][A-Za-z0-9_]*$", description: "密钥环境变量名：key 经 env 注入不落盘（推荐方式）" }
                       model: { type: string }
                       priority: { type: integer, minimum: 1, description: 数字越小优先级越高，列表内唯一 }
                       enabled: { type: boolean }
@@ -2979,6 +2980,9 @@ components:
         priority: { type: integer, description: 尝试优先级（1 最高，唯一） }
         base_url: { type: string }
         api_key: { type: string, description: 回显时打码（*）；提交空白/含掩码保持原值 }
+        api_key_env:
+          type: string
+          description: 密钥环境变量名（推荐）：key 经 env 注入不落盘；设置后 api_key 明文不再回捞
         model: { type: string }
         supports_function_calling: { type: boolean }
         enabled: { type: boolean }

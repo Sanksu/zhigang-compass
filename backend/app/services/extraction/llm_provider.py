@@ -16,6 +16,7 @@ jd_extractor 捕获后降级规则抽取，保证无 key 环境可运行。
 """
 
 import logging
+import os
 import time
 import urllib.request
 from pathlib import Path
@@ -257,7 +258,7 @@ def check_provider_health(provider: dict, timeout: Optional[int] = None) -> bool
     Redis 不可用 / 网络异常均不抛异常（健康检查为旁路增强，探测结果仍返回）。
     """
     base_url = (provider.get("base_url") or "").rstrip("/")
-    api_key = (provider.get("api_key") or "").strip()
+    api_key = _resolve_api_key(provider)
     healthy = False
     if base_url:
         # 部分网关（如 opencode.ai）对无 UA 的 urllib 请求返回 403，需带浏览器 UA 探测
@@ -347,6 +348,21 @@ def _with_outcome(exc: LLMExtractionError, outcome: str) -> LLMExtractionError:
     """为审计附着精确 outcome 标记（调用方 _outcome_of 优先读取）。"""
     exc.outcome = outcome
     return exc
+
+
+def _resolve_api_key(provider: dict) -> str:
+    """provider api_key 解析：显式明文优先，其次 api_key_env 环境变量。
+
+    推荐配置 api_key_env（如 OPENCODE_API_KEY）——密钥经环境变量注入，
+    不落盘不回显；遗留明文 api_key 仍兼容（负责人拍板：key 走 env）。
+    """
+    explicit = (provider.get("api_key") or "").strip()
+    if explicit:
+        return explicit
+    env_name = (provider.get("api_key_env") or "").strip()
+    if env_name:
+        return os.environ.get(env_name, "").strip()
+    return ""
 
 
 class LLMProviderChain:
@@ -579,9 +595,12 @@ class LLMProviderChain:
             RateLimitError,
         )
 
-        api_key = (provider.get("api_key") or "").strip()
+        api_key = _resolve_api_key(provider)
         if not api_key:
-            raise LLMConfigurationError(f"provider '{provider['name']}' 未配置 api_key")
+            env_hint = f"（api_key_env={provider.get('api_key_env')} 未设置或为空）" if provider.get("api_key_env") else ""
+            raise LLMConfigurationError(
+                f"provider '{provider['name']}' 未配置 api_key{env_hint}"
+            )
 
         client = _build_client(provider, timeout)
         try:
