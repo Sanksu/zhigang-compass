@@ -260,7 +260,11 @@ def _import_jd_tx(
         tool_name = tool.name.strip()
         if not tool_name:
             continue
-        _upsert_tool_node(tx, tool_name, tool.category or "", tool.vendor or "", now)
+        _upsert_tool_node(
+            tx, tool_name,
+            effective_tool_category(tool.category or "", tool_name),
+            tool.vendor or "", now,
+        )
         tx.run(
             """
             MATCH (p:Position {id: $position_id}), (t:Tool {name: $tool_name})
@@ -392,6 +396,19 @@ def _create_evidence(tx, position_id: str, evidence: dict, now: str) -> str:
         now=now,
     )
     return evidence_id
+
+
+def effective_tool_category(llm_category: str, tool_name: str) -> str:
+    """Tool 节点分类：LLM 抽取类别优先，缺省回退技能白名单词表映射。
+
+    08-24 盘点：线上 2670 个 Tool 节点 category 全空串（LLM 极少输出该字段），
+    已分类的用自造词表与技能 23 类不对齐。回退复用 skill_whitelist.yaml 单一
+    词表（GitHub→工程协作 等交集命中即归类），未命中返回「未分类」哨兵，
+    与 Skill 口径一致。
+    """
+    if llm_category and llm_category.strip():
+        return llm_category.strip()
+    return skill_category(tool_name)
 
 
 def _upsert_tool_node(tx, tool_name: str, category: str, vendor: str, now: str) -> None:
