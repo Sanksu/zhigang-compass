@@ -138,7 +138,11 @@ def _warm_async(positions: list[PositionProfile]) -> None:
 
 
 async def _load_from_payload(redis, key: str) -> list[PositionProfile] | None:
-    """读载荷 → 校验 → 进程内缓存 + 预热。"""
+    """读载荷 → 校验 → 进程内缓存 + 预热。
+
+    空岗位列表视为失效（08-23 实证：部署窗口空图构建出 sha256("[]") 载荷，
+    7 天 TTL 令匹配持续 0 岗位）——走重建路径自愈，不再命中污染载荷。
+    """
     cached = _local_cache.get(key)
     if cached is not None:
         return cached
@@ -146,7 +150,7 @@ async def _load_from_payload(redis, key: str) -> list[PositionProfile] | None:
     if raw is None:
         return None
     positions = _parse_payload(raw)
-    if positions is None:
+    if not positions:
         _local_cache.pop(key, None)
         return None
     _local_cache[key] = positions
@@ -231,6 +235,12 @@ async def load_positions_shared(redis=None) -> list[PositionProfile]:
             from app.services.matching.loaders import _load_positions_uncached
 
             positions = await asyncio.to_thread(_load_positions_uncached)
+            if not positions:
+                # 空图/加载异常返回空：不发布共享缓存。发布后空载荷将按
+                # 图谱哈希被指针引用 7 天（08-23 部署窗口实证），数据到位后
+                # 匹配仍读空——仅返回本次结果，下次 miss 自然重建。
+                logger.warning("岗位画像加载结果为空，跳过共享缓存发布（防空载荷污染）")
+                return positions
             graph_rev = _positions_hash(positions)
             key = _PAYLOAD_PREFIX + graph_rev + ":" + weights_rev
             meta = {
