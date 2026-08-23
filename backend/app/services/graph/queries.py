@@ -154,54 +154,10 @@ def query_skill_ids(session, names: list[str]) -> dict[str, str]:
     return {rec["name"]: rec["id"] for rec in rows}
 
 
-def query_position_skills(session, id: str, necessity: str | None, status_filter: str) -> list[dict]:
-    """岗位技能（可按 necessity 过滤，线程池执行）。"""
-    query = f"""
-        MATCH (p:Position {{id: $id}})-[r:REQUIRES]->(s:Skill)
-        WHERE ({status_filter}) AND ($necessity IS NULL OR r.necessity = $necessity)
-        RETURN s.id AS skill_id, s.name AS skill_name,
-               r.necessity AS necessity, r.weight AS weight,
-               r.level AS level, r.source_count AS source_count,
-               s.category AS skill_category
-        ORDER BY r.weight DESC
-    """
-    rows = session.run(
-        query, id=id, necessity=necessity,
-        public_statuses=list(_PUBLIC_POSITION_STATUSES),
-    )
-    return [
-        {
-            "skill_id": rec["skill_id"],
-            "skill_name": rec.get("skill_name", rec["skill_id"]),
-            "necessity": rec.get("necessity", "must"),
-            "weight": rec.get("weight", 0.0),
-            "level": rec.get("level", "中级"),
-            "source_count": rec.get("source_count", 1),
-            "skill_category": rec.get("skill_category"),
-        }
-        for rec in rows
-    ]
-
-
 def query_all_skills(session) -> list[tuple[str, str]]:
     """全技能 (id, name)（线程池执行）。"""
     rows = session.run("MATCH (s:Skill) RETURN s.id AS id, s.name AS name")
     return [(rec["id"], rec.get("name", rec["id"])) for rec in rows]
-
-
-def query_skill_counts(session, skill_id: str, status_filter: str) -> dict:
-    """技能关联计数（岗位/证据，线程池执行）。"""
-    rec = session.run(
-        f"""
-        MATCH (s:Skill {{id: $skill_id}})
-        OPTIONAL MATCH (p:Position)-[r:REQUIRES]->(s)
-        OPTIONAL MATCH (s)-[:EVIDENCED_BY]->(e:Evidence)
-        WITH s, e, CASE WHEN {status_filter} THEN p ELSE null END AS visible_p
-        RETURN count(DISTINCT visible_p) AS positions_count, count(DISTINCT e) AS evidence_count
-        """,
-        skill_id=skill_id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-    ).single()
-    return dict(rec) if rec else {}
 
 
 def query_graph_counts(session) -> dict:

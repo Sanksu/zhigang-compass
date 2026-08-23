@@ -240,51 +240,6 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /api/v1/graph/position/{id}/skills:
-    get:
-      tags: [graph]
-      security: []
-      summary: 岗位技能列表
-      parameters:
-        - $ref: '#/components/parameters/Id'
-        - name: necessity
-          in: query
-          schema: { type: string, enum: [must, nice] }
-      responses:
-        '200':
-          description: 技能列表
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  code: { type: integer }
-                  msg: { type: string }
-                  data:
-                    $ref: '#/components/schemas/PositionSkillsData'
-                  trace_id: { type: string }
-
-  /api/v1/graph/skill/{id}:
-    get:
-      tags: [graph]
-      security: []
-      summary: 技能节点详情
-      parameters:
-        - $ref: '#/components/parameters/Id'
-      responses:
-        '200':
-          description: 技能详情
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  code: { type: integer }
-                  msg: { type: string }
-                  data:
-                    $ref: '#/components/schemas/SkillDetail'
-                  trace_id: { type: string }
-
   /api/v1/graph/skill/{id}/evidence:
     get:
       tags: [graph]
@@ -2359,16 +2314,6 @@ components:
           type: array
           items: { type: string }
           description: 岗位软素质（20 项白名单封闭集，聚合层按频次降序写回；与技术栈技能分离展示）
-
-    PositionSkillsData:
-      type: object
-      description: GET /graph/position/{id}/skills 响应 data
-      required: [position_id, skills]
-      properties:
-        position_id: { type: string }
-        skills:
-          type: array
-          items: { $ref: '#/components/schemas/PositionSkillItem' }
 
     SkillEvidenceItem:
       type: object

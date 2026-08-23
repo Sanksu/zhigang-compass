@@ -38,19 +38,9 @@ def query_skill_ids(driver, names) -> dict[str, str]:
         return queries.query_skill_ids(session, names)
 
 
-def query_position_skills(driver, id, necessity, status_filter) -> list[dict]:
-    with driver.session() as session:
-        return queries.query_position_skills(session, id, necessity, status_filter)
-
-
 def query_all_skills(driver) -> list[tuple[str, str]]:
     with driver.session() as session:
         return queries.query_all_skills(session)
-
-
-def query_skill_counts(driver, skill_id, status_filter) -> dict:
-    with driver.session() as session:
-        return queries.query_skill_counts(session, skill_id, status_filter)
 
 
 def query_graph_counts(driver) -> dict:
