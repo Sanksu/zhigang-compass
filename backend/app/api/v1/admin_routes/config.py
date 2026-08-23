@@ -72,6 +72,7 @@ def validate_providers(providers: list) -> str | None:
         name = (p.get("name") or "").strip()
         base_url = (p.get("base_url") or "").strip()
         model = (p.get("model") or "").strip()
+        api_key_env = (p.get("api_key_env") or "").strip()
         if not name:
             return f"第 {i + 1} 个 provider 缺少 name"
         if not re.match(r"^[A-Za-z0-9_-]+$", name):
@@ -83,6 +84,8 @@ def validate_providers(providers: list) -> str | None:
             return f"provider '{name}' 的 base_url 必须以 http(s):// 开头"
         if not model:
             return f"provider '{name}' 缺少 model"
+        if api_key_env and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", api_key_env):
+            return f"provider '{name}' 的 api_key_env 不是合法环境变量名"
         priority = p.get("priority")
         if not isinstance(priority, int) or priority < 1:
             return f"provider '{name}' 的 priority 必须为正整数"
@@ -123,7 +126,10 @@ def save_llm_config(path: Path, providers: list) -> dict:
         for p in providers:
             name = (p.get("name") or "").strip()
             api_key = (p.get("api_key") or "").strip()
-            if not api_key or "*" in api_key:
+            has_env = bool((p.get("api_key_env") or "").strip())
+            if "*" in api_key or (not api_key and not has_env):
+                # 掩码/留空且未配 env：保持原值；显式配了 env 则以 env 为源，
+                # 不再回捞旧明文（key 走 env 的迁移路径，负责人拍板 2026-08-23）
                 api_key = (old.get(name) or {}).get("api_key", "")
             entry = {
                 "name": name,
@@ -134,6 +140,10 @@ def save_llm_config(path: Path, providers: list) -> dict:
                 "supports_function_calling": bool(p.get("supports_function_calling", True)),
                 "enabled": bool(p.get("enabled", True)),
             }
+            # 密钥环境变量名（推荐方式：key 经 env 注入不落盘），非空才写
+            api_key_env = (p.get("api_key_env") or "").strip()
+            if api_key_env:
+                entry["api_key_env"] = api_key_env
             # provider 特定请求参数（如 deepseek 关闭思考模式 thinking.type=disabled），非 dict 忽略
             extra_body = p.get("extra_body")
             if isinstance(extra_body, dict) and extra_body:
@@ -160,7 +170,8 @@ class LlmProviderIn(BaseModel):
     priority: int = Field(ge=1, description="尝试优先级，1 最高，列表内唯一")
     enabled: bool = Field(default=True)
     supports_function_calling: bool = Field(default=True)
-    api_key: str = Field(default="", description="留空或含掩码保持原值；明文才更新")
+    api_key: str = Field(default="", description="留空或含掩码保持原值；明文才更新（推荐改用 api_key_env）")
+    api_key_env: str = Field(default="", description="密钥环境变量名：key 经 env 注入不落盘（推荐）")
     extra_body: dict[str, Any] | None = Field(default=None)
 
 
