@@ -36,7 +36,8 @@ class TestBackup:
         rows = [{"name": "教学", "sid": "sk_1"}, {"name": "辅导", "sid": "sk_2"}]
         path = _backup(rows, "teaching_skills")
         assert path.exists()
-        loaded = [json.loads(l) for l in path.open(encoding="utf-8")]
+        with path.open(encoding="utf-8") as backup_file:
+            loaded = [json.loads(line) for line in backup_file]
         assert loaded == rows
 
 

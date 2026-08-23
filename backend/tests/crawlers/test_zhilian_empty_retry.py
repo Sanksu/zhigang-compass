@@ -94,30 +94,30 @@ def test_max_empty_retries_explicit_value(monkeypatch):
 
 
 # ---- parse 空列表退避重试 ----
-@pytest.fixture(autouse=True)
-def _no_real_reactor(monkeypatch):
-    """避免测试内真实 reactor 延迟调度；改为记录待调度项。"""
-    requests = []
+@pytest.fixture
+def _scheduled_calls(monkeypatch):
+    """只为实际重试测试记录 _call_later 的完整调用参数。"""
+    calls = []
 
     class Nameable:
         pass
 
     def _fake_request(url, meta=None, **kwargs):
-        r = Nameable()
-        r.url = url
-        r.meta = dict(meta or {})
-        return r
+        request = Nameable()
+        request.url = url
+        request.meta = dict(meta or {})
+        return request
+
+    def _record_call_later(*args, **kwargs):
+        calls.append((args, kwargs))
 
     monkeypatch.setattr(zhilian_mod, "make_playwright_request", _fake_request)
-    # patch 真实 reactor 实例（spider 已改函数内局部导入，模块级 reactor 属性不复存在）
-    from twisted.internet import reactor
-
-    monkeypatch.setattr(reactor, "callLater", lambda d, fn, req, sp: requests.append((d, fn, req)))
-    yield requests
+    monkeypatch.setattr(zhilian_mod, "_call_later", _record_call_later)
+    return calls
 
 
-def test_empty_list_schedules_retry_and_increments(monkeypatch, _no_real_reactor):
-    """空列表时调用 reactor.callLater 调度重发，且计数递增。"""
+def test_empty_list_schedules_retry_and_increments(monkeypatch, _scheduled_calls):
+    """空列表通过惰性 _call_later 调度重发，且计数递增。"""
     spider = _make_spider()
     _patch_logger(spider, monkeypatch)
     response = _fake_response()
@@ -125,13 +125,33 @@ def test_empty_list_schedules_retry_and_increments(monkeypatch, _no_real_reactor
     result = list(spider.parse(response))
     assert result == []  # parse 空列表无 Item 产出
     assert spider._empty_retries_used == 1  # 计数递增
-    assert len(_no_real_reactor) == 1  # 调度了退避重发
-    delay, fn, req = _no_real_reactor[0]
+    assert len(_scheduled_calls) == 1
+
+    args, kwargs = _scheduled_calls[0]
+    delay, callback, request, scheduled_spider = args
+    assert kwargs == {}
     assert delay == zhilian_mod.backoff_delay(0)  # 首次退避 30s
-    assert req.url == response.url  # 重发同一搜索 URL
+    assert callback == spider.crawler.engine.schedule
+    assert request.url == response.url  # 重发同一搜索 URL
+    assert request.meta == {"keyword": "Python", "city": "北京", "page": 1}
+    assert scheduled_spider is spider
 
 
-def test_empty_list_exhausts_no_schedule(monkeypatch, _no_real_reactor):
+def test_empty_list_scheduler_exception_propagates(monkeypatch):
+    """惰性调度器失败时不吞异常，交由 Scrapy 正常处理。"""
+    spider = _make_spider()
+    _patch_logger(spider, monkeypatch)
+
+    def _raise_scheduler_error(*args, **kwargs):
+        raise RuntimeError("scheduler unavailable")
+
+    monkeypatch.setattr(zhilian_mod, "_call_later", _raise_scheduler_error)
+
+    with pytest.raises(RuntimeError, match="scheduler unavailable"):
+        list(spider.parse(_fake_response()))
+
+
+def test_empty_list_exhausts_no_schedule(monkeypatch):
     """用尽 max_empty_retries 后不再调度，走原跳过逻辑。"""
     spider = _make_spider(max_empty_retries=1)
     spider._empty_retries_used = 1  # 已用尽
@@ -140,14 +160,12 @@ def test_empty_list_exhausts_no_schedule(monkeypatch, _no_real_reactor):
     result = list(spider.parse(_fake_response()))
     assert result == []
     assert spider._empty_retries_used == 1  # 不再递增
-    assert len(_no_real_reactor) == 0  # 未调度
 
 
-def test_empty_list_disabled_no_schedule(monkeypatch, _no_real_reactor):
+def test_empty_list_disabled_no_schedule(monkeypatch):
     """max_empty_retries=0 关闭重试。"""
     spider = _make_spider(max_empty_retries=0)
     _patch_logger(spider, monkeypatch)
 
     result = list(spider.parse(_fake_response()))
     assert result == []
-    assert len(_no_real_reactor) == 0  # 未调度
