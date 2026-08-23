@@ -45,11 +45,24 @@ PLAYWRIGHT_BROWSER_TYPE = "chromium"
 PLAYWRIGHT_LAUNCH_OPTIONS = {
     "headless": True,
 }
-# 国际平台走系统代理（Clash/V2Ray），通过 HTTPS_PROXY 环境变量注入
-# 国内平台不设此变量即可直连
-_playwright_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
-if _playwright_proxy:
-    PLAYWRIGHT_LAUNCH_OPTIONS["proxy"] = {"server": _playwright_proxy}
+# 代理注入按 spider 门控（08-23 修复）：此前全局读 HTTPS_PROXY 注入，国内
+# Playwright 源（zhilian 智联每日主源）也硬依赖代理可达——Linux Docker 不解析
+# host.docker.internal 时智联全灭。scrapy-playwright 0.0.48 不读
+# request.meta["proxy"]，代理只能走启动参数；国际 Playwright 源（coursera）
+# 经自身 custom_settings 调 playwright_launch_options() 注入，国内源继承此处直连。
+
+
+def playwright_launch_options(env=None) -> dict:
+    """国际 Playwright 源的浏览器启动参数：env 代理非空时注入 proxy。
+
+    env 缺省取 os.environ；测试可传自定义映射。空值视为未设置（直连）。
+    """
+    env = os.environ if env is None else env
+    proxy = env.get("HTTPS_PROXY") or env.get("HTTP_PROXY")
+    options = {"headless": True}
+    if proxy:
+        options["proxy"] = {"server": proxy}
+    return options
 PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 60000  # 60s（SO/Coursera/edX 广告资源多，30s 易超时）
 
 # ── 中间件栈（UA 轮换 → 代理池 → 指数退避）──
