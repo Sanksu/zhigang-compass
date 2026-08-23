@@ -20,6 +20,8 @@ RAG 接地是"辅助确认"而非"硬门控"：未命中权威库/种子的 cand
 
 import asyncio
 import json
+import logging
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -53,6 +55,20 @@ RRF_K = 60
 _CACHE_TTL_SECONDS = 6 * 3600
 # 测试通过 monkeypatch 关闭（避免 fake db 用例命中真实缓存）
 _CACHE_ENABLED = True
+
+# ── 降级可观测性（第五轮审查 P1-5）──
+# 六条检索/接地降级路径曾全静默：语义路/Neo4j 全文/Redis/LLM 任一故障均无声
+# 降级，可在生产潜伏数周不被发现。此处累计各组件降级次数并打 warning，运维
+# 巡检：docker exec zhigang-api python -c "from app.services.discovery.grounding
+# import degradation_counts; print(dict(degradation_counts))"
+degradation_counts: Counter[str] = Counter()
+logger = logging.getLogger(__name__)
+
+
+def _record_degradation(component: str, error: Exception) -> None:
+    """记录一次降级（计数 + warning），不改变任何控制流。"""
+    degradation_counts[component] += 1
+    logger.warning("grounding 降级 [%s]: %s", component, error)
 
 
 def _norm(text: str) -> str:
@@ -164,7 +180,7 @@ def _escape_ilike(pattern: str) -> str:
     ILIKE 的 %/_ 是通配符，用户输入含 % 或 _ 会变成模糊匹配（如搜索 "100%" 
     匹配全部、"_" 匹配单字符）——词面检索应只做字面包含匹配。
     """
-    return pattern.replace("\\", "\\\\").replace("%", "\%").replace("_", "\_")
+    return pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 async def _pg_ilike(db: AsyncSession, pos: str, limit: int) -> list[dict]:
@@ -221,8 +237,9 @@ async def _neo4j_fulltext(neo4j, pos: str, limit: int) -> list[dict]:
         # 查询范围扩大（limit×3，至少 30）：cjk 分词下精确别名命中可能不在
         # 全文高分前列，扩大候选集供 _merge_hits 的精确加权拣出
         rows = await asyncio.to_thread(_query_fulltext, neo4j, q, max(limit * 3, 30))
-    except Exception:
+    except Exception as e:
         # Neo4j 未同步/不可达：降级 ILIKE，不阻塞接地
+        _record_degradation("neo4j_fulltext", e)
         return []
     return [
         _normalize_hit(
@@ -262,8 +279,9 @@ async def _expand_fulltext_query(db: AsyncSession, pos: str) -> str:
         if not extras:
             return pos
         return " OR ".join([pos, *extras])
-    except Exception:
+    except Exception as e:
         # 扩展查询失败回退岗位名本身（扩展是增强，失败不放大/不阻塞检索面）
+        _record_degradation("query_expansion", e)
         return pos
 
 
@@ -331,7 +349,9 @@ async def _cache_get(pos: str, limit: int) -> Optional[list[dict]]:
             return None
         hits = json.loads(raw)
         return hits if isinstance(hits, list) else None
-    except Exception:
+    except Exception as e:
+        # Redis 读失败按未命中处理（下次检索回源并再次记录）
+        _record_degradation("redis_cache_get", e)
         return None
 
 
@@ -346,8 +366,9 @@ async def _cache_set(pos: str, limit: int, hits: list[dict]) -> None:
             _cache_key(pos, limit), json.dumps(hits, ensure_ascii=False),
             ex=_CACHE_TTL_SECONDS,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        # Redis 写失败跳过缓存（检索结果仍正确返回）
+        _record_degradation("redis_cache_set", e)
 
 
 async def search_authoritative(
@@ -395,9 +416,9 @@ async def search_authoritative(
     semantic_hits = []
     try:
         semantic_hits = await _semantic_search(db, pos, embedder, limit)
-    except Exception:
+    except Exception as e:
         # 向量列缺失/扩展不可用/模型不可用 → 语义路降级为关键词路
-        pass
+        _record_degradation("semantic_search", e)
     keyword_hits = await _keyword_search(neo4j, db, pos, limit)
     merged = _merge_hits([*semantic_hits, *keyword_hits], limit)
     if use_cache:
@@ -505,8 +526,9 @@ async def _generate_definition(
                 return _DefinitionResult(
                     text=reference, source=source, nli_contradicted=True
                 )
-            except Exception:
-                # LLM 失败静默回退到原文，不阻塞接地判定
+            except Exception as e:
+                # LLM 失败回退到原文，不阻塞接地判定（计数+告警）
+                _record_degradation("llm_definition", e)
                 break
 
     # 回退：权威库定义原文（英文）或种子描述
