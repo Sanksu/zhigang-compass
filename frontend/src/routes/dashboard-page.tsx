@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { Activity, Database, GitBranch, Network, TrendingUp, Users } from 'lucide-react'
-import { CompassMark } from '@/components/layout/compass-mark'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -62,13 +61,13 @@ export function DashboardPage() {
   const [stats, setStats] = useState<StatItem[]>(EMPTY_STATS)
   const [sources, setSources] = useState<CrawlPlatform[]>([])
   const [activities, setActivities] = useState<ActivityItem[]>([])
-  const [graphNodes, setGraphNodes] = useState(0)
   const [sourceCount, setSourceCount] = useState(0)
   const [crawlAvailable, setCrawlAvailable] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     Promise.allSettled([
+      // panorama 供「图谱节点」指标卡（节点/边数）；签名区移除后仍是唯一数据源
       apiGet<components['schemas']['GraphViewData']>('/graph/panorama?limit=200&min_weight=0.3'),
       // 采集统计需 admin 权限：游客 401 时静默降级，不触发全局登出
       apiGet<components['schemas']['CrawlStatusData']>('/admin/crawl/status', { skipAuthRedirect: true }),
@@ -85,7 +84,6 @@ export function DashboardPage() {
       const versions = versionRes.status === 'fulfilled' ? versionRes.value.items : []
       const logs = auditRes.status === 'fulfilled' ? auditRes.value.items : []
 
-      setGraphNodes(graph?.nodes ?? 0)
       setCrawlAvailable(crawlRes.status === 'fulfilled')
       setSourceCount(platforms.length)
       setSources(platforms)
@@ -138,48 +136,6 @@ export function DashboardPage() {
         title="仪表盘"
         description="多源异构驱动的岗位能力动态演化与人岗匹配系统"
       />
-
-      {/* 签名区域 — 罗盘标记 + 系统状态（真实指标） */}
-      <Card className="mb-6 overflow-hidden">
-        <CardContent className="flex items-center gap-6 py-8">
-          <CompassMark size="lg" active className="shrink-0" />
-          <div className="space-y-1 flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold">智岗罗盘</h2>
-              <Badge variant="outline" className="font-mono">v0.1.0</Badge>
-              <Badge variant="outline" className="text-xs font-mono text-state-emerging border-state-emerging/30">
-                真实 API 已接入
-              </Badge>
-            </div>
-            <p className="text-sm text-ink-muted">
-              证据驱动的人才能力大脑 — 每条技能断言可追溯至原始 JD / 论文 / 社区信号
-            </p>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2 text-xs text-ink-faint">
-              <span className="flex items-center gap-1">
-                <span className="size-1.5 rounded-full bg-state-emerging" />
-                {crawlAvailable ? `采集管线 · ${sourceCount}/13 源有采集记录` : '采集统计 · 登录后查看'}
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="size-1.5 rounded-full bg-state-stable" />
-                图谱服务 · {graphNodes} 节点
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="size-1.5 rounded-full bg-state-candidate" />
-                匹配引擎 · 真实 recommend/compare
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="size-1.5 rounded-full bg-ink-faint" />
-                演化看板 · M4 已交付
-              </span>
-            </div>
-          </div>
-          <div className="hidden md:flex flex-col items-end gap-1 text-right">
-            <p className="text-xs text-ink-muted">数据来源</p>
-            <p className="text-sm font-mono text-ink">Postgres + Neo4j + Redis</p>
-            <p className="text-[10px] text-ink-faint">docker compose 5 服务</p>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* 关键指标卡片（真实数据） */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
