@@ -122,7 +122,17 @@ class ZhilianSpider(BaseSpider):
     name = "zhilian"
     platform = "zhilian"
 
+    # 入口保持 sou.zhaopin.com：www.zhaopin.com 的 robots.txt 已被 EdgeOne 验证页
+    # 拦截（Protego 解析出 DENY，2026-08 实证 robotstxt/forbidden），sou 域放行；
+    # 请求落地后 302 至新版 www.zhaopin.com/jobs（Playwright 导航内跳转，不在
+    # Scrapy robots 过滤范围），SSR positionList 提供岗位数据。
     SEARCH_URL = "https://sou.zhaopin.com/"
+
+    # 页面就绪信号（岗位数据统一从 SSR positionList 提取，见 parse）：
+    # 智联现分流两套搜索页——新版 www.zhaopin.com/jobs（.job-card）与
+    # sou 版 www.zhaopin.com/sou/jl489/kw.../p1（jobdetail 链接），
+    # 任一出现即视为就绪（2026-08 改版实证）。
+    LIST_SELECTOR = "[class*='job-card'], a[href*='jobdetail']"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -169,64 +179,47 @@ class ZhilianSpider(BaseSpider):
                 yield make_playwright_request(
                     url,
                     meta={"keyword": keyword, "city": city, "page": 1},
-                    selector=".joblist-box__item",
+                    selector=self.LIST_SELECTOR,
                     wait_timeout=15000,
                     scroll_times=1,
                     scroll_wait_ms=0,
                     headers=self._compliance_headers(),
                 )
 
-    def _extract_publish_time_map(self, response: Response) -> dict:
-        """从 SSR __INITIAL_STATE__ 提取 number → publishTime 映射。
+    def _extract_list_state(self, response: Response) -> tuple[list, dict, bool]:
+        """从 SSR __INITIAL_STATE__ 提取 positionList / number→publishTime / hasMore。
 
-        智联列表页 DOM 不渲染发布日期，但 SSR 数据含 publishTime 字段。
+        2026-08 改版后岗位数据直接随 SSR positionList 提供（含标题/公司/薪资/
+        经验/学历/技能标签/详情 URL/发布时间），DOM 卡片仅展示用，不再递归遍历
+        script 找 publishTime（旧版 sou.zhaopin.com 结构）。
         """
-        script_text = response.css("script:not([src])::text").getall()
-        publish_map = {}
-        for text in script_text:
-            if "__INITIAL_STATE__" not in text or "publishTime" not in text:
+        for text in response.css("script:not([src])::text").getall():
+            if "__INITIAL_STATE__" not in text:
                 continue
-            # __INITIAL_STATE__={...} 格式：用括号配平从第一个 { 提取完整 JSON 对象
-            # （H4 修复 08-21b：原贪婪正则 `\{.*\}` 在 script 内 JSON 后仍有其它 JS
-            # 时吞到文件尾导致 json 解析失败 → publish_map 恒空 → 全部 post_date 落空，
-            # 直接影响 history_days 截断与新鲜度口径）。括号配平同时跳过字符串内的
-            # 花括号，对嵌套对象也正确。
             data = _extract_initial_state(text)
             if data is None:
                 continue
-            # 遍历 jobList 提取 number → publishTime
-            self._walk_for_publish_time(data, publish_map)
-            break
-        return publish_map
-
-    def _walk_for_publish_time(self, obj, publish_map: dict):
-        """递归遍历 SSR JSON，提取 number 与 publishTime 的配对。"""
-        if isinstance(obj, dict):
-            number = obj.get("number")
-            publish_time = obj.get("publishTime")
-            if number and publish_time:
-                publish_map[number] = publish_time
-            for v in obj.values():
-                self._walk_for_publish_time(v, publish_map)
-        elif isinstance(obj, list):
-            for item in obj:
-                self._walk_for_publish_time(item, publish_map)
+            position_list = data.get("positionList") or []
+            publish_map = {
+                str(j.get("number")): (j.get("publishTime") or "")
+                for j in position_list
+                if j.get("number")
+            }
+            return position_list, publish_map, bool(data.get("hasMore"))
+        return [], {}, False
 
     def parse(self, response: Response):
         """解析搜索列表页，为每条岗位发出详情请求。
 
-        列表页仅有 title/company/salary/经验/学历/标签（详情页有验证码反爬，
-        不再批量直抓），正文（岗位职责/任职要求）在详情页 SSR __INITIAL_STATE__
-        内。对每条岗位发详情请求解析正文；详情失败（验证码拦截等）经 errback
-        降级为列表页摘要产出，不丢数据。
+        列表页仅有标题/公司/薪资/经验/学历/技能标签与详情 URL（SSR positionList，
+        2026-08 改版后 DOM 卡片不渲染完整字段；正文在详情页 SSR，列表页
+        jobDescription 仅摘要）。对每条岗位发详情请求解析正文；详情失败
+        （验证码拦截等）经 errback 降级为列表页摘要产出，不丢数据。
         """
-        # 提取 SSR 中的 number → publishTime 映射（DOM 不渲染发布日期）
-        publish_time_map = self._extract_publish_time_map(response)
+        position_list, publish_time_map, has_more = self._extract_list_state(response)
 
-        cards = response.css(".joblist-box__item")
-
-        if not cards:
-            # 页面级空列表退避重试（08-21c）：200 但无卡片 = 智联临时风控/跳验证页。
+        if not position_list:
+            # 页面级空列表退避重试（08-21c）：200 但无岗位数据 = 智联临时风控/跳验证页。
             # 未用尽重试额度时按 backoff_delay 延迟重发同一搜索 URL（reactor 调度、
             # 不阻塞事件循环）；用尽则记录并按原逻辑跳过。
             if self._max_empty_retries > 0 and self._empty_retries_used < self._max_empty_retries:
@@ -234,7 +227,7 @@ class ZhilianSpider(BaseSpider):
                 self._empty_retries_used += 1
                 delay = backoff_delay(retry_n)
                 self.logger.warning(
-                    f"[zhilian] 列表页无岗位卡片（kw={response.meta.get('keyword')} "
+                    f"[zhilian] 列表页无岗位数据（kw={response.meta.get('keyword')} "
                     f"页={response.meta.get('page')}），指数退避 {delay}s 后重试 "
                     f"（{self._empty_retries_used}/{self._max_empty_retries}）",
                 )
@@ -245,7 +238,7 @@ class ZhilianSpider(BaseSpider):
                         "city": response.meta.get("city"),
                         "page": response.meta.get("page", 1),
                     },
-                    selector=".joblist-box__item",
+                    selector=self.LIST_SELECTOR,
                     wait_timeout=15000,
                     scroll_times=1,
                     scroll_wait_ms=0,
@@ -257,39 +250,41 @@ class ZhilianSpider(BaseSpider):
                 _call_later(delay, self.crawler.engine.schedule, retry_request, self)
                 return
             self.logger.warning(
-                f"[zhilian] 列表页无岗位卡片（kw={response.meta.get('keyword')} 页={response.meta.get('page')}），"
+                f"[zhilian] 列表页无岗位数据（kw={response.meta.get('keyword')} 页={response.meta.get('page')}），"
                 f"页面标题: {response.css('title::text').get(default='')}"
             )
             return
 
         yield_count = 0
-        for card in cards:
-            title = card.css(".jobinfo__name::text").get(default="").strip()
-            company = card.css(".companyinfo__name::text").get(default="").strip()
-            salary = card.css(".jobinfo__salary::text").get(default="").strip()
+        for j in position_list:
+            title = (j.get("name") or "").strip()
+            number = str(j.get("number") or "")
+            if not title or not number:
+                continue
+            company = (j.get("companyName") or "").strip()
+            salary = (j.get("salary60") or j.get("salaryReal") or "").strip()
+            # 地点：工作城市 + 区县（DOM 卡片同源字段）
+            location = " ".join(
+                x for x in [j.get("workCity") or "", j.get("cityDistrict") or ""] if x
+            )
+            experience = (j.get("workingExp") or "").strip()
+            education = (j.get("education") or "").strip()
+            # 技能标签：SSR 为 {id,name,standard} 列表
+            tags = [t.get("name") for t in (j.get("jobSkillTags") or []) if t.get("name")]
 
-            # 地点/经验/学历在 .jobinfo__other-info-item 中
-            info_items = card.css(".jobinfo__other-info-item")
-            location = info_items[0].css("span::text").get(default="").strip() if len(info_items) > 0 else ""
-            experience = info_items[1].css("::text").get(default="").strip() if len(info_items) > 1 else ""
-            education = info_items[2].css("::text").get(default="").strip() if len(info_items) > 2 else ""
-
-            # 技术标签（FASTAPI / Flask 等）
-            tags = [t.strip() for t in card.css(".jobinfo__tag .joblist-box__item-tag::text").getall() if t.strip()]
-
-            detail_href = card.css(".jobinfo__name::attr(href)").get()
-            if not detail_href or not title:
+            detail_url = (j.get("positionUrl") or "").strip()
+            if not detail_url:
                 continue
             # 详情 URL 剥离追踪参数（refcode/srccode/preactionid）：
             # 智联 robots.txt 用 `Disallow: /*?*` 拒绝一切带 query 的请求
             # （Protego 匹配 path+query），scrapy ROBOTSTXT_OBEY 会直接丢弃，
             # 导致详情页全部走 errback 降级为列表页摘要、正文缺失。
-            clean_href = detail_href.split("?")[0]
+            clean_href = detail_url.split("?")[0]
             detail_url = response.urljoin(clean_href)
-            source_id = clean_href.rstrip("/").split("/")[-1].split(".")[0]
+            source_id = number
 
-            # 发布日期：从 SSR __INITIAL_STATE__ 提取（DOM 不渲染）
-            post_date = publish_time_map.get(source_id, "")
+            # 发布日期：SSR positionList 随条目提供（DOM 不渲染）
+            post_date = publish_time_map.get(number, "")
 
             # 列表页摘要：详情页解析失败时作为 raw_text 兜底（正文在详情页）
             raw_text = "\n".join([
@@ -323,23 +318,30 @@ class ZhilianSpider(BaseSpider):
             f"[zhilian] kw={response.meta.get('keyword')} city={response.meta.get('city')} "
             f"页={current_page} 产出 {yield_count} 条详情请求"
         )
-        if current_page < self._max_pages and not self._cutoff_reached(publish_time_map):
-            next_href = response.css(".next-page::attr(href), a.pageset[rel=next]::attr(href)").get()
-            if next_href:
-                next_url = response.urljoin(next_href)
-                yield make_playwright_request(
-                    next_url,
-                    meta={
-                        "keyword": response.meta["keyword"],
-                        "city": response.meta["city"],
-                        "page": current_page + 1,
-                    },
-                    selector=".joblist-box__item",
-                    wait_timeout=15000,
-                    scroll_times=1,
-                    scroll_wait_ms=0,
-                    headers=self._compliance_headers(),
-                )
+        if (
+            current_page < self._max_pages
+            and has_more
+            and not self._cutoff_reached(publish_time_map)
+        ):
+            # 新版翻页：SSR hasMore 驱动，pn 递增直构 URL（旧版 DOM 翻页链接已不存在）
+            city_code = ZHILIAN_CITY_CODES.get(response.meta.get("city", ""))
+            params = {"kw": response.meta.get("keyword", ""), "pn": current_page + 1}
+            if city_code:
+                params["jl"] = city_code
+            next_url = f"{self.SEARCH_URL}?{self.build_query(params)}"
+            yield make_playwright_request(
+                next_url,
+                meta={
+                    "keyword": response.meta["keyword"],
+                    "city": response.meta["city"],
+                    "page": current_page + 1,
+                },
+                selector=self.LIST_SELECTOR,
+                wait_timeout=15000,
+                scroll_times=1,
+                scroll_wait_ms=0,
+                headers=self._compliance_headers(),
+            )
 
     def _make_detail_request(self, url: str, job: dict):
         """构造详情页请求（普通 HTTP，SSR 已含正文，无需渲染）。"""

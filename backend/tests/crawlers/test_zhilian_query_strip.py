@@ -18,16 +18,18 @@ from scrapy.http import HtmlResponse, Request
 from crawlers.spiders import zhilian
 
 
-def _response(url: str = "https://sou.zhaopin.com/?jl=530&kw=Python&pn=1"):
-    """构造含一张卡片（href 带追踪参数）的列表页响应。"""
+def _response(url: str = "https://www.zhaopin.com/jobs?jl=530&kw=Python&pn=1"):
+    """构造含一条岗位（positionUrl 带追踪参数）的新版 SSR 列表页响应。
+
+    2026-08 改版：岗位数据在 __INITIAL_STATE__.positionList（DOM 卡片仅展示）。
+    """
     body = """
     <html>
       <body>
-        <div class="joblist-box__item">
-          <a class="jobinfo__name" href="https://www.zhaopin.com/jobdetail/CC123456.htm?refcode=4019&srccode=401903&preactionid=abc">Python 工程师</a>
-          <div class="jobinfo__salary">20-30K</div>
-          <span class="companyinfo__name">测试公司</span>
-        </div>
+        <div class="job-card">Python 工程师</div>
+        <script>
+        window.__INITIAL_STATE__={"positionList":[{"name":"Python 工程师","number":"CC123456","companyName":"测试公司","salary60":"20-30K","workingExp":"3-5年","education":"本科","workCity":"北京","cityDistrict":"海淀","jobSkillTags":[{"name":"Python"}],"positionUrl":"https://www.zhaopin.com/jobdetail/CC123456.htm?refcode=4019&srccode=401903&preactionid=abc","publishTime":"2026-08-23 01:09:29"}],"hasMore":false}
+        </script>
       </body>
     </html>
     """

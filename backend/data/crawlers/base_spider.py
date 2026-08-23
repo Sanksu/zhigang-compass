@@ -52,10 +52,18 @@ def make_playwright_request(
         if scroll_wait_ms > 0:
             methods.append(PageMethod("wait_for_timeout", scroll_wait_ms))
 
+    # playwright_context_kwargs.user_agent：headers 只作用于初始导航请求，
+    # 浏览器 context 的真实 UA 才是源站风控（EdgeOne 等）判定依据——默认
+    # HeadlessChrome UA 会被拦（08-23 zhilian 改版实测 selector 恒超时）
     return Request(
         url,
         callback=callback,
-        meta={"playwright": True, "playwright_page_methods": methods, **meta},
+        meta={
+            "playwright": True,
+            "playwright_page_methods": methods,
+            "playwright_context_kwargs": {"user_agent": _BROWSER_UA["User-Agent"]},
+            **meta,
+        },
         headers=_BROWSER_UA if headers is None else headers,
         dont_filter=True,
     )
