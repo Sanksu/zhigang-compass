@@ -41,6 +41,9 @@ DEFAULTS: dict = {
     "dict_guard_max_candidates": 20,         # 每类候选上限（控制每日 LLM 成本）
     # 岗位名 LLM 审查（幻觉防控第四道防线，方案评审稿）：默认关闭先实验后灰度
     "position_review_enabled": False,
+    # 技能分类 LLM 审查（LLM 驱动化 P1）：未分类技能灰度提议，默认关闭
+    "skill_category_review_enabled": False,
+    "skill_category_max_candidates": 20,
 }
 
 _VALIDATORS = {
@@ -58,6 +61,8 @@ _VALIDATORS = {
     "dict_guard_min_confidence": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0,
     "dict_guard_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
     "position_review_enabled": lambda v: isinstance(v, bool),
+    "skill_category_review_enabled": lambda v: isinstance(v, bool),
+    "skill_category_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
 }
 
 
