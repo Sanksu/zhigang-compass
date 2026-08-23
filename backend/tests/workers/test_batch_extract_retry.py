@@ -81,6 +81,8 @@ def _run(rows, extractions=None, import_jd_side_effect=None):
     """patch 数据库层 + LLM/入图服务后执行 batch_extract。"""
 
     class _FakeExtractor:
+        llm = None  # 与 JDExtractor 接口对齐（本文件场景不经过 LLM 全败检测）
+
         def extract_batch(self, texts, **kwargs):
             # 按 valid 行数返回抽取结果（与编排契约一致）
             return [extractions[i] for i in range(len(texts))] if extractions else []
