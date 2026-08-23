@@ -5,6 +5,17 @@
 
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
+### 2026-08-24
+- **图谱治理：dict-guard 积压提案批量裁决闭环**（线上 192.168.0.226）：79 条积压提案（08-21 起，置信度均低于自动档 0.8）全部处置——**69 批准**（43 技能停用词+同名节点清理 / 19 孤岛课程删除 / 6 低质 LEARNABLE_VIA 边（sim 0.209<0.30 门控）/ 1 孤岛伪岗位）、**5 驳回**（Full Stack Development 应归一至「全栈」而非停用、BPEL/数据策略/智能建筑/网络布线为真实概念）、**5 移除停用词留算法岗**（多线程/数据库/数据结构/消息队列/缓存 解禁改匹配语义，待张恺天）。执行走真实审批端点（DictChangeLog/AuditLog 全留痕）；图谱变化 Skill 4441→4399 / Course 1491→1472 / Position 139→138。**实证端点隐患**：`review_proposal` 图谱删除先于 PG 提交、非原子，中途失败产生半执行态——修复 PR 待提。报告归档 docs/reviews/图谱治理_20260824.md
+- **全流程九环节体检**（采集→入库→ETL→图谱→匹配→演化→API→运维）：整体健康——三 JD 主源日更、ETL cron 配置正确（05:00 daily + 日期幂等锁）、技能归一化覆盖 100%、graph 四视图亚秒、embedding 三表随 ETL 新鲜。修复：宿主 crontab 死项（`rtk_force_restart.sh` 残留每分钟调用）清理（备份保留）、无引用旧 latest 镜像回收。待观察：glassdoor 断流 3 天（今日 ETL 后复查）；孤岛课 528 = 采集入库但未建 LEARNABLE_VIA 边的活数据（补边优于删课）。报告归档 docs/reviews/全流程治理_20260824.md
+- **项目文档整理**：docs/README.md 索引全量重建（29 文件全覆盖，原仅 ~10）；技能字典自治守卫方案状态「实施中」→「已落地运行」（§9 分期表补真实 PR 号 #390/#392/#393/#394）；岗位名 LLM 审查方案状态同步（已实现·灰度默认关 #457/#460）；修复 test_cases.md 断链；新增 postmortem 003（dict-guard 审批非原子）
+
+### 2026-08-23
+- **LLM 驱动转向评估落档**（docs/reviews/LLM驱动转向评估_20260823.md）：结论 **No-Go**——治理/归一/关系生成尚不具备直接 LLM 化条件，先建黄金集与回归基线；新建私有仓库 Sanksu/zhigang-llm-driven 作主实验场（v0.1 架构反转方案已推 main），主仓库 hybrid 路线不受影响
+- **P0/P1 批次六连**（#454/#455/#456/#457/#458/#460）：LLM 调用审计（provider 链埋点 + JSONL 明细 + Redis 聚合）、异步延迟重试链、配置加固；岗位名 LLM 审查落地**灰度默认关**（第四道防线 `position_review_enabled=False`，#457）；LLM 统计日报接入 ETL 阶段 17（#458）；M1 实验脚本（#460）；技能分类灰度（#461，负责人豁免审查留痕）。#459 api_key_env CI 绿但待人工逐行审查未合
+- **闭环收敛四批**（#462~#467）：ETL 事实门禁（事实阶段失败不再发布快照/驱动演化）、诊断 GET 只读化 + PG 耐久回退、匹配结果 Redis 过期后从 match_results 回读回填、死表 skill_freq_observation drop（迁移 20260823_001）、embedding 三表增量回填（指纹游标消除每日全量重算）、课程/技能归一化增量化、/graph/panorama 物理删除统一至 /graph/view/{view_type}、死接口清理（/graph/position/{id}/skills 等）、演化信号同页双请求合并、技能归一化指纹 summary 改 JSON 字符串存取（Neo4j 属性不收 Map）
+- **局域网部署固化**（192.168.0.226）：develop 镜像滚动更新（GHCR），5 容器全 healthy；icourse163 实跑 19 条产出实证爬虫代理三层修复（#443/#444/#445）生效
+
 ### 2026-08-22
 - **工程设施 P0 收口（第五轮全流程评审建议当日执行）**：① `main` 分支补 GitHub 保护（1 人审 + 双 CI 必过 + enforce_admins + 禁 force-push/删除——此前 main 无任何服务端保护，「铁律二」仅靠自觉）；develop 保留 CI 门禁但关闭 force-push 与分支删除。② 在途分支收口：#417（dict-guard paged_ok 500）/#421（血缘含斜杠岗位名 + 证据链滚动）/#424（血缘缓存 + http 部署整页刷新丢登录）当日合并；Career Atlas 图谱工作台八连重构本地链（数据适配层/图层系统/节点档案/2D·3D 测绘语义）push 收口为 #428。③ 软技能部署两步补齐：21:58 重建镜像已含技能类别透出（容器内 grep 实证 6 处）+ `backfill_skill_category.py` 存量回填执行（补 4 节点，幂等复跑确认零待回填；3715 未分类为白名单外长尾属设计内）。④ 新增 `CD (images)` workflow：develop 合并自动构建并推送后端镜像至 GHCR（公开仓库免认证），作为「可部署性门禁」；DEPLOY.md 新增 §3.1「合并 ≠ 部署」部署清单（镜像重建/dist 重建/挂载前置检查/回填检查/显式 `-f` 排除 override），固化 08-22 两次部署滞后事故教训；⑤ 部署事故三连防：线上库被未合并分支的镜像迁移推进至 `20260822_001` 而 develop 缺该迁移文件，api 启动即 `Can't locate revision` 崩溃循环——#431 原样补入迁移文件修复（教训：任何 worktree 镜像直接对共享库跑 `alembic upgrade head` 都会把库推进到未合并状态，跨 worktree 部署须先确认迁移链已合入 develop）；同批 #430 修复 #421/#417 陈旧绿灯合并后的测试对账（lineage 进程缓存隔离 + dict_guard entity_type 夹具），Career Atlas #428 合并时恢复被重构挤掉的演化时间轴接线并保留 P0-1 选中清空
 - **dict-guard 横向扩展：岗位/课程脏节点接入 LLM 自动清理 + 手动巡检**（#423）：契约/模型/迁移新增 `entity_type`(skill/position/course) 与 `remove_node`/`remove_edge` 动作；服务层新增岗位零引用候选、完全孤立课程、课程脏边候选生成，硬门禁对岗位/技能白名单一票否决、分级「低影响 + 高置信」删除自动生效（先写 reports/ 备份再删，低置信/高影响转人工审核池，风险不对称）；worker 每日并行三实体候选 → LLM 裁决(Pydantic 强校验) → 分级 → 按 entity_type 分派清理（删脏岗位/删孤立脏课程/删课程脏边）；admin 提案与变更审计按 entity_type 过滤与分派、新增 `POST /admin/dict-guard/trigger` 手动巡检；前端字典守卫面板对象类型展示 + 手动巡检开关；部署 JWT 密钥改挂载注入（非 COPY 进镜像）修复重建后登录 500。后端 52 单测、前端 typecheck + 6 单测通过。算法红线：岗位/课程删除判定 prompt/门禁/分级阈值需算法岗复核
