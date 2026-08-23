@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -95,13 +96,15 @@ def _patch_norm_env(monkeypatch, state_single):
 
 
 def test_skill_norm_skips_on_matching_fingerprint(monkeypatch):
-    """指纹一致 → 直接返回上次 summary + skipped 标记，不加载 SBERT。"""
+    """指纹一致（summary 以 JSON 字符串存）→ 直接返回上次 summary + skipped 标记。"""
     names = ["Python", "机器学习"]
     fp = input_fingerprint(names, {"Go": "Golang"}, DISTANCE_THRESHOLD)
     etl_tasks = _patch_norm_env(
         monkeypatch,
-        {"fp": fp, "summary": {"skills": 2, "normalized": 5, "similar_pairs": 9,
-                               "skipped_standard": 0, "detail": "SIMILAR_TO 已回写（幂等）"}},
+        {"fp": fp, "summary_json": json.dumps(
+            {"skills": 2, "normalized": 5, "similar_pairs": 9,
+             "skipped_standard": 0, "detail": "SIMILAR_TO 已回写（幂等）"},
+            ensure_ascii=False)},
     )
 
     result = asyncio.run(etl_tasks.sync_skill_normalization({}))
@@ -112,7 +115,7 @@ def test_skill_norm_skips_on_matching_fingerprint(monkeypatch):
 
 def test_skill_norm_fingerprint_mismatch_proceeds(monkeypatch):
     """指纹不一致（技能集变化）→ 进入全量路径（此处以构造被触达为证）。"""
-    etl_tasks = _patch_norm_env(monkeypatch, {"fp": "stale", "summary": {"skills": 1}})
+    etl_tasks = _patch_norm_env(monkeypatch, {"fp": "stale", "summary_json": "{\"skills\": 1}"})
 
     with pytest.raises(AssertionError, match="不应被构造"):
         asyncio.run(etl_tasks.sync_skill_normalization({}))

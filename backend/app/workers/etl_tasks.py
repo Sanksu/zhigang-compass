@@ -13,6 +13,7 @@ identical to preserve ARQ job matching.
 """
 
 import asyncio
+import json
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable
@@ -1043,7 +1044,7 @@ async def sync_skill_normalization(ctx: dict, *, force: bool = False) -> dict:
             state = (
                 session.run(
                     "MATCH (m:SkillNormState {id: 'singleton'}) "
-                    "RETURN m.fingerprint AS fp, m.summary AS summary"
+                    "RETURN m.fingerprint AS fp, m.summary_json AS summary_json"
                 ).single()
             )
         names = [r["name"] for r in rows if r.get("name")]
@@ -1051,13 +1052,18 @@ async def sync_skill_normalization(ctx: dict, *, force: bool = False) -> dict:
             return {"skills": 0, "normalized": 0, "similar_pairs": 0, "detail": "图谱无 Skill 节点"}
 
         fingerprint = input_fingerprint(names, _default_alias(), DISTANCE_THRESHOLD)
+        stored_summary = (
+            state.get("summary_json") if state is not None else None
+        )
         if (
             not force
             and state is not None
             and state.get("fp") == fingerprint
-            and isinstance(state.get("summary"), dict)
+            and isinstance(stored_summary, str)
         ):
-            summary = dict(state["summary"])
+            # Neo4j 属性只允许原始类型——summary 以 JSON 字符串存取（08-23 实跑修复：
+            # map 属性触发 CypherTypeError，归一化写回整体失败）
+            summary = json.loads(stored_summary)
             summary["skipped"] = "input_unchanged"
             return summary
 
@@ -1126,11 +1132,13 @@ async def sync_skill_normalization(ctx: dict, *, force: bool = False) -> dict:
             session.run(
                 """
                 MERGE (m:SkillNormState {id: 'singleton'})
-                SET m.fingerprint = $fp, m.run_at = $at, m.summary = $summary
+                SET m.fingerprint = $fp, m.run_at = $at,
+                    m.summary_json = $summary_json
                 """,
                 fp=fingerprint,
                 at=datetime.now(timezone(timedelta(hours=8))).isoformat(),
-                summary=summary,
+                # Neo4j 属性只收原始类型——嵌套 Map 会 CypherTypeError（08-23 实跑）
+                summary_json=json.dumps(summary, ensure_ascii=False),
             )
         return summary
 
