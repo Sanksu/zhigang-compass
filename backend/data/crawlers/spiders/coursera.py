@@ -27,6 +27,7 @@ from scrapy.http import Response
 from crawlers.base_spider import make_playwright_request
 from crawlers.items import CourseItem
 from crawlers.settings import RATE_LIMIT
+from crawlers.scrapy_settings import playwright_launch_options
 
 
 COURSERA_BASE = "https://www.coursera.org"
@@ -51,6 +52,14 @@ class CourseraSpider(Spider):
 
     name = "coursera"
     platform = "coursera"
+
+    # 国际 Playwright 源：浏览器走代理（scrapy-playwright 0.0.48 不读
+    # request.meta["proxy"]，代理仅能经启动参数注入，08-23 从全局注入改为
+    # 按源门控——国内 Playwright 源 zhilian 直连不再被代理可达性绑架）。
+    # 代理 env 未设置/为空时直连（LAN 无代理部署尽力采集）
+    custom_settings = {
+        "PLAYWRIGHT_LAUNCH_OPTIONS": playwright_launch_options(),
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
