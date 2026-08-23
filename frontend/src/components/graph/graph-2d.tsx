@@ -143,11 +143,6 @@ function sizeOf(node: GraphNode, displayValue?: number): number {
   return Math.min(54, Math.max(14, scaled))
 }
 
-function weightToWidth(weight?: number): number {
-  if (!weight) return 1
-  return 0.5 + weight * 2.5
-}
-
 function isNarrowScreen(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
 }
@@ -632,6 +627,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     })
 
     // 关系分层：域隶属=细虚线，域间共享=弱弧线，must=海图蓝实线，nice=灰蓝虚线。
+    // 各类线宽统一固定值，不再按 weight 分粗细（演示口径：去粗细分级）。
     const nodeById = new Map(data.nodes.map((node) => [node.id, node]))
     const links = data.edges.map((edge, index) => {
       const source = nodeById.get(edge.source)
@@ -646,15 +642,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         : kind === 'shared'
           ? { width: 0.7, type: 'dashed', color: colors.edge, curveness: 0.22 }
           : kind === 'must'
-            ? { width: Math.max(0.7, weightToWidth(edge.weight) * 0.72), type: 'solid', color: colors.edgeStrong, curveness: 0 }
-            : { width: Math.max(0.5, weightToWidth(edge.weight) * 0.42), type: 'dashed', color: colors.edgeOptional, curveness: 0 }
+            ? { width: 1.5, type: 'solid', color: colors.edgeStrong, curveness: 0 }
+            : { width: 0.9, type: 'dashed', color: colors.edgeOptional, curveness: 0 }
       return {
         source: edge.source,
         target: edge.target,
         value: edge.weight,
         silent: dimmed,
         lineStyle: { ...baseStyle, opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : kind === 'membership' || kind === 'shared' ? 0.45 : GRAPH_OPACITY.edge[dark ? 'dark' : 'light'] + 0.18 },
-        emphasis: { lineStyle: { opacity: 0.95, width: weightToWidth(edge.weight) * 1.8, color: kind === 'nice' ? colors.edgeOptional : colors.edgeStrong } },
+        emphasis: { lineStyle: { opacity: 0.95, width: 2.4, color: kind === 'nice' ? colors.edgeOptional : colors.edgeStrong } },
       }
     })
 

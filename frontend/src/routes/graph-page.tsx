@@ -647,7 +647,7 @@ export function GraphPage() {
           大屏演示模式（focusMode）：画布 Card 转为 fixed 全屏（同树仅切类名，
           组件不重挂载、力导向布局不重算），详情栏转为右侧浮层 */}
       <div className={focusMode ? 'relative' : 'grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4'}>
-        <Card className={cn('relative overflow-hidden border-atlas-grid bg-atlas-surface', focusMode ? 'fixed inset-0 z-40' : 'h-[min(720px,calc(100dvh-210px))] min-h-[560px]')}>
+        <Card className={cn('relative overflow-hidden border-atlas-grid', focusMode ? 'fixed inset-0 z-40' : 'h-[min(720px,calc(100dvh-210px))] min-h-[560px]')}>
           {/* 画布操作组：重置视角 + 大屏演示切换（答辩/录屏用，Esc 退出） */}
           <div className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded-md border border-atlas-grid bg-canvas/90 p-1 shadow-md backdrop-blur-xl">
             <Button
