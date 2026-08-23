@@ -28,6 +28,7 @@ from app.workers.tasks import (
     evaluate_courses,
     generate_diagnosis,
     graph_health_check,
+    llm_stats_daily,
     load_courses,
     match_recommend,
     resume_parse,
@@ -132,6 +133,7 @@ class WorkerSettings:
         watch_signal_daily,
         snapshot_graph,
         dict_guard_daily,
+        llm_stats_daily,
         check_llm_providers_health,
         graph_health_check,
     ]

@@ -46,6 +46,9 @@ from app.workers.courses import (
 from app.workers.dict_guard import (
     dict_guard_daily as dict_guard_daily,
 )
+from app.workers.llm_stats import (
+    llm_stats_daily as llm_stats_daily,
+)
 from app.workers.diagnosis import generate_diagnosis as generate_diagnosis
 from app.workers.discovery import (
     _Provider as _Provider,

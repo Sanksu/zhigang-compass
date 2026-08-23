@@ -24,6 +24,7 @@ from app.workers.tasks import (
     dedup_simhash,
     detect_inflation,
     dict_guard_daily,
+    llm_stats_daily,
     discovery_auto_transition,
     discovery_daily,
     diversity_report,
@@ -68,6 +69,7 @@ EXPECTED_FUNCTIONS = [
     watch_signal_daily,
     snapshot_graph,
     dict_guard_daily,
+    llm_stats_daily,
     check_llm_providers_health,
     graph_health_check,
 ]
