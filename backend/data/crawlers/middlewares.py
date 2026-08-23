@@ -67,6 +67,13 @@ def retry_after_seconds(response) -> int | None:
         return None
 
 
+def _call_later(delay, callback, *args, **kwargs):
+    """惰性导入 reactor 并完整转发延迟调度调用。"""
+    from twisted.internet import reactor
+
+    return reactor.callLater(delay, callback, *args, **kwargs)
+
+
 class BackoffRetryMiddleware:
     """429/403 指数退避重试（设计文档 §4 失败处理）。
 
@@ -106,15 +113,11 @@ class BackoffRetryMiddleware:
             f"[退避] {spider.name} 收到 {response.status}，"
             f"{('遵循 Retry-After ' + str(retry_after) + 's') if retry_after is not None else f'指数退避 {delay}s'} 后重试 {request.url}"
         )
-        # 局部导入：模块级导入 reactor 会在 AsyncCrawlerProcess 构造期被
-        # SpiderLoader 预加载 spider（zhilian 等 import 本模块）时提前安装
-        # 默认 reactor，启动校验即崩
-        from twisted.internet import reactor
-
         try:
-            reactor.callLater(delay, self.crawler.engine.schedule, retry_request, spider)
+            _call_later(delay, self.crawler.engine.schedule, retry_request, spider)
         except Exception as e:
             spider.logger.error(f"[退避] 延迟重试调度失败: {e}")
+            return response
         # 返回 None：请求已由延迟调度接管，不触发内置 RetryMiddleware 的即时重试
         return None
 

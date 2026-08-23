@@ -340,9 +340,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     applyLodBand(1)
   }, [applyLodBand])
 
-  /** 解析节点当前布局坐标并换算目标 center（节点不存在或布局未就绪返回 null） */
-  const resolveCenter = useCallback(
-    (id: string, targetZoom: number): [number, number] | null => {
+  /** 解析节点当前布局坐标（节点不存在或布局未就绪返回 null） */
+  const resolveNodePoint = useCallback(
+    (id: string): [number, number] | null => {
       const chart = chartRef.current
       if (!chart) return null
       const node = data.nodes.find((n) => n.id === id)
@@ -354,27 +354,38 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       if (idx < 0) return null
       const layout = list.getItemLayout(idx)
       if (!layout || layout.length < 2) return null
-      const [x, y] = layout
-      const W = chart.getWidth()
-      const H = chart.getHeight()
-      return [0.5 - (x * targetZoom) / W, 0.5 - (y * targetZoom) / H]
+      return [layout[0], layout[1]]
     },
     [data.nodes],
   )
 
+  // view 坐标系的 center 语义是「缩放锚点的图坐标」（Number 按 pixel 解析，非画布
+  // 百分比），锚点会被平移到画布中心——聚焦节点须直接传节点布局坐标。历史坑：
+  // 曾按 screen = center%×W + zoom×point 语义换算出 0.x 量级小数传入，被
+  // parsePercent 当作 0.x 像素，镜头每次都锚到图原点外，全图被推出画布外。
   const focusNode = useCallback(
     (id: string) => {
       const chart = chartRef.current
       if (!chart) return
-      const center = resolveCenter(id, 2.4)
-      if (!center) return
+      const point = resolveNodePoint(id)
+      if (!point) return
       chart.setOption({
-        series: [{ zoom: 2.4, center, animationDurationUpdate: 0 }],
+        series: [{ zoom: 2.4, center: point, animationDurationUpdate: 0 }],
       })
       // 编程式聚焦放大也会改变 zoom 档位——同步 LOD（前端聚焦到 2.4 → 全量标签）
       applyLodBand(2.4)
+      // 定位目标常随岗位/域刚展开上画布，力导向仍在迭代、坐标持续漂移——
+      // 800ms 后按最新坐标校正一次镜头（漂移 ≤8px 视为已静止，不重设）
+      window.setTimeout(() => {
+        const settled = resolveNodePoint(id)
+        if (!settled || !chartRef.current) return
+        if (Math.abs(settled[0] - point[0]) <= 8 && Math.abs(settled[1] - point[1]) <= 8) return
+        chartRef.current.setOption({
+          series: [{ zoom: 2.4, center: settled, animationDurationUpdate: 0 }],
+        })
+      }, 800)
     },
-    [resolveCenter, applyLodBand],
+    [resolveNodePoint, applyLodBand],
   )
 
   // 演示书签飞行：带缓动的镜头过渡（全局 animation:false 需按次临时开启）。
@@ -387,15 +398,15 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       const tryFly = () => {
         const chart = chartRef.current
         if (!chart) return
-        const center = resolveCenter(id, targetZoom)
-        if (center) {
+        const point = resolveNodePoint(id)
+        if (point) {
           const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
           const duration = reduceMotion ? 0 : FLY_DURATION_MS
           chart.setOption({
             series: [
               {
                 zoom: targetZoom,
-                center,
+                center: point,
                 animation: duration > 0,
                 animationDurationUpdate: duration,
                 animationEasingUpdate: 'cubicInOut',
@@ -412,7 +423,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       }
       tryFly()
     },
-    [resolveCenter, applyLodBand],
+    [resolveNodePoint, applyLodBand],
   )
 
   useImperativeHandle(ref, () => ({ focusNode, resetView, flyTo }), [focusNode, resetView, flyTo])
@@ -740,33 +751,41 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand, evolutionMarks])
 
   // 新兴岗位脉冲光晕（视觉评审 P1-3）：emerging 节点 shadowBlur 呼吸动画
-  // （~1.6s 周期），让"哪里在变热"一眼可见。按 id 局部 setOption merge
-  // （节点数少，100ms 步进对 60fps 画布无压力）；主 option 重建会复位
-  // itemStyle，下一 tick 自动重涂。DAG 视图/无新兴节点时不启动。
-  const emergingNodes = useMemo(
-    () => data.nodes.filter((n) => n.type === 'position' && n.status === 'emerging'),
+  // （~1.6s 周期），让"哪里在变热"一眼可见。⚠️ 不可经
+  // setOption({series:[{data:[…]}]}) 做局部更新——data 数组在 merge 模式下是
+  // 全量替换语义，只传 emerging 节点会把其余节点全部判删、画布坍缩成几个点
+  // （"多次点击后图缩成一个小点"的根因）。改为直接改写节点图形元素的 shadow
+  // 属性（零 data diff、不重启力导向）；主 option 重建会生成新元素复位样式，
+  // 下一 tick 自动重涂。DAG 视图/无新兴节点时不启动。
+  const emergingIdx = useMemo(
+    () =>
+      data.nodes
+        .map((n, i) => (n.type === 'position' && n.status === 'emerging' ? i : -1))
+        .filter((i) => i >= 0),
     [data],
   )
   useEffect(() => {
-    if (viewMode !== 'graph' || emergingNodes.length === 0) return
+    if (viewMode !== 'graph' || emergingIdx.length === 0) return
     const dark = isDark()
     let phase = 0
     const timer = window.setInterval(() => {
       phase = (phase + 1) % 16
       const glow = 8 + ((Math.sin((phase / 16) * Math.PI * 2) + 1) / 2) * 16
-      chartRef.current?.setOption({
-        series: [
-          {
-            data: emergingNodes.map((n) => ({
-              id: n.id,
-              itemStyle: { shadowBlur: glow, shadowColor: colorOf(n, dark) },
-            })),
-          },
-        ],
-      })
+      const chart = chartRef.current
+      if (!chart) return
+      const list = (chart as unknown as { getModel(): EChartsModel }).getModel().getSeriesByIndex(0)?.getData()
+      if (!list) return
+      for (const idx of emergingIdx) {
+        const el = list.getItemGraphicEl(idx)
+        if (el) {
+          el.shadowBlur = glow
+          el.shadowColor = colorOf(data.nodes[idx], dark)
+          el.dirty()
+        }
+      }
     }, 100)
     return () => window.clearInterval(timer)
-  }, [emergingNodes, viewMode, themeVersion])
+  }, [emergingIdx, data, viewMode, themeVersion])
 
   useEffect(() => {
     const chart = chartRef.current
