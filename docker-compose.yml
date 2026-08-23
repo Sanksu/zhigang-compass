@@ -185,6 +185,10 @@ services:
       - ./backend/configs/skill_filters_dynamic.json:/app/configs/skill_filters_dynamic.json
       # 报告目录（08-18 压测核验）：与 api 同款挂载，容器重建不丢 freshness/diversity 报告
       - ./backend/reports:/app/reports
+      # SBERT 模型（与 api 同款挂载）：匹配引擎在 worker 侧执行（match_recommend），
+      # 镜像内无模型文件——不挂载时 SkillEmbedder 尝试从 HuggingFace 下载，
+      # 无代理环境（08-23 226 部署实证）直接卡死匹配任务
+      - ./backend/models:/app/models:ro
     depends_on:
       postgres:
         condition: service_healthy

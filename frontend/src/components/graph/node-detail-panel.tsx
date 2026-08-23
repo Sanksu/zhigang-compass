@@ -192,7 +192,7 @@ export function NodeDetailPanel({
   }, [node])
 
   return (
-    <div className="flex h-full w-full flex-col bg-atlas-surface">
+    <div className="flex h-full w-full flex-col">
       {!node ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-ink-faint">
           <Network className="size-10 opacity-40" />
@@ -224,7 +224,8 @@ export function NodeDetailPanel({
                       职能域 · {node.memberCount ?? 0} 岗
                     </Badge>
                   )}
-                  {node.type === 'skill' && node.level && (
+                  {/* level 0/“0”=未定级噪声，不渲染（数字 0 会以字面量漏出） */}
+                  {node.type === 'skill' && !!node.level && node.level !== '0' && (
                     <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                       {node.level}
                     </Badge>
@@ -385,7 +386,7 @@ export function NodeDetailPanel({
                           >
                             <span className="truncate text-xs font-medium text-ink">{s.skill_name}</span>
                             <span className="flex shrink-0 items-center gap-1.5">
-                              {s.level && <span className="text-[10px] text-ink-faint">{s.level}</span>}
+                              {!!s.level && s.level !== '0' && <span className="text-[10px] text-ink-faint">{s.level}</span>}
                               <span className="text-[10px] font-mono text-ink-faint">
                                 {(s.weight * 100).toFixed(0)}%
                               </span>

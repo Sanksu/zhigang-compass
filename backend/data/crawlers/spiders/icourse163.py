@@ -43,6 +43,11 @@ class Icourse163Spider(Spider):
     name = "icourse163"
     platform = "icourse163"
 
+    # 占位请求打本地不可达端口（与 boss/maimai 的 CDP 端点占位同构）：
+    # 不依赖外网/代理/DNS 可达，连接拒绝即刻进入 errback（NO_PROXY 已覆盖
+    # 127.0.0.1，代理环境也不会劫持该请求），由 errback 转发 parse 触发采集。
+    PLACEHOLDER_URL = "http://127.0.0.1:9/icourse163-placeholder"
+
     custom_settings = {
         "ROBOTSTXT_OBEY": False,
         "DOWNLOAD_DELAY": 0,
@@ -75,16 +80,18 @@ class Icourse163Spider(Spider):
             yield request
 
     def start_requests(self):
-        # 用 search.htm 作为占位请求（已知返回 200），触发 parse 调用采集脚本
+        # 占位请求仅用于触发 parse 调用采集脚本：打本地不可达端口（预期连接拒绝，
+        # dont_retry 跳过重试立即进 errback）。此前打真实 search.htm（已知 200），
+        # 依赖网络/代理可达——代理不可达时走 errback 死胡同，整轮 0 产出（08-23 修复）。
         yield Request(
-            "https://www.icourse163.org/search.htm?search=_placeholder",
+            self.PLACEHOLDER_URL,
             callback=self.parse,
-            meta={"keywords": self.keywords},
+            meta={"keywords": self.keywords, "dont_retry": True},
             dont_filter=True,
             errback=self._on_error,
         )
 
-    async def parse(self, response: Response):
+    def parse(self, response: Response):
         """通过 subprocess 调用独立采集脚本，解析 JSONL 输出并 yield Item。"""
         # 空关键词 = 平台默认课程流（08-16 用户决策）
         keywords = (response.meta.get("keywords") or self.keywords) or [""]
@@ -126,8 +133,13 @@ class Icourse163Spider(Spider):
             self.logger.info(f"[icourse163] 进度 {kw_idx + 1}/{keyword_total}: 关键词={keyword} 采集完成，共 {count} 条")
 
     def _on_error(self, failure):
-        """占位请求失败回调（正常情况，本地 1 端口不通）。"""
-        self.logger.info("占位请求触发（预期行为），开始调用采集脚本")
+        """占位请求失败回调（预期：本地端口不可达），转发 parse 执行采集。
+
+        parse 是生成器，必须 yield from 才能把产出的 Item 流转给引擎；
+        parse 仅依赖 response.meta（= request.meta），传 request 即可（与 boss 一致）。
+        """
+        self.logger.info("占位请求触发（本地端口不可达，预期行为），转发采集流程")
+        yield from self.parse(failure.request)
 
     def _make_item(self, data: dict) -> CourseItem:
         """把脚本输出的 dict 转为 CourseItem。"""
