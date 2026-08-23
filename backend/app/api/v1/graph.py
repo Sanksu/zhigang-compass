@@ -6,9 +6,7 @@ import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import Response
 
-from app.core.middleware import trace_id_var
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,18 +25,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 全景查询缓存 TTL（设计文档 10.3：panorama 短 TTL 30s）
-# 08-18 TTL 风暴治理：30s → 300s——到期风暴频率降 10 倍（P99 尾部 6.6s→基线水平）。
-# 交互路径（管理端岗位编辑/审核/归档）经 invalidate_graph_caches() 即时失效，
-# 日常 ETL 聚合与自动流转变更接受 ≤5min 展示滞后（T+1 版本视图不受影响）。
-PANORAMA_CACHE_TTL = 300
-
-# 全文检索缓存 TTL（同治理：60s → 300s）
+# 全文检索缓存 TTL（08-18 TTL 风暴治理：60s → 300s）
 SEARCH_CACHE_TTL = 300
 
-# 缓存穿透合并（08-15 压测扩容）：panorama TTL 失效瞬间 100 并发同时
-# miss 打 Neo4j（to_thread 线程池饱和 → P95 20s 长尾根因）。in-flight 表让
-# 同 key 并发请求只放行 1 个查库，其余 await 同一 future 读缓存。
+# 缓存穿透合并（08-15 压测扩容）：TTL 失效瞬间 100 并发同时 miss 打
+# Neo4j（to_thread 线程池饱和 → P95 20s 长尾根因）。in-flight 表让同 key
+# 并发请求只放行 1 个查库，其余 await 同一 future 读缓存。
 _inflight: dict[str, asyncio.Future] = {}
 
 # 节点详情缓存 TTL（设计文档 §11.3.5：position:{id} 5min，skill 同档）
@@ -64,35 +56,16 @@ async def _cache_set(key: str, data, ttl: int = _NODE_CACHE_TTL) -> None:
 
 
 async def invalidate_graph_caches() -> None:
-    """图数据变更后失效全部图谱热路径缓存（panorama/view/search/节点详情）。
+    """图数据变更后失效全部图谱热路径缓存（view/search/节点详情）。
 
     管理端岗位编辑与审核/归档状态变更后调用（交互路径即时可见）；
     日常 ETL 聚合与自动流转变更由 TTL（300s）兜底。scan 前缀 graph:*
-    覆盖 graph:panorama/graph:view/graph:search/graph:position/graph:skill
-    全部键；匹配岗位共享缓存（matching:*）不受影响。
+    覆盖 graph:view/graph:search/graph:position/graph:skill 全部键；
+    匹配岗位共享缓存（matching:*）不受影响。
     """
     keys = [key async for key in redis_client.scan_iter(match="graph:*")]
     if keys:
         await redis_client.delete(*keys)
-
-
-def _panorama_json_response(data_json: str) -> Response:
-    """panorama 预序列化响应（08-18 压测尾部治理）。
-
-    缓存存 data JSON 串；命中/风暴等待者直接拼接统一信封返回，跳过
-    json.loads + FastAPI 二次序列化（577KB 载荷 × 风暴窗口 100+ 等待者
-    的事件循环积压是 P99 尾部放大器之一）。
-    """
-    body = (
-        '{"code":0,"msg":"ok","data":' + data_json
-        + ',"trace_id":' + json.dumps(trace_id_var.get("")) + "}"
-    )
-    return Response(content=body, media_type="application/json")
-
-
-async def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int) -> tuple[dict, list]:
-    """panorama 热路径查询（P2：async Neo4j 驱动直查，替代 to_thread 包 sync IO）。"""
-    return await repository.query_panorama_async(async_neo4j_driver, scope, focus, min_weight, limit)
 
 
 async def _query_skill_positions(skill_id: str, status_filter: str) -> list[dict]:
@@ -161,52 +134,6 @@ async def _query_view_techstack(limit: int, status_filter: str) -> list:
 async def _query_view_main(limit: int, status_filter: str) -> list:
     """positionCenter/level/panorama 视图热路径查询（P2：async Neo4j 驱动直查）。"""
     return await repository.query_view_main_async(async_neo4j_driver, limit, status_filter)
-
-
-@router.get("/panorama")
-async def panorama(
-    limit: int = Query(default=100, ge=1, le=600),
-    min_weight: float = Query(default=0.3, ge=0.0, le=1.0),
-    focus: Optional[str] = Query(default=None),
-    user: Optional[dict] = Depends(get_optional_user),
-):
-    """图谱全景视图（匿名可读，300s Redis TTL 缓存 + 管理端写路径即时失效，见设计文档 10.3）。
-
-    focus 缺省时返回 Top-N 高频岗位 + 关联技能；指定 focus 时以该岗位为中心展开。
-    匿名/guest 仅返回 emerging/stable/declining 岗位（candidate 待审核不外宣），
-    携带有效 token 的 user/admin 返回全量。
-    """
-    scope = _position_scope(user)
-    cache_key = f"graph:panorama:{scope}:{limit}:{min_weight}:{focus or 'all'}"
-    cached = await redis_client.get(cache_key)
-    if cached is not None:
-        return _panorama_json_response(cached)
-
-    # single-flight：同 key 并发 miss 只放行一个查库，其余 await 同 future
-    inflight = _inflight.get(cache_key)
-    if inflight is not None:
-        return _panorama_json_response(await inflight)
-
-    future = asyncio.get_running_loop().create_future()
-    _inflight[cache_key] = future
-    try:
-        nodes, edges = await _query_panorama(scope, focus, min_weight, limit)
-
-        data = {
-            "nodes": list(nodes.values()),
-            "edges": edges,
-            "stats": {"nodes": len(nodes), "edges": len(edges),
-                      **await _query_graph_counts()},
-        }
-        cached_str = json.dumps(data, ensure_ascii=False)
-        await redis_client.set(cache_key, cached_str, ex=PANORAMA_CACHE_TTL)
-        future.set_result(cached_str)
-        return _panorama_json_response(cached_str)
-    except Exception as exc:
-        future.set_exception(exc)
-        raise
-    finally:
-        _inflight.pop(cache_key, None)
 
 
 @router.get("/skill/{skill_id}/positions")

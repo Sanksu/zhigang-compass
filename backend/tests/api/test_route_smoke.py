@@ -1,9 +1,8 @@
 """路由级冒烟测试（08-15 审查 H2：路由测试缺口闭环起步）。
 
-背景：panorama 装饰器错位回归（08-14 重构把 @router.get 错挂内部函数
-_query_panorama——scope 变必填 Query，生产 8290 个 422）在 105 个
-graph 测试全绿下溜进 develop——既有测试直调函数绕过路由表，装饰器
-错位测不出来。本文件做两件事：
+背景：08-14 装饰器错位回归（@router.get 错挂内部查询函数——参数变必填，
+生产 8290 个 422）在 105 个 graph 测试全绿下溜进 develop——既有测试直调
+函数绕过路由表，装饰器错位测不出来。本文件做两件事：
 
 1. 静态挂载检查：递归收集全部路由（Starlette 1.3 惰性 _IncludedRouter
    顶层不展开，经 original_router 展开），断言路径唯一、端点不绑定
@@ -12,7 +11,6 @@ graph 测试全绿下溜进 develop——既有测试直调函数绕过路由表
    代表性匿名端点真实挂载且响应结构符合契约（不走外部服务，CI 可跑）。
 """
 
-import asyncio
 from typing import Iterator
 
 import httpx
@@ -100,50 +98,6 @@ def test_no_route_bound_to_internal_helper():
     assert not bad, f"路由绑定到内部 helper（装饰器错位形态）: {bad}"
 
 
-def test_panorama_bound_to_async_endpoint():
-    """panorama 路由绑定到 async 端点（历史回归点专项）。"""
-    from app.api.v1 import graph as graph_mod
-
-    targets = [r for p, r in _all_routes() if p == "/api/v1/graph/panorama"]
-    assert targets, "panorama 路由未挂载"
-    ep = targets[0].endpoint
-    assert ep is graph_mod.panorama, f"panorama 绑定到 {getattr(ep, '__name__', ep)}，应为 graph.panorama"
-    assert asyncio.iscoroutinefunction(ep), "panorama 端点应为 async 函数"
-
-
-@pytest.mark.asyncio
-async def test_panorama_smoke_mocked(monkeypatch):
-    """panorama 端点冒烟：全 mock 下 200 + {nodes, edges, stats} 契约结构。"""
-    from app.api.v1 import graph as graph_mod
-    from app.core import middleware as middleware_mod
-
-    async def _mock_panorama(scope, focus, min_weight, limit):
-        return (
-            {"pos_1": {"id": "pos_1", "name": "测试岗位", "type": "position", "status": "stable"}},
-            [{"source": "pos_1", "target": "sk_1", "weight": 0.9, "necessity": "must", "level": "中级"}],
-        )
-
-    async def _mock_graph_counts():
-        return {"total_nodes": 2, "total_edges": 1}
-
-    fake_redis = _FakeRedis()
-    monkeypatch.setattr(graph_mod, "redis_client", fake_redis)
-    monkeypatch.setattr(middleware_mod, "redis_client", fake_redis)
-    monkeypatch.setattr(graph_mod, "_query_panorama", _mock_panorama)
-    monkeypatch.setattr(graph_mod, "_query_graph_counts", _mock_graph_counts)
-
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/v1/graph/panorama")
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["code"] == 0
-    assert body["data"]["nodes"][0]["id"] == "pos_1"
-    assert body["data"]["edges"][0]["source"] == "pos_1"
-    assert body["data"]["stats"]["total_nodes"] == 2
-    assert fake_redis.set_calls[0] == ("rate:127.0.0.1:graph", 1, True, 60)
-
-
 @pytest.mark.asyncio
 async def test_skill_positions_smoke_mocked(monkeypatch):
     """skill/{id}/positions 冒烟：匿名可见性过滤不破坏响应结构。"""
@@ -179,7 +133,7 @@ async def test_graph_view_smoke_mocked(monkeypatch):
     async def _mock_view_main(limit, status_filter):
         return [
             {"p": {"id": "pos_1", "name": "测试岗位", "status": "stable"},
-             "s": {"id": "sk_1", "name": "测试技能"},
+             "s": {"id": "sk_1", "name": "测试技能", "category": "软技能"},
              "r": {"weight": 0.8, "necessity": "must", "level": "中级"}},
         ]
 
@@ -199,31 +153,10 @@ async def test_graph_view_smoke_mocked(monkeypatch):
     body = resp.json()
     assert body["data"]["view_type"] == "level"
     assert body["data"]["nodes"][0]["id"] == "pos_1"
+    # skill_category 透传（软技能粉色渲染数据来源，原 panorama 用例迁移至此）
+    skill = next(n for n in body["data"]["nodes"] if n["type"] == "skill")
+    assert skill["skill_category"] == "软技能"
     assert fake_redis.set_calls[0] == ("rate:127.0.0.1:graph", 1, True, 60)
-
-
-def test_panorama_hotpath_no_to_thread_for_neo4j():
-    """P2 回归：panorama 热路径不再以 asyncio.to_thread 包 Neo4j 查询。
-
-    源码级断言（路由表探测不到的形态）：handler 体内 await _query_panorama /
-    _query_graph_counts，且不再出现 to_thread(_query_panorama /
-    to_thread(_query_graph_counts)。包装层应为 async 且经由 async_neo4j_driver
-    （database.py 新驱动）直查。
-    """
-    import inspect
-
-    from app.api.v1 import graph as graph_mod
-
-    src = inspect.getsource(graph_mod.panorama)
-    assert "await _query_panorama(" in src, "panorama handler 应 await _query_panorama"
-    assert "await _query_graph_counts()" in src, "panorama handler 应 await _query_graph_counts"
-    assert "to_thread(_query_panorama" not in src, "panorama 不再 to_thread 包 panorama 查询"
-    assert "to_thread(_query_graph_counts" not in src, "panorama 不再 to_thread 包 graph_counts"
-
-    wrapper_src = inspect.getsource(graph_mod._query_panorama)
-    assert wrapper_src.lstrip().startswith("async def"), "_query_panorama 应为 async 包装"
-    assert "async_neo4j_driver" in wrapper_src, "_query_panorama 应使用 async_neo4j_driver"
-    assert "asyncio.to_thread" not in wrapper_src, "_query_panorama 内不应再 to_thread"
 
 
 def test_hotspot_wrappers_use_async_driver():

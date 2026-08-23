@@ -396,42 +396,6 @@ paths:
                     $ref: '#/components/schemas/SkillSimilarData'
                   trace_id: { type: string }
 
-  /api/v1/graph/panorama:
-    get:
-      tags: [graph]
-      security: []
-      deprecated: true
-      summary: 全景视图（已弃用——统一迁移至 /graph/view/panorama）
-      description: >
-        已弃用（08-23 闭环收敛）：前端图谱页/仪表盘已统一消费
-        /api/v1/graph/view/{view_type}。本端点因 focus（岗位中心展开）与
-        min_weight 参数暂无 view 端点等价物而保留，待语义迁移后移除。
-        新消费方禁止接入本端点。
-      parameters:
-        - name: limit
-          in: query
-          schema: { type: integer, default: 100, maximum: 600 }
-        - name: min_weight
-          in: query
-          schema: { type: number, default: 0.3, minimum: 0, maximum: 1 }
-        - name: focus
-          in: query
-          schema: { type: string }
-          description: 以某岗位为中心展开
-      responses:
-        '200':
-          description: 全景图数据
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiResponse'
-                properties:
-                  data:
-                    properties:
-                      nodes: { type: array, items: { type: object } }
-                      edges: { type: array, items: { type: object } }
-                      stats: { type: object }
-
   /api/v1/graph/algorithms/pagerank:
     get:
       tags: [graph]

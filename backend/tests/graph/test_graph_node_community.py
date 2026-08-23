@@ -79,31 +79,6 @@ class _FakeDriver:
         return _FakeSessionCtx(_FakeSession(self._records))
 
 
-class TestPanoramaCommunityId:
-    @pytest.mark.asyncio
-    async def test_panorama_nodes_include_community_id(self):
-        records = [
-            {
-                "p": FakeNode(id="p1", name="Java 后端", status="active", community_id="0"),
-                "s": FakeNode(id="s1", name="Spring", community_id="0"),
-                "r": FakeNode(weight=0.8, necessity="must", level="中级"),
-            },
-            {
-                "p": FakeNode(id="p2", name="算法工程师", status="active", community_id="1"),
-                "s": FakeNode(id="s2", name="PyTorch", community_id="1"),
-                "r": FakeNode(weight=0.4, necessity="nice", level="中级"),
-            },
-        ]
-        with patch.object(graph_api, "async_neo4j_driver", _FakeDriver(records)):
-            nodes, edges = await graph_api._query_panorama("all", None, 0.3, 10)
-
-        assert len(nodes) == 4
-        for n in nodes.values():
-            assert "communityId" in n
-        assert nodes["p1"]["communityId"] == "0"
-        assert nodes["s2"]["communityId"] == "1"
-
-
 class TestViewMainCommunityId:
     @pytest.mark.asyncio
     async def test_view_main_records_include_community_id(self):

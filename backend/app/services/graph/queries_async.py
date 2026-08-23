@@ -1,7 +1,7 @@
 """图谱会话级异步 Neo4j 查询函数（P2 热路径 async 驱动迁移产物）。
 
 与 queries.py（sync）一一对应的 async 变体，供 graph API 热路径
-（panorama / skill_positions / fulltext_search / graph_counts / view）
+（skill_positions / fulltext_search / graph_counts / view）
 使用——改走 async_neo4j_driver 直查，不再以 asyncio.to_thread 包同步 IO。
 
 迁移约束：Cypher 文本 / 状态过滤子句 / 分页（SKIP/LIMIT）/ Redis-key 与
@@ -9,85 +9,15 @@ TTL 语义 / 结果结构与 sync 版本完全一致，仅把 session.run 改 aw
 记录迭代改 async for、single() 改 await。查询逻辑本身（status-clause、
 communityId 字段等）与 HEAD 同步版本逐字相同。
 
-性能约束（08-18 压测对比发现）：panorama 全图查询返回数千行，**记录到
-dict 的映射是 CPU 密集**——若在协程内同步映射会阻塞 API 事件循环（冷查询
-3.2s 期间缓存命中请求全被堵住，P99 长尾放大）。因此大结果集查询
-（panorama）改为：await 物化记录（网络等待，不占事件循环）→ 映射放
-asyncio.to_thread；小结果集查询保持协程内映射。
+性能约束（08-18 压测对比发现，源自已删除的 panorama 全图查询）：大结果集
+**记录到 dict 的映射是 CPU 密集**——协程内同步映射会阻塞 API 事件循环。
+大结果集查询应 await 物化记录（网络等待）后把映射放 asyncio.to_thread。
 """
 
-import asyncio
 
 from app.services.graph.visibility import (
     _PUBLIC_POSITION_STATUSES,
-    _status_clause,
 )
-
-
-async def query_panorama(session, scope: str, focus: str | None, min_weight: float, limit: int) -> tuple[dict, list]:
-    """panorama 异步查询（focus 展开分支 + 状态过滤子句，与 sync 一致）。
-
-    映射放线程池：全图结果数千行，协程内映射会阻塞事件循环（压测根因）。
-    """
-    status_filter = _status_clause(scope)
-    if focus:
-        rows = await session.run(
-            f"""
-            MATCH (p:Position {{id: $focus}})-[r:REQUIRES]->(s:Skill)
-            WHERE {status_filter} AND r.weight >= $min_weight
-            RETURN p, s, r
-            """,
-            focus=focus, min_weight=min_weight, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        )
-    else:
-        rows = await session.run(
-            f"""
-            MATCH (p:Position)
-            WHERE {status_filter}
-            WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
-            MATCH (p)-[r:REQUIRES]->(s:Skill)
-            WHERE r.weight >= $min_weight
-            RETURN p, s, r
-            """,
-            limit=limit, min_weight=min_weight, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        )
-    # 注意：async driver 的 data() 会把 Node 反序列化为 dict、Relationship 反序列化
-    # 为 tuple（丢实体类型），必须用 fetch() 物化 Record（保留 Node/Relationship）
-    records = await rows.fetch(100000)
-
-    def _map(records) -> tuple[dict, list]:
-        nodes: dict[str, dict] = {}
-        edges: list[dict] = []
-        for record in records:
-            p, s, r = record["p"], record["s"], record["r"]
-            p_id = p.get("id", "")
-            s_id = s.get("id", "")
-            nodes.setdefault(p_id, {
-                "id": p_id,
-                "name": p.get("name", p_id),
-                "type": "position",
-                "status": p.get("status", "active"),
-                "communityId": p.get("community_id"),
-                "domain_id": p.get("domain_id"),
-                "domain_name": p.get("domain_name"),
-            })
-            nodes.setdefault(s_id, {
-                "id": s_id,
-                "name": s.get("name", s_id),
-                "type": "skill",
-                "communityId": s.get("community_id"),
-                "skill_category": s.get("category"),
-            })
-            edges.append({
-                "source": p_id,
-                "target": s_id,
-                "weight": r.get("weight", 0.0),
-                "necessity": r.get("necessity", "must"),
-                "level": r.get("level", "中级"),
-            })
-        return nodes, edges
-
-    return await asyncio.to_thread(_map, records)
 
 
 async def query_skill_positions(session, skill_id: str, status_filter: str) -> list[dict]:

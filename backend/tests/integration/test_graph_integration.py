@@ -36,7 +36,7 @@ class TestGraph:
 
         if not auth_headers:
             pytest.skip("admin 登录失败（库已初始化且密码非默认），跳过认证用例")
-        r = client.get("/api/v1/graph/panorama", params={"limit": 50}, headers=auth_headers)
+        r = client.get("/api/v1/graph/view/panorama", params={"limit": 50}, headers=auth_headers)
         assert r.status_code == 200
         data = r.json()["data"]
         assert data["stats"]["nodes"] > 0
@@ -48,7 +48,7 @@ class TestGraph:
         构造验证：guest 返回的 position 节点 status 必须全部 ∈ 公开状态集
         （#218 后 active 为常态公开，仅 candidate 待审核不外宣）。
         """
-        r = client.get("/api/v1/graph/panorama", params={"limit": 600})
+        r = client.get("/api/v1/graph/view/panorama", params={"limit": 600})
         assert r.status_code == 200
         data = r.json()["data"]
         visible = {"active", "emerging", "stable", "declining"}
@@ -69,7 +69,7 @@ class TestGraph:
 
         if not auth_headers:
             pytest.skip("admin 登录失败（库已初始化且密码非默认），跳过认证用例")
-        pano = client.get("/api/v1/graph/panorama", params={"limit": 600}, headers=auth_headers).json()["data"]
+        pano = client.get("/api/v1/graph/view/panorama", params={"limit": 600}, headers=auth_headers).json()["data"]
         candidate = next(
             (n["id"] for n in pano["nodes"] if n["type"] == "position" and n.get("status") == "candidate"),
             None,
@@ -97,7 +97,7 @@ class TestGraph:
 
         if not auth_headers:
             pytest.skip("admin 登录失败（库已初始化且密码非默认），跳过认证用例")
-        pano = client.get("/api/v1/graph/panorama", params={"limit": 100}, headers=auth_headers).json()["data"]
+        pano = client.get("/api/v1/graph/view/panorama", params={"limit": 100}, headers=auth_headers).json()["data"]
         skill_id = next(
             (n["id"] for n in pano["nodes"] if n["type"] == "skill"), None
         )
@@ -117,7 +117,7 @@ class TestGraph:
 
         if not auth_headers:
             pytest.skip("admin 登录失败（库已初始化且密码非默认），跳过认证用例")
-        pano = client.get("/api/v1/graph/panorama", params={"limit": 100}, headers=auth_headers).json()["data"]
+        pano = client.get("/api/v1/graph/view/panorama", params={"limit": 100}, headers=auth_headers).json()["data"]
         skill_id = next(
             (n["id"] for n in pano["nodes"] if n["type"] == "skill"), None
         )
