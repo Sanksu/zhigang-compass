@@ -185,8 +185,17 @@ def test_skill_coverage_english_mapping():
 
 
 def test_skill_coverage_unmapped_english():
-    """未映射英文技能保守不命中（宁缺毋滥）。"""
-    assert skill_coverage(["Amazon Redshift", "AWS Kinesis"]) == 0.0
+    """未映射英文技能保守不命中（宁缺毋滥）。
+
+    样本须不在现行白名单——08-24 扩容后原样本 Amazon Redshift/AWS Kinesis
+    已成合法白名单条目（命中=正确行为），换用域外长尾词保持「未映射」语义；
+    前置断言让未来扩容再撞样本时在此处显式报错提示换词。
+    """
+    samples = ["Kaseya VSA", "Zoho Campaigns"]
+    from app.services.extraction.dictionary import SKILL_WHITELIST
+
+    assert not any(s in SKILL_WHITELIST for s in samples), "夹具已入白名单，请更换样本"
+    assert skill_coverage(samples) == 0.0
 
 
 def test_skill_coverage_mixed():
