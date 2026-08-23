@@ -142,8 +142,12 @@ services:
       # host.docker.internal 指向宿主机 Clash（否则国际源连接被拒，
       # 实测 arxiv/github/stackoverflow 产出 0 条）；宿主机显式设置
       # HTTPS_PROXY 时优先（可覆盖）。
-      HTTPS_PROXY: ${HTTPS_PROXY:-http://host.docker.internal:7890}
-      HTTP_PROXY: ${HTTP_PROXY:-http://host.docker.internal:7890}
+      # 08-23 修复：`:-` 对空值也回退默认——LAN/无 Clash 部署无法经 .env
+      # 关闭代理（Linux Docker 不解析 host.docker.internal → 全部请求
+      # DNS 失败，226 实证）。改用 `-`（仅未设置时取默认）：.env 写
+      # `HTTPS_PROXY=`（空值）即关闭，国内源直连、国际源尽力直连。
+      HTTPS_PROXY: ${HTTPS_PROXY-http://host.docker.internal:7890}
+      HTTP_PROXY: ${HTTP_PROXY-http://host.docker.internal:7890}
       # 08-16 修复：CDP 就绪探测（urllib 访问 127.0.0.1:922x）必须绕过代理——
       # 未设 NO_PROXY 时探测被路由到宿主机 Clash（CONNECT 宿主机自身端口）返回 502，
       # ensure_cdp_chrome 恒失败 → maimai/boss/glassdoor 等 CDP 爬虫全部 0 产出
@@ -151,8 +155,9 @@ services:
       no_proxy: "127.0.0.1,localhost"
       # 容器无显示服务器：CDP 浏览器以无头模式运行（本地桌面保持有头以完成登录/验证）
       CDP_HEADLESS: "1"
-      # CDP 浏览器代理（glassdoor 等国际源）：容器内经 host.docker.internal 指向宿主机 Clash
-      CDP_PROXY: http://host.docker.internal:7890
+      # CDP 浏览器代理（glassdoor 等国际源）：容器内经 host.docker.internal 指向宿主机 Clash；
+      # `.env` 置空（CDP_PROXY=）即关闭——setup_boss_chrome 仅非空时注入 --proxy-server
+      CDP_PROXY: ${CDP_PROXY-http://host.docker.internal:7890}
       # boss 登录态文件（宿主机经 export-cookies 导出；采集从文件读 cookies，无浏览器依赖）
       BOSS_COOKIES_FILE: /home/app/.zhigang-compass/boss-cookies.json
       # 可选 GitHub API token（提升无 token 的 10 req/min 按 IP 限流配额，消除二次限制）；
@@ -161,6 +166,9 @@ services:
     volumes:
       # JWT 密钥（与 api 同款挂载，对称校验/续签任务用）
       - ./backend/keys:/app/keys
+      # SBERT 模型（与 api 同款挂载）：worker 的匹配/嵌入链路需加载模型——
+      # 无挂载时容器层无模型，无代理环境从 HuggingFace 下载挂起（08-23 226 实证）
+      - ./backend/models:/app/models:ro
       # 爬虫输出持久化：容器重建不丢 JSONL
       - ./backend/data/crawlers/output:/app/data/crawlers/output
       # boss 登录态文件（导出: cd backend/data/crawlers && python boss_cdp_crawler.py --export-cookies ~/.zhigang-compass/boss-cookies.json）

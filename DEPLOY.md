@@ -40,6 +40,19 @@ printf '{\n  "version": 0,\n  "blocked": [],\n  "protected": []\n}\n' > backend/
 
 其余可选项（LLM provider、CDP、代理等）见 `.env.example` 注释。
 
+**代理（爬虫国际源）**：compose 默认 `HTTPS_PROXY=http://host.docker.internal:7890`（Docker Desktop 指向宿主机 Clash）。**LAN/无 Clash 部署必须显式关闭**——Linux Docker 不解析 `host.docker.internal`，默认值会导致容器内全部外联请求 DNS 失败（爬虫 0 产出、HF 模型下载挂起、LLM 健康检查失败）。
+
+⚠️ 关闭必须写在 **compose 同目录（仓库根）的 `.env`**（插值上下文），**不是 `backend/.env`**——`backend/.env` 是 `env_file`（仅注入容器运行时 env），worker `environment` 内联项插值取根 `.env`/shell 且覆盖 `env_file` 同名值：
+
+```bash
+# 仓库根 .env（与 docker-compose.yml 同目录，gitignore 不入库）
+HTTPS_PROXY=
+HTTP_PROXY=
+CDP_PROXY=
+```
+
+置空后国内源（智联/BOSS/脉脉/中国大学MOOC）直连正常，国际源（LinkedIn/Glassdoor/Coursera/arxiv 等）在无代理网络下尽力直连。已有 override 文件（如 `docker-compose.images.yml`）里 `environment: HTTPS_PROXY: ""` 同样有效。
+
 **前端产物**（api 容器以只读卷挂载托管）：
 
 ```bash
