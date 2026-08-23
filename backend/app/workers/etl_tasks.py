@@ -653,6 +653,83 @@ def _llm_total_outage(methods: list[str], *, llm_configured: bool) -> bool:
     return all(m == "rule" for m in methods)
 
 
+# 岗位名审查单轮上限（§4.6 成本控制：设计预估每日 < 50 条）
+_POSITION_REVIEW_MAX_PER_RUN = 50
+
+
+async def _position_frequencies(session, names: list[str]) -> dict[str, int]:
+    """历史 JD 频次（按归一化岗位名分组；本批未落库记录不计入=首次出现为 0）。"""
+    from sqlalchemy import func
+
+    col = JDRaw.snapshot["normalized_position"].astext
+    stmt = (
+        select(col.label("name"), func.count())
+        .where(col.in_(names))
+        .group_by(col)
+    )
+    rows = (await session.execute(stmt)).all()
+    return {r[0]: r[1] for r in rows}
+
+
+async def _review_position_names(session, rows, extractions, llm):
+    """岗位名 LLM 审查编排（§4.1 触发 + §4.4 决策表）。
+
+    同名候选只调一次 LLM、裁决共享（成本与一致性双赢）。
+    返回 (rejected_row_ids, {row_id: position_review 落库记录})；
+    LLM 失败的候选静默跳过（无记录），不阻塞管线。
+    """
+    from app.services.extraction.dictionary import (
+        _POSITION_WHITELIST,
+        normalize_position_name,
+    )
+    from app.services.extraction.position_review import (
+        REVIEW_FREQ_MAX,
+        apply_decision,
+        extraction_skills,
+        review_position_name,
+    )
+
+    by_norm: dict[str, list[int]] = {}
+    meta: dict[str, tuple[str, list[str]]] = {}
+    for idx, (row, ext) in enumerate(zip(rows, extractions)):
+        raw = (ext.position_name or "").strip()
+        if not raw:
+            continue
+        skills = extraction_skills(ext.skills, ext.requirements)
+        norm = normalize_position_name(raw, skills=skills)
+        # 规则拦截（norm 空）或白名单族（规则已分类）不审
+        if not norm or norm in _POSITION_WHITELIST or norm in meta:
+            continue
+        by_norm[norm] = []
+        meta[norm] = (raw, skills)
+        by_norm[norm].append(idx)
+    if not by_norm:
+        return set(), {}
+
+    freqs = await _position_frequencies(session, list(by_norm))
+    targets = [
+        (norm, idxs) for norm, idxs in by_norm.items()
+        if freqs.get(norm, 0) < REVIEW_FREQ_MAX
+    ][:_POSITION_REVIEW_MAX_PER_RUN]
+
+    rejected: set[int] = set()
+    records: dict[int, dict] = {}
+    for norm, idxs in targets:
+        raw, skills = meta[norm]
+        result = await asyncio.to_thread(review_position_name, raw, skills, llm)
+        if result is None:
+            continue  # 降级：保留原名，无审计记录
+        final, record = apply_decision(result, raw, skills)
+        if final != raw:
+            for i in idxs:
+                extractions[i].position_name = final
+        for i in idxs:
+            records[rows[i].id] = record
+        if final == "":
+            rejected.update(rows[i].id for i in idxs)
+    return rejected, records
+
+
 async def batch_extract(
     ctx: dict,
     jd_ids: list[int] | None = None,
@@ -763,6 +840,23 @@ async def batch_extract(
         # 局部降级计数（llm/rule 混合）：供运维观测，不触发整体延迟重试
         results["llm_rule_fallback"] = sum(1 for r in extractions if r.method == "rule")
 
+        # ── 幻觉防控第四道防线：岗位名 LLM 审查（方案评审稿 §4.6，默认关闭）──
+        # 位置：抽取后、normalize 持久化与入图之前；只审规则放行的未知低频名
+        results["position_reviews"] = 0
+        results["review_rejected"] = 0
+        rejected_row_ids: set[int] = set()
+        from app.core import runtime_config
+
+        if runtime_config.get("position_review_enabled", False) and valid:
+            rejected_row_ids, review_records = await _review_position_names(
+                session, valid, extractions, extractor.llm,
+            )
+            results["position_reviews"] = len(review_records)
+            for row in valid:
+                record = review_records.get(row.id)
+                if record is not None:
+                    row.snapshot = {**(row.snapshot or {}), "position_review": record}
+
         # 规范岗位名单独写入快照，保留原始抽取 position_name 供审计和评测。
         # 所有写入均通过版本化单一入口，保证下游只消费当前规则版本的快照值。
         from app.services.extraction.position_normalization import persist_normalized_position
@@ -791,6 +885,12 @@ async def batch_extract(
             if (row.snapshot or {}).get("_duplicate_of"):
                 row.snapshot = normalized_snapshot
                 results["skipped_dup"] += 1
+                continue
+            if row.id in rejected_row_ids:
+                # 审查 invalid（§4.4）：extraction 落库推进游标 + 审计记录已在快照，
+                # 不入图（与 _duplicate_of 同款跳过语义）
+                row.snapshot = normalized_snapshot
+                results["review_rejected"] += 1
                 continue
             try:
                 evidence = {

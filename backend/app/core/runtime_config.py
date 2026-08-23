@@ -39,6 +39,8 @@ DEFAULTS: dict = {
     "dict_guard_auto_impact_threshold": 50,  # 自动生效影响面上限（图谱节点数，超过转人工）
     "dict_guard_min_confidence": 0.8,        # 自动生效最低 LLM 置信度
     "dict_guard_max_candidates": 20,         # 每类候选上限（控制每日 LLM 成本）
+    # 岗位名 LLM 审查（幻觉防控第四道防线，方案评审稿）：默认关闭先实验后灰度
+    "position_review_enabled": False,
 }
 
 _VALIDATORS = {
@@ -55,6 +57,7 @@ _VALIDATORS = {
     "dict_guard_auto_impact_threshold": lambda v: isinstance(v, int) and 1 <= v <= 1000,
     "dict_guard_min_confidence": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0,
     "dict_guard_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
+    "position_review_enabled": lambda v: isinstance(v, bool),
 }
 
 
