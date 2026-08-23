@@ -636,6 +636,23 @@ def _is_jd_text_short(snapshot: dict, raw_text: str) -> bool:
     return len((_build_jd_text(snapshot, raw_text) or "").strip()) < 10
 
 
+# LLM 全败延迟重试预算（设计文档 §6.5：全部 provider 失败后入延迟队列，不立即
+# 落库规则降级产物）。job_try ≤ 该值时整任务延迟重试；耗尽后落库降级产物并告警。
+_LLM_RETRY_DEFER_SECONDS = 600
+_LLM_RETRY_MAX_JOB_TRY = 2
+
+
+def _llm_total_outage(methods: list[str], *, llm_configured: bool) -> bool:
+    """抽取结果是否为 LLM 全面不可用降级：配置了 LLM 且全部条目 method=rule。
+
+    - LLM 未配置时 method=rule 是设计内模式（无 key 环境），不算事故；
+    - 部分批次降级（llm/rule 混合）属局部失败，批内已逐条重试过，不整体延迟重试。
+    """
+    if not llm_configured or not methods:
+        return False
+    return all(m == "rule" for m in methods)
+
+
 async def batch_extract(
     ctx: dict,
     jd_ids: list[int] | None = None,
@@ -650,7 +667,9 @@ async def batch_extract(
     - 抽取结果写回 jd_raw.snapshot["extraction"]（可审计、可重跑）
     - kg_service.import_jd 入图（Neo4j MERGE 幂等，重复执行不产生重复节点）
 
-    全部失败时抛出，由 ARQ 重试机制兜底。
+    LLM 全败处理（设计文档 §6.5 延迟队列）：配置了 LLM 且全部条目降级为规则抽取时，
+    先按预算延迟重试整任务（Retry defer，期间不落库、游标不推进）；预算耗尽才落库
+    降级产物（method=rule 低置信）并发告警。入图失败仍抛出由 ARQ 重试机制兜底。
     """
 
     from app.core.database import async_session_factory, neo4j_driver
@@ -715,6 +734,34 @@ async def batch_extract(
             )
         else:
             extractions = []
+
+        # LLM 全败延迟重试（设计文档 §6.5 延迟队列）：此刻尚未落库、游标未推进，
+        # raise Retry 整任务延迟重跑；短文本/低质行的 skipped 标记随会话回滚，
+        # 下次重跑重新标记（幂等，代价可忽略）。
+        if _llm_total_outage(
+            [r.method for r in extractions], llm_configured=extractor.llm is not None
+        ):
+            job_try = int(ctx.get("job_try") or 1)
+            if job_try <= _LLM_RETRY_MAX_JOB_TRY:
+                from arq.worker import Retry
+
+                logger.warning(
+                    "batch_extract LLM 全部 provider 失败（job_try=%s），%ss 后延迟重试",
+                    job_try, _LLM_RETRY_DEFER_SECONDS,
+                )
+                raise Retry(defer=_LLM_RETRY_DEFER_SECONDS)
+            # 重试预算耗尽：落库规则降级产物（下方正常流程，method=rule 低置信）
+            from app.services.alerting import send_alert
+
+            await send_alert(
+                "batch_extract_llm_degraded",
+                f"batch_extract LLM 全部 provider 失败且延迟重试预算耗尽"
+                f"（job_try={job_try}），{len(extractions)} 条按规则抽取降级落库"
+                f"（method=rule，低置信，勿用于 must 判定口径）",
+            )
+
+        # 局部降级计数（llm/rule 混合）：供运维观测，不触发整体延迟重试
+        results["llm_rule_fallback"] = sum(1 for r in extractions if r.method == "rule")
 
         # 规范岗位名单独写入快照，保留原始抽取 position_name 供审计和评测。
         # 所有写入均通过版本化单一入口，保证下游只消费当前规则版本的快照值。
