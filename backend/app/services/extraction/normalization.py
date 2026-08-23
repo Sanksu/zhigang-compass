@@ -275,3 +275,24 @@ def _default_alias() -> dict[str, str]:
     from app.services.extraction.dictionary import SKILL_ALIAS
 
     return SKILL_ALIAS
+
+
+def input_fingerprint(names: list[str], alias_map: dict[str, str], threshold: float) -> str:
+    """归一化输入指纹（08-23 闭环收敛 P1-1：ETL 增量跳过）。
+
+    输入 = 技能名全集 + 别名词典内容 + 距离阈值——三者不变时
+    normalize_many 的输出必然不变（词典命中确定性 + 聚类输入相同），
+    ETL 可整体跳过 SBERT 推理与写回。注意：换 SBERT 模型不受指纹保护，
+    需清除 SkillNormState 状态节点触发全量重算。纯函数，不加载模型。
+    """
+    import hashlib
+    import json
+
+    payload = {
+        "names": sorted(names),
+        "alias": sorted(alias_map.items()),
+        "threshold": threshold,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
