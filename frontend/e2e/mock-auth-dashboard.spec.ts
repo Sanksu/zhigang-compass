@@ -44,6 +44,6 @@ test('未登录访问仪表盘数据静默降级不崩溃', async ({ page }) => 
   // 页面应正常渲染（空态文案或 mock 数据均可，不得白屏/抛错）
   await page.goto('/')
   await expect(page.getByRole('heading', { name: '仪表盘' })).toBeVisible()
-  // 采集统计未登录显示引导文案（crawlAvailable=false 路径）
-  await expect(page.getByText('采集统计 · 登录后查看')).toBeVisible()
+  // 采集统计未登录走降级路径（签名区已移除，以采集概览卡的引导文案为锚点）
+  await expect(page.getByText('采集统计需 admin 登录后查看')).toBeVisible()
 })
