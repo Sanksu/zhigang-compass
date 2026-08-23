@@ -861,7 +861,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     return () => {
       chart.off('mouseover')
       chart.off('mouseout')
-      chart.getZr().off('globalout', onGlobalOut)
+      // 卸载序：挂载 effect（定义在前）先 dispose 图表，dispose 后 getZr() 为
+      // null——可选链守卫，防 cleanup 阶段把整页打成 Unexpected Application Error
+      chart.getZr()?.off('globalout', onGlobalOut)
     }
   }, [viewMode, edgeBase, incidentEdges])
 
