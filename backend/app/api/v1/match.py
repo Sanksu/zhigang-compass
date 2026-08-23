@@ -23,7 +23,7 @@ from app.api.common import owns_resume, parse_uuid, serialize_task
 from app.api.deps import require_role
 from app.core.arq_client import enqueue
 from app.core.database import async_session_factory, get_db, neo4j_driver, redis_client
-from app.core.errors import ERR_FORBIDDEN, ERR_INTERNAL, ERR_LLM_TIMEOUT, ERR_NOT_FOUND, ERR_VALIDATION
+from app.core.errors import ERR_FORBIDDEN, ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import (
     DiagnosisReportRecord,
     MatchFeedbackRecord,
@@ -147,25 +147,6 @@ async def _load_or_404(match_id: str, user: dict) -> dict:
     if data is None:
         return error(ERR_NOT_FOUND, "匹配结果不存在或已过期", http_status=404)
     return data
-
-
-async def _persist_diagnosis_report(
-    session: AsyncSession, match_id: str, position_name: str, payload: dict
-) -> None:
-    """诊断报告幂等落库（match_id 唯一，重复生成更新而非追加）。"""
-    row = await session.scalar(
-        select(DiagnosisReportRecord).where(DiagnosisReportRecord.match_id == match_id)
-    )
-    if row is None:
-        session.add(
-            DiagnosisReportRecord(
-                match_id=match_id, position_name=position_name, report=payload
-            )
-        )
-    else:
-        row.position_name = position_name
-        row.report = payload
-    await session.commit()
 
 
 async def _persist_match_result_db(
@@ -495,14 +476,18 @@ async def request_match_diagnosis(
 
 
 @router.get("/result/{match_id}/diagnosis")
-async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user"))):
-    """[M4] 获取人岗比对诊断报告（LLM 生成，结果缓存 24h + 落库）。
+async def match_diagnosis(
+    match_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
+):
+    """[M4] 获取人岗比对诊断报告（只读：24h 缓存 → PG 耐久回退）。
 
-    以结果快照的分数/差距/学习路径/证据为 context，并动态检索图谱上下文
-    （§6.4 通用 RAG：岗位定义 + 技能 + 历史诊断报告）生成结构化报告
-    （设计文档 §9.5：总体匹配度 + 雷达解读 + 关键差距 Top-5 + 路径解读 + 改进建议，
-    每条差距断言附 evidence_id 可追溯）。仅人岗比对（compare）快照含 gaps，
-    AUTO 推荐快照返回 400；LLM 超时返回 5003/504、配置不可用返回 503（诊断是增强功能，不阻断主流程）。
+    生成一律走 POST 异步任务（worker 唯一执行路径：30s 超时 + provider 降级
+    + TaskStatus 状态机）。本端点不再同步调用 LLM——同步/异步双路径并存会
+    绕过任务状态机重复生成、且超时语义分叉（08-23 闭环审查 P0）。Redis
+    过期后从 DiagnosisReportRecord 落库报告回读并回填缓存（耐久镜像补上
+    读取回退）；两者皆无 → 404，前端应先 POST 创建生成任务。
     """
     data = await _load_or_404(match_id, user)
     if not data.get("gaps"):
@@ -512,63 +497,27 @@ async def match_diagnosis(match_id: str, user: dict = Depends(require_role("user
     if cached:
         return ok(data=json.loads(cached))
 
-    from app.services.diagnosis.generator import generate_diagnosis
-    from app.services.extraction.llm_provider import (
-        LLMConfigurationError,
-        LLMExtractionError,
-        LLMTimeoutError,
-    )
-
-    # 动态检索图谱上下文（§6.4）：岗位定义/技能/历史诊断报告，失败降级为空上下文
-    rag_chunks: list[dict] = []
-    position_name = data.get("position_name", "")
-    if position_name:
-        from app.services.matching.semantic import SemanticUnavailableError, SkillEmbedder
-        from app.services.rag.retrieval import retrieve_context
-
-        try:
-            embedder = SkillEmbedder.get()
-        except SemanticUnavailableError:
-            # 语义模型不可用 → 降级为关键词路检索，不阻塞诊断
-            embedder = None
-        try:
-            async with async_session_factory() as session:
-                chunks = await retrieve_context(
-                    position_name, session, neo4j=neo4j_driver, embedder=embedder
-                )
-            rag_chunks = [c.__dict__ for c in chunks]
-        except Exception:
-            # RAG 是增强：检索失败不阻塞诊断生成（§6.4 证据不足时明确说明）
-            logger.exception("图谱上下文检索失败，诊断降级为无 RAG 上下文")
-
-    try:
-        report = await asyncio.to_thread(
-            generate_diagnosis, data, rag_chunks=rag_chunks
+    row = await db.scalar(
+        select(DiagnosisReportRecord).where(
+            DiagnosisReportRecord.match_id == match_id
         )
-    except LLMTimeoutError as e:
-        # 契约 5003（§2.4.7）：LLM 调用超时 → 504，前端可据此触发降级链
-        logger.warning("诊断报告 LLM 超时: %s", e)
-        return error(ERR_LLM_TIMEOUT, "诊断报告生成失败：LLM 调用超时", http_status=504)
-    except LLMConfigurationError as e:
-        # 配置不可用（无 api_key/全部禁用）→ 503（契约：LLM 不可用或超时）
-        logger.warning("诊断报告 LLM 配置不可用: %s", e)
-        return error(ERR_INTERNAL, "诊断报告生成失败：LLM 配置不可用", http_status=503)
-    except LLMExtractionError as e:
-        # 全部 provider 失败（超时/连接/校验）→ 503，避免裸 500 且与契约一致
-        logger.warning("诊断报告 LLM 抽取失败: %s", e)
-        return error(ERR_INTERNAL, "诊断报告生成失败：LLM 服务异常", http_status=503)
-
-    payload = {"match_id": match_id, **report.model_dump()}
-    await redis_client.set(
-        f"match:diagnosis:{match_id}", json.dumps(payload), ex=_MATCH_RESULT_TTL
     )
-    # 诊断报告落库（§6.4 RAG 检索源之一）：失败不影响响应（Redis 为主存储）
-    try:
-        async with async_session_factory() as session:
-            await _persist_diagnosis_report(session, match_id, position_name, payload)
-    except Exception:
-        logger.exception("诊断报告落库失败，跳过（不影响本次响应）")
-    return ok(data=payload)
+    if row is not None and isinstance(row.report, dict):
+        try:
+            await redis_client.set(
+                f"match:diagnosis:{match_id}",
+                json.dumps(row.report, ensure_ascii=False),
+                ex=_MATCH_RESULT_TTL,
+            )
+        except Exception:
+            logger.warning("诊断报告缓存回填失败（不影响本次响应）", exc_info=True)
+        return ok(data=row.report)
+
+    return error(
+        ERR_NOT_FOUND,
+        "诊断报告尚未生成或已过期，请先创建诊断任务（POST /match/result/{match_id}/diagnosis）",
+        http_status=404,
+    )
 
 
 class FeedbackRequest(BaseModel):
