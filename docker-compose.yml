@@ -166,8 +166,9 @@ services:
     volumes:
       # JWT 密钥（与 api 同款挂载，对称校验/续签任务用）
       - ./backend/keys:/app/keys
-      # SBERT 模型（与 api 同款挂载）：worker 的匹配/嵌入链路需加载模型——
-      # 无挂载时容器层无模型，无代理环境从 HuggingFace 下载挂起（08-23 226 实证）
+      # SBERT 模型（与 api 同款挂载）：匹配引擎在 worker 侧执行（match_recommend），
+      # 镜像内无模型文件——不挂载时 SkillEmbedder 尝试从 HuggingFace 下载，
+      # 无代理环境（08-23 226 部署实证）直接卡死匹配任务
       - ./backend/models:/app/models:ro
       # 爬虫输出持久化：容器重建不丢 JSONL
       - ./backend/data/crawlers/output:/app/data/crawlers/output
@@ -185,10 +186,6 @@ services:
       - ./backend/configs/skill_filters_dynamic.json:/app/configs/skill_filters_dynamic.json
       # 报告目录（08-18 压测核验）：与 api 同款挂载，容器重建不丢 freshness/diversity 报告
       - ./backend/reports:/app/reports
-      # SBERT 模型（与 api 同款挂载）：匹配引擎在 worker 侧执行（match_recommend），
-      # 镜像内无模型文件——不挂载时 SkillEmbedder 尝试从 HuggingFace 下载，
-      # 无代理环境（08-23 226 部署实证）直接卡死匹配任务
-      - ./backend/models:/app/models:ro
     depends_on:
       postgres:
         condition: service_healthy
