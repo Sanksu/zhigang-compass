@@ -246,6 +246,13 @@ async def run_etl_pipeline(
         tasks_module.dict_guard_daily(ctx),
     )
 
+    # 阶段 17：LLM 调用统计日报（#454 审计计数聚合 → reports/llm_stats_{date}.json；
+    # 报告 only 无阈值动作，失败不阻塞管线——见 workers/llm_stats.py）
+    results["stages"]["llm_stats"] = await run_stage(
+        "llm_stats",
+        tasks_module.llm_stats_daily(ctx),
+    )
+
     # L-9：阶段隔离吞错继续跑（防单阶段失败拖垮全线）不等于无声——聚合各阶段
     # error 一次性外发告警并落 error 日志，结束"管线永远成功"的可观测盲区。
     # crawl 阶段为 list[dict]（每爬虫一项），其余阶段为 dict。
