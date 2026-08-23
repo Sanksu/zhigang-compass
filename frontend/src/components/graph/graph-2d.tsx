@@ -813,23 +813,36 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       const edgeData = (
         (chart as unknown as { getModel(): EChartsModel }).getModel().getSeriesByIndex(0) as unknown as {
           getEdgeData?: () => {
-            getItemGraphicEl: (i: number) => {
-              style: { lineWidth?: number; stroke?: string; opacity?: number }
-              dirty: () => void
-            } | undefined
+            getItemGraphicEl: (i: number) => unknown
           }
         }
       )?.getEdgeData?.()
       if (!edgeData) return
+      type PaintTarget = {
+        style: { lineWidth?: number; stroke?: string; opacity?: number }
+        dirty: () => void
+      }
+      const isPaintable = (x: unknown): x is PaintTarget => {
+        const s = (x as { style?: unknown })?.style
+        return typeof s === 'object' && s !== null
+      }
       for (const i of idxs) {
         const el = edgeData.getItemGraphicEl(i)
         const base = edgeBase[i]
         if (!el || !base) continue
         if (hovered && base.dimmed) continue // 过滤压暗的边不复活
-        el.style.lineWidth = hovered ? 2.4 : base.width
-        el.style.stroke = hovered ? strong : base.color
-        el.style.opacity = hovered ? 0.95 : base.opacity
-        el.dirty()
+        // edgeSymbol(['none','arrow']) 下边元素是 Group（线 + 箭头子元素），
+        // Group 无 style——取含 style 的显示元素（线/箭头）逐个涂色；
+        // zrender Group 的 children 是方法（children()），非数组属性
+        const anyEl = el as { children?: unknown[] | (() => unknown[]) }
+        const kids = typeof anyEl.children === 'function' ? anyEl.children() : (anyEl.children ?? [])
+        const targets = isPaintable(el) ? [el] : kids.filter(isPaintable)
+        for (const t of targets) {
+          t.style.lineWidth = hovered ? 2.4 : base.width
+          t.style.stroke = hovered ? strong : base.color
+          t.style.opacity = hovered ? 0.95 : base.opacity
+          t.dirty()
+        }
       }
     }
 
