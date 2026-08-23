@@ -341,94 +341,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/graph/position/{id}/skills": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 岗位技能列表 */
-        get: {
-            parameters: {
-                query?: {
-                    necessity?: "must" | "nice";
-                };
-                header?: never;
-                path: {
-                    id: components["parameters"]["Id"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 技能列表 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            code?: number;
-                            msg?: string;
-                            data?: components["schemas"]["PositionSkillsData"];
-                            trace_id?: string;
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/graph/skill/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 技能节点详情 */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: components["parameters"]["Id"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 技能详情 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            code?: number;
-                            msg?: string;
-                            data?: components["schemas"]["SkillDetail"];
-                            trace_id?: string;
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/graph/skill/{id}/evidence": {
         parameters: {
             query?: never;
@@ -3967,11 +3879,6 @@ export interface components {
             nice_skills: components["schemas"]["PositionSkillItem"][];
             /** @description 岗位软素质（20 项白名单封闭集，聚合层按频次降序写回；与技术栈技能分离展示） */
             soft_skills?: string[];
-        };
-        /** @description GET /graph/position/{id}/skills 响应 data */
-        PositionSkillsData: {
-            position_id: string;
-            skills: components["schemas"]["PositionSkillItem"][];
         };
         /** @description 技能证据项（GET /graph/skill/{id}/evidence，EVIDENCED_BY 原始 JD） */
         SkillEvidenceItem: {

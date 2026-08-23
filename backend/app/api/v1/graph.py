@@ -96,19 +96,9 @@ def _query_skill_ids(names: list[str]) -> dict[str, str]:
     return repository.query_skill_ids(neo4j_driver, names)
 
 
-def _query_position_skills(id: str, necessity: str | None, status_filter: str) -> list[dict]:
-    """岗位技能（可按 necessity 过滤，线程池执行）。"""
-    return repository.query_position_skills(neo4j_driver, id, necessity, status_filter)
-
-
 def _query_all_skills() -> list[tuple[str, str]]:
     """全技能 (id, name)（线程池执行）。"""
     return repository.query_all_skills(neo4j_driver)
-
-
-def _query_skill_counts(skill_id: str, status_filter: str) -> dict:
-    """技能关联计数（岗位/证据，线程池执行）。"""
-    return repository.query_skill_counts(neo4j_driver, skill_id, status_filter)
 
 
 async def _query_graph_counts() -> dict:
@@ -323,24 +313,6 @@ async def position_detail(
     return ok(data=data)
 
 
-@router.get("/position/{id}/skills")
-async def position_skills(
-    id: str,
-    necessity: Optional[Literal["must", "nice"]] = Query(default=None),
-    user: Optional[dict] = Depends(get_optional_user),
-):
-    """[M4] 岗位技能列表（可按 necessity 过滤）。"""
-    if await asyncio.to_thread(_load_position, id, user) is None:
-        return error(ERR_NOT_FOUND, "岗位不存在", http_status=404)
-
-    scope = _position_scope(user)
-    status_filter = _status_clause(scope)
-    items = await asyncio.to_thread(
-        _query_position_skills, id, necessity, status_filter)
-
-    return ok(data={"position_id": id, "skills": items})
-
-
 @router.get("/skill/{skill_id}/evidence")
 async def skill_evidence(skill_id: str):
     """[M4] 技能证据列表：Skill-EVIDENCED_BY->Evidence 原始 JD。"""
@@ -455,41 +427,6 @@ async def skill_similar(
             {"skill_id": sid, "skill_name": name, "similarity": round(score, 4)}
             for sid, name, score in similar
         ],
-    }
-    await _cache_set(cache_key, data)
-    return ok(data=data)
-
-
-@router.get("/skill/{skill_id}")
-async def skill_detail(
-    skill_id: str,
-    user: Optional[dict] = Depends(get_optional_user),
-):
-    """[M4] 技能节点详情：基础属性 + 关联计数（岗位/证据/课程）。
-
-    定义在 /skill/similar 之后，避免静态段 similar 被 {skill_id} 参数路径截胡。
-    """
-    scope = _position_scope(user)
-    cache_key = f"graph:skill:{skill_id}:{scope}"
-    cached = await _cache_get(cache_key)
-    if cached is not None:
-        return ok(data=cached)
-    skill = await asyncio.to_thread(_load_skill, skill_id)
-    if skill is None:
-        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
-
-    status_filter = _status_clause(scope)
-    counts = await asyncio.to_thread(_query_skill_counts, skill_id, status_filter)
-
-    courses = await load_courses_for_skill(
-        skill_id, skill["name"], top_k=None, semantic=_course_semantic())
-    data = {
-        "id": skill_id,
-        "name": skill["name"],
-        "category": skill.get("category"),
-        "positions_count": counts.get("positions_count", 0),
-        "evidence_count": counts.get("evidence_count", 0),
-        "courses_count": len(courses),
     }
     await _cache_set(cache_key, data)
     return ok(data=data)
