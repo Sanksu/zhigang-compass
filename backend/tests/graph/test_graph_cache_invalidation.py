@@ -10,7 +10,6 @@ class _FakeRedis:
 
     def __init__(self):
         self.store = {
-            "graph:panorama:public:100:0.3:all": "1",
             "graph:search:public:position:Python:1:20": "1",
             "graph:view:techstack:100:public": "1",
             "graph:position:pos_1:public": "1",
@@ -34,14 +33,13 @@ class _FakeRedis:
 
 
 def test_invalidate_graph_caches_deletes_all_graph_prefix(monkeypatch):
-    """失效覆盖 panorama/view/search/节点详情全部 graph:* 键，不动 matching:*。"""
+    """失效覆盖 view/search/节点详情全部 graph:* 键，不动 matching:*。"""
     fake = _FakeRedis()
     monkeypatch.setattr(graph_api, "redis_client", fake)
 
     asyncio.run(graph_api.invalidate_graph_caches())
 
-    assert len(fake.deleted) == 5
-    assert any("graph:panorama" in k for k in fake.deleted)
+    assert len(fake.deleted) == 4
     assert any("graph:search" in k for k in fake.deleted)
     assert any("graph:view" in k for k in fake.deleted)
     assert any("graph:position" in k for k in fake.deleted)

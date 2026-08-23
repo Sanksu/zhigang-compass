@@ -645,51 +645,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/graph/panorama": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 全景视图（已弃用——统一迁移至 /graph/view/panorama）
-         * @deprecated
-         * @description 已弃用（08-23 闭环收敛）：前端图谱页/仪表盘已统一消费 /api/v1/graph/view/{view_type}。本端点因 focus（岗位中心展开）与 min_weight 参数暂无 view 端点等价物而保留，待语义迁移后移除。 新消费方禁止接入本端点。
-         */
-        get: {
-            parameters: {
-                query?: {
-                    limit?: number;
-                    min_weight?: number;
-                    /** @description 以某岗位为中心展开 */
-                    focus?: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 全景图数据 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ApiResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/graph/algorithms/pagerank": {
         parameters: {
             query?: never;

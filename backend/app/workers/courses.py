@@ -8,11 +8,35 @@ evaluate_courses) and their retry constants. All names are re-exported from
 """
 
 import asyncio
+import hashlib
+import json
 from datetime import datetime, timezone
 
 from sqlalchemy import or_, select
 
 from app.models.raw import CourseRaw
+
+# 入图增量指纹（08-23 闭环收敛 P1-1）：import_course 消费的快照字段——
+# 这些字段不变时 MERGE 结果不变，跳过重复导入；quality/skills_enriched
+# 等阶段自写字段刻意排除（否则评估回写会触发每日全量重导）。
+_IMPORT_FIELDS = (
+    "source", "source_id", "title", "institution", "platform",
+    "category", "description", "rating", "enrollment",
+    "duration", "source_url", "skills",
+)
+
+# 质量评估输入字段（evaluate_course 六维评分的实际输入 + title 标签）
+_EVAL_FIELDS = (
+    "title", "platform", "rating", "enrollment",
+    "start_date", "skills", "description",
+)
+
+
+def _fingerprint(snap: dict, fields: tuple[str, ...]) -> str:
+    payload = {k: snap.get(k) for k in fields}
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
 
 
 # ============================================================
@@ -160,8 +184,9 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
 async def load_courses(ctx: dict) -> dict:
     """课程数据入图（course_raw → Course/Skill 节点 + LEARNABLE_VIA 关系）。
 
-    遍历 course_raw.snapshot 调 import_course（Neo4j MERGE 幂等，重复执行
-    不产生重复节点）。单条失败不阻塞整体（批量语义）。
+    增量导入（08-23 闭环收敛 P1-1）：入图相关字段的指纹存 Course.import_hash，
+    与库中一致即跳过（MERGE 幂等前提下免每日全量重导）；缺 source/source_id
+    的行无法定位指纹键，保守走全量导入。单条失败不阻塞整体（批量语义）。
     """
 
     from app.core.database import async_session_factory, neo4j_driver
@@ -175,39 +200,70 @@ async def load_courses(ctx: dict) -> dict:
         # 同步 Neo4j 写入放线程池，避免阻塞 ARQ 事件循环（Redis 心跳超时崩溃根因）
         imported = 0
         failed = 0
+        skipped = 0
         with neo4j_driver.session() as neo4j_session:
+            existing: dict[tuple[str, str], str] = {}
+            for rec in neo4j_session.run(
+                "MATCH (c:Course) RETURN c.source AS s, c.source_id AS sid, c.import_hash AS h"
+            ).data():
+                if rec.get("h"):
+                    existing[(rec.get("s") or "", rec.get("sid") or "")] = rec["h"]
             for course_data in data:
+                source = course_data.get("source") or ""
+                source_id = course_data.get("source_id") or ""
+                fp = _fingerprint(course_data, _IMPORT_FIELDS) if source and source_id else None
+                if fp and existing.get((source, source_id)) == fp:
+                    skipped += 1
+                    continue
                 try:
                     import_course(neo4j_session, course_data)
+                    if fp:
+                        neo4j_session.run(
+                            "MATCH (c:Course {source: $s, source_id: $sid}) "
+                            "SET c.import_hash = $fp",
+                            s=source, sid=source_id, fp=fp,
+                        )
+                        existing[(source, source_id)] = fp
                     imported += 1
                 except Exception:
                     failed += 1
-        return imported, failed
+        return imported, failed, skipped
 
-    imported, failed = await asyncio.to_thread(_import_all)
-    return {"total": len(data), "imported": imported, "failed": failed}
+    imported, failed, skipped = await asyncio.to_thread(_import_all)
+    return {"total": len(data), "imported": imported, "failed": failed, "skipped": skipped}
 
 
 async def evaluate_courses(ctx: dict) -> dict:
     """课程质量评估（DA-M4-01，设计文档 §4.6）。
 
-    遍历 course_raw 全量课程 → 六维加权质量评分 → 幂等写回
-    `snapshot["quality"]`（覆盖更新）。返回推荐池统计，供学习路径取 Top-3。
+    增量评估（08-23 闭环收敛 P1-1）：六维输入字段指纹存
+    snapshot.quality.input_hash，与上次一致即复用已存评分（不重算不重写，
+    消除每日全量 PG 写放大）；输入变化或历史记录无指纹时重评一次。
     """
 
     from app.core.database import async_session_factory
     from app.services.data_quality.course_quality import (
         RECOMMEND_MIN_SCORE,
+        CourseQualityResult,
         evaluate_course,
     )
 
     async with async_session_factory() as session:
         rows = (await session.scalars(select(CourseRaw).order_by(CourseRaw.id.asc()))).all()
-        results = []
+        results: list[CourseQualityResult] = []
         for row in rows:
             snap = dict(row.snapshot or {})
+            fp = _fingerprint(snap, _EVAL_FIELDS)
+            prev = snap.get("quality")
+            if isinstance(prev, dict) and prev.get("input_hash") == fp:
+                # 输入未变：复用已存评分（不回写 snapshot，零写放大）
+                try:
+                    results.append(CourseQualityResult.model_validate(prev))
+                    continue
+                except Exception:
+                    pass  # 历史结构异常 → 落到重评
             result = evaluate_course(snap)
-            snap["quality"] = result.model_dump()
+            snap["quality"] = {**result.model_dump(), "input_hash": fp}
             row.snapshot = snap
             results.append(result)
         await session.commit()

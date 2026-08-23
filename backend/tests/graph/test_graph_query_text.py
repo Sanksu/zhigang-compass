@@ -79,32 +79,6 @@ def _install(monkeypatch) -> _FakeDriver:
     return driver
 
 
-class TestPanoramaStatusFilter:
-    @pytest.mark.asyncio
-    async def test_public_scope_has_status_filter(self, monkeypatch):
-        driver = _install(monkeypatch)
-        await graph_api._query_panorama("public", None, 0.3, 100)
-        query, params = driver.sessions[0].queries[0]
-        assert "p.status IN $public_statuses" in query
-        assert params["public_statuses"] == list(graph_api._PUBLIC_POSITION_STATUSES)
-
-    @pytest.mark.asyncio
-    async def test_all_scope_no_status_filter(self, monkeypatch):
-        driver = _install(monkeypatch)
-        await graph_api._query_panorama("all", None, 0.3, 100)
-        query, _ = driver.sessions[0].queries[0]
-        assert "p.status IN $public_statuses" not in query
-
-    @pytest.mark.asyncio
-    async def test_focus_branch_has_status_filter(self, monkeypatch):
-        driver = _install(monkeypatch)
-        await graph_api._query_panorama("public", "pos_0001", 0.3, 100)
-        query, params = driver.sessions[0].queries[0]
-        assert "p.status IN $public_statuses" in query
-        assert params["focus"] == "pos_0001"
-        assert params["min_weight"] == 0.3
-
-
 class TestViewStatusFilter:
     @pytest.mark.asyncio
     async def test_techstack_public_statuses_passed(self, monkeypatch):

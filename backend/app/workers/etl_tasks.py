@@ -1011,11 +1011,17 @@ async def cross_validate_jds(ctx: dict, limit: int | None = None) -> dict:
     }
 
 
-async def sync_skill_normalization(ctx: dict) -> dict:
+async def sync_skill_normalization(ctx: dict, *, force: bool = False) -> dict:
     """技能归一化 + SIMILAR_TO 建边（设计文档 §5.3，ETL 阶段 9.5）。
 
     对图谱全量 Skill 名做 SBERT 层次聚类，回写 `Skill.normalized_name`，
     同簇相似度 ≥ 0.85 自动建 `SIMILAR_TO {similarity}` 关系（幂等 MERGE）。
+
+    增量跳过（08-23 闭环收敛 P1-1）：技能名全集 + 别名词典 + 阈值三者
+    不变时聚类输入相同、输出必然不变——比对 SkillNormState 节点存的
+    输入指纹，一致即整段跳过（免 SBERT 加载与全量写回）。换 SBERT 模型
+    不受指纹保护，需清除 SkillNormState 触发全量；门禁拦截/模型不可用
+    的运行不落指纹（下轮自动重算）。force=True 强制全量。
 
     模型不可用时归一化退化为词典路径（normalize_skill 在线词典不变），
     不阻塞 ETL 主线。
@@ -1025,15 +1031,35 @@ async def sync_skill_normalization(ctx: dict) -> dict:
         # 同步 Neo4j 全量读取 + SBERT 聚类 + 关系回写为 CPU/IO 密集，整体放线程池
         from app.core.database import neo4j_driver
         from app.services.extraction.normalization import (
+            DISTANCE_THRESHOLD,
             SkillNormalizer,
+            _default_alias,
             guard_cluster_distribution,
+            input_fingerprint,
         )
 
         with neo4j_driver.session() as session:
             rows = session.run("MATCH (s:Skill) RETURN s.name AS name").data()
-            names = [r["name"] for r in rows if r.get("name")]
+            state = (
+                session.run(
+                    "MATCH (m:SkillNormState {id: 'singleton'}) "
+                    "RETURN m.fingerprint AS fp, m.summary AS summary"
+                ).single()
+            )
+        names = [r["name"] for r in rows if r.get("name")]
         if not names:
             return {"skills": 0, "normalized": 0, "similar_pairs": 0, "detail": "图谱无 Skill 节点"}
+
+        fingerprint = input_fingerprint(names, _default_alias(), DISTANCE_THRESHOLD)
+        if (
+            not force
+            and state is not None
+            and state.get("fp") == fingerprint
+            and isinstance(state.get("summary"), dict)
+        ):
+            summary = dict(state["summary"])
+            summary["skipped"] = "input_unchanged"
+            return summary
 
         normalizer = SkillNormalizer()
         normalized = normalizer.normalize_many(names)
@@ -1088,13 +1114,25 @@ async def sync_skill_normalization(ctx: dict) -> dict:
                 )
                 written += 1
 
-        return {
+        summary = {
             "skills": len(names),
             "normalized": changed,
             "similar_pairs": written,
             "skipped_standard": skipped_standard,
             "detail": "SIMILAR_TO 已回写（幂等）",
         }
+        # 成功写回后落输入指纹（模型可用 + 门禁通过路径才会到达此处）
+        with neo4j_driver.session() as session:
+            session.run(
+                """
+                MERGE (m:SkillNormState {id: 'singleton'})
+                SET m.fingerprint = $fp, m.run_at = $at, m.summary = $summary
+                """,
+                fp=fingerprint,
+                at=datetime.now(timezone(timedelta(hours=8))).isoformat(),
+                summary=summary,
+            )
+        return summary
 
     return await asyncio.to_thread(_run)
 

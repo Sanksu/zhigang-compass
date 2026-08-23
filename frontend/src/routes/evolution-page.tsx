@@ -91,15 +91,39 @@ type SkillEvolutionData = components['schemas']['SkillEvolutionData']
 
 // ===== SignalsView =====
 
-/** 新兴/衰退技能 Top-N（真实 GET /evolution/signals） */
+/** 信号模块级共享缓存（60s TTL + 单飞）：同页 SkillDeclineWarningCard 与
+ * SignalsView 原各自请求（top_n=8/10 重复拉取），合并为一次共享。
+ * 口径与后端 Redis 缓存对齐；失败静默由各消费方自行降级。 */
+let signalsCache: { at: number; data: EvolutionSignalsData } | null = null
+let signalsPromise: Promise<EvolutionSignalsData | null> | null = null
+function loadSignals(): Promise<EvolutionSignalsData | null> {
+  const now = Date.now()
+  if (signalsCache && now - signalsCache.at < 60_000) {
+    return Promise.resolve(signalsCache.data)
+  }
+  if (signalsPromise) return signalsPromise
+  signalsPromise = apiGet<EvolutionSignalsData>('/evolution/signals?top_n=10')
+    .then((r) => {
+      signalsCache = { at: now, data: r }
+      return r
+    })
+    .catch(() => null)
+    .finally(() => {
+      signalsPromise = null
+    })
+  return signalsPromise
+}
+
+/** 新兴/衰退技能 Top-N（共享 loadSignals，真实 GET /evolution/signals） */
 function SignalsView() {
   const [data, setData] = useState<EvolutionSignalsData | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    apiGet<EvolutionSignalsData>('/evolution/signals?top_n=10')
-      .then(setData)
-      .catch((e) => setError(errMsg(e, '信号加载失败')))
+    loadSignals().then((r) => {
+      if (r) setData(r)
+      else setError('信号加载失败')
+    })
   }, [])
 
   if (error) {
@@ -213,20 +237,16 @@ function SignalsView() {
 
 /** C 端技能衰退预警摘要卡（风险治理引导）：declining Top-N 一眼可见。
 
- * 数据复用 /evolution/signals（Redis 缓存 60s），衰退技能以橙徽标 + Z-score
- * 悬浮提示呈现；无信号不渲染（不留占位）。 */
+ * 数据共享 loadSignals（与 SignalsView 同页一次拉取，不再独立请求）；
+ * 衰退技能以橙徽标 + Z-score 悬浮提示呈现；无信号不渲染（不留占位）。 */
 function SkillDeclineWarningCard() {
   const [declining, setDeclining] = useState<EvolutionSignal[] | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    apiGet<EvolutionSignalsData>('/evolution/signals?top_n=8')
-      .then((r) => {
-        if (!cancelled) setDeclining(r.declining)
-      })
-      .catch(() => {
-        if (!cancelled) setDeclining([])
-      })
+    loadSignals().then((r) => {
+      if (!cancelled) setDeclining(r ? r.declining.slice(0, 8) : [])
+    })
     return () => {
       cancelled = true
     }
