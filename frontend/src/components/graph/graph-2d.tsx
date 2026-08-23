@@ -832,9 +832,11 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         if (!el || !base) continue
         if (hovered && base.dimmed) continue // 过滤压暗的边不复活
         // edgeSymbol(['none','arrow']) 下边元素是 Group（线 + 箭头子元素），
-        // Group 无 style——取含 style 的显示元素（线/箭头）逐个涂色
-        const anyEl = el as { children?: unknown[] }
-        const targets = isPaintable(el) ? [el] : (anyEl.children ?? []).filter(isPaintable)
+        // Group 无 style——取含 style 的显示元素（线/箭头）逐个涂色；
+        // zrender Group 的 children 是方法（children()），非数组属性
+        const anyEl = el as { children?: unknown[] | (() => unknown[]) }
+        const kids = typeof anyEl.children === 'function' ? anyEl.children() : (anyEl.children ?? [])
+        const targets = isPaintable(el) ? [el] : kids.filter(isPaintable)
         for (const t of targets) {
           t.style.lineWidth = hovered ? 2.4 : base.width
           t.style.stroke = hovered ? strong : base.color
