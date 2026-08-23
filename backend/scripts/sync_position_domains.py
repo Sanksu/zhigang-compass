@@ -134,7 +134,7 @@ def llm_domain_names(members_by_key: dict[str, list[str]]) -> dict[str, str]:
     )
     try:
         llm = LLMProviderChain()
-        with invocation_scope():
+        with invocation_scope("domain_label"):
             plan = llm.extract_structured(
                 prompt, _DomainNamePlan,
                 system_prompt="你是严谨的岗位 taxonomy 标注员，严格按 JSON schema 输出。",
