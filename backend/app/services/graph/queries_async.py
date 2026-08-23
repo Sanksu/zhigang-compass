@@ -6,8 +6,8 @@
 
 迁移约束：Cypher 文本 / 状态过滤子句 / 分页（SKIP/LIMIT）/ Redis-key 与
 TTL 语义 / 结果结构与 sync 版本完全一致，仅把 session.run 改 await、
-记录迭代改 async for、single() 改 await。查询逻辑本身（status-clause、
-communityId 字段等）与 HEAD 同步版本逐字相同。
+记录迭代改 async for、single() 改 await。查询逻辑（status-clause 等）
+与 HEAD 同步版本逐字相同。
 
 性能约束（08-18 压测对比发现，源自已删除的 panorama 全图查询）：大结果集
 **记录到 dict 的映射是 CPU 密集**——协程内同步映射会阻塞 API 事件循环。
@@ -139,9 +139,9 @@ async def query_view_techstack(session, limit: int, status_filter: str) -> list:
         ORDER BY heat DESC LIMIT $limit
         MATCH (s)<-[r:REQUIRES]-(p:Position)
         WHERE {status_filter}
-        RETURN s.id AS sid, s.name AS sname, s.community_id AS s_community,
+        RETURN s.id AS sid, s.name AS sname,
                s.category AS s_category,
-               p.id AS pid, p.name AS pname, p.status AS pstatus, p.community_id AS p_community, r
+               p.id AS pid, p.name AS pname, p.status AS pstatus, r
         """,
         limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
     )
