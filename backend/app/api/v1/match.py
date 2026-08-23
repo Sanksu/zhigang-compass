@@ -23,7 +23,7 @@ from app.api.common import owns_resume, parse_uuid, serialize_task
 from app.api.deps import require_role
 from app.core.arq_client import enqueue
 from app.core.database import async_session_factory, get_db, neo4j_driver, redis_client
-from app.core.errors import ERR_FORBIDDEN, ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALIDATION
+from app.core.errors import ERR_FORBIDDEN, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import (
     DiagnosisReportRecord,
     MatchFeedbackRecord,
