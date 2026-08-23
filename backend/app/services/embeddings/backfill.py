@@ -5,7 +5,11 @@
 - jd_embeddings：jd_raw 已入库记录（title+company+location 语义指纹）
 - project_embeddings：resume_cache 已解析简历的项目文本
 
-幂等 upsert（按业务键更新向量，不存在则插入）；模型不可用时抛
+增量回填（08-23 闭环收敛 P1-2）：payload 列存有嵌入原文口径（skill=name /
+jd=title+company+city / project=text），与当前文本比对一致即跳过——仅对
+新增或文本变化的记录做 SBERT 推理与写入，消除每日全量重算（写入幂等
+upsert 不变）。换嵌入模型需手动清空三表触发全量重建（payload 无模型
+版本标记，模型维度不同时 upsert 也会失败暴露）。模型不可用时抛
 SemanticUnavailableError，由调用方决定跳过（不阻塞 ETL 主线）。
 """
 
@@ -52,16 +56,58 @@ def _jd_text(snapshot: dict) -> str:
     )
 
 
+async def _existing_skill_names(db: AsyncSession) -> dict[str, str]:
+    """已存 skill 向量的原文（id → name；payload 缺失视为空串触发重嵌）。"""
+    rows = (await db.execute(select(SkillEmbedding.id, SkillEmbedding.payload))).all()
+    return {rid: (payload or {}).get("name") or "" for rid, payload in rows}
+
+
+async def _existing_jd_texts(db: AsyncSession) -> dict[str, str]:
+    """已存 jd 向量的原文（jd_id → 由 metadata 重建的同口径文本）。"""
+    rows = (await db.execute(select(JdEmbedding.jd_id, JdEmbedding.payload))).all()
+    out: dict[str, str] = {}
+    for jd_id, meta in rows:
+        m = meta or {}
+        out[str(jd_id)] = " ".join(filter(None, [
+            m.get("title", ""), m.get("company", ""), m.get("city", ""),
+        ]))
+    return out
+
+
+async def _existing_project_texts(db: AsyncSession) -> dict[tuple[str, int], str]:
+    """已存项目向量的原文（(resume_id, project_index) → text）。"""
+    rows = (
+        await db.execute(
+            select(
+                ProjectEmbedding.resume_id,
+                ProjectEmbedding.project_index,
+                ProjectEmbedding.payload,
+            )
+        )
+    ).all()
+    return {
+        (rid, idx): (meta or {}).get("text") or "" for rid, idx, meta in rows
+    }
+
+
 async def backfill_skill_embeddings(db: AsyncSession, embedder) -> dict:
-    """Neo4j Skill → skill_embeddings（upsert，幂等）。"""
+    """Neo4j Skill → skill_embeddings（增量：仅新增/改名技能重嵌）。"""
     skills = await asyncio.to_thread(_fetch_skill_rows)
     if not skills:
         return {"written": 0, "detail": "图谱无 Skill 节点"}
 
-    names = [name for _, name in skills]
-    vecs = await asyncio.to_thread(_embed_all, embedder, names)
+    existing = await _existing_skill_names(db)
+    pending = [(sid, name) for sid, name in skills if existing.get(sid) != name]
+    if not pending:
+        return {
+            "written": 0,
+            "skipped": len(skills),
+            "detail": "skill_embeddings 无变化，跳过推理",
+        }
+
+    vecs = await asyncio.to_thread(_embed_all, embedder, [name for _, name in pending])
     written = 0
-    for (sid, name), vec in zip(skills, vecs):
+    for (sid, name), vec in zip(pending, vecs):
         stmt = insert(SkillEmbedding).values(
             id=sid, embedding=vec, payload={"name": name}
         )
@@ -72,11 +118,15 @@ async def backfill_skill_embeddings(db: AsyncSession, embedder) -> dict:
         await db.execute(stmt)
         written += 1
     await db.commit()
-    return {"written": written, "detail": "skill_embeddings 已回填"}
+    return {
+        "written": written,
+        "skipped": len(skills) - len(pending),
+        "detail": "skill_embeddings 已回填",
+    }
 
 
 async def backfill_jd_embeddings(db: AsyncSession, embedder, limit: int | None = None) -> dict:
-    """jd_raw → jd_embeddings（upsert 按 jd_id，幂等）。"""
+    """jd_raw → jd_embeddings（增量：仅新增/文本变化 JD 重嵌，upsert 幂等）。"""
     stmt = select(JDRaw).order_by(JDRaw.id.asc())
     rows = (await db.scalars(stmt)).all()
     if limit:
@@ -91,9 +141,18 @@ async def backfill_jd_embeddings(db: AsyncSession, embedder, limit: int | None =
     if not records:
         return {"written": 0, "detail": "jd_raw 无可用文本"}
 
-    vecs = await asyncio.to_thread(_embed_all, embedder, [text for _, text, _ in records])
+    existing = await _existing_jd_texts(db)
+    pending = [(jd, text, snap) for jd, text, snap in records if existing.get(jd) != text]
+    if not pending:
+        return {
+            "written": 0,
+            "skipped": len(records),
+            "detail": "jd_embeddings 无变化，跳过推理",
+        }
+
+    vecs = await asyncio.to_thread(_embed_all, embedder, [text for _, text, _ in pending])
     written = 0
-    for (jd_id, text, snap), vec in zip(records, vecs):
+    for (jd_id, text, snap), vec in zip(pending, vecs):
         meta = {
             "jd_id": jd_id,
             "title": snap.get("title", ""),
@@ -110,17 +169,22 @@ async def backfill_jd_embeddings(db: AsyncSession, embedder, limit: int | None =
         await db.execute(stmt)
         written += 1
     await db.commit()
-    return {"written": written, "detail": "jd_embeddings 已回填"}
+    return {
+        "written": written,
+        "skipped": len(records) - len(pending),
+        "detail": "jd_embeddings 已回填",
+    }
 
 
 async def backfill_project_embeddings(db: AsyncSession, embedder) -> dict:
-    """resume_cache → project_embeddings（按 resume_id+project_index 幂等）。
+    """resume_cache → project_embeddings（增量：按简历比对，仅变化简历重建）。
 
-    每份简历的项目重解析后会更新，先删后插保证旧项目向量不残留。
+    每份简历的项目集合或任一项目文本变化时，先删后插该简历的全部项目
+    向量（保证删项不残留）；完全未变的简历整份跳过推理与写入。
     """
     resumes = (await db.scalars(select(ResumeCache))).all()
 
-    items: list[tuple[str, int, str, str, str]] = []
+    by_resume: dict[str, list[tuple[int, str, str, str]]] = {}
     for resume in resumes:
         projects = (resume.parsed_data or {}).get("projects") or []
         for idx, pr in enumerate(projects):
@@ -134,21 +198,40 @@ async def backfill_project_embeddings(db: AsyncSession, embedder) -> dict:
             text = _project_text(name, desc)
             if not text:
                 continue
-            items.append((str(resume.id), idx, name, desc, text))
-    if not items:
+            by_resume.setdefault(str(resume.id), []).append((idx, name, desc, text))
+    if not by_resume:
         return {"written": 0, "detail": "无简历项目数据"}
 
-    vecs = await asyncio.to_thread(_embed_all, embedder, [text for *_, text in items])
-    # 先删后插：简历项目重解析后集合变化（增删改），删除旧向量防残留
-    resume_ids = {rid for rid, *_ in items}
-    if resume_ids:
-        await db.execute(
-            ProjectEmbedding.__table__.delete().where(
-                ProjectEmbedding.resume_id.in_(resume_ids)
-            )
+    existing = await _existing_project_texts(db)
+    changed: dict[str, list[tuple[int, str, str, str]]] = {}
+    skipped = 0
+    for resume_id, items in by_resume.items():
+        # 未变 = 索引集合数量一致（捕获项目增删）且每个项目文本一致
+        unchanged = (
+            len(items) == sum(1 for idx, *_ in items if (resume_id, idx) in existing)
+            and all(existing.get((resume_id, idx)) == text for _, _, _, text in items)
         )
+        if unchanged:
+            skipped += len(items)
+        else:
+            changed[resume_id] = items
+    if not changed:
+        return {
+            "written": 0,
+            "skipped": skipped,
+            "detail": "project_embeddings 无变化，跳过推理",
+        }
+
+    flat = [(rid, idx, name, desc, text) for rid, items in changed.items() for idx, name, desc, text in items]
+    vecs = await asyncio.to_thread(_embed_all, embedder, [text for *_, text in flat])
+    # 先删后插（仅变化简历）：项目增删后旧向量不残留
+    await db.execute(
+        ProjectEmbedding.__table__.delete().where(
+            ProjectEmbedding.resume_id.in_(list(changed.keys()))
+        )
+    )
     written = 0
-    for (resume_id, idx, name, desc, text), vec in zip(items, vecs):
+    for (resume_id, idx, name, desc, text), vec in zip(flat, vecs):
         meta = {
             "resume_id": resume_id,
             "project_index": idx,
@@ -161,7 +244,11 @@ async def backfill_project_embeddings(db: AsyncSession, embedder) -> dict:
         ))
         written += 1
     await db.commit()
-    return {"written": written, "detail": "project_embeddings 已回填"}
+    return {
+        "written": written,
+        "skipped": skipped,
+        "detail": "project_embeddings 已回填",
+    }
 
 
 async def run_backfill(
