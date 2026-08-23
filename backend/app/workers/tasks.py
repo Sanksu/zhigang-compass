@@ -49,6 +49,9 @@ from app.workers.dict_guard import (
 from app.workers.llm_stats import (
     llm_stats_daily as llm_stats_daily,
 )
+from app.workers.skill_category_review import (
+    skill_category_review_daily as skill_category_review_daily,
+)
 from app.workers.diagnosis import generate_diagnosis as generate_diagnosis
 from app.workers.discovery import (
     _Provider as _Provider,

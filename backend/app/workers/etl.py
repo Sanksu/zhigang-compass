@@ -253,6 +253,13 @@ async def run_etl_pipeline(
         tasks_module.llm_stats_daily(ctx),
     )
 
+    # 阶段 18：技能分类 LLM 审查（未分类技能灰度提议，默认关；
+    # 只写 suggested_category 提议字段不动权威 category——见 workers/skill_category_review.py）
+    results["stages"]["skill_category_review"] = await run_stage(
+        "skill_category_review",
+        tasks_module.skill_category_review_daily(ctx),
+    )
+
     # L-9：阶段隔离吞错继续跑（防单阶段失败拖垮全线）不等于无声——聚合各阶段
     # error 一次性外发告警并落 error 日志，结束"管线永远成功"的可观测盲区。
     # crawl 阶段为 list[dict]（每爬虫一项），其余阶段为 dict。
