@@ -1,17 +1,19 @@
 """GitHub Trending 爬虫（技术热点观察池数据源）。
 
 策略：
-- 爬取 https://github.com/trending/{language}?since={daily|weekly|monthly} 公开页
-- 解析 SSR HTML 中的仓库卡片（article.Box-row）
-- 无需 token，无需 API 调用
+- 爬取 GitHub Search API（官方 API 条款允许程序化访问；trending 网页 robots
+  Disallow: / 且无官方 API——用 search/repositories created:>窗口 sort=stars 近似）
+- 默认全局热度模式（08-16 用户决策）：不限语言，取窗口内 star 最高的 100 个
+  仓库；可通过 -a languages= 覆盖为按语言过滤（每语言 20 个）
 - 产出 CommunityTrendItem（trend_type=trending）
 
 合规：
-- 仅采集公开 trending 页面元数据（仓库名/描述/star/fork/language）
-- 请求间隔 10-20s，避免触发 GitHub 反爬
+- 仅采集 API 返回的仓库元数据（full_name/描述/star/fork/language）
+- 无 token 限 10 req/min（全局模式 1 请求 / 语言模式 5 请求，请求间隔保留）
+- 可选 GITHUB_TOKEN 提升配额并消除按 IP 二次限制（env 配置，缺省匿名）
 
 运行：
-  scrapy crawl github -a languages=python,java,javascript -a since=daily -o output/github.jsonl
+  scrapy crawl github -a since=daily -o output/github.jsonl
   # 国际源，需代理
   $env:HTTPS_PROXY="http://127.0.0.1:7890"
 """
@@ -21,17 +23,22 @@ from datetime import datetime, timedelta, timezone
 from scrapy import Request, Spider
 from scrapy.http import Response
 
+import json
+import os
+from urllib.parse import quote
+
 from crawlers.items import CommunityTrendItem
-from crawlers.settings import RATE_LIMIT
+from crawlers.settings import CRAWL_ITEMS_CAP, RATE_LIMIT
 
 
-GITHUB_TRENDING_URL = "https://github.com/trending/{language}?since={since}"
-
-# 默认关注的技术方向（与项目 AI/大数据/全栈方向一致）
-DEFAULT_LANGUAGES = ["python", "java", "javascript", "typescript", "go"]
+GITHUB_SEARCH_API = "https://api.github.com/search/repositories"
 
 # 默认时间窗口（daily/weekly/monthly）
 DEFAULT_SINCE = "daily"
+
+# 默认语言过滤：空 = 全局热度（不限语言，窗口内 star 最高 top 100）。
+# 传 -a languages=python,java 时按语言分别取热度（每语言 20，合计 ≤100）
+DEFAULT_LANGUAGES: list[str] = []
 
 
 class GithubSpider(Spider):
@@ -61,45 +68,99 @@ class GithubSpider(Spider):
             yield request
 
     def start_requests(self):
-        for lang in self.languages:
-            url = GITHUB_TRENDING_URL.format(language=lang, since=self.since)
-            self.logger.info(f"开始采集 GitHub Trending: {lang} ({self.since})")
+        # since 语义 → created 窗口：daily=1 天 / weekly=7 天 / monthly=30 天
+        window = {"daily": 1, "weekly": 7, "monthly": 30}.get(self.since, 7)
+        created = (datetime.now(timezone(timedelta(hours=8))).date()
+                   - timedelta(days=window)).isoformat()
+
+        if not self.languages:
+            # 全局热度：不限语言，窗口内 star 最高的 100 个仓库（单次采集上限内）
+            query = f"created:>{created}"
+            url = f"{GITHUB_SEARCH_API}?q={quote(query)}&sort=stars&order=desc&per_page={min(CRAWL_ITEMS_CAP, 100)}"
+            self.logger.info(f"开始采集 GitHub 全局热门 (created>{created})")
             yield Request(
                 url,
                 callback=self.parse,
-                meta={"language": lang, "since": self.since},
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.9",
-                },
+                meta={"language": "", "since": self.since, "dont_obey_robotstxt": True},
+                headers=self._api_headers(),
             )
-
-    def parse(self, response: Response):
-        """解析 GitHub Trending 页面，产出 CommunityTrendItem。"""
-        # 每个仓库是 article.Box-row
-        cards = response.css("article.Box-row")
-
-        if not cards:
-            # GitHub 可能改版，选择器需要对照真实页面验证
-            self.logger.warning(
-                f"未解析到仓库卡片（language={response.meta['language']}），"
-                f"页面标题: {response.css('title::text').get(default='')}"
-            )
-            # 保存原始 HTML 便于排查选择器
-            self.logger.debug(f"页面前 1000 字符: {response.text[:1000]}")
             return
 
-        for card in cards:
-            item = self._card_to_item(card, response.meta)
+        for lang in self.languages:
+            query = f"language:{lang} created:>{created}"
+            url = f"{GITHUB_SEARCH_API}?q={quote(query)}&sort=stars&order=desc&per_page=20"
+            self.logger.info(f"开始采集 GitHub 热门: {lang} (created>{created})")
+            yield Request(
+                url,
+                callback=self.parse,
+                # API 例外（08-14 用户确认 B 方案）：api.github.com 官方 API 条款
+                # 允许合理程序化访问（robots 保守规则不适用 API 端点）
+                meta={"language": lang, "since": self.since, "dont_obey_robotstxt": True},
+                headers=self._api_headers(),
+            )
+
+    def _api_headers(self) -> dict:
+        """GitHub Search API 请求头（可选 GITHUB_TOKEN 提升限流配额）。
+
+        匿名无 token 时按 IP 10 req/min（Search 二次限制 10/min）；共享出口
+        IP 下易触发 403 限流。环境变量 GITHUB_TOKEN 存在时附 Authorization
+        提升到 30/min 并消除二次限制；未配置时维持匿名（不阻塞采集）。
+        采集端设置：宿主机/容器 env 设 GITHUB_TOKEN 即可（compose 已透传）。
+        """
+        headers = {
+            "User-Agent": "zhigang-compass/1.0 (github-api)",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        token = os.environ.get("GITHUB_TOKEN", "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    def parse(self, response: Response):
+        """解析 GitHub Search API 响应（JSON），产出 CommunityTrendItem。"""
+        try:
+            data = json.loads(response.text)
+        except ValueError as e:
+            self.logger.error(f"GitHub API 响应解析失败（language={response.meta['language']}）: {e}")
+            return
+        items = data.get("items") or []
+        if not items:
+            self.logger.warning(
+                f"GitHub API 无结果（language={response.meta['language']}），"
+                f"message: {data.get('message', '')[:120]}"
+            )
+            return
+        for repo in items:
+            item = self._api_to_item(repo, response.meta)
             if item:
                 yield item
-
         self.logger.info(
-            f"GitHub Trending [{response.meta['language']}/{response.meta['since']}] "
-            f"采集 {len(cards)} 个仓库"
+            f"GitHub API [{response.meta['language']}/{response.meta['since']}] "
+            f"采集 {len(items)} 个仓库"
         )
+
+    def _api_to_item(self, repo: dict, meta: dict) -> CommunityTrendItem:
+        """将 GitHub Search API 仓库对象转为 CommunityTrendItem。"""
+        full_name = repo.get("full_name", "")
+        if not full_name:
+            return None
+        language = repo.get("language") or meta.get("language", "")
+        item = CommunityTrendItem()
+        item["source"] = self.platform
+        item["source_id"] = full_name  # owner/repo 作为唯一 ID
+        item["source_url"] = repo.get("html_url", f"https://github.com/{full_name}")
+        item["crawled_at"] = datetime.now(timezone(timedelta(hours=8))).isoformat()
+        item["title"] = full_name
+        item["description"] = (repo.get("description") or "").strip()
+        item["url"] = item["source_url"]
+        item["stars"] = repo.get("stargazers_count", 0)
+        item["forks"] = repo.get("forks_count", 0)
+        item["stars_today"] = 0  # Search API 无"今日新增 star"，置 0
+        item["language"] = language
+        item["tags"] = [language] if language else []
+        item["trend_type"] = "trending"
+        return item
 
     def _card_to_item(self, card, meta: dict) -> CommunityTrendItem:
         """将单个仓库卡片转为 CommunityTrendItem。"""

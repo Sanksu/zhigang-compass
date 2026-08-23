@@ -15,7 +15,7 @@ can_promote_to_emerging（置信度 ≥ 0.6 AND 源 ≥ 2）：
 import asyncio
 import unittest.mock as mock
 
-from app.workers.tasks import watch_signal_daily
+from app.workers.discovery import watch_signal_daily
 
 
 class _FakeScalarsResult:

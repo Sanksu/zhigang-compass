@@ -27,7 +27,7 @@ from app.services.extraction.prompts import (
     SYSTEM_PROMPT,
     TASK_TEMPLATE,
 )
-from app.services.extraction.post_processor import post_process
+from app.services.extraction.post_processor import lexical_guard, post_process
 
 # 批间限流缓冲（秒）：串行逐批调用 LLM 时降低突发频率，防 provider 429。
 # 设计文档 §6.5：_BATCH_REQUEST_INTERVAL 移到批之间（0.3s/条 → 批间 0.3s）。
@@ -46,13 +46,32 @@ class JDExtractor:
             # 降级纯规则抽取（见类 docstring「LLM 不可用时规则抽取兜底」）
             self._llm = None
 
-    def extract(self, jd_text: str) -> JDExtractionResult:
+    @property
+    def llm(self) -> Optional[LLMProviderChain]:
+        """LLM 客户端公开访问点——tasks.py 课程技能补全等复用同一
+        provider 链（避免重复初始化/重复读配置），勿绕过本属性直取 _llm。"""
+        return self._llm
+
+    def extract(self, jd_text: str, title_hint: str = "", timeout: Optional[int] = None) -> JDExtractionResult:
         """从 JD 文本中抽取结构化实体。
 
         LLM 抽取 → 词典过滤 → 后缀清洗 → 去重；LLM 不可用时规则抽取兜底。
+
+        title_hint：招聘标题（采集端 JobItem.title / 评测端 job_title_raw）。
+        非空时拼到正文首行（对齐生产 `_build_jd_text` 的 title 首行形态），
+        prompt 首行标题规则即生效——岗位名优先采用招聘标题，正文职责/技术栈
+        不得改写（盲审 08-14：评测链路此前丢标题，title 失配 14/32 中
+        7 条为"标题明确但正文带偏"）。
+
+        timeout：单 provider LLM 超时（秒），缺省走 provider 异步默认（30s）。
+        L1-1 六维补齐（#328）后抽取输出更重，重 JD 偶发 >30s；
+        评测侧显式传 60s，生产默认不变。
         """
         if not jd_text or len(jd_text.strip()) < 10:
             return JDExtractionResult(position_name="")
+
+        if title_hint and title_hint.strip():
+            jd_text = f"{title_hint.strip()}\n{jd_text}"
 
         if self._llm is None:
             result = self._rule_based_extract(jd_text)
@@ -63,12 +82,12 @@ class JDExtractor:
                 # 分层 Prompt：system 角色（SYSTEM_PROMPT）+ Few-Shot + 任务输入（§6.2）
                 system_prompt = SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES
                 result = self._llm.extract_structured(
-                    prompt, JDExtractionResult, system_prompt=system_prompt
+                    prompt, JDExtractionResult, system_prompt=system_prompt, timeout=timeout
                 )
             except LLMExtractionError:
                 result = self._rule_based_extract(jd_text)
 
-        return post_process(result)
+        return lexical_guard(post_process(result), jd_text)
 
     def extract_batch(
         self,
@@ -144,7 +163,7 @@ class JDExtractor:
                 raise LLMExtractionError(
                     f"批量返回 {len(batch.results)} 条 ≠ 输入 {len(chunk)} 条，降级逐条"
                 )
-            return [post_process(r) for r in batch.results]
+            return [lexical_guard(post_process(r), t) for r, t in zip(batch.results, chunk)]
         except LLMExtractionError:
             # 整批失败（超时/校验/provider 全挂）→ 该批逐条抽取（单条有规则兜底）
             return [self.extract(text) for text in chunk]

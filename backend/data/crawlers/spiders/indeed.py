@@ -29,4 +29,4 @@ class IndeedSpider(JobSpyBaseSpider):
     cities = ["New York", "San Francisco", "Seattle", "Boston", "Remote"]
 
     # 单次采集岗位数上限（保守值，Indeed 无限流但避免压力）
-    results_wanted = 20
+    results_wanted = 100

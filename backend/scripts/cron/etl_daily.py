@@ -18,7 +18,7 @@ r"""每日 ETL 调度入口（设计文档 §4.4）。
 幂等：同 run_date 仅允许一次入队（Redis SET NX 锁 arq:etl:run:{date}，24h TTL），
 重复触发直接跳过；失败重跑加 --force 覆盖。
 
-依赖：Redis 已启动、ARQ Worker 已运行（arq app.workers.tasks.WorkerSettings）
+依赖：Redis 已启动、ARQ Worker 已运行（arq app.workers.settings.WorkerSettings）
 """
 
 import asyncio
@@ -70,7 +70,9 @@ async def enqueue_etl_pipeline(force: bool = False) -> None:
         # 占位，24h TTL 覆盖当日窗口；任务失败重试需显式 --force 释放后重入。
         lock_key = f"arq:etl:run:{run_date}"
         if not force:
-            acquired = await client.set(lock_key, "1", nx=True, expire=60 * 60 * 24)
+            # redis-py set 参数为 ex=（秒），非 expire=（08-14 修复：05:00 计划任务
+            # 会因 TypeError 崩溃，幂等锁形同虚设）
+            acquired = await client.set(lock_key, "1", nx=True, ex=60 * 60 * 24)
             if not acquired:
                 logger.warning("当日 ETL 已在队列/执行中（%s），跳过重复触发（如需强制重跑请用 --force）", run_date)
                 return

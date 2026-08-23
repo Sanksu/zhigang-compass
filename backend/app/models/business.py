@@ -149,6 +149,11 @@ class GraphVersion(Base):
     node_added: Mapped[int] = mapped_column(Integer, default=0)
     node_removed: Mapped[int] = mapped_column(Integer, default=0)
     node_changed: Mapped[int] = mapped_column(Integer, default=0)
+    # 机制补强 ①：样本量对比告警（evidence 量比上版本萎缩<50%/膨胀>200% 时非空 JSONB）
+    data_warning: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True, default=None,
+        comment="样本量对比告警（机制补强①，阈值 50%/200%）",
+    )
 
 
 class Occupation(Base):
@@ -469,4 +474,99 @@ class TechnologyWatch(Base):
     __table_args__ = (
         # 幂等 upsert 约束：同一技能同源同周期仅一行
         UniqueConstraint("skill_name", "signal_source", "period", name="uq_technology_watch_skill_period"),
+    )
+
+
+class EvolutionEvent(Base):
+    """岗位演化事件（机制补强②：born/merged/ended 可展示事实，PR #334 确认）。
+
+    Neo4j EVOLVED_FROM 边（rename/split）保持不变；本表承载"岗位诞生/归并/消亡"
+    三类可答辩事件的 PG 落库，供 /evolution/events 查询与前端事件流。
+    """
+
+    __tablename__ = "evolution_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version_id: Mapped[str] = mapped_column(
+        String(64), index=True, nullable=False  # 归属版本，如 graph_v20260820
+    )
+    event_type: Mapped[str] = mapped_column(String(20), nullable=False)  # born / merged / ended
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    from_name: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)  # 旧名（ended/merged）
+    to_name: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)  # 新名（born/merged）
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)  # 附加（如 merged 的多个 from_names）
+
+
+class DictProposal(Base):
+    """技能字典调整提案（dict-guard 每日评估产出，人工审批通道）。
+
+    分级自动策略（技能字典自治守卫方案 §4）：仅低风险 add_stopword
+    （过硬门禁 + 影响面 ≤ 阈值 + LLM 置信度达标）自动生效并落 DictChangeLog，
+    不建本表行；remove_stopword / protect_whitelist / 超影响面 / 低置信度
+    一律进本表 pending，admin 审批后生效——字典是幻觉防控第三道防线载体，
+    高风险变更不自动写（对齐岗位名 LLM 审查方案"不自动写规则库"原则）。
+    """
+
+    __tablename__ = "dict_proposals"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    term: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    entity_type: Mapped[str] = mapped_column(
+        String(20), default="skill", index=True, nullable=False
+        # 治理对象类型: skill（技能字典）/ position（岗位节点清理）/ course（课程脏边或孤立课程节点）
+    )
+    action: Mapped[str] = mapped_column(
+        String(30), nullable=False  # skill: add/remove_stopword/protect_whitelist；position/course: remove_node/remove_edge
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", index=True, nullable=False  # pending / approved / rejected
+    )
+    reason: Mapped[str] = mapped_column(Text, default="", nullable=False)  # LLM 判定理由
+    llm_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    evidence: Mapped[list] = mapped_column(JSONB, default=list)  # JD 样例/命中统计
+    impact_stats: Mapped[dict] = mapped_column(JSONB, default=dict)  # {graph_nodes, jd_snapshots}
+    run_date: Mapped[str] = mapped_column(String(10), index=True, nullable=False)  # 评估批次日期
+    reviewed_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    review_reason: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class DictChangeLog(Base):
+    """字典变更审计（动态过滤层每次变更一行：自动生效/人工审批/回滚）。
+
+    与 configs/skill_filters_dynamic.json 一一对应：JSON 文件是运行时生效态，
+    本表是完整审计链（谁/何时/何词/何动作/何理由/影响面），回滚依据。
+    """
+
+    __tablename__ = "dict_change_logs"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    term: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    entity_type: Mapped[str] = mapped_column(
+        String(20), default="skill", index=True, nullable=False
+        # 与 DictProposal.entity_type 同语义；skill=动态层变更，position/course=图谱清理
+    )
+    action: Mapped[str] = mapped_column(String(30), nullable=False)  # 同 DictProposal.action + rollback
+    source: Mapped[str] = mapped_column(
+        String(20), nullable=False  # auto（守卫自动）/ manual（人工审批）/ rollback
+    )
+    kind: Mapped[str] = mapped_column(
+        String(20), nullable=False  # skill=blocked/protected；position/course=node/edge
+    )
+    proposal_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 关联提案
+    reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)  # {operator, evidence 摘要等}
+    impact_stats: Mapped[dict] = mapped_column(JSONB, default=dict)
+    applied_by: Mapped[str] = mapped_column(String(64), default="system", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -32,10 +32,11 @@ import json
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlencode, urljoin
+from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.logging import setup_logging
+from crawlers.cdp_common import connect_cdp, isolated_page
 
 logger = setup_logging("glassdoor_cdp_crawler", stream=sys.stderr)
 
@@ -187,26 +188,15 @@ async def crawl(keyword: str, city: str, max_pages: int = 2, cdp_url: str = DEFA
     all_jobs_data = []
 
     async with async_playwright() as p:
-        try:
-            browser = await p.chromium.connect_over_cdp(cdp_url)
-        except Exception as e:
-            logger.error(f"❌ CDP 连接失败（{cdp_url}）: {e}")
-            logger.info(f"   请先运行 setup_boss_chrome.py 启动带 CDP 的 Chrome/Edge")
+        browser = await connect_cdp(p, cdp_url)
+        if browser is None:
             return 0
 
         # 隔离：新建独立 context 并复制主 context 的 cookies（保留 Cloudflare 验证），
         # 爬虫导航只发生在隔离 context 内，不触碰用户正在浏览的页面
         async def _new_page():
-            """新建隔离 context+page，并复制主 context 的 cookies（保留 Cloudflare 验证态）。"""
-            context = await browser.new_context()
-            if browser.contexts:
-                try:
-                    _cookies = await browser.contexts[0].cookies()
-                    if _cookies:
-                        await context.add_cookies(_cookies)
-                except Exception as e:
-                    logger.warning(f"⚠️ 复制 cookies 到隔离 context 失败: {e}")
-            return context, await context.new_page()
+            """新建隔离 context+page（复制主 context cookies 保留 Cloudflare 验证态）。"""
+            return await isolated_page(browser)
 
         # 城市解析：headless 下 Cloudflare 仅放行每个 context 的首次导航（实测同 context
         # 第二次导航即 challenge），故用独立 context 完成首页导航 + typeahead 查询，

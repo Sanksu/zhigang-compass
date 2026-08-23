@@ -18,7 +18,7 @@ dependencies = [
     "httpx>=0.27",
     "arq>=0.26",
     "pyjwt[crypto]>=2.8",
-    "passlib[bcrypt]>=1.7",
+    "bcrypt>=4.0",
     "python-multipart>=0.0.9",
     "instructor>=1.0",
     "openai>=1.0",
@@ -28,11 +28,10 @@ dependencies = [
     "scrapy-playwright>=0.0.40",
     "playwright>=1.40",
     "python-jobspy>=1.1.82",
-    "pypdf>=6.14.2",
     "pdfplumber>=0.11",
     "python-docx>=1.2.0",
     "paddlepaddle>=2.6",
-    "paddleocr>=2.8",
+    "paddlex[ocr-core]>=3.0",
     "pillow>=10.0",
     "pymupdf>=1.24",
     "psycopg2-binary>=2.9.12",
@@ -45,15 +44,18 @@ dev-dependencies = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
-    "httpx>=0.27",
+    "pypdf>=6.14.2",
     "locust>=2.0",
     "optuna>=4.0",
     "ruff>=0.9",
+    "openpyxl>=3.1",
 ]
 
 # ── 代码质量（CI 门禁：uv run ruff check）──
 [tool.ruff]
 line-length = 120
+# 归档目录（scripts/archive/）为历史一次性脚本留档，退出 lint
+exclude = ["scripts/archive"]
 # 仅启用正确性类规则（pyflakes F + pycodestyle 子集 + 未使用变量），
 # 不含风格类（E501 行宽）与自动格式化，避免与既有代码风格冲突
 lint.select = ["F", "E401", "E402"]
@@ -71,7 +73,11 @@ lint.select = ["F", "E401", "E402"]
 testpaths = ["tests"]
 addopts = ["-m", "not integration"]
 markers = [
-    "integration: 真实 LLM API 集成测试（产生费用，需有效 api_key，默认不跑，显式 -m integration 执行）",
+    # M1 修复:marker 语义从"真实 LLM API"扩为"需外部基础设施或真实 LLM API",
+    # 覆盖 tests/integration/ 目录下依赖 docker-compose(Neo4j/PG/Redis)的端到端
+    # 用例——本地 docker 在跑时普通 pytest 会拉起这些用例,且数据演化后断言易脆,
+    # 一并默认排除,需显式 -m integration 执行
+    "integration: 集成测试（需 docker-compose 基础设施或真实 LLM API；默认不跑，显式 -m integration 执行）",
 ]
 
 [tool.coverage.run]

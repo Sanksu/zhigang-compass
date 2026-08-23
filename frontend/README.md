@@ -54,7 +54,7 @@ pnpm preview
 
 ## 设计约束
 
-- **岗位五状态色**仅用于状态指示，不作装饰（candidate/emerging/stable/declining/archived）
+- **岗位六状态色**仅用于状态指示，不作装饰（active/candidate/emerging/stable/declining/archived，图谱与详情面板统一取 globals.css 设计令牌）
 - **图谱视图**后端过滤，2D 力导向图为主，3D 为可选模式
 - **匹配结果页**需标注"基于 [日期] 版本快照计算"
 - **路由守卫**：`/resume-match` 需 `user`/`admin` 角色，`/admin/*` 需 `admin` 角色

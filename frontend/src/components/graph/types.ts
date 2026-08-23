@@ -26,26 +26,34 @@ export type GraphViewType = components['schemas']['GraphViewType']
 export type GraphNode = components['schemas']['GraphNode'] & {
   /** 节点度数（toGraphData 由 edges 统计，驱动布局斥力/大小） */
   value?: number
+  /** 域超节点标记（前端派生：panorama 聚合下钻，type 仍为 'position' 复用交互） */
+  isDomain?: boolean
+  /** 域内岗位数（仅域超节点） */
+  memberCount?: number
+  /** 待归类桶标记（前端派生：未回填 domain_id 的兜底域，画布弱化样式依据） */
+  isUncategorized?: boolean
 }
 
 /** 契约 GraphEdge（source/target/weight/necessity/level） */
 export type GraphEdge = components['schemas']['GraphEdge']
+/** 前端派生边标记：域-域共享关系与岗位/技能边使用不同降噪样式 */
+export type DisplayGraphEdge = GraphEdge & { isDomainEdge?: boolean }
 
-/** 前端图统计容器（toGraphData 由返回 nodes/edges 自算，非后端字段） */
+/** 前端图统计容器（由后端 GraphViewStats 契约映射，total_* 为图谱全量） */
 export interface GraphStats {
   totalPositions: number
   totalSkills: number
   totalEdges: number
   /** 实际返回节点数（受 limit 约束） */
   returnedNodes: number
-  /** 全量节点总数（可能 > returnedNodes） */
+  /** 全量节点总数（后端 total_nodes，可能 > returnedNodes；缺失时回落返回数） */
   totalNodesInGraph: number
 }
 
 /** 前端图数据容器（由契约 GraphViewData 映射而来） */
 export interface GraphData {
   nodes: GraphNode[]
-  edges: GraphEdge[]
+  edges: DisplayGraphEdge[]
   stats: GraphStats
 }
 
@@ -55,6 +63,9 @@ export interface NodeDetail {
   name: string
   type: NodeType
   status?: PositionStatus
+  /** 域超节点（isDomain 时不走 /graph/position/{id} 详情，本地渲染域信息） */
+  isDomain?: boolean
+  memberCount?: number
   /** 技能级别（后端 view 端点未返回，面板预留展示） */
   level?: string
   /** 证据来源（后端 view 端点未返回，面板预留展示） */

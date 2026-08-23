@@ -1,0 +1,22 @@
+{
+  "version": 0,
+  "updated_at": "1970-01-01T00:00:00",
+  "blocked": [
+    {
+      "term": "示例噪音词",
+      "reason": "dict-guard 评估：白名单外长尾、无真实技能语义（示例条目，实际文件由运行时生成）",
+      "source": "dict_guard",
+      "operator": "",
+      "added_at": "1970-01-01T00:00:00"
+    }
+  ],
+  "protected": [
+    {
+      "term": "示例保护词",
+      "reason": "静态停用词误伤的真实技能，审批后放行（示例条目）",
+      "source": "manual",
+      "operator": "admin",
+      "added_at": "1970-01-01T00:00:00"
+    }
+  ]
+}

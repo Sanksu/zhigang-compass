@@ -141,13 +141,71 @@ class TestScorePosition:
         result = score_position(cand, pos, weights=W)
         assert result.nice_score == 1.0
 
-    def test_no_must_skills_gives_full_must(self):
-        """岗位无必备技能 → must_score=1.0，不判零。"""
-        cand = _candidate([])
-        pos = _position("p1", musts=[])
+    def test_no_must_skills_renormalizes_instead_of_free_full(self):
+        """A1：岗位无必备技能 → must_score=None（不再白得满分），总分在
+        nice/exp 上权重重归一，雷达 must 维度为 None。"""
+        cand = _candidate(["Go", "Rust"])
+        pos = _position(
+            "p1",
+            musts=[],
+            nices=[_req("Go", Necessity.NICE, weight=1.0), _req("Rust", Necessity.NICE, weight=1.0)],
+            required_years=2,
+        )
         result = score_position(cand, pos, weights=W)
-        assert result.must_score == 1.0
+        assert result.must_score is None
+        assert result.nice_score == 1.0
+        assert result.exp_score == 1.0
+        # 重归一：(1.0×0.2 + 1.0×0.2) / (0.2+0.2) = 1.0（旧口径白得 0.6 满分贡献）
+        assert result.total_score == 1.0
         assert result.unqualified is False
+        assert result.radar["must"] is None
+        assert "无必备技能门槛" in result.summary
+
+    def test_no_must_partial_nice_scales_renormalized_total(self):
+        """A1：无门槛岗位部分命中 nice → 总分只由 nice/exp 决定（重归一后）。
+
+        命中 1/2 nice（exp 满分）：(0.5×0.2 + 1.0×0.2) / 0.4 = 0.75。
+        """
+        cand = _candidate(["Go"], total_years=5)
+        pos = _position(
+            "p1",
+            musts=[],
+            nices=[_req("Go", Necessity.NICE, weight=1.0), _req("Rust", Necessity.NICE, weight=1.0)],
+            required_years=2,
+        )
+        result = score_position(cand, pos, weights=W)
+        assert result.total_score == pytest.approx(0.75)
+
+    def test_no_must_all_nice_missed_unqualified(self):
+        """A3：无门槛岗位 nice 全未命中 → 判零不纳入推荐（防无关候选占位）。"""
+        cand = _candidate(["Python"])
+        pos = _position(
+            "p1",
+            musts=[],
+            nices=[_req("Go", Necessity.NICE, weight=1.0), _req("Rust", Necessity.NICE, weight=1.0)],
+        )
+        result = score_position(cand, pos, weights=W)
+        assert result.total_score == 0.0
+        assert result.unqualified is True
+        assert "命中不足" in result.summary
+
+    def test_no_must_nice_below_floor_unqualified(self):
+        """O1：无门槛岗位 Top-10 命中不足 2 条（nice<0.2）→ 判零。
+
+        10 条 nice 命中 1 条 = 0.1 < 0.2 → unqualified；命中 2 条 = 0.2 达门槛。
+        （freq=3 小样本岗重归一后 exp 占 86.7%，1 条命中曾得 0.88 倒挂真匹配岗）
+        """
+        nices = [_req(f"s{i}", Necessity.NICE, weight=1.0) for i in range(10)]
+        pos = _position("p1", musts=[], nices=nices)
+
+        one_hit = score_position(_candidate(["s0"]), pos, weights=W)
+        assert one_hit.nice_score == pytest.approx(0.1)
+        assert one_hit.unqualified is True
+        assert one_hit.total_score == 0.0
+
+        two_hits = score_position(_candidate(["s0", "s1"]), pos, weights=W)
+        assert two_hits.nice_score == pytest.approx(0.2)
+        assert two_hits.unqualified is False
 
     def test_nice_score_is_weighted_average(self):
         """nice_score = 命中技能权重和 / 总权重。"""
@@ -162,6 +220,50 @@ class TestScorePosition:
         )
         result = score_position(cand, pos, weights=W)
         assert result.nice_score == pytest.approx(0.75)
+
+    def test_nice_topk_truncates_long_tail(self):
+        """B1：nice 池超过 NICE_TOP_K 时只考核跨源数最高的前 K 条。
+
+        12 条 nice：top-10 跨源数高（source_count=5）、尾部 2 条跨源数低
+        （source_count=1）。候选人只命中尾部 2 条 → 被截断 → 0.0；
+        命中 top-10 中的 5 条 → 0.5。
+        """
+        nices = [_req(f"core{i}", Necessity.NICE, weight=1.0, source_count=5) for i in range(10)]
+        nices += [_req(f"tail{i}", Necessity.NICE, weight=1.0, source_count=1) for i in range(2)]
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST)], nices=nices)
+
+        only_tail = score_position(_candidate(["Python", "tail0", "tail1"]), pos, weights=W)
+        assert only_tail.nice_score == 0.0
+
+        half_core = score_position(_candidate(["Python", *[f"core{i}" for i in range(5)]]), pos, weights=W)
+        assert half_core.nice_score == pytest.approx(0.5)
+
+    def test_nice_topk_ranks_by_source_count(self):
+        """B1：Top-K 排序键是 source_count（nice 边权重统一无区分度）。"""
+        nices = [
+            _req("b", Necessity.NICE, weight=0.4, source_count=9),
+            _req("a", Necessity.NICE, weight=0.4, source_count=1),
+        ]
+        # 池不足 K 条不截断，但排序语义由本用例锁定：候选只命中低跨源 a → 0.5×0.4/0.8
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST)], nices=nices)
+        result = score_position(_candidate(["Python", "a"]), pos, weights=W)
+        assert result.nice_score == pytest.approx(0.5)
+
+    def test_nice_topk_tiebreak_deterministic(self):
+        """B1 边角：source_count 平局按 skill_name 升序截断，Top-K 组成确定。
+
+        12 条 sc=1（插入序把 zz 开头放最前）：字典序前 10 条入围、zz 两条被
+        截断——不随图谱返回序漂移（小样本岗 sc 全为 1 时尤其重要）。
+        """
+        names = [f"zz{i}" for i in range(2)] + [f"a{i:02d}" for i in range(10)]
+        nices = [_req(n, Necessity.NICE, weight=1.0, source_count=1) for n in names]
+        pos = _position("p1", musts=[_req("Python", Necessity.MUST)], nices=nices)
+
+        hit_truncated = score_position(_candidate(["Python", "zz0"]), pos, weights=W)
+        assert hit_truncated.nice_score == 0.0
+
+        hit_kept = score_position(_candidate(["Python", "a00"]), pos, weights=W)
+        assert hit_kept.nice_score == pytest.approx(0.1)
 
     def test_staleness_mild_and_strong(self):
         """时效衰减：>180d → 0.95，>365d → 0.85，新鲜 → 1.0。"""
@@ -401,9 +503,16 @@ class TestProficiencyFactor:
     def test_missing_candidate_no_penalty(self):
         assert _proficiency_factor("高级", None) == 1.0
 
-    def test_unknown_level_falls_back_no_penalty(self):
-        """未知档位（数据异常）不武断惩罚。"""
-        assert _proficiency_factor("未知", 1) == 1.0
+    def test_aliases_normalize_to_existing_matrix_rows(self):
+        # 规范化只改变输入口径，不改变既定评分矩阵。
+        assert _proficiency_factor("熟悉", 1) == pytest.approx(0.85)
+        assert _proficiency_factor("掌握", 1) == pytest.approx(0.60)
+        assert _proficiency_factor("精通", 2) == pytest.approx(0.60)
+        assert _proficiency_factor("资深", 3) == pytest.approx(1.0)
+
+    def test_unknown_level_is_not_full_credit(self):
+        """非空未知等级不能被静默当作 1.0 完全满足。"""
+        assert _proficiency_factor("未知", 1) == 0.0
 
 
 class TestSourceWeight:
@@ -806,7 +915,12 @@ class TestSoftSkillDownweight:
         assert result.must_score == 0.0
 
     def test_soft_skill_nice_requirement_scored(self):
-        """岗位侧 soft_skills 并入 nice 后，推断软技能命中按 ×0.5 计入 nice_score。"""
+        """引擎对评分池内要求按 low_confidence ×0.5 计分（机制回归）。
+
+        生产链路软技能已退出评分池（soft_requirements 独立通道，2026-08-22
+        拍板）——本例直接构造含软技能名的 nice 池，验证引擎对 low_confidence
+        候选技能的降权机制本身不因通道拆分回归。
+        """
         cand = self._soft_candidate("团队协作")
         pos = _position(
             "p1",

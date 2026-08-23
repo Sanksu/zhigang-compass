@@ -2,10 +2,17 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import {
   Activity,
+  Bot,
+  ClipboardCheck,
   Database,
+  Filter,
+  Globe,
+  Network,
   RefreshCw,
+  Settings2,
   Shield,
   Users,
+  Workflow,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,6 +27,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiGet, apiPost } from '@/lib/api'
+import { formatDateTime } from '@/lib/utils'
+import type { components } from '@/types/api'
 
 /* ------------------------------------------------------------------ */
 /*  类型定义（对应后端 /admin/* 返回）                                    */
@@ -36,35 +45,8 @@ interface AuditLogItem {
 
 type AuditActionType = '用户管理' | '爬取' | '岗位审核' | '系统'
 
-interface BackendAuditLog {
-  id: number
-  user_id: string
-  action: string
-  resource: string
-  resource_id: string | null
-  detail: { username?: string }
-  ip_address: string
-  created_at: string | null
-}
-
-interface CrawlPlatform {
-  id: string
-  name: string
-  level: string
-  files: number
-  total_count: number
-  today_count: number
-  last_run: string | null
-}
-
-interface CrawlStatusData {
-  metrics: {
-    today_count: number
-    output_total: number
-    raw: { jd: number; course: number; paper: number; community: number }
-  }
-  platforms: CrawlPlatform[]
-}
+/** 后端 /admin/crawl/status 响应 data（契约 CrawlStatusData） */
+type CrawlStatusData = components['schemas']['CrawlStatusData']
 
 interface SourceItem {
   name: string
@@ -115,9 +97,32 @@ function actionType(action: string): AuditActionType {
   return '系统'
 }
 
-const QUICK_ACTIONS = [
+export const QUICK_ACTIONS: {
+  id: string
+  label: string
+  icon: typeof RefreshCw
+  desc: string
+  /** 导航型快捷入口（to 存在时渲染 Link，否则为触发型按钮） */
+  to?: string
+}[] = [
   { id: 'crawl', label: '触发全量爬取', icon: RefreshCw, desc: '重新采集所有数据源' },
+  { id: 'etl-clean', label: '数据清洗', icon: Filter, desc: 'SimHash 近似去重 · 立即执行' },
+  { id: 'etl-graph', label: '聚合入图', icon: Network, desc: '岗位-技能图写回 Neo4j' },
+  { id: 'etl-full', label: '完整 ETL 管线', icon: Workflow, desc: '采集→清洗→入图→快照全阶段' },
+  { id: 'goto-review', label: '前往岗位审核', icon: ClipboardCheck, desc: '处理候选晋升 / 驳回', to: '/admin/review' },
+  { id: 'goto-dictguard', label: '字典守卫', icon: Shield, desc: '技能/岗位/课程 LLM 自动治理 · 手动巡检', to: '/admin/review?tab=dict' },
+  { id: 'goto-crawl', label: '爬取管理', icon: Globe, desc: '单源触发 · 任务状态 · 输出查看', to: '/admin/crawl' },
+  { id: 'goto-llm', label: 'LLM 配置', icon: Bot, desc: '多 Provider 重试链 · 健康检查', to: '/admin/llm' },
+  { id: 'goto-settings', label: '系统配置', icon: Settings2, desc: '运行时参数 · 重启生效', to: '/admin/settings/tasks' },
+  { id: 'goto-users', label: '用户管理', icon: Users, desc: '账号 · 角色 · 状态', to: '/admin/users' },
 ]
+
+/** ETL 触发型快捷操作 → 后端白名单 job（契约 POST /admin/etl/trigger） */
+export const ETL_ACTION_JOBS: Record<string, string> = {
+  'etl-clean': 'dedup_simhash',
+  'etl-graph': 'aggregate_positions',
+  'etl-full': 'run_etl_pipeline',
+}
 
 const LEVEL_VARIANT: Record<string, SourceItem['levelVariant']> = {
   A: 'default',
@@ -154,7 +159,7 @@ export function AdminDashboardPage() {
     Promise.allSettled([
       apiGet<{ items: { id: string }[]; total: number }>('/admin/users?page=1&size=1'),
       apiGet<CrawlStatusData>('/admin/crawl/status'),
-      apiGet<{ items: BackendAuditLog[]; total: number }>('/admin/audit/logs?page=1&size=10'),
+      apiGet<components['schemas']['AuditLogsData']>('/admin/audit/logs?page=1&size=10'),
       apiGet<{ items: unknown[]; total: number }>('/admin/positions/pending'),
     ]).then(([usersRes, crawlRes, auditRes, pendingRes]) => {
       if (cancelled) return
@@ -181,15 +186,15 @@ export function AdminDashboardPage() {
           files: p.files,
           totalCount: p.total_count,
           todayCount: p.today_count,
-          lastRun: p.last_run,
+          lastRun: p.last_run ?? null,
         })),
       )
       setAuditLogs(
         logs.map((l) => ({
           id: l.id,
-          time: l.created_at ? new Date(l.created_at).toLocaleString('zh-CN') : '—',
+          time: formatDateTime(l.created_at),
           type: actionType(l.action),
-          operator: l.detail?.username ?? l.user_id,
+          operator: (l.detail?.username as string | undefined) ?? l.user_id,
           detail: `${l.action} · ${l.resource}`,
           ip: l.ip_address || '—',
         })),
@@ -201,6 +206,39 @@ export function AdminDashboardPage() {
     }
   }, [])
 
+  /** 按钮下方一次性提示（ttlMs 后自动清除；0 = 常驻直至下次更新） */
+  function flashAction(id: string, text: string, ttlMs = 4000) {
+    setActionMessages((prev) => new Map(prev).set(id, text))
+    if (ttlMs > 0) {
+      setTimeout(() => {
+        setActionMessages((prev) => {
+          const next = new Map(prev)
+          next.delete(id)
+          return next
+        })
+      }, ttlMs)
+    }
+  }
+
+  /** ETL 任务状态轮询：3s 间隔至终态（完整管线最长窗口 3h，400 次 ≈ 20min
+   * 后不再阻塞提示，任务仍在后台由 worker 继续执行） */
+  async function trackEtlTask(id: string, taskId: string) {
+    for (let i = 0; i < 400; i++) {
+      await new Promise((r) => setTimeout(r, 3000))
+      try {
+        const t = await apiGet<components['schemas']['EtlTaskStatus']>(
+          `/admin/etl/task/${taskId}`,
+        )
+        if (t.status === 'success') return flashAction(id, '执行完成')
+        if (t.status === 'failed') return flashAction(id, '执行失败（详情见服务端日志）')
+      } catch (e) {
+        console.error(`[quick-action] ETL 状态查询失败: ${id}`, e)
+        return flashAction(id, '状态查询中断，请稍后刷新查看')
+      }
+    }
+    flashAction(id, '仍在执行，请稍后刷新查看')
+  }
+
   async function handleQuickAction(id: string) {
     if (runningActions.has(id)) return
     setRunningActions((prev) => new Set(prev).add(id))
@@ -210,28 +248,31 @@ export function AdminDashboardPage() {
       return next
     })
     try {
+      const job = ETL_ACTION_JOBS[id]
+      if (job) {
+        // ETL 触发型（数据清洗/聚合入图/完整管线）：入队即释放按钮，
+        // 由 trackEtlTask 轮询终态更新提示——管线可长达小时级，不占用按钮态
+        const res = await apiPost<components['schemas']['EtlTriggerResult']>('/admin/etl/trigger', { job })
+        flashAction(id, '已入队 · 执行中…', 0)
+        void trackEtlTask(id, res.task_id)
+        return
+      }
       // 真实触发：对每个平台入队 crawl_platform 任务（POST /admin/crawl/trigger）
+      // 不传 keyword：留空走平台热度/最新采集（08-16 起爬虫无默认关键词，契约 keyword 可选）
       const res = await apiGet<CrawlStatusData>('/admin/crawl/status')
       for (const p of res.platforms) {
-        await apiPost('/admin/crawl/trigger', { platform: p.id, keyword: '高级前端' })
+        await apiPost('/admin/crawl/trigger', { platform: p.id })
       }
-      setActionMessages((prev) => new Map(prev).set(id, `已入队 ${res.platforms.length} 个平台`))
+      flashAction(id, `已入队 ${res.platforms.length} 个平台`)
     } catch (e) {
       console.error(`[quick-action] 失败: ${id}`, e)
-      setActionMessages((prev) => new Map(prev).set(id, '触发失败'))
+      flashAction(id, '触发失败')
     } finally {
       setRunningActions((prev) => {
         const next = new Set(prev)
         next.delete(id)
         return next
       })
-      setTimeout(() => {
-        setActionMessages((prev) => {
-          const next = new Map(prev)
-          next.delete(id)
-          return next
-        })
-      }, 4000)
     }
   }
 
@@ -391,7 +432,7 @@ export function AdminDashboardPage() {
         </Card>
       </div>
 
-      {/* 快捷操作区 */}
+      {/* 快捷操作区：触发型（爬取）+ 导航型（审核/爬取管理/LLM/用户） */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">快捷操作</CardTitle>
@@ -402,7 +443,29 @@ export function AdminDashboardPage() {
               const Icon = action.icon
               const isRunning = runningActions.has(action.id)
               const message = actionMessages.get(action.id)
-              return (
+              const inner = (
+                <>
+                  <div className="flex items-center gap-2 w-full">
+                    <Icon className={`size-4 shrink-0 ${isRunning ? 'animate-spin' : ''}`} />
+                    <span className="text-sm font-medium">{action.label}</span>
+                    {/* 审核入口显示真实待审核数（/admin/positions/pending total） */}
+                    {action.id === 'goto-review' && auditQueueCount > 0 && (
+                      <span className="ml-auto rounded-full bg-state-candidate/15 px-2 py-0.5 text-[10px] font-medium text-state-candidate">
+                        {auditQueueCount}
+                      </span>
+                    )}
+                    {message && (
+                      <span className="ml-auto text-[10px] text-state-emerging font-medium">{message}</span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-ink-muted font-normal">{action.desc}</span>
+                </>
+              )
+              return action.to ? (
+                <Button key={action.id} variant="outline" asChild className="h-auto flex-col items-start gap-2 p-4 text-left">
+                  <Link to={action.to}>{inner}</Link>
+                </Button>
+              ) : (
                 <Button
                   key={action.id}
                   variant="outline"
@@ -410,14 +473,7 @@ export function AdminDashboardPage() {
                   onClick={() => handleQuickAction(action.id)}
                   className="h-auto flex-col items-start gap-2 p-4 text-left"
                 >
-                  <div className="flex items-center gap-2 w-full">
-                    <Icon className={`size-4 shrink-0 ${isRunning ? 'animate-spin' : ''}`} />
-                    <span className="text-sm font-medium">{action.label}</span>
-                    {message && (
-                      <span className="ml-auto text-[10px] text-state-emerging font-medium">{message}</span>
-                    )}
-                  </div>
-                  <span className="text-[11px] text-ink-muted font-normal">{action.desc}</span>
+                  {inner}
                 </Button>
               )
             })}

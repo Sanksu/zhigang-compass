@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from app.services import alerting
-from app.workers import tasks
+from app.workers import crawl, quality, tasks
 
 
 class TestSendAlert:
@@ -88,16 +88,16 @@ class TestCrawlFailureAlert:
 
             TimeoutError = asyncio.TimeoutError
 
-        monkeypatch.setattr(tasks, "send_alert", _fake_alert)
-        monkeypatch.setattr(tasks, "asyncio", _FakeAsyncio())
-        monkeypatch.setattr(tasks, "_OUTPUT_DIR", tmp_path)
-        monkeypatch.setattr(tasks, "_CRAWLERS_DIR", tmp_path.parent.parent)
-        monkeypatch.setattr(tasks, "_push_crawl_log", _noop_log)
-        monkeypatch.setattr(tasks, "_update_crawl_task", _fake_update)
+        monkeypatch.setattr(crawl, "send_alert", _fake_alert)
+        monkeypatch.setattr(crawl, "asyncio", _FakeAsyncio())
+        monkeypatch.setattr(crawl, "_OUTPUT_DIR", tmp_path)
+        monkeypatch.setattr(crawl, "_CRAWLERS_DIR", tmp_path.parent.parent)
+        monkeypatch.setattr(crawl, "push_crawl_log", _noop_log)
+        monkeypatch.setattr(crawl, "update_crawl_task", _fake_update)
 
         async def run():
             try:
-                await tasks.crawl_platform({}, "boss", task_id="t-alert")
+                await crawl.crawl_platform({}, "boss", task_id="t-alert")
             except RuntimeError:
                 pass
 
@@ -144,7 +144,7 @@ class TestStaleDataAlert:
         def _factory():
             return _FakeSession()
 
-        monkeypatch.setattr(tasks, "send_alert", _fake_alert)
+        monkeypatch.setattr(quality, "send_alert", _fake_alert)
         monkeypatch.setattr("app.core.database.async_session_factory", _factory)
 
         result = asyncio.run(tasks.check_data_freshness({}))
@@ -178,7 +178,7 @@ class TestStaleDataAlert:
         def _factory():
             return _FakeSession()
 
-        monkeypatch.setattr(tasks, "send_alert", _fake_alert)
+        monkeypatch.setattr(quality, "send_alert", _fake_alert)
         monkeypatch.setattr("app.core.database.async_session_factory", _factory)
 
         asyncio.run(tasks.check_data_freshness({}))

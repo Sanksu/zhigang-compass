@@ -32,12 +32,42 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    （"全栈工程师"、"大模型评测工程师"），括号内为技能/方向列表，不得并入岗位名。
    **岗位名必须是岗位语义词**：不得取自产品名/公司名/人名（如 "Odoo"、"Gemini"），
    也不得输出空字符串——正文存在岗位标题时必须输出岗位名。
+   **标题优先**：岗位名以招聘标题（首行标题/"岗位名称：xxx"/输入标题）为准，
+   正文职责或高频技术栈不得改写标题岗位名——标题"Python工程师"而正文是量化金融
+   仍输出"Python工程师"；标题"python开发工程师"而正文高频 Odoo 仍输出
+   "Python开发工程师"（Odoo 是平台产品名，不得作岗位名）。
+   **技术栈前缀保留**：标题中的技术栈前缀（React、Vue、Golang、SLAM、Java 等）
+   必须保留在岗位名中，不得删除或泛化——"React前端工程师"不得输出"前端开发工程师"；
+   标题无前缀的泛化岗位（"前端工程师"）保持泛化。
 2. 技能（skills）：仅列出**必备**技术技能（如"Python"、"Java"、"数据分析"）。
    **技能名使用标准简短名称**：不要加"系统/维护/开发/技术"等冗余后缀
    （"Windows系统维护"→"Windows"、"Python开发"→"Python"、"Linux运维"→"Linux"），
    以可独立学习/匹配的技术点为准。
    **基础理论词不作为独立技能**："计算机基础"、"软件工程"、"数据结构"、"测试理论"
    等泛化基础词仅在 JD 明确作为岗位核心技能要求时收录，一般性提及不收录。
+   **通用工程工具克制（08-16 r6 实证）**：Git、CI/CD、CMake、Makefile、
+   gtest/JUnit/pytest 等测试框架、JIRA/Confluence 等协作工具、Docker 容器化等
+   "任何工程岗位都可能用到"的通用工具——仅当 JD 明确作为岗位核心能力要求时
+   才收录，一般工程实践提及（"熟悉常用工具"、"具备工程能力"语境）不收录。
+   **外围工具克制**：仿真/调试/可视化等外围工具（Gazebo、RViz、GDB、Isaac Sim、
+   Cartographer、LOAM 等）仅当岗位核心工作明确依赖时收录——正文技术清单里
+   出现但与岗位核心能力关联弱的不收录（宁缺毋滥，防工具清单全量入技能）。
+   **测试类型不演绎**：接口测试/性能测试/UI测试/自动化测试等测试类型，仅当
+   文本**明确出现该类型名称**时收录；正文笼统表述（"各类测试"、"测试流程"、
+   "对接口、APP、UI 进行持续测试"中未逐项列出的类型）不得逐个演绎成技能名。
+   **任职要求清单全收（08-16 r6.1 反向保护）**："任职要求/岗位要求/
+   Requirements"段落中明确列出的技能（含模型名如 DeepSeek/GLM/Qwen、框架名、
+   工具名）**必须全部收录**，不受上述克制规则影响——克制规则仅作用于职责描述
+   段与泛化提及；"宁缺毋滥"不适用于任职要求清单（清单是硬性要求，漏抽同样失真）。
+   **"等/如"列举完整性（08-17 r6.2 实证）**："熟悉 DeepSeek/Qwen 等主流大模型"
+   中"等"之前的**每一项具体技术名都必须收录**——"等"仅表示列举未尽，
+   不是省略已列出词的理由；**但"等"后未在正文出现的词不得自行补充**
+   （如正文只列 DeepSeek/Qwen，"等"后不得猜测 OpenAI/文心一言 等）。
+   **长清单完整性（08-17 r6.2）**：任职要求段落列出的技能超过 5 个时，
+   **必须全部逐一收录**——禁止按重要性筛选、省略尾部或凭印象只收核心
+   （实证：40 词级技能清单 LLM 常漏 10+ 个，评测 recall 崩）。
+   **输出自查（08-17 r6.2）**：完成抽取后，**回读任职要求段落逐项核对**——
+   确认每个明确列出的技能名都已进入 skills 或 requirements，发现遗漏立即补上。
    **岗位方向词不作为技能**：岗位名/标题括号中的方向限定词（"音视频"、"AIGC"、
    "多模态"、"大模型"、"机器人"等）是岗位方向而非可独立匹配的技能，
    不得进入 skills 或 requirements——除非该词在正文中作为独立技能要求出现。
@@ -73,6 +103,8 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    时，该结构内的技能标 "nice" 且**不得出现在 skills 字段**（skills 仅收录必备技能）。
    示例："熟悉 Python、SQL 者优先" → skills 不含 Python/SQL，requirements 中 Python/SQL
    均标 "nice"。
+   **同一技能只能出现在一个位置**：已列入 skills 的技能不得再进 requirements，
+   反之亦然——加分项只能进 requirements(nice)，禁止在 skills 中重复出现。
    **反向保护**：以下语境中的技能必须保留为必备（must）并进入 skills，不得因附近出现
    "如/等/或"就降级或漏抽："任职要求/岗位要求"清单中的技能、"精通/熟练掌握/熟悉/具备 XX"
    明确要求的技能（如"熟悉常用测试管理工具，如 Jira、QC 等"→ Jira、QC 均为 must 进 skills；
@@ -98,6 +130,12 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    平台性宽泛表述不得推断为技能；模型名/产品名（如 DeepSeek、Qwen、GPT）仅当作为
    明确技能要求出现时才收录，上下文提及不算技能。
    **宁缺毋滥**：宁可漏抽，不可多抽——误抽会污染技能图谱与岗位匹配。
+11. 经验（experience_range）：仅当正文出现"X 年以上 / X-Y 年 / 至少 X 年 / X 年经验"等显式年限
+   表述才填 min_years/max_years（如"3年以上"→min 3/max null；"3-5年"→min 3/max 5）；
+   "经验不限"不填；正文与列表页冲突以正文为准。无明确年限时输出 null（绝不填 0 年）。
+12. 核心职责（core_duties）：从职责段归纳 2~8 条精炼短语（每条 5~20 字，如"负责分布式缓存架构设计"、
+   "主导信贷风控建模"），只讲"岗位做什么"；禁止整段抄写职责原文，禁止收录技能/福利/公司介绍
+   （技能由 requirements 承载）。职责段缺失时留空数组。
 
 JD 文本：
 {jd_text}
@@ -145,6 +183,41 @@ JD 文本：招聘资深数据平台工程师，负责搭建实时数仓与离�
 示例 10（优先/加分条件正确示范——加分技能不进 skills）：
 JD 文本：招聘数据分析师，精通 SQL 与 Python，熟悉 Tableau、Power BI 者优先，具备统计学基础，本科及以上学历，有电商行业经验更佳
 输出：{{"position_name": "数据分析师", "skills": [{{"name": "SQL"}}, {{"name": "Python"}}, {{"name": "统计学"}}], "tools": [], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "SQL", "necessity": "must", "level": "高级"}}, {{"skill_name": "Python", "necessity": "must", "level": "高级"}}, {{"skill_name": "统计学", "necessity": "must"}}, {{"skill_name": "Tableau", "necessity": "nice"}}, {{"skill_name": "Power BI", "necessity": "nice"}}]}}
+
+示例 11（标题优先——正文技术栈/职责不得改写标题岗位名）：
+JD 文本：岗位名称：python开发工程师
+岗位职责：设计和开发基于Odoo的应用程序，参与Odoo平台的定制开发与系统集成。
+任职要求：具备扎实的Python开发能力，熟悉Odoo平台的开发环境。
+输出：{{"position_name": "Python开发工程师", "skills": [{{"name": "Python"}}, {{"name": "Odoo"}}], "requirements": [{{"skill_name": "Python", "necessity": "must"}}, {{"skill_name": "Odoo", "necessity": "must"}}]}}
+
+示例 12（职责方向词/基础理论词不收录 + 优先项进 nice）：
+JD 文本：岗位名称：大模型测试工程师
+岗位职责：负责大模型产品的功能测试、性能测试与安全性测试，搭建自动化测试框架。
+任职要求：熟悉 Python、Java，掌握自动化测试，了解数据结构与 Transformer 原理者优先，本科及以上学历。
+输出：{{"position_name": "大模型测试工程师", "skills": [{{"name": "Python"}}, {{"name": "Java"}}, {{"name": "自动化测试"}}], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Python", "necessity": "must"}}, {{"skill_name": "Java", "necessity": "must"}}, {{"skill_name": "自动化测试", "necessity": "must"}}, {{"skill_name": "数据结构", "necessity": "nice"}}, {{"skill_name": "Transformer", "necessity": "nice"}}]}}
+
+示例 13（工具链全量列出——JD 明确要求的所有技术栈都必须进 skills，不得省略辅助工具）：
+JD 文本：岗位名称：前端开发工程师
+岗位职责：使用 React、Vue.js 开发 Web 应用，基于 Webpack、Vite 构建打包，执行 ESLint、Prettier 代码规范，接入 Git 版本控制，使用 Axios 调用 RESTful API，开发 React Native 移动端，发布至 iOS/Android 平台。
+任职要求：掌握 HTML5、CSS3、JavaScript、TypeScript，熟悉状态管理（Vuex、Pinia、Vue Router）。
+输出：{{"position_name": "前端开发工程师", "skills": [{{"name": "React"}}, {{"name": "Vue.js"}}, {{"name": "Webpack"}}, {{"name": "Vite"}}, {{"name": "ESLint"}}, {{"name": "Prettier"}}, {{"name": "Git"}}, {{"name": "Axios"}}, {{"name": "RESTful API"}}, {{"name": "React Native"}}, {{"name": "iOS"}}, {{"name": "Android"}}, {{"name": "HTML5"}}, {{"name": "CSS3"}}, {{"name": "JavaScript"}}, {{"name": "TypeScript"}}, {{"name": "Vuex"}}, {{"name": "Pinia"}}, {{"name": "Vue Router"}}], "requirements": [{{"skill_name": "React", "necessity": "must"}}, {{"skill_name": "Vue.js", "necessity": "must"}}, {{"skill_name": "Webpack", "necessity": "must"}}, {{"skill_name": "Git", "necessity": "must"}}, {{"skill_name": "RESTful API", "necessity": "must"}}, {{"skill_name": "JavaScript", "necessity": "must"}}]}}
+
+示例 14（加分项技能严格分离——只进 nice 不进 skills，多个加分项并列时同样适用）：
+JD 文本：岗位名称：java开发工程师
+岗位职责：负责 Java 后端开发与系统实施，精通 Java、Spring Boot，掌握 HTML、CSS、JavaScript，熟悉 Vue、React 前端框架，熟悉 MySQL 数据库与 SQL 开发。
+任职要求：本科及以上学历；熟悉 MES、WMS 系统者优先，了解 OPC UA、Modbus 通信协议更佳，熟悉 Redis 缓存加分，有 ERP 实施经验者优先。
+输出：{{"position_name": "Java开发工程师", "skills": [{{"name": "Java"}}, {{"name": "Spring Boot"}}, {{"name": "HTML"}}, {{"name": "CSS"}}, {{"name": "JavaScript"}}, {{"name": "Vue"}}, {{"name": "React"}}, {{"name": "MySQL"}}, {{"name": "SQL"}}], "education": {{"level": "本科"}}, "requirements": [{{"skill_name": "Java", "necessity": "must"}}, {{"skill_name": "Spring Boot", "necessity": "must"}}, {{"skill_name": "HTML", "necessity": "must"}}, {{"skill_name": "CSS", "necessity": "must"}}, {{"skill_name": "JavaScript", "necessity": "must"}}, {{"skill_name": "Vue", "necessity": "must"}}, {{"skill_name": "React", "necessity": "must"}}, {{"skill_name": "MySQL", "necessity": "must"}}, {{"skill_name": "SQL", "necessity": "must"}}, {{"skill_name": "MES", "necessity": "nice"}}, {{"skill_name": "WMS", "necessity": "nice"}}, {{"skill_name": "OPC UA", "necessity": "nice"}}, {{"skill_name": "Modbus", "necessity": "nice"}}, {{"skill_name": "Redis", "necessity": "nice"}}, {{"skill_name": "ERP", "necessity": "nice"}}]}}
+
+示例 15（"等"列举——"等"前的每一项都收录，"等"后未在正文出现的词不自行补充）：
+JD 文本：岗位名称：大模型算法工程师
+岗位职责：负责大模型推理优化与部署。
+任职要求：1.熟悉 DeepSeek/Qwen 等主流大模型；2.熟悉 PyTorch、DeepSpeed、Megatron 等训练框架；3.熟悉 vLLM、TensorRT-LLM 等推理框架；4.了解 AWQ、GPTQ 等量化方法。
+输出：{{"position_name": "大模型算法工程师", "skills": [{{"name": "DeepSeek"}}, {{"name": "Qwen"}}, {{"name": "PyTorch"}}, {{"name": "DeepSpeed"}}, {{"name": "Megatron"}}, {{"name": "vLLM"}}, {{"name": "TensorRT-LLM"}}, {{"name": "AWQ"}}, {{"name": "GPTQ"}}], "requirements": [{{"skill_name": "DeepSeek", "necessity": "must"}}, {{"skill_name": "Qwen", "necessity": "must"}}, {{"skill_name": "PyTorch", "necessity": "must"}}, {{"skill_name": "DeepSpeed", "necessity": "must"}}, {{"skill_name": "Megatron", "necessity": "must"}}, {{"skill_name": "vLLM", "necessity": "must"}}, {{"skill_name": "TensorRT-LLM", "necessity": "must"}}, {{"skill_name": "AWQ", "necessity": "must"}}, {{"skill_name": "GPTQ", "necessity": "must"}}]}}
+
+示例 16（超长技能清单——30+ 项全部输出，禁止按重要性省略或凭印象只收核心）：
+JD 文本：岗位名称：全栈开发工程师
+任职要求：1.精通 Python、C++、Java、Go、Rust、TypeScript；2.熟悉 FastAPI、Flask、Django、Spring Boot、Spring Cloud、MyBatis、Express.js；3.熟悉 MySQL、PostgreSQL、MongoDB、Redis、Kafka、RabbitMQ、Elasticsearch、ClickHouse；4.熟悉 Docker、Kubernetes、Jenkins、Git、CI/CD、Terraform、Ansible、Nginx；5.熟悉 PyTorch、TensorFlow、scikit-learn、Pandas、NumPy、大语言模型。
+输出：{{"position_name": "全栈开发工程师", "skills": [{{"name": "Python"}}, {{"name": "C++"}}, {{"name": "Java"}}, {{"name": "Go"}}, {{"name": "Rust"}}, {{"name": "TypeScript"}}, {{"name": "FastAPI"}}, {{"name": "Flask"}}, {{"name": "Django"}}, {{"name": "Spring Boot"}}, {{"name": "Spring Cloud"}}, {{"name": "MyBatis"}}, {{"name": "Express.js"}}, {{"name": "MySQL"}}, {{"name": "PostgreSQL"}}, {{"name": "MongoDB"}}, {{"name": "Redis"}}, {{"name": "Kafka"}}, {{"name": "RabbitMQ"}}, {{"name": "Elasticsearch"}}, {{"name": "ClickHouse"}}, {{"name": "Docker"}}, {{"name": "Kubernetes"}}, {{"name": "Jenkins"}}, {{"name": "Git"}}, {{"name": "CI/CD"}}, {{"name": "Terraform"}}, {{"name": "Ansible"}}, {{"name": "Nginx"}}, {{"name": "PyTorch"}}, {{"name": "TensorFlow"}}, {{"name": "scikit-learn"}}, {{"name": "Pandas"}}, {{"name": "NumPy"}}, {{"name": "大语言模型"}}], "requirements": [{{"skill_name": "Python", "necessity": "must"}}, {{"skill_name": "C++", "necessity": "must"}}, {{"skill_name": "Java", "necessity": "must"}}, {{"skill_name": "Go", "necessity": "must"}}, {{"skill_name": "Rust", "necessity": "must"}}, {{"skill_name": "TypeScript", "necessity": "must"}}, {{"skill_name": "Docker", "necessity": "must"}}, {{"skill_name": "Kubernetes", "necessity": "must"}}, {{"skill_name": "MySQL", "necessity": "must"}}, {{"skill_name": "PyTorch", "necessity": "must"}}]}}
 """
 
 BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输出 JSON 数组（每条 JD 对应一个对象，数组第 i 个元素对应"JD文本 i"）。
@@ -172,12 +245,42 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    （"全栈工程师"、"大模型评测工程师"），括号内为技能/方向列表，不得并入岗位名。
    **岗位名必须是岗位语义词**：不得取自产品名/公司名/人名（如 "Odoo"、"Gemini"），
    也不得输出空字符串——正文存在岗位标题时必须输出岗位名。
+   **标题优先**：岗位名以招聘标题（首行标题/"岗位名称：xxx"/输入标题）为准，
+   正文职责或高频技术栈不得改写标题岗位名——标题"Python工程师"而正文是量化金融
+   仍输出"Python工程师"；标题"python开发工程师"而正文高频 Odoo 仍输出
+   "Python开发工程师"（Odoo 是平台产品名，不得作岗位名）。
+   **技术栈前缀保留**：标题中的技术栈前缀（React、Vue、Golang、SLAM、Java 等）
+   必须保留在岗位名中，不得删除或泛化——"React前端工程师"不得输出"前端开发工程师"；
+   标题无前缀的泛化岗位（"前端工程师"）保持泛化。
 2. 技能（skills）：仅列出**必备**技术技能（如"Python"、"Java"、"数据分析"）。
    **技能名使用标准简短名称**：不要加"系统/维护/开发/技术"等冗余后缀
    （"Windows系统维护"→"Windows"、"Python开发"→"Python"、"Linux运维"→"Linux"），
    以可独立学习/匹配的技术点为准。
    **基础理论词不作为独立技能**："计算机基础"、"软件工程"、"数据结构"、"测试理论"
    等泛化基础词仅在 JD 明确作为岗位核心技能要求时收录，一般性提及不收录。
+   **通用工程工具克制（08-16 r6 实证）**：Git、CI/CD、CMake、Makefile、
+   gtest/JUnit/pytest 等测试框架、JIRA/Confluence 等协作工具、Docker 容器化等
+   "任何工程岗位都可能用到"的通用工具——仅当 JD 明确作为岗位核心能力要求时
+   才收录，一般工程实践提及（"熟悉常用工具"、"具备工程能力"语境）不收录。
+   **外围工具克制**：仿真/调试/可视化等外围工具（Gazebo、RViz、GDB、Isaac Sim、
+   Cartographer、LOAM 等）仅当岗位核心工作明确依赖时收录——正文技术清单里
+   出现但与岗位核心能力关联弱的不收录（宁缺毋滥，防工具清单全量入技能）。
+   **测试类型不演绎**：接口测试/性能测试/UI测试/自动化测试等测试类型，仅当
+   文本**明确出现该类型名称**时收录；正文笼统表述（"各类测试"、"测试流程"、
+   "对接口、APP、UI 进行持续测试"中未逐项列出的类型）不得逐个演绎成技能名。
+   **任职要求清单全收（08-16 r6.1 反向保护）**："任职要求/岗位要求/
+   Requirements"段落中明确列出的技能（含模型名如 DeepSeek/GLM/Qwen、框架名、
+   工具名）**必须全部收录**，不受上述克制规则影响——克制规则仅作用于职责描述
+   段与泛化提及；"宁缺毋滥"不适用于任职要求清单（清单是硬性要求，漏抽同样失真）。
+   **"等/如"列举完整性（08-17 r6.2 实证）**："熟悉 DeepSeek/Qwen 等主流大模型"
+   中"等"之前的**每一项具体技术名都必须收录**——"等"仅表示列举未尽，
+   不是省略已列出词的理由；**但"等"后未在正文出现的词不得自行补充**
+   （如正文只列 DeepSeek/Qwen，"等"后不得猜测 OpenAI/文心一言 等）。
+   **长清单完整性（08-17 r6.2）**：任职要求段落列出的技能超过 5 个时，
+   **必须全部逐一收录**——禁止按重要性筛选、省略尾部或凭印象只收核心
+   （实证：40 词级技能清单 LLM 常漏 10+ 个，评测 recall 崩）。
+   **输出自查（08-17 r6.2）**：完成抽取后，**回读任职要求段落逐项核对**——
+   确认每个明确列出的技能名都已进入 skills 或 requirements，发现遗漏立即补上。
    **岗位方向词不作为技能**：岗位名/标题括号中的方向限定词（"音视频"、"AIGC"、
    "多模态"、"大模型"、"机器人"等）是岗位方向而非可独立匹配的技能，
    不得进入 skills 或 requirements——除非该词在正文中作为独立技能要求出现。
@@ -213,6 +316,8 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    时，该结构内的技能标 "nice" 且**不得出现在 skills 字段**（skills 仅收录必备技能）。
    示例："熟悉 Python、SQL 者优先" → skills 不含 Python/SQL，requirements 中 Python/SQL
    均标 "nice"。
+   **同一技能只能出现在一个位置**：已列入 skills 的技能不得再进 requirements，
+   反之亦然——加分项只能进 requirements(nice)，禁止在 skills 中重复出现。
    **反向保护**：以下语境中的技能必须保留为必备（must）并进入 skills，不得因附近出现
    "如/等/或"就降级或漏抽："任职要求/岗位要求"清单中的技能、"精通/熟练掌握/熟悉/具备 XX"
    明确要求的技能（如"熟悉常用测试管理工具，如 Jira、QC 等"→ Jira、QC 均为 must 进 skills；
@@ -238,6 +343,12 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    平台性宽泛表述不得推断为技能；模型名/产品名（如 DeepSeek、Qwen、GPT）仅当作为
    明确技能要求出现时才收录，上下文提及不算技能。
    **宁缺毋滥**：宁可漏抽，不可多抽——误抽会污染技能图谱与岗位匹配。
+11. 经验（experience_range）：仅当正文出现"X 年以上 / X-Y 年 / 至少 X 年 / X 年经验"等显式年限
+   表述才填 min_years/max_years（如"3年以上"→min 3/max null；"3-5年"→min 3/max 5）；
+   "经验不限"不填；正文与列表页冲突以正文为准。无明确年限时输出 null（绝不填 0 年）。
+12. 核心职责（core_duties）：从职责段归纳 2~8 条精炼短语（每条 5~20 字，如"负责分布式缓存架构设计"、
+   "主导信贷风控建模"），只讲"岗位做什么"；禁止整段抄写职责原文，禁止收录技能/福利/公司介绍
+   （技能由 requirements 承载）。职责段缺失时留空数组。
 
 JD 文本：
 {jd_texts}

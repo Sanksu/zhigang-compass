@@ -13,52 +13,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { apiGet } from '@/lib/api'
+import type { components } from '@/types/api'
 
-interface PagerankSkill {
-  id: string
-  name: string
-  score: number
-}
-
-interface ClusterSkill {
-  id: string
-  name: string
-}
-
-/** LLM 兜底命名结果（后端 skill-clusters 响应，契约 openapi.yaml 已声明） */
-interface ClusterLLM {
-  coherent: boolean
-  cluster_name: string | null
-  rationale: string | null
-  splits: string[]
-}
-
-interface SkillCluster {
-  id: number
-  size: number
-  /** 规则标签（簇内共现权重 Top-3 技能，· 拼接） */
-  label?: string
-  /** 是否命中 LLM 兜底触发条件（无主导技能/跨类别复合栈/规则标签为空） */
-  needs_llm?: boolean
-  /** 触发原因（no_dominant_skill / cross_category / empty_label） */
-  triggers?: string[]
-  /** LLM 兜底结果（未触发或 LLM 降级时为 null） */
-  llm?: ClusterLLM | null
-  skills: ClusterSkill[]
-}
-
-/** 层级元数据（阶段三层次化提取：0 = 最细，逐层变粗） */
-interface ClusterLevel {
-  level: number
-  cluster_count: number
-  modularity: number
-}
-
-interface PathNode {
-  id: string
-  name: string
-  type: string
-}
+type PagerankSkill = components['schemas']['PagerankSkill']
+type SkillCluster = components['schemas']['SkillCluster']
+type ClusterLevel = components['schemas']['ClusterLevel']
+type PathNode = components['schemas']['ShortestPathNode']
 
 interface GraphAnalysisPanelProps {
   /** 当前画布技能 id → name 映射，用于最短路径选择下拉 */
@@ -104,7 +64,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
   // 注意：pagerankLoading 初始 true，无需在 effect 内再次 set，避免 react-hooks/set-state-in-effect
   useEffect(() => {
     let cancelled = false
-    apiGet<{ skills: PagerankSkill[] }>('/graph/algorithms/pagerank?top_n=20')
+    apiGet<components['schemas']['PagerankData']>('/graph/algorithms/pagerank?top_n=20')
       .then((r) => {
         if (!cancelled) setPagerank(r.skills)
       })
@@ -126,7 +86,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
     const levelQuery = selectedLevel === null ? '' : `&level=${selectedLevel}`
     ;(async () => {
       try {
-        const r = await apiGet<{ clusters: SkillCluster[]; levels: ClusterLevel[] | null }>(
+        const r = await apiGet<components['schemas']['SkillClustersData']>(
           `/graph/algorithms/skill-clusters?min_size=2${levelQuery}`,
         )
         if (!cancelled) {
@@ -162,7 +122,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
     setPathError(null)
     setPath(null)
     try {
-      const r = await apiGet<{ from: string; to: string; path: PathNode[] }>(
+      const r = await apiGet<components['schemas']['ShortestPathData']>(
         `/graph/algorithms/shortest-path?from=${encodeURIComponent(fromSkill)}&to=${encodeURIComponent(toSkill)}`,
       )
       setPath(r.path)
@@ -174,21 +134,23 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
   }
 
   return (
-    <Card className={className}>
-      <CardHeader className="pb-2">
+    <Card className={`overflow-hidden ${className ?? ''}`}>
+      <CardHeader className="border-b border-atlas-grid bg-subtle/50 px-4 py-3">
         <CardTitle className="text-sm flex items-center gap-2">
-          <BarChart2 className="size-4 text-ink-faint" />
-          图谱算法分析
+          <BarChart2 className="size-4 text-atlas-ocean" />
+          算法工作台
         </CardTitle>
-        <CardDescription className="text-[11px]">技能重要性 · 技能簇 · 最短路径（设计文档 §7.1）</CardDescription>
+        <CardDescription className="font-mono text-[10px] tracking-[0.08em]">ALGORITHM WORKBENCH / 结构洞察与路径探测</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-0 p-4">
         {/* ── PageRank 技能重要性 ── */}
-        <section>
-          <h4 className="text-xs font-medium text-ink mb-1.5 flex items-center gap-1.5">
+        <section className="border-b border-border/60 pb-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="font-mono text-[10px] text-atlas-ocean">01</span>
             <GitBranch className="size-3 text-ink-faint" />
-            技能重要性 Top-20
-          </h4>
+            <h4 className="text-xs font-semibold text-ink">影响力地图</h4>
+            <span className="text-[10px] text-ink-muted">PageRank Top-20</span>
+          </div>
           {pagerankLoading ? (
             <div className="flex items-center gap-2 py-3 text-xs text-ink-muted">
               <Loader2 className="size-3 animate-spin" />
@@ -197,7 +159,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
           ) : !pagerank || pagerank.length === 0 ? (
             <p className="py-2 text-xs text-ink-faint">暂无 PageRank 数据</p>
           ) : (
-            <ol className="space-y-1 max-h-48 overflow-y-auto pr-1">
+            <ol className="max-h-48 divide-y divide-border/50 overflow-y-auto rounded-lg border border-border/60 bg-canvas pr-1">
               {pagerank.map((s, i) => (
                 <li key={s.id}>
                   <button
@@ -215,11 +177,12 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
         </section>
 
         {/* ── Louvain 技能簇 ── */}
-        <section>
-          <h4 className="text-xs font-medium text-ink mb-1.5 flex items-center gap-1.5">
+        <section className="border-b border-border/60 py-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="font-mono text-[10px] text-atlas-ocean">02</span>
             <Boxes className="size-3 text-ink-faint" />
-            技能簇（技术栈聚类）
-          </h4>
+            <h4 className="text-xs font-semibold text-ink">技术栈社区</h4>
+          </div>
           {levels && levels.length > 1 && (
             <div className="mb-1.5">
               <Label htmlFor="cluster-level-select" className="text-[10px] text-ink-faint">
@@ -307,8 +270,13 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
         </section>
 
         {/* ── 最短路径 ── */}
-        <section>
-          <h4 className="text-xs font-medium text-ink mb-1.5">技能最短路径</h4>
+        <section className="pt-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="font-mono text-[10px] text-atlas-ocean">03</span>
+            <GitBranch className="size-3 text-ink-faint" />
+            <h4 className="text-xs font-semibold text-ink">路径探测器</h4>
+            <span className="text-[10px] text-ink-muted">验证技能间连接</span>
+          </div>
           <div className="space-y-1.5">
             <div>
               <Label className="text-[10px] text-ink-faint">起点技能</Label>

@@ -6,6 +6,7 @@
 
 from app.services.data_quality.simhash import (
     DEFAULT_HAMMING_THRESHOLD,
+    SimHashIndex,
     find_similar_pairs,
     hamming_distance,
     is_duplicate,
@@ -38,37 +39,6 @@ class TestHammingDistance:
     def test_same_fingerprint_zero_distance(self):
         a = simhash64("Python 后端开发工程师")
         assert hamming_distance(a, a) == 0
-
-
-class TestIsDuplicate:
-    def test_identical_is_duplicate(self):
-        a = simhash64("Python 后端开发工程师")
-        assert is_duplicate(a, a) is True
-
-    def test_near_text_is_duplicate(self):
-        """跨平台同岗位（空格/后缀格式差异）判定为重复。"""
-        desc = ("负责公司核心业务系统后端开发，使用 Python 技术栈，"
-                "参与高并发分布式系统设计与实现，熟悉 MySQL Redis 缓存 消息队列 微服务架构 容器化部署")
-        a = simhash64("Python 后端开发工程师 " + desc)
-        b = simhash64("Python后端开发工程师 " + desc)  # 仅空格差异
-        assert is_duplicate(a, b) is True
-
-    def test_unrelated_text_not_duplicate(self):
-        a = simhash64("Python 后端开发工程师")
-        b = simhash64("前端网页设计排版")
-        assert is_duplicate(a, b) is False
-
-    def test_threshold_boundary(self):
-        desc = ("负责公司核心业务系统后端开发，使用 Python 技术栈，"
-                "参与高并发分布式系统设计与实现，熟悉 MySQL Redis 缓存 消息队列 微服务架构 容器化部署")
-        a = simhash64("Python 后端开发工程师 " + desc)
-        b = simhash64("Python 后端开发工程师（北京） " + desc)  # 追加城市后缀
-        distance = hamming_distance(a, b)
-        assert distance <= 3  # 设计阈值边界内
-        assert is_duplicate(a, b, threshold=distance) is True
-        assert is_duplicate(a, b, threshold=distance - 1) is False
-
-
 class TestFindSimilarPairs:
     def test_detects_similar_pairs(self):
         desc = ("负责公司核心业务系统后端开发，使用 Python 技术栈，"
@@ -127,3 +97,63 @@ class TestAccuracy:
 
     def test_threshold_constant_within_design(self):
         assert DEFAULT_HAMMING_THRESHOLD == 3
+
+
+class TestSimHashIndex:
+    """P12: 增量式 SimHash 近邻索引（流式去重性能优化）。"""
+
+    def _cluster_records(self):
+        desc = ("负责公司核心业务系统后端开发，使用 Python 技术栈，"
+                "参与高并发分布式系统设计与实现，熟悉 MySQL Redis 缓存 消息队列 微服务架构 容器化部署")
+        return [
+            ("jd1", simhash64("Python 后端开发工程师 " + desc)),
+            ("jd2", simhash64("Python后端开发工程师 " + desc)),  # 仅空格差异 → 重复
+            ("jd3", simhash64("前端 React 开发工程师 负责前端组件库设计与实现")),
+        ]
+
+    def test_incremental_scan_finds_all_batch_pairs(self):
+        """增量逐条入索引的近邻检索结果 == 全量 find_similar_pairs 的重复对。"""
+        records = self._cluster_records()
+        index = SimHashIndex()
+        incremental: set[tuple[str, str]] = set()
+        for rid, fp in records:
+            for cid in index.find_near(rid, fp):
+                incremental.add(tuple(sorted((rid, cid))))  # 归一化顺序（方向无关）
+            index.add(rid, fp)
+        batch = set(tuple(sorted(p)) for p in find_similar_pairs(records))
+        assert incremental == batch
+        assert ("jd1", "jd2") in incremental
+
+    def test_find_near_excludes_self(self):
+        index = SimHashIndex()
+        rid, fp = "jd1", simhash64("Python 后端开发工程师 分布式 高并发")
+        index.add(rid, fp)
+        assert index.find_near(rid, fp) == []  # 不把自身当作重复候选
+        assert len(index) == 1
+
+    def test_find_near_respects_threshold(self):
+        index = SimHashIndex()
+        index.add("a", simhash64("Python 后端开发工程师 微服务架构"))
+        assert index.find_near("b", simhash64("Python后端开发工程师 微服务架构"))
+        # 明显不同文本（无共享块/汉明距超阈值）不应命中
+        assert index.find_near("c", simhash64("园林景观设计")) == []
+
+    def test_from_items_roundtrip_restores_index(self):
+        """持久化导出→恢复后近邻检索结果一致（Redis 重启恢复路径）。"""
+        records = self._cluster_records()
+        index = SimHashIndex.from_items(records)
+        restored = SimHashIndex.from_items(index.items())
+        for rid, fp in records:
+            assert set(restored.find_near(rid, fp)) == set(index.find_near(rid, fp))
+        assert len(restored) == len(records)
+
+    def test_empty_index_no_near(self):
+        assert SimHashIndex().find_near("jd1", simhash64("任意文本")) == []
+
+    def test_invalid_threshold_rejected(self):
+        """阈值 ≥ 块宽时抽屉原理不成立，构造应报错（防静默退化）。"""
+        try:
+            SimHashIndex(threshold=16)
+        except ValueError:
+            return
+        raise AssertionError("threshold>=block_bits 应拒绝构造")

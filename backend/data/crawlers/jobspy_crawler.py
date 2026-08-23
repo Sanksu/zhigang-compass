@@ -40,6 +40,10 @@ def crawl(site: str, keyword: str, city: str, results_wanted: int = 20,
             results_wanted=results_wanted,
             country_indeed="USA",
             hours_old=days_old * 24,
+            # 08-16 修复：不抓详情 → LinkedIn 职位 description 恒空（列表 JSON 不含
+            # 描述），下游 batch_extract 无正文可抽、技能全空（存量 1938 条均空描述）。
+            # 仅 linkedin 平台生效（参数名带平台前缀），Indeed 忽略。
+            linkedin_fetch_description=True,
         )
     except Exception as e:
         logger.error(f"❌ JobSpy 采集失败: {type(e).__name__}: {e}")

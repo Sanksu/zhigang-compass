@@ -11,7 +11,6 @@
 """
 
 from statistics import median
-from datetime import date
 
 from app.services.data_quality.schemas import (
     JDSkillSet,
@@ -85,14 +84,23 @@ def compute_sai(
 
 def classify_sai(
     sai: float,
-    stale_threshold: float = SAI_STALE_THRESHOLD,
-    obsolete_threshold: float = SAI_OBSOLETE_THRESHOLD,
+    stale_threshold: float | None = None,
+    obsolete_threshold: float | None = None,
 ) -> SAIResult:
     """按 SAI 阈值划分时滞等级并给出降权系数。
 
     stale_threshold / obsolete_threshold 可覆盖（DA-M3-04 调优），
-    缺省用设计文档 §4.7.2 固定值 1.5 / 2.0。
+    缺省（None）取运行时配置 configs/data_quality_thresholds.json，
+    默认值对应设计文档 §4.7.2 固定值 1.5 / 2.0。
     """
+    if stale_threshold is None:
+        from app.services.data_quality.thresholds import load_sai_stale_threshold
+
+        stale_threshold = load_sai_stale_threshold()
+    if obsolete_threshold is None:
+        from app.services.data_quality.thresholds import load_sai_obsolete_threshold
+
+        obsolete_threshold = load_sai_obsolete_threshold()
     if sai > obsolete_threshold:
         return SAIResult(sai=sai, label="content_obsolete", decay_weight=OBSOLETE_DECAY_WEIGHT)
     if sai > stale_threshold:
@@ -105,9 +113,9 @@ def detect_zombie_jd(
     current_jd_skills: set[str],
     sai: float,
     consecutive_periods: int | None = None,
-    jaccard_threshold: float = ZOMBIE_JACCARD_THRESHOLD,
-    min_periods: int = ZOMBIE_CONSECUTIVE_PERIODS,
-    sai_threshold: float = ZOMBIE_SAI_THRESHOLD,
+    jaccard_threshold: float | None = None,
+    min_periods: int | None = None,
+    sai_threshold: float | None = None,
 ) -> ZombieJDResult:
     """僵尸 JD 检测（设计文档 §4.7.2）。
 
@@ -120,10 +128,23 @@ def detect_zombie_jd(
         current_jd_skills: 当前 JD 技能集合
         sai: 当前 JD 的 SAI 值（外部预算后传入，避免重复计算）
         consecutive_periods: 显式传入连续周期数；为 None 时按历史序列尾部连续相似计数
-        jaccard_threshold / min_periods / sai_threshold: DA-M3-04 调优可覆盖
+        jaccard_threshold / min_periods / sai_threshold: 缺省（None）取运行时配置
+            configs/data_quality_thresholds.json（DA-M3-04 调优可显式覆盖）
 
     处置：仅保留最早版本，后续版本降权 ×0.3。
     """
+    if jaccard_threshold is None:
+        from app.services.data_quality.thresholds import load_zombie_jaccard_threshold
+
+        jaccard_threshold = load_zombie_jaccard_threshold()
+    if min_periods is None:
+        from app.services.data_quality.thresholds import load_zombie_consecutive_periods
+
+        min_periods = load_zombie_consecutive_periods()
+    if sai_threshold is None:
+        from app.services.data_quality.thresholds import load_zombie_sai_threshold
+
+        sai_threshold = load_zombie_sai_threshold()
     if consecutive_periods is None:
         consecutive_periods = _count_consecutive_similar(
             history_jd_skills, current_jd_skills, jaccard_threshold
@@ -164,7 +185,7 @@ def _count_consecutive_similar(
 def detect_plagiarism(
     new_jd: JDSkillSet,
     old_jd: JDSkillSet,
-    days_threshold: int = PLAGIARISM_DAYS_THRESHOLD,
+    days_threshold: int | None = None,
 ) -> PlagiarismResult:
     """抄袭时滞检测（设计文档 §4.7.3）。
 
@@ -172,8 +193,13 @@ def detect_plagiarism(
     - 新 JD 技能集合是旧 JD 的子集（抄袭后删除部分要求）
     - 发布时间间隔 > 90 天
 
+    days_threshold 缺省（None）取运行时配置 configs/data_quality_thresholds.json。
     处置：降权 ×0.4 不参与聚合。
     """
+    if days_threshold is None:
+        from app.services.data_quality.thresholds import load_plagiarism_days
+
+        days_threshold = load_plagiarism_days()
     new_skills = set(new_jd.skills)
     old_skills = set(old_jd.skills)
     is_subset = new_skills.issubset(old_skills) and bool(new_skills)
@@ -208,6 +234,3 @@ def apply_temporal_decay(
     return min(weights)
 
 
-def is_within_recent_window(publish_date: date, reference_date: date) -> bool:
-    """发布日期是否落在近 90 天窗口内（设计文档 §4.7.2 同岗位近期 JD 定义）。"""
-    return (reference_date - publish_date).days <= RECENT_WINDOW_DAYS

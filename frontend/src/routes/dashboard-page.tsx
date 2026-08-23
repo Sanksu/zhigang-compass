@@ -6,6 +6,8 @@ import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { apiGet } from '@/lib/api'
+import { formatDateTime } from '@/lib/utils'
+import type { components } from '@/types/api'
 
 interface StatItem {
   label: string
@@ -18,6 +20,8 @@ interface StatItem {
 
 interface ActivityItem {
   id: string
+  /** 原始时间戳（排序用——formatDateTime 后的字符串无法正确比较日期） */
+  ts: number
   time: string
   icon: typeof Network
   title: string
@@ -25,25 +29,9 @@ interface ActivityItem {
   color: string
 }
 
-interface CrawlPlatform {
-  id: string
-  name: string
-  level: string
-  total_count: number
-}
+/** 后端 /admin/crawl/status 返回项（契约 CrawlPlatform） */
+type CrawlPlatform = components['schemas']['CrawlPlatform']
 
-interface GraphVersion {
-  version_id: string
-  created_at: string | null
-  change_summary: string
-}
-
-interface AuditLog {
-  id: number
-  action: string
-  detail: { username?: string }
-  created_at: string | null
-}
 
 /** 真实数据驱动的统计卡 */
 const EMPTY_STATS: StatItem[] = [
@@ -57,7 +45,7 @@ const QUICK_LINKS = [
   { to: '/graph', icon: Network, title: '能力图谱', desc: '2D 力导向图为主，3D 模式可选。四种视图切换：全景 / 技术栈 / 级别 / 岗位中心', badge: '真实' },
   { to: '/evolution', icon: TrendingUp, title: '演化看板', desc: '图谱版本快照追踪技能频次变化，Z-score 检测新兴/衰退技能', badge: '真实' },
   { to: '/resume-match', icon: Users, title: '简历匹配', desc: '上传简历 → LLM 解析 → 三维加权匹配 → 差距分析', badge: '真实' },
-  { to: '/admin/crawl', icon: Database, title: '爬取管理', desc: '13 源采集状态 · 真实 output/raw 统计', badge: 'admin' },
+  { to: '/admin/crawl', icon: Database, title: '爬取管理', desc: '13 源采集状态 · 真实统计（DB 入库口径）', badge: 'admin' },
 ]
 
 /**
@@ -81,13 +69,13 @@ export function DashboardPage() {
   useEffect(() => {
     let cancelled = false
     Promise.allSettled([
-      apiGet<{ stats: { nodes: number; edges: number } }>('/graph/panorama?limit=200&min_weight=0.3'),
+      apiGet<components['schemas']['GraphViewData']>('/graph/panorama?limit=200&min_weight=0.3'),
       // 采集统计需 admin 权限：游客 401 时静默降级，不触发全局登出
-      apiGet<{ platforms: CrawlPlatform[] }>('/admin/crawl/status', { skipAuthRedirect: true }),
+      apiGet<components['schemas']['CrawlStatusData']>('/admin/crawl/status', { skipAuthRedirect: true }),
       // 简历/采集/审计统计均需认证：游客 401 时静默降级，不触发全局登出
       apiGet<{ items: unknown[]; total: number }>('/resume/list?limit=100', { skipAuthRedirect: true }),
-      apiGet<{ items: GraphVersion[]; total: number }>('/evolution/versions?page=1&size=10', { skipAuthRedirect: true }),
-      apiGet<{ items: AuditLog[]; total: number }>('/admin/audit/logs?page=1&size=10', { skipAuthRedirect: true }),
+      apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=10', { skipAuthRedirect: true }),
+      apiGet<components['schemas']['AuditLogsData']>('/admin/audit/logs?page=1&size=10', { skipAuthRedirect: true }),
     ]).then(([graphRes, crawlRes, resumeRes, versionRes, auditRes]) => {
       if (cancelled) return
 
@@ -103,9 +91,12 @@ export function DashboardPage() {
       setSources(platforms)
 
       const collectTotal = platforms.reduce((s, p) => s + p.total_count, 0)
+      // 采集统计需 admin 权限：非 admin（403 降级）时显示 '—' 而非 "0"——
+      // 0 会被误读为"系统无采集数据"（08-15 修复，与图谱节点卡口径一致）
+      const collectOk = crawlRes.status === 'fulfilled'
       setStats([
         { label: '图谱节点', value: graph ? String(graph.nodes) : '—', delta: `${graph?.edges ?? 0} 边`, icon: Network, hint: 'Neo4j 岗位-技能关系', deltaType: graph ? 'up' : 'neutral' },
-        { label: '累计采集量', value: collectTotal.toLocaleString(), delta: `${platforms.length} 源`, icon: Database, hint: 'output/*.jsonl 真实行数', deltaType: platforms.length ? 'up' : 'neutral' },
+        { label: '累计采集量', value: collectOk ? collectTotal.toLocaleString() : '—', delta: collectOk ? `${platforms.length} 源` : '—', icon: Database, hint: 'DB 入库总量（JD/课程/论文/社区）', deltaType: platforms.length ? 'up' : 'neutral' },
         { label: '已解析简历', value: String(resumeTotal), delta: 'resume_cache', icon: Users, hint: '可发起真实匹配', deltaType: resumeTotal ? 'up' : 'neutral' },
         { label: '图谱版本', value: String(versions.length), delta: versions[0]?.version_id ?? '—', icon: GitBranch, hint: 'T+1 快照 · 可 diff', deltaType: versions.length ? 'up' : 'neutral' },
       ])
@@ -113,7 +104,8 @@ export function DashboardPage() {
       // 最近活动 = 版本发布（优先全部展示）+ 登录审计补足至 6 条
       const versionActs: ActivityItem[] = versions.map((v) => ({
         id: `v-${v.version_id}`,
-        time: v.created_at ? new Date(v.created_at).toLocaleString('zh-CN') : '—',
+        ts: Date.parse(v.created_at ?? '') || 0,
+        time: formatDateTime(v.created_at),
         icon: Network,
         title: `图谱版本 ${v.version_id} 发布`,
         desc: v.change_summary || '版本快照',
@@ -121,7 +113,8 @@ export function DashboardPage() {
       }))
       const auditActs: ActivityItem[] = logs.map((l) => ({
         id: `a-${l.id}`,
-        time: l.created_at ? new Date(l.created_at).toLocaleString('zh-CN') : '—',
+        ts: Date.parse(l.created_at ?? '') || 0,
+        time: formatDateTime(l.created_at),
         icon: Activity,
         title: `${l.detail?.username ?? '用户'} 登录`,
         desc: l.action,
@@ -130,7 +123,7 @@ export function DashboardPage() {
       const remaining = Math.max(0, 6 - versionActs.length)
       setActivities(
         [...versionActs, ...auditActs.slice(0, remaining)]
-          .sort((a, b) => (a.time > b.time ? -1 : 1))
+          .sort((a, b) => b.ts - a.ts)
           .slice(0, 6),
       )
     })
@@ -176,14 +169,14 @@ export function DashboardPage() {
               </span>
               <span className="flex items-center gap-1">
                 <span className="size-1.5 rounded-full bg-ink-faint" />
-                演化信号 · M4 待交付
+                演化看板 · M4 已交付
               </span>
             </div>
           </div>
           <div className="hidden md:flex flex-col items-end gap-1 text-right">
             <p className="text-xs text-ink-muted">数据来源</p>
             <p className="text-sm font-mono text-ink">Postgres + Neo4j + Redis</p>
-            <p className="text-[10px] text-ink-faint">docker compose 4 服务</p>
+            <p className="text-[10px] text-ink-faint">docker compose 5 服务</p>
           </div>
         </CardContent>
       </Card>

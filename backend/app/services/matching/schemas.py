@@ -22,12 +22,15 @@ class SkillRequirement(BaseModel):
     weight: float = Field(default=1.0, description="技能权重，由聚合层预计算")
     proficiency: Optional[str] = Field(default=None, description="期望熟练度：初级/中级/高级/专家")
     source_count: int = Field(default=1, description="命中该技能的独立 JD 源数")
+    is_soft: bool = Field(default=False, description="软技能标记（Position.soft_skills 并入或 Skill.category=软技能；仅展示打标，不影响评分）")
 
 
 class PositionProfile(BaseModel):
     """岗位画像（设计文档 9.2 节）。
 
     must_skills / nice_skills 由图谱聚合层预计算，匹配引擎直接消费聚合值。
+    soft_requirements 是软技能独立通道（2026-08-22 拍板）：不进 must/nice
+    评分池，仅供差距分析展示（is_soft 打标）——匹配评分只算技术栈能力。
     """
     position_id: str
     name: str
@@ -37,6 +40,10 @@ class PositionProfile(BaseModel):
     required_education: Optional[str] = Field(default=None, description="学历要求")
     required_certs: list[str] = Field(default_factory=list, description="证书要求")
     soft_skills: list[str] = Field(default_factory=list, description="软技能白名单")
+    soft_requirements: list[SkillRequirement] = Field(
+        default_factory=list,
+        description="软技能要求独立通道（不参与评分，仅差距展示；来源=REQUIRES 边软技能类目 + Position.soft_skills）",
+    )
     typical_scenarios: list[str] = Field(default_factory=list, description="典型项目场景，用于项目 Embedding 比对")
     industry: Optional[str] = Field(default=None, description="行业（JD 抽取 industry，图谱 Position.industry）")
     last_updated: Optional[str] = Field(default=None, description="岗位聚合最近更新时间 ISO8601，用于时效衰减")
@@ -93,13 +100,19 @@ class MatchResult(BaseModel):
     position_id: str
     position_name: str
     total_score: float = Field(ge=0.0, le=1.0)
-    must_score: float = Field(ge=0.0, le=1.0)
+    must_score: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="必备技能匹配分；岗位无必备技能门槛时为 None（无信息不判分，总分重归一）",
+    )
     nice_score: float = Field(ge=0.0, le=1.0)
     exp_score: float = Field(ge=0.0, le=1.0)
     matched_must: list[str] = Field(default_factory=list, description="已匹配的必备技能名")
     missing_must: list[str] = Field(default_factory=list, description="缺失的必备技能名")
     summary: str = Field(default="", description="匹配摘要，供前端展示")
-    unqualified: bool = Field(default=False, description="必备技能全缺失判零时为 True")
+    unqualified: bool = Field(
+        default=False,
+        description="必备技能全缺失（或无门槛岗位加分技能全未命中）判零时为 True",
+    )
     radar: dict = Field(
         default_factory=dict,
         description="人岗比对五维雷达（§9.5）：must/nice/experience/education/projects，"

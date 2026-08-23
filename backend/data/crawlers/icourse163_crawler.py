@@ -32,6 +32,45 @@ from app.core.logging import setup_logging
 logger = setup_logging("icourse163_crawler", stream=sys.stderr)
 
 
+def _safe_int(value) -> int:
+    """安全解析为 int（H3 修复）：API 可能返回 "3,600" / "1.2万" / "约8000人" 等。
+
+    数值类直接 int；字符串剥离千分位/单位后缀/中文单位，无法解析返回 0，
+    避免 int() 抛 ValueError 导致整批课程丢失（脚本异常会炸子进程）。
+    """
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    if not isinstance(value, str):
+        return 0
+    s = value.strip().replace(",", "").replace("，", "")
+    # 中文单位：万
+    if s.endswith("万"):
+        try:
+            return int(float(s[:-1]) * 10000)
+        except ValueError:
+            return 0
+    try:
+        return int(float(s))
+    except ValueError:
+        return 0
+
+
+def _safe_float(value) -> float:
+    """安全解析为 float：非数值返回 0.0（H3 修复，同 _safe_int 语义）。"""
+    if isinstance(value, bool):
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return 0.0
+    try:
+        return float(value.strip())
+    except ValueError:
+        return 0.0
+
+
 # icourse163 搜索课程 RPC API
 ICOURSE163_SEARCH_RPC = (
     "https://www.icourse163.org/web/j/mocSearchBean.searchCourse.rpc"
@@ -112,7 +151,6 @@ def parse_course_list(api_data: dict, keyword: str) -> list:
         school = course_card.get("schoolPanel") or {}
 
         course_id = str(card.get("courseId") or entry.get("courseId") or "")
-        term_id = str(card.get("termId") or term_panel.get("id") or "")
         if not course_id:
             continue
 
@@ -135,7 +173,14 @@ def parse_course_list(api_data: dict, keyword: str) -> list:
             logger.warning(f"  跳过培训/应试类课程: {course_name[:50]}")
             continue
 
-        source_url = f"https://www.icourse163.org/course/{course_id}"
+        # 课程页 URL 必须带学校简称前缀（/course/{shortName}-{courseId}），
+        # 纯数字路径 404 → commonError.htm 错误页（08-22 实测 891 门存量全坏）
+        school_short = school.get("shortName") or ""
+        if school_short:
+            source_url = f"https://www.icourse163.org/course/{school_short}-{course_id}"
+        else:
+            logger.warning(f"  缺 schoolPanel.shortName，URL 回退纯数字（不可访问）: {course_name[:50]}")
+            source_url = f"https://www.icourse163.org/course/{course_id}"
         source_id = course_id
 
         # 讲师
@@ -183,7 +228,7 @@ def parse_course_list(api_data: dict, keyword: str) -> list:
             "category": keyword,
             "description": description,
             "rating": 0.0,
-            "enrollment": int(enrollment),
+            "enrollment": _safe_int(enrollment),
             "duration": duration,
             "start_date": start_date,
             "skills": tags,

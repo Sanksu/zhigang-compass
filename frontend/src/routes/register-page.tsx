@@ -5,13 +5,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { apiPost, ApiError } from '@/lib/api'
+import {apiPost, errMsg} from '@/lib/api'
+import type { components } from '@/types/api'
 
-interface RegisterResult {
-  id: string
-  username: string
-  role: string
-}
+/** 注册返回（契约 User 必填子集：id/username/role） */
+type RegisterResult = Pick<components['schemas']['User'], 'id' | 'username' | 'role'>
 
 /**
  * 注册页 — 与登录页同款布局（设计文档 §10.2）
@@ -44,7 +42,7 @@ export function RegisterPage() {
       })
       navigate('/login', { replace: true })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '注册失败，请稍后重试')
+      setError(errMsg(err, '注册失败，请稍后重试'))
     } finally {
       setLoading(false)
     }

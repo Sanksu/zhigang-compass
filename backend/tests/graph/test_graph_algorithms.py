@@ -56,6 +56,32 @@ class TestPageRank:
         scores = pagerank(graph)
         assert all(v >= 0.0 and v <= 1.0 for v in scores.values())
 
+    def test_weights_influence_ranking(self):
+        """加权共现边影响排序（08-14 修复：此前仅按邻居数均分，权重失效）。
+
+        A→X 强共现（9.0）、A→Y 弱共现（1.0）：加权后 X 从 A 获得 0.9·pr(A)，
+        Y 仅 0.1·pr(A) → X 排名高于 Y（等权均分下两者相等）。
+        """
+        graph = {
+            "A": {"X": 9.0, "Y": 1.0},
+            "X": {"A": 1.0},
+            "Y": {"A": 1.0},
+        }
+        scores = pagerank(graph)
+        assert scores["X"] > scores["Y"]
+
+    def test_weights_reduce_to_uniform_when_equal(self):
+        """等权图与均分行为数学等价（现有等权测试兼容性回归护栏）。"""
+        graph = {
+            "center": {"a": 1.0, "b": 1.0, "c": 1.0},
+            "a": {"center": 1.0},
+            "b": {"center": 1.0},
+            "c": {"center": 1.0},
+        }
+        scores = pagerank(graph)
+        assert scores["center"] > scores["a"]
+        assert sum(scores.values()) == pytest.approx(1.0, abs=1e-6)
+
 
 # ============================================================
 # Louvain

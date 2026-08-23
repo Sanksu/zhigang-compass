@@ -26,7 +26,6 @@
 
 import json
 import os
-import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -34,8 +33,8 @@ from scrapy import Request
 from scrapy.exceptions import CloseSpider
 from scrapy.http import Response
 
-from crawlers.base_spider import BaseSpider
-from crawlers.settings import MAIMAI_COMPLIANCE, SUBPROCESS_TIMEOUT
+from crawlers.base_spider import BaseSpider, iter_jsonl, run_script
+from crawlers.settings import MAIMAI_COMPLIANCE
 from crawlers.setup_boss_chrome import ensure_cdp_chrome, platform_profile_dir
 
 
@@ -52,7 +51,7 @@ class MaimaiSpider(BaseSpider):
     platform = "maimai"
 
     # 脉脉飞书招聘页无城市筛选，固定城市列表仅作日志记录
-    cities = ["北京"]
+    cities: list[str] = []  # 城市仅作日志记录（飞书招聘页无城市筛选，08-16 置空）
 
     def start_requests(self):
         """合规守卫：仅夜间 22:00-08:00 启动。
@@ -98,40 +97,13 @@ class MaimaiSpider(BaseSpider):
 
         cmd = [sys.executable, CRAWLER_SCRIPT, "--keyword", keyword, "--cdp-url", cdp_url]
 
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                cwd=os.path.dirname(CRAWLER_SCRIPT),
-                env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
-            )
-        except Exception as e:
-            self.logger.error(f"启动 CDP 脚本失败: {e}")
+        result = run_script(cmd, os.path.dirname(CRAWLER_SCRIPT), self.logger, "CDP 脚本")
+        if result is None:
             return
-
-        # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
-        try:
-            stdout, stderr_output = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout, stderr_output = proc.communicate()
-            self.logger.error(f"CDP 脚本超时（>{SUBPROCESS_TIMEOUT}s），已终止")
-            return
+        stdout, stderr_output, returncode = result
 
         item_count = 0
-        for line in stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                item_data = json.loads(line)
-            except json.JSONDecodeError as e:
-                self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
-                continue
-
+        for item_data in iter_jsonl(stdout, self.logger):
             item_count += 1
             yield self.make_item(
                 source_id=str(item_data.get("id", "")),
@@ -148,8 +120,8 @@ class MaimaiSpider(BaseSpider):
                 raw_text=json.dumps(item_data.get("raw", item_data), ensure_ascii=False),
             )
 
-        if proc.returncode != 0:
-            self.logger.warning(f"CDP 脚本退出码 {proc.returncode}")
+        if returncode != 0:
+            self.logger.warning(f"CDP 脚本退出码 {returncode}")
         if stderr_output:
             for line in stderr_output.strip().splitlines()[-5:]:
                 self.logger.info(f"[cdp] {line}")

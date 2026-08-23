@@ -1,50 +1,54 @@
 """edX 爬虫（国际学习路径数据源）。
 
-策略：
-- 用 Playwright 渲染搜索页 https://www.edx.org/search?search_key={keyword}
-- 解析 SSR HTML 中的课程卡片（2026 版本，edX 改用 Tailwind CSS）
-- 大卡片选择器：a 内含 div[class*="shadow-product-card"]
-- 国际源，需走代理
-- 产出 CourseItem，用于构建 (Skill)-[:LEARNABLE_VIA]->(Course) 关系
+数据面（2026-08-19 重写）：edX 改版后搜索页为全客户端渲染（无课程卡片、
+无 __NEXT_DATA__、headless 无法复现结果），旧 Playwright 卡片选择器失效。
+改走稳定公开数据面：
+
+  1. 拉取 ``https://www.edx.org/sitemap.xml``（sitemap 主动公开，robots.txt
+     允许英文 ``/learn/*``，仅禁 ``/es/learn/*`` 等）→ 提取课程详情 URL
+     ``/learn/{subject}/{slug}``（约 5300 条）
+  2. 详情页 SSR 完整返回（无需 JS 渲染），解析 ``<script type="application/ld+json">``
+     中 ``@type=Course`` 节点——标题/机构/时长/级别/技能等全字段结构化
 
 合规：
-- 仅采集公开搜索页元数据（标题/院校/类型/时长/级别）
-- 每周全量同步，请求间隔 10-20s
-- 遵循 edX robots.txt
+  - 仅采集 sitemap 公开课程页元数据（标题/院校/时长/级别/技能）
+  - 每日同步，请求间隔 10-20s
+  - 不爬 robots Disallow 路径（/es/learn/*、/preview/ 等）
 
 运行：
-  scrapy crawl edx -a keywords=Python,Data-Science -o output/edx.jsonl
-  # 国际源，需代理
-  $env:HTTPS_PROXY="http://127.0.0.1:7890"
+  scrapy crawl edx -o output/edx.jsonl                    # 全量（默认每批 100）
+  scrapy crawl edx -a keywords=Python -o output/edx.jsonl  # 关键词过滤
+  scrapy crawl edx -a limit=5 -o output/edx.jsonl          # 限制批内数量（调试）
 """
 
+import json
 import re
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote, urljoin
 
 from scrapy import Request, Spider
 from scrapy.http import Response
-from scrapy_playwright.page import PageMethod
 
 from crawlers.items import CourseItem
 from crawlers.settings import RATE_LIMIT
 
 
 EDX_BASE = "https://www.edx.org"
-# edX 搜索参数是 q（search_key 为旧版参数，已失效，返回浏览模式而非搜索结果）
-EDX_SEARCH_URL = "https://www.edx.org/search?q={keyword}"
+EDX_SITEMAP_URL = "https://www.edx.org/sitemap.xml"
+# 课程详情页 URL 形态：/learn/{subject}/{slug}
+_COURSE_RE = re.compile(r"^https://www\.edx\.org/learn/[^/]+/[^/]+$")
 
-# 默认搜索关键词（与项目 AI/大数据/全栈方向一致）
-DEFAULT_KEYWORDS = ["Python", "Data Science", "Machine Learning", "SQL", "Java"]
-
-# edX 大卡片内 a 标签特征类名（用于卡片定位）
-EDX_CARD_LINK_XPATH = (
-    '//a[contains(@class, "no-underline") and .//div[contains(@class, "shadow-product-card")]]'
+# 简单真实 UA：edX 对无 UA/默认 UA 的 SSR 请求可能返回错误页（bot 检测）
+_EDX_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
+
+# 详情页 JSON-LD 脚本提取
+_LD_RE = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
 
 
 class EdxSpider(Spider):
-    """edX 采集。
+    """edX 采集：sitemap 课程索引 → 详情页 JSON-LD 解析。
 
     不继承 BaseSpider（非岗位数据），但复用 keywords 参数风格。
     """
@@ -54,14 +58,14 @@ class EdxSpider(Spider):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # -a keywords=Python,Data Science 覆盖默认关键词
+        # -a keywords=Python,Data Science 过滤 sitemap（URL 含任一关键词）
         kws = kwargs.get("keywords")
-        self.keywords = kws.split(",") if kws else DEFAULT_KEYWORDS
-        # -a max_pages=3 控制单关键词翻页数
-        self.max_pages = int(kwargs.get("max_pages", "3"))
+        self.keywords = [k.lower() for k in kws.split(",") if k.strip()] if kws else []
+        # 每批采集上限（默认 100，对应每日同步节奏；调试用 -a limit=N）
+        self.limit = int(kwargs.get("limit") or kwargs.get("max_results") or 100)
         # 请求间隔
-        limit = RATE_LIMIT.get(self.platform, {})
-        delay_range = limit.get("delay_range", (10, 20))
+        limit_cfg = RATE_LIMIT.get(self.platform, {})
+        delay_range = limit_cfg.get("delay_range", (10, 20))
         self.download_delay = sum(delay_range) / 2
 
     async def start(self):
@@ -70,212 +74,153 @@ class EdxSpider(Spider):
             yield request
 
     def start_requests(self):
-        for keyword in self.keywords:
-            url = EDX_SEARCH_URL.format(keyword=quote(keyword))
-            self.logger.info(f"开始采集 edX: 关键词={keyword}")
-            yield self._make_playwright_request(
-                url,
-                meta={"keyword": keyword},
-            )
+        """入口：请求 sitemap.xml 获取课程 URL 索引。"""
+        self.logger.info(f"开始采集 edX sitemap（limit={self.limit}, "
+                         f"keywords={self.keywords or '(全部)'}）")
+        yield Request(
+            EDX_SITEMAP_URL,
+            callback=self.parse_sitemap,
+            headers={"User-Agent": _EDX_UA},
+            dont_filter=True,
+        )
 
-    def parse(self, response: Response):
-        """解析搜索结果页，产出 CourseItem。
+    def parse_sitemap(self, response: Response):
+        """解析 sitemap，筛选课程详情 URL 并逐个请求详情页。"""
+        locs = response.xpath("//*[local-name()='loc']/text()").getall()
+        courses = [
+            u for u in locs
+            if _COURSE_RE.match(u)
+            and "/es/" not in u and "/aprende/" not in u
+        ]
+        if self.keywords:
+            courses = [u for u in courses if any(k in u.lower() for k in self.keywords)]
+        courses = courses[: self.limit]
 
-        edX 2026 版 DOM 结构（Tailwind CSS）：
-        <a href="/certificates/...|/courses/...|/learn/..." class="no-underline ...">
-          <div class="... shadow-product-card ...">
-            <div><span class="font-bold text-primary-500">Professional Certificate</span></div>
-            <img alt="课程标题" />
-            <img alt="机构名" />
-            <span>课程标题</span>  (重复)
-            <span>机构名</span>     (重复)
-            <span>2 courses</span>
-            <span>6 months to complete</span>
-            <span>Intermediate level</span>
-          </div>
-        </a>
-        """
-        # 大卡片：a 标签内含 div[class*="shadow-product-card"]
-        cards = response.xpath(EDX_CARD_LINK_XPATH)
-
-        if not cards:
-            # 兜底：找含 shadow-product-card 的 div 的父节点（parsel 不支持 ::parent，用 XPath）
-            cards = response.xpath('//div[contains(@class, "shadow-product-card")]/..')
-            cards = [c for c in cards if c.root.tag == 'a'] if cards else []
-
-        if not cards:
+        if not courses:
             self.logger.warning(
-                f"未解析到课程卡片（keyword={response.meta['keyword']}），"
-                f"页面标题: {response.css('title::text').get(default='')}"
+                f"[edx] sitemap 未筛出课程 URL（keywords={self.keywords or '(全部)'}），"
+                f"sitemap loc 总数={len(locs)}"
             )
-            # 检查是否被 Cloudflare 拦截
-            if "cloudflare" in response.text.lower() or "challenge" in response.text.lower():
-                self.logger.error("被 Cloudflare 拦截，请检查代理配置")
-            self.logger.debug(f"页面前 1000 字符: {response.text[:1000]}")
             return
 
-        item_count = 0
-        for card in cards:
-            item = self._card_to_item(card, response.meta)
-            if item:
-                item_count += 1
-                yield item
+        self.logger.info(f"[edx] sitemap 筛出 {len(courses)} 个课程 URL，开始逐个抓详情页")
+        for url in courses:
+            yield Request(url, callback=self.parse_course, headers={"User-Agent": _EDX_UA})
 
-        self.logger.info(f"[edx] kw={response.meta['keyword']} 产出 {item_count} 条")
+    def parse_course(self, response: Response):
+        """解析课程详情页的 JSON-LD Course 节点，产出 CourseItem。"""
+        item = self._item_from_jsonld(response)
+        if item:
+            yield item
+        else:
+            self.logger.warning(
+                f"[edx] 详情页无 Course JSON-LD: {response.url} "
+                f"(title={response.css('title::text').get(default='')[:60]})"
+            )
 
-        # 无 URL 翻页：edX 搜索为 SPA 无限滚动，&page=N 会返回空结果，
-        # 已通过 _make_playwright_request 在页面内滚动触发加载更多
-
-    def _card_to_item(self, card, meta: dict) -> CourseItem:
-        """将单个大卡片转为 CourseItem。"""
-        # href
-        href = card.xpath('./@href').get()
-        if not href:
+    def _item_from_jsonld(self, response: Response) -> CourseItem | None:
+        """从详情页 JSON-LD 中取 @type=Course 节点，映射为 CourseItem。"""
+        course = None
+        for block in _LD_RE.findall(response.text):
+            try:
+                data = json.loads(block)
+            except (ValueError, TypeError):
+                continue
+            graph = data.get("@graph") if isinstance(data, dict) else None
+            nodes = graph if isinstance(graph, list) else [data]
+            for node in nodes:
+                if isinstance(node, dict) and node.get("@type") == "Course":
+                    course = node
+                    break
+            if course:
+                break
+        if not course:
             return None
 
-        # source_id：从 URL 最后一段提取
-        # /certificates/professional-certificate/harvardx-cs50 -> harvardx-cs50
-        # /learn/python/harvard-university-cs50 -> harvard-university-cs50
-        # /courses/course-v1:edX+DemoX -> course-v1:edX+DemoX
-        source_id = href.rstrip("/").split("/")[-1].split("?")[0]
-        source_url = urljoin(EDX_BASE, href)
+        name = str(course.get("name") or "").strip()
+        if not name:
+            return None
 
-        # 类型徽章：<span class="font-bold text-primary-500 ...">Professional Certificate</span>
-        category = card.xpath(
-            './/span[contains(@class, "text-primary-500")]/text()'
-        ).get(default="").strip()
-
-        # 标题：第一个 <img alt="...">（非机构 logo）
-        # 机构 logo 的 alt 通常含 "logo" 或在第二个 img
-        img_alts = card.xpath('.//img/@alt').getall()
-        title = ""
         institution = ""
-        for alt in img_alts:
-            alt = alt.strip()
-            if not alt:
-                continue
-            # 跳过 logo（alt 含 "logo"）
-            if "logo" in alt.lower():
-                continue
-            if not title:
-                title = alt
-            elif not institution:
-                institution = alt
+        provider = course.get("provider")
+        if isinstance(provider, list):
+            for p in provider:
+                if isinstance(p, dict) and p.get("name"):
+                    institution = str(p["name"])
+                    break
+        elif isinstance(provider, dict) and provider.get("name"):
+            institution = str(provider["name"])
 
-        # 兜底：从 spans 提取
-        if not title or not institution:
-            spans_text = card.xpath('.//span/text()').getall()
-            spans_text = [s.strip() for s in spans_text if s.strip()]
-            # spans 顺序：[类型, 标题, 机构, 课程数, 时长, 级别]
-            # 已知类型，过滤后剩下的就是元数据
-            type_set = {"Professional Certificate", "Course", "MicroMasters",
-                        "XSeries", "Executive Education", "Graduate Program",
-                        "Boot Camp", "Degree", "High School"}
-            metadata_spans = [s for s in spans_text if s not in type_set and s != category]
-            if not title and metadata_spans:
-                title = metadata_spans[0]
-                metadata_spans = metadata_spans[1:]
-            if not institution and metadata_spans:
-                institution = metadata_spans[0]
-                metadata_spans = metadata_spans[1:]
-        else:
-            # 已有 title 和 institution，提取其余 spans 作为元数据
-            spans_text = card.xpath('.//span/text()').getall()
-            spans_text = [s.strip() for s in spans_text if s.strip()]
-            type_set = {"Professional Certificate", "Course", "MicroMasters",
-                        "XSeries", "Executive Education", "Graduate Program",
-                        "Boot Camp", "Degree", "High School"}
-            metadata_spans = [s for s in spans_text
-                              if s not in type_set and s != category
-                              and s != title and s != institution]
+        # category：取 URL 的 subject 段（/learn/{subject}/{slug}）
+        m = re.match(r"https://www\.edx\.org/learn/([^/]+)/", response.url)
+        category = m.group(1) if m else ""
 
-        # 解析元数据 spans（如 "2 courses"、"6 months to complete"、"Intermediate level"）
-        # 优先级：week/month/year > courses 数（多课程项目可能两种都有）
-        duration = ""
-        level = ""
-        course_count = ""
-        for text in metadata_spans:
-            text_lower = text.lower()
-            if "level" in text_lower and not level:
-                level = text
-            elif any(k in text_lower for k in ("week", "month", "year", "day")) and not duration:
-                duration = text
-            elif "courses" in text_lower and not course_count:
-                course_count = text
-        # 若无具体时长，用课程数兜底
-        if not duration and course_count:
-            duration = course_count
-
-        # 评分：edX 列表页通常无评分
+        # rating / enrollment（缺省留 0）
         rating = 0.0
+        agg = course.get("aggregateRating")
+        if isinstance(agg, dict):
+            try:
+                rating = float(str(agg.get("ratingValue") or 0))
+            except (TypeError, ValueError):
+                rating = 0.0
+        enrollment = 0
+        if isinstance(course.get("totalHistoricalEnrollment"), (int, float)):
+            enrollment = int(course.get("totalHistoricalEnrollment"))
 
-        # 描述：列表页无独立描述
-        description = ""
+        duration = self._iso8601_duration(course.get("timeRequired"))
 
-        # 用搜索关键词作为分类补充
-        if not category:
-            category = meta.get("keyword", "")
+        # start_date：第一个 hasCourseInstance.startDate（可为空）
+        start_date = ""
+        instances = course.get("hasCourseInstance")
+        if isinstance(instances, list):
+            for inst in instances:
+                if isinstance(inst, dict) and inst.get("startDate"):
+                    start_date = str(inst["startDate"])
+                    break
+
+        # skills：about 列表里 Lightcast 技能标签（LEARNABLE_VIA 关键）
+        skills = []
+        about = course.get("about")
+        if isinstance(about, list):
+            for a in about:
+                if isinstance(a, dict) and a.get("name"):
+                    skills.append(str(a["name"]))
+
+        source_id = str(course.get("courseCode") or "").strip() or response.url.rstrip("/").split("/")[-1]
 
         item = CourseItem()
         item["source"] = self.platform
         item["source_id"] = source_id
-        item["source_url"] = source_url
+        item["source_url"] = response.url
         item["crawled_at"] = datetime.now(timezone(timedelta(hours=8))).isoformat()
-        item["title"] = title
+        item["title"] = name
         item["institution"] = institution
         item["platform"] = "edx"
         item["category"] = category
         item["rating"] = rating
-        item["enrollment"] = 0  # edX 列表页通常不显示注册人数
+        item["enrollment"] = enrollment
         item["duration"] = duration
-        item["skills"] = []  # 列表页通常无技能标签
-        item["raw_text"] = card.get()
+        item["description"] = str(course.get("description") or "")
+        item["start_date"] = start_date
+        item["skills"] = skills
+        item["raw_text"] = json.dumps(course, ensure_ascii=False)
         item["is_desensitized"] = False
         return item
 
-    def _make_playwright_request(self, url: str, meta: dict, callback=None):
-        """构造 Playwright 渲染请求，等待课程卡片加载并滚动触发更多结果。
-
-        edX 搜索为 SPA 无限滚动（URL 翻页参数失效），故在单个页面内
-        重复滚动到底部 + 等待，触发动态加载。max_pages 语义 = 滚动次数。
-        """
-        methods = [
-            # 等待大卡片或无结果提示出现
-            # Tailwind 类名含冒号，CSS 选择器需转义为 \:
-            PageMethod(
-                "wait_for_selector",
-                'div[class*="shadow-product-card"], .no-results, [class*="no-results"]',
-                timeout=30000,
-            ),
-        ]
-        # 滚动到底部触发无限滚动加载，滚动次数由 max_pages 控制
-        for _ in range(max(1, self.max_pages)):
-            methods.append(PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"))
-            methods.append(PageMethod("wait_for_timeout", 3500))
-
-        return Request(
-            url,
-            callback=callback or self.parse,
-            meta={
-                "playwright": True,
-                "playwright_page_methods": methods,
-                **meta,
-            },
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-            dont_filter=True,
-        )
-
     @staticmethod
-    def _safe_float(text) -> float:
-        """安全转 float，失败返回 0.0。"""
-        if not text:
-            return 0.0
-        try:
-            match = re.search(r"([\d.]+)", str(text))
-            return float(match.group(1)) if match else 0.0
-        except (ValueError, TypeError):
-            return 0.0
+    def _iso8601_duration(value) -> str:
+        """ISO8601 时长（P4W / P3M / PT6H）转人类可读文本，失败返回空串。"""
+        if not value:
+            return ""
+        s = str(value).strip()
+        m = re.match(r"P(?:(\d+)W|(\d+)M|T(?:(\d+)H)?)?", s)
+        if not m:
+            return ""
+        months, weeks, hours = m.group(2), m.group(1), m.group(3)
+        if months:
+            return f"{months} months to complete"
+        if weeks:
+            return f"{weeks} weeks to complete"
+        if hours:
+            return f"{hours} hours to complete"
+        return ""

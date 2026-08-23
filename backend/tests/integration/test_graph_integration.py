@@ -9,9 +9,17 @@
 
 基础设施不可达时由 conftest 统一 skip。链路中某数据源为空（如无技能先修）
 时用「链路通 + 结构合法」断言，不绑定固定数值，避免基础设施演化导致脆测。
+
+M1 修复:补 pytest.mark.integration marker(原仅 conftest 端口探测兜底,
+普通 pytest 在 docker 在跑时会拉起集成用例,marker 与 conftest 双保险)。
 """
 
 import httpx
+
+import pytest
+
+# M1 修复:打 integration marker,普通 pytest 默认排除(需 -m integration 显式跑)
+pytestmark = pytest.mark.integration
 
 
 class TestHealth:
@@ -37,13 +45,13 @@ class TestGraph:
     def test_panorama_guest_excludes_candidate(self, client: httpx.Client):
         """方案一：匿名/guest 全景不含 candidate 岗位（user/admin 可见全量）。
 
-        构造验证：当前真实库岗位多为 candidate，guest 返回的 position 节点
-        status 必须全部 ∈ {emerging, stable, declining}。
+        构造验证：guest 返回的 position 节点 status 必须全部 ∈ 公开状态集
+        （#218 后 active 为常态公开，仅 candidate 待审核不外宣）。
         """
         r = client.get("/api/v1/graph/panorama", params={"limit": 600})
         assert r.status_code == 200
         data = r.json()["data"]
-        visible = {"emerging", "stable", "declining"}
+        visible = {"active", "emerging", "stable", "declining"}
         for node in data["nodes"]:
             if node["type"] == "position":
                 assert node.get("status", "candidate") in visible, (

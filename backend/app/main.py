@@ -11,9 +11,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from neo4j.exceptions import GqlError
 
 from app.core.config import settings
+from app.core.security import ensure_jwt_keys
 from app.core.errors import (
     ERR_INTERNAL,
     ERR_NEO4J,
@@ -41,27 +43,88 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动时
+    # JWT RS256 密钥预加载（所有环境）：密钥经 compose 挂载注入而非入镜像，
+    # 挂载缺失时懒加载会把 FileNotFoundError 暴露成运行时 500（登录/refresh
+    # 报「服务器内部错误」，2026-08-22 事故）——启动即校验并给出修复指引
+    ensure_jwt_keys()
     if settings.is_production:
         if settings.secret_key == "change-me-in-production":
             raise RuntimeError("SECRET_KEY 未修改，生产环境拒绝启动")
         if settings.admin_password == "admin123":
             raise RuntimeError("ADMIN_PASSWORD 仍为默认弱口令，生产环境拒绝启动")
-    _prewarm_semantic()
+        # H2 修复:生产姿态校验补全。debug=True 默认值会让 asyncpg echo 把含
+        # 简历 PII/密码哈希列的 SQL 全量打进日志(§六 H2);CORS 通配 * 允许任意
+        # 站点跨域携带凭据访问。两项漏配时 fail-fast 拒绝启动。
+        if settings.debug:
+            raise RuntimeError(
+                "生产环境禁止 DEBUG=True（SQL echo 将泄露 PII 至日志），"
+                "请显式设置 DEBUG=false"
+            )
+        if "*" in settings.cors_origins:
+            raise RuntimeError(
+                "生产环境禁止 CORS 通配 *，请显式配置 cors_origins 白名单"
+            )
+    await _prewarm_semantic()
     yield
-    # 关闭时 — 资源由各自模块管理
+    await _shutdown_resources()
 
 
-def _prewarm_semantic() -> None:
-    """后台预加载 SBERT 模型，避免首次匹配请求触发模型加载（>30s 超时）。
+async def _shutdown_resources() -> None:
+    """关闭时释放连接资源（各自身 try/except 防单点失败阻断后续关闭）。
 
-    模型加载约 5-15s，放后台线程执行，不阻塞 API 启动；失败静默
-    （语义不可用时匹配自动降级纯规则，见 semantic.SemanticUnavailableError）。
+    08-17 P2 迁移新增 async_neo4j_driver，一并纳入关闭路径；sync neo4j_driver
+    仍由停机遇期关闭（workers/脚本复用）。PostgreSQL asyncpg 连接池 dispose 常驻
+    服务关闭时回收（单元测试不跑 lifespan，不会影响测试套件）。
     """
-    import threading
+    from app.core import database as _db
+
+    try:
+        await _db.async_neo4j_driver.close()
+    except Exception:
+        logger.exception("async_neo4j_driver 关闭失败")
+    try:
+        _db.neo4j_driver.close()
+    except Exception:
+        logger.exception("neo4j_driver 关闭失败")
+    try:
+        await _db.redis_client.aclose()
+    except Exception:
+        logger.exception("redis_client 关闭失败")
+    try:
+        await _db.engine.dispose()
+    except Exception:
+        logger.exception("PostgreSQL 连接池 dispose 失败")
+
+
+async def _prewarm_semantic() -> None:
+    """启动时同步预加载 SBERT 模型（08-15 修复：比对详情白屏）。
+
+    此前后台线程预加载——api 冷启动后首次 compare 实测 16.3s（模型加载 +
+    编码），用户感知"加载比对详情…白屏一段时间"。改为启动阶段同步等待
+    （实测 16s 在 healthcheck start_period 窗口内），用户请求永不感知加载。
+    失败静默（语义不可用时匹配自动降级纯规则，见 semantic.SemanticUnavailableError）。
+
+    M8 修复:静默语义保留,但补 warning 日志恢复可观测——SBERT 加载失败
+    唯一症状是线上匹配莫名变弱,无日志则排障无线索。
+    """
+    import asyncio
 
     from app.services.matching.semantic import SkillEmbedder
 
-    threading.Thread(target=SkillEmbedder.get().preload, daemon=True).start()
+    try:
+        await asyncio.to_thread(SkillEmbedder.get().preload)
+        # 预热岗位画像（08-15 修复：首次 compare 的 positions 加载 +
+        # 批量 encode 实测 16s——比模型加载更长，用户"比对详情白屏"主因）。
+        # P1 起走 Redis 版本化共享缓存：冷启动构建载荷并切指针，
+        # 其他进程/worker 直接读共享载荷，不再各自全量查图。
+        from app.services.matching.shared_cache import load_positions_shared
+
+        await load_positions_shared()
+    except Exception:
+        logger.warning(
+            "语义模型预热失败,匹配已降级为纯规则模式(详见 SemanticUnavailableError)",
+            exc_info=True,
+        )
 
 
 app = FastAPI(
@@ -140,6 +203,31 @@ async def health_check():
 
 
 # ---------- 前端静态资源（生产：同端口托管；开发：Vite dev server 独立） ----------
+class _SPAFallbackStaticFiles(StaticFiles):
+    """SPA history 路由回退（08-15 修复：前端路由刷新 404）。
+
+    StaticFiles(html=True) 只回退目录索引，/evolution 等前端路由直接
+    刷新时 404 {"detail":"Not Found"}。本类将非 /api 路径的 404 回退到
+    index.html（前端 Router 接管渲染）；/api/* 404 保持原样（契约 JSON）。
+    """
+
+    async def get_response(self, path: str, scope):
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            # Starlette 1.3 静态文件未命中 raise HTTPException(404)（非返回 404 响应）；
+            # 注意用 starlette.exceptions.HTTPException（fastapi.HTTPException 是独立类）
+            if exc.status_code == 404 and not scope.get("path", "").startswith("/api/"):
+                return await super().get_response("index.html", scope)
+            raise
+        if response.status_code == 404 and not scope.get("path", "").startswith("/api/"):
+            return await super().get_response("index.html", scope)
+        return response
+
+
 frontend_dist = Path(settings.frontend_dist_dir)
 if frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+    app.mount(
+        "/", _SPAFallbackStaticFiles(directory=str(frontend_dist), html=True),
+        name="frontend",
+    )

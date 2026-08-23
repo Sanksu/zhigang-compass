@@ -22,8 +22,12 @@ from app.services.matching.semantic import SkillEmbedder
 _POSITIONS_CACHE_TTL = 300  # 秒
 _positions_cache: dict = {"ts": 0.0, "positions": None}
 
-# 岗位侧软技能并入 nice 时的权重（与聚合层 nice 两档中的低档一致）
+# 软技能要求在独立通道中的展示权重（差距列表排序用；不参与评分——
+# 2026-08-22 拍板软技能退出 must/nice 评分池，仅保留差距展示）
 _SOFT_SKILL_WEIGHT = 0.4
+
+# 软技能类目值（与 configs/skill_whitelist.yaml 中 category 命名一致，仅展示打标）
+SOFT_SKILL_CATEGORY = "软技能"
 
 
 def build_candidate(parsed: dict) -> CandidateProfile:
@@ -73,26 +77,27 @@ def build_candidate(parsed: dict) -> CandidateProfile:
     )
 
 
-def load_positions_from_graph() -> list[PositionProfile]:
-    """从图谱聚合岗位画像（进程级 TTL 缓存；加载时批量预热技能向量）。
+def _load_positions_uncached() -> list[PositionProfile]:
+    """从图谱聚合岗位画像（无进程缓存；加载时批量预热技能向量）。
 
     语义向量缓存到 SkillEmbedder，评分阶段全部 cache hit，
     避免首次匹配请求触发全量 embedding 计算（>30s 前端超时的主因）。
     """
-    now = time.monotonic()
-    cached = _positions_cache.get("positions")
-    if cached is not None and now - _positions_cache["ts"] < _POSITIONS_CACHE_TTL:
-        return cached
-
     positions: dict[str, PositionProfile] = {}
     with neo4j_driver.session() as session:
         rows = session.run(
             """
             MATCH (p:Position)-[r:REQUIRES]->(s:Skill)
-            RETURN p.id AS pid, p.name AS pname,
+            // 边缘岗位过滤（08-20）：剔除单/低频岗位（freq<3，多为 1 条 JD 支撑的
+            // 噪声岗位，如 GSBOA/Clay/TeamCenter基础设施管理员）与 legacy 状态岗位，
+            // 避免"文本相关但证据薄弱"的边缘岗位混入匹配推荐
+            WHERE p.freq IS NOT NULL AND p.freq >= 3
+              AND coalesce(p.status, '') <> 'legacy'
+            RETURN p.id AS pid,
+                   p.name AS pname,
                    p.required_years AS req_years, p.last_updated AS last_updated,
                    p.industry AS industry,
-                   s.id AS sid, s.name AS sname,
+                   s.id AS sid, s.name AS sname, s.category AS category,
                    r.necessity AS necessity, r.weight AS weight,
                    r.level AS level, r.source_count AS source_count
             """
@@ -117,15 +122,21 @@ def load_positions_from_graph() -> list[PositionProfile]:
                 weight=float(rec.get("weight", 1.0) or 1.0),
                 proficiency=rec.get("level"),
                 source_count=int(rec.get("source_count", 1) or 1),
+                is_soft=rec.get("category") == SOFT_SKILL_CATEGORY,
             )
-            if skill.necessity == Necessity.MUST:
+            # 软技能退出评分（2026-08-22 拍板）：REQUIRES 边上类目=软技能的条目
+            # 无论 must/nice 标注一律进独立通道，不进 must/nice 评分池
+            if skill.is_soft:
+                pos.soft_requirements.append(skill)
+            elif skill.necessity == Necessity.MUST:
                 pos.must_skills.append(skill)
             else:
                 pos.nice_skills.append(skill)
 
-        # 岗位侧软技能（Position.soft_skills，聚合层写回）：并入 nice 要求参与评分。
-        # 候选人侧 LLM 推断软技能（low_confidence）命中时按 ×0.5 降权（engine._skill_similarity），
-        # 与设计文档 9.2 节"LLM 推断兜底（标 low_confidence，匹配时降权 ×0.5）"一致。
+        # 岗位侧软技能（Position.soft_skills，聚合层写回）：并入独立通道
+        # soft_requirements（2026-08-22 拍板：不参与评分，仅差距分析展示；
+        # 候选人侧 LLM 推断软技能 low_confidence ×0.5 降权仍保留——显式技术
+        # 技能被标 low_confidence 时同样生效，设计文档 9.2 节）。
         soft_rows = session.run(
             """
             MATCH (p:Position)
@@ -138,19 +149,45 @@ def load_positions_from_graph() -> list[PositionProfile]:
                 continue
             soft = [s for s in (rec.get("soft") or []) if s]
             pos.soft_skills = soft
+            # 与 REQUIRES 软技能边同名去重（边版本带 skill_id/source_count 优先）；
+            # 与 nice 同名跳过防差距列表重复（存量未回填 category 的边暂留 nice）
+            existing = (
+                {s.skill_name for s in pos.nice_skills}
+                | {s.skill_name for s in pos.soft_requirements}
+            )
             for name in soft:
-                pos.nice_skills.append(SkillRequirement(
+                if name in existing:
+                    continue
+                pos.soft_requirements.append(SkillRequirement(
                     skill_id=name,
                     skill_name=name,
                     necessity=Necessity.NICE,
                     weight=_SOFT_SKILL_WEIGHT,
+                    is_soft=True,
                 ))
+                existing.add(name)
 
     result = list(positions.values())
-    # 预热语义向量：一次 batch encode 所有岗位技能名，评分时不再逐条前向推理
+    # 预热语义向量：一次 batch encode 所有岗位技能名（含软技能独立通道——
+    # 差距分析对软技能要求同样做语义匹配），评分时不再逐条前向推理
     SkillEmbedder.get().warm(
-        [s.skill_name for p in result for s in (*p.must_skills, *p.nice_skills)]
+        [s.skill_name for p in result for s in (*p.must_skills, *p.nice_skills, *p.soft_requirements)]
     )
+    return result
+
+
+def load_positions_from_graph() -> list[PositionProfile]:
+    """从图谱聚合岗位画像（进程级 TTL 缓存；加载时批量预热技能向量）。
+
+    P1 后 API/worker 主路径走 shared_cache.load_positions_shared（Redis 版本化
+    共享），本函数保留为：降级路径、集成测试与旧调用方兼容入口。
+    """
+    now = time.monotonic()
+    cached = _positions_cache.get("positions")
+    if cached is not None and now - _positions_cache["ts"] < _POSITIONS_CACHE_TTL:
+        return cached
+
+    result = _load_positions_uncached()
     _positions_cache["ts"] = now
     _positions_cache["positions"] = result
     return result

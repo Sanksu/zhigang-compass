@@ -94,6 +94,42 @@ def _get_redis_client():
     return _redis_client
 
 
+# instructor/OpenAI client 缓存（08-14 审查：每次调用重建 client，连接池无法复用）。
+# 按 (base_url, api_key, mode, timeout) 复用；上限 32 防 timeout 变化导致的膨胀
+_client_cache: dict = {}
+_CLIENT_CACHE_MAX = 32
+
+
+def _build_client(provider: dict, timeout: int):
+    """构建/复用 instructor client（连接复用，批量/并发场景降低握手开销）。"""
+    import instructor
+    from openai import OpenAI
+
+    api_key = (provider.get("api_key") or "").strip()
+    # from_openai 函数身份入 key：测试 monkeypatch 换 fake 时不命中缓存（每次重建）
+    key = (
+        instructor.from_openai,
+        provider["base_url"],
+        api_key,
+        provider.get("supports_function_calling", True),
+        timeout,
+    )
+    client = _client_cache.get(key)
+    if client is None:
+        client = instructor.from_openai(
+            OpenAI(base_url=key[1], api_key=key[2], timeout=timeout),
+            mode=(
+                instructor.Mode.TOOLS
+                if key[3]
+                else instructor.Mode.JSON_SCHEMA
+            ),
+        )
+        if len(_client_cache) >= _CLIENT_CACHE_MAX:
+            _client_cache.pop(next(iter(_client_cache)))
+        _client_cache[key] = client
+    return client
+
+
 def _redis_get(key: str) -> Optional[str]:
     try:
         return _get_redis_client().get(key)
@@ -265,54 +301,53 @@ class LLMProviderChain:
 
     def __init__(self, config_path: Optional[Path] = None):
         self._config_path = config_path or _CONFIG_PATH
+        self._config = self._load_config()
         self._providers = self._load_providers()
         self._temperature = self._load_temperature()
         self._max_tokens = self._load_max_tokens()
         self._top_p = self._load_top_p()
 
-    def _load_providers(self) -> list[dict]:
-        """读取 yaml 并按 priority 升序返回 enabled provider。"""
+    def _load_config(self) -> dict:
+        """一次性读取 yaml（08-14 优化：原 4 个 _load_* 各自读文件，构造链读 4 次）。"""
         if not self._config_path.exists():
             raise LLMConfigurationError(f"LLM 配置缺失: {self._config_path}")
         try:
-            data = yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
+            return yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
         except yaml.YAMLError as e:
             raise LLMConfigurationError(f"LLM 配置解析失败: {e}") from e
+
+    def _load_providers(self) -> list[dict]:
+        """按 priority 升序返回 enabled provider（配置已由 _load_config 读取）。"""
         providers = [
-            p for p in data.get("providers", [])
+            p for p in self._config.get("providers", [])
             if isinstance(p, dict)
         ]
         enabled = [p for p in providers if p.get("enabled")]
         return sorted(enabled, key=lambda p: p.get("priority", 99))
 
     def _load_temperature(self) -> float:
-        """结构化输出温度（yaml `structured_output.temperature`，缺省 0.1）。"""
+        """结构化输出温度（yaml `structured_output.temperature`，缺省 0.1）。
+
+        配置值类型非法（如 "abc"）回落默认——配置缺省容忍，读取一次不重复
+        解析（08-14 优化）。
+        """
         try:
-            data = yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
-            return float(data.get("structured_output", {}).get("temperature", 0.1))
-        except (OSError, yaml.YAMLError, TypeError, ValueError):
+            return float(self._config.get("structured_output", {}).get("temperature", 0.1))
+        except (TypeError, ValueError):
             return 0.1
 
     def _load_max_tokens(self) -> int:
-        """结构化输出 max_tokens（yaml `structured_output.max_tokens`，缺省 2048）。
-
-        设计文档 §6.2：max_tokens = 2048（与 temperature 同源的读取模式）。
-        """
+        """结构化输出 max_tokens（yaml `structured_output.max_tokens`，缺省 2048）。"""
         try:
-            data = yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
-            return int(data.get("structured_output", {}).get("max_tokens", 2048))
-        except (OSError, yaml.YAMLError, TypeError, ValueError):
+            return int(self._config.get("structured_output", {}).get("max_tokens", 2048))
+        except (TypeError, ValueError):
             return 2048
 
     def _load_top_p(self) -> float:
-        """结构化输出 top_p（yaml `structured_output.top_p`，缺省 0.9）。
-
-        设计文档 §6.2：top_p = 0.9（与 temperature 同源的读取模式）。
-        """
+        """结构化输出 top_p（yaml `structured_output.top_p`，缺省 0.9）。"""
         try:
-            data = yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
-            return float(data.get("structured_output", {}).get("top_p", 0.9))
-        except (OSError, yaml.YAMLError, TypeError, ValueError):
+            return float(self._config.get("structured_output", {}).get("top_p", 0.9))
+        except (TypeError, ValueError):
             return 0.9
 
     # ---- 对外接口 ----
@@ -455,12 +490,10 @@ class LLMProviderChain:
         - 5xx（APIStatusError, status_code>=500）→ LLMServerError，累计熔断
         - 其余（超时/连接/4xx/校验）保持既有 LLMTimeoutError/LLMExtractionError
         """
-        import instructor
         from openai import (
             APIConnectionError,
             APIStatusError,
             APITimeoutError,
-            OpenAI,
             RateLimitError,
         )
 
@@ -468,14 +501,7 @@ class LLMProviderChain:
         if not api_key:
             raise LLMConfigurationError(f"provider '{provider['name']}' 未配置 api_key")
 
-        client = instructor.from_openai(
-            OpenAI(base_url=provider["base_url"], api_key=api_key, timeout=timeout),
-            mode=(
-                instructor.Mode.TOOLS
-                if provider.get("supports_function_calling", True)
-                else instructor.Mode.JSON_SCHEMA
-            ),
-        )
+        client = _build_client(provider, timeout)
         try:
             return client.chat.completions.create(
                 model=provider["model"],

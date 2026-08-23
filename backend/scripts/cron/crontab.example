@@ -7,13 +7,14 @@
 # 前置条件：
 #   1. Redis 已启动（默认 redis://localhost:6379/1）
 #   2. ARQ Worker 已运行：
-#        cd /path/to/backend && nohup uv run arq app.workers.tasks.WorkerSettings > logs/worker.log 2>&1 &
+#        cd /path/to/backend && nohup uv run arq app.workers.settings.WorkerSettings > logs/worker.log 2>&1 &
 #   3. PostgreSQL + Neo4j 已启动
 #   4. 国际源需配置 HTTPS_PROXY 环境变量（Clash/V2Ray Rule 模式）
 #
 # 采集责任划分：
 #   - boss/zhilian/indeed/glassdoor/arxiv/github/stackoverflow 由 ETL 主管线
-#     （05:00）阶段 1 统一采集，不再单独调度（避免同一平台每日重复采集）；
+#     阶段 1 统一采集，不再单独调度（避免同一平台每日重复采集）；
+#     ETL 主管线 08-21 起由容器内 ARQ cron 调度（见下方说明）；
 #   - maimai 为夜间合规窗口（23:00 - 06:00，≤100 req/h），保持独立调度；
 #   - linkedin_public / 课程平台不在 ETL 采集列表内，保持独立调度。
 #
@@ -31,18 +32,29 @@ LOG_DIR=/opt/zhigang-compass/logs
 0 23 * * * cd $BACKEND_DIR && uv run python scripts/cron/crawl_spider.py maimai 30 >> $LOG_DIR/crawl_maimai_$(date +\%Y\%m\%d).log 2>&1
 
 # ── 国际非招聘源（每日 UTC 0:00 = 北京时间 08:00）──
-0 8 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py linkedin_public 50 >> $LOG_DIR/crawl_linkedin_$(date +\%Y\%m\%d).log 2>&1
+0 8 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py linkedin_public 50 python,java,golang,react,devops,security,embedded,data,engineer,frontend,backend >> $LOG_DIR/crawl_linkedin_$(date +\%Y\%m\%d).log 2>&1
 
-# ── 课程平台每周日全量同步（UTC 2:00 = 北京时间 10:00）──
-0 10 * * 0 cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py coursera 100 >> $LOG_DIR/crawl_coursera_$(date +\%Y\%m\%d).log 2>&1
-30 10 * * 0 cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py edx 100 >> $LOG_DIR/crawl_edx_$(date +\%Y\%m\%d).log 2>&1
-0 11 * * 0 cd $BACKEND_DIR && uv run python scripts/cron/crawl_spider.py icourse163 100 >> $LOG_DIR/crawl_icourse163_$(date +\%Y\%m\%d).log 2>&1
+# ── 课程平台每日同步（UTC 2:00 = 北京时间 10:00，08-19 由周日改每日）──
+0 10 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py coursera 100 >> $LOG_DIR/crawl_coursera_$(date +\%Y\%m\%d).log 2>&1
+30 10 * * * cd $BACKEND_DIR && HTTPS_PROXY=http://127.0.0.1:7890 uv run python scripts/cron/crawl_spider.py edx 100 >> $LOG_DIR/crawl_edx_$(date +\%Y\%m\%d).log 2>&1
+0 11 * * * cd $BACKEND_DIR && uv run python scripts/cron/crawl_spider.py icourse163 100 >> $LOG_DIR/crawl_icourse163_$(date +\%Y\%m\%d).log 2>&1
 
-# ── ETL 主管线（每日 05:00）──
+# ── ETL 主管线（08-21 起由容器内 ARQ cron 调度，不再走外部 crontab）──
 # 阶段 1 采集 boss/zhilian/indeed/glassdoor/arxiv/github/stackoverflow，
 # 后续依次执行去重→LLM 抽取→时滞/通胀→入图→快照→发现+自动流转（阶段 15）。
-# _timeout 已放宽至 3h，_max_tries=1（整管线重跑会重复爬取，阶段内已容错）。
-0 5 * * * cd $BACKEND_DIR && uv run python scripts/cron/etl_daily.py >> $LOG_DIR/etl_$(date +\%Y\%m\%d).log 2>&1
+# 执行时间在配置中心「ETL 队列」页配置（etl_run_hour/minute，默认 05:00），
+# worker 重启后生效；当日幂等由 run_etl_pipeline_scheduled 内 Redis 锁保证。
+# 如仍需要外部触发（手动重跑等），可用：etl_daily.py [--force]（脚本保留）。
+# 0 5 * * * cd $BACKEND_DIR && uv run python scripts/cron/etl_daily.py >> $LOG_DIR/etl_$(date +\%Y\%m\%d).log 2>&1
 
 # ── 时效衰减每日凌晨 4:00 重算（设计文档 §4.7.5）──
 # 由 run_etl_pipeline 内 validate_temporal 阶段覆盖，无需独立任务
+
+# ── 图谱健康治理（每日 06:30，ETL 完成后）──
+# 脏边（同语言 sim<0.30）/孤立伪技能/教学词自动清理，备份 reports/graph_health_*。
+# SBERT 加载约 1 分钟；--dry-run 可人工复核。
+30 6 * * * cd $BACKEND_DIR && uv run python scripts/cron/graph_health_daily.py >> $LOG_DIR/graph_health_$(date +\%Y\%m\%d).log 2>&1
+
+# ── 岗位重复对治理（每日 06:45，GraphHealth 之后）──
+# 字符级变体/语义别名合并 + 语义近似对提议（复核清单），备份 reports/position_duplicates_*。
+45 6 * * * cd $BACKEND_DIR && uv run python scripts/cron/position_dup_daily.py >> $LOG_DIR/position_dup_$(date +\%Y\%m\%d).log 2>&1

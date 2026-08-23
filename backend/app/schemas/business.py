@@ -115,3 +115,9 @@ class ResumeCacheResponse(BaseModel):
     version: int
     created_at: datetime
     updated_at: datetime
+
+
+class ResumeUpdateRequest(BaseModel):
+    """PUT /resume/{resume_id} 请求体：fields 按顶层覆盖合并进 parsed_data（设计文档 §2.4.3）。"""
+
+    fields: dict[str, Any]

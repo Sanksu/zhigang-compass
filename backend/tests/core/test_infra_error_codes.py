@@ -18,6 +18,7 @@ from sqlalchemy.exc import ProgrammingError
 
 from app import main as main_module
 from app.api.v1 import match as match_api
+from app.core.errors import ERR_VALIDATION, HTTP_STATUS_ERROR_CODE
 from app.main import unhandled_exception_handler
 from app.services.embeddings.vector_store import (
     PgvectorUnavailableError,
@@ -31,6 +32,16 @@ def _req():
 
 def _silence_logger():
     return patch.object(main_module.logger, "exception")
+
+
+# ---------- 4000：HTTP 状态映射 ----------
+
+
+def test_content_too_large_maps_to_validation_error():
+    """413 请求内容过大 → 参数校验错误码 4000。"""
+    from fastapi import status
+
+    assert HTTP_STATUS_ERROR_CODE[status.HTTP_413_CONTENT_TOO_LARGE] == ERR_VALIDATION
 
 
 # ---------- 5001：Neo4j 异常 ----------

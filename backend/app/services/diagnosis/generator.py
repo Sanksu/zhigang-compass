@@ -72,6 +72,8 @@ def generate_diagnosis(
     data: dict,
     llm: Optional[LLMProviderChain] = None,
     rag_chunks: Optional[list[dict]] = None,
+    *,
+    timeout: Optional[int] = None,
 ) -> DiagnosisReport:
     """基于匹配结果快照生成诊断报告。
 
@@ -81,16 +83,21 @@ def generate_diagnosis(
         llm: LLMProviderChain（测试可注入桩）；缺省实时链
         rag_chunks: 通用 RAG 检索模块返回的图谱上下文命中（RetrievedChunk 的
             dict 形态：content + evidence_id），缺省空列表（上下文渲染为"无"）
+        timeout: 异步任务专用（08-18 E2E 联调发现）：传值时走
+            call_with_fallback（多 provider 降级 + 该超时，后台任务无同步阻塞
+            约束）；缺省走 call_sync（同步 10s 单次契约，超时映射 504）
 
     Raises:
         LLMConfigurationError / LLMTimeoutError / LLMExtractionError：LLM 不可用、
         全部 provider 失败（诊断是增强功能，多 provider 降级后仍失败时向上传播）
     """
     chain = llm or LLMProviderChain()
+    # must_score 可空（A1 口径：无必备门槛岗位为 None），预格式化避免误导性"必备 0.00"
+    must_raw = data.get("must_score")
     prompt = DIAGNOSIS_TASK_TEMPLATE.format(
         position_name=data.get("position_name", ""),
         total_score=float(data.get("total_score", 0)),
-        must_score=float(data.get("must_score", 0)),
+        must_score=f"{float(must_raw):.2f}" if must_raw is not None else "无门槛",
         nice_score=float(data.get("nice_score", 0)),
         exp_score=float(data.get("exp_score", 0)),
         matched="、".join(data.get("matched_must") or []) or "无",
@@ -100,11 +107,19 @@ def generate_diagnosis(
         evidence=_render_evidence(data.get("evidence_refs") or []),
         rag_context=_render_rag_context(rag_chunks or []),
     )
-    # 同步路由契约（设计文档 §6.5，G-04）：诊断实时路径单 provider 10s 单次，
-    # 不重试不切换；失败（LLMTimeoutError 等）向上传播由 API 层映射 504(5003)
-    report = chain.call_sync(
-        prompt, DiagnosisReport, system_prompt=DIAGNOSIS_SYSTEM_PROMPT
-    )
+    if timeout is not None:
+        # 异步路径：后台生成无同步阻塞约束，放宽超时 + 多 provider 降级，
+        # 避免同步 10s 契约在边缘延迟 provider（实测 9-10s）下误杀
+        report = chain.call_with_fallback(
+            prompt, DiagnosisReport, system_prompt=DIAGNOSIS_SYSTEM_PROMPT,
+            timeout=timeout,
+        )
+    else:
+        # 同步路由契约（设计文档 §6.5，G-04）：诊断实时路径单 provider 10s 单次，
+        # 不重试不切换；失败（LLMTimeoutError 等）向上传播由 API 层映射 504(5003)
+        report = chain.call_sync(
+            prompt, DiagnosisReport, system_prompt=DIAGNOSIS_SYSTEM_PROMPT
+        )
     # 虚构引用后置拦截（§6.4 生成约束）：断言引用的 evidence_id 必须能追溯
     # 到 RAG 上下文或匹配快照证据，否则视为 LLM 编造，置空避免前端点击死链
     allowed = allowed_evidence_ids(rag_chunks or [], data.get("evidence_refs") or [])

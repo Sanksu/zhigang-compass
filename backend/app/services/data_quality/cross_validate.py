@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Optional
 
+from app.services.data_quality.city_index import city_index, extract_city
 from app.services.data_quality.schemas import CrossValidationResult
 
 # ── 设计文档 §4.5 / 附录阈值 ──
@@ -140,15 +141,11 @@ def build_position_groups(records: list[dict]) -> dict[str, list[dict]]:
 
     返回 {归一化岗位名: [record, ...]}。岗位名归一化失败（空串）的记录丢弃。
     """
-    from app.services.extraction.dictionary import normalize_position_name
+    from app.services.extraction.position_normalization import normalized_position_from_snapshot
 
     groups: dict[str, list[dict]] = {}
     for rec in records:
-        ext = (rec.get("snapshot") or {}).get("extraction") or {}
-        pos = normalize_position_name(
-            ext.get("position_name") or "",
-            skills=[s.get("name", "") for s in (ext.get("skills") or []) if s.get("name")],
-        )
+        pos = normalized_position_from_snapshot(rec.get("snapshot"))
         if not pos:
             continue
         groups.setdefault(pos, []).append(rec)
@@ -183,14 +180,23 @@ def validate_group(position_name: str, group: list[dict]) -> CrossValidationResu
         skill for skill, srcs in skill_sources.items() if len(srcs) < VERIFIED_MIN_SOURCES
     )
 
-    # 薪资：组内各 JD 可解析月薪中值（过滤非正数，防除零/无意义中位数）
-    salaries = []
+    # 薪资：组内各 JD 可解析月薪中值（过滤非正数，防除零/无意义中位数）。
+    # 跨城市平滑（P12）：薪资按城市指数归一化（salary / city_index）后再判
+    # max/min 异常——一线城市 JD 与二线城市 JD 同组时，跨城市正常薪资差被
+    # 平滑掉，不再把二线城市 JD 误判为「低薪异常」；同一城市口径下的真实
+    # 薪资分歧仍会触发 salary_outlier。
+    salaries: list[float] = []
+    cities: set[str] = set()
     for rec in group:
         ext = (rec.get("snapshot") or {}).get("extraction") or {}
         raw = ext.get("salary_range") or (rec.get("snapshot") or {}).get("salary")
         value = parse_monthly_salary(raw, rec.get("source"))
         if value and value > 0:
-            salaries.append(value)
+            city = extract_city((rec.get("snapshot") or {}).get("location"))
+            if city:
+                cities.add(city)
+            # 归一化月薪用于异常判定；salary_median 保留原始中值（市场口径）
+            salaries.append(value / city_index(city))
     salary_median = median(salaries) if salaries else None
     salary_outlier = (
         len(salaries) >= 2 and (max(salaries) / min(salaries)) > SALARY_OUTLIER_RATIO
@@ -222,6 +228,7 @@ def validate_group(position_name: str, group: list[dict]) -> CrossValidationResu
         jd_count=len(group),
         source_count=source_count,
         sources=sorted(sources),
+        cities=sorted(cities),
         verified=bool(verified_skills),
         confidence=confidence,
         verified_skill_ratio=round(verified_ratio, 3),

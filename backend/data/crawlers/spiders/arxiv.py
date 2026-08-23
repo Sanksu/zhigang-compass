@@ -20,25 +20,19 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 from scrapy import Request, Spider
+from scrapy.exceptions import CloseSpider
 from scrapy.http import Response
 
 from crawlers.items import PaperItem
-from crawlers.settings import RATE_LIMIT
+from crawlers.settings import CRAWL_ITEMS_CAP, RATE_LIMIT
 
 
 # arXiv API 端点
 ARXIV_API = "https://export.arxiv.org/api/query"
 
-# 默认拉取的 cs.* 分类（覆盖项目关注的 AI/大数据/全栈方向）
-DEFAULT_CATEGORIES = [
-    "cs.AI",   # 人工智能
-    "cs.LG",   # 机器学习
-    "cs.CL",   # 计算语言学（NLP）
-    "cs.CV",   # 计算机视觉
-    "cs.SE",   # 软件工程
-    "cs.DB",   # 数据库
-    "stat.ML", # 统计机器学习
-]
+# 默认分类：空 = 全局最新（08-16 用户决策，不限定 cs.* 分类）；
+# 传 -a categories=cs.AI,cs.LG 时按分类分别拉取
+DEFAULT_CATEGORIES: list[str] = []
 
 
 class ArxivSpider(Spider):
@@ -51,16 +45,20 @@ class ArxivSpider(Spider):
     name = "arxiv"
     platform = "arxiv"
 
+    # 单次采集总上限（多分类合计，08-16 用户决策；后台可配置）
+    max_items_total = CRAWL_ITEMS_CAP
+
     # Atom 命名空间
     namespaces = {"atom": "http://www.w3.org/2005/Atom"}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._collected = 0  # 单次采集累计产出（跨分类合计）
         # -a categories=cs.AI,cs.LG 覆盖默认分类
         cats = kwargs.get("categories")
         self.categories = cats.split(",") if cats else DEFAULT_CATEGORIES
         # -a max_results=50 控制单分类拉取数
-        self.max_results = int(kwargs.get("max_results", "50"))
+        self.max_results = int(kwargs.get("max_results", "100"))
         # arXiv 官方约束 1 req/3s，通过 download_delay 控制
         limit = RATE_LIMIT.get(self.platform, {})
         delay_range = limit.get("delay_range", (3, 5))
@@ -72,22 +70,45 @@ class ArxivSpider(Spider):
             yield request
 
     def start_requests(self):
-        for cat in self.categories:
-            params = {
-                "search_query": f"cat:{cat}",
-                "start": 0,
-                "max_results": self.max_results,
-                "sortBy": "submittedDate",
-                "sortOrder": "descending",
-            }
-            url = f"{ARXIV_API}?{urlencode(params)}"
-            self.logger.info(f"开始采集 arXiv 分类 {cat}（max={self.max_results}）")
-            yield Request(
-                url,
-                callback=self.parse,
-                meta={"category": cat},
-                headers={"User-Agent": "zhigang-compass/1.0 (academic-research)"},
-            )
+        # API 例外（08-14 用户确认 B 方案）：export.arxiv.org 官方 API 条款明确
+        # 允许程序化访问，robots.txt 保守 Disallow: /——跳过 robots 检查
+        # （合规依据：https://info.arxiv.org/help/api/）
+        if self.categories:
+            for cat in self.categories:
+                params = {
+                    "search_query": f"cat:{cat}",
+                    "start": 0,
+                    "max_results": self.max_results,
+                    "sortBy": "submittedDate",
+                    "sortOrder": "descending",
+                }
+                url = f"{ARXIV_API}?{urlencode(params)}"
+                self.logger.info(f"开始采集 arXiv 分类 {cat}（max={self.max_results}）")
+                yield Request(
+                    url,
+                    callback=self.parse,
+                    meta={"category": cat, "dont_obey_robotstxt": True},
+                    headers={"User-Agent": "zhigang-compass/1.0 (academic-research)"},
+                )
+            return
+
+        # 全局最新（08-16 用户决策）：cat:* 匹配全部分类（API 不接受省略
+        # search_query，实测 cat:* 通配返回全站最新投稿）
+        params = {
+            "search_query": "cat:*",
+            "start": 0,
+            "max_results": self.max_results,
+            "sortBy": "submittedDate",
+            "sortOrder": "descending",
+        }
+        url = f"{ARXIV_API}?{urlencode(params)}"
+        self.logger.info(f"开始采集 arXiv 全局最新（max={self.max_results}）")
+        yield Request(
+            url,
+            callback=self.parse,
+            meta={"category": "global", "dont_obey_robotstxt": True},
+            headers={"User-Agent": "zhigang-compass/1.0 (academic-research)"},
+        )
 
     def parse(self, response: Response):
         """解析 Atom XML，产出 PaperItem。"""
@@ -104,12 +125,17 @@ class ArxivSpider(Spider):
 
         item_count = 0
         for entry in entries:
+            if self._collected >= self.max_items_total:
+                break
             item = self._entry_to_item(entry, response.meta["category"])
             if item:
                 item_count += 1
+                self._collected += 1
                 yield item
 
         self.logger.info(f"[arxiv] 分类 {response.meta['category']} 产出 {item_count} 条论文")
+        if self._collected >= self.max_items_total:
+            raise CloseSpider(f"达到单次采集上限 {self.max_items_total} 条")
 
     def _entry_to_item(self, entry, category: str) -> PaperItem:
         """将 Atom <entry> 元素转为 PaperItem。"""

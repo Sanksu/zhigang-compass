@@ -46,7 +46,38 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 WORKDIR /app
 
-# 项目代码
+# 非 root 用户 + CDP 浏览器 profile 根目录（playwright chown 依赖 app 用户先存在）
+RUN useradd -m -u 1000 app && chown -R app:app /app && \
+    mkdir -p /home/app/.zhigang-compass && chown app:app /home/app/.zhigang-compass
+
+# Playwright chromium（爬虫国际源 JS 渲染）。
+# 08-18 构建修复：置于项目代码 COPY 之前——chromium 层随依赖层缓存，
+# 应用代码变更不再触发 ~170MB 重复下载（此前 COPY app/ 在前，每次代码
+# 变更都重下 chromium，网络波动时构建阻塞）。root 阶段安装二进制到公共
+# 路径再 chown 给 app；构建代理经 build-arg 透传（宿主 Clash 7890）。
+ARG HTTPS_PROXY
+ARG HTTP_PROXY
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# 拆分安装（08-18 构建修复）：浏览器二进制下载走构建代理（Clash 7890），
+# 系统依赖 apt 直连 deb.debian.org（代理对 apt 返回 502）
+RUN HTTPS_PROXY=$HTTPS_PROXY HTTP_PROXY=$HTTP_PROXY \
+    python -m playwright install chromium
+# 系统依赖 apt 直连（08-18 构建修复）：宿主 Clash TUN 对 deb.debian.org
+# 经代理节点返回 502，切阿里云镜像（中国 IP 直连规则放行）；同时剥离
+# Docker Desktop 注入的代理环境变量
+RUN env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy sh -c '\
+    sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null; \
+    sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list 2>/dev/null; \
+    python -m playwright install-deps chromium' && chown -R app:app /ms-playwright
+# 软链 playwright chromium 到系统路径：setup_boss_chrome.find_chrome() 的
+# Linux 分支查找 /usr/bin/chromium，CDP 源（maimai 等）经它启动浏览器
+RUN ln -sf $(ls -d /ms-playwright/chromium-*/chrome-linux64/chrome | head -1) /usr/bin/chromium
+# 清理构建代理环境（运行时爬虫按需自设 HTTPS_PROXY，不继承构建代理）
+ENV HTTPS_PROXY=
+ENV HTTP_PROXY=
+
+# 项目代码（唯一 COPY：应用层变更只重建自身层——08-18 曾误留 playwright 前
+# 的旧 COPY 块，使 app 变更仍触发 playwright/apt 层重跑，08-21 已移除）
 COPY app/ ./app/
 COPY alembic/ ./alembic/
 COPY alembic.ini .
@@ -55,24 +86,14 @@ COPY configs/ ./configs/
 # 爬虫项目（crawl_platform 以 data/crawlers 为 cwd 调 scrapy crawl）
 COPY data/crawlers/ ./data/crawlers/
 
-# 非 root 用户
-RUN useradd -m -u 1000 app && chown -R app:app /app
-# 预创建 CDP 浏览器 profile 根目录并归 app：否则 compose 以 root 创建
-# boss-cookies.json 挂载的父目录，maimai 等需写 profile 的源会 PermissionError
-RUN mkdir -p /home/app/.zhigang-compass && chown app:app /home/app/.zhigang-compass
-
-# Playwright chromium（爬虫国际源 JS 渲染）。
-# root 阶段安装二进制到公共路径，再 chown 给 app，避免 USER app 后读权限问题
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN python -m playwright install chromium --with-deps && chown -R app:app /ms-playwright
-# 软链 playwright chromium 到系统路径：setup_boss_chrome.find_chrome() 的
-# Linux 分支查找 /usr/bin/chromium，CDP 源（maimai 等）经它启动浏览器
-RUN ln -sf $(ls -d /ms-playwright/chromium-*/chrome-linux64/chrome | head -1) /usr/bin/chromium
-
 # crawlers 包位于 data/ 下，app 包位于项目根：
 # scrapy 以 data/crawlers 为 cwd 启动时，import crawlers.* 需要 data/、
 # PostgresPipeline 的 import app.* 需要项目根在 sys.path 上
 ENV PYTHONPATH=/app:/app/data
+
+# dict-guard 运行时需在 configs/ 下创建 skill_filters_dynamic.json（COPY 产物
+# 默认 root 属主，app 用户不可写）——目录属主预先让渡给 app 用户
+RUN mkdir -p /app/configs /app/reports && chown -R app:app /app/configs /app/reports
 
 USER app
 

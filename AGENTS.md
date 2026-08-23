@@ -48,7 +48,8 @@
 
 ### 铁律二：main 可运行
 
-- 不允许向 `main` 直推，必须经 PR + CI 全绿 + ≥ 1 人 Review
+- 不允许向 `main` 直推；`main` 仅经 PR 由项目负责人人工 Review 后合入（流程纪律）
+- `develop` 合并门禁 = PR + CI 全绿（2026-08-19 决策：移除强制人工 Review 与分支锁，保留 status checks + enforce_admins）；算法/安全/业务红线按 §4.1 人工把关、不依赖合并门禁
 - 智能体输出代码前必须自检：是否破坏现有 import？是否引入未声明的依赖？是否破坏 `.env.example`？
 
 ## 4. 智能体工作规则
@@ -95,7 +96,7 @@
 | 文档更新 | `git checkout develop && git pull && git checkout -b docs/api-spec` | `develop`（PR） | ≤ 3 天 |
 
 **智能体操作铁律**：
-- ❌ 禁止直推 `main` / `develop`，必须经 PR + ≥ 1 人 Review
+- ❌ 禁止直推 `main` / `develop`；`develop` 经 PR + CI 全绿即可合并（无需强制 Review），`main` 经 PR + 项目负责人 Review
 - ❌ 禁止跨基线切分支（feature 必须从最新 `develop` 切出，先 `git pull`）
 - ❌ 禁止分支生命周期 > 3 天，超出必须拆分或合并
 - ✅ 单 PR 改动 ≤ 500 行，超出必须拆分

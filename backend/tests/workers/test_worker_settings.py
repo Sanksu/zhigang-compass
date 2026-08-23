@@ -4,27 +4,37 @@
 入队后无人消费），且各任务均为 async 可调用。
 """
 
+import asyncio
 import inspect
 
+from app.workers.settings import WorkerSettings
 from app.workers.tasks import (
-    WorkerSettings,
+    _run_limited_stage,
+    _run_stage,
     aggregate_positions,
     backfill_embeddings,
     batch_extract,
     check_data_freshness,
     check_llm_providers_health,
+    generate_diagnosis,
+    graph_health_check,
     crawl_platform,
+    crawl_scheduler,
     cross_validate_jds,
     dedup_simhash,
     detect_inflation,
+    dict_guard_daily,
     discovery_auto_transition,
     discovery_daily,
     diversity_report,
+    enrich_course_skills,
     evaluate_courses,
     load_courses,
     match_recommend,
     resume_parse,
+    run_etl_job_manual,
     run_etl_pipeline,
+    run_etl_pipeline_scheduled,
     snapshot_graph,
     sync_skill_normalization,
     validate_temporal,
@@ -33,13 +43,18 @@ from app.workers.tasks import (
 
 EXPECTED_FUNCTIONS = [
     crawl_platform,
+    crawl_scheduler,
     run_etl_pipeline,
+    run_etl_pipeline_scheduled,
+    run_etl_job_manual,
     dedup_simhash,
     validate_temporal,
     detect_inflation,
     resume_parse,
     match_recommend,
+    generate_diagnosis,
     batch_extract,
+    enrich_course_skills,
     load_courses,
     evaluate_courses,
     diversity_report,
@@ -52,7 +67,9 @@ EXPECTED_FUNCTIONS = [
     discovery_auto_transition,
     watch_signal_daily,
     snapshot_graph,
+    dict_guard_daily,
     check_llm_providers_health,
+    graph_health_check,
 ]
 
 
@@ -87,7 +104,7 @@ def test_etl_pipeline_stages_cover_all_quality_tasks():
                      "aggregate_positions", "cross_validate_jds",
                      "diversity_report", "check_data_freshness",
                      "snapshot_graph"):
-        assert f"await {stage_fn}" in src, f"run_etl_pipeline 缺少阶段 {stage_fn}"
+        assert stage_fn in src, f"run_etl_pipeline 缺少阶段 {stage_fn}"
 
 
 def test_worker_settings_has_redis_config():
@@ -115,3 +132,87 @@ def test_etl_pipeline_has_per_function_timeout():
     )
     assert etl.timeout_s == 10800
     assert etl.max_tries == 1
+
+
+def test_etl_scheduled_has_per_function_timeout():
+    """容器内 ETL cron 入口同样按 3h 超时（主管线可跑数小时）。"""
+    etl = next(
+        f
+        for f in WorkerSettings.functions
+        if _name(f) == run_etl_pipeline_scheduled.__qualname__
+    )
+    assert etl.timeout_s == 10800
+    assert etl.max_tries == 1
+
+
+def test_etl_job_manual_has_per_function_timeout():
+    """管理端手动触发包装按 3h 超时（run_etl_pipeline 白名单目标可跑数小时）。"""
+    etl = next(
+        f
+        for f in WorkerSettings.functions
+        if _name(f) == run_etl_job_manual.__qualname__
+    )
+    assert etl.timeout_s == 10800
+    assert etl.max_tries == 1
+
+
+def test_crawl_platform_has_per_function_timeout():
+    """crawl_platform 显式放宽超时 2h（H2 修复）。
+
+    回归：全局 job_timeout=1800s 会在 zhilian 独立触发合法采集（最长 7200s）
+    完成前 kill 掉 ARQ 任务；crawl_platform 需按 per-function timeout 放宽。
+    """
+    cp = next(
+        f for f in WorkerSettings.functions if _name(f) == crawl_platform.__qualname__
+    )
+    assert cp.timeout_s == 7200
+    assert cp.max_tries == 1
+
+
+def test_worker_cron_jobs_register_etl_schedule():
+    """WorkerSettings.cron_jobs 注册 ETL 主管线 cron（时间来自 runtime_config）。"""
+    from app.core import runtime_config as rc
+    from arq.cron import CronJob
+
+    etl_cron = next(
+        c for c in WorkerSettings.cron_jobs if c.coroutine == run_etl_pipeline_scheduled
+    )
+    assert isinstance(etl_cron, CronJob)
+    assert etl_cron.hour == rc.get("etl_run_hour", 5)
+    assert etl_cron.minute == rc.get("etl_run_minute", 0)
+    assert etl_cron.run_at_startup is False
+
+
+# ── _run_stage 阶段隔离（08-14 修复：evolved_from 崩溃拖垮 ETL 实证）──
+
+def test_run_stage_success():
+    """成功阶段返回原始结果。"""
+    async def _ok():
+        return {"status": "ok"}
+    assert asyncio.run(_run_stage("t", _ok())) == {"status": "ok"}
+
+
+def test_run_stage_failure_isolated():
+    """失败阶段记录 error dict，不抛异常（不阻塞后续阶段）。"""
+    async def _boom():
+        raise ValueError("测试异常")
+    result = asyncio.run(_run_stage("t", _boom()))
+    assert isinstance(result, dict) and "error" in result
+    assert "ValueError" in result["error"]
+
+
+def test_limited_stage_isolates_limit_lookup_failure(monkeypatch):
+    """积压量查询失败也属于阶段失败，不得终止整条 ETL。"""
+    async def _limit(*args, **kwargs):
+        raise RuntimeError("数据库不可用")
+
+    async def _task(ctx, limit):
+        raise AssertionError("限额查询失败时不应执行任务")
+
+    monkeypatch.setattr("app.workers.tasks._etl_limit", _limit)
+    result = asyncio.run(
+        _run_limited_stage(
+            "limited", extracted=True, default=100, task=_task, ctx={}
+        )
+    )
+    assert "RuntimeError" in result["error"]

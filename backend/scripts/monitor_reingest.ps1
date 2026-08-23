@@ -1,4 +1,4 @@
-# 日志监控：监听重抽（after_backfill_reingest）进度，完成或出错时桌面通知。
+﻿# 日志监控：监听重抽（after_backfill_reingest）进度，完成或出错时桌面通知。
 #
 # 判定口径：
 # - 完成：reingest_auto.log 出现 "[after_backfill_reingest] 全部完成"

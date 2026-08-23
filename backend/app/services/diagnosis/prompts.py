@@ -14,7 +14,7 @@ evidence_id 可追溯依据，给定证据中找不到对应项时 evidence_id �
 DIAGNOSIS_TASK_TEMPLATE = """请基于以下人岗匹配数据生成诊断报告。
 
 【岗位】{position_name}
-【匹配分数】总分 {total_score:.2f}（必备 {must_score:.2f} / 加分 {nice_score:.2f} / 经验 {exp_score:.2f}）
+【匹配分数】总分 {total_score:.2f}（必备 {must_score} / 加分 {nice_score:.2f} / 经验 {exp_score:.2f}；"无门槛"表示该岗位无必备技能要求，必备分不计）
 【已具备的必备技能】{matched}
 【缺失的必备技能】{missing}
 【关键差距 Top-5】

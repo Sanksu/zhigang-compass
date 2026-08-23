@@ -5,7 +5,10 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.core.errors import ERR_TOKEN_EXPIRED, business_error
+from redis.asyncio import Redis
+
+from app.core.database import get_redis
+from app.core.errors import ERR_TOKEN_EXPIRED, ERR_UNAUTHORIZED, business_error
 from app.core.security import TokenExpiredError, decode_token, has_permission
 
 security = HTTPBearer(auto_error=False)
@@ -13,8 +16,9 @@ security = HTTPBearer(auto_error=False)
 
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    redis: Redis = Depends(get_redis),
 ) -> dict:
-    """解析 JWT 并返回 payload。"""
+    """解析 JWT 并返回 payload（登出拉黑的 jti 拒绝，08-14 补）。"""
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -33,16 +37,21 @@ async def get_current_user(
             detail="无效或过期的 Token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    jti = payload.get("jti")
+    if jti and await redis.get(f"token:blacklist:{jti}"):
+        raise business_error(ERR_UNAUTHORIZED, "Token 已注销，请重新登录", http_status=401)
     return payload
 
 
 async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    redis: Redis = Depends(get_redis),
 ) -> Optional[dict]:
     """可选鉴权：匿名/guest 返回 None，有效 token 返回 payload。
 
     供「匿名可读但登录用户获得更多数据」的接口使用（如图谱按角色
     过滤 candidate 岗位）。无 token 或 token 无效均视为匿名，不抛 401。
+    redis 用于登出黑名单检查（08-14 补），直接调用测试可传桩。
     """
     if credentials is None:
         return None
@@ -52,6 +61,9 @@ async def get_optional_user(
         return None
     if payload is None or payload.get("type") != "access":
         return None
+    jti = payload.get("jti")
+    if jti and await redis.get(f"token:blacklist:{jti}"):
+        return None  # 已注销 token 按匿名处理
     return payload
 
 

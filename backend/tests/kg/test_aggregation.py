@@ -1,8 +1,10 @@
 """岗位聚合 level 合并测试（设计文档 §5.5 REQUIRES 边）。
 
-覆盖：_position_skills 携带 level、_most_common_level 众数、build_aggregates 收集 level。
+覆盖：_position_skills 携带 level、_most_common_level 众数、build_aggregates 收集 level、
+last_updated 时效依据（08-14 修复：岗位最近 JD 采集时间）。
 """
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -42,9 +44,21 @@ class TestMustJudgment:
         assert _is_must(self._sa(hit=6, must_count=3), jd_count=10) is False
 
     def test_low_hit_protection_is_nice(self):
-        # hit=1/2（样本不足），即使全标 must 也判 nice，防单条 JD 虚高
-        assert _is_must(self._sa(hit=1, must_count=1), jd_count=2) is False
+        # hit≥3 样本保护线：jd_count=3 但 hit=2（样本不足）→ 防虚高判 nice
+        assert _is_must(self._sa(hit=1, must_count=1), jd_count=3) is False
         assert _is_must(self._sa(hit=2, must_count=2), jd_count=3) is False
+
+    def test_small_position_inherits_extraction_must(self):
+        # 单源/少源岗位兜底（08-20 修复）：jd_count≤2 样本不足以做跨 JD 表决，
+        # 任一 JD 标 must（must_count>0）即继承 must，不再因 hit<3 全压成 nice
+        assert _is_must(self._sa(hit=1, must_count=1), jd_count=1) is True
+        assert _is_must(self._sa(hit=2, must_count=2), jd_count=2) is True
+        assert _is_must(self._sa(hit=2, must_count=1), jd_count=2) is True
+
+    def test_small_position_no_must_stays_nice(self):
+        # 单源岗位如果技能未标 must（must_count=0）保持 nice
+        assert _is_must(self._sa(hit=1, must_count=0), jd_count=1) is False
+        assert _is_must(self._sa(hit=2, must_count=0), jd_count=2) is False
 
     def test_zero_jd_count_is_nice(self):
         # jd_count=0 防御：不判 must
@@ -94,9 +108,10 @@ class TestPositionSkillsNormalization:
         assert _position_skills(ext) == [("React", "nice", "")]
 
     def test_whitelist_word_preserved(self):
-        # 白名单词整体保护，聚合不被剥成泛词碎片
+        # 08-14 迭代：基础词停用（操作系统 入 SKILL_STOPWORDS，is_noise 优先）——
+        # 抽取端过滤，聚合不再产生该技能
         ext = {"requirements": [{"skill_name": "操作系统", "necessity": "must", "level": None}]}
-        assert _position_skills(ext) == [("操作系统", "must", "")]
+        assert _position_skills(ext) == []
 
     def test_stopword_dropped(self):
         # 归一化后为空的旧泛词碎片（"系统"→""）不进聚合
@@ -118,6 +133,15 @@ class TestMostCommonLevel:
 
     def test_tie_keeps_first_seen(self):
         assert _most_common_level(["高级", "初级", "初级", "高级"]) == "高级"
+
+    def test_normalizes_aliases_before_mode(self):
+        # 同义输入先归一化再众数：精通/资深均归为高级，不能分票。
+        assert _most_common_level(["精通", "资深", "中级"]) == "高级"
+
+    def test_invalid_levels_filtered_before_mode(self):
+        # 非法等级不参与众数，避免写回无法由匹配层解释的 REQUIRES.level。
+        assert _most_common_level(["未知", "中级", "随便写"]) == "中级"
+        assert _most_common_level(["未知", "随便写"]) == ""
 
 
 class TestBuildAggregatesLevel:
@@ -144,6 +168,15 @@ class TestBuildAggregatesLevel:
         pa = agg["Java开发工程师"]
         assert pa.skills["Java"].levels == ["高级", "中级"]
         assert pa.skills["Java"].hit == 3
+
+    def test_invalid_levels_filtered_before_aggregation_mode(self):
+        rows = [
+            self._row("Java开发工程师", "boss", "精通"),
+            self._row("Java开发工程师", "zhilian", "未知"),
+            self._row("Java开发工程师", "lagou", "随便写"),
+        ]
+        agg = build_aggregates(rows)
+        assert agg["Java开发工程师"].skills["Java"].levels == ["高级"]
 
     def test_skills_outside_requirements_counted(self):
         # P4 聚合级：requirements 之外 skills 补入的技能计入 hit/来源，
@@ -619,3 +652,44 @@ class TestAggregatesAlignedDeletion:
         fake = _FakeSession()
         result = write_aggregates(fake, build_aggregates(rows), now="2026-08-09T00:00:00")
         assert result["removed_edges"] == 0
+
+
+class TestLastUpdated:
+    """时效衰减依据（08-14 修复）：last_updated = 岗位最近 JD 采集时间。"""
+
+    def _row(self, position: str, crawled_at: str | None = None):
+        return SimpleNamespace(
+            snapshot={
+                "extraction": {
+                    "position_name": position,
+                    "requirements": [{"skill_name": "Java", "necessity": "must", "level": None}],
+                }
+            },
+            source="boss",
+            crawled_at=crawled_at,
+        )
+
+    def test_last_crawled_is_max_of_rows(self):
+        """同岗位多条 JD 取最近采集时间。"""
+        rows = [
+            self._row("Java开发工程师", "2026-01-01T00:00:00+00:00"),
+            self._row("Java开发工程师", "2026-06-01T00:00:00+00:00"),
+        ]
+        agg = build_aggregates(rows)
+        assert agg["Java开发工程师"].last_crawled == datetime(2026, 6, 1, tzinfo=timezone.utc)
+
+    def test_write_uses_last_crawled(self):
+        """写回 last_updated = 最近 JD 采集时间（供 engine 时效衰减判定）。"""
+        rows = [self._row("Java开发工程师", "2026-06-01T00:00:00+00:00")]
+        fake = _FakeSession()
+        write_aggregates(fake, build_aggregates(rows), now="2026-08-12T00:00:00")
+        items = fake.calls[0][1]["items"]
+        assert items[0]["last_updated"] == "2026-06-01T00:00:00+00:00"
+
+    def test_missing_crawled_at_falls_back_to_now(self):
+        """无 JD 时间（旧数据）回退聚合时间，与历史行为一致。"""
+        rows = [self._row("Java开发工程师", None)]
+        fake = _FakeSession()
+        write_aggregates(fake, build_aggregates(rows), now="2026-08-12T00:00:00")
+        items = fake.calls[0][1]["items"]
+        assert items[0]["last_updated"] == "2026-08-12T00:00:00"

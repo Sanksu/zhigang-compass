@@ -10,9 +10,13 @@
 """
 
 import re
+import unicodedata
 from pathlib import Path
 
 import yaml
+from app.services.extraction.dictionary_data import SKILL_ALIAS, SKILL_STOPWORDS
+from app.services.extraction.dynamic_filters import is_dynamically_blocked, is_dynamically_protected
+
 
 # 白名单 yaml 路径（dictionary.py 位于 backend/app/services/extraction/，
 # parents[3] = backend/）。与 skill_prerequisites.yaml 的读取口径一致
@@ -86,146 +90,7 @@ def skill_category(name: str) -> str:
 
 
 # 技能别名映射：非标准表述 → 标准名
-SKILL_ALIAS: dict[str, str] = {
-    # 编程语言
-    "JS": "JavaScript",
-    "TS": "TypeScript",
-    "C++": "C++",
-    ".net": ".NET",
-    # 编程语言口语变体
-    "c/c++": "C++",
-    "c语言": "C",
-    "c#": "C#",
-    "golang": "Go",
-    # 框架与库
-    "spring": "Spring Boot",
-    "springboot": "Spring Boot",
-    "springcloud": "Spring Cloud",
-    "vue": "Vue.js",
-    "react": "React",
-    "node": "Node.js",
-    "express": "Express.js",
-    "mybatis": "MyBatis",
-    # 大数据
-    "hadoop": "Hadoop",
-    "spark": "Apache Spark",
-    "flink": "Apache Flink",
-    "kafka": "Apache Kafka",
-    "pyspark": "PySpark",
-    # 云原生
-    "k8s": "Kubernetes",
-    "docker": "Docker",
-    # AI/ML
-    "pytorch": "PyTorch",
-    "tf": "TensorFlow",
-    "sklearn": "scikit-learn",
-    "numpy": "NumPy",
-    "pandas": "Pandas",
-    "大模型": "大语言模型",
-    "llm": "大语言模型",
-    "rag": "检索增强生成",
-    "自然语言处理算法": "自然语言处理",
-    "深度学习算法": "深度学习",
-    "机器学习算法": "机器学习",
-    # 数据库
-    "sql": "SQL",
-    "mysql": "MySQL",
-    "pg": "PostgreSQL",
-    "redis": "Redis",
-    "mongo": "MongoDB",
-    "es": "Elasticsearch",
-    # 工具
-    "git": "Git",
-    "jenkins": "Jenkins",
-    # P1-1 高频同义变体（评估报告 3.4 别名缺失，归一化到白名单标准词）
-    # 前端
-    "vue3": "Vue.js",
-    "vue2": "Vue.js",
-    "reactjs": "React",
-    "es6": "JavaScript",
-    "element plus": "ElementUI",
-    "uniapp": "uni-app",
-    "微信小程序": "小程序",
-    "小程序开发": "小程序",
-    # 后端
-    "springmvc": "Spring MVC",
-    "mybatis-plus": "MyBatis",
-    "mybatis plus": "MyBatis",
-    "rest api": "RESTful API",
-    "restful": "RESTful API",
-    "mq": "消息队列",
-    "sql优化": "SQL",
-    "sql 优化": "SQL",
-    "分布式事务": "分布式",
-    "微服务架构": "微服务",
-    # AI/ML
-    "nlp": "自然语言处理",
-    "prompt engineering": "提示工程",
-    "prompt工程": "提示工程",
-    "prompt 工程": "提示工程",
-    "ai agent": "Agentic AI",
-    "llm agent": "智能体",
-    "agent开发": "Agent开发",
-    "sft": "模型微调",
-    # 计算机基础
-    "面向对象编程": "面向对象",
-    "面向对象设计": "面向对象",
-    # "算法设计" 别名已移除（JD 基线决策支持 ② 2026-08-12）：指向宽泛词"算法"，
-    # 白名单已排除，保留该别名会使基线 alias 扫描仍命中"算法"误报
-    "计算机网络基础": "计算机网络",
-    # 测试
-    "单元测试编写": "单元测试",
-    "自动化测试框架": "自动化测试",
-    # 软技能
-    "沟通协作": "沟通能力",
-    "团队协作能力": "团队协作",
-    "解决问题能力": "问题解决",
-    # 其他
-    "性能优化": "性能调优",
-    "多传感器融合": "传感器融合",
-    "ros2": "ROS",
-    "敏捷": "敏捷开发",
-    "大屏可视化": "数据可视化",
-    # P3 盲审评测词形变体（2026-08-12：故障处置/多模态大模型 等词形差异 FN，
-    # 归一化到白名单标准词，与 gold 标注对齐）
-    "故障处置": "故障处理",
-    "故障排查": "故障处理",
-    "多模态大模型": "多模态模型",
-    "自动化评测脚本": "自动化评测",
-    "AB测试": "A/B测试",
-    "ab测试": "A/B测试",
-    "可视化分析": "数据可视化",
-    # P3b 盲审二轮：标注抽象/词形差异（统一部署→系统部署、电网业务→电网业务知识）
-    # 注：不做 "监控管理"→"监控"——"监控"在 SKILL_STOPWORDS（职责词拦截），
-    # alias 值会触发 is_noise_skill 别名标准名保护导致停用词失效（TestStopwordInterception）
-    "统一部署": "系统部署",
-    "电网业务": "电网业务知识",
-    "office办公": "Office",
-    "office 办公": "Office",
-    # P2-B 同义异构归一（岗位评估报告 4.1：AI 编码工具/Agent 生态表述碎片，
-    # 统一到白名单标准词，防同一技能建出多个图谱节点）
-    "ai coding": "AI辅助编程",
-    "ai-assisted coding": "AI辅助编程",
-    "ai assisted coding": "AI辅助编程",
-    "ai编程": "AI辅助编程",
-    "ai辅助编码": "AI辅助编程",
-    "ai辅助开发": "AI辅助编程",
-    "ai 辅助编程": "AI辅助编程",
-    "copilot": "GitHub Copilot",
-    "github copilot": "GitHub Copilot",
-    "claude code": "Claude Code",
-    "cursor": "Cursor",
-    "codex": "Codex",
-    "chatgpt": "ChatGPT",
-    "genai": "GenAI",
-    "milvus": "Milvus",
-    "dbt": "dbt",
-    "databricks": "Databricks",
-    "jvm": "JVM",
-    ".net core": ".NET",
-    "nodejs": "Node.js",
-    "postgres": "PostgreSQL",
-}
+
 
 # 工具名别名映射：大小写/拼写变体 → 规范名（P1 Tool 节点碎片治理）。
 # 图谱 Tool 节点由 LLM 抽取工具名直接建节点（post_process 仅过 normalize_skill，
@@ -340,20 +205,6 @@ SOFT_SKILL_NOISE: frozenset[str] = frozenset({
 
 
 # 行业/业务领域/招聘福利词黑名单：LLM 在正文缺失的 JD 上常将这些词误抽为技能
-SKILL_STOPWORDS: set[str] = {
-    "保险", "金融", "银行", "证券", "地产", "零售", "电商", "餐饮", "医疗",
-    "教育", "旅游", "物流", "汽车", "能源", "制造", "农业", "传媒", "广告",
-    "娱乐", "生活服务", "车联网", "无人机组装测试", "五险", "五险一金", "社保",
-    "公积金", "双休", "不加班", "福利", "年终奖", "提成", "股票期权",
-    "运营", "销售", "客服", "市场", "行政", "财务", "人力资源", "公关",
-    "采购", "前台", "助理岗", "兼职", "实习岗",
-    # 碎片/泛词（历史图谱审计残留，正常技能应指向"微服务""软件"的完整语义）
-    "微", "软件",
-    # P1-2 泛词碎片（评估报告 3.5：JD 高频泛词被 LLM 误抽为技能）
-    # 白名单词（操作系统/自动化测试/嵌入式开发/计算机网络 等）已整体保护不受影响
-    "系统", "操作", "网络", "前端", "自动化", "嵌入式", "安全", "监控",
-    "数据处理",
-}
 
 # 岗位名关键词 → 标准岗位名（合并同义重复岗位，设计文档 4.5 实体对齐的轻量实现）
 _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
@@ -361,6 +212,10 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("产品经理",), "产品经理"),
     (("项目经理",), "项目经理"),
     (("创始",), "创始工程师"),
+    # 鸿蒙开发族（2026-08-14 白名单补录，用户裁决）：合并前端/全栈/应用变体，
+    # 复合词限定防误吸"鸿蒙生态运营"等非开发岗；配合 _TECH_STACKS 移除"鸿蒙"
+    # （tech 前缀提取先于族匹配，不移除则"鸿蒙前端开发工程师"永远拼回原样）
+    (("鸿蒙开发", "鸿蒙前端", "鸿蒙全栈", "鸿蒙应用"), "鸿蒙开发工程师"),
     # UI设计师 独立族：置于前端族前，防 "ui" 关键词子串把 UI 岗吸进前端
     # （"UI工程师" 不含 "ui设计师"，仍走前端族）
     (("ui设计师",), "UI设计师"),
@@ -371,6 +226,10 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("devops", "sre", "站点可靠性", "平台工程", "mlops"), "DevOps工程师"),
     (("架构",), "架构师"),
     (("测试",), "测试工程师"),
+    # P7 存量碎片治理（2026-08-15，T-04）：测试岗英文别名归位测试族
+    # （SDET = Software Development Engineer in Test；qa 词边界匹配防
+    # 误吸 qas/qatar 等词内子串，QA自动化/生物信息学 QA 一并归位）
+    (("sdet", "qa"), "测试工程师"),
     (("运维",), "运维工程师"),
     (("网络",), "网络工程师"),
     (("嵌入式",), "嵌入式开发工程师"),
@@ -400,6 +259,29 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("golang", "go"), "Go开发工程师"),
     (("c/c++", "c++", "c语言"), "C++开发工程师"),
     (("全栈",), "全栈工程师"),
+    # P10 英文裸词/中文碎片兜底（2026-08-16 legacy 决策）：LLM 把
+    # "Senior Web Engineer" 压成裸词 "Web"、把 "AI Infra Engineer" 翻译
+    # 成丢后缀的 "AI 基础设施"——置于尾部仅兜底未命中任何族/后缀的碎片；
+    # "web" 词边界匹配防误伤 WebGL/WebSphere，"web前端" 已由前端族先行拦截
+    (("web",), "Web开发工程师"),
+    (("AI 基础设施", "ai infra", "ai基础设施"), "AI基础设施工程师"),
+    (("AI 生产力", "ai productivity", "ai生产力"), "AI生产力工程师"),
+    (("AI与数据风险管理", "ai and data risk"), "AI与数据风险管理经理"),
+    # P11 岗位名碎片归位（2026-08-16 岗位处置）：LLM 把团队名/技术栈名/产品名
+    # 压成岗位名（"FPGA团队"、"Kubernetes与OpenShift"、"Endur技术"）——按
+    # JD 技能语义归位到规范岗位（图谱已有节点优先，存量见
+    # scripts/position_fragment_redirect.py）；"tak" 词边界匹配防误伤 stack 等
+    (("fpga团队",), "FPGA验证"),
+    (("kubernetes与openshift",), "DevOps工程师"),
+    (("endur技术",), "后端开发工程师"),
+    (("stem课程",), "STEM科技教育讲师"),
+    (("cfd分析",), "CFD分析工程师"),
+    (("仪器ait",), "仪器AIT工程师"),
+    (("obd标定",), "OBD标定工程师"),
+    (("tak",), "移动开发工程师"),
+    # "ux" 词边界命中（UX设计师 剥壳前拦截，防 _EN_POSITION_MAP 翻译结果被
+    # _normalize_base 剥后缀成裸 "UX"）
+    (("ux",), "UX设计师"),
     (("游戏",), "游戏开发工程师"),
     (("硬件",), "硬件工程师"),
     (("软件",), "软件开发工程师"),
@@ -432,6 +314,15 @@ _POSITION_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
     (("投诉处理助理",), "投诉处理助理"),
     (("计算生物学家",), "计算生物学家"),
     (("首席统计师",), "首席统计师"),
+    # 2026-08-14 白名单补录（用户确认，候选文档 position_whitelist_candidates）：
+    # ① STEM讲师 合并"课后STEM讲师"变体（复合词防误吸"stem工程师"）；
+    # ② 统计师 修复不入图（剥壳残留未命中白名单）；
+    # ③ 生物统计师 前置防被"统计师"族子串吸收（英文映射 biostatistician 落点）；
+    # ④ IC验证 规范"工程师"后缀
+    (("stem讲师", "stem 讲师"), "STEM讲师"),
+    (("生物统计师",), "生物统计师"),
+    (("统计师",), "统计师"),
+    (("ic验证", "ic验证工程师"), "IC验证工程师"),
 ]
 
 # 失真兜底岗位族（2026-08-09 图谱质量治理）："软件/科学家/架构/研究员/顾问/硬件/
@@ -448,6 +339,17 @@ _GENERIC_ROUTED_FAMILIES: frozenset[str] = frozenset({
     # 算法工程师（2026-08-09 追加）：通用算法兜底族混聚大模型/视觉/机器人等方向，
     # 纳入技能路由后仅纯通用算法技能（机器学习/深度学习/pytorch 等）仍归本族
     "算法工程师",
+    # AI 泛词族（2026-08-15 T-04 第二批）：LLM 把"AI+方向/产品/业务"拼成的
+    # 非标准岗位名（无空格变体不命中 "ai 应用" 等带空格关键词族），统一按
+    # JD 技能路由到细分族（大模型/视觉/语音/机器人 → 通用算法 → 语言族）；
+    # 业务+AI 组合（应用AI客户/零售运营与AI参与 等）技能不在路由表 → 返回
+    # 空串不入图（宁缺毋滥，与失真兜底族口径一致）
+    "AI应用", "AI产品", "AI自动化", "AI 自动化", "AI建模", "AI构建", "AI 构建",
+    "AI智能体", "AI与智能体", "AI 模型部署", "LLM 应用", "AI 性能", "AI性能",
+    "AI 原生构建", "云AI", "预测科学与AI", "AI前向部署", "AI与LLM",
+    "AI智能体与RAG系统", "智能体AI首席", "智能体 AI", "企业AI平台",
+    "生成式AI应用", "Azure 平台", "应用AI客户", "应用AI智能体",
+    "零售运营与AI参与", "客户策略分析及应用AI", "云AI客户", "AI验证", "AIoT",
 })
 
 # 失真兜底岗位族的技能路由表（优先级从细到泛）：核心技能关键词 → 细分岗位族。
@@ -521,7 +423,7 @@ _ANALYST_SUB_FAMILIES: tuple[tuple[tuple[str, ...], str], ...] = (
 # 需保留的技术栈限定词（岗位细分维度）：(匹配串, 显示名)。
 # 如 "React前端开发工程师" 与 "前端开发工程师" 分列；web/h5/html 视为通用归并
 _TECH_STACKS: tuple[tuple[str, str], ...] = (
-    ("小程序", "小程序"), ("鸿蒙", "鸿蒙"), ("移动端", "移动端"), ("移动", "移动"),
+    ("小程序", "小程序"), ("移动端", "移动端"), ("移动", "移动"),
     ("桌面", "桌面"), ("可视化", "可视化"), ("大屏", "大屏"),
     ("next.js", "Next.js"), ("three.js", "Three.js"), ("typescript", "TypeScript"),
     ("react", "React"), ("vue", "Vue"), ("angular", "Angular"), ("node", "Node.js"),
@@ -529,8 +431,40 @@ _TECH_STACKS: tuple[tuple[str, str], ...] = (
     ("electron", "Electron"), ("webgl", "WebGL"),
 )
 
+# 语义近似岗位对别名（2026-08-16 重复岗位对治理 B 阶段产物）：
+# 变体键 → 规范岗位名。SBERT 语义提议 + 人工复核确认的对写入本表，
+# normalize_position_name 入口先查表（键/值均为岗位名原文，查表时计算变体键），
+# 防止"数据科学与 vs 数据科学"类语义近似名再分裂成两个图谱节点。
+# 格式对齐 _EN_POSITION_MAP（dict[str, str]）；值须为清洗后规范名（无空格），
+# 与 _variant_key(键) == _variant_key(值) 一致性由 test_alias_table_consistency 把关。
+_POSITION_ALIAS: dict[str, str] = {
+    # 2026-08-16 复核确认（sim ≥ 0.90 语义对，证据比见 reports/position_duplicates_stageB_*）
+    "AI数据科学与机器人教练": "AI数据科学机器人教练",
+    "Angular开发工程师": "Angular前端开发工程师",
+    "React开发工程师": "React前端开发工程师",
+    "STEM讲师": "STEM科技教育讲师",
+    "AS400应用": "AS400应用程序",
+    "AS400 应用程序": "AS400应用程序",  # 存量带空格节点改名统一（清洗后规范名）
+    "AI/ML应用": "AI/ML",
+    # 2026-08-16 晚复核（Stage B 新对）：AI 基础设施支持岗归位（P10 族内变体）
+    "AI基础设施支持": "AI基础设施工程师",
+}
+
+
 # 英文岗位名 → 中文标准名（国际源 JD 的 position_name 翻译，再与中文岗位合并去重）
 _EN_POSITION_MAP: dict[str, str] = {
+    # P10（2026-08-16）：web/AI 碎片兜底——LLM 输出完整英文岗位名时直接翻译；
+    # 裸词 "Web" 亦命中（纯英文走翻译路径，见 _translate_en_position）
+    "web": "Web开发工程师",
+    "web engineer": "Web开发工程师",
+    "web developer": "Web开发工程师",
+    "ai infra engineer": "AI基础设施工程师",
+    "ai productivity engineer": "AI生产力工程师",
+    "ai and data risk management": "AI与数据风险管理经理",
+    # P11 英文碎片归位（2026-08-16 岗位处置）：Staff 为 Staff Engineer 缩略
+    # （走失真兜底族按技能路由）、UX 为用户体验设计师
+    "staff": "软件工程师",
+    "ux": "UX设计师",
     "software engineer": "软件工程师",
     "senior software engineer": "软件工程师",
     "staff software engineer": "软件工程师",
@@ -778,6 +712,9 @@ _POSITION_STOPWORDS: set[str] = {
     "定价", "服务器", "经理", "创始", "董事总", "分析",
     # P0-A 碎片/业务词岗位（低频空岗，不入图）
     "专利", "传播", "跟单员", "量化", "中训练", "后训练", "前向部署",
+    # P11 复核（2026-08-16 Stage B 新对）：AI 客户类岗位碎片（客户成功岗
+    # 语义弱且无岗位族）——精确匹配拦截，"AI客户经理" 等组合不受影响
+    "AI客户", "应用AI客户",
     "大客户销售", "定制服装导购", "短视频编导", "项目申报销售", "电子发现协调员",
     "设施合同与投标", "MEC运营", "OSINT 情报收集员", "Palantir 前向部署",
     "产品交付", "信贷支持", "数据生产", "零售运营分析", "多模态理解",
@@ -788,7 +725,7 @@ _POSITION_STOPWORDS: set[str] = {
     "Palantir 管理员", "Kubernetes 服务", "Azure 云", "ML平台", "SCADA迁移与集成",
     "Genesys CCaaS", "SAP BTP", "EDC", "WCS", "DFT", "Power Automate", "KDB",
     "BI", "Angular/NodeJS", "智能体平台", "爬虫", "提示词", "物联网",
-    "GRC 自动化", "云系统管理员",
+    "GRC 自动化", "云系统管理员", "AS400 应用程序", "AS400",
     # 碎片/业务词误抽（工作内容/领域词被抽成岗位，非真实业务岗）
     "应用程序", "商业智能", "安卓", "构建与发布", "工业", "技术支持", "自动化",
     "智能化", "自动化集成", "商业智能与平台管理", "数据处理", "控制系统",
@@ -872,6 +809,20 @@ _POSITION_STOPWORDS: set[str] = {
     # 无标准关键词族承接，拦截不入图（"人事"拦"人事经理"剥壳、"公司：外企德科"
     # 是公司名、"智能"拦"智能开发工程师AI"剥壳）
     "人事", "智能", "激光工艺", "重点客户", "AI平台", "AI总监", "公司：外企德科", "行政",
+    # P7 存量碎片治理（2026-08-15，T-04 图谱扫描 89 个低频碎片岗位）：
+    # ① 缩写/产品名/平台名当岗位名（无岗位语义）；② 荒谬组合（LLM 把
+    # 公司/产品/短语拼成岗位名）；③ 既有拦截词的"空格变体漏网"（"CMDB 发现"
+    # 已拦但 "CMDB发现" 漏网——LLM 输出空格波动，无空格变体一并拦截）。
+    # 注：岗位白名单（_POSITION_WHITELIST）优先——'IT系统管理员' 在白名单
+    # 不拦截（IT系统管理员 测试断言保留）
+    "CNO", "GTM", "Pega", "OpenResty", "Salesforce", "Salesforce 应用",
+    ".Net", "C#/.NET",
+    "AI 证据", "AI证据", "BLT 首席", "340B 项目分析", "RFP 文案",
+    "AI/ML应用", "AI/ML与生成式AI", "Web内容平台", "Web 内容平台", "Web与移动端",
+    "云/DevSecOps", "AI 与自动化",
+    "IT支持", "IT 支持", "IT 系统", "IT站点", "IT研发系统",
+    "IT站点技术支持", "IT流程自动化",
+    "CMDB发现", "AR/VR设计验证", "Gemini 应用合作伙伴", "GRC自动化",
 } | set(_COMPANY_NAME_STOPWORDS)
 
 
@@ -987,6 +938,40 @@ def _route_position_by_skills(skills: list[str] | None) -> str:
     return ""
 
 
+# CJK 标点（变体键剔除用）。ASCII 标点保留——C++/C#/Node.js 等技术名
+# 依赖 + # . / 等符号，去掉会合并成错误岗位（"C++开发工程师" vs "C开发工程师"）。
+_CJK_PUNCT_RE = re.compile(r"[，。！？、；：（）《》「」『』【】·…—–-]")
+
+
+def _variant_key(name: str) -> str:
+    """岗位名字符级变体键：NFKC（全角→半角）+ 去全部空白 + 去 CJK 标点 + 小写。
+
+    仅用于重复岗位对枚举分组与语义别名查表（_POSITION_ALIAS），不做改名：
+    "CMDB 发现" 与 "CMDB发现"、全角 "ＡＩ" 与 "AI" 归为同键；ASCII 标点保留
+    （防 C++/C# 误并）。
+    """
+    s = unicodedata.normalize("NFKC", name)
+    s = _CJK_PUNCT_RE.sub("", s)
+    return re.sub(r"\s+", "", s).casefold()
+
+
+def _clean_variant(name: str) -> str:
+    """岗位名输出收敛：NFKC + 去全部空白（含全角空格 U+3000）。
+
+    仅去空白、不动标点——ASCII 标点技术名（C++/C#/Node.js）与中文标点
+    （"产品、运营经理" 去顿号会改变语义）均保留。作为 normalize_position_name
+    最终输出前的一步，使带空格变体与规范名指向同一图谱节点。
+    """
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", name))
+
+
+# _POSITION_ALIAS 的变体键反向索引（表键为岗位名原文，查表用变体键）：
+# 模块加载时构建；_POSITION_ALIAS 增加条目后需同步（测试/复核流程负责）。
+_POSITION_ALIAS_BY_VARIANT: dict[str, str] = {
+    _variant_key(k): v for k, v in _POSITION_ALIAS.items()
+}
+
+
 def normalize_position_name(name: str, skills: list[str] | None = None) -> str:
     """岗位名归一化：英文翻译中文 + 合并同义重复岗位，保留技术栈细分维度。
 
@@ -1014,6 +999,12 @@ def normalize_position_name(name: str, skills: list[str] | None = None) -> str:
     - "技术" → ""（泛词不入图）
     - "SQL" → ""（技能词不入图）
     """
+    # 语义别名收敛（2026-08-16 重复岗位对治理）：变体键命中别名表 → 用规范名
+    # 继续归一化。别名键为中文/中英混合岗位名，英文原名校（"Software Engineer"）
+    # 的变体键不会命中中文键，翻译路径不受影响。
+    alias = _POSITION_ALIAS_BY_VARIANT.get(_variant_key(name))
+    if alias:
+        name = alias
     translated = _translate_en_position(name)
     # 实习类岗位不入图（招聘形态，非正式岗位族；含"实习"即过滤，含翻译结果）
     if "实习" in (translated or name):
@@ -1073,7 +1064,10 @@ def normalize_position_name(name: str, skills: list[str] | None = None) -> str:
         # 单英文词（RAG/SRE 等缩写或技术词）原样保留，discovery 等下游依赖其作为岗位名
         if result.lower() == name.strip().lower() and " " in name.strip():
             return ""
-    return result
+    # 输出收敛（2026-08-16 重复岗位对治理）：去空白/全角统一在关键词/停用词匹配
+    # 之后做，不改动既有命中逻辑；使 "AI 数据科学机器人教练" 与规范名
+    # "AI数据科学机器人教练" 指向同一图谱节点
+    return _clean_variant(result)
 
 
 # 技能名尾随修饰词（"MySQL 优化"→"MySQL"、"K8s 运维"→"K8s"）。未命中别名/白名单
@@ -1171,10 +1165,26 @@ def is_noise_skill(name: str) -> bool:
     用于观察池 JD 信号过滤（LLM 误抽"算法工程师""熟悉Redis"等非技能词）与
     白名单扩充候选挖掘。白名单词与别名标准名整体保护（如"嵌入式开发"不以
     "开发"后缀退化判噪），其余按泛词/岗位名/经验碎片规则判定。
+
+    动态过滤层（dict-guard）叠加语义：
+    1. 动态保护最先判定——静态停用词误伤真实技能时（"微" vs "微信小程序"），
+       审批通过的保护条目在此放行，优先于一切停用词与启发式；
+    2. 动态停用词在白名单/别名保护之后——即使写入侧硬门禁被绕过，白名单词
+       也不会被动态拦截误杀（纵深防御；正常路径由 dict-guard 门禁保证互斥）。
     """
+    if is_dynamically_protected(name):
+        return False
+    # SKILL_STOPWORDS 优先于白名单保护：显式停用词（含白名单基础词）一律判噪
+    # （08-14 盲审迭代：消息队列/数据结构 等上位泛词是 gold 口径不收的，
+    # LLM 高频误抽；路由依赖词如计算机视觉/图像处理/统计学保留白名单保护，
+    # 防破坏 _POSITION_SKILL_ROUTING 岗位聚合）
+    if name in SKILL_STOPWORDS:
+        return True
     if name in SKILL_WHITELIST or name in _ALIAS_STANDARDS:
         return False
-    if name in _GENERIC_NOISE or name in SKILL_STOPWORDS:
+    if is_dynamically_blocked(name):
+        return True
+    if name in _GENERIC_NOISE:
         return True
     if len(name) < 2 or name.isdigit():
         return True
@@ -1191,26 +1201,59 @@ def is_noise_skill(name: str) -> bool:
 _SKILL_WHITELIST_LOWER: dict[str, str] = {w.lower(): w for w in SKILL_WHITELIST}
 
 
-# 熟练度映射（JD 自然语言 → level 三档，按优先级从高到低匹配）：
-# 高级词先匹配（"精通/深入/专家/资深"），避免被中级/初级子串误吞（如"熟练掌握"）
-_PROFICIENCY_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
-    (("精通", "深入", "专家", "资深"), "高级"),
-    (("掌握", "熟练", "独立"), "中级"),
-    (("熟悉", "了解", "入门", "基础"), "初级"),
-]
+# ── 灰名单验证区（技能生命周期，2026-08-21 新岗位发现优化 ②）──
+# 白名单对新兴技术存在滞后：新技能出现早于人工补录。白名单未命中且非噪音的
+# 技能不静默丢弃，而是注册进灰名单验证区（内存计数），供观测池/置信度模型
+# 定向复核；满足证据门槛后可人工 graduation 补录进 configs/skill_whitelist.yaml。
+# 内存态：进程内窗口统计，不落库（白名单扩充候选由 scripts/expand_skill_whitelist.py
+# 的离线挖掘路径承担，本注册表只做在线侧"漏召回"兜底标记）。
+_GREY_SKILL_HITS: dict[str, int] = {}
+_GREY_SKILL_GRADUATED: set[str] = set()
 
 
-def normalize_proficiency(text: str) -> str | None:
-    """JD 自然语言熟练度 → level 三档（了解/熟悉→初级、掌握→中级、精通→高级）。
+def register_grey_skill(name: str) -> None:
+    """注册灰名单技能：白名单未命中且非噪音的新技能，进入验证区。
 
-    直接命中规范枚举（初级/中级/高级）原样返回；未命中返回 None（不武断判定）。
+    供抽取链路对"白名单外保留技能"计数；已是白名单/已毕业/停用词的技能
+    不注册（重复调用幂等累加）。在线侧只做标记，不改变保留与否的语义——
+    消费方据此决定是否降权或路由到人工复核。
     """
-    if not text:
-        return None
-    t = text.strip()
-    if t in ("初级", "中级", "高级"):
-        return t
-    for keywords, level in _PROFICIENCY_KEYWORDS:
-        if any(k in t for k in keywords):
-            return level
-    return None
+    if not name:
+        return
+    if name in SKILL_WHITELIST or name in _GREY_SKILL_GRADUATED or name in SKILL_STOPWORDS:
+        return
+    _GREY_SKILL_HITS[name] = _GREY_SKILL_HITS.get(name, 0) + 1
+
+
+def grey_skills(min_hits: int = 1) -> list[tuple[str, int]]:
+    """灰名单验证区快照：[(技能名, 出现次数)]，按次数降序。
+
+    min_hits 过滤低频噪声（默认 ≥1 全部列出；观测池/复核消费方可按频次截断）。
+    """
+    return sorted(
+        ((k, v) for k, v in _GREY_SKILL_HITS.items() if v >= min_hits),
+        key=lambda kv: kv[1],
+        reverse=True,
+    )
+
+
+def is_grey_skill(name: str) -> bool:
+    """技能是否在灰名单验证区（白名单外、已注册、未毕业）。"""
+    return name in _GREY_SKILL_HITS
+
+
+def graduate_grey_skill(name: str) -> None:
+    """技能从灰名单毕业（人工补录白名单后调用）：移除验证区并豁免重复注册。
+
+    毕业技能即使尚未在 SKILL_WHITELIST 生效（配置热加载前），也不再被
+    灰名单反复跟踪——避免人工已确认的技能仍在验证区挂起。
+    """
+    _GREY_SKILL_HITS.pop(name, None)
+    _GREY_SKILL_GRADUATED.add(name)
+
+
+def clear_grey_skills() -> None:
+    """清空灰名单验证区（窗口轮换 / 测试隔离用）。"""
+    _GREY_SKILL_HITS.clear()
+    _GREY_SKILL_GRADUATED.clear()
+

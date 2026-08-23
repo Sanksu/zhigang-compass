@@ -1,16 +1,13 @@
 name: CI Frontend
 
+# 全量触发（无 paths 过滤）：分支保护将本 workflow 设为 develop 必过 check，
+# 若按 frontend/** 过滤，backend-only PR 永不触发本 workflow → 保护死锁
+# 无法合并（2026-08-16 重复岗位治理 PR #260 首次触发，临时放宽保护后修复）
 on:
   push:
     branches: [main, develop]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/ci-frontend.yml'
   pull_request:
     branches: [main, develop]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/ci-frontend.yml'
 
 defaults:
   run:
@@ -48,8 +45,52 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # M6 修复:coverage 阈值 80/80/70/80 此前从未执行(门禁纸面化,vite.config
+      # thresholds 只在带 --coverage 时生效)。改用 test:coverage 使阈值真正落地,
+      # 覆盖率不达标即 CI 红。tests/README 宣称的"前端核心 ≥95%"与阈值 80/80/70/80
+      # 不符——以实际阈值 80/80/70/80 为准(README 文案另 PR 校正)。
       - name: Test
-        run: pnpm test
+        run: pnpm test:coverage
 
       - name: Build
         run: pnpm build
+
+  # 无基础设施 E2E（mock API，浏览器层 page.route 拦截 /api/v1，无需 docker/后端）：
+  # L0-2 新增。非必过 check（未加入分支保护 required checks）——持续产生信号，
+  # 如需收为合并门禁，加进 develop 保护的 required_status_checks 即可。
+  e2e-mock:
+    name: E2E (mock API)
+    runs-on: ubuntu-latest
+    # 首次运行须下载 Playwright 浏览器（已加缓存，后续同 lockfile 快速），
+    # 10min 曾超时被取消；20min 预留安装/下载抖动余量
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: E2E (mock API)
+        run: pnpm e2e:ci

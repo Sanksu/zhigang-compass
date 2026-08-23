@@ -8,7 +8,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-from app.workers.tasks import _upsert_candidate
+from app.workers.discovery import _upsert_candidate
 
 
 def _cand(name: str = "测试工程师"):

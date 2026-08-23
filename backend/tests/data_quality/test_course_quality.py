@@ -59,9 +59,10 @@ class TestEnrollmentScore:
     def test_cap_at_100k(self):
         assert enrollment_score(200_000) == 1.0
 
-    def test_zero_or_missing(self):
-        assert enrollment_score(0) == 0.0
-        assert enrollment_score(None) == 0.0
+    def test_zero_or_missing_neutral(self):
+        """缺失/0（爬虫未解析）取中性 0.5——与 rating 口径一致，避免数据缺口双重惩罚。"""
+        assert enrollment_score(0) == 0.5
+        assert enrollment_score(None) == 0.5
 
     def test_monotonic(self):
         assert enrollment_score(10_000) > enrollment_score(1_000)
@@ -174,3 +175,21 @@ class TestEvaluateCourse:
         result = evaluate_course({"title": "t", "platform": "edx"})
         assert result.title == "t"
         assert result.platform == "edx"
+
+
+# ── skill_coverage 英文映射（08-14 修复：coursera/edx 英文 ESCO 技能结构性 0 分）──
+
+def test_skill_coverage_english_mapping():
+    """英文 ESCO 技能经 _EN_SKILL_MAP 转中文白名单后命中。"""
+    assert skill_coverage(["Cloud Computing", "Machine Learning"]) > 0.0
+
+
+def test_skill_coverage_unmapped_english():
+    """未映射英文技能保守不命中（宁缺毋滥）。"""
+    assert skill_coverage(["Amazon Redshift", "AWS Kinesis"]) == 0.0
+
+
+def test_skill_coverage_mixed():
+    """中英文混合：映射 + 中文直命中。"""
+    score = skill_coverage(["Cloud Computing", "Python", "机器学习"])
+    assert 0.5 < score <= 1.0

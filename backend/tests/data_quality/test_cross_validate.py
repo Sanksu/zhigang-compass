@@ -13,7 +13,7 @@ from app.services.data_quality.cross_validate import (
 from app.services.data_quality.schemas import CrossValidationResult
 
 
-def _rec(source: str, position: str, skills: list[str], salary: str = "", experience: str = "") -> dict:
+def _rec(source: str, position: str, skills: list[str], salary: str = "", experience: str = "", location: str = "") -> dict:
     return {
         "source": source,
         "crawled_at": "2026-08-02T00:00:00+08:00",
@@ -24,6 +24,7 @@ def _rec(source: str, position: str, skills: list[str], salary: str = "", experi
                 "salary_range": salary,
             },
             "experience": experience,
+            "location": location,
         },
     }
 
@@ -116,3 +117,49 @@ class TestValidateGroup:
         dumped = result.model_dump()
         assert dumped["position_name"] == "运维工程师"
         assert set(dumped) >= {"verified", "confidence", "unverified_skills"}
+
+
+class TestCrossCitySalarySmoothing:
+    """P12：薪资跨城市平滑——二线城市 JD 不再被一线城市 JD 误判为低薪异常。
+
+    归一化口径：月薪 / 城市指数（北京 1.0 / 武汉 0.85 等）。跨城市正常薪资差
+    平滑后 max/min 不再超阈值；同一城市口径下的真实分歧仍触发 salary_outlier。
+    """
+
+    def test_second_tier_jd_not_flagged_by_first_tier(self):
+        # 原始口径：北京 25K vs 武汉 15K → max/min = 1.67 > 1.5 会被误判异常；
+        # 城市归一化后：25.0 vs 15/0.85 ≈ 17.65 → 1.42 < 1.5，不再误报
+        group = [
+            _rec("boss", "Java开发工程师", ["Java"], salary="22-28K", location="北京·朝阳区"),
+            _rec("zhilian", "java", ["Java"], salary="14-16K", location="武汉"),
+        ]
+        result = validate_group("Java开发工程师", group)
+        assert result.salary_outlier is False
+        assert "北京" in result.cities and "武汉" in result.cities
+
+    def test_same_city_real_outlier_still_detected(self):
+        # 同一城市（北京，指数相同）下薪资分歧 1.67 倍仍判异常
+        group = [
+            _rec("boss", "Java开发工程师", ["Java"], salary="22-28K", location="北京"),
+            _rec("zhilian", "java", ["Java"], salary="14-16K", location="北京·海淀区"),
+        ]
+        result = validate_group("Java开发工程师", group)
+        assert result.salary_outlier is True
+
+    def test_location_parsing_from_separators(self):
+        group = [
+            _rec("boss", "前端开发工程师", ["React"], salary="22-28K", location="上海·浦东新区"),
+            _rec("zhilian", "前端开发", ["React"], salary="18-22K", location="杭州 滨江区"),
+        ]
+        result = validate_group("前端开发工程师", group)
+        assert "上海" in result.cities and "杭州" in result.cities
+
+    def test_no_location_defaults_to_no_smoothing(self):
+        # 无 location 时指数回退 1.0，行为与原实现一致（9K vs 27.5K 判异常）
+        group = [
+            _rec("boss", "Java开发工程师", ["Java"], salary="8-10K"),
+            _rec("zhilian", "java", ["Java"], salary="25-30K"),
+        ]
+        result = validate_group("Java开发工程师", group)
+        assert result.salary_outlier is True
+        assert result.cities == []

@@ -15,6 +15,9 @@ const badgeVariants = cva(
         stable: 'border-transparent bg-state-stable/10 text-state-stable',
         declining: 'border-transparent bg-state-declining/10 text-state-declining',
         archived: 'border-transparent bg-state-archived/10 text-state-archived',
+        // 人机协同标识 — AI 生成内容（紫）/ 人工校验确认（绿，与 emerging 同色系不同语义）
+        ai: 'border-transparent bg-ai/10 text-ai',
+        verified: 'border-transparent bg-state-emerging/10 text-state-emerging',
       },
     },
     defaultVariants: { variant: 'default' },

@@ -58,6 +58,7 @@ ENV/
 # 测试与覆盖率
 .pytest_cache/
 .pytest-tmp
+.pytest_tmp/
 .tox/
 .nox/
 .coverage
@@ -122,6 +123,14 @@ credentials.json
 backend/configs/llm_providers.yaml
 !backend/configs/llm_providers.yaml.example
 
+# 运行时配置（管理后台 /admin/settings 落盘，重启生效；模板保留）
+backend/configs/runtime_settings.json
+!backend/configs/runtime_settings.json.example
+
+# 动态过滤层（dict-guard 运行时落盘，变更审计于 DictChangeLog 表；模板保留）
+backend/configs/skill_filters_dynamic.json
+!backend/configs/skill_filters_dynamic.json.example
+
 # ---------- 数据库 ----------
 *.sqlite3
 *.sqlite3-journal
@@ -182,6 +191,11 @@ reference/
 
 # ---------- 临时文件 ----------
 temp/
+
+# ---------- AI 会话产物（根目录验证截图 / Playwright MCP / pytest basetemp） ----------
+/*.png
+.playwright-mcp/
+backend/.pytest_tmp_*/
 
 # ---------- 工具本地目录（ZCode 计划文件等，不入版本控制） ----------
 .zcode/

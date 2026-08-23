@@ -5,6 +5,7 @@
 Position-[:REQUIRES {necessity: 'must'}] 关系，且同名实体重复导入 ID 稳定（MERGE 幂等）。
 """
 
+from app.services.extraction.position_normalization import POSITION_NORMALIZATION_VERSION
 from app.services.extraction.schemas import (
     CertificationExtracted,
     EducationExtracted,
@@ -128,6 +129,35 @@ class TestImportJdEducationCertification:
         assert not any("Certification" in q for q, _ in tx.queries)
 
 
+class TestImportJdPositionNormalization:
+    def test_current_snapshot_name_is_used_for_graph_import(self):
+        tx = _FakeTx()
+        snapshot = {
+            "normalized_position": "人工审核岗位",
+            "normalized_position_meta": {"version": POSITION_NORMALIZATION_VERSION},
+            "extraction": _extraction().model_dump(),
+        }
+
+        import_jd(_FakeSession(tx), _extraction(), _evidence(), snapshot)
+
+        positions = [p for q, p in tx.queries if "MERGE (p:Position" in q]
+        assert positions[0]["name"] == "人工审核岗位"
+
+    def test_stale_snapshot_name_uses_current_rules(self):
+        tx = _FakeTx()
+        snapshot = {
+            "normalized_position": "旧规则岗位",
+            "normalized_position_meta": {"version": "2026-08-01.1"},
+            "extraction": {"position_name": "前端开发", "skills": []},
+        }
+        extraction = JDExtractionResult(position_name="前端开发")
+
+        import_jd(_FakeSession(tx), extraction, _evidence(), snapshot)
+
+        positions = [p for q, p in tx.queries if "MERGE (p:Position" in q]
+        assert positions[0]["name"] == "前端开发工程师"
+
+
 class TestImportJdSkillNormalization:
     """import_jd 技能名归一化：旧快照异构名（P1-1 前抽取）合并到规范 Skill 节点。
 
@@ -156,9 +186,9 @@ class TestImportJdSkillNormalization:
         assert names == {"Vue.js"}
 
     def test_whitelist_word_preserved(self):
-        # 白名单词整体保护（clean_skill_name），不被剥成泛词碎片
+        # 08-14 迭代：基础词停用（操作系统 入 SKILL_STOPWORDS）——不建节点
         skill_merges = self._run(["操作系统"])
-        assert skill_merges[0][1]["name"] == "操作系统"
+        assert skill_merges == []
 
     def test_stopword_dropped(self):
         # 归一化后为空（"系统"→""）直接跳过，不建节点

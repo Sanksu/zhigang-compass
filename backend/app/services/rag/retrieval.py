@@ -15,7 +15,9 @@
 """
 
 from dataclasses import dataclass
+import asyncio
 from typing import Optional
+from app.services.kg.fulltext import sanitize_fulltext
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,13 +31,8 @@ _VERIFIED_STATES = ("candidate", "emerging", "stable")
 DEFAULT_TOP_K = 10
 DEFAULT_MAX_TOKENS = 3000
 
-# Neo4j 全文查询（Lucene 语法）特殊字符：查询前剔除，避免语法异常
-_LUCENE_SPECIAL = frozenset('+-&|!(){}[]^"~*?:\\/')
 
 
-def _sanitize_fulltext(q: str) -> str:
-    """剔除 Neo4j 全文查询的 Lucene 特殊字符，空串视为无关键词命中。"""
-    return "".join(ch for ch in q if ch not in _LUCENE_SPECIAL).strip()
 
 
 def _estimate_tokens(text: str) -> int:
@@ -63,6 +60,8 @@ async def _verified_positions(db: AsyncSession, query: str) -> list[RetrievedChu
     q = (query or "").strip().lower()
     if not q:
         return []
+    # 通配符转义（08-14 审查）：用户输入 %/_ 会放大 ILIKE 检索面，转义为字面量
+    q = q.replace("\\", "\\\\").replace("%", "\%").replace("_", "\_")
     rows = (
         await db.scalars(
             select(DiscoveryCandidate)
@@ -113,21 +112,27 @@ async def _occupations(
     return chunks
 
 
+def _query_skill_fulltext(neo4j, q: str) -> list[dict]:
+    """Neo4j skill_search 全文索引查询（同步驱动，线程池执行）。"""
+    with neo4j.session() as session:
+        return session.run(
+            "CALL db.index.fulltext.queryNodes('skill_search', $q) "
+            "YIELD node, score "
+            "RETURN node.name AS name, node.description AS description, score "
+            "LIMIT $limit",
+            q=q,
+            limit=DEFAULT_TOP_K,
+        ).data()
+
+
 async def _skills(neo4j, query: str) -> list[RetrievedChunk]:
     """技能描述（Neo4j skill_search 全文索引关键词路）。"""
-    q = _sanitize_fulltext(query)
+    q = sanitize_fulltext(query)
     if neo4j is None or not q:
         return []
     try:
-        with neo4j.session() as session:
-            rows = session.run(
-                "CALL db.index.fulltext.queryNodes('skill_search', $q) "
-                "YIELD node, score "
-                "RETURN node.name AS name, node.description AS description, score "
-                "LIMIT $limit",
-                q=q,
-                limit=DEFAULT_TOP_K,
-            ).data()
+        # 同步 Neo4j 驱动查询放线程池，避免阻塞事件循环
+        rows = await asyncio.to_thread(_query_skill_fulltext, neo4j, q)
     except Exception:
         # Neo4j 不可达：跳过技能源，不阻塞检索
         return []
@@ -154,6 +159,8 @@ async def _diagnoses(db: AsyncSession, query: str) -> list[RetrievedChunk]:
     q = (query or "").strip().lower()
     if not q:
         return []
+    # 通配符转义（08-14 审查）：用户输入 %/_ 会放大 ILIKE 检索面，转义为字面量
+    q = q.replace("\\", "\\\\").replace("%", "\%").replace("_", "\_")
     rows = (
         await db.scalars(
             select(DiagnosisReportRecord)

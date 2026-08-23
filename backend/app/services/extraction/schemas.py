@@ -49,6 +49,12 @@ class REQUIRESRelation(BaseModel):
     level: Optional[str] = Field(default=None, description="熟练度：初级/中级/高级/专家")
 
 
+class ExperienceRange(BaseModel):
+    """经验年限区间（align 110 条 gold 的 gold_experience）。"""
+    min_years: Optional[int] = Field(default=None, description="最低年限（无明确准入时为 null）")
+    max_years: Optional[int] = Field(default=None, description="最高年限（开放区间为 null）")
+
+
 class JDExtractionResult(BaseModel):
     """JD 抽取的完整结果。"""
     position_name: str = Field(description="岗位名称")
@@ -59,6 +65,17 @@ class JDExtractionResult(BaseModel):
     tools: list[ToolExtracted] = Field(default_factory=list, description="工具列表")
     education: Optional[EducationExtracted] = Field(default=None, description="教育要求")
     certifications: list[CertificationExtracted] = Field(default_factory=list, description="证书要求")
+    experience_range: Optional[ExperienceRange] = Field(
+        default=None,
+        # L1-1（六维评测补齐）：仅当正文明确年限才填；无明确年限且无最低准入 → null
+        # （与数据字典 gold_experience 的 null 语义一致，绝不代表 0 年经验）
+        description="经验年限区间；正文无明确年限时置 null（≠ 0 年经验）",
+    )
+    core_duties: list[str] = Field(
+        default_factory=list,
+        # L1-1：核心职责概要，2~8 条精炼短语（正文职责段归纳）
+        description="核心职责概要，2~8 条精炼短语（正文职责段归纳，实测范围 2~8）",
+    )
     typical_scenarios: list[TypicalScenario] = Field(
         default_factory=list,
         description="典型项目场景列表（JD 描述的岗位核心工作场景）",

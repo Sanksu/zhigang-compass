@@ -10,15 +10,42 @@
 """
 
 import json
-import re
 from datetime import datetime, timedelta, timezone
 
 from scrapy.exceptions import CloseSpider
 from scrapy.http import Response
-from scrapy_playwright.page import PageMethod
 
-from crawlers.base_spider import BaseSpider
+from crawlers.base_spider import make_playwright_request, BaseSpider
+from crawlers.middlewares import backoff_delay
+from crawlers.settings import CRAWL_ITEMS_CAP
 from crawlers.zhilian_detail import extract_job_detail
+
+# 页面级空列表退避重试（08-21c zhilian 反爬加固）：列表页 200 但无岗位卡片时，
+# 判定为智联临时风控/跳验证页——现有 BackoffRetry 只处理 HTTP 429/403，不覆盖
+# 渲染后空列表场景。此处按 max_empty_retries（默认 3）指数退避（30/60/120s，
+# 复用 crawlers.middlewares.backoff_delay）重发同一搜索 URL；0=关闭。
+DEFAULT_MAX_EMPTY_RETRIES = 3
+
+
+def _call_later(delay, callback, *args, **kwargs):
+    """延迟调度回调；仅在实际重试时加载 Twisted reactor。"""
+    from twisted.internet import reactor
+
+    return reactor.callLater(delay, callback, *args, **kwargs)
+
+
+def _max_empty_retries() -> int:
+    """读取爬虫级 max_empty_retries 配置（0=关闭），失败回退默认 3。"""
+    try:
+        from app.core import runtime_config
+
+        cfg = runtime_config.get("crawlers") or {}
+        mer = (cfg.get("zhilian") or {}).get("max_empty_retries")
+        if mer is None:
+            return DEFAULT_MAX_EMPTY_RETRIES
+        return mer
+    except Exception:
+        return DEFAULT_MAX_EMPTY_RETRIES
 
 # 智联城市代码映射
 ZHILIAN_CITY_CODES = {
@@ -33,6 +60,50 @@ BACKFILL_MAX_PAGES = 50
 
 # 东八区
 _CST = timezone(timedelta(hours=8))
+
+
+def _extract_initial_state(text: str) -> dict | None:
+    """从 script 文本提取 __INITIAL_STATE__ 后的完整 JSON 对象（H4 修复）。
+
+    从 `__INITIAL_STATE__=` 之后的第一个 `{` 开始做花括号配平（跳过字符串内
+    的花括号），直到配平的 `}` 结束，再 json.loads。相比贪婪正则（匹配 `{...}`
+    到行尾）：script 内 JSON 后仍跟其它 JS 内容时不会被误吞，嵌套对象也正确。
+
+    找不到 / 解析失败返回 None。
+    """
+    marker = "__INITIAL_STATE__"
+    idx = text.find(marker)
+    if idx == -1:
+        return None
+    start = text.find("{", idx)
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = text[start : i + 1]
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    return None
+    return None
 
 
 def _is_older_than_days(post_date: str, days: int) -> bool:
@@ -61,8 +132,13 @@ class ZhilianSpider(BaseSpider):
         # JD 采集条数上限（-a max_results=200，默认 200）：按产出条数截断，
         # 防列表页全量遍历超长运行（08-13 实测 zhilian 挂死 8h，900s 超时后
         # 孤儿爬虫仍残留；条数上限在源头截断，与页数上限/900s 超时三重保险）
-        self._max_results = int(kwargs.get("max_results") or 200)
+        self._max_results = int(kwargs.get("max_results") or CRAWL_ITEMS_CAP)
         self._items_collected = 0
+        # 页面级空列表退避重试（08-21c）：0=关闭；>0 时列表页 200 但无卡片按
+        # 指数退避重发（防智联临时风控/跳验证页）。计数跨列表页累计，防单次
+        # 采集被"每页都空列表"无限重试拖长运行。
+        self._max_empty_retries = _max_empty_retries()
+        self._empty_retries_used = 0
 
     def _bump_items(self):
         """产出计数：达到 max_results 上限即关闭爬虫（CloseSpider 停止新调度）。"""
@@ -77,16 +153,27 @@ class ZhilianSpider(BaseSpider):
         return any(_is_older_than_days(v, self.history_days) for v in publish_time_map.values())
 
     def start_requests(self):
-        for keyword in self.keywords:
-            for city in self.cities:
+        # 空关键词/空城市 = 平台默认推荐列表且不限城市（08-16 用户决策）
+        keywords = self.keywords or [""]
+        cities = self.cities or [""]
+        for keyword in keywords:
+            for city in cities:
                 city_code = ZHILIAN_CITY_CODES.get(city)
-                if not city_code:
+                if city and not city_code:
                     self.logger.warning(f"跳过未映射城市: {city}（智联城市码表仅含 {list(ZHILIAN_CITY_CODES)}）")
                     continue
-                url = f"{self.SEARCH_URL}?{self.build_query({'jl': city_code, 'kw': keyword, 'pn': 1})}"
-                yield self._make_playwright_request(
+                params = {"kw": keyword, "pn": 1}
+                if city_code:
+                    params["jl"] = city_code
+                url = f"{self.SEARCH_URL}?{self.build_query(params)}"
+                yield make_playwright_request(
                     url,
                     meta={"keyword": keyword, "city": city, "page": 1},
+                    selector=".joblist-box__item",
+                    wait_timeout=15000,
+                    scroll_times=1,
+                    scroll_wait_ms=0,
+                    headers=self._compliance_headers(),
                 )
 
     def _extract_publish_time_map(self, response: Response) -> dict:
@@ -94,19 +181,18 @@ class ZhilianSpider(BaseSpider):
 
         智联列表页 DOM 不渲染发布日期，但 SSR 数据含 publishTime 字段。
         """
-        # 提取 __INITIAL_STATE__ 的 JSON 内容
         script_text = response.css("script:not([src])::text").getall()
         publish_map = {}
         for text in script_text:
             if "__INITIAL_STATE__" not in text or "publishTime" not in text:
                 continue
-            # __INITIAL_STATE__={...} 格式，截取 JSON 部分（非贪婪 + 尾部锚定，避免贪婪吞掉后续 JS）
-            match = re.search(r"__INITIAL_STATE__\s*=\s*(\{.*\})\s*;?\s*$", text, re.DOTALL)
-            if not match:
-                continue
-            try:
-                data = json.loads(match.group(1))
-            except json.JSONDecodeError:
+            # __INITIAL_STATE__={...} 格式：用括号配平从第一个 { 提取完整 JSON 对象
+            # （H4 修复 08-21b：原贪婪正则 `\{.*\}` 在 script 内 JSON 后仍有其它 JS
+            # 时吞到文件尾导致 json 解析失败 → publish_map 恒空 → 全部 post_date 落空，
+            # 直接影响 history_days 截断与新鲜度口径）。括号配平同时跳过字符串内的
+            # 花括号，对嵌套对象也正确。
+            data = _extract_initial_state(text)
+            if data is None:
                 continue
             # 遍历 jobList 提取 number → publishTime
             self._walk_for_publish_time(data, publish_map)
@@ -140,6 +226,36 @@ class ZhilianSpider(BaseSpider):
         cards = response.css(".joblist-box__item")
 
         if not cards:
+            # 页面级空列表退避重试（08-21c）：200 但无卡片 = 智联临时风控/跳验证页。
+            # 未用尽重试额度时按 backoff_delay 延迟重发同一搜索 URL（reactor 调度、
+            # 不阻塞事件循环）；用尽则记录并按原逻辑跳过。
+            if self._max_empty_retries > 0 and self._empty_retries_used < self._max_empty_retries:
+                retry_n = self._empty_retries_used
+                self._empty_retries_used += 1
+                delay = backoff_delay(retry_n)
+                self.logger.warning(
+                    f"[zhilian] 列表页无岗位卡片（kw={response.meta.get('keyword')} "
+                    f"页={response.meta.get('page')}），指数退避 {delay}s 后重试 "
+                    f"（{self._empty_retries_used}/{self._max_empty_retries}）",
+                )
+                retry_request = make_playwright_request(
+                    response.url,
+                    meta={
+                        "keyword": response.meta.get("keyword"),
+                        "city": response.meta.get("city"),
+                        "page": response.meta.get("page", 1),
+                    },
+                    selector=".joblist-box__item",
+                    wait_timeout=15000,
+                    scroll_times=1,
+                    scroll_wait_ms=0,
+                    headers=self._compliance_headers(),
+                )
+                # make_playwright_request 已设 dont_filter=True，重发同一 URL 不会被去重。
+                # _call_later 仅在实际重试时才加载 reactor，避免 SpiderLoader 预加载时
+                # 安装默认 reactor；不捕获调度异常，保持其向调用方传播。
+                _call_later(delay, self.crawler.engine.schedule, retry_request, self)
+                return
             self.logger.warning(
                 f"[zhilian] 列表页无岗位卡片（kw={response.meta.get('keyword')} 页={response.meta.get('page')}），"
                 f"页面标题: {response.css('title::text').get(default='')}"
@@ -211,13 +327,18 @@ class ZhilianSpider(BaseSpider):
             next_href = response.css(".next-page::attr(href), a.pageset[rel=next]::attr(href)").get()
             if next_href:
                 next_url = response.urljoin(next_href)
-                yield self._make_playwright_request(
+                yield make_playwright_request(
                     next_url,
                     meta={
                         "keyword": response.meta["keyword"],
                         "city": response.meta["city"],
                         "page": current_page + 1,
                     },
+                    selector=".joblist-box__item",
+                    wait_timeout=15000,
+                    scroll_times=1,
+                    scroll_wait_ms=0,
+                    headers=self._compliance_headers(),
                 )
 
     def _make_detail_request(self, url: str, job: dict):
@@ -282,20 +403,3 @@ class ZhilianSpider(BaseSpider):
             post_date=job["post_date"],
         )
 
-    def _make_playwright_request(self, url: str, meta: dict):
-        """构造 Playwright 渲染请求，等待列表卡片加载。"""
-        from scrapy.http import Request
-        return Request(
-            url,
-            callback=self.parse,
-            meta={
-                "playwright": True,
-                "playwright_page_methods": [
-                    PageMethod("wait_for_selector", ".joblist-box__item", timeout=15000),
-                    PageMethod("evaluate", "window.scrollTo(0, document.body.scrollHeight)"),
-                ],
-                **meta,
-            },
-            headers=self._compliance_headers(),
-            dont_filter=True,
-        )

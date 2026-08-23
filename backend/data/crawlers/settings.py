@@ -55,6 +55,24 @@ RATE_LIMIT = {
     "stackoverflow": {"req_per_min": 4, "delay_range": (10, 20)},  # 标签页公开页
 }
 
+# 08-16：管理后台可编辑的运行时覆盖（runtime_settings.json，worker 重启生效）。
+# rate_limit 覆盖各源 req_per_min/delay_range；crawl_items_cap 为单次采集上限。
+try:
+    from app.core import runtime_config
+
+    _RT_RATE_LIMIT = runtime_config.get("rate_limit") or {}
+    if _RT_RATE_LIMIT:
+        RATE_LIMIT = {
+            **RATE_LIMIT,
+            **{
+                src: {**RATE_LIMIT.get(src, {}), **cfg}
+                for src, cfg in _RT_RATE_LIMIT.items()
+            },
+        }
+    CRAWL_ITEMS_CAP = runtime_config.get("crawl_items_cap", 100)
+except Exception:  # 独立运行（无 backend 包）时回退默认
+    CRAWL_ITEMS_CAP = 100
+
 # ---------- 代理池 ----------
 # 国际平台需走代理；国内直连（platform 不在 POOL_REQUIRED 中时）
 POOL_REQUIRED = {

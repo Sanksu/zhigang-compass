@@ -1,16 +1,19 @@
 """认证路由：登录、刷新 Token、注册、登出、当前用户。"""
 
+import ipaddress
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, Request, Response
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.common import iso
 from app.api.deps import get_current_user
 from app.core.config import settings
 from app.core.database import get_db, get_redis
+from app.core.errors import ERR_CONFLICT, ERR_FORBIDDEN, ERR_NOT_FOUND, ERR_UNAUTHORIZED, ERR_VALIDATION
 from app.core.security import (
     TokenExpiredError,
     create_access_token,
@@ -28,7 +31,7 @@ from app.schemas.business import (
     RegisterRequest,
     UpdateProfileRequest,
 )
-from app.schemas.common import ok, error
+from app.schemas.common import error, ok
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +41,29 @@ router = APIRouter()
 REFRESH_COOKIE_NAME = "refresh_token"
 
 
-def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+def _is_https(request: Request) -> bool:
+    """按当前请求的实际传输协议判定是否加密链路。
+
+    之前以 `settings.is_production` 一刀切：API 通过 HTTPS 反向代理
+    暴露时为安全，但对 http 直连（如本机管理端 http://localhost:8000）
+    会写入 Secure Cookie，浏览器在 http 下拒绝持久化，整页刷新后
+    refresh_token 丢失、会话无法静默恢复。改为跟随请求 scheme——
+    https 部署仍加 Secure，http 则不加，保证刷新不掉登录。
+    """
+    return request.url.scheme == "https"
+
+
+def _set_refresh_cookie(
+    response: Response, refresh_token: str, *, secure: bool = True
+) -> None:
     """将 refresh_token 写入 httpOnly Cookie（刷新页面后会话可自动恢复）。"""
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
         value=refresh_token,
         max_age=settings.jwt_refresh_token_expire_days * 86400,
         httponly=True,
-        # 生产走 HTTPS 时启用 Secure；本地开发 http 场景不加
-        secure=settings.is_production,
+        # 仅加密链路（HTTPS）加 Secure，见 _is_https 说明
+        secure=secure,
         samesite="lax",
         path="/",
     )
@@ -70,9 +87,15 @@ def _client_ip(request: Request) -> str:
     IP（离客户端最近）；开发/直连场景取 peer IP，避免未经验证的伪造头污染审计。
     """
     if settings.is_production:
+        # 与 middleware._client_ip 对齐（08-14）：逐候选校验合法 IP 才采用，
+        # 非法值回退 peer IP，防伪造 XFF 头污染审计 IP
         xff = request.headers.get("x-forwarded-for", "")
-        if xff:
-            return xff.split(",")[0].strip()
+        for candidate in (c.strip() for c in xff.split(",") if c.strip()):
+            try:
+                ipaddress.ip_address(candidate)
+            except ValueError:
+                continue
+            return candidate
     return request.client.host if request.client else ""
 
 
@@ -86,14 +109,19 @@ async def login(
     """用户登录，返回双 Token（凭据校验走 users 表）。
 
     refresh_token 同时写入 httpOnly Cookie，刷新页面后前端可无感恢复会话。
+    暴力破解防护由中间件 IP 限流承担（08-14 决策：移除 ip:username 登录锁定，
+    避免攻击者可故意失败锁死目标账号 15 分钟的账号 DoS 面）。
     """
     user = await db.scalar(select(User).where(User.username == req.username))
     if user is None:
-        # 首次部署 bootstrap：users 表为空时按配置创建 admin 用户，
-        # 创建后即落入 users 表，后续登录走 DB 校验；生产环境禁用该路径
+        # 首次部署 bootstrap：仅当 users 表完全为空时按配置创建 admin 用户，
+        # 创建后即落入 users 表，后续登录走 DB 校验；生产环境禁用该路径。
+        # 08-14 安全修复：原条件为"admin 用户名不存在"——表非空时任何人可用
+        # 默认配置抢注 admin（admin/admin123），改为表空才允许。
         if settings.is_production:
-            return error(4010, "用户名或密码错误", http_status=401)
-        if req.username == settings.admin_username and req.password == settings.admin_password:
+            return error(ERR_UNAUTHORIZED, "用户名或密码错误", http_status=401)
+        user_count = await db.scalar(select(func.count()).select_from(User))
+        if user_count == 0 and req.username == settings.admin_username and req.password == settings.admin_password:
             user = User(
                 username=req.username,
                 password_hash=hash_password(req.password),
@@ -103,17 +131,17 @@ async def login(
             await db.commit()
             await db.refresh(user)
         else:
-            return error(4010, "用户名或密码错误", http_status=401)
+            return error(ERR_UNAUTHORIZED, "用户名或密码错误", http_status=401)
     elif not verify_password(req.password, user.password_hash):
-        return error(4010, "用户名或密码错误", http_status=401)
+        return error(ERR_UNAUTHORIZED, "用户名或密码错误", http_status=401)
 
     if not user.is_active:
-        return error(4030, "账户已禁用", http_status=403)
+        return error(ERR_FORBIDDEN, "账户已禁用", http_status=403)
 
     access_token = create_access_token(user.id, user.role)
     refresh_token = create_refresh_token(user.id, user.role)
     # refresh_token 写入 httpOnly Cookie（刷新页面后自动恢复会话）
-    _set_refresh_cookie(response, refresh_token)
+    _set_refresh_cookie(response, refresh_token, secure=_is_https(request))
     # 写审计日志（登录成功，便于管理后台 /admin/audit/logs 追踪）
     db.add(AuditLog(
         user_id=user.id,
@@ -128,7 +156,8 @@ async def login(
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
-        "expires_in": 1800,
+        # 与 create_access_token 的 exp 同源（settings），防两处漂移
+        "expires_in": settings.jwt_access_token_expire_minutes * 60,
     })
 
 
@@ -148,23 +177,23 @@ async def refresh_token(
     """
     refresh_token = _extract_refresh_token(request, req)
     if not refresh_token:
-        return error(4010, "缺少 refresh_token", http_status=401)
+        return error(ERR_UNAUTHORIZED, "缺少 refresh_token", http_status=401)
     try:
         payload = decode_token(refresh_token)
     except TokenExpiredError:
         # refresh 过期（7 天 TTL）无法续期，引导重新登录（4011 专指 access 过期触发刷新）
-        return error(4010, "refresh_token 已过期，请重新登录", http_status=401)
+        return error(ERR_UNAUTHORIZED, "refresh_token 已过期，请重新登录", http_status=401)
     if payload is None or payload.get("type") != "refresh":
-        return error(4010, "无效的 refresh_token", http_status=401)
+        return error(ERR_UNAUTHORIZED, "无效的 refresh_token", http_status=401)
     jti = payload.get("jti")
     if jti:
         revoked = await redis.get(f"token:blacklist:{jti}")
         if revoked:
-            return error(4010, "refresh_token 已失效", http_status=401)
+            return error(ERR_UNAUTHORIZED, "refresh_token 已失效", http_status=401)
     user_id = payload["sub"]
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
-        return error(4010, "用户不存在或已禁用", http_status=401)
+        return error(ERR_UNAUTHORIZED, "用户不存在或已禁用", http_status=401)
     # 轮换：旧 refresh 拉黑防重放，签发新 refresh 并重写 httpOnly Cookie
     if jti:
         await redis.set(
@@ -174,11 +203,11 @@ async def refresh_token(
         )
     new_access = create_access_token(user_id, user.role)
     new_refresh = create_refresh_token(user_id, user.role)
-    _set_refresh_cookie(response, new_refresh)
+    _set_refresh_cookie(response, new_refresh, secure=_is_https(request))
     return ok(data={
         "access_token": new_access,
         "refresh_token": new_refresh,
-        "expires_in": 1800,
+        "expires_in": settings.jwt_access_token_expire_minutes * 60,
     })
 
 
@@ -188,12 +217,12 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     logger.info(f"[register] 收到注册请求: username={req.username}")
     if len(req.username) < 3 or len(req.password) < 6:
         logger.warning(f"[register] 参数校验失败: username={req.username}")
-        return error(400, "用户名至少 3 字符，密码至少 6 字符")
+        return error(ERR_VALIDATION, "用户名至少 3 字符，密码至少 6 字符")
 
     existing = await db.scalar(select(User).where(User.username == req.username))
     if existing is not None:
         logger.warning(f"[register] 用户名已存在: username={req.username}")
-        return error(409, "用户名已存在")
+        return error(ERR_CONFLICT, "用户名已存在")
 
     user = User(
         username=req.username,
@@ -224,7 +253,7 @@ async def me(
     """获取当前用户信息（需登录）。"""
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
-        return error(404, "用户不存在")
+        return error(ERR_NOT_FOUND, "用户不存在")
     return ok(data={
         "id": user.id,
         "username": user.username,
@@ -232,7 +261,7 @@ async def me(
         "email": user.email,
         "phone": user.phone,
         "bio": user.bio,
-        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "created_at": iso(user.created_at),
     })
 
 
@@ -249,7 +278,7 @@ async def update_me(
     """
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
-        return error(404, "用户不存在")
+        return error(ERR_NOT_FOUND, "用户不存在")
     if req.email is not None:
         user.email = req.email
     if req.phone is not None:
@@ -272,7 +301,7 @@ async def update_me(
         "email": user.email,
         "phone": user.phone,
         "bio": user.bio,
-        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "created_at": iso(user.created_at),
     })
 
 
@@ -289,11 +318,11 @@ async def change_password(
     """
     user = await db.get(User, payload["sub"])
     if user is None or not user.is_active:
-        return error(404, "用户不存在")
+        return error(ERR_NOT_FOUND, "用户不存在")
     if not verify_password(req.old_password, user.password_hash):
-        return error(400, "原密码错误")
+        return error(ERR_VALIDATION, "原密码错误")
     if req.old_password == req.new_password:
-        return error(400, "新密码不能与原密码相同")
+        return error(ERR_VALIDATION, "新密码不能与原密码相同")
     user.password_hash = hash_password(req.new_password)
     db.add(AuditLog(
         user_id=user.id,
@@ -320,6 +349,19 @@ async def logout(
     refresh_token 来源：body（旧客户端）或 httpOnly Cookie。
     """
     refresh_token = _extract_refresh_token(request, req)
+    # 08-14 补：拉黑 access token jti（Authorization: Bearer），登出后立即失效
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        access_token = auth_header[len("Bearer "):].strip()
+        try:
+            access_payload = decode_token(access_token)
+        except TokenExpiredError:
+            access_payload = None  # 过期 token 无需拉黑，登出幂等
+        if access_payload and access_payload.get("jti"):
+            await redis.set(
+                f"token:blacklist:{access_payload['jti']}", "1",
+                ex=settings.jwt_access_token_expire_minutes * 60,
+            )
     try:
         payload = decode_token(refresh_token) if refresh_token else None
     except TokenExpiredError:

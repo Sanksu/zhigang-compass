@@ -22,7 +22,6 @@ from app.services.data_quality.temporal_detector import (
     compute_sai,
     detect_plagiarism,
     detect_zombie_jd,
-    is_within_recent_window,
 )
 from app.services.data_quality.schemas import JDSkillSet
 
@@ -251,19 +250,3 @@ class TestApplyTemporalDecay:
 
 
 # ───────────────────────── 窗口判断 ─────────────────────────
-
-class TestRecentWindow:
-    def test_within_90_days(self):
-        assert is_within_recent_window(
-            date.today() - timedelta(days=30), date.today()
-        ) is True
-
-    def test_beyond_90_days(self):
-        assert is_within_recent_window(
-            date.today() - timedelta(days=100), date.today()
-        ) is False
-
-    def test_boundary_exactly_90_days(self):
-        assert is_within_recent_window(
-            date.today() - timedelta(days=90), date.today()
-        ) is True

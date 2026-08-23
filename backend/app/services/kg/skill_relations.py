@@ -112,14 +112,6 @@ def sync_skill_relations(session: Session, dry_run: bool = False) -> dict:
     return stats
 
 
-def build_skill_relations() -> dict:
-    """一键同步技能关系（独立脚本入口）。"""
-    from app.core.database import neo4j_driver
-
-    with neo4j_driver.session() as session:
-        return sync_skill_relations(session)
-
-
 def graph_prerequisite_chain(session: Session, skill_name: str) -> list[str]:
     """沿 PREREQUISITE_OF 入边展开先修链（拓扑序，先修在前，不含目标本身）。
 

@@ -7,15 +7,13 @@
 """
 
 import asyncio
-from unittest.mock import patch
 
-import pytest
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.api.deps import get_optional_user
 from app.api.v1 import graph as graph_api
-from app.core.config import settings
 from app.core.security import create_access_token
+from tests.helpers import FakeRedis
 
 
 class TestVisibilityScope:
@@ -51,47 +49,12 @@ class TestVisibilityScope:
         assert graph_api._position_scope(user) == "public"
 
 
-@pytest.fixture(scope="module")
-def tmp_rsa_keys(tmp_path_factory):
-    """生成临时 RSA 密钥对（参考 test_token_expired 的注入方式）。"""
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
-
-    tmp = tmp_path_factory.mktemp("jwt-keys-graph")
-    priv_path = tmp / "private.pem"
-    pub_path = tmp / "public.pem"
-
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    priv_path.write_bytes(
-        key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        )
-    )
-    pub_path.write_bytes(
-        key.public_key().public_bytes(
-            serialization.Encoding.PEM,
-            serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-    )
-    return str(priv_path), str(pub_path)
-
-
-@pytest.fixture(autouse=True)
-def _use_tmp_keys(tmp_rsa_keys):
-    priv, pub = tmp_rsa_keys
-    with patch.object(settings, "jwt_private_key_path", priv), \
-         patch.object(settings, "jwt_public_key_path", pub):
-        yield
-
-
 class TestGetOptionalUser:
     """可选鉴权依赖：匿名/无效 → None，有效 token → payload。"""
 
     async def _call(self, token: str | None):
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token) if token else None
-        return await get_optional_user(creds)
+        return await get_optional_user(creds, FakeRedis())
 
     def test_no_credentials_returns_none(self):
         assert asyncio.run(self._call(None)) is None

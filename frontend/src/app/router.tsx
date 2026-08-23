@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { createBrowserRouter, RouterProvider } from 'react-router'
+import { Navigate, createBrowserRouter, RouterProvider } from 'react-router'
 import { AppShell } from '@/components/layout/app-shell'
 import { AuthGuard, GuestGuard } from '@/routes/guards'
 import { CompassMark } from '@/components/layout/compass-mark'
@@ -16,7 +16,9 @@ const AdminDashboardPage = lazy(() => import('@/routes/admin-dashboard-page').th
 const AdminUsersPage = lazy(() => import('@/routes/admin-users-page').then((m) => ({ default: m.AdminUsersPage })))
 const AdminCrawlPage = lazy(() => import('@/routes/admin-crawl-page').then((m) => ({ default: m.AdminCrawlPage })))
 const AdminReviewPage = lazy(() => import('@/routes/admin-review-page').then((m) => ({ default: m.AdminReviewPage })))
+const AdminLineagePage = lazy(() => import('@/routes/admin-lineage-page').then((m) => ({ default: m.AdminLineagePage })))
 const AdminLlmPage = lazy(() => import('@/routes/admin-llm-page').then((m) => ({ default: m.AdminLlmPage })))
+const AdminSettingsPage = lazy(() => import('@/routes/admin-settings-page').then((m) => ({ default: m.AdminSettingsPage })))
 
 function RouteLoading() {
   return (
@@ -58,8 +60,32 @@ const protectedRoutes = [
         element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminReviewPage /></Suspense></AuthGuard>,
       },
       {
+        path: 'admin/lineage',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminLineagePage /></Suspense></AuthGuard>,
+      },
+      {
         path: 'admin/llm',
         element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminLlmPage /></Suspense></AuthGuard>,
+      },
+      {
+        path: 'admin/settings',
+        element: <Navigate to="/admin/settings/tasks" replace />,
+      },
+      {
+        path: 'admin/settings/tasks',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="tasks" /></Suspense></AuthGuard>,
+      },
+      {
+        path: 'admin/settings/crawl',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="crawl" /></Suspense></AuthGuard>,
+      },
+      {
+        path: 'admin/settings/evolution',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="evolution" /></Suspense></AuthGuard>,
+      },
+      {
+        path: 'admin/settings/etl',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="etl" /></Suspense></AuthGuard>,
       },
     ],
   },

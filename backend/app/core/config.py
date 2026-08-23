@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     jwt_public_key_path: str = "keys/public.pem"
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
+    jwt_audience: str = "zhigang-compass"  # JWT audience（08-15 中危修复：防跨服务 token 复用）
 
     # ---------- 初始管理员（首次启动用，生产环境务必修改） ----------
     admin_username: str = "admin"
@@ -61,20 +62,5 @@ class Settings(BaseSettings):
     @property
     def _backend_dir(self) -> Path:
         return Path(__file__).resolve().parent.parent.parent
-
-    @property
-    def jwt_private_key(self) -> str:
-        p = Path(self.jwt_private_key_path)
-        if not p.is_absolute():
-            p = self._backend_dir / self.jwt_private_key_path
-        return p.read_text()
-
-    @property
-    def jwt_public_key(self) -> str:
-        p = Path(self.jwt_public_key_path)
-        if not p.is_absolute():
-            p = self._backend_dir / self.jwt_public_key_path
-        return p.read_text()
-
 
 settings = Settings()

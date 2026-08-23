@@ -35,6 +35,24 @@ def compute_zscore(current: float, mean: float, std: float) -> float:
     return (current - mean) / std
 
 
+def _series_values(
+    current_window: SkillFrequencyWindow,
+    historical_windows: list[SkillFrequencyWindow],
+) -> list[float]:
+    """整序列参与 Z-score 的数值（时间升序，末位为当前窗口）。
+
+    口径以序列为单位统一：全部窗口都有占比分母（total_requires>0）时用
+    占比口径（frequency/total_requires），抗采集总量波动；任一窗口缺分母
+    （旧快照无 relation 字段）则整条序列退回计数口径——逐窗口独立 fallback
+    会令旧计数(~60)与新占比(~0.06)混排，z 全失真批量伪 declining（评审
+    A-2 负责人拍板：整序列同口径）。
+    """
+    windows = [*historical_windows, current_window]
+    if all(w.total_requires > 0 for w in windows):
+        return [w.frequency / w.total_requires for w in windows]
+    return [float(w.frequency) for w in windows]
+
+
 def classify_trend(
     z_score: float,
     current_freq: int,
@@ -104,6 +122,9 @@ class EvolutionDetector:
             historical_windows: 历史窗口列表（≥1 个即可计算 Z-score 与环比）
         """
         freqs = [w.frequency for w in historical_windows]
+        # Z-score 序列整列同口径（占比或计数，见 _series_values）；输出字段仍用原始计数
+        series = _series_values(current_window, historical_windows)
+        hist_values = series[:-1]
 
         if not freqs:
             # 无历史窗口：无法计算 Z-score/MoM，保守标记为稳定观察基线
@@ -119,9 +140,9 @@ class EvolutionDetector:
                 confidence=0.0,
             )
 
-        mean = sum(freqs) / len(freqs)
-        std = statistics.stdev(freqs) if len(freqs) > 1 else 0.0
-        z = compute_zscore(float(current_window.frequency), mean, std)
+        mean = sum(hist_values) / len(hist_values)
+        std = statistics.stdev(hist_values) if len(hist_values) > 1 else 0.0
+        z = compute_zscore(series[-1], mean, std)
         trend = classify_trend(z, current_window.frequency)
 
         # 小基数保护：z 不对外输出（schemas 约定保护态 z=None）

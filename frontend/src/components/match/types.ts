@@ -1,3 +1,4 @@
+import type { components } from '@/types/api'
 /**
  * 匹配类型定义 — 设计文档 §9 人岗匹配算法 + §10.4 简历解析与匹配
  *
@@ -8,100 +9,28 @@
  * - POST /api/v1/match/compare → 单点人岗比对
  */
 
-/** 后端 match 返回的岗位评分项（recommend / compare 共用） */
-export interface BackendMatchResult {
-  position_id: string
-  position_name: string
-  total_score: number
-  must_score: number
-  nice_score: number
-  exp_score: number
-  matched_must: string[]
-  missing_must: string[]
-  summary: string
-  unqualified: boolean
-  /** 结果快照 ID（compare 同步执行后持久化，供 /match/result|gap|path|feedback 查询） */
-  match_id?: string
-  /** compare 专属：差距三态（missing/weak/matched，按优先级排序） */
-  gaps?: BackendGapItem[]
-  /** compare 专属：学习路径（missing/weak 技能的先修链 + 课程 Top-3） */
-  learning_path?: BackendLearningPathItem[]
-  /** compare 专属：证据引用（技能 → 原始 JD，图谱 EVIDENCED_BY 链路） */
-  evidence_refs?: BackendEvidenceRef[]
-}
+/** 后端匹配结果（契约 MatchResult，compare 同步 / result 快照共用） */
+export type BackendMatchResult = components['schemas']['MatchResult']
 
-/** 后端证据引用项 */
-export interface BackendEvidenceRef {
-  skill: string
-  source: string
-  url: string
-  confidence: number
-}
+/** 后端差距项（契约 GapSkill） */
+export type BackendGapItem = components['schemas']['GapSkill']
 
-/** 后端差距项 */
-export interface BackendGapItem {
-  skill: string
-  skill_id?: string | null
-  necessity: 'must' | 'nice'
-  gap_type: 'missing' | 'weak' | 'matched'
-  weight: number
-  priority: 'high' | 'medium' | 'low'
-  current_proficiency?: string | null
-  required_proficiency?: string | null
-}
+/** 后端学习路径项（契约 LearningPathItem） */
+export type BackendLearningPathItem = components['schemas']['LearningPathItem']
 
-/** 后端学习路径项 */
-export interface BackendLearningPathItem {
-  skill: string
-  skill_id?: string | null
-  prerequisites: string[]
-  courses: BackendCourseRecommendation[]
-  estimated_hours: number
-  priority: 'high' | 'medium' | 'low'
-}
+/** LLM 诊断报告（契约 DiagnosisReport，GET /match/result/{id}/diagnosis） */
+export type BackendDiagnosisReport = components['schemas']['DiagnosisReport']
 
-/** 后端课程推荐 */
-export interface BackendCourseRecommendation {
-  course_id: string
-  title: string
-  platform: string
-  quality_score?: number | null
-  recommended: boolean
-  source_url: string
-  hours?: number | null
-}
-
-/** LLM 诊断报告 — 设计文档 §9.5（GET /match/result/{id}/diagnosis，结果缓存 24h） */
-export interface BackendDiagnosisReport {
-  match_id: string
-  /** 总体匹配度解读 */
-  overall_summary: string
-  /** 三维雷达图解读（必备/加分/经验） */
-  radar_analysis: string
-  /** 关键差距 Top-5 及改进建议（evidence_id 可点击追溯） */
-  top_gaps: { skill: string; advice: string; evidence_id: string }[]
-  /** 学习路径解读 */
-  path_analysis: string
-  /** 整体改进建议清单 */
-  recommendations: string[]
-}
-
-/** 已解析简历摘要（GET /resume/list） */
-export interface ResumeSummary {
-  id: string
-  file_name: string
-  skills: string[]
-  total_years: number
-  education_level?: string | null
-  updated_at?: string | null
-}
+/** 已解析简历摘要（契约 ResumeSummaryItem，GET /resume/list） */
+export type ResumeSummary = components['schemas']['ResumeSummaryItem']
 
 /** Top-N 推荐结果项（页面展示） */
 export interface RecommendItem {
   position_id: string
   position_name: string
   total_score: number
-  must_score: number
+  /** 岗位无必备技能门槛时为 null（A1 口径：无信息不判分，总分重归一） */
+  must_score: number | null
   nice_score: number
   exp_score: number
   summary: string
@@ -120,26 +49,45 @@ export interface RadarDimension {
   required: number
 }
 
-/** 技能矩阵热力图项 */
+/** 技能矩阵热力图项（直接映射后端 GapSkill） */
 export interface SkillMatrixItem {
   skill: string
-  /** 候选人熟练度 0-3（0=未掌握） */
+  /** 候选人熟练度数值（0-4，用于热力图色阶） */
   candidate_level: number
-  /** 岗位要求熟练度 0-3 */
+  /** 岗位要求熟练度数值（0-4，用于热力图色阶） */
   required_level: number
+  /** 后端返回的熟练度展示值 */
+  candidate_label: string
+  required_label: string
   /** 必要性 */
   necessity: 'must' | 'nice'
-  /** 匹配状态 */
-  match: 'full' | 'partial' | 'missing'
+  /** 后端差距状态 */
+  status: 'missing' | 'weak' | 'matched'
 }
 
 /** 差距分析项 */
 export interface GapItem {
   skill: string
   gap_type: 'missing_must' | 'level_gap' | 'missing_nice' | 'matched'
+  /** 后端权威差距状态，前端不得根据展示刻度重新判定 */
+  match_status: 'missing' | 'weak' | 'matched'
   priority: 'high' | 'medium' | 'low'
   current_level: string
   required_level: string
+  /** 软技能标记（责任心/沟通能力等软素质，仅展示打标不影响评分） */
+  is_soft?: boolean
+  // ── 契约扩展字段（#341 起后端全量返回，可选——图谱不可用时后端回填补齐，
+  //    前端不再本地推导/mock；对应契约 GapSkill schema）──
+  /** 市场需求度 0-1 */
+  demand?: number
+  /** 需求趋势 -1..1（契约描述；实现现口径为 0..1 扩散度，见审查报告 L-13 待裁决） */
+  trend?: number
+  /** ROI 指标 = (demand × trend) / cost，用于高杠杆缺口打标 */
+  roi?: number
+  /** 该技能是否高杠杆缺口（Top3 ROI） */
+  high_roi?: boolean
+  /** 评分/差距证据（供点击展开溯源） */
+  evidence?: { role: 'jd' | 'resume'; text: string }[]
 }
 
 /** 学习路径项（甘特图） */
@@ -152,9 +100,23 @@ export interface LearningPathItem {
   /** 先修技能 */
   prerequisites: string[]
   /** 推荐课程 */
-  courses: { title: string; platform: string; hours: number }[]
+  courses: { title: string; platform: string; hours: number; url?: string }[]
   /** 优先级 */
   priority: 'high' | 'medium' | 'low'
+  // ── 契约字段（对应契约 LearningPathItem schema：status/estimated_hours
+  //    后端返回；本接口沿用驼峰命名由 toLearningPath 映射）──
+  /** 学习状态（done=已掌握 / doing=下一步 / locked=未解锁） */
+  status?: 'done' | 'doing' | 'locked'
+  /** 预计学时（小时）。缺省由 duration_days×8 推导 */
+  estimatedHours?: number
+  /** 市场需求度 0-1（可选，供 ROI 打标） */
+  demand?: number
+  /** 需求趋势 -1..1（可选，供 ROI 打标） */
+  trend?: number
+  /** ROI 指标 = (demand × trend) / cost（可选，供高杠杆缺口复用） */
+  roi?: number
+  /** 评分/差距证据（可选，供数据溯源展开） */
+  evidence?: string[]
 }
 
 /** 完整匹配结果（人岗比对） */
@@ -162,7 +124,8 @@ export interface MatchResult {
   position_id: string
   position_name: string
   total_score: number
-  must_score: number
+  /** 岗位无必备技能门槛时为 null（A1 口径：无信息不判分，总分重归一） */
+  must_score: number | null
   nice_score: number
   exp_score: number
   summary: string
@@ -170,6 +133,10 @@ export interface MatchResult {
   skill_matrix: SkillMatrixItem[]
   gaps: GapItem[]
   learning_path: LearningPathItem[]
+  /** 学习路径是否因领域跨簇语义黑名单拦截（P1：跨域诱导组合拒绝生成） */
+  learning_path_blocked?: boolean
+  /** 拦截原因（命中的岗位行业 × 候选人领域对），未拦截为 null/undefined */
+  learning_path_block_reason?: string | null
   /** 证据引用（设计文档要求 100% 覆盖率） */
   evidence_refs: { skill: string; source: string; url: string; confidence: number }[]
 }

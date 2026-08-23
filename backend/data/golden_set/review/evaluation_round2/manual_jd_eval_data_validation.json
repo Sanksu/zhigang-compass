@@ -1,0 +1,12 @@
+{
+  "row_count": 20,
+  "observed_annotators": [
+    "AI"
+  ],
+  "annotator_nonempty_and_consistent": true,
+  "rows_with_nonempty_detail": 20,
+  "rows_with_source_url": 20,
+  "fully_valid_rows": 20,
+  "issues": [],
+  "ready_for_real_run": true
+}

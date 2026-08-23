@@ -84,13 +84,51 @@ class TestEvalMatch:
         assert isinstance(r["error_cases"], list)
 
     def test_jd_golden_set_has_positive_samples(self):
-        """黄金集样本足够（字段级评测有意义的前提）。"""
+        """黄金集样本足够（字段级评测有意义的前提）。
+
+        设计文档硬性要求：JD 100 条（M3），此处作为回归护栏防缩水。
+        """
         from tests.evaluate.run_baseline import load_golden_set
 
         from scripts.evaluate import _JD_GOLDEN
 
         items = load_golden_set(str(_JD_GOLDEN))
-        assert len(items) >= 50
+        assert len(items) >= 100
+
+    def test_match_golden_set_has_positive_samples(self):
+        """匹配黄金集规模护栏：100 岗位 × 3 候选（1 正 2 负）= 300 行。"""
+        from tests.evaluate.run_baseline import load_golden_set
+
+        from scripts.evaluate import _MATCH_GOLDEN
+
+        items = load_golden_set(str(_MATCH_GOLDEN))
+        assert len(items) >= 300
+        assert any(item.get("label") == 1 for item in items)
+
+    def test_jd_golden_skills_clean_of_non_skill_tags(self):
+        """gold_skills 无经验/校招类非技能标签污染（08-14 补词后回归护栏）。
+
+        此前 jd_009 gold_skills=["1年以内"]、jd_076=["校招"] 以垃圾标注计入评测
+        污染指标；补词后已剔除（该 2 样本 gold_skills 为空，评测自动跳过）。
+        """
+        from tests.evaluate.run_baseline import load_golden_set
+
+        from scripts.evaluate import _JD_GOLDEN
+
+        non_skill = {
+            "1年以内", "1年以上", "2年以内", "经验要求", "经验",
+            "校招", "在校", "在校生", "应届", "应届生", "在校/应届",
+            "24届", "25届", "26届", "社招", "秋招", "春招",
+            "经验不限", "1-3年", "3-5年", "5-10年", "10年以上",
+            "大专", "本科", "硕士", "博士", "学历不限",
+            "5天/周", "4天/周", "3天/周", "6天/周",
+            "3个月", "6个月", "9个月", "12个月",
+            "Remote", "全职", "兼职", "实习",
+        }
+        items = load_golden_set(str(_JD_GOLDEN))
+        for item in items:
+            polluted = [s for s in (item.get("gold_skills") or []) if s in non_skill]
+            assert not polluted, f"{item.get('id')} gold_skills 含非技能标签: {polluted}"
 
 
 class TestTop3Accuracy:
@@ -302,7 +340,6 @@ class TestEvalJdLlm:
     evaluate.py 只读最近归档、不重跑（避免重复消耗 LLM 额度）。
     本测试用 tmp_path 构造归档验证读取/跳过/损坏判定与 HTML 渲染。
     """
-
     _ARCHIVE_TEMPLATE = {
         "task": "jd_llm",
         "method": "真实抽取（LLM + 规则兜底，12 条人工盲审）",
@@ -426,7 +463,10 @@ class TestJdLlmArchive:
             "failed_samples": 0,
             "title_raw_exact_accuracy": 0.4545454545,
             "title_normalized_accuracy": 0.8181818181,
-            "skills_micro": {"tp": 100, "fp": 20, "fn": 10, "precision": 0.8333, "recall": 0.9091, "f1": 0.8696},
+            # skills_micro_aligned = 方案 A 达标口径（PR #330）；skills_micro = raw 精选口径参照
+            "skills_micro_aligned": {"tp": 100, "fp": 20, "fn": 10, "precision": 0.8333, "recall": 0.9091, "f1": 0.8696},
+            "skills_micro": {"tp": 100, "fp": 40, "fn": 10, "precision": 0.7143, "recall": 0.9091, "f1": 0.8},
+            "hallucinated_fp": {"K8s": 1},
             "skills_average_sample_f1": 0.85,
             "bonus_skills_micro": {"tp": 5, "fp": 8, "fn": 20, "precision": 0.3846, "recall": 0.2, "f1": 0.2632},
             "bonus_skills_average_sample_f1": 0.2,
@@ -463,7 +503,7 @@ class TestJdLlmArchive:
         from tests.evaluate.run_manual_jd_eval import archive_metrics
 
         m = self._metrics_fixture()
-        m["skills_micro"]["f1"] = 0.9001
+        m["skills_micro_aligned"]["f1"] = 0.9001
         r = json.loads(archive_metrics(m, report_dir=tmp_path).read_text(encoding="utf-8"))["results"][0]
         assert r["target_met"] is True
 
@@ -533,3 +573,307 @@ class TestGoldRevisions:
         from tests.evaluate.run_manual_jd_eval import load_gold_revisions
 
         assert load_gold_revisions(tmp_path / "no.json") == {}
+
+
+def _valid_review_row(sample_id: str, annotator: str) -> dict[str, str]:
+    """构造一条格式合法的盲审行（满足 validate_rows 全字段校验）。"""
+    return {
+        "sample_id": sample_id,
+        "detail_raw_text": "岗位职责：负责系统开发。任职要求：熟悉 Python。",
+        "source_url": f"https://example.com/{sample_id}",
+        "review_gold_skills": '["Python"]',
+        "review_gold_bonus_skills": "[]",
+        "review_gold_core_duties": '["系统开发"]',
+        "review_gold_experience": "",
+        "annotator": annotator,
+    }
+
+
+class TestValidateRows:
+    """盲审预检（validate_rows）：annotator 非空即放行，支持多人标注。
+
+    合并口径 round1（LQ 人工）+ round2（张恺天终审）为两名标注者，
+    单一 annotator 检查会误阻塞终审后的正式评测（08-14 放宽）。
+    """
+
+    def _validate(self, rows):
+        from tests.evaluate.run_manual_jd_eval import validate_rows
+
+        return validate_rows(rows)
+
+    def test_multi_annotator_ready(self):
+        """LQ + ZKT 两名人工标注者：预检通过（终审后合并簿场景）。"""
+        rows = [_valid_review_row("jd_012", "LQ"), _valid_review_row("r2_001", "ZKT")]
+        v = self._validate(rows)
+        assert v["ready_for_real_run"] is True
+        assert v["observed_annotators"] == ["LQ", "ZKT"]
+
+    def test_single_annotator_ready(self):
+        rows = [_valid_review_row("jd_012", "LQ")]
+        v = self._validate(rows)
+        assert v["ready_for_real_run"] is True
+
+    def test_empty_annotator_blocked(self):
+        rows = [_valid_review_row("jd_012", ""), _valid_review_row("r2_001", "ZKT")]
+        v = self._validate(rows)
+        assert v["ready_for_real_run"] is False
+        assert v["annotator_nonempty_and_consistent"] is False
+
+    def test_ai_placeholder_runs_exploratory(self):
+        """AI 占位（未终审）仍可跑探索评测，结果须标注非终审。"""
+        rows = [_valid_review_row("r2_001", "AI")]
+        v = self._validate(rows)
+        assert v["ready_for_real_run"] is True
+
+    def test_invalid_json_skills_blocked(self):
+        rows = [_valid_review_row("jd_012", "LQ")]
+        rows[0]["review_gold_skills"] = "not-json"
+        v = self._validate(rows)
+        assert v["ready_for_real_run"] is False
+        assert any(i["field"] == "review_gold_skills" for i in v["issues"])
+
+
+class TestGoldJsonlLoader:
+    """final gold JSONL 装载（_load_gold_jsonl，纯输入适配，不触发 LLM）。
+
+    PR #316 交付的 110 条 Round1 gold 以原生 JSON 值存放 gold_* 字段；装载器把它
+    映射回评测链消费的 review_gold_* 字符串列（指标口径与盲审 xlsx 路径一致）。
+    """
+
+    def _write_gold_jsonl(self, tmp_path, items):
+        import json
+
+        p = tmp_path / "gold.jsonl"
+        p.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in items) + "\n", encoding="utf-8")
+        return p
+
+    def _item(self, sample_id="ANN-0001"):
+        return {
+            "sample_id": sample_id,
+            "source": "zhilian",
+            "source_id": "S1",
+            "source_url": f"https://example.com/{sample_id}",
+            "job_title_raw": "Java开发工程师",
+            "detail_raw_text": "岗位职责：负责后端开发。任职要求：熟悉 Java、Spring。",
+            "gold_title": "Java开发工程师",
+            "gold_skills": ["Java", "Spring"],
+            "gold_bonus_skills": ["Docker"],
+            "gold_experience": {"min_years": 3, "max_years": 5},
+            "gold_education": "本科",
+            "gold_core_duties": ["负责后端开发", "性能调优"],
+        }
+
+    def test_maps_fields_and_serializes_arrays(self, tmp_path):
+        """字段名映射 + 数组/对象回序列化 + 标注员常量 A01。"""
+        import json
+
+        from tests.evaluate.run_manual_jd_eval import _load_gold_jsonl
+
+        p = self._write_gold_jsonl(tmp_path, [self._item()])
+        r = _load_gold_jsonl(p)[0]
+        assert r["sample_id"] == "ANN-0001"
+        assert r["review_gold_title"] == "Java开发工程师"
+        assert json.loads(r["review_gold_skills"]) == ["Java", "Spring"]
+        assert json.loads(r["review_gold_bonus_skills"]) == ["Docker"]
+        assert json.loads(r["review_gold_core_duties"]) == ["负责后端开发", "性能调优"]
+        assert json.loads(r["review_gold_experience"]) == {"min_years": 3, "max_years": 5}
+        assert r["review_gold_education"] == "本科"
+        assert r["annotator"] == "A01"
+        assert r["job_title_raw"] == "Java开发工程师"
+        assert r["detail_raw_text"] == "岗位职责：负责后端开发。任职要求：熟悉 Java、Spring。"
+
+    def test_null_experience_and_education_map_to_empty(self, tmp_path):
+        """gold_experience/gold_education 为 null 时映射为空串（无 gold 语义，见数据字典）。"""
+        from tests.evaluate.run_manual_jd_eval import _load_gold_jsonl
+
+        item = self._item()
+        item["gold_experience"] = None
+        item["gold_education"] = None
+        r = _load_gold_jsonl(self._write_gold_jsonl(tmp_path, [item]))[0]
+        assert r["review_gold_experience"] == ""
+        assert r["review_gold_education"] == ""
+
+    def test_real_110_gold_passes_preflight(self):
+        """仓库内 110 条 final gold：装载 110 行 + 预检 110/110 放行（不调用 LLM）。"""
+        import json
+
+        from tests.evaluate.run_manual_jd_eval import (
+            DEFAULT_GOLD_JSONL,
+            _load_gold_jsonl,
+            validate_rows,
+        )
+
+        assert DEFAULT_GOLD_JSONL.exists()
+        rows = _load_gold_jsonl(DEFAULT_GOLD_JSONL)
+        assert len(rows) == 110
+        v = validate_rows(rows)
+        assert v["issues"] == []
+        assert v["fully_valid_rows"] == 110
+        assert v["observed_annotators"] == ["A01"]
+        assert v["ready_for_real_run"] is True
+        # 空数组必须被有效解析（110 条均非空爬虫文本，stats 见导出报告）
+        assert all(json.loads(r["review_gold_skills"]) is not None for r in rows)
+
+
+class TestSixDimCompare:
+    """六维评测补齐（L1-1）比较函数单测：experience 区间重叠（D1-A）+ core_duties 词面 containment（D2-A）。"""
+
+    def test_experience_both_null_is_match(self):
+        from tests.evaluate.run_manual_jd_eval import experience_overlap
+
+        assert experience_overlap(None, None) is True
+
+    def test_experience_single_null_is_miss(self):
+        from tests.evaluate.run_manual_jd_eval import experience_overlap
+
+        assert experience_overlap({"min_years": 3, "max_years": 5}, None) is False
+        assert experience_overlap(None, {"min_years": 3, "max_years": 5}) is False
+
+    def test_experience_overlap_match(self):
+        from tests.evaluate.run_manual_jd_eval import experience_overlap
+
+        # 3-5 vs 4-6 相交
+        assert experience_overlap({"min_years": 3, "max_years": 5}, {"min_years": 4, "max_years": 6}) is True
+        # 3-5 vs 5+（开放）端点相接
+        assert experience_overlap({"min_years": 3, "max_years": 5}, {"min_years": 5, "max_years": None}) is True
+        # 1-2 vs 5+ 不相交
+        assert experience_overlap({"min_years": 1, "max_years": 2}, {"min_years": 5, "max_years": None}) is False
+
+    def test_core_duties_containment(self):
+        from tests.evaluate.run_manual_jd_eval import core_duties_compare
+
+        gold = ["负责平台核心模块开发", "主导数据治理与ETL开发", "代码评审与性能调优"]
+        pred = ["负责平台核心模块开发与性能调优", "主导数据治理与ETL开发"]
+        r = core_duties_compare(gold, pred)
+        assert r["tp"] == 2 and r["fn"] == 1  # 第三条 gold 未命中
+        assert r["fp"] == 0  # 预测两条均命中某 gold
+        assert 0.0 < r["f1"] < 1.0
+
+    def test_core_duties_empty_pred(self):
+        """预测未产出 core_duties → 全部 fn，F1=0（诚实报低，不伪造）。"""
+        from tests.evaluate.run_manual_jd_eval import core_duties_compare
+
+        r = core_duties_compare(["负责系统开发"], [])
+        assert r["tp"] == 0 and r["fn"] == 1 and r["fp"] == 0
+        assert r["f1"] == 0.0
+
+    def test_core_duties_exact_and_substring(self):
+        from tests.evaluate.run_manual_jd_eval import core_duties_compare
+
+        assert core_duties_compare(["系统开发"], ["负责系统开发"])["tp"] == 1
+        assert core_duties_compare(["系统开发"], ["系统开发"])["tp"] == 1
+
+    def test_core_duties_fuzzy_rephrase_hits(self):
+        """D2-A 细化（08-21）：措辞变体（词序重排/插入修饰）按 bigram 包含度命中。"""
+        from tests.evaluate.run_manual_jd_eval import core_duties_compare, duty_surface_hit
+
+        # 词序重排 + 动词前缀差异（纯子串不命中，实测近失对）
+        assert duty_surface_hit(
+            "跨团队协作推动项目交付", "主导跨团队协作与项目交付管理"
+        ) is True
+
+        r = core_duties_compare(
+            ["跨团队协作推动项目交付"], ["主导跨团队协作与项目交付管理"]
+        )
+        assert r["tp"] == 1 and r["fn"] == 0 and r["fp"] == 0
+
+    def test_core_duties_fuzzy_rejects_partial_relation(self):
+        """边界护栏：部分相关但语义不同的职责不得被模糊匹配吞掉（防指标虚高）。"""
+        from tests.evaluate.run_manual_jd_eval import duty_surface_hit
+
+        # "数据分析平台" vs "数据平台"：分析维度缺失，属不同职责
+        assert duty_surface_hit(
+            "数据分析平台建设", "负责公司级数据平台的建设与后续运维"
+        ) is False
+        assert duty_surface_hit("负责前端开发", "负责数据库运维") is False
+
+
+class TestJdLlmReportSixDim:
+    """evaluate.py HTML 渲染：六维启用后显示经验/核心职责列与口径说明，旧归档仍显示缺口。"""
+
+    def _archive(self, with_gap=True):
+        return {
+            "task": "jd_llm",
+            "method": "真实抽取（LLM + 规则兜底，2 条人工盲审）",
+            "samples": 2,
+            "fallback_samples": 0,
+            "failed_samples": 0,
+            "precision": 0.9,
+            "recall": 0.9,
+            "f1": 0.9,
+            "target_f1": 0.90,
+            "target_met": True,
+            "confusion": {"tp": 9, "fp": 1, "fn": 1},
+            "bonus": {"fp": 0, "fn": 0, "tp": 0, "precision": 1.0, "recall": 1.0, "f1": 1.0},
+            "title_raw_exact_accuracy": 1.0,
+            "title_normalized_accuracy": 1.0,
+            "education_raw_exact_accuracy": 1.0,
+            "skills_average_sample_f1": 0.9,
+            "per_sample_skills_f1": [0.9, 0.9],
+            "per_sample_bonus_f1": [],
+            "error_types": [],
+            "experience_accuracy": 0.5,
+            "experience_compared": 2,
+            "core_duties_micro": {"tp": 4, "fp": 1, "fn": 1, "precision": 0.8, "recall": 0.8, "f1": 0.8},
+            "experience_gap": ("Schema coverage gap" if with_gap else None),
+            "core_duties_gap": ("Schema coverage gap" if with_gap else None),
+        }
+
+    def test_new_archive_shows_six_dim_metrics(self):
+        import scripts.evaluate as ev
+
+        report = {"generated_at": "x", "target": "y", "results": [self._archive(with_gap=False)]}
+        html = ev.generate_html_report(report)
+        assert "经验（区间重叠）" in html
+        assert "核心职责 F1" in html
+        assert "0.5000" in html  # experience_accuracy
+        assert "0.8000" in html  # core_duties f1
+        assert "六维已启用" in html
+        assert "Schema 缺口" not in html
+
+    def test_legacy_archive_still_shows_gap_note(self):
+        import scripts.evaluate as ev
+
+        report = {"generated_at": "x", "target": "y", "results": [self._archive(with_gap=True)]}
+        html = ev.generate_html_report(report)
+        assert "Schema 缺口" in html
+
+
+    def test_new_archive_shows_aligned_metric_note(self):
+        """新归档（含 skills_micro_raw/hallucinated_fp）渲染 达标(对齐)/精选(raw)/幻觉 对照说明。"""
+        import scripts.evaluate as ev
+
+        a = self._archive(with_gap=False)
+        a["skills_micro_raw"] = {"tp": 9, "fp": 3, "fn": 1, "precision": 0.75, "recall": 0.9, "f1": 0.8182}
+        a["hallucinated_fp"] = {"ETL": 1}
+        html = ev.generate_html_report({"generated_at": "x", "target": "y", "results": [a]})
+        assert "词面真值对齐" in html
+        assert "精选对照(raw) F1 0.8182" in html
+        assert "幻觉(非词面 FP) 1 个" in html
+
+
+class TestAlignedFp:
+    """方案 A 词面真值对齐（PR #330）：FP 拆分为 词面豁免 / 非词面幻觉。"""
+
+    def test_word_in_text_exempted(self):
+        from tests.evaluate.run_manual_jd_eval import split_fp_aligned
+
+        fp = ["Docker", "Kubernetes", "Selenium"]
+        text = "熟悉 Docker、Kubernetes 容器编排，负责平台开发".lower()
+        in_text, halluc = split_fp_aligned(fp, text)
+        assert in_text == ["Docker", "Kubernetes"]
+        assert halluc == ["Selenium"]  # 正文无此技能 → 幻觉
+
+    def test_all_exempted_when_grounded(self):
+        from tests.evaluate.run_manual_jd_eval import split_fp_aligned
+
+        in_text, halluc = split_fp_aligned(["Java"], "岗位要求熟悉 Java 开发".lower())
+        assert in_text == ["Java"] and halluc == []
+
+    def test_english_word_boundary_halluc(self):
+        """词边界：'system' 不命中 'systematic' → 仍计幻觉（防子串误豁免）。"""
+        from tests.evaluate.run_manual_jd_eval import split_fp_aligned
+
+        in_text, halluc = split_fp_aligned(["system"], "需要 systematic testing 经验".lower())
+        assert "system" in halluc
+        assert "system" not in in_text

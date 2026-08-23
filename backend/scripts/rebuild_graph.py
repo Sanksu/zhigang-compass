@@ -54,6 +54,66 @@ async def _load_extracted() -> list[tuple[JDRaw, dict]]:
     return [(r, (r.snapshot or {}).get("extraction") or {}) for r in rows]
 
 
+_REVIEWED_STATES = (
+    "emerging", "stable", "declining", "archived", "rejected",
+)
+
+
+async def _restore_reviewed_statuses() -> int:
+    """迁移候选键后，按候选池回写审核状态。
+
+    图谱重建把全部岗位置为 active；已审核岗位（emerging/stable/declining/
+    archived/rejected）的状态存于 discovery_candidates，重放完成后恢复
+    Position.status。归一化版本升级时先以 JD 快照建立旧→新名称映射；仅一对一
+    映射自动改候选键，一对多或目标键冲突均保留旧键并记录告警，避免静默丢失
+    状态。仅更新重建后确实存在的节点（MATCH），无 JD 支撑的已审核岗位不创建
+    孤儿节点。返回回写岗位数。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.business import DiscoveryCandidate
+    from app.services.extraction.position_normalization import candidate_position_rename_plan
+
+    async with async_session_factory() as s:
+        candidates = (await s.scalars(select(DiscoveryCandidate))).all()
+        jd_rows = (await s.scalars(
+            select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
+        )).all()
+        by_name = {row.position_name: row for row in candidates}
+        renames, ambiguous = candidate_position_rename_plan(
+            set(by_name), [row.snapshot or {} for row in jd_rows],
+        )
+        for old_name, new_name in renames.items():
+            by_name[old_name].position_name = new_name
+            logger.info("重建前迁移候选岗位键: %s -> %s", old_name, new_name)
+        for old_name, targets in ambiguous.items():
+            logger.warning("候选键一对多/冲突，保留旧名称等待人工处理: %s -> %s", old_name, sorted(targets))
+        if renames:
+            await s.commit()
+        rows = [row for row in candidates if row.state in _REVIEWED_STATES]
+    pairs = [(r.position_name, r.state) for r in rows]
+    if not pairs:
+        return 0
+
+    tz_cn = timezone(timedelta(hours=8))
+
+    def _write() -> None:
+        now = datetime.now(tz_cn).isoformat(timespec="seconds")
+        with neo4j_driver.session() as session:
+            for name, state in pairs:
+                session.run(
+                    """
+                    MATCH (p:Position {name: $name})
+                    SET p.status = $state, p.state_updated_at = $now
+                    """,
+                    name=name, state=state, now=now,
+                )
+
+    await asyncio.to_thread(_write)
+    logger.info("回写审核状态 %s 个岗位（%s）", len(pairs), "/".join(_REVIEWED_STATES))
+    return len(pairs)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="重建图谱（全库级破坏操作）")
     parser.add_argument("--yes", action="store_true", help="跳过交互确认")
@@ -98,7 +158,7 @@ def main() -> None:
                 "raw_text": (row.snapshot or {}).get("raw_text", "") or row.raw_text or "",
             }
             try:
-                import_jd(session, extraction, evidence)
+                import_jd(session, extraction, evidence, row.snapshot)
             except Exception as e:
                 logger.exception("  [%s] 入图失败: %s %s", i, row.id, str(e)[:150])
             if i % 100 == 0:
@@ -109,9 +169,9 @@ def main() -> None:
     #    重建只重放 import_jd，若不补跑这些阶段，课程/关系边/归一化/快照
     #    在重建后全部缺失（08-12 重建丢失 Course 与五类关系的根因）。
     async def _post_rebuild() -> dict:
+        from app.services.evolution.evolved_from import derive_evolved_from
         from app.workers.tasks import (
             aggregate_positions,
-            derive_evolved_from,
             load_courses,
             snapshot_graph,
             sync_skill_normalization,
@@ -130,6 +190,9 @@ def main() -> None:
 
         results["relations"] = await asyncio.to_thread(_relations)
         results["evolved"] = await derive_evolved_from()
+        # 审核状态回写（08-16 风险 A）：重建把全部岗位置 active，候选池已审核
+        # 状态在此恢复，快照含最终状态（避免"已归档岗位复活为公开 active"）
+        results["reviewed_status"] = await _restore_reviewed_statuses()
         results["snapshot"] = await snapshot_graph({}, triggered_by="manual-rebuild")
         return results
 

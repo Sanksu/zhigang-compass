@@ -36,11 +36,32 @@ def _load_rsa_key(key_path: str) -> str:
     return p.read_text()
 
 
+def ensure_jwt_keys() -> None:
+    """启动时预加载 RSA 密钥对（main.lifespan 调用）。
+
+    密钥经 compose 挂载注入（pem 不入 git/镜像），挂载缺失时懒加载会把
+    FileNotFoundError 暴露成运行时 500——登录后 refresh 报「服务器内部错误」
+    且无任何线索（2026-08-22 事故：容器按旧 compose 创建缺少 keys 挂载）。
+    启动阶段 fail-fast，报错直接指向挂载修复动作。
+    """
+    try:
+        _load_rsa_key(settings.jwt_private_key_path)
+        _load_rsa_key(settings.jwt_public_key_path)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"JWT 签名密钥缺失（{exc.filename}）：密钥不入镜像，经 compose 挂载 "
+            "backend/keys:/app/keys 注入；确认宿主 backend/keys/ 下 private.pem 与 "
+            "public.pem 存在后执行 docker compose up -d --force-recreate api worker"
+        ) from exc
+
+
 def create_access_token(user_id: str, role: str) -> str:
     payload = {
         "sub": user_id,
         "role": role,
         "type": "access",
+        "aud": settings.jwt_audience,  # audience（08-15 中危修复：防 token 跨服务复用）
+        "jti": uuid.uuid4().hex,  # 登出黑名单依据（08-14 补：此前仅 refresh 有 jti，登出后 access 仍有效至过期）
         "iat": int(time.time()),
         "exp": int(time.time()) + settings.jwt_access_token_expire_minutes * 60,
     }
@@ -53,6 +74,7 @@ def create_refresh_token(user_id: str, role: str = "guest") -> str:
         "sub": user_id,
         "role": role,
         "type": "refresh",
+        "aud": settings.jwt_audience,
         "jti": uuid.uuid4().hex,  # 登出黑名单依据（TTL = refresh 有效期）
         "iat": int(time.time()),
         "exp": int(time.time()) + settings.jwt_refresh_token_expire_days * 86400,
@@ -72,7 +94,7 @@ class TokenExpiredError(Exception):
 def decode_token(token: str) -> Optional[dict]:
     try:
         public_key = _load_rsa_key(settings.jwt_public_key_path)
-        return jwt.decode(token, public_key, algorithms=["RS256"])
+        return jwt.decode(token, public_key, algorithms=["RS256"], audience=settings.jwt_audience)
     except jwt.ExpiredSignatureError:
         raise TokenExpiredError("Token 已过期") from None
     except jwt.PyJWTError:

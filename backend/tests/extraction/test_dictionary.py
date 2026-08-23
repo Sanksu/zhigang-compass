@@ -8,10 +8,11 @@
 from app.services.extraction.dictionary import (
     SOFT_SKILL_WHITELIST,
     _POSITION_PREFIX_RE,
+    _clean_variant,
     _normalize_base,
     _translate_en_position,
+    _variant_key,
     normalize_position_name,
-    normalize_proficiency,
     normalize_skill,
 )
 
@@ -173,6 +174,20 @@ class TestNormalizePositionName:
         # 正向：go/ui 关键词对目标岗仍命中
         assert normalize_position_name("Go开发工程师") == "Go开发工程师"
         assert normalize_position_name("golang开发") == "Go开发工程师"
+
+    def test_whitelist_backfill_20260814(self):
+        # 08-14 白名单补录（用户确认）：鸿蒙变体合并 / STEM讲师合并 / 统计师入图 /
+        # IC验证规范后缀；复合词限定防误吸
+        assert normalize_position_name("鸿蒙前端开发工程师") == "鸿蒙开发工程师"
+        assert normalize_position_name("鸿蒙全栈工程师") == "鸿蒙开发工程师"
+        assert normalize_position_name("鸿蒙应用开发工程师") == "鸿蒙开发工程师"
+        assert normalize_position_name("鸿蒙生态运营") == ""  # 非开发岗不误吸
+        assert normalize_position_name("课后STEM讲师") == "STEM讲师"
+        assert normalize_position_name("stem工程师") != "STEM讲师"  # 复合词防误吸
+        assert normalize_position_name("统计师") == "统计师"  # 修复不入图
+        assert normalize_position_name("生物统计师") == "生物统计师"  # 不被统计师族吸收
+        assert normalize_position_name("IC验证") == "IC验证工程师"
+        assert normalize_position_name("IC验证工程师") == "IC验证工程师"
 
     def test_untranslated_pure_en_filtered(self):
         # 问题 2：未翻译的纯英文岗位名直接拦截（不入图），不再靠停用词逐条点杀
@@ -470,7 +485,8 @@ class TestNormalizePositionName:
         assert normalize_position_name("策略分析师") == "策略分析师"
         assert normalize_position_name("可持续发展分析师") == "可持续发展分析师"
         # 英文未翻译岗 P2 一并停用（低频脏边，见清理决策）
-        assert normalize_position_name("AI Infra Engineer") == ""
+        # P10（08-16）例外：AI Infra Engineer 翻译丢后缀碎片 → AI基础设施工程师族
+        assert normalize_position_name("AI Infra Engineer") == "AI基础设施工程师"
         assert normalize_position_name("Manager, Logistics") == ""
         assert normalize_position_name("量化分析师") == "量化分析师"  # 细分族优先，不因"量化"停用词被拦
         # 2026-08-08 P0 停用词扩充后，细分分析师岗不受"分析师"兜底拦截影响
@@ -543,32 +559,161 @@ class TestNormalizeBase:
     def test_keyword_family(self):
         assert _normalize_base("数仓工程师") == "大数据开发工程师"
         assert _normalize_base("嵌入式工程师") == "嵌入式开发工程师"
+class TestAIGenericRouting:
+    """AI 泛词族按技能路由（T-04 第二批，2026-08-15）。
+
+    AI 前缀/拼凑岗位名（无空格变体不命中带空格关键词族）加入
+    _GENERIC_ROUTED_FAMILIES 后按 JD 技能路由到细分族；业务技能
+    不在路由表 → 返回空串不入图（与失真兜底族口径一致）。
+    """
+
+    def test_ai_generic_routes_to_sub_family(self):
+        assert normalize_position_name("AI应用", ["Python", "机器学习"]) == "算法工程师"
+        assert normalize_position_name("AI应用", ["Python", "计算机视觉"]) == "机器视觉算法工程师"
+        assert normalize_position_name("AI产品", ["大模型", "RAG"]) == "大模型算法工程师"
+        assert normalize_position_name("AI智能体", ["大模型", "Agent"]) == "大模型算法工程师"
+        assert normalize_position_name("AIoT", ["嵌入式", "C++"]) == "嵌入式开发工程师"
+        # P10（08-16）AI基础设施 已建独立族（AI Infra Engineer 翻译丢后缀），
+        # 无空格变体同族——不再走泛词路由（T-04 泛词条目已随 P10 清理）
+        assert normalize_position_name("AI基础设施", ["Kubernetes", "Docker"]) == "AI基础设施工程师"
+
+    def test_ai_generic_no_skills_returns_empty(self):
+        # 无技能/未命中路由 → 不入图（宁缺毋滥）
+        assert normalize_position_name("AI应用", None) == ""
+        assert normalize_position_name("应用AI客户", ["客户成功", "CRM"]) == ""
+        assert normalize_position_name("零售运营与AI参与", ["零售运营"]) == ""
+        assert normalize_position_name("云AI客户", ["销售"]) == ""
+
+    def test_ai_generic_spaced_variant_still_routes(self):
+        # 带空格变体（"AI 应用"）走算法族关键词 → 路由不回归
+        assert normalize_position_name("AI 应用", ["Python", "机器学习"]) == "算法工程师"
 
 
-class TestNormalizeProficiency:
-    """熟练度三档映射（了解/熟悉→初级、掌握→中级、精通→高级）。"""
+class TestP10FragmentFallback:
+    """P10 英文裸词/中文碎片兜底（2026-08-16 legacy 决策）。
 
-    def test_normalized_enum_passthrough(self):
-        assert normalize_proficiency("初级") == "初级"
-        assert normalize_proficiency("中级") == "中级"
-        assert normalize_proficiency("高级") == "高级"
+    LLM 把 "Senior Web Engineer" 压成裸词 "Web"、把 "AI Infra Engineer"
+    翻译成丢后缀的 "AI 基础设施"——兜底映射到规范岗位名。
+    """
 
-    def test_high_level_keywords(self):
-        assert normalize_proficiency("精通") == "高级"
-        assert normalize_proficiency("深入理解") == "高级"
-        assert normalize_proficiency("资深") == "高级"
+    def test_web_bare_word_mapped(self):
+        assert normalize_position_name("Web") == "Web开发工程师"
 
-    def test_mid_level_keywords(self):
-        assert normalize_proficiency("掌握") == "中级"
-        assert normalize_proficiency("熟练使用") == "中级"
-        assert normalize_proficiency("熟练掌握") == "中级"  # 高级词优先不误判
+    def test_ai_fragment_mapped(self):
+        assert normalize_position_name("AI 基础设施") == "AI基础设施工程师"
+        assert normalize_position_name("AI 生产力") == "AI生产力工程师"
+        assert normalize_position_name("AI与数据风险管理") == "AI与数据风险管理经理"
 
-    def test_low_level_keywords(self):
-        assert normalize_proficiency("熟悉") == "初级"
-        assert normalize_proficiency("了解") == "初级"
-        assert normalize_proficiency("入门") == "初级"
+    def test_web_no_false_positive(self):
+        # 词边界保护：不误伤 WebGL/WebSphere/web前端
+        assert normalize_position_name("WebGL开发工程师") == "WebGL开发工程师"
+        assert normalize_position_name("WebSphere管理员") == "WebSphere管理员"
+        assert normalize_position_name("web前端开发工程师") == "前端开发工程师"
 
-    def test_unknown_returns_none(self):
-        assert normalize_proficiency("") is None
-        assert normalize_proficiency("加分项") is None
-        assert normalize_proficiency(None) is None
+
+class TestPositionVariantCleaning:
+    """重复岗位对治理：字符级变体键/输出收敛/语义别名（2026-08-16）。"""
+
+    def test_variant_key_whitespace_and_fullwidth(self):
+        assert _variant_key("CMDB 发现") == _variant_key("CMDB发现") == "cmdb发现"
+        assert _variant_key("ＡＩ数据科学") == _variant_key("AI数据科学") == "ai数据科学"
+
+    def test_variant_key_keeps_ascii_punct(self):
+        # C++/C# 依赖 ASCII 标点，不得与 C/C# 合并
+        assert _variant_key("C++开发工程师") == "c++开发工程师"
+        assert _variant_key("C开发工程师") != _variant_key("C++开发工程师")
+
+    def test_variant_key_strips_cjk_punct(self):
+        assert _variant_key("产品、运营经理") == _variant_key("产品运营经理")
+
+    def test_clean_variant_removes_whitespace_only(self):
+        assert _clean_variant("AI 数据科学机器人教练") == "AI数据科学机器人教练"
+        assert _clean_variant("ＡＩ") == "AI"
+        assert _clean_variant("C++ 开发工程师") == "C++开发工程师"  # ASCII 标点保留
+
+    def test_normalize_converges_whitespace_variant(self):
+        assert normalize_position_name("AI 数据科学机器人教练") == "AI数据科学机器人教练"
+        assert normalize_position_name("React 前端开发工程师") == "React前端开发工程师"
+
+    def test_normalize_existing_paths_unaffected(self):
+        # 关键词/翻译/停用词路径零回归
+        assert normalize_position_name("前端开发工程师") == "前端开发工程师"
+        assert normalize_position_name("web") == "Web开发工程师"
+        assert normalize_position_name("Software Engineer") == ""
+        assert normalize_position_name("实习") == ""
+
+    def test_alias_redirect(self, monkeypatch):
+        # 语义别名：键/值为岗位名原文，入口按变体键收敛（临时注入）
+        from app.services.extraction import dictionary as d
+
+        monkeypatch.setitem(d._POSITION_ALIAS, "AI数据科学与机器人教练", "AI数据科学机器人教练")
+        monkeypatch.setattr(
+            d, "_POSITION_ALIAS_BY_VARIANT",
+            {d._variant_key(k): v for k, v in d._POSITION_ALIAS.items()},
+        )
+        assert normalize_position_name("AI 数据科学与机器人教练") == "AI数据科学机器人教练"
+        assert normalize_position_name("AI数据科学与机器人教练") == "AI数据科学机器人教练"
+        # 无关岗位名与英文翻译路径不受别名影响
+        assert normalize_position_name("前端开发工程师") == "前端开发工程师"
+        assert normalize_position_name("Software Engineer") == ""
+
+    def test_alias_table_consistency(self):
+        # CI 把关：键值非空、键值不同、变体键唯一、无自映射（空表幂等通过）。
+        # 跨组别名合法（AS400应用 → AS400应用程序 变体键不同，属归一目标迁移），
+        # 不强制 vk(键) == vk(值)；值须为清洗后规范名（无空白，防输出分裂）
+        from app.services.extraction import dictionary as d
+
+        seen: set[str] = set()
+        for k, v in d._POSITION_ALIAS.items():
+            assert k and v
+            assert k != v
+            vk = d._variant_key(k)
+            assert vk not in seen  # 一个变体键只能对应一个规范名
+            seen.add(vk)
+            assert d._clean_variant(v) == v  # 值须为清洗后形式（无空白）
+
+
+class TestP11FragmentRedirect:
+    """P11 岗位名碎片归位（2026-08-16 岗位处置）：团队名/技术栈名/产品名
+    按 JD 技能语义归位到规范岗位；词边界防误伤。"""
+
+    def test_en_fragments(self):
+        assert normalize_position_name("Staff", ["Java", "Spring"]) == "后端开发工程师"
+        assert normalize_position_name("UX") == "UX设计师"
+        assert normalize_position_name("UX设计师") == "UX设计师"  # 幂等
+
+    def test_cn_fragments(self):
+        assert normalize_position_name("FPGA团队") == "FPGA验证"
+        assert normalize_position_name("Kubernetes与OpenShift") == "DevOps工程师"
+        assert normalize_position_name("Endur技术") == "后端开发工程师"
+        assert normalize_position_name("STEM课程") == "STEM科技教育讲师"
+        assert normalize_position_name("仪器AIT") == "仪器AIT工程师"
+        assert normalize_position_name("OBD标定") == "OBD标定工程师"
+        assert normalize_position_name("TAK") == "移动开发工程师"
+        assert normalize_position_name("CFD分析") == "CFD分析工程师"
+
+    def test_no_false_positive(self):
+        # 词边界保护：stack 含 tak 不误伤；IT 泛词不拦（T-04 决策）；web 族先行
+        assert normalize_position_name("stack") == "stack"
+        assert normalize_position_name("IT系统管理员") == "IT系统管理员"
+        assert normalize_position_name("web前端开发工程师") == "前端开发工程师"
+
+
+class TestP11LateReview:
+    """Stage B 晚复核新对（2026-08-16）：AI基础设施支持归位 + AI客户类拦截。"""
+
+    def test_ai_infra_support_aliased(self):
+        assert normalize_position_name("AI基础设施支持") == "AI基础设施工程师"
+        assert normalize_position_name("AI 基础设施支持") == "AI基础设施工程师"
+
+    def test_ai_infra_no_space_keyword(self):
+        # 清洗后无空格输入命中 P10 无空格变体（#260 清洗暴露的兼容缺陷：
+        # 原关键词带空格，无空格输入剥壳后落入 AI 泛词族被路由为空）
+        assert normalize_position_name("AI基础设施") == "AI基础设施工程师"
+        assert normalize_position_name("AI 基础设施") == "AI基础设施工程师"
+        assert normalize_position_name("AI生产力") == "AI生产力工程师"
+        assert normalize_position_name("AI基础设施工程师") == "AI基础设施工程师"
+
+    def test_ai_customer_blocked(self):
+        assert normalize_position_name("AI客户") == ""
+        assert normalize_position_name("应用AI客户") == ""

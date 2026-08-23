@@ -1,0 +1,227 @@
+{
+  "metrics": {
+    "total_hallucination": 11,
+    "intercepted": 9,
+    "residual": 2,
+    "interception_rate": 0.8182,
+    "baseline_interception_rate": 0.0,
+    "false_interception": 0,
+    "stage_counts": {
+      "negation_asymmetry": 3,
+      "degree_level_conflict": 3,
+      "resample": 3
+    },
+    "stage_order": [
+      "negation_asymmetry",
+      "degree_level_conflict",
+      "resample"
+    ]
+  },
+  "details": [
+    {
+      "id": "neg-1",
+      "kind": "hallucination",
+      "premise": "该岗位要求候选人熟练掌握 Python 编程，负责推荐系统开发与模型训练，具备扎实的机器学习基础。",
+      "draft": "该岗位要求候选人熟练掌握 Python 编程，负责推荐系统开发与模型训练，无需任何机器学习基础。",
+      "expected": "negation_asymmetry",
+      "actual": "negation_asymmetry",
+      "intercepted": true,
+      "nli_label": "contradiction",
+      "nli_score": 0.9,
+      "signals": [
+        "negation_asymmetry(overlap=0.78)"
+      ],
+      "source": "occupation",
+      "llm_calls": 1
+    },
+    {
+      "id": "neg-2",
+      "kind": "hallucination",
+      "premise": "岗位要求熟悉容器化部署与 Kubernetes 集群管理，具备微服务架构经验。",
+      "draft": "岗位要求熟悉容器化部署与 Kubernetes 集群管理，不具备微服务架构经验。",
+      "expected": "negation_asymmetry",
+      "actual": "negation_asymmetry",
+      "intercepted": true,
+      "nli_label": "contradiction",
+      "nli_score": 0.9,
+      "signals": [
+        "negation_asymmetry(overlap=0.92)"
+      ],
+      "source": "occupation",
+      "llm_calls": 1
+    },
+    {
+      "id": "neg-3",
+      "kind": "hallucination",
+      "premise": "岗位负责爬虫系统开发，要求掌握 Scrapy 框架与反爬对抗经验。",
+      "draft": "岗位负责爬虫系统开发，不要求掌握 Scrapy 框架与反爬对抗经验。",
+      "expected": "negation_asymmetry",
+      "actual": "negation_asymmetry",
+      "intercepted": true,
+      "nli_label": "contradiction",
+      "nli_score": 0.9,
+      "signals": [
+        "negation_asymmetry(overlap=0.91)"
+      ],
+      "source": "occupation",
+      "llm_calls": 1
+    },
+    {
+      "id": "deg-1",
+      "kind": "hallucination",
+      "premise": "岗位要求本科及以上学历，负责数据分析与 SQL 开发，掌握可视化工具。",
+      "draft": "岗位负责数据分析与 SQL 开发，高中学历即可胜任，掌握可视化工具。",
+      "expected": "degree_level_conflict",
+      "actual": "degree_level_conflict",
+      "intercepted": true,
+      "nli_label": "contradiction",
+      "nli_score": 0.8,
+      "signals": [
+        "degree_level_conflict(premise=3,hypothesis=1)"
+      ],
+      "source": "occupation",
+      "llm_calls": 1
+    },
+    {
+      "id": "deg-2",
+      "kind": "hallucination",
+      "premise": "岗位要求硕士学历，负责大模型训练与推理优化。",
+      "draft": "岗位负责大模型训练与推理优化，大专学历即可。",
+      "expected": "degree_level_conflict",
+      "actual": "degree_level_conflict",
+      "intercepted": true,
+      "nli_label": "contradiction",
+      "nli_score": 0.8,
+      "signals": [
+        "degree_level_conflict(premise=4,hypothesis=2)"
+      ],
+      "source": "occupation",
+      "llm_calls": 1
+    },
+    {
+      "id": "deg-3",
+      "kind": "hallucination",
+      "premise": "This position requires a doctoral degree and expertise in reinforcement learning.",
+      "draft": "该岗位需要本科学历即可，负责强化学习相关工作。",
+      "expected": "degree_level_conflict",
+      "actual": "degree_level_conflict",
+      "intercepted": true,
+      "nli_label": "contradiction",
+      "nli_score": 0.8,
+      "signals": [
+        "degree_level_conflict(premise=5,hypothesis=3)"
+      ],
+      "source": "occupation",
+      "llm_calls": 1
+    },
+    {
+      "id": "neg-g-1",
+      "kind": "hallucination",
+      "premise": "Machine learning engineers build and deploy ML models for production systems, working with large-scale data pipelines.",
+      "draft": "机器学习工程师不需要了解任何编程语言。",
+      "expected": "resample",
+      "actual": "resample",
+      "intercepted": true,
+      "nli_label": "neutral",
+      "nli_score": 0.55,
+      "signals": [
+        "negation_assertion_without_grounding(overlap=0.00)"
+      ],
+      "source": "occupation",
+      "llm_calls": 2
+    },
+    {
+      "id": "neg-g-2",
+      "kind": "hallucination",
+      "premise": "DevOps engineers manage CI/CD pipelines and cloud infrastructure automation.",
+      "draft": "DevOps 工程师完全不需要了解任何云基础设施知识。",
+      "expected": "resample",
+      "actual": "resample",
+      "intercepted": true,
+      "nli_label": "neutral",
+      "nli_score": 0.55,
+      "signals": [
+        "negation_assertion_without_grounding(overlap=0.06)"
+      ],
+      "source": "occupation",
+      "llm_calls": 2
+    },
+    {
+      "id": "neg-g-3",
+      "kind": "hallucination",
+      "premise": "岗位要求掌握机器学习基础与数据处理能力。",
+      "draft": "该职位完全不涉及机器学习相关技能，候选人无需任何算法背景。",
+      "expected": "resample",
+      "actual": "resample",
+      "intercepted": true,
+      "nli_label": "neutral",
+      "nli_score": 0.55,
+      "signals": [
+        "negation_assertion_without_grounding(overlap=0.07)"
+      ],
+      "source": "occupation",
+      "llm_calls": 2
+    },
+    {
+      "id": "miss-1",
+      "kind": "hallucination",
+      "premise": "数据分析师负责业务数据报表开发，使用 SQL 提取数据并输出分析结论。",
+      "draft": "数据分析师负责业务数据报表开发，使用 SQL 提取数据并输出分析结论，且要求十年以上专家级经验。",
+      "expected": "pass",
+      "actual": "pass",
+      "intercepted": false,
+      "nli_label": "entailment",
+      "nli_score": 0.0,
+      "signals": [],
+      "source": "llm",
+      "llm_calls": 1
+    },
+    {
+      "id": "miss-2",
+      "kind": "hallucination",
+      "premise": "前端工程师负责 Web 应用界面开发与交互优化。",
+      "draft": "前端工程师负责 Web 应用界面开发与交互优化，同时必须通过内部保密级别最高的政审认证。",
+      "expected": "pass",
+      "actual": "pass",
+      "intercepted": false,
+      "nli_label": "entailment",
+      "nli_score": 0.0,
+      "signals": [],
+      "source": "llm",
+      "llm_calls": 1
+    }
+  ],
+  "controls": [
+    {
+      "id": "ctrl-1",
+      "kind": "control",
+      "intercepted": false,
+      "nli_label": "entailment",
+      "nli_score": 0.0,
+      "signals": [],
+      "source": "llm",
+      "llm_calls": 1
+    },
+    {
+      "id": "ctrl-2",
+      "kind": "control",
+      "intercepted": false,
+      "nli_label": "neutral",
+      "nli_score": 0.0,
+      "signals": [],
+      "source": "llm",
+      "llm_calls": 1
+    },
+    {
+      "id": "ctrl-3",
+      "kind": "control",
+      "intercepted": false,
+      "nli_label": "entailment",
+      "nli_score": 0.0,
+      "signals": [],
+      "source": "llm",
+      "llm_calls": 1
+    }
+  ],
+  "mismatch": []
+}

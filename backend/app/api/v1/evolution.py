@@ -4,18 +4,89 @@
 T+1 全量快照（设计文档 7.1）。
 """
 
+import asyncio
+import json
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.common import iso, paged_ok, paginate
+from app.core import runtime_config
 from app.api.deps import require_role
-from app.core.database import get_db
-from app.models.business import GraphVersion
-from app.schemas.common import ok, error
+from app.core.database import get_db, redis_client
+from app.core.errors import ERR_NOT_FOUND
+from app.models.business import EvolutionEvent, GraphVersion
+from app.schemas.common import error, ok
 
 router = APIRouter()
+
+# 演化列表缓存 TTL（默认 60s）：快照每日 05:00 更新，列表查询每请求全量加载
+# 快照建索引（O(快照×节点×边)），看板高频访问下重复计算（08-15 审查）。
+# 缓存是增强非正确性依赖：redis 不可用（测试环境/故障）时自动降级直查。
+# 08-16 管理后台可编辑（runtime_settings.json，重启生效）
+EVOLUTION_CACHE_TTL = runtime_config.get("evolution_cache_ttl", 60)
+
+
+async def _cache_get_json(key: str):
+    """Redis 缓存读取（JSON）；redis 不可用时返回 None（不阻塞主查询）。"""
+    try:
+        cached = await redis_client.get(key)
+        return json.loads(cached) if cached else None
+    except Exception:
+        return None
+
+
+async def _cache_set_json(key: str, data, ttl: int = EVOLUTION_CACHE_TTL) -> None:
+    """Redis 缓存写入；失败静默（缓存写失败不影响响应正确性）。"""
+    try:
+        await redis_client.set(key, json.dumps(data), ex=ttl)
+    except Exception:
+        pass
+
+
+# 快照全量加载单飞（沿袭 graph.py in-flight 表）：演化看板一次并发拉起
+# 4-5 个端点，各自全量加载快照建索引（每期 ~20k 节点+60k 边）会复制同量级
+# 副本并叠加 PG 传输——同进程并发 miss 合流，跟随者 await 首个加载结果
+# （08-15 演化看板 30s 超时/TTL 风暴教训在新模块的回归，第五轮审查 P1-3）
+_snapshots_inflight: dict[str, asyncio.Future] = {}
+
+
+async def _load_snapshots(db: AsyncSession) -> list | None:
+    """加载全部版本快照（时间升序）；无数据返回 None（调用方 404）。"""
+    inflight = _snapshots_inflight.get("all")
+    if inflight is not None:
+        return await inflight
+
+    future = asyncio.get_running_loop().create_future()
+    _snapshots_inflight["all"] = future
+    try:
+        rows = list(await db.scalars(
+            select(GraphVersion).order_by(GraphVersion.created_at.asc())
+        ))
+        snapshots = rows or None
+        future.set_result(snapshots)
+        return snapshots
+    except Exception as exc:
+        if not future.done():
+            future.set_exception(exc)
+        raise
+    finally:
+        _snapshots_inflight.pop("all", None)
+
+
+def _requires_edges(edges: list) -> list:
+    """REQUIRES 边集过滤（岗位→技能口径统一，与 trend_service A-1① 同约定）。
+
+    BELONGS_TO/ALTERNATIVE_OF/PREREQUISITE_OF/EVOLVED_FROM 等技能→技能边的
+    target 同为 sk_ 前缀，不过滤会混入「岗位」列/频次统计；旧快照边无
+    relation 标注则整体放行（历史口径兼容）。
+    """
+    if any(e.get("relation") for e in edges):
+        return [e for e in edges if e.get("relation") == "REQUIRES"]
+    return edges
 
 
 def _diff_snapshots(a: dict, b: dict) -> dict:
@@ -61,26 +132,24 @@ async def list_versions(
     user: dict = Depends(require_role("guest")),
 ):
     """图谱版本列表（分页，按创建时间倒序）。"""
-    total = await db.scalar(select(func.count()).select_from(GraphVersion))
-    rows = await db.scalars(
-        select(GraphVersion)
-        .order_by(GraphVersion.created_at.desc())
-        .offset((page - 1) * size)
-        .limit(size)
+    stmt = select(GraphVersion).order_by(GraphVersion.created_at.desc())
+    rows, total = await paginate(
+        db, stmt, page, size, count_stmt=select(func.count()).select_from(GraphVersion)
     )
     items = [
         {
             "version_id": v.id,
-            "created_at": v.created_at.isoformat() if v.created_at else None,
+            "created_at": iso(v.created_at),
             "change_summary": v.change_summary,
             "triggered_by": v.triggered_by,
             "node_added": v.node_added,
             "node_removed": v.node_removed,
             "node_changed": v.node_changed,
+            "data_warning": v.data_warning,
         }
         for v in rows
     ]
-    return ok(data={"items": items, "total": total or 0, "page": page, "size": size})
+    return paged_ok(items, total, page, size)
 
 
 @router.get("/diff")
@@ -94,8 +163,28 @@ async def version_diff(
     va = await db.get(GraphVersion, from_version)
     vb = await db.get(GraphVersion, to_version)
     if va is None or vb is None:
-        return error(4040, "版本不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "版本不存在", http_status=404)
     return ok(data=_diff_snapshots(va.snapshot_json, vb.snapshot_json))
+
+
+def _annotate_anti_fluctuation(
+    rows: list,
+    snapshots: list[dict],
+    signals: list,
+) -> None:
+    """抗波动补强：给信号打 warning 标 + 附 freq_ratio 展示口径（打标不剔除）。
+
+    - warning：解读期（最近两期快照）任一命中 data_warning → 所有信号打标
+      （z 的 current 与紧邻历史窗口都落在解读期内，证据量异常时读数不可靠）；
+    - freq_ratio：当期频次 / 当期 REQUIRES 总边数（分母 0 → None）。
+    """
+    interpretation_warning = any(v.data_warning for v in rows[-2:])
+    requires_total = sum(
+        1 for e in snapshots[-1].get("edges", []) if e.get("relation") == "REQUIRES"
+    ) if snapshots else 0
+    for s in signals:
+        s.warning = interpretation_warning
+        s.freq_ratio = round(s.current_freq / requires_total, 4) if requires_total else None
 
 
 @router.get("/signals")
@@ -109,23 +198,52 @@ async def evolution_signals(
     从 graph_versions 快照序列重建技能频次窗口 → EvolutionDetector 计算
     Z-score → 按 confidence 降序取 emerging（z>2.0）/ declining（z<-1.5）。
     快照不足 2 期（冷启动）时返回空列表，不武断判定。
+
+    双层抗波动：检测侧命中 data_warning 的快照整期剔除（不作为判定输入，
+    防总量骤变反向伪信号）；展示侧打标不剔除——解读期（最近两期快照）
+    任一命中时 warnings 透出全序列告警明细，信号照常输出仅打 warning 标。
     """
-    rows = await db.scalars(
+    # 全量快照重建窗口 + 逐技能 Z-score 是看板最重路径，此前无缓存每次
+    # 轮询都全量重算（第五轮审查 P1-3）；快照每日一更，TTL 缓存即可
+    cache_key = f"evolution:signals:{top_n}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+
+    rows = list(await db.scalars(
         select(GraphVersion).order_by(GraphVersion.created_at.asc())
-    )
+    ))
     snapshots = [v.snapshot_json or {} for v in rows]
 
     from app.services.evolution.trend_service import detect_signals_from_snapshots, rank_signals
 
-    signals = detect_signals_from_snapshots(snapshots)
+    # 检测侧抑制：命中 data_warning 的快照整期剔除（部分源故障的总量骤变
+    # 会反向放大占比产生伪 emerging，不作为判定输入）；展示侧仍打标不剔除
+    signals = detect_signals_from_snapshots(
+        snapshots, degraded_flags=[bool(v.data_warning) for v in rows],
+    )
     emerging = rank_signals(signals, "emerging", top_n)
     declining = rank_signals(signals, "declining", top_n)
+    _annotate_anti_fluctuation(rows, snapshots, [*emerging, *declining])
 
-    return ok(data={
+    warnings = [
+        {
+            "version_id": v.id,
+            "created_at": iso(v.created_at),
+            "warning": v.data_warning,
+        }
+        for v in reversed(rows)
+        if v.data_warning
+    ]
+
+    payload = {
         "window_count": len(snapshots),
         "emerging": [s.model_dump() for s in emerging],
         "declining": [s.model_dump() for s in declining],
-    })
+        "warnings": warnings,
+    }
+    await _cache_set_json(cache_key, payload)
+    return ok(data=payload)
 
 
 @router.get("/versions/{version_id}")
@@ -140,7 +258,7 @@ async def version_detail(
     """
     v = await db.get(GraphVersion, version_id)
     if v is None:
-        return error(4040, "版本不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "版本不存在", http_status=404)
 
     snapshot = v.snapshot_json or {}
     nodes = snapshot.get("nodes", [])
@@ -152,18 +270,150 @@ async def version_detail(
 
     return ok(data={
         "version_id": v.id,
-        "created_at": v.created_at.isoformat() if v.created_at else None,
+        "created_at": iso(v.created_at),
         "change_summary": v.change_summary,
         "triggered_by": v.triggered_by,
         "node_added": v.node_added,
         "node_removed": v.node_removed,
         "node_changed": v.node_changed,
+        "data_warning": v.data_warning,
         "stats": {"nodes": len(nodes), "edges": len(edges), "by_type": by_type},
         "nodes": [
             {"id": n.get("id"), "name": n.get("name", n.get("id")), "type": n.get("type")}
             for n in nodes if isinstance(n, dict)
         ],
     })
+
+
+@router.get("/events")
+async def evolution_events(
+    version_id: str | None = Query(default=None, description="按版本过滤；缺省返回全部（最新在前）"),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
+):
+    """谱系事件流（机制补强② born/merged/ended 落库数据）。
+
+    由 derive_evolved_from 在快照演化时写入 evolution_events；本端点只读。
+    """
+    stmt = select(EvolutionEvent).order_by(EvolutionEvent.id.desc()).limit(limit)
+    if version_id:
+        stmt = (
+            select(EvolutionEvent)
+            .where(EvolutionEvent.version_id == version_id)
+            .order_by(EvolutionEvent.id.desc())
+            .limit(limit)
+        )
+    rows = (await db.scalars(stmt)).all()
+    items = [
+        {
+            "id": e.id,
+            "version_id": e.version_id,
+            "event_type": e.event_type,
+            "from_name": e.from_name,
+            "to_name": e.to_name,
+            "created_at": iso(e.created_at),
+            "detail": e.detail,
+        }
+        for e in rows
+    ]
+    return ok(data={"items": items})
+
+
+def _build_snapshot_indexes(snapshots: list) -> list[dict]:
+    """一次性构建全部快照索引（08-15 超时根因修复）。
+
+    原实现每节点对全部边 sum 统计 freq——O(节点×边)（2 万×6 万×11 期）
+    秒级变分钟级，浏览器并发演化请求 30s 超时。索引化后：
+      nodes: id → 节点 dict（一次构建复用）
+      src/tgt: collections.Counter 边计数（O(边) 一次，节点查 freq O(1)）
+    """
+    indexes = []
+    for v in snapshots:
+        snapshot = v.snapshot_json or {}
+        nodes = {n.get("id"): n for n in snapshot.get("nodes", []) if isinstance(n, dict)}
+        edges = snapshot.get("edges", []) or []
+        indexes.append({
+            "v": v,
+            "nodes": nodes,
+            "src": Counter(e.get("source") for e in edges),
+            "tgt": Counter(e.get("target") for e in edges),
+        })
+    return indexes
+
+
+def _rebuild_node_evolution(
+    indexes: list[dict], node_id: str, edge_side: str = "source"
+) -> tuple[str, list]:
+    """从快照索引重建节点演化轨迹（岗位 source 侧 / 技能 target 侧）。
+
+    返回 (最近名称或 id, points)，points 时间升序
+    （date/version/freq=节点被引用边数/present=节点是否存在）。
+    """
+    name = None
+    points = []
+    for idx in indexes:
+        node = idx["nodes"].get(node_id)
+        if node is not None:
+            name = node.get("name") or name
+        counter = idx["src"] if edge_side == "source" else idx["tgt"]
+        v = idx["v"]
+        points.append({
+            "date": v.created_at.date().isoformat() if v.created_at else None,
+            "version": v.id,
+            "freq": counter.get(node_id, 0),
+            "present": node is not None,
+        })
+    return name or node_id, points
+
+
+def _rebuild_position_evolution(
+    indexes: list[dict], position_id: str
+) -> dict:
+    """从快照索引重建单个岗位的演化轨迹（position_evolution 与新列表端点共用）。"""
+    name, points = _rebuild_node_evolution(indexes, position_id, edge_side="source")
+    return {"position_id": position_id, "position_name": name, "points": points}
+
+
+async def _load_snapshots(db: AsyncSession) -> list | None:
+    """加载全部版本快照（时间升序）；无数据返回 None（调用方 404）。"""
+    rows = await db.scalars(
+        select(GraphVersion).order_by(GraphVersion.created_at.asc())
+    )
+    snapshots = [v for v in rows]
+    return snapshots or None
+
+
+def _top_nodes_by_heat(
+    indexes: list[dict], node_kind: str, id_prefix: str, edge_side: str
+) -> list[tuple[str, str]]:
+    """按快照出现热度全量排序（/positions 与 /skills 共用，分页切片由调用方做）。
+
+    热度 = 出现期数降序、最新引用边数降序；返回 [(id, 最近名称)]。
+    node_kind: 快照节点 type 值；id_prefix: id 前缀兜底；edge_side:
+    "src"/"tgt"——岗位 source 侧 / 技能 target 侧（与 _rebuild_node_evolution 一致）。
+    """
+    heat: dict[str, dict] = {}  # node_id -> {name, count, latest_freq}
+    for idx in indexes:
+        for nid, node in idx["nodes"].items():
+            if node.get("type") != node_kind and not nid.startswith(id_prefix):
+                continue
+            rec = heat.setdefault(nid, {"name": None, "count": 0, "latest_freq": 0})
+            rec["name"] = node.get("name") or rec["name"]
+            rec["count"] += 1
+            rec["latest_freq"] = idx[edge_side].get(nid, 0)
+    ranked = sorted(
+        heat.items(), key=lambda kv: (-kv[1]["count"], -kv[1]["latest_freq"])
+    )
+    return [(nid, rec["name"]) for nid, rec in ranked]
+
+
+def _slice_page(
+    ranked: list, page: int, size: int
+) -> list:
+    """分页切片（page 从 1 起，越界返回空列表）。"""
+    start = (page - 1) * size
+    return ranked[start : start + size]
 
 
 @router.get("/position/{id}/evolution")
@@ -177,30 +427,101 @@ async def position_evolution(
     返回 points（时间升序，date/version/freq=该岗位被引用边数），
     并附当前岗位名（快照中最近出现过的名称）。
     """
-    rows = await db.scalars(
-        select(GraphVersion).order_by(GraphVersion.created_at.asc())
-    )
-    snapshots = [v for v in rows]
-    if not snapshots:
-        return error(4040, "无图谱版本数据", http_status=404)
+    cache_key = f"evolution:position:{id}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return ok(data=cached)
 
-    name = None
-    points = []
-    for v in snapshots:
-        snapshot = v.snapshot_json or {}
-        nodes = {n.get("id"): n for n in snapshot.get("nodes", []) if isinstance(n, dict)}
-        node = nodes.get(id)
-        if node is not None:
-            name = node.get("name") or name
-        freq = sum(1 for e in snapshot.get("edges", []) if e.get("source") == id)
-        points.append({
-            "date": v.created_at.date().isoformat() if v.created_at else None,
-            "version": v.id,
-            "freq": freq,
-            "present": node is not None,
-        })
+    snapshots = await _load_snapshots(db)
+    if snapshots is None:
+        return error(ERR_NOT_FOUND, "无图谱版本数据", http_status=404)
+    indexes = _build_snapshot_indexes(snapshots)
+    data = _rebuild_position_evolution(indexes, id)
+    await _cache_set_json(cache_key, data)
+    return ok(data=data)
 
-    return ok(data={"position_id": id, "position_name": name or id, "points": points})
+@router.get("/positions")
+async def position_evolution_list(
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=10, ge=1, le=50),
+    q: str | None = Query(default=None, description="按岗位名称模糊过滤（08-16：下拉全量可搜索）"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
+):
+    """岗位演化历史列表：按快照出现热度（出现期数、最新引用边数）降序分页。
+
+    供演化看板默认展示——页面加载即有岗位演化轨迹，无需先查节点 ID。
+    岗位判定：快照节点 type=position（id 前缀 pos_ 兜底）。
+    08-16：limit 改 page/size 分页（演化看板翻页，10 项一页），响应含 total；
+    q 参数按名称模糊过滤（大小写不敏感），供下拉搜索。
+    """
+    cache_key = f"evolution:positions:{page}:{size}:{q or ''}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+
+    snapshots = await _load_snapshots(db)
+    if snapshots is None:
+        return error(ERR_NOT_FOUND, "无图谱版本数据", http_status=404)
+
+    indexes = _build_snapshot_indexes(snapshots)
+    ranked = _top_nodes_by_heat(indexes, "position", "pos_", "src")
+    # isinstance 防御：测试直调端点时 q 为 Query 对象（HTTP 下恒为 str）
+    if isinstance(q, str) and q.strip():
+        ql = q.strip().lower()
+        ranked = [(nid, name) for nid, name in ranked if name and ql in name.lower()]
+    total = len(ranked)
+    top = _slice_page(ranked, page, size)
+    data = {
+        "positions": [_rebuild_position_evolution(indexes, pid) for pid, _ in top],
+        "total": total,
+        "page": page,
+        "size": size,
+    }
+    await _cache_set_json(cache_key, data)
+    return ok(data=data)
+
+
+@router.get("/skills")
+async def skill_evolution_list(
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=10, ge=1, le=50),
+    q: str | None = Query(default=None, description="按技能名称模糊过滤（08-16：下拉全量可搜索）"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
+):
+    """技能频次趋势列表：按快照出现热度（出现期数、最新引用边数）降序分页。
+
+    与 /positions 同模式，供演化看板技能频次趋势默认展示。
+    技能 freq = 被引用边数（edges.target == skill，与 /trends 口径一致）。
+    技能判定：快照节点 type=skill（id 前缀 sk_ 兜底）。
+    08-16：limit 改 page/size 分页（演化看板翻页，10 项一页），响应含 total；
+    q 参数按名称模糊过滤（大小写不敏感），供下拉搜索。
+    """
+    cache_key = f"evolution:skills:{page}:{size}:{q or ''}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+
+    snapshots = await _load_snapshots(db)
+    if snapshots is None:
+        return error(ERR_NOT_FOUND, "无图谱版本数据", http_status=404)
+
+    indexes = _build_snapshot_indexes(snapshots)
+    ranked = _top_nodes_by_heat(indexes, "skill", "sk_", "tgt")
+    # isinstance 防御：测试直调端点时 q 为 Query 对象（HTTP 下恒为 str）
+    if isinstance(q, str) and q.strip():
+        ql = q.strip().lower()
+        ranked = [(nid, name) for nid, name in ranked if name and ql in name.lower()]
+    total = len(ranked)
+    top = _slice_page(ranked, page, size)
+    skills = []
+    for sid, _ in top:
+        name, points = _rebuild_node_evolution(indexes, sid, edge_side="target")
+        skills.append({"skill_id": sid, "skill_name": name, "points": points})
+    data = {"skills": skills, "total": total, "page": page, "size": size}
+    await _cache_set_json(cache_key, data)
+    return ok(data=data)
 
 
 @router.get("/trends")
@@ -210,10 +531,15 @@ async def skill_trends(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_role("guest")),
 ):
-    """技能频次趋势：从图谱版本快照序列统计该技能关联边数。
+    """技能频次趋势：从图谱版本快照序列统计该技能关联 REQUIRES 边数。
 
     skill 参数为技能节点 ID（sk_xxxx），由图谱 ID 生成器产出。
     """
+    cache_key = f"evolution:trends:{skill}:{window}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+
     # created_at 为 DateTime(timezone=True)，须用带时区的东八区 now 比较，否则偏移 8h
     since = datetime.now(timezone(timedelta(hours=8))) - timedelta(days=window)
     rows = await db.scalars(
@@ -224,7 +550,8 @@ async def skill_trends(
 
     points = []
     for v in rows:
-        edges = (v.snapshot_json or {}).get("edges", [])
+        # 仅 REQUIRES 边（P1-2 同根）：趋势曲线喂给桑基时间轴内嵌图，口径须一致
+        edges = _requires_edges((v.snapshot_json or {}).get("edges", []))
         freq = sum(
             1 for e in edges if e.get("target") == skill
         )
@@ -234,7 +561,84 @@ async def skill_trends(
             "freq": freq,
         })
 
-    return ok(data={"skill": skill, "window": window, "points": points})
+    data = {"skill": skill, "window": window, "points": points}
+    await _cache_set_json(cache_key, data)
+    return ok(data=data)
+
+
+def _build_skill_flow(
+    snapshots: list, skill_id: str, top_n: int
+) -> dict:
+    """从快照序列构建技能关联岗位动态变迁桑基图数据。
+
+    逐期统计各岗位对该技能的 REQUIRES 频次，取 Top-N 岗位入列；
+    相邻期次同名岗位连线（值=左侧期次频次）——纵向看单岗位持续需求厚度，
+    横向看关联岗位的进出（无连线的期次即新进入/已离开 Top 榜）。
+    """
+    periods: list[str | None] = []
+    per_period: list[tuple[Counter, dict]] = []  # (岗位→频次, id→名称)
+    skill_name = skill_id
+    for v in snapshots:
+        snap = v.snapshot_json or {}
+        nodes = {n.get("id"): n.get("name") for n in snap.get("nodes", []) if isinstance(n, dict)}
+        # 仅 REQUIRES 边（P1-2）：技能→技能边 target 同为 sk_ 前缀，不过滤会
+        # 以「岗位」身份混入桑基图，与 docstring/前端文案「REQUIRES 频次」不符
+        freq = Counter(
+            e.get("source")
+            for e in _requires_edges(snap.get("edges", []))
+            if e.get("target") == skill_id
+        )
+        if skill_id in nodes and nodes[skill_id]:
+            skill_name = nodes[skill_id]
+        periods.append(v.created_at.date().isoformat() if v.created_at else None)
+        per_period.append((freq, nodes))
+
+    flow_nodes: list[dict] = []
+    flow_links: list[dict] = []
+    for i, (freq, names) in enumerate(per_period):
+        for pid, f in freq.most_common(top_n):
+            flow_nodes.append({
+                "id": f"{pid}::{i}",
+                "name": names.get(pid) or pid,
+                "period_index": i,
+                "freq": f,
+            })
+    node_ids = {n["id"] for n in flow_nodes}
+    for i in range(len(per_period) - 1):
+        for pid, f in per_period[i][0].most_common(top_n):
+            cur, nxt = f"{pid}::{i}", f"{pid}::{i + 1}"
+            if cur in node_ids and nxt in node_ids:
+                flow_links.append({"source": cur, "target": nxt, "value": f})
+
+    return {
+        "skill_id": skill_id,
+        "skill_name": skill_name,
+        "periods": periods,
+        "top": top_n,
+        "nodes": flow_nodes,
+        "links": flow_links,
+    }
+
+
+@router.get("/skill/{id}/flow")
+async def skill_flow(
+    id: str,
+    top: int = Query(default=8, ge=1, le=20, description="每期取频次 Top-N 岗位"),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("guest")),
+):
+    """技能关联岗位动态变迁桑基图（列=快照期次，节点=Top-N 岗位，连线=相邻期同名岗位）。"""
+    cache_key = f"evolution:flow:{id}:{top}"
+    cached = await _cache_get_json(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+
+    snapshots = await _load_snapshots(db)
+    if snapshots is None:
+        return error(ERR_NOT_FOUND, "无图谱版本数据", http_status=404)
+    data = _build_skill_flow(snapshots, id, top)
+    await _cache_set_json(cache_key, data)
+    return ok(data=data)
 
 
 @router.get("/state-machine")
@@ -277,7 +681,7 @@ async def state_machine_overview(
             "from_state": (log.detail or {}).get("from_state"),
             "to_state": (log.detail or {}).get("to_state"),
             "reason": (log.detail or {}).get("reason", ""),
-            "created_at": log.created_at.isoformat() if log.created_at else None,
+            "created_at": iso(log.created_at),
         }
         for log in logs
     ]
@@ -287,14 +691,16 @@ async def state_machine_overview(
 @router.get("/watch")
 async def technology_watch_overview(
     db: AsyncSession = Depends(get_db),
-    limit: int = Query(default=20, ge=1, le=100),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=10, ge=1, le=100),
     user: dict = Depends(require_role("guest")),
 ):
     """观察池公开摘要 + MLI 产业化拐点排名（设计文档 §7.2.5，前端看板）。
 
     按技能聚合 technology_watch 各源最新信号值，用 MLI（媒介落差指数，四维
-    等权）排序输出 Top-N；mli > 0.6 标记 ready_to_industrialize。
+    等权）排序输出分页；mli > 0.6 标记 ready_to_industrialize。
     数据来自 watch_signal_daily 每日任务，仅返回公开摘要（无审核队列细节）。
+    08-16：limit 改 page/size 分页（演化看板翻页，10 项一页）。
     """
     from app.models.business import TechnologyWatch
     from app.services.discovery.mli import compute_mli
@@ -325,7 +731,9 @@ async def technology_watch_overview(
             "mli": mli.mli,
             "ready_to_industrialize": mli.ready_to_industrialize,
             "status": info["status"],
-            "last_signal_at": info["last_signal_at"].isoformat() if info.get("last_signal_at") else None,
+            "last_signal_at": iso(info.get("last_signal_at")),
         })
     items.sort(key=lambda x: (-x["mli"], x["skill_name"]))
-    return ok(data={"items": items[:limit], "total": len(items)})
+    total = len(items)
+    page_items = _slice_page(items, page, size)
+    return ok(data={"items": page_items, "total": total, "page": page, "size": size})

@@ -7,7 +7,8 @@
 - jd_llm  JD 解析：真实 LLM 盲审评测（读取 tests/evaluate/run_manual_jd_eval.py --run 的
           最近归档 reports/eval_jd_llm_*.json；只读不重跑，避免重复消耗 LLM 额度）
 - match   人岗匹配：total_score 与人工标注的 Spearman 秩相关 + 分类准确率 + Top-3 推荐准确率
-          （黄金集 data/golden_set/golden_set_match.jsonl，权重来自 configs/match_weights.json）
+          （默认黄金集 data/golden_set/golden_set_match.jsonl；生产权重口径传
+          --match-golden data/golden_set/golden_set_match_v2.jsonl，权重来自 configs/match_weights.json）
 - resume  简历提取：真实抽取（LLM + 规则兜底）vs 简历黄金集 F1
           （黄金集 data/golden_set/golden_set_resume.jsonl；未交付时跳过并注明）
 
@@ -22,6 +23,8 @@
     uv run python scripts/evaluate.py --task jd_llm     # 读最近 LLM 盲审归档
     uv run python scripts/evaluate.py --task resume
     uv run python scripts/evaluate.py --task match --semantic   # 匹配项注入 SBERT 语义增强
+    uv run python scripts/evaluate.py --task match --semantic \
+        --match-golden data/golden_set/golden_set_match_v2.jsonl   # 生产权重口径（BT v2 384 对）
 """
 
 import argparse
@@ -221,10 +224,11 @@ def _top3_accuracy(pairs: list[dict], scores: list[float]) -> tuple[float | None
     return (hits / total if total > 0 else None), total
 
 
-def eval_match(semantic: bool) -> dict:
+def eval_match(semantic: bool, golden: Path | None = None) -> dict:
     """人岗匹配评测：Spearman 秩相关 + 分类准确率 + Top-3 推荐准确率 + 混淆矩阵。"""
-    if not _MATCH_GOLDEN.exists():
-        return {"task": "match", "skipped": True, "reason": f"黄金集缺失: {_MATCH_GOLDEN.relative_to(_BACKEND_DIR)}"}
+    golden = golden or _MATCH_GOLDEN
+    if not golden.exists():
+        return {"task": "match", "skipped": True, "reason": f"黄金集缺失: {golden.relative_to(_BACKEND_DIR)}"}
     from app.services.matching.weights import load_sim_threshold, load_weights
 
     weights = load_weights()
@@ -236,7 +240,7 @@ def eval_match(semantic: bool) -> dict:
 
         sem = SkillEmbedder.get()
         method = "规则 + SBERT 语义增强"
-    pairs = load_pairs(_MATCH_GOLDEN)
+    pairs = load_pairs(golden)
     result = evaluate_pairs(pairs, weights, sem, threshold)
     scores = result["scores"]
     labels = result["labels"]
@@ -267,6 +271,7 @@ def eval_match(semantic: bool) -> dict:
         "task": "match",
         "skipped": False,
         "method": method,
+        "golden_set": golden.name,
         "spearman": round(result["spearman"], 4),
         "accuracy": round(result["accuracy"], 4),
         "target_accuracy": _MATCH_TARGET,
@@ -365,6 +370,25 @@ def generate_html_report(report: dict) -> str:
         ) or "<tr><td colspan='2'>无自动可分类错误</td></tr>"
         lowest_f1 = sorted(jd_llm.get("per_sample_skills_f1", []))[:3]
         lowest_html = "、".join(f"{x:.4f}" for x in lowest_f1) or "—"
+        # L1-1 六维已启用：旧归档带 gap 串（缺口提示）→ 仍渲染缺口；新归档显示口径说明
+        if jd_llm.get("experience_gap") or jd_llm.get("core_duties_gap"):
+            gap_note = (
+                f"Schema 缺口（未评测维度）：{esc(jd_llm.get('experience_gap', ''))}；"
+                f"{esc(jd_llm.get('core_duties_gap', ''))}"
+            )
+        else:
+            gap_note = "六维已启用：经验按区间重叠判定（D1-A）、核心职责按词面 containment（D2-A，L1-1 张恺天确认口径，2026-08-20）。"
+        # 0.90 技能达标口径（PR #330 张恺天确认，方案 A 词面真值对齐）：新归档含 skills_micro_raw
+        # → 展示 达标(对齐)/精选(raw) 对照 + 幻觉(非词面 FP) 数；旧归档无该字段则空
+        if jd_llm.get("skills_micro_raw"):
+            _raw_f1 = jd_llm["skills_micro_raw"].get("f1", 0)
+            _halls = sum((jd_llm.get("hallucinated_fp") or {}).values())
+            aligned_note = (
+                f"技能达标口径=词面真值对齐（PR #330）：达标 F1 {jd_llm['f1']:.4f}（目标 ≥0.90）；"
+                f"精选对照(raw) F1 {_raw_f1:.4f}；幻觉(非词面 FP) {_halls} 个"
+            )
+        else:
+            aligned_note = ""
         jd_llm_section = f"""
         <div class="card">
             <h2>JD 解析评测详情 · LLM 盲审（归档 {esc(jd_llm.get('archive', '?'))}）</h2>
@@ -375,10 +399,11 @@ def generate_html_report(report: dict) -> str:
             </table>
             <h3>分维度</h3>
             <table>
-                <tr><th>岗位名（原文对齐）</th><th>岗位名（归一化后）</th><th>学历</th><th>加分技能 F1</th><th>样本平均技能 F1</th></tr>
+                <tr><th>岗位名（原文对齐）</th><th>岗位名（归一化后）</th><th>学历</th><th>加分技能 F1</th><th>样本平均技能 F1</th><th>经验（区间重叠）</th><th>核心职责 F1</th></tr>
                 <tr><td>{jd_llm.get('title_raw_exact_accuracy', 0):.4f}</td><td>{jd_llm.get('title_normalized_accuracy', 0):.4f}</td>
                 <td>{jd_llm.get('education_raw_exact_accuracy', 0):.4f}</td><td>{bonus.get('f1', 0):.4f}</td>
-                <td>{jd_llm.get('skills_average_sample_f1', 0):.4f}</td></tr>
+                <td>{jd_llm.get('skills_average_sample_f1', 0):.4f}</td><td>{jd_llm.get('experience_accuracy', 0):.4f}（n={jd_llm.get('experience_compared', 0)}）</td>
+                <td>{jd_llm.get('core_duties_micro', {}).get('f1', 0):.4f}</td></tr>
             </table>
             <h3>混淆矩阵（必备技能多标签：TP / FP / FN）</h3>
             <table>
@@ -392,7 +417,8 @@ def generate_html_report(report: dict) -> str:
                 <tr><th>错误类型</th><th>条数</th></tr>
                 {err_rows}
             </table>
-            <p class="note">Schema 缺口（未评测维度）：{esc(jd_llm.get('experience_gap', ''))}；{esc(jd_llm.get('core_duties_gap', ''))}</p>
+            {gap_note}
+            {aligned_note and f'<p class="note">{esc(aligned_note)}</p>' or ''}
         </div>"""
 
     # --- 简历详情 ---
@@ -498,6 +524,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="准确率评测统一入口（设计文档 §13.3）")
     parser.add_argument("--task", choices=["jd", "jd_llm", "resume", "match", "all"], default="all")
     parser.add_argument("--semantic", action="store_true", help="匹配评测注入 SBERT 语义增强")
+    parser.add_argument(
+        "--match-golden",
+        type=Path,
+        default=None,
+        help="匹配黄金集路径（默认 v1 golden_set_match.jsonl；生产权重口径传 v2）",
+    )
     args = parser.parse_args()
 
     results = []
@@ -508,7 +540,7 @@ def main() -> None:
     if args.task in ("resume", "all"):
         results.append(eval_resume())
     if args.task in ("match", "all"):
-        results.append(eval_match(args.semantic))
+        results.append(eval_match(args.semantic, args.match_golden))
 
     report = {
         "generated_at": _now(),

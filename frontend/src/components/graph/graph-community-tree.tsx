@@ -7,6 +7,7 @@
  * 节点可折叠（expandAndCollapse）。暗色模式跟随 store theme 切换刷新。
  */
 import { useEffect, useRef, useState } from 'react'
+import { isDark } from '@/lib/utils'
 import * as echarts from 'echarts'
 import { GitFork, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,12 +23,11 @@ interface GraphCommunityTreeProps {
 }
 
 /** 暗色模式判定 — 跟随 documentElement 上的 .dark 类（与 graph-2d 同口径） */
-function isDark(): boolean {
-  return document.documentElement.classList.contains('dark')
-}
-
 export function GraphCommunityTree({ className }: GraphCommunityTreeProps) {
   const chartRef = useRef<HTMLDivElement>(null)
+  // D3: chartInstanceRef 单独管理当前 ECharts 实例引用，
+  // 避免 ResizeObserver 快照到已 dispose 的实例
+  const chartInstanceRef = useRef<echarts.ECharts | null>(null)
   const [tree, setTree] = useState<CommunityNode[] | null>(null)
   const [levels, setLevels] = useState<number[]>([])
   const [loading, setLoading] = useState(true)
@@ -57,11 +57,23 @@ export function GraphCommunityTree({ className }: GraphCommunityTreeProps) {
     }
   }, [])
 
+  // D3: ResizeObserver 独立 useEffect（不依赖 tree/theme），
+  // 通过 chartInstanceRef 安全访问当前实例（已 dispose 则为 null，?.resize() 跳过）
+  useEffect(() => {
+    const el = chartRef.current
+    if (!el) return
+    const observer = new ResizeObserver(() => chartInstanceRef.current?.resize())
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   // ECharts tree 渲染（依赖 tree + theme，主题切换时重建配色）
+  // D3: 实例生命周期独立于 ResizeObserver，不会相互干扰
   useEffect(() => {
     if (!chartRef.current || !tree || tree.length === 0) return
     const dark = isDark()
     const chart = echarts.init(chartRef.current)
+    chartInstanceRef.current = chart
     chart.setOption({
       tooltip: {
         trigger: 'item',
@@ -102,33 +114,31 @@ export function GraphCommunityTree({ className }: GraphCommunityTreeProps) {
         },
       ],
     })
-    const observer = new ResizeObserver(() => chart.resize())
-    observer.observe(chartRef.current)
     return () => {
-      observer.disconnect()
+      chartInstanceRef.current = null
       chart.dispose()
     }
   }, [tree, theme])
 
   return (
-    <Card className={className}>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm flex items-center gap-2">
-          <GitFork className="size-4 text-ink-faint" />
-          社区层级树
+    <Card className={`overflow-hidden ${className ?? ''}`}>
+      <CardHeader className="border-b border-atlas-grid bg-subtle/50 px-4 py-3">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <GitFork className="size-4 text-atlas-ocean" />
+          社区层级视图
         </CardTitle>
-        <CardDescription className="text-[11px]">
-          Louvain 层次化提取 · {levels.length > 0 ? `${levels.length} 层（L0 最细 → L${levels[levels.length - 1]} 最粗）` : 'dendrogram'}
+        <CardDescription className="font-mono text-[10px] tracking-[0.08em]">
+          LOUVAIN DENDROGRAM / {levels.length > 0 ? `${levels.length} 层（L0 最细 → L${levels[levels.length - 1]} 最粗）` : '待加载'}
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="p-4">
         {loading ? (
           <div className="flex items-center gap-2 py-6 text-xs text-ink-muted">
             <Loader2 className="size-3 animate-spin" />
             加载中…
           </div>
         ) : tree && tree.length > 0 ? (
-          <div ref={chartRef} className="h-56 w-full" />
+          <div ref={chartRef} className="h-56 w-full rounded-lg border border-border/60 bg-canvas" />
         ) : (
           <p className="py-6 text-xs text-ink-faint">
             社区层级索引未同步，请先运行{' '}

@@ -20,14 +20,22 @@ RAG 接地是"辅助确认"而非"硬门控"：未命中权威库/种子的 cand
 
 import asyncio
 import json
+import logging
+from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+from app.services.kg.fulltext import sanitize_fulltext
 
 import yaml
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.discovery.nli_guard import (
+    SUSPICIOUS_THRESHOLD,
+    detect_contradiction,
+)
 from app.services.discovery.schemas import RagGroundingResult
 
 _SEEDS_PATH = Path(__file__).resolve().parents[3] / "configs" / "emerging_seeds.yaml"
@@ -37,7 +45,6 @@ _SEEDS_PATH = Path(__file__).resolve().parents[3] / "configs" / "emerging_seeds.
 _MATCH_MIN_ALIAS_LEN = 3
 
 # Neo4j 全文查询（Lucene 语法）特殊字符：查询前剔除，避免语法异常
-_LUCENE_SPECIAL = frozenset('+-&|!(){}[]^"~*?:\\/')
 
 # ── 检索融合与缓存（2026-08-13 评审 P1-2 / P2）──
 # RRF 融合常数 k=60（业界默认）：跨源排序融合，消除语义余弦（0-1）与
@@ -49,15 +56,26 @@ _CACHE_TTL_SECONDS = 6 * 3600
 # 测试通过 monkeypatch 关闭（避免 fake db 用例命中真实缓存）
 _CACHE_ENABLED = True
 
+# ── 降级可观测性（第五轮审查 P1-5）──
+# 六条检索/接地降级路径曾全静默：语义路/Neo4j 全文/Redis/LLM 任一故障均无声
+# 降级，可在生产潜伏数周不被发现。此处累计各组件降级次数并打 warning，运维
+# 巡检：docker exec zhigang-api python -c "from app.services.discovery.grounding
+# import degradation_counts; print(dict(degradation_counts))"
+degradation_counts: Counter[str] = Counter()
+logger = logging.getLogger(__name__)
+
+
+def _record_degradation(component: str, error: Exception) -> None:
+    """记录一次降级（计数 + warning），不改变任何控制流。"""
+    degradation_counts[component] += 1
+    logger.warning("grounding 降级 [%s]: %s", component, error)
+
 
 def _norm(text: str) -> str:
     """归一化：小写 + 去首尾空白。"""
     return (text or "").strip().lower()
 
 
-def _sanitize_fulltext(q: str) -> str:
-    """剔除 Neo4j 全文查询的 Lucene 特殊字符，空串视为无关键词命中。"""
-    return "".join(ch for ch in q if ch not in _LUCENE_SPECIAL).strip()
 
 
 def match_seed(position_name: str, seeds: list[dict]) -> Optional[dict]:
@@ -156,17 +174,27 @@ def _merge_hits(hits: list[dict], limit: int) -> list[dict]:
     return out[:limit]
 
 
+def _escape_ilike(pattern: str) -> str:
+    """转义 ILIKE 通配符（%/_）与转义符本身（08-15 中危修复）。
+
+    ILIKE 的 %/_ 是通配符，用户输入含 % 或 _ 会变成模糊匹配（如搜索 "100%" 
+    匹配全部、"_" 匹配单字符）——词面检索应只做字面包含匹配。
+    """
+    return pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 async def _pg_ilike(db: AsyncSession, pos: str, limit: int) -> list[dict]:
     """PostgreSQL ILIKE 关键词检索（Neo4j 全文路的降级兜底）。"""
     from app.models.business import Occupation
     from sqlalchemy import cast
     from sqlalchemy.dialects import postgresql
 
+    escaped = _escape_ilike(pos)
     stmt = (
         select(Occupation)
         .where(
-            (Occupation.name.ilike(f"%{pos}%"))
-            | (cast(Occupation.aliases, postgresql.TEXT).ilike(f"%{pos}%"))
+            (Occupation.name.ilike(f"%{escaped}%", escape="\\"))
+            | (cast(Occupation.aliases, postgresql.TEXT).ilike(f"%{escaped}%", escape="\\"))
         )
         .limit(limit)
     )
@@ -201,7 +229,7 @@ async def _neo4j_fulltext(neo4j, pos: str, limit: int) -> list[dict]:
     neo4j 为驱动对象（.session() 上下文）。查询前剔除 Lucene 特殊字符；
     任一异常返回 []（由调用方降级 PostgreSQL ILIKE）。
     """
-    q = _sanitize_fulltext(pos)
+    q = sanitize_fulltext(pos)
     if not q:
         return []
     try:
@@ -209,8 +237,9 @@ async def _neo4j_fulltext(neo4j, pos: str, limit: int) -> list[dict]:
         # 查询范围扩大（limit×3，至少 30）：cjk 分词下精确别名命中可能不在
         # 全文高分前列，扩大候选集供 _merge_hits 的精确加权拣出
         rows = await asyncio.to_thread(_query_fulltext, neo4j, q, max(limit * 3, 30))
-    except Exception:
+    except Exception as e:
         # Neo4j 未同步/不可达：降级 ILIKE，不阻塞接地
+        _record_degradation("neo4j_fulltext", e)
         return []
     return [
         _normalize_hit(
@@ -250,8 +279,9 @@ async def _expand_fulltext_query(db: AsyncSession, pos: str) -> str:
         if not extras:
             return pos
         return " OR ".join([pos, *extras])
-    except Exception:
+    except Exception as e:
         # 扩展查询失败回退岗位名本身（扩展是增强，失败不放大/不阻塞检索面）
+        _record_degradation("query_expansion", e)
         return pos
 
 
@@ -319,7 +349,9 @@ async def _cache_get(pos: str, limit: int) -> Optional[list[dict]]:
             return None
         hits = json.loads(raw)
         return hits if isinstance(hits, list) else None
-    except Exception:
+    except Exception as e:
+        # Redis 读失败按未命中处理（下次检索回源并再次记录）
+        _record_degradation("redis_cache_get", e)
         return None
 
 
@@ -334,8 +366,9 @@ async def _cache_set(pos: str, limit: int, hits: list[dict]) -> None:
             _cache_key(pos, limit), json.dumps(hits, ensure_ascii=False),
             ex=_CACHE_TTL_SECONDS,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        # Redis 写失败跳过缓存（检索结果仍正确返回）
+        _record_degradation("redis_cache_set", e)
 
 
 async def search_authoritative(
@@ -383,9 +416,9 @@ async def search_authoritative(
     semantic_hits = []
     try:
         semantic_hits = await _semantic_search(db, pos, embedder, limit)
-    except Exception:
+    except Exception as e:
         # 向量列缺失/扩展不可用/模型不可用 → 语义路降级为关键词路
-        pass
+        _record_degradation("semantic_search", e)
     keyword_hits = await _keyword_search(neo4j, db, pos, limit)
     merged = _merge_hits([*semantic_hits, *keyword_hits], limit)
     if use_cache:
@@ -411,45 +444,95 @@ class _DefinitionDraft(BaseModel):
     text: str
 
 
+@dataclass
+class _DefinitionResult:
+    """定义草案生成结果。
+
+    text: 最终定义草案
+    source: 产出来源（llm=LLM 生成；occupation/seed=参考原文兜底）
+    nli_contradicted: 是否因 NLI 矛盾检测被截断回退参考原文（软门控打标）
+    """
+
+    text: str
+    source: str = "reference"
+    nli_contradicted: bool = False
+
+
+# NLI 软门控重采样指令：首稿被 NLI 判为可疑/矛盾时，要求 LLM 严格对齐
+# 参考信息重写（不引入参考中不存在的否定表述或降级的学历/经验要求）
+_RESAMPLE_SYSTEM_PROMPT = """你是岗位定义专家。你上次生成的岗位定义草案与参考信息
+存在矛盾，请重新基于参考信息改写，忠实反映参考内容：不要引入参考信息中不存在的
+否定表述，不得降低参考中的学历/经验要求，也不要添加参考未提及的硬性门槛。
+只输出定义本身，不要前缀如"岗位定义："。"""
+
+
 async def _generate_definition(
     position_name: str,
     seed: Optional[dict],
     occupation: Optional[dict],
     llm,
-) -> str:
-    """生成岗位定义草案。
+) -> _DefinitionResult:
+    """生成岗位定义草案（含 NLI 矛盾检测软门控，P0）。
 
-    优先级：LLM 聚合生成（可配置）→ 权威库定义原文 → 种子描述。
-    LLM 失败静默回退，不阻塞接地判定（RAG 接地是"辅助确认"而非硬门控）。
+    流程：LLM 生成（可配置）→ NLI 检测 vs 参考基座（图谱/权威库检索结果）
+    → 无矛盾放行 / 可疑触发一次重采样（对齐参考重写）→ 确认矛盾或重采样
+    后仍可疑 → 截断回退参考原文 + 打标 nli_contradicted。
+    LLM 失败静默回退原文，不阻塞接地判定（RAG 接地是"辅助确认"而非硬门控）。
     """
     reference = ""
+    source = "reference"
     if occupation and occupation.get("definition"):
         reference = occupation["definition"]
+        source = "occupation"
     elif seed and seed.get("description"):
         reference = seed["description"]
+        source = "seed"
 
     if not reference:
-        return ""
+        return _DefinitionResult(text="", source="")
 
     if llm is not None:
-        try:
-            # LLM 参与定义草案生成：英文 O*NET 定义 → 中文凝练
-            draft = await asyncio.to_thread(
-                llm.extract_structured,
-                _DEFINITION_TASK_TEMPLATE.format(
-                    position_name=position_name, reference=reference
-                ),
-                _DefinitionDraft,
-                system_prompt=_DEFINITION_SYSTEM_PROMPT,
-            )
-            if draft.text and draft.text.strip():
-                return draft.text.strip()
-        except Exception:
-            # LLM 失败静默回退到原文，不阻塞接地判定
-            pass
+        # 首稿 + 重采样至多各一次：NLI 软门控触发重采样（不重复调用，防放大成本）
+        for attempt in range(2):
+            try:
+                draft = await asyncio.to_thread(
+                    llm.extract_structured,
+                    _DEFINITION_TASK_TEMPLATE.format(
+                        position_name=position_name, reference=reference
+                    ),
+                    _DefinitionDraft,
+                    system_prompt=(
+                        _DEFINITION_SYSTEM_PROMPT
+                        if attempt == 0
+                        else _RESAMPLE_SYSTEM_PROMPT
+                    ),
+                )
+                text = (draft.text or "").strip()
+                if not text:
+                    break
+                result = detect_contradiction(reference, text)
+                if result.label == "contradiction":
+                    # 确认矛盾 → 强制截断回退参考原文 + 打标（软门控，不再重采样）
+                    return _DefinitionResult(
+                        text=reference, source=source, nli_contradicted=True
+                    )
+                if result.score < SUSPICIOUS_THRESHOLD:
+                    # 无矛盾信号（entailment/neutral）→ 放行
+                    return _DefinitionResult(text=text, source="llm")
+                if attempt == 0:
+                    # 可疑（未达确认级）→ 触发一次重采样（软门控第一级）
+                    continue
+                # 重采样后仍可疑 → 截断回退参考原文 + 打标（软门控第二级）
+                return _DefinitionResult(
+                    text=reference, source=source, nli_contradicted=True
+                )
+            except Exception as e:
+                # LLM 失败回退到原文，不阻塞接地判定（计数+告警）
+                _record_degradation("llm_definition", e)
+                break
 
     # 回退：权威库定义原文（英文）或种子描述
-    return reference
+    return _DefinitionResult(text=reference, source=source)
 
 
 async def ground_with_rag(
@@ -501,7 +584,9 @@ async def ground_with_rag(
         rag_matched=occupation is not None,
         matched_name=(occupation or seed or {}).get("name", ""),
         occupation_code=(occupation or {}).get("code", ""),
-        definition=definition,
+        definition=definition.text,
+        definition_source=definition.source,
+        nli_contradicted=definition.nli_contradicted,
     )
 
 

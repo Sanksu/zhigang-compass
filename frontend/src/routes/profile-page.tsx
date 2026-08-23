@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { ROLES } from '@/lib/constants'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -22,20 +23,12 @@ import {
   TableCell,
 } from '@/components/ui/table'
 import type { ResumeSummary } from '@/components/match/types'
-import { apiDelete, apiGet, apiPost, apiPut, ApiError, getAccessToken } from '@/lib/api'
+import {apiDelete, apiGet, apiPost, apiPut, getAccessToken, errMsg} from '@/lib/api'
+import type { components } from '@/types/api'
 
-/** /auth/me 返回的用户资料 */
-interface MeProfile {
-  id: string
-  username: string
-  role: string
-  email: string
-  phone: string
-  bio: string
-  created_at: string | null
-}
+/** /auth/me 返回的用户资料（契约 User） */
+type MeProfile = components['schemas']['User']
 
-const ROLE_LABEL: Record<string, string> = { admin: '管理员', user: '用户', guest: '访客' }
 
 export function ProfilePage() {
   /* ── 用户资料（/auth/me 真实数据） ── */
@@ -92,7 +85,7 @@ export function ProfilePage() {
 
   const loadResumes = useCallback(async () => {
     try {
-      const data = await apiGet<{ items: ResumeSummary[]; total: number }>('/resume/list')
+      const data = await apiGet<components['schemas']['ResumeListData']>('/resume/list')
       setResumes(data.items)
     } catch {
       setResumes([])
@@ -117,7 +110,7 @@ export function ProfilePage() {
       setProfile(updated)
       showToast('已保存')
     } catch (e) {
-      setSaveError(e instanceof ApiError ? e.message : '保存失败，请重试')
+      setSaveError(errMsg(e, '保存失败，请重试'))
     } finally {
       setSaving(false)
     }
@@ -148,7 +141,7 @@ export function ProfilePage() {
       setNewPwd('')
       setConfirmPwd('')
     } catch (e) {
-      setPwdError(e instanceof ApiError ? e.message : '密码修改失败，请重试')
+      setPwdError(errMsg(e, '密码修改失败，请重试'))
     } finally {
       setPwdSubmitting(false)
     }
@@ -179,7 +172,7 @@ export function ProfilePage() {
       setResumes((prev) => prev.filter((r) => r.id !== id))
       showToast('已删除')
     } catch (e) {
-      showToast(e instanceof ApiError ? e.message : '删除失败')
+      showToast(errMsg(e, '删除失败'))
     } finally {
       setDeletingId(null)
     }
@@ -238,13 +231,13 @@ export function ProfilePage() {
       showToast('简历已更新')
       await loadResumes()
     } catch (e) {
-      setEditError(e instanceof ApiError ? e.message : '保存失败，请重试')
+      setEditError(errMsg(e, '保存失败，请重试'))
     } finally {
       setSavingEdit(false)
     }
   }
 
-  const roleLabel = profile ? ROLE_LABEL[profile.role] ?? profile.role : ''
+  const roleLabel = profile ? ROLES[profile.role as keyof typeof ROLES] ?? profile.role : ''
 
   return (
     <div className="space-y-6">

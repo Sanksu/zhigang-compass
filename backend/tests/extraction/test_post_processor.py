@@ -99,21 +99,79 @@ class TestStopwordInterception:
         assert out.skills == []
 
     def test_whitelist_word_never_intercepted(self):
-        # 白名单词与泛词同源（操作系统/系统），整体保护不误杀
+        # 08-14 迭代：SKILL_STOPWORDS 优先于白名单保护（is_noise_skill 顺序调整），
+        # 基础词"操作系统"停用后判噪过滤；路由依赖词（计算机视觉等）仍保护
         result = JDExtractionResult(
             position_name="",
-            skills=[SkillExtracted(name="操作系统")],
+            skills=[SkillExtracted(name="操作系统"), SkillExtracted(name="计算机视觉")],
         )
         out = post_process(result)
-        assert [s.name for s in out.skills] == ["操作系统"]
+        assert [s.name for s in out.skills] == ["计算机视觉"]
 
     def test_requirement_fragment_filtered(self):
         result = JDExtractionResult(
             position_name="",
-            requirements=[REQUIRESRelation(skill_name="监控", necessity="must")],
+            requirements=[REQUIRESRelation(skill_name="告警", necessity="must")],
         )
         out = post_process(result)
         assert out.requirements == []
+
+    def test_bare_fragment_stopwords(self):
+        # 08-15 迭代二：裸碎片词（模型把"模型对齐/模型量化"拆出裸词"对齐/量化"）停用；
+        # 精确匹配不伤"模型对齐/量化交易"类复合词
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="对齐"), SkillExtracted(name="模型对齐")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["模型对齐"]
+
+    def test_course_marketing_words_filtered(self):
+        # P7（08-15 用户要求）：课程营销/学历词被 LLM 误抽为技能时剔除——
+        # 专转本/专升本（学历提升课程主题）、小白/零基础（入门营销词）
+        result = JDExtractionResult(
+            position_name="",
+            skills=[
+                SkillExtracted(name="专转本"),
+                SkillExtracted(name="专升本"),
+                SkillExtracted(name="小白"),
+                SkillExtracted(name="零基础"),
+            ],
+        )
+        out = post_process(result)
+        assert out.skills == []
+
+    def test_course_marketing_compound_not_hit(self):
+        # 精确匹配不伤复合表达中的合法技能词（"零基础入门"中的入门课程）
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="零基础入门")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["零基础入门"]
+
+    def test_teaching_domain_words_filtered(self):
+        # P9（08-16 图谱治理）：教学法/教育主题词被课程文本误抽为技能时剔除
+        result = JDExtractionResult(
+            position_name="",
+            skills=[
+                SkillExtracted(name="项目化教学"),
+                SkillExtracted(name="教育信息化"),
+                SkillExtracted(name="教学反思"),
+                SkillExtracted(name="计算机二级考试"),
+            ],
+        )
+        out = post_process(result)
+        assert out.skills == []
+
+    def test_teaching_pattern_not_hit_real_skills(self):
+        # 精确匹配不伤真实技能（模式不含"学习"——机器学习/深度学习安全）
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="机器学习"), SkillExtracted(name="深度学习")],
+        )
+        out = post_process(result)
+        assert [s.name for s in out.skills] == ["机器学习", "深度学习"]
 
 
 class TestDedupSkills:
@@ -185,13 +243,14 @@ class TestSkillModifierCompoundWords:
         assert [s.name for s in out.skills] == ["Kubernetes"]
 
     def test_alias_key_not_stripped(self):
-        # "性能优化" 本身是别名键：先命中别名，不能被剥成碎片
+        # "性能优化" 命中别名归一为"性能调优"；后者为停用词（08-15 实测解除后
+        # 净效应为负——1 TP vs 5 FP 级误抽），归一后判噪过滤
         result = JDExtractionResult(
             position_name="",
             skills=[SkillExtracted(name="性能优化")],
         )
         out = post_process(result)
-        assert [s.name for s in out.skills] == ["性能调优"]
+        assert [s.name for s in out.skills] == []
 
     def test_whitelist_word_with_modifier_preserved(self):
         # 白名单词带修饰词（系统运维）整体保护，不剥离
@@ -314,3 +373,81 @@ class TestPostProcess:
         )
         out = post_process(result)
         assert [s.name for s in out.skills] == ["可靠性测试", "Python"]
+
+
+class TestGreySkillRegistration:
+    """灰名单验证区：白名单未命中但非噪音技能自动注册（新岗位发现优化 ②）。"""
+
+    def setup_method(self):
+        from app.services.extraction.dictionary import clear_grey_skills
+        clear_grey_skills()
+
+    def teardown_method(self):
+        from app.services.extraction.dictionary import clear_grey_skills
+        clear_grey_skills()
+
+    def test_non_whitelist_valid_skill_registered(self):
+        """白名单外、非噪音技能（新兴技术）自动注册进灰名单。"""
+        from app.services.extraction.dictionary import grey_skills, is_grey_skill
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="量子计算")],
+        )
+        post_process(result)
+        assert is_grey_skill("量子计算")
+        assert ("量子计算", 1) in grey_skills()
+
+    def test_whitelist_skill_not_registered(self):
+        """白名单技能不进入灰名单（非漏召回）。"""
+        from app.services.extraction.dictionary import is_grey_skill
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="Redis")],
+        )
+        post_process(result)
+        assert not is_grey_skill("Redis")
+
+    def test_noise_skill_not_registered(self):
+        """泛词噪音不注册（is_valid_skill_name 已拦截，不进入灰名单）。"""
+        from app.services.extraction.dictionary import grey_skills
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="熟悉"), SkillExtracted(name="框架")],
+        )
+        post_process(result)
+        assert grey_skills() == []
+
+    def test_hit_count_accumulates(self):
+        """同一技能多次出现计数累加（供观测池按频次截断）。"""
+        from app.services.extraction.dictionary import grey_skills
+        for _ in range(3):
+            result = JDExtractionResult(
+                position_name="",
+                skills=[SkillExtracted(name="量子计算")],
+            )
+            post_process(result)
+        assert ("量子计算", 3) in grey_skills()
+
+    def test_requirements_registered_too(self):
+        """requirements 中的白名单外技能同样注册。"""
+        from app.services.extraction.dictionary import is_grey_skill
+        result = JDExtractionResult(
+            position_name="",
+            requirements=[REQUIRESRelation(skill_name="量子计算", necessity="must")],
+        )
+        post_process(result)
+        assert is_grey_skill("量子计算")
+
+    def test_graduate_exempts_further_registration(self):
+        """人工毕业（补录白名单）后不再反复挂起在验证区。"""
+        from app.services.extraction.dictionary import (
+            graduate_grey_skill,
+            grey_skills,
+        )
+        graduate_grey_skill("量子计算")
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="量子计算")],
+        )
+        post_process(result)
+        assert grey_skills() == []

@@ -6,11 +6,16 @@
 聚合口径：
 - Position.freq           = 命中该岗位名的 JD 条数（Evidence 数）
 - Position.required_years = 该岗位 JD 经验要求最小年限的中位数（无则保留原值）
-- Position.last_updated   = 本次聚合时间
+- Position.last_updated   = 该岗位最近一条 JD 的采集时间（crawled_at 规范化 ISO；
+                            无 JD 时间回退本次聚合时间）——供匹配引擎时效衰减
+                            （180d→0.95 / 365d→0.85）判定。此前写"本次聚合时间"
+                            导致岗位恒新鲜、衰减永不触发（08-14 修复）
 - Position.soft_skills    = 软技能白名单（按 JD 命中数降序，设计文档 9.2 节）
 - REQUIRES.weight         = must=0.8 / nice=0.4（沿用图谱现有两档约定）
 - REQUIRES.necessity      = P2-D 三重条件判 must：hit≥3 样本保护 + JD 覆盖率
                             （hit/jd_count）≥15% + must 标注占比（must_count/hit）>1/2；
+                            单源/少源岗位（jd_count≤2）样本不足，继承抽取层 must 标注
+                            （08-20 修复，避免必备技能全被压成加分）；
                             大岗位（jd_count≥10）hit<2 的一次性噪声边不生成
 - REQUIRES.source_count   = 命中该技能的独立招聘源数
 
@@ -25,14 +30,20 @@ weight 取离散两档而非出现率连续值的原因：与匹配引擎 CII �
 from __future__ import annotations
 
 import re
+from app.services.kg.aggregation_data import _ALLOWED_SKILL_CATEGORIES
+
 from collections import Counter, defaultdict
+from datetime import datetime
 from statistics import median
+
+from app.services.data_quality.update_status import parse_crawled_at
 
 from app.services.extraction.dictionary import (
     SOFT_SKILL_WHITELIST,
     skill_category,
 )
-from app.services.extraction.post_processor import _is_valid_skill_name, canonical_skill_name
+from app.services.extraction.post_processor import is_valid_skill_name, canonical_skill_name
+from app.services.proficiency import normalize_proficiency_level
 
 # 图谱 weight 两档约定
 _WEIGHT_MUST = 0.8
@@ -44,6 +55,10 @@ _WEIGHT_NICE = 0.4
 _MUST_THRESHOLD = 0.5
 _COVERAGE_THRESHOLD = 0.15
 _MIN_HIT_FOR_MUST = 3
+# 单源/少源岗位兜底（08-20 修复）：jd_count ≤ 2 时岗位 JD 样本不足以做
+# 跨 JD 多数表决（任何技能 hit≤jd_count≤2 <3，三重条件必然判 nice），
+# 直接继承抽取层的 must 标注（must_count>0 即 must），避免必备技能全被压成加分
+_SMALL_JD_THRESHOLD = 2
 # P2-D 低频边过滤：jd_count≥10 的岗位，hit<2 的边视为一次性噪声不生成
 # （jd_count<10 的小岗位样本不足，全量保留）
 _MIN_HIT_EDGE = 2
@@ -51,13 +66,22 @@ _MIN_JD_FOR_FILTER = 10
 
 
 def _is_must(sa: SkillAgg, jd_count: int) -> bool:
-    """技能边是否判 must（P2-D 聚合口径）。
+    """技能边是否判 must（P2-D 聚合口径 + 单源岗位兜底）。
 
-    must 判定三重条件：
+    样本充分时（jd_count > _SMALL_JD_THRESHOLD）沿用三重条件：
     1. hit ≥ 3：样本保护，防 1-2 次出现的技能因单条 JD 标注虚高判 must
     2. hit/jd_count ≥ 15%：技能须在该岗位足够比例的 JD 中出现（普适要求）
     3. must_count/hit > 50%：出现该技能的 JD 中超半数标 must
+
+    单源/少源岗位兜底（08-20 修复）：jd_count ≤ _SMALL_JD_THRESHOLD 时，
+    岗位 JD 样本不足以做跨 JD 多数表决（任何技能 hit≤jd_count≤2 <3，
+    三重条件必然判 nice），直接继承抽取层的 must 标注——该岗位任一 JD
+    将技能标 must（must_count > 0）即判 must，否则 nice。
     """
+    if jd_count <= 0:
+        return False
+    if jd_count <= _SMALL_JD_THRESHOLD:
+        return sa.must_count > 0
     if sa.hit < _MIN_HIT_FOR_MUST:
         return False
     coverage = sa.hit / jd_count if jd_count else 0
@@ -77,122 +101,18 @@ def _is_cross_domain(pos: str, skill_name: str) -> bool:
     return cat != "未分类" and cat not in allowed
 
 
-# P2-C 岗位族 → 期望技能类别白名单（评估报告 4.2 跨域污染治理）。
-# 已分类技能不在对应岗位族白名单内 → 降权为 nice；未配置的岗位族不做跨域判定。
-_ALLOWED_SKILL_CATEGORIES: dict[str, set[str]] = {
-    "前端开发工程师": {"前端", "编程语言", "计算机基础", "网络/协议", "移动/桌面", "测试",
-                   "音视频", "游戏/数字孪生", "工程协作", "数据库", "云原生/DevOps", "AI/机器学习", "安全"},
-    "后端开发工程师": {"后端", "编程语言", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
-                   "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作", "安全", "移动/桌面"},
-    "Java开发工程师": {"后端", "编程语言", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
-                   "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作", "安全", "移动/桌面"},
-    "Go开发工程师": {"后端", "编程语言", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
-                 "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作"},
-    "Python开发工程师": {"后端", "编程语言", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
-                    "网络/协议", "测试", "大数据", "AI/机器学习", "数据分析/商业", "工程协作"},
-    "C++开发工程师": {"编程语言", "后端", "计算机基础", "硬件/芯片", "云原生/DevOps", "网络/协议",
-                  "消息/中间件", "AI/机器学习", "智能驾驶/机器人", "数据库"},
-    "算法工程师": {"AI/机器学习", "编程语言", "大数据", "计算机基础", "智能驾驶/机器人", "数据分析/商业",
-              "数据库", "网络/协议", "消息/中间件", "音视频", "工程协作", "云原生/DevOps", "后端", "测试"},
-    # P1-A 算法细分岗（评估报告 3.2 算法 28 合一）
-    "大模型算法工程师": {"AI/机器学习", "编程语言", "大数据", "计算机基础", "数据分析/商业", "数据库",
-                   "云原生/DevOps", "工程协作", "网络/协议"},
-    "自动驾驶算法工程师": {"AI/机器学习", "智能驾驶/机器人", "编程语言", "计算机基础", "硬件/芯片",
-                   "网络/协议", "音视频"},
-    "机器视觉算法工程师": {"AI/机器学习", "计算机基础", "编程语言", "智能驾驶/机器人", "音视频",
-                   "硬件/芯片"},
-    "推荐搜索算法工程师": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础", "数据库",
-                   "网络/协议"},
-    "语音算法工程师": {"AI/机器学习", "音视频", "编程语言", "计算机基础", "智能驾驶/机器人"},
-    "机器人算法工程师": {"AI/机器学习", "智能驾驶/机器人", "编程语言", "计算机基础", "硬件/芯片",
-                   "网络/协议"},
-    "测试工程师": {"测试", "编程语言", "计算机基础", "网络/协议", "云原生/DevOps", "工程协作",
-              "数据库", "后端", "AI/机器学习", "安全"},
-    "网络安全工程师": {"安全", "网络/协议", "编程语言", "云原生/DevOps", "计算机基础", "工程协作",
-                 "数据库", "后端", "AI/机器学习"},
-    "网络工程师": {"网络/协议", "云原生/DevOps", "计算机基础", "安全", "编程语言", "工程协作"},
-    "大数据开发工程师": {"大数据", "数据库", "编程语言", "云原生/DevOps", "消息/中间件", "计算机基础",
-                   "AI/机器学习", "数据分析/商业", "后端", "网络/协议", "工程协作"},
-    "数据分析师": {"数据分析/商业", "数据库", "编程语言", "大数据", "AI/机器学习", "计算机基础",
-              "工程协作", "网络/协议"},
-    "架构师": {"云原生/DevOps", "后端", "数据库", "消息/中间件", "大数据", "编程语言", "计算机基础",
-           "网络/协议", "AI/机器学习", "安全", "工程协作", "测试", "移动/桌面", "音视频", "前端"},
-    "运维工程师": {"云原生/DevOps", "网络/协议", "编程语言", "计算机基础", "数据库", "消息/中间件",
-              "安全", "测试", "大数据", "工程协作"},
-    "DevOps工程师": {"云原生/DevOps", "网络/协议", "编程语言", "计算机基础", "数据库", "消息/中间件",
-                "安全", "测试", "大数据", "工程协作", "AI/机器学习"},
-    "嵌入式开发工程师": {"硬件/芯片", "编程语言", "计算机基础", "智能驾驶/机器人", "网络/协议",
-                   "AI/机器学习", "测试", "移动/桌面", "音视频"},
-    "硬件工程师": {"硬件/芯片", "编程语言", "计算机基础", "网络/协议", "智能驾驶/机器人", "AI/机器学习"},
-    "数据库管理员": {"数据库", "编程语言", "云原生/DevOps", "计算机基础", "网络/协议", "安全"},
-    "软件开发工程师": {"编程语言", "后端", "前端", "数据库", "云原生/DevOps", "消息/中间件",
-                  "计算机基础", "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作", "安全",
-                  "移动/桌面", "音视频", "游戏/数字孪生", "数据分析/商业"},
-    "科学家": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础", "智能驾驶/机器人",
-           "数据库", "音视频", "工程协作", "网络/协议"},
-    "分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "AI/机器学习", "计算机基础",
-           "工程协作", "网络/协议"},
-    "顾问": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础", "数据库",
-         "云原生/DevOps", "后端", "工程协作", "网络/协议"},
-    "量化分析师": {"编程语言", "AI/机器学习", "大数据", "数据分析/商业", "计算机基础", "数据库"},
-    "研究员": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础", "数据库",
-           "音视频", "智能驾驶/机器人", "网络/协议"},
-    "创始工程师": {"编程语言", "后端", "前端", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
-             "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作", "移动/桌面", "安全"},
-    "全栈工程师": {"前端", "后端", "编程语言", "数据库", "云原生/DevOps", "消息/中间件", "计算机基础",
-              "网络/协议", "测试", "大数据", "AI/机器学习", "工程协作", "安全", "移动/桌面", "音视频",
-              "游戏/数字孪生", "数据分析/商业"},
-    # P5 补齐：业务/管理岗（此前未配置 → 跨域技能不降权）
-    "产品经理": {"工程协作", "数据分析/商业", "编程语言", "计算机基础", "数据库", "大数据",
-             "AI/机器学习", "网络/协议", "测试", "云原生/DevOps"},
-    "项目经理": {"工程协作", "数据分析/商业", "编程语言", "计算机基础", "数据库", "大数据",
-             "AI/机器学习", "网络/协议", "测试", "云原生/DevOps"},
-    "数据科学家": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础", "数据库",
-               "工程协作", "网络/协议", "云原生/DevOps", "音视频", "智能驾驶/机器人"},
-    "游戏开发工程师": {"游戏/数字孪生", "编程语言", "计算机基础", "音视频", "移动/桌面", "前端",
-                 "网络/协议", "AI/机器学习", "工程协作", "测试", "数据库", "云原生/DevOps", "硬件/芯片"},
-    "UI设计师": {"前端", "移动/桌面", "编程语言", "计算机基础", "网络/协议", "测试", "音视频",
-             "游戏/数字孪生", "工程协作"},
-    "专家": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础", "数据库",
-          "云原生/DevOps", "后端", "工程协作", "网络/协议"},
-    # P5 补齐：分析师细分族（核心分析技能：数据/编程/业务，不含纯开发/前端/运维类别）
-    "业务分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "AI/机器学习",
-               "工程协作", "网络/协议"},
-    "商业智能分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "AI/机器学习",
-                   "工程协作", "网络/协议", "云原生/DevOps"},
-    "市场分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "AI/机器学习",
-               "工程协作"},
-    "策略分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "AI/机器学习",
-               "工程协作", "网络/协议"},
-    "投资分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "AI/机器学习",
-               "工程协作", "网络/协议"},
-    "财务分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
-    "信贷分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
-    "保险分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
-    "精算分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
-    "可持续发展分析师": {"数据分析/商业", "数据库", "大数据", "编程语言", "计算机基础", "工程协作"},
-    # P0 图谱低质岗治理（2026-08-09）：英文复合岗名新族跨域白名单
-    "生化工程师": {"AI/机器学习", "硬件/芯片", "数据分析/商业", "计算机基础", "编程语言"},
-    "生物光学工程师": {"AI/机器学习", "硬件/芯片", "数据分析/商业", "计算机基础", "编程语言"},
-    "解决方案工程师": {"云原生/DevOps", "后端", "前端", "数据库", "网络/协议", "计算机基础", "编程语言", "工程协作"},
-    "成本估算师": {"数据分析/商业", "工程协作", "计算机基础", "编程语言"},
-    "系统可靠性工程师": {"云原生/DevOps", "安全", "数据库", "网络/协议", "计算机基础", "编程语言", "工程协作"},
-    "开发者体验工程师": {"云原生/DevOps", "后端", "前端", "工程协作", "数据库", "编程语言", "计算机基础"},
-    # 白名单改造新增族（2026-08-12）：低频合法岗位按业务域配置期望技能类别
-    "IT系统管理员": {"云原生/DevOps", "网络/协议", "计算机基础", "数据库", "安全", "工程协作"},
-    "产品助理": {"工程协作", "数据分析/商业", "计算机基础"},
-    "技术教师": {"编程语言", "计算机基础", "工程协作"},
-    "投诉处理助理": {"工程协作", "数据分析/商业"},
-    "计算生物学家": {"AI/机器学习", "大数据", "数据分析/商业", "编程语言", "计算机基础"},
-    "首席统计师": {"数据分析/商业", "数据库", "大数据", "计算机基础", "AI/机器学习"},
-}
 
 
-def _most_common_level(levels: list[str]) -> str:
-    """熟练度众数（并列取出现最早的一档）；无 level 返回空串。"""
-    if not levels:
+
+def _most_common_level(levels: list[object]) -> str:
+    """规范熟练度的众数（并列取出现最早的一档）；无有效等级返回空串。"""
+    normalized_levels = [
+        normalized for level in levels
+        if (normalized := normalize_proficiency_level(level)) is not None
+    ]
+    if not normalized_levels:
         return ""
-    return Counter(levels).most_common(1)[0][0]
+    return Counter(normalized_levels).most_common(1)[0][0]
 
 
 class SkillAgg:
@@ -207,7 +127,7 @@ class SkillAgg:
 
 
 class PositionAgg:
-    __slots__ = ("jd_count", "skills", "exp_years", "soft_skills", "typical_scenarios")
+    __slots__ = ("jd_count", "skills", "exp_years", "soft_skills", "typical_scenarios", "last_crawled")
 
     def __init__(self) -> None:
         self.jd_count = 0
@@ -217,6 +137,8 @@ class PositionAgg:
         self.soft_skills: Counter = Counter()
         # 典型项目场景文本计数（写回 Position.typical_scenarios，按频次降序截断）
         self.typical_scenarios: Counter = Counter()
+        # 最近一条参与聚合 JD 的采集时间（写回 Position.last_updated 供时效衰减）
+        self.last_crawled: datetime | None = None
 
 
 def _min_experience_years(snapshot: dict) -> float | None:
@@ -239,7 +161,7 @@ def _position_skills(ext: dict) -> list[tuple[str, str, str]]:
     """
     def _norm(name: str) -> str:
         n = canonical_skill_name(name)
-        return n if _is_valid_skill_name(n) else ""
+        return n if is_valid_skill_name(n) else ""
 
     reqs = ext.get("requirements") or []
     out: list[tuple[str, str, str]] = []
@@ -295,7 +217,7 @@ def _inflation_stats(rows) -> tuple[dict[str, int], dict[str, int], dict[str, in
     岗位/源 → JD 总数 / 通胀 JD 数。跳过 _duplicate_of 与空岗位名，
     与 build_aggregates 主循环口径一致。
     """
-    from app.services.extraction.dictionary import normalize_position_name
+    from app.services.extraction.position_normalization import normalized_position_from_snapshot
 
     pos_total: Counter = Counter()
     pos_inflated: Counter = Counter()
@@ -305,15 +227,7 @@ def _inflation_stats(rows) -> tuple[dict[str, int], dict[str, int], dict[str, in
         snap = row.snapshot or {}
         if snap.get("_duplicate_of"):
             continue
-        ext = snap.get("extraction") or {}
-        pos = normalize_position_name(
-            (ext.get("position_name") or "").strip(),
-            skills=[
-                s.get("name", "")
-                for s in (ext.get("skills") or [])
-                if isinstance(s, dict) and s.get("name")
-            ],
-        )
+        pos = normalized_position_from_snapshot(snap)
         if not pos:
             continue
         source = row.source or ""
@@ -342,7 +256,7 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
       jd_count 不计，避免虚高 JD 污染岗位频次与技能边）
     - 平台级：源内通胀 JD 占比 >50% 时，该源全部 JD 额外降权 ×0.5
     """
-    from app.services.extraction.dictionary import normalize_position_name
+    from app.services.extraction.position_normalization import normalized_position_from_snapshot
 
     pos_total, pos_inflated, src_total, src_inflated = _inflation_stats(rows)
     agg: dict[str, PositionAgg] = defaultdict(PositionAgg)
@@ -353,14 +267,7 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
         if snap.get("_duplicate_of"):
             continue
         ext = snap.get("extraction") or {}
-        pos = normalize_position_name(
-            (ext.get("position_name") or "").strip(),
-            skills=[
-                s.get("name", "")
-                for s in (ext.get("skills") or [])
-                if isinstance(s, dict) and s.get("name")
-            ],
-        )
+        pos = normalized_position_from_snapshot(snap)
         if not pos:
             continue
         source = row.source or ""
@@ -383,6 +290,13 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
             jd_weight = min(jd_weight, _SOURCE_INFLATION_WEIGHT)
         pa = agg[pos]
         pa.jd_count += 1
+        # 时效衰减依据（08-14 修复）：记录该岗位最近一条 JD 的采集时间
+        # （此前 last_updated 写聚合时间，岗位恒新鲜，engine 的 180d/365d 惩罚永不触发）
+        crawled = getattr(row, "crawled_at", None)
+        if crawled:
+            dt = parse_crawled_at(crawled)
+            if dt is not None and (pa.last_crawled is None or dt > pa.last_crawled):
+                pa.last_crawled = dt
         years = _min_experience_years(snap)
         if years is not None:
             pa.exp_years.append(years)
@@ -391,8 +305,9 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
             sa = pa.skills[skill]
             sa.hit += jd_weight
             sa.sources.add(source)
-            if level:
-                sa.levels.append(level)
+            normalized_level = normalize_proficiency_level(level)
+            if normalized_level is not None:
+                sa.levels.append(normalized_level)
             if necessity == "must":
                 sa.must_count += jd_weight
         # 软技能：仅统计岗位本体白名单（JD 抽取已过滤，此处兜底再校验）
@@ -454,7 +369,8 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
             "pos": pos,
             "freq": pa.jd_count,
             "req_years": median(pa.exp_years) if pa.exp_years else None,
-            "now": now,
+            # 最近 JD 采集时间（规范化 ISO）；无 JD 时间（旧数据）回退聚合时间
+            "last_updated": pa.last_crawled.isoformat() if pa.last_crawled else now,
             # 软技能按 JD 命中数降序（低频软技能不写入岗位本体）
             "soft_skills": [s for s, _ in pa.soft_skills.most_common()],
             # 典型场景按 JD 命中数降序，上限 20 条防属性膨胀（仅非空时 SET）
@@ -470,7 +386,7 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
                 UNWIND $items AS it
                 MATCH (p:Position {name: it.pos})
                 SET p.freq = it.freq,
-                    p.last_updated = it.now,
+                    p.last_updated = it.last_updated,
                     p.required_years = coalesce(it.req_years, p.required_years),
                     p.soft_skills = it.soft_skills,
                     p.typical_scenarios = coalesce(

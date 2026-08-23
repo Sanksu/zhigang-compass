@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.workers import tasks
+from app.workers import crawl
 
 
 class _FakeStream:
@@ -59,13 +59,13 @@ def _patch_env(monkeypatch, tmp_path) -> list[tuple[str, dict]]:
     async def _fake_update(task_id, **fields):
         updates.append((task_id, fields))
 
-    monkeypatch.setattr(tasks, "asyncio", _FakeAsyncio())
-    monkeypatch.setattr(tasks, "datetime", _FrozenDateTime)
-    monkeypatch.setattr(tasks, "_OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(crawl, "asyncio", _FakeAsyncio())
+    monkeypatch.setattr(crawl, "datetime", _FrozenDateTime)
+    monkeypatch.setattr(crawl, "_OUTPUT_DIR", tmp_path)
     # _CRAWLERS_DIR 用于 output 相对路径（relative_to），指向 tmp_path 的祖父目录
-    monkeypatch.setattr(tasks, "_CRAWLERS_DIR", tmp_path.parent.parent)
-    monkeypatch.setattr(tasks, "_push_crawl_log", _noop_log)
-    monkeypatch.setattr(tasks, "_update_crawl_task", _fake_update)
+    monkeypatch.setattr(crawl, "_CRAWLERS_DIR", tmp_path.parent.parent)
+    monkeypatch.setattr(crawl, "push_crawl_log", _noop_log)
+    monkeypatch.setattr(crawl, "update_crawl_task", _fake_update)
     return updates, cmd_calls
 
 
@@ -76,7 +76,7 @@ def test_zero_items_marks_failed(monkeypatch, tmp_path):
 
     async def run():
         with pytest.raises(RuntimeError, match="产出 0 条数据"):
-            await tasks.crawl_platform({}, "boss", task_id="t-zero")
+            await crawl.crawl_platform({}, "boss", task_id="t-zero")
 
     asyncio.run(run())
     assert updates[-1][0] == "t-zero"
@@ -92,7 +92,7 @@ def test_nonzero_items_marks_success(monkeypatch, tmp_path):
     )
 
     async def run():
-        return await tasks.crawl_platform({}, "boss", task_id="t-ok")
+        return await crawl.crawl_platform({}, "boss", task_id="t-ok")
 
     result = asyncio.run(run())
     assert result["items"] == 2
@@ -107,7 +107,7 @@ def test_cities_passed_to_scrapy_cmd(monkeypatch, tmp_path):
     (tmp_path / "indeed_20260803_120001.jsonl").write_text("{}\n", encoding="utf-8")
 
     async def run():
-        return await tasks.crawl_platform(
+        return await crawl.crawl_platform(
             {}, "indeed", keywords=["Python"], cities=["New York"], task_id="t-city"
         )
 
@@ -135,10 +135,15 @@ def test_timeout_kills_subprocess_and_marks_failed(monkeypatch, tmp_path):
         async def create_subprocess_exec(self, *args, **kwargs):
             return _SlowProc()
 
-        async def gather(self, *aws):
-            await asyncio.gather(*aws)
+        def gather(self, *aws):
+            # 超时路径：gather 不会被真正调度（wait_for 直接抛超时），
+            # 参数协程（_drain 等）在创建后从未 await，close 防 RuntimeWarning
+            for aw in aws:
+                getattr(aw, "close", lambda: None)()
+            return asyncio.sleep(0)
 
         async def wait_for(self, aw, timeout):
+            getattr(aw, "close", lambda: None)()
             raise asyncio.TimeoutError()
 
         TimeoutError = asyncio.TimeoutError
@@ -154,20 +159,96 @@ def test_timeout_kills_subprocess_and_marks_failed(monkeypatch, tmp_path):
         alerts.append(kind)
 
     alerts = []
-    monkeypatch.setattr(tasks, "asyncio", _SlowAsyncio())
-    monkeypatch.setattr(tasks, "datetime", _FrozenDateTime)
-    monkeypatch.setattr(tasks, "_OUTPUT_DIR", tmp_path)
-    monkeypatch.setattr(tasks, "_CRAWLERS_DIR", tmp_path.parent.parent)
-    monkeypatch.setattr(tasks, "_push_crawl_log", _noop_log)
-    monkeypatch.setattr(tasks, "_update_crawl_task", _fake_update)
-    monkeypatch.setattr(tasks, "send_alert", _fake_alert)
+    monkeypatch.setattr(crawl, "asyncio", _SlowAsyncio())
+    monkeypatch.setattr(crawl, "datetime", _FrozenDateTime)
+    monkeypatch.setattr(crawl, "_OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(crawl, "_CRAWLERS_DIR", tmp_path.parent.parent)
+    monkeypatch.setattr(crawl, "push_crawl_log", _noop_log)
+    monkeypatch.setattr(crawl, "update_crawl_task", _fake_update)
+    monkeypatch.setattr(crawl, "send_alert", _fake_alert)
 
     async def run():
         with pytest.raises(RuntimeError, match="超时"):
-            await tasks.crawl_platform({}, "zhilian", task_id="t-timeout")
+            await crawl.crawl_platform({}, "zhilian", task_id="t-timeout")
 
     asyncio.run(run())
     assert killed, "超时必须 kill 子进程"
     assert updates[-1][0] == "t-timeout"
     assert updates[-1][1]["status"] == "failed"
     assert alerts == ["crawl_timeout"]
+
+
+# ============================================================
+# crawl_scheduler（08-21b 每爬虫独立触发时间）
+# ============================================================
+
+
+def _patch_scheduler(monkeypatch, crawlers_cfg: dict, now=None):
+    """替换 runtime_config / crawl_platform / 锁，固定当前时间。"""
+    triggered: list[str] = []
+
+    async def _fake_crawl_platform(ctx, spider, **kwargs):
+        triggered.append(spider)
+        return {"spider": spider, "items": 1}
+
+    async def _fake_lock(spider, run_date):
+        return True  # 默认放行
+
+    if now is None:
+        now = datetime(2026, 8, 3, 7, 30, tzinfo=timezone(timedelta(hours=8)))
+
+    class _FrozenNow:
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(crawl, "runtime_config", type("RC", (), {"get": staticmethod(lambda k, d=None: crawlers_cfg if k == "crawlers" else d)})())
+    monkeypatch.setattr(crawl, "crawl_platform", _fake_crawl_platform)
+    monkeypatch.setattr(crawl, "_crawl_run_lock_acquire", _fake_lock)
+    monkeypatch.setattr(crawl, "datetime", _FrozenNow)
+    return triggered
+
+
+def test_crawl_scheduler_triggers_matching_spider(monkeypatch):
+    """当前 HH:MM 匹配配置的爬虫被触发。"""
+    triggered = _patch_scheduler(monkeypatch, {
+        "zhilian": {"hour": 7, "minute": 30},
+        "arxiv": {"hour": 6, "minute": 0},
+    }, now=datetime(2026, 8, 3, 7, 30, tzinfo=timezone(timedelta(hours=8))))
+    result = asyncio.run(crawl.crawl_scheduler({}))
+    assert triggered == ["zhilian"]
+    assert result["run_date"] == "2026-08-03"
+    assert result["triggered"][0]["spider"] == "zhilian"
+
+
+def test_crawl_scheduler_skips_nonmatching(monkeypatch):
+    """未到点/未配置时间的爬虫均不触发。"""
+    triggered = _patch_scheduler(monkeypatch, {
+        "zhilian": {"hour": 7, "minute": 30},
+        "github": {"enabled": True},  # 无独立时间 → 跳过（并入主管线）
+    }, now=datetime(2026, 8, 3, 8, 0, tzinfo=timezone(timedelta(hours=8))))
+    asyncio.run(crawl.crawl_scheduler({}))
+    assert triggered == []  # 8:00 不匹配 7:30；github 无 hour/minute
+
+
+def test_crawl_scheduler_skips_disabled(monkeypatch):
+    """enabled=false 且时间匹配也跳过。"""
+    triggered = _patch_scheduler(monkeypatch, {
+        "zhilian": {"hour": 7, "minute": 30, "enabled": False},
+    }, now=datetime(2026, 8, 3, 7, 30, tzinfo=timezone(timedelta(hours=8))))
+    asyncio.run(crawl.crawl_scheduler({}))
+    assert triggered == []
+
+
+def test_crawl_scheduler_respects_day_lock(monkeypatch):
+    """当日幂等锁命中 → 跳过（防重触发）。"""
+    triggered = _patch_scheduler(monkeypatch, {
+        "zhilian": {"hour": 7, "minute": 30},
+    }, now=datetime(2026, 8, 3, 7, 30, tzinfo=timezone(timedelta(hours=8))))
+    async def _locked(spider, run_date):
+        return False  # 锁命中
+
+    monkeypatch.setattr(crawl, "_crawl_run_lock_acquire", _locked)
+    result = asyncio.run(crawl.crawl_scheduler({}))
+    assert triggered == []
+    assert result["triggered"][0]["skipped"] == "duplicate_day_lock"

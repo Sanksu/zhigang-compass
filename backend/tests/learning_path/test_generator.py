@@ -27,14 +27,18 @@ def _candidate(skills: list[tuple[str, int]]) -> CandidateProfile:
     )
 
 
-def _req(name: str, necessity: Necessity = Necessity.MUST, weight: float = 1.0, proficiency=None):
+def _req(name: str, necessity: Necessity = Necessity.MUST, weight: float = 1.0, proficiency=None, is_soft: bool = False):
     return SkillRequirement(
-        skill_id=name, skill_name=name, necessity=necessity, weight=weight, proficiency=proficiency
+        skill_id=name, skill_name=name, necessity=necessity, weight=weight,
+        proficiency=proficiency, is_soft=is_soft,
     )
 
 
-def _position(musts: list, nices: list | None = None) -> PositionProfile:
-    return PositionProfile(position_id="p1", name="p1", must_skills=musts, nice_skills=nices or [])
+def _position(musts: list, nices: list | None = None, softs: list | None = None) -> PositionProfile:
+    return PositionProfile(
+        position_id="p1", name="p1", must_skills=musts,
+        nice_skills=nices or [], soft_requirements=softs or [],
+    )
 
 
 class _FakeCourseLoader:
@@ -92,9 +96,13 @@ async def test_generate_missing_skill_with_chain_and_courses(monkeypatch):
     assert item.prerequisites.index("机器学习") > item.prerequisites.index("线性代数")
     # 只取质量 Top-3（剔除低分课程）
     assert [c.course_id for c in item.courses] == ["c1", "c2", "c3"]
-    # 学时 = 目标 + 先修链各技能基础学时（深度学习 30 + 机器学习 30 + Python 30 + 线性代数 30）
-    assert item.estimated_hours == 120.0
+    # 学时 = 目标 + 先修链各技能基础学时（P1-2 分层：深度学习 70 + 机器学习 70
+    # + Python 55 + 线性代数 40，白名单类别基准）
+    assert item.estimated_hours == 235.0
     assert item.priority == "high"
+    # 双轨制数据升级（task 1.2）：path 项均为待学 → status=doing，携带 demand/trend/roi
+    assert item.status == "doing"
+    assert item.demand is not None and item.roi is not None
 
 
 @pytest.mark.asyncio
@@ -150,3 +158,60 @@ async def test_course_loader_receives_skill_id_and_top_k(monkeypatch):
     pos = _position([_req("Java")])
     await LearningPathGenerator(course_loader=spy_loader).generate(cand, pos)
     assert received == {"skill_id": "Java", "top_k": 3}
+
+
+@pytest.mark.asyncio
+async def test_soft_skill_gap_skips_course_matching(monkeypatch):
+    """软技能缺口不走课程匹配（2026-08-22 拍板）：只留在差距列表展示，
+    不生成学习路径项、不触发课程加载（课程池为技术课，软素质命中即误配）。"""
+    monkeypatch.setattr(mod, "load_prerequisite_config", lambda: {"default_hours_per_skill": 30.0, "skills": {}})
+
+    requested_skills: list[str] = []
+
+    async def spy_loader(skill_id: str, skill_name: str, top_k: int, semantic=None, sim_threshold=None):
+        requested_skills.append(skill_name)
+        return []
+
+    cand = _candidate([])
+    pos = _position(
+        [_req("Java")],
+        softs=[_req("沟通能力", necessity=Necessity.NICE, weight=0.4, is_soft=True)],
+    )
+    result = await LearningPathGenerator(course_loader=spy_loader).generate(cand, pos)
+
+    # 差距列表保留软技能（展示用，is_soft 打标），但路径项与课程匹配只有技术缺口
+    gap_by_name = {g.skill: g for g in result.gaps}
+    assert gap_by_name["沟通能力"].is_soft is True
+    assert {i.skill for i in result.items} == {"Java"}
+    assert requested_skills == ["Java"]
+
+
+@pytest.mark.asyncio
+async def test_generate_blocked_by_domain_blacklist(monkeypatch):
+    """P1 演示：岗位行业×候选人领域命中黑名单（量子计算×占星术）→ 拒绝生成并返回拦截原因。"""
+    monkeypatch.setattr(mod, "load_prerequisite_config", lambda: {"default_hours_per_skill": 30.0, "skills": {}})
+    cand = CandidateProfile(user_id="u1", skills=[], domain_experience=["占星术"])
+    pos = PositionProfile(
+        position_id="p1", name="量子计算工程师",
+        must_skills=[_req("Python")], industry="量子计算",
+    )
+    result = await LearningPathGenerator(course_loader=_FakeCourseLoader({})).generate(cand, pos)
+    assert result.blocked is True
+    assert "量子计算" in result.block_reason and "占星术" in result.block_reason
+    # 拦截时输出空差距/空路径（跨域诱导请求拒绝生成）
+    assert result.items == [] and result.gaps == []
+
+
+@pytest.mark.asyncio
+async def test_generate_not_blocked_without_domain_hit(monkeypatch):
+    """未命中黑名单（正常行业）→ 正常生成学习路径。"""
+    monkeypatch.setattr(mod, "load_prerequisite_config", lambda: {"default_hours_per_skill": 30.0, "skills": {}})
+    cand = CandidateProfile(user_id="u1", skills=[], domain_experience=["机器学习"])
+    pos = PositionProfile(
+        position_id="p1", name="p1",
+        must_skills=[_req("Java")], industry="人工智能",
+    )
+    result = await LearningPathGenerator(course_loader=_FakeCourseLoader({})).generate(cand, pos)
+    assert result.blocked is False
+    assert result.block_reason is None
+    assert len(result.items) == 1

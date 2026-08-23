@@ -11,22 +11,22 @@
 
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 from scrapy.http import Response
 
-from crawlers.base_spider import BaseSpider
-from crawlers.settings import SUBPROCESS_TIMEOUT
+from crawlers.base_spider import BaseSpider, iter_jsonl, run_script
+from crawlers.settings import CRAWL_ITEMS_CAP
 
 
 class JobSpyBaseSpider(BaseSpider):
     """通过 subprocess 调用 jobspy_crawler.py 采集 JobSpy 支持的平台。"""
 
     site_name: str = ""  # 子类必须设置：indeed / linkedin
-    results_wanted = 20  # 单次采集岗位数上限
+    results_wanted = 20  # 单任务（关键词×城市）岗位数上限
+    max_items_total = CRAWL_ITEMS_CAP  # 单次采集总上限（跨任务合计，08-16 可后台配置）
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -36,14 +36,18 @@ class JobSpyBaseSpider(BaseSpider):
         # 历史回爬（G-01）：-a history_days=90 透传 --days-old 到 jobspy_crawler
         self.history_days = int(kwargs.get("history_days") or 0)
 
-    def _build_cmd(self, keyword: str, city: str) -> list[str]:
-        """构造 jobspy_crawler 采集命令（含历史回爬 --days-old 参数）。"""
+    def _build_cmd(self, keyword: str, city: str, limit: int | None = None) -> list[str]:
+        """构造 jobspy_crawler 采集命令（含历史回爬 --days-old 参数）。
+
+        limit: 单次采集剩余配额（max_items_total 减去已产出），None 不额外限制。
+        """
+        wanted = min(self.results_wanted, limit) if limit else self.results_wanted
         cmd = [
             sys.executable, self.crawler_script,
             "--site", self.site_name,
             "--keyword", keyword,
             "--city", city,
-            "--results-wanted", str(self.results_wanted),
+            "--results-wanted", str(wanted),
         ]
         if self.history_days:
             cmd.extend(["--days-old", str(self.history_days)])
@@ -51,9 +55,12 @@ class JobSpyBaseSpider(BaseSpider):
 
     def start_requests(self):
         """通过 subprocess 调用 JobSpy 采集脚本，解析 JSONL 输出并 yield Item。"""
+        # 空关键词/空城市 = 按平台热度/最新且不限位置采集（08-16 用户决策）
+        keywords = self.keywords or [""]
+        cities = self.cities or [""]
         tasks = []
-        for keyword in self.keywords:
-            for city in self.cities:
+        for keyword in keywords:
+            for city in cities:
                 tasks.append({"keyword": keyword, "city": city})
 
         if not tasks:
@@ -62,47 +69,29 @@ class JobSpyBaseSpider(BaseSpider):
 
         task_total = len(tasks)
         _started = time.monotonic()
+        _collected = 0  # 单次采集累计产出（跨关键词×城市任务合计，上限 max_items_total）
         for task_idx, task in enumerate(tasks):
             keyword = task["keyword"]
             city = task["city"]
-            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword} city={city}")
-
-            cmd = self._build_cmd(keyword, city)
-
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    cwd=os.path.dirname(self.crawler_script),
-                    env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
+            remaining = self.max_items_total - _collected
+            if remaining <= 0:
+                self.logger.info(
+                    f"[{self.platform}] 已达单次采集上限 {self.max_items_total} 条，"
+                    f"跳过剩余 {task_total - task_idx} 个任务"
                 )
-            except Exception as e:
-                self.logger.error(f"启动 JobSpy 脚本失败: {e}")
-                continue
+                break
+            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}（已用 {time.monotonic() - _started:.0f}s）: 开始采集 kw={keyword or '(全局)'} city={city}")
 
-            # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
-            try:
-                stdout, stderr = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                stdout, stderr = proc.communicate()
-                self.logger.error(f"[{self.platform}] 任务 {task_idx + 1}/{task_total} 超时（>{SUBPROCESS_TIMEOUT}s），已终止")
+            cmd = self._build_cmd(keyword, city, remaining)
+
+            result = run_script(cmd, os.path.dirname(self.crawler_script), self.logger,
+                               f"[{self.platform}] 任务 {task_idx + 1}/{task_total}")
+            if result is None:
                 continue
+            stdout, stderr, returncode = result
 
             item_count = 0
-            for line in stdout.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    item_data = json.loads(line)
-                except json.JSONDecodeError as e:
-                    self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
-                    continue
-
+            for item_data in iter_jsonl(stdout, self.logger):
                 item_count += 1
                 salary = self._format_salary(
                     item_data.get("salary_interval"),
@@ -127,11 +116,12 @@ class JobSpyBaseSpider(BaseSpider):
                     raw_text=json.dumps(item_data, ensure_ascii=False),
                 )
 
-            if proc.returncode != 0:
-                self.logger.error(f"JobSpy 脚本退出码 {proc.returncode}: {stderr[-500:]}")
+            if returncode != 0:
+                self.logger.error(f"JobSpy 脚本退出码 {returncode}: {stderr[-500:]}")
             elif stderr:
                 self.logger.debug(f"JobSpy stderr: {stderr[-300:]}")
-            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条")
+            _collected += item_count
+            self.logger.info(f"[{self.platform}] 进度 {task_idx + 1}/{task_total}: kw={keyword} city={city} 完成：产出 {item_count} 条（累计 {_collected}/{self.max_items_total}）")
 
     def parse(self, response: Response):
         """占位：start_requests 已直接 yield Item，无需 parse。"""

@@ -5,10 +5,15 @@
  * 前置：docker compose 基础设施 + webServer（后端 8000 / 前端 5173）由
  * playwright.config.ts 自动拉起；/graph 路由需登录（admin/bootstrap 口令 admin123）。
  * 触控设备用 Playwright Pixel 5 device 模拟（pointer: coarse 命中）。
+ *
+ * M4 修复:口令改 env 注入(详见 full-flow.spec.ts 头注)。
  */
 import { test, expect, devices } from '@playwright/test'
 
-const ADMIN = { username: 'admin', password: 'admin123' }
+const ADMIN = {
+  username: process.env.E2E_ADMIN_USERNAME ?? 'admin',
+  password: process.env.E2E_ADMIN_PASSWORD ?? 'admin123',
+}
 
 async function login(page: import('@playwright/test').Page) {
   await page.goto('/login')
@@ -17,7 +22,7 @@ async function login(page: import('@playwright/test').Page) {
   await page.getByLabel('密码').fill(ADMIN.password)
   await page.getByRole('button', { name: '登录' }).click()
   // 登录成功标志：管理入口（顶栏用户名在窄视口 hidden，不能用 getByText('admin')）
-  await expect(page.getByRole('link', { name: /爬取管理/ })).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('link', { name: '爬取管理', exact: true })).toBeVisible({ timeout: 20_000 })
 }
 
 test('桌面端（精细指针）：3D 按钮可用并可切换渲染', async ({ page }) => {

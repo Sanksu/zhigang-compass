@@ -8,7 +8,7 @@
 import hashlib
 import math
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from scrapy.exceptions import DropItem
@@ -331,10 +331,17 @@ class CleaningPipeline:
             f"{item.get('source', '')}:{item.get('source_id', '')}".encode()
         ).hexdigest()
 
-        # PII 脱敏：description/requirements/raw_text 均可能含手机/邮箱/身份证，
-        # 对所有招聘源统一脱敏，is_desensitized 标记
+        # PII 脱敏：title/description/requirements/raw_text 均可能含手机/邮箱/身份证
+        # （08-15 中危修复：补 title 字段 + 课程/论文/社区 Item 的文本字段——
+        # 此前仅 JobItem 三字段，标题含"李工138xxx"类联系方式会漏网），
+        # 对所有 Item 类型统一脱敏，is_desensitized 标记
         if isinstance(item, JobItem):
-            for field in ("description", "requirements", "raw_text"):
+            for field in ("title", "description", "requirements", "raw_text"):
+                if item.get(field) and isinstance(item.get(field), str):
+                    item[field] = self._desensitize(item[field])
+            item["is_desensitized"] = True
+        else:
+            for field in ("title", "description", "raw_text"):
                 if item.get(field) and isinstance(item.get(field), str):
                     item[field] = self._desensitize(item[field])
             item["is_desensitized"] = True
@@ -533,7 +540,9 @@ class PostgresPipeline:
             crawled_at=item_dict.get("crawled_at", ""),
             fingerprint=fingerprint,
             snapshot=item_dict,
-            raw_text=str(raw_text)[:65535] if raw_text else "",
+            # 08-14：移除 65535 截断（初始化模板遗留，PG Text 无长度限制；
+            # 截断丢失 JD 原文尾部，LLM 抽取输入侧另行裁剪）
+            raw_text=str(raw_text) if raw_text else "",
             is_desensitized=item_dict.get("is_desensitized", False),
         )
 

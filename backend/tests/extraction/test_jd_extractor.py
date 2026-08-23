@@ -22,9 +22,11 @@ class _FakeLLM:
     def __init__(self, result: JDExtractionResult):
         self.result = result
         self.calls = 0
+        self.last_kwargs = None
 
     def extract_structured(self, prompt, response_model, **kwargs):
         self.calls += 1
+        self.last_kwargs = kwargs
         return self.result
 
 
@@ -46,14 +48,58 @@ class TestExtract:
             requirements=[REQUIRESRelation(skill_name="Docker 技术", necessity="must")],
         )
         fake = _FakeLLM(raw)
-        out = JDExtractor(llm=fake).extract("这是一个足够长的 JD 文本，用于验证抽取流程")
+        out = JDExtractor(llm=fake).extract(
+            "这是一个足够长的 JD 文本，用于验证抽取流程，熟悉 Docker"
+        )
         assert fake.calls == 1
         # 后处理：后缀清洗 + 大小写去重，requirements 同规则
+        # （正文含 Docker 词面，词面守卫不降级）
         assert [s.name for s in out.skills] == ["Docker"]
         assert out.requirements[0].skill_name == "Docker"
         assert out.position_name == "Python 开发工程师"
         # P1-2：LLM 路径 method=llm（默认）
         assert out.method == "llm"
+
+    def test_extract_forwards_timeout(self):
+        """extract 的 timeout 参数透传给 provider 链（评测 30s→60s 依赖此转发）。"""
+        raw = JDExtractionResult(position_name="Java 开发工程师")
+        fake = _FakeLLM(raw)
+        out = JDExtractor(llm=fake).extract(
+            "这是一个足够长的 JD 文本，用于验证 timeout 透传，熟悉 Java",
+            timeout=60,
+        )
+        assert fake.last_kwargs.get("timeout") == 60
+        assert out.position_name == "Java 开发工程师"
+
+    def test_lexical_guard_demotes_not_in_text(self):
+        """词面守卫（08-17）：LLM 路径 skills 中正文无词面的技能降级 nice。"""
+        raw = JDExtractionResult(
+            position_name="",
+            skills=[
+                SkillExtracted(name="Docker"),
+                SkillExtracted(name="Kubernetes"),
+            ],
+        )
+        fake = _FakeLLM(raw)
+        out = JDExtractor(llm=fake).extract(
+            "这是一个足够长的 JD 文本，用于验证抽取流程，熟悉 Docker 技术"
+        )
+        assert [s.name for s in out.skills] == ["Docker"]  # Kubernetes 无词面被降级
+        assert {r.skill_name: r.necessity for r in out.requirements} == {
+            "Kubernetes": "nice"
+        }
+
+    def test_lexical_guard_alias_exempt(self):
+        """词面守卫别名豁免：正文用缩写（LLM）时技能（大语言模型）保留。"""
+        raw = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="大语言模型")],
+        )
+        fake = _FakeLLM(raw)
+        out = JDExtractor(llm=fake).extract(
+            "这是一个足够长的 JD 文本，熟悉 LLM 相关技术"
+        )
+        assert [s.name for s in out.skills] == ["大语言模型"]
 
     def test_llm_failure_falls_back_to_rule_based(self):
         extractor = JDExtractor(llm=_FailingLLM())

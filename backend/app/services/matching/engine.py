@@ -17,6 +17,7 @@ from app.services.matching.schemas import (
     PositionProfile,
 )
 from app.services.matching.weights import load_domain_sem_blocklist, load_sim_threshold, load_weights
+from app.services.proficiency import proficiency_factor
 
 logger = logging.getLogger(__name__)
 
@@ -39,34 +40,29 @@ ROUGH_SELECT_K = 200
 # 推断来源（项目角色/经历）置信度低于文本直述，同技能命中计一半分。
 SOFT_SKILL_DOWNWEIGHT = 0.5
 
+# nice 维度 Top-K 覆盖口径（08-22 B1 裁决）：聚合层 nice 池是全量关联技能倾倒
+# （实测 43 岗位中位 36 / p90 271 / max 348），全量 Σ(w×sim)/Σ(w) 占比使分数随
+# 愿望清单长度稀释（资深前端命中 30/348 ≈ 0.09，而短清单岗位 4/10 = 0.4）。
+# 只考核跨源数最高的前 K 条加分项：nice 边权重统一 0.4 无区分度，排序键用
+# source_count（跨源多的核心加分技能优先），分数反映"最想要的加分项满足几成"。
+NICE_TOP_K = 10
+
+# 无门槛岗位（must 为空）推荐门槛（08-22 O1 裁决）：nice Top-K 命中率下限。
+# 无门槛岗位重归一后 exp 占 86.7% 权重（0.287/0.331），req_years 缺失时恒满分，
+# 唯一有效技能信号是 nice——实测 freq=3 小样本岗（AI基础设施工程师）前端候选
+# 仅命中 Top-10 中 1 条 TypeScript（nice=0.1）即得 0.88，倒挂真前端岗 0.63-0.70。
+# 命中率不足 20%（Top-10 少于 2 条）判 unqualified 不纳入推荐。
+NO_MUST_NICE_FLOOR = 0.2
+
 
 def _soft_multiplier(cs) -> float:
     """候选技能置信度乘数：LLM 推断软技能 ×0.5，显式技能 ×1.0。"""
     return SOFT_SKILL_DOWNWEIGHT if cs.low_confidence else 1.0
 
 
-# 熟练度满足度矩阵（方案 A，对齐设计文档 9.2"期望熟练度"匹配）：
-# 岗位期望熟练度（聚合层 REQUIRES.level：初级/中级/高级/专家）× 候选人熟练度
-# （1 了解 / 2 熟悉 / 3 精通）→ 系数。候选人熟练度 ≥ 岗位期望 → 1.0（不惩罚），
-# 低一档 ×0.6、低两档 ×0.3；"了解"对"初级"岗容忍基础接触 ×0.85，
-# "精通"对"专家"岗留 ×0.85 余量（避免要求堆到极值把分压到 0）。
-_PROFICIENCY_FACTORS: dict[str, dict[int, float]] = {
-    "初级": {1: 0.85, 2: 1.0, 3: 1.0},
-    "中级": {1: 0.60, 2: 1.0, 3: 1.0},
-    "高级": {1: 0.30, 2: 0.60, 3: 1.0},
-    "专家": {1: 0.30, 2: 0.60, 3: 0.85},
-}
-
-
 def _proficiency_factor(required: str | None, candidate: int | None) -> float:
-    """熟练度满足度系数：候选人熟练度 ≥ 岗位期望 → 1.0，低一档 0.6，低两档 0.3。
-
-    岗位期望缺失（聚合层未写 level / 黄金集构造未传）或候选人熟练度缺失 → 1.0，
-    不武断惩罚（黄金集评测零回归的关键默认）。
-    """
-    if not required or candidate is None:
-        return 1.0
-    return _PROFICIENCY_FACTORS.get(required, {}).get(candidate, 1.0)
+    """兼容匹配引擎内部调用的共享熟练度评分入口。"""
+    return proficiency_factor(required, candidate)
 
 
 def _source_weight(source_count: int | None) -> float:
@@ -219,11 +215,16 @@ def _build_summary(
     position_name: str,
     matched_must: list[str],
     missing_must: list[str],
-    must_score: float,
+    must_score: float | None,
+    nice_score: float,
     unqualified: bool,
 ) -> str:
     if unqualified:
+        if must_score is None:
+            return f"{position_name}：无必备门槛但加分技能命中不足 20%，未达门槛"
         return f"{position_name}：必备技能全缺失，未达门槛"
+    if must_score is None:
+        return f"{position_name}：无必备技能门槛，加分项命中 {nice_score:.0%}"
     parts = [f"{position_name}：必备技能命中 {must_score:.0%}"]
     if matched_must:
         parts.append("已具备 " + "、".join(matched_must[:5]))
@@ -368,7 +369,7 @@ def _domain_score(candidate, position: PositionProfile, semantic=None) -> float 
     for term in ind_terms:
         for d in dom_lower:
             if d == term or d in term or term in d:
-                logger.info(
+                logger.debug(
                     "领域词面命中 pid=%s industry=%r 候选=%r term=%r → 1.0",
                     position.position_id, industry, domains, term,
                 )
@@ -420,7 +421,7 @@ def _domain_score(candidate, position: PositionProfile, semantic=None) -> float 
 
 
 def build_radar(
-    must_score: float,
+    must_score: float | None,
     nice_score: float,
     exp_score: float,
     candidate,
@@ -432,14 +433,15 @@ def build_radar(
 
     五维构成（§9.2 六类特征中实现可达的五维）：must（必备技能）/ nice（加分技能）/
     experience（经验）/ education（学历）/ projects（项目），另加 skill_level
-    （熟练度满足度，仅展示）与 domain（领域匹配，仅展示）。软技能已并入
-    must/nice（low_confidence 降权 ×0.5），证书维度当前图谱侧 required_certs
-    数据稀疏暂不入雷达。
-    education/projects/domain/skill_level 为保守近似：无数据返回 None，不参与总分。
+    （熟练度满足度，仅展示）与 domain（领域匹配，仅展示）。软技能不参与评分
+    （2026-08-22 拍板：独立通道 soft_requirements 仅差距展示；评分池纯技术栈，
+    low_confidence 候选技能降权 ×0.5 仍生效），证书维度当前图谱侧 required_certs
+    数据稀疏暂不入雷达。education/projects/domain/skill_level 为保守近似：
+    无数据返回 None 不参与总分；无必备门槛岗位 must 同为 None（A1 口径）。
     """
     skill_level = _skill_level_score(position, candidate.skills)
     return {
-        "must": round(must_score, 4),
+        "must": round(must_score, 4) if must_score is not None else None,
         "nice": round(nice_score, 4),
         "experience": round(exp_score, 4),
         "education": _education_score(position.required_education, candidate.education_level),
@@ -447,6 +449,75 @@ def build_radar(
         "domain": _domain_score(candidate, position, semantic),
         "skill_level": round(skill_level, 4) if skill_level is not None else None,
     }
+
+
+def _score_must(
+    position: PositionProfile,
+    candidate,
+    semantic=None,
+    sim_threshold: float | None = None,
+) -> tuple[float | None, int, list[str], list[str]]:
+    """must 维度评分：Σ(w×sim)/Σ(w)；岗位无必备技能 → None（无门槛不判分）。
+
+    w = log(source_count+1)（跨源多的核心技能贡献/缺失惩罚均更重；source_count
+    默认 1 时等权，退化为优化前行为），别名级 sim=1.0，语义级 sim∈[threshold,1)；
+    Σ(w×sim)/Σ(w) 天然惩罚缺失，未注入语义时退化为布尔匹配。
+    返回 (score, must_total, matched_must, missing_must)。
+    """
+    must_total = len(position.must_skills)
+    must_weights = [_source_weight(req.source_count) for req in position.must_skills]
+    must_total_weight = sum(must_weights)
+    must_sims = [
+        _skill_similarity(req, candidate.skills, semantic, sim_threshold)
+        for req in position.must_skills
+    ]
+    matched_must = [
+        req.skill_name for req, sim in zip(position.must_skills, must_sims) if sim > 0
+    ]
+    missing_must = [
+        req.skill_name for req, sim in zip(position.must_skills, must_sims) if sim == 0
+    ]
+    if must_total_weight == 0:
+        return None, must_total, matched_must, missing_must
+    score = (
+        sum(w * sim for w, sim in zip(must_weights, must_sims)) / must_total_weight
+    )
+    return score, must_total, matched_must, missing_must
+
+
+def _score_nice(
+    position: PositionProfile,
+    candidate,
+    semantic=None,
+    sim_threshold: float | None = None,
+) -> float:
+    """nice 维度评分：Top-K 覆盖率 Σ(w×sim)/Σ(w)（K=NICE_TOP_K，跨源数降序）。
+
+    岗位无 nice 时取 1.0 不扣分；Top-K 截断见 NICE_TOP_K 注释（长尾愿望清单
+    不稀释分数），岗位 nice 池不足 K 条时退化为全量口径。source_count 平局按
+    skill_name 升序截断（图谱返回序无保证，确定性边界便于复现与排查）。
+    """
+    if not position.nice_skills:
+        return 1.0
+    pool = sorted(
+        position.nice_skills, key=lambda r: (-r.source_count, r.skill_name)
+    )[:NICE_TOP_K]
+    nice_total_weight = sum(req.weight for req in pool)
+    if nice_total_weight == 0:
+        return 1.0
+    return sum(
+        req.weight * _skill_similarity(req, candidate.skills, semantic, sim_threshold)
+        for req in pool
+    ) / nice_total_weight
+
+
+def _score_exp(position: PositionProfile, candidate) -> float:
+    """经验维度评分：min(total_years / required_years, 1.0)，无年限要求时满分。"""
+    if position.required_years is None or position.required_years <= 0:
+        return 1.0
+    if candidate.total_years >= position.required_years:
+        return 1.0
+    return candidate.total_years / position.required_years
 
 
 def score_position(
@@ -462,10 +533,16 @@ def score_position(
 
     - must_score = Σ(w×sim) / Σ(w)（w = log(source_count+1)，别名级 sim=1.0，
       语义级 sim∈[threshold,1)；Σ(w×sim)/Σ(w) 天然惩罚缺失，未注入语义时退化为
-      布尔匹配；source_count 默认 1 时等权退化）
-    - nice_score = Σ(sim×weight) / Σ(weight)，岗位无 nice 时取 1.0 不扣分
+      布尔匹配；source_count 默认 1 时等权退化）；岗位无必备技能 → None，
+      总分在 nice/exp 上权重重归一（A1：无门槛岗位不再白得 w_must 满分贡献，
+      08-22 前实测 43 岗位中 7 个零 must 对任意候选保底送 66.9% 总分）
+    - nice_score = Top-K 覆盖率 Σ(sim×weight) / Σ(weight)（K=NICE_TOP_K，
+      跨源数降序；岗位无 nice 时取 1.0 不扣分）
     - exp_score = min(total_years / required_years, 1.0)，无年限要求时满分
-    必备技能全缺失判零（unqualified=True），不纳入推荐排序。
+    必备技能全缺失判零（unqualified=True）；无门槛岗位加分技能 Top-K 命中率
+    < NO_MUST_NICE_FLOOR（20%，即前 10 条核心加分项命中不足 2 条）同样判零
+    （A3/O1：无门槛岗位唯一技能信号是 nice，命中不足不推荐）。两者均不纳入
+    推荐排序。
 
     Args:
         candidate: 候选人画像
@@ -478,48 +555,20 @@ def score_position(
     w_must, w_nice, w_exp = weights or load_weights()
     position = apply_cii_correction(position)
 
-    must_total = len(position.must_skills)
-    # must 按 source_count 加权（log(source_count+1)）：跨源多的核心技能贡献/缺失
-    # 惩罚均更重；source_count 默认 1 时等权，退化为优化前行为（黄金集零回归）
-    must_weights = [_source_weight(req.source_count) for req in position.must_skills]
-    must_total_weight = sum(must_weights)
-    must_sims = [
-        _skill_similarity(req, candidate.skills, semantic, sim_threshold)
-        for req in position.must_skills
-    ]
-    matched_must = [
-        req.skill_name for req, sim in zip(position.must_skills, must_sims) if sim > 0
-    ]
-    missing_must = [
-        req.skill_name for req, sim in zip(position.must_skills, must_sims) if sim == 0
-    ]
-    must_score = (
-        1.0
-        if must_total_weight == 0
-        else sum(
-            w * sim for w, sim in zip(must_weights, must_sims)
-        ) / must_total_weight
+    must_score, must_total, matched_must, missing_must = _score_must(
+        position, candidate, semantic, sim_threshold
     )
+    nice_score = _score_nice(position, candidate, semantic, sim_threshold)
+    exp_score = _score_exp(position, candidate)
 
-    nice_total_weight = sum(req.weight for req in position.nice_skills)
-    if nice_total_weight == 0:
-        nice_score = 1.0
+    if must_score is None:
+        base_total = (nice_score * w_nice + exp_score * w_exp) / (w_nice + w_exp)
     else:
-        nice_score = sum(
-            req.weight * _skill_similarity(req, candidate.skills, semantic, sim_threshold)
-            for req in position.nice_skills
-        ) / nice_total_weight
+        base_total = must_score * w_must + nice_score * w_nice + exp_score * w_exp
 
-    if position.required_years is None or position.required_years <= 0:
-        exp_score = 1.0
-    elif candidate.total_years >= position.required_years:
-        exp_score = 1.0
-    else:
-        exp_score = candidate.total_years / position.required_years
-
-    base_total = must_score * w_must + nice_score * w_nice + exp_score * w_exp
-
-    if must_total > 0 and must_score == 0.0:
+    if (must_total > 0 and must_score == 0.0) or (
+        must_total == 0 and nice_score < NO_MUST_NICE_FLOOR
+    ):
         total = 0.0
         unqualified = True
     else:
@@ -530,12 +579,12 @@ def score_position(
         position_id=position.position_id,
         position_name=position.name,
         total_score=round(total, 4),
-        must_score=round(must_score, 4),
+        must_score=round(must_score, 4) if must_score is not None else None,
         nice_score=round(nice_score, 4),
         exp_score=round(exp_score, 4),
         matched_must=matched_must,
         missing_must=missing_must,
-        summary=_build_summary(position.name, matched_must, missing_must, must_score, unqualified),
+        summary=_build_summary(position.name, matched_must, missing_must, must_score, nice_score, unqualified),
         unqualified=unqualified,
         radar=build_radar(
             must_score, nice_score, exp_score, candidate, position, semantic, project_vectors

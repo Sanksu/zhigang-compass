@@ -18,10 +18,12 @@
 """
 
 
-from sqlalchemy import select
+from collections import Counter
+
+from sqlalchemy import delete, select
 
 from app.core.database import async_session_factory
-from app.models.business import GraphVersion
+from app.models.business import EvolutionEvent, GraphVersion
 
 
 def _name_containment(new: str, old: str) -> bool:
@@ -29,15 +31,53 @@ def _name_containment(new: str, old: str) -> bool:
     return len(new) > len(old) and old in new and len(new) - len(old) >= 2
 
 
+# 岗位名通用词片段：几乎所有工程师岗名都含，不参与 split 判定——
+# 否则任意"X工程师" vs "Y工程师"共享"工程/程师"即误建演化边（08-14 测试发现）。
+_GENERIC_NAME_SEGMENTS = frozenset({"工程", "程师", "开发", "分析", "研究", "专员"})
+
+
 def _shared_segments(new: str, old: str, seg_len: int = 2) -> int:
     """新名与旧名共享的连续片段数（split 信号，按片段去重计数）。
 
     与 old_segments 取交集后计数，避免 new 中重复出现的同一片段被重复累计
-    （如"数据数据" vs "数据"：片段"数据"只算 1 次）。
+    （如"数据数据" vs "数据"：片段"数据"只算 1 次）。通用岗位词片段
+    （工程/程师/开发/分析等）排除——防"运维工程师"vs"算法工程师"式误判。
     """
     old_segments = {old[i : i + seg_len] for i in range(len(old) - seg_len + 1)}
     new_segments = {new[i : i + seg_len] for i in range(len(new) - seg_len + 1)}
-    return len(new_segments & old_segments)
+    shared = new_segments & old_segments
+    return len(shared - _GENERIC_NAME_SEGMENTS)
+
+
+def classify_evolution_events(
+    new_names: set[str],
+    gone_names: set[str],
+    matched_gone_by_new: dict[str, list[str]],
+    suppress_ended: bool = False,
+) -> list[dict]:
+    """谱系事件分类（机制补强②，PR #334 张恺天确认）：born / merged / ended。
+
+    - merged：一个 new 同时 rename/split 匹配到多个 old（"新名含多旧名"归并）
+    - born：new_names 中未配对任何 old（无演化来源的新岗位涌现）
+    - ended：gone_names 中未配对任何 new（岗位消失）；suppress_ended=True（当前版本
+      命中样本量告警 data_warning，采集量异常）时不产出 ended——防"采集停摆被误报为岗位消亡"
+    """
+    events: list[dict] = []
+    matched_gones = {g for olds in matched_gone_by_new.values() for g in olds}
+    for new, olds in sorted(matched_gone_by_new.items()):
+        if len(olds) >= 2:
+            events.append({
+                "event_type": "merged",
+                "from_name": ",".join(sorted(olds)),
+                "to_name": new,
+                "detail": {"from_names": sorted(olds)},
+            })
+    for new in sorted(new_names - set(matched_gone_by_new)):
+        events.append({"event_type": "born", "from_name": None, "to_name": new, "detail": {}})
+    if not suppress_ended:
+        for old in sorted(gone_names - matched_gones):
+            events.append({"event_type": "ended", "from_name": old, "to_name": None, "detail": {}})
+    return events
 
 
 def _position_nodes(snapshot: dict) -> dict[str, str]:
@@ -84,6 +124,7 @@ async def derive_evolved_from(dry_run: bool = False) -> dict:
 
     edges = 0
     skipped = 0
+    matched_gone_by_new: dict[str, list[str]] = {}
     for new in new_names:
         new_id = cur_name_to_id.get(new)
         if new_id is None:
@@ -100,15 +141,26 @@ async def derive_evolved_from(dry_run: bool = False) -> dict:
             if old_id is None:
                 skipped += 1
                 continue
+            # 记录该 new 已配对哪些 old（机制补强②：merged 判定 + born/ended 排除）
+            matched_gone_by_new.setdefault(new, []).append(old)
             if dry_run:
                 edges += 1
                 continue
             with neo4j_driver.session() as ns:
                 result = ns.run(
                     """
-                    // 旧岗位已从当前图谱消失（快照全量导出），按快照 id 重建为 legacy 节点后再建边
+                    // 旧岗位已从当前图谱消失（快照全量导出），按快照 id 重建为 legacy 节点后再建边。
+                    // 08-14 修复：SET name 前检查同名节点占用（ETL 重跑后新聚合可能已建同名岗位，
+                    // UNIQUE name 约束冲突会中断整个 ETL——AS400 应用程序 案例）——被占用则跳过改名
+                    // （保留 legacy 状态，该条演化边不建，宁缺毋滥）。
                     MERGE (b:Position {id: $old_id})
-                    SET b.name = $old, b.status = 'legacy'
+                    SET b.status = 'legacy'
+                    WITH b
+                    OPTIONAL MATCH (taken:Position {name: $old})
+                    WHERE taken <> b
+                    WITH b, taken
+                    WHERE taken IS NULL
+                    SET b.name = $old
                     WITH b
                     MATCH (a:Position {id: $new_id})
                     MERGE (a)-[r:EVOLVED_FROM]->(b)
@@ -120,10 +172,39 @@ async def derive_evolved_from(dry_run: bool = False) -> dict:
                 ).single()
                 edges += int(result["covered"]) if result else 0
 
+    # 机制补强②：谱系事件 born/merged/ended 落库（D4：当前版本命中样本量告警 data_warning
+    # → 抑制 ended，防"采集停摆被误报为岗位消亡"——与机制补强①联动）
+    # getattr 兼容既有测试的 SimpleNamespace mock（生产 ORM 带 data_warning 属性）
+    suppress_ended = bool(getattr(versions[-1], "data_warning", None))
+    events = classify_evolution_events(
+        new_names, gone_names, matched_gone_by_new, suppress_ended=suppress_ended
+    )
+    event_counts = Counter(e["event_type"] for e in events)
+    if not dry_run and events:
+        async with async_session_factory() as session:
+            await session.execute(
+                delete(EvolutionEvent).where(EvolutionEvent.version_id == cur_version)
+            )
+            session.add_all([
+                EvolutionEvent(
+                    version_id=cur_version,
+                    event_type=e["event_type"],
+                    from_name=e["from_name"],
+                    to_name=e["to_name"],
+                    detail=e["detail"],
+                )
+                for e in events
+            ])
+            await session.commit()
+
     return {
         "versions": [versions[-2].id, cur_version],
         "edges": edges,
         "skipped": skipped,
         "new_positions": len(new_names),
         "gone_positions": len(gone_names),
+        "events": dict(event_counts),
+        # dry_run 输出明细供人工抽检（含 suppress_ended 语境）
+        "events_detail": events if dry_run else None,
+        "ended_suppressed": suppress_ended,
     }

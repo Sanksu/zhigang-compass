@@ -1,27 +1,39 @@
-import { useEffect, useState } from 'react'
-import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw, FileText, ThumbsUp, ThumbsDown, RefreshCw, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw, FileText, ThumbsUp, ThumbsDown, RefreshCw, Sparkles, ChevronDown } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ResumeUploader } from '@/components/resume/resume-uploader'
-import { ScoreRing, RadarChart, SkillHeatmap, GanttChart } from '@/components/match/charts'
+import { ScoreRing, RadarChart, SkillHeatmap } from '@/components/match/charts'
+import { AiThinkingCard } from '@/components/match/ai-thinking-card'
+import { CitationBadge } from '@/components/ui/citation-badge'
+import { LearningTimeline } from '@/components/learning/learning-timeline'
+import { useTypewriter } from '@/hooks/use-typewriter'
 import {
   type BackendDiagnosisReport,
-  type BackendGapItem,
   type BackendLearningPathItem,
   type BackendMatchResult,
   type CandidateProfile,
-  type GapItem,
   type MatchResult,
+  type RadarDimension,
   type RecommendItem,
   type ResumeSummary,
-  type SkillMatrixItem,
 } from '@/components/match/types'
 import type { PositionStatus } from '@/components/graph/types'
-import { apiGet, apiPost, ApiError, getAccessToken } from '@/lib/api'
+import {apiGet, apiPost, getAccessToken, errMsg} from '@/lib/api'
+import { prefersReducedMotion } from '@/lib/utils'
+import {
+  completedSkillsFromMatrix,
+  proficiencyNumber,
+  toGapItem,
+  toSkillMatrixItem,
+  withRefreshedGaps,
+} from './resume-match-adapters'
+import type { components } from '@/types/api'
 
 const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
+  active: '活跃',
   candidate: '候选',
   emerging: '新兴',
   stable: '稳定',
@@ -31,6 +43,7 @@ const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
 }
 
 const STATUS_CLASS: Record<PositionStatus | 'low', string> = {
+  active: 'border-state-active/30 text-state-active bg-state-active/10',
   candidate: 'border-state-candidate/30 text-state-candidate bg-state-candidate/10',
   emerging: 'border-state-emerging/30 text-state-emerging bg-state-emerging/10',
   stable: 'border-state-stable/30 text-state-stable bg-state-stable/10',
@@ -39,12 +52,10 @@ const STATUS_CLASS: Record<PositionStatus | 'low', string> = {
   low: 'border-ink-faint/30 text-ink-muted bg-subtle',
 }
 
-const PRIORITY_LABEL = { high: '高', medium: '中', low: '低' } as const
-const PRIORITY_CLASS = {
-  high: 'border-state-archived/30 text-state-archived bg-state-archived/10',
-  medium: 'border-state-declining/30 text-state-declining bg-state-declining/10',
-  low: 'border-ink-faint/30 text-ink-muted bg-subtle',
-} as const
+const REL_LABEL = { missing: '缺失', weak: '待提升', matched: '达标' } as const
+function relLabel(rel: keyof typeof REL_LABEL): string {
+  return REL_LABEL[rel]
+}
 
 const GAP_TYPE_LABEL = {
   missing_must: '必备缺失',
@@ -73,25 +84,6 @@ function toRecommendItem(r: BackendMatchResult): RecommendItem {
   }
 }
 
-function toGapItem(g: BackendGapItem): GapItem {
-  // 后端三态（missing/weak/matched）→ 前端四态；matched 是已匹配而非缺失
-  const gap_type =
-    g.gap_type === 'matched'
-      ? 'matched'
-      : g.gap_type === 'weak'
-        ? 'level_gap'
-        : g.necessity === 'must'
-          ? 'missing_must'
-          : 'missing_nice'
-  return {
-    skill: g.skill,
-    gap_type,
-    priority: g.priority,
-    current_level: g.current_proficiency ?? '未掌握',
-    required_level: g.required_proficiency ?? '不限',
-  }
-}
-
 /** 后端 estimated_hours（学时）→ 甘特图天数：每天 8 学时折算，起点按前序累计 */
 function toLearningPath(items: BackendLearningPathItem[]): MatchResult['learning_path'] {
   let offset = 0
@@ -108,22 +100,42 @@ function toLearningPath(items: BackendLearningPathItem[]): MatchResult['learning
         title: c.title,
         platform: c.platform,
         hours: c.hours ?? 0,
+        url: c.source_url ?? undefined,
       })),
       priority: item.priority,
+      // 契约 #341 后装字段透传（后端回填后覆盖前端 mock 兜底）
+      status: item.status,
+      demand: item.demand,
+      trend: item.trend,
+      roi: item.roi,
     }
   })
 }
 
 function toMatchResult(r: BackendMatchResult): MatchResult {
-  const skill_matrix: SkillMatrixItem[] = [
-    ...r.matched_must.map((s) => ({
-      skill: s, candidate_level: 3, required_level: 3, necessity: 'must' as const, match: 'full' as const,
-    })),
-    ...r.missing_must.map((s) => ({
-      skill: s, candidate_level: 0, required_level: 3, necessity: 'must' as const, match: 'missing' as const,
-    })),
-  ]
-  const gaps: GapItem[] = (r.gaps ?? []).map(toGapItem)
+  const gaps = (r.gaps ?? []).map(toGapItem)
+  const skill_matrix = (r.gaps ?? []).map(toSkillMatrixItem)
+  // 五维雷达消费后端 radar；无数据维度不展示。
+  const radar = r.radar
+  const radarDims: RadarDimension[] = []
+  const mustVal = radar?.must ?? r.must_score
+  if (mustVal != null) {
+    radarDims.push({ name: '必备技能', candidate: Math.round(mustVal * 100), required: 100 })
+  }
+  const skillLevel = radar?.skill_level
+  if (skillLevel != null) {
+    radarDims.push({ name: '熟练度', candidate: Math.round(skillLevel * 100), required: 100 })
+  }
+  radarDims.push(
+    { name: '加分技能', candidate: Math.round((radar?.nice ?? r.nice_score) * 100), required: 80 },
+    { name: '工作经验', candidate: Math.round((radar?.experience ?? r.exp_score) * 100), required: 85 },
+  )
+  if (radar?.education != null) {
+    radarDims.push({ name: '学历背景', candidate: Math.round(radar.education * 100), required: 100 })
+  }
+  if (radar?.projects != null) {
+    radarDims.push({ name: '项目经验', candidate: Math.round(radar.projects * 100), required: 100 })
+  }
   return {
     position_id: r.position_id,
     position_name: r.position_name,
@@ -132,16 +144,13 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
     nice_score: r.nice_score,
     exp_score: r.exp_score,
     summary: r.summary,
-    radar: [
-      { name: '必备技能', candidate: Math.round(r.must_score * 100), required: 100 },
-      { name: '加分技能', candidate: Math.round(r.nice_score * 100), required: 80 },
-      { name: '工作经验', candidate: Math.round(r.exp_score * 100), required: 85 },
-      { name: '学历背景', candidate: 70, required: 75 },
-      { name: '项目经验', candidate: 70, required: 70 },
-    ],
+    radar: radarDims,
     skill_matrix: skill_matrix,
     gaps,
     learning_path: toLearningPath(r.learning_path ?? []),
+    // P1 领域跨簇黑名单拦截状态透传（compare / 结果快照共用）
+    learning_path_blocked: r.learning_path_blocked ?? false,
+    learning_path_block_reason: r.learning_path_block_reason ?? null,
     // 证据引用：技能 → 原始 JD（图谱 MENTIONED_IN 链路，后端 compare 返回）
     evidence_refs: r.evidence_refs ?? [],
   }
@@ -176,16 +185,27 @@ export function ResumeMatchPage() {
   // AI 诊断报告（GET /match/result/{id}/diagnosis，LLM 生成 + Redis 缓存 24h）
   const [diagnosis, setDiagnosis] = useState<BackendDiagnosisReport | null>(null)
   const [diagnosisLoading, setDiagnosisLoading] = useState(false)
+  // 总体匹配度解读打字机呈现（reduced-motion 直接整段渲染；新报告到达自动重播）
+  const typedSummary = useTypewriter(diagnosis?.overall_summary ?? '', 60)
+  // 动效偏好（挂载时判定一次，驱动打字机光标显隐）
+  const reducedMotion = useMemo(() => prefersReducedMotion(), [])
   // 用户反馈（1=有用 / -1=没用，POST /match/feedback）
   const [feedback, setFeedback] = useState<number | null>(null)
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
   const [resumeList, setResumeList] = useState<ResumeSummary[]>([])
   const [activeResumeId, setActiveResumeId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // 差距展开溯源（task T3）：被展开的技能集
+  const [expandedGaps, setExpandedGaps] = useState<Set<string>>(() => new Set())
+  // 差距数据升级派生（task T3）. H4 修复:直接消费后端 gaps(删除 decorateGaps 前端
+  // ROI 覆盖与 evidence 重建)。toGapItem 已透传契约 #341 后装字段 demand/trend/
+  // roi/high_roi/evidence——前端 GAP_COST 常量公式与后端成本口径(base_hours×熟练度
+  // 缺口)不一致,曾推翻后端 high_roi 标记。后端字段缺失时已由后端回填,前端不再 mock 兜底。
+  const gapRows = useMemo(() => (matchResult ? matchResult.gaps : []), [matchResult])
 
   // 载入已解析简历列表（后端 /resume/list）
   function loadResumeList() {
-    return apiGet<{ items: ResumeSummary[]; total: number }>('/resume/list')
+    return apiGet<components['schemas']['ResumeListData']>('/resume/list')
       .then((res) => setResumeList(res.items))
       .catch(() => {
         /* 列表加载失败不阻塞页面 */
@@ -205,7 +225,7 @@ export function ResumeMatchPage() {
       form.append('file', file)
       // 不手动设 Content-Type：axios 对 FormData 自动生成含 boundary 的 multipart 头，
       // 手动覆盖会丢失 boundary 导致后端解析失败
-      const res = await apiPost<{ task_id: string; resume_id: string; cached: boolean }>(
+      const res = await apiPost<components['schemas']['ResumeParseTaskData']>(
         '/resume/parse',
         form,
       )
@@ -217,7 +237,7 @@ export function ResumeMatchPage() {
       await streamParseProgress(res.task_id, file.name)
     } catch (e) {
       setStage('upload')
-      setNotice(e instanceof ApiError ? e.message : '上传失败，请检查后端服务')
+      setNotice(errMsg(e, '上传失败，请检查后端服务'))
     }
   }
 
@@ -298,7 +318,7 @@ export function ResumeMatchPage() {
     setStage('parsing')
     setNotice('推荐计算中，请稍候…')
     try {
-      const submitted = await apiPost<{ task_id: string }>('/match/recommend', {
+      const submitted = await apiPost<components['schemas']['RecommendTaskResult']>('/match/recommend', {
         resume_id: resumeId,
         top_n: 10,
       })
@@ -306,7 +326,7 @@ export function ResumeMatchPage() {
       if (task.status !== 'success' || !task.match_id) {
         throw new Error(task.error || '推荐失败，请稍后重试')
       }
-      const result = await apiGet<{ items: BackendMatchResult[] }>(`/match/result/${task.match_id}`)
+      const result = await apiGet<components['schemas']['MatchResultList']>(`/match/result/${task.match_id}`)
       const items = result.items.map(toRecommendItem)
       setRecommendations(items)
       setStage('matched')
@@ -315,9 +335,13 @@ export function ResumeMatchPage() {
       setNotice(null)
     } catch (e) {
       setStage('upload')
-      setNotice(e instanceof ApiError ? e.message : '推荐失败，请检查后端服务')
+      setNotice(errMsg(e, '推荐失败，请检查后端服务'))
     }
   }
+
+  // 轮询中止标志（08-14 审查：路由切走后停止轮询，避免卸载后 setState/请求浪费）
+  const pollCancelledRef = useRef(false)
+  useEffect(() => () => { pollCancelledRef.current = true }, [])
 
   // 轮询推荐任务状态：pending/running 等待，success/failed 结束，超时抛错
   async function pollMatchTask(
@@ -326,7 +350,8 @@ export function ResumeMatchPage() {
   ): Promise<{ status: string; match_id?: string; error?: string }> {
     const deadline = Date.now() + maxWaitMs
     for (;;) {
-      const task = await apiGet<{ status: string; match_id?: string; error?: string }>(
+      if (pollCancelledRef.current) throw new Error('已离开页面，推荐轮询中止')
+      const task = await apiGet<components['schemas']['MatchTaskStatus']>(
         `/match/task/${taskId}`,
       )
       if (task.status === 'success' || task.status === 'failed') return task
@@ -352,7 +377,7 @@ export function ResumeMatchPage() {
       setMatchId(res.match_id ?? null)
       setMatchResult(toMatchResult(res))
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '比对失败')
+      setNotice(errMsg(e, '比对失败'))
     } finally {
       setLoadingDetail(false)
     }
@@ -364,7 +389,7 @@ export function ResumeMatchPage() {
     if (!matchId) return
     setNotice(null)
     try {
-      const task = await apiGet<{ status: string }>(`/match/task/${matchId}`)
+      const task = await apiGet<components['schemas']['MatchTaskStatus']>(`/match/task/${matchId}`)
       if (task.status !== 'success') {
         setNotice('匹配任务尚未完成，请稍后重试')
         return
@@ -376,7 +401,7 @@ export function ResumeMatchPage() {
         setNotice('已从结果快照刷新（无需重新计算）')
       }
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '快照刷新失败（结果可能已过期，请重新比对）')
+      setNotice(errMsg(e, '快照刷新失败（结果可能已过期，请重新比对）'))
     }
   }
 
@@ -384,11 +409,11 @@ export function ResumeMatchPage() {
   async function refreshGaps() {
     if (!matchId) return
     try {
-      const res = await apiGet<{ gaps: BackendGapItem[] }>(`/match/result/${matchId}/gap`)
-      setMatchResult((prev) => (prev ? { ...prev, gaps: res.gaps.map(toGapItem) } : prev))
+      const res = await apiGet<components['schemas']['MatchGapData']>(`/match/result/${matchId}/gap`)
+      setMatchResult((prev) => (prev ? withRefreshedGaps(prev, res.gaps) : prev))
       setNotice('差距分析已从快照刷新')
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '差距刷新失败')
+      setNotice(errMsg(e, '差距刷新失败'))
     }
   }
 
@@ -396,30 +421,46 @@ export function ResumeMatchPage() {
   async function refreshPath() {
     if (!matchId) return
     try {
-      const res = await apiGet<{ learning_path: BackendLearningPathItem[] }>(`/match/result/${matchId}/path`)
-      setMatchResult((prev) => (prev ? { ...prev, learning_path: toLearningPath(res.learning_path) } : prev))
+      const res = await apiGet<components['schemas']['MatchPathData']>(`/match/result/${matchId}/path`)
+      setMatchResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              learning_path: toLearningPath(res.learning_path),
+              learning_path_blocked: res.learning_path_blocked ?? false,
+              learning_path_block_reason: res.learning_path_block_reason ?? null,
+            }
+          : prev,
+      )
       setNotice('学习路径已从快照刷新')
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '学习路径刷新失败')
+      setNotice(errMsg(e, '学习路径刷新失败'))
     }
   }
 
-  // 生成/刷新 AI 诊断报告（GET /match/result/{id}/diagnosis，LLM 配置不可用返回 503、超时返回 504，不阻断主流程）
+  // 创建异步诊断任务，完成后从兼容 GET 端点读取报告。
   async function loadDiagnosis() {
     if (!matchId || diagnosisLoading) return
     setDiagnosisLoading(true)
     setNotice(null)
     try {
-      // 诊断是 LLM 长时生成（多 provider 降级，可能 30s+），超时放宽到 120s，
-      // 覆盖默认 axios 30s 上限，避免"生成中"被误中断
+      const created = await apiPost<components['schemas']['DiagnosisTaskResponse']>(
+        `/match/result/${matchId}/diagnosis`,
+      )
+      if (created.report) {
+        setDiagnosis(created.report)
+        return
+      }
+      if (!created.task_id) throw new Error('诊断任务创建失败')
+      const task = await pollMatchTask(created.task_id, 120_000)
+      if (task.status === 'failed') throw new Error(task.error || '诊断任务执行失败')
       const report = await apiGet<BackendDiagnosisReport>(
         `/match/result/${matchId}/diagnosis`,
-        { timeout: 120_000 },
       )
       setDiagnosis(report)
     } catch (e) {
       setDiagnosis(null)
-      setNotice(e instanceof ApiError ? e.message : '诊断报告生成失败，请稍后重试')
+      setNotice(errMsg(e, '诊断报告生成失败，请稍后重试'))
     } finally {
       setDiagnosisLoading(false)
     }
@@ -435,7 +476,7 @@ export function ResumeMatchPage() {
       setFeedback(score)
       setNotice(`已记录反馈（${score === 1 ? '👍 匹配结果有用' : '👎 匹配结果不准确'}）`)
     } catch (e) {
-      setNotice(e instanceof ApiError ? e.message : '反馈提交失败')
+      setNotice(errMsg(e, '反馈提交失败'))
     } finally {
       setFeedbackSubmitting(false)
     }
@@ -452,6 +493,7 @@ export function ResumeMatchPage() {
     setFeedback(null)
     setActiveResumeId(null)
     setNotice(null)
+    setExpandedGaps(new Set())
   }
 
   // ===== 上传阶段 =====
@@ -615,7 +657,7 @@ export function ResumeMatchPage() {
                     <span className="text-[10px] text-ink-faint font-mono">{rec.position_id}</span>
                   </div>
                   <p className="text-xs text-ink-muted line-clamp-2">{rec.summary}</p>
-                  {/* 三维分数 mini bar */}
+                  {/* 三维分数 mini bar（无必备门槛岗位 must=null 显示空条） */}
                   <div className="flex items-center gap-1.5 mt-2">
                     {[
                       { label: '必', val: rec.must_score, color: 'bg-ink' },
@@ -627,7 +669,7 @@ export function ResumeMatchPage() {
                         <div className="flex-1 h-1 rounded-full bg-subtle overflow-hidden">
                           <div
                             className={`h-full rounded-full ${d.color}`}
-                            style={{ width: `${d.val * 100}%` }}
+                            style={{ width: `${(d.val ?? 0) * 100}%` }}
                           />
                         </div>
                       </div>
@@ -653,9 +695,11 @@ export function ResumeMatchPage() {
 
           {selectedPosition && loadingDetail && (
             <Card className="border-dashed">
-              <CardContent className="flex flex-col items-center justify-center py-20 text-center">
-                <div className="size-8 rounded-full border-2 border-ink border-t-transparent animate-spin mb-3" />
-                <p className="text-sm text-ink-muted">加载比对详情…</p>
+              <CardContent>
+                <AiThinkingCard
+                  stages={['正在运行人岗匹配引擎…', '正在计算三维得分与技能矩阵…', '正在生成比对详情…']}
+                  rows={4}
+                />
               </CardContent>
             </Card>
           )}
@@ -720,11 +764,11 @@ export function ResumeMatchPage() {
                           <div className="flex-1 h-2 rounded-full bg-subtle overflow-hidden">
                             <div
                               className="h-full rounded-full bg-ink"
-                              style={{ width: `${d.score * 100}%` }}
+                              style={{ width: `${(d.score ?? 0) * 100}%` }}
                             />
                           </div>
                           <span className="text-xs font-mono text-ink tabular-nums w-12 text-right">
-                            {(d.score * 100).toFixed(0)}
+                            {d.score == null ? '—' : (d.score * 100).toFixed(0)}
                           </span>
                           <span className="text-[10px] text-ink-faint w-8">w={d.weight}</span>
                         </div>
@@ -741,8 +785,8 @@ export function ResumeMatchPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm">五维能力对比</CardTitle>
-                    <CardDescription>候选人 vs 岗位要求（三维真实 + 学历/项目占位）</CardDescription>
+                    <CardTitle className="text-sm">能力对比</CardTitle>
+                    <CardDescription>候选人 vs 岗位要求（直接消费后端雷达评分；包含后端提供的熟练度满足度）</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <RadarChart data={matchResult.radar} />
@@ -752,7 +796,7 @@ export function ResumeMatchPage() {
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm">技能矩阵</CardTitle>
-                    <CardDescription>必备技能命中情况（真实 matched/missing_must）</CardDescription>
+                    <CardDescription>候选人与岗位要求的真实熟练度及后端差距状态</CardDescription>
                   </CardHeader>
                   <CardContent>
                     {matchResult.skill_matrix.length > 0 ? (
@@ -785,50 +829,160 @@ export function ResumeMatchPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {matchResult.gaps.length === 0 ? (
+                  {gapRows.length === 0 ? (
                     <p className="text-xs text-ink-faint py-6 text-center">
                       无必备技能缺口，岗位要求全部满足
                     </p>
                   ) : (
                     <div className="space-y-2">
-                      {matchResult.gaps.map((gap, i) => {
-                        const Icon =
-                          gap.gap_type === 'missing_must'
-                            ? XCircle
-                            : gap.gap_type === 'level_gap'
-                              ? AlertCircle
-                              : CheckCircle2
+                      {gapRows.map((gap) => {
+                        const expanded = expandedGaps.has(gap.skill)
+                        // 双轨对齐：目标(岗位要求) vs 现状(候选人) 的 0-4 熟练度
+                        const target = Math.max(0, Math.min(4, proficiencyNumber(gap.required_level, 'requirement', 3)))
+                        const actual = Math.max(0, Math.min(4, proficiencyNumber(gap.current_level, 'candidate', 0)))
+                        // 两侧刻度的语义不同，不能以数字比较重判匹配结果；沿用后端权威三态。
+                        const rel = gap.match_status
+                        const GAP_ICON =
+                          gap.gap_type === 'missing_must' ? XCircle : gap.gap_type === 'level_gap' ? AlertCircle : CheckCircle2
+                        const relClass =
+                          rel === 'missing' ? 'text-state-archived' : rel === 'weak' ? 'text-state-declining' : 'text-state-stable'
+                        const relBar =
+                          rel === 'missing' ? 'bg-state-archived' : rel === 'weak' ? 'bg-state-declining' : 'bg-state-stable'
                         const iconColor =
                           gap.gap_type === 'missing_must'
                             ? 'text-state-archived'
                             : gap.gap_type === 'level_gap'
                               ? 'text-state-declining'
-                              : gap.gap_type === 'matched'
-                                ? 'text-state-stable'
-                                : 'text-ink-faint'
+                              : 'text-state-stable'
                         return (
                           <div
-                            key={i}
-                            className="flex items-center gap-3 rounded-md border border-border p-2.5"
+                            key={gap.skill}
+                            className={`rounded-md border p-2.5 ${expanded ? 'border-border-strong' : 'border-border'}`}
                           >
-                            <Icon className={`size-4 shrink-0 ${iconColor}`} />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-ink">{gap.skill}</span>
-                                <Badge variant="outline" className="text-[10px]">
-                                  {GAP_TYPE_LABEL[gap.gap_type]}
-                                </Badge>
-                              </div>
-                              <p className="text-xs text-ink-muted mt-0.5">
-                                当前: {gap.current_level} → 要求: {gap.required_level}
-                              </p>
-                            </div>
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] ${PRIORITY_CLASS[gap.priority]}`}
+                            {/* 头部：技能 + 类型/ROI 徽标 + 对齐状态（点击展开溯源） */}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedGaps((prev) => {
+                                  const n = new Set(prev)
+                                  if (n.has(gap.skill)) n.delete(gap.skill)
+                                  else n.add(gap.skill)
+                                  return n
+                                })
+                              }
+                              className="flex w-full items-center gap-3 text-left"
                             >
-                              {PRIORITY_LABEL[gap.priority]}优
-                            </Badge>
+                              <GAP_ICON className={`size-4 shrink-0 ${iconColor}`} />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="text-sm font-medium text-ink">{gap.skill}</span>
+                                  <Badge variant="outline" className="text-[10px]">
+                                    {GAP_TYPE_LABEL[gap.gap_type]}
+                                  </Badge>
+                                  {gap.is_soft && (
+                                    <span className="inline-flex items-center rounded-full border border-[#ec4899]/40 bg-[#ec4899]/5 px-1.5 py-0 text-[10px] font-medium text-[#ec4899] dark:text-[#f472b6]">
+                                      软技能
+                                    </span>
+                                  )}
+                                  {gap.high_roi && (
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-state-emerging/40 bg-state-emerging/10 px-1.5 py-0 text-[10px] font-medium text-state-emerging">
+                                      <Sparkles className="size-3" />核心突破点 · 高 ROI
+                                    </span>
+                                  )}
+                                  <span className={`ml-auto text-[9px] font-mono ${relClass}`}>{relLabel(rel)}</span>
+                                </div>
+                                {/* 双轨对比基线（task T3）：上轨=目标期望基线，下轨=实际掌握度 */}
+                                {/* 上轨：期望达到段（0→target 淡色承托）+ 目标刻度；下轨：现状填充，溢出段高亮 */}
+                                <div className="mt-2 space-y-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-8 shrink-0 text-right text-[9px] text-ink-faint">要求</span>
+                                    <div className="relative h-2 flex-1 rounded-full bg-border/40">
+                                      <div
+                                        className={`absolute inset-y-0 left-0 rounded-l-full ${rel === 'missing' ? 'bg-state-archived/20' : rel === 'weak' ? 'bg-state-declining/20' : 'bg-state-stable/20'}`}
+                                        style={{ width: `${(target / 4) * 100}%` }}
+                                      />
+                                      <div
+                                        className="absolute inset-y-[-3px] w-[3px] rounded bg-ink/70"
+                                        style={{ left: `${(target / 4) * 100}%` }}
+                                        title={`岗位要求 ${target}/4`}
+                                      />
+                                    </div>
+                                    <span className="w-6 shrink-0 text-[9px] font-mono text-ink-muted tabular-nums">
+                                      {target}/4
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-8 shrink-0 text-right text-[9px] text-ink-faint">现状</span>
+                                    <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-border/40">
+                                      <div
+                                        className={`absolute inset-y-0 left-0 rounded-full ${relBar}`}
+                                        style={{ width: `${(actual / 4) * 100}%` }}
+                                      />
+                                    </div>
+                                    <span className="w-6 shrink-0 text-[9px] font-mono text-ink-muted tabular-nums">
+                                      {actual}/4
+                                    </span>
+                                  </div>
+                                  <span className="flex items-center gap-1 text-[9px] text-ink-faint">
+                                    <span className={`font-mono ${relClass}`}>{relLabel(rel)}</span>
+                                    <ChevronDown
+                                      className={`size-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                                    />
+                                  </span>
+                                </div>
+                              </div>
+                            </button>
+                            {/* 展开：ROI 明细 + 证据溯源（task T3） */}
+                            {expanded && (
+                              <div className="mt-2 space-y-2 border-t border-border pt-2">
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-muted">
+                                  <span>
+                                    需求 <b className="text-ink">{Math.round((gap.demand ?? 0) * 100)}</b>
+                                  </span>
+                                  <span>
+                                    趋势{' '}
+                                    <b className={((gap.trend ?? 0) >= 0 ? 'text-state-emerging' : 'text-state-archived')}>
+                                      {(gap.trend ?? 0) >= 0 ? '↑' : '↓'} {Math.round(Math.abs(gap.trend ?? 0) * 100)}
+                                    </b>
+                                  </span>
+                                  <span>
+                                    ROI <b className="text-ink">{((gap.roi ?? 0)).toFixed(2)}</b>
+                                  </span>
+                                </div>
+                                {/* 数据溯源（task T3）：一条 JD 要求 ↔ 对应简历特征，逐条成对展示，打破算法黑盒 */}
+                                {(() => {
+                                  // 按 role 交替配对：每条 JD 要求对应同位置的简历特征
+                                  const jd = (gap.evidence ?? []).filter((e) => e.role === 'jd')
+                                  const resume = (gap.evidence ?? []).filter((e) => e.role === 'resume')
+                                  const rows = Math.max(1, Math.max(jd.length, resume.length))
+                                  const pairs: ReactElement[] = []
+                                  for (let k = 0; k < rows; k++) {
+                                    const j = jd[k]?.text ?? '—'
+                                    const r = resume[k]?.text ?? '未标注/缺失'
+                                    pairs.push(
+                                      <div
+                                        key={k}
+                                        className="grid grid-cols-2 gap-2 rounded-md border border-border/60 p-2"
+                                      >
+                                        <div>
+                                          <div className="mb-0.5 flex items-center gap-1 text-[9px] font-medium text-state-archived">
+                                            <FileText className="size-3" />JD 要求原文
+                                          </div>
+                                          <p className="text-[10px] leading-relaxed text-ink-secondary">{j}</p>
+                                        </div>
+                                        <div>
+                                          <div className="mb-0.5 flex items-center gap-1 text-[9px] font-medium text-state-stable">
+                                            <CheckCircle2 className="size-3" />简历提取特征
+                                          </div>
+                                          <p className="text-[10px] leading-relaxed text-ink-secondary">{r}</p>
+                                        </div>
+                                      </div>,
+                                    )
+                                  }
+                                  return <div className="space-y-1.5">{pairs}</div>
+                                })()}
+                              </div>
+                            )}
                           </div>
                         )
                       })}
@@ -837,7 +991,7 @@ export function ResumeMatchPage() {
                 </CardContent>
               </Card>
 
-              {/* 学习路径甘特图（先修链 + 推荐课程 Top-3，后端 compare 返回） */}
+              {/* 学习路径规划（双轨制：先修拓扑分层 → 阶段时间轴；已匹配技能标记已掌握） */}
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm flex items-center gap-2">
@@ -852,11 +1006,29 @@ export function ResumeMatchPage() {
                       <RefreshCw className="size-3 mr-1" />刷新
                     </Button>
                   </CardTitle>
-                  <CardDescription>基于课程图谱的补足路径（先修链 + 推荐课程）</CardDescription>
+                  <CardDescription>按先修关系分阶段的学习时间轴（学时 / 推荐课程 / 前往学习）</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {matchResult.learning_path.length > 0 ? (
-                    <GanttChart data={matchResult.learning_path} />
+                  {matchResult.learning_path_blocked ? (
+                    // P1 演示：领域跨簇语义黑名单拦截（跨域诱导组合拒绝生成）
+                    <div className="flex items-start gap-3 rounded-md border border-state-archived/40 bg-state-archived/5 px-4 py-3">
+                      <AlertCircle className="size-4 mt-0.5 shrink-0 text-state-archived" />
+                      <div className="text-xs text-ink-strong leading-relaxed">
+                        <p className="font-medium mb-1">学习路径已拒绝生成（领域语义黑名单拦截）</p>
+                        <p className="text-ink-faint">{matchResult.learning_path_block_reason ?? '检测到跨领域诱导组合，已停止规划。'}</p>
+                      </div>
+                    </div>
+                  ) : matchResult.learning_path.length > 0 ? (
+                    <LearningTimeline
+                      items={matchResult.learning_path}
+                      completedSkills={completedSkillsFromMatrix(matchResult.skill_matrix)}
+                      onGoToLearn={(task) => {
+                        // 接入课程：跳转该技能首门推荐课程（新标签）
+                        const url = task.courses?.find((c) => c.url)?.url
+                        if (url) window.open(url, '_blank', 'noreferrer')
+                        else setNotice(`「${task.skill}」暂无推荐课程，可先补充相关课程后再学习`)
+                      }}
+                    />
                   ) : (
                     <p className="text-xs text-ink-faint py-10 text-center">
                       无需要补足的技能差距，岗位要求已全部满足
@@ -887,16 +1059,26 @@ export function ResumeMatchPage() {
                 </CardHeader>
                 <CardContent>
                   {diagnosisLoading ? (
-                    <div className="flex flex-col items-center justify-center py-10 text-center">
-                      <div className="size-6 rounded-full border-2 border-ink border-t-transparent animate-spin mb-3" />
-                      <p className="text-xs text-ink-muted">诊断报告生成中（LLM 推理约需 1 分钟，多通道自动切换）…</p>
-                    </div>
+                    <AiThinkingCard
+                      stages={[
+                        'AI 正在汇总匹配结果与关键差距…',
+                        'AI 正在生成岗位能力诊断报告…',
+                        'AI 正在撰写改进建议与路径解读…',
+                      ]}
+                      rows={4}
+                      hint="LLM 推理约需 1 分钟，多通道自动切换，结果缓存 24h"
+                    />
                   ) : diagnosis ? (
                     <div className="space-y-4">
-                      {/* 总体匹配度解读 */}
+                      {/* 总体匹配度解读（打字机呈现；reduced-motion 直接整段） */}
                       <div>
                         <h4 className="text-xs font-medium text-ink mb-1">总体匹配度解读</h4>
-                        <p className="text-sm text-ink-muted leading-relaxed">{diagnosis.overall_summary}</p>
+                        <p className="text-sm text-ink-muted leading-relaxed">
+                          {typedSummary}
+                          {!reducedMotion && typedSummary.length < (diagnosis.overall_summary?.length ?? 0) && (
+                            <span className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-ink/70 align-text-bottom" />
+                          )}
+                        </p>
                       </div>
                       {/* 三维雷达图解读 */}
                       <div>
@@ -987,21 +1169,15 @@ export function ResumeMatchPage() {
                       {matchResult.evidence_refs.map((ev, i) => (
                         <div
                           key={i}
-                          className="flex items-center gap-3 text-xs rounded-md border border-border p-2"
+                          className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs rounded-md border border-border p-2"
                         >
                           <span className="font-medium text-ink w-24 truncate">{ev.skill}</span>
-                          <Badge variant="outline" className="text-[10px]">{ev.source}</Badge>
-                          <span className="text-ink-muted font-mono">
-                            置信度 {(ev.confidence * 100).toFixed(0)}%
-                          </span>
-                          <a
-                            href={ev.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="ml-auto text-ink-muted hover:text-ink underline"
-                          >
-                            查看原文
-                          </a>
+                          <CitationBadge
+                            source={ev.source}
+                            confidence={ev.confidence}
+                            url={ev.url}
+                            title={`技能「${ev.skill}」溯源至 ${ev.source}`}
+                          />
                         </div>
                       ))}
                     </div>

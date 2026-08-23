@@ -22,7 +22,6 @@
 
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -30,8 +29,7 @@ from pathlib import Path
 from scrapy import Request
 from scrapy.http import Response
 
-from crawlers.base_spider import BaseSpider
-from crawlers.settings import SUBPROCESS_TIMEOUT
+from crawlers.base_spider import BaseSpider, iter_jsonl, run_script
 from crawlers.setup_boss_chrome import ensure_cdp_chrome, platform_profile_dir
 
 # 独立采集脚本路径
@@ -105,40 +103,14 @@ class MonsterSpider(BaseSpider):
                 "--cdp-url", cdp_url,
             ]
 
-            try:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    cwd=os.path.dirname(CRAWLER_SCRIPT),
-                    env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
-                )
-            except Exception as e:
-                self.logger.error(f"启动采集脚本失败: {e}")
+            result = run_script(cmd, os.path.dirname(CRAWLER_SCRIPT), self.logger,
+                               f"[monster] 任务 {task_idx + 1}/{task_total}")
+            if result is None:
                 continue
-
-            # 阻塞读取子进程输出（stdout/stderr 一并读取避免管道死锁），超时后终止
-            try:
-                stdout, stderr = proc.communicate(timeout=SUBPROCESS_TIMEOUT)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                stdout, stderr = proc.communicate()
-                self.logger.error(f"[monster] 任务 {task_idx + 1}/{task_total} 超时（>{SUBPROCESS_TIMEOUT}s），已终止")
-                continue
+            stdout, stderr, returncode = result
 
             item_count = 0
-            for line in stdout.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    item_data = json.loads(line)
-                except json.JSONDecodeError as e:
-                    self.logger.error(f"JSONL 解析失败: {e}, line={line[:100]}")
-                    continue
-
+            for item_data in iter_jsonl(stdout, self.logger):
                 item_count += 1
                 yield self.make_item(
                     source_id=str(item_data.get("id", "")),
@@ -156,8 +128,8 @@ class MonsterSpider(BaseSpider):
                     raw_text=json.dumps(item_data, ensure_ascii=False),
                 )
 
-            if proc.returncode != 0:
-                self.logger.error(f"[monster] CDP 脚本退出码 {proc.returncode}: {stderr[-500:]}")
+            if returncode != 0:
+                self.logger.error(f"[monster] CDP 脚本退出码 {returncode}: {stderr[-500:]}")
             elif stderr:
                 # 转发 CDP 脚本关键日志（连接/cookies/导航/拦截），便于实时排查。
                 # 跳过脚本自身的"采集完成"汇总（下方输出产出统计，避免重复反馈）

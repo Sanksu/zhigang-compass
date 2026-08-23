@@ -6,41 +6,50 @@ import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
+
+from app.core.middleware import trace_id_var
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_optional_user, role_rank
-from app.core.database import get_db, neo4j_driver, redis_client
+from app.api.deps import get_optional_user
+from app.core.database import async_neo4j_driver, get_db, neo4j_driver, redis_client
+from app.core.errors import ERR_INTERNAL, ERR_NOT_FOUND
 from app.models.business import SkillEmbedding
 from app.schemas.common import error, ok
+from app.services.graph import repository, visibility
 from app.services.graph_algorithms.config import load_graph_algo_config
-from app.services.kg.skill_relations import graph_prerequisite_chain
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
-from app.services.matching.semantic import SkillEmbedder, SemanticUnavailableError
+from app.services.matching.semantic import SemanticUnavailableError, SkillEmbedder
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 # 全景查询缓存 TTL（设计文档 10.3：panorama 短 TTL 30s）
-PANORAMA_CACHE_TTL = 30
+# 08-18 TTL 风暴治理：30s → 300s——到期风暴频率降 10 倍（P99 尾部 6.6s→基线水平）。
+# 交互路径（管理端岗位编辑/审核/归档）经 invalidate_graph_caches() 即时失效，
+# 日常 ETL 聚合与自动流转变更接受 ≤5min 展示滞后（T+1 版本视图不受影响）。
+PANORAMA_CACHE_TTL = 300
+
+# 全文检索缓存 TTL（同治理：60s → 300s）
+SEARCH_CACHE_TTL = 300
+
+# 缓存穿透合并（08-15 压测扩容）：panorama TTL 失效瞬间 100 并发同时
+# miss 打 Neo4j（to_thread 线程池饱和 → P95 20s 长尾根因）。in-flight 表让
+# 同 key 并发请求只放行 1 个查库，其余 await 同一 future 读缓存。
+_inflight: dict[str, asyncio.Future] = {}
 
 # 节点详情缓存 TTL（设计文档 §11.3.5：position:{id} 5min，skill 同档）
 _NODE_CACHE_TTL = 300
 
-# 匿名/guest 可见的岗位状态（方案一：candidate 待审核不外宣，archived 已下线）
-_PUBLIC_POSITION_STATUSES = ("emerging", "stable", "declining")
-
-
-def _can_view_all_positions(user: Optional[dict]) -> bool:
-    """user/admin 可见全部岗位；匿名/guest 只见 emerging/stable/declining。"""
-    return user is not None and role_rank(user) >= role_rank({"role": "user"})
-
-
-def _position_scope(user: Optional[dict]) -> str:
-    """缓存 key 的可见性维度：all=全量（user/admin），public=仅公开态。"""
-    return "all" if _can_view_all_positions(user) else "public"
+# 兼容别名：岗位可见性纯函数已迁至 services/graph/visibility.py（单一事实源），
+# graph.py 保留同名绑定——tests/graph/test_graph_visibility.py 直读此处。
+_PUBLIC_POSITION_STATUSES = visibility._PUBLIC_POSITION_STATUSES
+_can_view_all_positions = visibility._can_view_all_positions
+_position_scope = visibility._position_scope
+_status_clause = visibility._status_clause
 
 
 async def _cache_get(key: str):
@@ -54,6 +63,106 @@ async def _cache_set(key: str, data, ttl: int = _NODE_CACHE_TTL) -> None:
     await redis_client.set(key, json.dumps(data), ex=ttl)
 
 
+async def invalidate_graph_caches() -> None:
+    """图数据变更后失效全部图谱热路径缓存（panorama/view/search/节点详情）。
+
+    管理端岗位编辑与审核/归档状态变更后调用（交互路径即时可见）；
+    日常 ETL 聚合与自动流转变更由 TTL（300s）兜底。scan 前缀 graph:*
+    覆盖 graph:panorama/graph:view/graph:search/graph:position/graph:skill
+    全部键；匹配岗位共享缓存（matching:*）不受影响。
+    """
+    keys = [key async for key in redis_client.scan_iter(match="graph:*")]
+    if keys:
+        await redis_client.delete(*keys)
+
+
+def _panorama_json_response(data_json: str) -> Response:
+    """panorama 预序列化响应（08-18 压测尾部治理）。
+
+    缓存存 data JSON 串；命中/风暴等待者直接拼接统一信封返回，跳过
+    json.loads + FastAPI 二次序列化（577KB 载荷 × 风暴窗口 100+ 等待者
+    的事件循环积压是 P99 尾部放大器之一）。
+    """
+    body = (
+        '{"code":0,"msg":"ok","data":' + data_json
+        + ',"trace_id":' + json.dumps(trace_id_var.get("")) + "}"
+    )
+    return Response(content=body, media_type="application/json")
+
+
+async def _query_panorama(scope: str, focus: str | None, min_weight: float, limit: int) -> tuple[dict, list]:
+    """panorama 热路径查询（P2：async Neo4j 驱动直查，替代 to_thread 包 sync IO）。"""
+    return await repository.query_panorama_async(async_neo4j_driver, scope, focus, min_weight, limit)
+
+
+async def _query_skill_positions(skill_id: str, status_filter: str) -> list[dict]:
+    """skill_positions 热路径查询（P2：async Neo4j 驱动直查）。"""
+    return await repository.query_skill_positions_async(async_neo4j_driver, skill_id, status_filter)
+
+
+async def _query_fulltext_search(
+    q: str, type_: str, status_clause: str, offset: int, size: int,
+) -> tuple[list[dict], int]:
+    """fulltext_search 热路径查询（P2：async Neo4j 驱动直查）。"""
+    return await repository.query_fulltext_search_async(
+        async_neo4j_driver, q, type_, status_clause, offset, size)
+
+
+def _query_position_skills_by_necessity(id: str) -> dict[str, dict]:
+    """岗位技能（按 necessity 分组，线程池执行，08-14 审查）。"""
+    return repository.query_position_skills_by_necessity(neo4j_driver, id)
+
+
+def _query_prereq_chain(skill_name: str) -> list[str]:
+    """图谱先修链（线程池执行，08-14 审查）。"""
+    return repository.query_prereq_chain(neo4j_driver, skill_name)
+
+
+def _query_skill_ids(names: list[str]) -> dict[str, str]:
+    """技能名 → 图谱 ID（线程池执行）。"""
+    return repository.query_skill_ids(neo4j_driver, names)
+
+
+def _query_position_skills(id: str, necessity: str | None, status_filter: str) -> list[dict]:
+    """岗位技能（可按 necessity 过滤，线程池执行）。"""
+    return repository.query_position_skills(neo4j_driver, id, necessity, status_filter)
+
+
+def _query_all_skills() -> list[tuple[str, str]]:
+    """全技能 (id, name)（线程池执行）。"""
+    return repository.query_all_skills(neo4j_driver)
+
+
+def _query_skill_counts(skill_id: str, status_filter: str) -> dict:
+    """技能关联计数（岗位/证据，线程池执行）。"""
+    return repository.query_skill_counts(neo4j_driver, skill_id, status_filter)
+
+
+async def _query_graph_counts() -> dict:
+    """图谱全量节点/边数（stats.total_*，P2：async Neo4j 驱动直查）。"""
+    return await repository.query_graph_counts_async(async_neo4j_driver)
+
+
+def _query_skill_evidence(skill_id: str) -> list[dict]:
+    """技能证据列表（线程池执行，08-14 低优先批次）。"""
+    return repository.query_skill_evidence(neo4j_driver, skill_id)
+
+
+def _query_shortest_path(from_skill: str, to_skill: str, statuses) -> list | None:
+    """最短路径查询（线程池执行）。"""
+    return repository.query_shortest_path(neo4j_driver, from_skill, to_skill, statuses)
+
+
+async def _query_view_techstack(limit: int, status_filter: str) -> list:
+    """techStack 视图热路径查询（P2：async Neo4j 驱动直查）。"""
+    return await repository.query_view_techstack_async(async_neo4j_driver, limit, status_filter)
+
+
+async def _query_view_main(limit: int, status_filter: str) -> list:
+    """positionCenter/level/panorama 视图热路径查询（P2：async Neo4j 驱动直查）。"""
+    return await repository.query_view_main_async(async_neo4j_driver, limit, status_filter)
+
+
 @router.get("/panorama")
 async def panorama(
     limit: int = Query(default=100, ge=1, le=600),
@@ -61,7 +170,7 @@ async def panorama(
     focus: Optional[str] = Query(default=None),
     user: Optional[dict] = Depends(get_optional_user),
 ):
-    """图谱全景视图（匿名可读，30s Redis TTL 缓存，见设计文档 10.3）。
+    """图谱全景视图（匿名可读，300s Redis TTL 缓存 + 管理端写路径即时失效，见设计文档 10.3）。
 
     focus 缺省时返回 Top-N 高频岗位 + 关联技能；指定 focus 时以该岗位为中心展开。
     匿名/guest 仅返回 emerging/stable/declining 岗位（candidate 待审核不外宣），
@@ -71,67 +180,33 @@ async def panorama(
     cache_key = f"graph:panorama:{scope}:{limit}:{min_weight}:{focus or 'all'}"
     cached = await redis_client.get(cache_key)
     if cached is not None:
-        return ok(data=json.loads(cached))
+        return _panorama_json_response(cached)
 
-    nodes: dict[str, dict] = {}
-    edges: list[dict] = []
+    # single-flight：同 key 并发 miss 只放行一个查库，其余 await 同 future
+    inflight = _inflight.get(cache_key)
+    if inflight is not None:
+        return _panorama_json_response(await inflight)
 
-    # 匿名/guest 只见公开态岗位：状态过滤条件（focus 分支用 AND 衔接 weight 条件）
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    future = asyncio.get_running_loop().create_future()
+    _inflight[cache_key] = future
+    try:
+        nodes, edges = await _query_panorama(scope, focus, min_weight, limit)
 
-    with neo4j_driver.session() as session:
-        if focus:
-            rows = session.run(
-                f"""
-                MATCH (p:Position {{id: $focus}})-[r:REQUIRES]->(s:Skill)
-                WHERE {status_filter} AND r.weight >= $min_weight
-                RETURN p, s, r
-                """,
-                focus=focus, min_weight=min_weight, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-            )
-        else:
-            # 先按岗位热度取 Top-N 岗位，再展开其边（limit 语义为岗位数，避免低频岗位被边数截断）
-            rows = session.run(
-                f"""
-                MATCH (p:Position)
-                WHERE {status_filter}
-                WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
-                MATCH (p)-[r:REQUIRES]->(s:Skill)
-                WHERE r.weight >= $min_weight
-                RETURN p, s, r
-                """,
-                limit=limit, min_weight=min_weight, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-            )
-
-        for record in rows:
-            p, s, r = record["p"], record["s"], record["r"]
-            p_id = p.get("id", "")
-            s_id = s.get("id", "")
-            nodes.setdefault(p_id, {
-                "id": p_id,
-                "name": p.get("name", p_id),
-                "type": "position",
-                # 岗位状态机（candidate/emerging/stable/declining/archived）：
-                # 前端按 status 映射形状与颜色（2D 衰退为矩形/琥珀色），
-                # 漏取会让所有岗位兜底成 candidate，状态标记失效
-                "status": p.get("status", "candidate"),
-            })
-            nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
-            edges.append({
-                "source": p_id,
-                "target": s_id,
-                "weight": r.get("weight", 0.0),
-                "necessity": r.get("necessity", "must"),
-                "level": r.get("level", "中级"),
-            })
-
-    data = {
-        "nodes": list(nodes.values()),
-        "edges": edges,
-        "stats": {"nodes": len(nodes), "edges": len(edges)},
-    }
-    await redis_client.set(cache_key, json.dumps(data), ex=PANORAMA_CACHE_TTL)
-    return ok(data=data)
+        data = {
+            "nodes": list(nodes.values()),
+            "edges": edges,
+            "stats": {"nodes": len(nodes), "edges": len(edges),
+                      **await _query_graph_counts()},
+        }
+        cached_str = json.dumps(data, ensure_ascii=False)
+        await redis_client.set(cache_key, cached_str, ex=PANORAMA_CACHE_TTL)
+        future.set_result(cached_str)
+        return _panorama_json_response(cached_str)
+    except Exception as exc:
+        future.set_exception(exc)
+        raise
+    finally:
+        _inflight.pop(cache_key, None)
 
 
 @router.get("/skill/{skill_id}/positions")
@@ -148,28 +223,8 @@ async def skill_positions(
     cached = await _cache_get(cache_key)
     if cached is not None:
         return ok(data=cached)
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            f"""
-            MATCH (p:Position)-[r:REQUIRES]->(s:Skill {{id: $skill_id}})
-            WHERE {status_filter}
-            RETURN p.id AS position_id, p.name AS position_name,
-                   r.necessity AS necessity, r.weight AS weight, r.level AS level
-            ORDER BY r.weight DESC
-            """,
-            skill_id=skill_id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        )
-        positions = [
-            {
-                "position_id": rec["position_id"],
-                "position_name": rec.get("position_name", rec["position_id"]),
-                "necessity": rec.get("necessity", "must"),
-                "weight": rec.get("weight", 0.0),
-                "level": rec.get("level", "中级"),
-            }
-            for rec in rows
-        ]
+    status_filter = _status_clause(scope)
+    positions = await _query_skill_positions(skill_id, status_filter)
     data = {"skill_id": skill_id, "positions": positions}
     await _cache_set(cache_key, data)
     return ok(data=data)
@@ -191,94 +246,42 @@ async def fulltext_search(
     """
     scope = _position_scope(user)
     offset = (page - 1) * size
-    items: list[dict] = []
-    total = 0
-    # 匿名/guest 检索岗位时排除 candidate（全文索引 YIELD 的是完整节点，可直接过滤）
-    status_clause = (
-        "WHERE node.status IN $public_statuses" if scope == "public" and type_ == "position" else ""
-    )
+    # 全文检索缓存（08-15 压测扩容）：搜索词重复度高（真实用户/压测同词命中），
+    # 每次打 Neo4j 在 100 并发下排队严重；300s TTL 缓存大幅降 Neo4j 压力。
+    # 08-18 TTL 治理补 single-flight：同 q 并发冷查合并为一次（此前无合并，
+    # 冷键被 2-5 并发同时打 Neo4j fulltext，压测 P99 尾部主因之一）。
+    cache_key = f"graph:search:{scope}:{type_}:{q}:{page}:{size}"
+    cached = await redis_client.get(cache_key)
+    if cached is not None:
+        return ok(data=json.loads(cached))
 
-    with neo4j_driver.session() as session:
-        if type_ in ("position", "skill"):
-            index = "position_search" if type_ == "position" else "skill_search"
-            result = session.run(
-                f"""
-                CALL db.index.fulltext.queryNodes('{index}', $q) YIELD node, score
-                {status_clause}
-                RETURN node.id AS id, node.name AS name, score
-                ORDER BY score DESC SKIP $offset LIMIT $size
-                """,
-                q=q, offset=offset, size=size,
-                public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
-            )
-            total_row = session.run(
-                f"""
-                CALL db.index.fulltext.queryNodes('{index}', $q) YIELD node
-                {status_clause}
-                RETURN count(node) AS c
-                """,
-                q=q,
-                public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
-            ).single()
-            total = total_row["c"] if total_row else 0
-        else:
-            # Evidence 全文索引：schema.cypher 建 evidence_search
-            # （ON source, raw_text，cjk 分词）。Evidence 无 name 属性，返回 source
-            # 作为展示名；索引缺失（旧库未重跑 init_neo4j）时降级 CONTAINS 兜底。
-            try:
-                result = session.run(
-                    "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
-                    "YIELD node, score "
-                    "RETURN node.id AS id, node.source AS name, score "
-                    "ORDER BY score DESC SKIP $offset LIMIT $size",
-                    q=q, offset=offset, size=size,
-                )
-                total_row = session.run(
-                    "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
-                    "YIELD node RETURN count(node) AS c",
-                    q=q,
-                ).single()
-            except Exception:
-                result = session.run(
-                    """
-                    MATCH (e:Evidence)
-                    WHERE e.source CONTAINS $q OR e.raw_text CONTAINS $q
-                    RETURN e.id AS id, e.source AS name, 0.0 AS score
-                    ORDER BY id SKIP $offset LIMIT $size
-                    """,
-                    q=q, offset=offset, size=size,
-                )
-                total_row = session.run(
-                    """
-                    MATCH (e:Evidence)
-                    WHERE e.source CONTAINS $q OR e.raw_text CONTAINS $q
-                    RETURN count(e) AS c
-                    """,
-                    q=q,
-                ).single()
-            total = total_row["c"] if total_row else 0
+    inflight = _inflight.get(cache_key)
+    if inflight is not None:
+        return ok(data=await inflight)
 
-        items = [
-            {
-                "id": rec["id"],
-                "name": rec.get("name", rec["id"]),
-                "type": type_,
-                "score": round(rec["score"], 4),
-            }
-            for rec in result
-        ]
+    future = asyncio.get_running_loop().create_future()
+    _inflight[cache_key] = future
+    try:
+        # 匿名/guest 检索岗位时排除 candidate（全文索引 YIELD 的是完整节点，可直接过滤）
+        status_clause = (
+            "WHERE node.status IN $public_statuses" if scope == "public" and type_ == "position" else ""
+        )
 
-    return ok(data={"items": items, "total": total, "page": page, "size": size})
+        items, total = await _query_fulltext_search(q, type_, status_clause, offset, size)
+        data = {"items": items, "total": total, "page": page, "size": size}
+        await _cache_set(cache_key, data, ttl=SEARCH_CACHE_TTL)
+        future.set_result(data)
+        return ok(data=data)
+    except Exception as exc:
+        future.set_exception(exc)
+        raise
+    finally:
+        _inflight.pop(cache_key, None)
 
 
 def _load_skill(skill_id: str) -> dict | None:
     """按 ID 查询技能节点（id + name），不存在返回 None。"""
-    with neo4j_driver.session() as session:
-        rec = session.run(
-            "MATCH (s:Skill {id: $skill_id}) RETURN s.id AS id, s.name AS name",
-            skill_id=skill_id,
-        ).single()
-    return dict(rec) if rec else None
+    return repository.load_skill(neo4j_driver, skill_id)
 
 
 @router.get("/skill/{skill_id}/prerequisites")
@@ -289,23 +292,16 @@ async def skill_prerequisites(skill_id: str):
     图谱未建边时回退人工维护字典 configs/skill_prerequisites.yaml；
     返回拓扑序（先修在前），并富化图谱技能 ID。
     """
-    skill = _load_skill(skill_id)
+    skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
-    chain: list[str] = []
-    with neo4j_driver.session() as session:
-        chain = graph_prerequisite_chain(session, skill["name"])
+    chain = await asyncio.to_thread(_query_prereq_chain, skill["name"])
     if not chain:
         chain = prerequisite_chain(skill["name"])
     id_by_name: dict[str, str] = {}
     if chain:
-        with neo4j_driver.session() as session:
-            rows = session.run(
-                "MATCH (s:Skill) WHERE s.name IN $names RETURN s.name AS name, s.id AS id",
-                names=chain,
-            )
-            id_by_name = {rec["name"]: rec["id"] for rec in rows}
+        id_by_name = await asyncio.to_thread(_query_skill_ids, chain)
     prerequisites = [
         {"skill_id": id_by_name.get(name), "name": name, "depth": i + 1}
         for i, name in enumerate(chain)
@@ -326,11 +322,12 @@ async def skill_courses(skill_id: str):
     图谱 LEARNABLE_VIA 课程按质量分降序返回（质量分来自 course_raw 评估产物），
     top 3 为学习路径推荐课程。
     """
-    skill = _load_skill(skill_id)
+    skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
-    courses = await load_courses_for_skill(skill_id, skill["name"], top_k=None)
+    courses = await load_courses_for_skill(
+        skill_id, skill["name"], top_k=None, semantic=_course_semantic())
     return ok(
         data={
             "skill_id": skill_id,
@@ -340,26 +337,28 @@ async def skill_courses(skill_id: str):
     )
 
 
+def _course_semantic() -> object | None:
+    """课程门控语义器（08-15 审查 M1：graph API 课程与 learning-path 同门控）。
+
+    语义可用：P1-3 标题门控 + 灰色带质量门控全部生效（脏 LEARNABLE_VIA 边
+    不再外泄，口径与 compare 学习路径一致）；模型不可用降级 None——courses
+    是增强能力，纯规则链路继续（与 match 诊断链路降级一致，不 503 不空列表）。
+    """
+    try:
+        embedder = SkillEmbedder.get()
+        embedder.embed("__probe__")  # 触发惰性加载，探测模型可用性
+        return embedder
+    except SemanticUnavailableError:
+        return None
+
+
 def _load_position(id: str, user: Optional[dict] = None) -> dict | None:
     """按 ID 查询岗位节点基础属性（不含技能边），不存在返回 None。
 
     user/admin 可见全部岗位；匿名/guest 对 candidate/archived 岗位返回 None
     （视为不存在，避免待审核岗位外泄，见方案一）。
     """
-    scope = _position_scope(user)
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
-    with neo4j_driver.session() as session:
-        rec = session.run(
-            f"""
-            MATCH (p:Position {{id: $id}})
-            WHERE {status_filter}
-            RETURN p.id AS id, p.name AS name, p.required_years AS required_years,
-                   p.required_education AS required_education, p.last_updated AS last_updated,
-                   p.status AS status, p.freq AS freq
-            """,
-            id=id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        ).single()
-    return dict(rec) if rec else None
+    return repository.load_position(neo4j_driver, id, user)
 
 
 @router.get("/position/{id}")
@@ -376,32 +375,11 @@ async def position_detail(
     cached = await _cache_get(cache_key)
     if cached is not None:
         return ok(data=cached)
-    position = _load_position(id, user)
+    position = await asyncio.to_thread(_load_position, id, user)
     if position is None:
-        return error(4040, "岗位不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "岗位不存在", http_status=404)
 
-    skills: dict[str, dict] = {}
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            """
-            MATCH (p:Position {id: $id})-[r:REQUIRES]->(s:Skill)
-            RETURN s.id AS skill_id, s.name AS skill_name,
-                   r.necessity AS necessity, r.weight AS weight,
-                   r.level AS level, r.source_count AS source_count
-            ORDER BY r.weight DESC
-            """,
-            id=id,
-        )
-        for rec in rows:
-            necessity = rec.get("necessity", "must")
-            skills.setdefault(necessity, []).append({
-                "skill_id": rec["skill_id"],
-                "skill_name": rec.get("skill_name", rec["skill_id"]),
-                "necessity": necessity,
-                "weight": rec.get("weight", 0.0),
-                "level": rec.get("level", "中级"),
-                "source_count": rec.get("source_count", 1),
-            })
+    skills = await asyncio.to_thread(_query_position_skills_by_necessity, id)
 
     data = {
         "id": position["id"],
@@ -412,6 +390,7 @@ async def position_detail(
         "status": position.get("status"),
         "must_skills": skills.get("must", []),
         "nice_skills": skills.get("nice", []),
+        "soft_skills": position.get("soft_skills") or [],
     }
     await _cache_set(cache_key, data)
     return ok(data=data)
@@ -424,35 +403,13 @@ async def position_skills(
     user: Optional[dict] = Depends(get_optional_user),
 ):
     """[M4] 岗位技能列表（可按 necessity 过滤）。"""
-    if _load_position(id, user) is None:
-        return error(4040, "岗位不存在", http_status=404)
+    if await asyncio.to_thread(_load_position, id, user) is None:
+        return error(ERR_NOT_FOUND, "岗位不存在", http_status=404)
 
     scope = _position_scope(user)
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
-    query = f"""
-        MATCH (p:Position {{id: $id}})-[r:REQUIRES]->(s:Skill)
-        WHERE ({status_filter}) AND ($necessity IS NULL OR r.necessity = $necessity)
-        RETURN s.id AS skill_id, s.name AS skill_name,
-               r.necessity AS necessity, r.weight AS weight,
-               r.level AS level, r.source_count AS source_count
-        ORDER BY r.weight DESC
-    """
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            query, id=id, necessity=necessity,
-            public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        )
-        items = [
-            {
-                "skill_id": rec["skill_id"],
-                "skill_name": rec.get("skill_name", rec["skill_id"]),
-                "necessity": rec.get("necessity", "must"),
-                "weight": rec.get("weight", 0.0),
-                "level": rec.get("level", "中级"),
-                "source_count": rec.get("source_count", 1),
-            }
-            for rec in rows
-        ]
+    status_filter = _status_clause(scope)
+    items = await asyncio.to_thread(
+        _query_position_skills, id, necessity, status_filter)
 
     return ok(data={"position_id": id, "skills": items})
 
@@ -464,29 +421,11 @@ async def skill_evidence(skill_id: str):
     cached = await _cache_get(cache_key)
     if cached is not None:
         return ok(data=cached)
-    skill = _load_skill(skill_id)
+    skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            """
-            MATCH (s:Skill {id: $skill_id})-[:EVIDENCED_BY]->(e:Evidence)
-            RETURN e.id AS id, e.source AS source, e.source_url AS source_url,
-                   e.crawled_at AS crawled_at
-            ORDER BY e.crawled_at DESC
-            """,
-            skill_id=skill_id,
-        )
-        evidence = [
-            {
-                "id": rec["id"],
-                "source": rec.get("source", ""),
-                "source_url": rec.get("source_url", ""),
-                "crawled_at": rec.get("crawled_at"),
-            }
-            for rec in rows
-        ]
+    evidence = await asyncio.to_thread(_query_skill_evidence, skill_id)
 
     data = {
         "skill_id": skill_id,
@@ -510,9 +449,9 @@ async def skill_similar(
     未回填或查询失败（表缺失/维度不匹配等）时回退内存 SBERT 全量扫描，口径一致。
     阈值 0.5，过低不返回；SBERT 不可用时返回 503（语义能力缺失，不降级为猜）。
     """
-    skill = _load_skill(skill_id)
+    skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
     cache_key = f"graph:skill:similar:{skill_id}:{top_k}"
     cached = await _cache_get(cache_key)
@@ -526,7 +465,8 @@ async def skill_similar(
     try:
         target_vec_row = await db.get(SkillEmbedding, skill_id)
         if target_vec_row is not None:
-            qvec = embedder.embed(skill["name"])
+            # SBERT 推理 CPU 密集，放线程池避免阻塞事件循环
+            qvec = await asyncio.to_thread(embedder.embed, skill["name"])
             rows = (
                 await db.scalars(
                     select(SkillEmbedding)
@@ -551,30 +491,30 @@ async def skill_similar(
             await _cache_set(cache_key, data)
             return ok(data=data)
     except SemanticUnavailableError:
-        return error(503, "语义模型不可用，无法计算相似技能")
-    except Exception:
+        return error(ERR_INTERNAL, "语义模型不可用，无法计算相似技能", http_status=503)
+    except Exception as exc:
         # skill_embeddings 表缺失 / 向量维度不匹配等 → 降级回退内存扫描
-        pass
+        logger.warning("pgvector 技能相似查询降级回退内存扫描: %s", exc)
 
     # 回退路径：skill_embeddings 未回填（表空/缺该技能），内存 SBERT 全量扫描
-    with neo4j_driver.session() as session:
-        rows = session.run(
-            "MATCH (s:Skill) RETURN s.id AS id, s.name AS name"
-        )
-        all_skills = [(rec["id"], rec.get("name", rec["id"])) for rec in rows]
+    all_skills = await asyncio.to_thread(_query_all_skills)
     if not all_skills:
         data = {"skill_id": skill_id, "skill_name": skill["name"], "similar": []}
         await _cache_set(cache_key, data)
         return ok(data=data)
 
-    try:
-        scores = [
+    def _sbert_scan() -> list:
+        # 全量两两相似度 SBERT 推理 CPU 密集，放线程池避免阻塞事件循环
+        return [
             (sid, name, embedder.similarity(skill["name"], name))
             for sid, name in all_skills
             if sid != skill_id
         ]
+
+    try:
+        scores = await asyncio.to_thread(_sbert_scan)
     except SemanticUnavailableError:
-        return error(503, "语义模型不可用，无法计算相似技能")
+        return error(ERR_INTERNAL, "语义模型不可用，无法计算相似技能", http_status=503)
 
     similar = sorted(
         (s for s in scores if s[2] >= 0.5),
@@ -607,28 +547,19 @@ async def skill_detail(
     cached = await _cache_get(cache_key)
     if cached is not None:
         return ok(data=cached)
-    skill = _load_skill(skill_id)
+    skill = await asyncio.to_thread(_load_skill, skill_id)
     if skill is None:
-        return error(4040, "技能不存在", http_status=404)
+        return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
-    with neo4j_driver.session() as session:
-        rec = session.run(
-            f"""
-            MATCH (s:Skill {{id: $skill_id}})
-            OPTIONAL MATCH (p:Position)-[r:REQUIRES]->(s)
-            OPTIONAL MATCH (s)-[:EVIDENCED_BY]->(e:Evidence)
-            WITH s, e, CASE WHEN {status_filter} THEN p ELSE null END AS visible_p
-            RETURN count(DISTINCT visible_p) AS positions_count, count(DISTINCT e) AS evidence_count
-            """,
-            skill_id=skill_id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        ).single()
-        counts = dict(rec) if rec else {}
+    status_filter = _status_clause(scope)
+    counts = await asyncio.to_thread(_query_skill_counts, skill_id, status_filter)
 
-    courses = await load_courses_for_skill(skill_id, skill["name"], top_k=None)
+    courses = await load_courses_for_skill(
+        skill_id, skill["name"], top_k=None, semantic=_course_semantic())
     data = {
         "id": skill_id,
         "name": skill["name"],
+        "category": skill.get("category"),
         "positions_count": counts.get("positions_count", 0),
         "evidence_count": counts.get("evidence_count", 0),
         "courses_count": len(courses),
@@ -879,14 +810,13 @@ async def graph_shortest_path(
     （岗位共现边），节点序列按 type 区分。不存在可达路径返回 404。
     匿名/guest 路径经过的 Position 节点仅限公开态（candidate 不外宣）。
     """
-    from app.services.graph_algorithms.shortest_path import shortest_path
 
     scope = _position_scope(user)
     statuses = list(_PUBLIC_POSITION_STATUSES) if scope == "public" else None
-    with neo4j_driver.session() as session:
-        path = shortest_path(session, from_skill, to_skill, position_statuses=statuses)
+    path = await asyncio.to_thread(
+        _query_shortest_path, from_skill, to_skill, statuses)
     if path is None:
-        return error(4040, "两技能间不存在 ≤6 跳的可达路径", http_status=404)
+        return error(ERR_NOT_FOUND, "两技能间不存在 ≤6 跳的可达路径", http_status=404)
     return ok(data={"from": from_skill, "to": to_skill, "path": path})
 
 
@@ -910,33 +840,27 @@ async def graph_view(
     if cached is not None:
         return ok(data=json.loads(cached))
 
-    status_filter = "p.status IN $public_statuses" if scope == "public" else "true"
+    status_filter = _status_clause(scope)
 
     if view_type == "techStack":
-        with neo4j_driver.session() as session:
-            rows = list(session.run(
-                f"""
-                MATCH (s:Skill)<-[r:REQUIRES]-(p:Position)
-                WHERE {status_filter}
-                WITH s, count(p) AS heat
-                ORDER BY heat DESC LIMIT $limit
-                MATCH (s)<-[r:REQUIRES]-(p:Position)
-                WHERE {status_filter}
-                RETURN s.id AS sid, s.name AS sname, p.id AS pid, p.name AS pname,
-                       p.status AS pstatus, r
-                """,
-                limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-            ))
+        rows = await _query_view_techstack(limit, status_filter)
         nodes: dict[str, dict] = {}
         edges: list[dict] = []
         for record in rows:
             s_id, p_id = record["sid"], record["pid"]
-            nodes.setdefault(s_id, {"id": s_id, "name": record.get("sname", s_id), "type": "skill"})
+            nodes.setdefault(s_id, {
+                "id": s_id,
+                "name": record.get("sname", s_id),
+                "type": "skill",
+                "communityId": record.get("s_community"),
+                "skill_category": record.get("s_category"),
+            })
             nodes.setdefault(p_id, {
                 "id": p_id,
                 "name": record.get("pname", p_id),
                 "type": "position",
-                "status": record.get("pstatus") or "candidate",
+                "status": record.get("pstatus") or "active",
+                "communityId": record.get("p_community"),
             })
             edges.append({
                 "source": s_id,
@@ -949,20 +873,11 @@ async def graph_view(
             "view_type": view_type,
             "nodes": list(nodes.values()),
             "edges": edges,
-            "stats": {"nodes": len(nodes), "edges": len(edges)},
+            "stats": {"nodes": len(nodes), "edges": len(edges),
+                      **await _query_graph_counts()},
         }
     else:
-        with neo4j_driver.session() as session:
-            rows = list(session.run(
-                f"""
-                MATCH (p:Position)
-                WHERE {status_filter}
-                WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
-                MATCH (p)-[r:REQUIRES]->(s:Skill)
-                RETURN p, s, r
-                """,
-                limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-            ))
+        rows = await _query_view_main(limit, status_filter)
         nodes = {}
         edges = []
         for record in rows:
@@ -972,9 +887,18 @@ async def graph_view(
                 "id": p_id,
                 "name": p.get("name", p_id),
                 "type": "position",
-                "status": p.get("status", "candidate"),
+                "status": p.get("status", "active"),
+                "communityId": p.get("community_id"),
+                "domain_id": p.get("domain_id"),
+                "domain_name": p.get("domain_name"),
             })
-            nodes.setdefault(s_id, {"id": s_id, "name": s.get("name", s_id), "type": "skill"})
+            nodes.setdefault(s_id, {
+                "id": s_id,
+                "name": s.get("name", s_id),
+                "type": "skill",
+                "communityId": s.get("community_id"),
+                "skill_category": s.get("category"),
+            })
             edges.append({
                 "source": p_id,
                 "target": s_id,
@@ -986,7 +910,8 @@ async def graph_view(
             "view_type": view_type,
             "nodes": list(nodes.values()),
             "edges": edges,
-            "stats": {"nodes": len(nodes), "edges": len(edges)},
+            "stats": {"nodes": len(nodes), "edges": len(edges),
+                      **await _query_graph_counts()},
         }
 
     await redis_client.set(cache_key, json.dumps(data), ex=30)
