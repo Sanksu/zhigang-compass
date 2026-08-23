@@ -39,11 +39,18 @@ class TestHardGate:
         assert ok is True
 
     def test_add_stopword_vetoes_whitelist(self):
-        # 核心不变量：停用词优先于白名单，白名单词绝不可入停用词（误加即误杀）
-        sample = next(iter(SKILL_WHITELIST))
-        ok, reason = hard_gate("add_stopword", sample)
-        assert ok is False
-        assert "白名单" in reason
+        # 核心不变量：白名单词绝不可入停用词（误加即误杀）。
+        # 遍历全量而非 next(iter()) 抽样——集合迭代序随哈希种子变化，抽到
+        # 双重身份词（如待裁决的 多线程/数据库 等：既在白名单又在停用词表）
+        # 时 hard_gate 按「停用词优先」返回「已是现行停用词」，理由不同但
+        # 同样拒绝，抽样断言写死单一致 flaky。
+        for sample in SKILL_WHITELIST:
+            ok, reason = hard_gate("add_stopword", sample)
+            assert ok is False, sample
+            # 单字符白名单词（如 C）先命中「过短」；双重身份词先命中「停用词」；
+            # 纯白名单词命中「白名单」——三种理由均为正确拒绝
+            assert ("白名单" in reason or "停用词" in reason
+                    or "过短" in reason), (sample, reason)
 
     def test_add_stopword_vetoes_existing_stopword(self):
         sample = next(iter(SKILL_STOPWORDS))
