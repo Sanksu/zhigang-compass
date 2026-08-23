@@ -224,6 +224,7 @@ class TestDeferredRetryOnTotalOutage:
 
         assert session2.committed is True
         assert rows[0].snapshot["extraction"]["method"] == "rule"
+        assert result2["llm_rule_fallback"] == 1
         assert len(alerts2) == 1
         event, message = alerts2[0]
         assert event == "batch_extract_llm_degraded"
@@ -259,6 +260,7 @@ class TestDeferredRetryOnTotalOutage:
 
         assert session.committed is True
         assert alerts == []
+        assert result["succeeded"] == 1
         assert rows[0].snapshot["extraction"]["method"] == "rule"
 
 
