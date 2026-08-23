@@ -32,6 +32,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.extraction.llm_invocation import invocation_scope
 from app.services.discovery.nli_guard import (
     SUSPICIOUS_THRESHOLD,
     detect_contradiction,
@@ -495,18 +496,19 @@ async def _generate_definition(
         # 首稿 + 重采样至多各一次：NLI 软门控触发重采样（不重复调用，防放大成本）
         for attempt in range(2):
             try:
-                draft = await asyncio.to_thread(
-                    llm.extract_structured,
-                    _DEFINITION_TASK_TEMPLATE.format(
-                        position_name=position_name, reference=reference
-                    ),
-                    _DefinitionDraft,
-                    system_prompt=(
-                        _DEFINITION_SYSTEM_PROMPT
-                        if attempt == 0
-                        else _RESAMPLE_SYSTEM_PROMPT
-                    ),
-                )
+                with invocation_scope("definition_draft"):
+                    draft = await asyncio.to_thread(
+                        llm.extract_structured,
+                        _DEFINITION_TASK_TEMPLATE.format(
+                            position_name=position_name, reference=reference
+                        ),
+                        _DefinitionDraft,
+                        system_prompt=(
+                            _DEFINITION_SYSTEM_PROMPT
+                            if attempt == 0
+                            else _RESAMPLE_SYSTEM_PROMPT
+                        ),
+                    )
                 text = (draft.text or "").strip()
                 if not text:
                     break

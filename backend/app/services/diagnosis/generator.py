@@ -18,6 +18,7 @@ from app.services.diagnosis.prompts import (
 )
 from app.services.diagnosis.schemas import DiagnosisReport
 from app.services.extraction.llm_provider import LLMProviderChain
+from app.services.extraction.llm_invocation import invocation_scope
 from app.services.rag.retrieval import allowed_evidence_ids
 
 # 报告上下文裁剪上限：控制 prompt 长度，避免超出上下文窗口
@@ -110,16 +111,18 @@ def generate_diagnosis(
     if timeout is not None:
         # 异步路径：后台生成无同步阻塞约束，放宽超时 + 多 provider 降级，
         # 避免同步 10s 契约在边缘延迟 provider（实测 9-10s）下误杀
-        report = chain.call_with_fallback(
-            prompt, DiagnosisReport, system_prompt=DIAGNOSIS_SYSTEM_PROMPT,
-            timeout=timeout,
-        )
+        with invocation_scope("diagnosis_async"):
+            report = chain.call_with_fallback(
+                prompt, DiagnosisReport, system_prompt=DIAGNOSIS_SYSTEM_PROMPT,
+                timeout=timeout,
+            )
     else:
         # 同步路由契约（设计文档 §6.5，G-04）：诊断实时路径单 provider 10s 单次，
         # 不重试不切换；失败（LLMTimeoutError 等）向上传播由 API 层映射 504(5003)
-        report = chain.call_sync(
-            prompt, DiagnosisReport, system_prompt=DIAGNOSIS_SYSTEM_PROMPT
-        )
+        with invocation_scope("diagnosis_sync"):
+            report = chain.call_sync(
+                prompt, DiagnosisReport, system_prompt=DIAGNOSIS_SYSTEM_PROMPT
+            )
     # 虚构引用后置拦截（§6.4 生成约束）：断言引用的 evidence_id 必须能追溯
     # 到 RAG 上下文或匹配快照证据，否则视为 LLM 编造，置空避免前端点击死链
     allowed = allowed_evidence_ids(rag_chunks or [], data.get("evidence_refs") or [])

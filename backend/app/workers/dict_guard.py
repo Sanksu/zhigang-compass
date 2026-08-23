@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.core import runtime_config
+from app.services.extraction import llm_invocation
 from app.services.extraction.dict_guard import (
     DictGuardDecision,
     build_decision_prompt,
@@ -69,9 +70,10 @@ class _DictGuardEvaluator:
             # 执行不阻塞事件循环）。每日批处理非用户实时等待路径，不复用同步
             # 10s 单 provider 契约——主 provider 熔断/边缘延迟会把整轮候选
             # 全部误杀（#306 同款教训：诊断 generator 已因此改走 fallback 链）
-            return await asyncio.to_thread(
-                self._llm.call_with_fallback, prompt, DictGuardDecision,
-            )
+            with llm_invocation.invocation_scope("dict_guard"):
+                return await asyncio.to_thread(
+                    self._llm.call_with_fallback, prompt, DictGuardDecision,
+                )
         except (LLMExtractionError, LLMTimeoutError, self._config_error):
             return None
 

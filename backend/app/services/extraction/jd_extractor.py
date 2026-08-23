@@ -21,6 +21,7 @@ from app.services.extraction.llm_provider import (
     LLMExtractionError,
     LLMProviderChain,
 )
+from app.services.extraction.llm_invocation import invocation_scope
 from app.services.extraction.prompts import (
     BATCH_TASK_TEMPLATE,
     FEW_SHOT_EXAMPLES,
@@ -81,9 +82,10 @@ class JDExtractor:
                 prompt = TASK_TEMPLATE.format(jd_text=jd_text)
                 # 分层 Prompt：system 角色（SYSTEM_PROMPT）+ Few-Shot + 任务输入（§6.2）
                 system_prompt = SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES
-                result = self._llm.extract_structured(
-                    prompt, JDExtractionResult, system_prompt=system_prompt, timeout=timeout
-                )
+                with invocation_scope("jd_extract"):
+                    result = self._llm.extract_structured(
+                        prompt, JDExtractionResult, system_prompt=system_prompt, timeout=timeout
+                    )
             except LLMExtractionError:
                 result = self._rule_based_extract(jd_text)
 
@@ -154,10 +156,11 @@ class JDExtractor:
                 jd_count=len(chunk),
                 jd_texts="\n---\n".join(f"JD文本{i + 1}: {t}" for i, t in enumerate(chunk)),
             )
-            batch = self._llm.extract_structured(
-                prompt, JDExtractionBatch,
-                system_prompt=system_prompt, timeout=batch_timeout,
-            )
+            with invocation_scope("jd_extract_batch"):
+                batch = self._llm.extract_structured(
+                    prompt, JDExtractionBatch,
+                    system_prompt=system_prompt, timeout=batch_timeout,
+                )
             # 错位防护：LLM 返回条数与输入不一致时不可直接拆条，降级逐条
             if len(batch.results) != len(chunk):
                 raise LLMExtractionError(

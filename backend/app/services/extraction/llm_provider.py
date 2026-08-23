@@ -22,7 +22,9 @@ from pathlib import Path
 from typing import Optional, Type, TypeVar
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+
+from app.services.extraction import llm_invocation
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -292,6 +294,61 @@ def health_check_all() -> dict:
     return {p.get("name", "?"): check_provider_health(p) for p in chain._providers}
 
 
+# ---- 调用审计（P0 可观测：每次尝试/跳过写 JSONL 明细 + Redis 聚合，旁路 fail-open）----
+
+_OUTCOME_TIMEOUT = "timeout"
+_OUTCOME_RATE_LIMITED = "rate_limited"
+_OUTCOME_SERVER_ERROR = "server_error"
+_OUTCOME_CONNECTION_ERROR = "connection_error"
+_OUTCOME_VALIDATION_ERROR = "validation_error"
+_OUTCOME_HTTP_4XX = "http_4xx"
+_OUTCOME_CONFIG_ERROR = "config_error"
+_OUTCOME_EXTRACTION_ERROR = "extraction_error"
+
+
+def _outcome_of(exc: Optional[BaseException]) -> str:
+    """异常 → 审计 outcome；优先取 _call_provider 附着的精确标记，按类型兜底。"""
+    attached = getattr(exc, "outcome", None)
+    if attached:
+        return str(attached)
+    if exc is None:
+        return "ok"
+    if isinstance(exc, LLMConfigurationError):
+        return _OUTCOME_CONFIG_ERROR
+    if isinstance(exc, LLMTimeoutError):
+        return _OUTCOME_TIMEOUT
+    if isinstance(exc, LLMRateLimitError):
+        return _OUTCOME_RATE_LIMITED
+    if isinstance(exc, LLMServerError):
+        return _OUTCOME_SERVER_ERROR
+    return _OUTCOME_EXTRACTION_ERROR
+
+
+def _record_attempt(
+    route: str,
+    provider: dict,
+    attempt: int,
+    started: Optional[float],
+    exc: Optional[BaseException] = None,
+) -> None:
+    """记录一次尝试（exc=None 为成功）或熔断/退避跳过事件（started=None）。"""
+    llm_invocation.record(
+        route=route,
+        provider=str(provider.get("name", "?")),
+        model=str(provider.get("model") or ""),
+        attempt=attempt,
+        outcome=_outcome_of(exc),
+        duration_ms=0 if started is None else int((time.perf_counter() - started) * 1000),
+        error=None if exc is None else str(exc),
+    )
+
+
+def _with_outcome(exc: LLMExtractionError, outcome: str) -> LLMExtractionError:
+    """为审计附着精确 outcome 标记（调用方 _outcome_of 优先读取）。"""
+    exc.outcome = outcome
+    return exc
+
+
 class LLMProviderChain:
     """多 provider 重试链。
 
@@ -386,9 +443,16 @@ class LLMProviderChain:
             raise LLMConfigurationError("未配置可用 provider（无 api_key 或全部禁用）")
         provider = self._providers[0]
         name = provider.get("name", "?")
-        if _is_skipped(name) is not None:
+        skip_kind = _is_skipped(name)
+        if skip_kind is not None:
             # 同步路由不重试不切换：直接按"LLM 暂时不可用"抛超时（上层映射 504，§6.5）
+            _record_attempt("sync", provider, attempt=0, started=None,
+                            exc=_with_outcome(
+                                LLMTimeoutError(f"{skip_kind} 窗口跳过"),
+                                f"{skip_kind}_skipped",
+                            ))
             raise LLMTimeoutError(f"主 provider '{name}' 处于熔断/退避窗口，跳过")
+        started = time.perf_counter()
         try:
             result = self._call_provider(
                 provider, prompt, response_model,
@@ -396,11 +460,17 @@ class LLMProviderChain:
             )
         except LLMRateLimitError as e:
             _record_429(name)
+            _record_attempt("sync", provider, attempt=1, started=started, exc=e)
             raise LLMTimeoutError(str(e)) from e
         except LLMServerError as e:
             _record_5xx(name)
+            _record_attempt("sync", provider, attempt=1, started=started, exc=e)
             raise LLMTimeoutError(str(e)) from e
+        except LLMExtractionError as e:
+            _record_attempt("sync", provider, attempt=1, started=started, exc=e)
+            raise
         _clear_state(name)
+        _record_attempt("sync", provider, attempt=1, started=started)
         return result
 
     def call_with_fallback(
@@ -428,34 +498,46 @@ class LLMProviderChain:
         # 路径对"LLM 超时"映射 504（错误码 5003，§2.4.7）一致；连接/校验失败、
         # 限流、5xx 不算超时，维持父类 LLMExtractionError（上层映射 503）。
         timeout_like = 0
-        for provider in self._providers:
+        for index, provider in enumerate(self._providers, start=1):
             name = provider.get("name", "?")
             # 熔断/退避窗口内跳过该 provider，不发起调用（§6.5 运维机制）
-            if _is_skipped(name) is not None:
+            skip_kind = _is_skipped(name)
+            if skip_kind is not None:
+                _record_attempt("fallback", provider, attempt=0, started=None,
+                                exc=_with_outcome(
+                                    LLMTimeoutError(f"{skip_kind} 窗口跳过"),
+                                    f"{skip_kind}_skipped",
+                                ))
                 failures.append(f"{name} 处于熔断/退避窗口，跳过")
                 timeout_like += 1
                 continue
+            started = time.perf_counter()
             try:
                 result = self._call_provider(
                     provider, prompt, response_model, max_retries,
                     effective_timeout, system_prompt,
                 )
                 _clear_state(name)  # 成功即恢复：解除该 provider 的熔断/退避计数
+                _record_attempt("fallback", provider, attempt=index, started=started)
                 return result
             except LLMRateLimitError as e:
                 _record_429(name)
+                _record_attempt("fallback", provider, attempt=index, started=started, exc=e)
                 failures.append(str(e))
                 continue
             except LLMServerError as e:
                 _record_5xx(name)
+                _record_attempt("fallback", provider, attempt=index, started=started, exc=e)
                 failures.append(str(e))
                 continue
-            except LLMTimeoutError:
+            except LLMTimeoutError as e:
+                _record_attempt("fallback", provider, attempt=index, started=started, exc=e)
                 failures.append(f"{name} 超时")
                 timeout_like += 1
                 continue
             except LLMExtractionError as e:
                 # 连接/校验等其余抽取错误：非超时语义，交给上层按 503 处理
+                _record_attempt("fallback", provider, attempt=index, started=started, exc=e)
                 failures.append(str(e))
                 continue
         if timeout_like == len(self._providers):
@@ -516,16 +598,46 @@ class LLMProviderChain:
                 extra_body=provider.get("extra_body") or None,
             )
         except APITimeoutError as e:
-            raise LLMTimeoutError(f"provider '{provider['name']}' 超时（{timeout}s）") from e
+            raise _with_outcome(
+                LLMTimeoutError(f"provider '{provider['name']}' 超时（{timeout}s）"),
+                _OUTCOME_TIMEOUT,
+            ) from e
         except RateLimitError as e:
-            raise LLMRateLimitError(f"provider '{provider['name']}' 触发限流(429): {e}") from e
+            raise _with_outcome(
+                LLMRateLimitError(f"provider '{provider['name']}' 触发限流(429): {e}"),
+                _OUTCOME_RATE_LIMITED,
+            ) from e
         except APIStatusError as e:
             if e.status_code >= 500:
-                raise LLMServerError(
-                    f"provider '{provider['name']}' 服务不可用({e.status_code}): {e}"
+                raise _with_outcome(
+                    LLMServerError(
+                        f"provider '{provider['name']}' 服务不可用({e.status_code}): {e}"
+                    ),
+                    _OUTCOME_SERVER_ERROR,
                 ) from e
-            raise LLMExtractionError(f"provider '{provider['name']}' 调用失败: {e}") from e
+            raise _with_outcome(
+                LLMExtractionError(f"provider '{provider['name']}' 调用失败: {e}"),
+                _OUTCOME_HTTP_4XX,
+            ) from e
         except APIConnectionError as e:
-            raise LLMExtractionError(f"provider '{provider['name']}' 连接失败: {e}") from e
+            raise _with_outcome(
+                LLMExtractionError(f"provider '{provider['name']}' 连接失败: {e}"),
+                _OUTCOME_CONNECTION_ERROR,
+            ) from e
         except Exception as e:  # 外部 API/校验异常统一包装，交给重试链
-            raise LLMExtractionError(f"provider '{provider['name']}' 调用异常: {e}") from e
+            # 校验失败细分：instructor 重试耗尽（InstructorRetryException）与
+            # 裸 Pydantic 校验错误 → validation_error；其余保持 extraction_error
+            outcome = _OUTCOME_EXTRACTION_ERROR
+            try:
+                from instructor.exceptions import InstructorRetryException
+
+                if isinstance(e, (InstructorRetryException,)):
+                    outcome = _OUTCOME_VALIDATION_ERROR
+            except ImportError:
+                pass
+            if isinstance(e, ValidationError):
+                outcome = _OUTCOME_VALIDATION_ERROR
+            raise _with_outcome(
+                LLMExtractionError(f"provider '{provider['name']}' 调用异常: {e}"),
+                outcome,
+            ) from e
