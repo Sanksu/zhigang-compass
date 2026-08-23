@@ -10,7 +10,6 @@
 - icourse163：空关键词 → 单次默认课程流请求（--keyword 传空串）
 """
 
-import asyncio
 import json
 import logging
 import subprocess
@@ -187,11 +186,8 @@ class TestIcourse163EmptyKeywords:
         req = Request(url="https://www.icourse163.org/search.htm", meta={"keywords": []})
         resp = Response(url="https://www.icourse163.org/search.htm", request=req)
 
-        async def _run():
-            async for _ in spider.parse(resp):
-                pass
-
-        asyncio.run(_run())
+        # parse 为同步生成器（08-23 与 boss/monster 模式统一，errback 可 yield from）
+        list(spider.parse(resp))
 
         # 空关键词不再报"无采集关键词"，单次默认课程流请求（--keyword 传空串）
         assert len(calls) == 1
