@@ -6,10 +6,13 @@
 """
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.api.v1.admin import _persist_rejected_change
+from app.api.v1 import match as match_api
 from app.api.v1.match import (
+    _load_match_result,
     _match_task_cache_owned,
     _persist_feedback,
     _persist_match_result_db,
@@ -146,5 +149,83 @@ class TestMatchTaskCacheOwned:
         # 无 match_id 的快照无法校验归属 → 拒绝（防伪造快照绕过校验）
         async def _run():
             assert await _match_task_cache_owned({}, "u1") is False
+
+        asyncio.run(_run())
+
+
+class TestLoadMatchResultDurableFallback:
+    """_load_match_result 耐久回退（08-23 闭环收敛 P1-5：双写单读修复）。
+
+    Redis 过期/丢失 → match_results 副本回读（表级归属校验）+ 回填缓存；
+    无副本或空 result → None（404）。Redis 命中路径行为不变。
+    """
+
+    @staticmethod
+    def _make_factory(row):
+        """async_session_factory 替身：async context manager 包 FakeDb。"""
+
+        class _Ctx:
+            async def __aenter__(self):
+                return _FakeDb(rows=[row] if row is not None else [])
+
+            async def __aexit__(self, *args):
+                return False
+
+        return lambda: _Ctx()
+
+    def test_redis_miss_falls_back_to_pg_and_rewarms_cache(self):
+        async def _run():
+            record = SimpleNamespace(
+                result={"match_id": "m1", "total_score": 0.8, "user_id": "u1"}
+            )
+            redis_mock = AsyncMock()
+            redis_mock.get.return_value = None
+            with patch.object(
+                match_api, "redis_client", new=redis_mock
+            ), patch(
+                "app.api.v1.match.async_session_factory",
+                new=self._make_factory(record),
+            ):
+                data = await _load_match_result("m1", "u1")
+
+            assert data == record.result
+            redis_mock.set.assert_awaited_once()
+
+        asyncio.run(_run())
+
+    def test_redis_miss_without_record_returns_none(self):
+        async def _run():
+            redis_mock = AsyncMock()
+            redis_mock.get.return_value = None
+            with patch.object(
+                match_api, "redis_client", new=redis_mock
+            ), patch(
+                "app.api.v1.match.async_session_factory",
+                new=self._make_factory(None),
+            ):
+                data = await _load_match_result("m1", "u1")
+
+            assert data is None
+            redis_mock.set.assert_not_awaited()
+
+        asyncio.run(_run())
+
+    def test_redis_miss_with_empty_result_returns_none(self):
+        """副本 result 为空 dict → 视为无有效数据（404），不回填缓存。"""
+
+        async def _run():
+            record = SimpleNamespace(result={})
+            redis_mock = AsyncMock()
+            redis_mock.get.return_value = None
+            with patch.object(
+                match_api, "redis_client", new=redis_mock
+            ), patch(
+                "app.api.v1.match.async_session_factory",
+                new=self._make_factory(record),
+            ):
+                data = await _load_match_result("m1", "u1")
+
+            assert data is None
+            redis_mock.set.assert_not_awaited()
 
         asyncio.run(_run())
