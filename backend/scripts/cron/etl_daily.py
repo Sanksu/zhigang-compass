@@ -1,13 +1,14 @@
-r"""每日 ETL 调度入口（设计文档 §4.4）。
+r"""每日 ETL 手动补跑入口（设计文档 §4.4；08-23 闭环收敛 P0-2）。
 
-被系统 cron / Windows 计划任务调用，将 ETL 任务入队到 ARQ。
+⚠️ 仅手动运维工具——生产调度唯一事实源是 WorkerSettings 容器内 ARQ cron
+（runtime_config.etl_run_hour/minute 控制，worker 重启后生效）。
+禁止再将本脚本装入 crontab / Windows 计划任务：外部入队绕过
+run_etl_pipeline_scheduled 包装（语义分叉），--force 可覆盖当日幂等锁
+造成双跑；快照/演化顺序也会被独立触发打乱。
 
-调用方式：
-    # Linux cron（crontab -e）
-    0 2 * * * cd /path/to/backend && uv run python scripts/cron/etl_daily.py >> logs/etl_$(date +\%Y\%m\%d).log 2>&1
-
-    # Windows 计划任务（PowerShell）
-    cd backend; uv run python scripts/cron/etl_daily.py
+调用方式（手动补跑）：
+    cd backend && uv run python scripts/cron/etl_daily.py            # 常规（幂等）
+    cd backend && uv run python scripts/cron/etl_daily.py --force    # 失败重跑（覆盖当日锁）
 
 任务分组（对齐设计文档 §4.4 数据更新频率）：
     02:00  国内 A/B 级招聘平台（boss/zhilian）

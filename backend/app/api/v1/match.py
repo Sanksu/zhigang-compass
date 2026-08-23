@@ -119,23 +119,43 @@ async def _persist_match_result(match_id: str, data: dict) -> None:
 async def _load_match_result(match_id: str, user_id: str) -> dict | None:
     """加载匹配结果并校验归属（越权防护）。
 
-    快照内 user_id（新写点）优先；存量快照无该字段时回退 match_results 表校验，
-    防止本人访问修复前生成的结果被误拦。
+    Redis 快照优先；过期/丢失后回退 match_results 耐久副本并回填缓存
+    （08-23 闭环收敛：修复双写单读——PG 镜像此前只写不可恢复）。快照内
+    user_id（新写点）优先；存量快照无该字段时回退表级归属校验，防止
+    本人访问修复前生成的结果被误拦。
     """
     cached = await redis_client.get(f"match:result:{match_id}")
-    if cached is None:
-        return None
-    data = json.loads(cached)
-    if data.get("user_id") == user_id:
-        return data
+    if cached is not None:
+        data = json.loads(cached)
+        if data.get("user_id") == user_id:
+            return data
+        async with async_session_factory() as session:
+            owner = await session.scalar(
+                select(MatchResultRecord.id).where(
+                    MatchResultRecord.match_id == match_id,
+                    MatchResultRecord.user_id == user_id,
+                )
+            )
+        return data if owner is not None else None
+
     async with async_session_factory() as session:
-        owner = await session.scalar(
-            select(MatchResultRecord.id).where(
+        row = await session.scalar(
+            select(MatchResultRecord).where(
                 MatchResultRecord.match_id == match_id,
                 MatchResultRecord.user_id == user_id,
             )
         )
-    return data if owner is not None else None
+    if row is None or not isinstance(row.result, dict) or not row.result:
+        return None
+    try:
+        await redis_client.set(
+            f"match:result:{match_id}",
+            json.dumps(row.result, ensure_ascii=False),
+            ex=_MATCH_RESULT_TTL,
+        )
+    except Exception:
+        logger.warning("匹配结果缓存回填失败（不影响本次响应）", exc_info=True)
+    return row.result
 
 
 async def _load_or_404(match_id: str, user: dict) -> dict:
