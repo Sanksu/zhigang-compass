@@ -31,6 +31,14 @@ SKILL_ALIAS: dict[str, str] = {
     "flink": "Apache Flink",
     "kafka": "Apache Kafka",
     "pyspark": "PySpark",
+    # 全栈（2026-08-24 图谱治理：dict-guard 停用提案被驳回——真实技能变体
+    # 应归一至图内主节点「全栈」而非屏蔽，变体节点 Full Stack Development
+    # 曾以 0 引用孤岛形态存活）
+    "full stack development": "全栈",
+    "full-stack development": "全栈",
+    "fullstack development": "全栈",
+    "full-stack web development": "全栈",
+    "full stack": "全栈",
     # 云原生
     "k8s": "Kubernetes",
     "docker": "Docker",
