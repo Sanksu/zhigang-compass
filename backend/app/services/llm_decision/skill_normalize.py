@@ -157,6 +157,16 @@ def decide_skill_normalize(
             key=lambda c: candidate_rank_key(name, c),
         )
         candidates = ordered[:15]
+        # 权威别名提示（校准 r3）：输入命中别名表时，其标准落点置顶入候选。
+        # 与生产一致性对齐——别名/白名单是确定性快速路径，决策器是对齐后的
+        # 一致确认而非独立猜测（r2 遗留：跨语言 full stack→全栈、llm→大语言
+        # 模型等 40 例纯词面分级无法召回；别名表即权威对应）
+        from app.services.extraction.dictionary_data import SKILL_ALIAS
+
+        alias_target = SKILL_ALIAS.get(name) or SKILL_ALIAS.get(name.lower())
+        if alias_target and alias_target not in candidates:
+            candidates = [alias_target] + [c for c in candidates if c != alias_target]
+            candidates = candidates[:15]
     prompt = build_skill_normalize_prompt(name, candidates)
     try:
         with invocation_scope(

@@ -134,3 +134,15 @@ class TestPromptCalibration:
         assert "前置先修" in prompt
         assert "不要因缺少共现证据而保守答 NONE" in prompt
         assert "子领域" in prompt  # BELONGS_TO 判据
+
+
+class TestPromptCalibrationR3:
+    """校准 r3：先修/父子判据显式区分（r2 新偏移：BELONGS_TO 15/26 被判先修）。"""
+
+    def test_prompt_distinguishes_prerequisite_and_belongs(self):
+        from app.services.llm_decision.skill_relation import build_skill_relation_prompt
+
+        prompt = build_skill_relation_prompt("Spring Boot", "Java", [])
+        assert "学习顺序依赖" in prompt
+        assert "分类包含" in prompt
+        assert "框架/平台对语言的依赖是先修" in prompt
