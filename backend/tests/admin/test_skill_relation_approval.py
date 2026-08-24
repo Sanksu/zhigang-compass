@@ -23,10 +23,12 @@ def _rel_record(status="proposal", entity_id="Java->Spring", relation="PREREQUIS
 
 
 class _FakeSession:
-    def __init__(self, record):
+    def __init__(self, record, existing_relations=()):
         self._record = record
+        self._existing_relations = list(existing_relations)
         self.added: list = []
         self.committed = False
+        self.rolled_back = False
 
     async def __aenter__(self):
         return self
@@ -37,11 +39,20 @@ class _FakeSession:
     async def get(self, model, decision_id):
         return self._record
 
+    async def scalars(self, stmt):
+        rows = self._existing_relations
+        return SimpleNamespace(
+            all=lambda: rows, first=lambda: rows[0] if rows else None,
+        )
+
     def add(self, obj):
         self.added.append(obj)
 
     async def commit(self):
         self.committed = True
+
+    async def rollback(self):
+        self.rolled_back = True
 
 
 def _approve(session, reason="先修语义确认", operator=_OPERATOR):
@@ -98,6 +109,42 @@ class TestApproveEndpoint:
         session = _FakeSession(_rel_record(entity_id="Java"))
         resp = _approve(session)
         assert _code(resp) != 0
+
+    def test_approve_duplicate_relation_conflict(self):
+        """同对关系已批准过（脚本重跑产生重复 proposal）→ ERR_CONFLICT 不落库。"""
+        from app.models.business import SkillDynamicRelation as _SDR
+
+        existing = _SDR(
+            source_skill="Java", target_skill="Spring",
+            relation_type="PREREQUISITE_OF", proposal_id="cccccccc-cccc-cccc-cccc-cccccccccccc",
+        )
+        session = _FakeSession(_rel_record(), existing_relations=[existing])
+        resp = _approve(session)
+        assert _code(resp) != 0
+        import json as _json
+
+        assert "已批准过" in _json.loads(resp.body)["msg"]
+        assert session.committed is False
+        assert not any(type(o).__name__ == "SkillDynamicRelation" for o in session.added)
+
+    def test_approve_integrity_error_rolls_back(self):
+        """并发兜底：commit 撞唯一约束 → 回滚 + 冲突响应（不 500）。"""
+        import json as _json
+
+        from starlette.responses import JSONResponse
+
+        class _IntegritySession(_FakeSession):
+            async def commit(self):
+                from sqlalchemy.exc import IntegrityError
+
+                raise IntegrityError("dup", None, Exception())
+
+        session = _IntegritySession(_rel_record())
+        resp = _approve(session)
+        assert isinstance(resp, JSONResponse)
+        assert _json.loads(resp.body)["code"] != 0
+        assert session.rolled_back is True
+        assert "并发批准冲突" in _json.loads(resp.body)["msg"]
 
     def test_reject_only_status(self):
         session = _FakeSession(_rel_record())

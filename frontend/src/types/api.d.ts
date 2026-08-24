@@ -2779,6 +2779,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/llm-decisions/{decision_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 批准 skill_relation proposal——落动态关系表 + 决策置 approved（RBAC admin） */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    decision_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description 审批理由（必填） */
+                        review_reason: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description 批准成功（relation 形如 源->目标->类型） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: {
+                                decision_id?: string;
+                                relation?: string;
+                            };
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/llm-decisions/{decision_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 驳回 proposal（仅状态流转，效果为 0） */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    decision_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        review_reason: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description 驳回成功 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: {
+                                decision_id?: string;
+                            };
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/positions/{position_name}": {
         parameters: {
             query?: never;

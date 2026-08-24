@@ -131,6 +131,7 @@ async def approve_llm_decision(
     from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
     from app.models.business import AuditLog, SkillDynamicRelation
     from app.schemas.common import error
+    from sqlalchemy.exc import IntegrityError
 
     reason = (req.get("review_reason") or "").strip()
     if not reason:
@@ -159,6 +160,24 @@ async def approve_llm_decision(
     if relation_type not in {"PREREQUISITE_OF", "BELONGS_TO", "ALTERNATIVE_OF"} or not source or source == target:
         return error(ERR_VALIDATION, "关系类型/方向非法（PREREQUISITE_OF/BELONGS_TO/ALTERNATIVE_OF 且源≠目标）")
 
+    # 重复关系预查（unique(source,target,type) 会硬拒）：同对关系已被批准过
+    # （如 propose 脚本重跑产生多条同对 proposal）时给出可读冲突而非 500
+    from sqlalchemy import select
+
+    existing = (await db.scalars(
+        select(SkillDynamicRelation).where(
+            SkillDynamicRelation.source_skill == source,
+            SkillDynamicRelation.target_skill == target,
+            SkillDynamicRelation.relation_type == relation_type,
+        )
+    )).first()
+    if existing is not None:
+        return error(
+            ERR_CONFLICT,
+            f"关系 {source}->{target}->{relation_type} 已批准过"
+            f"（proposal {existing.proposal_id}），不可重复批准",
+        )
+
     db.add(SkillDynamicRelation(
         source_skill=source, target_skill=target, relation_type=relation_type,
         direction=direction, proposal_id=str(record.id), reviewed_by=operator,
@@ -174,7 +193,12 @@ async def approve_llm_decision(
         detail={"source": source, "target": target, "relation_type": relation_type,
                 "reason": reason},
     ))
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # 并发兜底：两管理员同时批准同对关系，后者撞唯一约束
+        await db.rollback()
+        return error(ERR_CONFLICT, "关系已存在（并发批准冲突）")
     return ok({"decision_id": str(record.id), "relation": f"{source}->{target}->{relation_type}"})
 
 
