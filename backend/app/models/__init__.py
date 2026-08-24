@@ -10,6 +10,7 @@ from app.models.business import (
     LLMDecisionRecord,
     Occupation,
     ResumeCache,
+    SkillDynamicRelation,
     TaskStatus,
     User,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "Occupation",
     "PaperRaw",
     "ResumeCache",
+    "SkillDynamicRelation",
     "TaskStatus",
     "User",
 ]

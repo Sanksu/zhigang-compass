@@ -6,10 +6,12 @@
 只读，不触发任何写操作（决策记录的生产者见各域 worker/scripts）。
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_permission
+from app.core.database import get_db
 from app.models.business import LLMDecisionRecord
 
 router = APIRouter(tags=["admin-llm-decisions"])
@@ -97,3 +99,122 @@ async def llm_decisions_summary() -> dict:
 
     async with async_session_factory() as session:
         return await summarize(session)
+
+
+# ---- 技能关系审批执行通道（PR9b）：proposal→approved/rejected ----
+
+_REL_DOMAINS = {"skill_relation"}
+
+
+async def _load_decision(session, decision_id: str):
+    from app.models.business import LLMDecisionRecord
+
+    return await session.get(LLMDecisionRecord, decision_id)
+
+
+@router.post("/llm-decisions/{decision_id}/approve")
+async def approve_llm_decision(
+    decision_id: str,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+) -> dict:
+    """批准一条 skill_relation proposal：落动态关系表 + 决策记录置 approved。
+
+    执行顺序（对齐 postmortem 003 教训）：先校验 → PG 落库（动态关系 +
+    决策状态 + AuditLog）→ 成功返回。图写入由 scripts/sync_dynamic_relations.py
+    幂等 MERGE（与 YAML 种子并列），不在本端点内直接改 Neo4j。
+    """
+    import uuid as _uuid
+
+    from app.api.common import ok
+    from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
+    from app.models.business import AuditLog, SkillDynamicRelation
+    from app.schemas.common import error
+
+    reason = (req.get("review_reason") or "").strip()
+    if not reason:
+        return error(ERR_VALIDATION, "审批必须填写 review_reason")
+    operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    try:
+        _uuid.UUID(str(operator))
+    except (ValueError, AttributeError, TypeError):
+        return error(ERR_VALIDATION, f"操作者身份必须为 UUID（AuditLog.user_id 列约束），收到: {operator!r}")
+
+    record = await _load_decision(db, decision_id)
+    if record is None:
+        return error(ERR_NOT_FOUND, "决策记录不存在", http_status=404)
+    if record.domain not in _REL_DOMAINS:
+        return error(ERR_VALIDATION, f"仅 skill_relation 域可批准（当前 {record.domain}）")
+    if record.status != "proposal":
+        return error(ERR_CONFLICT, f"决策当前状态 {record.status}，不可批准")
+
+    out = record.structured_output or {}
+    relation_type = str(out.get("relation") or "")
+    direction = str(out.get("direction") or "a_to_b")
+    entity_id = str(record.entity_id or "")
+    if "->" not in entity_id:
+        return error(ERR_VALIDATION, "entity_id 非法（应为 源->目标）")
+    source, target = [x.strip() for x in entity_id.split("->", 1)]
+    if relation_type not in {"PREREQUISITE_OF", "BELONGS_TO", "ALTERNATIVE_OF"} or not source or source == target:
+        return error(ERR_VALIDATION, "关系类型/方向非法（PREREQUISITE_OF/BELONGS_TO/ALTERNATIVE_OF 且源≠目标）")
+
+    db.add(SkillDynamicRelation(
+        source_skill=source, target_skill=target, relation_type=relation_type,
+        direction=direction, proposal_id=str(record.id), reviewed_by=operator,
+        review_reason=reason,
+    ))
+    record.status = "approved"
+    record.reviewer = operator
+    record.review_reason = reason
+    record.effects_applied = True
+    db.add(AuditLog(
+        user_id=operator, action="llm_decision_approve",
+        resource="skill_relation", resource_id=str(record.id),
+        detail={"source": source, "target": target, "relation_type": relation_type,
+                "reason": reason},
+    ))
+    await db.commit()
+    return ok({"decision_id": str(record.id), "relation": f"{source}->{target}->{relation_type}"})
+
+
+@router.post("/llm-decisions/{decision_id}/reject")
+async def reject_llm_decision(
+    decision_id: str,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+) -> dict:
+    """驳回一条 proposal（仅 status 流转，效果为 0）。"""
+    import uuid as _uuid
+
+    from app.api.common import ok
+    from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
+    from app.models.business import AuditLog
+    from app.schemas.common import error
+
+    reason = (req.get("review_reason") or "").strip()
+    if not reason:
+        return error(ERR_VALIDATION, "审批必须填写 review_reason")
+    operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    try:
+        _uuid.UUID(str(operator))
+    except (ValueError, AttributeError, TypeError):
+        return error(ERR_VALIDATION, f"操作者身份必须为 UUID（AuditLog.user_id 列约束），收到: {operator!r}")
+
+    record = await _load_decision(db, decision_id)
+    if record is None:
+        return error(ERR_NOT_FOUND, "决策记录不存在", http_status=404)
+    if record.status != "proposal":
+        return error(ERR_CONFLICT, f"决策当前状态 {record.status}，不可驳回")
+
+    record.status = "rejected"
+    record.reviewer = operator
+    record.review_reason = reason
+    db.add(AuditLog(
+        user_id=operator, action="llm_decision_reject",
+        resource=record.domain, resource_id=str(record.id),
+        detail={"reason": reason},
+    ))
+    await db.commit()
+    return ok({"decision_id": str(record.id)})
