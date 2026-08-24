@@ -2691,6 +2691,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/llm-decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** LLM 决策记录分页列表（只读，domain/status 过滤） */
+        get: {
+            parameters: {
+                query?: {
+                    domain?: string;
+                    status?: string;
+                    limit?: number;
+                    offset?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 决策记录列表（created_at 倒序） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: components["schemas"]["LlmDecisionItem"][];
+                            limit?: number;
+                            offset?: number;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/llm-decisions/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** LLM 决策汇总（domain×status，验收卡片数据源，只读） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 按域的状态计数与总额 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description 按域倒序（total 降序） */
+                            by_domain?: components["schemas"]["LlmDecisionDomainSummary"][];
+                            /** @description 全量状态计数（shadow/proposal/auto_applied/blocked/other/records） */
+                            totals?: {
+                                [key: string]: number;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/positions/{position_name}": {
         parameters: {
             query?: never;
@@ -4386,6 +4474,50 @@ export interface components {
         /** @description GET/PUT /admin/llm-config 响应/请求 data */
         LlmConfig: {
             providers: components["schemas"]["LlmProviderConfig"][];
+        };
+        /** @description 六域 LLM 决策记录（llm_decision_records 行） */
+        LlmDecisionItem: {
+            /** @description UUID */
+            id: string;
+            /** @description jd_extract/position_normalize/skill_normalize/position_classify/cluster_label/skill_classify/governance/skill_relation */
+            domain: string;
+            entity_type?: string;
+            entity_id?: string;
+            run_id?: string;
+            env?: string;
+            input_hash?: string;
+            provider?: string;
+            model?: string;
+            prompt_version?: string;
+            schema_version?: string;
+            /** @description LLM 结构化输出（决策明细，供抽检） */
+            structured_output?: {
+                [key: string]: unknown;
+            };
+            confidence?: number | null;
+            /** @description pass/blocked */
+            gate_result?: string;
+            /** @description R0/R1/R2/blocked */
+            risk_tier?: string;
+            /** @description shadow/proposal/auto_applied/blocked/rejected/approved/failed */
+            status: string;
+            reviewer?: string;
+            review_reason?: string;
+            effects_applied?: boolean;
+            duration_ms?: number;
+            attempts?: number;
+            fallback_reason?: string;
+            /** @description ISO8601 */
+            created_at: string;
+        };
+        /** @description GET /admin/llm-decisions/summary by_domain 项 */
+        LlmDecisionDomainSummary: {
+            domain: string;
+            /** @description status → count */
+            by_status: {
+                [key: string]: number;
+            };
+            total: number;
         };
         /** @description 图谱版本列表项（GET /evolution/versions） */
         EvolutionVersion: {
