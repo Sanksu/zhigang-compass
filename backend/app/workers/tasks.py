@@ -52,6 +52,9 @@ from app.workers.llm_stats import (
 from app.workers.skill_category_review import (
     skill_category_review_daily as skill_category_review_daily,
 )
+from app.workers.name_normalization_shadow import (
+    name_normalization_shadow_daily as name_normalization_shadow_daily,
+)
 from app.workers.diagnosis import generate_diagnosis as generate_diagnosis
 from app.workers.discovery import (
     _Provider as _Provider,
