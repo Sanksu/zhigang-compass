@@ -56,11 +56,14 @@ _TASK_TEMPLATE = """技能关系判定。
   "reason": "一句话依据"
 }}
 
-语义约定：
-- PREREQUISITE_OF：源是目标的前置先修（方向 a_to_b）
-- BELONGS_TO：源从属于目标（子→父，方向 a_to_b）
-- ALTERNATIVE_OF：两者可互相替代（方向 symmetric）
-- NONE：无稳定关系
+语义约定（判定判据）：
+- PREREQUISITE_OF：源是目标的前置先修——学目标之前通常需先掌握源
+  （语言→其上构建的框架/平台、数学基础→算法领域）。技术栈依赖常识即可
+  判定，不要因缺少共现证据而保守答 NONE；方向恒为 a_to_b（先修→目标）
+- BELONGS_TO：源从属于目标（子领域/子技术→父领域，如某框架特性→框架
+  本身）；方向恒为 a_to_b（子→父）
+- ALTERNATIVE_OF：两者解决同类问题、岗位要求中可互相替代；方向 symmetric
+- NONE：以上三者都不成立时才使用；拿不准语义关系时优先 NONE 并降置信度
 - 只选最有把握的一种关系；多义时优先 BELONGS_TO → NONE
 """
 

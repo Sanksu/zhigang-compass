@@ -46,8 +46,12 @@ _TASK_TEMPLATE = """技能名归一判断。
 
 要求：
 1. action=merge 时 target_standard 必须与候选清单原文完全一致
-2. 短英文缩写/产品名（≤6 字符）倾向 keep，防 SBERT 误并
-3. 明显非技能（岗位名/教材名/噪音）判 noise
+2. 同一技能的变体应 merge 到对应标准名——缩写/全称（JS→JavaScript）、
+   大小写与拼写变体（react→React、golang→Go）、版本号（Python3→Python）、
+   中英对应（c语言→C）；候选清单里的关联名优先考虑
+3. 与自身相同的目标不是 merge（标准名输入直接 keep）；拿不准语义是否
+   同一时 keep 并降低置信度；无关联缩写（≤6 字符）保持 keep 防 SBERT 误并
+4. 明显非技能（岗位名/教材名/噪音）判 noise
 """
 
 
@@ -100,6 +104,38 @@ def skill_normalize_gate(
     return True, ""
 
 
+def candidate_rank_key(name: str, candidate: str) -> tuple:
+    """候选召回排序键（校准 r1）：词面关联优先于长度差。
+
+    基线实证（docs/reviews/LLM驱动黄金集首跑基线_20260824.md）：纯长度差
+    排序下 gold 标准名仅 2/60 进入候选前 15（react→React 长度差 0 仍被同长
+    名挤出），merge accuracy 塌到 0.06 的决定性瓶颈是候选召回而非模型判断。
+    分级：0=强关联（大小写不敏感相等/词面子串/去符号相等）；1=首字母相同
+    （不区分大小写，覆盖缩写族 JS→JavaScript）；2=其余；同级按长度差+字典序。
+    """
+    import re as _re
+
+    nl, cl = (name or "").lower(), (candidate or "").lower()
+
+    def _strip(s: str) -> str:
+        return _re.sub(r"[^a-z0-9\u4e00-\u9fff]", "", s)
+
+    # 缩写首字母匹配：JS = JavaScript 的大写首字母串（全大写短缩写专用）
+    upper_initials = "".join(ch for ch in (candidate or "") if ch.isupper())
+    abbr_match = (
+        2 <= len(name or "") <= 6 and (name or "").isalpha() and (name or "").isupper()
+        and upper_initials == (name or "")
+    )
+    # 中文后缀前缀：c语言→C（变体含 CJK 且以候选开头）
+    cjk_prefix = any("\u4e00" <= ch <= "\u9fff" for ch in (name or "")) and cl and nl.startswith(cl)
+    strong = (
+        (nl == cl or nl in cl or cl in nl or _strip(nl) == _strip(cl))
+        and min(len(nl), len(cl)) >= 2
+    ) or abbr_match or cjk_prefix
+    tier = 0 if strong else (1 if nl[:1] == cl[:1] and nl and cl else 2)
+    return (tier, abs(len(cl) - len(nl)), candidate)
+
+
 def decide_skill_normalize(
     name: str,
     llm,
@@ -110,15 +146,15 @@ def decide_skill_normalize(
 ) -> Optional[SkillNormalizeDecision]:
     """单条技能名决策；LLM 未配置/失败返回 None（shadow 跳过不阻塞）。
 
-    candidates 缺省取权威标准名全集（白名单 ∪ 别名落点），按与技能名的
-    长度差排序取前 15（接近名优先，控制 prompt 体积）。
+    candidates 缺省取权威标准名全集，按 candidate_rank_key（词面关联优先）
+    排序取前 15——保证变体的强关联标准名（react→React、c#→C#）稳定入候选。
     """
     if llm is None or not (name or "").strip():
         return None
     if candidates is None:
         ordered = sorted(
             known_standard_names(),
-            key=lambda c: (abs(len(c) - len(name)), c),
+            key=lambda c: candidate_rank_key(name, c),
         )
         candidates = ordered[:15]
     prompt = build_skill_normalize_prompt(name, candidates)

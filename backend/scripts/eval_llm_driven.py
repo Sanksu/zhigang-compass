@@ -114,7 +114,7 @@ async def eval_normalization(rows: list[dict], llm) -> dict:
     )
 
     results: list[dict] = []
-    llm_failed = merge_hit = error_merge = 0
+    llm_failed = merge_hit = error_merge = gate_saved = 0
     for row in rows:
         decision = await asyncio.to_thread(decide_skill_normalize, row["variant"], llm)
         if decision is None:
@@ -126,7 +126,11 @@ async def eval_normalization(rows: list[dict], llm) -> dict:
         if row["gold_action"] == "keep":
             match = decision.action in ("keep", "noise")
             if decision.action == "merge":
-                error_merge += 1
+                if gate_ok:
+                    error_merge += 1  # 硬门未拦的真实错误合并（验收必须 0）
+                else:
+                    # 硬门拦截（如 AIGC→AIGC 同义反复）：生产零风险，单列不计错误
+                    gate_saved += 1
         else:
             match = decision.action == "merge" and decision.target_standard == row["gold_standard"]
             if decision.action == "merge":
@@ -147,7 +151,8 @@ async def eval_normalization(rows: list[dict], llm) -> dict:
         "merge_count": len(merge_rows),
         "keep_accuracy": round(sum(1 for r in keep_rows if r["match"]) / len(keep_rows), 4) if keep_rows else None,
         "keep_count": len(keep_rows),
-        "error_merge_count": error_merge,  # 短词被错误 merge 数（验收必须 0）
+        "error_merge_count": error_merge,  # 硬门未拦的真实错误合并（验收必须 0）
+        "gate_saved_count": gate_saved,  # 硬门拦截的无效 merge（生产零风险）
         "results": results,
     }
 

@@ -40,6 +40,9 @@ _TASK_TEMPLATE = """任务：为技能名 "{name}" 选择分类。
 类别清单（必须从中选一，原样输出）：
 {categories}
 
+类别锚点示例（近邻类目易混，按本表口径判）：
+{anchors}
+
 输出 JSON：
 {{
   "category": "清单中的某一类",
@@ -50,8 +53,30 @@ _TASK_TEMPLATE = """任务：为技能名 "{name}" 选择分类。
 要求：
 1. category 必须与清单原文完全一致（含标点与斜杠），不得自创类别
 2. 工具/框架按其所属技术领域归类（如 Docker → 云原生/DevOps）
-3. 不确定时选大类并降低 confidence
+3. 查询/脚本语言（SQL、Shell 等）归编程语言；具体数据库产品（MySQL、
+   Redis 等）归数据库；语言 vs 其上框架分属编程语言 vs 对应领域
+4. 不确定时选大类并降低 confidence
 """
+
+
+def category_anchors(max_per_category: int = 2) -> str:
+    """类别锚点示例（从权威白名单取每类代表词，近邻类目易混口径）。
+
+    基线实证：分类 top-1 0.8714 的错误集中在同域近邻（SQL→数据库、
+    ES5→前端、异步编程→计算机基础）——锚点把权威口径的边界词显式给到
+    prompt（校准 r1，算法红线：口径变更须算法岗确认）。
+    """
+    from app.services.extraction.dictionary import SKILL_CATEGORY
+
+    by_category: dict[str, list[str]] = {}
+    for skill, category in SKILL_CATEGORY.items():
+        by_category.setdefault(category, []).append(skill)
+    lines = []
+    for category in sorted(by_category):
+        reps = sorted(by_category[category], key=lambda s: (len(s), s))[:max_per_category]
+        if reps:
+            lines.append(f"- {category}：{'、'.join(reps)}")
+    return "\n".join(lines)
 
 
 class SkillCategorySuggestion(BaseModel):
@@ -86,6 +111,7 @@ def classify_skill(
     prompt = _TASK_TEMPLATE.format(
         name=name.strip(),
         categories="、".join(sorted(KNOWN_CATEGORIES)),
+        anchors=category_anchors(),
     )
     try:
         with invocation_scope("skill_category_review"):
