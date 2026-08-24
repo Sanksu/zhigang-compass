@@ -31,6 +31,9 @@ DEFAULTS: dict = {
     "etl_validate_temporal_default": 200,  # 时滞/通胀检测默认批次
     "etl_run_hour": 5,                  # ETL 调度小时（0-23，容器内 ARQ cron）
     "etl_run_minute": 0,                # ETL 调度分钟（0-59）
+    # JD 批量抽取提速（08-25 参数化）：并发批次上限与每批条数，226 实测调参用
+    "etl_extract_concurrency": 6,        # 并发批次上限（过高触发 provider 429 整批降级逐条）
+    "etl_extract_batch_size": 8,         # 每批 JD 条数（受 max_tokens 约束，8 为甜点）
     # 每爬虫采集配置（08-21）：spider -> {enabled, max_results, max_empty_retries}；
     # 缺省启用、按源默认数量；max_empty_retries=0 关闭页面级空列表退避重试（默认 3）
     "crawlers": {},
@@ -64,6 +67,8 @@ _VALIDATORS = {
     "etl_validate_temporal_default": lambda v: isinstance(v, int) and 100 <= v <= 500,
     "etl_run_hour": lambda v: isinstance(v, int) and 0 <= v <= 23,
     "etl_run_minute": lambda v: isinstance(v, int) and 0 <= v <= 59,
+    "etl_extract_concurrency": lambda v: isinstance(v, int) and 1 <= v <= 16,
+    "etl_extract_batch_size": lambda v: isinstance(v, int) and 1 <= v <= 16,
     "dict_guard_auto_impact_threshold": lambda v: isinstance(v, int) and 1 <= v <= 1000,
     "dict_guard_min_confidence": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0,
     "dict_guard_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,

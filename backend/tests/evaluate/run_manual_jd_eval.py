@@ -72,6 +72,9 @@ JD_LLM_TARGET_F1 = 0.90
 # 评测侧单 provider LLM 超时（秒）：L1-1 六维后抽取更重，30s 生产默认偶发超时（打样 10/110 被排除），
 # 评测显式放宽到 60s；生产默认 ASYNC_TIMEOUT_SECONDS=30 保持不变（见 jd_extractor.extract timeout 参数）
 _EVAL_LLM_TIMEOUT_SECONDS = 60
+# 评测并行度（08-25 提速）：ThreadPoolExecutor 并发单条抽取，逐条 tracker/结果语义不变
+# （生产 extract_batch 本就线程池并发调用 LLM；110 条串行 ~7min/跑 → 并行 ~2min/跑）
+_EVAL_EXTRACT_CONCURRENCY = 8
 NS = {
     "m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
     "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -487,6 +490,37 @@ def apply_gold_revisions(
     return out_skills, out_bonus
 
 
+def _extract_row_for_eval(provider, row):
+    """单行 LLM 抽取（供线程池并行，08-25 提速）：返回 (tracker, result, error_summary)。
+
+    逻辑与原循环内嵌完全一致（tracker 捕获是否真实 LLM 输出），仅剥离成
+    可并行单元——线程池保证结果顺序与输入一一对应，逐条指标口径不变。
+    """
+    from app.services.extraction.jd_extractor import JDExtractor
+
+    tracker = TrackingLLM(provider)
+    try:
+        # title_hint=job_title_raw：评测输入对齐生产链路（_build_jd_text 首行
+        # 含 title），岗位名优先采用招聘标题（08-14 title 失配根因修复）
+        # timeout=60：L1-1 六维后抽取更重，30s 默认偶发超时致 10/110 被排除（打样 08-20）
+        result = JDExtractor(llm=tracker).extract(
+            row["detail_raw_text"],
+            title_hint=row.get("job_title_raw", ""),
+            timeout=_EVAL_LLM_TIMEOUT_SECONDS,
+        )
+        return tracker, result, None
+    except Exception as exc:
+        return tracker, None, _safe_exception_summary(exc)
+
+
+def _extract_all_parallel(provider, rows) -> list:
+    """全量行并发抽取（08-25 提速）：顺序与输入一一对应。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=_EVAL_EXTRACT_CONCURRENCY) as pool:
+        return list(pool.map(lambda r: _extract_row_for_eval(provider, r), rows))
+
+
 def run_real_eval(
     rows: list[dict[str, str]],
     output_dir: Path,
@@ -496,7 +530,6 @@ def run_real_eval(
     """Run the current extractor and reject all records that fall back to rules."""
     sys.path.insert(0, str(ROOT))
     from app.services.extraction.dictionary import normalize_position_name, normalize_skill
-    from app.services.extraction.jd_extractor import JDExtractor
     from app.services.extraction.llm_provider import LLMConfigurationError, LLMProviderChain
     from app.services.extraction.post_processor import _text_has, clean_skill_name
 
@@ -537,25 +570,18 @@ def run_real_eval(
     sample_bonus_f1: list[float] = []
     fallback_samples = 0
     failed_samples = 0
-    for row in rows:
-        tracker = TrackingLLM(provider)
-        try:
-            # title_hint=job_title_raw：评测输入对齐生产链路（_build_jd_text 首行
-            # 含 title），岗位名优先采用招聘标题（08-14 title 失配根因修复）
-            # timeout=60：L1-1 六维后抽取更重，30s 默认偶发超时致 10/110 被排除（打样 08-20）
-            result = JDExtractor(llm=tracker).extract(
-                row["detail_raw_text"],
-                title_hint=row.get("job_title_raw", ""),
-                timeout=_EVAL_LLM_TIMEOUT_SECONDS,
-            )
-        except Exception as exc:
+    # 08-25 提速：全量行并发抽取（顺序与实际逻辑不变，逐条 tracker 语义保留）
+    extracted_by_row = _extract_all_parallel(provider, rows)
+    for i, row in enumerate(rows):
+        tracker, result, extract_error = extracted_by_row[i]
+        if extract_error is not None:
             failed_samples += 1
             predictions.append({
                 "sample_id": row["sample_id"], "source": row["source"], "source_id": row["source_id"],
                 "source_url": row["source_url"], "job_title_raw": row["job_title_raw"],
                 "human_gold": {key: row.get(key, "") for key in LABEL_COLUMNS},
                 "execution_status": "failed",
-                "failure_reason": _safe_exception_summary(exc),
+                "failure_reason": extract_error,
             })
             continue
         if tracker.model_output is None:

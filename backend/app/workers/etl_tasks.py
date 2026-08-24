@@ -842,16 +842,21 @@ async def batch_extract(
         texts = [_build_jd_text(r.snapshot or {}, r.raw_text or "") for r in valid]
         if texts:
             # 同步 LLM 批量调用放线程池，避免阻塞 ARQ 事件循环（Redis 心跳超时崩溃根因）。
-            # concurrency=6 / batch_size=8：2026-08-07 用户确认提速（max_tokens 同步调至 4096）。
+            # 并发与批次参数化（08-25 提速）：runtime_config.etl_extract_concurrency /
+            # etl_extract_batch_size，默认 6×8 保持 08-07 确认口径，226 实测调参无需发版。
             # LLM 生成时间由输出 token 总量决定，并发提吞吐；若触发 provider 429，退避期
-            # 整批降级逐条反而更慢，届时回调参数。
+            # 整批降级逐条反而更慢，3 档调参守则见 design/执行计划。
+            from app.core import runtime_config
+
+            extract_concurrency = runtime_config.get("etl_extract_concurrency", 6)
+            extract_batch_size = runtime_config.get("etl_extract_batch_size", 8)
             extractions = await asyncio.to_thread(
                 extractor.extract_batch,
                 texts,
-                batch_size=8,
+                batch_size=extract_batch_size,
                 batch_timeout=180,  # 批量输出 token 放大，独立超时
                 max_batch_chars=8000,
-                concurrency=6,
+                concurrency=extract_concurrency,
             )
         else:
             extractions = []
