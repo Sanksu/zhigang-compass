@@ -2885,6 +2885,12 @@ components:
               max_empty_retries: { type: integer, description: 页面级空列表退避重试次数（0=关闭，1-10；zhilian 消费，默认 3） }
               hour: { type: integer, description: 独立触发小时（0-23；配置后该爬虫单独 cron 触发，缺省并入主管线） }
               minute: { type: integer, description: 独立触发分钟（0-59；与 hour 成对） }
+        # ── dict-guard 字典守卫（08-24 契约补齐：管理面板可编辑）──
+        dict_guard_enabled: { type: boolean, description: 总开关（false 时 ETL 阶段直接跳过） }
+        dict_guard_auto_impact_threshold: { type: integer, description: 自动生效影响面上限（图谱节点数，超过转人工，1-1000） }
+        dict_guard_min_confidence: { type: number, description: 自动生效最低 LLM 置信度（0.0-1.0） }
+        dict_guard_max_candidates: { type: integer, description: 每类候选上限（控制每日 LLM 成本，1-100） }
+        dict_guard_reproposal_cooldown_days: { type: integer, description: 驳回提案冷却期（天内不重提，1-90） }
 
     LlmProviderConfig:
       type: object
