@@ -111,7 +111,7 @@
 
 ┌─────────────────────────────────────────────────────────────────┐
 │  LLM 多 Provider 重试链（OpenAI 兼容 API）                      │
-│  优先级与组合运行时可配置（configs/llm_providers.yaml）         │
+│  优先级与组合运行时可配置（configs/llm_providers.yaml，模板见 [llm_providers.yaml.example](../../backend/configs/llm_providers.yaml.example)）         │
 │  同步路由 10s 超时返 504（错误码 5003）；异步任务 90s 上限       │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -247,7 +247,7 @@ zhigang-compass/
 
 | 文件 | 职责 |
 |------|------|
-| [config.py](../../backend/app/core/config.py) | 配置中心。`Settings(BaseSettings)` 从 `.env` + 环境变量加载；含应用/数据库/JWT/缓存/ARQ/前端目录配置（LLM provider 见 `configs/llm_providers.yaml`）；`is_production` 控制安全开关 |
+| [config.py](../../backend/app/core/config.py) | 配置中心。`Settings(BaseSettings)` 从 `.env` + 环境变量加载；含应用/数据库/JWT/缓存/ARQ/前端目录配置（LLM provider 见 `configs/llm_providers.yaml`，模板见 [llm_providers.yaml.example](../../backend/configs/llm_providers.yaml.example)）；`is_production` 控制安全开关 |
 | [database.py](../../backend/app/core/database.py) | 三库连接管理：PostgreSQL（async engine + session 工厂）、Neo4j（同步 driver）、Redis（async client）；提供 `get_db` / `get_neo4j` / `get_redis` 依赖注入 |
 | [middleware.py](../../backend/app/core/middleware.py) | 中间件链：CORS（白名单）+ GZip（>1KB）+ SecurityHeaders（CSP/HSTS/TraceID）+ RateLimitMiddleware（普通 100 req/min / LLM 10 req/min，键 `rate:{ip}:{path}`，Redis 不可用降级放行，错误码 4290） |
 | [security.py](../../backend/app/core/security.py) | JWT RS256 双 Token（access 30min / refresh 7d）+ bcrypt 密码哈希 + RBAC 四角色权限映射 |
@@ -353,7 +353,7 @@ ID 格式 `{prefix}_{seq:04d}`（如 `sk_0042`），通过 Neo4j Counter 节点�
 | [embeddings/vector_store.py](../../backend/app/services/embeddings/vector_store.py) | pgvector 存取与消费辅助（§11.4.3）：`load_*` 按业务键映射 `{key: vector}`，供 skill/similar、dedup_simhash 语义辅助、engine._project_score 消费 | ✅ 完整 |
 | [embeddings/backfill.py](../../backend/app/services/embeddings/backfill.py) | embedding 回填任务入口 | ✅ 完整 |
 | [alerting.py](../../backend/app/services/alerting.py) | webhook 告警（§4.4/§11.1）：兼容飞书/钉钉/企微机器人 POST JSON；未配置或失败仅记日志不阻塞主流程 | ✅ 完整 |
-| [prompts/](../../backend/app/services/prompts/) | 共享提示词包（soft_skill 等跨模块复用） | ✅ 完整 |
+| [prompts.py](../../backend/app/services/extraction/prompts.py) | 共享提示词（soft_skill 等跨模块复用；原 services/prompts/ 目录已整合） | ✅ 完整 |
 
 ### 5.4 异步任务（[backend/app/workers/](../../backend/app/workers/)）
 
@@ -426,7 +426,7 @@ Scrapy + Playwright + CDP，13 源（7 招聘 A/B/C 三级分级 + 6 非招聘�
 
 #### `Settings` — [core/config.py](../../backend/app/core/config.py)
 应用配置中心，`pydantic-settings` 驱动。
-- 关键字段：`postgres_dsn` / `neo4j_uri` / `redis_url` / `jwt_*` / `arq_*`（LLM provider 配置见 `configs/llm_providers.yaml`，可配置任意 OpenAI 兼容 API）
+- 关键字段：`postgres_dsn` / `neo4j_uri` / `redis_url` / `jwt_*` / `arq_*`（LLM provider 配置见 [llm_providers.yaml.example](../../backend/configs/llm_providers.yaml.example)，可配置任意 OpenAI 兼容 API）
 - 关键 property：`is_production`（控制 CORS/HSTS/Swagger/SECRET_KEY 守卫）、`jwt_private_key` / `jwt_public_key`（惰性读文件）
 
 #### `create_access_token(user_id, role)` / `create_refresh_token(user_id)` — [core/security.py](../../backend/app/core/security.py)
@@ -596,7 +596,7 @@ services.diagnosis:
 | [discovery/detector.py](../../backend/app/services/discovery/detector.py) | [configs/emerging_seeds.yaml](../../backend/configs/emerging_seeds.yaml)（种子列表） |
 | [data_quality/inflation_detector.py](../../backend/app/services/data_quality/inflation_detector.py) | [configs/inflation_weights.json](../../backend/configs/inflation_weights.json)（Optuna 调优） |
 | [learning_path](../../backend/app/services/learning_path/) | [configs/skill_prerequisites.yaml](../../backend/configs/skill_prerequisites.yaml)（40+ 技能先修字典） |
-| LLM Provider | [configs/llm_providers.yaml](../../backend/configs/llm_providers.yaml)（单一事实源，api_key 由管理后台写入，gitignore 忽略） |
+| LLM Provider | [configs/llm_providers.yaml.example](../../backend/configs/llm_providers.yaml.example)（单一事实源模板；运行时 llm_providers.yaml 由管理后台写入，gitignore 忽略不入库） |
 
 ### 7.3 前端依赖
 
