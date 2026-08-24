@@ -11,10 +11,16 @@
    proposal：写 DictProposal(pending) 进审核池（同 term+action 待审去重）
 5. 报告落 reports/dict_guard_{date}.json；有自动生效/LLM 全败时 webhook 告警
 
+统一风险路由（08-24 决策信封）：auto 档决策落 llm_decision_records
+（domain=governance，risk_tier=R1、status=auto_applied）；proposal 档落
+（risk_tier=R2、status=proposal）；硬门拦截项已在 skipped 报告留痕（等价
+blocked 语义，不重复落档防噪音）。决策记录落库失败只计数不阻塞既有链路。
+
 红线：prompt/门禁阈值/分级规则属算法核心，变更须算法岗张恺天 review。
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -76,6 +82,15 @@ class _DictGuardEvaluator:
                 )
         except (LLMExtractionError, LLMTimeoutError, self._config_error):
             return None
+
+
+def _primary_of(llm) -> tuple[str, str]:
+    """provider 链主 provider 名称/模型（best-effort，决策信封落档用）。"""
+    try:
+        primary = ((llm._providers or [{}])[0] if llm is not None else {})
+        return str(primary.get("name") or ""), str(primary.get("model") or "")
+    except Exception:
+        return "", ""
 
 
 async def dict_guard_daily(ctx: dict) -> dict:
@@ -162,6 +177,17 @@ async def dict_guard_daily(ctx: dict) -> dict:
     auto_applied: list[dict] = []
     proposal_count = 0
     skipped: list[dict] = []
+    # 统一风险路由（08-24 决策信封）：auto→R1/auto_applied，proposal→R2/proposal
+    from app.services.llm_decision import (
+        DOMAIN_GOVERNANCE,
+        STATUS_AUTO_APPLIED,
+        STATUS_PROPOSAL,
+        build_record,
+        persist_record,
+    )
+
+    provider, model = _primary_of(evaluator._llm)
+    decision_records: list = []
     async with async_session_factory() as session:
         for dec in decisions:
             if dec.action in ("add_stopword", "remove_stopword", "protect_whitelist"):
@@ -190,6 +216,22 @@ async def dict_guard_daily(ctx: dict) -> dict:
                 ))
                 auto_applied.append({"term": dec.term, "entity_type": dec.entity_type,
                                      "action": dec.action, "reason": dec.reason, **impact})
+                decision_records.append(build_record(
+                    domain=DOMAIN_GOVERNANCE,
+                    entity_type=dec.entity_type, entity_id=dec.term,
+                    run_id=f"dict_guard:{run_date}",
+                    input_hash=hashlib.sha256(dec.term.encode("utf-8")).hexdigest(),
+                    evidence_refs=[
+                        {"label": k, "value": v}
+                        for k, v in cand_evidence.get(dec.term, {}).items()
+                    ],
+                    provider=provider, model=model,
+                    structured_output={"action": dec.action, "reason": dec.reason,
+                                       "impact": impact},
+                    confidence=dec.confidence,
+                    gate_result="pass", risk_tier="R1",
+                    status=STATUS_AUTO_APPLIED,
+                ))
                 continue
 
             # proposal 档去重：同 term+action+entity_type 的最近提案——
@@ -218,7 +260,32 @@ async def dict_guard_daily(ctx: dict) -> dict:
                 impact_stats=impact, run_date=run_date,
             ))
             proposal_count += 1
+            decision_records.append(build_record(
+                domain=DOMAIN_GOVERNANCE,
+                entity_type=dec.entity_type, entity_id=dec.term,
+                run_id=f"dict_guard:{run_date}",
+                input_hash=hashlib.sha256(dec.term.encode("utf-8")).hexdigest(),
+                evidence_refs=[
+                    {"label": k, "value": v}
+                    for k, v in cand_evidence.get(dec.term, {}).items()
+                ],
+                provider=provider, model=model,
+                structured_output={"action": dec.action, "reason": dec.reason,
+                                   "impact": impact, "term": dec.term},
+                confidence=dec.confidence,
+                gate_result="pass", risk_tier="R2",
+                status=STATUS_PROPOSAL,
+            ))
         await session.commit()
+
+    # 决策信封落库（best-effort：失败只计数不阻塞既有提案/自动链路）
+    record_failed = 0
+    for record in decision_records:
+        try:
+            await persist_record(record)
+        except Exception as e:
+            record_failed += 1
+            logger.warning("[dict_guard] 决策记录落库失败（不影响既有链路）: %s", e)
 
     # ---- 5. 报告 + 告警 ----
     summary = {
@@ -229,6 +296,7 @@ async def dict_guard_daily(ctx: dict) -> dict:
         "llm_failed": llm_failed,
         "auto_applied": auto_applied,
         "proposals": proposal_count,
+        "record_failed": record_failed,
         "skipped": skipped[:20],
     }
     _write_report(summary)
