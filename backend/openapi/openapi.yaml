@@ -1532,6 +1532,7 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/LlmDecisionItem'
+                  total: { type: integer, description: 过滤后总数（分页条） }
                   limit: { type: integer }
                   offset: { type: integer }
 
@@ -3063,6 +3064,12 @@ components:
         run_id: { type: string }
         env: { type: string }
         input_hash: { type: string }
+        evidence_refs:
+          type: array
+          description: 证据引用（{label,value} 摘要，供人工抽检）
+          items:
+            type: object
+            additionalProperties: true
         provider: { type: string }
         model: { type: string }
         prompt_version: { type: string }
@@ -3078,6 +3085,7 @@ components:
         reviewer: { type: string }
         review_reason: { type: string }
         effects_applied: { type: boolean }
+        rollback_ref: { type: string, description: 回滚引用（可变更动作） }
         duration_ms: { type: integer }
         attempts: { type: integer }
         fallback_reason: { type: string }

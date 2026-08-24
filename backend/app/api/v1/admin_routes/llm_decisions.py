@@ -16,13 +16,13 @@ from app.models.business import LLMDecisionRecord
 
 router = APIRouter(tags=["admin-llm-decisions"])
 
-# 响应/列表字段（避免把内部大字段无谓外泄；structured_output 保留供抽检）
+# 响应/列表字段（structured_output/evidence_refs 保留供抽检；rollback_ref 供审计）
 _SERIALIZE_FIELDS = (
     "id", "domain", "entity_type", "entity_id", "run_id", "env",
-    "input_hash", "provider", "model", "prompt_version", "schema_version",
-    "structured_output", "confidence", "gate_result", "risk_tier", "status",
-    "reviewer", "review_reason", "effects_applied", "duration_ms",
-    "attempts", "fallback_reason", "created_at",
+    "input_hash", "evidence_refs", "provider", "model", "prompt_version",
+    "schema_version", "structured_output", "confidence", "gate_result",
+    "risk_tier", "status", "reviewer", "review_reason", "effects_applied",
+    "rollback_ref", "duration_ms", "attempts", "fallback_reason", "created_at",
 )
 
 
@@ -84,12 +84,23 @@ async def list_llm_decisions(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
-    """决策记录分页列表（倒序，只读）。"""
+    """决策记录分页列表（倒序，只读；total 为过滤后总数，供分页条）。"""
+    from sqlalchemy import func
+
     from app.core.database import async_session_factory
 
     async with async_session_factory() as session:
         rows = await query_decisions(session, domain, status, limit, offset)
-    return {"items": [serialize_record(r) for r in rows], "limit": limit, "offset": offset}
+        count_stmt = select(func.count()).select_from(LLMDecisionRecord)
+        if domain:
+            count_stmt = count_stmt.where(LLMDecisionRecord.domain == domain)
+        if status:
+            count_stmt = count_stmt.where(LLMDecisionRecord.status == status)
+        total = await session.scalar(count_stmt) or 0
+    return {
+        "items": [serialize_record(r) for r in rows],
+        "total": total, "limit": limit, "offset": offset,
+    }
 
 
 @router.get("/llm-decisions/summary")

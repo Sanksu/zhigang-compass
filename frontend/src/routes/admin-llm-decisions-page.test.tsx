@@ -42,7 +42,7 @@ function afterRender(decisions: unknown[], totals: Record<string, number>) {
     if (url.startsWith('/admin/llm-decisions/summary')) {
       return { by_domain: [{ domain: 'governance', by_status: { auto_applied: 1 }, total: 1 }], totals }
     }
-    return { items: decisions, limit: 20, offset: 0 }
+    return { items: decisions, total: decisions.length, limit: 20, offset: 0 }
   })
   return render(<AdminLlmDecisionsPage />)
 }

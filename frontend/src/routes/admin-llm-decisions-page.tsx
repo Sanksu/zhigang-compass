@@ -52,6 +52,7 @@ const TIER_TONE: Record<string, string> = {
 /** 决策信封只读页：验收卡片（domain×status 汇总）+ 决策记录列表 */
 export function AdminLlmDecisionsPage() {
   const [items, setItems] = useState<LlmDecisionItem[]>([])
+  const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<{ by_domain: DomainSummary[]; totals: Record<string, number> } | null>(null)
   const [page, setPage] = useState(1)
   const [domain, setDomain] = useState('')
@@ -69,11 +70,12 @@ export function AdminLlmDecisionsPage() {
 
   useEffect(() => {
     let cancelled = false
-    apiGet<{ items: LlmDecisionItem[]; limit: number; offset: number }>(`/admin/llm-decisions?${params}`)
+    apiGet<{ items: LlmDecisionItem[]; total: number; limit: number; offset: number }>(`/admin/llm-decisions?${params}`)
       .then((res) => {
         if (cancelled) return
         setError(null)
         setItems(res.items)
+        setTotal(res.total)
       })
       .catch(() => {
         if (!cancelled) setError('决策记录加载失败，请确认后端已运行决策流水')
@@ -237,7 +239,7 @@ export function AdminLlmDecisionsPage() {
           <PaginationBar
             page={page}
             pageSize={PAGE_SIZE}
-            total={Math.max(filtered.length, page * PAGE_SIZE)}
+            total={total}
             onPageChange={setPage}
           />
         </CardContent>
