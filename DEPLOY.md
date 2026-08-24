@@ -130,7 +130,8 @@ curl http://localhost:8000/health
 
 ETL 主管线（采集 → 去重 → LLM 抽取 → 时滞/通胀 → 入图 → 快照 → 发现/自动流转）由 **worker 容器内 ARQ cron** 触发，不再依赖外部计划任务：
 
-- 执行时间在**配置中心 →「ETL 队列」页**配置（`etl_run_hour` / `etl_run_minute`，默认 05:00），持久化到 `backend/configs/runtime_settings.json`
+- 执行时间在**配置中心 →「ETL 队列」页**配置（`etl_run_hour` / `etl_run_minute`，默认 05:00 **北京时间**），持久化到 `backend/configs/runtime_settings.json`
+- **时区前提（2026-08-24 修复）**：ARQ cron 按进程本地时间触发，api/worker 容器已设 `TZ=Asia/Shanghai`；老部署未设 TZ 时 hour=5 实为 UTC 5 点=北京 13:00，升级后需 `docker compose up -d --force-recreate api worker`
 - 修改后需 **重启 worker** 生效：`docker compose restart worker`
 - 当日幂等：`run_etl_pipeline_scheduled` 内部 Redis 锁（`arq:etl:run:{date}`，24h TTL），重复触发自动跳过
 - 已验证：`docker logs zhigang-worker` 可见 ARQ cron 注册与 ETL 入队/执行日志
