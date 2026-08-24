@@ -40,3 +40,14 @@ class TestEvalHelpers:
 
     def test_eval_functions_listed(self):
         assert ev._FILES.keys() >= {"classification", "normalization", "relation"}
+
+
+class TestClassificationTolerance:
+    """校准 r3：分类容差副指标（近邻可辩口径分组）。"""
+
+    def test_family_grouping(self):
+        from scripts.eval_llm_driven import _family
+
+        assert _family("编程语言") == _family("数据库") == "基础技术"
+        assert _family("AI/机器学习") == _family("大数据") == "数据与AI"
+        assert _family("前端") != _family("数据库")

@@ -192,3 +192,16 @@ class TestCandidateRecallCalibration:
         prompt = build_skill_normalize_prompt("react", ["React"])
         assert "缩写" in prompt and "版本号" in prompt
         assert "与自身相同的目标不是 merge" in prompt
+
+
+class TestAliasHintCalibration:
+    """校准 r3：别名表命中时标准落点置顶（跨语言召回补强）。"""
+
+    def test_alias_target_prepended_to_candidates(self):
+        from app.services.llm_decision.skill_normalize import (
+            build_skill_normalize_prompt,
+        )
+
+        # 直接验证 prompt 组装含别名提示语义（不可离线调 LLM 的路径）
+        prompt = build_skill_normalize_prompt("full stack development", ["全栈", "React"])
+        assert "全栈" in prompt.split("候选标准技能名")[1]

@@ -75,8 +75,32 @@ def _macro_f1(hits: list[dict]) -> dict:
     return {"macro_f1": macro, "group_count": len(per), "groups": per}
 
 
+# 分类同域簇（校准 r3 副指标）：近邻可辩口径的容差分组。
+# 官方验收口径保持严格 top-1；容差口径供张恺天拍板时数据支撑
+# （r2 实证 12/18 错误为同域近邻互判，如 SQL→数据库 vs 编程语言）。
+_CATEGORY_FAMILY: dict[str, str] = {
+    "编程语言": "基础技术", "数据库": "基础技术", "网络/协议": "基础技术",
+    "计算机基础": "基础技术", "操作系统": "基础技术",
+    "AI/机器学习": "数据与AI", "大数据": "数据与AI", "数据分析/商业": "数据与AI",
+    "智能驾驶/机器人": "数据与AI",
+    "前端": "应用开发", "后端": "应用开发", "移动/桌面": "应用开发",
+    "云原生/DevOps": "应用开发", "测试": "应用开发", "游戏/数字孪生": "应用开发",
+    "消息/中间件": "应用开发",
+    "安全": "安全与运维", "硬件/芯片": "硬件与嵌入式", "音视频": "应用开发",
+    "工程协作": "软技能与管理", "软技能": "软技能与管理",
+}
+
+
+def _family(category: str) -> str:
+    return _CATEGORY_FAMILY.get(category, "其他")
+
+
 async def eval_classification(rows: list[dict], llm) -> dict:
-    """分类：LLM 直判（绕过白名单快速路径），gold=权威 category。"""
+    """分类：LLM 直判（绕过白名单快速路径），gold=权威 category。
+
+    top1_accuracy=严格口径（官方验收）；tolerance_accuracy=同域簇容差
+    （同簇互判不误判，供口径拍板数据支撑，不作为放行依据）。
+    """
     from app.services.extraction.skill_category_review import classify_skill
     from app.services.extraction.llm_provider import LLMExtractionError
 
@@ -94,16 +118,20 @@ async def eval_classification(rows: list[dict], llm) -> dict:
             results.append({"skill": row["skill"], "gold": row["gold_category"],
                             "predicted": None, "match": False, "failed": True})
             continue
+        tolerance = _family(decision.category) == _family(row["gold_category"])
         results.append({
             "skill": row["skill"], "gold": row["gold_category"],
             "predicted": decision.category, "confidence": decision.confidence,
-            "match": decision.category == row["gold_category"], "failed": False,
+            "match": decision.category == row["gold_category"],
+            "tolerance": tolerance, "failed": False,
         })
     ok = [r for r in results if not r["failed"]]
     accuracy = round(sum(1 for r in ok if r["match"]) / len(ok), 4) if ok else 0.0
+    tolerance_accuracy = round(sum(1 for r in ok if r["tolerance"]) / len(ok), 4) if ok else 0.0
     return {
         "task": "classification", "total": len(rows), "llm_failed": llm_failed,
-        "top1_accuracy": accuracy, "macro": _macro_f1(ok), "results": results,
+        "top1_accuracy": accuracy, "tolerance_accuracy": tolerance_accuracy,
+        "macro": _macro_f1(ok), "results": results,
     }
 
 
