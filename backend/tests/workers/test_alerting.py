@@ -48,6 +48,48 @@ class TestSendAlert:
         assert ok is False
 
 
+class TestPlatformPayloadFormat:
+    """2026-08-24 修复：按域名自适应 IM 机器人格式。
+
+    此前统一发裸 {"event","message"}——飞书/钉钉/企微机器人均不收该格式，
+    配置了地址也静默投递失败。
+    """
+
+    def _post_and_capture(self, url):
+        captured = {}
+
+        def _fake_urlopen(req, timeout=5):
+            captured["data"] = json.loads(req.data.decode("utf-8"))
+            return mock.MagicMock()
+
+        with mock.patch.object(alerting.settings, "alert_webhook_url", url):
+            with mock.patch.object(alerting.urllib.request, "urlopen", _fake_urlopen):
+                ok = asyncio.run(
+                    alerting.send_alert("crawl_failed", "某爬虫失败", spider="glassdoor")
+                )
+        return ok, captured["data"]
+
+    def test_feishu_format(self):
+        ok, data = self._post_and_capture("https://open.feishu.cn/open-apis/bot/v2/hook/xxx")
+        assert ok is True and data["msg_type"] == "text"
+        assert "crawl_failed" in data["content"]["text"]
+        assert "glassdoor" in data["content"]["text"]
+
+    def test_wecom_and_dingtalk_format(self):
+        for url in (
+            "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x",
+            "https://oapi.dingtalk.com/robot/send?access_token=x",
+        ):
+            ok, data = self._post_and_capture(url)
+            assert ok is True and data["msgtype"] == "text"
+            assert "crawl_failed" in data["text"]["content"]
+
+    def test_generic_url_keeps_json(self):
+        ok, data = self._post_and_capture("https://example.com/hook")
+        assert ok is True
+        assert data["event"] == "crawl_failed" and data["spider"] == "glassdoor"
+
+
 class _FakeStream:
     async def readline(self):
         return b""
