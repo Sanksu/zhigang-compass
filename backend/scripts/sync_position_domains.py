@@ -27,6 +27,7 @@ community_id 靠稀疏技能社区继承只落进 2-3 个技术大杂烩桶。
 """
 
 import argparse
+import hashlib
 import sys
 from pathlib import Path
 
@@ -152,7 +153,57 @@ def llm_domain_names(members_by_key: dict[str, list[str]]) -> dict[str, str]:
     for key in members_by_key:
         if key not in naming:
             logger.info("簇「%s」未获有效命名，回退代表岗名", key)
+    # 决策信封（PR4b）：每条域名决策落 shadow 记录（cluster_label），供验收/回放；
+    # 落库失败只告警不阻塞命名回写
+    _try_persist_domain_records(naming, members_by_key, llm)
     return naming
+
+
+def _try_persist_domain_records(
+    naming: dict[str, str],
+    members_by_key: dict[str, list[str]],
+    llm,
+) -> None:
+    """域名决策落 llm_decision_records（status=shadow，best-effort 不阻塞）。
+
+    cluster_label 域命名经 sanitize 硬校验（非空/不重名/不与成员岗同名），
+    此处 gate_result=pass、risk_tier=R0（label_cluster 建议类）。
+    """
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.llm_decision import (
+        DOMAIN_CLUSTER_LABEL,
+        STATUS_SHADOW,
+        build_record,
+        persist_record,
+    )
+
+    try:
+        primary = (llm._providers or [{}])[0]
+        provider = str(primary.get("name") or "")
+        model = str(primary.get("model") or "")
+    except Exception:
+        provider, model = "", ""
+    run_date = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+    for key, name in sorted(naming.items()):
+        record = build_record(
+            domain=DOMAIN_CLUSTER_LABEL,
+            entity_type="cluster", entity_id=key,
+            run_id=f"domain_label:{run_date}",
+            input_hash=hashlib.sha256(f"{key}\n{name}".encode("utf-8")).hexdigest(),
+            evidence_refs=[{"member_count": len(members_by_key.get(key, []))}],
+            provider=provider, model=model,
+            structured_output={"cluster": key, "name": name},
+            confidence=None,
+            gate_result="pass",
+            risk_tier="R0",
+            status=STATUS_SHADOW,
+        )
+        try:
+            asyncio.run(persist_record(record))
+        except Exception as e:
+            logger.warning("[domain_label] 决策记录落库失败（不影响命名回写）: %s", e)
 
 
 def merge_singletons(

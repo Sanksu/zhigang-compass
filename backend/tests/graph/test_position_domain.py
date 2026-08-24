@@ -140,3 +140,48 @@ class TestSanitizeLlmNames:
         ]
         out = sanitize_llm_names(items, {"A", "B"}, {"A": set(), "B": set()})
         assert out == {"A": "测试"}
+
+
+class TestDomainDecisionRecords:
+    """PR4b：域名决策落 llm_decision_records（cluster_label shadow）。"""
+
+    def test_records_persisted_as_shadow(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from scripts import sync_position_domains as script
+
+        persisted: list = []
+
+        async def _fake_persist(record):
+            persisted.append(record)
+            return "rec"
+
+        monkeypatch.setattr("app.services.llm_decision.persist_record", _fake_persist)
+        llm = SimpleNamespace(_providers=[{"name": "deepseek", "model": "m"}])
+        script._try_persist_domain_records(
+            {"数据分析师": "金融数据分析", "算法工程师": "机器视觉算法"},
+            {"数据分析师": ["数据分析师", "精算师"], "算法工程师": ["算法工程师"]},
+            llm,
+        )
+        assert len(persisted) == 2
+        by_key = {r.entity_id: r for r in persisted}
+        record = by_key["数据分析师"]
+        assert record.domain == "cluster_label"
+        assert record.status == "shadow"
+        assert record.risk_tier == "R0"
+        assert record.gate_result == "pass"
+        assert record.structured_output == {"cluster": "数据分析师", "name": "金融数据分析"}
+        assert record.evidence_refs == [{"member_count": 2}]
+        assert record.provider == "deepseek"
+        assert by_key["算法工程师"].structured_output["name"] == "机器视觉算法"
+
+    def test_persist_failure_does_not_raise(self, monkeypatch):
+        from scripts import sync_position_domains as script
+
+        async def _boom(record):
+            raise RuntimeError("pg down")
+
+        monkeypatch.setattr("app.services.llm_decision.persist_record", _boom)
+        script._try_persist_domain_records(
+            {"数据分析师": "金融数据分析"}, {"数据分析师": ["数据分析师"]}, object(),
+        )  # 不抛异常即通过
