@@ -47,7 +47,8 @@ docs/
 │   ├── 002-powershell-ps1-utf8-bom.md
 │   └── 003-dict-guard-review-nonatomic.md
 └── m5/
-    └── PPT大纲.md                    # M5 答辩 PPT 大纲
+    ├── PPT大纲.md                    # M5 答辩 PPT 大纲
+    └── 初审提交物料清单_20260824.md  # 初审提交单一入口：交付物状态/口径速查/倒排时间线
 ```
 
 ---
