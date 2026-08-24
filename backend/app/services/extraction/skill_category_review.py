@@ -43,6 +43,9 @@ _TASK_TEMPLATE = """任务：为技能名 "{name}" 选择分类。
 类别锚点示例（近邻类目易混，按本表口径判）：
 {anchors}
 
+边界口径（权威分类政策，易混对按此裁决）：
+{boundary_rules}
+
 输出 JSON：
 {{
   "category": "清单中的某一类",
@@ -57,6 +60,21 @@ _TASK_TEMPLATE = """任务：为技能名 "{name}" 选择分类。
    Redis 等）归数据库；语言 vs 其上框架分属编程语言 vs 对应领域
 4. 不确定时选大类并降低 confidence
 """
+
+# 边界口径规则（校准 r5，2026-08-25）：四轮复测（r1-r4）稳定的 16 类错误
+# 全为语义边界政策题（词面近邻证据 12/16 命中为 0，无法用检索证据解），
+# 本块把白名单分类政策显式化——等价于给标注员的口径手册。
+# 错误来源实证：docs/reviews/LLM驱动黄金集复测r4_20260824.md。
+# 红线：口径规则属算法核心，变更须张恺天 review。
+_BOUNDARY_RULES = """\
+- 数据治理/统计/仓库类（数据质量、数据统计、数据仓库）→ 大数据；商业分析与报表 → 数据分析/商业
+- RPC/微服务框架（Dubbo、gRPC）→ 后端；消息系统（Kafka、RabbitMQ）→ 消息/中间件
+- 分布式存储/存储引擎（Ceph、HBase）→ 数据库；容器与编排（K8s）→ 云原生/DevOps
+- 办公套件/项目管理/构建工具/系统集成（Microsoft 365、CMake、Maven、Jira）→ 工程协作
+- 车载感知/传感器（毫米波雷达、激光雷达）→ 智能驾驶/机器人；EDA/芯片设计工具（Allegro、Vivado）→ 硬件/芯片
+- 学科课程类（计算机网络、操作系统）→ 计算机基础；具体网络协议（TCP/IP、HTTP）→ 网络/协议；流媒体协议（RTMP、WebRTC、HLS）→ 音视频
+- 语言标准/版本（ES5、ES6）与编程范式概念（异步编程、函数式编程）→ 编程语言；JS 运行时与工具链（Node.js、Bun、npm）→ 前端
+- 数学基础（线性代数、概率论、统计推断）→ 数据分析/商业"""
 
 
 def category_anchors(max_per_category: int = 2) -> str:
@@ -112,6 +130,7 @@ def classify_skill(
         name=name.strip(),
         categories="、".join(sorted(KNOWN_CATEGORIES)),
         anchors=category_anchors(),
+        boundary_rules=_BOUNDARY_RULES,
     )
     try:
         with invocation_scope("skill_category_review"):
