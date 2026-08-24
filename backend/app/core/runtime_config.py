@@ -40,6 +40,9 @@ DEFAULTS: dict = {
     "dict_guard_min_confidence": 0.8,        # 自动生效最低 LLM 置信度
     "dict_guard_max_candidates": 20,         # 每类候选上限（控制每日 LLM 成本）
     "dict_guard_reproposal_cooldown_days": 7,  # 驳回提案冷却期（天内不重提，08-24 缺口修复）
+    # LLM 决策统一风险路由（六域决策信封，PR1 灰度底座）：R1 自动生效门限
+    "llm_decision_min_confidence": 0.8,        # R1 自动最低置信度
+    "llm_decision_auto_impact_max": 50,        # R1 自动影响面上限（图谱节点数）
     # 岗位名 LLM 审查（幻觉防控第四道防线，方案评审稿）：默认关闭先实验后灰度
     "position_review_enabled": False,
     # 技能分类 LLM 审查（LLM 驱动化 P1）：未分类技能灰度提议，默认关闭
@@ -62,6 +65,8 @@ _VALIDATORS = {
     "dict_guard_min_confidence": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0,
     "dict_guard_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
     "dict_guard_reproposal_cooldown_days": lambda v: isinstance(v, int) and 1 <= v <= 90,
+    "llm_decision_min_confidence": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0,
+    "llm_decision_auto_impact_max": lambda v: isinstance(v, int) and 1 <= v <= 1000,
     "position_review_enabled": lambda v: isinstance(v, bool),
     "skill_category_review_enabled": lambda v: isinstance(v, bool),
     "skill_category_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
