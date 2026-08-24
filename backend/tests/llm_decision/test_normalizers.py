@@ -1,0 +1,161 @@
+"""名称归一 LLM 决策器测试（PR3a：岗位名 + 技能名，shadow 风控先行）。
+
+覆盖：prompt 组装、硬门（防幻觉长名/空名/自创名/虚构标准名/同义反复）、
+LLM 失败降级 None、风险档位映射（R0 建议类 / blocked 硬门失败）。
+"""
+
+import pytest
+
+from app.services.extraction.llm_provider import LLMExtractionError
+from app.services.llm_decision import TIER_BLOCKED, TIER_R0
+from app.services.llm_decision.position_name import (
+    PositionNameDecision,
+    build_position_name_prompt,
+    decide_position_name,
+    position_name_gate,
+    tier_for_position_decision,
+)
+from app.services.llm_decision.skill_normalize import (
+    SkillNormalizeDecision,
+    build_skill_normalize_prompt,
+    decide_skill_normalize,
+    known_standard_names,
+    skill_normalize_gate,
+    tier_for_skill_decision,
+)
+
+
+def _pos(*, canonical="", is_new=False, keep=False, conf=0.9):
+    return PositionNameDecision(
+        canonical_name=canonical, is_new=is_new,
+        keep_original=keep, confidence=conf,
+    )
+
+
+class TestPositionNameGate:
+    def test_keep_original_passes(self):
+        assert position_name_gate(_pos(keep=True), "Java 后端", []) == (True, "")
+
+    def test_empty_canonical_blocked(self):
+        # Schema 已把"非 keep 却空名"拦在前面；这里用 model_construct 绕过校验，
+        # 专门验证 gate 的防御性分支（keep_original=True 但 canonical 仍为空的异常态）
+        dec = PositionNameDecision.model_construct(
+            canonical_name="", is_new=False, keep_original=False, confidence=0.9,
+        )
+        ok, reason = position_name_gate(dec, "Java 后端", [])
+        assert not ok
+        assert "为空" in reason
+
+    def test_overlong_canonical_blocked(self):
+        ok, reason = position_name_gate(_pos(canonical="x" * 41), "Java 后端", [])
+        assert not ok
+        assert "长度越界" in reason
+
+    def test_new_position_passes(self):
+        assert position_name_gate(_pos(canonical="AGI 安全研究员", is_new=True), "AGI安全研究员", []) == (True, "")
+
+    def test_same_as_raw_passes(self):
+        assert position_name_gate(_pos(canonical="Java 后端工程师"), "Java 后端工程师", []) == (True, "")
+
+    def test_in_candidates_passes(self):
+        assert position_name_gate(_pos(canonical="测试开发工程师"), "测试开发", ["测试开发工程师"]) == (True, "")
+
+    def test_hallucinated_name_blocked(self):
+        ok, reason = position_name_gate(
+            _pos(canonical="量子烹饪架构师"), "测试开发", ["测试开发工程师", "Java 后端工程师"],
+        )
+        assert not ok
+        assert "候选清单" in reason
+
+
+class TestPositionNamePromptAndDecide:
+    def test_prompt_carries_evidence(self):
+        prompt = build_position_name_prompt("测试开发", ["Python", "pytest"], "boss", ["测试开发工程师"])
+        assert "测试开发" in prompt
+        assert "Python" in prompt
+        assert "boss" in prompt
+        assert "测试开发工程师" in prompt
+
+    def test_decide_parses_valid_output(self):
+        sentinel = PositionNameDecision(canonical_name="测试开发工程师", is_new=False, confidence=0.95)
+
+        class _FakeLLM:
+            def extract_structured(self, prompt, model, **kwargs):
+                return sentinel
+
+        decision = decide_position_name("测试开发", ["Python"], "boss", ["测试开发工程师"], _FakeLLM())
+        assert decision is sentinel
+        assert decision.canonical_name == "测试开发工程师"
+
+    def test_decide_none_on_llm_failure(self):
+        class _BoomLLM:
+            def extract_structured(self, prompt, model, **kwargs):
+                raise LLMExtractionError("provider 全挂")
+
+        assert decide_position_name("测试开发", [], "boss", [], _BoomLLM()) is None
+
+    def test_decide_none_without_llm_or_title(self):
+        assert decide_position_name("", [], "boss", [], None) is None
+        assert decide_position_name("测试开发", [], "boss", [], None) is None
+
+    def test_tier_mapping(self):
+        assert tier_for_position_decision(_pos(canonical="测试开发工程师"), gate_ok=True) == (TIER_R0, "")
+        assert tier_for_position_decision(_pos(canonical="四处乱名"), gate_ok=False)[0] == TIER_BLOCKED
+
+
+class TestSkillNormalizeGate:
+    def test_keep_and_noise_pass(self):
+        assert skill_normalize_gate(SkillNormalizeDecision(action="keep"), "ArkUI") == (True, "")
+        assert skill_normalize_gate(SkillNormalizeDecision(action="noise"), "某教程名") == (True, "")
+
+    def test_merge_to_known_standard_passes(self):
+        target = next(iter(known_standard_names()))
+        assert skill_normalize_gate(SkillNormalizeDecision(action="merge", target_standard=target), "x-" + target) == (True, "")
+
+    def test_merge_to_unknown_target_blocked(self):
+        ok, reason = skill_normalize_gate(
+            SkillNormalizeDecision(action="merge", target_standard="量子烹饪学"), "量子烹饪",
+        )
+        assert not ok
+        assert "权威标准名集合" in reason
+
+    def test_merge_same_name_blocked(self):
+        ok, reason = skill_normalize_gate(
+            SkillNormalizeDecision(action="merge", target_standard="Python"), "Python",
+        )
+        assert not ok
+        assert "同义反复" in reason
+
+
+class TestSkillNormalizePromptAndDecide:
+    def test_prompt_carries_name_and_candidates(self):
+        prompt = build_skill_normalize_prompt("Python3", ["Python", "Python 3"])
+        assert "Python3" in prompt
+        assert "Python 3" in prompt
+
+    def test_decide_parses_valid_output(self):
+        sentinel = SkillNormalizeDecision(action="merge", target_standard="Python", confidence=0.97)
+
+        class _FakeLLM:
+            def extract_structured(self, prompt, model, **kwargs):
+                return sentinel
+
+        decision = decide_skill_normalize("Python3", _FakeLLM(), candidates=["Python", "Python 3"])
+        assert decision is sentinel
+
+    def test_decide_invalid_action_falls_back_none(self):
+        class _BadLLM:
+            def extract_structured(self, prompt, model, **kwargs):
+                return SkillNormalizeDecision(action="explode")
+
+        with pytest.raises(Exception):
+            decide_skill_normalize("Python3", _BadLLM(), candidates=["Python"])
+
+    def test_decide_none_without_llm(self):
+        assert decide_skill_normalize("Python3", None) is None
+        assert decide_skill_normalize("", object()) is None
+
+    def test_tier_mapping(self):
+        dec = SkillNormalizeDecision(action="merge", target_standard="Python", confidence=0.9)
+        assert tier_for_skill_decision(dec, gate_ok=True) == (TIER_R0, "")
+        assert tier_for_skill_decision(dec, gate_ok=False)[0] == TIER_BLOCKED
