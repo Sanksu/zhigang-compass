@@ -305,6 +305,13 @@ async def run_etl_pipeline(
         tasks_module.skill_category_review_daily(ctx),
     )
 
+    # 阶段 19：名称归一 LLM 影子审查（默认关；岗位名/技能名归一决策只落
+    # llm_decision_records status=shadow 不生效——见 workers/name_normalization_shadow.py）
+    results["stages"]["name_normalization_shadow"] = await run_stage(
+        "name_normalization_shadow",
+        tasks_module.name_normalization_shadow_daily(ctx),
+    )
+
     # L-9：阶段隔离吞错继续跑（防单阶段失败拖垮全线）不等于无声——聚合各阶段
     # error 一次性外发告警并落 error 日志，结束"管线永远成功"的可观测盲区。
     # crawl 阶段为 list[dict]（每爬虫一项），其余阶段为 dict。

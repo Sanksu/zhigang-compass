@@ -48,6 +48,9 @@ DEFAULTS: dict = {
     # 技能分类 LLM 审查（LLM 驱动化 P1）：未分类技能灰度提议，默认关闭
     "skill_category_review_enabled": False,
     "skill_category_max_candidates": 20,
+    # 名称归一 LLM 影子审查（PR3b）：岗位名/技能名归一决策只落 shadow 记录，默认关闭
+    "name_normalization_shadow_enabled": False,
+    "name_normalization_max_candidates": 20,
 }
 
 _VALIDATORS = {
@@ -70,6 +73,8 @@ _VALIDATORS = {
     "position_review_enabled": lambda v: isinstance(v, bool),
     "skill_category_review_enabled": lambda v: isinstance(v, bool),
     "skill_category_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
+    "name_normalization_shadow_enabled": lambda v: isinstance(v, bool),
+    "name_normalization_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
 }
 
 
