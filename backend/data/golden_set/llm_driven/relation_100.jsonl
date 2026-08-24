@@ -1,0 +1,95 @@
+{"source": "计算机基础", "target": "Java", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "计算机基础", "target": "Python", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "计算机基础", "target": "Go", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "计算机基础", "target": "C++", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "计算机基础", "target": "C语言", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "HTML", "target": "JavaScript", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "CSS", "target": "JavaScript", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "JavaScript", "target": "TypeScript", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "计算机基础", "target": "Rust", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "HTML", "target": "前端开发", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "CSS", "target": "前端开发", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "JavaScript", "target": "前端开发", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "JavaScript", "target": "React", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "HTML", "target": "React", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "CSS", "target": "React", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "JavaScript", "target": "Vue.js", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "HTML", "target": "Vue.js", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "CSS", "target": "Vue.js", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "JavaScript", "target": "小程序", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "Java", "target": "鸿蒙", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "JavaScript", "target": "鸿蒙", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "JavaScript", "target": "Node.js", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "JavaScript", "target": "Webpack", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "Node.js", "target": "Webpack", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "React", "target": "Next.js", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "Node.js", "target": "Next.js", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "Java", "target": "Spring Boot", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "Java", "target": "Spring", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "Java", "target": "MyBatis", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "SQL", "target": "MyBatis", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "Java", "target": "微服务", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "Spring Boot", "target": "微服务", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "分布式", "target": "微服务", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "计算机基础", "target": "分布式", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "操作系统", "target": "分布式", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "分布式", "target": "消息队列", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "Java", "target": "Apache Kafka", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "分布式", "target": "Apache Kafka", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "分布式", "target": "RabbitMQ", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "计算机基础", "target": "Redis", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "计算机基础", "target": "Elasticsearch", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "Elasticsearch", "target": "搜索引擎", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "计算机基础", "target": "SQL", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "SQL", "target": "MySQL", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "SQL", "target": "PostgreSQL", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "SQL", "target": "MongoDB", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "计算机基础", "target": "数据库", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "SQL", "target": "数据仓库", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "数据库", "target": "数据仓库", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "数据仓库", "target": "主数据", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "数据仓库", "target": "ODS", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "SQL", "target": "ODS", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "数据仓库", "target": "Databricks", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "分布式", "target": "Databricks", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "ETL 管道", "target": "Data Factory", "gold_relation": "PREREQUISITE_OF", "gold_direction": "a_to_b", "source_note": "skill_prerequisites.yaml"}
+{"source": "Spring Boot", "target": "Java", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Spring Cloud", "target": "Java", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "MyBatis", "target": "Java", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Hibernate", "target": "Java", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "JUnit", "target": "Java", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "React", "target": "JavaScript", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "React", "target": "Vue.js", "gold_relation": "ALTERNATIVE_OF", "gold_direction": "symmetric", "source_note": "skill_relations.yaml"}
+{"source": "React", "target": "Angular", "gold_relation": "ALTERNATIVE_OF", "gold_direction": "symmetric", "source_note": "skill_relations.yaml"}
+{"source": "React Native", "target": "React", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Vue.js", "target": "JavaScript", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Vue.js", "target": "React", "gold_relation": "ALTERNATIVE_OF", "gold_direction": "symmetric", "source_note": "skill_relations.yaml"}
+{"source": "Vue.js", "target": "Angular", "gold_relation": "ALTERNATIVE_OF", "gold_direction": "symmetric", "source_note": "skill_relations.yaml"}
+{"source": "Next.js", "target": "React", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Nuxt.js", "target": "Vue.js", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Webpack", "target": "JavaScript", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Webpack", "target": "Vite", "gold_relation": "ALTERNATIVE_OF", "gold_direction": "symmetric", "source_note": "skill_relations.yaml"}
+{"source": "Vite", "target": "JavaScript", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Vite", "target": "Webpack", "gold_relation": "ALTERNATIVE_OF", "gold_direction": "symmetric", "source_note": "skill_relations.yaml"}
+{"source": "TypeScript", "target": "JavaScript", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Node.js", "target": "JavaScript", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Express.js", "target": "Node.js", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "jQuery", "target": "JavaScript", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "jQuery", "target": "Vue.js", "gold_relation": "ALTERNATIVE_OF", "gold_direction": "symmetric", "source_note": "skill_relations.yaml"}
+{"source": "Tailwind CSS", "target": "CSS", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Bootstrap", "target": "CSS", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Three.js", "target": "JavaScript", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Flutter", "target": "Dart", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Django", "target": "Python", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "Flask", "target": "Python", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "FastAPI", "target": "Python", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "PyTorch", "target": "Python", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "PyTorch", "target": "TensorFlow", "gold_relation": "ALTERNATIVE_OF", "gold_direction": "symmetric", "source_note": "skill_relations.yaml"}
+{"source": "TensorFlow", "target": "Python", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "TensorFlow", "target": "PyTorch", "gold_relation": "ALTERNATIVE_OF", "gold_direction": "symmetric", "source_note": "skill_relations.yaml"}
+{"source": "scikit-learn", "target": "Python", "gold_relation": "BELONGS_TO", "gold_direction": "a_to_b", "source_note": "skill_relations.yaml"}
+{"source": "智能体", "target": "FFmpeg", "gold_relation": "NONE", "gold_direction": "a_to_b", "source_note": "跨类规则推断，待人工抽样确认"}
+{"source": "AKS", "target": "数据分析思维", "gold_relation": "NONE", "gold_direction": "a_to_b", "source_note": "跨类规则推断，待人工抽样确认"}
+{"source": "Framer Motion", "target": "分布式系统", "gold_relation": "NONE", "gold_direction": "a_to_b", "source_note": "跨类规则推断，待人工抽样确认"}
+{"source": "Flask", "target": "反向代理", "gold_relation": "NONE", "gold_direction": "a_to_b", "source_note": "跨类规则推断，待人工抽样确认"}
+{"source": "Azure HDInsight", "target": "Tcl", "gold_relation": "NONE", "gold_direction": "a_to_b", "source_note": "跨类规则推断，待人工抽样确认"}

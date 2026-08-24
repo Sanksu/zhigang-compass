@@ -1,0 +1,143 @@
+{"variant": ".net", "gold_standard": ".NET", "gold_action": "merge", "slice": "alias"}
+{"variant": ".net core", "gold_standard": ".NET", "gold_action": "merge", "slice": "alias"}
+{"variant": "AB测试", "gold_standard": "A/B测试", "gold_action": "merge", "slice": "alias"}
+{"variant": "AIGC创作", "gold_standard": "AIGC", "gold_action": "merge", "slice": "alias"}
+{"variant": "JS", "gold_standard": "JavaScript", "gold_action": "merge", "slice": "alias"}
+{"variant": "TS", "gold_standard": "TypeScript", "gold_action": "merge", "slice": "alias"}
+{"variant": "ab测试", "gold_standard": "A/B测试", "gold_action": "merge", "slice": "alias"}
+{"variant": "agent开发", "gold_standard": "Agent开发", "gold_action": "merge", "slice": "alias"}
+{"variant": "ai agent", "gold_standard": "Agentic AI", "gold_action": "merge", "slice": "alias"}
+{"variant": "ai assisted coding", "gold_standard": "AI辅助编程", "gold_action": "merge", "slice": "alias"}
+{"variant": "ai coding", "gold_standard": "AI辅助编程", "gold_action": "merge", "slice": "alias"}
+{"variant": "ai 辅助编程", "gold_standard": "AI辅助编程", "gold_action": "merge", "slice": "alias"}
+{"variant": "ai-assisted coding", "gold_standard": "AI辅助编程", "gold_action": "merge", "slice": "alias"}
+{"variant": "ai编程", "gold_standard": "AI辅助编程", "gold_action": "merge", "slice": "alias"}
+{"variant": "ai辅助开发", "gold_standard": "AI辅助编程", "gold_action": "merge", "slice": "alias"}
+{"variant": "ai辅助编码", "gold_standard": "AI辅助编程", "gold_action": "merge", "slice": "alias"}
+{"variant": "azure bicep", "gold_standard": "Azure", "gold_action": "merge", "slice": "alias"}
+{"variant": "bicep", "gold_standard": "Azure", "gold_action": "merge", "slice": "alias"}
+{"variant": "burn in", "gold_standard": "老化测试", "gold_action": "merge", "slice": "alias"}
+{"variant": "burn-in", "gold_standard": "老化测试", "gold_action": "merge", "slice": "alias"}
+{"variant": "c#", "gold_standard": "C#", "gold_action": "merge", "slice": "alias"}
+{"variant": "c/c++", "gold_standard": "C++", "gold_action": "merge", "slice": "alias"}
+{"variant": "chatgpt", "gold_standard": "ChatGPT", "gold_action": "merge", "slice": "alias"}
+{"variant": "claude code", "gold_standard": "Claude Code", "gold_action": "merge", "slice": "alias"}
+{"variant": "codex", "gold_standard": "Codex", "gold_action": "merge", "slice": "alias"}
+{"variant": "copilot", "gold_standard": "GitHub Copilot", "gold_action": "merge", "slice": "alias"}
+{"variant": "cursor", "gold_standard": "Cursor", "gold_action": "merge", "slice": "alias"}
+{"variant": "c语言", "gold_standard": "C", "gold_action": "merge", "slice": "alias"}
+{"variant": "databricks", "gold_standard": "Databricks", "gold_action": "merge", "slice": "alias"}
+{"variant": "docker", "gold_standard": "Docker", "gold_action": "merge", "slice": "alias"}
+{"variant": "domo", "gold_standard": "Domo", "gold_action": "merge", "slice": "alias"}
+{"variant": "element plus", "gold_standard": "ElementUI", "gold_action": "merge", "slice": "alias"}
+{"variant": "es", "gold_standard": "Elasticsearch", "gold_action": "merge", "slice": "alias"}
+{"variant": "es6", "gold_standard": "JavaScript", "gold_action": "merge", "slice": "alias"}
+{"variant": "express", "gold_standard": "Express.js", "gold_action": "merge", "slice": "alias"}
+{"variant": "flink", "gold_standard": "Apache Flink", "gold_action": "merge", "slice": "alias"}
+{"variant": "full stack", "gold_standard": "全栈", "gold_action": "merge", "slice": "alias"}
+{"variant": "full stack development", "gold_standard": "全栈", "gold_action": "merge", "slice": "alias"}
+{"variant": "full-stack development", "gold_standard": "全栈", "gold_action": "merge", "slice": "alias"}
+{"variant": "full-stack web development", "gold_standard": "全栈", "gold_action": "merge", "slice": "alias"}
+{"variant": "fullstack development", "gold_standard": "全栈", "gold_action": "merge", "slice": "alias"}
+{"variant": "genai", "gold_standard": "GenAI", "gold_action": "merge", "slice": "alias"}
+{"variant": "git", "gold_standard": "Git", "gold_action": "merge", "slice": "alias"}
+{"variant": "github copilot", "gold_standard": "GitHub Copilot", "gold_action": "merge", "slice": "alias"}
+{"variant": "golang", "gold_standard": "Go", "gold_action": "merge", "slice": "alias"}
+{"variant": "hadoop", "gold_standard": "Hadoop", "gold_action": "merge", "slice": "alias"}
+{"variant": "jenkins", "gold_standard": "Jenkins", "gold_action": "merge", "slice": "alias"}
+{"variant": "jvm", "gold_standard": "JVM", "gold_action": "merge", "slice": "alias"}
+{"variant": "k8s", "gold_standard": "Kubernetes", "gold_action": "merge", "slice": "alias"}
+{"variant": "kafka", "gold_standard": "Apache Kafka", "gold_action": "merge", "slice": "alias"}
+{"variant": "llm", "gold_standard": "大语言模型", "gold_action": "merge", "slice": "alias"}
+{"variant": "llm agent", "gold_standard": "智能体", "gold_action": "merge", "slice": "alias"}
+{"variant": "load balancers", "gold_standard": "负载均衡", "gold_action": "merge", "slice": "alias"}
+{"variant": "load-balancers", "gold_standard": "负载均衡", "gold_action": "merge", "slice": "alias"}
+{"variant": "milvus", "gold_standard": "Milvus", "gold_action": "merge", "slice": "alias"}
+{"variant": "mongo", "gold_standard": "MongoDB", "gold_action": "merge", "slice": "alias"}
+{"variant": "mq", "gold_standard": "消息队列", "gold_action": "merge", "slice": "alias"}
+{"variant": "mxml exchange", "gold_standard": "Murex", "gold_action": "merge", "slice": "alias"}
+{"variant": "mybatis", "gold_standard": "MyBatis", "gold_action": "merge", "slice": "alias"}
+{"variant": "mybatis plus", "gold_standard": "MyBatis", "gold_action": "merge", "slice": "alias"}
+{"variant": "mybatis-plus", "gold_standard": "MyBatis", "gold_action": "merge", "slice": "alias"}
+{"variant": "mysql", "gold_standard": "MySQL", "gold_action": "merge", "slice": "alias"}
+{"variant": "nlp", "gold_standard": "自然语言处理", "gold_action": "merge", "slice": "alias"}
+{"variant": "node", "gold_standard": "Node.js", "gold_action": "merge", "slice": "alias"}
+{"variant": "nodejs", "gold_standard": "Node.js", "gold_action": "merge", "slice": "alias"}
+{"variant": "nsg", "gold_standard": "网络安全", "gold_action": "merge", "slice": "alias"}
+{"variant": "nsgs", "gold_standard": "网络安全", "gold_action": "merge", "slice": "alias"}
+{"variant": "numpy", "gold_standard": "NumPy", "gold_action": "merge", "slice": "alias"}
+{"variant": "office 办公", "gold_standard": "Office", "gold_action": "merge", "slice": "alias"}
+{"variant": "office办公", "gold_standard": "Office", "gold_action": "merge", "slice": "alias"}
+{"variant": "pandas", "gold_standard": "Pandas", "gold_action": "merge", "slice": "alias"}
+{"variant": "pg", "gold_standard": "PostgreSQL", "gold_action": "merge", "slice": "alias"}
+{"variant": "postgres", "gold_standard": "PostgreSQL", "gold_action": "merge", "slice": "alias"}
+{"variant": "prompt engineering", "gold_standard": "提示工程", "gold_action": "merge", "slice": "alias"}
+{"variant": "prompt 工程", "gold_standard": "提示工程", "gold_action": "merge", "slice": "alias"}
+{"variant": "prompt工程", "gold_standard": "提示工程", "gold_action": "merge", "slice": "alias"}
+{"variant": "pyspark", "gold_standard": "PySpark", "gold_action": "merge", "slice": "alias"}
+{"variant": "pytorch", "gold_standard": "PyTorch", "gold_action": "merge", "slice": "alias"}
+{"variant": "rag", "gold_standard": "检索增强生成", "gold_action": "merge", "slice": "alias"}
+{"variant": "react", "gold_standard": "React", "gold_action": "merge", "slice": "alias"}
+{"variant": "reactjs", "gold_standard": "React", "gold_action": "merge", "slice": "alias"}
+{"variant": "redis", "gold_standard": "Redis", "gold_action": "merge", "slice": "alias"}
+{"variant": "rest api", "gold_standard": "RESTful API", "gold_action": "merge", "slice": "alias"}
+{"variant": "restful", "gold_standard": "RESTful API", "gold_action": "merge", "slice": "alias"}
+{"variant": "ros2", "gold_standard": "ROS", "gold_action": "merge", "slice": "alias"}
+{"variant": "sft", "gold_standard": "模型微调", "gold_action": "merge", "slice": "alias"}
+{"variant": "sklearn", "gold_standard": "scikit-learn", "gold_action": "merge", "slice": "alias"}
+{"variant": "spark", "gold_standard": "Apache Spark", "gold_action": "merge", "slice": "alias"}
+{"variant": "spring", "gold_standard": "Spring Boot", "gold_action": "merge", "slice": "alias"}
+{"variant": "springboot", "gold_standard": "Spring Boot", "gold_action": "merge", "slice": "alias"}
+{"variant": "springcloud", "gold_standard": "Spring Cloud", "gold_action": "merge", "slice": "alias"}
+{"variant": "springmvc", "gold_standard": "Spring MVC", "gold_action": "merge", "slice": "alias"}
+{"variant": "sql", "gold_standard": "SQL", "gold_action": "merge", "slice": "alias"}
+{"variant": "sql 优化", "gold_standard": "SQL", "gold_action": "merge", "slice": "alias"}
+{"variant": "sql优化", "gold_standard": "SQL", "gold_action": "merge", "slice": "alias"}
+{"variant": "tf", "gold_standard": "TensorFlow", "gold_action": "merge", "slice": "alias"}
+{"variant": "uniapp", "gold_standard": "uni-app", "gold_action": "merge", "slice": "alias"}
+{"variant": "vue", "gold_standard": "Vue.js", "gold_action": "merge", "slice": "alias"}
+{"variant": "vue2", "gold_standard": "Vue.js", "gold_action": "merge", "slice": "alias"}
+{"variant": "vue3", "gold_standard": "Vue.js", "gold_action": "merge", "slice": "alias"}
+{"variant": "分布式事务", "gold_standard": "分布式", "gold_action": "merge", "slice": "alias"}
+{"variant": "单元测试编写", "gold_standard": "单元测试", "gold_action": "merge", "slice": "alias"}
+{"variant": "可视化分析", "gold_standard": "数据可视化", "gold_action": "merge", "slice": "alias"}
+{"variant": "团队协作能力", "gold_standard": "团队协作", "gold_action": "merge", "slice": "alias"}
+{"variant": "图像目标检测", "gold_standard": "目标检测", "gold_action": "merge", "slice": "alias"}
+{"variant": "多传感器数据融合", "gold_standard": "传感器融合", "gold_action": "merge", "slice": "alias"}
+{"variant": "多传感器融合", "gold_standard": "传感器融合", "gold_action": "merge", "slice": "alias"}
+{"variant": "多模态大模型", "gold_standard": "多模态模型", "gold_action": "merge", "slice": "alias"}
+{"variant": "大屏可视化", "gold_standard": "数据可视化", "gold_action": "merge", "slice": "alias"}
+{"variant": "大模型", "gold_standard": "大语言模型", "gold_action": "merge", "slice": "alias"}
+{"variant": "小程序开发", "gold_standard": "小程序", "gold_action": "merge", "slice": "alias"}
+{"variant": "微信小程序", "gold_standard": "小程序", "gold_action": "merge", "slice": "alias"}
+{"variant": "微服务架构", "gold_standard": "微服务", "gold_action": "merge", "slice": "alias"}
+{"variant": "性能优化", "gold_standard": "性能调优", "gold_action": "merge", "slice": "alias"}
+{"variant": "故障处置", "gold_standard": "故障处理", "gold_action": "merge", "slice": "alias"}
+{"variant": "故障排查", "gold_standard": "故障处理", "gold_action": "merge", "slice": "alias"}
+{"variant": "敏捷", "gold_standard": "敏捷开发", "gold_action": "merge", "slice": "alias"}
+{"variant": "机器学习算法", "gold_standard": "机器学习", "gold_action": "merge", "slice": "alias"}
+{"variant": "沟通协作", "gold_standard": "沟通能力", "gold_action": "merge", "slice": "alias"}
+{"variant": "深度学习算法", "gold_standard": "深度学习", "gold_action": "merge", "slice": "alias"}
+{"variant": "特征提取与匹配", "gold_standard": "特征提取", "gold_action": "merge", "slice": "alias"}
+{"variant": "电网业务", "gold_standard": "电网业务知识", "gold_action": "merge", "slice": "alias"}
+{"variant": "畸变校准", "gold_standard": "畸变校正", "gold_action": "merge", "slice": "alias"}
+{"variant": "目标分割", "gold_standard": "图像分割", "gold_action": "merge", "slice": "alias"}
+{"variant": "统一部署", "gold_standard": "系统部署", "gold_action": "merge", "slice": "alias"}
+{"variant": "自动化测试框架", "gold_standard": "自动化测试", "gold_action": "merge", "slice": "alias"}
+{"variant": "自动化评测脚本", "gold_standard": "自动化评测", "gold_action": "merge", "slice": "alias"}
+{"variant": "自然语言处理算法", "gold_standard": "自然语言处理", "gold_action": "merge", "slice": "alias"}
+{"variant": "视频目标检测", "gold_standard": "目标检测", "gold_action": "merge", "slice": "alias"}
+{"variant": "解决问题能力", "gold_standard": "问题解决", "gold_action": "merge", "slice": "alias"}
+{"variant": "计算机网络基础", "gold_standard": "计算机网络", "gold_action": "merge", "slice": "alias"}
+{"variant": "面向对象编程", "gold_standard": "面向对象", "gold_action": "merge", "slice": "alias"}
+{"variant": "面向对象设计", "gold_standard": "面向对象", "gold_action": "merge", "slice": "alias"}
+{"variant": "ABAC", "gold_standard": "ABAC", "gold_action": "keep", "slice": "short_ascii"}
+{"variant": "ADAS", "gold_standard": "ADAS", "gold_action": "keep", "slice": "short_ascii"}
+{"variant": "AGENT", "gold_standard": "AGENT", "gold_action": "keep", "slice": "short_ascii"}
+{"variant": "AI", "gold_standard": "AI", "gold_action": "keep", "slice": "short_ascii"}
+{"variant": "AIGC", "gold_standard": "AIGC", "gold_action": "keep", "slice": "short_ascii"}
+{"variant": "AIOps", "gold_standard": "AIOps", "gold_action": "keep", "slice": "short_ascii"}
+{"variant": "AJAX", "gold_standard": "AJAX", "gold_action": "keep", "slice": "short_ascii"}
+{"variant": "AKS", "gold_standard": "AKS", "gold_action": "keep", "slice": "short_ascii"}
+{"variant": "AOP", "gold_standard": "AOP", "gold_action": "keep", "slice": "short_ascii"}
+{"variant": "API", "gold_standard": "API", "gold_action": "keep", "slice": "short_ascii"}
