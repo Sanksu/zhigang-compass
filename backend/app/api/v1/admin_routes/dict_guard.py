@@ -9,6 +9,7 @@ DictChangeLog(source="manual"/"rollback") + AuditLog，回滚按记录反向操�
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -160,6 +161,11 @@ async def review_proposal(
 ):
     """审核提案：approve 按动作执行动态层变更 / reject 仅置状态。
 
+    执行顺序（20260824 事故整改，见 postmortems/003）：**先校验、再落库、
+    最后执行副作用**——动态词表与 Neo4j 删除不可回滚，必须放在 PG 提交成功
+    之后；此前删除先行、提交在后，中途失败（如 AuditLog 的 UUID 校验）会
+    产生「图谱已删而提案仍 pending」的半执行态。
+
     approve 执行语义（方案 §5）：
     - add_stopword：动态 blocked 即时生效 + scoped 清理同名 Skill（与 auto 一致）
     - remove_stopword：动态条目直接移除；静态停用词以「受影响技能」的动态
@@ -182,17 +188,20 @@ async def review_proposal(
         return error(ERR_CONFLICT, f"提案当前状态 {row.status}，不可审核")
 
     operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    try:
+        uuid.UUID(str(operator))
+    except (ValueError, AttributeError, TypeError):
+        return error(ERR_VALIDATION, f"操作者身份必须为 UUID（AuditLog.user_id 列约束），收到: {operator!r}")
+
     effect_term = row.term
+    changelog_row = None
 
     if action == "approve":
+        # 预解析效果类型（只读判定，不产生任何副作用）
         if row.action == "add_stopword":
-            dyn.add_entry("blocked", row.term, reason=reason, source="dict_guard_review")
             effect_kind = "blocked"
-            removed = await asyncio.to_thread(_cleanup_skill_nodes, row.term)
-            row.impact_stats = {**(row.impact_stats or {}), "removed_nodes": removed}
         elif row.action == "remove_stopword":
             if dyn.is_dynamically_blocked(row.term):
-                dyn.remove_entry("blocked", row.term)
                 effect_kind = "blocked"
             elif row.term in SKILL_STOPWORDS:
                 victim = _victim_of(row.evidence)
@@ -203,21 +212,16 @@ async def review_proposal(
                         "后改用 protect_whitelist",
                     )
                 # 静态词不动，保护受影响的真实技能使其穿透停用词
-                dyn.add_entry("protected", victim, reason=reason, source="dict_guard_review")
                 effect_kind = "protected"
                 effect_term = victim
             else:
                 return error(ERR_CONFLICT, "目标不是现行停用词，无需移除")
         elif row.action == "protect_whitelist":
-            dyn.add_entry("protected", row.term, reason=reason, source="dict_guard_review")
             effect_kind = "protected"
         elif row.action in ("remove_node", "remove_edge"):
             if row.entity_type not in ("position", "course"):
                 return error(ERR_CONFLICT, "图谱删除提案的 entity_type 必须为 position/course")
-            effect_kind, removed = await asyncio.to_thread(_cleanup_by_proposal, row)
-            row.impact_stats = {
-                **(row.impact_stats or {}), "removed_units": removed, "kind": effect_kind,
-            }
+            effect_kind = "node" if row.action == "remove_node" else "edge"
         else:
             return error(ERR_CONFLICT, f"未知提案动作: {row.action}")
 
@@ -227,12 +231,13 @@ async def review_proposal(
     row.reviewed_at = datetime.now(timezone(timedelta(hours=8)))
 
     if action == "approve":
-        db.add(DictChangeLog(
+        changelog_row = DictChangeLog(
             term=effect_term, action=row.action, source="manual", kind=effect_kind,
             proposal_id=row.id, reason=reason, entity_type=getattr(row, "entity_type", "skill"),
             detail={"operator": operator},
             impact_stats=row.impact_stats or {},
-        ))
+        )
+        db.add(changelog_row)
     db.add(AuditLog(
         user_id=operator,
         action=f"admin.dict_guard.{action}",
@@ -241,6 +246,40 @@ async def review_proposal(
         detail={"term": row.term, "proposal_action": row.action, "reason": reason},
     ))
     await db.commit()
+
+    # ── 副作用阶段（不可回滚操作放最后）：失败不回滚已批准的状态，以日志 +
+    #    effects_applied=False 透出，由巡检报告对账兜底
+    if action == "approve":
+        try:
+            if row.action == "add_stopword":
+                dyn.add_entry("blocked", row.term, reason=reason, source="dict_guard_review")
+                removed = await asyncio.to_thread(_cleanup_skill_nodes, row.term)
+                row.impact_stats = {**(row.impact_stats or {}), "removed_nodes": removed}
+            elif row.action == "remove_stopword":
+                if effect_kind == "blocked":
+                    dyn.remove_entry("blocked", row.term)
+                else:
+                    dyn.add_entry("protected", effect_term, reason=reason, source="dict_guard_review")
+            elif row.action == "protect_whitelist":
+                dyn.add_entry("protected", row.term, reason=reason, source="dict_guard_review")
+            else:  # remove_node / remove_edge
+                _, removed = await asyncio.to_thread(_cleanup_by_proposal, row)
+                row.impact_stats = {
+                    **(row.impact_stats or {}), "removed_units": removed, "kind": effect_kind,
+                }
+            if changelog_row is not None:
+                # session 内持久对象直接改属性即脏标记，无需重复 add
+                changelog_row.impact_stats = row.impact_stats or {}
+            await db.commit()
+        except Exception:
+            logger.exception("dict_guard 审批副作用执行失败 proposal=%s term=%s", row.id, row.term)
+            return ok(
+                data={
+                    "id": row.id, "term": row.term, "action": row.action,
+                    "status": row.status, "effects_applied": False,
+                },
+                msg=f"已批准但副作用执行失败（详见服务日志，待巡检对账）: {row.term}",
+            )
 
     return ok(
         data={"id": row.id, "term": row.term, "action": row.action, "status": row.status},
@@ -302,6 +341,10 @@ async def rollback_change(
         return error(ERR_CONFLICT, "该变更已回滚过（防复滚）")
 
     operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    try:
+        uuid.UUID(str(operator))
+    except (ValueError, AttributeError, TypeError):
+        return error(ERR_VALIDATION, f"操作者身份必须为 UUID（AuditLog.user_id 列约束），收到: {operator!r}")
     if row.kind == "blocked":
         removed = dyn.remove_entry("blocked", row.term)
         if not removed:

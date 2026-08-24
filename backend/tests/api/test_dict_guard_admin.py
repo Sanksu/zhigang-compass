@@ -59,7 +59,7 @@ class _FakeDB:
         self.committed += 1
 
 
-_ADMIN = {"sub": "admin"}
+_ADMIN = {"sub": "0356249f-9b04-47a3-a307-af6e7883f084"}  # AuditLog.user_id 为 UUID 列，operator 必须合法
 
 
 @pytest.fixture()
@@ -170,6 +170,38 @@ async def test_reject_marks_status_without_side_effects(dyn_spy):
     # reject 无动态层变更，不写 DictChangeLog（仅 AuditLog）
     assert not [o for o in db.added if hasattr(o, "kind")]
     assert len(db.added) == 1
+
+
+# ── 副作用与落库顺序（20260824 事故回归：postmortems/003）────────────
+
+@pytest.mark.asyncio
+async def test_review_non_uuid_operator_rejected_before_side_effects(dyn_spy):
+    """operator 非 UUID 必须在任何副作用前拒绝——此前 AuditLog 在图谱删除后
+    才因 UUID 校验失败，产生「图已删、提案仍 pending」的半执行态。"""
+    db = _FakeDB(_proposal())
+    resp = await dg.review_proposal(
+        "p1", {"action": "approve", "reason": "r"}, db, {"sub": "admin"})
+    body = json.loads(resp.body)
+    assert body["code"] == 4000 and "UUID" in body["msg"]
+    # 零副作用：动态词表未动、无审计写入、提案状态未翻转
+    assert dyn_spy["adds"] == []
+    assert db.added == [] and db.committed == 0
+    assert db.row.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_approve_side_effect_failure_keeps_approved_state(dyn_spy, monkeypatch):
+    """副作用阶段失败不得回滚已提交的批准状态——返回 effects_applied=False
+    由巡检对账，而不是让调用方误以为审核未生效。"""
+    def _boom(term):
+        raise RuntimeError("neo4j down")
+    monkeypatch.setattr(dg, "_cleanup_skill_nodes", _boom)
+    db = _FakeDB(_proposal())
+    resp = await dg.review_proposal("p1", {"action": "approve", "reason": "r"}, db, _ADMIN)
+    assert resp.code == 0 and resp.data["status"] == "approved"
+    assert resp.data["effects_applied"] is False
+    # 状态与审计已先于副作用提交（commit 至少一次），changelog 已写
+    assert [o for o in db.added if getattr(o, "source", "") == "manual"]
 
 
 # ── 回滚 ─────────────────────────────────────────────────────────
