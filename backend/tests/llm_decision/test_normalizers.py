@@ -159,3 +159,36 @@ class TestSkillNormalizePromptAndDecide:
         dec = SkillNormalizeDecision(action="merge", target_standard="Python", confidence=0.9)
         assert tier_for_skill_decision(dec, gate_ok=True) == (TIER_R0, "")
         assert tier_for_skill_decision(dec, gate_ok=False)[0] == TIER_BLOCKED
+
+class TestCandidateRecallCalibration:
+    """校准 r1：候选召回排序（词面关联优先于长度差）。"""
+
+    def test_rank_key_tiers(self):
+        from app.services.llm_decision.skill_normalize import candidate_rank_key
+
+        assert candidate_rank_key("react", "React")[0] == 0  # 大小写不敏感相等
+        assert candidate_rank_key("c语言", "C")[0] == 0  # 子串
+        assert candidate_rank_key("JS", "JavaScript")[0] == 0  # 大写首字母串缩写匹配
+        assert candidate_rank_key("量子烹饪", "React")[0] == 2  # 无关联
+
+    def test_default_candidates_recall_variants(self):
+        """基线瓶颈回归：变体的 gold 标准名必须进默认候选前 15。"""
+        from app.services.llm_decision.skill_normalize import (
+            candidate_rank_key, known_standard_names,
+        )
+
+        known = known_standard_names()
+        checks = {
+            "react": "React", "golang": "Go", "vue": "Vue.js",
+            "JS": "JavaScript", "c语言": "C",
+        }
+        for variant, standard in checks.items():
+            top = sorted(known, key=lambda c: candidate_rank_key(variant, c))[:15]
+            assert standard in top, f"{variant} 的候选未召回 {standard}"
+
+    def test_prompt_mentions_variant_kinds(self):
+        from app.services.llm_decision.skill_normalize import build_skill_normalize_prompt
+
+        prompt = build_skill_normalize_prompt("react", ["React"])
+        assert "缩写" in prompt and "版本号" in prompt
+        assert "与自身相同的目标不是 merge" in prompt

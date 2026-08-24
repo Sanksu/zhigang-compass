@@ -123,3 +123,14 @@ class TestPromptAndDecide:
     def test_tier_mapping_always_r2(self):
         assert tier_for_relation_decision(_dec(REL_PREREQUISITE), gate_ok=True)[0] == TIER_R2
         assert tier_for_relation_decision(_dec(REL_PREREQUISITE), gate_ok=False)[0] == TIER_BLOCKED
+
+class TestPromptCalibration:
+    """校准 r1：先修判据锚点（防无证据下保守 NONE）。"""
+
+    def test_prompt_contains_prerequisite_criteria(self):
+        from app.services.llm_decision.skill_relation import build_skill_relation_prompt
+
+        prompt = build_skill_relation_prompt("Java", "Spring", [])
+        assert "前置先修" in prompt
+        assert "不要因缺少共现证据而保守答 NONE" in prompt
+        assert "子领域" in prompt  # BELONGS_TO 判据
