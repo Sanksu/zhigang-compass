@@ -108,7 +108,10 @@ def _build_client(provider: dict, timeout: int):
     import instructor
     from openai import OpenAI
 
-    api_key = (provider.get("api_key") or "").strip()
+    # 逐行审查修复（2026-08-24）：与 _call_provider 同源解析——env-only provider
+    # 此前直读明文得空串，真实调用链以空 key 构建 client（测试 monkeypatch 掉
+    # _build_client 掩盖了该缺口，仅健康检查路径正确）
+    api_key = _resolve_api_key(provider)
     # from_openai 函数身份入 key：测试 monkeypatch 换 fake 时不命中缓存（每次重建）
     key = (
         instructor.from_openai,

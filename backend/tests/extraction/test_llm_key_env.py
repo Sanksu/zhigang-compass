@@ -157,3 +157,43 @@ class TestConfigChainApiKeyEnv:
         stored = load_llm_config(path)["providers"][0]
         assert stored["api_key"] == ""
         assert stored["api_key_env"] == "NEW_ENV_KEY"
+
+    def test_masked_key_with_env_does_not_resurrect_old_plaintext(self, tmp_path):
+        """逐行审查修复回归：掩码 * 提交 + env 配置 → 旧明文同样不回捞。"""
+        path = tmp_path / "llm_providers.yaml"
+        path.write_text(
+            "providers:\n"
+            "  - name: a\n    priority: 1\n    base_url: https://a.com\n"
+            "    api_key: sk-old-plaintext\n    model: m\n    enabled: true\n",
+            encoding="utf-8",
+        )
+        save_llm_config(path, [{
+            "name": "a", "priority": 1, "base_url": "https://a.com",
+            "model": "m", "enabled": True, "api_key": "****",
+            "api_key_env": "NEW_ENV_KEY",
+        }])
+        stored = load_llm_config(path)["providers"][0]
+        assert stored["api_key"] == ""
+        assert stored["api_key_env"] == "NEW_ENV_KEY"
+
+
+class TestBuildClientEnvResolution:
+    """逐行审查修复回归：_build_client 与 _call_provider 同源解析 env。
+
+    此前 _build_client 直读明文 api_key——env-only provider 真实调用链以
+    空 key 构建 client（401），测试 monkeypatch 掉 _build_client 掩盖了缺口。
+    """
+
+    def test_build_client_cache_key_contains_env_secret(self, monkeypatch):
+        monkeypatch.setenv("ENV_ONLY_KEY", "env-secret-verify")
+        llm_provider_module._client_cache.clear()
+        provider = {
+            "name": "env-only", "base_url": "https://env-only.example.com",
+            "api_key": "", "api_key_env": "ENV_ONLY_KEY",
+            "supports_function_calling": True,
+        }
+        llm_provider_module._build_client(provider, 10)
+        assert any(
+            "env-secret-verify" in str(k) for k in llm_provider_module._client_cache
+        ), "客户端缓存键应含 env 解析出的密钥（直读明文会得空串）"
+        llm_provider_module._client_cache.clear()
