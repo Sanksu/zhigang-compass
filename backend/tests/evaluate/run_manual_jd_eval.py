@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import re
+import subprocess
 import sys
 import zipfile
 from collections import Counter
@@ -34,6 +36,37 @@ DEFAULT_REPORT_DIR = ROOT / "reports"
 DEFAULT_GOLD_JSONL = ROOT / "data" / "golden_set" / "final" / "jd_golden_110.jsonl"
 # final gold 为单标注员 A01 + 最终 QA（数据字典声明，不得描述为双人独立标注）
 _GOLD_ANNOTATOR = "A01"
+# 评测链证据信封版本（08-24：prompt/schema/规则链联合快照标识，随口径变更递增）
+EVAL_SPEC_VERSION = "20260824-a"
+
+
+def _input_sha256(title: str, detail: str) -> str:
+    """评测输入指纹：招聘标题 + 正文（对齐生产 _build_jd_text 拼装后的形态）。
+
+    同一输入重放时指纹一致；正文/标题任一变化即变化的哈希，供回放比对。
+    """
+    payload = f"{title or ''}\n{detail or ''}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _gold_sha256(path: Path) -> str:
+    """gold 源文件 SHA256（xlsx / final jsonl 皆可），跨容器逐条回放的比对锚点。"""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _git_commit() -> str:
+    """当前仓库 commit 短 ID（best-effort：容器内无 .git 时返回 unknown）。"""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
 # 与 scripts/evaluate.py 目标阈值一致（设计文档 §13.3：JD 解析 ≥ 90%）
 JD_LLM_TARGET_F1 = 0.90
 # 评测侧单 provider LLM 超时（秒）：L1-1 六维后抽取更重，30s 生产默认偶发超时（打样 10/110 被排除），
@@ -454,7 +487,12 @@ def apply_gold_revisions(
     return out_skills, out_bonus
 
 
-def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any]:
+def run_real_eval(
+    rows: list[dict[str, str]],
+    output_dir: Path,
+    *,
+    gold_sha256: str = "",
+) -> dict[str, Any]:
     """Run the current extractor and reject all records that fall back to rules."""
     sys.path.insert(0, str(ROOT))
     from app.services.extraction.dictionary import normalize_position_name, normalize_skill
@@ -466,6 +504,18 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         provider = LLMProviderChain()
     except LLMConfigurationError as exc:
         raise RuntimeError(f"LLMProviderChain 不可用：{type(exc).__name__}: {exc}") from exc
+
+    try:
+        _primary = provider._providers[0] if provider._providers else {}
+    except Exception:
+        _primary = {}
+    envelope = {
+        "provider": str(_primary.get("name") or ""),
+        "model": str(_primary.get("model") or ""),
+        "commit": _git_commit(),
+        "eval_spec_version": EVAL_SPEC_VERSION,
+        "gold_sha256": gold_sha256,
+    }
 
     predictions: list[dict[str, Any]] = []
     revisions = load_gold_revisions()
@@ -480,6 +530,8 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
     skills_total_a: Counter[str] = Counter()
     hallucinated_total: Counter[str] = Counter()
     skills_total: Counter[str] = Counter()
+    # 纯模型口径（08-24 证据链）：不打补漏、不做词面豁免的模型输出 vs gold 微平均
+    llm_only_total: Counter[str] = Counter()
     bonus_total: Counter[str] = Counter()
     sample_skill_f1: list[float] = []
     sample_bonus_f1: list[float] = []
@@ -526,6 +578,11 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         normalized_gold_bonus = [clean_skill_name(normalize_skill(x)) for x in gold_bonus]
         predicted_skills = [skill.name for skill in result.skills]
         predicted_bonus = [req.skill_name for req in result.requirements if req.necessity == "nice"]
+        # —— 纯模型口径（LLM-only，08-24 证据链）：补漏/豁免之前的模型输出 vs gold ——
+        # skills_micro_llm_only 证明达标口径里有多少来自模型本体，多少来自确定性补漏
+        llm_only_cmp = _compare_set(normalized_gold_skills, list(predicted_skills))
+        for key in ("tp", "fp", "fn"):
+            llm_only_total[key] += len(llm_only_cmp[key])
         # 评测侧确定性补漏（08-17 JD 解析收尾）：预测 ∪ {gold 词 ∩ 正文词面}
         # ——消除"正文明确 + gold 收录但 LLM 随机漏抽"的 fn（LLM 非确定性波动源）。
         # 08-17 r6.2 迭代扩展：白名单扫描 → 纯词面（_text_has 对 gold 词）——
@@ -608,6 +665,12 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
                 "core_duties": duties_cmp,
             },
         })
+    # 输入指纹注入（08-24 证据链）：逐条可回放——同一 input_sha256 + commit +
+    # gold_sha256 + provider/model 可定位到同版本重放产物
+    for row, item in zip(rows, predictions):
+        item["input_sha256"] = _input_sha256(
+            row.get("job_title_raw", ""), row.get("detail_raw_text", "")
+        )
     success_count = len([p for p in predictions if p["execution_status"] == "real_llm_success"])
     if not success_count:
         reasons = [p.get("fallback_reason") or p.get("failure_reason") for p in predictions]
@@ -652,7 +715,13 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         "title_normalized_accuracy": (title_hits / title_count) if title_count else None,
         "skills_micro": _metric(**skills_total),
         "skills_micro_aligned": _metric(**skills_total_a),
+        "skills_micro_llm_only": _metric(**llm_only_total),
         "hallucinated_fp": dict(hallucinated_total),
+        "provider": envelope["provider"],
+        "model": envelope["model"],
+        "commit": envelope["commit"],
+        "eval_spec_version": envelope["eval_spec_version"],
+        "gold_sha256": envelope["gold_sha256"],
         "skills_average_sample_f1": sum(sample_skill_f1) / success_count,
         "bonus_skills_micro": _metric(**bonus_total),
         "bonus_skills_average_sample_f1": sum(sample_bonus_f1) / success_count,
@@ -681,6 +750,8 @@ def run_real_eval(rows: list[dict[str, str]], output_dir: Path) -> dict[str, Any
         "# A01 人工 JD 集端到端评测报告\n\n"
         "本报告只把 `real_llm_success` 行计入指标；`fallback` 和 `failed` 行保留在逐条结果中，但绝不计入指标。\n\n"
         "## 当前真实链路\n\n`JDExtractor.extract` → `LLMProviderChain.extract_structured` → `post_process`。岗位名归一化只用于评测侧的 `normalize_position_name` 对照；`PositionAligner`（Neo4j/SBERT）不在 `JDExtractor.extract` 内。\n\n"
+        "## 三口径说明（08-24 证据链）\n\n"
+        "`skills_micro_llm_only` = 纯模型输出 vs gold（无补漏、无词面豁免）；`skills_micro_raw` = 模型 + 确定性补漏（gold 词 ∩ 正文词面）；`skills_micro_aligned` = 补漏后 + 词面豁免（PR #330 达标口径）。三口径同时归档，防止达标数字掩盖纯模型回退；逐条结果带 `input_sha256`，配合 commit/provider/model/gold_sha256 可同版本回放。\n\n"
         f"## 指标\n\n```json\n{json.dumps(metrics, ensure_ascii=False, indent=2)}\n```\n\n"
         "空学历 gold 以 `null / No explicit education requirement` 参与 raw exact 对比：模型同样未输出学历即为正确，凭空输出学历即为错误。经验按**区间重叠判定**（双 null=命中、单 null=未命中）、核心职责按**词面 containment**（D1-A/D2-A，L1-1 张恺天确认口径，2026-08-20）参与对比。`skills` 与 `requirements[nice]` 分别作为必备技能和加分技能的可观测输出；该映射应在后续算法评审中确认。历史 0.6112 未参与本报告。\n",
         encoding="utf-8",
@@ -727,7 +798,15 @@ def _archive_result(metrics: dict[str, Any]) -> dict[str, Any]:
         "confusion": {"tp": skills["tp"], "fp": skills["fp"], "fn": skills["fn"]},
         # 精选项对照（豁免前 raw 微平均）与幻觉单列（非词面 FP，技能→次数）
         "skills_micro_raw": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in skills_raw.items()},
+        "skills_micro_llm_only": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in metrics.get("skills_micro_llm_only", {}).items()},
         "hallucinated_fp": metrics.get("hallucinated_fp", {}),
+        # 证据信封（08-24 证据链）：commit/provider/model/gold SHA + 评测链版本，跨轮次可回放比较
+        "commit": metrics.get("commit", ""),
+        "provider": metrics.get("provider", ""),
+        "model": metrics.get("model", ""),
+        "gold_sha256": metrics.get("gold_sha256", ""),
+        "eval_spec_version": metrics.get("eval_spec_version", EVAL_SPEC_VERSION),
+        "inputs_hashed": True,
         "bonus": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in bonus.items()},
         "title_raw_exact_accuracy": round(metrics["title_raw_exact_accuracy"], 4),
         "title_normalized_accuracy": round(metrics["title_normalized_accuracy"], 4),
@@ -914,7 +993,7 @@ def main() -> int:
         print("READY: preflight passed. Re-run with --run to call the real LLM chain.")
         return 0
     try:
-        metrics = run_real_eval(rows, output_dir)
+        metrics = run_real_eval(rows, output_dir, gold_sha256=_gold_sha256(source_desc))
     except Exception as exc:
         validation["runtime_blocker"] = _safe_exception_summary(exc)
         validation_write_warning = write_validation(output_dir, validation)
