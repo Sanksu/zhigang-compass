@@ -2,13 +2,16 @@
 
 链入 run_etl_pipeline（阶段 18，llm_stats 之后），继承主管线当日幂等锁。
 只写 `suggested_category*` 提议字段，**不改动权威 category**；LLM 失败
-静默跳过不阻塞管线。报告落 reports/skill_category_review_{date}.json。
+静默跳过不阻塞管线。每条成功提议同步落 llm_decision_records（决策信封，
+08-24 统一：domain=skill_classify、status=shadow，供验收统计与抽检）。
+报告落 reports/skill_category_review_{date}.json。
 
 红线：prompt/触发门属算法核心（见 services 层 docstring）；晋升通道
 （suggested→category）走人工确认，后续 PR 接管理后台。
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -60,9 +63,18 @@ async def skill_category_review_daily(ctx: dict) -> dict:
         llm = LLMProviderChain()
     except LLMConfigurationError:
         llm = None
+    provider, model = _primary_of(llm)
+
+    from app.services.llm_decision import (
+        DOMAIN_SKILL_CLASSIFY,
+        STATUS_SHADOW,
+        build_record,
+        persist_record,
+    )
 
     classified: list[dict] = []
     llm_failed = 0
+    record_failed = 0
     with neo4j_driver.session() as session:
         for row in candidates:
             name = row["name"]
@@ -78,6 +90,27 @@ async def skill_category_review_daily(ctx: dict) -> dict:
                 "name": name, "category": result.category,
                 "confidence": result.confidence, "reason": result.reason,
             })
+            # 决策信封（08-24）：每条成功提议同步落 shadow 记录，供验收统计
+            record = build_record(
+                domain=DOMAIN_SKILL_CLASSIFY,
+                entity_type="skill", entity_id=name,
+                run_id=f"skill_review:{run_date}",
+                input_hash=hashlib.sha256(name.encode("utf-8")).hexdigest(),
+                evidence_refs=[{"req_count": int(row.get("req_count") or 0)}],
+                provider=provider, model=model,
+                structured_output={
+                    "category": result.category, "reason": result.reason,
+                },
+                confidence=result.confidence,
+                gate_result="pass",
+                risk_tier="R0",  # suggest_category 属 R0 建议类
+                status=STATUS_SHADOW,
+            )
+            try:
+                await persist_record(record)
+            except Exception as e:
+                record_failed += 1
+                logger.warning("[skill_category_review] 决策记录落库失败（不影响提议）: %s", e)
 
     summary = {
         "status": "ok",
@@ -85,6 +118,7 @@ async def skill_category_review_daily(ctx: dict) -> dict:
         "candidates": len(candidates),
         "classified": classified,
         "llm_failed": llm_failed,
+        "record_failed": record_failed,
     }
     _write_report(summary)
     logger.info(
@@ -92,6 +126,15 @@ async def skill_category_review_daily(ctx: dict) -> dict:
         len(candidates), len(classified), llm_failed,
     )
     return summary
+
+
+def _primary_of(llm) -> tuple[str, str]:
+    """provider 链主 provider 名称/模型（best-effort，决策信封落档用）。"""
+    try:
+        primary = (llm._providers or [{}])[0] if llm is not None else {}
+        return str(primary.get("name") or ""), str(primary.get("model") or "")
+    except Exception:
+        return "", ""
 
 
 def _fetch_unclassified(driver) -> list[dict]:
