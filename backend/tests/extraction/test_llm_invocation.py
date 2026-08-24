@@ -228,10 +228,16 @@ class TestChainInstrumentation:
         with pytest.raises(LLMTimeoutError):
             chain.call_with_fallback("prompt", _DemoModel)
         entries = _read_lines(sink)
-        assert [(e["provider"], e["attempt"]) for e in entries] == [
+        attempts = [e for e in entries if e["route"] != "chain"]
+        assert [(e["provider"], e["attempt"]) for e in attempts] == [
             ("primary", 1), ("backup", 2),
         ]
-        assert all(e["outcome"] == "timeout" for e in entries)
+        assert all(e["outcome"] == "timeout" for e in attempts)
+        # 链汇总行：全链失败 provider=""，record_chain 只落 JSONL
+        chain_rows = [e for e in entries if e["route"] == "chain"]
+        assert len(chain_rows) == 1
+        assert chain_rows[0]["provider"] == ""
+        assert chain_rows[0]["outcome"] == "failed"
 
     def test_circuit_skip_event_recorded_attempt_zero(self, tmp_path, audit_env, monkeypatch):
         sink, _ = audit_env

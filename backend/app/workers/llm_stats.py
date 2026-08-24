@@ -28,6 +28,8 @@ async def llm_stats_daily(ctx: dict) -> dict:
     from app.services.extraction import llm_invocation
     from app.services.extraction.llm_stats import (
         aggregate_provider_stats,
+        completeness_report_from_jsonl,
+        latency_percentiles_from_jsonl,
         purpose_counts_from_jsonl,
     )
 
@@ -57,6 +59,12 @@ async def llm_stats_daily(ctx: dict) -> dict:
     purposes = purpose_counts_from_jsonl(jsonl)
     if purposes:
         summary["purposes"] = purposes
+    percentiles = latency_percentiles_from_jsonl(jsonl)
+    if percentiles:
+        summary["latency_percentiles"] = percentiles
+    completeness = completeness_report_from_jsonl(jsonl)
+    if completeness.get("entries"):
+        summary["completeness"] = completeness
 
     _write_report(summary)
     logger.info("[llm_stats_daily] 报告已写入: %s", _report_path(run_date))
