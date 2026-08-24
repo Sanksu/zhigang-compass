@@ -11,12 +11,12 @@ import { describe, expect, it } from 'vitest'
 import { ETL_ACTION_JOBS, QUICK_ACTIONS } from './admin-dashboard-page'
 
 describe('QUICK_ACTIONS 快捷操作面板', () => {
-  it('补全为 10 项：4 触发 + 6 导航', () => {
-    expect(QUICK_ACTIONS).toHaveLength(10)
+  it('补全为 11 项：4 触发 + 7 导航', () => {
+    expect(QUICK_ACTIONS).toHaveLength(11)
     const triggers = QUICK_ACTIONS.filter((a) => !a.to)
     const navs = QUICK_ACTIONS.filter((a) => a.to)
     expect(triggers).toHaveLength(4)
-    expect(navs).toHaveLength(6)
+    expect(navs).toHaveLength(7)
     expect(triggers.map((t) => t.id)).toEqual(
       expect.arrayContaining(['crawl', 'etl-clean', 'etl-graph', 'etl-full']),
     )

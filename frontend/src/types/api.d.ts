@@ -4355,6 +4355,16 @@ export interface components {
                     minute?: number;
                 };
             };
+            /** @description 总开关（false 时 ETL 阶段直接跳过） */
+            dict_guard_enabled?: boolean;
+            /** @description 自动生效影响面上限（图谱节点数，超过转人工，1-1000） */
+            dict_guard_auto_impact_threshold?: number;
+            /** @description 自动生效最低 LLM 置信度（0.0-1.0） */
+            dict_guard_min_confidence?: number;
+            /** @description 每类候选上限（控制每日 LLM 成本，1-100） */
+            dict_guard_max_candidates?: number;
+            /** @description 驳回提案冷却期（天内不重提，1-90） */
+            dict_guard_reproposal_cooldown_days?: number;
         };
         /** @description LLM provider 配置项（GET/PUT /admin/llm-config） */
         LlmProviderConfig: {
