@@ -127,10 +127,14 @@ def save_llm_config(path: Path, providers: list) -> dict:
             name = (p.get("name") or "").strip()
             api_key = (p.get("api_key") or "").strip()
             has_env = bool((p.get("api_key_env") or "").strip())
-            if "*" in api_key or (not api_key and not has_env):
-                # 掩码/留空且未配 env：保持原值；显式配了 env 则以 env 为源，
-                # 不再回捞旧明文（key 走 env 的迁移路径，负责人拍板 2026-08-23）
-                api_key = (old.get(name) or {}).get("api_key", "")
+            if "*" in api_key or not api_key:
+                # 逐行审查修复（2026-08-24）：掩码/留空时——配了 env 一律存空串
+                # （掩码原样落盘会被 _resolve_api_key 当显式明文压过 env，有害）；
+                # 未配 env 保持原值（既有语义）
+                if has_env:
+                    api_key = ""
+                else:
+                    api_key = (old.get(name) or {}).get("api_key", "")
             entry = {
                 "name": name,
                 "priority": int(p["priority"]),
