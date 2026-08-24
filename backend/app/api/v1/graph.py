@@ -716,7 +716,6 @@ async def graph_view(
                 "id": s_id,
                 "name": record.get("sname", s_id),
                 "type": "skill",
-                "communityId": record.get("s_community"),
                 "skill_category": record.get("s_category"),
             })
             nodes.setdefault(p_id, {
@@ -724,7 +723,6 @@ async def graph_view(
                 "name": record.get("pname", p_id),
                 "type": "position",
                 "status": record.get("pstatus") or "active",
-                "communityId": record.get("p_community"),
             })
             edges.append({
                 "source": s_id,
@@ -752,7 +750,6 @@ async def graph_view(
                 "name": p.get("name", p_id),
                 "type": "position",
                 "status": p.get("status", "active"),
-                "communityId": p.get("community_id"),
                 "domain_id": p.get("domain_id"),
                 "domain_name": p.get("domain_name"),
             })
@@ -760,7 +757,6 @@ async def graph_view(
                 "id": s_id,
                 "name": s.get("name", s_id),
                 "type": "skill",
-                "communityId": s.get("community_id"),
                 "skill_category": s.get("category"),
             })
             edges.append({

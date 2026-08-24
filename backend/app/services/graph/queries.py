@@ -207,9 +207,9 @@ def query_view_techstack(session, limit: int, status_filter: str) -> list:
         ORDER BY heat DESC LIMIT $limit
         MATCH (s)<-[r:REQUIRES]-(p:Position)
         WHERE {status_filter}
-        RETURN s.id AS sid, s.name AS sname, s.community_id AS s_community,
+        RETURN s.id AS sid, s.name AS sname,
                s.category AS s_category,
-               p.id AS pid, p.name AS pname, p.status AS pstatus, p.community_id AS p_community, r
+               p.id AS pid, p.name AS pname, p.status AS pstatus, r
         """,
         limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
     ))
