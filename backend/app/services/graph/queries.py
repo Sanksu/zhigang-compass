@@ -4,7 +4,7 @@
 repository.py）。Cypher / 状态过滤子句 / 结果结构与原 graph.py 完全一致，
 repository 层开 session 后在此批量执行。
 
-- group A：panorama / 技能反向查询 / 全文检索
+- group A：技能反向查询 / 全文检索
 - group B：岗位技能 / 先修链 / 计数 / 证据 / 最短路径 / 视图查询 / 节点加载
 """
 
@@ -15,62 +15,6 @@ from app.services.graph.visibility import (
 )
 from app.services.graph_algorithms.shortest_path import shortest_path
 from app.services.kg.skill_relations import graph_prerequisite_chain
-
-
-def query_panorama(session, scope: str, focus: str | None, min_weight: float, limit: int) -> tuple[dict, list]:
-    """panorama 同步 Neo4j 查询（08-14 审查：原在 async 函数内同步阻塞事件循环，抽到线程池）。"""
-    nodes: dict[str, dict] = {}
-    edges: list[dict] = []
-    status_filter = _status_clause(scope)
-    if focus:
-        rows = session.run(
-            f"""
-            MATCH (p:Position {{id: $focus}})-[r:REQUIRES]->(s:Skill)
-            WHERE {status_filter} AND r.weight >= $min_weight
-            RETURN p, s, r
-            """,
-            focus=focus, min_weight=min_weight, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        )
-    else:
-        rows = session.run(
-            f"""
-            MATCH (p:Position)
-            WHERE {status_filter}
-            WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
-            MATCH (p)-[r:REQUIRES]->(s:Skill)
-            WHERE r.weight >= $min_weight
-            RETURN p, s, r
-            """,
-            limit=limit, min_weight=min_weight, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-        )
-    for record in rows:
-        p, s, r = record["p"], record["s"], record["r"]
-        p_id = p.get("id", "")
-        s_id = s.get("id", "")
-        nodes.setdefault(p_id, {
-            "id": p_id,
-            "name": p.get("name", p_id),
-            "type": "position",
-            "status": p.get("status", "active"),
-            "communityId": p.get("community_id"),
-            "domain_id": p.get("domain_id"),
-            "domain_name": p.get("domain_name"),
-        })
-        nodes.setdefault(s_id, {
-            "id": s_id,
-            "name": s.get("name", s_id),
-            "type": "skill",
-            "communityId": s.get("community_id"),
-            "skill_category": s.get("category"),
-        })
-        edges.append({
-            "source": p_id,
-            "target": s_id,
-            "weight": r.get("weight", 0.0),
-            "necessity": r.get("necessity", "must"),
-            "level": r.get("level", "中级"),
-        })
-    return nodes, edges
 
 
 def query_skill_positions(session, skill_id: str, status_filter: str) -> list[dict]:
@@ -210,54 +154,10 @@ def query_skill_ids(session, names: list[str]) -> dict[str, str]:
     return {rec["name"]: rec["id"] for rec in rows}
 
 
-def query_position_skills(session, id: str, necessity: str | None, status_filter: str) -> list[dict]:
-    """岗位技能（可按 necessity 过滤，线程池执行）。"""
-    query = f"""
-        MATCH (p:Position {{id: $id}})-[r:REQUIRES]->(s:Skill)
-        WHERE ({status_filter}) AND ($necessity IS NULL OR r.necessity = $necessity)
-        RETURN s.id AS skill_id, s.name AS skill_name,
-               r.necessity AS necessity, r.weight AS weight,
-               r.level AS level, r.source_count AS source_count,
-               s.category AS skill_category
-        ORDER BY r.weight DESC
-    """
-    rows = session.run(
-        query, id=id, necessity=necessity,
-        public_statuses=list(_PUBLIC_POSITION_STATUSES),
-    )
-    return [
-        {
-            "skill_id": rec["skill_id"],
-            "skill_name": rec.get("skill_name", rec["skill_id"]),
-            "necessity": rec.get("necessity", "must"),
-            "weight": rec.get("weight", 0.0),
-            "level": rec.get("level", "中级"),
-            "source_count": rec.get("source_count", 1),
-            "skill_category": rec.get("skill_category"),
-        }
-        for rec in rows
-    ]
-
-
 def query_all_skills(session) -> list[tuple[str, str]]:
     """全技能 (id, name)（线程池执行）。"""
     rows = session.run("MATCH (s:Skill) RETURN s.id AS id, s.name AS name")
     return [(rec["id"], rec.get("name", rec["id"])) for rec in rows]
-
-
-def query_skill_counts(session, skill_id: str, status_filter: str) -> dict:
-    """技能关联计数（岗位/证据，线程池执行）。"""
-    rec = session.run(
-        f"""
-        MATCH (s:Skill {{id: $skill_id}})
-        OPTIONAL MATCH (p:Position)-[r:REQUIRES]->(s)
-        OPTIONAL MATCH (s)-[:EVIDENCED_BY]->(e:Evidence)
-        WITH s, e, CASE WHEN {status_filter} THEN p ELSE null END AS visible_p
-        RETURN count(DISTINCT visible_p) AS positions_count, count(DISTINCT e) AS evidence_count
-        """,
-        skill_id=skill_id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
-    ).single()
-    return dict(rec) if rec else {}
 
 
 def query_graph_counts(session) -> dict:
@@ -307,9 +207,9 @@ def query_view_techstack(session, limit: int, status_filter: str) -> list:
         ORDER BY heat DESC LIMIT $limit
         MATCH (s)<-[r:REQUIRES]-(p:Position)
         WHERE {status_filter}
-        RETURN s.id AS sid, s.name AS sname, s.community_id AS s_community,
+        RETURN s.id AS sid, s.name AS sname,
                s.category AS s_category,
-               p.id AS pid, p.name AS pname, p.status AS pstatus, p.community_id AS p_community, r
+               p.id AS pid, p.name AS pname, p.status AS pstatus, r
         """,
         limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
     ))

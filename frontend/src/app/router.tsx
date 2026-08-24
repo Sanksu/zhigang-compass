@@ -87,6 +87,10 @@ const protectedRoutes = [
         path: 'admin/settings/etl',
         element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="etl" /></Suspense></AuthGuard>,
       },
+      {
+        path: 'admin/settings/dictguard',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="dictguard" /></Suspense></AuthGuard>,
+      },
     ],
   },
 ]

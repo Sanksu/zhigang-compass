@@ -90,11 +90,13 @@ export function EvolutionTimeline({
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
 
-  // 版本列表（失败静默隐藏整条时间轴）
+  // 版本列表（失败静默隐藏整条时间轴；访客可浏览图谱页——401 静默降级，
+  // 不触发全局登出跳转，与 dashboard 同端点 skipAuthRedirect 模式一致）
   useEffect(() => {
     let cancelled = false
     apiGet<components['schemas']['EvolutionVersionListData']>(
       '/evolution/versions?page=1&size=30',
+      { skipAuthRedirect: true },
     )
       .then((r) => {
         if (!cancelled) setVersions(sortVersionsAsc(r.items))
@@ -118,6 +120,7 @@ export function EvolutionTimeline({
     let cancelled = false
     apiGet<EvolutionDiff>(
       `/evolution/diff?from=${encodeURIComponent(from.version_id)}&to=${encodeURIComponent(to.version_id)}`,
+      { skipAuthRedirect: true },
     )
       .then((d) => {
         if (!cancelled) setDiffs((prev) => ({ ...prev, [pairKey]: d }))

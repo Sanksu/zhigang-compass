@@ -1,6 +1,6 @@
 """webhook 告警服务（设计文档 §4.4 异常阈值告警 / §11.1 配置项）。
 
-兼容飞书/钉钉/企业微信群机器人的 POST JSON 协议；未配置
+按 ALERT_WEBHOOK_URL 域名自适应飞书/钉钉/企业微信机器人格式；未配置
 ALERT_WEBHOOK_URL 或 webhook 调用失败时仅记日志，不阻塞主流程
 （告警是旁路，不能因告警失败拖垮 ETL/爬虫管线）。
 """
@@ -35,8 +35,34 @@ def send_alert_sync(event: str, message: str, **extra) -> bool:
     if not settings.alert_webhook_url:
         logger.warning("[alert] 未配置 ALERT_WEBHOOK_URL，跳过告警 %s: %s", event, message)
         return False
-    payload = json.dumps({"event": event, "message": message, **extra}, ensure_ascii=False)
-    return _post_webhook(payload)
+    return _post_webhook(_build_payload(settings.alert_webhook_url, event, message, extra))
+
+
+def _render_text(event: str, message: str, extra: dict) -> str:
+    """纯文本渲染（IM 机器人通用）：事件 + 描述 + 附加字段逐行。"""
+    lines = [f"【智岗罗盘】{event}", message]
+    lines += [f"{k}: {v}" for k, v in extra.items()]
+    return "\n".join(lines)
+
+
+def _build_payload(url: str, event: str, message: str, extra: dict) -> str:
+    """按 webhook 平台构造可被接收的 payload（2026-08-24 修复）。
+
+    此前统一发裸 {"event","message"}——飞书/钉钉/企微机器人均不收该
+    格式（配置了地址也静默投递失败）。按域名自适应：
+    - 飞书 open.feishu.cn → {"msg_type":"text","content":{"text":...}}
+    - 钉钉 oapi.dingtalk.com → {"msgtype":"text","text":{"content":...}}
+    - 企微 qyapi.weixin.qq.com → {"msgtype":"text","text":{"content":...}}
+    - 其余（自建接收端）→ 通用 JSON（原格式，兼容既有消费方）
+    """
+    text = _render_text(event, message, extra)
+    if "open.feishu.cn" in url:
+        payload = {"msg_type": "text", "content": {"text": text}}
+    elif "oapi.dingtalk.com" in url or "qyapi.weixin.qq.com" in url:
+        payload = {"msgtype": "text", "text": {"content": text}}
+    else:
+        payload = {"event": event, "message": message, **extra}
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _post_webhook(payload: str) -> bool:
@@ -50,8 +76,7 @@ def _post_webhook(payload: str) -> bool:
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             resp.read()
-        logger.info("[alert] 已发送: event=%s len=%d（payload 不打日志防敏感字段泄露）",
-                    json.loads(payload).get("event"), len(payload))
+        logger.info("[alert] 已发送: len=%d（payload 不打日志防敏感字段泄露）", len(payload))
         return True
     except Exception as e:  # noqa: BLE001 告警失败不影响主流程
         logger.error("[alert] 发送失败: %s", e)

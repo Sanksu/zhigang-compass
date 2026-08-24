@@ -77,6 +77,13 @@ class TestP1AliasExpansion:
         assert normalize_skill("SQL优化") == "SQL"
         assert normalize_skill("微服务架构") == "微服务"
 
+    def test_fullstack_aliases(self):
+        """2026-08-24 图谱治理：全栈变体归一至主节点，防碎片孤岛再现。"""
+        assert normalize_skill("Full Stack Development") == "全栈"
+        assert normalize_skill("full-stack web development") == "全栈"
+        assert normalize_skill("Fullstack Development") == "全栈"
+        assert normalize_skill("Full Stack") == "全栈"
+
     def test_ai_aliases(self):
         assert normalize_skill("NLP") == "自然语言处理"
         assert normalize_skill("Prompt Engineering") == "提示工程"

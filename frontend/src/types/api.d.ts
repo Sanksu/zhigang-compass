@@ -341,94 +341,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/graph/position/{id}/skills": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 岗位技能列表 */
-        get: {
-            parameters: {
-                query?: {
-                    necessity?: "must" | "nice";
-                };
-                header?: never;
-                path: {
-                    id: components["parameters"]["Id"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 技能列表 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            code?: number;
-                            msg?: string;
-                            data?: components["schemas"]["PositionSkillsData"];
-                            trace_id?: string;
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/graph/skill/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 技能节点详情 */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: components["parameters"]["Id"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 技能详情 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            code?: number;
-                            msg?: string;
-                            data?: components["schemas"]["SkillDetail"];
-                            trace_id?: string;
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/graph/skill/{id}/evidence": {
         parameters: {
             query?: never;
@@ -633,47 +545,6 @@ export interface paths {
                             data?: components["schemas"]["SkillSimilarData"];
                             trace_id?: string;
                         };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/graph/panorama": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 全景视图（Neo4j 直接查询，无缓存） */
-        get: {
-            parameters: {
-                query?: {
-                    limit?: number;
-                    min_weight?: number;
-                    /** @description 以某岗位为中心展开 */
-                    focus?: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 全景图数据 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ApiResponse"];
                     };
                 };
             };
@@ -1545,8 +1416,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 获取人岗比对诊断报告（兼容同步生成）
-         * @description LLM 基于结果快照（分数/差距/学习路径/证据）生成结构化诊断报告，结果缓存 24h
+         * 获取人岗比对诊断报告（只读）
+         * @description 读取已生成的诊断报告：24h Redis 缓存优先，过期后从 PostgreSQL DiagnosisReportRecord 耐久记录回读并回填缓存。生成一律走 POST 异步任务（worker 唯一执行路径），本端点不再同步调用 LLM； 缓存与落库皆无时返回 404，客户端应先 POST 创建生成任务。
          */
         get: {
             parameters: {
@@ -1580,22 +1451,8 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description 匹配结果不存在或已过期 */
+                /** @description 匹配结果不存在或已过期；或诊断报告尚未生成（需先 POST 创建生成任务） */
                 404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description 诊断报告生成失败（LLM 未配置可用 provider 或全部 provider 调用失败，错误码 503） */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description LLM 调用超时（错误码 5003，前端可据此提示稍后重试） */
-                504: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -2795,13 +2652,17 @@ export interface paths {
                             name: string;
                             /** Format: uri */
                             base_url: string;
-                            /** @description 留空或 **** 表示保持原值；明文才更新 */
+                            /** @description 留空或 **** 表示保持原值；明文才更新。推荐改用 api_key_env */
                             api_key?: string;
+                            /** @description 密钥环境变量名：key 经 env 注入不落盘（推荐方式） */
+                            api_key_env?: string;
                             model: string;
                             /** @description 数字越小优先级越高，列表内唯一 */
                             priority: number;
                             enabled: boolean;
                             supports_function_calling?: boolean;
+                            /** @description provider 特定请求参数（如 deepseek 关闭思考模式），编辑时须保留 */
+                            extra_body?: Record<string, never>;
                         }[];
                     };
                 };
@@ -4019,11 +3880,6 @@ export interface components {
             /** @description 岗位软素质（20 项白名单封闭集，聚合层按频次降序写回；与技术栈技能分离展示） */
             soft_skills?: string[];
         };
-        /** @description GET /graph/position/{id}/skills 响应 data */
-        PositionSkillsData: {
-            position_id: string;
-            skills: components["schemas"]["PositionSkillItem"][];
-        };
         /** @description 技能证据项（GET /graph/skill/{id}/evidence，EVIDENCED_BY 原始 JD） */
         SkillEvidenceItem: {
             id: string;
@@ -4499,6 +4355,16 @@ export interface components {
                     minute?: number;
                 };
             };
+            /** @description 总开关（false 时 ETL 阶段直接跳过） */
+            dict_guard_enabled?: boolean;
+            /** @description 自动生效影响面上限（图谱节点数，超过转人工，1-1000） */
+            dict_guard_auto_impact_threshold?: number;
+            /** @description 自动生效最低 LLM 置信度（0.0-1.0） */
+            dict_guard_min_confidence?: number;
+            /** @description 每类候选上限（控制每日 LLM 成本，1-100） */
+            dict_guard_max_candidates?: number;
+            /** @description 驳回提案冷却期（天内不重提，1-90） */
+            dict_guard_reproposal_cooldown_days?: number;
         };
         /** @description LLM provider 配置项（GET/PUT /admin/llm-config） */
         LlmProviderConfig: {
@@ -4509,6 +4375,8 @@ export interface components {
             base_url: string;
             /** @description 回显时打码（*）；提交空白/含掩码保持原值 */
             api_key?: string;
+            /** @description 密钥环境变量名（推荐）：key 经 env 注入不落盘；设置后 api_key 明文不再回捞 */
+            api_key_env?: string;
             model: string;
             supports_function_calling?: boolean;
             enabled: boolean;

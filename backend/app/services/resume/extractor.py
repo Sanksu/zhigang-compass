@@ -14,6 +14,7 @@ from app.services.extraction.llm_provider import (
     LLMExtractionError,
     LLMProviderChain,
 )
+from app.services.extraction.llm_invocation import invocation_scope
 from app.services.resume.prompts import RESUME_SYSTEM_PROMPT, RESUME_TASK_TEMPLATE
 from app.services.resume.schemas import ResumeExtractionResult, ResumeSkill
 
@@ -82,9 +83,10 @@ class ResumeExtractor:
         else:
             try:
                 prompt = RESUME_TASK_TEMPLATE.format(resume_text=resume_text)
-                result = self._llm.extract_structured(
-                    prompt, ResumeExtractionResult, system_prompt=RESUME_SYSTEM_PROMPT
-                )
+                with invocation_scope("resume_extract"):
+                    result = self._llm.extract_structured(
+                        prompt, ResumeExtractionResult, system_prompt=RESUME_SYSTEM_PROMPT
+                    )
                 # LLM 返回空对象（provider/instructor 层解析失败，实测 3 个样本稳定复现）：
                 # 视同抽取失败，与 LLMExtractionError 同语义回退规则兜底。
                 # 简历技能为空即视为失败——黄金集实证规则兜底对其 F1=1.0，回退为纯收益。

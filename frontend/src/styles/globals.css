@@ -122,33 +122,18 @@ body {
   min-height: 100vh;
 }
 
+/* 图谱画布容器：仅保留方位椭圆环（::before）；浅蓝底色、网格与中线装饰已按演示口径移除 */
 .atlas-surface {
   isolation: isolate;
-  background-color: var(--color-atlas-surface);
-  background-image:
-    linear-gradient(to right, color-mix(in srgb, var(--color-atlas-grid) 62%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--color-atlas-grid) 62%, transparent) 1px, transparent 1px),
-    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--color-atlas-domain) 7%, transparent), transparent 52%);
-  background-size: 32px 32px, 32px 32px, auto;
-}
-
-.atlas-surface::before,
-.atlas-surface::after {
-  content: '';
-  position: absolute;
-  pointer-events: none;
-  inset: 18px;
-  border: 1px solid color-mix(in srgb, var(--color-atlas-grid) 78%, transparent);
 }
 
 .atlas-surface::before {
-  border-radius: 50%;
+  content: '';
+  position: absolute;
+  pointer-events: none;
   inset: 13% 22%;
-}
-
-.atlas-surface::after {
-  border-width: 1px 0;
-  inset: 50% 10%;
+  border: 1px solid color-mix(in srgb, var(--color-atlas-grid) 78%, transparent);
+  border-radius: 50%;
 }
 
 /* 滚动条 — 细线样式 */

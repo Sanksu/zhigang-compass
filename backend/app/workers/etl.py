@@ -61,6 +61,28 @@ async def _run_stage(name: str, coro) -> dict:
         return {"error": f"{type(error).__name__}: {str(error)[:300]}"}
 
 
+# 事实阶段（08-23 全流程闭环审查 P0）：去重/LLM 抽取入图/岗位聚合构成图谱
+# 事实链——任一失败意味着当日图谱不完整。此时发布新快照会让演化 Z-score
+# 序列和岗位发现消费一个"部分失败被当作新事实"的版本，因此下游派生阶段
+# 整体跳过（治理/报告阶段不依赖当日数据完整性，继续执行）。
+_FACT_STAGES = ("dedup_simhash", "structure_load", "aggregate_positions")
+
+# 受事实门禁跳过的派生阶段：快照发布/演化推导/画像缓存/新岗位发现。
+_FACT_GATED_STAGES = (
+    "backfill_embeddings",
+    "snapshot_graph",
+    "evolved_from",
+    "positions_cache_prebuild",
+    "discovery_daily",
+    "discovery_auto_transition",
+)
+
+
+def _stage_failed(result) -> bool:
+    """阶段结果是否为硬失败（_run_stage/_run_limited_stage 捕获的 error 项）。"""
+    return isinstance(result, dict) and isinstance(result.get("error"), str)
+
+
 async def _run_limited_stage(
     name: str,
     *,
@@ -88,6 +110,11 @@ async def run_etl_pipeline(
     tasks_module=None,
 ) -> dict:
     """Run the complete ETL pipeline in dependency order.
+
+    Fact stages (dedup/extract/aggregate) gate the derived stages: any hard
+    failure marks the run ``pipeline_status=degraded`` and skips snapshot /
+    evolved_from / discovery so partial data is never published as a new
+    graph version. Governance stages (health/dict-guard/stats) still run.
 
     ``tasks_module`` is an internal compatibility seam. The public wrapper in
     ``app.workers.tasks`` supplies that module so existing monkeypatches of task
@@ -202,38 +229,56 @@ async def run_etl_pipeline(
         asyncio.to_thread(_run_skill_relations),
     )
 
-    from app.services.evolution.evolved_from import derive_evolved_from
+    # 事实门禁：事实链任一失败 → 快照/演化/发现整体跳过（记 skipped 审计项），
+    # 防止不完整数据被当作新事实版本发布；治理/报告阶段不受影响继续执行。
+    fact_failures = [
+        name for name in _FACT_STAGES if _stage_failed(results["stages"].get(name))
+    ]
+    pipeline_status = "degraded" if fact_failures else "complete"
+    results["pipeline_status"] = pipeline_status
 
-    results["stages"]["evolved_from"] = await run_stage(
-        "evolved_from",
-        derive_evolved_from(),
-    )
-    results["stages"]["backfill_embeddings"] = await run_stage(
-        "backfill_embeddings",
-        tasks_module.backfill_embeddings(ctx),
-    )
-    results["stages"]["snapshot_graph"] = await run_stage(
-        "snapshot_graph",
-        tasks_module.snapshot_graph(ctx, triggered_by="scheduled"),
-    )
+    if pipeline_status == "degraded":
+        for stage_name in _FACT_GATED_STAGES:
+            results["stages"][stage_name] = {
+                "skipped": "pipeline_degraded",
+                "failed_fact_stages": fact_failures,
+            }
+    else:
+        from app.services.evolution.evolved_from import derive_evolved_from
 
-    # 阶段 14.5：岗位画像共享缓存预构建（P1）——聚合与快照完成后重建
-    # 版本化载荷并切指针（先写载荷后切指针，旧版本保持可读；失败仅记审计，
-    # 不阻塞 ETL——匹配侧按指针读取或走降级路径）
-    from app.services.matching.shared_cache import load_positions_shared
+        # 顺序：先回填向量、发布当日快照，演化关系推导基于「上一版本+当日本
+        # 版本」配对——旧顺序在快照前推导，当日新数据要滞后一轮才参与演化。
+        results["stages"]["backfill_embeddings"] = await run_stage(
+            "backfill_embeddings",
+            tasks_module.backfill_embeddings(ctx),
+        )
+        results["stages"]["snapshot_graph"] = await run_stage(
+            "snapshot_graph",
+            tasks_module.snapshot_graph(ctx, triggered_by="scheduled"),
+        )
+        results["stages"]["evolved_from"] = await run_stage(
+            "evolved_from",
+            derive_evolved_from(),
+        )
 
-    results["stages"]["positions_cache_prebuild"] = await run_stage(
-        "positions_cache_prebuild",
-        load_positions_shared(),
-    )
-    results["stages"]["discovery_daily"] = await run_stage(
-        "discovery_daily",
-        tasks_module.discovery_daily(ctx),
-    )
-    results["stages"]["discovery_auto_transition"] = await run_stage(
-        "discovery_auto_transition",
-        tasks_module.discovery_auto_transition(ctx),
-    )
+        # 阶段 14.5：岗位画像共享缓存预构建（P1）——聚合与快照完成后重建
+        # 版本化载荷并切指针（先写载荷后切指针，旧版本保持可读；失败仅记审计，
+        # 不阻塞 ETL——匹配侧按指针读取或走降级路径）
+        from app.services.matching.shared_cache import load_positions_shared
+
+        results["stages"]["positions_cache_prebuild"] = await run_stage(
+            "positions_cache_prebuild",
+            load_positions_shared(),
+        )
+        # 新岗位发现消费快照窗口，同样只在事实链完整时执行
+        results["stages"]["discovery_daily"] = await run_stage(
+            "discovery_daily",
+            tasks_module.discovery_daily(ctx),
+        )
+        results["stages"]["discovery_auto_transition"] = await run_stage(
+            "discovery_auto_transition",
+            tasks_module.discovery_auto_transition(ctx),
+        )
     results["stages"]["graph_health_check"] = await run_stage(
         "graph_health_check",
         tasks_module.graph_health_check(ctx),
@@ -246,10 +291,29 @@ async def run_etl_pipeline(
         tasks_module.dict_guard_daily(ctx),
     )
 
+    # 阶段 17：LLM 调用统计日报（#454 审计计数聚合 → reports/llm_stats_{date}.json；
+    # 报告 only 无阈值动作，失败不阻塞管线——见 workers/llm_stats.py）
+    results["stages"]["llm_stats"] = await run_stage(
+        "llm_stats",
+        tasks_module.llm_stats_daily(ctx),
+    )
+
+    # 阶段 18：技能分类 LLM 审查（未分类技能灰度提议，默认关；
+    # 只写 suggested_category 提议字段不动权威 category——见 workers/skill_category_review.py）
+    results["stages"]["skill_category_review"] = await run_stage(
+        "skill_category_review",
+        tasks_module.skill_category_review_daily(ctx),
+    )
+
     # L-9：阶段隔离吞错继续跑（防单阶段失败拖垮全线）不等于无声——聚合各阶段
     # error 一次性外发告警并落 error 日志，结束"管线永远成功"的可观测盲区。
     # crawl 阶段为 list[dict]（每爬虫一项），其余阶段为 dict。
     stage_errors: list[str] = []
+    if pipeline_status == "degraded":
+        stage_errors.append(
+            f"pipeline_degraded: 快照/演化/发现已跳过（事实阶段失败: "
+            f"{', '.join(fact_failures)}）"
+        )
     for stage_name, stage_result in results["stages"].items():
         entries = (
             stage_result
@@ -262,7 +326,12 @@ async def run_etl_pipeline(
             if isinstance(entry, dict) and isinstance(entry.get("error"), str):
                 stage_errors.append(f"{stage_name}: {entry['error'][:120]}")
     if stage_errors:
-        logger.error("ETL 完成，但 %d 个阶段项失败：\n%s", len(stage_errors), "\n".join(stage_errors))
+        logger.error(
+            "ETL 完成（pipeline_status=%s），但 %d 个阶段项失败：\n%s",
+            pipeline_status,
+            len(stage_errors),
+            "\n".join(stage_errors),
+        )
         from app.services.alerting import send_alert
 
         try:

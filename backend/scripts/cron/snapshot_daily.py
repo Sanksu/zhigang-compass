@@ -1,13 +1,12 @@
-r"""每日图谱版本快照调度入口（设计文档 §7.1 T+1 版本管理）。
+r"""每日图谱版本快照手动补跑入口（设计文档 §7.1 T+1 版本管理；08-23 P0-2）。
 
-被系统 cron / Windows 计划任务调用，将快照任务入队到 ARQ。
+⚠️ 仅手动运维工具——快照发布已链入 run_etl_pipeline（backfill_embeddings
+之后、evolved_from 之前，且受事实门禁保护）。禁止将本脚本装入
+crontab / Windows 计划任务：独立触发会在主管线之外发布快照版本，
+打乱「快照 → 演化推导 → 发现」顺序，且不经过事实门禁。
 
-调用方式：
-    # Linux cron（crontab -e，05:00 前发布当日版本）
-    0 5 * * * cd /path/to/backend && uv run python scripts/cron/snapshot_daily.py >> logs/snapshot_$(date +\%Y\%m\%d).log 2>&1
-
-    # Windows 计划任务（PowerShell，每日 05:00）
-    cd backend; uv run python scripts/cron/snapshot_daily.py
+调用方式（手动补跑）：
+    cd backend && uv run python scripts/cron/snapshot_daily.py
 
 依赖：Redis 已启动、ARQ Worker 已运行（arq app.workers.settings.WorkerSettings）
 """

@@ -12,6 +12,7 @@ is_valid_skill_name（停用词/白名单口径，与 import_course 一致）过
 
 from pydantic import BaseModel, Field
 
+from app.services.extraction.llm_invocation import invocation_scope
 from app.services.extraction.post_processor import (
     is_valid_skill_name,
     canonical_skill_name,
@@ -66,12 +67,13 @@ def extract_course_skills(llm, title: str, description: str) -> list[str]:
     if llm is None:
         return []
     try:
-        result = llm.extract_structured(
-            build_prompt(title, description),
-            response_model=CourseSkillResult,
-            system_prompt=SYSTEM_PROMPT,
-            timeout=30,
-        )
+        with invocation_scope("course_skills"):
+            result = llm.extract_structured(
+                build_prompt(title, description),
+                response_model=CourseSkillResult,
+                system_prompt=SYSTEM_PROMPT,
+                timeout=30,
+            )
     except Exception:
         # LLM 不可用/超时/校验失败：静默降级（课程无标签不影响语义兜底推荐）
         return []

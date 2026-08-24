@@ -13,6 +13,7 @@ identical to preserve ARQ job matching.
 """
 
 import asyncio
+import json
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable
@@ -636,6 +637,100 @@ def _is_jd_text_short(snapshot: dict, raw_text: str) -> bool:
     return len((_build_jd_text(snapshot, raw_text) or "").strip()) < 10
 
 
+# LLM 全败延迟重试预算（设计文档 §6.5：全部 provider 失败后入延迟队列，不立即
+# 落库规则降级产物）。job_try ≤ 该值时整任务延迟重试；耗尽后落库降级产物并告警。
+_LLM_RETRY_DEFER_SECONDS = 600
+_LLM_RETRY_MAX_JOB_TRY = 2
+
+
+def _llm_total_outage(methods: list[str], *, llm_configured: bool) -> bool:
+    """抽取结果是否为 LLM 全面不可用降级：配置了 LLM 且全部条目 method=rule。
+
+    - LLM 未配置时 method=rule 是设计内模式（无 key 环境），不算事故；
+    - 部分批次降级（llm/rule 混合）属局部失败，批内已逐条重试过，不整体延迟重试。
+    """
+    if not llm_configured or not methods:
+        return False
+    return all(m == "rule" for m in methods)
+
+
+# 岗位名审查单轮上限（§4.6 成本控制：设计预估每日 < 50 条）
+_POSITION_REVIEW_MAX_PER_RUN = 50
+
+
+async def _position_frequencies(session, names: list[str]) -> dict[str, int]:
+    """历史 JD 频次（按归一化岗位名分组；本批未落库记录不计入=首次出现为 0）。"""
+    from sqlalchemy import func
+
+    col = JDRaw.snapshot["normalized_position"].astext
+    stmt = (
+        select(col.label("name"), func.count())
+        .where(col.in_(names))
+        .group_by(col)
+    )
+    rows = (await session.execute(stmt)).all()
+    return {r[0]: r[1] for r in rows}
+
+
+async def _review_position_names(session, rows, extractions, llm):
+    """岗位名 LLM 审查编排（§4.1 触发 + §4.4 决策表）。
+
+    同名候选只调一次 LLM、裁决共享（成本与一致性双赢）。
+    返回 (rejected_row_ids, {row_id: position_review 落库记录})；
+    LLM 失败的候选静默跳过（无记录），不阻塞管线。
+    """
+    from app.services.extraction.dictionary import (
+        _POSITION_WHITELIST,
+        normalize_position_name,
+    )
+    from app.services.extraction.position_review import (
+        REVIEW_FREQ_MAX,
+        apply_decision,
+        extraction_skills,
+        review_position_name,
+    )
+
+    by_norm: dict[str, list[int]] = {}
+    meta: dict[str, tuple[str, list[str]]] = {}
+    for idx, (row, ext) in enumerate(zip(rows, extractions)):
+        raw = (ext.position_name or "").strip()
+        if not raw:
+            continue
+        skills = extraction_skills(ext.skills, ext.requirements)
+        norm = normalize_position_name(raw, skills=skills)
+        # 规则拦截（norm 空）或白名单族（规则已分类）不审
+        if not norm or norm in _POSITION_WHITELIST or norm in meta:
+            continue
+        by_norm[norm] = []
+        meta[norm] = (raw, skills)
+        by_norm[norm].append(idx)
+    if not by_norm:
+        return set(), {}
+
+    freqs = await _position_frequencies(session, list(by_norm))
+    targets = [
+        (norm, idxs) for norm, idxs in by_norm.items()
+        if freqs.get(norm, 0) < REVIEW_FREQ_MAX
+    ][:_POSITION_REVIEW_MAX_PER_RUN]
+
+    rejected: set[int] = set()
+    records: dict[int, dict] = {}
+    for norm, idxs in targets:
+        raw, skills = meta[norm]
+        result = await asyncio.to_thread(review_position_name, raw, skills, llm)
+        if result is None:
+            continue  # 降级：保留原名，无审计记录
+        final, record = apply_decision(result, raw, skills)
+        if final != raw:
+            for i in idxs:
+                extractions[i].position_name = final
+        for i in idxs:
+            records[rows[i].id] = record
+        if final == "":
+            rejected.update(rows[i].id for i in idxs)
+    return rejected, records
+
+
 async def batch_extract(
     ctx: dict,
     jd_ids: list[int] | None = None,
@@ -650,7 +745,9 @@ async def batch_extract(
     - 抽取结果写回 jd_raw.snapshot["extraction"]（可审计、可重跑）
     - kg_service.import_jd 入图（Neo4j MERGE 幂等，重复执行不产生重复节点）
 
-    全部失败时抛出，由 ARQ 重试机制兜底。
+    LLM 全败处理（设计文档 §6.5 延迟队列）：配置了 LLM 且全部条目降级为规则抽取时，
+    先按预算延迟重试整任务（Retry defer，期间不落库、游标不推进）；预算耗尽才落库
+    降级产物（method=rule 低置信）并发告警。入图失败仍抛出由 ARQ 重试机制兜底。
     """
 
     from app.core.database import async_session_factory, neo4j_driver
@@ -716,6 +813,51 @@ async def batch_extract(
         else:
             extractions = []
 
+        # LLM 全败延迟重试（设计文档 §6.5 延迟队列）：此刻尚未落库、游标未推进，
+        # raise Retry 整任务延迟重跑；短文本/低质行的 skipped 标记随会话回滚，
+        # 下次重跑重新标记（幂等，代价可忽略）。
+        if _llm_total_outage(
+            [r.method for r in extractions], llm_configured=extractor.llm is not None
+        ):
+            job_try = int(ctx.get("job_try") or 1)
+            if job_try <= _LLM_RETRY_MAX_JOB_TRY:
+                from arq.worker import Retry
+
+                logger.warning(
+                    "batch_extract LLM 全部 provider 失败（job_try=%s），%ss 后延迟重试",
+                    job_try, _LLM_RETRY_DEFER_SECONDS,
+                )
+                raise Retry(defer=_LLM_RETRY_DEFER_SECONDS)
+            # 重试预算耗尽：落库规则降级产物（下方正常流程，method=rule 低置信）
+            from app.services.alerting import send_alert
+
+            await send_alert(
+                "batch_extract_llm_degraded",
+                f"batch_extract LLM 全部 provider 失败且延迟重试预算耗尽"
+                f"（job_try={job_try}），{len(extractions)} 条按规则抽取降级落库"
+                f"（method=rule，低置信，勿用于 must 判定口径）",
+            )
+
+        # 局部降级计数（llm/rule 混合）：供运维观测，不触发整体延迟重试
+        results["llm_rule_fallback"] = sum(1 for r in extractions if r.method == "rule")
+
+        # ── 幻觉防控第四道防线：岗位名 LLM 审查（方案评审稿 §4.6，默认关闭）──
+        # 位置：抽取后、normalize 持久化与入图之前；只审规则放行的未知低频名
+        results["position_reviews"] = 0
+        results["review_rejected"] = 0
+        rejected_row_ids: set[int] = set()
+        from app.core import runtime_config
+
+        if runtime_config.get("position_review_enabled", False) and valid:
+            rejected_row_ids, review_records = await _review_position_names(
+                session, valid, extractions, extractor.llm,
+            )
+            results["position_reviews"] = len(review_records)
+            for row in valid:
+                record = review_records.get(row.id)
+                if record is not None:
+                    row.snapshot = {**(row.snapshot or {}), "position_review": record}
+
         # 规范岗位名单独写入快照，保留原始抽取 position_name 供审计和评测。
         # 所有写入均通过版本化单一入口，保证下游只消费当前规则版本的快照值。
         from app.services.extraction.position_normalization import persist_normalized_position
@@ -744,6 +886,12 @@ async def batch_extract(
             if (row.snapshot or {}).get("_duplicate_of"):
                 row.snapshot = normalized_snapshot
                 results["skipped_dup"] += 1
+                continue
+            if row.id in rejected_row_ids:
+                # 审查 invalid（§4.4）：extraction 落库推进游标 + 审计记录已在快照，
+                # 不入图（与 _duplicate_of 同款跳过语义）
+                row.snapshot = normalized_snapshot
+                results["review_rejected"] += 1
                 continue
             try:
                 evidence = {
@@ -864,11 +1012,17 @@ async def cross_validate_jds(ctx: dict, limit: int | None = None) -> dict:
     }
 
 
-async def sync_skill_normalization(ctx: dict) -> dict:
+async def sync_skill_normalization(ctx: dict, *, force: bool = False) -> dict:
     """技能归一化 + SIMILAR_TO 建边（设计文档 §5.3，ETL 阶段 9.5）。
 
     对图谱全量 Skill 名做 SBERT 层次聚类，回写 `Skill.normalized_name`，
     同簇相似度 ≥ 0.85 自动建 `SIMILAR_TO {similarity}` 关系（幂等 MERGE）。
+
+    增量跳过（08-23 闭环收敛 P1-1）：技能名全集 + 别名词典 + 阈值三者
+    不变时聚类输入相同、输出必然不变——比对 SkillNormState 节点存的
+    输入指纹，一致即整段跳过（免 SBERT 加载与全量写回）。换 SBERT 模型
+    不受指纹保护，需清除 SkillNormState 触发全量；门禁拦截/模型不可用
+    的运行不落指纹（下轮自动重算）。force=True 强制全量。
 
     模型不可用时归一化退化为词典路径（normalize_skill 在线词典不变），
     不阻塞 ETL 主线。
@@ -878,15 +1032,40 @@ async def sync_skill_normalization(ctx: dict) -> dict:
         # 同步 Neo4j 全量读取 + SBERT 聚类 + 关系回写为 CPU/IO 密集，整体放线程池
         from app.core.database import neo4j_driver
         from app.services.extraction.normalization import (
+            DISTANCE_THRESHOLD,
             SkillNormalizer,
+            _default_alias,
             guard_cluster_distribution,
+            input_fingerprint,
         )
 
         with neo4j_driver.session() as session:
             rows = session.run("MATCH (s:Skill) RETURN s.name AS name").data()
-            names = [r["name"] for r in rows if r.get("name")]
+            state = (
+                session.run(
+                    "MATCH (m:SkillNormState {id: 'singleton'}) "
+                    "RETURN m.fingerprint AS fp, m.summary_json AS summary_json"
+                ).single()
+            )
+        names = [r["name"] for r in rows if r.get("name")]
         if not names:
             return {"skills": 0, "normalized": 0, "similar_pairs": 0, "detail": "图谱无 Skill 节点"}
+
+        fingerprint = input_fingerprint(names, _default_alias(), DISTANCE_THRESHOLD)
+        stored_summary = (
+            state.get("summary_json") if state is not None else None
+        )
+        if (
+            not force
+            and state is not None
+            and state.get("fp") == fingerprint
+            and isinstance(stored_summary, str)
+        ):
+            # Neo4j 属性只允许原始类型——summary 以 JSON 字符串存取（08-23 实跑修复：
+            # map 属性触发 CypherTypeError，归一化写回整体失败）
+            summary = json.loads(stored_summary)
+            summary["skipped"] = "input_unchanged"
+            return summary
 
         normalizer = SkillNormalizer()
         normalized = normalizer.normalize_many(names)
@@ -941,13 +1120,27 @@ async def sync_skill_normalization(ctx: dict) -> dict:
                 )
                 written += 1
 
-        return {
+        summary = {
             "skills": len(names),
             "normalized": changed,
             "similar_pairs": written,
             "skipped_standard": skipped_standard,
             "detail": "SIMILAR_TO 已回写（幂等）",
         }
+        # 成功写回后落输入指纹（模型可用 + 门禁通过路径才会到达此处）
+        with neo4j_driver.session() as session:
+            session.run(
+                """
+                MERGE (m:SkillNormState {id: 'singleton'})
+                SET m.fingerprint = $fp, m.run_at = $at,
+                    m.summary_json = $summary_json
+                """,
+                fp=fingerprint,
+                at=datetime.now(timezone(timedelta(hours=8))).isoformat(),
+                # Neo4j 属性只收原始类型——嵌套 Map 会 CypherTypeError（08-23 实跑）
+                summary_json=json.dumps(summary, ensure_ascii=False),
+            )
+        return summary
 
     return await asyncio.to_thread(_run)
 

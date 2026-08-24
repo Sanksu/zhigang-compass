@@ -192,7 +192,7 @@ export function NodeDetailPanel({
   }, [node])
 
   return (
-    <div className="flex h-full w-full flex-col bg-atlas-surface">
+    <div className="flex h-full w-full flex-col bg-canvas">
       {!node ? (
         <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-ink-faint">
           <Network className="size-10 opacity-40" />
@@ -202,14 +202,13 @@ export function NodeDetailPanel({
       ) : (
         <>
           {/* 头部 */}
-          <div className="flex items-start justify-between gap-3 border-b border-atlas-grid bg-canvas/85 p-4 backdrop-blur-xl">
+          <div className="flex items-start justify-between gap-3 border-b border-border bg-subtle/50 p-4">
             <div className="flex items-start gap-3 min-w-0">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-atlas-grid bg-atlas-ocean/10">
-                <Icon className="size-4 text-atlas-ocean" />
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-subtle">
+                <Icon className="size-4 text-ink-muted" />
               </div>
               <div className="min-w-0">
-                <p className="font-mono text-[9px] tracking-[0.16em] text-atlas-muted">NODE DOSSIER / {TYPE_LABEL[node.type]}</p>
-                <h3 className="mt-1 text-sm font-semibold text-ink truncate">{node.name}</h3>
+                <h3 className="text-sm font-semibold text-ink truncate">{node.name}</h3>
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                     {TYPE_LABEL[node.type]}
@@ -224,7 +223,8 @@ export function NodeDetailPanel({
                       职能域 · {node.memberCount ?? 0} 岗
                     </Badge>
                   )}
-                  {node.type === 'skill' && node.level && (
+                  {/* level 0/“0”=未定级噪声，不渲染（数字 0 会以字面量漏出） */}
+                  {node.type === 'skill' && !!node.level && node.level !== '0' && (
                     <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                       {node.level}
                     </Badge>
@@ -267,7 +267,7 @@ export function NodeDetailPanel({
           <div className="flex-1 space-y-4 overflow-y-auto p-4">
             {/* 匹配度 / 熟练度 微型进度条 */}
             {typeof node.value === 'number' && (
-              <section className="space-y-2 rounded-xl bg-subtle/50 p-3">
+              <section className="space-y-2 rounded-lg border border-border bg-subtle/40 p-3">
                 <div className="flex items-center gap-2 text-xs font-medium text-ink-muted">
                   <Target className="size-3.5" />
                   {node.type === 'skill' ? '熟练度' : '关联度'}
@@ -306,7 +306,7 @@ export function NodeDetailPanel({
             {/* 来源 */}
             {node.type === 'evidence' && node.source && (
               <section className="space-y-1.5">
-                <h4 className="text-xs font-medium uppercase tracking-wide text-ink-muted">来源</h4>
+                <h4 className="text-xs font-medium text-ink-muted">来源</h4>
                 <p className="text-sm text-ink">{node.source}</p>
               </section>
             )}
@@ -314,7 +314,7 @@ export function NodeDetailPanel({
             {/* 关联统计 */}
             {stats && (stats.positionCount || stats.skillCount || stats.evidenceCount) && (
               <section className="space-y-2">
-                <h4 className="text-xs font-medium uppercase tracking-wide text-ink-muted">关联统计</h4>
+                <h4 className="text-xs font-medium text-ink-muted">关联统计</h4>
                 <dl className="grid grid-cols-3 gap-2 text-center">
                   {stats.positionCount !== undefined && (
                     <div className="rounded-lg bg-subtle/60 p-2">
@@ -341,7 +341,7 @@ export function NodeDetailPanel({
             {/* 描述 */}
             {node.description && (
               <section className="space-y-1.5">
-                <h4 className="text-xs font-medium uppercase tracking-wide text-ink-muted">描述</h4>
+                <h4 className="text-xs font-medium text-ink-muted">描述</h4>
                 <p className="text-sm leading-relaxed text-ink-secondary">{node.description}</p>
               </section>
             )}
@@ -351,7 +351,7 @@ export function NodeDetailPanel({
               <>
                 {(positionDetail.required_years != null || positionDetail.required_education) && (
                   <section className="space-y-1.5">
-                    <h4 className="text-xs font-medium uppercase tracking-wide text-ink-muted">任职要求</h4>
+                    <h4 className="text-xs font-medium text-ink-muted">任职要求</h4>
                     <div className="flex flex-wrap gap-1.5">
                       {positionDetail.required_years != null && (
                         <Badge variant="outline" className="text-xs">
@@ -368,7 +368,7 @@ export function NodeDetailPanel({
                 )}
 
                 <section className="space-y-2">
-                  <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                  <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                     <Briefcase className="size-3" />
                     必备技能
                     <span className="ml-auto font-mono text-[10px]">{positionDetail.must_skills.length}</span>
@@ -385,7 +385,7 @@ export function NodeDetailPanel({
                           >
                             <span className="truncate text-xs font-medium text-ink">{s.skill_name}</span>
                             <span className="flex shrink-0 items-center gap-1.5">
-                              {s.level && <span className="text-[10px] text-ink-faint">{s.level}</span>}
+                              {!!s.level && s.level !== '0' && <span className="text-[10px] text-ink-faint">{s.level}</span>}
                               <span className="text-[10px] font-mono text-ink-faint">
                                 {(s.weight * 100).toFixed(0)}%
                               </span>
@@ -399,7 +399,7 @@ export function NodeDetailPanel({
 
                 {positionDetail.nice_skills.length > 0 && (
                   <section className="space-y-2">
-                    <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                       <Briefcase className="size-3" />
                       加分技能
                       <span className="ml-auto font-mono text-[10px]">{positionDetail.nice_skills.length}</span>
@@ -422,7 +422,7 @@ export function NodeDetailPanel({
                     不走 REQUIRES 边、多为非图谱节点，纯文本胶囊 + 粉色调与画布一致 */}
                 {(positionDetail.soft_skills?.length ?? 0) > 0 && (
                   <section className="space-y-2">
-                    <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                       <Briefcase className="size-3" />
                       软素质
                       <span className="ml-auto font-mono text-[10px]">{positionDetail.soft_skills?.length}</span>
@@ -451,7 +451,7 @@ export function NodeDetailPanel({
                     demand/trend 仅存在于 GapSkill/LearningPathItem,图谱五个钻取
                     端点均无此字段。改为按岗位命中数叙事。 */}
                 <section className="space-y-2">
-                  <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                  <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                     <Sparkles className="size-3" />
                     为什么学
                   </h4>
@@ -477,7 +477,7 @@ export function NodeDetailPanel({
 
                 {/* 导学面板（task 1.3）：如何开始 → 前置就绪检查 */}
                 <section className="space-y-2">
-                  <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                  <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                     <Route className="size-3" />
                     如何开始
                   </h4>
@@ -519,7 +519,7 @@ export function NodeDetailPanel({
                   })()}
                 </section>
                 <section className="space-y-2">
-                  <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                  <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                     <Briefcase className="size-3" />
                     要求该技能的岗位
                   </h4>
@@ -551,7 +551,7 @@ export function NodeDetailPanel({
 
                 {/* 先修链伪时间轴 */}
                 <section className="space-y-2">
-                  <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                  <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                     <GitBranch className="size-3" />
                     前置推荐路径
                   </h4>
@@ -590,7 +590,7 @@ export function NodeDetailPanel({
                 </section>
 
                 <section className="space-y-2">
-                  <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                  <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                     <BookOpen className="size-3" />
                     推荐课程
                   </h4>
@@ -637,7 +637,7 @@ export function NodeDetailPanel({
 
                 {similarSkills && similarSkills.length > 0 && (
                   <section className="space-y-2">
-                    <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                       <Network className="size-3" />
                       相似技能
                     </h4>
@@ -661,7 +661,7 @@ export function NodeDetailPanel({
 
                 {skillEvidence && skillEvidence.length > 0 && (
                   <section className="space-y-2">
-                    <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-muted">
+                    <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                       <ExternalLink className="size-3" />
                       证据来源
                       <span className="ml-auto font-mono text-[10px]">{skillEvidence.length}</span>

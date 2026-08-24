@@ -40,6 +40,19 @@ printf '{\n  "version": 0,\n  "blocked": [],\n  "protected": []\n}\n' > backend/
 
 其余可选项（LLM provider、CDP、代理等）见 `.env.example` 注释。
 
+**代理（爬虫国际源）**：compose 默认 `HTTPS_PROXY=http://host.docker.internal:7890`（Docker Desktop 指向宿主机 Clash）。**LAN/无 Clash 部署必须显式关闭**——Linux Docker 不解析 `host.docker.internal`，默认值会导致容器内全部外联请求 DNS 失败（爬虫 0 产出、HF 模型下载挂起、LLM 健康检查失败）。
+
+⚠️ 关闭必须写在 **compose 同目录（仓库根）的 `.env`**（插值上下文），**不是 `backend/.env`**——`backend/.env` 是 `env_file`（仅注入容器运行时 env），worker `environment` 内联项插值取根 `.env`/shell 且覆盖 `env_file` 同名值：
+
+```bash
+# 仓库根 .env（与 docker-compose.yml 同目录，gitignore 不入库）
+HTTPS_PROXY=
+HTTP_PROXY=
+CDP_PROXY=
+```
+
+置空后国内源（智联/BOSS/脉脉/中国大学MOOC）直连正常，国际源（LinkedIn/Glassdoor/Coursera/arxiv 等）在无代理网络下尽力直连。已有 override 文件（如 `docker-compose.images.yml`）里 `environment: HTTPS_PROXY: ""` 同样有效。
+
 **前端产物**（api 容器以只读卷挂载托管）：
 
 ```bash
@@ -117,7 +130,8 @@ curl http://localhost:8000/health
 
 ETL 主管线（采集 → 去重 → LLM 抽取 → 时滞/通胀 → 入图 → 快照 → 发现/自动流转）由 **worker 容器内 ARQ cron** 触发，不再依赖外部计划任务：
 
-- 执行时间在**配置中心 →「ETL 队列」页**配置（`etl_run_hour` / `etl_run_minute`，默认 05:00），持久化到 `backend/configs/runtime_settings.json`
+- 执行时间在**配置中心 →「ETL 队列」页**配置（`etl_run_hour` / `etl_run_minute`，默认 05:00 **北京时间**），持久化到 `backend/configs/runtime_settings.json`
+- **时区前提（2026-08-24 修复）**：ARQ cron 按进程本地时间触发，api/worker 容器已设 `TZ=Asia/Shanghai`；老部署未设 TZ 时 hour=5 实为 UTC 5 点=北京 13:00，升级后需 `docker compose up -d --force-recreate api worker`
 - 修改后需 **重启 worker** 生效：`docker compose restart worker`
 - 当日幂等：`run_etl_pipeline_scheduled` 内部 Redis 锁（`arq:etl:run:{date}`，24h TTL），重复触发自动跳过
 - 已验证：`docker logs zhigang-worker` 可见 ARQ cron 注册与 ETL 入队/执行日志

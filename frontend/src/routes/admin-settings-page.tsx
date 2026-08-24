@@ -25,13 +25,14 @@ type RateLimitEntry = NonNullable<RuntimeConfig['rate_limit']>[string]
 type Feedback = { type: 'ok' | 'err'; text: string } | null
 
 /** 配置分区（08-16：不同配置项放不同页面；08-21：新增 ETL 队列） */
-export type SettingsSection = 'tasks' | 'crawl' | 'evolution' | 'etl'
+export type SettingsSection = 'tasks' | 'crawl' | 'evolution' | 'etl' | 'dictguard'
 
 const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   tasks: { title: '任务与告警', desc: 'ARQ 任务并发/超时与告警 Webhook · 重启后生效' },
   crawl: { title: '采集与限频', desc: '单次采集上限与各源请求限频 · 重启后生效' },
   evolution: { title: '演化与缓存', desc: '演化看板缓存 TTL · 重启后生效' },
   etl: { title: 'ETL 队列', desc: 'ETL 批次/调度时间 + 每爬虫开关/采集数量/独立触发时间（容器内 ARQ cron）· 重启 worker 后生效' },
+  dictguard: { title: '字典守卫', desc: 'dict-guard 自动清理与提案门槛 · 重启 worker 后生效' },
 }
 
 /** 任务与告警字段 */
@@ -73,6 +74,16 @@ const ETL_DEFAULTS: Record<string, string> = {
   etl_run_hour: '5',
   etl_run_minute: '0',
 }
+
+/** 字典守卫字段（08-24：驳回冷却期配置化） */
+const DICTGUARD_FIELDS: {
+  key: 'dict_guard_reproposal_cooldown_days'
+  label: string
+  placeholder: string
+  hint: string
+}[] = [
+  { key: 'dict_guard_reproposal_cooldown_days', label: '驳回提案冷却期（天）', placeholder: '7', hint: '已驳回提案在冷却期内不被每日 ETL 重复提议（1-90）' },
+]
 
 /** 全部可配置爬虫（对齐 backend admin_routes/crawl.py PLATFORM_META + etl.py crawl_platforms）。
  *  前 6 源为 ETL 主管线源（国内+国际+趋势，每日 clock 入队）；
@@ -123,6 +134,8 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
           setRateLimit(cfg.rate_limit ?? {})
         } else if (section === 'evolution') {
           next.evolution_cache_ttl = String(cfg.evolution_cache_ttl ?? 60)
+        } else if (section === 'dictguard') {
+          next.dict_guard_reproposal_cooldown_days = String(cfg.dict_guard_reproposal_cooldown_days ?? 7)
         } else {
           next.etl_batch_cap = String(cfg.etl_batch_cap ?? 2000)
           next.etl_structure_load_default = String(cfg.etl_structure_load_default ?? 500)
@@ -171,6 +184,8 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
       payload.rate_limit = rateLimit
     } else if (section === 'evolution') {
       payload.evolution_cache_ttl = Number(scalars.evolution_cache_ttl) || 60
+    } else if (section === 'dictguard') {
+      payload.dict_guard_reproposal_cooldown_days = Number(scalars.dict_guard_reproposal_cooldown_days) || 7
     } else {
       payload.etl_batch_cap = Number(scalars.etl_batch_cap) || 2000
       payload.etl_structure_load_default = Number(scalars.etl_structure_load_default) || 500
@@ -218,6 +233,8 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
         setRateLimit(saved.rate_limit ?? {})
       } else if (section === 'evolution') {
         setScalars({ evolution_cache_ttl: String(saved.evolution_cache_ttl ?? 60) })
+      } else if (section === 'dictguard') {
+        setScalars({ dict_guard_reproposal_cooldown_days: String(saved.dict_guard_reproposal_cooldown_days ?? 7) })
       } else {
         setScalars({
           etl_batch_cap: String(saved.etl_batch_cap ?? 2000),
@@ -255,6 +272,8 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
       setRateLimit({})
     } else if (section === 'evolution') {
       setScalars({ evolution_cache_ttl: '60' })
+    } else if (section === 'dictguard') {
+      setScalars({ dict_guard_reproposal_cooldown_days: '7' })
     } else {
       setScalars({ ...ETL_DEFAULTS })
       const reset: Record<string, CrawlerConfig> = {}
@@ -297,6 +316,40 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {TASK_FIELDS.map((f) => (
+                  <div key={f.key} className="space-y-1.5">
+                    <Label className="text-xs">{f.label}</Label>
+                    <Input
+                      value={scalars[f.key] ?? ''}
+                      onChange={(e) => setScalars((s) => ({ ...s, [f.key]: e.target.value }))}
+                      placeholder={f.placeholder}
+                      className="h-8 text-xs font-mono"
+                    />
+                    <p className="text-[10px] text-ink-faint">{f.hint}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {section === 'dictguard' && (
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Settings2 className="size-4" />
+              字典守卫
+              <Badge variant="outline" className="text-[10px] ml-auto font-mono">
+                驳回冷却期
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <p className="py-6 text-center text-xs text-ink-faint">加载配置…</p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {DICTGUARD_FIELDS.map((f) => (
                   <div key={f.key} className="space-y-1.5">
                     <Label className="text-xs">{f.label}</Label>
                     <Input

@@ -98,3 +98,45 @@ class TestGuardDomainDistribution:
         stats = guard_domain_distribution(assign)
         assert stats["semantic_domains"] == 6
         assert stats["max_domain_ratio"] == pytest.approx(4 / 25)
+
+
+# ---- 08-24 补强：LLM 语义域名 sanitize + 孤立岗兜底口径 ----
+
+from scripts.sync_position_domains import (  # noqa: E402
+    _DomainNameItem,
+    sanitize_llm_names,
+)
+
+
+class TestSanitizeLlmNames:
+    def test_valid_names_pass_through(self):
+        items = [_DomainNameItem(cluster="数据分析师", name="金融数据分析")]
+        out = sanitize_llm_names(items, {"数据分析师"}, {"数据分析师": {"数据分析师", "精算师"}})
+        assert out == {"数据分析师": "金融数据分析"}
+
+    def test_unknown_cluster_key_dropped(self):
+        items = [_DomainNameItem(cluster="不存在的簇", name="前端开发")]
+        assert sanitize_llm_names(items, {"数据分析师"}, {}) == {}
+
+    def test_duplicate_name_second_falls_back(self):
+        items = [
+            _DomainNameItem(cluster="A", name="算法研发"),
+            _DomainNameItem(cluster="B", name="算法研发"),
+        ]
+        out = sanitize_llm_names(items, {"A", "B"}, {"A": set(), "B": set()})
+        assert out == {"A": "算法研发"}
+
+    def test_name_equal_to_member_position_rejected(self):
+        items = [_DomainNameItem(cluster="前端开发工程师", name="前端开发工程师")]
+        out = sanitize_llm_names(
+            items, {"前端开发工程师"}, {"前端开发工程师": {"前端开发工程师", "Web前端"}},
+        )
+        assert out == {}
+
+    def test_whitespace_and_empty_handled(self):
+        items = [
+            _DomainNameItem(cluster=" A ", name="  测试 "),
+            _DomainNameItem(cluster="B", name="  "),
+        ]
+        out = sanitize_llm_names(items, {"A", "B"}, {"A": set(), "B": set()})
+        assert out == {"A": "测试"}

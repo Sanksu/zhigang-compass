@@ -135,18 +135,18 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
 
   return (
     <Card className={`overflow-hidden ${className ?? ''}`}>
-      <CardHeader className="border-b border-atlas-grid bg-subtle/50 px-4 py-3">
+      <CardHeader className="border-b border-border bg-subtle/50 px-4 py-3">
         <CardTitle className="text-sm flex items-center gap-2">
-          <BarChart2 className="size-4 text-atlas-ocean" />
+          <BarChart2 className="size-4 text-ink-muted" />
           算法工作台
         </CardTitle>
-        <CardDescription className="font-mono text-[10px] tracking-[0.08em]">ALGORITHM WORKBENCH / 结构洞察与路径探测</CardDescription>
+        <CardDescription>结构洞察与路径探测</CardDescription>
       </CardHeader>
       <CardContent className="space-y-0 p-4">
         {/* ── PageRank 技能重要性 ── */}
         <section className="border-b border-border/60 pb-4">
           <div className="mb-2 flex items-center gap-2">
-            <span className="font-mono text-[10px] text-atlas-ocean">01</span>
+            <span className="font-mono text-[10px] text-ink-faint">01</span>
             <GitBranch className="size-3 text-ink-faint" />
             <h4 className="text-xs font-semibold text-ink">影响力地图</h4>
             <span className="text-[10px] text-ink-muted">PageRank Top-20</span>
@@ -179,7 +179,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
         {/* ── Louvain 技能簇 ── */}
         <section className="border-b border-border/60 py-4">
           <div className="mb-2 flex items-center gap-2">
-            <span className="font-mono text-[10px] text-atlas-ocean">02</span>
+            <span className="font-mono text-[10px] text-ink-faint">02</span>
             <Boxes className="size-3 text-ink-faint" />
             <h4 className="text-xs font-semibold text-ink">技术栈社区</h4>
           </div>
@@ -272,7 +272,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
         {/* ── 最短路径 ── */}
         <section className="pt-4">
           <div className="mb-2 flex items-center gap-2">
-            <span className="font-mono text-[10px] text-atlas-ocean">03</span>
+            <span className="font-mono text-[10px] text-ink-faint">03</span>
             <GitBranch className="size-3 text-ink-faint" />
             <h4 className="text-xs font-semibold text-ink">路径探测器</h4>
             <span className="text-[10px] text-ink-muted">验证技能间连接</span>

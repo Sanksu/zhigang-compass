@@ -114,6 +114,7 @@ export const QUICK_ACTIONS: {
   { id: 'goto-crawl', label: '爬取管理', icon: Globe, desc: '单源触发 · 任务状态 · 输出查看', to: '/admin/crawl' },
   { id: 'goto-llm', label: 'LLM 配置', icon: Bot, desc: '多 Provider 重试链 · 健康检查', to: '/admin/llm' },
   { id: 'goto-settings', label: '系统配置', icon: Settings2, desc: '运行时参数 · 重启生效', to: '/admin/settings/tasks' },
+  { id: 'goto-dictguard-settings', label: '字典守卫配置', icon: Shield, desc: '驳回冷却期 · 重启 worker 后生效', to: '/admin/settings/dictguard' },
   { id: 'goto-users', label: '用户管理', icon: Users, desc: '账号 · 角色 · 状态', to: '/admin/users' },
 ]
 

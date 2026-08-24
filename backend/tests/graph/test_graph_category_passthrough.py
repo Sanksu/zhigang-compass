@@ -1,8 +1,9 @@
 """技能类别/软素质字段透出单元测试（软技能与技术栈技能区分展示）。
 
 覆盖 queries.py 同步查询的结果组装（不依赖真实 Neo4j）：
-- query_panorama：skill 节点带 skill_category（软技能粉色渲染的数据来源）
-- query_position_skills_by_necessity / query_position_skills：技能项透传 skill_category
+- view/{view_type} 端点：skill 节点带 skill_category（软技能粉色渲染数据来源，
+  见 tests/api/test_route_smoke.py 的 view 冒烟断言）
+- query_position_skills_by_necessity：技能项透传 skill_category
 - load_position：PositionDetail.soft_skills 数据来源
 - load_skill：SkillDetail.category 数据来源
 """
@@ -50,27 +51,6 @@ class _FakeSession:
         return _Result([_Rec(r) if isinstance(r, dict) else r for r in self._rows])
 
 
-def _panorama_row(s_category="编程语言"):
-    return {
-        "p": _Node(id="pos-1", name="后端工程师", status="stable", freq=10),
-        "s": _Node(id="sk-1", name="Python", category=s_category),
-        "r": _Node(weight=0.8, necessity="must", level="中级"),
-    }
-
-
-def test_panorama_skill_node_carries_category():
-    nodes, edges = queries.query_panorama(_FakeSession([_panorama_row()]), "all", None, 0.0, 100)
-    skill = nodes["sk-1"]
-    assert skill["type"] == "skill"
-    assert skill["skill_category"] == "编程语言"
-
-
-def test_panorama_soft_skill_category_passthrough():
-    nodes, _ = queries.query_panorama(
-        _FakeSession([_panorama_row(s_category="软技能")]), "all", None, 0.0, 100)
-    assert nodes["sk-1"]["skill_category"] == "软技能"
-
-
 def test_position_skills_by_necessity_passthrough():
     row = {
         "skill_id": "sk-1", "skill_name": "沟通能力", "necessity": "nice",
@@ -80,15 +60,6 @@ def test_position_skills_by_necessity_passthrough():
     item = skills["nice"][0]
     assert item["skill_category"] == "软技能"
     assert item["skill_name"] == "沟通能力"
-
-
-def test_position_skills_passthrough():
-    row = {
-        "skill_id": "sk-2", "skill_name": "Java", "necessity": "must",
-        "weight": 0.8, "level": "高级", "source_count": 5, "skill_category": "编程语言",
-    }
-    items = queries.query_position_skills(_FakeSession([row]), "pos-1", None, "TRUE")
-    assert items[0]["skill_category"] == "编程语言"
 
 
 def test_load_position_returns_soft_skills():

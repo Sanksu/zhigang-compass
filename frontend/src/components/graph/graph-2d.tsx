@@ -13,7 +13,7 @@ import * as echarts from 'echarts/core'
 import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import type { GraphData, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
+import type { GraphData, GraphEdge, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 import type { EChartsModel } from './graph-layout'
 import { COLOR_BY_STATUS, computeFilterMarks, isSoftSkill, skillLabelThreshold } from './graph-utils'
 import { graphColors, graphNodeColor, GRAPH_OPACITY } from './graph-visual-tokens'
@@ -143,9 +143,35 @@ function sizeOf(node: GraphNode, displayValue?: number): number {
   return Math.min(54, Math.max(14, scaled))
 }
 
-function weightToWidth(weight?: number): number {
-  if (!weight) return 1
-  return 0.5 + weight * 2.5
+/** 单条边的基础视觉（宽/色/线型/透明度）——option 构建与悬停离场复位共用一套口径 */
+function edgeBaseStyle(
+  edge: GraphEdge,
+  nodeById: Map<string, GraphNode>,
+  colors: ReturnType<typeof graphColors>,
+  dark: boolean,
+  dimmed: boolean,
+) {
+  const source = nodeById.get(edge.source)
+  const target = nodeById.get(edge.target)
+  const touchesDomain = source?.isDomain || target?.isDomain
+  const domainToDomain = source?.isDomain && target?.isDomain
+  const kind = domainToDomain ? 'shared' : touchesDomain ? 'membership' : edge.necessity !== 'nice' ? 'must' : 'nice'
+  const base = kind === 'membership'
+    ? { width: 0.8, type: 'dotted' as const, color: colors.edge, curveness: 0.08 }
+    : kind === 'shared'
+      ? { width: 0.7, type: 'dashed' as const, color: colors.edge, curveness: 0.22 }
+      : kind === 'must'
+        ? { width: 1.5, type: 'solid' as const, color: colors.edgeStrong, curveness: 0 }
+        : { width: 0.9, type: 'dashed' as const, color: colors.edgeOptional, curveness: 0 }
+  return {
+    kind,
+    ...base,
+    opacity: dimmed
+      ? FILTER_DIM_EDGE_OPACITY
+      : kind === 'membership' || kind === 'shared'
+        ? 0.45
+        : GRAPH_OPACITY.edge[dark ? 'dark' : 'light'] + 0.18,
+  }
 }
 
 function isNarrowScreen(): boolean {
@@ -632,29 +658,19 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     })
 
     // 关系分层：域隶属=细虚线，域间共享=弱弧线，must=海图蓝实线，nice=灰蓝虚线。
+    // 各类线宽统一固定值（演示口径）；悬停节点的关联边提亮由下方 hover 效果
+    // 直改边元素实现，不进 option。
     const nodeById = new Map(data.nodes.map((node) => [node.id, node]))
     const links = data.edges.map((edge, index) => {
-      const source = nodeById.get(edge.source)
-      const target = nodeById.get(edge.target)
-      const touchesDomain = source?.isDomain || target?.isDomain
-      const domainToDomain = source?.isDomain && target?.isDomain
-      const isMust = edge.necessity !== 'nice'
       const dimmed = filterMarks.dimEdgeFlags[index]
-      const kind = domainToDomain ? 'shared' : touchesDomain ? 'membership' : isMust ? 'must' : 'nice'
-      const baseStyle = kind === 'membership'
-        ? { width: 0.8, type: 'dotted', color: colors.edge, curveness: 0.08 }
-        : kind === 'shared'
-          ? { width: 0.7, type: 'dashed', color: colors.edge, curveness: 0.22 }
-          : kind === 'must'
-            ? { width: Math.max(0.7, weightToWidth(edge.weight) * 0.72), type: 'solid', color: colors.edgeStrong, curveness: 0 }
-            : { width: Math.max(0.5, weightToWidth(edge.weight) * 0.42), type: 'dashed', color: colors.edgeOptional, curveness: 0 }
+      const base = edgeBaseStyle(edge, nodeById, colors, dark, dimmed)
       return {
         source: edge.source,
         target: edge.target,
         value: edge.weight,
         silent: dimmed,
-        lineStyle: { ...baseStyle, opacity: dimmed ? FILTER_DIM_EDGE_OPACITY : kind === 'membership' || kind === 'shared' ? 0.45 : GRAPH_OPACITY.edge[dark ? 'dark' : 'light'] + 0.18 },
-        emphasis: { lineStyle: { opacity: 0.95, width: weightToWidth(edge.weight) * 1.8, color: kind === 'nice' ? colors.edgeOptional : colors.edgeStrong } },
+        lineStyle: { width: base.width, type: base.type, color: base.color, curveness: base.curveness, opacity: base.opacity },
+        emphasis: { lineStyle: { opacity: 0.95, width: 2.4, color: base.kind === 'nice' ? colors.edgeOptional : colors.edgeStrong } },
       }
     })
 
@@ -749,6 +765,120 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     chart.setOption(option)
     builtRef.current = true
   }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand, evolutionMarks])
+
+  // ── 悬停节点 → 关联连线提亮 ──
+  // 邻接表（node id → 关联边下标）与基础视觉快照（与 option 构建同口径）：
+  // 离场复位、主 option 重建后补涂都依赖后者——重建会换新元素回基础样式
+  const incidentEdges = useMemo(() => {
+    const m = new Map<string, number[]>()
+    data.edges.forEach((edge, i) => {
+      for (const id of [edge.source, edge.target]) {
+        const arr = m.get(id)
+        if (arr) arr.push(i)
+        else m.set(id, [i])
+      }
+    })
+    return m
+  }, [data])
+
+  // themeVersion 不在函数体内出现但语义必要：主题切换时 isDark() 结果变化，
+  // 基础色/透明度需随 memo 重算（否则离场复位会涂错主题的底色）
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const edgeBase = useMemo(() => {
+    const nodeById = new Map(data.nodes.map((node) => [node.id, node]))
+    const dark = isDark()
+    const colors = graphColors(dark ? 'dark' : 'light')
+    return data.edges.map((edge, i) => ({
+      ...edgeBaseStyle(edge, nodeById, colors, dark, !!filterMarks.dimEdgeFlags[i]),
+      dimmed: !!filterMarks.dimEdgeFlags[i],
+    }))
+  }, [data, filterMarks, themeVersion])
+
+  const hoverNodeRef = useRef<string | null>(null)
+  const hoverEdgesRef = useRef<number[] | null>(null)
+
+  useEffect(() => {
+    if (viewMode !== 'graph') {
+      hoverNodeRef.current = null
+      hoverEdgesRef.current = null
+      return
+    }
+    const chart = chartRef.current
+    if (!chart) return
+
+    // 直改边图形元素（与新兴脉冲同一模式）：零 data diff、不重启力导向；
+    // 不经 setOption，邻域压暗（focus:adjacency 的 blur 状态）不受打扰
+    const paintEdges = (idxs: number[], hovered: boolean) => {
+      const strong = graphColors(isDark() ? 'dark' : 'light').edgeStrong
+      const edgeData = (
+        (chart as unknown as { getModel(): EChartsModel }).getModel().getSeriesByIndex(0) as unknown as {
+          getEdgeData?: () => {
+            getItemGraphicEl: (i: number) => unknown
+          }
+        }
+      )?.getEdgeData?.()
+      if (!edgeData) return
+      type PaintTarget = {
+        style: { lineWidth?: number; stroke?: string; opacity?: number }
+        dirty: () => void
+      }
+      const isPaintable = (x: unknown): x is PaintTarget => {
+        const s = (x as { style?: unknown })?.style
+        return typeof s === 'object' && s !== null
+      }
+      for (const i of idxs) {
+        const el = edgeData.getItemGraphicEl(i)
+        const base = edgeBase[i]
+        if (!el || !base) continue
+        if (hovered && base.dimmed) continue // 过滤压暗的边不复活
+        // edgeSymbol(['none','arrow']) 下边元素是 Group（线 + 箭头子元素），
+        // Group 无 style——取含 style 的显示元素（线/箭头）逐个涂色；
+        // zrender Group 的 children 是方法（children()），非数组属性
+        const anyEl = el as { children?: unknown[] | (() => unknown[]) }
+        const kids = typeof anyEl.children === 'function' ? anyEl.children() : (anyEl.children ?? [])
+        const targets = isPaintable(el) ? [el] : kids.filter(isPaintable)
+        for (const t of targets) {
+          t.style.lineWidth = hovered ? 2.4 : base.width
+          t.style.stroke = hovered ? strong : base.color
+          t.style.opacity = hovered ? 0.95 : base.opacity
+          t.dirty()
+        }
+      }
+    }
+
+    const applyHover = (nodeId: string | null) => {
+      if (hoverNodeRef.current === nodeId) return
+      const prev = hoverEdgesRef.current
+      const next = nodeId ? (incidentEdges.get(nodeId) ?? null) : null
+      hoverNodeRef.current = nodeId
+      hoverEdgesRef.current = next
+      if (prev) paintEdges(prev, false)
+      if (next) paintEdges(next, true)
+    }
+
+    const onGlobalOut = () => applyHover(null)
+    chart.on('mouseover', (params) => {
+      if (params.dataType === 'node' && params.data) {
+        const id = (params.data as GraphNode).id
+        if (id) applyHover(id)
+      }
+    })
+    chart.on('mouseout', (params) => {
+      if (params.dataType === 'node') applyHover(null)
+    })
+    chart.getZr().on('globalout', onGlobalOut)
+
+    // 主 option 重建后元素换新回基础样式，按当前悬停状态补一次提亮
+    if (hoverEdgesRef.current) paintEdges(hoverEdgesRef.current, true)
+
+    return () => {
+      chart.off('mouseover')
+      chart.off('mouseout')
+      // 卸载序：挂载 effect（定义在前）先 dispose 图表，dispose 后 getZr() 为
+      // null——可选链守卫，防 cleanup 阶段把整页打成 Unexpected Application Error
+      chart.getZr()?.off('globalout', onGlobalOut)
+    }
+  }, [viewMode, edgeBase, incidentEdges])
 
   // 新兴岗位脉冲光晕（视觉评审 P1-3）：emerging 节点 shadowBlur 呼吸动画
   // （~1.6s 周期），让"哪里在变热"一眼可见。⚠️ 不可经

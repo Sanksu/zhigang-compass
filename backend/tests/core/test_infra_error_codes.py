@@ -3,7 +3,7 @@
 覆盖：
 - 未捕获 Neo4j 异常（GqlError 族）→ 5001/500
 - pgvector 查询失败 → PgvectorUnavailableError，全局兜底 5002/500
-- LLM 超时（match 诊断端点）→ 5003/504
+- match 诊断 GET 只读化：Redis 命中 / PG 耐久回退 / 皆无 404（08-23 闭环收敛）
 - vector_store.load_* 对 SQLAlchemyError 转抛 PgvectorUnavailableError
 """
 
@@ -93,61 +93,57 @@ def test_load_project_vectors_raises_pgvector_error():
         asyncio.run(load_project_vectors(_FakeDbScalarsError(), "resume-id"))
 
 
-# ---------- 5003：LLM 超时（match 诊断端点） ----------
+# ---------- 诊断 GET 只读化：Redis → PG 耐久回退 → 404 ----------
 
 
-def test_match_diagnosis_llm_timeout_emits_5003():
-    """LLM 超时 → 诊断端点返回 5003/504（而非旧契约 503/200）。"""
-    from app.services.extraction.llm_provider import LLMTimeoutError
+class _FakeScalarDb:
+    """GET 诊断端点的最小 AsyncSession 替身（仅 scalar 查询）。"""
 
-    snapshot = {
-        "gaps": [{"skill": "Python", "status": "missing"}],
-        "position_name": "",  # 空岗位名跳过 RAG 检索，聚焦 LLM 异常路径
-    }
-    with patch.object(match_api, "_load_match_result", new=AsyncMock(return_value=snapshot)), \
-         patch.object(match_api, "redis_client", new=AsyncMock()) as redis_mock, \
-         patch("app.services.diagnosis.generator.generate_diagnosis",
-               side_effect=LLMTimeoutError("provider timeout")) as gen_mock:
-        redis_mock.get.return_value = None
+    def __init__(self, row):
+        self._row = row
+
+    async def scalar(self, *_args, **_kwargs):
+        return self._row
+
+
+def test_match_diagnosis_readonly_cache_hit():
+    """Redis 命中 → 直接返回报告，不查库不触发生成路径。"""
+    snapshot = {"gaps": [{"skill": "Python", "status": "missing"}]}
+    payload = {"match_id": "m1", "overall_summary": "ok"}
+    with patch.object(match_api, "_load_match_result", new=AsyncMock(return_value=snapshot)),          patch.object(match_api, "redis_client", new=AsyncMock()) as redis_mock:
+        redis_mock.get.return_value = json.dumps(payload)
+        db = _FakeScalarDb(row=object())  # 不应被读取
         resp = asyncio.run(
-            match_api.match_diagnosis(match_id="m1", user={"sub": "u1"})
+            match_api.match_diagnosis(match_id="m1", db=db, user={"sub": "u1"})
         )
 
-    gen_mock.assert_called_once()
-    assert resp.status_code == 504
-    assert json.loads(resp.body)["code"] == 5003
+    assert resp.data["overall_summary"] == "ok"
 
 
-def test_match_diagnosis_llm_config_error_keeps_503():
-    """LLM 配置不可用（非超时）→ 维持 503 语义。"""
-    from app.services.extraction.llm_provider import LLMConfigurationError
-
-    snapshot = {"gaps": [{"skill": "Python"}], "position_name": ""}
-    with patch.object(match_api, "_load_match_result", new=AsyncMock(return_value=snapshot)), \
-         patch.object(match_api, "redis_client", new=AsyncMock()) as redis_mock, \
-         patch("app.services.diagnosis.generator.generate_diagnosis",
-               side_effect=LLMConfigurationError("no api_key")):
+def test_match_diagnosis_readonly_falls_back_to_pg_record():
+    """Redis 过期 → DiagnosisReportRecord 回读并回填缓存（耐久镜像读取回退）。"""
+    snapshot = {"gaps": [{"skill": "Python"}]}
+    record = SimpleNamespace(report={"match_id": "m1", "overall_summary": "durable"})
+    with patch.object(match_api, "_load_match_result", new=AsyncMock(return_value=snapshot)),          patch.object(match_api, "redis_client", new=AsyncMock()) as redis_mock:
         redis_mock.get.return_value = None
+        db = _FakeScalarDb(row=record)
         resp = asyncio.run(
-            match_api.match_diagnosis(match_id="m1", user={"sub": "u1"})
+            match_api.match_diagnosis(match_id="m1", db=db, user={"sub": "u1"})
         )
 
-    assert resp.status_code == 503
+    assert resp.data["overall_summary"] == "durable"
+    redis_mock.set.assert_awaited_once()
 
 
-def test_match_diagnosis_llm_all_providers_failed_emits_503():
-    """全部 provider 失败（父类 LLMExtractionError）→ 503（契约：LLM 不可用或超时），
-    而非 500。"""
-    from app.services.extraction.llm_provider import LLMExtractionError
-
-    snapshot = {"gaps": [{"skill": "Python"}], "position_name": ""}
-    with patch.object(match_api, "_load_match_result", new=AsyncMock(return_value=snapshot)), \
-         patch.object(match_api, "redis_client", new=AsyncMock()) as redis_mock, \
-         patch("app.services.diagnosis.generator.generate_diagnosis",
-               side_effect=LLMExtractionError("所有 provider 均失败")):
+def test_match_diagnosis_readonly_returns_404_when_absent():
+    """缓存与落库皆无 → 404 引导先 POST；同步生成路径已删除（不触达 LLM）。"""
+    snapshot = {"gaps": [{"skill": "Python"}]}
+    with patch.object(match_api, "_load_match_result", new=AsyncMock(return_value=snapshot)),          patch.object(match_api, "redis_client", new=AsyncMock()) as redis_mock,          patch("app.services.diagnosis.generator.generate_diagnosis") as gen_mock:
         redis_mock.get.return_value = None
+        db = _FakeScalarDb(row=None)
         resp = asyncio.run(
-            match_api.match_diagnosis(match_id="m1", user={"sub": "u1"})
+            match_api.match_diagnosis(match_id="m1", db=db, user={"sub": "u1"})
         )
 
-    assert resp.status_code == 503
+    assert resp.status_code == 404
+    gen_mock.assert_not_called()

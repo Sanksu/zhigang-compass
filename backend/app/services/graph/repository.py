@@ -13,11 +13,6 @@ API 热路径（panorama/search/view 等）使用——接收 async 驱动 → a
 from app.services.graph import queries, queries_async
 
 
-def query_panorama(driver, scope, focus, min_weight, limit) -> tuple[dict, list]:
-    with driver.session() as session:
-        return queries.query_panorama(session, scope, focus, min_weight, limit)
-
-
 def query_skill_positions(driver, skill_id, status_filter) -> list[dict]:
     with driver.session() as session:
         return queries.query_skill_positions(session, skill_id, status_filter)
@@ -43,19 +38,9 @@ def query_skill_ids(driver, names) -> dict[str, str]:
         return queries.query_skill_ids(session, names)
 
 
-def query_position_skills(driver, id, necessity, status_filter) -> list[dict]:
-    with driver.session() as session:
-        return queries.query_position_skills(session, id, necessity, status_filter)
-
-
 def query_all_skills(driver) -> list[tuple[str, str]]:
     with driver.session() as session:
         return queries.query_all_skills(session)
-
-
-def query_skill_counts(driver, skill_id, status_filter) -> dict:
-    with driver.session() as session:
-        return queries.query_skill_counts(session, skill_id, status_filter)
 
 
 def query_graph_counts(driver) -> dict:
@@ -94,11 +79,6 @@ def load_position(driver, id, user=None) -> dict | None:
 
 
 # ---------- async 变体（graph API 热路径，P2 迁移） ----------
-
-
-async def query_panorama_async(driver, scope, focus, min_weight, limit) -> tuple[dict, list]:
-    async with driver.session() as session:
-        return await queries_async.query_panorama(session, scope, focus, min_weight, limit)
 
 
 async def query_skill_positions_async(driver, skill_id, status_filter) -> list[dict]:

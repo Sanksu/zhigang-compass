@@ -152,6 +152,6 @@ export async function mockLogin(page: Page): Promise<void> {
   await page.getByLabel('用户名').fill('admin')
   await page.getByLabel('密码').fill(process.env.E2E_ADMIN_PASSWORD ?? 'mock-password')
   await page.getByRole('button', { name: '登录' }).click()
-  // 登录成功 → 跳转首页仪表盘（"真实 API 已接入"徽章，mock 数据已注入）
-  await expect(page.getByText('真实 API 已接入')).toBeVisible({ timeout: 20_000 })
+  // 登录成功 → 跳转首页仪表盘（mock 数据已注入；签名区已移除，以页面标题为锚点）
+  await expect(page.getByRole('heading', { name: '仪表盘' })).toBeVisible({ timeout: 20_000 })
 }

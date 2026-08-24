@@ -265,3 +265,42 @@ def test_serialization_roundtrip():
 
 def test_weights_revision_is_deterministic():
     assert weights_revision() == weights_revision()
+
+
+def test_empty_positions_not_published(_reset_state, monkeypatch):
+    """空图/加载空结果：本次返回空，但不发布载荷与指针（防空载荷 7 天污染）。"""
+    redis = _FakeRedis()
+    loads = []
+
+    def _fake_uncached():
+        loads.append(1)
+        return []
+
+    monkeypatch.setattr("app.services.matching.loaders._load_positions_uncached", _fake_uncached)
+
+    positions = asyncio.run(load_positions_shared(redis=redis))
+
+    assert positions == []
+    assert _POINTER_KEY not in redis.store
+    assert not any(k.startswith(_PAYLOAD_PREFIX) for k in redis.store)
+    assert len(loads) == 1
+
+
+def test_poisoned_empty_payload_self_heals(_reset_state, monkeypatch):
+    """历史空载荷（部署窗口污染实证）不再命中：读路径拒绝 → 重建并发布真实载荷。"""
+    redis = _FakeRedis()
+    old_key = _seed_payload(redis, profiles=[])
+    loads = []
+
+    def _fake_uncached():
+        loads.append(1)
+        return _profiles()
+
+    monkeypatch.setattr("app.services.matching.loaders._load_positions_uncached", _fake_uncached)
+
+    positions = asyncio.run(load_positions_shared(redis=redis))
+
+    assert len(positions) == 1
+    meta = json.loads(redis.store[_POINTER_KEY])
+    assert meta["key"] != old_key  # 指针已切到真实载荷
+    assert len(loads) == 1

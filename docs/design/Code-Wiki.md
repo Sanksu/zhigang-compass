@@ -111,7 +111,7 @@
 
 ┌─────────────────────────────────────────────────────────────────┐
 │  LLM 多 Provider 重试链（OpenAI 兼容 API）                      │
-│  优先级与组合运行时可配置（configs/llm_providers.yaml）         │
+│  优先级与组合运行时可配置（configs/llm_providers.yaml，模板见 [llm_providers.yaml.example](../../backend/configs/llm_providers.yaml.example)）         │
 │  同步路由 10s 超时返 504（错误码 5003）；异步任务 90s 上限       │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -247,7 +247,7 @@ zhigang-compass/
 
 | 文件 | 职责 |
 |------|------|
-| [config.py](../../backend/app/core/config.py) | 配置中心。`Settings(BaseSettings)` 从 `.env` + 环境变量加载；含应用/数据库/JWT/缓存/ARQ/前端目录配置（LLM provider 见 `configs/llm_providers.yaml`）；`is_production` 控制安全开关 |
+| [config.py](../../backend/app/core/config.py) | 配置中心。`Settings(BaseSettings)` 从 `.env` + 环境变量加载；含应用/数据库/JWT/缓存/ARQ/前端目录配置（LLM provider 见 `configs/llm_providers.yaml`，模板见 [llm_providers.yaml.example](../../backend/configs/llm_providers.yaml.example)）；`is_production` 控制安全开关 |
 | [database.py](../../backend/app/core/database.py) | 三库连接管理：PostgreSQL（async engine + session 工厂）、Neo4j（同步 driver）、Redis（async client）；提供 `get_db` / `get_neo4j` / `get_redis` 依赖注入 |
 | [middleware.py](../../backend/app/core/middleware.py) | 中间件链：CORS（白名单）+ GZip（>1KB）+ SecurityHeaders（CSP/HSTS/TraceID）+ RateLimitMiddleware（普通 100 req/min / LLM 10 req/min，键 `rate:{ip}:{path}`，Redis 不可用降级放行，错误码 4290） |
 | [security.py](../../backend/app/core/security.py) | JWT RS256 双 Token（access 30min / refresh 7d）+ bcrypt 密码哈希 + RBAC 四角色权限映射 |
@@ -353,7 +353,7 @@ ID 格式 `{prefix}_{seq:04d}`（如 `sk_0042`），通过 Neo4j Counter 节点�
 | [embeddings/vector_store.py](../../backend/app/services/embeddings/vector_store.py) | pgvector 存取与消费辅助（§11.4.3）：`load_*` 按业务键映射 `{key: vector}`，供 skill/similar、dedup_simhash 语义辅助、engine._project_score 消费 | ✅ 完整 |
 | [embeddings/backfill.py](../../backend/app/services/embeddings/backfill.py) | embedding 回填任务入口 | ✅ 完整 |
 | [alerting.py](../../backend/app/services/alerting.py) | webhook 告警（§4.4/§11.1）：兼容飞书/钉钉/企微机器人 POST JSON；未配置或失败仅记日志不阻塞主流程 | ✅ 完整 |
-| [prompts/](../../backend/app/services/prompts/) | 共享提示词包（soft_skill 等跨模块复用） | ✅ 完整 |
+| [prompts.py](../../backend/app/services/extraction/prompts.py) | 共享提示词（soft_skill 等跨模块复用；原 services/prompts/ 目录已整合） | ✅ 完整 |
 
 ### 5.4 异步任务（[backend/app/workers/](../../backend/app/workers/)）
 
@@ -426,7 +426,7 @@ Scrapy + Playwright + CDP，13 源（7 招聘 A/B/C 三级分级 + 6 非招聘�
 
 #### `Settings` — [core/config.py](../../backend/app/core/config.py)
 应用配置中心，`pydantic-settings` 驱动。
-- 关键字段：`postgres_dsn` / `neo4j_uri` / `redis_url` / `jwt_*` / `arq_*`（LLM provider 配置见 `configs/llm_providers.yaml`，可配置任意 OpenAI 兼容 API）
+- 关键字段：`postgres_dsn` / `neo4j_uri` / `redis_url` / `jwt_*` / `arq_*`（LLM provider 配置见 [llm_providers.yaml.example](../../backend/configs/llm_providers.yaml.example)，可配置任意 OpenAI 兼容 API）
 - 关键 property：`is_production`（控制 CORS/HSTS/Swagger/SECRET_KEY 守卫）、`jwt_private_key` / `jwt_public_key`（惰性读文件）
 
 #### `create_access_token(user_id, role)` / `create_refresh_token(user_id)` — [core/security.py](../../backend/app/core/security.py)
@@ -514,7 +514,7 @@ Louvain 技能簇：两阶段模块度优化（节点移动 ΔQ 最大化 → �
 阶段二 Leiden 条件替换：同签名（igraph 1.0 + leidenalg 0.12，RBConfigurationVertexPartition + resolution_parameter，seed=0 确定性），输出与 louvain 同格式（reindex 0..k-1）。**2026-08-12 验收未达标**（同质性 +0.21 领先但 Q −0.037 落后，两项需同时达标），默认 `algorithm=louvain` 不切换；configs 一行切换 + API 依赖缺失自动回退 louvain。
 
 #### 参数调优 — [scripts/graph_algo_tune.py](../../backend/scripts/graph_algo_tune.py)
-图算法阶段一 Optuna 扫描：γ∈[0.5,2.0] × min_weight∈[1.0,3.0]，objective = 0.5·Q + 0.3·同质性 + 0.2·(1−过小簇占比)。Q 用标准模块度评分（γ 只生成划分），**退化解（簇数 ≤2 或最大簇占比 >0.5）罚 0**（2026-08-12 实跑修复 γ<1 单簇退化最优）。2026-08-12 真实快照（386 节点/3901 边）50 trial 最优 γ=1.256 / min_weight=2.502（同质性 0.37→0.56，详见 [图算法评估与链路审查综合报告.md](./图算法评估与链路审查综合报告.md)）。模式：--export（Neo4j 快照导出）/ --snapshot（固定数据集扫描）/ --dry-run（当前配置指标）/ --apply（写回 configs）/ **--compare（阶段二 Leiden 验收对比）**/ **--algorithm {louvain,leiden}（Leiden 专属调优——参数不可互通，须自身空间扫描）**。
+图算法阶段一 Optuna 扫描：γ∈[0.5,2.0] × min_weight∈[1.0,3.0]，objective = 0.5·Q + 0.3·同质性 + 0.2·(1−过小簇占比)。Q 用标准模块度评分（γ 只生成划分），**退化解（簇数 ≤2 或最大簇占比 >0.5）罚 0**（2026-08-12 实跑修复 γ<1 单簇退化最优）。2026-08-12 真实快照（386 节点/3901 边）50 trial 最优 γ=1.256 / min_weight=2.502（同质性 0.37→0.56，详见 [图算法评估与链路审查综合报告.md](../reviews/图算法评估与链路审查综合报告.md)）。模式：--export（Neo4j 快照导出）/ --snapshot（固定数据集扫描）/ --dry-run（当前配置指标）/ --apply（写回 configs）/ **--compare（阶段二 Leiden 验收对比）**/ **--algorithm {louvain,leiden}（Leiden 专属调优——参数不可互通，须自身空间扫描）**。
 
 **调参口径警示（2026-08-13 实测）**：`--export` 快照按**当前配置的 min_weight** 过滤导出（351 节点），与全量图（1245 节点）口径不一致——快照上调出的 min_weight 应用到全量图会二次过滤过度（mw=2.325 只剩 75 节点）。**自动调参链（wait_etl_then_tune.py）已在 apply 后增加全量图门禁验证，失败自动回滚旧参数**；手动调参须在 apply 前用 `guard_community_distribution` 验证全量图。
 
@@ -596,7 +596,7 @@ services.diagnosis:
 | [discovery/detector.py](../../backend/app/services/discovery/detector.py) | [configs/emerging_seeds.yaml](../../backend/configs/emerging_seeds.yaml)（种子列表） |
 | [data_quality/inflation_detector.py](../../backend/app/services/data_quality/inflation_detector.py) | [configs/inflation_weights.json](../../backend/configs/inflation_weights.json)（Optuna 调优） |
 | [learning_path](../../backend/app/services/learning_path/) | [configs/skill_prerequisites.yaml](../../backend/configs/skill_prerequisites.yaml)（40+ 技能先修字典） |
-| LLM Provider | [configs/llm_providers.yaml](../../backend/configs/llm_providers.yaml)（单一事实源，api_key 由管理后台写入，gitignore 忽略） |
+| LLM Provider | [configs/llm_providers.yaml.example](../../backend/configs/llm_providers.yaml.example)（单一事实源模板；运行时 llm_providers.yaml 由管理后台写入，gitignore 忽略不入库） |
 
 ### 7.3 前端依赖
 
@@ -765,6 +765,8 @@ ALERT_WEBHOOK_URL=                   # 飞书/钉钉/企微机器人 webhook，�
 ---
 
 ## 9. 当前进度与下一步建议
+
+> **2026-08-24 注记**：本节快照冻结于 08-12 审计，其后 M4 后段与 M5 冲刺进展（dict-guard 全链、岗位职能域、软技能区分、LLM 审计/统计日报、panorama 端点统一等）**不再逐条回填本文件**，以 [进度跟踪.md §6.0](../project/进度跟踪.md) 与 [CHANGELOG.md](../../CHANGELOG.md) 为准；本文其余章节仍可作为代码导航参考。
 
 ### 9.1 当前进度（M4 收官 + M4→M5 过渡，2026.08.12 审计）
 

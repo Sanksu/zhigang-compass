@@ -155,8 +155,9 @@ class ProxyPoolMiddleware:
 
         排除两类请求：
         - 本地 CDP 占位请求（monster/glassdoor 连 127.0.0.1:9222），代理会把它路由到远程
-        - Playwright 请求：scrapy-playwright 不读 meta["proxy"]，代理由
-          PLAYWRIGHT_LAUNCH_OPTIONS["proxy"]（环境变量）控制，分配了也不生效
+        - Playwright 请求：scrapy-playwright 不读 meta["proxy"]，代理由各 spider
+          custom_settings 的 PLAYWRIGHT_LAUNCH_OPTIONS["proxy"] 控制（08-23 起按源
+          门控：国际源 coursera 注入、国内源 zhilian 直连），分配了也不生效
         """
         if request.meta.get("playwright"):
             return False

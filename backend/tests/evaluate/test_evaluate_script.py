@@ -877,3 +877,20 @@ class TestAlignedFp:
         in_text, halluc = split_fp_aligned(["system"], "需要 systematic testing 经验".lower())
         assert "system" in halluc
         assert "system" not in in_text
+
+    def test_alias_key_in_text_exempted(self):
+        """08-24 别名感知豁免：正文含别名键 MQ → 「消息队列」不判幻觉（生产守卫
+        别名感知保留的合法命中；复测实证 ANN-0024 原文含 MQ）。"""
+        from tests.evaluate.run_manual_jd_eval import split_fp_aligned
+
+        in_text, halluc = split_fp_aligned(["消息队列"], "负责消息中间件选型，熟悉 MQ 与 Kafka".lower())
+        assert "消息队列" in in_text
+        assert "消息队列" not in halluc
+
+    def test_alias_absent_still_halluc(self):
+        """别名键与规范名都不在正文 → 仍判幻觉（守卫失灵灵敏度不丢）。"""
+        from tests.evaluate.run_manual_jd_eval import split_fp_aligned
+
+        in_text, halluc = split_fp_aligned(["消息队列"], "负责网关与限流设计，无消息相关职责".lower())
+        assert "消息队列" in halluc
+        assert "消息队列" not in in_text

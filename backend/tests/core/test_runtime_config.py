@@ -97,6 +97,14 @@ class TestSave:
         with pytest.raises(ValueError):
             rc.save({"etl_run_minute": -1})
 
+    def test_save_invalid_dict_guard_cooldown_rejected(self, _isolated_config):
+        with pytest.raises(ValueError):
+            rc.save({"dict_guard_reproposal_cooldown_days": 0})  # < 1
+        with pytest.raises(ValueError):
+            rc.save({"dict_guard_reproposal_cooldown_days": 91})  # > 90
+        with pytest.raises(ValueError):
+            rc.save({"dict_guard_reproposal_cooldown_days": "7"})
+
     def test_save_invalid_rate_limit_rejected(self, _isolated_config):
         with pytest.raises(ValueError):
             rc.save({"rate_limit": {"zhilian": {"delay_range": [20, 5]}}})  # min > max

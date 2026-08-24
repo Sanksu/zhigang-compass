@@ -26,6 +26,7 @@ from app.services.extraction.llm_provider import (
     LLMTimeoutError,
     LLMProviderChain,
 )
+from app.services.extraction.llm_invocation import invocation_scope
 
 
 class ClusterLLMDecision(BaseModel):
@@ -112,7 +113,8 @@ class ClusterLLMClassifier:
         try:
             # 同步路由契约（设计文档 §6.5，G-04）：单 provider 10s 超时单次尝试，
             # 不重试不切换（技能簇接口在 API 请求路径上，避免同步阻塞）
-            return self._llm.call_sync(prompt, ClusterLLMDecision)
+            with invocation_scope("cluster_label"):
+                return self._llm.call_sync(prompt, ClusterLLMDecision)
         except (LLMExtractionError, LLMTimeoutError, LLMConfigurationError):
             # LLM 调用失败（超时/熔断/校验/未配置）：降级规则标签，不阻塞 API
             return ClusterLLMDecision(coherent=True, cluster_name=rule_label or None)

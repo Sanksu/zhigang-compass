@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.core import runtime_config
+from app.services.extraction import llm_invocation
 from app.services.extraction.dict_guard import (
     DictGuardDecision,
     build_decision_prompt,
@@ -69,9 +70,10 @@ class _DictGuardEvaluator:
             # 执行不阻塞事件循环）。每日批处理非用户实时等待路径，不复用同步
             # 10s 单 provider 契约——主 provider 熔断/边缘延迟会把整轮候选
             # 全部误杀（#306 同款教训：诊断 generator 已因此改走 fallback 链）
-            return await asyncio.to_thread(
-                self._llm.call_with_fallback, prompt, DictGuardDecision,
-            )
+            with llm_invocation.invocation_scope("dict_guard"):
+                return await asyncio.to_thread(
+                    self._llm.call_with_fallback, prompt, DictGuardDecision,
+                )
         except (LLMExtractionError, LLMTimeoutError, self._config_error):
             return None
 
@@ -81,7 +83,7 @@ async def dict_guard_daily(ctx: dict) -> dict:
     if not runtime_config.get("dict_guard_enabled", True):
         return {"status": "skipped", "reason": "dict_guard_enabled=false"}
 
-    from sqlalchemy import func, select
+    from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
     from app.models.business import DictChangeLog, DictProposal
@@ -190,18 +192,20 @@ async def dict_guard_daily(ctx: dict) -> dict:
                                      "action": dec.action, "reason": dec.reason, **impact})
                 continue
 
-            # proposal 档：同 term+action+entity_type 待审去重（多日重复候选不刷屏）
-            exists = await session.scalar(
-                select(func.count()).select_from(DictProposal).where(
+            # proposal 档去重：同 term+action+entity_type 的最近提案——
+            # pending 不再重复提议；rejected 进入驳回冷却期（默认 7 天）也不重提
+            # （08-24 实证：数据策略/BPEL 驳回次日被每日 ETL 重复提议刷池）
+            prior = await session.scalar(
+                select(DictProposal).where(
                     DictProposal.term == dec.term,
                     DictProposal.action == dec.action,
                     DictProposal.entity_type == dec.entity_type,
-                    DictProposal.status == "pending",
-                )
+                ).order_by(DictProposal.created_at.desc()).limit(1)
             )
-            if exists:
+            if prior is not None and _reproposal_blocked(prior, datetime.now(timezone.utc)):
                 skipped.append({"term": dec.term, "action": dec.action,
-                                "entity_type": dec.entity_type, "reason": "已有待审提案"})
+                                "entity_type": dec.entity_type,
+                                "reason": _reproposal_skip_reason(prior)})
                 continue
             session.add(DictProposal(
                 term=dec.term, action=dec.action, status="pending",
@@ -445,3 +449,39 @@ def _apply_cleanup(entity_type: str, action: str, term: str, *, reason: str) -> 
     if action == "remove_edge":
         return _cleanup_course_edge(term)
     return 0
+
+
+def _reproposal_blocked(prior, now: datetime, cooldown_days: int | None = None) -> bool:
+    """同 term+action+entity_type 的最近提案是否阻止再次提议。
+
+    - pending：待审中不重复提议（原去重语义）
+    - rejected：驳回冷却期内不重提（08-24 修复：驳回次日被 ETL 刷池）；
+      冷却期默认取 runtime_config.dict_guard_reproposal_cooldown_days（7）
+    - approved / reviewed_at 缺失：允许重新提议（批准后状态变更或历史数据
+      不构成阻塞，证据更新可再议）
+    """
+    if prior is None:
+        return False
+    if prior.status == "pending":
+        return True
+    if prior.status != "rejected":
+        return False
+    if cooldown_days is None:
+        from app.core import runtime_config
+
+        cooldown_days = runtime_config.get("dict_guard_reproposal_cooldown_days", 7)
+    reviewed_at = prior.reviewed_at
+    if reviewed_at is None:
+        return False
+    cutoff = reviewed_at + timedelta(days=cooldown_days)
+    return now <= cutoff
+
+
+def _reproposal_skip_reason(prior) -> str:
+    """跳过理由（留痕到 skipped 报告，供管理面板可见）。"""
+    if prior.status == "pending":
+        return "已有待审提案"
+    return (
+        f"驳回冷却期内不重提（驳回于 {prior.reviewed_at:%Y-%m-%d}，"
+        f"默认 {runtime_config.get('dict_guard_reproposal_cooldown_days', 7)} 天）"
+    )
