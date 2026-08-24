@@ -623,3 +623,36 @@ class LLMDecisionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class SkillDynamicRelation(Base):
+    """LLM 技能关系审批执行通道（PR9b）——proposal→approved 的关系持久化。
+
+    与 configs YAML 静态种子并列的第二个图关系事实源：管理员在决策页
+    approve 一条 skill_relation proposal 后，此处落一行（PG），由
+    scripts/sync_dynamic_relations.py 与 YAML 种子共同幂等 MERGE 入图。
+
+    - ALTERNATIVE_OF 对称语义一条记录，同步时双向 MERGE
+    - source=llm_review（人工审批 + LLM 提议链路），与 YAML 的 manual 区分
+    - applied_to_graph 标记同步进度（幂等不依赖）
+    """
+
+    __tablename__ = "skill_dynamic_relations"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    source_skill: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    target_skill: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    relation_type: Mapped[str] = mapped_column(
+        String(24), nullable=False  # PREREQUISITE_OF | BELONGS_TO | ALTERNATIVE_OF
+    )
+    direction: Mapped[str] = mapped_column(String(12), default="a_to_b", nullable=False)
+    proposal_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str] = mapped_column(String(24), default="llm_review", nullable=False)
+    reviewed_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    review_reason: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    applied_to_graph: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

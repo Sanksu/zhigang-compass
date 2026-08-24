@@ -1557,6 +1557,75 @@ paths:
                     description: 全量状态计数（shadow/proposal/auto_applied/blocked/other/records）
                     additionalProperties: { type: integer }
 
+  /api/v1/admin/llm-decisions/{decision_id}/approve:
+    post:
+      tags: [admin]
+      summary: 批准 skill_relation proposal——落动态关系表 + 决策置 approved（RBAC admin）
+      parameters:
+        - name: decision_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [review_reason]
+              properties:
+                review_reason: { type: string, description: 审批理由（必填） }
+      responses:
+        '200':
+          description: 批准成功（relation 形如 源->目标->类型）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      decision_id: { type: string }
+                      relation: { type: string }
+                  trace_id: { type: string }
+
+  /api/v1/admin/llm-decisions/{decision_id}/reject:
+    post:
+      tags: [admin]
+      summary: 驳回 proposal（仅状态流转，效果为 0）
+      parameters:
+        - name: decision_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [review_reason]
+              properties:
+                review_reason: { type: string }
+      responses:
+        '200':
+          description: 驳回成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      decision_id: { type: string }
+                  trace_id: { type: string }
+
   /api/v1/admin/positions/{position_name}:
     get:
       tags: [admin]
