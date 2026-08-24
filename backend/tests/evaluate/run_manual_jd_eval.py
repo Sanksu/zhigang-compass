@@ -339,19 +339,37 @@ def _eval_literal_hit(low: str, name: str) -> bool:
     与生产守卫 post_processor._text_has 刻意解耦：只用词边界正则、不查生产
     别名表——若守卫（含别名表）误放行，幻觉清单会如实浮现，统计对守卫
     失灵保持敏感；两侧口径漂移属预期（评测=纯词面，生产=词面+别名）。
+
+    08-24 别名感知豁免（split_fp_aligned 改用 _eval_surface_hit）：别名键
+    词面命中同样豁免——生产 lexical_guard 别名感知（正文含 MQ 即保留
+    「消息队列」为 must），评测纯词面会把这类合法保留误报为幻觉（复测
+    实证 ANN-0024 正文含 MQ / ANN-0096 正文含消息队列，均非模型凭空演绎）。
+    真守卫失灵（别名键与规范名都不在正文）仍会如实浮现，灵敏度不丢。
     """
     return re.search(r"(?<![a-z0-9])" + re.escape(name.lower()) + r"(?![a-z0-9])", low) is not None
+
+
+def _eval_surface_hit(low: str, name: str) -> bool:
+    """词面命中（含同义别名键）：规范名或任一别名键词面出现即豁免。"""
+    if _eval_literal_hit(low, name):
+        return True
+    from app.services.extraction.post_processor import _ALIAS_REV
+
+    return any(
+        re.search(r"(?<![a-z0-9])" + re.escape(a) + r"(?![a-z0-9])", low)
+        for a in _ALIAS_REV.get(name.lower(), [])
+    )
 
 
 def split_fp_aligned(fp_list: list[str], low_text: str) -> tuple[list[str], list[str]]:
     """方案 A（0.90 达标口径，PR #330 张恺天确认）：FP 拆成 词面命中（豁免）与非词面（幻觉）。
 
-    词面命中 = 归一化技能名在正文词面出现（本文件 _eval_literal_hit，独立于
-    生产守卫），视为"预测全收 vs gold 精选"的评测口径不对等而非错误，不计 FP；
-    非词面 FP 为真实幻觉，单列监控（打样非词面 1/254=0.4%）。
+    词面命中 = 归一化技能名或其同义别名键在正文词面出现（_eval_surface_hit，
+    08-24 与生产守卫别名感知口径对齐），视为"预测全收 vs gold 精选"的评测
+    口径不对等而非错误，不计 FP；非词面 FP 为真实幻觉，单列监控。
     """
-    in_text = [s for s in fp_list if _eval_literal_hit(low_text, s)]
-    halluc = [s for s in fp_list if not _eval_literal_hit(low_text, s)]
+    in_text = [s for s in fp_list if _eval_surface_hit(low_text, s)]
+    halluc = [s for s in fp_list if not _eval_surface_hit(low_text, s)]
     return in_text, halluc
 
 
