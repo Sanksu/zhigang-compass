@@ -517,6 +517,7 @@ class LLMProviderChain:
         # 路径对"LLM 超时"映射 504（错误码 5003，§2.4.7）一致；连接/校验失败、
         # 限流、5xx 不算超时，维持父类 LLMExtractionError（上层映射 503）。
         timeout_like = 0
+        wall_started = time.perf_counter()
         for index, provider in enumerate(self._providers, start=1):
             name = provider.get("name", "?")
             # 熔断/退避窗口内跳过该 provider，不发起调用（§6.5 运维机制）
@@ -538,6 +539,11 @@ class LLMProviderChain:
                 )
                 _clear_state(name)  # 成功即恢复：解除该 provider 的熔断/退避计数
                 _record_attempt("fallback", provider, attempt=index, started=started)
+                # 链汇总（08-24 灰度底座）：整链总墙钟 + 最终 provider，仅 JSONL
+                llm_invocation.record_chain(
+                    provider=name, outcome="ok",
+                    duration_ms=int((time.perf_counter() - wall_started) * 1000),
+                )
                 return result
             except LLMRateLimitError as e:
                 _record_429(name)
@@ -559,6 +565,11 @@ class LLMProviderChain:
                 _record_attempt("fallback", provider, attempt=index, started=started, exc=e)
                 failures.append(str(e))
                 continue
+        llm_invocation.record_chain(
+            provider="", outcome="failed",
+            duration_ms=int((time.perf_counter() - wall_started) * 1000),
+            error=" | ".join(failures)[:200] or None,
+        )
         if timeout_like == len(self._providers):
             raise LLMTimeoutError("所有 provider 均超时/不可用: " + " | ".join(failures))
         raise LLMExtractionError("所有 provider 均失败: " + " | ".join(failures))

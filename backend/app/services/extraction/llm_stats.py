@@ -70,3 +70,78 @@ def purpose_counts_from_jsonl(path: Path) -> dict[str, int]:
             purpose = str(entry.get("purpose") or "unspecified")
             counts[purpose] = counts.get(purpose, 0) + 1
     return counts
+
+
+def latency_percentiles_from_jsonl(path: Path) -> dict[str, dict]:
+    """JSONL 明细 → per-provider 时延分位数 {p50,p95,p99,n}（最近秩）。
+
+    只统计真实调用尝试行（route=sync/fallback）；chain 汇总行不计入，
+    避免把整链耗时重复算进最终 provider 的时延分布。文件缺失/空返回 {}。
+    """
+    per: dict[str, list[int]] = {}
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("route") == "chain":
+                continue
+            provider = str(entry.get("provider") or "?")
+            per.setdefault(provider, []).append(max(0, int(entry.get("duration_ms") or 0)))
+
+    result: dict[str, dict] = {}
+    for provider, values in per.items():
+        values.sort()
+        n = len(values)
+
+        def _quantile(p: float) -> int:
+            # 最近秩：rank = ceil(p * n)，取第 rank 个有序值（1 基）
+            rank = max(1, min(n, int(p * n) + (1 if p * n > int(p * n) else 0)))
+            return values[rank - 1]
+
+        result[provider] = {
+            "p50": _quantile(0.50),
+            "p95": _quantile(0.95),
+            "p99": _quantile(0.99),
+            "n": n,
+        }
+    return result
+
+
+def completeness_report_from_jsonl(path: Path) -> dict:
+    """JSONL 明细审计完整性：purpose/model 缺失与测试日志混入计数。
+
+    正式验收门槛：purpose 不得为 unspecified、model 不得为空、test 环境
+    行不得出现在生产日志——本函数只数数，由验收 gate 判定是否达标。
+    """
+    if not path.exists():
+        return {"entries": 0, "unspecified_purpose": 0, "empty_model": 0, "test_env_entries": 0}
+    total = unspecified = empty_model = test_env = 0
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            total += 1
+            if not entry.get("purpose") or entry.get("purpose") == "unspecified":
+                unspecified += 1
+            if not entry.get("model"):
+                empty_model += 1
+            if entry.get("env") == "test":
+                test_env += 1
+    return {
+        "entries": total,
+        "unspecified_purpose": unspecified,
+        "empty_model": empty_model,
+        "test_env_entries": test_env,
+    }
