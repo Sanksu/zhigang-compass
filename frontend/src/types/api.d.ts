@@ -2721,6 +2721,8 @@ export interface paths {
                     content: {
                         "application/json": {
                             items?: components["schemas"]["LlmDecisionItem"][];
+                            /** @description 过滤后总数（分页条） */
+                            total?: number;
                             limit?: number;
                             offset?: number;
                         };
@@ -4590,6 +4592,10 @@ export interface components {
             run_id?: string;
             env?: string;
             input_hash?: string;
+            /** @description 证据引用（{label,value} 摘要，供人工抽检） */
+            evidence_refs?: {
+                [key: string]: unknown;
+            }[];
             provider?: string;
             model?: string;
             prompt_version?: string;
@@ -4608,6 +4614,8 @@ export interface components {
             reviewer?: string;
             review_reason?: string;
             effects_applied?: boolean;
+            /** @description 回滚引用（可变更动作） */
+            rollback_ref?: string;
             duration_ms?: number;
             attempts?: number;
             fallback_reason?: string;

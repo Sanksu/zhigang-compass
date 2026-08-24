@@ -149,7 +149,7 @@ async def dict_guard_daily(ctx: dict) -> dict:
     if not candidates:
         summary = {"status": "ok", "run_date": run_date, "candidates": 0,
                    "evaluated": 0, "llm_failed": 0, "auto_applied": [],
-                   "proposals": 0, "skipped": []}
+                   "proposals": 0, "record_failed": 0, "skipped": []}
         _write_report(summary)
         return summary
 

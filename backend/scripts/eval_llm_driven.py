@@ -83,9 +83,11 @@ async def eval_classification(rows: list[dict], llm) -> dict:
     results: list[dict] = []
     llm_failed = 0
     for row in rows:
+        # 只捕 LLM 链路异常（超时/限流/校验）计为 failed；脚本自身 bug 直接抛出，
+        # 防止把编码错误淹没在 llm_failed 里（审查 P2 修复）
         try:
             decision = await asyncio.to_thread(classify_skill, row["skill"], llm)
-        except (LLMExtractionError, Exception):
+        except LLMExtractionError:
             decision = None
         if decision is None:
             llm_failed += 1
