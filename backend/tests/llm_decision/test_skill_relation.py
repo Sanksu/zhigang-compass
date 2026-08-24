@@ -128,9 +128,13 @@ class TestPromptCalibration:
     """校准 r1：先修判据锚点（防无证据下保守 NONE）。"""
 
     def test_prompt_contains_prerequisite_criteria(self):
+        import re
+
         from app.services.llm_decision.skill_relation import build_skill_relation_prompt
 
         prompt = build_skill_relation_prompt("Java", "Spring", [])
+        flat = re.sub(r"\s+", "", prompt)
         assert "前置先修" in prompt
-        assert "不要因缺少共现证据而保守答 NONE" in prompt
+        assert "不要因缺少共现证据而保守答NONE" in flat
         assert "子领域" in prompt  # BELONGS_TO 判据
+        assert "组成部分" in prompt  # r4：父子=分类包含定义
