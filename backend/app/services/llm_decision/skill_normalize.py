@@ -198,6 +198,118 @@ def decide_skill_normalize(
         return None
 
 
+# 批量决策条数上限（08-25 提速：align 六维 N=20 口径，deepseek 100M 上下文）。
+SKILL_BATCH_SIZE = 20
+
+
+class SkillNormalizeBatch(BaseModel):
+    """批量技能名归一容器（instructor 包装模型，list 更稳）。"""
+
+    results: list[SkillNormalizeDecision] = Field(
+        default_factory=list,
+        description="批量归一决策，数组第 i 个对应输入第 i 个技能名",
+    )
+
+
+# 批量模板：每行一个技能名+候选（含 * 权威落点），逐条输出 merge/keep/noise。
+# 强化规则吸收归一分歧：版本/缩写/中英对应统一归并到候选（Python3→Python、
+# react→React、c语言→C）；带 * 的候选是权威别名落点，merge 必须选它。
+_BATCH_TASK_TEMPLATE = """批量技能名归一判断（一次 {count} 条，逐条输出，顺序严格对应）。
+
+{items}
+
+输出 JSON：
+{{
+  "results": [
+    {{
+      "action": "merge" 或 "keep" 或 "noise",
+      "target_standard": "merge 时标准技能名（原样取自该题候选，不含 * 号）",
+      "confidence": 0.0到1.0,
+      "reason": "一句话依据"
+    }}
+  ]
+}}
+
+要求（逐条）：
+1. action=merge 时 target_standard 必须与该题候选清单原文完全一致（不含 * 号）
+2. 带 * 的候选是权威别名表对该输入的既定落点：若判 merge，目标必须是带 * 的候选
+   （如 c语言→C 而非 C语言、vue3→Vue.js 而非 Vue 3）
+3. 同一技能变体应 merge 到对应标准名——缩写/全称（JS→JavaScript）、大小写与拼写
+   （react→React、golang→Go）、版本号（Python3→Python）、中英对应（c语言→C）
+4. 与自身相同的目标不是 merge（标准名输入直接 keep）；无关联缩写（≤6字符）保持
+   keep 防 SBERT 误并；拿不准时 keep 并降置信度
+5. 明显非技能（岗位名/教材名/噪音）判 noise
+"""
+
+
+def build_skill_normalize_batch_prompt(
+    names: list[str], candidates_list: list[list[str]],
+) -> str:
+    """组装批量技能名归一 prompt（每行技能名+候选，含 * 权威落点）。"""
+    items: list[str] = []
+    for i, name in enumerate(names):
+        cands = candidates_list[i] if i < len(candidates_list) else []
+        shown = cands[:15]
+        # 复用单条别名落点标记逻辑：命中别名表则其标准名标 *
+        from app.services.extraction.dictionary_data import SKILL_ALIAS
+
+        alias_target = SKILL_ALIAS.get(name) or SKILL_ALIAS.get(name.lower())
+        marked = [f"{c}*" if alias_target and c == alias_target else c for c in shown]
+        items.append(f"[{i}] 技能名：{name.strip()}\n    候选标准技能名：{'、'.join(marked) or '（无）'}")
+    return _BATCH_TASK_TEMPLATE.format(count=len(names), items="\n\n".join(items))
+
+
+def decide_skill_normalize_batch(
+    names: list[str],
+    llm,
+    candidates_list: Optional[list[list[str]]] = None,
+    *,
+    batch_size: int = SKILL_BATCH_SIZE,
+    timeout: int = 0,
+) -> list[Optional[SkillNormalizeDecision]]:
+    """批量技能名归一决策（一次 LLM 调用多条，均摊往返提速）。
+
+    candidates_list 缺省时每行用单条口径（known_standard_names+candidate_rank_key
+    Top-15+别名落点）。LLM 失败/未配置返回 [None]*count；条数不符降级逐条。
+    """
+    count = len(names)
+    if llm is None or count == 0:
+        return [None] * count
+    if timeout <= 0:
+        timeout = DECIDE_TIMEOUT_SECONDS * batch_size
+    results: list[Optional[SkillNormalizeDecision]] = []
+    for start in range(0, count, batch_size):
+        chunk = names[start:start + batch_size]
+        c_chunk = (
+            candidates_list[start:start + batch_size]
+            if candidates_list is not None
+            else [None] * len(chunk)
+        )
+        prompt = build_skill_normalize_batch_prompt(chunk, c_chunk)
+        try:
+            with invocation_scope(
+                "skill_normalize_batch", entity_ref=f"skill_batch:{start}:{len(chunk)}",
+            ):
+                batch = llm.extract_structured(
+                    prompt, SkillNormalizeBatch,
+                    system_prompt=SYSTEM_PROMPT, timeout=timeout,
+                )
+            got = list(batch.results)
+            if len(got) != len(chunk):
+                for i, nm in enumerate(chunk):
+                    results.append(decide_skill_normalize(
+                        nm, llm, c_chunk[i] if c_chunk[i] is not None else None,
+                    ))
+            else:
+                results.extend(got)
+        except LLMExtractionError:
+            for i, nm in enumerate(chunk):
+                results.append(decide_skill_normalize(
+                    nm, llm, c_chunk[i] if c_chunk[i] is not None else None,
+                ))
+    return results
+
+
 def tier_for_skill_decision(
     decision: SkillNormalizeDecision,
     gate_ok: bool,

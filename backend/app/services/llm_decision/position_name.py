@@ -52,7 +52,12 @@ JD 抽取技能：{skills}
 要求：
 1. canonical_name 必须来自候选清单或原始标题本身的合理整理，不得凭空创造新名
 2. is_new=true 仅在"该岗位语义不在任何候选中且确实构成新岗位"时使用
-3. 中文标题保持中文；英文标题保持英文；中英混合按主语言归一
+3. 中文标题保持中文；英文标题优先用权威标准名候选（如 ai engineer→算法工程师）
+4. **原岗位名含"实习/见习"要归到正式岗位**（如"前端开发实习生"→"前端开发工程师"），
+   不得 keep 为实习生原样；这是招聘形态非正式岗位族
+5. **职能岗（架构师/算法工程师/研究员/科学家/分析师）是独立职能**，勿因技术栈
+   拆分到具体开发方向（"系统架构师"应归"架构师"类，而非"前端/后端开发工程师"）
+6. 中英混合按主语言归一；拿不准时 keep_original 并降置信度
 """
 
 
@@ -90,6 +95,138 @@ def build_position_name_prompt(
         skills=skills_text,
         candidates=candidates_text,
     )
+
+
+# 批量决策条数上限（05-25 提速：deepseek 100M 上下文一次打包多条，均摊往返）。
+# 实测 N=20 时 0.9~1.0s/条（vs 单条 16s），且质量与单条相当（85% vs 80%）。
+POSITION_BATCH_SIZE = 20
+
+
+class PositionNameBatch(BaseModel):
+    """批量岗位名归一容器（instructor 对 list[BaseModel] 用包装模型更稳）。
+
+    一次 LLM 调用决策多条岗位名：`results` 顺序与输入严格一一对应，调用方据此
+    拆条。条数不符即判定错位风险，降级逐条（对齐 JDExtractionBatch 语义）。
+    """
+
+    results: list[PositionNameDecision] = Field(
+        default_factory=list,
+        description="批量归一决策，数组第 i 个元素对应输入第 i 个岗位",
+    )
+
+
+# 批量模板（05-25 提速 + prompt 强化）：jobs 每行含 title/source/skills/candidates，
+# LLM 逐条输出 canonical/is_new/keep_original；强化规则吸收 33 分歧点：
+#   a) 实习生岗（标题含"实习/见习"）归正式岗位名（前端开发实习生→前端开发工程师），
+#      不得 keep 为实习生原样（生产 normalize_position_name 对"实习"返回空不入图）
+#   b) 职能岗（架构师/算法工程师/研究员/科学家）是独立职能，勿因技术栈拆分到
+#      具体开发方向（如"系统架构师"≠"前端开发工程师"，应归"架构师"类）
+#   c) 英文标题优先归 _EN_POSITION_MAP 权威中文映射（ai engineer→算法工程师），
+#      非用户输入语言，而是图谱标准名语言
+_BATCH_TASK_TEMPLATE = """批量岗位名归一判断（一次 {count} 条，逐条输出，顺序严格对应）。
+
+{items}
+
+输出 JSON：
+{{
+  "results": [
+    {{
+      "canonical_name": "标准岗位名（与图谱标准名同语言；keep_original 时可为原始标题）",
+      "is_new": true/false,
+      "keep_original": true/false,
+      "confidence": 0.0到1.0,
+      "reason": "一句话依据"
+    }}
+  ]
+}}
+
+要求（逐条）：
+1. canonical_name 必须来自该题候选清单或原始标题本身的合理整理，不得凭空创造新名
+2. is_new=true 仅在"该岗位语义不在任何候选中且确实构成新岗位"时使用
+3. 中文标题保持中文；英文标题优先用权威标准名候选（如 ai engineer→算法工程师）
+4. **原岗位名含"实习/见习"要归到正式岗位**（如"前端开发实习生"→"前端开发工程师"），
+   不得 keep 为实习生原样；这是招聘形态非正式岗位族
+5. **职能岗（架构师/算法工程师/研究员/科学家/分析师）是独立职能**，勿因技术栈
+   拆分到具体开发方向（"系统架构师"应归"架构师"类，而非"前端/后端开发工程师"）
+6. 中英混合按主语言归一；拿不准时 keep_original 并降置信度
+"""
+
+
+def build_position_name_batch_prompt(
+    titles: list[str],
+    sources: list[str],
+    skills_list: list[list[str]],
+    candidates_list: list[list[str]],
+) -> str:
+    """组装批量岗位名归一 prompt（每行一道，含标题/来源/技能/候选）。"""
+    items: list[str] = []
+    for i, title in enumerate(titles):
+        skills = "、".join((skills_list[i] if i < len(skills_list) else [])[:30]) or "（空）"
+        cands = "、".join((candidates_list[i] if i < len(candidates_list) else [])[:20]) or "（无）"
+        items.append(
+            f"[{i}] 原始标题：{title.strip()}\n"
+            f"    来源：{sources[i].strip() if i < len(sources) else '' or 'unknown'}\n"
+            f"    JD 抽取技能：{skills}\n"
+            f"    候选标准岗位名：{cands}"
+        )
+    return _BATCH_TASK_TEMPLATE.format(count=len(titles), items="\n\n".join(items))
+
+
+def decide_position_name_batch(
+    titles: list[str],
+    sources: list[str],
+    skills_list: list[list[str]],
+    candidates_list: list[list[str]],
+    llm,
+    *,
+    batch_size: int = POSITION_BATCH_SIZE,
+    timeout: int = 0,
+) -> list[Optional[PositionNameDecision]]:
+    """批量岗位名归一决策（一次 LLM 调用多条，均摊往返提速）。
+
+    实测 N=20 时 ~1s/条（vs 单条 16s，16×），质量相当。LLM 未配置/失败返回
+    [None]*count（shadow 跳过不阻塞）。条数与输入不符（instructor 包装模型
+    偶发错位）时降级逐条单决策。
+    """
+    if timeout <= 0:
+        timeout = DECIDE_TIMEOUT_SECONDS * batch_size
+    count = len(titles)
+    if llm is None or count == 0:
+        return [None] * count
+    # 分批：每批 batch_size 条（条数统一，防超长 prompt）
+    results: list[Optional[PositionNameDecision]] = []
+    for start in range(0, count, batch_size):
+        chunk = titles[start:start + batch_size]
+        s_chunk = sources[start:start + batch_size]
+        sk_chunk = skills_list[start:start + batch_size]
+        c_chunk = candidates_list[start:start + batch_size]
+        prompt = build_position_name_batch_prompt(chunk, s_chunk, sk_chunk, c_chunk)
+        try:
+            with invocation_scope(
+                "position_normalize_batch", entity_ref=f"jd_batch:{start}:{len(chunk)}",
+            ):
+                batch = llm.extract_structured(
+                    prompt, PositionNameBatch,
+                    system_prompt=SYSTEM_PROMPT, timeout=timeout,
+                )
+            got = list(batch.results)
+            if len(got) != len(chunk):
+                # 错位：降级逐条
+                for i in range(start, start + len(chunk)):
+                    results.append(
+                        decide_position_name(titles[i], skills_list[i] if i < len(skills_list) else [],
+                                              sources[i] if i < len(sources) else "", candidates_list[i] if i < len(candidates_list) else [], llm)
+                    )
+            else:
+                results.extend(got)
+        except LLMExtractionError:
+            # 单批失败：该批降级逐条（宁可慢不可丢）
+            for i in range(start, start + len(chunk)):
+                results.append(
+                    decide_position_name(titles[i], skills_list[i] if i < len(skills_list) else [],
+                                          sources[i] if i < len(sources) else "", candidates_list[i] if i < len(candidates_list) else [], llm)
+                )
+    return results
 
 
 def position_name_gate(
@@ -173,9 +310,27 @@ class PositionCandidateRecaller:
             self._matrix = None  # 模型未下载/依赖缺失：降级频次前缀
 
     def recall(self, title: str) -> list[str]:
-        """标题 → 候选 Top-K；embedding 不可用或单条失败回退池前缀。"""
-        if self._matrix is None or len(self._pool) <= self._k:
-            return self._pool[: self._k]
+        """标题 → 候选 Top-K；embedding 不可用或单条失败回退池前缀。
+
+        08-25 补 pure_en 候选召回（③）：英文标题命中 _EN_POSITION_MAP 权威映射时，
+        其中文目标（如 'ai engineer'→'算法工程师'）置顶并入候选——词面/语义召回对
+        英文长尾标题覆盖差，权威映射是确定性事实源。映射目标已是规范化中文岗位名
+        （图谱节点也用该名），故直接置顶不冲突。
+        """
+        title = (title or "").strip()
+        # pure_en 权威映射置顶：英文标题 → 权威中文岗位名
+        from app.services.extraction.dictionary import _EN_POSITION_MAP
+
+        en_target = _EN_POSITION_MAP.get(title.lower())
+        base = self._pool[: self._k] if (self._matrix is None or len(self._pool) <= self._k) else self._k_pool(title)
+        if en_target:
+            # 权威目标置顶，去重后保留 Top-K
+            dedup = [en_target] + [p for p in base if p != en_target]
+            return dedup[: self._k]
+        return base
+
+    def _k_pool(self, title: str) -> list[str]:
+        """embedding 可用时的 Top-K 召回（原 recall 主体）。"""
         try:
             import numpy as np
 
