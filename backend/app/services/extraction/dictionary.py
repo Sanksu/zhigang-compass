@@ -571,7 +571,7 @@ _EN_POSITION_MAP: dict[str, str] = {
     "solutions architect": "架构师",
     "software architect": "架构师",
     "technical architect": "架构师",
-    "solutions engineer": "软件开发工程师",
+    "solutions engineer": "解决方案工程师",
     "ai/ml applied engineer": "AI应用工程师",
     "genai engineer": "大模型算法工程师",
     "llm engineer": "大模型算法工程师",
@@ -611,7 +611,7 @@ _EN_POSITION_MAP: dict[str, str] = {
     "bio-chemical engineer": "生化工程师",
     "biochemical engineer": "生化工程师",
     "bio-optics engineer": "生物光学工程师",
-    "privacy engineer": "网络安全工程师",
+    "privacy engineer": "隐私工程师",
     "web content platform developer": "前端开发工程师",
     "collaboration cloud engineer": "DevOps工程师",
     # P0-B 英文岗位映射扩充（2026-08-12）：审计发现 526 个纯英文技术岗
