@@ -68,8 +68,10 @@ SKILL_ALIAS: dict[str, str] = {
     # 前端
     "vue3": "Vue.js",
     "vue2": "Vue.js",
+    "vue 3": "Vue.js",
     "reactjs": "React",
     "es6": "JavaScript",
+    "es6+": "JavaScript",
     "element plus": "ElementUI",
     "uniapp": "uni-app",
     "微信小程序": "小程序",

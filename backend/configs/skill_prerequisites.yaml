@@ -14,9 +14,6 @@ skills:
   C++:
     prerequisites:
     - 计算机基础
-  C语言:
-    prerequisites:
-    - 计算机基础
   JavaScript:
     prerequisites:
     - HTML
@@ -539,7 +536,7 @@ skills:
   # lp_18 AIoT
   编译调试:
     prerequisites:
-    - C语言
+    - C
     - 计算机基础
     hours: 40
   物联网:
@@ -550,7 +547,7 @@ skills:
   嵌入式Linux:
     prerequisites:
     - Linux
-    - C语言
+    - C
     hours: 70
   边缘计算:
     prerequisites:

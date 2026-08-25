@@ -24,7 +24,6 @@ skills:
   - {name: "C++", category: "编程语言"}
   - {name: "C#", category: "编程语言"}
   - {name: "C", category: "编程语言"}
-  - {name: "C语言", category: "编程语言"}
   - {name: "Ruby", category: "编程语言"}
   - {name: "PHP", category: "编程语言"}
   - {name: "Swift", category: "编程语言"}
@@ -327,7 +326,6 @@ skills:
   - {name: "GPT", category: "AI/机器学习"}
   - {name: "Claude", category: "AI/机器学习"}
   - {name: "机器学习算法", category: "AI/机器学习"}
-  - {name: "深度学习算法", category: "AI/机器学习"}
 
   # ---- 智能驾驶 / 机器人 ----
   - {name: "智能驾驶", category: "智能驾驶/机器人"}
@@ -880,7 +878,6 @@ skills:
   - {name: "Context API", category: "前端"}
   - {name: "D3", category: "前端"}
   - {name: "DOM", category: "前端"}
-  - {name: "ES6+", category: "前端"}
   - {name: "ESLint", category: "前端"}
   - {name: "Flex布局", category: "前端"}
   - {name: "Framer Motion", category: "前端"}
@@ -891,7 +888,6 @@ skills:
   - {name: "Highcharts", category: "前端"}
   - {name: "MVVM", category: "前端"}
   - {name: "NPM", category: "前端"}
-  - {name: "Vue 3", category: "前端"}
   - {name: "Vue Router", category: "前端"}
   - {name: "Web性能", category: "前端"}
   - {name: "前端性能", category: "前端"}
