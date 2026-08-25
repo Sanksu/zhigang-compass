@@ -10,6 +10,10 @@
   见 eval_normalization docstring），非生产归一 accuracy
 - relation：技能对 → LLM 关系判定，gold=先修/父子/替代 YAML 或 NONE
   → 关系 precision / 方向准确率
+- position：岗位名 → LLM 归一决策，gold=canonical/is_new/keep_original
+  → canonical_accuracy / is_new_accuracy / keep_original_accuracy /
+  gate_blocked_count / error_merge_count（DRAFT 行 gold_* 为机器建议，
+  仅参考，正式指标须人工转正后读取）
 
 用法：
     uv run python scripts/eval_llm_driven.py --task all
@@ -40,11 +44,34 @@ _FILES = {
     "classification": "classification_150.jsonl",
     "normalization": "normalization_150.jsonl",
     "relation": "relation_100.jsonl",
+    "position": "position_normalization_draft.jsonl",
 }
+
+# position 任务读取任意 position_normalization* 黄金/草稿文件（优先草稿主文件）。
+_POSITION_GLOB_PREFIX = "position_normalization"
+
+
+def _get_file_for(task: str) -> str | None:
+    """任务 → 数据文件名。
+
+    position 任务可路由到任意 position_normalization* 文件（冻结金标准或草稿），
+    依 _POSITION_GLOB_PREFIX 前缀通配；其余任务固定映射。
+    """
+    if task == "position":
+        # 优先草稿主文件，其次已人工转正的同前缀文件（若存在）。
+        for cand in (
+            "position_normalization_draft.jsonl",
+            "position_normalization_gold.jsonl",
+            "position_normalization_frozen.jsonl",
+        ):
+            if (_GOLDEN_DIR / cand).exists():
+                return cand
+        return None
+    return _FILES.get(task)
 
 
 def _load_rows(task: str) -> list[dict]:
-    fname = _FILES.get(task)
+    fname = _get_file_for(task)
     if fname is None:
         return []
     path = _GOLDEN_DIR / fname
@@ -193,6 +220,107 @@ async def eval_normalization(rows: list[dict], llm) -> dict:
     }
 
 
+async def eval_position_normalization(rows: list[dict], llm) -> dict:
+    """岗位名归一：LLM 决策器 vs gold_canonical / gold_is_new / gold_keep_original。
+
+    gold 为 final/jd_golden 或 DRAFT 集（annotation_status=draft_auto = 机器建议，
+    仅作参考，不计入正式指标）。指标（生产口径按评分目的区分为两类）：
+
+    - canonical_accuracy   ：LLM canonical == gold_canonical（变体键容忍空白/全角/大小写）
+    - is_new_accuracy      ：LLM is_new == gold_is_new
+    - keep_original_accuracy：LLM keep_original == gold_keep_original
+    - gate_blocked_count   ：hard gate（position_name_gate）拦截条数（防幻觉）
+    - error_merge_count    ：gate 未拦、但与 gold 不一致的"错归并"条数
+
+    核心思路：评分必须过 gate——gate 拦截（防幻觉长名/空名/自创名）视为防御成功，
+    不误记为"错误"；只有 gate 通过但仍与 gold 不一致才记 error_merge_count。
+    """
+    from app.services.llm_decision.position_name import (
+        decide_position_name, position_name_gate,
+    )
+
+    results: list[dict] = []
+    llm_failed = canonical_hit = is_new_hit = keep_hit = gate_blocked = error_merge = 0
+    human_rows = 0
+
+    def _vk(s: str) -> str:
+        import unicodedata
+
+        return "".join(s.split()).casefold() if s else ""
+
+    for row in rows:
+        raw = row.get("raw_title") or row.get("position_name") or ""
+        if not raw:
+            continue
+        if row.get("annotation_status") == "human":
+            human_rows += 1
+        decision = await asyncio.to_thread(
+            decide_position_name, raw, row.get("skills") or [],
+            row.get("source") or "", row.get("candidates") or [], llm,
+        )
+        if decision is None:
+            llm_failed += 1
+            results.append({"raw_title": raw, "failed": True, "match": False})
+            continue
+        gate_ok, gate_reason = position_name_gate(decision, raw, row.get("candidates") or [])
+        if not gate_ok:
+            gate_blocked += 1
+            results.append({
+                "raw_title": raw, "gate_ok": False, "gate_reason": gate_reason,
+                "predicted_canonical": decision.canonical_name,
+                "predicted_is_new": decision.is_new,
+                "predicted_keep_original": decision.keep_original,
+                "failed": False, "match": False,
+            })
+            continue
+
+        # gold 取值（DRAFT 行 gold_* 为机器建议初值，仅参考；human 行为最终金标准）
+        gold_canon = row.get("gold_canonical") or ""
+        gold_is_new = bool(row.get("gold_is_new"))
+        gold_keep = bool(row.get("gold_keep_original"))
+
+        canonical_ok = (
+            _vk(decision.canonical_name) == _vk(gold_canon)
+            if not (gold_keep or decision.keep_original or gold_is_new or decision.is_new)
+            else True
+        )
+        # 若 gold 与原始标题一致（keep_original），canonical 名义一致由 keep 决定
+        is_new_ok = decision.is_new == gold_is_new
+        keep_ok = decision.keep_original == gold_keep
+        canonical_hit += int(canonical_ok)
+        is_new_hit += int(is_new_ok)
+        keep_hit += int(keep_ok)
+
+        # 错误归并：keep_original 语义冲突或 canonical 语义错过 gold（gate 未拦）
+        mismatch = (not canonical_ok) or (not is_new_ok) or (not keep_ok)
+        if mismatch:
+            error_merge += 1
+        results.append({
+            "raw_title": raw, "gate_ok": True,
+            "gold_canonical": gold_canon, "gold_is_new": gold_is_new,
+            "gold_keep_original": gold_keep,
+            "predicted_canonical": decision.canonical_name,
+            "predicted_is_new": decision.is_new,
+            "predicted_keep_original": decision.keep_original,
+            "canonical_ok": canonical_ok, "is_new_ok": is_new_ok,
+            "keep_ok": keep_ok, "match": not mismatch,
+            "failed": False,
+        })
+
+    ok = [r for r in results if not r["failed"] and r.get("gate_ok")]
+    return {
+        "task": "position_normalization", "total": len(rows),
+        "human_confirmed_rows": human_rows,
+        "llm_failed": llm_failed,
+        "canonical_accuracy": round(sum(1 for r in ok if r["canonical_ok"]) / len(ok), 4) if ok else None,
+        "is_new_accuracy": round(sum(1 for r in ok if r["is_new_ok"]) / len(ok), 4) if ok else None,
+        "keep_original_accuracy": round(sum(1 for r in ok if r["keep_ok"]) / len(ok), 4) if ok else None,
+        "gate_blocked_count": gate_blocked,
+        "error_merge_count": error_merge,
+        "results": results,
+    }
+
+
 async def eval_relation(rows: list[dict], llm) -> dict:
     """关系：gold=先修/父子/替代 YAML 或 NONE。命中=类型一致（NONE 为 NONE）。"""
     from app.services.llm_decision.skill_relation import (
@@ -250,7 +378,7 @@ async def main_async(args) -> dict:
         if args.limit:
             rows = rows[: args.limit]
         fn = {"classification": eval_classification, "normalization": eval_normalization,
-              "relation": eval_relation}[task]
+              "relation": eval_relation, "position": eval_position_normalization}[task]
         started = time.perf_counter()
         result = await fn(rows, llm)
         result["duration_seconds"] = round(time.perf_counter() - started, 1)
@@ -269,11 +397,11 @@ async def main_async(args) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="LLM 驱动决策器 vs 确定性 gold 评测")
-    parser.add_argument("--task", nargs="+", choices=["classification", "normalization", "relation", "all"], default=["all"])
+    parser.add_argument("--task", nargs="+", choices=["classification", "normalization", "relation", "position", "all"], default=["all"])
     parser.add_argument("--limit", type=int, default=0, help="冒烟采样数（0=全量）")
     args = parser.parse_args()
     if "all" in args.task:
-        args.task = ["classification", "normalization", "relation"]
+        args.task = ["classification", "normalization", "relation", "position"]
     asyncio.run(main_async(args))
 
 
