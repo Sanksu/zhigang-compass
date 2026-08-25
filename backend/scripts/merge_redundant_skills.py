@@ -24,7 +24,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.database import neo4j_driver  # noqa: E402
+
+def _driver():
+    """创建 Neo4j 驱动（不走 app.core.database，避免其顶层 postgres engine
+    副作用）。Neo4j-only 脚本在主机/容器跑都不因 postgres 缺失报无关错。
+    从 app core settings 读 URI（环境变量带出 neo4j_uri/user/password）。
+    """
+    from neo4j import GraphDatabase
+
+    from app.core.config import settings
+
+    return GraphDatabase.driver(
+        settings.neo4j_uri,
+        auth=(settings.neo4j_user, settings.neo4j_password),
+    )
 
 MERGES: list[tuple[str, str]] = [
     ("C语言", "C"),
@@ -93,7 +106,8 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="执行合并（默认 dry-run）")
     args = parser.parse_args()
 
-    with neo4j_driver.session() as session:
+    driver = _driver()
+    with driver.session() as session:
         for dup, keep in MERGES:
             stats = _stats(session, dup)
             keep_exists = session.run(
@@ -111,7 +125,7 @@ def main() -> int:
                     _merge_one(tx, dup, keep)
                     tx.commit()
                 print(f"    已合并 {dup!r} → {keep!r}")
-    neo4j_driver.close()
+    driver.close()
     print("\n完成" + ("" if args.apply else "（dry-run，--apply 执行）"))
     return 0
 
