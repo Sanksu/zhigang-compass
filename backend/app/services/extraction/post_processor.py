@@ -24,6 +24,34 @@ for _k, _v in SKILL_ALIAS.items():
     _ALIAS_REV.setdefault(_v.lower(), []).append(_k.lower())
 
 
+# 08-25 加分弱维修复：requirements(nice) 行业/厂商/业务领域词剔除。
+# 110 条盲审实测 bonus FP 中大量为厂商/行业/业务领域短语（华为/腾讯/阿里/星环/
+# 证券行业业务逻辑/航天/航空/公安系统/政府数据治理等）——此类词无技能匹配语义，
+# 会污染加分技能池。is_valid_skill_name（→ is_noise_skill）只拦截白名单外泛词，
+# 不覆盖"厂商名 + 行业域 + 业务短语"复合词，故此处加保守词表。
+# 极保守原则：只剔除无歧义的厂商/平台名（其不可能构成技术技能），以及
+# 仅在"厂商产品名上下文"中出现的强业务标记。**不做宽泛域形容词（证券/风电/公安/
+# 政府/航天/航空/火电/水声等）子串剔除**——这类词可前缀在真实细分技能上（实测
+# "风电备件智能化""结售汇测试"是 gold 收录的合法加分技能），误杀会损 recall。
+_BONUS_VENDOR_MARKERS: frozenset[str] = frozenset({
+    # 厂商/公司名/平台产品名（无技能语义，不可能构成技术技能）
+    "华为", "腾讯", "阿里", "星环", "全志", "海思", "恒生", "顶点", "柜台",
+})
+
+
+def _is_bonus_industry_vendor_noise(name: str) -> bool:
+    """加分技能中的行业/厂商/业务领域噪音判定（极保守，仅剔厂商/平台名）。
+
+    name 本身或包含前缀即厂商/平台名（"华为"、"恒生柜台"、"顶点交易柜台"）即判噪。
+    仅用于 requirements；不用于 skills（必备技能保留，且 skills 的 FP 治理在评测侧
+    _llm_only 分离）。已知取舍："阿里"会连带剔除"阿里云"（若其出现在 requirements），
+    但实测 gold 全集无任何加分技能含该前缀，且"阿里云"作必备技能留在 skills 不受影响。
+    """
+    if not name:
+        return False
+    return any(m in name for m in _BONUS_VENDOR_MARKERS)
+
+
 def _text_has(low: str, name: str) -> bool:
     """词边界检查技能名或其别名是否出现在正文（小写）。"""
     n = name.lower()
@@ -52,8 +80,13 @@ def lexical_guard(result: JDExtractionResult, jd_text: str) -> JDExtractionResul
     result.skills = kept
     existing = {r.skill_name for r in result.requirements}
     for name in demoted:
-        if name not in existing:
-            result.requirements.append(REQUIRESRelation(skill_name=name, necessity="nice"))
+        if name in existing:
+            continue
+        # 08-25 加分弱维修复：被降级的行业/厂商/业务领域词同样剔除（防降级路径绕过
+        # post_process 的 requirements 清洗，误入 nice 加分池）。
+        if _is_bonus_industry_vendor_noise(name):
+            continue
+        result.requirements.append(REQUIRESRelation(skill_name=name, necessity="nice"))
     return result
 
 # 需去除的中文后缀（按长度降序排列，优先匹配长后缀）。
@@ -168,6 +201,10 @@ def post_process(result: JDExtractionResult) -> JDExtractionResult:
     for req in result.requirements:
         name = _clean(req.skill_name)
         if not is_valid_skill_name(name) or _is_soft_noise(name):
+            continue
+        # 08-25 加分弱维修复：行业/厂商/业务领域词剔除（主要作用于 nice；must 同样
+        # 剔除，因为此类词无论必须/加分都不是技能）。在清洗后再判，避免剥后缀后漏网。
+        if _is_bonus_industry_vendor_noise(name):
             continue
         key = (name.lower(), req.necessity)
         if key in seen:
