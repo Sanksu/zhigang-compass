@@ -6,7 +6,8 @@
 - classification：对冻结技能名直接调 LLM 分类（不走白名单快速路径），
   gold=权威 category → top-1 accuracy / macro-F1 / 三跑一致率
 - normalization：变体名 → LLM 归并决策，gold=别名映射标准名（merge）或
-  短词 keep（错误合并率必须为 0）
+  短词 keep（错误合并率必须为 0）；口径=alias 权威遵循率（①重定义，
+  见 eval_normalization docstring），非生产归一 accuracy
 - relation：技能对 → LLM 关系判定，gold=先修/父子/替代 YAML 或 NONE
   → 关系 precision / 方向准确率
 
@@ -136,7 +137,14 @@ async def eval_classification(rows: list[dict], llm) -> dict:
 
 
 async def eval_normalization(rows: list[dict], llm) -> dict:
-    """归一：变体→ merge 到 gold 标准名 / 短词 keep。"""
+    """归一：变体→ merge 到 gold 标准名 / 短词 keep。
+
+    口径（2026-08-25 拍板 ① 重定义）：本任务测「alias 权威遵循率」——
+    评测集全部为 alias 域变体（slice=alias），生产中由确定性快速路径直解
+    不进 LLM；r7 起 prompt 对 alias 落点标注 * 约束 merge 目标，指标语义
+    = LLM 对权威落点的遵循率（参考线 0.90），不再作为生产归一 accuracy
+    的验收口径（生产口径=快速路径直解+LLM 兜底，另行汇报）。
+    """
     from app.services.llm_decision.skill_normalize import (
         decide_skill_normalize, skill_normalize_gate,
     )
