@@ -40,6 +40,12 @@ _TASK_TEMPLATE = """任务：为技能名 "{name}" 选择分类。
 类别清单（必须从中选一，原样输出）：
 {categories}
 
+类别锚点示例（近邻类目易混，按本表口径判）：
+{anchors}
+
+边界口径（权威分类政策，易混对按此裁决）：
+{boundary_rules}
+
 输出 JSON：
 {{
   "category": "清单中的某一类",
@@ -50,8 +56,45 @@ _TASK_TEMPLATE = """任务：为技能名 "{name}" 选择分类。
 要求：
 1. category 必须与清单原文完全一致（含标点与斜杠），不得自创类别
 2. 工具/框架按其所属技术领域归类（如 Docker → 云原生/DevOps）
-3. 不确定时选大类并降低 confidence
+3. 查询/脚本语言（SQL、Shell 等）归编程语言；具体数据库产品（MySQL、
+   Redis 等）归数据库；语言 vs 其上框架分属编程语言 vs 对应领域
+4. 不确定时选大类并降低 confidence
 """
+
+# 边界口径规则（校准 r5，2026-08-25）：四轮复测（r1-r4）稳定的 16 类错误
+# 全为语义边界政策题（词面近邻证据 12/16 命中为 0，无法用检索证据解），
+# 本块把白名单分类政策显式化——等价于给标注员的口径手册。
+# 错误来源实证：docs/reviews/LLM驱动黄金集复测r4_20260824.md。
+# 红线：口径规则属算法核心，变更须张恺天 review。
+_BOUNDARY_RULES = """\
+- 数据治理/统计/仓库类（数据质量、数据统计、数据仓库）→ 大数据；商业分析与报表 → 数据分析/商业
+- RPC/微服务框架（Dubbo、gRPC）→ 后端；消息系统（Kafka、RabbitMQ）→ 消息/中间件
+- 分布式存储/存储引擎（Ceph、HBase）→ 数据库；容器与编排（K8s）→ 云原生/DevOps
+- 办公套件/项目管理/构建工具/系统集成（Microsoft 365、CMake、Maven、Jira）→ 工程协作
+- 车载感知/传感器（毫米波雷达、激光雷达）→ 智能驾驶/机器人；EDA/芯片设计工具（Allegro、Vivado）→ 硬件/芯片
+- 学科课程类（计算机网络、操作系统）→ 计算机基础；具体网络协议（TCP/IP、HTTP）→ 网络/协议；流媒体协议（RTMP、WebRTC、HLS）→ 音视频
+- 语言标准/版本（ES5、ES6）与编程范式概念（异步编程、函数式编程）→ 编程语言；JS 运行时与工具链（Node.js、Bun、npm）→ 前端
+- 数学基础（线性代数、概率论、统计推断）→ 数据分析/商业"""
+
+
+def category_anchors(max_per_category: int = 2) -> str:
+    """类别锚点示例（从权威白名单取每类代表词，近邻类目易混口径）。
+
+    基线实证：分类 top-1 0.8714 的错误集中在同域近邻（SQL→数据库、
+    ES5→前端、异步编程→计算机基础）——锚点把权威口径的边界词显式给到
+    prompt（校准 r1，算法红线：口径变更须算法岗确认）。
+    """
+    from app.services.extraction.dictionary import SKILL_CATEGORY
+
+    by_category: dict[str, list[str]] = {}
+    for skill, category in SKILL_CATEGORY.items():
+        by_category.setdefault(category, []).append(skill)
+    lines = []
+    for category in sorted(by_category):
+        reps = sorted(by_category[category], key=lambda s: (len(s), s))[:max_per_category]
+        if reps:
+            lines.append(f"- {category}：{'、'.join(reps)}")
+    return "\n".join(lines)
 
 
 class SkillCategorySuggestion(BaseModel):
@@ -86,6 +129,8 @@ def classify_skill(
     prompt = _TASK_TEMPLATE.format(
         name=name.strip(),
         categories="、".join(sorted(KNOWN_CATEGORIES)),
+        anchors=category_anchors(),
+        boundary_rules=_BOUNDARY_RULES,
     )
     try:
         with invocation_scope("skill_category_review"):

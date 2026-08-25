@@ -31,6 +31,9 @@ DEFAULTS: dict = {
     "etl_validate_temporal_default": 200,  # 时滞/通胀检测默认批次
     "etl_run_hour": 5,                  # ETL 调度小时（0-23，容器内 ARQ cron）
     "etl_run_minute": 0,                # ETL 调度分钟（0-59）
+    # JD 批量抽取提速（08-25 参数化）：并发批次上限与每批条数，226 实测调参用
+    "etl_extract_concurrency": 6,        # 并发批次上限（过高触发 provider 429 整批降级逐条）
+    "etl_extract_batch_size": 8,         # 每批 JD 条数（受 max_tokens 约束，8 为甜点）
     # 每爬虫采集配置（08-21）：spider -> {enabled, max_results, max_empty_retries}；
     # 缺省启用、按源默认数量；max_empty_retries=0 关闭页面级空列表退避重试（默认 3）
     "crawlers": {},
@@ -40,11 +43,17 @@ DEFAULTS: dict = {
     "dict_guard_min_confidence": 0.8,        # 自动生效最低 LLM 置信度
     "dict_guard_max_candidates": 20,         # 每类候选上限（控制每日 LLM 成本）
     "dict_guard_reproposal_cooldown_days": 7,  # 驳回提案冷却期（天内不重提，08-24 缺口修复）
+    # LLM 决策统一风险路由（六域决策信封，PR1 灰度底座）：R1 自动生效门限
+    "llm_decision_min_confidence": 0.8,        # R1 自动最低置信度
+    "llm_decision_auto_impact_max": 50,        # R1 自动影响面上限（图谱节点数）
     # 岗位名 LLM 审查（幻觉防控第四道防线，方案评审稿）：默认关闭先实验后灰度
     "position_review_enabled": False,
     # 技能分类 LLM 审查（LLM 驱动化 P1）：未分类技能灰度提议，默认关闭
     "skill_category_review_enabled": False,
     "skill_category_max_candidates": 20,
+    # 名称归一 LLM 影子审查（PR3b）：岗位名/技能名归一决策只落 shadow 记录，默认关闭
+    "name_normalization_shadow_enabled": False,
+    "name_normalization_max_candidates": 20,
 }
 
 _VALIDATORS = {
@@ -58,13 +67,19 @@ _VALIDATORS = {
     "etl_validate_temporal_default": lambda v: isinstance(v, int) and 100 <= v <= 500,
     "etl_run_hour": lambda v: isinstance(v, int) and 0 <= v <= 23,
     "etl_run_minute": lambda v: isinstance(v, int) and 0 <= v <= 59,
+    "etl_extract_concurrency": lambda v: isinstance(v, int) and 1 <= v <= 16,
+    "etl_extract_batch_size": lambda v: isinstance(v, int) and 1 <= v <= 16,
     "dict_guard_auto_impact_threshold": lambda v: isinstance(v, int) and 1 <= v <= 1000,
     "dict_guard_min_confidence": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0,
     "dict_guard_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
     "dict_guard_reproposal_cooldown_days": lambda v: isinstance(v, int) and 1 <= v <= 90,
+    "llm_decision_min_confidence": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0,
+    "llm_decision_auto_impact_max": lambda v: isinstance(v, int) and 1 <= v <= 1000,
     "position_review_enabled": lambda v: isinstance(v, bool),
     "skill_category_review_enabled": lambda v: isinstance(v, bool),
     "skill_category_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
+    "name_normalization_shadow_enabled": lambda v: isinstance(v, bool),
+    "name_normalization_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
 }
 
 

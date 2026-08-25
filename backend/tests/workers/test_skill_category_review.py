@@ -137,6 +137,7 @@ def _run(rows, llm_outcome=None, enabled=True, monkeypatch=None, tmp_path=None):
             return_value=fake_llm,
         ),
         mock.patch.object(worker_module, "_REPORT_DIR", tmp_path),
+        mock.patch("app.services.llm_decision.persist_record", return_value="rec"),
     ):
         summary = asyncio.run(skill_category_review_daily({}))
     return summary, driver, fake_llm, None

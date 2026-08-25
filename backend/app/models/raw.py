@@ -57,6 +57,11 @@ class JDRaw(_RawMixin, Base):
         UniqueConstraint("source", "source_id", name="uq_jd_raw_source_id"),
     )
 
+    # LLM 抽取输入的内容指纹（08-24 决策配套）：sha256(标题+正文拼装后文本)，
+    # batch_extract 落库时写入；重爬更新正文/标题后与存量不一致 → 触发重抽
+    # （重爬不重抽的语义滞后治理）。存量行回填时空值；未抽取行参与常规游标。
+    content_hash: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+
 
 class CourseRaw(_RawMixin, Base):
     """课程信息原始数据。"""

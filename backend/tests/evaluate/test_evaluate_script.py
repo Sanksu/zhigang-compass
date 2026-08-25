@@ -7,6 +7,8 @@
 执行（见 pyproject.toml）。
 """
 
+import subprocess
+
 import pytest
 
 from scripts.evaluate import (
@@ -894,3 +896,74 @@ class TestAlignedFp:
         in_text, halluc = split_fp_aligned(["消息队列"], "负责网关与限流设计，无消息相关职责".lower())
         assert "消息队列" in halluc
         assert "消息队列" not in in_text
+
+
+class TestEvalEvidenceEnvelope:
+    """08-24 证据链：输入/gold 指纹、commit 兜底与归档信封字段。"""
+
+    def test_input_sha256_deterministic_and_sensitive(self):
+        from tests.evaluate.run_manual_jd_eval import _input_sha256
+
+        h1 = _input_sha256("Java 后端", "负责微服务开发")
+        h2 = _input_sha256("Java 后端", "负责微服务开发")
+        assert h1 == h2
+        assert len(h1) == 64
+        h3 = _input_sha256("Java 后端", "负责微服务开发与架构设计")
+        assert h3 != h1
+
+    def test_gold_sha256_stable(self, tmp_path):
+        from tests.evaluate.run_manual_jd_eval import _gold_sha256
+
+        p = tmp_path / "gold.jsonl"
+        p.write_text("line1\nline2\n", encoding="utf-8")
+        h_old = _gold_sha256(p)
+        assert h_old == _gold_sha256(p)
+        p.write_text("line1\nline2\nchanged\n", encoding="utf-8")
+        assert _gold_sha256(p) != h_old
+        assert _gold_sha256(tmp_path / "absent.jsonl") == ""
+
+    def test_git_commit_unknown_on_failure(self, monkeypatch):
+        from tests.evaluate.run_manual_jd_eval import _git_commit
+
+        def boom(*args, **kwargs):
+            raise OSError("no git")
+
+        monkeypatch.setattr(subprocess, "run", boom)
+        assert _git_commit() == "unknown"
+
+    def test_archive_result_includes_envelope_fields(self):
+        from tests.evaluate.run_manual_jd_eval import _archive_result
+
+        metrics = {
+            "skills_micro_aligned": {"tp": 9, "fp": 1, "fn": 1, "precision": 0.9, "recall": 0.9, "f1": 0.9},
+            "skills_micro": {"tp": 8, "fp": 2, "fn": 1, "precision": 0.8, "recall": 0.89, "f1": 0.84},
+            "skills_micro_llm_only": {"tp": 6, "fp": 3, "fn": 2, "precision": 0.67, "recall": 0.75, "f1": 0.7},
+            "hallucinated_fp": {"Kafka": 1},
+            "bonus_skills_micro": {"tp": 0, "fp": 0, "fn": 0, "precision": 1.0, "recall": 1.0, "f1": 1.0},
+            "title_raw_exact_accuracy": 0.9,
+            "title_normalized_accuracy": 0.92,
+            "education_raw_exact_accuracy": 0.8,
+            "skills_average_sample_f1": 0.88,
+            "experience_accuracy": 0.9,
+            "experience_compared": 10,
+            "core_duties_micro": {"tp": 1, "fp": 1, "fn": 1, "precision": 0.5, "recall": 0.5, "f1": 0.5},
+            "total_samples": 10,
+            "real_llm_success_samples": 9,
+            "fallback_samples": 1,
+            "failed_samples": 0,
+            "per_sample_skills_f1": [0.9],
+            "per_sample_bonus_f1": [1.0],
+            "error_types": [],
+            "commit": "abc1234",
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "gold_sha256": "g" * 64,
+            "eval_spec_version": "20260824-a",
+        }
+        result = _archive_result(metrics)
+        assert result["skills_micro_llm_only"]["f1"] == 0.7
+        assert result["commit"] == "abc1234"
+        assert result["provider"] == "deepseek"
+        assert result["gold_sha256"] == "g" * 64
+        assert result["eval_spec_version"] == "20260824-a"
+        assert result["inputs_hashed"] is True

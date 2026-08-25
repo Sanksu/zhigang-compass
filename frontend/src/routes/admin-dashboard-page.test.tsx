@@ -11,12 +11,12 @@ import { describe, expect, it } from 'vitest'
 import { ETL_ACTION_JOBS, QUICK_ACTIONS } from './admin-dashboard-page'
 
 describe('QUICK_ACTIONS 快捷操作面板', () => {
-  it('补全为 11 项：4 触发 + 7 导航', () => {
-    expect(QUICK_ACTIONS).toHaveLength(11)
+  it('补全为 12 项：4 触发 + 8 导航', () => {
+    expect(QUICK_ACTIONS).toHaveLength(12)
     const triggers = QUICK_ACTIONS.filter((a) => !a.to)
     const navs = QUICK_ACTIONS.filter((a) => a.to)
     expect(triggers).toHaveLength(4)
-    expect(navs).toHaveLength(7)
+    expect(navs).toHaveLength(8)
     expect(triggers.map((t) => t.id)).toEqual(
       expect.arrayContaining(['crawl', 'etl-clean', 'etl-graph', 'etl-full']),
     )
@@ -30,7 +30,7 @@ describe('QUICK_ACTIONS 快捷操作面板', () => {
   it('导航目标均为已注册的管理路由', () => {
     const navs = QUICK_ACTIONS.filter((a) => a.to).map((a) => a.to)
     expect(navs).toEqual(
-      expect.arrayContaining(['/admin/review', '/admin/review?tab=dict', '/admin/crawl', '/admin/llm', '/admin/users', '/admin/settings/tasks']),
+      expect.arrayContaining(['/admin/review', '/admin/review?tab=dict', '/admin/crawl', '/admin/llm', '/admin/llm-decisions', '/admin/users', '/admin/settings/tasks']),
     )
   })
 

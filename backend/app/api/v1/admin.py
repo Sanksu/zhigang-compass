@@ -19,6 +19,7 @@ from app.api.v1.admin_routes import (
     dict_guard,
     etl,
     lineage,
+    llm_decisions,
     position_edit,
     position_reviews,
 )
@@ -32,6 +33,7 @@ router.include_router(position_reviews.router)
 router.include_router(position_edit.router)
 router.include_router(config.router)
 router.include_router(dict_guard.router)
+router.include_router(llm_decisions.router)
 router.include_router(etl.router)
 
 # 爬虫域私有符号 re-export（tests/admin/* 直连导入）

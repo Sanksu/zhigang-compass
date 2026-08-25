@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -567,6 +568,91 @@ class DictChangeLog(Base):
     detail: Mapped[dict] = mapped_column(JSONB, default=dict)  # {operator, evidence 摘要等}
     impact_stats: Mapped[dict] = mapped_column(JSONB, default=dict)
     applied_by: Mapped[str] = mapped_column(String(64), default="system", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class LLMDecisionRecord(Base):
+    """LLM 语义决策流水——六域统一决策信封（主仓灰度底座）。
+
+    覆盖 jd_extract / position_normalize / skill_normalize / position_classify /
+    cluster_label / skill_classify / governance / skill_relation 的每次 LLM
+    结构化决策，一行一条：输入哈希、证据引用、provider/model、prompt/schema
+    版本、结构化输出、风险路由结果、审核与生效状态、回滚引用。
+
+    设计约束：
+    - 不复制完整敏感原文，只用实体引用、证据摘要与输入/输出哈希；
+    - status 状态机：shadow（只记录）→ proposal（进审核池）→ approved /
+      rejected；低风险可 auto_applied；不变量失败记 blocked；超预算记 failed；
+    - risk_tier 由 app.services.llm_decision.risk_tier_for 统一裁决（R0/R1/R2）。
+    """
+
+    __tablename__ = "llm_decision_records"
+    __table_args__ = (
+        Index("ix_llm_decision_domain_status", "domain", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    domain: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    entity_type: Mapped[str] = mapped_column(String(30), default="", nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(128), default="", nullable=False)
+    run_id: Mapped[str] = mapped_column(String(40), default="", nullable=False, index=True)
+    env: Mapped[str] = mapped_column(String(16), default="production", nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    evidence_refs: Mapped[list] = mapped_column(JSONB, default=list)
+    provider: Mapped[str] = mapped_column(String(50), default="", nullable=False)
+    model: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    structured_output: Mapped[dict] = mapped_column(JSONB, default=dict)
+    postprocessed_output: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gate_result: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    risk_tier: Mapped[str] = mapped_column(String(8), default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="shadow", nullable=False)
+    reviewer: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    review_reason: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    effects_applied: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    rollback_ref: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    fallback_reason: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class SkillDynamicRelation(Base):
+    """LLM 技能关系审批执行通道（PR9b）——proposal→approved 的关系持久化。
+
+    与 configs YAML 静态种子并列的第二个图关系事实源：管理员在决策页
+    approve 一条 skill_relation proposal 后，此处落一行（PG），由
+    scripts/sync_dynamic_relations.py 与 YAML 种子共同幂等 MERGE 入图。
+
+    - ALTERNATIVE_OF 对称语义一条记录，同步时双向 MERGE
+    - source=llm_review（人工审批 + LLM 提议链路），与 YAML 的 manual 区分
+    - applied_to_graph 标记同步进度（幂等不依赖）
+    """
+
+    __tablename__ = "skill_dynamic_relations"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    source_skill: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    target_skill: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    relation_type: Mapped[str] = mapped_column(
+        String(24), nullable=False  # PREREQUISITE_OF | BELONGS_TO | ALTERNATIVE_OF
+    )
+    direction: Mapped[str] = mapped_column(String(12), default="a_to_b", nullable=False)
+    proposal_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str] = mapped_column(String(24), default="llm_review", nullable=False)
+    reviewed_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    review_reason: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    applied_to_graph: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

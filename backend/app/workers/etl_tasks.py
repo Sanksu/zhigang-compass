@@ -13,6 +13,7 @@ identical to preserve ARQ job matching.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -637,6 +638,16 @@ def _is_jd_text_short(snapshot: dict, raw_text: str) -> bool:
     return len((_build_jd_text(snapshot, raw_text) or "").strip()) < 10
 
 
+def _content_hash(snapshot: dict, raw_text: str) -> str:
+    """LLM 抽取输入的内容指纹：sha256(拼装后正文)。
+
+    batch_extract 落库时写 jd_raw.content_hash；重爬更新正文/标题后该哈希
+    与存量不一致 → 触发重抽（08-24 决策配套：重爬不重抽的语义滞后治理）。
+    与 _build_jd_text 同源，输入不变则指纹不变（抽取结果变化不改变指纹）。
+    """
+    return hashlib.sha256((_build_jd_text(snapshot, raw_text) or "").encode("utf-8")).hexdigest()
+
+
 # LLM 全败延迟重试预算（设计文档 §6.5：全部 provider 失败后入延迟队列，不立即
 # 落库规则降级产物）。job_try ≤ 该值时整任务延迟重试；耗尽后落库降级产物并告警。
 _LLM_RETRY_DEFER_SECONDS = 600
@@ -761,6 +772,7 @@ async def batch_extract(
             rows = (await session.scalars(
                 select(JDRaw).where(JDRaw.id.in_(jd_ids))
             )).all()
+            recheck_rows = []  # 显式指定 jd_ids 不触发指纹重抽
         else:
             # 未抽取 = snapshot 无 extraction 键（JSONB 键缺失时为 SQL NULL）
             rows = (await session.scalars(
@@ -769,18 +781,29 @@ async def batch_extract(
                 .order_by(JDRaw.id.asc())
                 .limit(limit)
             )).all()
+            # 内容指纹重抽（08-24 决策配套）：已抽取但正文/标题更新（重爬）的行。
+            # 只扫最近 limit 条已抽取记录（updated_at 倒序），指纹为空=存量行 → 回填
+            # 不重抽；指纹不一致=内容已变化 → 复用下方批量抽取路径重新入图。
+            recheck_rows = (await session.scalars(
+                select(JDRaw)
+                .where(JDRaw.snapshot["extraction"].astext.is_not(None))
+                .order_by(JDRaw.updated_at.desc())
+                .limit(limit)
+            )).all()
 
         # 过滤过短正文（<10 字符无法抽取）与低质 JD（needs_review 人工复核标记）：
         # 写 skipped 标记推进游标，否则 `extraction IS NULL` 游标永不推进
         # （短文本行/低质行堆积时正常 JD 饿死）
         valid: list[JDRaw] = []
-        results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": [], "skipped_dup": 0}
+        results: dict = {"processed": 0, "succeeded": 0, "failed": [], "positions": [], "skipped_dup": 0,
+                         "re_extracted": 0, "content_hash_backfilled": 0}
         for row in rows:
             snap = row.snapshot or {}
             if _is_jd_text_short(snap, row.raw_text or ""):
                 snap = dict(snap)
                 snap["extraction"] = {"skipped": True, "reason": "JD 正文过短（<10 字符）"}
                 row.snapshot = snap
+                row.content_hash = _content_hash(snap, row.raw_text or "")
                 results["failed"].append({"jd_id": row.id, "error": "JD 正文过短（<10 字符），跳过"})
             elif snap.get("needs_review"):
                 # 低质 JD（爬虫端质量评分 < 0.6 标记）：跳过 LLM 抽取，
@@ -788,9 +811,29 @@ async def batch_extract(
                 snap = dict(snap)
                 snap["extraction"] = {"skipped": True, "reason": "质量评分 < 0.6，需人工复核"}
                 row.snapshot = snap
+                row.content_hash = _content_hash(snap, row.raw_text or "")
                 results["failed"].append({"jd_id": row.id, "error": "质量评分 < 0.6，跳过"})
             else:
                 valid.append(row)
+
+        # 内容指纹重抽：存量行（空指纹）只回填哈希不重抽；指纹变化（重爬更新）
+        # 追加进 valid 复用批量抽取路径，改写前旧产物留存 snapshot.extraction_prev
+        for r in recheck_rows:
+            if not (r.snapshot or {}).get("extraction"):
+                continue
+            fingerprint = _content_hash(r.snapshot or {}, r.raw_text or "")
+            stored = getattr(r, "content_hash", "") or ""
+            if not stored:
+                r.content_hash = fingerprint
+                results["content_hash_backfilled"] += 1
+                continue
+            if fingerprint == stored:
+                continue
+            snap = dict(r.snapshot or {})
+            snap["extraction_prev"] = snap.get("extraction")
+            r.snapshot = snap
+            valid.append(r)
+            results["re_extracted"] += 1
 
         # 批量抽取：一次调用处理全部有效 JD——组批（batch_size 条数 + max_batch_chars
         # 文本总长双封顶）→ 每批一次 LLM 调用（独立 batch_timeout，设计文档 §6.5）→
@@ -799,16 +842,21 @@ async def batch_extract(
         texts = [_build_jd_text(r.snapshot or {}, r.raw_text or "") for r in valid]
         if texts:
             # 同步 LLM 批量调用放线程池，避免阻塞 ARQ 事件循环（Redis 心跳超时崩溃根因）。
-            # concurrency=6 / batch_size=8：2026-08-07 用户确认提速（max_tokens 同步调至 4096）。
+            # 并发与批次参数化（08-25 提速）：runtime_config.etl_extract_concurrency /
+            # etl_extract_batch_size，默认 6×8 保持 08-07 确认口径，226 实测调参无需发版。
             # LLM 生成时间由输出 token 总量决定，并发提吞吐；若触发 provider 429，退避期
-            # 整批降级逐条反而更慢，届时回调参数。
+            # 整批降级逐条反而更慢，3 档调参守则见 design/执行计划。
+            from app.core import runtime_config
+
+            extract_concurrency = runtime_config.get("etl_extract_concurrency", 6)
+            extract_batch_size = runtime_config.get("etl_extract_batch_size", 8)
             extractions = await asyncio.to_thread(
                 extractor.extract_batch,
                 texts,
-                batch_size=8,
+                batch_size=extract_batch_size,
                 batch_timeout=180,  # 批量输出 token 放大，独立超时
                 max_batch_chars=8000,
-                concurrency=6,
+                concurrency=extract_concurrency,
             )
         else:
             extractions = []
@@ -872,6 +920,8 @@ async def batch_extract(
         for i, (row, extraction, normalized_snapshot) in enumerate(
             zip(valid, extractions, normalized_snapshots), start=1
         ):
+            # 内容指纹随抽取落库：重爬更新正文/标题后由指纹差异触发重抽
+            row.content_hash = _content_hash(row.snapshot or {}, row.raw_text or "")
             # 逐条记 jd_id + 进度百分比：batch_extract 只在循环结束 commit，
             # 中间进度 DB 不可见，靠此日志实时确认推进（worker.err.log）
             logger.info(

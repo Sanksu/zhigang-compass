@@ -1499,6 +1499,134 @@ paths:
                     $ref: '#/components/schemas/LlmConfig'
                   trace_id: { type: string }
 
+  /api/v1/admin/llm-decisions:
+    get:
+      tags: [admin]
+      summary: LLM 决策记录分页列表（只读，domain/status 过滤）
+      parameters:
+        - name: domain
+          in: query
+          required: false
+          schema: { type: string, description: 决策域（jd_extract/position_normalize/skill_normalize/position_classify/cluster_label/skill_classify/governance/skill_relation） }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, description: shadow/proposal/auto_applied/blocked/rejected/approved }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: 决策记录列表（created_at 倒序）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LlmDecisionItem'
+                  total: { type: integer, description: 过滤后总数（分页条） }
+                  limit: { type: integer }
+                  offset: { type: integer }
+
+  /api/v1/admin/llm-decisions/summary:
+    get:
+      tags: [admin]
+      summary: LLM 决策汇总（domain×status，验收卡片数据源，只读）
+      responses:
+        '200':
+          description: 按域的状态计数与总额
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  by_domain:
+                    type: array
+                    description: 按域倒序（total 降序）
+                    items:
+                      $ref: '#/components/schemas/LlmDecisionDomainSummary'
+                  totals:
+                    type: object
+                    description: 全量状态计数（shadow/proposal/auto_applied/blocked/other/records）
+                    additionalProperties: { type: integer }
+
+  /api/v1/admin/llm-decisions/{decision_id}/approve:
+    post:
+      tags: [admin]
+      summary: 批准 skill_relation proposal——落动态关系表 + 决策置 approved（RBAC admin）
+      parameters:
+        - name: decision_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [review_reason]
+              properties:
+                review_reason: { type: string, description: 审批理由（必填） }
+      responses:
+        '200':
+          description: 批准成功（relation 形如 源->目标->类型）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      decision_id: { type: string }
+                      relation: { type: string }
+                  trace_id: { type: string }
+
+  /api/v1/admin/llm-decisions/{decision_id}/reject:
+    post:
+      tags: [admin]
+      summary: 驳回 proposal（仅状态流转，效果为 0）
+      parameters:
+        - name: decision_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [review_reason]
+              properties:
+                review_reason: { type: string }
+      responses:
+        '200':
+          description: 驳回成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      decision_id: { type: string }
+                  trace_id: { type: string }
+
   /api/v1/admin/positions/{position_name}:
     get:
       tags: [admin]
@@ -2919,6 +3047,61 @@ components:
         providers:
           type: array
           items: { $ref: '#/components/schemas/LlmProviderConfig' }
+
+    # ============================================================
+    # LLM 决策与验收（08-24 决策信封：GET /admin/llm-decisions* 只读）
+    # ============================================================
+
+    LlmDecisionItem:
+      type: object
+      description: 六域 LLM 决策记录（llm_decision_records 行）
+      required: [id, domain, status, created_at]
+      properties:
+        id: { type: string, description: UUID }
+        domain: { type: string, description: jd_extract/position_normalize/skill_normalize/position_classify/cluster_label/skill_classify/governance/skill_relation }
+        entity_type: { type: string }
+        entity_id: { type: string }
+        run_id: { type: string }
+        env: { type: string }
+        input_hash: { type: string }
+        evidence_refs:
+          type: array
+          description: 证据引用（{label,value} 摘要，供人工抽检）
+          items:
+            type: object
+            additionalProperties: true
+        provider: { type: string }
+        model: { type: string }
+        prompt_version: { type: string }
+        schema_version: { type: string }
+        structured_output:
+          type: object
+          description: LLM 结构化输出（决策明细，供抽检）
+          additionalProperties: true
+        confidence: { type: number, nullable: true }
+        gate_result: { type: string, description: pass/blocked }
+        risk_tier: { type: string, description: R0/R1/R2/blocked }
+        status: { type: string, description: shadow/proposal/auto_applied/blocked/rejected/approved/failed }
+        reviewer: { type: string }
+        review_reason: { type: string }
+        effects_applied: { type: boolean }
+        rollback_ref: { type: string, description: 回滚引用（可变更动作） }
+        duration_ms: { type: integer }
+        attempts: { type: integer }
+        fallback_reason: { type: string }
+        created_at: { type: string, description: ISO8601 }
+
+    LlmDecisionDomainSummary:
+      type: object
+      description: GET /admin/llm-decisions/summary by_domain 项
+      required: [domain, by_status, total]
+      properties:
+        domain: { type: string }
+        by_status:
+          type: object
+          description: status → count
+          additionalProperties: { type: integer }
+        total: { type: integer }
 
     # ============================================================
     # 演化模块端点 data（08-14 契约补全：versions/diff/trends/signals/state-machine/watch）

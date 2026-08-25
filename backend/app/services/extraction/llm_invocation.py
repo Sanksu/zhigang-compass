@@ -12,10 +12,17 @@
    未声明时记录 "unspecified"；
 3. 线程安全：JSONL 追加持进程内锁；asyncio.to_thread 会复制 contextvars，
    线程池路径的 purpose 同样生效。
+
+运行上下文（08-24 灰度底座）：invocation_scope 可携带 run_id / version /
+entity_ref / env 覆盖——维测与回放依赖这些字段定位"哪批、哪个实体、哪个
+prompt/schema 版本"产生的结果；env 未显式声明时按 pytest 进程 → "test"，
+否则 APP_ENV → "production"，实现测试/生产日志隔离。
 """
 
 import json
 import logging
+import os
+import sys
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -37,25 +44,67 @@ _append_lock = threading.Lock()
 _sink_disabled = False
 
 _purpose: ContextVar[str] = ContextVar("llm_invocation_purpose", default="unspecified")
+_run_id: ContextVar[str] = ContextVar("llm_invocation_run_id", default="")
+_version: ContextVar[str] = ContextVar("llm_invocation_version", default="")
+_entity_ref: ContextVar[str] = ContextVar("llm_invocation_entity_ref", default="")
+_env: ContextVar[str] = ContextVar("llm_invocation_env", default="")
 
 
 @contextmanager
-def invocation_scope(purpose: str):
-    """声明当前调用链的用途标签（供审计记录 purpose 字段）。
+def invocation_scope(
+    purpose: str,
+    *,
+    run_id: str = "",
+    version: str = "",
+    entity_ref: str = "",
+    env: str = "",
+):
+    """声明当前调用链的用途标签与运行上下文（供审计记录维度）。
 
-    用法：`with invocation_scope("jd_extract"): chain.extract_structured(...)`
+    用法：`with invocation_scope("jd_extract", run_id=..., version="v3"): ...`
+    可选维度（未传则回退默认）：run_id 批/轮次标识、version prompt/schema 版本
+    标签、entity_ref 实体引用（如 jd:{id}）、env 环境覆盖（缺省自动判 test/prod）。
     asyncio.to_thread 复制 contextvars，线程池内调用同样生效；
     退出时 reset 回外层值，不向后续调用泄漏。
     """
-    token = _purpose.set(purpose or "unspecified")
+    tokens = [
+        _purpose.set(purpose or "unspecified"),
+        _run_id.set(run_id or ""),
+        _version.set(version or ""),
+        _entity_ref.set(entity_ref or ""),
+        _env.set(env or ""),
+    ]
     try:
         yield
     finally:
-        _purpose.reset(token)
+        for token in reversed(tokens):
+            token.var.reset(token)
 
 
 def current_purpose() -> str:
     return _purpose.get()
+
+
+def current_run_id() -> str:
+    return _run_id.get()
+
+
+def current_version() -> str:
+    return _version.get()
+
+
+def current_entity_ref() -> str:
+    return _entity_ref.get()
+
+
+def _current_env() -> str:
+    """环境判定：显式覆盖 > pytest 进程（test）> APP_ENV（production）。"""
+    override = _env.get()
+    if override:
+        return override
+    if "pytest" in sys.modules:
+        return "test"
+    return os.environ.get("APP_ENV", "production")
 
 
 def record(
@@ -72,6 +121,7 @@ def record(
 
     route: sync | fallback；outcome 见 llm_provider._OUTCOME_*；
     attempt 从 1 计（0 = 未发起调用的熔断/退避跳过事件）。
+    运行上下文（run_id/version/entity_ref/env）自动从 invocation_scope 带入。
     """
     entry = {
         "ts": datetime.now(_CST).isoformat(timespec="milliseconds"),
@@ -83,8 +133,43 @@ def record(
         "outcome": outcome,
         "duration_ms": duration_ms,
         "error": (error or "")[:200] or None,
+        "run_id": current_run_id(),
+        "version": current_version(),
+        "entity_ref": current_entity_ref(),
+        "env": _current_env(),
     }
     _incr_redis_counters(entry)
+    _append_jsonl(entry)
+
+
+def record_chain(
+    *,
+    provider: str,
+    outcome: str,
+    duration_ms: int,
+    error: Optional[str] = None,
+) -> None:
+    """记录一次 provider 链整条汇总（总墙钟 + 最终 provider）。
+
+    仅写 JSONL 明细，**不写 Redis 计数**——避免把整链耗时混入单 provider
+    的 latency 均值（per-provider 统计只应含真实尝试行）。purpose/上下文
+    与 record() 同源；provider 传最终成功 provider 或 ""（全链失败）。
+    """
+    entry = {
+        "ts": datetime.now(_CST).isoformat(timespec="milliseconds"),
+        "route": "chain",
+        "purpose": current_purpose(),
+        "provider": provider,
+        "model": "",
+        "attempt": 0,
+        "outcome": outcome,
+        "duration_ms": duration_ms,
+        "error": (error or "")[:200] or None,
+        "run_id": current_run_id(),
+        "version": current_version(),
+        "entity_ref": current_entity_ref(),
+        "env": _current_env(),
+    }
     _append_jsonl(entry)
 
 
