@@ -192,7 +192,9 @@ async def _match_jd_candidates(
             MatchRequest(
                 candidate=candidate,
                 mode=MatchMode.AUTO,
-                top_n=len(pool),
+                # MatchRequest.top_n 上限 100；粗选内全量评分时用上限值，
+                # 聚合层再取真正的 top_n。
+                top_n=min(len(pool), 100),
                 project_vectors=project_vectors,
             )
         )
