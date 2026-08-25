@@ -23,8 +23,6 @@ import pytest
 from scripts.evaluate import _load_jd_titles, _JD_GOLDEN, _MATCH_GOLDEN
 from scripts.tune_match_weights import (
     build_position,
-    evaluate_pairs,
-    load_pairs,
 )
 
 
