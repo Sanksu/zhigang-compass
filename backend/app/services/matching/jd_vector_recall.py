@@ -34,10 +34,12 @@ _POOL_CACHE_TTL = 7 * 24 * 60 * 60  # 7 天（指纹变化自然失效，TTL 仅
 def pool_profiles_fingerprint(profiles) -> str:
     """JD 技能集指纹（缓存键成分）：(jd_id, 排序后技能名集) 哈希。
 
-    任何 JD 的技能集变化 → 指纹变 → 缓存整体失效重建。
+    按 position_id 排序后哈希——profiles 列表顺序无关（DB 返回行序不稳定
+    会导致指纹抖动 → 缓存间歇 miss → 每次重建池化（数十秒慢请求），226
+    实测第 2 次请求 36.67s 即此假说实证）。任何 JD 的技能集变化 → 指纹变。
     """
     h = hashlib.sha256()
-    for p in profiles:
+    for p in sorted(profiles, key=lambda x: x.position_id):
         skills = sorted(
             {r.skill_name for r in (*p.must_skills, *p.nice_skills) if r.skill_name}
         )
