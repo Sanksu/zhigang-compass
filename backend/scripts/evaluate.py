@@ -7,8 +7,8 @@
 - jd_llm  JD 解析：真实 LLM 盲审评测（读取 tests/evaluate/run_manual_jd_eval.py --run 的
           最近归档 reports/eval_jd_llm_*.json；只读不重跑，避免重复消耗 LLM 额度）
 - match   人岗匹配：total_score 与人工标注的 Spearman 秩相关 + 分类准确率 + Top-3 推荐准确率
-          （默认黄金集 data/golden_set/golden_set_match.jsonl；生产权重口径传
-          --match-golden data/golden_set/golden_set_match_v2.jsonl，权重来自 configs/match_weights.json）
+          （默认黄金集 data/golden_set/golden_set_match_v2.jsonl = 单条真实 JD 口径，
+          BT 补标注；v1 golden_set_match.jsonl 仅作历史对照，权重来自 configs/match_weights.json）
 - resume  简历提取：真实抽取（LLM + 规则兜底）vs 简历黄金集 F1
           （黄金集 data/golden_set/golden_set_resume.jsonl；未交付时跳过并注明）
 
@@ -22,9 +22,7 @@
     uv run python scripts/evaluate.py --task jd
     uv run python scripts/evaluate.py --task jd_llm     # 读最近 LLM 盲审归档
     uv run python scripts/evaluate.py --task resume
-    uv run python scripts/evaluate.py --task match --semantic   # 匹配项注入 SBERT 语义增强
-    uv run python scripts/evaluate.py --task match --semantic \
-        --match-golden data/golden_set/golden_set_match_v2.jsonl   # 生产权重口径（BT v2 384 对）
+    uv run python scripts/evaluate.py --task match --semantic   # 匹配项注入 SBERT 语义增强（默认 v2 单条真实 JD 口径）
 """
 
 import argparse
@@ -85,7 +83,10 @@ def _load_jd_titles() -> dict[str, str]:
     _JD_TITLE_CACHE = titles
     return titles
 _RESUME_GOLDEN = _BACKEND_DIR / "data" / "golden_set" / "golden_set_resume.jsonl"
-_MATCH_GOLDEN = _BACKEND_DIR / "data" / "golden_set" / "golden_set_match.jsonl"
+# 默认切到 v2 单条真实 JD 口径（golden_set_match_v2.jsonl，0802-16 BT 补标注：
+# 每行 position_id 对应单条真实 JD 的 must/nice，评测画像=JD 字面而非图谱聚合）。
+# v1（golden_set_match.jsonl，全 must 无 nice）仅保留作历史对照。
+_MATCH_GOLDEN = _BACKEND_DIR / "data" / "golden_set" / "golden_set_match_v2.jsonl"
 _REPORT_DIR = _BACKEND_DIR / "reports"
 
 
@@ -565,7 +566,7 @@ def main() -> None:
         "--match-golden",
         type=Path,
         default=None,
-        help="匹配黄金集路径（默认 v1 golden_set_match.jsonl；生产权重口径传 v2）",
+        help="匹配黄金集路径（默认 v2 单条真实 JD：golden_set_match_v2.jsonl，BT 补标注口径）",
     )
     args = parser.parse_args()
 
