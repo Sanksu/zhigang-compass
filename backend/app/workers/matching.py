@@ -8,6 +8,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from app.core import runtime_config
 from app.models.business import MatchResultRecord, ResumeCache, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,54 @@ async def _load_jd_evidence_rows(
     return dict(gathered)
 
 
+async def _match_jd_candidates(
+    session,
+    candidate,
+    project_vectors: dict,
+    top_n: int,
+) -> list[dict]:
+    """阶段 C：原生 JD 候选匹配（全量 JD → 粗选 → 逐条评分 → 岗位级聚合）。
+
+    候选源=jd_raw 抽取快照（非聚合岗位画像）：每条 JD 直接建成 PositionProfile
+    评分（score_position 复用），rough_select 把全量粗选到 K 控制评分成本，
+    结果按 snapshot.normalized_position 聚合回岗位级展示（Top-N 岗位 + 组内
+    最佳 JD 证据），输出与聚合岗位模式同构。
+    """
+    from sqlalchemy import select
+
+    from app.models.raw import JDRaw
+    from app.services.matching.engine import RuleBasedMatcher
+    from app.services.matching.jd_aggregate import aggregate_jd_scores
+    from app.services.matching.jd_profiles import rough_select, rows_to_profiles
+    from app.services.matching.schemas import MatchMode, MatchRequest
+    from app.services.matching.semantic import SkillEmbedder
+
+    rows = (await session.scalars(
+        select(JDRaw).where(JDRaw.snapshot["extraction"].astext.is_not(None))
+    )).all()
+    jd_profiles, jd_position = rows_to_profiles(rows)
+    if not jd_profiles:
+        return []
+
+    candidate_skills = [s.skill_name for s in candidate.skills if s.skill_name]
+    rough_k = runtime_config.get("match_jd_rough_k", 300)
+    pool = rough_select(jd_profiles, candidate_skills, k=int(rough_k))
+
+    def _score():
+        matcher = RuleBasedMatcher(pool, semantic=SkillEmbedder.get())
+        return matcher.match(
+            MatchRequest(
+                candidate=candidate,
+                mode=MatchMode.AUTO,
+                top_n=len(pool),
+                project_vectors=project_vectors,
+            )
+        )
+
+    scored = await asyncio.to_thread(_score)
+    return aggregate_jd_scores(scored, jd_position, top_n=top_n)
+
+
 async def match_recommend(
     ctx: dict,
     resume_id: str,
@@ -191,40 +240,52 @@ async def match_recommend(
             from app.services.embeddings.vector_store import load_project_vectors
 
             project_vectors = await load_project_vectors(session, resume_id)
-            # 岗位画像走 Redis 版本化共享缓存（跨进程单飞；Redis 故障降级进程 TTL）
-            positions = await load_positions_shared()
-
-            def _match():
-                matcher = RuleBasedMatcher(
-                    positions,
-                    semantic=SkillEmbedder.get(),
-                )
-                return matcher.match(
-                    MatchRequest(
-                        candidate=candidate,
-                        mode=MatchMode.AUTO,
-                        top_n=top_n,
-                        project_vectors=project_vectors,
-                    )
-                )
-
-            results = await asyncio.to_thread(_match)
-            match_id = str(uuid.uuid4())
-
-            # 阶段 B：JD 级证据精排（每个命中岗位族内原生 JD 二次精排，附加
-            # jd_evidence 到结果 dict，不动 MatchResult schema / 评分顺序）
-            from app.services.matching.jd_rerank import (
-                enrich_with_jd_evidence,
+            # 阶段 C（JD 候选模式）：开关默认 False（灰度），开启后候选从
+            # 「聚合岗位画像」切到「原生 JD 全量」（rough_select 预筛 → 逐条评分 →
+            # 岗位级聚合），输出与聚合岗位模式同构（岗位 Top-N + jd_evidence）。
+            jd_mode_enabled = (
+                ctx.get("jd_candidates") is True
+                or runtime_config.get("match_jd_candidates_enabled", False)
             )
+            if jd_mode_enabled:
+                data_items = await _match_jd_candidates(
+                    session, candidate, project_vectors, top_n,
+                )
+            else:
+                # 岗位画像走 Redis 版本化共享缓存（跨进程单飞；Redis 故障降级进程 TTL）
+                positions = await load_positions_shared()
 
-            jd_rows = await _load_jd_evidence_rows(session, results)
-            candidate_skills = [
-                s.get("name")
-                for s in (cache.parsed_data or {}).get("skills", [])
-                if s.get("name")
-            ]
-            data_items = [result.model_dump() for result in results]
-            enrich_with_jd_evidence(data_items, jd_rows, candidate_skills)
+                def _match():
+                    matcher = RuleBasedMatcher(
+                        positions,
+                        semantic=SkillEmbedder.get(),
+                    )
+                    return matcher.match(
+                        MatchRequest(
+                            candidate=candidate,
+                            mode=MatchMode.AUTO,
+                            top_n=top_n,
+                            project_vectors=project_vectors,
+                        )
+                    )
+
+                results = await asyncio.to_thread(_match)
+                # 阶段 B：JD 级证据精排（每个命中岗位族内原生 JD 二次精排，附加
+                # jd_evidence 到结果 dict，不动 MatchResult schema / 评分顺序）
+                from app.services.matching.jd_rerank import (
+                    enrich_with_jd_evidence,
+                )
+
+                jd_rows = await _load_jd_evidence_rows(session, results)
+                candidate_skills = [
+                    s.get("name")
+                    for s in (cache.parsed_data or {}).get("skills", [])
+                    if s.get("name")
+                ]
+                data_items = [result.model_dump() for result in results]
+                enrich_with_jd_evidence(data_items, jd_rows, candidate_skills)
+
+            match_id = str(uuid.uuid4())
 
             data = {
                 "items": data_items,
