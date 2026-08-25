@@ -68,6 +68,7 @@ async def name_normalization_shadow_daily(ctx: dict) -> dict:
         STATUS_SHADOW,
     )
     from app.services.llm_decision.position_name import (
+        PositionCandidateRecaller,
         decide_position_name,
         position_name_gate,
         tier_for_position_decision,
@@ -94,7 +95,10 @@ async def name_normalization_shadow_daily(ctx: dict) -> dict:
     from sqlalchemy import select
 
     # ---- 岗位名影子 ----
-    position_summary: dict = {"candidates": 0, "recorded": 0, "llm_failed": 0, "blocked": 0}
+    position_summary: dict = {
+        "candidates": 0, "recorded": 0, "llm_failed": 0, "blocked": 0,
+        "recall_mode": "",
+    }
     async with async_session_factory() as session:
         rows = (await session.scalars(
             select(JDRaw)
@@ -102,7 +106,17 @@ async def name_normalization_shadow_daily(ctx: dict) -> dict:
             .order_by(JDRaw.updated_at.desc())
             .limit(position_budget)
         )).all()
-    candidates = await asyncio.to_thread(_existing_positions, neo4j_driver)
+    pool = await asyncio.to_thread(_existing_positions, neo4j_driver)
+    # 候选按标题语义召回（embedding Top-K；模型不可用降级频次前缀）。
+    # 池向量一次编码放 to_thread（首次含模型加载，避免阻塞事件循环）
+    recaller = await asyncio.to_thread(
+        PositionCandidateRecaller, pool, max_candidates,
+    )
+    position_summary["recall_mode"] = recaller.mode
+    if recaller.mode != "embedding":
+        logger.warning(
+            "[name_shadow] 岗位候选召回降级 %s（SBERT 不可用）", recaller.mode,
+        )
     for row in rows:
         snap = row.snapshot or {}
         extraction = snap.get("extraction") or {}
@@ -111,6 +125,7 @@ async def name_normalization_shadow_daily(ctx: dict) -> dict:
             continue
         position_summary["candidates"] += 1
         skills = _skills_from_extraction(extraction)
+        candidates = recaller.recall(title)
         with llm_invocation.invocation_scope(
             "position_normalize_shadow", run_id=f"shadow:{run_date}",
         ):
