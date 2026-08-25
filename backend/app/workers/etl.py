@@ -312,6 +312,20 @@ async def run_etl_pipeline(
         tasks_module.name_normalization_shadow_daily(ctx),
     )
 
+    # 阶段 20：名称归一 LLM 提议（默认关；proposal→人工审批→sync 落图，
+    # 区别于阶段 19 shadow 只落档——见 workers/name_normalization_propose.py）
+    results["stages"]["name_normalization_propose"] = await run_stage(
+        "name_normalization_propose",
+        tasks_module.name_normalization_propose_daily(ctx),
+    )
+
+    # 阶段 21：技能关系 LLM 提议（默认关；JD 共现候选 → proposal→人工审批→
+    # sync 落图——见 workers/skill_relation_propose.py）
+    results["stages"]["skill_relation_propose"] = await run_stage(
+        "skill_relation_propose",
+        tasks_module.skill_relation_propose_daily(ctx),
+    )
+
     # L-9：阶段隔离吞错继续跑（防单阶段失败拖垮全线）不等于无声——聚合各阶段
     # error 一次性外发告警并落 error 日志，结束"管线永远成功"的可观测盲区。
     # crawl 阶段为 list[dict]（每爬虫一项），其余阶段为 dict。
