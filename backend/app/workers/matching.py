@@ -362,7 +362,7 @@ async def match_recommend(
             task.result = _complete_recommend_result(
                 task.result,
                 match_id,
-                len(results),
+                len(data_items),
             )
         except Exception as error:
             task.status = "failed"
