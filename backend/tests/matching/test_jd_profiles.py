@@ -84,7 +84,7 @@ class TestAggregate:
         assert len(out[0]["jd_evidence"]) == 2  # 组内 Top-2 JD 证据
         assert out[0]["jd_evidence"][0]["jd_id"] == "1"
 
-    def test_no_position_group_defaults(self):
+    def test_no_position_group_excluded(self):
+        """无岗位名归属的 JD（normalized_position 空）不参与岗位聚合（被排除）。"""
         out = aggregate_jd_scores([self._result("9", "JD-X", 0.5)], {"9": ""}, top_n=1)
-        assert out[0]["position_name"] == "(无归属JD)"
-        assert out[0]["total_score"] == 0.5
+        assert out == []

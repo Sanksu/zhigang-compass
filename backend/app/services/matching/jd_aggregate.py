@@ -39,7 +39,12 @@ def aggregate_jd_scores(
     """
     groups: dict[str, list] = defaultdict(list)
     for r in scored:
-        gname = jd_position.get(r.position_id) or ""
+        gname = jd_position.get(r.position_id)
+        if not gname:
+            # 无岗位名归属（snapshot.normalized_position 空）的 JD 不参与岗位
+            # 聚合——没有图谱岗位锚点，进 Top-N 对展示无意义（仅作 JD 证据候选，
+            # 已随命中岗位带出）。
+            continue
         groups[gname].append(r)
 
     out: list[dict] = []
@@ -49,8 +54,8 @@ def aggregate_jd_scores(
             :_AGGREGATE_TOP_JD_EVIDENCE
         ]
         out.append({
-            "position_id": gname or "(无归属JD)",
-            "position_name": gname or "(无归属JD)",
+            "position_id": gname,
+            "position_name": gname,
             "total_score": round(best.total_score, 4),
             "must_score": best.must_score,
             "nice_score": round(best.nice_score, 4),

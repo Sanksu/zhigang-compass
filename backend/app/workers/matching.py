@@ -159,12 +159,14 @@ async def _match_jd_candidates(
     project_vectors: dict,
     top_n: int,
 ) -> list[dict]:
-    """阶段 C：原生 JD 候选匹配（全量 JD → 粗选 → 逐条评分 → 岗位级聚合）。
+    """阶段 C：原生 JD 候选匹配（全量 JD → 向量预筛 → 逐条评分 → 岗位级聚合）。
 
     候选源=jd_raw 抽取快照（非聚合岗位画像）：每条 JD 直接建成 PositionProfile
-    评分（score_position 复用），rough_select 把全量粗选到 K 控制评分成本，
-    结果按 snapshot.normalized_position 聚合回岗位级展示（Top-N 岗位 + 组内
-    最佳 JD 证据），输出与聚合岗位模式同构。
+    评分（score_position 复用）。召回优先用「JD 技能池化向量」余弦 Top-K
+    （Redis 缓存池化向量，矩阵点积毫秒级——修复全量评分 36s 性能墙：
+    300 候选 × ~0.12s 评分 → 50 候选 ≈6s）；SBERT 不可用降级 rough_select
+    技能命中粗选（旧行为）。结果按 snapshot.normalized_position 聚合回岗位级
+    展示（Top-N 岗位 + 组内最佳 JD 证据），输出与聚合岗位模式同构。
     """
     from sqlalchemy import select
 
@@ -172,6 +174,11 @@ async def _match_jd_candidates(
     from app.services.matching.engine import RuleBasedMatcher
     from app.services.matching.jd_aggregate import aggregate_jd_scores
     from app.services.matching.jd_profiles import rough_select, rows_to_profiles
+    from app.services.matching.jd_vector_recall import (
+        candidate_vector,
+        load_pool_vectors_cached,
+        vector_recall,
+    )
     from app.services.matching.schemas import MatchMode, MatchRequest
     from app.services.matching.semantic import SkillEmbedder
 
@@ -183,8 +190,32 @@ async def _match_jd_candidates(
         return []
 
     candidate_skills = [s.skill_name for s in candidate.skills if s.skill_name]
-    rough_k = runtime_config.get("match_jd_rough_k", 300)
-    pool = rough_select(jd_profiles, candidate_skills, k=int(rough_k))
+    rough_k = int(runtime_config.get("match_jd_rough_k", 50))
+
+    # 向量预筛：池化向量加载（Redis 读写留主循环，CPU 段内部 to_thread）；
+    # SBERT 不可用/缓存异常 → pool_vecs=None 降级 rough_select 技能命中粗选
+    from app.core.database import redis_client
+
+    embedder = SkillEmbedder.get()
+    try:
+        pool_vecs = await load_pool_vectors_cached(jd_profiles, embedder, redis_client)
+    except Exception as e:
+        logger.warning("[match/jd_mode] 池化向量加载失败（降级命中粗选）: %s", e)
+        pool_vecs = None
+
+    pool = None
+    if pool_vecs:
+        def _recall():
+            cand_vec = candidate_vector(candidate_skills, embedder)
+            if cand_vec is None:
+                return None
+            return vector_recall(jd_profiles, pool_vecs, cand_vec, k=rough_k)
+
+        pool = await asyncio.to_thread(_recall)
+    if pool is None:
+        pool = rough_select(jd_profiles, candidate_skills, k=rough_k)
+    if not pool:
+        return []
 
     def _score():
         matcher = RuleBasedMatcher(pool, semantic=SkillEmbedder.get())
@@ -192,7 +223,7 @@ async def _match_jd_candidates(
             MatchRequest(
                 candidate=candidate,
                 mode=MatchMode.AUTO,
-                # MatchRequest.top_n 上限 100；粗选内全量评分时用上限值，
+                # MatchRequest.top_n 上限 100；召回内全量评分用上限值，
                 # 聚合层再取真正的 top_n。
                 top_n=min(len(pool), 100),
                 project_vectors=project_vectors,
