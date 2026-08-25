@@ -446,9 +446,9 @@ class TestNormalizePositionName:
         assert normalize_position_name("Test Automation Engineer") == "测试工程师"
         assert normalize_position_name("UI Developer") == "前端开发工程师"
         assert normalize_position_name("Front End Engineer") == "前端开发工程师"
-        assert normalize_position_name("Business Intelligence Engineer") == "大数据开发工程师"
+        assert normalize_position_name("Business Intelligence Engineer") == "商业智能分析师"
         assert normalize_position_name("Server Engineer") == "运维工程师"
-        assert normalize_position_name("Cloud Engineer") == "运维工程师"
+        assert normalize_position_name("Cloud Engineer") == "DevOps工程师"
         assert normalize_position_name("Robotics Engineer") == "机器人算法工程师"
         # Software Development Engineer → 失真兜底族：无技能不入图，带技能路由细分族
         assert normalize_position_name("Software Development Engineer") == ""
