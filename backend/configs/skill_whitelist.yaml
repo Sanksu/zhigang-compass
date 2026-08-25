@@ -134,6 +134,7 @@ skills:
   - {name: "Web Services", category: "后端"}
   - {name: "高并发", category: "计算机基础"}
   - {name: "分布式", category: "计算机基础"}
+  - {name: "分布式技术", category: "计算机基础"}
   - {name: "微服务", category: "计算机基础"}
   - {name: "消息队列", category: "消息/中间件"}
   - {name: "RabbitMQ", category: "消息/中间件"}

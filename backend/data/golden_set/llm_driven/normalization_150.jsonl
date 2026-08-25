@@ -98,7 +98,7 @@
 {"variant": "vue", "gold_standard": "Vue.js", "gold_action": "merge", "slice": "alias"}
 {"variant": "vue2", "gold_standard": "Vue.js", "gold_action": "merge", "slice": "alias"}
 {"variant": "vue3", "gold_standard": "Vue.js", "gold_action": "merge", "slice": "alias"}
-{"variant": "分布式事务", "gold_standard": "分布式", "gold_action": "merge", "slice": "alias"}
+{"variant": "分布式事务", "gold_standard": "分布式技术", "gold_action": "merge", "slice": "alias"}
 {"variant": "单元测试编写", "gold_standard": "单元测试", "gold_action": "merge", "slice": "alias"}
 {"variant": "可视化分析", "gold_standard": "数据可视化", "gold_action": "merge", "slice": "alias"}
 {"variant": "团队协作能力", "gold_standard": "团队协作", "gold_action": "merge", "slice": "alias"}
