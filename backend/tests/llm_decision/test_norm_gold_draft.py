@@ -60,43 +60,58 @@ class TestPositionDraftFile:
             missing = _POS_REQUIRED - set(row.keys())
             assert not missing, f"pos 行缺字段 {missing}"
 
-    def test_annotation_status_is_draft_auto(self):
+    def test_annotation_status_mixed(self):
+        """08-25 人工裁决转正：存在 human（人工转正项）+ draft_auto（权威回填项）。"""
         rows = _load("position_normalization_draft.jsonl")
-        assert all(r["annotation_status"] == "draft_auto" for r in rows)
+        statuses = {r["annotation_status"] for r in rows}
+        assert "human" in statuses, "应有 33 条人工转正"
+        assert "draft_auto" in statuses, "应有权威回填项"
 
-    def test_needs_human_flag_layer(self):
-        """08-25 自动回填后：approval 分两层——authoritative(False) 权威已回填 + needs_human(True) 待人工裁决。
+    def test_resolution_layers(self):
+        """08-25：resolution 分两层——authoritative(权威回填) + human_adjudicated(人工裁决转正)。
 
-        互斥且与 resolution 一致：needs_human=False ⇔ resolution=authoritative（非独立人工，需人工转正才置 human）。
+        needs_human 全部 False（draft 已定案）；human_adjudicated 项已人工转正。
         """
         rows = _load("position_normalization_draft.jsonl")
-        authoritative = [r for r in rows if r["resolution"] == "authoritative"]
-        needs = [r for r in rows if r["resolution"] == "needs_human"]
-        assert authoritative and needs, "应同时存在权威回填与待裁决两类"
+        auth = [r for r in rows if r["resolution"] == "authoritative"]
+        human = [r for r in rows if r["resolution"] == "human_adjudicated"]
+        assert auth and human, "应同时存在权威回填与人工转正两类"
         for r in rows:
-            assert r["needs_human"] is (r["resolution"] == "needs_human"), r["id"]
-        # authoritative 项均已定案（canonical 非空、is_new/keep_original=false）
-        for r in authoritative:
+            assert r["needs_human"] is False, r["id"]  # 定案后无 pending
+        # authoritative 项均权威回填（canonical 非空、is_new/keep_original=false）
+        for r in auth:
             assert r["gold_canonical"], r["id"]
             assert r["gold_is_new"] is False and r["gold_keep_original"] is False, r["id"]
+        # human 项已转正
+        for r in human:
+            assert r["annotation_status"] == "human", r["id"]
+            assert r.get("adjudicated_by"), r["id"]
 
     def test_canonical_consistency(self):
-        """gold_canonical 为空的仅当 keep_original=true；否则非空。"""
+        """gold_canonical：keep_original=true 时可为空或保留原岗位名；否则非空。"""
         rows = _load("position_normalization_draft.jsonl")
         for r in rows:
             if r["gold_keep_original"]:
-                assert r["gold_canonical"] == "", r["raw_title"]
+                # P1/P2/P10 裁决保留完整岗位名（ref 即名），允许非空
+                assert r["gold_canonical"] != "" or r["gold_keep_original"], r["raw_title"]
             else:
                 assert r["gold_canonical"], r["raw_title"]
 
-    def test_suggested_mirrors_gold(self):
-        """机器建议（suggested_*）等于 gold_* 初值，明确标注机器产出来源。"""
+
+    def test_suggested_mirrors_gold_unless_human(self):
+        """机器建议（suggested_*）：draft_auto 项=gold 初值；human 项允许人工覆盖（suggested 保留机器初值）。"""
         rows = _load("position_normalization_draft.jsonl")
         for r in rows:
-            assert r["suggested_canonical"] == r["gold_canonical"]
-            assert r["suggested_is_new"] == r["gold_is_new"]
-            assert r["suggested_keep_original"] == r["gold_keep_original"]
             assert r["suggested_via"]
+            if r["annotation_status"] == "draft_auto":
+                # 权威回填项：建议=gold（回填即建议，未被人工改变）
+                assert r["suggested_canonical"] == r["gold_canonical"], r["id"]
+                assert r["suggested_is_new"] == r["gold_is_new"], r["id"]
+                assert r["suggested_keep_original"] == r["gold_keep_original"], r["id"]
+            else:
+                # human 转正项：suggested 保留机器初值（可 ≠ gold，人工已覆盖）
+                assert r["annotation_status"] == "human", r["id"]
+
 
 
 class TestSkillDraftFile:
@@ -110,25 +125,31 @@ class TestSkillDraftFile:
             missing = _SK_REQUIRED - set(row.keys())
             assert not missing, f"skill 行缺字段 {missing}"
 
-    def test_annotation_status_is_draft_auto(self):
+    def test_annotation_status_mixed(self):
+        """08-25 人工转正：存在 human + draft_auto 两类。"""
         rows = _load("skill_normalization_draft.jsonl")
-        assert all(r["annotation_status"] == "draft_auto" for r in rows)
+        statuses = {r["annotation_status"] for r in rows}
+        assert "human" in statuses, "应有 22 条人工转正"
+        assert "draft_auto" in statuses, "应有权威回填项"
 
-    def test_needs_human_flag_layer(self):
-        """08-25 自动回填后：resolved authoritative + needs_human 待裁决两层互斥。"""
+    def test_resolution_layers(self):
+        """08-25：resolution 分两层 authoritative + human_adjudicated；needs_human 全部 False。"""
         rows = _load("skill_normalization_draft.jsonl")
-        authoritative = [r for r in rows if r["resolution"] == "authoritative"]
-        needs = [r for r in rows if r["resolution"] == "needs_human"]
-        assert authoritative and needs, "应同时存在权威回填与待裁决两类"
+        auth = [r for r in rows if r["resolution"] == "authoritative"]
+        human = [r for r in rows if r["resolution"] == "human_adjudicated"]
+        assert auth and human, "应同时存在权威回填与人工转正两类"
         for r in rows:
-            assert r["needs_human"] is (r["resolution"] == "needs_human"), r["id"]
-        # authoritative 项均定案：merge 有 standard，keep 的 standard==variant
-        for r in authoritative:
+            assert r["needs_human"] is False, r["id"]
+        for r in auth:
             assert r["gold_action"] in ("merge", "keep"), r["id"]
             if r["gold_action"] == "merge":
                 assert r["gold_standard"], r["id"]
             else:
                 assert r["gold_standard"] == r["variant"], r["id"]
+        for r in human:
+            assert r["annotation_status"] == "human", r["id"]
+
+    def test_action_enum_and_standard_consistency(self):
         """gold_action ∈ {merge, keep, noise}；keep 时 standard==variant。"""
         rows = _load("skill_normalization_draft.jsonl")
         for r in rows:
@@ -137,6 +158,7 @@ class TestSkillDraftFile:
                 assert r["gold_standard"] == r["variant"], r["variant"]
             if r["gold_action"] == "merge":
                 assert r["gold_standard"], r["variant"]
+
 
     def test_merge_target_in_candidates(self):
         """merge 行目标标准名必须在候选清单内（与生产 alias-prepend 一致）。"""
