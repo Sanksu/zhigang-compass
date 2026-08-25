@@ -342,8 +342,10 @@ async def match_recommend(
                     session.add(
                         MatchResultRecord(
                             match_id=match_id,
+                            # JD 候选模式与聚合岗位模式统一从 data_items 取
+                            # 首项岗位名（两模式输出同构 dict 列表）
                             position_name=(
-                                results[0].position_name if results else ""
+                                data_items[0]["position_name"] if data_items else ""
                             ),
                             user_id=user_id,
                             result=data,
