@@ -3599,6 +3599,24 @@ components:
         evidence_refs:
           type: array
           items: { $ref: '#/components/schemas/EvidenceRef' }
+        jd_evidence:
+          type: array
+          description: "JD 级证据（阶段 B：recommend 命中岗位族内原生 JD 二次精排 Top-2；compare/result 旧快照无此字段为空数组）"
+          items:
+            type: object
+            properties:
+              position_name: { type: string, description: 归属岗位名 }
+              jd_title: { type: string, description: 原生 JD 标题 }
+              source: { type: string, description: 采集源（zhilian/boss/indeed 等） }
+              source_url: { type: string, description: JD 原文链接 }
+              coverage: { type: number, description: "JD 要求满足比例 [0,1]（nice 半计）" }
+              hit_count: { type: integer, description: 命中技能数 }
+              must_total: { type: integer, description: JD 必备技能总数 }
+              nice_total: { type: integer, description: JD 加分技能总数 }
+              hit_skills:
+                type: array
+                items: { type: string }
+                description: 命中技能名（前 8）
 
     MatchTaskStatus:
       type: object

@@ -4985,6 +4985,27 @@ export interface components {
              */
             learning_path_block_reason: string | null;
             evidence_refs: components["schemas"]["EvidenceRef"][];
+            /** @description JD 级证据（阶段 B：recommend 命中岗位族内原生 JD 二次精排 Top-2；compare/result 旧快照无此字段为空数组） */
+            jd_evidence?: {
+                /** @description 归属岗位名 */
+                position_name?: string;
+                /** @description 原生 JD 标题 */
+                jd_title?: string;
+                /** @description 采集源（zhilian/boss/indeed 等） */
+                source?: string;
+                /** @description JD 原文链接 */
+                source_url?: string;
+                /** @description JD 要求满足比例 [0,1]（nice 半计） */
+                coverage?: number;
+                /** @description 命中技能数 */
+                hit_count?: number;
+                /** @description JD 必备技能总数 */
+                must_total?: number;
+                /** @description JD 加分技能总数 */
+                nice_total?: number;
+                /** @description 命中技能名（前 8） */
+                hit_skills?: string[];
+            }[];
         };
         /** @description 匹配任务状态（GET /match/task/{task_id}） */
         MatchTaskStatus: {
