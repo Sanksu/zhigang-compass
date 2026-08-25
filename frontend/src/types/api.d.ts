@@ -2790,7 +2790,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 批准 skill_relation proposal——落动态关系表 + 决策置 approved（RBAC admin） */
+        /** 批准图变异类 proposal/shadow——落图变更持久化表 + 决策置 approved（RBAC admin；skill_relation / position_normalize / skill_normalize / skill_classify） */
         post: {
             parameters: {
                 query?: never;
@@ -2809,7 +2809,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description 批准成功（relation 形如 源->目标->类型） */
+                /** @description 批准成功（域名；skill_relation 返回 relation 形如 源->目标->类型，名称归一返回 normalization 形如 action:源->目标；skill_classify 接受 shadow 记录并返回 category/skill） */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2820,7 +2820,18 @@ export interface paths {
                             msg?: string;
                             data?: {
                                 decision_id?: string;
+                                /** @description skill_relation 专用：源->目标->类型 */
                                 relation?: string;
+                                /** @description 名称归一专用：action:源->目标（noop 表示确认原样） */
+                                normalization?: string;
+                                /** @description 名称归一专用：源名 */
+                                source?: string;
+                                /** @description 名称归一专用：目标名 */
+                                target?: string;
+                                /** @description skill_classify 专用：批准后的权威分类 */
+                                category?: string;
+                                /** @description skill_classify 专用：技能名 */
+                                skill?: string;
                             };
                             trace_id?: string;
                         };
@@ -2843,7 +2854,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 驳回 proposal（仅状态流转，效果为 0） */
+        /** 驳回 proposal/shadow（仅状态流转，效果为 0；skill_classify 接受 shadow） */
         post: {
             parameters: {
                 query?: never;

@@ -707,3 +707,37 @@ class NameNormalizationRequest(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class SkillCategoryApproval(Base):
+    """技能分类审批执行通道（PR 补：skill_classify shadow → approved 的持久化）。
+
+    技能分类 worker 只写 `suggested_category*` 提议字段（不动权威 category），
+    LLM 建议落 llm_decision_records（domain=skill_classify、status=shadow、
+    risk_tier=R0）。管理员在决策页 approve 后此处落一行（PG），由
+    scripts/sync_dynamic_categories.py 把 Skill.category 晋升为批准值。
+    reject 仅流转决策状态无副作用（与 skill_relation 一致）。
+
+    幂等：sync 脚本用 SET（重复执行安全），与 applied_to_graph 标记无关。
+    category 必须命中权威分类枚举（KNOWN_CATEGORIES，classify_skill 侧保证）。
+    """
+
+    __tablename__ = "skill_category_approvals"
+    __table_args__ = (
+        # 幂等去重：同一 proposal 仅一行
+        UniqueConstraint("proposal_id", name="uq_skill_category_proposal"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    skill_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    proposal_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str] = mapped_column(String(24), default="llm_review", nullable=False)
+    reviewed_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    review_reason: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    applied_to_graph: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
