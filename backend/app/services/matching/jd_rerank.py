@@ -82,7 +82,7 @@ def rank_jds_for_position(
         cov = _coverage_score(cand, musts, nices)
         if cov <= 0 and not musts:
             continue
-        hit_skills = [s for s in (*musts, *nices) if s in cand]
+        hit_skills = list(dict.fromkeys(s for s in (*musts, *nices) if s in cand))
         scored.append({
             "position_name": position_name,
             "jd_title": str(snap.get("title") or "").strip() or "(无标题)",
