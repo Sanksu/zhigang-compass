@@ -741,3 +741,39 @@ class SkillCategoryApproval(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class SkillAlias(Base):
+    """技能别名回写记录（方案①：LLM 发现别名 → 人工审批 → 回写词典）。
+
+    与 SkillCategoryApproval 单表晋升范式一致：一条记录既是审批事实
+    （variant→standard_name，proposal_id 去重），也是运行时归一化并查源
+    （normalize_skill 只读 status=approved 的行）。approve 后 status=approved；
+    sync_dynamic_aliases 幂等读 approved 行写 Neo4j/图谱（可选）。
+
+    semantic：variant 为 LLM 发现的"向量不相似但语义等价"的别名（缩写/中英/
+    版本变体），standard_name 必须命中 known_standard_names()（gate 守护，
+    防虚构标准名）。
+    """
+
+    __tablename__ = "skill_aliases"
+    __table_args__ = (
+        UniqueConstraint("variant", name="uq_skill_alias_variant"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    variant: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    standard_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    # pending（LLM 建议待审）→ approved（人工批准，normalize 并查）→ rejected
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
+    proposal_id: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    source: Mapped[str] = mapped_column(String(24), default="llm_review", nullable=False)
+    reviewed_by: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    review_reason: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    applied_to_graph: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

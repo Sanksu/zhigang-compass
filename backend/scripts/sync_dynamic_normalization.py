@@ -204,22 +204,31 @@ async def _load_rows() -> tuple[list[dict], list[str]]:
         return payload, applied_ids
 
 
+async def _run_sync(dry_run: bool) -> dict:
+    """单事件循环同步：_load_rows + apply + _mark_applied（修复 08-26 发现的三处
+    重复 asyncio.run windows asyncpg 跨 loop bug——applied_to_graph 标记失效）。"""
+    payload, applied_ids = await _load_rows()
+    if not payload:
+        return {"payload": 0}
+    from app.core.database import neo4j_driver
+
+    with neo4j_driver.session() as session:
+        stats = apply_normalizations(payload, session, dry_run=dry_run)
+    if not dry_run and applied_ids:
+        await _mark_applied(applied_ids)
+    return {"payload": len(payload), **stats}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="名称归一审批落图（先审批后落图）")
     parser.add_argument("--dry-run", action="store_true", help="只统计不写图")
     args = parser.parse_args()
-
-    payload, applied_ids = asyncio.run(_load_rows())
-    if not payload:
+    # 单 asyncio.run 驱动全流程（避免 Windows 重复 asyncio.run 跨 loop）——修复 _mark_applied
+    result = asyncio.run(_run_sync(dry_run=args.dry_run))
+    if result.get("payload") == 0:
         print("无待同步的名称归一（name_normalization_requests 为空）")
         return
-
-    from app.core.database import neo4j_driver
-
-    with neo4j_driver.session() as session:
-        stats = apply_normalizations(payload, session, dry_run=args.dry_run)
-    if not args.dry_run and applied_ids:
-        asyncio.run(_mark_applied(applied_ids))
+    stats = {k: v for k, v in result.items() if k != "payload"}
     print(f"{'dry-run ' if args.dry_run else ''}同步完成: {stats}")
 
 
