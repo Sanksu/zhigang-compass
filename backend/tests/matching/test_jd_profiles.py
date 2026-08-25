@@ -1,0 +1,90 @@
+"""阶段 C 内核测试：JD → PositionProfile、预筛、岗位聚合（纯函数，无 DB）。"""
+
+from app.services.matching.jd_profiles import jd_profile_from_snapshot, rough_select
+from app.services.matching.schemas import MatchResult
+from app.services.matching.jd_aggregate import aggregate_jd_scores
+
+
+def _snap(title, skills, reqs=None, position_name="后端开发工程师", years=3, scenarios=None):
+    return {
+        "title": title,
+        "normalized_position": position_name,
+        "crawled_at": "2026-08-25",
+        "extraction": {
+            "skills": [{"name": s} for s in skills],
+            "requirements": [{"skill_name": s} for s in (reqs or [])],
+            "required_years": years,
+            "industry": "IT",
+            "typical_scenarios": scenarios or [],
+        },
+    }
+
+
+class TestJdProfile:
+    def test_builds_must_nice(self):
+        prof = jd_profile_from_snapshot(_snap("JD-A", ["Java", "Spring"], reqs=["MySQL"]), "42")
+        assert prof.position_id == "42"
+        assert [s.skill_name for s in prof.must_skills] == ["Java", "Spring"]
+        assert [s.skill_name for s in prof.nice_skills] == ["MySQL"]
+        assert prof.required_years == 3
+        assert prof.industry == "IT"
+        assert prof.soft_requirements == []
+
+    def test_soft_skill_isolated(self):
+        snap = _snap("JD-S", ["Python"])
+        snap["extraction"]["skills"] = [{"name": "沟通能力", "category": "soft-skills"}]
+        prof = jd_profile_from_snapshot(snap, "1")
+        assert [s.skill_name for s in prof.must_skills] == []
+        assert len(prof.soft_requirements) == 1
+        assert prof.soft_requirements[0].skill_name == "沟通能力"
+
+    def test_no_skills_returns_none(self):
+        assert jd_profile_from_snapshot({"extraction": {}}, "1") is None
+        assert jd_profile_from_snapshot({}, "1") is None
+
+
+class TestRoughSelect:
+    def test_orders_by_hits(self):
+        profs = [
+            jd_profile_from_snapshot(_snap("JD-A", ["Java", "Spring"]), "1"),
+            jd_profile_from_snapshot(_snap("JD-B", ["Python"]), "2"),
+            jd_profile_from_snapshot(_snap("JD-C", ["Java"]), "3"),
+        ]
+        out = rough_select(profs, ["Java", "Spring"], k=2)
+        assert [p.position_id for p in out] == ["1", "3"]  # JD-A 命中2 > JD-C 命中1
+
+    def test_zero_hit_keeps_fallback(self):
+        profs = [
+            jd_profile_from_snapshot(_snap("JD-A", ["Rust"]), "1"),
+            jd_profile_from_snapshot(_snap("JD-B", ["Zig"]), "2"),
+        ]
+        out = rough_select(profs, ["Java"], k=2)
+        assert len(out) == 2  # 0 命中保留兜底
+
+
+class TestAggregate:
+    def _result(self, jd_id, name, score):
+        return MatchResult(
+            position_id=jd_id, position_name=name, total_score=score,
+            nice_score=0.5, exp_score=0.5,
+            matched_must=["Java"], missing_must=[],
+            summary=f"摘要{name}", unqualified=False,
+        )
+
+    def test_groups_by_position_and_best_jd(self):
+        jd_position = {"1": "后端开发工程师", "2": "后端开发工程师", "3": "前端开发工程师"}
+        scored = [
+            self._result("1", "JD-A", 0.9),
+            self._result("2", "JD-B", 0.7),
+            self._result("3", "JD-C", 0.8),
+        ]
+        out = aggregate_jd_scores(scored, jd_position, top_n=2)
+        assert [r["position_name"] for r in out] == ["后端开发工程师", "前端开发工程师"]
+        assert out[0]["total_score"] == 0.9  # 组内最高分
+        assert len(out[0]["jd_evidence"]) == 2  # 组内 Top-2 JD 证据
+        assert out[0]["jd_evidence"][0]["jd_id"] == "1"
+
+    def test_no_position_group_defaults(self):
+        out = aggregate_jd_scores([self._result("9", "JD-X", 0.5)], {"9": ""}, top_n=1)
+        assert out[0]["position_name"] == "(无归属JD)"
+        assert out[0]["total_score"] == 0.5
