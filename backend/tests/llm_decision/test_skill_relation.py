@@ -138,3 +138,27 @@ class TestPromptCalibration:
         assert "不要因缺少共现证据而保守答NONE" in flat
         assert "子领域" in prompt  # BELONGS_TO 判据
         assert "组成部分" in prompt  # r4：父子=分类包含定义
+
+
+class TestPrerequisiteRulesR6:
+    """校准 r6：先修判据补充（r4 错误形态=组成技术→领域技能被判父子、
+    基础设施→中间件被判 NONE）。"""
+
+    def test_prompt_contains_prereq_policy_rules(self):
+        import re
+
+        from app.services.llm_decision.skill_relation import build_skill_relation_prompt
+
+        prompt = build_skill_relation_prompt("HTML", "前端开发", [])
+        flat = re.sub(r"\s+", "", prompt)
+        for phrase in ("组成技术", "领域技能", "基础设施概念", "数据链路上游",
+                       "HTML→前端开发", "分布式→消息队列"):
+            assert phrase in flat or phrase in prompt, f"判据缺 {phrase}"
+
+    def test_belongs_to_scope_clarified(self):
+        """BELONGS_TO 收窄为「子领域/特性→父技术」，防组成技术误判。"""
+        from app.services.llm_decision.skill_relation import build_skill_relation_prompt
+
+        prompt = build_skill_relation_prompt("SQL", "MySQL", [])
+        assert "这不是 BELONGS_TO" in prompt.replace("\n", "")
+        assert "具体数据库产品" in prompt
