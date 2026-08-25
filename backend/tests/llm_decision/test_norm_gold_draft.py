@@ -64,9 +64,21 @@ class TestPositionDraftFile:
         rows = _load("position_normalization_draft.jsonl")
         assert all(r["annotation_status"] == "draft_auto" for r in rows)
 
-    def test_needs_human_flag_true(self):
+    def test_needs_human_flag_layer(self):
+        """08-25 自动回填后：approval 分两层——authoritative(False) 权威已回填 + needs_human(True) 待人工裁决。
+
+        互斥且与 resolution 一致：needs_human=False ⇔ resolution=authoritative（非独立人工，需人工转正才置 human）。
+        """
         rows = _load("position_normalization_draft.jsonl")
-        assert all(r["needs_human"] is True for r in rows)
+        authoritative = [r for r in rows if r["resolution"] == "authoritative"]
+        needs = [r for r in rows if r["resolution"] == "needs_human"]
+        assert authoritative and needs, "应同时存在权威回填与待裁决两类"
+        for r in rows:
+            assert r["needs_human"] is (r["resolution"] == "needs_human"), r["id"]
+        # authoritative 项均已定案（canonical 非空、is_new/keep_original=false）
+        for r in authoritative:
+            assert r["gold_canonical"], r["id"]
+            assert r["gold_is_new"] is False and r["gold_keep_original"] is False, r["id"]
 
     def test_canonical_consistency(self):
         """gold_canonical 为空的仅当 keep_original=true；否则非空。"""
@@ -102,11 +114,21 @@ class TestSkillDraftFile:
         rows = _load("skill_normalization_draft.jsonl")
         assert all(r["annotation_status"] == "draft_auto" for r in rows)
 
-    def test_needs_human_flag_true(self):
+    def test_needs_human_flag_layer(self):
+        """08-25 自动回填后：resolved authoritative + needs_human 待裁决两层互斥。"""
         rows = _load("skill_normalization_draft.jsonl")
-        assert all(r["needs_human"] is True for r in rows)
-
-    def test_action_enum_and_standard_consistency(self):
+        authoritative = [r for r in rows if r["resolution"] == "authoritative"]
+        needs = [r for r in rows if r["resolution"] == "needs_human"]
+        assert authoritative and needs, "应同时存在权威回填与待裁决两类"
+        for r in rows:
+            assert r["needs_human"] is (r["resolution"] == "needs_human"), r["id"]
+        # authoritative 项均定案：merge 有 standard，keep 的 standard==variant
+        for r in authoritative:
+            assert r["gold_action"] in ("merge", "keep"), r["id"]
+            if r["gold_action"] == "merge":
+                assert r["gold_standard"], r["id"]
+            else:
+                assert r["gold_standard"] == r["variant"], r["id"]
         """gold_action ∈ {merge, keep, noise}；keep 时 standard==variant。"""
         rows = _load("skill_normalization_draft.jsonl")
         for r in rows:
