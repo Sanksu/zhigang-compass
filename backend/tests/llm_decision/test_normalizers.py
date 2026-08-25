@@ -205,3 +205,34 @@ class TestAliasHintCalibration:
         # 直接验证 prompt 组装含别名提示语义（不可离线调 LLM 的路径）
         prompt = build_skill_normalize_prompt("full stack development", ["全栈", "React"])
         assert "全栈" in prompt.split("候选标准技能名")[1]
+
+
+class TestAliasAnchorCalibration:
+    """校准 r7（拍板 ②2a）：别名落点 * 标注为 merge 目标约束。
+
+    边界：只约束 merge 目标选择（可辩域 9 例），不动保守 keep 门
+    （缩写 12 例行为保持 = 2b 不做）；无别名命中时候选无 *，独立
+    判断路径不受影响。
+    """
+
+    def test_alias_target_marked_with_star(self):
+        from app.services.llm_decision.skill_normalize import build_skill_normalize_prompt
+
+        prompt = build_skill_normalize_prompt(
+            "c语言", ["C", "C++", "C#"], alias_target="C",
+        )
+        cand_line = prompt.split("既定落点）：")[1].splitlines()[0]
+        assert "C*" in cand_line and "C++" in cand_line and "C#*" not in cand_line
+
+    def test_no_alias_target_no_star(self):
+        from app.services.llm_decision.skill_normalize import build_skill_normalize_prompt
+
+        prompt = build_skill_normalize_prompt("某种库", ["Python", "Java"])
+        assert "*" not in prompt.split("既定落点）：")[1].splitlines()[0]
+
+    def test_rule_states_merge_target_constraint(self):
+        from app.services.llm_decision.skill_normalize import build_skill_normalize_prompt
+
+        prompt = build_skill_normalize_prompt("x", ["A"], alias_target="A")
+        assert "不得改选其他近义候选" in prompt
+        assert "不含 * 号" in prompt

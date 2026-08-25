@@ -34,24 +34,27 @@ SYSTEM_PROMPT = """你是招聘技能图谱的技能名归一并助手。给定�
 _TASK_TEMPLATE = """技能名归一判断。
 
 技能名：{name}
-候选标准技能名（白名单/别名落点，最多 15 个）：{candidates}
+候选标准技能名（白名单/别名落点，最多 15 个；带 * 号者为权威别名表对本输入的既定落点）：{candidates}
 
 输出 JSON：
 {{
   "action": "merge" 或 "keep" 或 "noise",
-  "target_standard": "merge 时的标准技能名（原样取自候选清单）",
+  "target_standard": "merge 时的标准技能名（原样取自候选清单，不含 * 号）",
   "confidence": 0.0到1.0,
   "reason": "一句话依据"
 }}
 
 要求：
-1. action=merge 时 target_standard 必须与候选清单原文完全一致
-2. 同一技能的变体应 merge 到对应标准名——缩写/全称（JS→JavaScript）、
+1. action=merge 时 target_standard 必须与候选清单原文完全一致（不含 * 号）
+2. 候选中带 * 的名是权威别名表对输入的既定落点：若判 merge，目标必须是
+   带 * 的候选，不得改选其他近义候选（如 c语言→C 而非 C语言、
+   深度学习算法→深度学习而非保留、vue3→Vue.js 而非 Vue 3）
+3. 同一技能的变体应 merge 到对应标准名——缩写/全称（JS→JavaScript）、
    大小写与拼写变体（react→React、golang→Go）、版本号（Python3→Python）、
-   中英对应（c语言→C）；候选清单里的关联名优先考虑
-3. 与自身相同的目标不是 merge（标准名输入直接 keep）；拿不准语义是否
+   中英对应（c语言→C）
+4. 与自身相同的目标不是 merge（标准名输入直接 keep）；拿不准语义是否
    同一时 keep 并降低置信度；无关联缩写（≤6 字符）保持 keep 防 SBERT 误并
-4. 明显非技能（岗位名/教材名/噪音）判 noise
+5. 明显非技能（岗位名/教材名/噪音）判 noise
 """
 
 
@@ -74,9 +77,18 @@ class SkillNormalizeDecision(BaseModel):
         return self
 
 
-def build_skill_normalize_prompt(name: str, candidates: list[str]) -> str:
-    """组装技能名归一 prompt（候选为权威标准名证据，不引入外部虚构）。"""
-    candidates_text = "、".join(candidates[:15]) or "（无）"
+def build_skill_normalize_prompt(
+    name: str, candidates: list[str], alias_target: str = "",
+) -> str:
+    """组装技能名归一 prompt（候选为权威标准名证据，不引入外部虚构）。
+
+    alias_target 非空时该候选标注 *（校准 r7：r3 置顶只是弱提示「优先
+    考虑」，LLM 仍改选近义权威名致 9 例可辩域 miss；升格为 merge 目标
+    约束）。无别名命中时候选无 *，独立判断路径不受影响。
+    """
+    shown = candidates[:15]
+    marked = [f"{c}*" if alias_target and c == alias_target else c for c in shown]
+    candidates_text = "、".join(marked) or "（无）"
     return _TASK_TEMPLATE.format(name=(name or "").strip(), candidates=candidates_text)
 
 
@@ -160,14 +172,18 @@ def decide_skill_normalize(
         # 权威别名提示（校准 r3）：输入命中别名表时，其标准落点置顶入候选。
         # 与生产一致性对齐——别名/白名单是确定性快速路径，决策器是对齐后的
         # 一致确认而非独立猜测（r2 遗留：跨语言 full stack→全栈、llm→大语言
-        # 模型等 40 例纯词面分级无法召回；别名表即权威对应）
+        # 模型等 40 例纯词面分级无法召回；别名表即权威对应）。
+        # r7：落点同时以 * 标注进 prompt（merge 目标约束，r3 置顶弱提示
+        # 不足以阻止 LLM 改选近义权威名）。
         from app.services.extraction.dictionary_data import SKILL_ALIAS
 
         alias_target = SKILL_ALIAS.get(name) or SKILL_ALIAS.get(name.lower())
         if alias_target and alias_target not in candidates:
             candidates = [alias_target] + [c for c in candidates if c != alias_target]
             candidates = candidates[:15]
-    prompt = build_skill_normalize_prompt(name, candidates)
+    else:
+        alias_target = ""
+    prompt = build_skill_normalize_prompt(name, candidates, alias_target)
     try:
         with invocation_scope(
             "skill_normalize", entity_ref=entity_ref or f"skill:{name[:40]}",
