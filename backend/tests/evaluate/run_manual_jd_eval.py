@@ -723,13 +723,16 @@ def run_real_eval(
             hallucinated_total[s] += 1
         gold_title_raw = row["review_gold_title"] or ""
         has_gold_title = bool(gold_title_raw.strip())
+        # 08-25 采纳 A：实习岗（gold_title 含"实习"）为招聘形态，生产 normalize_position_name
+        # 返回空不入图；岗位名维度不评（排除 title_count），技能/教育/经验等维度照常。
+        is_intern_title = has_gold_title and ("实习" in gold_title_raw)
         # gold 缺失（盲审标注未填 title）不计入 title 准确率——非模型错误
-        normalized_gold_title = normalize_position_name(gold_title_raw)
+        normalized_gold_title = normalize_position_name(gold_title_raw) if has_gold_title else ""
         normalized_pred_title = normalize_position_name(result.position_name)
-        title_match = has_gold_title and normalized_gold_title == normalized_pred_title
+        title_match = has_gold_title and not is_intern_title and normalized_gold_title == normalized_pred_title
         title_hits += int(title_match)
-        title_count += int(has_gold_title)
-        title_raw_exact = has_gold_title and gold_title_raw == result.position_name
+        title_count += int(has_gold_title and not is_intern_title)
+        title_raw_exact = has_gold_title and not is_intern_title and gold_title_raw == result.position_name
         title_raw_hits += int(title_raw_exact)
         gold_education = row.get("review_gold_education", "").strip() or None
         predicted_education = result.education
