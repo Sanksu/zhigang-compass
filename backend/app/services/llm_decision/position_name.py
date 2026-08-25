@@ -140,6 +140,57 @@ def decide_position_name(
         return None
 
 
+class PositionCandidateRecaller:
+    """岗位名候选召回器：按标题语义余弦 Top-K（池向量构建时一次编码）。
+
+    回流自实验场 zhigang-llm-driven（e0d53ab）：110 条岗位黄金集上
+    SBERT Top-8 召回 0.927、词面谓词 0.10——与标题无关的全局热门截断
+    对长尾标题召回趋近于 0。模型（设计文档 9.3 指定 SBERT）不可用时
+    降级池前缀（即频次序），shadow 不阻塞。
+    """
+
+    def __init__(self, pool: list[str], k: int = 20):
+        self._pool = [p.strip() for p in pool if p and p.strip()]
+        self._k = k
+        self._matrix = None
+        self.mode = "pool-prefix"
+        if len(self._pool) <= k:
+            self.mode = "pool-full"
+            return
+        try:
+            import numpy as np
+
+            from app.services.matching.semantic import SkillEmbedder
+
+            embedder = SkillEmbedder.get()
+            matrix = np.asarray(
+                [embedder.embed(p) for p in self._pool], dtype=np.float32,
+            )
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            self._matrix = matrix / np.clip(norms, 1e-12, None)
+            self.mode = "embedding"
+        except Exception:
+            self._matrix = None  # 模型未下载/依赖缺失：降级频次前缀
+
+    def recall(self, title: str) -> list[str]:
+        """标题 → 候选 Top-K；embedding 不可用或单条失败回退池前缀。"""
+        if self._matrix is None or len(self._pool) <= self._k:
+            return self._pool[: self._k]
+        try:
+            import numpy as np
+
+            from app.services.matching.semantic import SkillEmbedder
+
+            q = np.asarray(
+                SkillEmbedder.get().embed((title or "").strip()), dtype=np.float32,
+            )
+            q = q / max(float(np.linalg.norm(q)), 1e-12)
+            order = np.argsort(-(self._matrix @ q))
+            return [self._pool[i] for i in order[: self._k]]
+        except Exception:
+            return self._pool[: self._k]
+
+
 def tier_for_position_decision(
     decision: PositionNameDecision,
     gate_ok: bool,
