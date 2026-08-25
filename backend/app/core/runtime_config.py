@@ -62,7 +62,7 @@ DEFAULTS: dict = {
     "skill_relation_propose_max_candidates": 40,
     # 阶段 C：匹配候选切到原生 JD（灰度开关 + 粗选 K；默认 False 走聚合岗位画像）
     "match_jd_candidates_enabled": False,
-    "match_jd_rough_k": 300,
+    "match_jd_rough_k": 50,
 }
 
 _VALIDATORS = {
