@@ -188,6 +188,10 @@ async def approve_llm_decision(
         return await _approve_skill_relation(db, record, reason, operator)
     if record.domain == "skill_classify":
         return await _approve_skill_classify(db, record, reason, operator)
+    # 别名回写（方案①）：skill_normalize 记录且 structured_output.kind=="alias"——
+    # 走 _approve_skill_alias（写 skill_aliases + reload），非归一图变异。
+    if record.domain == "skill_normalize" and (record.structured_output or {}).get("kind") == "alias":
+        return await _approve_skill_alias(db, record, reason, operator)
     return await _approve_normalization(db, record, reason, operator)
 
 
@@ -387,6 +391,69 @@ async def _approve_skill_classify(db, record, reason: str, operator: str) -> dic
         await db.rollback()
         return error(ERR_CONFLICT, "该技能分类已批准（并发批准冲突）")
     return ok({"decision_id": str(record.id), "category": category, "skill": skill_name})
+
+
+async def _approve_skill_alias(db, record, reason: str, operator: str) -> dict:
+    """技能别名回写批准（方案①）：写 skill_aliases(approved) + reload_dynamic_aliases。
+
+    skill_normalize 记录且 structured_output.kind=="alias"（propose_skill_alias 产出）：
+    approve 即把该"别名→标准名"写进 skill_aliases（status=approved），供
+    normalize_skill 并查（词典→动态→白名单）。standard_name 必须命中
+    known_standard_names（propose 侧 gate 已保证；此处二次校验防脏数据）。
+    图边界：别名回写不改图谱拓扑（非图变异），故落 skill_aliases 足够。
+    """
+    from app.api.common import ok
+    from app.core.errors import ERR_CONFLICT, ERR_VALIDATION
+    from app.models.business import AuditLog, SkillAlias
+    from app.schemas.common import error
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
+
+    alias = str(record.entity_id or "").strip()
+    out = record.structured_output or {}
+    standard = str(out.get("target_standard") or "").strip()
+    confidence = out.get("confidence")
+    if not alias or not standard:
+        return error(ERR_VALIDATION, "别名回写审批非法（variant/target_standard 缺失）")
+    # gate 二次校验：standard 必须命中权威标准名（`known_standard_names()`）
+    from app.services.llm_decision.skill_normalize import known_standard_names
+
+    if standard not in known_standard_names():
+        return error(ERR_VALIDATION, f"标准名 {standard!r} 不在权威标准名集合（防虚构）")
+
+    # 幂等：unique(variant) —— 已存在该 variant（pending/approved）则跳过
+    existing = (await db.scalars(
+        select(SkillAlias).where(SkillAlias.variant == alias)
+    )).first()
+    if existing is not None:
+        return error(ERR_CONFLICT, f"别名 {alias!r} 已存在（proposal {existing.proposal_id}），不可重复批准")
+
+    db.add(SkillAlias(
+        variant=alias, standard_name=standard,
+        status="approved", proposal_id=str(record.id),
+        reviewed_by=operator, review_reason=reason, confidence=confidence,
+    ))
+    record.status = "approved"
+    record.reviewer = operator
+    record.review_reason = reason
+    record.effects_applied = True
+    db.add(AuditLog(
+        user_id=operator, action="llm_decision_approve",
+        resource=record.domain, resource_id=str(record.id),
+        detail={"kind": "alias", "variant": alias, "standard": standard, "reason": reason},
+    ))
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return error(ERR_CONFLICT, "该别名已批准（并发批准冲突）")
+    # 触发 normalize_skill 动态别名表刷新（approve 后立即可并查）
+    try:
+        from app.services.extraction.dictionary import reload_dynamic_aliases
+        reload_dynamic_aliases()
+    except Exception:
+        pass  # reload 失败（DB 抖动）不阻断；下次启动会重新加载
+    return ok({"decision_id": str(record.id), "variant": alias, "standard": standard})
 
 
 @router.post("/llm-decisions/{decision_id}/reject")

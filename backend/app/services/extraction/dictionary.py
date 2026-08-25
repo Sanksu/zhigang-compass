@@ -1098,6 +1098,10 @@ def normalize_skill(raw: str) -> str:
     alias = SKILL_ALIAS.get(raw.lower())
     if alias is not None:
         return alias
+    # 动态别名并查（方案①：LLM 发现 + 人工审批回写，读序=词典→动态→白名单）
+    dyn = _DYNAMIC_ALIAS_LOWER.get(raw.lower())
+    if dyn:
+        return dyn
     canonical = _SKILL_WHITELIST_LOWER.get(raw.lower())
     if canonical is not None:
         return canonical
@@ -1199,6 +1203,48 @@ def is_noise_skill(name: str) -> bool:
 
 # 白名单词小写 → 标准写法映射（normalize_skill 用于大小写统一）
 _SKILL_WHITELIST_LOWER: dict[str, str] = {w.lower(): w for w in SKILL_WHITELIST}
+
+
+# ── 动态别名回写（方案①：LLM 发现 + 人工审批，normalize_skill 并查）──
+# dictionary.py 是抽取/归一热路径，不能 sync 查 DB。动态别名用模块级缓存
+# （小写 variant → standard_name），由 reload_dynamic_aliases() 从 skill_aliases
+# 表的 approved 行加载；approve 端点写表后调用 reload 刷新（版本化可选）。
+# 读序：硬编码 SKILL_ALIAS → 动态别名表 → 白名单（决策项 D5：词典→动态→SBERT）。
+_DYNAMIC_ALIAS_LOWER: dict[str, str] = {}
+
+
+def reload_dynamic_aliases() -> int:
+    """从 skill_aliases 表加载 status=approved 的别名对（小写 variant → standard）。
+
+    返回加载数（0 表示 None/DB 不可用时保持既有缓存——热路径不因 DB 抖动失败）。
+    仅供 approve 端点/启动时调用，不在 normalize_skill 热路径内 sync 查询。
+    """
+    global _DYNAMIC_ALIAS_LOWER
+    try:
+        from app.models.business import SkillAlias
+        from sqlalchemy import select
+
+        from app.core.database import async_session_factory
+
+        import asyncio
+
+        async def _load() -> dict[str, str]:
+            async with async_session_factory() as session:
+                rows = (await session.scalars(
+                    select(SkillAlias).where(SkillAlias.status == "approved")
+                )).all()
+                return {r.variant.strip().lower(): r.standard_name.strip() for r in rows}
+
+        _DYNAMIC_ALIAS_LOWER = asyncio.run(_load())
+        return len(_DYNAMIC_ALIAS_LOWER)
+    except Exception:
+        # DB 不可用/迁移未跑：保持既有缓存（可能空），不阻断归一热路径
+        return len(_DYNAMIC_ALIAS_LOWER)
+
+
+def dynamic_alias_lower() -> dict[str, str]:
+    """动态别名表访问点（测试可 monkeypatch；热路径只读）。"""
+    return _DYNAMIC_ALIAS_LOWER
 
 
 # ── 灰名单验证区（技能生命周期，2026-08-21 新岗位发现优化 ②）──

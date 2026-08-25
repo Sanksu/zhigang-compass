@@ -225,6 +225,83 @@ async def propose_skill(
     return summary
 
 
+# 别名回写置信度门槛（决策项 D4）：LLM merge confidence ≥ 0.8 才进 skill_aliases
+ALIAS_CONFIDENCE_FLOOR = 0.8
+
+
+async def propose_skill_alias(
+    llm, provider: str, model: str, run_date: str, limit: int,
+) -> dict:
+    """技能别名回写提议一轮（方案①，async 编排，写 skill_aliases)。
+
+    复用 decide_skill_normalize 的 merge 结论（别名→标准名，与 proposed_skill
+    同链），但只取 action=merge 且 confidence ≥ ALIAS_CONFIDENCE_FLOOR（D4）
+    的候选，写 skill_aliases（status=pending）供人工审批回写词典。
+    区别于 propose_skill（走 NameNormalizationRequest 图变异 R2）——别名回写
+    不改图谱拓扑，是"归一字典增强"。
+
+    D3：仅"向量不相似但语义等价"类（缩写/中英/版本）——由别名筛选（非 SBERT 聚类
+    覆盖的近义）体现；merge 到已知标准名（gate）保证不虚构。
+    """
+    from app.core.database import neo4j_driver
+    from app.services.llm_decision.skill_normalize import (
+        decide_skill_normalize,
+        skill_normalize_gate,
+    )
+
+    summary = {"candidates": 0, "proposed": 0, "blocked": 0, "llm_failed": 0, "low_conf": 0}
+    rows = await asyncio.to_thread(_fetch_unormalized_skills, neo4j_driver, limit)
+    for row in rows:
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        summary["candidates"] += 1
+        decision = decide_skill_normalize(name, llm)
+        if decision is None:
+            summary["llm_failed"] += 1
+            continue
+        gate_ok, gate_reason = skill_normalize_gate(decision, name)
+        # 仅别名回写：must 是 merge 到标准名，且置信度 ≥ 门槛
+        if decision.action != "merge" or decision.confidence < ALIAS_CONFIDENCE_FLOOR:
+            summary["low_conf"] += 1
+            continue
+        if not gate_ok:
+            summary["blocked"] += 1
+            logger.info("[propose_alias] 技能 %s 拦截: %s", name, gate_reason)
+            continue
+        standard = decision.target_standard
+        # 落 LLMDecisionRecord（domain=skill_normalize, kind="alias"）——复用
+        # /admin/llm-decisions 决策页展示/审批；approve 时写 skill_aliases + reload。
+        from app.services.llm_decision import (
+            DOMAIN_SKILL_NORMALIZE,
+            STATUS_PROPOSAL,
+            build_record,
+            persist_record,
+        )
+
+        record = build_record(
+            domain=DOMAIN_SKILL_NORMALIZE,
+            entity_type="skill", entity_id=name, run_id=f"alias_propose:{run_date}",
+            input_hash=_input_hash("alias", name),
+            evidence_refs=[{"kind": "unormalized_skill", "name": name}],
+            provider=provider, model=model,
+            structured_output={
+                "action": "merge", "target_standard": standard,
+                "kind": "alias",  # 区分"别名回写" vs 归一图变异（_approve 分发按此）
+                "confidence": decision.confidence,
+            },
+            confidence=decision.confidence,
+            gate_result="pass",
+            risk_tier="R2",
+            status=STATUS_PROPOSAL,
+        )
+        await persist_record(record)
+        summary["proposed"] += 1
+        logger.info("[propose_alias] 技能 %s → %s（proposal，conf %.2f）",
+                    name, standard, decision.confidence)
+    return summary
+
+
 async def propose(limit: int = DEFAULT_LIMIT, domain: str = "all") -> dict:
     """执行一轮名称归一提议（async，ETL worker 直调）；返回摘要。"""
     from app.core.database import neo4j_driver
