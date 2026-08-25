@@ -244,8 +244,6 @@ async def eval_position_normalization(rows: list[dict], llm) -> dict:
     human_rows = 0
 
     def _vk(s: str) -> str:
-        import unicodedata
-
         return "".join(s.split()).casefold() if s else ""
 
     for row in rows:

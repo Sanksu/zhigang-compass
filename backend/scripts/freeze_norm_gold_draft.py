@@ -38,7 +38,6 @@ from app.services.extraction.dictionary import (  # noqa: E402
     SKILL_WHITELIST,
     _ALIAS_STANDARDS,
     _EN_POSITION_MAP,
-    _POSITION_ALIAS,
     _POSITION_KEYWORDS,
     _POSITION_SKILL_ROUTING,
     _POSITION_WHITELIST,
