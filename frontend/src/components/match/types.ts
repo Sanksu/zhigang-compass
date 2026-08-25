@@ -38,6 +38,17 @@ export interface RecommendItem {
   status: 'stable' | 'emerging' | 'declining' | 'low'
   /** 关键差距（前 3 条，来自 missing_must） */
   key_gaps: string[]
+  /** JD 级证据（阶段 B：命中岗位族内原生 JD 二次精排 Top-2） */
+  jd_evidence: {
+    jd_title: string
+    source: string
+    source_url: string
+    coverage: number
+    hit_count: number
+    must_total: number
+    nice_total: number
+    hit_skills: string[]
+  }[]
 }
 
 /** 五维雷达图数据 */

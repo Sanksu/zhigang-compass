@@ -121,6 +121,37 @@ def _complete_recommend_result(
     return {**(previous or {}), "match_id": match_id, "top_n": top_n}
 
 
+async def _load_jd_evidence_rows(
+    session,
+    results: list,
+) -> dict:
+    """并发加载命中岗位族内 JD 行（stage B：JD 级证据）。
+
+    results 去重 position_name 后并行查 jd_raw（limit 控制成本），
+    失败单岗位降级为空（不影响匹配结果）。
+    """
+    from app.services.matching.jd_rerank import load_jd_rows_for_position
+
+    names = list(
+        dict.fromkeys(
+            str(r.position_name) for r in results if r.position_name
+        )
+    )
+    if not names:
+        return {}
+
+    async def _one(name: str) -> tuple[str, list]:
+        try:
+            rows = await load_jd_rows_for_position(session, name)
+            return name, rows
+        except Exception:
+            logger.warning("[match/jd_evidence] 岗位 %s JD 加载失败，降级为空", name)
+            return name, []
+
+    gathered = await asyncio.gather(*(_one(n) for n in names))
+    return dict(gathered)
+
+
 async def match_recommend(
     ctx: dict,
     resume_id: str,
@@ -179,8 +210,24 @@ async def match_recommend(
 
             results = await asyncio.to_thread(_match)
             match_id = str(uuid.uuid4())
+
+            # 阶段 B：JD 级证据精排（每个命中岗位族内原生 JD 二次精排，附加
+            # jd_evidence 到结果 dict，不动 MatchResult schema / 评分顺序）
+            from app.services.matching.jd_rerank import (
+                enrich_with_jd_evidence,
+            )
+
+            jd_rows = await _load_jd_evidence_rows(session, results)
+            candidate_skills = [
+                s.get("name")
+                for s in (cache.parsed_data or {}).get("skills", [])
+                if s.get("name")
+            ]
+            data_items = [result.model_dump() for result in results]
+            enrich_with_jd_evidence(data_items, jd_rows, candidate_skills)
+
             data = {
-                "items": [result.model_dump() for result in results],
+                "items": data_items,
                 "match_id": match_id,
                 "user_id": user_id,
             }

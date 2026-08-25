@@ -81,6 +81,16 @@ function toRecommendItem(r: BackendMatchResult): RecommendItem {
     summary: r.summary,
     status,
     key_gaps: r.missing_must.slice(0, 3),
+    jd_evidence: (r.jd_evidence ?? []).map((e) => ({
+      jd_title: e.jd_title ?? '(无标题)',
+      source: e.source ?? '',
+      source_url: e.source_url ?? '',
+      coverage: e.coverage ?? 0,
+      hit_count: e.hit_count ?? 0,
+      must_total: e.must_total ?? 0,
+      nice_total: e.nice_total ?? 0,
+      hit_skills: e.hit_skills ?? [],
+    })),
   }
 }
 
@@ -657,6 +667,39 @@ export function ResumeMatchPage() {
                     <span className="text-[10px] text-ink-faint font-mono">{rec.position_id}</span>
                   </div>
                   <p className="text-xs text-ink-muted line-clamp-2">{rec.summary}</p>
+                  {/* JD 级证据（阶段 B）：命中岗位族内原生 JD，显示最匹配的 1-2 条 */}
+                  {rec.jd_evidence.length > 0 && (
+                    <div className="mt-2 space-y-1.5">
+                      <p className="text-[9px] uppercase tracking-wide text-ink-faint">JD 证据</p>
+                      {rec.jd_evidence.slice(0, 2).map((ev, ei) => (
+                        <div key={ei} className="rounded-md border border-border bg-background/50 px-2 py-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <a
+                              href={ev.source_url || undefined}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs text-ink hover:underline line-clamp-1"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {ev.jd_title}
+                            </a>
+                            <span className="text-[10px] font-mono text-ink-faint shrink-0">
+                              命中 {ev.hit_count}/{ev.must_total + ev.nice_total}
+                            </span>
+                          </div>
+                          {ev.hit_skills.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {ev.hit_skills.map((s) => (
+                                <span key={s} className="rounded bg-subtle px-1 py-0.5 text-[9px] text-ink-muted">
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {/* 三维分数 mini bar（无必备门槛岗位 must=null 显示空条） */}
                   <div className="flex items-center gap-1.5 mt-2">
                     {[
