@@ -118,7 +118,9 @@ _REL_DOMAINS = {"skill_relation"}
 # 图变异类域（归并/改名/关系变更 = R2 高风险动作）须人工 approve、不得 auto-apply。
 # 名称归一（position/skill normalize，PR3 c）并入 _MUTABLE_DOMAINS 统一门禁。
 _NORMALIZE_DOMAINS = {"position_normalize", "skill_normalize"}
-_MUTABLE_DOMAINS = _REL_DOMAINS | _NORMALIZE_DOMAINS
+# 技能分类（skill_classify）：建议晋升权威 category，同样须人工 approve
+# （worker 落 shadow+R0，approve 端对 skill_classify 接受 shadow→approved）。
+_MUTABLE_DOMAINS = _REL_DOMAINS | _NORMALIZE_DOMAINS | {"skill_classify"}
 
 
 async def _load_decision(session, decision_id: str):
@@ -176,11 +178,16 @@ async def approve_llm_decision(
         return error(ERR_NOT_FOUND, "决策记录不存在", http_status=404)
     if record.domain not in _MUTABLE_DOMAINS:
         return error(ERR_VALIDATION, f"仅 {sorted(_MUTABLE_DOMAINS)} 域可批准（当前 {record.domain}）")
-    if record.status != "proposal":
+    # skill_classify 记录为 shadow（worker 验收语义），批准即晋升权威 category；
+    # 其余域为 proposal 人工档。
+    accepted_statuses = {"shadow"} if record.domain == "skill_classify" else {"proposal"}
+    if record.status not in accepted_statuses:
         return error(ERR_CONFLICT, f"决策当前状态 {record.status}，不可批准")
 
     if record.domain == "skill_relation":
         return await _approve_skill_relation(db, record, reason, operator)
+    if record.domain == "skill_classify":
+        return await _approve_skill_classify(db, record, reason, operator)
     return await _approve_normalization(db, record, reason, operator)
 
 
@@ -328,6 +335,60 @@ async def _approve_normalization(db, record, reason: str, operator: str) -> dict
                "source": source_name, "target": target_name})
 
 
+async def _approve_skill_classify(db, record, reason: str, operator: str) -> dict:
+    """技能分类批准：落 SkillCategoryApproval + 决策置 approved（图写走 sync 脚本）。
+
+    worker 已把 LLM 建议写进图谱 `suggested_category*` 提议字段（不动权威
+    category），approve 在此固化批准意图（PG），由
+    scripts/sync_dynamic_categories.py 把 Skill.category 晋升为批准值。
+    category 必须非空（classify_skill 侧 KNOWN_CATEGORIES 枚举已保证）。
+    """
+    from app.api.common import ok
+    from app.core.errors import ERR_CONFLICT, ERR_VALIDATION
+    from app.models.business import AuditLog, SkillCategoryApproval
+    from app.schemas.common import error
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
+
+    skill_name = str(record.entity_id or "").strip()
+    category = str((record.structured_output or {}).get("category") or "").strip()
+    if not skill_name or not category:
+        return error(ERR_VALIDATION, "技能分类审批非法（技能名/category 缺失）")
+
+    # 重复批准预查（unique(proposal_id) 硬拒）：同 proposal 已被批准过 → 可读冲突
+    existing = (await db.scalars(
+        select(SkillCategoryApproval).where(
+            SkillCategoryApproval.proposal_id == str(record.id),
+        )
+    )).first()
+    if existing is not None:
+        return error(
+            ERR_CONFLICT,
+            f"技能 {skill_name}→{category} 已批准过（proposal {existing.proposal_id}），不可重复批准",
+        )
+
+    db.add(SkillCategoryApproval(
+        skill_name=skill_name, category=category,
+        proposal_id=str(record.id), reviewed_by=operator, review_reason=reason,
+    ))
+    record.status = "approved"
+    record.reviewer = operator
+    record.review_reason = reason
+    record.effects_applied = True
+    db.add(AuditLog(
+        user_id=operator, action="llm_decision_approve",
+        resource=record.domain, resource_id=str(record.id),
+        detail={"skill_name": skill_name, "category": category, "reason": reason},
+    ))
+    try:
+        await db.commit()
+    except IntegrityError:
+        # 并发兜底：两管理员同时批准同一 proposal，后者撞唯一约束
+        await db.rollback()
+        return error(ERR_CONFLICT, "该技能分类已批准（并发批准冲突）")
+    return ok({"decision_id": str(record.id), "category": category, "skill": skill_name})
+
+
 @router.post("/llm-decisions/{decision_id}/reject")
 async def reject_llm_decision(
     decision_id: str,
@@ -355,7 +416,9 @@ async def reject_llm_decision(
     record = await _load_decision(db, decision_id)
     if record is None:
         return error(ERR_NOT_FOUND, "决策记录不存在", http_status=404)
-    if record.status != "proposal":
+    # skill_classify 记录为 shadow（worker 验收语义），其余域为 proposal 人工档。
+    accepted_statuses = {"shadow"} if record.domain == "skill_classify" else {"proposal"}
+    if record.status not in accepted_statuses:
         return error(ERR_CONFLICT, f"决策当前状态 {record.status}，不可驳回")
 
     record.status = "rejected"
