@@ -112,15 +112,41 @@ async def llm_decisions_summary() -> dict:
         return await summarize(session)
 
 
-# ---- 技能关系审批执行通道（PR9b）：proposal→approved/rejected ----
+# ---- 审批执行通道（PR9b + PR3 c）：proposal→approved/rejected ----
 
 _REL_DOMAINS = {"skill_relation"}
+# 图变异类域（归并/改名/关系变更 = R2 高风险动作）须人工 approve、不得 auto-apply。
+# 名称归一（position/skill normalize，PR3 c）并入 _MUTABLE_DOMAINS 统一门禁。
+_NORMALIZE_DOMAINS = {"position_normalize", "skill_normalize"}
+_MUTABLE_DOMAINS = _REL_DOMAINS | _NORMALIZE_DOMAINS
 
 
 async def _load_decision(session, decision_id: str):
     from app.models.business import LLMDecisionRecord
 
     return await session.get(LLMDecisionRecord, decision_id)
+
+
+def _approve_common_guard(req: dict, current_user: dict) -> tuple[dict | None, str, str]:
+    """公共审批前置校验：返回 (None, reason, operator) 通过；(error_resp, "", "") 失败。
+
+    校验 review_reason 非空 + 操作者身份为合法 UUID（AuditLog.user_id 列约束）。
+    独立成函数便于单测注入，同时避免在两个 domain 分支重复。
+    """
+    import uuid as _uuid
+
+    from app.core.errors import ERR_VALIDATION
+    from app.schemas.common import error
+
+    reason = (req.get("review_reason") or "").strip()
+    if not reason:
+        return error(ERR_VALIDATION, "审批必须填写 review_reason"), "", ""
+    operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    try:
+        _uuid.UUID(str(operator))
+    except (ValueError, AttributeError, TypeError):
+        return error(ERR_VALIDATION, f"操作者身份必须为 UUID（AuditLog.user_id 列约束），收到: {operator!r}"), "", ""
+    return None, reason, operator
 
 
 @router.post("/llm-decisions/{decision_id}/approve")
@@ -130,36 +156,42 @@ async def approve_llm_decision(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
 ) -> dict:
-    """批准一条 skill_relation proposal：落动态关系表 + 决策记录置 approved。
+    """批准一条图变异类 proposal（skill_relation / position_normalize / skill_normalize）。
 
-    执行顺序（对齐 postmortem 003 教训）：先校验 → PG 落库（动态关系 +
-    决策状态 + AuditLog）→ 成功返回。图写入由 scripts/sync_dynamic_relations.py
-    幂等 MERGE（与 YAML 种子并列），不在本端点内直接改 Neo4j。
+    执行顺序（对齐 postmortem 003 教训）：先校验 → PG 落库（图变更持久化 +
+    决策状态 approved + AuditLog）→ 成功返回。图写入由各自 sync_* 脚本幂等落图
+    （与 YAML 种子并列），不在本端点内直接改 Neo4j。
+    - skill_relation → scripts/sync_dynamic_relations.py
+    - position/skill normalize → scripts/sync_dynamic_normalization.py
     """
-    import uuid as _uuid
-
-    from app.api.common import ok
     from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
-    from app.models.business import AuditLog, SkillDynamicRelation
     from app.schemas.common import error
-    from sqlalchemy.exc import IntegrityError
 
-    reason = (req.get("review_reason") or "").strip()
-    if not reason:
-        return error(ERR_VALIDATION, "审批必须填写 review_reason")
-    operator = current_user.get("sub") or current_user.get("user_id", "admin")
-    try:
-        _uuid.UUID(str(operator))
-    except (ValueError, AttributeError, TypeError):
-        return error(ERR_VALIDATION, f"操作者身份必须为 UUID（AuditLog.user_id 列约束），收到: {operator!r}")
+    guard, reason, operator = _approve_common_guard(req, current_user)
+    if guard is not None:
+        return guard
 
     record = await _load_decision(db, decision_id)
     if record is None:
         return error(ERR_NOT_FOUND, "决策记录不存在", http_status=404)
-    if record.domain not in _REL_DOMAINS:
-        return error(ERR_VALIDATION, f"仅 skill_relation 域可批准（当前 {record.domain}）")
+    if record.domain not in _MUTABLE_DOMAINS:
+        return error(ERR_VALIDATION, f"仅 {sorted(_MUTABLE_DOMAINS)} 域可批准（当前 {record.domain}）")
     if record.status != "proposal":
         return error(ERR_CONFLICT, f"决策当前状态 {record.status}，不可批准")
+
+    if record.domain == "skill_relation":
+        return await _approve_skill_relation(db, record, reason, operator)
+    return await _approve_normalization(db, record, reason, operator)
+
+
+async def _approve_skill_relation(db, record, reason: str, operator: str) -> dict:
+    """skill_relation 批准：落 SkillDynamicRelation + 决策置 approved（图写走 sync 脚本）。"""
+    from app.api.common import ok
+    from app.core.errors import ERR_CONFLICT, ERR_VALIDATION
+    from app.models.business import AuditLog, SkillDynamicRelation
+    from app.schemas.common import error
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
 
     out = record.structured_output or {}
     relation_type = str(out.get("relation") or "")
@@ -173,8 +205,6 @@ async def approve_llm_decision(
 
     # 重复关系预查（unique(source,target,type) 会硬拒）：同对关系已被批准过
     # （如 propose 脚本重跑产生多条同对 proposal）时给出可读冲突而非 500
-    from sqlalchemy import select
-
     existing = (await db.scalars(
         select(SkillDynamicRelation).where(
             SkillDynamicRelation.source_skill == source,
@@ -211,6 +241,91 @@ async def approve_llm_decision(
         await db.rollback()
         return error(ERR_CONFLICT, "关系已存在（并发批准冲突）")
     return ok({"decision_id": str(record.id), "relation": f"{source}->{target}->{relation_type}"})
+
+
+async def _approve_normalization(db, record, reason: str, operator: str) -> dict:
+    """名称归一批准：落 NameNormalizationRequest + 决策置 approved（图写走 sync 脚本）。
+
+    解析决策结构化输出为 (entity_type, action, source_name, target_name)：
+    - 仅 action 为非空（即产生 rename/merge）才落 NameNormalizationRequest；
+      keep_original / keep / noise 视为确认原样，不产生图变更（效果为 0）。
+    - 目标名必须非空且 ≠ 源名（hard gate 已保证；此处防脏数据入表）。
+    - 重复批准预查（unique(proposal_id) 硬拒）给出可读冲突而非 500。
+    """
+    from app.api.common import ok
+    from app.core.errors import ERR_CONFLICT, ERR_VALIDATION
+    from app.models.business import AuditLog, NameNormalizationRequest
+    from app.schemas.common import error
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services.llm_decision.normalize_approval import parse_normalization
+
+    try:
+        norm = parse_normalization(record)
+    except ValueError as e:
+        return error(ERR_VALIDATION, str(e))
+
+    action = norm["action"]
+    source_name = norm["source_name"]
+    target_name = norm["target_name"]
+    entity_type = norm["entity_type"]
+
+    # keep_original / keep / noise（action="")：确认原样，无图变更，仅置 approved
+    if not action:
+        record.status = "approved"
+        record.reviewer = operator
+        record.review_reason = reason
+        record.effects_applied = True
+        db.add(AuditLog(
+            user_id=operator, action="llm_decision_approve",
+            resource=record.domain, resource_id=str(record.id),
+            detail={"source_name": source_name, "target_name": target_name,
+                    "action": "noop", "reason": reason},
+        ))
+        await db.commit()
+        return ok({"decision_id": str(record.id), "normalization": "noop",
+                   "source": source_name, "target": target_name})
+
+    if not source_name or not target_name or source_name == target_name:
+        return error(ERR_VALIDATION, "名称归一变更非法（源/目标名缺失或相同）")
+
+    # 重复批准预查（unique(proposal_id) 会硬拒）：同 proposal 已被批准过 → 可读冲突
+    existing = (await db.scalars(
+        select(NameNormalizationRequest).where(
+            NameNormalizationRequest.proposal_id == str(record.id),
+        )
+    )).first()
+    if existing is not None:
+        return error(
+            ERR_CONFLICT,
+            f"记录 {source_name}→{target_name} 已批准过（proposal {existing.proposal_id}），不可重复批准",
+        )
+
+    db.add(NameNormalizationRequest(
+        entity_type=entity_type, action=action,
+        source_name=source_name, target_name=target_name,
+        primary_node_name=norm["primary_node_name"],
+        proposal_id=str(record.id), reviewed_by=operator, review_reason=reason,
+    ))
+    record.status = "approved"
+    record.reviewer = operator
+    record.review_reason = reason
+    record.effects_applied = True
+    db.add(AuditLog(
+        user_id=operator, action="llm_decision_approve",
+        resource=record.domain, resource_id=str(record.id),
+        detail={"entity_type": entity_type, "action": action,
+                "source": source_name, "target": target_name, "reason": reason},
+    ))
+    try:
+        await db.commit()
+    except IntegrityError:
+        # 并发兜底：两管理员同时批准同一 proposal，后者撞唯一约束
+        await db.rollback()
+        return error(ERR_CONFLICT, "该名称归一已批准（并发批准冲突）")
+    return ok({"decision_id": str(record.id), "normalization": f"{action}:{source_name}->{target_name}",
+               "source": source_name, "target": target_name})
 
 
 @router.post("/llm-decisions/{decision_id}/reject")

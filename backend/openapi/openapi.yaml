@@ -1561,7 +1561,7 @@ paths:
   /api/v1/admin/llm-decisions/{decision_id}/approve:
     post:
       tags: [admin]
-      summary: 批准 skill_relation proposal——落动态关系表 + 决策置 approved（RBAC admin）
+      summary: 批准图变异类 proposal——落图变更持久化表 + 决策置 approved（RBAC admin；skill_relation / position_normalize / skill_normalize）
       parameters:
         - name: decision_id
           in: path
@@ -1578,7 +1578,7 @@ paths:
                 review_reason: { type: string, description: 审批理由（必填） }
       responses:
         '200':
-          description: 批准成功（relation 形如 源->目标->类型）
+          description: 批准成功（域名；skill_relation 返回 relation 形如 源->目标->类型，名称归一返回 normalization 形如 action:源->目标）
           content:
             application/json:
               schema:
@@ -1590,7 +1590,10 @@ paths:
                     type: object
                     properties:
                       decision_id: { type: string }
-                      relation: { type: string }
+                      relation: { type: string, description: skill_relation 专用：源->目标->类型 }
+                      normalization: { type: string, description: 名称归一专用：action:源->目标（noop 表示确认原样） }
+                      source: { type: string, description: 名称归一专用：源名 }
+                      target: { type: string, description: 名称归一专用：目标名 }
                   trace_id: { type: string }
 
   /api/v1/admin/llm-decisions/{decision_id}/reject:
