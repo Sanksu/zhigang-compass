@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { apiGet } from '@/lib/api'
+import { apiGet, apiPost } from '@/lib/api'
 import { formatDateTime } from '@/lib/utils'
 import type { components } from '@/types/api'
 
@@ -120,6 +120,45 @@ export function AdminLlmDecisionsPage() {
     ? items.filter((it) => `${it.entity_id ?? ''} ${it.entity_type ?? ''} ${it.run_id ?? ''}`.toLowerCase().includes(q.trim().toLowerCase()))
     : items
 
+  // 可批准/驳回状态：proposal（规范人工档）或 skill_classify 的 shadow（验收档晋升权威）
+  function canReview(it: LlmDecisionItem): boolean {
+    const mutable = ['skill_relation', 'position_normalize', 'skill_normalize', 'skill_classify']
+    if (!mutable.includes(it.domain ?? '')) return false
+    if (it.domain === 'skill_classify') return it.status === 'shadow'
+    return it.status === 'proposal'
+  }
+
+  const [reviewing, setReviewing] = useState<{ id: string; entity: string; action: 'approve' | 'reject' } | null>(null)
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  async function submitReview() {
+    if (!reviewing) return
+    if (!reason.trim()) {
+      setActionError('审批必须填写 review_reason')
+      return
+    }
+    setBusy(true)
+    setActionError(null)
+    try {
+      const url = `/admin/llm-decisions/${reviewing.id}/${reviewing.action}`
+      await apiPost(url, { review_reason: reason.trim() })
+      setReviewing(null)
+      setReason('')
+      // 刷新列表与汇总
+      const res = await apiGet<{ items: LlmDecisionItem[]; total: number; limit: number; offset: number }>(`/admin/llm-decisions?${params}`)
+      setItems(res.items)
+      setTotal(res.total)
+      const s = await apiGet<{ by_domain: DomainSummary[]; totals: Record<string, number> }>('/admin/llm-decisions/summary')
+      setSummary(s)
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : '审批失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -196,18 +235,19 @@ export function AdminLlmDecisionsPage() {
                   <TableHead>置信度</TableHead>
                   <TableHead>Provider</TableHead>
                   <TableHead>创建时间</TableHead>
+                  <TableHead>操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading && filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
                       加载中…
                     </TableCell>
                   </TableRow>
                 ) : filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
                       无匹配的决策记录
                     </TableCell>
                   </TableRow>
@@ -230,6 +270,36 @@ export function AdminLlmDecisionsPage() {
                       <TableCell>{it.confidence != null ? it.confidence.toFixed(2) : '-'}</TableCell>
                       <TableCell className="text-xs">{it.provider || '-'}</TableCell>
                       <TableCell className="text-xs">{it.created_at ? formatDateTime(it.created_at) : '-'}</TableCell>
+                      <TableCell>
+                        {canReview(it) ? (
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs"
+                              onClick={() => {
+                                setActionError(null)
+                                setReviewing({ id: it.id, entity: `${it.entity_type ?? ''}:${it.entity_id ?? ''}`, action: 'approve' })
+                              }}
+                            >
+                              批准
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 text-xs text-state-declining"
+                              onClick={() => {
+                                setActionError(null)
+                                setReviewing({ id: it.id, entity: `${it.entity_type ?? ''}:${it.entity_id ?? ''}`, action: 'reject' })
+                              }}
+                            >
+                              驳回
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
@@ -244,6 +314,42 @@ export function AdminLlmDecisionsPage() {
           />
         </CardContent>
       </Card>
+
+      {reviewing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60" role="dialog" aria-modal="true">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>{reviewing.action === 'approve' ? '批准' : '驳回'}决策记录</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {reviewing.action === 'approve' ? '批准后' : '驳回将仅流转状态'}：{' '}
+                <span className="font-mono text-xs">{reviewing.entity}</span>
+              </p>
+              <Input
+                placeholder="review_reason（必填）"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                autoFocus
+              />
+              {actionError && <p className="text-xs text-state-declining">{actionError}</p>}
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => setReviewing(null)}>
+                  取消
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={busy}
+                  onClick={submitReview}
+                  className={reviewing.action === 'reject' ? 'bg-state-declining hover:bg-state-declining/90' : ''}
+                >
+                  {busy ? '提交中…' : '确认'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

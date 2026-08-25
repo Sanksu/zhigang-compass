@@ -1561,7 +1561,7 @@ paths:
   /api/v1/admin/llm-decisions/{decision_id}/approve:
     post:
       tags: [admin]
-      summary: 批准 skill_relation proposal——落动态关系表 + 决策置 approved（RBAC admin）
+      summary: 批准图变异类 proposal/shadow——落图变更持久化表 + 决策置 approved（RBAC admin；skill_relation / position_normalize / skill_normalize / skill_classify）
       parameters:
         - name: decision_id
           in: path
@@ -1578,7 +1578,7 @@ paths:
                 review_reason: { type: string, description: 审批理由（必填） }
       responses:
         '200':
-          description: 批准成功（relation 形如 源->目标->类型）
+          description: 批准成功（域名；skill_relation 返回 relation 形如 源->目标->类型，名称归一返回 normalization 形如 action:源->目标；skill_classify 接受 shadow 记录并返回 category/skill）
           content:
             application/json:
               schema:
@@ -1590,13 +1590,18 @@ paths:
                     type: object
                     properties:
                       decision_id: { type: string }
-                      relation: { type: string }
+                      relation: { type: string, description: skill_relation 专用：源->目标->类型 }
+                      normalization: { type: string, description: 名称归一专用：action:源->目标（noop 表示确认原样） }
+                      source: { type: string, description: 名称归一专用：源名 }
+                      target: { type: string, description: 名称归一专用：目标名 }
+                      category: { type: string, description: skill_classify 专用：批准后的权威分类 }
+                      skill: { type: string, description: skill_classify 专用：技能名 }
                   trace_id: { type: string }
 
   /api/v1/admin/llm-decisions/{decision_id}/reject:
     post:
       tags: [admin]
-      summary: 驳回 proposal（仅状态流转，效果为 0）
+      summary: 驳回 proposal/shadow（仅状态流转，效果为 0；skill_classify 接受 shadow）
       parameters:
         - name: decision_id
           in: path
@@ -3594,6 +3599,24 @@ components:
         evidence_refs:
           type: array
           items: { $ref: '#/components/schemas/EvidenceRef' }
+        jd_evidence:
+          type: array
+          description: "JD 级证据（阶段 B：recommend 命中岗位族内原生 JD 二次精排 Top-2；compare/result 旧快照无此字段为空数组）"
+          items:
+            type: object
+            properties:
+              position_name: { type: string, description: 归属岗位名 }
+              jd_title: { type: string, description: 原生 JD 标题 }
+              source: { type: string, description: 采集源（zhilian/boss/indeed 等） }
+              source_url: { type: string, description: JD 原文链接 }
+              coverage: { type: number, description: "JD 要求满足比例 [0,1]（nice 半计）" }
+              hit_count: { type: integer, description: 命中技能数 }
+              must_total: { type: integer, description: JD 必备技能总数 }
+              nice_total: { type: integer, description: JD 加分技能总数 }
+              hit_skills:
+                type: array
+                items: { type: string }
+                description: 命中技能名（前 8）
 
     MatchTaskStatus:
       type: object

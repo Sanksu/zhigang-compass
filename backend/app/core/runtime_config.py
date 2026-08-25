@@ -54,6 +54,15 @@ DEFAULTS: dict = {
     # 名称归一 LLM 影子审查（PR3b）：岗位名/技能名归一决策只落 shadow 记录，默认关闭
     "name_normalization_shadow_enabled": False,
     "name_normalization_max_candidates": 20,
+    # 名称归一 LLM 提议（ETL 阶段 20）：proposal 进人工审核池（approve 后 sync 落图），默认关闭
+    "name_normalization_propose_enabled": False,
+    "name_normalization_propose_max_candidates": 40,
+    # 技能关系 LLM 提议（ETL 阶段 21）：共现候选 proposal 进人工审核池，默认关闭
+    "skill_relation_propose_enabled": False,
+    "skill_relation_propose_max_candidates": 40,
+    # 阶段 C：匹配候选切到原生 JD（灰度开关 + 粗选 K；默认 False 走聚合岗位画像）
+    "match_jd_candidates_enabled": False,
+    "match_jd_rough_k": 50,
 }
 
 _VALIDATORS = {
@@ -80,6 +89,12 @@ _VALIDATORS = {
     "skill_category_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
     "name_normalization_shadow_enabled": lambda v: isinstance(v, bool),
     "name_normalization_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 100,
+    "name_normalization_propose_enabled": lambda v: isinstance(v, bool),
+    "name_normalization_propose_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 200,
+    "skill_relation_propose_enabled": lambda v: isinstance(v, bool),
+    "skill_relation_propose_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 200,
+    "match_jd_candidates_enabled": lambda v: isinstance(v, bool),
+    "match_jd_rough_k": lambda v: isinstance(v, int) and 1 <= v <= 2000,
 }
 
 

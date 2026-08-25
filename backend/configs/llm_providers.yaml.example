@@ -48,6 +48,18 @@ providers:
     supports_function_calling: true
     enabled: true
 
+  # commandcode（08-25 实测）：deepseek-v4-flash-vision-exp 走 TOOLS 模式报
+  # "Thinking mode does not support this tool_choice"，须 supports_function_calling: false
+  # 切 JSON_SCHEMA 模式才能跑结构化抽取；但实测延迟（35.9s/条）与归一质量（不懂归中文
+  # 标准名）均低于 deepseek，故仅作末位容灾 fallback（priority 最高 ≤ 主链），非 first。
+  - name: commandcode    # 默认组合示例 4（末位容灾，勿升 first）
+    priority: 4
+    base_url: https://api.commandcode.ai/provider/v1
+    api_key: ""
+    model: deepseek/deepseek-v4-flash-vision-exp
+    supports_function_calling: false   # JSON_SCHEMA 模式（TOOLS 不支持该模型）
+    enabled: true
+
 # ---------- 路由策略 ----------
 routing:
   # 同步路由（图谱查询、诊断报告等）：单次尝试，超时即返回 504（错误码 5003）

@@ -429,7 +429,7 @@ class TestNormalizePositionName:
         assert normalize_position_name("Verification Engineer III") == "测试工程师"
         assert normalize_position_name("Quality Engineer") == "测试工程师"
         assert normalize_position_name("Senior Firmware Engineer") == "嵌入式开发工程师"
-        assert normalize_position_name("Privacy Engineer") == "网络安全工程师"
+        assert normalize_position_name("Privacy Engineer") == ""
         # 失真兜底族治理（be-position-governance）：Solution/Physical Design 映射到
         # 兜底族（解决方案工程师/硬件工程师）后按技能路由，无技能不入图
         assert normalize_position_name("Solution Engineer") == ""
@@ -446,9 +446,9 @@ class TestNormalizePositionName:
         assert normalize_position_name("Test Automation Engineer") == "测试工程师"
         assert normalize_position_name("UI Developer") == "前端开发工程师"
         assert normalize_position_name("Front End Engineer") == "前端开发工程师"
-        assert normalize_position_name("Business Intelligence Engineer") == "大数据开发工程师"
+        assert normalize_position_name("Business Intelligence Engineer") == "商业智能分析师"
         assert normalize_position_name("Server Engineer") == "运维工程师"
-        assert normalize_position_name("Cloud Engineer") == "运维工程师"
+        assert normalize_position_name("Cloud Engineer") == "DevOps工程师"
         assert normalize_position_name("Robotics Engineer") == "机器人算法工程师"
         # Software Development Engineer → 失真兜底族：无技能不入图，带技能路由细分族
         assert normalize_position_name("Software Development Engineer") == ""

@@ -30,6 +30,8 @@ from app.workers.tasks import (
     graph_health_check,
     llm_stats_daily,
     name_normalization_shadow_daily,
+    name_normalization_propose_daily,
+    skill_relation_propose_daily,
     skill_category_review_daily,
     load_courses,
     match_recommend,
@@ -74,6 +76,42 @@ async def on_startup(ctx: dict) -> None:
             logger.warning("岗位画像预热跳过: %s", str(error)[:100])
 
     asyncio.create_task(warm_matching())
+
+    async def warm_jd_pool() -> None:
+        # JD 池化向量预热（阶段 C）：JD 候选模式开启时，启动即构建池化并写
+        # Redis（首建含 SBERT warm 可达数十秒——免容器重建后首个匹配请求
+        # 承担 ~226s 冷启动；指纹命中则秒级返回）。失败不阻塞 worker。
+        from app.core import runtime_config
+
+        if not runtime_config.get("match_jd_candidates_enabled", False):
+            return
+        try:
+            from sqlalchemy import select
+
+            from app.core.database import async_session_factory, redis_client
+            from app.models.raw import JDRaw
+            from app.services.matching.jd_profiles import rows_to_profiles
+            from app.services.matching.jd_vector_recall import load_pool_vectors_cached
+            from app.services.matching.semantic import SkillEmbedder
+
+            async with async_session_factory() as session:
+                rows = (await session.scalars(
+                    select(JDRaw)
+                    .where(JDRaw.snapshot["extraction"].astext.is_not(None))
+                    .order_by(JDRaw.id)
+                )).all()
+            profiles, _ = rows_to_profiles(rows)
+            vecs = await load_pool_vectors_cached(
+                profiles, SkillEmbedder.get(), redis_client,
+            )
+            logger.info(
+                "JD 池化向量预热完成：%d 条 JD（SBERT 不可用已降级跳过：%s）",
+                len(profiles), vecs is None,
+            )
+        except Exception as error:
+            logger.warning("JD 池化预热跳过: %s", str(error)[:100])
+
+    asyncio.create_task(warm_jd_pool())
 
 
 async def on_shutdown(ctx: dict) -> None:
@@ -137,6 +175,8 @@ class WorkerSettings:
         dict_guard_daily,
         llm_stats_daily,
         name_normalization_shadow_daily,
+        name_normalization_propose_daily,
+        skill_relation_propose_daily,
         skill_category_review_daily,
         check_llm_providers_health,
         graph_health_check,

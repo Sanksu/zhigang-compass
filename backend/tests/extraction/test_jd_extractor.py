@@ -9,6 +9,8 @@ from app.services.extraction.jd_extractor import JDExtractor
 from app.services.extraction.llm_provider import LLMConfigurationError, LLMExtractionError
 from app.services.extraction.prompts import BATCH_TASK_TEMPLATE, TASK_TEMPLATE
 from app.services.extraction.schemas import (
+    EducationExtracted,
+    ExperienceRange,
     JDExtractionResult,
     REQUIRESRelation,
     SkillExtracted,
@@ -190,6 +192,46 @@ class TestTypicalScenarios:
         p2 = BATCH_TASK_TEMPLATE.format(jd_count=2, jd_texts="jd1\njd2")
         assert "typical_scenarios" in p2 and "典型场景" in p2
 
+    def test_rule4_education_rule_synced_between_templates(self):
+        """08-25 学历弱维修复：规则 4（教育）在单条/批量模板中字节一致。
+
+        教育 level 取五档（本科/大专/硕士/博士/不限）+ major 可省略的规则文本
+        必须同时存在于两份模板且逐字一致，防模板漂移导致单/批量行为不一致。
+        """
+        assert "level 只取五档学历级别" in TASK_TEMPLATE
+        assert "level 只取五档学历级别" in BATCH_TASK_TEMPLATE
+
+        def rule(s: str) -> str:
+            i = s.index("4. 教育")
+            j = s.index("5. 证书")
+            return s[i:j]
+
+        assert rule(TASK_TEMPLATE) == rule(BATCH_TASK_TEMPLATE)
+
+    def test_rule6_bonus_negative_list_synced_between_templates(self):
+        """08-25 加分弱维修复：规则 6（requirements）的行业/厂商负向清单两模板一致。"""
+        assert "行业/厂商/业务领域词不得进入 requirements(nice)" in TASK_TEMPLATE
+        assert "行业/厂商/业务领域词不得进入 requirements(nice)" in BATCH_TASK_TEMPLATE
+
+        def rule6(s: str) -> str:
+            i = s.index("6. 岗位-技能关系")
+            j = s.index("7. 薪资")
+            return s[i:j]
+
+        assert rule6(TASK_TEMPLATE) == rule6(BATCH_TASK_TEMPLATE)
+
+    def test_rule4_mapping_domain(self):
+        """规则 4 教育：五档 level 取值 + 本科及以上→本科 + 学历不限→不限 的映射域。
+
+        仅校验规则文本明确给出映射，不触发断言其真实抽取（LLM 非确定性，
+        抽取行为由人工算法评审把关）。
+        """
+        for tpl in (TASK_TEMPLATE, BATCH_TASK_TEMPLATE):
+            assert "本科" in tpl and "大专" in tpl and "硕士" in tpl and "博士" in tpl and "不限" in tpl
+            assert "本科及以上" in tpl
+            assert "学历不限" in tpl
+            assert "major" in tpl
+
     def test_llm_path_preserves_scenarios(self):
         """LLM 返回场景时，抽取结果透传场景字段。"""
         raw = JDExtractionResult(
@@ -204,3 +246,53 @@ class TestTypicalScenarios:
         out = extractor.extract("这是一个足够长的 JD 文本，用于验证典型场景抽取流程")
         assert out.typical_scenarios == raw.typical_scenarios
         assert out.typical_scenarios[0].name == "实时数仓建设"
+
+    def test_llm_path_preserves_experience_range_and_core_duties(self):
+        """六维补齐（L1-1）：LLM 返回 experience_range/core_duties 时，
+        extract() 透传并经受 post_process/lexical_guard 后仍原样保留。
+
+        post_process 只做 skills/tools/requirements/soft_skills 清洗，
+        lexical_guard 只降级 skills 中正文无词面的技能——两者均不触碰
+        experience_range（ExperienceRange）与 core_duties（list[str]），
+        故端到端抽取后六维字段与 LLM 原始输出一致。
+        """
+        raw = JDExtractionResult(
+            position_name="数据平台工程师",
+            skills=[SkillExtracted(name="Flink")],
+            education=EducationExtracted(level="本科", major="计算机"),
+            experience_range=ExperienceRange(min_years=3, max_years=5),
+            core_duties=[
+                "负责大数据平台架构与功能设计",
+                "负责数据治理与ETL开发",
+                "参与代码评审与技术调研",
+            ],
+        )
+        fake = _FakeLLM(raw)
+        out = JDExtractor(llm=fake).extract(
+            "这是一个足够长的 JD 文本，用于验证六维抽取流程，熟悉 Flink 实时计算，3 年以上大数据平台开发经验"
+        )
+        # LLM 路径正常调用一次
+        assert fake.calls == 1
+        # experience_range 原样保留（区间对象，未被打平/清空）
+        assert out.experience_range is not None
+        assert out.experience_range.min_years == 3
+        assert out.experience_range.max_years == 5
+        # core_duties 原样保留（list[str]，未未被清空/去重/suffix 清洗）
+        assert out.core_duties == raw.core_duties
+        assert len(out.core_duties) == 3
+        assert out.core_duties[0] == "负责大数据平台架构与功能设计"
+
+    def test_rule_based_extract_leaves_six_dim_empty(self):
+        """规则兜底（LLM 不可用）不虚构 experience_range/core_duties。
+
+        P1-2 语义：规则兜底仅做白名单技能扫描，无语义判断，无法归纳经验区间
+        与核心职责，故六维字段保持空（experience_range=None，core_duties=[]），
+        下游据此识别低置信数据（method=rule）。
+        """
+        extractor = JDExtractor(llm=_FailingLLM())
+        out = extractor.extract(
+            "Python 后端开发工程师\n3 年以上经验\n负责核心业务系统后端开发，熟悉 Python、MySQL、Redis、Docker 容器化部署"
+        )
+        assert out.method == "rule"
+        assert out.experience_range is None
+        assert out.core_duties == []

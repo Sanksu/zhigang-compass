@@ -2790,7 +2790,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 批准 skill_relation proposal——落动态关系表 + 决策置 approved（RBAC admin） */
+        /** 批准图变异类 proposal/shadow——落图变更持久化表 + 决策置 approved（RBAC admin；skill_relation / position_normalize / skill_normalize / skill_classify） */
         post: {
             parameters: {
                 query?: never;
@@ -2809,7 +2809,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description 批准成功（relation 形如 源->目标->类型） */
+                /** @description 批准成功（域名；skill_relation 返回 relation 形如 源->目标->类型，名称归一返回 normalization 形如 action:源->目标；skill_classify 接受 shadow 记录并返回 category/skill） */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2820,7 +2820,18 @@ export interface paths {
                             msg?: string;
                             data?: {
                                 decision_id?: string;
+                                /** @description skill_relation 专用：源->目标->类型 */
                                 relation?: string;
+                                /** @description 名称归一专用：action:源->目标（noop 表示确认原样） */
+                                normalization?: string;
+                                /** @description 名称归一专用：源名 */
+                                source?: string;
+                                /** @description 名称归一专用：目标名 */
+                                target?: string;
+                                /** @description skill_classify 专用：批准后的权威分类 */
+                                category?: string;
+                                /** @description skill_classify 专用：技能名 */
+                                skill?: string;
                             };
                             trace_id?: string;
                         };
@@ -2843,7 +2854,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 驳回 proposal（仅状态流转，效果为 0） */
+        /** 驳回 proposal/shadow（仅状态流转，效果为 0；skill_classify 接受 shadow） */
         post: {
             parameters: {
                 query?: never;
@@ -4974,6 +4985,27 @@ export interface components {
              */
             learning_path_block_reason: string | null;
             evidence_refs: components["schemas"]["EvidenceRef"][];
+            /** @description JD 级证据（阶段 B：recommend 命中岗位族内原生 JD 二次精排 Top-2；compare/result 旧快照无此字段为空数组） */
+            jd_evidence?: {
+                /** @description 归属岗位名 */
+                position_name?: string;
+                /** @description 原生 JD 标题 */
+                jd_title?: string;
+                /** @description 采集源（zhilian/boss/indeed 等） */
+                source?: string;
+                /** @description JD 原文链接 */
+                source_url?: string;
+                /** @description JD 要求满足比例 [0,1]（nice 半计） */
+                coverage?: number;
+                /** @description 命中技能数 */
+                hit_count?: number;
+                /** @description JD 必备技能总数 */
+                must_total?: number;
+                /** @description JD 加分技能总数 */
+                nice_total?: number;
+                /** @description 命中技能名（前 8） */
+                hit_skills?: string[];
+            }[];
         };
         /** @description 匹配任务状态（GET /match/task/{task_id}） */
         MatchTaskStatus: {

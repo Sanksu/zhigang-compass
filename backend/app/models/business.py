@@ -656,3 +656,88 @@ class SkillDynamicRelation(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class NameNormalizationRequest(Base):
+    """名称归一审批执行通道（PR3 c：position/skill normalize proposal→approved 的持久化）。
+
+    与 skill_dynamic_relations 并列的第二个图幂等变更事实源：管理员在决策页
+    approve 一条 position_normalize / skill_normalize proposal 后，此处落一行（PG），
+    由 scripts/sync_dynamic_normalization.py 幂等应用到 Neo4j（rename/merge）。
+    图写入不在 API 端点内发生（对齐 skill_relation 的「approve 写 PG、独立 sync
+    脚本写图」原则）。
+
+    语义：
+    - entity_type=skill：source_name 技能节点并入/改名为 target_name（target 必须为
+      权威标准名，hard gate 保证）。action=merge（技能归并到标准名）。
+    - entity_type=position：source_name 岗位节点并入/改名为 target_name。
+      action=merge 或 rename 视决策意图。
+
+    幂等：sync 脚本用 MERGE / SET（重复执行安全），与 applied_to_graph 标记无关
+    （失败可重跑）。sync 侧按图形态自纠正：目标名节点已存在 → merge（重连边、
+    合并 freq、删除源节点）；不存在 → rename（SET source.name=target）。
+    action 字段为审批时的意图记录（审计用），sync 实际操作以目标节点存在性为准。
+    """
+
+    __tablename__ = "name_normalization_requests"
+    __table_args__ = (
+        # 幂等去重：同一 proposal 仅一行
+        UniqueConstraint("proposal_id", name="uq_name_normalization_proposal"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    entity_type: Mapped[str] = mapped_column(
+        String(20), nullable=False  # skill | position
+    )
+    action: Mapped[str] = mapped_column(
+        String(16), nullable=False  # rename | merge
+    )
+    source_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    # rename 后保留名=target_name；merge 后主节点名=target_name（primary_node_name 冗余
+    # 供 sync 侧判断与做证据，避免再读图）
+    primary_node_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    proposal_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str] = mapped_column(String(24), default="llm_review", nullable=False)
+    reviewed_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    review_reason: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    applied_to_graph: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class SkillCategoryApproval(Base):
+    """技能分类审批执行通道（PR 补：skill_classify shadow → approved 的持久化）。
+
+    技能分类 worker 只写 `suggested_category*` 提议字段（不动权威 category），
+    LLM 建议落 llm_decision_records（domain=skill_classify、status=shadow、
+    risk_tier=R0）。管理员在决策页 approve 后此处落一行（PG），由
+    scripts/sync_dynamic_categories.py 把 Skill.category 晋升为批准值。
+    reject 仅流转决策状态无副作用（与 skill_relation 一致）。
+
+    幂等：sync 脚本用 SET（重复执行安全），与 applied_to_graph 标记无关。
+    category 必须命中权威分类枚举（KNOWN_CATEGORIES，classify_skill 侧保证）。
+    """
+
+    __tablename__ = "skill_category_approvals"
+    __table_args__ = (
+        # 幂等去重：同一 proposal 仅一行
+        UniqueConstraint("proposal_id", name="uq_skill_category_proposal"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    skill_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    proposal_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str] = mapped_column(String(24), default="llm_review", nullable=False)
+    reviewed_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    review_reason: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    applied_to_graph: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
