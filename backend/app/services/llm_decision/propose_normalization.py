@@ -71,6 +71,32 @@ def _fetch_unormalized_skills(driver, limit: int) -> list[dict]:
         return [dict(record) for record in session.run(query, limit=limit)]
 
 
+def _fetch_alias_candidate_skills(driver, limit: int) -> list[dict]:
+    """别名回写候选池（方案① 08-26 226 实测修正）：非已知标准名的图技能节点。
+
+    未归一池（normalized_name IS NULL）在 ETL 每日归一后恒空（226 实测
+    POOL=0，3348/4399 技能非标准名）——真实别名机会在「自身归一但不是
+    标准名」的变体节点（如 Vue3/GoLang/c语言，白名单标准是 Vue.js/Go/C）。
+    按 freq 降序高频优先（价值最高）；Python 侧过滤已知标准名（Cypher
+    不知白名单）。独立新技能（AC-AC变换器等）由 LLM 判 keep（gate 只拦
+    merge 目标），不误伤。
+    """
+    from app.services.llm_decision.skill_normalize import known_standard_names
+
+    standards = known_standard_names()
+    with driver.session() as session:
+        rows = [
+            {"name": str(record["name"])}
+            for record in session.run(
+                "MATCH (s:Skill) WHERE s.name IS NOT NULL "
+                "RETURN s.name AS name ORDER BY coalesce(s.freq, 0) DESC LIMIT $pool",
+                pool=limit * 4,
+            )
+            if record["name"] and str(record["name"]) not in standards
+        ]
+    return rows[:limit]
+
+
 async def _recent_jd_rows(limit: int) -> list:
     """最近抽取 JD（快照含 extraction），供岗位名归一候选。
 
@@ -250,7 +276,8 @@ async def propose_skill_alias(
     )
 
     summary = {"candidates": 0, "proposed": 0, "blocked": 0, "llm_failed": 0, "low_conf": 0}
-    rows = await asyncio.to_thread(_fetch_unormalized_skills, neo4j_driver, limit)
+    # 候选源=非标准名技能节点（08-26 226 实测未归一池恒空，改用变体节点池）
+    rows = await asyncio.to_thread(_fetch_alias_candidate_skills, neo4j_driver, limit)
     for row in rows:
         name = str(row.get("name") or "").strip()
         if not name:
