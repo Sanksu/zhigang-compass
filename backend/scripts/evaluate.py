@@ -56,6 +56,34 @@ _RESUME_TARGET_F1 = 0.90
 _MATCH_TARGET = 0.90
 
 _JD_GOLDEN = _BACKEND_DIR / "data" / "golden_set" / "jd_golden_100.jsonl"
+_JD_TITLE_CACHE: dict[str, str] | None = None
+
+
+def _load_jd_titles() -> dict[str, str]:
+    """position_id → 该真实 JD 的原始标题（只读 jd_golden_100.jsonl，不改文件）。
+
+    人岗匹配评测目标是**单条真实 JD**（golden_set_match_v2 每行 position_id 对应
+    jd_golden_100 一条真实 JD，见 build_match_golden_v2）；该 map 仅用于让报告/错误
+    样例展示真实 JD 标题，而非归一化岗位名（评分只消费黄金集行字面 must/nice）。
+    读取失败返回空 dict（不影响评分，仅降级展示）。
+    """
+    global _JD_TITLE_CACHE
+    if _JD_TITLE_CACHE is not None:
+        return _JD_TITLE_CACHE
+    titles: dict[str, str] = {}
+    if _JD_GOLDEN.exists():
+        for line in _JD_GOLDEN.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            pid = item.get("id")
+            if pid:
+                titles[pid] = item.get("gold_title") or item.get("title") or pid
+    _JD_TITLE_CACHE = titles
+    return titles
 _RESUME_GOLDEN = _BACKEND_DIR / "data" / "golden_set" / "golden_set_resume.jsonl"
 _MATCH_GOLDEN = _BACKEND_DIR / "data" / "golden_set" / "golden_set_match.jsonl"
 _REPORT_DIR = _BACKEND_DIR / "reports"
@@ -225,7 +253,13 @@ def _top3_accuracy(pairs: list[dict], scores: list[float]) -> tuple[float | None
 
 
 def eval_match(semantic: bool, golden: Path | None = None) -> dict:
-    """人岗匹配评测：Spearman 秩相关 + 分类准确率 + Top-3 推荐准确率 + 混淆矩阵。"""
+    """人岗匹配评测：Spearman 秩相关 + 分类准确率 + Top-3 推荐准确率 + 混淆矩阵。
+
+    画像来源口径（与生产**分歧，有意为之**）：评测消费黄金集行字面
+    must/nice = 该 position_id 对应**单条真实 JD** 的技能要求（build_match_golden_v2
+    逐 JD 抽取），非生产"归一化岗位名 → Neo4j Position → 聚合 REQUIRES"的合并画像。
+    报告/错误样例经 jd_golden_100 展示真实 JD 标题（gold_title），非归一化岗位名。
+    """
     golden = golden or _MATCH_GOLDEN
     if not golden.exists():
         return {"task": "match", "skipped": True, "reason": f"黄金集缺失: {golden.relative_to(_BACKEND_DIR)}"}
@@ -241,7 +275,7 @@ def eval_match(semantic: bool, golden: Path | None = None) -> dict:
         sem = SkillEmbedder.get()
         method = "规则 + SBERT 语义增强"
     pairs = load_pairs(golden)
-    result = evaluate_pairs(pairs, weights, sem, threshold)
+    result = evaluate_pairs(pairs, weights, sem, threshold, jd_titles=_load_jd_titles())
     scores = result["scores"]
     labels = result["labels"]
 
@@ -255,6 +289,7 @@ def eval_match(semantic: bool, golden: Path | None = None) -> dict:
     top3, top3_samples = _top3_accuracy(pairs, scores)
 
     # 错误样例
+    jd_titles = _load_jd_titles()
     error_cases: list[dict] = []
     for p, s, l in zip(pairs, scores, labels):
         is_pred_match = s >= 0.5
@@ -262,6 +297,7 @@ def eval_match(semantic: bool, golden: Path | None = None) -> dict:
         if is_pred_match != is_gold_match and len(error_cases) < 5:
             error_cases.append({
                 "position_id": p.get("position_id", ""),
+                "position_title": jd_titles.get(p.get("position_id", ""), p.get("position_id", "")),
                 "score": round(s, 4),
                 "label": l,
                 "error_type": "FP" if is_pred_match and not is_gold_match else "FN",
@@ -452,7 +488,8 @@ def generate_html_report(report: dict) -> str:
             else "N/A（无合格候选人）"
         )
         err_rows = "".join(
-            f"<tr><td>{esc(e.get('position_id', ''))}</td><td>{e['score']:.4f}</td>"
+            f"<tr><td>{esc(e.get('position_title') or e.get('position_id', ''))}</td>"
+            f"<td>{e['score']:.4f}</td>"
             f"<td>{'匹配' if e['label'] == 1 else '不匹配'}</td><td>{e['error_type']}</td></tr>"
             for e in match.get("error_cases", [])
         ) or "<tr><td colspan='4'>无错误样例</td></tr>"
@@ -470,9 +507,9 @@ def generate_html_report(report: dict) -> str:
                 <tr><th>实际匹配</th><td>{c.get('tp', 0)} (TP)</td><td>{c.get('fn', 0)} (FN)</td></tr>
                 <tr><th>实际不匹配</th><td>{c.get('fp', 0)} (FP)</td><td>{c.get('tn', 0)} (TN)</td></tr>
             </table>
-            <h3>错误样例（前 5 条）</h3>
+            <h3>错误样例（前 5 条，画像=单条真实 JD）</h3>
             <table>
-                <tr><th>Position ID</th><th>系统评分</th><th>人工标注</th><th>错误类型</th></tr>
+                <tr><th>真实 JD 标题</th><th>系统评分</th><th>人工标注</th><th>错误类型</th></tr>
                 {err_rows}
             </table>
         </div>"""

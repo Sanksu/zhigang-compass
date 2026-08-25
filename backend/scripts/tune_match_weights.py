@@ -24,6 +24,24 @@ from app.core.logging import setup_logging
 
 logger = setup_logging("tune_match_weights")
 
+from app.services.matching.schemas import (  # noqa: E402
+    CandidateProfile,
+    CandidateSkill,
+    Necessity,
+    PositionProfile,
+    SkillRequirement,
+)
+
+# 人岗匹配评测的岗位画像来源口径（AGENTS.md §4.1 算法核心，张恺天把关）：
+# 评测与生产共用 app.services.matching.engine.score_position，**分歧仅在画像来源**：
+#   - 评测（本文件 evaluate_pairs）：PositionProfile 来自黄金集行的
+#     position_skills_must/nice 字面值，即该 position_id 对应**单条真实 JD** 的技能
+#     要求（golden_set_match_v2.jsonl 由 build_match_golden_v2 逐 JD 抽取），
+#     不做"归一化岗位名 → Neo4j Position → 聚合 REQUIRES"的合并。
+#   - 生产（loaders._load_positions_uncached）：按归一化岗位聚合所有同名 JD 的
+#     REQUIRES（freq>=3），是同名多 JD 的合并画像。
+# 该差异为**有意为之**：评测要验证"对真实 JD 的匹配"，而非对归一岗位合并画像的匹配。
+
 _GOLDEN_MATCH = _BACKEND_DIR / "data" / "golden_set" / "golden_set_match.jsonl"
 _WEIGHTS_PATH = _BACKEND_DIR / "configs" / "match_weights.json"
 
@@ -33,71 +51,81 @@ def load_pairs(path: Path) -> list[dict]:
     return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
-def evaluate_pairs(pairs: list[dict], weights, semantic, sim_threshold: float) -> dict:
+def build_position(p: dict) -> tuple[list[SkillRequirement], list[SkillRequirement], float | None]:
+    """从黄金集行构造岗位侧技能要求（真实 JD 口径，非图谱聚合）。
+
+    - v2（golden_set_match_v2.jsonl，BT 补标注 08-16）：position_skills_must/nice
+      是该 position_id 对应**单条真实 JD** 经 LLM 重抽（回收 gold_skills）得到的
+      must/nice，directly 用作 PositionProfile（真实 JD 画像）。
+    - v1（golden_set_match.jsonl）：position_skills 全 must、无 nice。
+    两口径均**不**经"归一化岗位名 → Neo4j Position 节点 → 聚合 REQUIRES"。
+    """
+    if "position_skills_must" in p:
+        musts = [
+            SkillRequirement(skill_id=s, skill_name=s, necessity=Necessity.MUST, weight=1.0)
+            for s in p["position_skills_must"]
+        ]
+        nices = [
+            SkillRequirement(skill_id=s, skill_name=s, necessity=Necessity.NICE, weight=1.0)
+            for s in p.get("position_skills_nice") or []
+        ]
+        return musts, nices, p.get("required_years") or None
+    # v1：position_skills 全 must、候选无年限信息（exp 恒满分退化）
+    musts = [
+        SkillRequirement(skill_id=s, skill_name=s, necessity=Necessity.MUST, weight=1.0)
+        for s in p["position_skills"]
+    ]
+    return musts, [], None
+
+
+def build_candidate(p: dict) -> CandidateProfile:
+    """从黄金集行构造候选人画像（熟练度/年限来自弱监督注入字段）。"""
+    if "candidate_skills" in p and "position_skills_must" in p:
+        return CandidateProfile(
+            user_id="eval",
+            skills=[
+                CandidateSkill(skill_id=s, skill_name=s, proficiency=p.get("candidate_proficiency", 2))
+                for s in p["candidate_skills"]
+            ],
+            total_years=p.get("candidate_total_years", 5.0),
+        )
+    return CandidateProfile(
+        user_id="eval",
+        skills=[
+            CandidateSkill(skill_id=s, skill_name=s, proficiency=2)
+            for s in p["candidate_skills"]
+        ],
+        total_years=5.0,
+    )
+
+
+def evaluate_pairs(pairs: list[dict], weights, semantic, sim_threshold: float, jd_titles: dict[str, str] | None = None) -> dict:
     """对每对计算 total_score，与 label 计算 Spearman 与分类准确率。
+
+    args:
+        jd_titles: 可选。position_id → 该真实 JD 的原始标题（gold_title），
+            仅用于让评测/报告展示真实 JD 名，而非归一化岗位名；
+            不影响评分（评分只用黄金集行字面 must/nice）。
 
     返回 dict；Spearman 全相同分时为 nan，转为 0.0（避免 Optuna 崩溃）。
     """
     from scipy.stats import spearmanr
 
     from app.services.matching.engine import score_position
-    from app.services.matching.schemas import (
-        CandidateProfile,
-        CandidateSkill,
-        Necessity,
-        PositionProfile,
-        SkillRequirement,
-    )
 
     scores, labels = [], []
     for p in pairs:
-        if "position_skills_must" in p:
-            # v2（BT 黄金集补标注 2026-08-16）：must/nice/年限/候选年限+熟练度
-            # 维度标注——exp 维度有区分力（弱监督注入年限不足负例）
-            musts = [
-                SkillRequirement(
-                    skill_id=s, skill_name=s, necessity=Necessity.MUST, weight=1.0
-                )
-                for s in p["position_skills_must"]
-            ]
-            nices = [
-                SkillRequirement(
-                    skill_id=s, skill_name=s, necessity=Necessity.NICE, weight=1.0
-                )
-                for s in p.get("position_skills_nice") or []
-            ]
-            position = PositionProfile(
-                position_id=p["position_id"], name=p["position_id"],
-                must_skills=musts, nice_skills=nices,
-                required_years=p.get("required_years") or None,
-            )
-            candidate = CandidateProfile(
-                user_id="eval",
-                skills=[
-                    CandidateSkill(skill_id=s, skill_name=s, proficiency=p.get("candidate_proficiency", 2))
-                    for s in p["candidate_skills"]
-                ],
-                total_years=p.get("candidate_total_years", 5.0),
-            )
-        else:
-            # v1：position_skills 全 must、候选无年限信息（exp 恒满分退化）
-            musts = [
-                SkillRequirement(
-                    skill_id=s, skill_name=s, necessity=Necessity.MUST, weight=1.0
-                )
-                for s in p["position_skills"]
-            ]
-            position = PositionProfile(
-                position_id=p["position_id"], name=p["position_id"], must_skills=musts
-            )
-            candidate = CandidateProfile(
-                user_id="eval",
-                skills=[
-                    CandidateSkill(skill_id=s, skill_name=s, proficiency=2)
-                    for s in p["candidate_skills"]
-                ],
-                total_years=5.0,
-            )
+        musts, nices, req_years = build_position(p)
+        # name 取真实 JD 标题（若可解析），否则回退 position_id——
+        # 评测画像名落为**单条真实 JD**（name=JD 原始标题 / position_id），
+        # 而非归一化岗位名（生产 loaders 用 p.name = 归一化求职岗位名）。
+        name = (jd_titles or {}).get(p["position_id"]) or p["position_id"]
+        position = PositionProfile(
+            position_id=p["position_id"], name=name,
+            must_skills=musts, nice_skills=nices,
+            required_years=req_years,
+        )
+        candidate = build_candidate(p)
         r = score_position(
             candidate, position, weights=weights, semantic=semantic, sim_threshold=sim_threshold
         )
