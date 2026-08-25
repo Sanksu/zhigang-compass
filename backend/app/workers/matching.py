@@ -183,7 +183,9 @@ async def _match_jd_candidates(
     from app.services.matching.semantic import SkillEmbedder
 
     rows = (await session.scalars(
-        select(JDRaw).where(JDRaw.snapshot["extraction"].astext.is_not(None))
+        select(JDRaw)
+        .where(JDRaw.snapshot["extraction"].astext.is_not(None))
+        .order_by(JDRaw.id)  # 行序稳定：池化向量指纹顺序无关化的双保险
     )).all()
     jd_profiles, jd_position = rows_to_profiles(rows)
     if not jd_profiles:
