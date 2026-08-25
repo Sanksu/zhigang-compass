@@ -173,41 +173,49 @@ async def eval_normalization(rows: list[dict], llm) -> dict:
     的验收口径（生产口径=快速路径直解+LLM 兜底，另行汇报）。
     """
     from app.services.llm_decision.skill_normalize import (
-        decide_skill_normalize, skill_normalize_gate,
+        SKILL_BATCH_SIZE, decide_skill_normalize_batch, skill_normalize_gate,
     )
 
     results: list[dict] = []
     llm_failed = merge_hit = error_merge = gate_saved = 0
-    for row in rows:
-        decision = await asyncio.to_thread(decide_skill_normalize, row["variant"], llm)
-        if decision is None:
-            llm_failed += 1
-            results.append({"variant": row["variant"], "gold_action": row["gold_action"],
-                            "match": False, "failed": True})
-            continue
-        gate_ok, _ = skill_normalize_gate(decision, row["variant"])
-        if row["gold_action"] == "keep":
-            match = decision.action in ("keep", "noise")
-            if decision.action == "merge":
-                if gate_ok:
-                    error_merge += 1  # 硬门未拦的真实错误合并（验收必须 0）
-                else:
-                    # 硬门拦截（如 AIGC→AIGC 同义反复）：生产零风险，单列不计错误
-                    gate_saved += 1
-        else:
-            match = decision.action == "merge" and decision.target_standard == row["gold_standard"]
-            if decision.action == "merge":
-                merge_hit += int(match)
-        results.append({
-            "variant": row["variant"], "gold_action": row["gold_action"],
-            "gold_standard": row.get("gold_standard"),
-            "predicted_action": decision.action,
-            "predicted_target": decision.target_standard,
-            "match": match, "gate_ok": gate_ok, "failed": False,
-        })
-    ok = [r for r in results if not r["failed"]]
-    merge_rows = [r for r in ok if r["gold_action"] == "merge"]
-    keep_rows = [r for r in ok if r["gold_action"] == "keep"]
+    # 08-25 提速：批量技能归一（N=SKILL_BATCH_SIZE，16×提速）；gate/gold 逐条比对不变。
+    variants = [(r.get("variant") or "").strip() for r in rows if (r.get("variant") or "").strip()]
+    if not variants:
+        ok: list[dict] = []
+        merge_rows = keep_rows = []
+    else:
+        decisions = await asyncio.to_thread(
+            decide_skill_normalize_batch, variants, llm, batch_size=SKILL_BATCH_SIZE,
+        )
+        for row, decision in zip(rows, decisions):
+            if decision is None:
+                llm_failed += 1
+                results.append({"variant": row["variant"], "gold_action": row["gold_action"],
+                                "match": False, "failed": True})
+                continue
+            gate_ok, _ = skill_normalize_gate(decision, row["variant"])
+            if row["gold_action"] == "keep":
+                match = decision.action in ("keep", "noise")
+                if decision.action == "merge":
+                    if gate_ok:
+                        error_merge += 1  # 硬门未拦的真实错误合并（验收必须 0）
+                    else:
+                        # 硬门拦截（如 AIGC→AIGC 同义反复）：生产零风险，单列不计错误
+                        gate_saved += 1
+            else:
+                match = decision.action == "merge" and decision.target_standard == row["gold_standard"]
+                if decision.action == "merge":
+                    merge_hit += int(match)
+            results.append({
+                "variant": row["variant"], "gold_action": row["gold_action"],
+                "gold_standard": row.get("gold_standard"),
+                "predicted_action": decision.action,
+                "predicted_target": decision.target_standard,
+                "match": match, "gate_ok": gate_ok, "failed": False,
+            })
+        ok = [r for r in results if not r["failed"]]
+        merge_rows = [r for r in ok if r["gold_action"] == "merge"]
+        keep_rows = [r for r in ok if r["gold_action"] == "keep"]
     return {
         "task": "normalization", "total": len(rows), "llm_failed": llm_failed,
         "merge_accuracy": round(sum(1 for r in merge_rows if r["match"]) / len(merge_rows), 4) if merge_rows else None,
@@ -236,7 +244,7 @@ async def eval_position_normalization(rows: list[dict], llm) -> dict:
     不误记为"错误"；只有 gate 通过但仍与 gold 不一致才记 error_merge_count。
     """
     from app.services.llm_decision.position_name import (
-        decide_position_name, position_name_gate,
+        POSITION_BATCH_SIZE, decide_position_name_batch, position_name_gate,
     )
 
     results: list[dict] = []
@@ -246,16 +254,22 @@ async def eval_position_normalization(rows: list[dict], llm) -> dict:
     def _vk(s: str) -> str:
         return "".join(s.split()).casefold() if s else ""
 
-    for row in rows:
-        raw = row.get("raw_title") or row.get("position_name") or ""
-        if not raw:
-            continue
+    # 08-25 提速：批量决策（N=POSITION_BATCH_SIZE），一次 LLM 调用多条（16×提速）。
+    # 逐条比对逻辑不变——批量仅替换 LLM 调用，gate/gold 比对逐条独立。
+    active_rows = [r for r in rows if (r.get("raw_title") or r.get("position_name") or "").strip()]
+    titles = [(r.get("raw_title") or r.get("position_name") or "").strip() for r in active_rows]
+    sources = [(r.get("source") or "") for r in active_rows]
+    skills_l = [(r.get("skills") or []) for r in active_rows]
+    cands_l = [(r.get("candidates") or []) for r in active_rows]
+    decisions = await asyncio.to_thread(
+        decide_position_name_batch, titles, sources, skills_l, cands_l, llm,
+        batch_size=POSITION_BATCH_SIZE,
+    )
+
+    for row, decision in zip(active_rows, decisions):
+        raw = (row.get("raw_title") or row.get("position_name") or "").strip()
         if row.get("annotation_status") == "human":
             human_rows += 1
-        decision = await asyncio.to_thread(
-            decide_position_name, raw, row.get("skills") or [],
-            row.get("source") or "", row.get("candidates") or [], llm,
-        )
         if decision is None:
             llm_failed += 1
             results.append({"raw_title": raw, "failed": True, "match": False})
@@ -269,6 +283,20 @@ async def eval_position_normalization(rows: list[dict], llm) -> dict:
                 "predicted_is_new": decision.is_new,
                 "predicted_keep_original": decision.keep_original,
                 "failed": False, "match": False,
+            })
+            continue
+
+        # 采纳 A（08-25）：reject_excluded 行（含"实习"=招聘形态不入图）岗位维不评
+        # canonical/is_new/keep（生产 normalize_position_name 返回空），仅记录 excluded。
+        # 技能维另评（该 JD 技能仍有效，见 _load_gold_jsonl）。
+        if row.get("resolution") == "reject_excluded":
+            results.append({
+                "raw_title": raw, "gate_ok": True, "excluded": True,
+                "gold_canonical": "", "gold_is_new": False, "gold_keep_original": True,
+                "predicted_canonical": decision.canonical_name,
+                "predicted_is_new": decision.is_new, "predicted_keep_original": decision.keep_original,
+                "canonical_ok": True, "is_new_ok": True, "keep_ok": True,
+                "match": True, "failed": False,
             })
             continue
 

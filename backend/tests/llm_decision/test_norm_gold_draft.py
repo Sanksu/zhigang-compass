@@ -212,11 +212,12 @@ class TestEvalPositionNormalization:
     def test_returns_expected_keys(self, fixture_rows):
         class _MockLLM:
             def extract_structured(self, prompt, model, **kwargs):
-                from app.services.llm_decision.position_name import PositionNameDecision
+                from app.services.llm_decision.position_name import PositionNameBatch, PositionNameDecision
                 # 一律 keep_original 保守决策，过 gate，便于断言结构而非数值
-                return PositionNameDecision(
-                    canonical_name="", is_new=False, keep_original=True, confidence=0.9,
-                )
+                return PositionNameBatch(results=[
+                    PositionNameDecision(canonical_name="", is_new=False, keep_original=True, confidence=0.9)
+                    for _ in range(len(fixture_rows))
+                ])
 
         import asyncio
 
@@ -233,11 +234,12 @@ class TestEvalPositionNormalization:
     def test_human_row_counted(self, fixture_rows):
         class _MockLLM:
             def extract_structured(self, prompt, model, **kwargs):
-                from app.services.llm_decision.position_name import PositionNameDecision
-                return PositionNameDecision(
-                    canonical_name="前端开发工程师", is_new=False,
-                    keep_original=False, confidence=0.9,
-                )
+                from app.services.llm_decision.position_name import PositionNameBatch, PositionNameDecision
+                return PositionNameBatch(results=[
+                    PositionNameDecision(canonical_name="前端开发工程师", is_new=False,
+                                         keep_original=False, confidence=0.9)
+                    for _ in range(len(fixture_rows))
+                ])
 
         import asyncio
 
@@ -248,12 +250,13 @@ class TestEvalPositionNormalization:
         """gate 拦截（空 canonical / 非 keep 且非候选）计为 blocked 而非错误。"""
         class _MockLLM:
             def extract_structured(self, prompt, model, **kwargs):
-                from app.services.llm_decision.position_name import PositionNameDecision
+                from app.services.llm_decision.position_name import PositionNameBatch, PositionNameDecision
                 # 非 keep 但 canonical 不在候选 → gate 拦截
-                return PositionNameDecision(
-                    canonical_name="量子烹饪架构师", is_new=False,
-                    keep_original=False, confidence=0.9,
-                )
+                return PositionNameBatch(results=[
+                    PositionNameDecision(canonical_name="量子烹饪架构师", is_new=False,
+                                         keep_original=False, confidence=0.9)
+                    for _ in range(len(fixture_rows))
+                ])
 
         import asyncio
 
