@@ -89,6 +89,8 @@ def _build_env(monkeypatch, *, aggregate_fails: bool):
         llm_stats_daily = staticmethod(_make_task("llm_stats"))
         skill_category_review_daily = staticmethod(_make_task("skill_category_review"))
         name_normalization_shadow_daily = staticmethod(_make_task("name_normalization_shadow"))
+        name_normalization_propose_daily = staticmethod(_make_task("name_normalization_propose"))
+        skill_relation_propose_daily = staticmethod(_make_task("skill_relation_propose"))
 
     # 编排器内直接导入的阶段模块以桩替换（防真实图数据库/演化/缓存副作用）
     database_stub = ModuleType("app.core.database")

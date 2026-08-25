@@ -82,6 +82,8 @@ def test_etl_pipeline_skips_independent_schedule(monkeypatch):
         llm_stats_daily = staticmethod(_stub_task)
         skill_category_review_daily = staticmethod(_stub_task)
         name_normalization_shadow_daily = staticmethod(_stub_task)
+        name_normalization_propose_daily = staticmethod(_stub_task)
+        skill_relation_propose_daily = staticmethod(_stub_task)
 
     # zhilian 配独立 hour/minute → 主管线跳过；arxiv 未配 → 主管线执行
     # 注意：runtime_config.get("crawlers") 直接返回爬虫配置 dict（无外层 crawlers 键）

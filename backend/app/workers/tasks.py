@@ -55,6 +55,12 @@ from app.workers.skill_category_review import (
 from app.workers.name_normalization_shadow import (
     name_normalization_shadow_daily as name_normalization_shadow_daily,
 )
+from app.workers.name_normalization_propose import (
+    name_normalization_propose_daily as name_normalization_propose_daily,
+)
+from app.workers.skill_relation_propose import (
+    skill_relation_propose_daily as skill_relation_propose_daily,
+)
 from app.workers.diagnosis import generate_diagnosis as generate_diagnosis
 from app.workers.discovery import (
     _Provider as _Provider,
