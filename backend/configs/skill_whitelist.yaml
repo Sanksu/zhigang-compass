@@ -97,7 +97,6 @@ skills:
   - {name: "Axios", category: "前端"}
   - {name: "跨浏览器兼容", category: "前端"}
   - {name: "小程序", category: "前端"}
-  - {name: "鸿蒙", category: "前端"}
 
   # ---- 后端 ----
   - {name: "Spring Boot", category: "后端"}
@@ -133,7 +132,6 @@ skills:
   - {name: "SOAP", category: "后端"}
   - {name: "Web Services", category: "后端"}
   - {name: "高并发", category: "计算机基础"}
-  - {name: "分布式", category: "计算机基础"}
   - {name: "分布式技术", category: "计算机基础"}
   - {name: "微服务", category: "计算机基础"}
   - {name: "消息队列", category: "消息/中间件"}
@@ -433,7 +431,6 @@ skills:
   - {name: "软件工程", category: "计算机基础"}
   - {name: "编译原理", category: "计算机基础"}
   - {name: "设计模式", category: "计算机基础"}
-  - {name: "分布式系统", category: "计算机基础"}
 
   # ---- 软技能（SOFT_SKILL_WHITELIST 对应项，必须保留） ----
   - {name: "团队协作", category: "软技能"}
