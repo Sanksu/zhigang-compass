@@ -93,7 +93,11 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    团队精神/团队合作/积极向上/勤奋/上进/职业素养 等是软素质表述，不是技术技能，
    不得出现在 skills 或 requirements 中（此类词无岗位区分度，会污染技能图谱与匹配）。
 3. 工具（tools）：列出框架/工具，如"Spring Boot"、"Kubernetes"
-4. 教育（education）：学历要求和专业要求
+4. 教育（education）：学历要求和专业要求。level 只取五档学历级别：本科/大专/硕士/博士/不限；
+   "本科及以上/本科以上/本科起"→本科，"大专及以上"→大专，"硕士及以上"→硕士，"博士及以上"→博士，
+   "学历不限/不限学历/学历无要求"→不限；无任何学历表述时省略 education 字段。
+   专业（major）：仅在正文明确给出专业时输出（如"计算机相关专业"→major="计算机"），
+   无明确专业表述时省略 major（只输出 level）。
 5. 证书（certifications）：需要的认证
 6. 岗位-技能关系（requirements）：每个技能标注必要性 — "must"（必备）或 "nice"（加分），
    判定标准：JD 明确要求/硬性必备（如"精通/熟练掌握 XX"、任职要求清单中的技能）→ "must"；
@@ -112,6 +116,10 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
    **列举式必备判定**：职责/任职要求中以并列列举出现的技能（"负责 XX、XX、XX 工作"、
    "需要 XX、XX 能力"）默认均为 must 进 skills——并列列举是岗位职责描述，
    不是加分项；仅当出现显式加分标记（规则 6 上文）才降级为 nice。
+   **行业/厂商/业务领域词不得进入 requirements(nice)**：行业、厂商、平台、业务领域、招聘福利
+   词（如保险/金融/银行/证券/电商/医疗/教育/华为/腾讯/阿里/星环/车联网/五险一金/双休/年终奖
+   等）不是加分技能，禁止出现在 requirements 的 nice 项——它们只可能是行业/招聘背景描述。
+   加分项仅收录可独立匹配的技术/工具技能。
    以及熟练度 level — "初级"/"中级"/"高级" 三档：文本含"了解/熟悉"→"初级"、
    "掌握/熟练"→"中级"、"精通/深入"→"高级"；JD 无明确熟练度表述时省略 level 字段
 7. 薪资（salary_range）：提取文本中的薪资表述，保留原始写法，币种与单位
@@ -136,6 +144,9 @@ TASK_TEMPLATE = """从以下 JD 文本中提取信息，以 JSON 格式输出。
 12. 核心职责（core_duties）：从职责段归纳 2~8 条精炼短语（每条 5~20 字，如"负责分布式缓存架构设计"、
    "主导信贷风控建模"），只讲"岗位做什么"；禁止整段抄写职责原文，禁止收录技能/福利/公司介绍
    （技能由 requirements 承载）。职责段缺失时留空数组。
+   **短语倾向动词开头**：优先以"负责/主导/参与/承担/构建/实现/编写"等动词引出（贴合职责段正文
+   的动宾结构），词序与 5~20 字精炼表达保持在正文语义内，禁止把整句职责拼接成超长短语
+   （长度接近或超过 20 字应拆分为多条 5~20 字的短短语）。
 
 JD 文本：
 {jd_text}
@@ -218,6 +229,12 @@ JD 文本：岗位名称：大模型算法工程师
 JD 文本：岗位名称：全栈开发工程师
 任职要求：1.精通 Python、C++、Java、Go、Rust、TypeScript；2.熟悉 FastAPI、Flask、Django、Spring Boot、Spring Cloud、MyBatis、Express.js；3.熟悉 MySQL、PostgreSQL、MongoDB、Redis、Kafka、RabbitMQ、Elasticsearch、ClickHouse；4.熟悉 Docker、Kubernetes、Jenkins、Git、CI/CD、Terraform、Ansible、Nginx；5.熟悉 PyTorch、TensorFlow、scikit-learn、Pandas、NumPy、大语言模型。
 输出：{{"position_name": "全栈开发工程师", "skills": [{{"name": "Python"}}, {{"name": "C++"}}, {{"name": "Java"}}, {{"name": "Go"}}, {{"name": "Rust"}}, {{"name": "TypeScript"}}, {{"name": "FastAPI"}}, {{"name": "Flask"}}, {{"name": "Django"}}, {{"name": "Spring Boot"}}, {{"name": "Spring Cloud"}}, {{"name": "MyBatis"}}, {{"name": "Express.js"}}, {{"name": "MySQL"}}, {{"name": "PostgreSQL"}}, {{"name": "MongoDB"}}, {{"name": "Redis"}}, {{"name": "Kafka"}}, {{"name": "RabbitMQ"}}, {{"name": "Elasticsearch"}}, {{"name": "ClickHouse"}}, {{"name": "Docker"}}, {{"name": "Kubernetes"}}, {{"name": "Jenkins"}}, {{"name": "Git"}}, {{"name": "CI/CD"}}, {{"name": "Terraform"}}, {{"name": "Ansible"}}, {{"name": "Nginx"}}, {{"name": "PyTorch"}}, {{"name": "TensorFlow"}}, {{"name": "scikit-learn"}}, {{"name": "Pandas"}}, {{"name": "NumPy"}}, {{"name": "大语言模型"}}], "requirements": [{{"skill_name": "Python", "necessity": "must"}}, {{"skill_name": "C++", "necessity": "must"}}, {{"skill_name": "Java", "necessity": "must"}}, {{"skill_name": "Go", "necessity": "must"}}, {{"skill_name": "Rust", "necessity": "must"}}, {{"skill_name": "TypeScript", "necessity": "must"}}, {{"skill_name": "Docker", "necessity": "must"}}, {{"skill_name": "Kubernetes", "necessity": "must"}}, {{"skill_name": "MySQL", "necessity": "must"}}, {{"skill_name": "PyTorch", "necessity": "must"}}]}}
+
+示例 17（经验区间 + 核心职责抽取——规则 11/12）：
+JD 文本：岗位名称：数据仓库工程师
+岗位职责：负责离线数仓分层建模与 ETL 开发，主导实时数仓建设与 Flink 计算任务落地，参与数据质量校验规则制定与数据口径治理。
+任职要求：3-5 年数据仓库开发经验，精通 SQL 与 Hive，熟练使用 Spark、Flink，本科及以上学历。
+输出：{{"position_name": "数据仓库工程师", "skills": [{{"name": "SQL"}}, {{"name": "Hive"}}, {{"name": "Spark"}}, {{"name": "Flink"}}], "education": {{"level": "本科"}}, "experience_range": {{"min_years": 3, "max_years": 5}}, "core_duties": ["负责离线数仓分层建模与ETL开发", "主导实时数仓建设与Flink计算任务落地", "参与数据质量校验规则制定与数据口径治理"], "requirements": [{{"skill_name": "SQL", "necessity": "must", "level": "高级"}}, {{"skill_name": "Hive", "necessity": "must", "level": "高级"}}, {{"skill_name": "Spark", "necessity": "must", "level": "中级"}}, {{"skill_name": "Flink", "necessity": "must", "level": "中级"}}]}}
 """
 
 BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输出 JSON 数组（每条 JD 对应一个对象，数组第 i 个元素对应"JD文本 i"）。
@@ -306,7 +323,11 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    团队精神/团队合作/积极向上/勤奋/上进/职业素养 等是软素质表述，不是技术技能，
    不得出现在 skills 或 requirements 中（此类词无岗位区分度，会污染技能图谱与匹配）。
 3. 工具（tools）：列出框架/工具，如"Spring Boot"、"Kubernetes"
-4. 教育（education）：学历要求和专业要求
+4. 教育（education）：学历要求和专业要求。level 只取五档学历级别：本科/大专/硕士/博士/不限；
+   "本科及以上/本科以上/本科起"→本科，"大专及以上"→大专，"硕士及以上"→硕士，"博士及以上"→博士，
+   "学历不限/不限学历/学历无要求"→不限；无任何学历表述时省略 education 字段。
+   专业（major）：仅在正文明确给出专业时输出（如"计算机相关专业"→major="计算机"），
+   无明确专业表述时省略 major（只输出 level）。
 5. 证书（certifications）：需要的认证
 6. 岗位-技能关系（requirements）：每个技能标注必要性 — "must"（必备）或 "nice"（加分），
    判定标准：JD 明确要求/硬性必备（如"精通/熟练掌握 XX"、任职要求清单中的技能）→ "must"；
@@ -325,6 +346,10 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
    **列举式必备判定**：职责/任职要求中以并列列举出现的技能（"负责 XX、XX、XX 工作"、
    "需要 XX、XX 能力"）默认均为 must 进 skills——并列列举是岗位职责描述，
    不是加分项；仅当出现显式加分标记（规则 6 上文）才降级为 nice。
+   **行业/厂商/业务领域词不得进入 requirements(nice)**：行业、厂商、平台、业务领域、招聘福利
+   词（如保险/金融/银行/证券/电商/医疗/教育/华为/腾讯/阿里/星环/车联网/五险一金/双休/年终奖
+   等）不是加分技能，禁止出现在 requirements 的 nice 项——它们只可能是行业/招聘背景描述。
+   加分项仅收录可独立匹配的技术/工具技能。
    以及熟练度 level — "初级"/"中级"/"高级" 三档：文本含"了解/熟悉"→"初级"、
    "掌握/熟练"→"中级"、"精通/深入"→"高级"；JD 无明确熟练度表述时省略 level 字段
 7. 薪资（salary_range）：提取文本中的薪资表述，保留原始写法，币种与单位
@@ -349,6 +374,9 @@ BATCH_TASK_TEMPLATE = """从以下 {jd_count} 条 JD 文本中提取信息，输
 12. 核心职责（core_duties）：从职责段归纳 2~8 条精炼短语（每条 5~20 字，如"负责分布式缓存架构设计"、
    "主导信贷风控建模"），只讲"岗位做什么"；禁止整段抄写职责原文，禁止收录技能/福利/公司介绍
    （技能由 requirements 承载）。职责段缺失时留空数组。
+   **短语倾向动词开头**：优先以"负责/主导/参与/承担/构建/实现/编写"等动词引出（贴合职责段正文
+   的动宾结构），词序与 5~20 字精炼表达保持在正文语义内，禁止把整句职责拼接成超长短语
+   （长度接近或超过 20 字应拆分为多条 5~20 字的短短语）。
 
 JD 文本：
 {jd_texts}

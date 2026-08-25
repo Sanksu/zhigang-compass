@@ -375,6 +375,75 @@ class TestPostProcess:
         assert [s.name for s in out.skills] == ["可靠性测试", "Python"]
 
 
+class TestBonusIndustryVendorStrip:
+    """08-25 加分弱维修复：requirements 中的厂商/平台名剔除（保守，不误杀真实技能）。
+
+    仅剔除厂商/平台名（华为/腾讯/阿里/恒生柜台等），不做宽泛域形容词子串剔除——
+    实测"风电备件智能化""结售汇测试"为 gold 收录的合法加分技能，宽泛剔除会损 recall。
+    """
+
+    def test_vendor_name_stripped_from_requirements(self):
+        result = JDExtractionResult(
+            position_name="",
+            requirements=[
+                REQUIRESRelation(skill_name="华为", necessity="nice"),
+                REQUIRESRelation(skill_name="腾讯", necessity="nice"),
+                REQUIRESRelation(skill_name="Python", necessity="must"),
+            ],
+        )
+        out = post_process(result)
+        names = [r.skill_name for r in out.requirements]
+        assert "华为" not in names and "腾讯" not in names and "Python" in names
+
+    def test_vendor_product_phrase_stripped(self):
+        """厂商产品名复合词（恒生柜台/顶点交易柜台）同样剔除。"""
+        result = JDExtractionResult(
+            position_name="",
+            requirements=[
+                REQUIRESRelation(skill_name="恒生柜台", necessity="nice"),
+                REQUIRESRelation(skill_name="顶点交易柜台", necessity="nice"),
+            ],
+        )
+        out = post_process(result)
+        assert out.requirements == []
+
+    def test_domain_adjective_skill_not_stripped(self):
+        """域形容词前缀的真实细分技能不被误杀（风电备件智能化是 gold 加分技能）。"""
+        result = JDExtractionResult(
+            position_name="",
+            requirements=[
+                REQUIRESRelation(skill_name="风电备件智能化", necessity="nice"),
+                REQUIRESRelation(skill_name="结售汇测试", necessity="nice"),
+            ],
+        )
+        out = post_process(result)
+        names = [r.skill_name for r in out.requirements]
+        assert "风电备件智能化" in names and "结售汇测试" in names
+
+    def test_skills_not_stripped_by_vendor_blacklist(self):
+        """skills（必备技能）不应用厂商剔除——"阿里云"等云技能保留。"""
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="阿里云"), SkillExtracted(name="华为")],
+        )
+        out = post_process(result)
+        # 阿里云是白名单云技能保留；华为作为技能（非白名单且触发软素质/停用）不在此断言范围
+        assert "阿里云" in [s.name for s in out.skills]
+
+    def test_lexical_guard_demoted_vendor_stripped(self):
+        """词面守卫将正文无词面的厂商名技能降级 nice 时，同样剔除（防降级绕过清洗）。"""
+        from app.services.extraction.post_processor import lexical_guard
+
+        result = JDExtractionResult(
+            position_name="",
+            skills=[SkillExtracted(name="华为"), SkillExtracted(name="Python")],
+        )
+        out = lexical_guard(result, "负责后端开发，熟悉 Python")
+        # 华为无正文词面 → 应降级但被厂商噪声剔除，Python 保留
+        assert [s.name for s in out.skills] == ["Python"]
+        assert [r.skill_name for r in out.requirements if r.necessity == "nice"] == []
+
+
 class TestGreySkillRegistration:
     """灰名单验证区：白名单未命中但非噪音技能自动注册（新岗位发现优化 ②）。"""
 

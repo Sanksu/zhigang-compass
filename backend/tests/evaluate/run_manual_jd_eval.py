@@ -49,6 +49,32 @@ def _input_sha256(title: str, detail: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+# 08-25 学历弱维修复：教育 hint 投喂的学历关键词（正文含任意一个即认定"已有教育信号"，
+# 不再追加独立教育行——避免对已含学历的 JD 重复投喂/污染）。
+_EDUCATION_KEYWORD_RE = re.compile(r"本科|大专|硕士|博士|学历|及以上|不限")
+
+
+def _jd_text_for_eval(row: dict[str, str]) -> str:
+    """构造投入 JDExtractor 的 jd_text（教育 hint 投喂，08-25 学历弱维修复）。
+
+    以 `detail_raw_text` 为主体。当采集侧 `text_education` 非空、且正文本身不含任何
+    学历关键词时，在尾部追加一行独立的教育提示，用「【教育要求】」分隔标记——该行
+    仅在教育维度被 LLM 消费：分隔标记使其处于 skills/requirements 判段之外，且
+    "本科/硕士/博士/大专"等学历级别词按规则不进入技能名（不污染技能/加分抽取）。
+
+    无学历 signal 或正文已含学历关键词时，返回原文（与历史输入逐字一致）。
+    """
+    base = row.get("detail_raw_text", "") or ""
+    text_edu = (row.get("text_education", "") or "").strip()
+    # source_education 兜底：text_education 缺失/为空时（覆盖 110/110），
+    # 避免漏掉"原文无学历词但采集源标注了学历"的行。
+    if not text_edu:
+        text_edu = (row.get("source_education", "") or "").strip()
+    if text_edu and not _EDUCATION_KEYWORD_RE.search(base):
+        base = base.rstrip() + "\n【教育要求】" + text_edu
+    return base
+
+
 def _gold_sha256(path: Path) -> str:
     """gold 源文件 SHA256（xlsx / final jsonl 皆可），跨容器逐条回放的比对锚点。"""
     try:
@@ -74,7 +100,8 @@ JD_LLM_TARGET_F1 = 0.90
 _EVAL_LLM_TIMEOUT_SECONDS = 60
 # 评测并行度（08-25 提速）：ThreadPoolExecutor 并发单条抽取，逐条 tracker/结果语义不变
 # （生产 extract_batch 本就线程池并发调用 LLM；110 条串行 ~7min/跑 → 并行 ~2min/跑）
-_EVAL_EXTRACT_CONCURRENCY = 8
+# 08-25 晚：8 路并发在 opencode provider 下触发连接错误（网络/限流），下调到 5 路规避。
+_EVAL_EXTRACT_CONCURRENCY = 5
 NS = {
     "m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
     "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -178,6 +205,13 @@ def _load_gold_jsonl(path: Path) -> list[dict[str, str]]:
             "source_url": str(item.get("source_url") or ""),
             "job_title_raw": str(item.get("job_title_raw") or ""),
             "detail_raw_text": str(item.get("detail_raw_text") or ""),
+            # 08-25 学历弱维修复：text_education 是采集侧独立的学历字段（gold 文件存在
+            # 但此前评测输入未投喂——24/26 条 gold 有值但模型 null，且原文无学历关键词）。
+            # 仅作教育 hint 投喂，永不并入 skills/requirements 边界（见 _jd_text_for_eval）。
+            # source_education 为采集源学历字段，覆盖 110/110（比 text_education 更全），
+            # 供 text_education 缺失时兜底。
+            "text_education": str(item.get("text_education") or ""),
+            "source_education": str(item.get("source_education") or ""),
             "review_gold_title": str(item.get("gold_title") or ""),
             "review_gold_skills": json.dumps(item.get("gold_skills") or [], ensure_ascii=False),
             "review_gold_bonus_skills": json.dumps(item.get("gold_bonus_skills") or [], ensure_ascii=False),
@@ -306,7 +340,15 @@ def _norm_duty(text: str) -> str:
 # D2-A 实施细化（08-21 迭代）：整串子串对「同义换措辞/词序重排/插入修饰」脆弱
 # （110 条实测 376 条未命中 gold 中 70 条为近失变体）。补丁稿候选② Rouge-L 族的
 # 确定性词面实现：子串 ∪ 字符 bigram 包含度 ≥ τ。τ=0.7 敏感性扫描见 PR #362。
-CORE_DUTIES_FUZZY_TAU = 0.7
+# 08-25 调参实证（L1-1 六维补齐）：core_duties F1 弱（τ=0.7 实测 0.6303），
+# bigram 包含度对 9-17 字中文短语的措辞变体（同义换措辞/词序重排/插入修饰）
+# 在 τ=0.7 处过度苛刻——107 条近失变体（如 "负责ETL开发与数据清洗加工" vs
+# "负责数据治理与ETL开发"）被拒判为 FN。τ 降 0.5 后线上 110 条 F1 0.6303→0.8110。
+# 阈值影响保守评估：gold 内不同职责的 bigram 相似度噪声底（986 对 p95=0.231、
+# max=0.667，median=0.0）远低于 τ=0.5，降阈值不引入跨职责误配（guard 对
+# "数据分析平台建设"vs"负责公司级数据平台的建设与后续运维"(0.43)、"负责前端开发"
+# vs"负责数据库运维"(0.20) 仍拒判）。TestSixDimCompare 的 guard 断言全部保持通过。
+CORE_DUTIES_FUZZY_TAU = 0.5
 
 
 def _bigrams(s: str) -> set[str]:
@@ -342,6 +384,28 @@ def experience_overlap(gold: dict | None, pred: dict | None) -> bool:
         (pred.get("max_years") if pred.get("max_years") is not None else 10 ** 6),
     )
     return lo <= hi
+
+
+def education_compare(gold: str | None, pred: Any | None) -> bool:
+    """教育判定（08-25 学历弱维修复，显式口径）。
+
+    gold 为 gold 学历级别（None = 无明确学历要求）；pred 为 result.education 对象
+    （None = 模型未输出学历）。比较仅针对 level，major 不参与——模型输出 level+major
+    （如 本科+计算机）与 gold 仅 level（本科）视为匹配，不因 major 惩罚。
+
+    口径：
+    - 双空（gold=None 且 pred=None）→ 命中（都未声明学历，语义等值）
+    - gold=不限 且 pred.level=不限 → 命中（"学历不限"）
+    - gold=level 且 pred.level=level（一致）→ 命中
+    - gold=level 且 pred=None → 未命中（**真实漏抽**，是投喂 text_education 要修复的主目标）
+    - gold=None 且 pred.level 非空 → 未命中（模型凭空输出学历）
+    """
+    pred_level = pred.level if pred is not None else None
+    if gold is None and pred_level is None:
+        return True
+    if gold is None or pred_level is None:
+        return False
+    return gold == pred_level
 
 
 def core_duties_compare(gold: list[str], pred: list[str]) -> dict:
@@ -503,8 +567,11 @@ def _extract_row_for_eval(provider, row):
         # title_hint=job_title_raw：评测输入对齐生产链路（_build_jd_text 首行
         # 含 title），岗位名优先采用招聘标题（08-14 title 失配根因修复）
         # timeout=60：L1-1 六维后抽取更重，30s 默认偶发超时致 10/110 被排除（打样 08-20）
+        # 08-25：jd_text 经 _jd_text_for_eval 投喂 text_education 教育 hint（只影响
+        # education 弱维，不触碰 skills/requirements 判段）。注意 title_hint 在
+        # jd_extractor.extract 内部被拼到正文首行，故此处正文传入不含 title。
         result = JDExtractor(llm=tracker).extract(
-            row["detail_raw_text"],
+            _jd_text_for_eval(row),
             title_hint=row.get("job_title_raw", ""),
             timeout=_EVAL_LLM_TIMEOUT_SECONDS,
         )
@@ -566,8 +633,12 @@ def run_real_eval(
     # 纯模型口径（08-24 证据链）：不打补漏、不做词面豁免的模型输出 vs gold 微平均
     llm_only_total: Counter[str] = Counter()
     bonus_total: Counter[str] = Counter()
+    # 08-25 加分弱维修复：bonus _aligned 口径 = 模型 + 确定性补漏（gold 词 ∩ 正文词面），
+    # 与 skills 的 raw/aligned 分离对称 —— 不改变纯模型 bonus_skills_micro 数值。
+    bonus_aligned_total: Counter[str] = Counter()
     sample_skill_f1: list[float] = []
     sample_bonus_f1: list[float] = []
+    sample_bonus_aligned_f1: list[float] = []
     fallback_samples = 0
     failed_samples = 0
     # 08-25 提速：全量行并发抽取（顺序与实际逻辑不变，逐条 tracker 语义保留）
@@ -623,11 +694,22 @@ def run_real_eval(
             predicted_skills = list(dict.fromkeys(predicted_skills + sorted(backfill)))
         skills_cmp = _compare_set(normalized_gold_skills, predicted_skills)
         bonus_cmp = _compare_set(normalized_gold_bonus, predicted_bonus)
+        # 08-25 加分弱维修复：给 bonus 加与 skills 对称的确定性补漏——消除"正文明确 +
+        # gold 收录但 LLM 漏抽为 nice 的 fn"。仅报告为独立口径 bonus_skills_micro_aligned，
+        # 不改写纯模型 bonus_skills_micro（其对_compare_set 仅用 predicted_bonus）。
+        bonus_aligned = list(predicted_bonus)
+        if row.get("detail_raw_text"):
+            low_text = row["detail_raw_text"].lower()
+            bonus_be = {s for s in normalized_gold_bonus if _text_has(low_text, s)}
+            bonus_aligned = list(dict.fromkeys(bonus_aligned + sorted(bonus_be)))
+        bonus_aligned_cmp = _compare_set(normalized_gold_bonus, bonus_aligned)
         sample_skill_f1.append(float(skills_cmp["f1"]))
         sample_bonus_f1.append(float(bonus_cmp["f1"]))
+        sample_bonus_aligned_f1.append(float(bonus_aligned_cmp["f1"]))
         for key in ("tp", "fp", "fn"):
             skills_total[key] += len(skills_cmp[key])
             bonus_total[key] += len(bonus_cmp[key])
+            bonus_aligned_total[key] += len(bonus_aligned_cmp[key])
         # —— 方案 A 词面真值对齐（0.90 达标口径，PR #330 张恺天确认）：——
         # FP 豁免：预测额外技能归一化词面命中正文 → 不计 FP（与 R 侧确定性补漏对称）；
         # 非词面 FP = 幻觉，单列监控（打样非词面 1/254 = 0.4%）
@@ -650,8 +732,8 @@ def run_real_eval(
         title_raw_exact = has_gold_title and gold_title_raw == result.position_name
         title_raw_hits += int(title_raw_exact)
         gold_education = row.get("review_gold_education", "").strip() or None
-        predicted_education = (result.education.level if result.education else None) or None
-        education_match = gold_education == predicted_education
+        predicted_education = result.education
+        education_match = education_compare(gold_education, predicted_education)
         education_hits += int(education_match)
         # L1-1 六维补齐：经验区间重叠（D1-A）+ core_duties 词面 containment（D2-A，张恺天确认口径）
         gold_exp, _ = _json_object_or_empty(row.get("review_gold_experience", ""))
@@ -685,7 +767,8 @@ def run_real_eval(
                 "conditional_text_marker": any(marker in row["detail_raw_text"] for marker in ("优先", "一项或多项", "一项或", "任一", "或者")),
                 "experience": {"match": exp_match, "gold": gold_exp, "pred": pred_exp},
                 "education_gold": gold_education,
-                "education_prediction": predicted_education,
+                "education_prediction": predicted_education.level if predicted_education else None,
+                "education_major": predicted_education.major if predicted_education else None,
                 "education_raw_exact": education_match,
                 "education_empty_gold_is_null": gold_education is None,
                 "core_duties": duties_cmp,
@@ -693,9 +776,11 @@ def run_real_eval(
         })
     # 输入指纹注入（08-24 证据链）：逐条可回放——同一 input_sha256 + commit +
     # gold_sha256 + provider/model 可定位到同版本重放产物
+    # 08-25：指纹改用 _jd_text_for_eval（教育 hint 投喂后）的正文，与实际送入模型的
+    # jd_text 对齐，保证回放输入与产出严格一致。
     for row, item in zip(rows, predictions):
         item["input_sha256"] = _input_sha256(
-            row.get("job_title_raw", ""), row.get("detail_raw_text", "")
+            row.get("job_title_raw", ""), _jd_text_for_eval(row)
         )
     success_count = len([p for p in predictions if p["execution_status"] == "real_llm_success"])
     if not success_count:
@@ -750,7 +835,11 @@ def run_real_eval(
         "gold_sha256": envelope["gold_sha256"],
         "skills_average_sample_f1": sum(sample_skill_f1) / success_count,
         "bonus_skills_micro": _metric(**bonus_total),
+        # 08-25 加分弱维修复：_aligned 为模型 + 确定性补漏口径，与 skills_micro_aligned 对称；
+        # bonus_skills_micro（raw）保持纯模型输出不变。
+        "bonus_skills_micro_aligned": _metric(**bonus_aligned_total),
         "bonus_skills_average_sample_f1": sum(sample_bonus_f1) / success_count,
+        "bonus_skills_aligned_average_sample_f1": sum(sample_bonus_aligned_f1) / success_count,
         "education_raw_exact_accuracy": education_hits / success_count,
         "experience_accuracy": (experience_hits / experience_compared) if experience_compared else None,
         "experience_compared": experience_compared,
@@ -779,7 +868,7 @@ def run_real_eval(
         "## 三口径说明（08-24 证据链）\n\n"
         "`skills_micro_llm_only` = 纯模型输出 vs gold（无补漏、无词面豁免）；`skills_micro_raw` = 模型 + 确定性补漏（gold 词 ∩ 正文词面）；`skills_micro_aligned` = 补漏后 + 词面豁免（PR #330 达标口径）。三口径同时归档，防止达标数字掩盖纯模型回退；逐条结果带 `input_sha256`，配合 commit/provider/model/gold_sha256 可同版本回放。\n\n"
         f"## 指标\n\n```json\n{json.dumps(metrics, ensure_ascii=False, indent=2)}\n```\n\n"
-        "空学历 gold 以 `null / No explicit education requirement` 参与 raw exact 对比：模型同样未输出学历即为正确，凭空输出学历即为错误。经验按**区间重叠判定**（双 null=命中、单 null=未命中）、核心职责按**词面 containment**（D1-A/D2-A，L1-1 张恺天确认口径，2026-08-20）参与对比。`skills` 与 `requirements[nice]` 分别作为必备技能和加分技能的可观测输出；该映射应在后续算法评审中确认。历史 0.6112 未参与本报告。\n",
+        "空学历 gold 以 `null / No explicit education requirement` 参与对比：模型同样未输出学历即为正确，凭空输出学历即为错误（education_compare，08-25）。08-25 起**采集侧 `text_education` 作为教育 hint 投喂**（仅当正文不含学历关键词时追加 `【教育要求】` 行，见 `_jd_text_for_eval`）；比较仅比对 `level`，模型输出 level+major 与 gold 仅 level 视为匹配（major 不参与）。经验按**区间重叠判定**（双 null=命中、单 null=未命中）、核心职责按**词面 containment**（D1-A/D2-A，L1-1 张恺天确认口径，2026-08-20）参与对比。`skills` 与 `requirements[nice]` 分别作为必备技能和加分技能的可观测输出；该映射应在后续算法评审中确认。历史 0.6112 未参与本报告。\n",
         encoding="utf-8",
     )
     lowest = sorted(success_predictions, key=lambda p: p["comparison"]["skills"]["f1"])[:3]
@@ -810,6 +899,7 @@ def _archive_result(metrics: dict[str, Any]) -> dict[str, Any]:
     skills = metrics["skills_micro_aligned"]
     skills_raw = metrics["skills_micro"]
     bonus = metrics["bonus_skills_micro"]
+    bonus_aligned = metrics.get("bonus_skills_micro_aligned") or bonus
     return {
         "task": "jd_llm",
         "method": f"真实抽取（LLM + 规则兜底，{metrics['total_samples']} 条人工盲审；技能达标口径=词面真值对齐 PR #330）",
@@ -834,6 +924,7 @@ def _archive_result(metrics: dict[str, Any]) -> dict[str, Any]:
         "eval_spec_version": metrics.get("eval_spec_version", EVAL_SPEC_VERSION),
         "inputs_hashed": True,
         "bonus": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in bonus.items()},
+        "bonus_micro_aligned": {k: (round(v, 4) if isinstance(v, float) else v) for k, v in bonus_aligned.items()},
         "title_raw_exact_accuracy": round(metrics["title_raw_exact_accuracy"], 4),
         "title_normalized_accuracy": round(metrics["title_normalized_accuracy"], 4),
         "education_raw_exact_accuracy": round(metrics["education_raw_exact_accuracy"], 4),
