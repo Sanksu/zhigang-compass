@@ -52,7 +52,6 @@ export function AdminSkillAliasesPage() {
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
     apiGet<{ items: SkillAliasItem[]; total: number; limit: number; offset: number }>(`/admin/skill-aliases?${params}`)
       .then((res) => {
         if (cancelled) return
