@@ -82,8 +82,9 @@ const MAX_SKILLS_PER_POSITION = 12
  */
 const DEMO_BOOKMARKS: { label: string; nodeName: string }[] = [
   { label: '算法簇', nodeName: '算法工程师' },
-  { label: '前端簇', nodeName: '前端开发工程师' },
+  { label: '大模型簇', nodeName: '大模型算法工程师' },
   { label: '数据簇', nodeName: '数据分析师' },
+  { label: '前端簇', nodeName: '前端开发工程师' },
 ]
 
 /** 非全景视图已由后端 /graph/view/{view_type} 提供（技术栈/级别/岗位中心均为服务端过滤）；
