@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { Activity, Database, GitBranch, Network, TrendingUp, Users } from 'lucide-react'
+import * as echarts from 'echarts'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { apiGet } from '@/lib/api'
-import { formatDateTime } from '@/lib/utils'
+import { formatDateTime, isDark } from '@/lib/utils'
 import type { components } from '@/types/api'
 
 interface StatItem {
@@ -30,6 +31,109 @@ interface ActivityItem {
 
 /** 后端 /admin/crawl/status 返回项（契约 CrawlPlatform） */
 type CrawlPlatform = components['schemas']['CrawlPlatform']
+
+/** 后端 /evolution/versions 返回项（契约 EvolutionVersion） */
+type EvolutionVersion = components['schemas']['EvolutionVersion']
+
+/** 图谱版本演化趋势条形图 — 版本快照的新增/变更/移除节点数（仪表盘首屏图表）
+ *
+ * 数据与「图谱版本」指标卡同源（/evolution/versions 前 10 条，无需新增端点）；
+ * 移除用警示橙、新增用信号绿，与岗位状态机语义一致。 */
+function VersionTrendChart({ versions }: { versions: EvolutionVersion[] }) {
+  const elRef = useRef<HTMLDivElement>(null)
+  const chartRef = useRef<echarts.ECharts | null>(null)
+  const [themeVersion, setThemeVersion] = useState(0)
+
+  useEffect(() => {
+    const el = document.documentElement
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.attributeName === 'class') {
+          setThemeVersion((v) => v + 1)
+          return
+        }
+      }
+    })
+    observer.observe(el, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const el = elRef.current
+    if (!el || versions.length === 0) return
+    const dark = isDark()
+    const ink = dark ? '#fafafa' : '#09090b'
+    const muted = dark ? '#a1a1aa' : '#71717a'
+    const border = dark ? '#27272a' : '#e4e4e7'
+    // 接口按新→旧返回，图表按时间正序绘制（左旧右新）
+    const asc = [...versions].reverse()
+    const chart = echarts.init(el)
+    chartRef.current = chart
+    chart.setOption({
+      animation: false,
+      grid: { left: 8, right: 8, top: 30, bottom: 2, containLabel: true },
+      legend: {
+        top: 0,
+        right: 0,
+        itemWidth: 10,
+        itemHeight: 6,
+        itemGap: 12,
+        textStyle: { fontSize: 10, color: muted },
+      },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: dark ? '#18181b' : '#ffffff',
+        borderColor: border,
+        textStyle: { color: ink, fontSize: 12 },
+        formatter: (params: unknown) => {
+          const list = (Array.isArray(params) ? params : [params]) as { name?: string; seriesName?: string; value?: number; marker?: string }[]
+          if (list.length === 0) return ''
+          const v = asc.find((x) => x.version_id === list[0].name)
+          const lines = [
+            `<b>${list[0].name ?? ''}</b>`,
+            v?.created_at ? `<span style="color:${muted};font-size:11px">${formatDateTime(v.created_at)}</span>` : '',
+            ...list.map((p) => `${p.marker ?? ''}${p.seriesName}: <b>${p.value ?? 0}</b>`),
+          ]
+          return lines.filter(Boolean).join('<br/>')
+        },
+      },
+      xAxis: {
+        type: 'category',
+        data: asc.map((v) => v.version_id),
+        axisLabel: { fontSize: 10, color: muted, hideOverlap: true },
+        axisLine: { lineStyle: { color: border } },
+        axisTick: { show: false },
+      },
+      yAxis: {
+        type: 'value',
+        minInterval: 1,
+        axisLabel: { fontSize: 10, color: muted },
+        splitLine: { lineStyle: { color: border, type: 'dashed' } },
+      },
+      series: [
+        { name: '新增', type: 'bar', data: asc.map((v) => v.node_added), itemStyle: { color: '#10b981', borderRadius: [2, 2, 0, 0] }, barGap: '25%' },
+        { name: '变更', type: 'bar', data: asc.map((v) => v.node_changed), itemStyle: { color: '#3b82f6', borderRadius: [2, 2, 0, 0] } },
+        { name: '移除', type: 'bar', data: asc.map((v) => v.node_removed), itemStyle: { color: '#f59e0b', borderRadius: [2, 2, 0, 0] } },
+      ],
+    })
+    const observer = new ResizeObserver(() => chartRef.current?.resize())
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      chart.dispose()
+      chartRef.current = null
+    }
+  }, [versions, themeVersion])
+
+  if (versions.length === 0) {
+    return (
+      <p className="flex h-52 items-center justify-center text-center text-xs text-ink-faint">
+        暂无版本快照 —— 图谱每日 T+1 快照发布后，此处展示节点新增/变更/移除趋势
+      </p>
+    )
+  }
+  return <div ref={elRef} className="h-52 w-full" aria-label="图谱版本演化趋势图" role="img" />
+}
 
 
 /** 真实数据驱动的统计卡 */
@@ -61,6 +165,7 @@ export function DashboardPage() {
   const [stats, setStats] = useState<StatItem[]>(EMPTY_STATS)
   const [sources, setSources] = useState<CrawlPlatform[]>([])
   const [activities, setActivities] = useState<ActivityItem[]>([])
+  const [versions, setVersions] = useState<EvolutionVersion[]>([])
   const [sourceCount, setSourceCount] = useState(0)
   const [crawlAvailable, setCrawlAvailable] = useState(false)
 
@@ -88,6 +193,7 @@ export function DashboardPage() {
       setCrawlAvailable(crawlRes.status === 'fulfilled')
       setSourceCount(platforms.length)
       setSources(platforms)
+      setVersions(versions)
 
       const collectTotal = platforms.reduce((s, p) => s + p.total_count, 0)
       // 采集统计需 admin 权限：非 admin（403 降级）时显示 '—' 而非 "0"——
@@ -224,6 +330,22 @@ export function DashboardPage() {
         </Card>
       </div>
 
+      {/* 图谱版本演化趋势（与「图谱版本」指标卡同源，无需额外端点） */}
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <TrendingUp className="size-4" />
+            <span>图谱版本演化趋势</span>
+            <span className="text-xs font-normal text-ink-faint ml-auto">
+              近 {versions.length} 版 · 节点新增 / 变更 / 移除
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <VersionTrendChart versions={versions} />
+        </CardContent>
+      </Card>
+
       {/* 数据源底座（真实采集统计） */}
       <Card className="mt-4">
         <CardHeader>
@@ -236,22 +358,36 @@ export function DashboardPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 text-xs">
-            {sources.map((src) => (
-              <div key={src.id} className="rounded-md border p-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[10px] text-ink-faint">{src.level}</span>
-                </div>
-                <p className="text-ink mt-0.5 truncate">{src.name}</p>
-                <p className="text-ink-muted font-mono tabular-nums">{src.total_count.toLocaleString()}</p>
+          {/* 各源采集量按全源最大值等比出条——数字卡升维为可比对的视觉量纲 */}
+          {(() => {
+            const maxSource = sources.reduce((m, s) => Math.max(m, s.total_count), 0)
+            return (
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 text-xs">
+                {sources.map((src) => (
+                  <div key={src.id} className="rounded-md border p-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-[10px] text-ink-faint">{src.level}</span>
+                    </div>
+                    <p className="text-ink mt-0.5 truncate">{src.name}</p>
+                    <p className="text-ink-muted font-mono tabular-nums">{src.total_count.toLocaleString()}</p>
+                    {maxSource > 0 && (
+                      <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-subtle" aria-hidden="true">
+                        <div
+                          className="h-full rounded-full bg-ink/45"
+                          style={{ width: `${Math.max(2, Math.round((src.total_count / maxSource) * 100))}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {sources.length === 0 && (
+                  <p className="col-span-7 py-6 text-center text-ink-faint">
+                    {crawlAvailable ? '暂无采集记录，请先运行爬虫' : '采集统计需 admin 登录后查看'}
+                  </p>
+                )}
               </div>
-            ))}
-            {sources.length === 0 && (
-              <p className="col-span-7 py-6 text-center text-ink-faint">
-                {crawlAvailable ? '暂无采集记录，请先运行爬虫' : '采集统计需 admin 登录后查看'}
-              </p>
-            )}
-          </div>
+            )
+          })()}
         </CardContent>
       </Card>
     </>
