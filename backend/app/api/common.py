@@ -137,3 +137,26 @@ async def sse_task_events(
             yield f"event: error\ndata: {json.dumps({'message': '推送超时'}, ensure_ascii=False)}\n\n"
             return
         await asyncio.sleep(poll_interval)
+
+
+def resolve_operator(current_user: dict) -> tuple[str, object]:
+    """审核/审计操作者 UUID 解析（第六轮审查 P1-4：守卫统一）。
+
+    AuditLog.user_id 为 UUID 列：sub 缺失时 fallback "admin" 会撞列约束 500。
+    返回 (operator, None) 通过；(None, error_response) 失败——错误响应复用
+    llm_decisions/dict_guard 已有文案，全 admin 写端点统一走此守卫。
+    """
+    import uuid as _uuid
+
+    from app.core.errors import ERR_VALIDATION
+    from app.schemas.common import error
+
+    operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    try:
+        _uuid.UUID(str(operator))
+    except (ValueError, AttributeError, TypeError):
+        return None, error(
+            ERR_VALIDATION,
+            f"操作者身份必须为 UUID（AuditLog.user_id 列约束），收到: {operator!r}",
+        )
+    return operator, None

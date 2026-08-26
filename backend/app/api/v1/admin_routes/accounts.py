@@ -8,12 +8,13 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.common import iso, paged_ok, paginate
+from app.api.common import iso, paged_ok, paginate, resolve_operator
 from app.api.deps import require_permission
 from app.core.database import get_db
 from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
 from app.core.security import hash_password
 from app.models.business import AuditLog, ResumeFile, User
+from app.schemas.admin_requests import CreateUserRequest, UpdateUserRequest
 from app.schemas.common import error, ok
 
 router = APIRouter()
@@ -56,18 +57,17 @@ async def list_users(
 
 @router.post("/users", status_code=201)
 async def create_user(
-    req: dict,
+    req: CreateUserRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
 ):
-    """创建用户（管理员代建）。"""
-    username = (req.get("username") or "").strip()
-    password = req.get("password") or ""
-    role = req.get("role") or "user"
-    if len(username) < 3 or len(password) < 6:
-        return error(ERR_VALIDATION, "用户名至少 3 字符，密码至少 6 字符")
-    if role not in ("admin", "user", "guest"):
-        return error(ERR_VALIDATION, "角色非法")
+    """创建用户（管理员代建）。username/password 长度与 role 枚举由 Pydantic 校验。"""
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
+    username = req.username.strip()
+    password = req.password
+    role = req.role
     existing = await db.scalar(select(User).where(User.username == username))
     if existing is not None:
         return error(ERR_CONFLICT, "用户名已存在")
@@ -75,7 +75,7 @@ async def create_user(
     db.add(user)
     # M5 修复：用户创建属敏感管理操作，补审计（含目标用户与被授予角色）
     db.add(AuditLog(
-        user_id=current_user.get("sub", ""),
+        user_id=operator,
         action="admin.user.create",
         resource="user",
         resource_id=username,
@@ -89,31 +89,35 @@ async def create_user(
 @router.put("/users/{user_id}")
 async def update_user(
     user_id: str,
-    req: dict,
+    req: UpdateUserRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
 ):
-    """更新用户角色 / 启用状态（M6 自保护：不可降级/禁用自己）。"""
+    """更新用户角色 / 启用状态（M6 自保护：不可降级/禁用自己；部分更新）。"""
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
     user = await db.get(User, user_id)
     if user is None:
         return error(ERR_NOT_FOUND, "用户不存在", http_status=404)
+    fields_set = req.model_fields_set
     # 自保护：当前登录管理员不允许降级自己的角色或禁用自己，避免后台锁死
     if user_id == current_user.get("sub"):
-        if req.get("status") is not None and req["status"] != "active":
+        if "status" in fields_set and req.status != "active":
             return error(ERR_VALIDATION, "不能禁用当前登录账户")
-        if req.get("role") and req["role"] != "admin":
+        if "role" in fields_set and req.role != "admin":
             return error(ERR_VALIDATION, "不能降级当前登录账户")
-    if "role" in req and req["role"] in ("admin", "user", "guest"):
-        user.role = req["role"]
-    if "status" in req:
-        user.is_active = req["status"] == "active"
+    if "role" in fields_set and req.role is not None:
+        user.role = req.role
+    if "status" in fields_set and req.status is not None:
+        user.is_active = req.status == "active"
     # M5 修复：改角色/禁用属提权与锁账号敏感操作，补审计（记录本次变更明细）
     db.add(AuditLog(
-        user_id=current_user.get("sub", ""),
+        user_id=operator,
         action="admin.user.update",
         resource="user",
         resource_id=user_id,
-        detail={"role": req.get("role"), "status": req.get("status")},
+        detail={"role": req.role, "status": req.status},
     ))
     await db.commit()
     return ok(data={"id": user.id, "username": user.username, "role": user.role, "is_active": user.is_active})

@@ -14,11 +14,16 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.common import iso, paged_ok, paginate
+from app.api.common import iso, paged_ok, paginate, resolve_operator
 from app.api.deps import require_permission
 from app.core.database import get_db
 from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import RejectedChange
+from app.schemas.admin_requests import (
+    AdminEvolutionReviewRequest,
+    AdminReasonRequest,
+    AdminReviewActionRequest,
+)
 from app.schemas.common import error, ok
 
 router = APIRouter()
@@ -108,7 +113,7 @@ async def positions_pending(
 @router.post("/positions/{candidate_id}/review")
 async def review_position(
     candidate_id: str,
-    req: dict,
+    req: AdminReviewActionRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
 ):
@@ -118,18 +123,13 @@ async def review_position(
     置信度 ≥ 0.6 AND 源 ≥ 2）→ PG 决策先行（状态 + 审计 + 驳回记录一次
     提交）→ Neo4j Position.status 图写副作用最后（postmortems/003 顺序）。
 
-    Args:
-        req: {"action": "approve" | "reject", "reason": "..."}，reason 必填
+    请求体 action/reason 由 Pydantic 强校验（第六轮审查 P1-4 收敛）。
     """
     from app.models.business import DiscoveryCandidate
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
 
-    action = req.get("action")
-    reason = (req.get("reason") or "").strip()
-    if action not in ("approve", "reject"):
-        return error(ERR_VALIDATION, "action 必须为 approve 或 reject")
-    if not reason:
-        return error(ERR_VALIDATION, "审核必须填写 reason")
+    action = req.action
+    reason = req.reason.strip()
 
     cand_row = await db.get(DiscoveryCandidate, candidate_id)
     if cand_row is None:
@@ -158,7 +158,9 @@ async def review_position(
         if not can_promote_to_emerging(candidate, confidence=float(conf.get("final_confidence", 0.0))):
             return error(ERR_VALIDATION, "置信度 < 0.6 或独立源 < 2，不满足 emerging 晋升条件")
 
-    operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
 
     # ── ① PG 决策先行（不可回滚的图写必须放在提交成功之后）：
     #    状态 + 审计 + 驳回记录一次提交，人工决策先固化
@@ -268,7 +270,7 @@ async def evolution_pending(
 @router.put("/evolution/{candidate_id}/review")
 async def review_evolution(
     candidate_id: str,
-    req: dict,
+    req: AdminEvolutionReviewRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
 ):
@@ -276,16 +278,11 @@ async def review_evolution(
 
     复用六状态机（PositionStateMachine）持久化 Neo4j Position.status，
     approve 且携带 modified 时合并进候选池 features（演化确认的属性修订）。
-
-    Args:
-        req: {"action": "approve" | "reject", "modified": {...}?}
     """
     from app.models.business import DiscoveryCandidate
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
 
-    action = req.get("action")
-    if action not in ("approve", "reject"):
-        return error(ERR_VALIDATION, "action 必须为 approve 或 reject")
+    action = req.action
 
     cand_row = await db.get(DiscoveryCandidate, candidate_id)
     if cand_row is None:
@@ -305,14 +302,16 @@ async def review_evolution(
         definition_draft=cand_row.definition_draft,
     )
     target = PositionState.STABLE if action == "approve" else PositionState.DECLINING
-    operator = current_user.get("sub") or current_user.get("user_id", "admin")
-    review_reason = (req.get("reason") or "").strip() or "admin evolution review"
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
+    review_reason = (req.reason or "").strip() or "admin evolution review"
 
     # ── ① PG 决策先行（postmortems/003）：状态 + 审计 + features 修订一次提交
     from_state = cand_row.state
     cand_row.state = target.value
     _add_state_audit(db, cand_row, from_state, target.value, operator, review_reason)
-    modified = req.get("modified")
+    modified = req.modified
     if action == "approve" and isinstance(modified, dict) and modified:
         cand_row.features = {**(cand_row.features or {}), **modified}
     await db.commit()
@@ -383,7 +382,7 @@ async def positions_declining(
 @router.put("/positions/{candidate_id}/archive")
 async def archive_position(
     candidate_id: str,
-    req: dict,
+    req: AdminReasonRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
 ):
@@ -397,9 +396,7 @@ async def archive_position(
     from app.models.business import DiscoveryCandidate
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
 
-    reason = (req.get("reason") or "").strip()
-    if not reason:
-        return error(ERR_VALIDATION, "归档必须填写 reason")
+    reason = req.reason.strip()
 
     cand_row = await db.get(DiscoveryCandidate, candidate_id)
     if cand_row is None:
@@ -418,7 +415,9 @@ async def archive_position(
         rag_matched=cand_row.rag_matched,
         definition_draft=cand_row.definition_draft,
     )
-    operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
 
     # ── ① PG 决策先行：状态 + 审计一次提交
     from_state = cand_row.state

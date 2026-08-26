@@ -10,8 +10,10 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 
+from app.api.common import resolve_operator
 from app.api.deps import require_permission
 from app.core.errors import ERR_NOT_FOUND, ERR_VALIDATION
+from app.schemas.admin_requests import AdminPositionEditRequest
 from app.schemas.common import error, ok
 from app.services.kg.id_generator import next_id
 
@@ -264,23 +266,29 @@ async def get_position_detail(position_name: str):
 @router.put("/positions/{position_name}")
 async def update_position_definition(
     position_name: str,
-    req: dict,
+    req: AdminPositionEditRequest,
     current_user: dict = Depends(require_permission("admin:*")),
 ):
     """人工编辑岗位定义（§12.2），所有实际变更写入 PositionEditLog 节点。
 
-    请求体（均可选，无字段时为空操作返回"无变更"）：
+    请求体（均可选，无字段时为空操作返回"无变更"；形状/枚举/权重域由
+    Pydantic 强校验，逐项业务校验保留在 validate_position_edit）：
         skills: 技能列表全量替换，每项 {name, necessity: must|nice, weight: 0.0-1.0}
         core_duties / scenarios: 字符串数组，更新 Position 节点属性
     """
-    skills = req.get("skills")
-    core_duties = req.get("core_duties")
-    scenarios = req.get("scenarios")
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
+    skills = (
+        [s.model_dump() for s in req.skills] if req.skills is not None else None
+    )
+    core_duties = req.core_duties
+    scenarios = req.scenarios
     err = validate_position_edit(skills, core_duties, scenarios)
     if err:
         return error(ERR_VALIDATION, err)
 
-    editor_id = current_user.get("sub") or current_user.get("user_id", "admin")
+    editor_id = operator
     result = await asyncio.to_thread(
         _edit_position_neo4j, position_name, editor_id, skills, core_duties, scenarios
     )

@@ -17,11 +17,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.common import iso, ok, paged_ok, paginate
+from app.api.common import iso, ok, paged_ok, paginate, resolve_operator
 from app.api.deps import require_permission
 from app.core.database import get_db
 from app.core.errors import ERR_CONFLICT, ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import AuditLog, DictChangeLog, DictProposal
+from app.schemas.admin_requests import AdminReviewActionRequest
 from app.schemas.common import error
 from app.services.extraction import dynamic_filters as dyn
 from app.services.extraction.dictionary import SKILL_STOPWORDS
@@ -155,7 +156,7 @@ async def list_proposals(
 @router.post("/dict-guard/proposals/{proposal_id}/review")
 async def review_proposal(
     proposal_id: str,
-    req: dict,
+    req: AdminReviewActionRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
 ):
@@ -174,12 +175,8 @@ async def review_proposal(
     - remove_node/remove_edge（position/course）：直接删除对应岗位/课程节点或
       课程脏边（无动态层变更），图谱删除不可回滚，approved 后立即生效
     """
-    action = req.get("action")
-    reason = (req.get("reason") or "").strip()
-    if action not in ("approve", "reject"):
-        return error(ERR_VALIDATION, "action 必须为 approve 或 reject")
-    if not reason:
-        return error(ERR_VALIDATION, "审核必须填写 reason")
+    action = req.action
+    reason = req.reason.strip()
 
     row = await db.get(DictProposal, proposal_id)
     if row is None:
@@ -187,11 +184,9 @@ async def review_proposal(
     if row.status != "pending":
         return error(ERR_CONFLICT, f"提案当前状态 {row.status}，不可审核")
 
-    operator = current_user.get("sub") or current_user.get("user_id", "admin")
-    try:
-        uuid.UUID(str(operator))
-    except (ValueError, AttributeError, TypeError):
-        return error(ERR_VALIDATION, f"操作者身份必须为 UUID（AuditLog.user_id 列约束），收到: {operator!r}")
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
 
     effect_term = row.term
     changelog_row = None

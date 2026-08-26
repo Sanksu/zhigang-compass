@@ -1215,11 +1215,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [username, password, role]
-              properties:
-                username: { type: string }
-                password: { type: string, format: password }
-                role: { type: string, enum: [admin, user, guest] }
+              $ref: '#/components/schemas/CreateUserRequest'
       responses:
         '201':
           description: 创建成功
@@ -1240,9 +1236,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                role: { type: string, enum: [admin, user, guest] }
-                status: { type: string, enum: [active, disabled] }
+              $ref: '#/components/schemas/UpdateUserRequest'
       responses:
         '200':
           description: 更新成功
@@ -1269,11 +1263,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [platform]
-              properties:
-                platform: { type: string, description: "平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx" }
-                keyword: { type: string, description: "关键词（可选，留空则采集平台热度/最新内容，08-16 起爬虫不再内置默认关键词）" }
-                city: { type: string, description: "城市（可选，海外源默认英文城市）" }
+              $ref: '#/components/schemas/CrawlTriggerRequest'
       responses:
         '202':
           description: 任务已触发（data 含 task_id/status=pending）
@@ -1573,9 +1563,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [review_reason]
-              properties:
-                review_reason: { type: string, description: 审批理由（必填） }
+              $ref: '#/components/schemas/LLMDecisionReviewRequest'
       responses:
         '200':
           description: 批准成功（域名；skill_relation 返回 relation 形如 源->目标->类型，名称归一返回 normalization 形如 action:源->目标；skill_classify 接受 shadow 记录并返回 category/skill）
@@ -1615,9 +1603,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [review_reason]
-              properties:
-                review_reason: { type: string }
+              $ref: '#/components/schemas/LLMDecisionReviewRequest'
       responses:
         '200':
           description: 驳回成功
@@ -1710,25 +1696,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                skills:
-                  type: array
-                  description: 技能全量替换（缺省不变更），每项含 name/necessity/weight
-                  items:
-                    type: object
-                    required: [name, necessity, weight]
-                    properties:
-                      name: { type: string, description: 技能名 }
-                      necessity: { type: string, enum: [must, nice] }
-                      weight: { type: number, minimum: 0.0, maximum: 1.0 }
-                core_duties:
-                  type: array
-                  description: 核心职责（字符串数组，全量替换）
-                  items: { type: string }
-                scenarios:
-                  type: array
-                  description: 典型场景（字符串数组，全量替换）
-                  items: { type: string }
+              $ref: '#/components/schemas/AdminPositionEditRequest'
       responses:
         '200':
           description: 保存结果（updated/diff_summary）
@@ -1787,10 +1755,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [action, reason]
-              properties:
-                action: { type: string, enum: [approve, reject] }
-                reason: { type: string, description: "审核理由（必填）" }
+              $ref: '#/components/schemas/AdminReviewActionRequest'
       responses:
         '200':
           description: 审核完成
@@ -1835,9 +1800,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [reason]
-              properties:
-                reason: { type: string, description: "归档原因（必填，写入审计日志）" }
+              $ref: '#/components/schemas/AdminReasonRequest'
       responses:
         '200':
           description: 归档完成
@@ -1909,10 +1872,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [action]
-              properties:
-                action: { type: string, enum: [approve, reject] }
-                modified: { type: object }
+              $ref: '#/components/schemas/AdminEvolutionReviewRequest'
       responses:
         '200':
           description: 审核完成
@@ -2079,10 +2039,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [action, reason]
-              properties:
-                action: { type: string, enum: [approve, reject] }
-                reason: { type: string, description: 审核理由（必填） }
+              $ref: '#/components/schemas/AdminReviewActionRequest'
       responses:
         '200':
           description: 审核完成
@@ -2256,6 +2213,71 @@ components:
         impact_stats: { type: object }
         applied_by: { type: string }
         created_at: { type: string }
+    AdminReviewActionRequest:
+      type: object
+      required: [action, reason]
+      properties:
+        action: { type: string, enum: [approve, reject], description: 审核动作 }
+        reason: { type: string, minLength: 1, maxLength: 500, description: 审核理由（必填，不能为纯空白） }
+    AdminReasonRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 500, description: 归档理由（必填，不能为纯空白） }
+    AdminEvolutionReviewRequest:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string, enum: [approve, reject] }
+        reason: { type: string, maxLength: 500, description: 审核理由（可选，缺省 admin evolution review） }
+        modified: { type: object, description: approve 时合并进候选池 features 的属性修订 }
+    LLMDecisionReviewRequest:
+      type: object
+      required: [review_reason]
+      properties:
+        review_reason: { type: string, minLength: 1, maxLength: 500, description: 审批理由（必填，不能为纯空白） }
+    CreateUserRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 100 }
+        password: { type: string, minLength: 6, maxLength: 256, format: password }
+        role: { type: string, enum: [admin, user, guest], default: user }
+    UpdateUserRequest:
+      type: object
+      description: 部分更新（未传字段不动）
+      properties:
+        role: { type: string, enum: [admin, user, guest] }
+        status: { type: string, enum: [active, disabled] }
+    AdminPositionEditRequest:
+      type: object
+      description: 岗位定义人工编辑（均可选，全空为无变更空操作）
+      properties:
+        skills:
+          type: array
+          description: 技能全量替换（缺省不变更），每项含 name/necessity/weight
+          items:
+            type: object
+            required: [name, necessity]
+            properties:
+              name: { type: string, minLength: 1, maxLength: 100, description: 技能名 }
+              necessity: { type: string, enum: [must, nice] }
+              weight: { type: number, minimum: 0.0, maximum: 1.0 }
+        core_duties:
+          type: array
+          description: 核心职责（字符串数组，全量替换）
+          items: { type: string }
+        scenarios:
+          type: array
+          description: 典型场景（字符串数组，全量替换）
+          items: { type: string }
+    CrawlTriggerRequest:
+      type: object
+      required: [platform]
+      properties:
+        platform: { type: string, minLength: 1, maxLength: 50, description: "平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx" }
+        keyword: { type: string, maxLength: 200, description: "关键词（可选，留空则采集平台热度/最新内容，08-16 起爬虫不再内置默认关键词）" }
+        city: { type: string, maxLength: 50, description: "城市（可选，海外源默认英文城市）" }
     ApiResponse:
       type: object
       required: [code, msg, trace_id]

@@ -21,6 +21,7 @@ from app.core.database import get_db
 from app.core.errors import ERR_INTERNAL, ERR_VALIDATION
 from app.models.business import TaskStatus
 from app.models.raw import CommunityRaw, CourseRaw, JDRaw, PaperRaw
+from app.schemas.admin_requests import CrawlTriggerRequest
 from app.schemas.common import error, ok
 
 router = APIRouter()
@@ -199,16 +200,16 @@ async def _enqueue_crawl(
 
 
 @router.post("/crawl/trigger", status_code=202)
-async def crawl_trigger(req: dict, db: AsyncSession = Depends(get_db)):
+async def crawl_trigger(req: CrawlTriggerRequest, db: AsyncSession = Depends(get_db)):
     """触发爬取任务（BE-M4-05，契约 /admin/crawl/trigger）。
 
     校验平台（PLATFORM_META 白名单）→ 建 TaskStatus(pending) → 入队 ARQ
     crawl_platform → 返回 task_id。队列不可用时标记任务 failed 并返回 500。
     keyword 留空 = 采集平台热度/最新内容（08-16 用户决策）。
     """
-    platform = (req.get("platform") or "").strip()
-    keyword = (req.get("keyword") or "").strip()
-    city = (req.get("city") or "").strip()
+    platform = req.platform.strip()
+    keyword = req.keyword.strip()
+    city = req.city.strip()
     logger.info(f"[crawl/trigger] 收到触发请求: platform={platform} keyword={keyword or '(空=热度/最新)'} city={city or '(默认)'}")
     if platform not in _PLATFORM_TO_SPIDER:
         logger.warning(f"[crawl/trigger] 未知平台: {platform}")

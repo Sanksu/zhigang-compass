@@ -4,6 +4,8 @@ asyncio.run 直调（注入 fake async session 与 current_user，项目纯函�
 """
 
 import asyncio
+
+from app.schemas.admin_requests import LLMDecisionReviewRequest
 from types import SimpleNamespace
 
 from app.api.v1.admin_routes import llm_decisions as mod
@@ -57,7 +59,7 @@ class _FakeSession:
 
 def _approve(session, reason="先修语义确认", operator=_OPERATOR):
     return asyncio.run(mod.approve_llm_decision(
-        session._record.id, {"review_reason": reason},
+        session._record.id, LLMDecisionReviewRequest(review_reason=reason),
         db=session, current_user={"sub": operator, "role": "admin"},
     ))
 
@@ -101,9 +103,14 @@ class TestApproveEndpoint:
         assert _code(resp) != 0
 
     def test_approve_requires_reason(self):
-        session = _FakeSession(_rel_record())
-        resp = _approve(session, reason="")
-        assert _code(resp) != 0
+        """空 review_reason 由 Pydantic 强校验拦截（HTTP 侧 422/4000）。"""
+        import pytest
+        from pydantic import ValidationError
+
+        from app.schemas.admin_requests import LLMDecisionReviewRequest
+
+        with pytest.raises(ValidationError):
+            LLMDecisionReviewRequest(review_reason="")
 
     def test_approve_rejects_malformed_entity_id(self):
         session = _FakeSession(_rel_record(entity_id="Java"))
@@ -149,7 +156,7 @@ class TestApproveEndpoint:
     def test_reject_only_status(self):
         session = _FakeSession(_rel_record())
         resp = asyncio.run(mod.reject_llm_decision(
-            session._record.id, {"review_reason": "关系不成立"},
+            session._record.id, LLMDecisionReviewRequest(review_reason="关系不成立"),
             db=session, current_user={"sub": _OPERATOR, "role": "admin"},
         ))
         assert _code(resp) == 0
