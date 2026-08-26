@@ -1,11 +1,14 @@
 """管理后台岗位审核域路由：候选池审核 / 演化审核 / 归档 / 技术观察池（RBAC admin only）。
 
 对齐契约 /api/v1/admin/{positions,evolution,discovery}/*。review 走六状态机
-（PositionStateMachine）校验 + Neo4j Position.status 同步 + 审计日志；
-_persist_position_state 为本域共享的 Neo4j 持久化 helper（线程池执行）。
+（PositionStateMachine）校验；持久化顺序遵循 postmortems/003（08-24 事故整改，
+同 dict_guard）：**PG 决策先行（状态 + 审计 + 驳回记录一次提交），图写副作用
+最后**——图写（Neo4j Position.status + 缓存失效）不可回滚，放提交成功之后；
+图写失败不回滚人工决策，以 effects_applied=False 透出待巡检对账。
 """
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -19,6 +22,8 @@ from app.models.business import RejectedChange
 from app.schemas.common import error, ok
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # 岗位审核（AL-M4-01 新岗位发现：候选池 pending 列表 + 审核流转）
@@ -34,6 +39,27 @@ async def _persist_rejected_change(
         )
     )
     await db.commit()
+
+
+def _add_state_audit(db: AsyncSession, cand_row, from_state: str, to_state: str, operator: str, reason: str) -> None:
+    """状态流转审计（随 PG 决策阶段先行提交——图写失败也不丢审计）。"""
+    from app.models.business import AuditLog
+
+    db.add(
+        AuditLog(
+            user_id=operator,
+            action="discovery.state_transition",
+            resource="Position",
+            resource_id=cand_row.position_name,
+            detail={
+                "from_state": from_state,
+                "to_state": to_state,
+                "reason": reason,
+                "seed_matched": cand_row.seed_matched,
+                "rag_matched": cand_row.rag_matched,
+            },
+        )
+    )
 
 
 @router.get("/positions/pending")
@@ -89,8 +115,8 @@ async def review_position(
     """审核 candidate：approve → emerging / reject → rejected。
 
     流程：读候选池 → 组装 CandidatePosition → 状态机校验（emerging 需
-    置信度 ≥ 0.6 AND 源 ≥ 2）→ Neo4j Position.status 同步 → 写审计日志
-    → 更新候选池状态。
+    置信度 ≥ 0.6 AND 源 ≥ 2）→ PG 决策先行（状态 + 审计 + 驳回记录一次
+    提交）→ Neo4j Position.status 图写副作用最后（postmortems/003 顺序）。
 
     Args:
         req: {"action": "approve" | "reject", "reason": "..."}，reason 必填
@@ -132,19 +158,29 @@ async def review_position(
         if not can_promote_to_emerging(candidate, confidence=float(conf.get("final_confidence", 0.0))):
             return error(ERR_VALIDATION, "置信度 < 0.6 或独立源 < 2，不满足 emerging 晋升条件")
 
-    updated = await _persist_state_and_invalidate(
-        candidate,
-        target,
-        db,
-        current_user.get("sub") or current_user.get("user_id", "admin"),
-        reason,
-    )
+    operator = current_user.get("sub") or current_user.get("user_id", "admin")
 
-    cand_row.state = updated.state.value
+    # ── ① PG 决策先行（不可回滚的图写必须放在提交成功之后）：
+    #    状态 + 审计 + 驳回记录一次提交，人工决策先固化
+    from_state = cand_row.state
+    cand_row.state = target.value
+    _add_state_audit(db, cand_row, from_state, target.value, operator, reason)
     if action == "reject":
-        # 审核驳回变更落库（§11.4.1 rejected_changes），驳回可追溯
+        # _persist_rejected_change 自带 commit（连同状态 + 审计一并落库）
         await _persist_rejected_change(db, cand_row.position_name, "discovery_reject", reason)
-    await db.commit()
+    else:
+        await db.commit()
+
+    # ── ② 图写副作用最后：失败不回滚决策，effects_applied=False 透出待对账
+    effects_applied = True
+    try:
+        await _apply_graph_state(candidate, target, operator, reason)
+    except Exception:
+        logger.exception(
+            "岗位审核图写副作用失败（决策已落库待对账）position=%s target=%s",
+            cand_row.position_name, target.value,
+        )
+        effects_applied = False
 
     return ok(
         data={
@@ -152,41 +188,38 @@ async def review_position(
             "position_name": cand_row.position_name,
             "state": cand_row.state,
             "reason": reason,
+            "effects_applied": effects_applied,
         },
-        msg=f"已{'通过晋升 emerging' if action == 'approve' else '驳回'}: {cand_row.position_name}",
+        msg=f"已{'通过晋升 emerging' if action == 'approve' else '驳回'}: {cand_row.position_name}"
+        + ("" if effects_applied else "（图谱写入失败，待巡检对账）"),
     )
 
 
-# 共享：岗位状态持久化（Neo4j 同步驱动 + 审计日志，线程池执行）
+# 共享：图写副作用（必须在 PG 决策提交成功之后调用）
 
-async def _persist_state_and_invalidate(candidate, target, db, operator: str, reason: str):
-    """岗位状态持久化 + 图谱热路径缓存失效（08-18 TTL 治理）。
+async def _apply_graph_state(candidate, target, operator: str, reason: str) -> None:
+    """Neo4j Position.status 幂等写入 + 图谱热路径缓存失效（08-18 TTL 治理）。
 
-    状态变更（晋升/归档/衰退）影响图谱可见性与聚合权重，持久化后立即
-    失效 panorama/view/search/节点详情缓存，避免 300s TTL 窗口内读到旧状态。
+    postmortems/003 顺序约束：本函数只承担不可回滚的图写副作用，由调用方在
+    PG 决策（状态 + 审计）提交成功之后调用；失败由调用方捕获并以
+    effects_applied=False 透出（人工决策不回滚，待巡检对账补图）。
+    不向 machine.persist 传 db——审计已随 PG 阶段先行落库，避免重复。
     """
-    result = await asyncio.to_thread(
-        _persist_position_state, candidate, target, db, operator, reason
-    )
+    await asyncio.to_thread(_write_position_state, candidate, target, operator, reason)
     from app.api.v1.graph import invalidate_graph_caches
 
     await invalidate_graph_caches()
-    return result
 
 
-def _persist_position_state(candidate, target, db, operator: str, reason: str):
-    """岗位状态持久化（Neo4j 同步驱动 + 审计日志），线程池执行。
-
-    Neo4j 驱动为同步实现，放线程池避免阻塞事件循环；db.add 仅操作
-    Session 内存态（不触 IO），commit 由调用方在主线程完成。
-    """
+def _write_position_state(candidate, target, operator: str, reason: str):
+    """岗位状态图写（Neo4j 同步驱动，线程池执行避免阻塞事件循环）。"""
     from app.core.database import neo4j_driver
     from app.services.discovery.state_machine import PositionStateMachine
 
     machine = PositionStateMachine()
     with neo4j_driver.session() as neo4j_session:
         return machine.persist(
-            neo4j_session, candidate, target, db=db, operator=operator, reason=reason
+            neo4j_session, candidate, target, operator=operator, reason=reason,
         )
 
 # ============================================================
@@ -272,28 +305,38 @@ async def review_evolution(
         definition_draft=cand_row.definition_draft,
     )
     target = PositionState.STABLE if action == "approve" else PositionState.DECLINING
+    operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    review_reason = (req.get("reason") or "").strip() or "admin evolution review"
 
-    updated = await _persist_state_and_invalidate(
-        candidate,
-        target,
-        db,
-        current_user.get("sub") or current_user.get("user_id", "admin"),
-        (req.get("reason") or "").strip() or "admin evolution review",
-    )
-
-    cand_row.state = updated.state.value
+    # ── ① PG 决策先行（postmortems/003）：状态 + 审计 + features 修订一次提交
+    from_state = cand_row.state
+    cand_row.state = target.value
+    _add_state_audit(db, cand_row, from_state, target.value, operator, review_reason)
     modified = req.get("modified")
     if action == "approve" and isinstance(modified, dict) and modified:
         cand_row.features = {**(cand_row.features or {}), **modified}
     await db.commit()
+
+    # ── ② 图写副作用最后：失败不回滚决策，effects_applied=False 透出待对账
+    effects_applied = True
+    try:
+        await _apply_graph_state(candidate, target, operator, review_reason)
+    except Exception:
+        logger.exception(
+            "演化审核图写副作用失败（决策已落库待对账）position=%s target=%s",
+            cand_row.position_name, target.value,
+        )
+        effects_applied = False
 
     return ok(
         data={
             "id": cand_row.id,
             "position_name": cand_row.position_name,
             "state": cand_row.state,
+            "effects_applied": effects_applied,
         },
-        msg=f"已{'确认晋级 stable' if action == 'approve' else '确认衰退 declining'}: {cand_row.position_name}",
+        msg=f"已{'确认晋级 stable' if action == 'approve' else '确认衰退 declining'}: {cand_row.position_name}"
+        + ("" if effects_applied else "（图谱写入失败，待巡检对账）"),
     )
 
 
@@ -346,9 +389,10 @@ async def archive_position(
 ):
     """[M4] 确认衰退归档：declining → archived（终态）。
 
-    六状态机最后一环：人工确认后 Neo4j Position.status 同步 + AuditLog
-    记录（reason 必填）。与 /positions/{id}/review（candidate → emerging/
-    rejected）和 /evolution/{id}/review（emerging → stable/declining）并列。
+    六状态机最后一环：PG 决策先行（状态 + 审计），Neo4j Position.status
+    图写副作用最后（postmortems/003 顺序，reason 必填）。与
+    /positions/{id}/review（candidate → emerging/rejected）和
+    /evolution/{id}/review（emerging → stable/declining）并列。
     """
     from app.models.business import DiscoveryCandidate
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
@@ -374,23 +418,33 @@ async def archive_position(
         rag_matched=cand_row.rag_matched,
         definition_draft=cand_row.definition_draft,
     )
-    updated = await _persist_state_and_invalidate(
-        candidate,
-        PositionState.ARCHIVED,
-        db,
-        current_user.get("sub") or current_user.get("user_id", "admin"),
-        reason,
-    )
-    cand_row.state = updated.state.value
+    operator = current_user.get("sub") or current_user.get("user_id", "admin")
+
+    # ── ① PG 决策先行：状态 + 审计一次提交
+    from_state = cand_row.state
+    cand_row.state = PositionState.ARCHIVED.value
+    _add_state_audit(db, cand_row, from_state, PositionState.ARCHIVED.value, operator, reason)
     await db.commit()
+
+    # ── ② 图写副作用最后：失败不回滚决策，effects_applied=False 透出待对账
+    effects_applied = True
+    try:
+        await _apply_graph_state(candidate, PositionState.ARCHIVED, operator, reason)
+    except Exception:
+        logger.exception(
+            "归档图写副作用失败（决策已落库待对账）position=%s", cand_row.position_name,
+        )
+        effects_applied = False
 
     return ok(
         data={
             "id": cand_row.id,
             "position_name": cand_row.position_name,
             "state": cand_row.state,
+            "effects_applied": effects_applied,
         },
-        msg=f"已归档（终态）: {cand_row.position_name}",
+        msg=f"已归档（终态）: {cand_row.position_name}"
+        + ("" if effects_applied else "（图谱写入失败，待巡检对账）"),
     )
 
 
