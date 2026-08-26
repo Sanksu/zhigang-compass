@@ -45,13 +45,16 @@ describe('Sidebar 导航过滤（§12.3 RBAC）', () => {
     expect(screen.queryAllByText('管理后台')).toHaveLength(0)
   })
 
-  it('admin 角色显示完整主导航 + 管理/配置中心两组', () => {
+  it('admin 角色显示完整主导航 + 管理/LLM 驱动/配置中心三组', () => {
     setRole('admin')
     renderSidebar()
     expect(screen.getAllByText('简历匹配').length).toBeGreaterThan(0)
     expect(screen.getAllByText('管理').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('LLM 驱动').length).toBeGreaterThan(0)
     expect(screen.getAllByText('配置中心').length).toBeGreaterThan(0)
     expect(screen.getAllByText('岗位审核').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('决策与验收').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('动态别名表').length).toBeGreaterThan(0)
     expect(screen.getAllByText('采集与限频').length).toBeGreaterThan(0)
   })
 
