@@ -14,6 +14,8 @@ import {
   Gauge,
   Database,
   Workflow,
+  ListChecks,
+  BookMarked,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/constants'
@@ -66,7 +68,7 @@ export const mainNav: NavItem[] = [
     },
 ]
 
-/** 管理后台分组（08-16 层级选择结构：管理 + 配置中心，配置项按页面拆分） */
+/** 管理后台分组（08-16 层级化：管理 + 配置中心两组，可折叠；08-26 加 LLM 驱动组） */
 export const adminNavGroups: AdminNavGroup[] = [
   {
     label: '管理',
@@ -76,6 +78,13 @@ export const adminNavGroups: AdminNavGroup[] = [
       { label: '爬取管理', to: '/admin/crawl', icon: Bot, requireRole: ['admin'] },
       { label: '岗位审核', to: '/admin/review', icon: CheckSquare, requireRole: ['admin'] },
       { label: '数据血缘', to: '/admin/lineage', icon: GitFork, requireRole: ['admin'] },
+    ],
+  },
+  {
+    label: 'LLM 驱动',
+    items: [
+      { label: '决策与验收', to: '/admin/llm-decisions', icon: ListChecks, requireRole: ['admin'] },
+      { label: '动态别名表', to: '/admin/skill-aliases', icon: BookMarked, requireRole: ['admin'] },
     ],
   },
   {
