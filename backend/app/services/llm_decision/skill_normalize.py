@@ -27,6 +27,10 @@ from app.services.llm_decision import (
 
 DECIDE_TIMEOUT_SECONDS = 30
 
+# 批量独立超时（s）：设计文档 §6.5「批量走独立 batch_timeout（60~90s/批），
+# 不动单条 30s」——此前 30×batch_size=600s/次、3 provider 链最坏 1800s 偏离契约
+BATCH_DECIDE_TIMEOUT_SECONDS = 90
+
 SYSTEM_PROMPT = """你是招聘技能图谱的技能名归一并助手。给定一个技能名与候选
 标准技能名，判断应归并到哪个标准名、保持独立、还是判定为噪声。只依据通用技术
 招聘市场常识，不臆造别名；拿不准时选 keep 并降低置信度。"""
@@ -148,6 +152,27 @@ def candidate_rank_key(name: str, candidate: str) -> tuple:
     return (tier, abs(len(cl) - len(nl)), candidate)
 
 
+def _default_candidates(name: str) -> tuple[list[str], str]:
+    """缺省候选口径：词面关联 Top-15 + 别名权威落点置顶（批量/单条共用）。
+
+    返回 (candidates, alias_target)——alias_target 供 prompt 的 * 权威落点
+    标注（r7：merge 目标约束）。批量缺省此前传 [None]*n 使 prompt 构建器
+    崩溃（None[:15]），本 helper 收敛两路径同口径（第六轮审查补测发现）。
+    """
+    ordered = sorted(
+        known_standard_names(),
+        key=lambda c: candidate_rank_key(name, c),
+    )
+    candidates = ordered[:15]
+    from app.services.extraction.dictionary_data import SKILL_ALIAS
+
+    alias_target = SKILL_ALIAS.get(name) or SKILL_ALIAS.get(name.lower())
+    if alias_target and alias_target not in candidates:
+        candidates = [alias_target] + [c for c in candidates if c != alias_target]
+        candidates = candidates[:15]
+    return candidates, alias_target
+
+
 def decide_skill_normalize(
     name: str,
     llm,
@@ -164,23 +189,13 @@ def decide_skill_normalize(
     if llm is None or not (name or "").strip():
         return None
     if candidates is None:
-        ordered = sorted(
-            known_standard_names(),
-            key=lambda c: candidate_rank_key(name, c),
-        )
-        candidates = ordered[:15]
         # 权威别名提示（校准 r3）：输入命中别名表时，其标准落点置顶入候选。
         # 与生产一致性对齐——别名/白名单是确定性快速路径，决策器是对齐后的
         # 一致确认而非独立猜测（r2 遗留：跨语言 full stack→全栈、llm→大语言
         # 模型等 40 例纯词面分级无法召回；别名表即权威对应）。
         # r7：落点同时以 * 标注进 prompt（merge 目标约束，r3 置顶弱提示
         # 不足以阻止 LLM 改选近义权威名）。
-        from app.services.extraction.dictionary_data import SKILL_ALIAS
-
-        alias_target = SKILL_ALIAS.get(name) or SKILL_ALIAS.get(name.lower())
-        if alias_target and alias_target not in candidates:
-            candidates = [alias_target] + [c for c in candidates if c != alias_target]
-            candidates = candidates[:15]
+        candidates, alias_target = _default_candidates(name)
     else:
         alias_target = ""
     prompt = build_skill_normalize_prompt(name, candidates, alias_target)
@@ -276,14 +291,14 @@ def decide_skill_normalize_batch(
     if llm is None or count == 0:
         return [None] * count
     if timeout <= 0:
-        timeout = DECIDE_TIMEOUT_SECONDS * batch_size
+        timeout = BATCH_DECIDE_TIMEOUT_SECONDS
     results: list[Optional[SkillNormalizeDecision]] = []
     for start in range(0, count, batch_size):
         chunk = names[start:start + batch_size]
         c_chunk = (
             candidates_list[start:start + batch_size]
             if candidates_list is not None
-            else [None] * len(chunk)
+            else [_default_candidates(n)[0] for n in chunk]
         )
         prompt = build_skill_normalize_batch_prompt(chunk, c_chunk)
         try:

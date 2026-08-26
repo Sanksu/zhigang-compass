@@ -173,7 +173,12 @@ async def propose_position(
         summary["candidates"] += 1
         skills = _skills_from_extraction(extraction)
         candidates = recaller.recall(title)
-        decision = decide_position_name(title, skills, str(row["source"] or ""), candidates, llm)
+        # LLM 决策器是同步 OpenAI client（单条最坏 30s×3 provider）——必须
+        # to_thread，否则阻塞 ARQ worker 事件循环（第六轮审查 P1-2；同域
+        # 阶段 19 shadow 已用 to_thread，此前复制时遗漏）
+        decision = await asyncio.to_thread(
+            decide_position_name, title, skills, str(row["source"] or ""), candidates, llm,
+        )
         if decision is None:
             summary["llm_failed"] += 1
             continue
@@ -224,7 +229,8 @@ async def propose_skill(
         if not name:
             continue
         summary["candidates"] += 1
-        decision = decide_skill_normalize(name, llm)
+        # 同步 LLM client → to_thread（第六轮审查 P1-2，防阻塞事件循环）
+        decision = await asyncio.to_thread(decide_skill_normalize, name, llm)
         if decision is None:
             summary["llm_failed"] += 1
             continue
@@ -283,7 +289,8 @@ async def propose_skill_alias(
         if not name:
             continue
         summary["candidates"] += 1
-        decision = decide_skill_normalize(name, llm)
+        # 同步 LLM client → to_thread（第六轮审查 P1-2，防阻塞事件循环）
+        decision = await asyncio.to_thread(decide_skill_normalize, name, llm)
         if decision is None:
             summary["llm_failed"] += 1
             continue
