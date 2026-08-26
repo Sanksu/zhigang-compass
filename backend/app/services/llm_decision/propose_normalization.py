@@ -330,7 +330,12 @@ async def propose_skill_alias(
 
 
 async def propose(limit: int = DEFAULT_LIMIT, domain: str = "all") -> dict:
-    """执行一轮名称归一提议（async，ETL worker 直调）；返回摘要。"""
+    """执行一轮名称归一提议（async，ETL worker 直调）；返回摘要。
+
+    三域编排：position/skill 走归一图变异（proposal→审批→sync 落图）；
+    alias 走别名回写（proposal→审批→skill_aliases，第六轮审查 P1-5 补齐
+    候选源断供——此前仅有手动脚本，ETL 阶段 20 不产出别名候选）。
+    """
     from app.core.database import neo4j_driver
     from app.services.extraction.llm_provider import LLMConfigurationError, LLMProviderChain
 
@@ -343,10 +348,12 @@ async def propose(limit: int = DEFAULT_LIMIT, domain: str = "all") -> dict:
     run_date = datetime.now(_CST).strftime("%Y-%m-%d")
     max_candidates = limit
     position_budget = max(5, max_candidates // 2)
-    skill_budget = max(5, max_candidates - position_budget)
+    alias_budget = max(5, max_candidates // 4)
+    skill_budget = max(5, max_candidates - position_budget - alias_budget)
 
     position: dict = {"candidates": 0, "proposed": 0, "blocked": 0, "llm_failed": 0, "recall_mode": ""}
     skill: dict = {"candidates": 0, "proposed": 0, "blocked": 0, "llm_failed": 0}
+    alias: dict = {"candidates": 0, "proposed": 0, "blocked": 0, "llm_failed": 0, "low_conf": 0}
 
     if domain in ("all", "position"):
         pool = await asyncio.to_thread(_existing_positions, neo4j_driver)
@@ -361,13 +368,18 @@ async def propose(limit: int = DEFAULT_LIMIT, domain: str = "all") -> dict:
     if domain in ("all", "skill"):
         skill = await propose_skill(llm, provider, model, run_date, skill_budget)
 
+    if domain in ("all", "alias"):
+        alias = await propose_skill_alias(llm, provider, model, run_date, alias_budget)
+
     summary = {
         "status": "ok", "run_date": run_date, "provider": provider, "model": model,
-        "position": position, "skill": skill,
+        "position": position, "skill": skill, "alias": alias,
     }
     logger.info(
-        "[propose_norm] 岗位 候选%d 提议%d 拦截%d / 技能 候选%d 提议%d 拦截%d",
+        "[propose_norm] 岗位 候选%d 提议%d 拦截%d / 技能 候选%d 提议%d 拦截%d"
+        " / 别名 候选%d 提议%d 拦截%d",
         position["candidates"], position["proposed"], position["blocked"],
         skill["candidates"], skill["proposed"], skill["blocked"],
+        alias["candidates"], alias["proposed"], alias["blocked"],
     )
     return summary

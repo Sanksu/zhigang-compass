@@ -54,6 +54,7 @@ async def list_skill_aliases(
     offset: int = Query(default=0, ge=0),
 ) -> dict:
     """动态别名表分页列表（倒序；approved 行为 normalize_skill 生效源）。"""
+    from app.api.common import ok
     from app.core.database import async_session_factory
 
     async with async_session_factory() as session:
@@ -62,7 +63,9 @@ async def list_skill_aliases(
         if status:
             count_stmt = count_stmt.where(SkillAlias.status == status)
         total = await session.scalar(count_stmt) or 0
-    return {
+    # 契约（openapi /admin/skill-aliases 200）声明 ApiResponse 包装——第六轮
+    # 审查 P0-2：此前裸返 {items,...}，前端 apiGet 取 res.data.data 得 undefined
+    return ok({
         "items": [serialize_alias(r) for r in rows],
         "total": total, "limit": limit, "offset": offset,
-    }
+    })

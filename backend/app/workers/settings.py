@@ -64,6 +64,17 @@ async def on_startup(ctx: dict) -> None:
 
     asyncio.create_task(warm_ocr())
 
+    async def warm_dynamic_aliases() -> None:
+        # 动态别名表（方案①）加载：worker 进程是 normalize_skill 的主消费方
+        # （ETL 抽取链）；approve 只刷新 API 进程内存，worker 靠此处 + 每轮
+        # ETL 起点刷新兜底（第六轮审查 P0-1 跨进程生效口径）。内部 fail-soft。
+        from app.services.extraction.dictionary import refresh_dynamic_aliases
+
+        loaded = await refresh_dynamic_aliases()
+        logger.info("动态别名表 worker 启动加载完成：%d 条", loaded)
+
+    asyncio.create_task(warm_dynamic_aliases())
+
     async def warm_matching() -> None:
         # 岗位画像共享缓存预热：首次 ARQ 匹配免冷加载（Redis 单飞构建载荷并切指针；
         # 失败不阻塞 worker 启动，匹配请求走降级路径）

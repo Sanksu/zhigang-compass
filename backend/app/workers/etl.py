@@ -145,6 +145,13 @@ async def run_etl_pipeline(
 
     results: dict = {"run_date": run_date, "stages": {}}
 
+    # 动态别名表按轮刷新（方案① 跨进程生效口径，第六轮审查 P0-1）：approve
+    # 只即时刷新 API 进程；worker 进程在此处（每轮 ETL 起点，先于抽取归一）
+    # 拉齐 skill_aliases approved 行。内部 fail-soft+warning，不阻断管线。
+    from app.services.extraction.dictionary import refresh_dynamic_aliases
+
+    await refresh_dynamic_aliases()
+
     crawl_results = []
     for spider in crawl_platforms:
         cfg = crawler_cfg.get(spider) or {}

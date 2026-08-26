@@ -56,8 +56,11 @@ class TestListSkillAliases:
         monkeypatch.setattr("app.core.database.async_session_factory", _FakeFactory(rows))
         # 直调须传显式参数（Query 默认值仅 FastAPI DI 解析）
         res = asyncio.run(mod.list_skill_aliases(status="", limit=50, offset=0))
-        assert res["total"] == 1
-        it = res["items"][0]
+        # 第六轮审查 P0-2：响应须为 ApiResponse 包装（前端 apiGet 取 res.data.data）
+        assert res.code == 0
+        data = res.data
+        assert data["total"] == 1
+        it = data["items"][0]
         assert it["variant"] == ".NET Framework"
         assert it["standard_name"] == ".NET"
         assert it["status"] == "approved"
@@ -67,7 +70,8 @@ class TestListSkillAliases:
     def test_list_empty(self, monkeypatch):
         monkeypatch.setattr("app.core.database.async_session_factory", _FakeFactory([]))
         res = asyncio.run(mod.list_skill_aliases(status="approved", limit=10, offset=0))
-        assert res == {"items": [], "total": 0, "limit": 10, "offset": 0}
+        assert res.code == 0
+        assert res.data == {"items": [], "total": 0, "limit": 10, "offset": 0}
 
     def test_build_query_status_filter(self):
         from app.models.business import SkillAlias

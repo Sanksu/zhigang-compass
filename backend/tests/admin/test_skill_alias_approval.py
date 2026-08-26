@@ -2,7 +2,8 @@
 
 asyncio.run 直调 mod._approve_skill_alias（注入 fake async session），对齐
 test_skill_classify_approval.py 的写法。解耦 DB/LLM：monkeypatch 掉
-known_standard_names 与 reload_dynamic_aliases。
+known_standard_names 与 refresh_dynamic_aliases（async spy——第六轮审查
+P0-1：此前 monkeypatch 掉同步 reload，掩盖了事件循环内 asyncio.run 死链）。
 
 成功返回 APIResponse（.data）；失败返回 JSONResponse（.status_code / .body）。
 """
@@ -64,12 +65,18 @@ class _FakeSession:
 
 class TestApproveSkillAlias:
     def test_approve_writes_skill_alias(self, monkeypatch):
-        """正常批准：落 skill_aliases(approved) + 决策 approved。"""
+        """正常批准：落 skill_aliases(approved) + 决策 approved + 触发缓存刷新。"""
         from app.services.llm_decision import skill_normalize as sn
         from app.services.extraction import dictionary as dict_mod
 
         monkeypatch.setattr(sn, "known_standard_names", lambda: {"JavaScript"})
-        monkeypatch.setattr(dict_mod, "reload_dynamic_aliases", lambda: 1)
+        refresh_calls: list[int] = []
+
+        async def _refresh_spy() -> int:
+            refresh_calls.append(1)
+            return 1
+
+        monkeypatch.setattr(dict_mod, "refresh_dynamic_aliases", _refresh_spy)
 
         rec = _alias_record()
         db = _FakeSession(rec)
@@ -81,6 +88,8 @@ class TestApproveSkillAlias:
         assert alias_rows and alias_rows[0].status == "approved"
         assert rec.status == "approved"
         assert rec.reviewer == _OPERATOR
+        # P0-1 回归锁：approve 必须真实触发动态别名缓存刷新（旧版此处是死链）
+        assert refresh_calls == [1]
 
     def test_approve_variant_missing(self, monkeypatch):
         """variant/target 缺失 → 校验错误（JSONResponse）。"""
@@ -102,12 +111,10 @@ class TestApproveSkillAlias:
         assert db.committed is False
 
     def test_approve_duplicate_variant(self, monkeypatch):
-        """unique(variant)：已存在该 variant → 冲突。"""
+        """unique(variant)：已存在该 variant → 冲突（409 早退，不触发缓存刷新）。"""
         from app.services.llm_decision import skill_normalize as sn
-        from app.services.extraction import dictionary as dict_mod
 
         monkeypatch.setattr(sn, "known_standard_names", lambda: {"JavaScript"})
-        monkeypatch.setattr(dict_mod, "reload_dynamic_aliases", lambda: 1)
         existing = SimpleNamespace(variant="JS", proposal_id="old", standard_name="JavaScript")
         rec = _alias_record()
         db = _FakeSession(rec, existing_aliases=[existing])
