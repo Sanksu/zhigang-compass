@@ -298,15 +298,24 @@ async def compare(
         # 放线程池避免同步 Neo4j/SBERT 阻塞事件循环
         candidate = build_candidate(cache.parsed_data)
         target = next((p for p in positions if p.position_id == req.position_id), None)
+        # JD 候选推荐（阶段 C）返回的 position_id 是岗位名（normalized_position，
+        # 见 jd_aggregate），而聚合岗位画像的 position_id 是图谱节点 id（pos_xxx）。
+        # 前端从推荐列表点选后拿岗位名调 compare，须兜底按岗位名 name 匹配，
+        # 否则 target=None → 404「岗位不存在」→ 右侧空白（08-27 修复）。
+        if target is None:
+            target = next((p for p in positions if p.name == req.position_id), None)
         if target is None:
             return None
+        # 统一用图谱岗位 id 作为后续匹配 key（target_position_id / evidence 查询），
+        # 即便 position_id 传入的是岗位名，也回落到真实节点 id
+        position_key = target.position_id
         semantic = SkillEmbedder.get()
         matcher = RuleBasedMatcher(positions, semantic=semantic)
         result = matcher.match(
             MatchRequest(
                 candidate=candidate,
                 mode=MatchMode.COMPARE,
-                target_position_id=req.position_id,
+                target_position_id=position_key,
                 project_vectors=project_vectors,
             )
         )[0]
@@ -323,11 +332,15 @@ async def compare(
         "match_id": match_id,
         "user_id": user.get("sub", ""),
         **result.model_dump(),
+        # 对外 position_id 用岗位名（与推荐列表 JD 候选模式一致，见
+        # jd_aggregate position_id=岗位名），避免前端显示/比较不一致；
+        # 图谱内部查询（evidence/match）用 target.position_id 已在上方处理
+        "position_id": target.name,
         "gaps": [g.model_dump() for g in path.gaps],
         "learning_path": [item.model_dump() for item in path.items],
         "learning_path_blocked": path.blocked,
         "learning_path_block_reason": path.block_reason,
-        "evidence_refs": await asyncio.to_thread(_load_evidence_for_position, req.position_id),
+        "evidence_refs": await asyncio.to_thread(_load_evidence_for_position, target.position_id),
     }
     await _persist_match_result(match_id, data)
     # 匹配结果落库（§11.4.1 match_results）：失败仅记日志，Redis 为主存储
