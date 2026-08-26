@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router'
 import { ClipboardCheck, EyeOff, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -128,6 +129,20 @@ export function AdminLlmDecisionsPage() {
     return it.status === 'proposal'
   }
 
+  /** skill_normalize 记录的建议目标（审批关键信息：变体要并到哪）。
+   *  kind=alias（别名回写）→ target_standard；归一图变异 → canonical_name/target_standard。 */
+  function suggestTarget(it: LlmDecisionItem): { target: string; isAlias: boolean } | null {
+    if (it.domain !== 'skill_normalize') return null
+    const out = (it.structured_output ?? {}) as Record<string, unknown>
+    const target = str(out['target_standard']) || str(out['canonical_name'])
+    if (!target) return null
+    return { target, isAlias: out['kind'] === 'alias' }
+  }
+
+  function str(v: unknown): string {
+    return typeof v === 'string' ? v : ''
+  }
+
   const [reviewing, setReviewing] = useState<{ id: string; entity: string; action: 'approve' | 'reject' } | null>(null)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -219,6 +234,9 @@ export function AdminLlmDecisionsPage() {
             <Button variant="ghost" size="sm" onClick={() => setQ('')}>
               清除
             </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/admin/skill-aliases">动态别名表</Link>
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -255,9 +273,28 @@ export function AdminLlmDecisionsPage() {
                   filtered.map((it) => (
                     <TableRow key={it.id}>
                       <TableCell>{DOMAIN_LABELS[it.domain ?? ""] ?? it.domain ?? "-"}</TableCell>
-                      <TableCell className="max-w-[220px] truncate">
-                        {it.entity_type ? `${it.entity_type}:` : ''}
-                        {it.entity_id || '-'}
+                      <TableCell className="max-w-[260px]">
+                        <div className="flex flex-col">
+                          <span className="truncate">
+                            {it.entity_type ? `${it.entity_type}:` : ''}
+                            {it.entity_id || '-'}
+                          </span>
+                          {(() => {
+                            const sug = suggestTarget(it)
+                            if (!sug) return null
+                            return (
+                              <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+                                <span className="text-state-candidate">→</span>
+                                <span className="truncate">{sug.target}</span>
+                                {sug.isAlias && (
+                                  <Badge variant="outline" className="h-4 px-1 text-[9px] text-state-emerging">
+                                    别名
+                                  </Badge>
+                                )}
+                              </span>
+                            )
+                          })()}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={`text-[10px] ${STATUS_TONE[it.status ?? ''] ?? ''}`}>

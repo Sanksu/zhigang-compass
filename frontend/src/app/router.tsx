@@ -19,6 +19,7 @@ const AdminReviewPage = lazy(() => import('@/routes/admin-review-page').then((m)
 const AdminLineagePage = lazy(() => import('@/routes/admin-lineage-page').then((m) => ({ default: m.AdminLineagePage })))
 const AdminLlmPage = lazy(() => import('@/routes/admin-llm-page').then((m) => ({ default: m.AdminLlmPage })))
 const AdminLlmDecisionsPage = lazy(() => import('@/routes/admin-llm-decisions-page').then((m) => ({ default: m.AdminLlmDecisionsPage })))
+const AdminSkillAliasesPage = lazy(() => import('@/routes/admin-skill-aliases-page').then((m) => ({ default: m.AdminSkillAliasesPage })))
 const AdminSettingsPage = lazy(() => import('@/routes/admin-settings-page').then((m) => ({ default: m.AdminSettingsPage })))
 
 function RouteLoading() {
@@ -71,6 +72,10 @@ const protectedRoutes = [
       {
         path: 'admin/llm-decisions',
         element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminLlmDecisionsPage /></Suspense></AuthGuard>,
+      },
+      {
+        path: 'admin/skill-aliases',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSkillAliasesPage /></Suspense></AuthGuard>,
       },
       {
         path: 'admin/settings',

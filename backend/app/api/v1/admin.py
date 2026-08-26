@@ -22,6 +22,7 @@ from app.api.v1.admin_routes import (
     llm_decisions,
     position_edit,
     position_reviews,
+    skill_aliases,
 )
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_permission("admin:*"))])
@@ -34,6 +35,7 @@ router.include_router(position_edit.router)
 router.include_router(config.router)
 router.include_router(dict_guard.router)
 router.include_router(llm_decisions.router)
+router.include_router(skill_aliases.router)
 router.include_router(etl.router)
 
 # 爬虫域私有符号 re-export（tests/admin/* 直连导入）
