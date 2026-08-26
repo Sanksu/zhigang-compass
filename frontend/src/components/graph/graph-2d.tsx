@@ -16,7 +16,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphEdge, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 import type { EChartsModel } from './graph-layout'
 import { COLOR_BY_STATUS, computeFilterMarks, isSoftSkill, skillLabelThreshold } from './graph-utils'
-import { graphColors, graphNodeColor, GRAPH_OPACITY, GRAPH_STATUS_META, GRAPH_STATUS_ORDER } from './graph-visual-tokens'
+import { graphColors, graphNodeColor, GRAPH_OPACITY } from './graph-visual-tokens'
 import { buildDagGraph, type DagSkillLink, type DagSkillNode } from '@/components/learning/learning-timeline'
 import type { LearningPathItem } from '@/components/match/types'
 import { GraphFilterPanel } from './graph-filter-panel'
@@ -176,57 +176,6 @@ function edgeBaseStyle(
 
 function isNarrowScreen(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
-}
-
-function LegendDot({ color, label, square = false }: { color: string; label: string; square?: boolean }) {
-  return (
-    <span className="inline-flex items-center gap-1">
-      <span
-        className={cn('size-2 shrink-0', square ? 'rounded-[2px]' : 'rounded-full')}
-        style={{ backgroundColor: color }}
-        aria-hidden="true"
-      />
-      {label}
-    </span>
-  )
-}
-
-/** 常显图例（视觉评审 P2）：节点配色语义一览——颜色开关此前只藏在默认折叠的
- * 「图层探索器」里，观演示者无从得知当前配色含义。图例仅作 key（不交互），
- * 悬停/状态过滤仍由图层探索器承担；条目按当前数据实际出现的节点类动态取舍。 */
-function GraphLegend({ nodes, themeVersion }: { nodes: GraphNode[]; themeVersion: number }) {
-  // 渲染期轻量计算（几百节点 × 少量 some 扫描），无需 memo；themeVersion 仅用于
-  // 主题切换时触发本组件重算配色
-  void themeVersion
-  const colors = graphColors(isDark() ? 'dark' : 'light')
-  const statuses = GRAPH_STATUS_ORDER.filter((s) =>
-    nodes.some((n) => n.type === 'position' && (n.status ?? 'candidate') === s),
-  )
-  const hasDomain = nodes.some((n) => n.isDomain)
-  const hasSkill = nodes.some((n) => n.type === 'skill' && !isSoftSkill(n))
-  const hasSoft = nodes.some((n) => n.type === 'skill' && isSoftSkill(n))
-  const hasEvidence = nodes.some((n) => n.type === 'evidence')
-
-  if (!hasDomain && statuses.length === 0 && !hasSkill && !hasSoft && !hasEvidence) return null
-  return (
-    <div
-      className="pointer-events-none absolute bottom-12 left-3 z-10 hidden max-w-[calc(100%-13rem)] flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border/80 bg-canvas/90 px-2.5 py-1.5 text-[10px] text-ink-muted shadow-sm backdrop-blur-xl lg:flex"
-      aria-label="节点配色图例"
-    >
-      {hasDomain && <LegendDot color={colors.domain} label="职能域" square />}
-      {statuses.length > 0 && (
-        <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-ink-faint">岗位</span>
-          {statuses.map((s) => (
-            <LegendDot key={s} color={GRAPH_STATUS_META[s].color} label={GRAPH_STATUS_META[s].label} />
-          ))}
-        </span>
-      )}
-      {hasSkill && <LegendDot color={colors.skill} label="技能" />}
-      {hasSoft && <LegendDot color={colors.softSkill} label="软技能" />}
-      {hasEvidence && <LegendDot color={colors.evidence} label="证据" />}
-    </div>
-  )
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -1004,8 +953,6 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           <span className="absolute bottom-3 left-3 text-[8px] text-atlas-muted/70">核心岗位 · 能力与证据</span>
         </div>
       )}
-      {/* 常显图例：颜色语义 key（交互开关仍在图层探索器） */}
-      {viewMode === 'graph' && <GraphLegend nodes={data.nodes} themeVersion={themeVersion} />}
       {/* task T2: 学习路径可用时提供 宏观 DAG / 全局图谱 切换 */}
       {dagEnabled && (
         <div className="absolute left-1/2 top-3 z-30 flex -translate-x-1/2 overflow-hidden rounded-md border border-atlas-grid bg-canvas/90 shadow-sm text-[10px]">
