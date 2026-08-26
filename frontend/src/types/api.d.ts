@@ -2832,6 +2832,10 @@ export interface paths {
                                 category?: string;
                                 /** @description skill_classify 专用：技能名 */
                                 skill?: string;
+                                /** @description 技能别名回写专用（kind=alias）：别名变体 */
+                                variant?: string;
+                                /** @description 技能别名回写专用（kind=alias）：归并目标标准名 */
+                                standard?: string;
                             };
                             trace_id?: string;
                         };
@@ -2890,6 +2894,56 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skill-aliases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 动态别名表列表（技能别名回写产物，normalize_skill 并查源） */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "pending" | "approved" | "rejected";
+                    limit?: number;
+                    offset?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 别名表分页列表（variant→standard，approved 行为 normalize_skill 生效源） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: {
+                                items?: components["schemas"]["SkillAliasItem"][];
+                                total?: number;
+                                limit?: number;
+                                offset?: number;
+                            };
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4641,6 +4695,31 @@ export interface components {
                 [key: string]: number;
             };
             total: number;
+        };
+        /** @description 技能别名回写记录（skill_aliases 行，方案① */
+        SkillAliasItem: {
+            /** @description UUID */
+            id: string;
+            /** @description 别名变体（如 .NET Framework / 3D Modeling） */
+            variant: string;
+            /** @description 归并目标标准名（known_standard_names 内） */
+            standard_name: string;
+            /** @description pending → approved（normalize_skill 生效）/ rejected */
+            status: string;
+            /** @description 来源决策记录 id（llm_decision_records） */
+            proposal_id?: string;
+            /** @description 来源（llm_review） */
+            source?: string;
+            /** @description 审批人（UUID） */
+            reviewed_by?: string;
+            /** @description 审批理由 */
+            review_reason?: string;
+            /** @description LLM merge 置信度 */
+            confidence?: number | null;
+            /** @description 图同步进度标记（别名 approve 即生效，此字段预留） */
+            applied_to_graph?: boolean;
+            /** @description ISO8601 */
+            created_at: string;
         };
         /** @description 图谱版本列表项（GET /evolution/versions） */
         EvolutionVersion: {

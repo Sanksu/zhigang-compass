@@ -1596,6 +1596,8 @@ paths:
                       target: { type: string, description: 名称归一专用：目标名 }
                       category: { type: string, description: skill_classify 专用：批准后的权威分类 }
                       skill: { type: string, description: skill_classify 专用：技能名 }
+                      variant: { type: string, description: 技能别名回写专用（kind=alias）：别名变体 }
+                      standard: { type: string, description: 技能别名回写专用（kind=alias）：归并目标标准名 }
                   trace_id: { type: string }
 
   /api/v1/admin/llm-decisions/{decision_id}/reject:
@@ -1630,6 +1632,44 @@ paths:
                     type: object
                     properties:
                       decision_id: { type: string }
+                  trace_id: { type: string }
+
+  /api/v1/admin/skill-aliases:
+    get:
+      tags: [admin]
+      summary: 动态别名表列表（技能别名回写产物，normalize_skill 并查源）
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [pending, approved, rejected], description: 状态过滤（空=全部） }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        '200':
+          description: 别名表分页列表（variant→standard，approved 行为 normalize_skill 生效源）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/SkillAliasItem' }
+                      total: { type: integer }
+                      limit: { type: integer }
+                      offset: { type: integer }
                   trace_id: { type: string }
 
   /api/v1/admin/positions/{position_name}:
@@ -3107,6 +3147,23 @@ components:
           description: status → count
           additionalProperties: { type: integer }
         total: { type: integer }
+
+    SkillAliasItem:
+      type: object
+      description: 技能别名回写记录（skill_aliases 行，方案① #559/#561）
+      required: [id, variant, standard_name, status, created_at]
+      properties:
+        id: { type: string, description: UUID }
+        variant: { type: string, description: 别名变体（如 .NET Framework / 3D Modeling） }
+        standard_name: { type: string, description: 归并目标标准名（known_standard_names 内） }
+        status: { type: string, description: pending → approved（normalize_skill 生效）/ rejected }
+        proposal_id: { type: string, description: 来源决策记录 id（llm_decision_records） }
+        source: { type: string, description: 来源（llm_review） }
+        reviewed_by: { type: string, description: 审批人（UUID） }
+        review_reason: { type: string, description: 审批理由 }
+        confidence: { type: number, nullable: true, description: LLM merge 置信度 }
+        applied_to_graph: { type: boolean, description: 图同步进度标记（别名 approve 即生效，此字段预留） }
+        created_at: { type: string, description: ISO8601 }
 
     # ============================================================
     # 演化模块端点 data（08-14 契约补全：versions/diff/trends/signals/state-machine/watch）
