@@ -143,12 +143,16 @@ function SignalsView() {
 
   function renderList(items: EvolutionSignal[], tone: 'emerging' | 'declining', windowCount: number) {
     if (items.length === 0) {
+      // 空态即方法论展示（视觉评审 P2）：0 信号不是"没数据"，是阈值未触发
       return (
-        <p className="py-6 text-center text-xs text-ink-faint">
-          {windowCount < 2
-            ? `历史快照不足（当前 ${windowCount} 期，需 ≥2 期），冷启动阶段暂不判定`
-            : '本期无该趋势信号'}
-        </p>
+        <div className="py-6 text-center">
+          <p className="text-xs text-ink-muted">当前窗口无统计显著涨落 —— Z-score 阈值未触发</p>
+          <p className="mt-1 text-[10px] text-ink-faint">
+            {windowCount < 2
+              ? `历史快照不足（当前 ${windowCount} 期，需 ≥2 期），冷启动阶段暂不判定`
+              : `判定口径：${tone === 'emerging' ? '新兴 z > 2.0' : '衰退 z < -1.5'}（${windowCount} 期滑窗 · 频次占比归一）；涨落越过阈值后在此列出`}
+          </p>
+        </div>
       )
     }
     const toneColor = tone === 'emerging' ? 'text-state-emerging' : 'text-state-declining'
@@ -903,10 +907,10 @@ function PointsTrendChart({ points, freqLabel }: { points: SnapshotPoint[]; freq
   return (
     <div className="mb-4">
       <div className="mb-1 flex items-center justify-between">
-        <span className="text-[10px] text-ink-faint">
+        <span className="text-xs text-ink-faint">
           时间轴播放：拖动滑窗或点击播放回放{freqLabel}演进
         </span>
-        <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={togglePlay}>
+        <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={togglePlay}>
           {playing ? <Pause className="mr-1 size-3" /> : <Play className="mr-1 size-3" />}
           {playing ? '暂停' : '播放'}
         </Button>
@@ -1130,9 +1134,9 @@ function PositionEvolutionView() {
       extraColumns={(_d, p) => (
         <TableCell className="text-right">
           {p.present ? (
-            <Badge variant="outline" className="text-[10px] text-state-stable">存在</Badge>
+            <Badge variant="outline" className="text-xs text-state-stable">存在</Badge>
           ) : (
-            <Badge variant="outline" className="text-[10px] text-ink-faint">未收录</Badge>
+            <Badge variant="outline" className="text-xs text-ink-faint">未收录</Badge>
           )}
         </TableCell>
       )}
