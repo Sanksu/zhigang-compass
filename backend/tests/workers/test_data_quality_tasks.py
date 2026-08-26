@@ -34,6 +34,27 @@ class TestBuildJdText:
         snap = {"title": "Python开发", "description": "  ", "requirements": ""}
         assert _build_jd_text(snap, "RAW") == "RAW"
 
+    def test_education_hint_no_double_when_joined_fields_include_edu(self):
+        # snapshot.education 已随 _JD_TEXT_FIELDS 拼入正文（含学历词）→ 不追加，防重复投喂
+        snap = {"title": "数据工程师", "description": "负责数仓建设", "education": "本科"}
+        assert "\n【教育要求】" not in _build_jd_text(snap, "RAW")
+
+    def test_education_hint_appended_on_raw_fallback(self):
+        # body 字段缺失回退 raw_text、正文缺学历词但列表页学历非空（黄金集形态）
+        # → 追加独立【教育要求】行（#537 学历弱维的真实缺口路径）
+        snap = {"education": "硕士"}
+        assert "\n【教育要求】硕士" in _build_jd_text(snap, "负责算法研发")
+
+    def test_education_hint_not_appended_when_raw_has_keyword(self):
+        # raw_text 已含学历信号 → 不追加
+        snap = {"education": "硕士"}
+        assert "\n【教育要求】" not in _build_jd_text(snap, "需要硕士及以上学历")
+
+    def test_education_hint_not_appended_when_edu_blank(self):
+        # 快照无学历 → 原样返回（与历史一致）
+        snap = {"title": "数据工程师", "description": "负责数仓建设", "education": ""}
+        assert "\n【教育要求】" not in _build_jd_text(snap, "RAW")
+
 
 class TestExtractionOf:
     def test_returns_extraction_dict(self):
