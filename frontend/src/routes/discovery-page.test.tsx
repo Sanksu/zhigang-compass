@@ -83,7 +83,7 @@ describe('DiscoveryPage', () => {
     )
     // 「技能待聚合/待审核」为跨 span 文案，getAllByText 宽松匹配取首个
     expect(screen.getAllByText(/技能待聚合/).length).toBeGreaterThan(0)
-    expect(screen.getByText('候选·待审核')).toBeInTheDocument()
+    expect(screen.getByText('候选')).toBeInTheDocument()
   })
 
   it('切到技能增减 Tab → 显示选择岗位下拉', async () => {

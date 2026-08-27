@@ -10,6 +10,7 @@ const badgeVariants = cva(
         default: 'border-transparent bg-ink text-canvas',
         outline: 'border-border text-ink-secondary',
         // 岗位状态色 — 仅用于状态指示
+        active: 'border-transparent bg-state-active/10 text-state-active',
         candidate: 'border-transparent bg-state-candidate/10 text-state-candidate',
         emerging: 'border-transparent bg-state-emerging/10 text-state-emerging',
         stable: 'border-transparent bg-state-stable/10 text-state-stable',

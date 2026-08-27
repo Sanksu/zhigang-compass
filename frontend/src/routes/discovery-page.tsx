@@ -9,27 +9,21 @@ import { useEffect, useMemo, useState } from 'react'
 import { Sparkles, Radar, ArrowUpRight, ArrowDownRight, Minus, AlertCircle, RotateCcw } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { PositionStateBadge } from '@/components/shared/position-state-badge'
 import { cn } from '@/lib/utils'
 import { apiGet } from '@/lib/api'
 import {
   type DiscoveryRecentData,
   type PositionSkillsDeltaData,
   type RecentDiscoveryCandidate,
-  DISCOVERY_STATE_LABEL,
-  DISCOVERY_STATE_TONE,
 } from '@/components/discovery/types'
 import { MetricCard } from '@/components/evolution/shared'
 
 type Tab = 'new' | 'delta'
 
 function stateBadge(state: string) {
-  return (
-    <Badge variant={DISCOVERY_STATE_TONE[state] as never} className="text-[10px]">
-      {DISCOVERY_STATE_LABEL[state] ?? state}
-    </Badge>
-  )
+  return <PositionStateBadge state={state} className="text-[10px]" />
 }
 
 function SkillChips({ skill, tone }: { skill: { skill_name: string }[]; tone: 'must' | 'nice' | 'soft' }) {
