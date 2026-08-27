@@ -6,6 +6,12 @@
 """
 
 import asyncio
+
+from app.schemas.admin_requests import (
+    AdminEvolutionReviewRequest,
+    AdminReasonRequest,
+    AdminReviewActionRequest,
+)
 from unittest.mock import AsyncMock, patch
 
 from app.api.v1.admin_routes import position_reviews
@@ -85,7 +91,7 @@ class TestReviewPositionAtomicity:
         """approve：PG 状态 + 审计先提交，随后才调图写副作用。"""
         cand_row = _make_candidate_stub("candidate")
         db = _FakeDB(cand_row)
-        req = {"action": "approve", "reason": "数据达标"}
+        req = AdminReviewActionRequest(action="approve", reason="数据达标")
 
         async def run():
             with patch.object(
@@ -115,7 +121,7 @@ class TestReviewPositionAtomicity:
         """图写副作用异常：决策不丢，透出 effects_applied=False。"""
         cand_row = _make_candidate_stub("candidate")
         db = _FakeDB(cand_row)
-        req = {"action": "approve", "reason": "数据达标"}
+        req = AdminReviewActionRequest(action="approve", reason="数据达标")
 
         async def run():
             with patch.object(
@@ -142,7 +148,7 @@ class TestReviewPositionAtomicity:
         """reject：状态 + 驳回记录 + 审计先提交，图写副作用随后。"""
         cand_row = _make_candidate_stub("candidate")
         db = _FakeDB(cand_row)
-        req = {"action": "reject", "reason": "驳回测试"}
+        req = AdminReviewActionRequest(action="reject", reason="驳回测试")
 
         async def run():
             with patch.object(
@@ -170,7 +176,7 @@ class TestReviewEvolutionAtomicity:
         """演化 approve：PG 状态 + 审计先提交，图写副作用随后。"""
         cand_row = _make_candidate_stub("emerging")
         db = _FakeDB(cand_row)
-        req = {"action": "approve", "reason": "确认稳定"}
+        req = AdminEvolutionReviewRequest(action="approve", reason="确认稳定")
 
         async def run():
             with patch.object(
@@ -194,7 +200,7 @@ class TestArchivePositionAtomicity:
         """归档：PG 状态 + 审计先提交，图写副作用随后且 effects_applied 透出。"""
         cand_row = _make_candidate_stub("declining")
         db = _FakeDB(cand_row)
-        req = {"reason": "业务确认归档"}
+        req = AdminReasonRequest(reason="业务确认归档")
 
         async def run():
             with patch.object(

@@ -6,6 +6,8 @@ test_name_normalization_approval.py 的写法。skill_classify 记录为 shadow
 """
 
 import asyncio
+
+from app.schemas.admin_requests import LLMDecisionReviewRequest
 from types import SimpleNamespace
 
 from app.api.v1.admin_routes import llm_decisions as mod
@@ -60,7 +62,7 @@ class _FakeSession:
 
 def _approve(session, reason="分类确认", operator=_OPERATOR):
     return asyncio.run(mod.approve_llm_decision(
-        session._record.id, {"review_reason": reason},
+        session._record.id, LLMDecisionReviewRequest(review_reason=reason),
         db=session, current_user={"sub": operator, "role": "admin"},
     ))
 
@@ -112,7 +114,7 @@ class TestSkillClassifyReject:
         """reject 对 skill_classify shadow 仅状态流转（效果为 0）。"""
         session = _FakeSession(_classify_record())
         resp = asyncio.run(mod.reject_llm_decision(
-            session._record.id, {"review_reason": "分类不当"},
+            session._record.id, LLMDecisionReviewRequest(review_reason="分类不当"),
             db=session, current_user={"sub": _OPERATOR, "role": "admin"},
         ))
         assert _code(resp) == 0

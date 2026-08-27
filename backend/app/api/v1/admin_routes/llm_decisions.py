@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_permission
 from app.core.database import get_db
 from app.models.business import LLMDecisionRecord
+from app.schemas.admin_requests import LLMDecisionReviewRequest
 
 router = APIRouter(tags=["admin-llm-decisions"])
 
@@ -129,32 +130,30 @@ async def _load_decision(session, decision_id: str):
     return await session.get(LLMDecisionRecord, decision_id)
 
 
-def _approve_common_guard(req: dict, current_user: dict) -> tuple[dict | None, str, str]:
+def _approve_common_guard(reason_raw: str, current_user: dict) -> tuple[dict | None, str, str]:
     """公共审批前置校验：返回 (None, reason, operator) 通过；(error_resp, "", "") 失败。
 
-    校验 review_reason 非空 + 操作者身份为合法 UUID（AuditLog.user_id 列约束）。
+    review_reason 非空已由 LLMDecisionReviewRequest Pydantic 强校验（P1-4），
+    此处仅做 strip 后非空复核 + 操作者 UUID 守卫（AuditLog.user_id 列约束）。
     独立成函数便于单测注入，同时避免在两个 domain 分支重复。
     """
-    import uuid as _uuid
-
+    from app.api.common import resolve_operator
     from app.core.errors import ERR_VALIDATION
     from app.schemas.common import error
 
-    reason = (req.get("review_reason") or "").strip()
+    reason = (reason_raw or "").strip()
     if not reason:
         return error(ERR_VALIDATION, "审批必须填写 review_reason"), "", ""
-    operator = current_user.get("sub") or current_user.get("user_id", "admin")
-    try:
-        _uuid.UUID(str(operator))
-    except (ValueError, AttributeError, TypeError):
-        return error(ERR_VALIDATION, f"操作者身份必须为 UUID（AuditLog.user_id 列约束），收到: {operator!r}"), "", ""
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err, "", ""
     return None, reason, operator
 
 
 @router.post("/llm-decisions/{decision_id}/approve")
 async def approve_llm_decision(
     decision_id: str,
-    req: dict,
+    req: LLMDecisionReviewRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
 ) -> dict:
@@ -169,7 +168,7 @@ async def approve_llm_decision(
     from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
     from app.schemas.common import error
 
-    guard, reason, operator = _approve_common_guard(req, current_user)
+    guard, reason, operator = _approve_common_guard(req.review_reason, current_user)
     if guard is not None:
         return guard
 
@@ -459,26 +458,22 @@ async def _approve_skill_alias(db, record, reason: str, operator: str) -> dict:
 @router.post("/llm-decisions/{decision_id}/reject")
 async def reject_llm_decision(
     decision_id: str,
-    req: dict,
+    req: LLMDecisionReviewRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
 ) -> dict:
     """驳回一条 proposal（仅 status 流转，效果为 0）。"""
-    import uuid as _uuid
-
-    from app.api.common import ok
+    from app.api.common import ok, resolve_operator
     from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
     from app.models.business import AuditLog
     from app.schemas.common import error
 
-    reason = (req.get("review_reason") or "").strip()
+    reason = req.review_reason.strip()
     if not reason:
         return error(ERR_VALIDATION, "审批必须填写 review_reason")
-    operator = current_user.get("sub") or current_user.get("user_id", "admin")
-    try:
-        _uuid.UUID(str(operator))
-    except (ValueError, AttributeError, TypeError):
-        return error(ERR_VALIDATION, f"操作者身份必须为 UUID（AuditLog.user_id 列约束），收到: {operator!r}")
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
 
     record = await _load_decision(db, decision_id)
     if record is None:

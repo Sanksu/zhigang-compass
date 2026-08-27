@@ -14,6 +14,11 @@ import types
 import pytest
 
 import app.api.v1.admin_routes.dict_guard as dg
+from app.schemas.admin_requests import AdminReviewActionRequest
+
+
+def _req(raw: dict) -> AdminReviewActionRequest:
+    return AdminReviewActionRequest(**raw)
 
 
 # ── 桩件 ──────────────────────────────────────────────────────────
@@ -81,28 +86,28 @@ def dyn_spy(monkeypatch):
 
 # ── 审核基础校验 ──────────────────────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_review_rejects_missing_reason(dyn_spy):
-    resp = await dg.review_proposal("p1", {"action": "approve", "reason": "  "}, _FakeDB(_proposal()), _ADMIN)
-    assert resp.status_code == 422 and json.loads(resp.body)["code"] == 4000
+def test_review_rejects_missing_reason():
+    """空白 reason / 非法 action 由 Pydantic 强校验拦截（HTTP 侧 422/4000）。"""
+    from pydantic import ValidationError
 
+    from app.schemas.admin_requests import AdminReviewActionRequest
 
-@pytest.mark.asyncio
-async def test_review_rejects_unknown_action(dyn_spy):
-    resp = await dg.review_proposal("p1", {"action": "maybe", "reason": "r"}, _FakeDB(_proposal()), _ADMIN)
-    assert json.loads(resp.body)["code"] == 4000
+    with pytest.raises(ValidationError):
+        AdminReviewActionRequest(action="approve", reason="  ")
+    with pytest.raises(ValidationError):
+        AdminReviewActionRequest(action="maybe", reason="r")
 
 
 @pytest.mark.asyncio
 async def test_review_missing_proposal_404(dyn_spy):
-    resp = await dg.review_proposal("pX", {"action": "approve", "reason": "r"}, _FakeDB(None), _ADMIN)
+    resp = await dg.review_proposal("pX", _req({"action": "approve", "reason": "r"}), _FakeDB(None), _ADMIN)
     assert resp.status_code == 404 and json.loads(resp.body)["code"] == 4040
 
 
 @pytest.mark.asyncio
 async def test_review_non_pending_conflict(dyn_spy):
     resp = await dg.review_proposal(
-        "p1", {"action": "approve", "reason": "r"}, _FakeDB(_proposal(status="approved")), _ADMIN)
+        "p1", _req({"action": "approve", "reason": "r"}), _FakeDB(_proposal(status="approved")), _ADMIN)
     assert json.loads(resp.body)["code"] == 4090
 
 
@@ -111,7 +116,7 @@ async def test_review_non_pending_conflict(dyn_spy):
 @pytest.mark.asyncio
 async def test_approve_add_stopword_applies_blocked_and_cleans(dyn_spy):
     db = _FakeDB(_proposal())
-    resp = await dg.review_proposal("p1", {"action": "approve", "reason": "确认噪音"}, db, _ADMIN)
+    resp = await dg.review_proposal("p1", _req({"action": "approve", "reason": "确认噪音"}), db, _ADMIN)
     assert resp.code == 0 and resp.data["status"] == "approved"
     assert dyn_spy["adds"] == [("blocked", "低代码平台搭建")]
     assert dyn_spy["removes"] == []
@@ -127,7 +132,7 @@ async def test_approve_add_stopword_applies_blocked_and_cleans(dyn_spy):
 async def test_approve_remove_dynamic_blocked_removes_entry(dyn_spy):
     dyn_spy["blocked"] = True
     db = _FakeDB(_proposal(action="remove_stopword", term="微"))
-    resp = await dg.review_proposal("p1", {"action": "approve", "reason": "误杀"}, db, _ADMIN)
+    resp = await dg.review_proposal("p1", _req({"action": "approve", "reason": "误杀"}), db, _ADMIN)
     assert resp.code == 0
     assert dyn_spy["removes"] == [("blocked", "微")]
     assert [o.kind for o in db.added if hasattr(o, "kind")] == ["blocked"]
@@ -136,7 +141,7 @@ async def test_approve_remove_dynamic_blocked_removes_entry(dyn_spy):
 @pytest.mark.asyncio
 async def test_approve_remove_static_without_victim_conflict(dyn_spy):
     db = _FakeDB(_proposal(action="remove_stopword", term="微", evidence=[]))
-    resp = await dg.review_proposal("p1", {"action": "approve", "reason": "r"}, db, _ADMIN)
+    resp = await dg.review_proposal("p1", _req({"action": "approve", "reason": "r"}), db, _ADMIN)
     body = json.loads(resp.body)
     assert body["code"] == 4090 and "git 固化流程" in body["msg"]
     assert dyn_spy["adds"] == [] and dyn_spy["removes"] == []
@@ -146,7 +151,7 @@ async def test_approve_remove_static_without_victim_conflict(dyn_spy):
 async def test_approve_remove_static_with_victim_protects_victim(dyn_spy):
     evidence = [{"label": "受影响技能", "value": "微信小程序"}]
     db = _FakeDB(_proposal(action="remove_stopword", term="微", evidence=evidence))
-    resp = await dg.review_proposal("p1", {"action": "approve", "reason": "误杀真实技能"}, db, _ADMIN)
+    resp = await dg.review_proposal("p1", _req({"action": "approve", "reason": "误杀真实技能"}), db, _ADMIN)
     assert resp.code == 0
     # 静态词不动 git 词表，以受影响技能的动态 protect 落地
     assert dyn_spy["adds"] == [("protected", "微信小程序")]
@@ -156,7 +161,7 @@ async def test_approve_remove_static_with_victim_protects_victim(dyn_spy):
 @pytest.mark.asyncio
 async def test_approve_protect_whitelist_adds_protected(dyn_spy):
     db = _FakeDB(_proposal(action="protect_whitelist", term="微信小程序"))
-    resp = await dg.review_proposal("p1", {"action": "approve", "reason": "真实技能"}, db, _ADMIN)
+    resp = await dg.review_proposal("p1", _req({"action": "approve", "reason": "真实技能"}), db, _ADMIN)
     assert resp.code == 0
     assert dyn_spy["adds"] == [("protected", "微信小程序")]
 
@@ -164,7 +169,7 @@ async def test_approve_protect_whitelist_adds_protected(dyn_spy):
 @pytest.mark.asyncio
 async def test_reject_marks_status_without_side_effects(dyn_spy):
     db = _FakeDB(_proposal())
-    resp = await dg.review_proposal("p1", {"action": "reject", "reason": "证据不足"}, db, _ADMIN)
+    resp = await dg.review_proposal("p1", _req({"action": "reject", "reason": "证据不足"}), db, _ADMIN)
     assert resp.code == 0 and resp.data["status"] == "rejected"
     assert dyn_spy["adds"] == [] and dyn_spy["removes"] == []
     # reject 无动态层变更，不写 DictChangeLog（仅 AuditLog）
@@ -180,7 +185,7 @@ async def test_review_non_uuid_operator_rejected_before_side_effects(dyn_spy):
     才因 UUID 校验失败，产生「图已删、提案仍 pending」的半执行态。"""
     db = _FakeDB(_proposal())
     resp = await dg.review_proposal(
-        "p1", {"action": "approve", "reason": "r"}, db, {"sub": "admin"})
+        "p1", _req({"action": "approve", "reason": "r"}), db, {"sub": "admin"})
     body = json.loads(resp.body)
     assert body["code"] == 4000 and "UUID" in body["msg"]
     # 零副作用：动态词表未动、无审计写入、提案状态未翻转
@@ -197,7 +202,7 @@ async def test_approve_side_effect_failure_keeps_approved_state(dyn_spy, monkeyp
         raise RuntimeError("neo4j down")
     monkeypatch.setattr(dg, "_cleanup_skill_nodes", _boom)
     db = _FakeDB(_proposal())
-    resp = await dg.review_proposal("p1", {"action": "approve", "reason": "r"}, db, _ADMIN)
+    resp = await dg.review_proposal("p1", _req({"action": "approve", "reason": "r"}), db, _ADMIN)
     assert resp.code == 0 and resp.data["status"] == "approved"
     assert resp.data["effects_applied"] is False
     # 状态与审计已先于副作用提交（commit 至少一次），changelog 已写

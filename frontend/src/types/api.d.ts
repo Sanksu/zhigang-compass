@@ -2155,13 +2155,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        username: string;
-                        /** Format: password */
-                        password: string;
-                        /** @enum {string} */
-                        role: "admin" | "user" | "guest";
-                    };
+                    "application/json": components["schemas"]["CreateUserRequest"];
                 };
             };
             responses: {
@@ -2202,12 +2196,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        role?: "admin" | "user" | "guest";
-                        /** @enum {string} */
-                        status?: "active" | "disabled";
-                    };
+                    "application/json": components["schemas"]["UpdateUserRequest"];
                 };
             };
             responses: {
@@ -2268,14 +2257,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        /** @description 平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx */
-                        platform: string;
-                        /** @description 关键词（可选，留空则采集平台热度/最新内容，08-16 起爬虫不再内置默认关键词） */
-                        keyword?: string;
-                        /** @description 城市（可选，海外源默认英文城市） */
-                        city?: string;
-                    };
+                    "application/json": components["schemas"]["CrawlTriggerRequest"];
                 };
             };
             responses: {
@@ -2802,10 +2784,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        /** @description 审批理由（必填） */
-                        review_reason: string;
-                    };
+                    "application/json": components["schemas"]["LLMDecisionReviewRequest"];
                 };
             };
             responses: {
@@ -2870,9 +2849,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        review_reason: string;
-                    };
+                    "application/json": components["schemas"]["LLMDecisionReviewRequest"];
                 };
             };
             responses: {
@@ -3004,20 +2981,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        /** @description 技能全量替换（缺省不变更），每项含 name/necessity/weight */
-                        skills?: {
-                            /** @description 技能名 */
-                            name: string;
-                            /** @enum {string} */
-                            necessity: "must" | "nice";
-                            weight: number;
-                        }[];
-                        /** @description 核心职责（字符串数组，全量替换） */
-                        core_duties?: string[];
-                        /** @description 典型场景（字符串数组，全量替换） */
-                        scenarios?: string[];
-                    };
+                    "application/json": components["schemas"]["AdminPositionEditRequest"];
                 };
             };
             responses: {
@@ -3126,12 +3090,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        action: "approve" | "reject";
-                        /** @description 审核理由（必填） */
-                        reason: string;
-                    };
+                    "application/json": components["schemas"]["AdminReviewActionRequest"];
                 };
             };
             responses: {
@@ -3234,10 +3193,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        /** @description 归档原因（必填，写入审计日志） */
-                        reason: string;
-                    };
+                    "application/json": components["schemas"]["AdminReasonRequest"];
                 };
             };
             responses: {
@@ -3368,11 +3324,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        action: "approve" | "reject";
-                        modified?: Record<string, never>;
-                    };
+                    "application/json": components["schemas"]["AdminEvolutionReviewRequest"];
                 };
             };
             responses: {
@@ -3629,12 +3581,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        action: "approve" | "reject";
-                        /** @description 审核理由（必填） */
-                        reason: string;
-                    };
+                    "application/json": components["schemas"]["AdminReviewActionRequest"];
                 };
             };
             responses: {
@@ -3924,6 +3871,71 @@ export interface components {
             impact_stats?: Record<string, never>;
             applied_by: string;
             created_at: string;
+        };
+        AdminReviewActionRequest: {
+            /**
+             * @description 审核动作
+             * @enum {string}
+             */
+            action: "approve" | "reject";
+            /** @description 审核理由（必填，不能为纯空白） */
+            reason: string;
+        };
+        AdminReasonRequest: {
+            /** @description 归档理由（必填，不能为纯空白） */
+            reason: string;
+        };
+        AdminEvolutionReviewRequest: {
+            /** @enum {string} */
+            action: "approve" | "reject";
+            /** @description 审核理由（可选，缺省 admin evolution review） */
+            reason?: string;
+            /** @description approve 时合并进候选池 features 的属性修订 */
+            modified?: Record<string, never>;
+        };
+        LLMDecisionReviewRequest: {
+            /** @description 审批理由（必填，不能为纯空白） */
+            review_reason: string;
+        };
+        CreateUserRequest: {
+            username: string;
+            /** Format: password */
+            password: string;
+            /**
+             * @default user
+             * @enum {string}
+             */
+            role: "admin" | "user" | "guest";
+        };
+        /** @description 部分更新（未传字段不动） */
+        UpdateUserRequest: {
+            /** @enum {string} */
+            role?: "admin" | "user" | "guest";
+            /** @enum {string} */
+            status?: "active" | "disabled";
+        };
+        /** @description 岗位定义人工编辑（均可选，全空为无变更空操作） */
+        AdminPositionEditRequest: {
+            /** @description 技能全量替换（缺省不变更），每项含 name/necessity/weight */
+            skills?: {
+                /** @description 技能名 */
+                name: string;
+                /** @enum {string} */
+                necessity: "must" | "nice";
+                weight?: number;
+            }[];
+            /** @description 核心职责（字符串数组，全量替换） */
+            core_duties?: string[];
+            /** @description 典型场景（字符串数组，全量替换） */
+            scenarios?: string[];
+        };
+        CrawlTriggerRequest: {
+            /** @description 平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx */
+            platform: string;
+            /** @description 关键词（可选，留空则采集平台热度/最新内容，08-16 起爬虫不再内置默认关键词） */
+            keyword?: string;
+            /** @description 城市（可选，海外源默认英文城市） */
+            city?: string;
         };
         ApiResponse: {
             /**
