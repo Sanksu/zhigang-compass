@@ -17,6 +17,7 @@ skill_weight DESC 优先，权重相同再按 gap_type（missing > weak > matche
 from app.services.learning_path.schemas import GapSkill, GapType, MatchEvidenceItem
 from app.services.learning_path.prerequisites import base_hours
 from app.services.matching.engine import _canonical_name
+from app.services.matching.schemas import SkillRequirement
 from app.services.matching.weights import load_sim_threshold
 from app.services.proficiency import proficiency_is_weak
 
@@ -116,9 +117,19 @@ def analyze_gaps(candidate, position, semantic=None, sim_threshold: float | None
         差距列表，按 (weight DESC, missing > weak > matched) 排序。软技能独立
         通道（soft_requirements，不参与评分）同样进入差距列表供展示（is_soft
         打标），但不触发学习路径课程匹配（generator 侧过滤）。
+
+    08-27 fix：入口按 skill_name 去重（must > nice > soft 保留最强优先级），
+    避免聚合画像/单 JD 画像三池（must/nice/soft）同名技能重复出现在差距列表。
     """
-    gaps: list[GapSkill] = []
+    # 08-27 fix：must > nice > soft 优先级去重——同名技能保留首个（最强）要求
+    seen: dict[str, SkillRequirement] = {}
     for req in [*position.must_skills, *position.nice_skills, *position.soft_requirements]:
+        if req.skill_name in seen:
+            continue
+        seen[req.skill_name] = req
+
+    gaps: list[GapSkill] = []
+    for req in seen.values():
         sim, matched_skill = _best_matching_skill(
             req, candidate.skills, semantic, sim_threshold
         )

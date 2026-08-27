@@ -241,3 +241,48 @@ class TestGapDataUpgrade:
         roles = [(e.role, e.text) for e in gaps[0].evidence]
         assert roles[0] == ("jd", "JD 要求：中级")
         assert roles[1][0] == "resume" and "简历" in roles[1][1]
+
+
+class TestGapDedup:
+    """08-27 fix：三池（must/nice/soft）同名技能去重——must > nice > soft 保留最强优先级。
+
+    聚合画像/单 JD 画像下同名技能只输出 1 条差距，避免前端重复透传。
+    """
+
+    def test_dedupes_by_skill_name_must_first(self):
+        """三池各放同名 Python → 仅 1 条 gap，necessity 取 must（非 nice/soft）。"""
+        cand = _candidate([])
+        pos = _position(
+            musts=[_req("Python", weight=0.9)],
+            nices=[_req("Python", necessity=Necessity.NICE, weight=0.4)],
+            softs=[_req("Python", necessity=Necessity.NICE, weight=0.4, is_soft=True)],
+        )
+        gaps = analyze_gaps(cand, pos)
+        assert len(gaps) == 1
+        assert gaps[0].skill == "Python"
+        assert gaps[0].necessity == "must"
+        assert gaps[0].is_soft is False
+
+    def test_nice_and_soft_duplicate_keeps_nice(self):
+        """同名技能仅出现在 nice + soft → 保留 nice（soft 不覆盖）。"""
+        cand = _candidate([])
+        pos = _position(
+            musts=[],
+            nices=[_req("沟通能力", necessity=Necessity.NICE, is_soft=False)],
+            softs=[_req("沟通能力", necessity=Necessity.NICE, weight=0.4, is_soft=True)],
+        )
+        gaps = analyze_gaps(cand, pos)
+        assert len(gaps) == 1
+        assert gaps[0].skill == "沟通能力"
+        assert gaps[0].is_soft is False
+
+    def test_distinct_names_not_deduped(self):
+        """不同技能名不受去重影响（去重只按 skill_name 键）。"""
+        cand = _candidate([])
+        pos = _position(
+            musts=[_req("Python")],
+            nices=[_req("Go", necessity=Necessity.NICE)],
+            softs=[_req("沟通能力", necessity=Necessity.NICE, is_soft=True)],
+        )
+        gaps = analyze_gaps(cand, pos)
+        assert len(gaps) == 3
