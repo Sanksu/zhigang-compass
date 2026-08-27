@@ -29,6 +29,7 @@
   "name_normalization_propose_max_candidates": 40,
   "skill_relation_propose_enabled": false,
   "skill_relation_propose_max_candidates": 40,
-  "match_jd_candidates_enabled": false,
-  "match_jd_rough_k": 50
+  "match_jd_rough_k": 50,
+  "match_jd_min_skills": 2,
+  "match_jd_max_per_position": 50
 }

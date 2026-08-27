@@ -63,6 +63,12 @@ DEFAULTS: dict = {
     # 阶段 C：匹配候选统一到原生 JD（方案 A，2026-08-27）：不再有聚合岗位
     # 灰度开关，JD 候选为唯一主路径；保留粗选 K（向量预筛召回数）
     "match_jd_rough_k": 50,
+    # 窄 JD 防虚高：must+nice 唯一技能名 < 该数的 JD 不参与匹配/评分
+    # （单技能 JD 命中即满分，系统性抬高分数并抹平岗位区分度；算法口径，需张恺天确认）
+    "match_jd_min_skills": 2,
+    # 每岗位评分 JD 数上限（按 updated_at 最近 N 条宽 JD）：compare 与 recommend
+    # 对齐共用，防全量重评超时（850 条岗位曾致 133s；算法口径，需张恺天确认）
+    "match_jd_max_per_position": 50,
 }
 
 _VALIDATORS = {
@@ -94,6 +100,8 @@ _VALIDATORS = {
     "skill_relation_propose_enabled": lambda v: isinstance(v, bool),
     "skill_relation_propose_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 200,
     "match_jd_rough_k": lambda v: isinstance(v, int) and 1 <= v <= 2000,
+    "match_jd_min_skills": lambda v: isinstance(v, int) and 1 <= v <= 20,
+    "match_jd_max_per_position": lambda v: isinstance(v, int) and 1 <= v <= 1000,
 }
 
 

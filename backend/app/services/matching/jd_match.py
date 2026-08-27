@@ -26,7 +26,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import runtime_config
 from app.models.raw import JDRaw
 from app.services.matching.engine import RuleBasedMatcher, score_position
-from app.services.matching.jd_aggregate import aggregate_jd_scores
+from app.services.matching.jd_aggregate import (
+    _AGGREGATE_TOP_JD_EVIDENCE,
+    aggregate_jd_scores,
+)
 from app.services.matching.jd_profiles import (
     diversify_by_position,
     jd_profile_from_snapshot,
@@ -219,7 +222,8 @@ async def _align_scores_with_full_jd(
             "unqualified": best_result.unqualified,
         })
         ev = [e for e in item["jd_evidence"] if e["jd_id"] != best_result.position_id]
-        item["jd_evidence"] = [
+        # 真最高分 JD 置顶后截断 Top-2，与契约 jd_evidence「Top-2」描述对齐
+        item["jd_evidence"] = ([
             {
                 "jd_id": best_result.position_id,
                 "jd_title": best_result.position_name,
@@ -227,7 +231,7 @@ async def _align_scores_with_full_jd(
                 "hit_count": len(best_result.matched_must) + len(best_result.matched_nice),
             },
             *ev,
-        ]
+        ])[:_AGGREGATE_TOP_JD_EVIDENCE]
     results.sort(key=lambda r: r["total_score"], reverse=True)
     return results
 
@@ -240,24 +244,28 @@ async def score_jd_compare(
     semantic=None,
     sim_threshold: float | None = None,
 ) -> tuple[PositionProfile, MatchResult] | None:
-    """compare 路径：该岗位名下全部 JD → COMPARE 评分 → 取真正最高分一条。
+    """compare 路径：该岗位名下 JD → COMPARE 评分 → 取最高分一条。
 
     position_name：岗位名（recommend 列表 position_id=岗位名，normalized_position
-    口径，与 jd_aggregate 分组 key 一致）。加载该岗位名下全量 JD（不限 50——
-    详情要取真最佳），全部评分后取 max(members, key=total_score) 作为详情基准，
-    保证列表分数与详情同口径单 JD。
+    口径，与 jd_aggregate 分组 key 一致）。按 updated_at 最近优先加载该岗位名下
+    JD，最多评分 max_jds（默认 50）条宽 JD（与 recommend 对齐同口径同上限，
+    385b3f1 修 133s 超时），取 max(members, key=total_score) 作为详情基准，
+    保证列表分数与详情同口径单 JD。最高分口径 = 最近 N 条宽 JD 中的最高分，
+    非全局全量（SQL 侧同步 limit 兜底，防大岗位全量拉取 snapshot）。
 
     返回 (最佳 PositionProfile, 最佳 MatchResult)；无该岗位 JD 返回 None。
     """
     embedder = semantic or SkillEmbedder.get()
+    min_skills = _read_min_jd_skills()
+    max_jds = _read_max_jds_per_position()
     rows = (await session.scalars(
         select(JDRaw)
         .where(JDRaw.snapshot["normalized_position"].astext == position_name)
         .order_by(JDRaw.updated_at.desc(), JDRaw.id)  # 最近优先，配合每岗位评分上限
+        # SQL 侧 limit 兜底：评分循环 50 条宽 JD 即 break，但无 limit 会对大岗位
+        # （850 条）全量拉取完整 snapshot JSONB×2（compare + evidence_refs 两查）
+        .limit(max_jds * 4)
     )).all()
-
-    min_skills = _read_min_jd_skills()
-    max_jds = _read_max_jds_per_position()
     profiles: list[PositionProfile] = []
     for row in rows:
         if (row.snapshot or {}).get("extraction") is None:
