@@ -6,8 +6,6 @@
 4. 混布快照 relation 口径：见 tests/discovery（快照级 any() 判定）
 """
 
-from types import SimpleNamespace
-
 from app.services.matching.jd_profiles import diversify_by_position, rough_select
 from app.services.matching.schemas import (
     CandidateProfile,
