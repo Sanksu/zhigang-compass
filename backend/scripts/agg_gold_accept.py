@@ -49,7 +49,7 @@ def main() -> int:
         "",
         f"- 生成时间：{datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds')}",
         "- 口径：技能 aligned F1 = 词面真值对齐（PR #330），EVAL_SPEC_VERSION=20260824-a（与 08-25 预验收一致，可比）",
-        f"- 三跑（全部 110 条，fallback=0，failed=0）：",
+        "- 三跑（全部 110 条，fallback=0，failed=0）：",
         "",
         "| 轮次 | 归档 | aligned F1 | raw F1 | precision | recall | 幻觉 FP | commit | provider/model |",
         "|---|---|---|---|---|---|---|---|---|",
@@ -61,11 +61,11 @@ def main() -> int:
         )
     lines += [
         "",
-        f"## 正式结论",
+        "## 正式结论",
         "",
         f"- 三跑中位 **aligned F1 = {med_aligned:.4f}**（raw 中位 {med_raw:.4f}）",
         f"- 阈值 ≥ 0.90：{'✅ 达标，正式验收通过' if ok else '❌ 未达标'}",
-        f"- 运行环境：226 zhigang-api 容器（develop @ 运行时 HEAD，与 08-25 预验收同口径）",
+        "- 运行环境：226 zhigang-api 容器（develop @ 运行时 HEAD，与 08-25 预验收同口径）",
         "",
     ]
     text = "\n".join(lines)
