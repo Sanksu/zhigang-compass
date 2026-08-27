@@ -237,7 +237,9 @@ async def _approve_skill_relation(db, record, reason: str, operator: str) -> dic
     record.status = "approved"
     record.reviewer = operator
     record.review_reason = reason
-    record.effects_applied = True
+    # 图写由 sync_dynamic_relations 执行——approve 置 False 待落图，sync 按
+    # proposal_id 回写 True（#570 对账语义，第六轮审查此前恒 True 名不副实）
+    record.effects_applied = False
     db.add(AuditLog(
         user_id=operator, action="llm_decision_approve",
         resource="skill_relation", resource_id=str(record.id),
@@ -321,7 +323,9 @@ async def _approve_normalization(db, record, reason: str, operator: str) -> dict
     record.status = "approved"
     record.reviewer = operator
     record.review_reason = reason
-    record.effects_applied = True
+    # 图写由 sync_dynamic_normalization 执行——approve 置 False 待落图
+    # （noop/keep 分支无图变更，仍在上文置 True）
+    record.effects_applied = False
     db.add(AuditLog(
         user_id=operator, action="llm_decision_approve",
         resource=record.domain, resource_id=str(record.id),
@@ -377,7 +381,8 @@ async def _approve_skill_classify(db, record, reason: str, operator: str) -> dic
     record.status = "approved"
     record.reviewer = operator
     record.review_reason = reason
-    record.effects_applied = True
+    # 图写由 sync_dynamic_categories 执行——approve 置 False 待落图（同上）
+    record.effects_applied = False
     db.add(AuditLog(
         user_id=operator, action="llm_decision_approve",
         resource=record.domain, resource_id=str(record.id),
