@@ -263,6 +263,32 @@ class TestNarrowJdFilter:
         assert all("position_name" in s for s in out)
 
 
+    def test_duplicate_skill_across_must_nice_counts_once(self, monkeypatch):
+        """同名技能在 skills[] 与 requirements[] 双列出现只算 1 个宽度（防撑宽漏过滤）。
+
+        08-27 E2E 实测：如 Kafka 同时进 skills 和 requirements，按条数会算成 2 而
+        漏过窄 JD 过滤，导致单技能 JD 命中即满分虚高。
+        """
+        rows = [_row("后端工程师", ["Java", "Spring"], title="宽 JD", jd_id=1)]
+        snap = _snap_with_extraction("后端工程师", ["Java"], title="窄 JD")
+        snap["extraction"]["requirements"] = [{"skill_name": "Java"}]
+        narrow = SimpleNamespace(id=2, source="x", source_url="", snapshot=snap)
+        scored_names: list[str] = []
+
+        def _fake_score(candidate, profile: PositionProfile, *a, **kw):
+            scored_names.append(profile.name)
+            return MatchResult(
+                position_id=profile.position_id, position_name=profile.name,
+                total_score=0.5, must_score=0.5, nice_score=1.0, exp_score=1.0,
+            )
+
+        monkeypatch.setattr(jd_match, "score_position", _fake_score)
+        asyncio.run(jd_match.score_jd_compare(
+            _FakeSession([rows[0], narrow]), _candidate(["Java"]), "后端工程师", {},
+        ))
+        assert "窄 JD" not in scored_names  # 单技能(双列重复)JD 被过滤
+
+
 class TestAlignScoresWithFullJd:
     """08-27 fix：Top-N 与 compare 对齐——召回池外最佳 JD 补入取真最高分。"""
 

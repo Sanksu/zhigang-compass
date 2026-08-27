@@ -62,8 +62,13 @@ def _read_min_jd_skills() -> int:
 
 
 def _jd_width(profile: PositionProfile) -> int:
-    """JD 技术技能宽度 = must + nice 技能数（软技能独立通道不计）。"""
-    return len(profile.must_skills) + len(profile.nice_skills)
+    """JD 技术技能宽度 = must + nice **唯一技能名数**（软技能独立通道不计）。
+
+    同名技能在 extraction 的 skills[] 与 requirements[] 双列重复出现（抽取常见，
+    如 Kafka 同时进 skills 和 requirements）只计一次——按条数计数会把单技能 JD 撑成
+    2 而漏过窄 JD 过滤，导致命中即满分虚高（08-27 E2E 实测）。
+    """
+    return len({r.skill_name for r in (*profile.must_skills, *profile.nice_skills)})
 
 
 def _run_in_thread(fn):
