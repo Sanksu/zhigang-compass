@@ -153,22 +153,32 @@ async def dict_guard_daily(ctx: dict) -> dict:
         _write_report(summary)
         return summary
 
-    # ---- 2. LLM 逐候选评估 ----
+    # ---- 2. LLM 逐候选评估（并发，Semaphore 限流）----
+    # 此前串行：候选池最多 5 类×max_candidates(20)=100 条，单条最坏 30s×3
+    # provider = 全超时 9000s 逼近 job timeout。evaluate 内部已 to_thread +
+    # 429 指数退避，此处 gather+Semaphore(5) 并发（第六轮审查 P2 修复）。
     evaluator = _DictGuardEvaluator()
     decisions: list[DictGuardDecision] = []
     llm_failed = 0
-    for cand in candidates:
-        decision = await evaluator.evaluate(cand)
+    _eval_sem = asyncio.Semaphore(5)
+
+    async def _eval(cand: dict) -> DictGuardDecision | None:
+        nonlocal llm_failed
+        async with _eval_sem:
+            decision = await evaluator.evaluate(cand)
         if decision is None:
             llm_failed += 1
-            continue
+            return None
         if not decision.term.strip():
             decision.term = cand["term"]
         # 候选给出的实体类型为准（position/course 不为空时覆盖 LLM 默认 skill）
         cand_entity = cand.get("entity_type", "skill")
         if cand_entity != "skill":
             decision.entity_type = cand_entity
-        decisions.append(decision)
+        return decision
+
+    outcomes = await asyncio.gather(*(_eval(c) for c in candidates))
+    decisions = [d for d in outcomes if d is not None]
 
     # ---- 3/4. 门禁 → 影响面 → 分级 → 生效/提案 ----
     # 候选证据随提案持久化（PR-C 审批执行依赖：静态停用词 remove 需从证据
@@ -301,14 +311,28 @@ async def dict_guard_daily(ctx: dict) -> dict:
     }
     _write_report(summary)
 
-    if auto_applied or (llm_failed > 0 and not decisions):
-        event = "dict_guard_auto_applied" if auto_applied else "dict_guard_llm_down"
-        message = (
-            f"dict-guard 自动新增停用词 {len(auto_applied)} 条: "
-            f"{', '.join(a['term'] for a in auto_applied)}"
-            if auto_applied
-            else f"dict-guard 本轮 {llm_failed} 个候选全部 LLM 评估失败，未产生任何调整"
-        )
+    # 告警三档：auto 生效（既有）/ LLM 全灭（既有）/ 半数以上失败降级（新增，
+    # 第六轮审查：部分失败此前零可观测，provider 退化可静默数周）
+    total_evaluated = llm_failed + len(decisions)
+    llm_degraded = (
+        llm_failed > 0 and bool(decisions) and llm_failed * 2 >= total_evaluated
+    )
+    if auto_applied or (llm_failed > 0 and not decisions) or llm_degraded:
+        if auto_applied:
+            event = "dict_guard_auto_applied"
+            message = (
+                f"dict-guard 自动新增停用词 {len(auto_applied)} 条: "
+                f"{', '.join(a['term'] for a in auto_applied)}"
+            )
+        elif llm_failed > 0 and not decisions:
+            event = "dict_guard_llm_down"
+            message = f"dict-guard 本轮 {llm_failed} 个候选全部 LLM 评估失败，未产生任何调整"
+        else:
+            event = "dict_guard_llm_degraded"
+            message = (
+                f"dict-guard LLM 评估半数以上失败（{llm_failed}/{total_evaluated}），"
+                "疑似 provider 退化，请核对 llm_stats"
+            )
         from app.services.alerting import send_alert
 
         await send_alert(event, f"{message}（详见 reports/dict_guard_{run_date}.json）")

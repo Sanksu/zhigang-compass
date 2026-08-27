@@ -128,7 +128,10 @@ async def propose(limit: int = DEFAULT_LIMIT) -> dict:
     run_date = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
     proposed = blocked = llm_failed = 0
     for cand in candidates:
-        decision = decide_skill_relation(cand["source"], cand["target"], cand["evidence"], llm)
+        # 同步 LLM client → to_thread（第六轮审查 P1-2，防阻塞 ARQ 事件循环）
+        decision = await asyncio.to_thread(
+            decide_skill_relation, cand["source"], cand["target"], cand["evidence"], llm,
+        )
         if decision is None:
             llm_failed += 1
             continue
