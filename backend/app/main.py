@@ -3,6 +3,7 @@
 启动：uv run uvicorn app.main:app --reload --port 8000
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -205,6 +206,29 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 @app.get("/health")
 async def health_check():
+    """健康检查：探 PostgreSQL 目录扫描路径（2026-08-27 事故教训）。
+
+    此前 /health 只返回常量 {"status":"healthy"}，不查数据库——PG 因
+    catalog 损坏死循环烧满 CPU 时容器仍显示 healthy，前端报"推荐失败"
+    才从 UI 发现问题。本探针执行触发排序/目录扫描路径的 SQL（正是本次
+    挂死类型：ORDER BY / information_schema），DB 异常即返回 503 让
+    docker healthcheck 判 unhealthy（start_period 后由 restart 策略拉起）。
+    探针自带 3s 超时：半死 DB 下探针自身也不悬挂。
+    """
+    from sqlalchemy import text
+
+    from app.core.database import async_session_factory
+
+    try:
+        async with asyncio.timeout(3):
+            async with async_session_factory() as session:
+                await session.execute(text("SELECT count(*) FROM information_schema.tables"))
+    except Exception as exc:
+        logger.warning("/health DB 探针失败: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content=_error_body(ERR_INTERNAL, "依赖服务异常"),
+        )
     return {"status": "healthy"}
 
 
