@@ -3,6 +3,7 @@ import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { PositionStateBadge } from '@/components/shared/position-state-badge'
 import { Button } from '@/components/ui/button'
 import { ResumeUploader } from '@/components/resume/resume-uploader'
 import { ScoreRing, RadarChart, SkillHeatmap } from '@/components/match/charts'
@@ -20,8 +21,7 @@ import {
   type RecommendItem,
   type ResumeSummary,
 } from '@/components/match/types'
-import type { PositionStatus } from '@/components/graph/types'
-import {apiGet, apiPost, getAccessToken, errMsg} from '@/lib/api'
+import { apiGet, apiPost, getAccessToken, errMsg } from '@/lib/api'
 import { prefersReducedMotion } from '@/lib/utils'
 import {
   completedSkillsFromMatrix,
@@ -31,26 +31,6 @@ import {
   withRefreshedGaps,
 } from './resume-match-adapters'
 import type { components } from '@/types/api'
-
-const STATUS_LABEL: Record<PositionStatus | 'low', string> = {
-  active: '活跃',
-  candidate: '候选',
-  emerging: '新兴',
-  stable: '稳定',
-  declining: '衰退',
-  archived: '归档',
-  low: '待提升',
-}
-
-const STATUS_CLASS: Record<PositionStatus | 'low', string> = {
-  active: 'border-state-active/30 text-state-active bg-state-active/10',
-  candidate: 'border-state-candidate/30 text-state-candidate bg-state-candidate/10',
-  emerging: 'border-state-emerging/30 text-state-emerging bg-state-emerging/10',
-  stable: 'border-state-stable/30 text-state-stable bg-state-stable/10',
-  declining: 'border-state-declining/30 text-state-declining bg-state-declining/10',
-  archived: 'border-state-archived/30 text-state-archived bg-state-archived/10',
-  low: 'border-ink-faint/30 text-ink-muted bg-subtle',
-}
 
 const REL_LABEL = { missing: '缺失', weak: '待提升', matched: '达标' } as const
 function relLabel(rel: keyof typeof REL_LABEL): string {
@@ -661,9 +641,7 @@ export function ResumeMatchPage() {
                     </span>
                   </div>
                   <div className="flex items-center gap-2 mb-1.5">
-                    <Badge variant="outline" className={`text-[10px] ${STATUS_CLASS[rec.status]}`}>
-                      {STATUS_LABEL[rec.status]}
-                    </Badge>
+                    <PositionStateBadge state={rec.status} label={rec.status === 'low' ? '待提升' : undefined} className="text-[10px]" />
                     <span className="text-[10px] text-ink-faint font-mono">{rec.position_id}</span>
                   </div>
                   <p className="text-xs text-ink-muted line-clamp-2">{rec.summary}</p>
@@ -754,9 +732,7 @@ export function ResumeMatchPage() {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
                     <span>{matchResult.position_name}</span>
-                    <Badge variant="outline" className={`text-[10px] ${STATUS_CLASS[selectedPosition.status]}`}>
-                      {STATUS_LABEL[selectedPosition.status]}
-                    </Badge>
+                    <PositionStateBadge state={selectedPosition.status} label={selectedPosition.status === 'low' ? '待提升' : undefined} className="text-[10px]" />
                     <span className="text-xs font-mono text-ink-faint ml-auto">{matchResult.position_id}</span>
                   </CardTitle>
                   {/* 结果快照 ID + 反馈 + 快照重载（POST /match/feedback / GET /match/task|result） */}
