@@ -518,3 +518,52 @@ class TestPersist:
         )
         assert out.state == PositionState.EMERGING
         assert len(executed) == 1
+
+
+class TestMixedSnapshotRelationCaliber:
+    """混布快照 relation 口径（第六轮审查算法口径 3，zkt 复核）。
+
+    快照级 any() 判定与 evolution/_requires_edges 一致：
+    - 任一边带 relation 标注 → 无标注边不计入（旧逐边默认 REQUIRES 会计入）
+    - 全部无标注（旧快照）→ 整期按 REQUIRES 处理（历史序列连续）
+    - 非 REQUIRES 标注边一律不计入
+    """
+
+    @staticmethod
+    def _mixed_snapshot() -> dict:
+        """2 条 REQUIRES + 1 条 BELONGS_TO + 1 条无标注。"""
+        return {
+            "nodes": [{"id": "pos_后端", "name": "后端工程师", "type": "position"}],
+            "edges": [
+                {"source": "pos_后端", "target": "sk_1", "relation": "REQUIRES"},
+                {"source": "pos_后端", "target": "sk_2", "relation": "REQUIRES"},
+                {"source": "pos_后端", "target": "sk_3", "relation": "BELONGS_TO"},
+                {"source": "pos_后端", "target": "sk_4"},  # 混布：无标注
+            ],
+        }
+
+    def test_mixed_snapshot_excludes_unannotated_edges(self):
+        out = position_freq_windows([self._mixed_snapshot()], {"后端工程师"})
+        assert out["后端工程师"] == [2.0]  # 仅 2 条 REQUIRES；无标注边不计入
+
+    def test_legacy_unannotated_snapshot_counts_all(self):
+        snap = {
+            "nodes": [{"id": "pos_后端", "name": "后端工程师", "type": "position"}],
+            "edges": [
+                {"source": "pos_后端", "target": "sk_1"},
+                {"source": "pos_后端", "target": "sk_2"},
+            ],
+        }
+        out = position_freq_windows([snap], {"后端工程师"})
+        assert out["后端工程师"] == [2.0]  # 旧快照全量计入（序列连续）
+
+    def test_fully_annotated_snapshot_ignores_maintenance_edges(self):
+        snap = {
+            "nodes": [{"id": "pos_后端", "name": "后端工程师", "type": "position"}],
+            "edges": [
+                {"source": "pos_后端", "target": "sk_1", "relation": "REQUIRES"},
+                {"source": "pos_后端", "target": "sk_2", "relation": "HAS_EVIDENCE"},
+            ],
+        }
+        out = position_freq_windows([snap], {"后端工程师"})
+        assert out["后端工程师"] == [1.0]

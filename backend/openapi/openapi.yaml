@@ -3618,6 +3618,10 @@ components:
           type: array
           items: { type: string }
           description: 已匹配的必备技能名
+        matched_nice:
+          type: array
+          items: { type: string }
+          description: 已匹配的加分技能名（JD 证据 hit_count 统一 must+nice 口径）
         missing_must:
           type: array
           items: { type: string }

@@ -91,13 +91,21 @@ def position_freq_windows(
         pid: [0] * n_windows for pid in name_by_id
     }
     for wi, snap in enumerate(snapshots):
+        edges = (snap or {}).get("edges", [])
+        # P2 频次口径：仅 REQUIRES 出边计入岗位频次（JD 需求边），
+        # HAS_EVIDENCE/BELONGS_TO_OCCUPATION 等维护边不计入，否则频次
+        # 被非需求边虚增（快照 edges 自 P2 起导出 relation 字段）。
+        # 混布快照口径（第六轮审查算法口径 3，zkt 复核）：快照级 any() 判定
+        # 与 evolution（trend_service/_requires_edges）一致——任一边带 relation
+        # 标注则无标注边不计入；全部无标注（旧快照）才整期按 REQUIRES 处理，
+        # 保持历史窗口序列连续。此前逐边默认 REQUIRES，混布期维护边被计入。
+        snapshot_annotated = any(e.get("relation") for e in edges)
         freq: dict[str, int] = {}
-        for e in (snap or {}).get("edges", []):
-            # P2 频次口径：仅 REQUIRES 出边计入岗位频次（JD 需求边），
-            # HAS_EVIDENCE/BELONGS_TO_OCCUPATION 等维护边不计入，否则频次
-            # 被非需求边虚增（快照 edges 自 P2 起导出 relation 字段）。
-            # 缺 relation 的旧快照按 REQUIRES 处理，保持历史窗口序列连续。
-            if e.get("relation", "REQUIRES") != "REQUIRES":
+        for e in edges:
+            rel = e.get("relation")
+            if snapshot_annotated and not rel:
+                continue
+            if rel and rel != "REQUIRES":
                 continue
             src = e.get("source", "")
             if src in name_by_id:

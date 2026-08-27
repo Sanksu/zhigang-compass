@@ -218,6 +218,11 @@ async def _match_jd_candidates(
         pool = rough_select(jd_profiles, candidate_skills, k=rough_k)
     if not pool:
         return []
+    # 岗位多样性配额（第六轮审查算法口径 1）：同族 JD 池化向量高度相似可
+    # 占满召回席位，聚合后岗位数远小于 top_n——按岗位名轮转配额后再评分
+    from app.services.matching.jd_profiles import diversify_by_position
+
+    pool = diversify_by_position(pool, jd_position, rough_k, top_n)
 
     def _score():
         matcher = RuleBasedMatcher(pool, semantic=SkillEmbedder.get())
