@@ -30,6 +30,17 @@ type RateLimitEntry = NonNullable<RuntimeConfig['rate_limit']>[string]
 type CrawlerConfig = NonNullable<RuntimeConfig['crawlers']>[string]
 type Feedback = { type: 'ok' | 'err'; text: string } | null
 
+/** 限频输入草稿（字符串态）：允许清空与输入中间态，保存时按后端契约域清洗——
+ * 修复此前 Number(value)||4/||1 兜底令用户无法清空、0 被静默改写的问题。 */
+type RateLimitDraft = { req_per_min: string; delay_min: string; delay_max: string }
+
+/** 整数字符串 → 契约域内整数；空/非整数/越界返回 null（调用方省略该字段，
+ * 服务端增量合并保留旧值，与后端 _validate_rate_limit 口径一致） */
+function toIntInRange(value: string, lo: number, hi: number): number | null {
+  const n = Number(value)
+  return value.trim() !== '' && Number.isInteger(n) && n >= lo && n <= hi ? n : null
+}
+
 /** 全部可配置爬虫（对齐 backend admin_routes/crawl.py PLATFORM_META + etl.py crawl_platforms）。
  *  前 6 源为 ETL 主管线源；CDP/课程源配独立触发时间由 crawl_scheduler 单独触发，否则仅供手动触发。 */
 const CRAWLER_SPIDERS = [
@@ -51,9 +62,22 @@ const CRAWLER_SPIDERS = [
   { name: 'edx', label: 'edX', note: '课程 · 独立时间触发' },
 ] as const
 
+/** 已保存配置 → 限频输入草稿（load 与保存成功回填共用） */
+function draftsFromConfig(cfg: RuntimeConfig): Record<string, RateLimitDraft> {
+  const out: Record<string, RateLimitDraft> = {}
+  for (const [source, v] of Object.entries(cfg.rate_limit ?? {})) {
+    out[source] = {
+      req_per_min: v.req_per_min != null ? String(v.req_per_min) : '',
+      delay_min: v.delay_range?.[0] != null ? String(v.delay_range[0]) : '',
+      delay_max: v.delay_range?.[1] != null ? String(v.delay_range[1]) : '',
+    }
+  }
+  return out
+}
+
 export function CrawlScheduleConfig() {
   const [scalars, setScalars] = useState<{ crawl_items_cap: string }>({ crawl_items_cap: '100' })
-  const [rateLimit, setRateLimit] = useState<Record<string, RateLimitEntry>>({})
+  const [rateDraft, setRateDraft] = useState<Record<string, RateLimitDraft>>({})
   const [crawlers, setCrawlers] = useState<Record<string, CrawlerConfig>>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -63,7 +87,7 @@ export function CrawlScheduleConfig() {
     apiGet<RuntimeConfig>('/admin/runtime-config')
       .then((cfg) => {
         setScalars({ crawl_items_cap: String(cfg.crawl_items_cap ?? 100) })
-        setRateLimit(cfg.rate_limit ?? {})
+        setRateDraft(draftsFromConfig(cfg))
         const saved = cfg.crawlers ?? {}
         const init: Record<string, CrawlerConfig> = {}
         for (const s of CRAWLER_SPIDERS) {
@@ -81,19 +105,31 @@ export function CrawlScheduleConfig() {
       .finally(() => setLoading(false))
   }, [])
 
-  function setSourceField(source: string, field: 'req_per_min' | 'delay_min' | 'delay_max', value: string) {
-    setRateLimit((prev) => {
-      const cur = prev[source] ?? { req_per_min: 4, delay_range: [10, 20] }
-      const next: RateLimitEntry = { ...cur, delay_range: [...(cur.delay_range ?? [10, 20])] }
-      if (field === 'req_per_min') next.req_per_min = Number(value) || 4
-      if (field === 'delay_min') next.delay_range![0] = Number(value) || 1
-      if (field === 'delay_max') next.delay_range![1] = Number(value) || 1
-      return { ...prev, [source]: next }
-    })
+  function setSourceField(source: string, field: keyof RateLimitDraft, value: string) {
+    setRateDraft((prev) => ({
+      ...prev,
+      [source]: { ...(prev[source] ?? { req_per_min: '', delay_min: '', delay_max: '' }), [field]: value },
+    }))
   }
 
   function buildPayload(): RuntimeConfig {
-    const payload: RuntimeConfig = { crawl_items_cap: Number(scalars.crawl_items_cap) || 100, rate_limit: rateLimit }
+    const payload: RuntimeConfig = {}
+    // 采集上限：空/越界省略（服务端增量合并保留旧值），不再静默回退 100
+    const cap = toIntInRange(scalars.crawl_items_cap, 10, 1000)
+    if (cap != null) payload.crawl_items_cap = cap
+    // 限频：逐字段清洗到契约域（req_per_min 1-600，delay_range 1-300），
+    // 清空/越界的字段省略；三项全空的源整体省略（与后端 _validate_rate_limit 口径一致）
+    const rate: NonNullable<RuntimeConfig['rate_limit']> = {}
+    for (const [source, d] of Object.entries(rateDraft)) {
+      const entry: RateLimitEntry = {}
+      const rpm = toIntInRange(d.req_per_min, 1, 600)
+      if (rpm != null) entry.req_per_min = rpm
+      const dmin = toIntInRange(d.delay_min, 1, 300)
+      const dmax = toIntInRange(d.delay_max, 1, 300)
+      if (dmin != null && dmax != null) entry.delay_range = [dmin, dmax]
+      if (entry.req_per_min != null || entry.delay_range != null) rate[source] = entry
+    }
+    payload.rate_limit = rate
     // 每爬虫配置：enabled 全量提交；max_results 仅提交非空；hour/minute 成对提交；
     // max_empty_retries 仅 zhilian 消费，提交非空值
     const cleaned: Record<string, CrawlerConfig> = {}
@@ -120,7 +156,7 @@ export function CrawlScheduleConfig() {
     try {
       const saved = await apiPut<RuntimeConfig>('/admin/runtime-config', buildPayload())
       setScalars({ crawl_items_cap: String(saved.crawl_items_cap ?? 100) })
-      setRateLimit(saved.rate_limit ?? {})
+      setRateDraft(draftsFromConfig(saved))
       const savedCrawlers = saved.crawlers ?? {}
       const init: Record<string, CrawlerConfig> = {}
       for (const s of CRAWLER_SPIDERS) {
@@ -143,7 +179,7 @@ export function CrawlScheduleConfig() {
 
   function resetAll() {
     setScalars({ crawl_items_cap: '100' })
-    setRateLimit({})
+    setRateDraft({})
     const reset: Record<string, CrawlerConfig> = {}
     for (const s of CRAWLER_SPIDERS) reset[s.name] = { enabled: true }
     setCrawlers(reset)
@@ -204,15 +240,15 @@ export function CrawlScheduleConfig() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {Object.entries(rateLimit).map(([source, cfg]) => {
-                  const dr = cfg.delay_range ?? [10, 20]
+                {Object.entries(rateDraft).map(([source, d]) => {
                   return (
                     <TableRow key={source}>
                       <TableCell className="font-mono text-xs text-ink">{source}</TableCell>
                       <TableCell>
                         <Input
                           type="number"
-                          value={cfg.req_per_min ?? 4}
+                          value={d.req_per_min}
+                          placeholder="1-600"
                           onChange={(e) => setSourceField(source, 'req_per_min', e.target.value)}
                           className="h-7 w-20 text-xs font-mono"
                         />
@@ -221,14 +257,16 @@ export function CrawlScheduleConfig() {
                         <div className="flex items-center gap-1.5">
                           <Input
                             type="number"
-                            value={dr[0]}
+                            value={d.delay_min}
+                            placeholder="1-300"
                             onChange={(e) => setSourceField(source, 'delay_min', e.target.value)}
                             className="h-7 w-20 text-xs font-mono"
                           />
                           <span className="text-xs text-ink-faint">~</span>
                           <Input
                             type="number"
-                            value={dr[1]}
+                            value={d.delay_max}
+                            placeholder="1-300"
                             onChange={(e) => setSourceField(source, 'delay_max', e.target.value)}
                             className="h-7 w-20 text-xs font-mono"
                           />
