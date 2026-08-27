@@ -14,7 +14,6 @@ import {
   Database,
   Workflow,
   ListChecks,
-  BookMarked,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/constants'
@@ -83,7 +82,6 @@ export const adminNavGroups: AdminNavGroup[] = [
     label: 'LLM 驱动',
     items: [
       { label: '决策与验收', to: '/admin/llm-decisions', icon: ListChecks, requireRole: ['admin'] },
-      { label: '动态别名表', to: '/admin/skill-aliases', icon: BookMarked, requireRole: ['admin'] },
     ],
   },
   {

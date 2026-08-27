@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router'
 import { ClipboardCheck, EyeOff, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { SkillAliasesTable } from '@/components/admin/llm/skill-aliases-table'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -181,6 +182,12 @@ export function AdminLlmDecisionsPage() {
         description="六域 LLM 决策统一透明：JD 抽取 / 名称归一 / 分类 / 治理 / 技能关系 —— shadow·提案·自动生效·硬门拦截全部可追溯可回放"
       />
 
+      <Tabs defaultValue="decisions">
+        <TabsList className="mb-2">
+          <TabsTrigger value="decisions" className="text-xs">决策与验收</TabsTrigger>
+          <TabsTrigger value="aliases" className="text-xs">动态别名表</TabsTrigger>
+        </TabsList>
+        <TabsContent value="decisions" className="space-y-6">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {cards.map((c) => (
           <Card key={c.label}>
@@ -233,9 +240,6 @@ export function AdminLlmDecisionsPage() {
             </select>
             <Button variant="ghost" size="sm" onClick={() => setQ('')}>
               清除
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/admin/skill-aliases">动态别名表</Link>
             </Button>
           </div>
         </CardHeader>
@@ -387,6 +391,11 @@ export function AdminLlmDecisionsPage() {
           </Card>
         </div>
       )}
+        </TabsContent>
+        <TabsContent value="aliases" className="space-y-6">
+          <SkillAliasesTable />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

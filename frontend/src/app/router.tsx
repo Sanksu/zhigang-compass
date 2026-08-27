@@ -16,10 +16,11 @@ const AdminDashboardPage = lazy(() => import('@/routes/admin-dashboard-page').th
 const AdminUsersPage = lazy(() => import('@/routes/admin-users-page').then((m) => ({ default: m.AdminUsersPage })))
 const AdminCrawlPage = lazy(() => import('@/routes/admin-crawl-page').then((m) => ({ default: m.AdminCrawlPage })))
 const AdminReviewPage = lazy(() => import('@/routes/admin-review-page').then((m) => ({ default: m.AdminReviewPage })))
+const AdminReviewWatchPage = lazy(() => import('@/routes/admin-review-watch-page').then((m) => ({ default: m.AdminReviewWatchPage })))
+const AdminReviewDictPage = lazy(() => import('@/routes/admin-review-dict-page').then((m) => ({ default: m.AdminReviewDictPage })))
 const AdminLineagePage = lazy(() => import('@/routes/admin-lineage-page').then((m) => ({ default: m.AdminLineagePage })))
 const AdminLlmPage = lazy(() => import('@/routes/admin-llm-page').then((m) => ({ default: m.AdminLlmPage })))
 const AdminLlmDecisionsPage = lazy(() => import('@/routes/admin-llm-decisions-page').then((m) => ({ default: m.AdminLlmDecisionsPage })))
-const AdminSkillAliasesPage = lazy(() => import('@/routes/admin-skill-aliases-page').then((m) => ({ default: m.AdminSkillAliasesPage })))
 const AdminSettingsPage = lazy(() => import('@/routes/admin-settings-page').then((m) => ({ default: m.AdminSettingsPage })))
 
 function RouteLoading() {
@@ -62,6 +63,14 @@ const protectedRoutes = [
         element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminReviewPage /></Suspense></AuthGuard>,
       },
       {
+        path: 'admin/review/watch',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminReviewWatchPage /></Suspense></AuthGuard>,
+      },
+      {
+        path: 'admin/review/dict',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminReviewDictPage /></Suspense></AuthGuard>,
+      },
+      {
         path: 'admin/lineage',
         element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminLineagePage /></Suspense></AuthGuard>,
       },
@@ -75,7 +84,7 @@ const protectedRoutes = [
       },
       {
         path: 'admin/skill-aliases',
-        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSkillAliasesPage /></Suspense></AuthGuard>,
+        element: <Navigate to="/admin/llm-decisions" replace />,
       },
       {
         path: 'admin/settings',
