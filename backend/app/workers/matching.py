@@ -8,7 +8,6 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from app.core import runtime_config
 from app.models.business import MatchResultRecord, ResumeCache, TaskStatus
 
 logger = logging.getLogger(__name__)
@@ -122,128 +121,6 @@ def _complete_recommend_result(
     return {**(previous or {}), "match_id": match_id, "top_n": top_n}
 
 
-async def _load_jd_evidence_rows(
-    results: list,
-) -> dict:
-    """并发加载命中岗位族内 JD 行（stage B：JD 级证据）。
-
-    results 去重 position_name 后并行查 jd_raw（limit 控制成本），失败单岗位
-    降级为空（不影响匹配结果）。每岗位独立 session：SQLAlchemy AsyncSession
-    禁止并发协程共用（第六轮审查 P1-1——此前 gather 共用同一 session，除
-    首个外均抛并发错被吞，生产环境 jd_evidence 大面积静默为空）。
-    """
-    from app.core.database import async_session_factory
-    from app.services.matching.jd_rerank import load_jd_rows_for_position
-
-    names = list(
-        dict.fromkeys(
-            str(r.position_name) for r in results if r.position_name
-        )
-    )
-    if not names:
-        return {}
-
-    async def _one(name: str) -> tuple[str, list]:
-        try:
-            async with async_session_factory() as s:
-                rows = await load_jd_rows_for_position(s, name)
-            return name, rows
-        except Exception:
-            logger.warning("[match/jd_evidence] 岗位 %s JD 加载失败，降级为空", name)
-            return name, []
-
-    gathered = await asyncio.gather(*(_one(n) for n in names))
-    return dict(gathered)
-
-
-async def _match_jd_candidates(
-    session,
-    candidate,
-    project_vectors: dict,
-    top_n: int,
-) -> list[dict]:
-    """阶段 C：原生 JD 候选匹配（全量 JD → 向量预筛 → 逐条评分 → 岗位级聚合）。
-
-    候选源=jd_raw 抽取快照（非聚合岗位画像）：每条 JD 直接建成 PositionProfile
-    评分（score_position 复用）。召回优先用「JD 技能池化向量」余弦 Top-K
-    （Redis 缓存池化向量，矩阵点积毫秒级——修复全量评分 36s 性能墙：
-    300 候选 × ~0.12s 评分 → 50 候选 ≈6s）；SBERT 不可用降级 rough_select
-    技能命中粗选（旧行为）。结果按 snapshot.normalized_position 聚合回岗位级
-    展示（Top-N 岗位 + 组内最佳 JD 证据），输出与聚合岗位模式同构。
-    """
-    from sqlalchemy import select
-
-    from app.models.raw import JDRaw
-    from app.services.matching.engine import RuleBasedMatcher
-    from app.services.matching.jd_aggregate import aggregate_jd_scores
-    from app.services.matching.jd_profiles import rough_select, rows_to_profiles
-    from app.services.matching.jd_vector_recall import (
-        candidate_vector,
-        load_pool_vectors_cached,
-        vector_recall,
-    )
-    from app.services.matching.schemas import MatchMode, MatchRequest
-    from app.services.matching.semantic import SkillEmbedder
-
-    rows = (await session.scalars(
-        select(JDRaw)
-        .where(JDRaw.snapshot["extraction"].astext.is_not(None))
-        .order_by(JDRaw.id)  # 行序稳定：池化向量指纹顺序无关化的双保险
-    )).all()
-    jd_profiles, jd_position = rows_to_profiles(rows)
-    if not jd_profiles:
-        return []
-
-    candidate_skills = [s.skill_name for s in candidate.skills if s.skill_name]
-    rough_k = int(runtime_config.get("match_jd_rough_k", 50))
-
-    # 向量预筛：池化向量加载（Redis 读写留主循环，CPU 段内部 to_thread）；
-    # SBERT 不可用/缓存异常 → pool_vecs=None 降级 rough_select 技能命中粗选
-    from app.core.database import redis_client
-
-    embedder = SkillEmbedder.get()
-    try:
-        pool_vecs = await load_pool_vectors_cached(jd_profiles, embedder, redis_client)
-    except Exception as e:
-        logger.warning("[match/jd_mode] 池化向量加载失败（降级命中粗选）: %s", e)
-        pool_vecs = None
-
-    pool = None
-    if pool_vecs:
-        def _recall():
-            cand_vec = candidate_vector(candidate_skills, embedder)
-            if cand_vec is None:
-                return None
-            return vector_recall(jd_profiles, pool_vecs, cand_vec, k=rough_k)
-
-        pool = await asyncio.to_thread(_recall)
-    if pool is None:
-        pool = rough_select(jd_profiles, candidate_skills, k=rough_k)
-    if not pool:
-        return []
-    # 岗位多样性配额（第六轮审查算法口径 1）：同族 JD 池化向量高度相似可
-    # 占满召回席位，聚合后岗位数远小于 top_n——按岗位名轮转配额后再评分
-    from app.services.matching.jd_profiles import diversify_by_position
-
-    pool = diversify_by_position(pool, jd_position, rough_k, top_n)
-
-    def _score():
-        matcher = RuleBasedMatcher(pool, semantic=SkillEmbedder.get())
-        return matcher.match(
-            MatchRequest(
-                candidate=candidate,
-                mode=MatchMode.AUTO,
-                # MatchRequest.top_n 上限 100；召回内全量评分用上限值，
-                # 聚合层再取真正的 top_n。
-                top_n=min(len(pool), 100),
-                project_vectors=project_vectors,
-            )
-        )
-
-    scored = await asyncio.to_thread(_score)
-    return aggregate_jd_scores(scored, jd_position, top_n=top_n)
-
-
 async def match_recommend(
     ctx: dict,
     resume_id: str,
@@ -253,11 +130,8 @@ async def match_recommend(
 ) -> dict:
     """Recommend Top-N positions and persist the asynchronous task result."""
     from app.core.database import async_session_factory, redis_client
-    from app.services.matching.engine import RuleBasedMatcher
+    from app.services.matching.jd_match import score_jd_auto
     from app.services.matching.loaders import build_candidate
-    from app.services.matching.schemas import MatchMode, MatchRequest
-    from app.services.matching.semantic import SkillEmbedder
-    from app.services.matching.shared_cache import load_positions_shared
 
     async with async_session_factory() as session:
         task = await session.get(TaskStatus, task_id) if task_id else None
@@ -283,50 +157,13 @@ async def match_recommend(
             from app.services.embeddings.vector_store import load_project_vectors
 
             project_vectors = await load_project_vectors(session, resume_id)
-            # 阶段 C（JD 候选模式）：开关默认 False（灰度），开启后候选从
-            # 「聚合岗位画像」切到「原生 JD 全量」（rough_select 预筛 → 逐条评分 →
-            # 岗位级聚合），输出与聚合岗位模式同构（岗位 Top-N + jd_evidence）。
-            jd_mode_enabled = (
-                ctx.get("jd_candidates") is True
-                or runtime_config.get("match_jd_candidates_enabled", False)
+            # 阶段 C（JD 候选模式）：方案 A 统一到 JD 级评分。候选从「聚合岗位
+            # 画像」切到「原生 JD 全量」（向量预筛 → 逐条评分 → 岗位级聚合），
+            # 输出与聚合岗位模式同构（岗位 Top-N + jd_evidence）。评分公式
+            # score_position 不变，只改岗位画像来源（单条 JD）。
+            data_items = await score_jd_auto(
+                session, candidate, project_vectors, top_n,
             )
-            if jd_mode_enabled:
-                data_items = await _match_jd_candidates(
-                    session, candidate, project_vectors, top_n,
-                )
-            else:
-                # 岗位画像走 Redis 版本化共享缓存（跨进程单飞；Redis 故障降级进程 TTL）
-                positions = await load_positions_shared()
-
-                def _match():
-                    matcher = RuleBasedMatcher(
-                        positions,
-                        semantic=SkillEmbedder.get(),
-                    )
-                    return matcher.match(
-                        MatchRequest(
-                            candidate=candidate,
-                            mode=MatchMode.AUTO,
-                            top_n=top_n,
-                            project_vectors=project_vectors,
-                        )
-                    )
-
-                results = await asyncio.to_thread(_match)
-                # 阶段 B：JD 级证据精排（每个命中岗位族内原生 JD 二次精排，附加
-                # jd_evidence 到结果 dict，不动 MatchResult schema / 评分顺序）
-                from app.services.matching.jd_rerank import (
-                    enrich_with_jd_evidence,
-                )
-
-                jd_rows = await _load_jd_evidence_rows(results)
-                candidate_skills = [
-                    s.get("name")
-                    for s in (cache.parsed_data or {}).get("skills", [])
-                    if s.get("name")
-                ]
-                data_items = [result.model_dump() for result in results]
-                enrich_with_jd_evidence(data_items, jd_rows, candidate_skills)
 
             match_id = str(uuid.uuid4())
 
