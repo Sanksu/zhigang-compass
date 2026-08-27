@@ -8,7 +8,6 @@ ETL 阶段 20 不产出别名候选，动态别名表无新增来源。锁定：
 """
 
 import asyncio
-import unittest.mock as mock
 
 from app.services.llm_decision import propose_normalization as pn
 
