@@ -479,6 +479,9 @@ paths:
                   trace_id: { type: string }
         '404':
           description: 两技能间不存在 ≤6 跳可达路径
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/graph/view/{view_type}:
     get:
@@ -631,12 +634,21 @@ paths:
               schema:
                 type: string
                 format: binary
-        '400':
-          description: resume_id 格式非法
+        '422':
+          description: resume_id 格式非法（code 4000）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '403':
           description: 非本人无权下载
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '404':
           description: 简历文件不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/resume/{resume_id}:
     get:
@@ -835,10 +847,16 @@ paths:
                   data:
                     $ref: '#/components/schemas/DiagnosisTaskResponse'
                   trace_id: { type: string }
-        '400':
-          description: 该匹配结果无差距数据
+        '422':
+          description: 该匹配结果无差距数据（code 4000）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '404':
           description: 匹配结果不存在或无权访问
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
     get:
       tags: [match]
       summary: 获取人岗比对诊断报告（只读）
@@ -862,10 +880,16 @@ paths:
                   data:
                     $ref: '#/components/schemas/DiagnosisReport'
                   trace_id: { type: string }
-        '400':
-          description: 该匹配结果无差距数据（仅人岗比对可生成诊断报告）
+        '422':
+          description: 该匹配结果无差距数据（仅人岗比对可生成诊断报告，code 4000）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '404':
           description: 匹配结果不存在或已过期；或诊断报告尚未生成（需先 POST 创建生成任务）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/match/feedback:
     post:
@@ -1036,6 +1060,9 @@ paths:
                   trace_id: { type: string }
         '404':
           description: 无图谱版本数据
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
   /api/v1/evolution/position/{id}/evolution:
     get:
       tags: [evolution]
@@ -1214,7 +1241,6 @@ paths:
         content:
           application/json:
             schema:
-              type: object
               $ref: '#/components/schemas/CreateUserRequest'
       responses:
         '201':
@@ -1235,7 +1261,6 @@ paths:
         content:
           application/json:
             schema:
-              type: object
               $ref: '#/components/schemas/UpdateUserRequest'
       responses:
         '200':
@@ -1262,7 +1287,6 @@ paths:
         content:
           application/json:
             schema:
-              type: object
               $ref: '#/components/schemas/CrawlTriggerRequest'
       responses:
         '202':
@@ -1332,6 +1356,9 @@ paths:
                   trace_id: { type: string }
         '404':
           description: 任务不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/admin/crawl/status:
     get:
@@ -1512,19 +1539,25 @@ paths:
           schema: { type: integer, minimum: 0, default: 0 }
       responses:
         '200':
-          description: 决策记录列表（created_at 倒序）
+          description: 决策记录列表（created_at 倒序，ApiResponse 包装）
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/LlmDecisionItem'
-                  total: { type: integer, description: 过滤后总数（分页条） }
-                  limit: { type: integer }
-                  offset: { type: integer }
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/LlmDecisionItem'
+                      total: { type: integer, description: 过滤后总数（分页条） }
+                      limit: { type: integer }
+                      offset: { type: integer }
+                  trace_id: { type: string }
 
   /api/v1/admin/llm-decisions/summary:
     get:
@@ -1532,21 +1565,27 @@ paths:
       summary: LLM 决策汇总（domain×status，验收卡片数据源，只读）
       responses:
         '200':
-          description: 按域的状态计数与总额
+          description: 按域的状态计数与总额（ApiResponse 包装）
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  by_domain:
-                    type: array
-                    description: 按域倒序（total 降序）
-                    items:
-                      $ref: '#/components/schemas/LlmDecisionDomainSummary'
-                  totals:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
                     type: object
-                    description: 全量状态计数（shadow/proposal/auto_applied/blocked/other/records）
-                    additionalProperties: { type: integer }
+                    properties:
+                      by_domain:
+                        type: array
+                        description: 按域倒序（total 降序）
+                        items:
+                          $ref: '#/components/schemas/LlmDecisionDomainSummary'
+                      totals:
+                        type: object
+                        description: 全量状态计数（shadow/proposal/auto_applied/blocked/other/records）
+                        additionalProperties: { type: integer }
+                  trace_id: { type: string }
 
   /api/v1/admin/llm-decisions/{decision_id}/approve:
     post:
@@ -1562,7 +1601,6 @@ paths:
         content:
           application/json:
             schema:
-              type: object
               $ref: '#/components/schemas/LLMDecisionReviewRequest'
       responses:
         '200':
@@ -1602,7 +1640,6 @@ paths:
         content:
           application/json:
             schema:
-              type: object
               $ref: '#/components/schemas/LLMDecisionReviewRequest'
       responses:
         '200':
@@ -1682,6 +1719,9 @@ paths:
                   trace_id: { type: string }
         '404':
           description: 岗位不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
     put:
       tags: [admin]
       summary: 人工编辑岗位定义（技能增删/necessity 切换/weight 调整/文本修改），变更写入 PositionEditLog 节点
@@ -1695,7 +1735,6 @@ paths:
         content:
           application/json:
             schema:
-              type: object
               $ref: '#/components/schemas/AdminPositionEditRequest'
       responses:
         '200':
@@ -1710,10 +1749,16 @@ paths:
                   data:
                     $ref: '#/components/schemas/PositionEditResult'
                   trace_id: { type: string }
-        '400':
-          description: 参数不合法（weight 越界 / necessity 非法等）
+        '422':
+          description: 参数不合法（weight 越界 / necessity 非法等，Pydantic 强校验 code 4000）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '404':
           description: 岗位不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/admin/positions/pending:
     get:
@@ -1754,7 +1799,6 @@ paths:
         content:
           application/json:
             schema:
-              type: object
               $ref: '#/components/schemas/AdminReviewActionRequest'
       responses:
         '200':
@@ -1763,12 +1807,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
-        '400':
-          description: 参数不合法 / 不满足晋升条件
+        '422':
+          description: 参数不合法 / 不满足晋升条件（code 4000）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '404':
           description: 候选岗位不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '409':
           description: 候选岗位当前状态不可审核
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/admin/positions/declining:
     get:
@@ -1799,7 +1852,6 @@ paths:
         content:
           application/json:
             schema:
-              type: object
               $ref: '#/components/schemas/AdminReasonRequest'
       responses:
         '200':
@@ -1871,7 +1923,6 @@ paths:
         content:
           application/json:
             schema:
-              type: object
               $ref: '#/components/schemas/AdminEvolutionReviewRequest'
       responses:
         '200':
@@ -2038,7 +2089,6 @@ paths:
         content:
           application/json:
             schema:
-              type: object
               $ref: '#/components/schemas/AdminReviewActionRequest'
       responses:
         '200':
@@ -2046,9 +2096,21 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiResponse' }
-        '400': { description: 参数不合法 }
-        '404': { description: 提案不存在 }
-        '409': { description: 状态不可审核 / 静态停用词移除缺少受影响技能 }
+        '422':
+          description: 参数不合法（code 4000）
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
+        '404':
+          description: 提案不存在
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
+        '409':
+          description: 状态不可审核 / 静态停用词移除缺少受影响技能
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/admin/dict-guard/changes:
     get:
@@ -2093,8 +2155,16 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiResponse' }
-        '404': { description: 变更记录不存在 }
-        '409': { description: 已是回滚记录或已回滚过 }
+        '404':
+          description: 变更记录不存在
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
+        '409':
+          description: 已是回滚记录或已回滚过
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/admin/dict-guard/report/latest:
     get:
@@ -2106,7 +2176,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiResponse' }
-        '404': { description: 暂无巡检报告 }
+        '404':
+          description: 暂无巡检报告
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/admin/dict-guard/trigger:
     post:
@@ -2119,7 +2193,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiResponse' }
-        '500': { description: 任务入队失败 }
+        '500':
+          description: 任务入队失败
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
 
 components:
   securitySchemes:
