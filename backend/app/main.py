@@ -64,6 +64,12 @@ async def lifespan(app: FastAPI):
             raise RuntimeError(
                 "生产环境禁止 CORS 通配 *，请显式配置 cors_origins 白名单"
             )
+    # 动态别名表启动加载（方案①，第六轮审查 P0-1）：approve 端点的即时刷新
+    # 只覆盖 API 进程内存；此处保证 API 重启后缓存非空（内部 fail-soft+warning）
+    from app.services.extraction.dictionary import refresh_dynamic_aliases
+
+    loaded_aliases = await refresh_dynamic_aliases()
+    logger.info("动态别名表启动加载完成：%d 条", loaded_aliases)
     await _prewarm_semantic()
     yield
     await _shutdown_resources()

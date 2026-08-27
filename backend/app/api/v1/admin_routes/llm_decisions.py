@@ -393,7 +393,7 @@ async def _approve_skill_classify(db, record, reason: str, operator: str) -> dic
 
 
 async def _approve_skill_alias(db, record, reason: str, operator: str) -> dict:
-    """技能别名回写批准（方案①）：写 skill_aliases(approved) + reload_dynamic_aliases。
+    """技能别名回写批准（方案①）：写 skill_aliases(approved) + 刷新动态别名缓存。
 
     skill_normalize 记录且 structured_output.kind=="alias"（propose_skill_alias 产出）：
     approve 即把该"别名→标准名"写进 skill_aliases（status=approved），供
@@ -446,12 +446,12 @@ async def _approve_skill_alias(db, record, reason: str, operator: str) -> dict:
     except IntegrityError:
         await db.rollback()
         return error(ERR_CONFLICT, "该别名已批准（并发批准冲突）")
-    # 触发 normalize_skill 动态别名表刷新（approve 后立即可并查）
-    try:
-        from app.services.extraction.dictionary import reload_dynamic_aliases
-        reload_dynamic_aliases()
-    except Exception:
-        pass  # reload 失败（DB 抖动）不阻断；下次启动会重新加载
+    # 触发 normalize_skill 动态别名表刷新：API 进程即时生效；worker 进程由
+    # on_startup + 每轮 ETL 起点刷新兜底（跨进程按轮次生效——第六轮审查 P0-1，
+    # 原 reload_dynamic_aliases 在事件循环内 asyncio.run 必抛且被静默吞掉）
+    from app.services.extraction.dictionary import refresh_dynamic_aliases
+
+    await refresh_dynamic_aliases()
     return ok({"decision_id": str(record.id), "variant": alias, "standard": standard})
 
 
