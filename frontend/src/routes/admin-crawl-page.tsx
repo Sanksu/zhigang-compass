@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/table'
 import { apiGet, apiPost, ApiError, getAccessToken } from '@/lib/api'
 import { formatDateTime } from '@/lib/utils'
+import { MetricCard, type MetricCardData } from '@/components/shared/metric-card'
 import type { components } from '@/types/api'
 import {
   Dialog,
@@ -79,15 +80,8 @@ interface CurrentTask {
 /** 后端 /admin/crawl/status 响应 data（契约 CrawlStatusData） */
 type CrawlStatusData = components['schemas']['CrawlStatusData']
 
-interface MetricCardItem {
-  id: string
-  label: string
-  value: string
-  delta: string
-  deltaColor: string
-  icon: typeof Database
-  hint: string
-}
+/** 指标卡数据 —— 共享 MetricCard 形态 + id（渲染 key 用） */
+type MetricCardItem = MetricCardData & { id: string }
 
 // 08-16 用户决策：无平台默认关键词/城市——留空 = 平台热度/最新且不限城市
 
@@ -334,19 +328,19 @@ export function AdminCrawlPage() {
           })),
         )
         setMetrics([
-          { id: 'today', label: '今日采集量', value: res.metrics.today_count.toLocaleString(), delta: '今日新增', deltaColor: 'text-state-emerging', icon: Database, hint: '今日 DB 入库新增（CST）' },
+          { id: 'today', label: '今日采集量', value: res.metrics.today_count.toLocaleString(), delta: '今日新增', deltaTone: 'emerging', icon: Database, hint: '今日 DB 入库新增（CST）' },
           // 累计采集量统一 DB 口径（08-15 用户决策）：与仪表盘一致的四表入库总量
-          { id: 'total', label: '累计采集量', value: (res.metrics.raw_total ?? 0).toLocaleString(), delta: `+${res.platforms.length}源`, deltaColor: 'text-state-emerging', icon: Database, hint: 'DB 入库总量（jd/course/paper/community）· 与仪表盘口径一致' },
-          { id: 'raw', label: 'JD/课程入库', value: (res.metrics.raw.jd + res.metrics.raw.course).toLocaleString(), delta: `JD ${res.metrics.raw.jd}`, deltaColor: 'text-state-emerging', icon: Activity, hint: 'jd_raw + course_raw 细分计数' },
-          { id: 'files', label: '有记录平台', value: res.platforms.length.toLocaleString(), delta: `${res.platforms.length} 源`, deltaColor: 'text-ink-muted', icon: Gauge, hint: '有采集记录的平台数' },
+          { id: 'total', label: '累计采集量', value: (res.metrics.raw_total ?? 0).toLocaleString(), delta: `+${res.platforms.length}源`, deltaTone: 'emerging', icon: Database, hint: 'DB 入库总量（jd/course/paper/community）· 与仪表盘口径一致' },
+          { id: 'raw', label: 'JD/课程入库', value: (res.metrics.raw.jd + res.metrics.raw.course).toLocaleString(), delta: `JD ${res.metrics.raw.jd}`, deltaTone: 'emerging', icon: Activity, hint: 'jd_raw + course_raw 细分计数' },
+          { id: 'files', label: '有记录平台', value: res.platforms.length.toLocaleString(), delta: `${res.platforms.length} 源`, deltaTone: 'muted', icon: Gauge, hint: '有采集记录的平台数' },
         ])
       })
       .catch(() => {
         setMetrics([
-          { id: 'today', label: '今日采集量', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Database, hint: '状态加载失败' },
-          { id: 'total', label: '累计采集量', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Database, hint: '请确认后端服务已启动' },
-          { id: 'raw', label: 'JD/课程入库', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Activity, hint: '—' },
-          { id: 'files', label: '有记录平台', value: '—', delta: '—', deltaColor: 'text-ink-muted', icon: Gauge, hint: '—' },
+          { id: 'today', label: '今日采集量', value: '—', delta: '—', deltaTone: 'muted', icon: Database, hint: '状态加载失败' },
+          { id: 'total', label: '累计采集量', value: '—', delta: '—', deltaTone: 'muted', icon: Database, hint: '请确认后端服务已启动' },
+          { id: 'raw', label: 'JD/课程入库', value: '—', delta: '—', deltaTone: 'muted', icon: Activity, hint: '—' },
+          { id: 'files', label: '有记录平台', value: '—', delta: '—', deltaTone: 'muted', icon: Gauge, hint: '—' },
         ])
       })
       .finally(() => setLoading(false))
@@ -434,25 +428,12 @@ export function AdminCrawlPage() {
         </TabsList>
 
         <TabsContent value="realtime">
-          {/* 顶部指标卡（真实 raw 表 + output 统计） */}
+          {/* 顶部指标卡（真实 raw 表 + output 统计）——共享 MetricCard 统一形态 */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {metrics.map((m) => {
-          const Icon = m.icon
-          return (
-            <Card key={m.id}>
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between mb-2">
-                  <Icon className="size-4 text-ink-faint" />
-                  <span className={`text-xs font-mono ${m.deltaColor}`}>{m.delta}</span>
-                </div>
-                <div className="text-2xl font-semibold tracking-tight tabular-nums">{m.value}</div>
-                <div className="text-xs text-ink-muted mt-1">{m.label}</div>
-                <div className="text-[10px] text-ink-faint mt-0.5 truncate">{m.hint}</div>
-              </CardContent>
-            </Card>
-          )
-        })}
-      </div>
+            {metrics.map((m) => (
+              <MetricCard key={m.id} data={m} />
+            ))}
+          </div>
 
       {/* 平台状态表 */}
       <Card className="mb-6">
