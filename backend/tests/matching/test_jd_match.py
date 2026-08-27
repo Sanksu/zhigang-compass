@@ -137,7 +137,7 @@ class TestScoreJdCompare:
 
     def test_skips_rows_without_extraction(self, monkeypatch):
         """无 extraction 的 JD 行跳过（不参与评分）。"""
-        ok_row = _row("后端工程师", ["Java"], jd_id=1)
+        ok_row = _row("后端工程师", ["Java", "Spring"], jd_id=1)
         no_ext_row = SimpleNamespace(
             id=2, source="x", source_url="", snapshot={"normalized_position": "后端工程师"},
         )
@@ -178,8 +178,8 @@ class TestScoreJdAutoRoughFallback:
     def test_pool_none_falls_back_to_rough_select(self, monkeypatch):
         """SBERT 池化不可用（pool_vecs=None）→ 命中粗选，不崩溃。"""
         rows = [
-            _row("后端工程师", ["Python"], jd_id=1),
-            _row("算法工程师", ["PyTorch"], jd_id=2),
+            _row("后端工程师", ["Python", "Docker"], jd_id=1),
+            _row("算法工程师", ["PyTorch", "Transformers"], jd_id=2),
         ]
         # 池化不可用：降级 rough_select 技能命中粗选
         monkeypatch.setattr(jd_match, "load_pool_vectors_cached", _fake_pool_none)
@@ -202,6 +202,119 @@ class TestScoreJdAutoRoughFallback:
         # 候选 Python 命中「后端工程师」→ 聚合出岗位级结果（池化降级路径不崩）
         assert isinstance(scored, list)
         assert all("position_name" in s for s in scored)
+
+
+class TestNarrowJdFilter:
+    """08-27 窄 JD 防虚高：单技能窄 JD 命中即满分会抹平区分度，须过滤（默认阈值 2）。"""
+
+    def test_compare_filters_narrow_single_skill_jd(self, monkeypatch):
+        """compare 路径：单技能窄 JD 不参与评分，取宽 JD 真最高分。"""
+        rows = [
+            _row("后端工程师", ["Java", "Spring"], title="后端 JD-宽", jd_id=1),
+            _row("后端工程师", ["Python"], title="后端 JD-窄", jd_id=2),
+        ]
+        scored_names: list[str] = []
+
+        def _fake_score(candidate, profile: PositionProfile, *a, **kw):
+            scored_names.append(profile.name)
+            # 窄 JD 若被误评分会得高分 0.99，但不应出现在结果
+            score = 0.99 if profile.name == "后端 JD-窄" else 0.7
+            return MatchResult(
+                position_id=profile.position_id, position_name=profile.name,
+                total_score=score, must_score=score, nice_score=1.0, exp_score=1.0,
+                matched_must=[], missing_must=[],
+            )
+
+        monkeypatch.setattr(jd_match, "score_position", _fake_score)
+        best, result = asyncio.run(jd_match.score_jd_compare(
+            _FakeSession(rows), _candidate(["Python"]), "后端工程师", {},
+        ))
+        assert "后端 JD-窄" not in scored_names  # 窄 JD 未参与评分
+        assert result.total_score == 0.7
+        assert best.name == "后端 JD-宽"
+
+    def test_auto_filters_narrow_jd_from_pool(self, monkeypatch):
+        """recommend 路径：单技能窄 JD 不进召回池（防列表虚高），宽 JD 正常。"""
+        rows = [
+            _row("后端工程师", ["Python", "Docker"], title="后端-宽", jd_id=1),
+            _row("后端工程师", ["Python"], title="后端-窄", jd_id=2),
+            _row("算法工程师", ["PyTorch", "NLP"], jd_id=3),
+        ]
+        seen: list[str] = []
+
+        def _fake_score(candidate, profile: PositionProfile, *a, **kw):
+            seen.append(profile.name)
+            return MatchResult(
+                position_id=profile.position_id, position_name=profile.name,
+                total_score=0.6, must_score=0.6, nice_score=1.0, exp_score=1.0,
+                matched_must=[], missing_must=[],
+            )
+
+        monkeypatch.setattr(jd_match, "load_pool_vectors_cached", _fake_pool_none)
+        monkeypatch.setattr(jd_match, "candidate_vector", lambda *a, **k: None)
+        monkeypatch.setattr(jd_match, "vector_recall", lambda *a, **k: None)
+        monkeypatch.setattr(jd_match, "score_position", _fake_score)
+        out = asyncio.run(jd_match.score_jd_auto(
+            _FakeSession(rows), _candidate(["Python"]), {},
+            top_n=10, rough_k=50, semantic=_DummyEmbedder(),
+        ))
+        assert "后端-窄" not in seen  # 单技能窄 JD 不进池
+        assert isinstance(out, list)
+        assert all("position_name" in s for s in out)
+
+
+class TestAlignScoresWithFullJd:
+    """08-27 fix：Top-N 与 compare 对齐——召回池外最佳 JD 补入取真最高分。"""
+
+    def test_full_jd_best_raises_score_and_evidence(self, monkeypatch):
+        """池内最高 0.7 → 全量（含池外）最高 0.92：分数/证据被真最高分 JD 覆盖。"""
+        results = [{
+            "position_id": "后端工程师",
+            "position_name": "后端工程师",
+            "total_score": 0.7, "must_score": 0.7, "nice_score": 1.0, "exp_score": 1.0,
+            "matched_must": ["Java"], "missing_must": ["Spring"],
+            "summary": "池内最佳", "unqualified": False,
+            "jd_evidence": [{"jd_id": "1", "jd_title": "JD-基础", "total_score": 0.7, "hit_count": 1}],
+        }]
+        best = MatchResult(
+            position_id="2", position_name="JD-全栈", total_score=0.92,
+            must_score=0.92, nice_score=1.0, exp_score=1.0,
+            matched_must=["Java", "Spring"], missing_must=[], matched_nice=["Docker"],
+            summary="全量最佳", unqualified=False,
+        )
+
+        async def _fake_compare(session, candidate, position_name, project_vectors, semantic=None, sim_threshold=None):
+            return (None, best)
+
+        monkeypatch.setattr(jd_match, "score_jd_compare", _fake_compare)
+        out = asyncio.run(jd_match._align_scores_with_full_jd(
+            None, _candidate(["Java", "Spring"]), results, {},
+        ))
+        assert out[0]["total_score"] == 0.92
+        assert out[0]["must_score"] == 0.92
+        assert out[0]["summary"] == "全量最佳"
+        assert out[0]["position_id"] == "后端工程师"  # 对外岗位名不变
+        assert out[0]["jd_evidence"][0]["jd_id"] == "2"  # 真最高分 JD 置顶
+        assert out[0]["jd_evidence"][0]["hit_count"] == 3  # must(2)+nice(1)
+
+    def test_no_position_jd_keeps_pool_result(self, monkeypatch):
+        """某岗位无 JD（score_jd_compare 返回 None）→ 保留池内聚合结果。"""
+        results = [{
+            "position_id": "后端工程师", "position_name": "后端工程师",
+            "total_score": 0.6, "must_score": 0.6, "nice_score": 1.0, "exp_score": 1.0,
+            "matched_must": [], "missing_must": [], "summary": "s", "unqualified": False,
+            "jd_evidence": [{"jd_id": "1", "jd_title": "JD-基础", "total_score": 0.6, "hit_count": 1}],
+        }]
+
+        async def _fake_compare(session, candidate, position_name, project_vectors, semantic=None, sim_threshold=None):
+            return None
+
+        monkeypatch.setattr(jd_match, "score_jd_compare", _fake_compare)
+        out = asyncio.run(jd_match._align_scores_with_full_jd(
+            None, _candidate(["Java"]), results, {},
+        ))
+        assert out[0]["total_score"] == 0.6
+        assert out[0]["jd_evidence"][0]["jd_id"] == "1"
 
 
 async def _fake_pool_none(profiles, embedder, redis_client=None):

@@ -49,6 +49,22 @@ from app.services.matching.semantic import SkillEmbedder
 
 logger = logging.getLogger(__name__)
 
+# 08-27：窄 JD 防虚高（对齐口径配套）——JD 须至少 must+nice ≥ 该数才参与匹配/评分。
+# 单技能窄 JD（如"只需 Apache Kafka"）命中即满分会系统性抬高 Top-N/详情分数并抹平
+# 岗位区分度（实测单技能 JD 使大量岗位冲到 1.0）。算法口径，默认 2，可经
+# runtime_config `match_jd_min_skills` 覆盖，需算法岗确认。
+_DEFAULT_MIN_JD_SKILLS = 2
+
+
+def _read_min_jd_skills() -> int:
+    """读取窄 JD 过滤阈值（runtime_config 可调，≥1）。"""
+    return max(1, int(runtime_config.get("match_jd_min_skills", _DEFAULT_MIN_JD_SKILLS)))
+
+
+def _jd_width(profile: PositionProfile) -> int:
+    """JD 技术技能宽度 = must + nice 技能数（软技能独立通道不计）。"""
+    return len(profile.must_skills) + len(profile.nice_skills)
+
 
 def _run_in_thread(fn):
     """CPU 密集段（SBERT/评分）放线程池，避免阻塞事件循环。"""
@@ -95,6 +111,12 @@ async def score_jd_auto(
     jd_profiles, jd_position = await load_all_jd_profiles(session)
     if not jd_profiles:
         return []
+    # 08-27 窄 JD 防虚高：单技能窄 JD 命中即满分会系统性抬高分数、抹平岗位区分度
+    # ——recommend 与 compare 同口径先按最小技能宽度过滤（阈值 runtime_config 可调）
+    min_skills = _read_min_jd_skills()
+    jd_profiles = [p for p in jd_profiles if _jd_width(p) >= min_skills]
+    if not jd_profiles:
+        return []
 
     candidate_skills = [s.skill_name for s in candidate.skills if s.skill_name]
 
@@ -136,7 +158,63 @@ async def score_jd_auto(
         )
 
     scored = await _run_in_thread(_score)
-    return aggregate_jd_scores(scored, jd_position, top_n=top_n)
+    results = aggregate_jd_scores(scored, jd_position, top_n=top_n)
+    # 08-27 fix：Top-N 与 compare 对齐——召回池(rough_k=50 全量粗选)可能漏掉
+    # 某岗位的最佳 JD，导致列表分(池内最高分)≠详情分(compare 用该岗位全部 JD
+    # 取真最高分)。对最终 Top-N 岗位补全量评分取真最高分，覆盖聚合分数与证据。
+    if results:
+        results = await _align_scores_with_full_jd(
+            session, candidate, results, project_vectors, embedder,
+        )
+    return results
+
+
+async def _align_scores_with_full_jd(
+    session: AsyncSession,
+    candidate: CandidateProfile,
+    results: list[dict],
+    project_vectors: dict,
+    semantic=None,
+) -> list[dict]:
+    """08-27 fix：Top-N 岗位分与 compare 对齐——取该岗位名下全部 JD 的真最高分。
+
+    recommend 召回池（rough_k 全量粗选 Top-K）可能漏掉某岗位的最佳 JD，导致
+    列表分 ≠ 详情分（compare 加载该岗位全部 JD 评分取真最高分，见 score_jd_compare）。
+    对每个 Top-N 岗位复用 score_jd_compare 取真最高分，覆盖聚合分数与证据
+    （真最高分 JD 置顶）。score 只会 ≥ 池内 max（全量集是池内集超集），仍防御性
+    仅在高分时覆盖。量级 = top_n 岗位 × 每岗位 JD 数，与 compare 单岗位同构，
+    池内少量重复评分可忽略（recommend 为异步任务，不阻塞同步响应）。
+    """
+    for item in results:
+        found = await score_jd_compare(
+            session, candidate, item["position_id"], project_vectors, semantic=semantic,
+        )
+        if found is None:
+            continue
+        _, best_result = found
+        if best_result.total_score >= item["total_score"]:
+            item.update({
+                "total_score": round(best_result.total_score, 4),
+                "must_score": best_result.must_score,
+                "nice_score": round(best_result.nice_score, 4),
+                "exp_score": round(best_result.exp_score, 4),
+                "matched_must": best_result.matched_must,
+                "missing_must": best_result.missing_must,
+                "summary": best_result.summary,
+                "unqualified": best_result.unqualified,
+            })
+        ev = [e for e in item["jd_evidence"] if e["jd_id"] != best_result.position_id]
+        item["jd_evidence"] = [
+            {
+                "jd_id": best_result.position_id,
+                "jd_title": best_result.position_name,
+                "total_score": round(best_result.total_score, 4),
+                "hit_count": len(best_result.matched_must) + len(best_result.matched_nice),
+            },
+            *ev,
+        ]
+    results.sort(key=lambda r: r["total_score"], reverse=True)
+    return results
 
 
 async def score_jd_compare(
@@ -163,6 +241,7 @@ async def score_jd_compare(
         .order_by(JDRaw.id)
     )).all()
 
+    min_skills = _read_min_jd_skills()
     profiles: list[PositionProfile] = []
     for row in rows:
         if (row.snapshot or {}).get("extraction") is None:
@@ -171,7 +250,8 @@ async def score_jd_compare(
             row.snapshot or {}, str(row.id),
             source=row.source or "", source_url=row.source_url or "",
         )
-        if prof is not None:
+        # 08-27 窄 JD 防虚高：与 recommend 同口径过滤单技能窄 JD（避免命中即满分）
+        if prof is not None and _jd_width(prof) >= min_skills:
             profiles.append(prof)
     if not profiles:
         return None
