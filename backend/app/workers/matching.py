@@ -123,14 +123,16 @@ def _complete_recommend_result(
 
 
 async def _load_jd_evidence_rows(
-    session,
     results: list,
 ) -> dict:
     """并发加载命中岗位族内 JD 行（stage B：JD 级证据）。
 
-    results 去重 position_name 后并行查 jd_raw（limit 控制成本），
-    失败单岗位降级为空（不影响匹配结果）。
+    results 去重 position_name 后并行查 jd_raw（limit 控制成本），失败单岗位
+    降级为空（不影响匹配结果）。每岗位独立 session：SQLAlchemy AsyncSession
+    禁止并发协程共用（第六轮审查 P1-1——此前 gather 共用同一 session，除
+    首个外均抛并发错被吞，生产环境 jd_evidence 大面积静默为空）。
     """
+    from app.core.database import async_session_factory
     from app.services.matching.jd_rerank import load_jd_rows_for_position
 
     names = list(
@@ -143,7 +145,8 @@ async def _load_jd_evidence_rows(
 
     async def _one(name: str) -> tuple[str, list]:
         try:
-            rows = await load_jd_rows_for_position(session, name)
+            async with async_session_factory() as s:
+                rows = await load_jd_rows_for_position(s, name)
             return name, rows
         except Exception:
             logger.warning("[match/jd_evidence] 岗位 %s JD 加载失败，降级为空", name)
@@ -311,7 +314,7 @@ async def match_recommend(
                     enrich_with_jd_evidence,
                 )
 
-                jd_rows = await _load_jd_evidence_rows(session, results)
+                jd_rows = await _load_jd_evidence_rows(results)
                 candidate_skills = [
                     s.get("name")
                     for s in (cache.parsed_data or {}).get("skills", [])
@@ -357,7 +360,12 @@ async def match_recommend(
                     row.result = data
                 await session.flush()
             except Exception:
+                # 镜像落库失败仅降级（Redis 为主存），但必须 rollback——否则
+                # session 残留 pending-rollback 态，末尾统一 commit 必抛
+                # PendingRollbackError 逃逸、task.status 卡 running
+                # （第六轮审查 P1-3）
                 logger.exception("匹配结果落库失败，跳过（不影响任务成功）")
+                await session.rollback()
 
             task.status = "success"
             task.progress = 1.0
