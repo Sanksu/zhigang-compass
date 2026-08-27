@@ -16,6 +16,7 @@ import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import { apiGet } from '@/lib/api'
 import type { components } from '@/types/api'
@@ -267,11 +268,8 @@ export function EvolutionPage() {
         }
       />
 
-      {/* 样本量波动告警 + 顶部指标卡（真实版本派生） */}
+      {/* 样本量波动告警 + 顶部指标卡（真实版本派生）——跨 Tab 始终置顶 */}
       {versions[0]?.data_warning && <DataWarningBanner warning={versions[0].data_warning} />}
-
-      {/* C 端技能衰退预警摘要（真实 /evolution/signals declining） */}
-      <SkillDeclineWarningCard />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         {metrics.map((m) => (
@@ -279,37 +277,35 @@ export function EvolutionPage() {
         ))}
       </div>
 
-      {/* 岗位演化历史（真实 /evolution/position/{id}/evolution） */}
-      <div className="mb-4">
-        <PositionEvolutionView />
-      </div>
+      {/* 演化看板 4 区块按 信号 / 趋势与流向 / 版本与状态机 分组，不再无限下滑 */}
+      <Tabs defaultValue="signals">
+        <TabsList className="mb-4">
+          <TabsTrigger value="signals" className="text-xs">信号</TabsTrigger>
+          <TabsTrigger value="trend" className="text-xs">趋势与流向</TabsTrigger>
+          <TabsTrigger value="versions" className="text-xs">版本与状态机</TabsTrigger>
+        </TabsList>
 
-      {/* 技能频次趋势（真实 /evolution/trends） */}
-      <div className="mb-4">
-        <SkillTrendView />
-      </div>
+        {/* 信号：衰退预警摘要 + 新兴/衰退 Top-10 */}
+        <TabsContent value="signals">
+          <SkillDeclineWarningCard />
+          <SignalsView />
+        </TabsContent>
 
-      {/* 技能关联岗位动态变迁桑基图（真实 /evolution/skill/{id}/flow） */}
-      <SkillFlowView />
+        {/* 趋势与流向：岗位演化历史 + 技能频次趋势 + 技能流向桑基 + 技术观察池 */}
+        <TabsContent value="trend" className="space-y-4">
+          <PositionEvolutionView />
+          <SkillTrendView />
+          <SkillFlowView />
+          <TechnologyWatchView />
+        </TabsContent>
 
-      {/* 新兴 / 衰退技能 Top-10（真实 /evolution/signals） */}
-      <SignalsView />
-
-      {/* 技术热点观察池（真实 /evolution/watch，MLI 产业化拐点） */}
-      <TechnologyWatchView />
-
-      {/* 版本快照对比（真实） */}
-      <div className="mb-4">
-        <VersionDiffView />
-      </div>
-
-      {/* 岗位状态机流转（真实 /evolution/state-machine） */}
-      <StateMachineView />
-
-      {/* 谱系事件流（真实 /evolution/events，新增/合并/终结） */}
-      <div className="mt-4">
-        <EvolutionEventsView />
-      </div>
+        {/* 版本与状态机：版本快照对比 + 状态机流转 + 谱系事件流 */}
+        <TabsContent value="versions" className="space-y-4">
+          <VersionDiffView />
+          <StateMachineView />
+          <EvolutionEventsView />
+        </TabsContent>
+      </Tabs>
     </>
   )
 }
