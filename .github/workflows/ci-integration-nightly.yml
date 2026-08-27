@@ -1,0 +1,74 @@
+name: Integration Nightly
+
+# 集成用例（-m integration）默认被 pyproject.addopts 排除，此前 CI 永久不跑
+# （第六轮审查 P2「CI integration 永冻」）。夜间 job：拉起 PG(pgvector) +
+# Redis + Neo4j 服务后显式执行，数据演化式断言脆性缓解：失败不阻塞主 CI，
+# nightly 独立暴露；workflow_dispatch 支持手动补跑。
+on:
+  schedule:
+    # UTC 22:00 = 北京时间 06:00（ETL 主管线之后，图谱形态最新）
+    - cron: '0 22 * * *'
+  workflow_dispatch: {}
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: zhigang
+          POSTGRES_PASSWORD: zhigang
+          POSTGRES_DB: zhigang
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U zhigang"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/password
+        ports: ['7687:7687']
+        options: >-
+          --health-cmd "wget -q -O /dev/null http://localhost:7474 || exit 1"
+          --health-interval 10s --health-timeout 5s --health-retries 12
+
+    env:
+      APP_ENV: test
+      POSTGRES_DSN: postgresql+asyncpg://zhigang:zhigang@localhost:5432/zhigang
+      NEO4J_URI: bolt://localhost:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: password
+      REDIS_URL: redis://localhost:6379/0
+      ARQ_REDIS_URL: redis://localhost:6379/1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Setup Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Run integration tests
+        run: uv run pytest -q -m integration
