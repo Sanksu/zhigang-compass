@@ -186,6 +186,8 @@ export function ResumeMatchPage() {
   const [resumeList, setResumeList] = useState<ResumeSummary[]>([])
   const [activeResumeId, setActiveResumeId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // recommend 异步任务进行中（渲染分阶段加载卡，替代素文案条）
+  const [recommending, setRecommending] = useState(false)
   // 差距展开溯源（task T3）：被展开的技能集
   const [expandedGaps, setExpandedGaps] = useState<Set<string>>(() => new Set())
   // 差距数据升级派生（task T3）. H4 修复:直接消费后端 gaps(删除 decorateGaps 前端
@@ -307,7 +309,8 @@ export function ResumeMatchPage() {
     if (summary) setCandidate(toCandidate(summary))
     setActiveResumeId(resumeId)
     setStage('parsing')
-    setNotice('推荐计算中，请稍候…')
+    setNotice(null)
+    setRecommending(true)
     try {
       const submitted = await apiPost<components['schemas']['RecommendTaskResult']>('/match/recommend', {
         resume_id: resumeId,
@@ -327,6 +330,8 @@ export function ResumeMatchPage() {
     } catch (e) {
       setStage('upload')
       setNotice(errMsg(e, '推荐失败，请检查后端服务'))
+    } finally {
+      setRecommending(false)
     }
   }
 
@@ -506,10 +511,19 @@ export function ResumeMatchPage() {
                 loading={stage === 'parsing'}
                 onFileSelected={handleFileSelected}
               />
-              {notice && (
-                <p className="text-xs text-ink-muted mt-3 border border-border rounded-md p-2 bg-subtle">
-                  {notice}
-                </p>
+              {recommending ? (
+                <AiThinkingCard
+                  stages={['正在召回岗位候选 JD…', '正在逐条三维评分…', '正在聚合岗位并对齐分数…']}
+                  rows={3}
+                  hint="全量 JD 真实匹配，通常 10~60 秒"
+                  className="py-4"
+                />
+              ) : (
+                notice && (
+                  <p className="text-xs text-ink-muted mt-3 border border-border rounded-md p-2 bg-subtle">
+                    {notice}
+                  </p>
+                )
               )}
             </CardContent>
           </Card>
@@ -726,21 +740,22 @@ export function ResumeMatchPage() {
             </Card>
           )}
 
-          {selectedPosition && matchResult && (
+          {/* 加载中只显示 AI 加载卡，避免上一岗位的旧结果与新岗位加载态同屏 */}
+          {selectedPosition && matchResult && !loadingDetail && (
             <>
               {/* 总分 + 三维 + 摘要 */}
               <Card>
                 <CardHeader className="pb-3">
+                  {/* 主标题=岗位名（与左侧列表点选项一致）；最佳 JD 标题降级为副标 */}
                   <CardTitle className="text-base flex items-center gap-2">
-                    <span>{matchResult.position_name}</span>
+                    <span>{selectedPosition.position_name}</span>
                     <PositionStateBadge state={selectedPosition.status} label={selectedPosition.status === 'low' ? '待提升' : undefined} className="text-[10px]" />
-                    <span className="text-xs font-mono text-ink-faint ml-auto">{matchResult.position_id}</span>
                   </CardTitle>
-                  {/* 结果快照 ID + 反馈 + 快照重载（POST /match/feedback / GET /match/task|result） */}
+                  {/* 结果最佳 JD + 反馈 + 快照重载（POST /match/feedback / GET /match/task|result） */}
                   <div className="flex flex-wrap items-center gap-2 pt-1">
-                    {matchId && (
-                      <span className="text-[10px] font-mono text-ink-faint" title="结果快照 ID（Redis 24h）">
-                        #{matchId.slice(0, 8)}
+                    {matchResult.position_name && matchResult.position_name !== selectedPosition.position_name && (
+                      <span className="text-[10px] text-ink-faint">
+                        最佳匹配 JD：<span className="font-medium text-ink-muted">{matchResult.position_name}</span>
                       </span>
                     )}
                     <div className="flex items-center gap-1 ml-auto">
@@ -764,7 +779,12 @@ export function ResumeMatchPage() {
                       >
                         <ThumbsDown className="size-3.5 mr-1" />没用
                       </Button>
-                      <RefreshButton variant="ghost" className="h-7 px-2 text-xs" onClick={reloadFromSnapshot}>重载</RefreshButton>
+                      <RefreshButton
+                        variant="ghost"
+                        className="h-7 px-2 text-xs"
+                        title={matchId ? `重载快照 ${matchId}` : undefined}
+                        onClick={reloadFromSnapshot}
+                      >重载</RefreshButton>
                     </div>
                   </div>
                 </CardHeader>
@@ -804,7 +824,7 @@ export function ResumeMatchPage() {
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm">能力对比</CardTitle>
-                    <CardDescription>候选人 vs 岗位要求（直接消费后端雷达评分；包含后端提供的熟练度满足度）</CardDescription>
+                    <CardDescription>候选人能力 vs 岗位要求（含熟练度满足度对比）</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <RadarChart data={matchResult.radar} />

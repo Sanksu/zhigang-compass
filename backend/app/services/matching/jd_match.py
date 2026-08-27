@@ -221,8 +221,12 @@ async def _align_scores_with_full_jd(
             "summary": best_result.summary,
             "unqualified": best_result.unqualified,
         })
-        ev = [e for e in item["jd_evidence"] if e["jd_id"] != best_result.position_id]
-        # 真最高分 JD 置顶后截断 Top-2，与契约 jd_evidence「Top-2」描述对齐
+        # 真最高分 JD 置顶后按 jd_id+标题去重（同标题不同 jd_id 的重复条目只留一个），
+        # 再截断 Top-2 与契约描述对齐
+        ev = [
+            e for e in item["jd_evidence"]
+            if e["jd_id"] != best_result.position_id and e["jd_title"] != best_result.position_name
+        ]
         item["jd_evidence"] = ([
             {
                 "jd_id": best_result.position_id,
