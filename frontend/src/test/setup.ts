@@ -28,6 +28,16 @@ if (typeof ResizeObserver === 'undefined') {
   window.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver
 }
 
+// jsdom 缺 PointerEvent（Radix Select 触发器 pointerdown 展开、选项 pointerup
+// 选中所依赖）；补 MouseEvent 别名 + pointer capture 桩，使 userEvent 可驱动
+// Radix Select 交互（原生 select 迁 ui/select 后组件测试依赖）
+if (typeof window.PointerEvent === 'undefined') {
+  window.PointerEvent = window.MouseEvent as unknown as typeof PointerEvent
+}
+window.HTMLElement.prototype.scrollIntoView = () => {}
+window.HTMLElement.prototype.hasPointerCapture = () => false
+window.HTMLElement.prototype.releasePointerCapture = () => {}
+
 // Node 26 的原生 localStorage（实验性，需 --localstorage-file）与 jsdom 缺省
 // url 配置下均不可用（ui.ts 主题持久化与多组件测试依赖）；统一注入内存实现
 let hasLocalStorage: boolean

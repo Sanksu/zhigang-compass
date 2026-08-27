@@ -11,6 +11,7 @@
  * - GET /api/v1/evolution/state-machine → 岗位状态机流转（六态分布 + 人工审核记录）
  */
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { Calendar, TrendingUp, TrendingDown } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -240,6 +241,19 @@ function SkillDeclineWarningCard() {
 
 export function EvolutionPage() {
   const [versions, setVersions] = useState<EvolutionVersion[]>([])
+  // Tab 以 URL ?tab= 为单一来源（对齐 admin-review-page 口径）：刷新/分享链接
+  // 直达目标 Tab；默认 signals 不写 query，保持 URL 干净
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rawTab = searchParams.get('tab')
+  const tab = rawTab === 'trend' || rawTab === 'versions' ? rawTab : 'signals'
+  const onTabChange = (v: string) => {
+    if (v === tab) return
+    setSearchParams((prev) => {
+      if (v === 'signals') prev.delete('tab')
+      else prev.set('tab', v)
+      return prev
+    }, { replace: true })
+  }
 
   // 加载真实版本列表（顶部指标 + diff 下拉共用），按 version_id 降序保证稳定
   useEffect(() => {
@@ -284,7 +298,7 @@ export function EvolutionPage() {
       </div>
 
       {/* 演化看板 4 区块按 信号 / 趋势与流向 / 版本与状态机 分组，不再无限下滑 */}
-      <Tabs defaultValue="signals">
+      <Tabs value={tab} onValueChange={onTabChange}>
         <TabsList className="mb-4">
           <TabsTrigger value="signals" className="text-xs">信号</TabsTrigger>
           <TabsTrigger value="trend" className="text-xs">趋势与流向</TabsTrigger>

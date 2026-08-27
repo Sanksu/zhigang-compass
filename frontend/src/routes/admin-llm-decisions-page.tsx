@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PaginationBar } from '@/components/ui/pagination'
 import {
   Table,
@@ -212,32 +213,38 @@ export function AdminLlmDecisionsPage() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
-            <select
-              aria-label="域过滤"
-              className="h-8 rounded-md border bg-background px-2 text-sm"
-              value={domain}
-              onChange={(e) => applyFilter({ domain: e.target.value })}
+            <Select
+              value={domain || 'all'}
+              onValueChange={(v) => applyFilter({ domain: v === 'all' ? '' : v })}
             >
-              <option value="">全部域</option>
-              {Object.entries(DOMAIN_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="状态过滤"
-              className="h-8 rounded-md border bg-background px-2 text-sm"
-              value={status}
-              onChange={(e) => applyFilter({ status: e.target.value })}
+              <SelectTrigger aria-label="域过滤" className="h-8 w-36 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部域</SelectItem>
+                {Object.entries(DOMAIN_LABELS).map(([k, v]) => (
+                  <SelectItem key={k} value={k}>
+                    {v}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={status || 'all'}
+              onValueChange={(v) => applyFilter({ status: v === 'all' ? '' : v })}
             >
-              <option value="">全部状态</option>
-              {['shadow', 'proposal', 'auto_applied', 'blocked', 'approved', 'rejected'].map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger aria-label="状态过滤" className="h-8 w-36 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部状态</SelectItem>
+                {['shadow', 'proposal', 'auto_applied', 'blocked', 'approved', 'rejected'].map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button variant="ghost" size="sm" onClick={() => setQ('')}>
               清除
             </Button>

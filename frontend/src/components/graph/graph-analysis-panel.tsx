@@ -12,6 +12,7 @@ import { BarChart2, Boxes, GitBranch, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { apiGet } from '@/lib/api'
 import type { components } from '@/types/api'
 
@@ -188,19 +189,22 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
               <Label htmlFor="cluster-level-select" className="text-[10px] text-ink-faint">
                 层级（dendrogram 粗→细）
               </Label>
-              <select
-                id="cluster-level-select"
-                value={selectedLevel ?? ''}
-                onChange={(e) => changeLevel(e.target.value)}
-                className="w-full h-7 rounded border border-border bg-canvas px-2 text-xs outline-none focus:border-ink"
+              <Select
+                value={selectedLevel ? String(selectedLevel) : 'auto'}
+                onValueChange={(v) => changeLevel(v === 'auto' ? '' : v)}
               >
-                <option value="">最优层</option>
-                {levels.map((l) => (
-                  <option key={l.level} value={l.level}>
-                    L{l.level} · {l.cluster_count} 簇 · Q={l.modularity.toFixed(3)}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="cluster-level-select" className="h-7 w-full text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">最优层</SelectItem>
+                  {levels.map((l) => (
+                    <SelectItem key={l.level} value={String(l.level)}>
+                      L{l.level} · {l.cluster_count} 簇 · Q={l.modularity.toFixed(3)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
           {clusterLoading ? (
@@ -280,37 +284,49 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
           <div className="space-y-1.5">
             <div>
               <Label className="text-[10px] text-ink-faint">起点技能</Label>
-              <select
-                value={fromSkill}
-                onChange={(e) => {
-                  setFromSkill(e.target.value)
+              <Select
+                value={fromSkill || 'none'}
+                onValueChange={(v) => {
+                  setFromSkill(v === 'none' ? '' : v)
                   setPath(null)
                   setPathError(null)
                 }}
-                className="w-full h-7 rounded border border-border bg-canvas px-2 text-xs outline-none focus:border-ink"
               >
-                <option value="">选择技能…</option>
-                {skills.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+                <SelectTrigger className="h-7 w-full text-xs">
+                  <SelectValue placeholder="选择技能…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">选择技能…</SelectItem>
+                  {skills.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label className="text-[10px] text-ink-faint">终点技能</Label>
-              <select
-                value={toSkill}
-                onChange={(e) => {
-                  setToSkill(e.target.value)
+              <Select
+                value={toSkill || 'none'}
+                onValueChange={(v) => {
+                  setToSkill(v === 'none' ? '' : v)
                   setPath(null)
                   setPathError(null)
                 }}
-                className="w-full h-7 rounded border border-border bg-canvas px-2 text-xs outline-none focus:border-ink"
               >
-                <option value="">选择技能…</option>
-                {skills.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+                <SelectTrigger className="h-7 w-full text-xs">
+                  <SelectValue placeholder="选择技能…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">选择技能…</SelectItem>
+                  {skills.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <Button size="sm" className="w-full h-7 text-xs" onClick={runShortestPath} disabled={pathLoading}>
               {pathLoading ? '计算中…' : '查询路径'}
