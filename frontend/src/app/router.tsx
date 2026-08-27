@@ -88,20 +88,12 @@ const protectedRoutes = [
         element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="tasks" /></Suspense></AuthGuard>,
       },
       {
-        path: 'admin/settings/crawl',
-        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="crawl" /></Suspense></AuthGuard>,
-      },
-      {
-        path: 'admin/settings/evolution',
-        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="evolution" /></Suspense></AuthGuard>,
+        path: 'admin/settings/system',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="system" /></Suspense></AuthGuard>,
       },
       {
         path: 'admin/settings/etl',
         element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="etl" /></Suspense></AuthGuard>,
-      },
-      {
-        path: 'admin/settings/dictguard',
-        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminSettingsPage section="dictguard" /></Suspense></AuthGuard>,
       },
     ],
   },

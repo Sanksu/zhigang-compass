@@ -1,5 +1,5 @@
 /** 技能胶囊 chips — must/nice/soft 三色唯一源。
- * 收敛 resume-match / node-detail-panel 的手写技能 chips。 */
+ * 收敛 resume-match 与 node-detail-panel 的手写技能 chips。 */
 import { cn } from '@/lib/utils'
 
 export type SkillChipTone = 'must' | 'nice' | 'soft'

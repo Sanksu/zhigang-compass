@@ -120,13 +120,26 @@ async def _prewarm_semantic() -> None:
 
     try:
         await asyncio.to_thread(SkillEmbedder.get().preload)
-        # 预热岗位画像（08-15 修复：首次 compare 的 positions 加载 +
-        # 批量 encode 实测 16s——比模型加载更长，用户"比对详情白屏"主因）。
-        # P1 起走 Redis 版本化共享缓存：冷启动构建载荷并切指针，
-        # 其他进程/worker 直接读共享载荷，不再各自全量查图。
-        from app.services.matching.shared_cache import load_positions_shared
+        # 方案 A：岗位画像来自 jd_raw 单条 JD（非图谱聚合）。预热 JD 技能池化
+        # 向量（向量预筛召回用，首建含 SBERT warm 可达数十秒——免冷启动首个
+        # 匹配请求承担）。失败静默不阻断启动；匹配侧池化不可用降级命中粗选。
+        from app.services.matching.jd_vector_recall import load_pool_vectors_cached
+        from app.core.database import redis_client
+        from app.services.matching.jd_profiles import rows_to_profiles
+        from app.models.raw import JDRaw
+        from sqlalchemy import select
+        from app.core.database import async_session_factory
 
-        await load_positions_shared()
+        async with async_session_factory() as session:
+            rows = (await session.scalars(
+                select(JDRaw)
+                .where(JDRaw.snapshot["extraction"].astext.is_not(None))
+                .order_by(JDRaw.id)
+            )).all()
+        profiles, _ = rows_to_profiles(rows)
+        await load_pool_vectors_cached(
+            profiles, SkillEmbedder.get(), redis_client,
+        )
     except Exception:
         logger.warning(
             "语义模型预热失败,匹配已降级为纯规则模式(详见 SemanticUnavailableError)",
