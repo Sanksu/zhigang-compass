@@ -55,7 +55,7 @@ describe('Sidebar 导航过滤（§12.3 RBAC）', () => {
     expect(screen.getAllByText('岗位审核').length).toBeGreaterThan(0)
     expect(screen.getAllByText('决策与验收').length).toBeGreaterThan(0)
     expect(screen.getAllByText('动态别名表').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('采集与限频').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('系统节流').length).toBeGreaterThan(0)
   })
 
   it('sidebarOpen 时显示移动端抽屉面板', () => {
