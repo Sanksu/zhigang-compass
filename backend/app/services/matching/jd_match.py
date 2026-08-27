@@ -61,6 +61,18 @@ def _read_min_jd_skills() -> int:
     return max(1, int(runtime_config.get("match_jd_min_skills", _DEFAULT_MIN_JD_SKILLS)))
 
 
+# 08-27：对齐全量重评的成本上界——每岗位参与评分的 JD 数上限（按 updated_at 最近 N 条宽 JD）。
+# 不设上限会对岗位全量 JD 评分（后端开发工程师 850 条 → recommend 对齐 133s 超时）。
+# compare 与对齐同用 score_jd_compare（同口径同上限），列表/详情分数仍一致。
+# 算法口径，默认 50，可 runtime_config `match_jd_max_per_position` 覆盖。
+_DEFAULT_MAX_JDS_PER_POSITION = 50
+
+
+def _read_max_jds_per_position() -> int:
+    """读取每岗位评分 JD 数上限（runtime_config 可调，≥1）。"""
+    return max(1, int(runtime_config.get("match_jd_max_per_position", _DEFAULT_MAX_JDS_PER_POSITION)))
+
+
 def _jd_width(profile: PositionProfile) -> int:
     """JD 技术技能宽度 = must + nice **唯一技能名数**（软技能独立通道不计）。
 
@@ -181,14 +193,13 @@ async def _align_scores_with_full_jd(
     project_vectors: dict,
     semantic=None,
 ) -> list[dict]:
-    """08-27 fix：Top-N 岗位分与 compare 对齐——取该岗位名下全部 JD 的真最高分。
+    """08-27 fix：Top-N 岗位分与 compare 对齐——取该岗位最近 N 条宽 JD 的真最高分。
 
-    recommend 召回池（rough_k 全量粗选 Top-K）可能漏掉某岗位的最佳 JD，导致
-    列表分 ≠ 详情分（compare 加载该岗位全部 JD 评分取真最高分，见 score_jd_compare）。
-    对每个 Top-N 岗位复用 score_jd_compare 取真最高分，覆盖聚合分数与证据
-    （真最高分 JD 置顶）。score 只会 ≥ 池内 max（全量集是池内集超集），仍防御性
-    仅在高分时覆盖。量级 = top_n 岗位 × 每岗位 JD 数，与 compare 单岗位同构，
-    池内少量重复评分可忽略（recommend 为异步任务，不阻塞同步响应）。
+    recommend 召回池（rough_k 全量粗选 Top-K）与 compare 的候选集不同，同一岗位
+    可能取到不同 JD 导致列表分 ≠ 详情分。对每个 Top-N 岗位复用 score_jd_compare
+    （与 compare 同口径：窄 JD 过滤 + 每岗位评分上限）取真最高分，**无条件覆盖**
+    聚合分数与证据（真最高分 JD 置顶），保证列表分 === 详情分。量级 = top_n 岗位
+    × 每岗位评分上限（默认 50），recommend 为异步任务，不阻塞同步响应。
     """
     for item in results:
         found = await score_jd_compare(
@@ -197,17 +208,16 @@ async def _align_scores_with_full_jd(
         if found is None:
             continue
         _, best_result = found
-        if best_result.total_score >= item["total_score"]:
-            item.update({
-                "total_score": round(best_result.total_score, 4),
-                "must_score": best_result.must_score,
-                "nice_score": round(best_result.nice_score, 4),
-                "exp_score": round(best_result.exp_score, 4),
-                "matched_must": best_result.matched_must,
-                "missing_must": best_result.missing_must,
-                "summary": best_result.summary,
-                "unqualified": best_result.unqualified,
-            })
+        item.update({
+            "total_score": round(best_result.total_score, 4),
+            "must_score": best_result.must_score,
+            "nice_score": round(best_result.nice_score, 4),
+            "exp_score": round(best_result.exp_score, 4),
+            "matched_must": best_result.matched_must,
+            "missing_must": best_result.missing_must,
+            "summary": best_result.summary,
+            "unqualified": best_result.unqualified,
+        })
         ev = [e for e in item["jd_evidence"] if e["jd_id"] != best_result.position_id]
         item["jd_evidence"] = [
             {
@@ -243,10 +253,11 @@ async def score_jd_compare(
     rows = (await session.scalars(
         select(JDRaw)
         .where(JDRaw.snapshot["normalized_position"].astext == position_name)
-        .order_by(JDRaw.id)
+        .order_by(JDRaw.updated_at.desc(), JDRaw.id)  # 最近优先，配合每岗位评分上限
     )).all()
 
     min_skills = _read_min_jd_skills()
+    max_jds = _read_max_jds_per_position()
     profiles: list[PositionProfile] = []
     for row in rows:
         if (row.snapshot or {}).get("extraction") is None:
@@ -258,6 +269,10 @@ async def score_jd_compare(
         # 08-27 窄 JD 防虚高：与 recommend 同口径过滤单技能窄 JD（避免命中即满分）
         if prof is not None and _jd_width(prof) >= min_skills:
             profiles.append(prof)
+            # 每岗位评分上限：只评最近 max_jds 条宽 JD（全量重评导致 recommend
+            # 对齐 133s 超时，见 _DEFAULT_MAX_JDS_PER_POSITION 注释）
+            if len(profiles) >= max_jds:
+                break
     if not profiles:
         return None
 

@@ -289,6 +289,33 @@ class TestNarrowJdFilter:
         assert "窄 JD" not in scored_names  # 单技能(双列重复)JD 被过滤
 
 
+    def test_compare_caps_scored_jds_per_position(self, monkeypatch):
+        """每岗位评分上限：宽 JD 超过上限时只评最近 N 条（防 recommend 对齐超时）。
+
+        08-27 E2E：不设上限会对岗位全量 JD 评分（后端开发工程师 850 条 → recommend
+        对齐 133s 超时），上限默认 50（runtime_config.match_jd_max_per_position 可调）。
+        """
+        rows = [
+            _row("后端工程师", ["Java", "Spring"], title=f"JD-{i}", jd_id=i)
+            for i in range(60)
+        ]
+        scored_count = {"n": 0}
+
+        def _fake_score(candidate, profile: PositionProfile, *a, **kw):
+            scored_count["n"] += 1
+            return MatchResult(
+                position_id=profile.position_id, position_name=profile.name,
+                total_score=0.5, must_score=0.5, nice_score=1.0, exp_score=1.0,
+            )
+
+        monkeypatch.setattr(jd_match, "score_position", _fake_score)
+        monkeypatch.setattr(jd_match, "_read_max_jds_per_position", lambda: 50)
+        asyncio.run(jd_match.score_jd_compare(
+            _FakeSession(rows), _candidate(["Java"]), "后端工程师", {},
+        ))
+        assert scored_count["n"] == 50  # 只评最近 50 条宽 JD，不是全量 60
+
+
 class TestAlignScoresWithFullJd:
     """08-27 fix：Top-N 与 compare 对齐——召回池外最佳 JD 补入取真最高分。"""
 
