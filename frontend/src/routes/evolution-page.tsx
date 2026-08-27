@@ -24,9 +24,8 @@ import type {
   EvolutionVersion,
   EvolutionSignal,
   EvolutionSignalsData,
-  MetricItem,
 } from '@/components/evolution/types'
-import { MetricCard } from '@/components/evolution/shared'
+import { MetricCard, type MetricCardData } from '@/components/shared/metric-card'
 import { SkillFlowView } from '@/components/evolution/flow-view'
 import { VersionDiffView } from '@/components/evolution/version-diff'
 import { StateMachineView, EvolutionEventsView, DataWarningBanner } from '@/components/evolution/state-views'
@@ -63,10 +62,16 @@ function SignalsView() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    let cancelled = false
     loadSignals().then((r) => {
+      // 卸载后晚到响应不再 setState（对齐 SkillDeclineWarningCard 口径）
+      if (cancelled) return
       if (r) setData(r)
       else setError('信号加载失败')
     })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   if (error) {
@@ -245,13 +250,13 @@ export function EvolutionPage() {
       })
   }, [])
 
-  const metrics = useMemo<MetricItem[]>(() => {
+  const metrics = useMemo<MetricCardData[]>(() => {
     const latest = versions[0]
     return [
-      { key: 'total', label: '图谱版本数', value: versions.length, delta: versions.length, tone: 'stable', hint: 'T+1 05:00 发布 · 保留 90 天' },
-      { key: 'version', label: '当前版本号', value: latest?.version_id ?? '—', delta: 0, tone: 'stable', hint: latest?.change_summary || '暂无版本快照' },
-      { key: 'nodes', label: '最新版本节点变化', value: latest ? latest.node_added + latest.node_changed : 0, delta: latest?.node_added ?? 0, tone: 'emerging', hint: `新增 ${latest?.node_added ?? 0} · 变化 ${latest?.node_changed ?? 0}` },
-      { key: 'signals', label: '新兴/衰退信号', value: '—', delta: 0, tone: 'stable', hint: '下方"新兴/衰退技能 Top-10"实时展示' },
+      { label: '图谱版本数', value: versions.length, delta: versions.length, deltaTone: 'stable', hint: 'T+1 05:00 发布 · 保留 90 天', bar: true },
+      { label: '当前版本号', value: latest?.version_id ?? '—', delta: 0, deltaTone: 'stable', hint: latest?.change_summary || '暂无版本快照', bar: true },
+      { label: '最新版本节点变化', value: latest ? latest.node_added + latest.node_changed : 0, delta: latest?.node_added ?? 0, deltaTone: 'emerging', hint: `新增 ${latest?.node_added ?? 0} · 变化 ${latest?.node_changed ?? 0}`, bar: true },
+      { label: '新兴/衰退信号', value: '—', delta: 0, deltaTone: 'stable', hint: '下方"新兴/衰退技能 Top-10"实时展示', bar: true },
     ]
   }, [versions])
 
@@ -273,7 +278,7 @@ export function EvolutionPage() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         {metrics.map((m) => (
-          <MetricCard key={m.key} metric={m} />
+          <MetricCard key={m.label} data={m} />
         ))}
       </div>
 

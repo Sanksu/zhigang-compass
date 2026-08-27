@@ -6,6 +6,11 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  POSITION_STATE_DOT,
+  POSITION_STATE_META,
+  type PositionState,
+} from '@/components/shared/position-state-badge'
 import { Graph2D, type Graph2DHandle } from '@/components/graph/graph-2d'
 import type { Graph3DHandle } from '@/components/graph/graph-3d'
 import { GraphAnalysisPanel } from '@/components/graph/graph-analysis-panel'
@@ -844,12 +849,12 @@ export function GraphPage() {
         <div className="space-y-2" role="listitem">
           <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">POSITION STATUS / 岗位状态色</p>
           <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-active" />活跃</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-stable" />稳定</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-emerging" />新兴</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-candidate" />候选</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-declining" />衰退</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-archived" />归档</span>
+            {(['active', 'stable', 'emerging', 'candidate', 'declining', 'archived'] as PositionState[]).map((s) => (
+              <span key={s} className="flex items-center gap-1">
+                <span className={`size-2 rounded-full ${POSITION_STATE_DOT[s]}`} />
+                {POSITION_STATE_META[s].label}
+              </span>
+            ))}
           </div>
         </div>      </div>
     </>

@@ -1,10 +1,10 @@
-/** 演化视图组件（从 evolution-page.tsx 抽出，第六轮审查拆分：页面 ≤800 行惯例）。 */
+/** 演化视图组件（从 evolution-page.tsx 抽出，第六轮审查拆分：页面 ≤800 行惯例）。
+ * 指标卡已统一到 @/components/shared/metric-card（08-27 审查遗留 P1-2），本文件
+ * 仅保留 SearchableSelect。 */
 import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import type { MetricItem } from './types'
 
 export function SearchableSelect({
   value,
@@ -133,43 +133,4 @@ export function SearchableSelect({
   )
 }
 
-
-// ===== MetricCard =====
-
-export function MetricCard({ metric }: { metric: MetricItem }) {
-  const toneColor =
-    metric.tone === 'emerging'
-      ? 'text-state-emerging'
-      : metric.tone === 'declining'
-        ? 'text-state-declining'
-        : 'text-state-stable'
-  const toneBg =
-    metric.tone === 'emerging'
-      ? 'bg-state-emerging/10'
-      : metric.tone === 'declining'
-        ? 'bg-state-declining/10'
-        : 'bg-state-stable/10'
-
-  return (
-    <Card>
-      <CardContent className="py-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-ink-muted">{metric.label}</span>
-          <span className={cn('inline-flex items-center gap-0.5 text-xs font-mono', toneColor)}>
-            {metric.delta > 0 ? '+' : ''}{metric.delta}
-          </span>
-        </div>
-        <div className="text-2xl font-semibold tracking-tight tabular-nums">
-          {typeof metric.value === 'number' ? (
-            metric.value.toLocaleString()
-          ) : (
-            <span className="font-mono">{metric.value}</span>
-          )}
-        </div>
-        <div className="text-[10px] text-ink-faint mt-1 truncate">{metric.hint}</div>
-        <div className={cn('mt-2 h-0.5 rounded-full', toneBg)} />
-      </CardContent>
-    </Card>
-  )
-}
 

@@ -88,6 +88,20 @@ const protectedRoutes = [
         path: 'admin/skill-aliases',
         element: <Navigate to="/admin/llm-decisions" replace />,
       },
+      // ── 旧 settings section 兼容重定向（08-27 settings 瘦身：crawl 分节并入
+      // 爬取管理页，evolution/dictguard 单字段分节合并为「系统节流」）──
+      {
+        path: 'admin/settings/crawl',
+        element: <Navigate to="/admin/crawl" replace />,
+      },
+      {
+        path: 'admin/settings/evolution',
+        element: <Navigate to="/admin/settings/system" replace />,
+      },
+      {
+        path: 'admin/settings/dictguard',
+        element: <Navigate to="/admin/settings/system" replace />,
+      },
       {
         path: 'admin/settings',
         element: <Navigate to="/admin/settings/tasks" replace />,

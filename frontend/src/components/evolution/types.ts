@@ -13,15 +13,6 @@ export interface VersionDiffItem {
   detail: string
 }
 
-export interface MetricItem {
-  key: string
-  label: string
-  value: string | number
-  delta: number
-  tone: TrendTone
-  hint: string
-}
-
 /** 后端 /evolution/versions 返回项 */
 export type EvolutionVersion = components['schemas']['EvolutionVersion']
 
