@@ -1,13 +1,12 @@
 /**
  * 岗位审核页路由壳测试（拆分后）
  *
- * 四类审核 Tab 已拆至 components/admin/review/*，本测试把四个子组件 mock 掉，
- * 验证受控 Tabs 壳：四个 Tab 标签齐全、仅激活 Tab 挂载、切换时挂载对应子组件
- * （保持原有"仅生效 Tab 渲染"的条件挂载语义）。
+ * 三类审核 Tab 已拆至 components/admin/review/*，本测试把子组件 mock 掉，
+ * 验证受控 Tabs 壳与旧 ?tab=watch/dict 重定向（08-27 watch/dict 迁独立路由）。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, Route, Routes } from 'react-router'
 import { AdminReviewPage } from './admin-review-page'
 
 vi.mock('@/components/admin/review/candidate-review-tab', () => ({
@@ -19,14 +18,8 @@ vi.mock('@/components/admin/review/evolution-review-tab', () => ({
 vi.mock('@/components/admin/review/position-editor-tab', () => ({
   PositionEditorTab: () => <div>position-editor-tab-mock</div>,
 }))
-vi.mock('@/components/admin/review/technology-watch-tab', () => ({
-  TechnologyWatchTab: () => <div>technology-watch-tab-mock</div>,
-}))
-vi.mock('@/components/admin/review/dict-guard-tab', () => ({
-  DictGuardTab: () => <div>dict-tab-mock</div>,
-}))
 
-/** AdminReviewPage 依赖 useSearchParams，需 Router 上下文（并入快捷操作 ?tab= 直达用） */
+/** AdminReviewPage 依赖 useSearchParams，需 Router 上下文 */
 const renderPage = (entry = '/admin/review') =>
   render(
     <MemoryRouter initialEntries={[entry]}>
@@ -37,39 +30,38 @@ const renderPage = (entry = '/admin/review') =>
 afterEach(cleanup)
 
 describe('AdminReviewPage 路由壳', () => {
-  it('渲染四个 Tab 标签', () => {
+  it('渲染三个 Tab 标签（观察池/字典守卫已迁独立路由）', () => {
     renderPage()
     expect(screen.getByText('候选晋升审核')).toBeInTheDocument()
     expect(screen.getByText('演化审核（emerging）')).toBeInTheDocument()
     expect(screen.getByText('岗位人工编辑')).toBeInTheDocument()
-    expect(screen.getByText('发现观察池')).toBeInTheDocument()
+    expect(screen.queryByText('发现观察池')).not.toBeInTheDocument()
+    expect(screen.queryByText('字典守卫')).not.toBeInTheDocument()
   })
 
   it('默认挂载候选晋升 Tab，切换时挂载对应子组件（仅激活 Tab 渲染）', () => {
     renderPage()
-    // 默认 candidate 激活
     expect(screen.getByText('candidate-tab-mock')).toBeInTheDocument()
     expect(screen.queryByText('evolution-tab-mock')).not.toBeInTheDocument()
-    // Radix Tabs 在 onMouseDown 激活（v1.1.x），用 mouseDown 驱动切换
     fireEvent.mouseDown(screen.getByText('演化审核（emerging）'))
     expect(screen.getByText('evolution-tab-mock')).toBeInTheDocument()
     expect(screen.queryByText('candidate-tab-mock')).not.toBeInTheDocument()
-    // 切到人工编辑
     fireEvent.mouseDown(screen.getByText('岗位人工编辑'))
     expect(screen.getByText('position-editor-tab-mock')).toBeInTheDocument()
     expect(screen.queryByText('evolution-tab-mock')).not.toBeInTheDocument()
-    // 切到观察池
-    fireEvent.mouseDown(screen.getByText('发现观察池'))
-    expect(screen.getByText('technology-watch-tab-mock')).toBeInTheDocument()
-    // 切回候选晋升
     fireEvent.mouseDown(screen.getByText('候选晋升审核'))
     expect(screen.getByText('candidate-tab-mock')).toBeInTheDocument()
-    expect(screen.queryByText('technology-watch-tab-mock')).not.toBeInTheDocument()
   })
 
-  it('快捷操作直达：?tab=dict 激活字典守卫 Tab', () => {
-    renderPage('/admin/review?tab=dict')
-    expect(screen.getByText('dict-tab-mock')).toBeInTheDocument()
-    expect(screen.queryByText('candidate-tab-mock')).not.toBeInTheDocument()
+  it('旧 ?tab=dict 快捷链接重定向到独立路由 /admin/review/dict', () => {
+    render(
+      <MemoryRouter initialEntries={['/admin/review?tab=dict']}>
+        <Routes>
+          <Route path="/admin/review" element={<AdminReviewPage />} />
+          <Route path="/admin/review/dict" element={<div>dict-route-marker</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('dict-route-marker')).toBeInTheDocument()
   })
 })
