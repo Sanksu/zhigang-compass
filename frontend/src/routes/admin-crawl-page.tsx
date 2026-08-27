@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Activity, Database, Gauge } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { CrawlScheduleConfig } from '@/components/admin/crawl-schedule-config'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -425,7 +427,15 @@ export function AdminCrawlPage() {
       )}
 
       {/* 顶部指标卡（真实 raw 表 + output 统计） */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <Tabs defaultValue="realtime">
+        <TabsList className="mb-4">
+          <TabsTrigger value="realtime" className="text-xs">实时与历史</TabsTrigger>
+          <TabsTrigger value="schedule" className="text-xs">调度与限频</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="realtime">
+          {/* 顶部指标卡（真实 raw 表 + output 统计） */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {metrics.map((m) => {
           const Icon = m.icon
           return (
@@ -697,6 +707,13 @@ export function AdminCrawlPage() {
           </Table>
         </CardContent>
       </Card>
+        </TabsContent>
+
+        {/* 调度与限频：采集上限 + 限频 + 每爬虫配置（08-27 从 settings 迁入，爬虫域一处管全） */}
+        <TabsContent value="schedule">
+          <CrawlScheduleConfig />
+        </TabsContent>
+      </Tabs>
 
       {/* 平台日志弹窗（SSE 实时/回溯） */}
       {logDialog && (

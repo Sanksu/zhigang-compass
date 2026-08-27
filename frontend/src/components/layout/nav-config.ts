@@ -11,7 +11,6 @@ import {
   GitFork,
   Cpu,
   Timer,
-  Gauge,
   Database,
   Workflow,
   ListChecks,
@@ -90,8 +89,7 @@ export const adminNavGroups: AdminNavGroup[] = [
     items: [
       { label: 'LLM 配置', to: '/admin/llm', icon: Cpu, requireRole: ['admin'] },
       { label: '任务与告警', to: '/admin/settings/tasks', icon: Timer, requireRole: ['admin'] },
-      { label: '采集与限频', to: '/admin/settings/crawl', icon: Gauge, requireRole: ['admin'] },
-      { label: '演化与缓存', to: '/admin/settings/evolution', icon: Database, requireRole: ['admin'] },
+      { label: '系统节流', to: '/admin/settings/system', icon: Database, requireRole: ['admin'] },
       { label: 'ETL 队列', to: '/admin/settings/etl', icon: Workflow, requireRole: ['admin'] },
     ],
   },
