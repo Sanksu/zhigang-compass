@@ -204,5 +204,59 @@ class TestScoreJdAutoRoughFallback:
         assert all("position_name" in s for s in scored)
 
 
+class TestAlignScoresWithFullJd:
+    """08-27 fix：Top-N 与 compare 对齐——召回池外最佳 JD 补入取真最高分。"""
+
+    def test_full_jd_best_raises_score_and_evidence(self, monkeypatch):
+        """池内最高 0.7 → 全量（含池外）最高 0.92：分数/证据被真最高分 JD 覆盖。"""
+        results = [{
+            "position_id": "后端工程师",
+            "position_name": "后端工程师",
+            "total_score": 0.7, "must_score": 0.7, "nice_score": 1.0, "exp_score": 1.0,
+            "matched_must": ["Java"], "missing_must": ["Spring"],
+            "summary": "池内最佳", "unqualified": False,
+            "jd_evidence": [{"jd_id": "1", "jd_title": "JD-基础", "total_score": 0.7, "hit_count": 1}],
+        }]
+        best = MatchResult(
+            position_id="2", position_name="JD-全栈", total_score=0.92,
+            must_score=0.92, nice_score=1.0, exp_score=1.0,
+            matched_must=["Java", "Spring"], missing_must=[], matched_nice=["Docker"],
+            summary="全量最佳", unqualified=False,
+        )
+
+        async def _fake_compare(session, candidate, position_name, project_vectors, semantic=None, sim_threshold=None):
+            return (None, best)
+
+        monkeypatch.setattr(jd_match, "score_jd_compare", _fake_compare)
+        out = asyncio.run(jd_match._align_scores_with_full_jd(
+            None, _candidate(["Java", "Spring"]), results, {},
+        ))
+        assert out[0]["total_score"] == 0.92
+        assert out[0]["must_score"] == 0.92
+        assert out[0]["summary"] == "全量最佳"
+        assert out[0]["position_id"] == "后端工程师"  # 对外岗位名不变
+        assert out[0]["jd_evidence"][0]["jd_id"] == "2"  # 真最高分 JD 置顶
+        assert out[0]["jd_evidence"][0]["hit_count"] == 3  # must(2)+nice(1)
+
+    def test_no_position_jd_keeps_pool_result(self, monkeypatch):
+        """某岗位无 JD（score_jd_compare 返回 None）→ 保留池内聚合结果。"""
+        results = [{
+            "position_id": "后端工程师", "position_name": "后端工程师",
+            "total_score": 0.6, "must_score": 0.6, "nice_score": 1.0, "exp_score": 1.0,
+            "matched_must": [], "missing_must": [], "summary": "s", "unqualified": False,
+            "jd_evidence": [{"jd_id": "1", "jd_title": "JD-基础", "total_score": 0.6, "hit_count": 1}],
+        }]
+
+        async def _fake_compare(session, candidate, position_name, project_vectors, semantic=None, sim_threshold=None):
+            return None
+
+        monkeypatch.setattr(jd_match, "score_jd_compare", _fake_compare)
+        out = asyncio.run(jd_match._align_scores_with_full_jd(
+            None, _candidate(["Java"]), results, {},
+        ))
+        assert out[0]["total_score"] == 0.6
+        assert out[0]["jd_evidence"][0]["jd_id"] == "1"
+
+
 async def _fake_pool_none(profiles, embedder, redis_client=None):
     return None
