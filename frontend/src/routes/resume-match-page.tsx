@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw, FileText, ThumbsUp, ThumbsDown, RefreshCw, Sparkles, ChevronDown } from 'lucide-react'
+import { ArrowRight, CheckCircle2, AlertCircle, XCircle, ExternalLink, RotateCcw, FileText, ThumbsUp, ThumbsDown, Sparkles, ChevronDown } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { PositionStateBadge } from '@/components/shared/position-state-badge'
+import { RefreshButton } from '@/components/shared/refresh-button'
 import { Button } from '@/components/ui/button'
 import { ResumeUploader } from '@/components/resume/resume-uploader'
 import { ScoreRing, RadarChart, SkillHeatmap } from '@/components/match/charts'
@@ -763,9 +764,7 @@ export function ResumeMatchPage() {
                       >
                         <ThumbsDown className="size-3.5 mr-1" />没用
                       </Button>
-                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={reloadFromSnapshot}>
-                        <RefreshCw className="size-3.5 mr-1" />重载
-                      </Button>
+                      <RefreshButton variant="ghost" className="h-7 px-2 text-xs" onClick={reloadFromSnapshot}>重载</RefreshButton>
                     </div>
                   </div>
                 </CardHeader>
@@ -836,15 +835,14 @@ export function ResumeMatchPage() {
                     <Badge variant="outline" className="text-[10px]">
                       {matchResult.gaps.length} 项
                     </Badge>
-                    <Button
-                      size="sm"
+                    <RefreshButton
                       variant="ghost"
                       className="h-6 px-1.5 text-[10px] ml-auto"
                       onClick={refreshGaps}
                       title="从结果快照刷新差距分析"
                     >
-                      <RefreshCw className="size-3 mr-1" />刷新
-                    </Button>
+                      刷新
+                    </RefreshButton>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -1020,15 +1018,14 @@ export function ResumeMatchPage() {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm flex items-center gap-2">
                     <span>学习路径规划</span>
-                    <Button
-                      size="sm"
+                    <RefreshButton
                       variant="ghost"
                       className="h-6 px-1.5 text-[10px] ml-auto"
                       onClick={refreshPath}
                       title="从结果快照刷新学习路径"
                     >
-                      <RefreshCw className="size-3 mr-1" />刷新
-                    </Button>
+                      刷新
+                    </RefreshButton>
                   </CardTitle>
                   <CardDescription>按先修关系分阶段的学习时间轴（学时 / 推荐课程 / 前往学习）</CardDescription>
                 </CardHeader>
@@ -1067,17 +1064,15 @@ export function ResumeMatchPage() {
                   <CardTitle className="text-sm flex items-center gap-2">
                     <Sparkles className="size-4 text-state-emerging" />
                     AI 诊断报告
-                    <Button
-                      size="sm"
+                    <RefreshButton
                       variant="ghost"
                       className="h-6 px-1.5 text-[10px] ml-auto"
                       onClick={loadDiagnosis}
                       disabled={diagnosisLoading}
                       title="生成/刷新诊断报告（LLM 生成，结果缓存 24h）"
                     >
-                      <RefreshCw className="size-3 mr-1" />
                       {diagnosis ? '刷新' : '生成'}
-                    </Button>
+                    </RefreshButton>
                   </CardTitle>
                   <CardDescription>基于匹配结果 + 差距 + 学习路径的 LLM 结构化诊断（§9.5）</CardDescription>
                 </CardHeader>

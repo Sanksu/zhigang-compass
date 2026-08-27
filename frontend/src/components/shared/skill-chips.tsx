@@ -20,18 +20,21 @@ interface SkillChipProps {
 }
 
 export function SkillChip({ tone, children, onClick, title, className }: SkillChipProps) {
+  const base = cn(
+    'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px]',
+    onClick && 'transition-colors hover:border-border-strong hover:bg-subtle/60',
+    TONE_CLASS[tone],
+    className,
+  )
+  if (!onClick) {
+    return (
+      <span title={title} className={base}>
+        {children}
+      </span>
+    )
+  }
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] transition-colors',
-        onClick && 'hover:border-border-strong hover:bg-subtle/60',
-        TONE_CLASS[tone],
-        className,
-      )}
-    >
+    <button type="button" onClick={onClick} title={title} className={base}>
       {children}
     </button>
   )

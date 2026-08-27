@@ -35,6 +35,7 @@ import type { NodeDetail } from './types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
 import { Badge } from '@/components/ui/badge'
 import { PositionStateBadge } from '@/components/shared/position-state-badge'
+import { SkillChip } from '@/components/shared/skill-chips'
 import { Button } from '@/components/ui/button'
 import { SkeletonList } from '@/components/ui/skeleton'
 import { apiGet } from '@/lib/api'
@@ -399,13 +400,9 @@ export function NodeDetailPanel({
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
                       {positionDetail.nice_skills.map((s) => (
-                        <button
-                          key={s.skill_id}
-                          onClick={() => onSelectSkill?.(s.skill_id, s.skill_name)}
-                          className="rounded-full border border-border px-2.5 py-1 text-[10px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle/60"
-                        >
+                        <SkillChip key={s.skill_id} tone="nice" onClick={() => onSelectSkill?.(s.skill_id, s.skill_name)}>
                           {s.skill_name}
-                        </button>
+                        </SkillChip>
                       ))}
                     </div>
                   </section>
@@ -422,12 +419,9 @@ export function NodeDetailPanel({
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
                       {positionDetail.soft_skills?.map((name) => (
-                        <span
-                          key={name}
-                          className="rounded-full border border-[#ec4899]/40 bg-[#ec4899]/5 px-2.5 py-1 text-[10px] text-ink-secondary"
-                        >
+                        <SkillChip key={name} tone="soft">
                           {name}
-                        </span>
+                        </SkillChip>
                       ))}
                     </div>
                     <p className="text-[10px] text-ink-faint">责任心/沟通能力等软性要求，与技术栈技能区分统计</p>
