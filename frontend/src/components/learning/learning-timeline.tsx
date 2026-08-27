@@ -11,6 +11,7 @@
  * 纯函数 buildTimelineMilestones 独立导出（供宏观 DAG 视图复用同一套分层逻辑，
  * 保证两视图口径一致）。
  */
+/* eslint-disable react-refresh/only-export-components -- 导出常量供测试断言，HMR 粒度降级可接受 */
 import { useMemo } from 'react'
 import { ArrowRight, BookOpen, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
