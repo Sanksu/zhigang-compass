@@ -300,7 +300,7 @@ function stat(s, x, y, w, num, label, opts = {}) {
   const metrics = [
     ["0.9629", "JD 解析 aligned F1", "110 条 gold · 目标 0.90"],
     ["0.988", "简历解析 F1", "字段级抽取真值"],
-    ["0.96", "人岗匹配 Acc", "BT 权重 v2 · 684 对"],
+    ["0.8906", "人岗匹配 Acc", "BT 权重 v2 · 384 对 · Top-3 1.0"],
     ["96.7%", "学习路径合理性", "30 案例专家定稿"],
   ];
   metrics.forEach((m, i) => {
