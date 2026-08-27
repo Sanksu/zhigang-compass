@@ -28,6 +28,21 @@ def query_position_skills_by_necessity(driver, id) -> dict[str, dict]:
         return queries.query_position_skills_by_necessity(session, id)
 
 
+def find_position_id_by_name(driver, name) -> str | None:
+    """按岗位名反查岗位 id（新岗位发现回查技能用；Position.name 唯一）。"""
+    with driver.session() as session:
+        return queries.find_position_id_by_name(session, name)
+
+
+def query_position_skills_by_name(driver, name) -> tuple[str | None, dict[str, dict]]:
+    """按岗位名查技能：返回 (岗位 id, {necessity: skills})；无图内岗位返回 (None, {})。"""
+    with driver.session() as session:
+        pid = queries.find_position_id_by_name(session, name)
+        if pid is None:
+            return None, {}
+        return pid, queries.query_position_skills_by_necessity(session, pid)
+
+
 def query_prereq_chain(driver, skill_name) -> list[str]:
     with driver.session() as session:
         return queries.query_prereq_chain(session, skill_name)

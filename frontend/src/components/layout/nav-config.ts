@@ -3,6 +3,7 @@ import {
   Network,
   FileText,
   TrendingUp,
+  Radar,
   User,
   Shield,
   Users,
@@ -57,7 +58,12 @@ export const mainNav: NavItem[] = [
     label: '演化看板',
     to: '/evolution',
     icon: TrendingUp,
-    },
+  },
+  {
+    label: '新岗位发现',
+    to: '/discovery',
+    icon: Radar,
+  },
   {
     label: '个人中心',
     to: '/profile',

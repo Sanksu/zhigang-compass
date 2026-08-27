@@ -11,6 +11,7 @@ const DashboardPage = lazy(() => import('@/routes/dashboard-page').then((m) => (
 const GraphPage = lazy(() => import('@/routes/graph-page').then((m) => ({ default: m.GraphPage })))
 const ResumeMatchPage = lazy(() => import('@/routes/resume-match-page').then((m) => ({ default: m.ResumeMatchPage })))
 const EvolutionPage = lazy(() => import('@/routes/evolution-page').then((m) => ({ default: m.EvolutionPage })))
+const DiscoveryPage = lazy(() => import('@/routes/discovery-page').then((m) => ({ default: m.DiscoveryPage })))
 const ProfilePage = lazy(() => import('@/routes/profile-page').then((m) => ({ default: m.ProfilePage })))
 const AdminDashboardPage = lazy(() => import('@/routes/admin-dashboard-page').then((m) => ({ default: m.AdminDashboardPage })))
 const AdminUsersPage = lazy(() => import('@/routes/admin-users-page').then((m) => ({ default: m.AdminUsersPage })))
@@ -42,6 +43,7 @@ const protectedRoutes = [
         element: <AuthGuard requireRole={['user', 'admin']}><Suspense fallback={<RouteLoading />}><ResumeMatchPage /></Suspense></AuthGuard>,
       },
       { path: 'evolution', element: <AuthGuard><Suspense fallback={<RouteLoading />}><EvolutionPage /></Suspense></AuthGuard> },
+      { path: 'discovery', element: <AuthGuard><Suspense fallback={<RouteLoading />}><DiscoveryPage /></Suspense></AuthGuard> },
       {
         path: 'profile',
         element: <AuthGuard><Suspense fallback={<RouteLoading />}><ProfilePage /></Suspense></AuthGuard>,
