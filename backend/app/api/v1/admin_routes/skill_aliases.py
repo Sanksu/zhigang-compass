@@ -52,7 +52,7 @@ async def list_skill_aliases(
     status: str = Query(default="", description="状态过滤：pending/approved/rejected（空=全部）"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-) -> dict:
+):
     """动态别名表分页列表（倒序；approved 行为 normalize_skill 生效源）。"""
     from app.api.common import ok
     from app.core.database import async_session_factory

@@ -84,7 +84,7 @@ async def list_llm_decisions(
     status: str = Query(default="", description="状态过滤：shadow/proposal/auto_applied/blocked 等（空=全部）"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-) -> dict:
+):
     """决策记录分页列表（倒序，只读；total 为过滤后总数，供分页条）。"""
     from sqlalchemy import func
 
@@ -109,7 +109,7 @@ async def list_llm_decisions(
 
 
 @router.get("/llm-decisions/summary")
-async def llm_decisions_summary() -> dict:
+async def llm_decisions_summary():
     """决策记录汇总（domain×status，验收卡片数据源，只读）。"""
     from app.api.common import ok
     from app.core.database import async_session_factory
@@ -162,7 +162,7 @@ async def approve_llm_decision(
     req: LLMDecisionReviewRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
-) -> dict:
+):
     """批准一条图变异类 proposal（skill_relation / position_normalize / skill_normalize）。
 
     执行顺序（对齐 postmortem 003 教训）：先校验 → PG 落库（图变更持久化 +
@@ -472,7 +472,7 @@ async def reject_llm_decision(
     req: LLMDecisionReviewRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
-) -> dict:
+):
     """驳回一条 proposal（仅 status 流转，效果为 0）。"""
     from app.api.common import ok, resolve_operator
     from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
