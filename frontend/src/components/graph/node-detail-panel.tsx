@@ -31,9 +31,11 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { components } from '@/types/api'
-import type { NodeDetail, PositionStatus } from './types'
+import type { NodeDetail } from './types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
 import { Badge } from '@/components/ui/badge'
+import { PositionStateBadge } from '@/components/shared/position-state-badge'
+import { SkillChip } from '@/components/shared/skill-chips'
 import { Button } from '@/components/ui/button'
 import { SkeletonList } from '@/components/ui/skeleton'
 import { apiGet } from '@/lib/api'
@@ -111,24 +113,6 @@ interface NodeDetailPanelProps {
   learningStatus?: LearningStatus
   /** 已掌握技能集（How to Start 判断前置是否就绪） */
   learnedSkills?: Set<string>
-}
-
-const STATUS_LABEL: Record<PositionStatus, string> = {
-  active: '活跃',
-  candidate: '候选',
-  emerging: '新兴',
-  stable: '稳定',
-  declining: '衰退',
-  archived: '归档',
-}
-
-const STATUS_CLASS: Record<PositionStatus, string> = {
-  active: 'bg-state-active/15 text-state-active border-state-active/30',
-  candidate: 'bg-state-candidate/15 text-state-candidate border-state-candidate/30',
-  emerging: 'bg-state-emerging/15 text-state-emerging border-state-emerging/30',
-  stable: 'bg-state-stable/15 text-state-stable border-state-stable/30',
-  declining: 'bg-state-declining/15 text-state-declining border-state-declining/30',
-  archived: 'bg-state-archived/15 text-state-archived border-state-archived/30',
 }
 
 const TYPE_LABEL: Record<NodeDetail['type'], string> = {
@@ -226,9 +210,7 @@ export function NodeDetailPanel({
                     {TYPE_LABEL[node.type]}
                   </Badge>
                   {node.type === 'position' && node.status && !node.isDomain && (
-                    <Badge variant="outline" className={`px-1.5 py-0 text-[10px] ${STATUS_CLASS[node.status]}`}>
-                      {STATUS_LABEL[node.status]}
-                    </Badge>
+                    <PositionStateBadge state={node.status} className="px-1.5 py-0 text-[10px]" />
                   )}
                   {node.isDomain && (
                     <Badge variant="outline" className="px-1.5 py-0 text-[10px] bg-primary/10 text-primary border-primary/30">
@@ -418,13 +400,9 @@ export function NodeDetailPanel({
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
                       {positionDetail.nice_skills.map((s) => (
-                        <button
-                          key={s.skill_id}
-                          onClick={() => onSelectSkill?.(s.skill_id, s.skill_name)}
-                          className="rounded-full border border-border px-2.5 py-1 text-[10px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle/60"
-                        >
+                        <SkillChip key={s.skill_id} tone="nice" onClick={() => onSelectSkill?.(s.skill_id, s.skill_name)}>
                           {s.skill_name}
-                        </button>
+                        </SkillChip>
                       ))}
                     </div>
                   </section>
@@ -441,12 +419,9 @@ export function NodeDetailPanel({
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
                       {positionDetail.soft_skills?.map((name) => (
-                        <span
-                          key={name}
-                          className="rounded-full border border-[#ec4899]/40 bg-[#ec4899]/5 px-2.5 py-1 text-[10px] text-ink-secondary"
-                        >
+                        <SkillChip key={name} tone="soft">
                           {name}
-                        </span>
+                        </SkillChip>
                       ))}
                     </div>
                     <p className="text-[10px] text-ink-faint">责任心/沟通能力等软性要求，与技术栈技能区分统计</p>

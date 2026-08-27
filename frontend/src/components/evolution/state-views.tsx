@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { GitBranch, Boxes, TrendingDown } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
+import { PositionStateBadge, POSITION_STATE_META } from '@/components/shared/position-state-badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { apiGet, errMsg } from '@/lib/api'
 import type { components } from '@/types/api'
@@ -10,17 +11,17 @@ import type { EvolutionEvent, EvolutionEventListData, EvolutionVersion } from '.
 
 export type StateMachineData = components['schemas']['StateMachineData']
 
-/** 岗位状态机流转（真实 GET /evolution/state-machine，六态分布 + 人工流转记录） */
-const STATE_META: Record<
-  string,
-  { label: string; dot: string; badge: BadgeProps['variant'] }
-> = {
-  candidate: { label: '候选', dot: 'bg-state-candidate', badge: 'candidate' },
-  emerging: { label: '新兴', dot: 'bg-state-emerging', badge: 'emerging' },
-  stable: { label: '稳定', dot: 'bg-state-stable', badge: 'stable' },
-  declining: { label: '衰退', dot: 'bg-state-declining', badge: 'declining' },
-  archived: { label: '归档', dot: 'bg-state-archived', badge: 'archived' },
-  rejected: { label: '驳回', dot: 'bg-state-archived', badge: 'archived' },
+/** 发现状态机六态（label/badge 复用 shared POSITION_STATE_META；active=图谱常态岗位，不入候选池分发） */
+const MACHINE_STATES = ['candidate', 'emerging', 'stable', 'declining', 'archived', 'rejected'] as const
+
+/** 六态分布点色（仅分发场景需要；徽标本身共用 POSITION_STATE_META.variant） */
+const STATE_DOT: Record<string, string> = {
+  candidate: 'bg-state-candidate',
+  emerging: 'bg-state-emerging',
+  stable: 'bg-state-stable',
+  declining: 'bg-state-declining',
+  archived: 'bg-state-archived',
+  rejected: 'bg-state-archived',
 }
 
 /** 六态分布 + 最近流转记录（GET /evolution/state-machine） */
@@ -53,15 +54,18 @@ export function StateMachineView() {
           <>
             {/* 六态分布（真实候选池状态聚合） */}
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-              {Object.entries(STATE_META).map(([state, meta]) => (
-                <div key={state} className="rounded-md border border-border p-2.5">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-ink">
-                    <span className={`size-2 rounded-full ${meta.dot}`} />
-                    {meta.label}
+              {MACHINE_STATES.map((state) => {
+                const meta = POSITION_STATE_META[state]
+                return (
+                  <div key={state} className="rounded-md border border-border p-2.5">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-ink">
+                      <span className={`size-2 rounded-full ${STATE_DOT[state]}`} />
+                      {meta.label}
+                    </div>
+                    <div className="mt-1 text-xl font-semibold tabular-nums">{data.states[state] ?? 0}</div>
                   </div>
-                  <div className="mt-1 text-xl font-semibold tabular-nums">{data.states[state] ?? 0}</div>
-                </div>
-              ))}
+                )
+              })}
             </div>
             {/* 最近人工流转记录（audit_logs discovery.state_transition） */}
             <div>
@@ -92,13 +96,9 @@ export function StateMachineView() {
                         </TableCell>
                         <TableCell className="text-xs">
                           <span className="inline-flex items-center gap-1">
-                            <Badge variant={STATE_META[t.from_state ?? '']?.badge ?? 'outline'} className="text-[9px]">
-                              {t.from_state}
-                            </Badge>
+                            <PositionStateBadge state={t.from_state ?? ''} label={t.from_state ?? undefined} className="text-[9px]" />
                             <span className="text-ink-faint">→</span>
-                            <Badge variant={STATE_META[t.to_state ?? '']?.badge ?? 'outline'} className="text-[9px]">
-                              {t.to_state}
-                            </Badge>
+                            <PositionStateBadge state={t.to_state ?? ''} label={t.to_state ?? undefined} className="text-[9px]" />
                           </span>
                         </TableCell>
                         <TableCell className="text-xs text-ink-secondary">{t.operator}</TableCell>

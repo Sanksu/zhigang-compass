@@ -5,6 +5,7 @@ import * as echarts from 'echarts'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { MetricCard } from '@/components/shared/metric-card'
 import { apiGet } from '@/lib/api'
 import { formatDateTime, isDark } from '@/lib/utils'
 import type { components } from '@/types/api'
@@ -244,25 +245,21 @@ export function DashboardPage() {
         description="多源异构驱动的岗位能力动态演化与人岗匹配系统"
       />
 
-      {/* 关键指标卡片（真实数据） */}
+      {/* 关键指标卡片（真实数据）——复用 shared MetricCard（统一指标卡形态） */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {stats.map((stat) => {
-          const Icon = stat.icon
-          const deltaColor = stat.deltaType === 'up' ? 'text-state-emerging' : 'text-ink-muted'
-          return (
-            <Card key={stat.label}>
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between mb-2">
-                  <Icon className="size-4 text-ink-faint" />
-                  <span className={`text-xs font-mono ${deltaColor}`}>{stat.delta}</span>
-                </div>
-                <div className="text-2xl font-semibold tracking-tight tabular-nums">{stat.value}</div>
-                <div className="text-xs text-ink-muted mt-1">{stat.label}</div>
-                <div className="text-[10px] text-ink-faint mt-0.5 truncate">{stat.hint}</div>
-              </CardContent>
-            </Card>
-          )
-        })}
+        {stats.map((stat) => (
+          <MetricCard
+            key={stat.label}
+            data={{
+              label: stat.label,
+              value: stat.value,
+              delta: stat.delta,
+              deltaTone: stat.deltaType === 'up' ? 'emerging' : 'muted',
+              hint: stat.hint,
+              icon: stat.icon,
+            }}
+          />
+        ))}
       </div>
 
       {/* 最近活动（真实版本发布 + 登录审计） + 快捷入口 */}
