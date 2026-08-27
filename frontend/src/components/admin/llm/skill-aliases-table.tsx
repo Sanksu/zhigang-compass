@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { apiGet } from '@/lib/api'
 import { formatDateTime } from '@/lib/utils'
 import type { components } from '@/types/api'
@@ -76,22 +77,25 @@ export function SkillAliasesTable() {
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <CardTitle>别名记录</CardTitle>
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            aria-label="状态过滤"
-            className="h-8 rounded-md border bg-background px-2 text-sm"
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value)
+          <Select
+            value={status || 'all'}
+            onValueChange={(v) => {
+              setStatus(v === 'all' ? '' : v)
               setPage(1)
             }}
           >
-            <option value="">全部状态</option>
-            {['pending', 'approved', 'rejected'].map((s) => (
-              <option key={s} value={s}>
-                {STATUS_LABEL[s] ?? s}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger aria-label="状态过滤" className="h-8 w-36 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部状态</SelectItem>
+              {['pending', 'approved', 'rejected'].map((s) => (
+                <SelectItem key={s} value={s}>
+                  {STATUS_LABEL[s] ?? s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button variant="ghost" size="sm" onClick={() => setStatus('pending')}>
             <BookMarked className="mr-1 h-3.5 w-3.5" />
             待审批

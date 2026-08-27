@@ -20,6 +20,7 @@ import {
   type RecentDiscoveryCandidate,
 } from '@/components/discovery/types'
 import { MetricCard } from '@/components/shared/metric-card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 type Tab = 'new' | 'delta'
 
@@ -194,18 +195,22 @@ function SkillsDeltaView({
         ) : (
           <>
             <div className="flex flex-wrap gap-2 mb-4">
-              <select
-                value={selected}
-                onChange={(e) => handleSelect(e.target.value)}
-                className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+              <Select
+                value={selected || 'none'}
+                onValueChange={(v) => handleSelect(v === 'none' ? '' : v)}
               >
-                <option value="">选择岗位…</option>
-                {options.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="h-8 w-56 text-xs">
+                  <SelectValue placeholder="选择岗位…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">选择岗位…</SelectItem>
+                  {options.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {delta && (
                 <span className="text-[10px] text-ink-faint self-center">
                   {delta.from_version} → {delta.to_version}

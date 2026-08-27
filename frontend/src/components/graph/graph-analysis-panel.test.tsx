@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { apiGet } from '@/lib/api'
 import { GraphAnalysisPanel } from './graph-analysis-panel'
 
@@ -188,8 +189,11 @@ describe('GraphAnalysisPanel', () => {
     await waitFor(() => expect(screen.getAllByRole('combobox')).toHaveLength(3))
     const selects = screen.getAllByRole('combobox')
     expect(screen.getByText('层级（dendrogram 粗→细）')).toBeInTheDocument()
-    // 切到 L1 → 请求带 level=1 且簇列表刷新
-    fireEvent.change(selects[0], { target: { value: '1' } })
+    // 切到 L1 → 请求带 level=1 且簇列表刷新（Radix Select 用键盘导航：
+    // focus + Enter 打开 → ArrowDown 跳到第一项 → ArrowDown 跳到 L1 → Enter 选中；
+    // 较 click portal 更稳，避开 jsdom portal 挂载时机问题）
+    selects[0].focus()
+    await userEvent.keyboard('{Enter}{ArrowDown}{ArrowDown}{Enter}')
     expect(await screen.findByText('粗层簇')).toBeInTheDocument()
     expect(mockApiGet).toHaveBeenCalledWith(expect.stringContaining('level=1'))
   })
@@ -224,11 +228,13 @@ describe('GraphAnalysisPanel', () => {
         onFocusSkill={vi.fn()}
       />,
     )
-    // 等待面板就绪后选择起止技能（两个 select 为 combobox，按顺序取）
+    // 等待面板就绪后选择起止技能（两个 select 为 combobox，按顺序取；Radix 键盘导航）
     await waitFor(() => expect(screen.getByText('PageRank Top-20')).toBeInTheDocument())
     const [fromSelect, toSelect] = screen.getAllByRole('combobox')
-    fireEvent.change(fromSelect, { target: { value: 'sk_1' } })
-    fireEvent.change(toSelect, { target: { value: 'sk_2' } })
+    fromSelect.focus()
+    await userEvent.keyboard('{Enter}{ArrowDown}{Enter}') // 第一项=Python
+    toSelect.focus()
+    await userEvent.keyboard('{Enter}{ArrowDown}{Enter}') // 第一项=Django
     mockApiGet.mockResolvedValueOnce({
       from: 'sk_1',
       to: 'sk_2',
@@ -256,8 +262,10 @@ describe('GraphAnalysisPanel', () => {
     )
     await waitFor(() => expect(screen.getByText('PageRank Top-20')).toBeInTheDocument())
     const [fromSelect, toSelect] = screen.getAllByRole('combobox')
-    fireEvent.change(fromSelect, { target: { value: 'sk_1' } })
-    fireEvent.change(toSelect, { target: { value: 'sk_9' } })
+    fromSelect.focus()
+    await userEvent.keyboard('{Enter}{ArrowDown}{Enter}') // Python
+    toSelect.focus()
+    await userEvent.keyboard('{Enter}{ArrowDown}{Enter}') // ROS
     mockApiGet.mockRejectedValueOnce(new Error('404'))
     fireEvent.click(screen.getByText('查询路径'))
     expect(await screen.findByText('两技能间不存在 ≤6 跳的可达路径')).toBeInTheDocument()
