@@ -50,9 +50,17 @@ def aggregate_jd_scores(
     out: list[dict] = []
     for gname, members in groups.items():
         best = max(members, key=lambda r: r.total_score)
-        jd_evidence = sorted(members, key=lambda r: r.total_score, reverse=True)[
-            :_AGGREGATE_TOP_JD_EVIDENCE
-        ]
+        # Top-2 证据按 jd_title 去重（同标题不同 jd_id 的重复挂载条目只保留最高分一条，
+        # 避免证据卡同名两行——E2E 实测「数据库管理员」两条证据同标题）
+        seen_titles: set[str] = set()
+        jd_evidence = []
+        for e in sorted(members, key=lambda r: r.total_score, reverse=True):
+            if e.position_name in seen_titles:
+                continue
+            seen_titles.add(e.position_name)
+            jd_evidence.append(e)
+            if len(jd_evidence) >= _AGGREGATE_TOP_JD_EVIDENCE:
+                break
         out.append({
             "position_id": gname,
             "position_name": gname,
