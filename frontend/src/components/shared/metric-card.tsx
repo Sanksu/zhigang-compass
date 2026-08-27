@@ -39,13 +39,15 @@ export function MetricCard({ data }: { data: MetricCardData }) {
   return (
     <Card>
       <CardContent className="py-4">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="flex items-center gap-1.5 text-xs text-ink-muted">
-            {Icon && <Icon className="size-4 text-ink-faint" />}
-            {data.label}
+        {/* flex-wrap：窄卡（移动端 2 列 / 中宽度 4 列）放不下时 delta 徽标换行，
+            而非把中文标签挤到 1ch 逐字竖排（中文无空格，min-content=单字宽） */}
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-muted">
+            {Icon && <Icon className="size-4 shrink-0 text-ink-faint" />}
+            <span className="truncate">{data.label}</span>
           </span>
           {data.delta != null && (
-            <span className={cn('inline-flex items-center gap-0.5 text-xs font-mono', TONE_TEXT[tone])}>
+            <span className={cn('inline-flex max-w-full items-center gap-0.5 truncate font-mono text-xs', TONE_TEXT[tone])}>
               {typeof data.delta === 'number' ? `${data.delta > 0 ? '+' : ''}${data.delta}` : data.delta}
             </span>
           )}
