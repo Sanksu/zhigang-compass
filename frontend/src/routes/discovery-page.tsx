@@ -13,7 +13,6 @@ import { Button } from '@/components/ui/button'
 import { PositionStateBadge } from '@/components/shared/position-state-badge'
 import { SkillChip, type SkillChipTone } from '@/components/shared/skill-chips'
 import { RefreshButton } from '@/components/shared/refresh-button'
-import { cn } from '@/lib/utils'
 import { apiGet } from '@/lib/api'
 import {
   type DiscoveryRecentData,
