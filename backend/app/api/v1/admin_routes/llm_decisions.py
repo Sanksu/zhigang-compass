@@ -98,19 +98,25 @@ async def list_llm_decisions(
         if status:
             count_stmt = count_stmt.where(LLMDecisionRecord.status == status)
         total = await session.scalar(count_stmt) or 0
-    return {
+    # ApiResponse 包装对齐契约（第六轮审查 P0-2 同类：此前裸返，前端 apiGet
+    # 取 res.data.data 得 undefined——决策页列表/汇总是 P0-2 漏网的同源断页）
+    from app.api.common import ok
+
+    return ok({
         "items": [serialize_record(r) for r in rows],
         "total": total, "limit": limit, "offset": offset,
-    }
+    })
 
 
 @router.get("/llm-decisions/summary")
 async def llm_decisions_summary() -> dict:
     """决策记录汇总（domain×status，验收卡片数据源，只读）。"""
+    from app.api.common import ok
     from app.core.database import async_session_factory
 
     async with async_session_factory() as session:
-        return await summarize(session)
+        # ApiResponse 包装对齐契约（同上）
+        return ok(await summarize(session))
 
 
 # ---- 审批执行通道（PR9b + PR3 c）：proposal→approved/rejected ----

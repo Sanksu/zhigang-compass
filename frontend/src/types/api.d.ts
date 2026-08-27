@@ -730,7 +730,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
                 };
             };
         };
@@ -1021,26 +1023,32 @@ export interface paths {
                         "application/octet-stream": string;
                     };
                 };
-                /** @description resume_id 格式非法 */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
                 /** @description 非本人无权下载 */
                 403: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
                 };
                 /** @description 简历文件不存在 */
                 404: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description resume_id 格式非法（code 4000） */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
                 };
             };
         };
@@ -1444,19 +1452,23 @@ export interface paths {
                         };
                     };
                 };
-                /** @description 该匹配结果无差距数据（仅人岗比对可生成诊断报告） */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
                 /** @description 匹配结果不存在或已过期；或诊断报告尚未生成（需先 POST 创建生成任务） */
                 404: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 该匹配结果无差距数据（仅人岗比对可生成诊断报告，code 4000） */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
                 };
             };
         };
@@ -1487,19 +1499,23 @@ export interface paths {
                         };
                     };
                 };
-                /** @description 该匹配结果无差距数据 */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
                 /** @description 匹配结果不存在或无权访问 */
                 404: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 该匹配结果无差距数据（code 4000） */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
                 };
             };
         };
@@ -1819,7 +1835,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
                 };
             };
         };
@@ -2379,7 +2397,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
                 };
             };
         };
@@ -2695,18 +2715,23 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description 决策记录列表（created_at 倒序） */
+                /** @description 决策记录列表（created_at 倒序，ApiResponse 包装） */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
                         "application/json": {
-                            items?: components["schemas"]["LlmDecisionItem"][];
-                            /** @description 过滤后总数（分页条） */
-                            total?: number;
-                            limit?: number;
-                            offset?: number;
+                            code?: number;
+                            msg?: string;
+                            data?: {
+                                items?: components["schemas"]["LlmDecisionItem"][];
+                                /** @description 过滤后总数（分页条） */
+                                total?: number;
+                                limit?: number;
+                                offset?: number;
+                            };
+                            trace_id?: string;
                         };
                     };
                 };
@@ -2737,19 +2762,24 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description 按域的状态计数与总额 */
+                /** @description 按域的状态计数与总额（ApiResponse 包装） */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
                         "application/json": {
-                            /** @description 按域倒序（total 降序） */
-                            by_domain?: components["schemas"]["LlmDecisionDomainSummary"][];
-                            /** @description 全量状态计数（shadow/proposal/auto_applied/blocked/other/records） */
-                            totals?: {
-                                [key: string]: number;
+                            code?: number;
+                            msg?: string;
+                            data?: {
+                                /** @description 按域倒序（total 降序） */
+                                by_domain?: components["schemas"]["LlmDecisionDomainSummary"][];
+                                /** @description 全量状态计数（shadow/proposal/auto_applied/blocked/other/records） */
+                                totals?: {
+                                    [key: string]: number;
+                                };
                             };
+                            trace_id?: string;
                         };
                     };
                 };
@@ -2965,7 +2995,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
                 };
             };
         };
@@ -2999,19 +3031,23 @@ export interface paths {
                         };
                     };
                 };
-                /** @description 参数不合法（weight 越界 / necessity 非法等） */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
                 /** @description 岗位不存在 */
                 404: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 参数不合法（weight 越界 / necessity 非法等，Pydantic 强校验 code 4000） */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
                 };
             };
         };
@@ -3103,26 +3139,32 @@ export interface paths {
                         "application/json": components["schemas"]["ApiResponse"];
                     };
                 };
-                /** @description 参数不合法 / 不满足晋升条件 */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
                 /** @description 候选岗位不存在 */
                 404: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
                 };
                 /** @description 候选岗位当前状态不可审核 */
                 409: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 参数不合法 / 不满足晋升条件（code 4000） */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
                 };
             };
         };
@@ -3594,13 +3636,6 @@ export interface paths {
                         "application/json": components["schemas"]["ApiResponse"];
                     };
                 };
-                /** @description 参数不合法 */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
                 /** @description 提案不存在 */
                 404: {
                     headers: {
@@ -3610,6 +3645,13 @@ export interface paths {
                 };
                 /** @description 状态不可审核 / 静态停用词移除缺少受影响技能 */
                 409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 参数不合法（code 4000） */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
