@@ -435,259 +435,259 @@ export function AdminCrawlPage() {
             ))}
           </div>
 
-      {/* 平台状态表 */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-sm flex items-center justify-between">
-            <span>平台状态</span>
-            <span className="text-xs font-normal text-ink-faint">{platforms.length} 源在线</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <p className="py-8 text-center text-sm text-ink-muted">加载真实采集状态…</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>平台名</TableHead>
-                  <TableHead>等级</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead className="text-right">今日采集</TableHead>
-                  <TableHead className="text-right">累计采集</TableHead>
-                  <TableHead>最后运行</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {platforms.map((p) => {
-                  const meta = STATUS_META[platformStatus(p, history)]
-                  return (
-                    <TableRow key={p.id} className={p.status === 'archived' ? 'opacity-50' : ''}>
-                      <TableCell className="font-medium">{p.name}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={LEVEL_CLASS[p.level]}>{p.level}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={meta.variant}>{meta.label}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums font-mono">{p.todayCount.toLocaleString()}</TableCell>
-                      <TableCell className="text-right tabular-nums font-mono text-ink-muted">{p.totalCount.toLocaleString()}</TableCell>
-                      <TableCell className="text-xs text-ink-muted font-mono">{p.lastRun}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={p.status === 'archived' || isBusy}
-                            onClick={() => triggerCrawl(p.id)}
-                          >
-                            触发
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setLogDialog({
-                            platformName: p.name,
-                            taskId: history.find((h) => h.platformKey === p.id)?.id ?? null,
-                          })}>日志</Button>
-                        </div>
-                      </TableCell>
+          {/* 平台状态表 */}
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center justify-between">
+                <span>平台状态</span>
+                <span className="text-xs font-normal text-ink-faint">{platforms.length} 源在线</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <p className="py-8 text-center text-sm text-ink-muted">加载真实采集状态…</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>平台名</TableHead>
+                      <TableHead>等级</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead className="text-right">今日采集</TableHead>
+                      <TableHead className="text-right">累计采集</TableHead>
+                      <TableHead>最后运行</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
                     </TableRow>
-                  )
-                })}
-                {platforms.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
-                      暂无采集记录，请先运行爬虫
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* 手动触发表单 + 当前任务进度 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">手动触发爬取</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>平台</Label>
-                <Select
-                  value={form.platform}
-                  onValueChange={(v) =>
-                    setForm((f) => ({
-                      // 关键词/城市均无平台默认（留空 = 热度/最新且不限城市，08-16 用户决策）
-                      ...f,
-                      platform: v,
-                    }))
-                  }
-                >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {platforms.filter((p) => p.status !== 'archived').map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>关键词</Label>
-                <Input
-                  value={form.keyword}
-                  onChange={(e) => setForm((f) => ({ ...f, keyword: e.target.value }))}
-                  placeholder="留空则采集平台热度/最新内容"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>城市</Label>
-                <Input
-                  value={form.city}
-                  onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
-                  placeholder="留空则不限城市"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>页数上限</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={form.maxPages}
-                  onChange={(e) => setForm((f) => ({ ...f, maxPages: Number(e.target.value) || 0 }))}
-                />
-              </div>
-            </div>
-            <Button className="w-full" disabled={isBusy} onClick={() => triggerCrawl(form.platform)}>
-              {isBusy ? '任务进行中…' : '触发爬取'}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center justify-between">
-              <span>当前任务</span>
-              {currentTask && (
-                <Badge
-                  variant={currentTask.status === 'running' ? 'stable' : currentTask.status === 'failed' ? 'archived' : 'candidate'}
-                >
-                  {currentTask.status === 'queued'
-                    ? '队列中'
-                    : currentTask.status === 'running'
-                      ? '运行中'
-                      : currentTask.status === 'failed'
-                        ? '失败'
-                        : '完成'}
-                </Badge>
+                  </TableHeader>
+                  <TableBody>
+                    {platforms.map((p) => {
+                      const meta = STATUS_META[platformStatus(p, history)]
+                      return (
+                        <TableRow key={p.id} className={p.status === 'archived' ? 'opacity-50' : ''}>
+                          <TableCell className="font-medium">{p.name}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={LEVEL_CLASS[p.level]}>{p.level}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={meta.variant}>{meta.label}</Badge>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums font-mono">{p.todayCount.toLocaleString()}</TableCell>
+                          <TableCell className="text-right tabular-nums font-mono text-ink-muted">{p.totalCount.toLocaleString()}</TableCell>
+                          <TableCell className="text-xs text-ink-muted font-mono">{p.lastRun}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={p.status === 'archived' || isBusy}
+                                onClick={() => triggerCrawl(p.id)}
+                              >
+                                触发
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setLogDialog({
+                                platformName: p.name,
+                                taskId: history.find((h) => h.platformKey === p.id)?.id ?? null,
+                              })}>日志</Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                    {platforms.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
+                          暂无采集记录，请先运行爬虫
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
               )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!currentTask ? (
-              <div className="flex items-center justify-center py-8 text-sm text-ink-faint">
-                暂无运行中的任务 · 点击「触发爬取」开始
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div><span className="text-ink-muted">平台：</span><span className="font-medium">{currentTask.platform}</span></div>
-                  <div><span className="text-ink-muted">关键词：</span><span className="font-medium">{currentTask.keyword}</span></div>
-                  <div><span className="text-ink-muted">城市：</span><span className="font-medium">{currentTask.city}</span></div>
-                  <div><span className="text-ink-muted">页数上限：</span><span className="font-mono">{currentTask.maxPages}</span></div>
-                </div>
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-ink-muted">进度</span>
-                    <span className="font-mono tabular-nums">
-                      {currentTask.collected}/{currentTask.total} · {currentTask.progress}%
-                    </span>
+            </CardContent>
+          </Card>
+    
+          {/* 手动触发表单 + 当前任务进度 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">手动触发爬取</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>平台</Label>
+                    <Select
+                      value={form.platform}
+                      onValueChange={(v) =>
+                        setForm((f) => ({
+                          // 关键词/城市均无平台默认（留空 = 热度/最新且不限城市，08-16 用户决策）
+                          ...f,
+                          platform: v,
+                        }))
+                      }
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {platforms.filter((p) => p.status !== 'archived').map((p) => (
+                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <div className="h-2 w-full rounded-full bg-subtle overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-500 ${
-                        currentTask.status === 'failed' ? 'bg-state-archived' : 'bg-state-stable'
-                      }`}
-                      style={{ width: `${currentTask.progress}%` }}
+                  <div className="space-y-1.5">
+                    <Label>关键词</Label>
+                    <Input
+                      value={form.keyword}
+                      onChange={(e) => setForm((f) => ({ ...f, keyword: e.target.value }))}
+                      placeholder="留空则采集平台热度/最新内容"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>城市</Label>
+                    <Input
+                      value={form.city}
+                      onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
+                      placeholder="留空则不限城市"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>页数上限</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={form.maxPages}
+                      onChange={(e) => setForm((f) => ({ ...f, maxPages: Number(e.target.value) || 0 }))}
                     />
                   </div>
                 </div>
-                {/* 实时日志（SSE 逐行推送 scrapy 输出） */}
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-ink-muted">实时日志</span>
-                    <span className="font-mono tabular-nums text-ink-faint">{currentTask.logs.length} 行</span>
+                <Button className="w-full" disabled={isBusy} onClick={() => triggerCrawl(form.platform)}>
+                  {isBusy ? '任务进行中…' : '触发爬取'}
+                </Button>
+              </CardContent>
+            </Card>
+    
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center justify-between">
+                  <span>当前任务</span>
+                  {currentTask && (
+                    <Badge
+                      variant={currentTask.status === 'running' ? 'stable' : currentTask.status === 'failed' ? 'archived' : 'candidate'}
+                    >
+                      {currentTask.status === 'queued'
+                        ? '队列中'
+                        : currentTask.status === 'running'
+                          ? '运行中'
+                          : currentTask.status === 'failed'
+                            ? '失败'
+                            : '完成'}
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {!currentTask ? (
+                  <div className="flex items-center justify-center py-8 text-sm text-ink-faint">
+                    暂无运行中的任务 · 点击「触发爬取」开始
                   </div>
-                  <div
-                    ref={logRef}
-                    className="max-h-48 overflow-y-auto rounded-md border border-border bg-ink/[0.03] p-2 font-mono text-[10px] leading-relaxed text-ink-secondary whitespace-pre-wrap"
-                  >
-                    {currentTask.logs.length === 0 ? (
-                      <span className="text-ink-faint">等待 worker 执行，日志将在此实时显示…</span>
-                    ) : (
-                      currentTask.logs.map((ln, i) => <div key={i}>{ln}</div>)
-                    )}
+                ) : (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div><span className="text-ink-muted">平台：</span><span className="font-medium">{currentTask.platform}</span></div>
+                      <div><span className="text-ink-muted">关键词：</span><span className="font-medium">{currentTask.keyword}</span></div>
+                      <div><span className="text-ink-muted">城市：</span><span className="font-medium">{currentTask.city}</span></div>
+                      <div><span className="text-ink-muted">页数上限：</span><span className="font-mono">{currentTask.maxPages}</span></div>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-ink-muted">进度</span>
+                        <span className="font-mono tabular-nums">
+                          {currentTask.collected}/{currentTask.total} · {currentTask.progress}%
+                        </span>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-subtle overflow-hidden">
+                        <div
+                          className={`h-full transition-all duration-500 ${
+                            currentTask.status === 'failed' ? 'bg-state-archived' : 'bg-state-stable'
+                          }`}
+                          style={{ width: `${currentTask.progress}%` }}
+                        />
+                      </div>
+                    </div>
+                    {/* 实时日志（SSE 逐行推送 scrapy 输出） */}
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-ink-muted">实时日志</span>
+                        <span className="font-mono tabular-nums text-ink-faint">{currentTask.logs.length} 行</span>
+                      </div>
+                      <div
+                        ref={logRef}
+                        className="max-h-48 overflow-y-auto rounded-md border border-border bg-ink/[0.03] p-2 font-mono text-[10px] leading-relaxed text-ink-secondary whitespace-pre-wrap"
+                      >
+                        {currentTask.logs.length === 0 ? (
+                          <span className="text-ink-faint">等待 worker 执行，日志将在此实时显示…</span>
+                        ) : (
+                          currentTask.logs.map((ln, i) => <div key={i}>{ln}</div>)
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* 历史记录 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm flex items-center justify-between">
-            <span>历史记录</span>
-            <span className="text-xs font-normal text-ink-faint">{history.length} 条</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>时间</TableHead>
-                <TableHead>平台</TableHead>
-                <TableHead>关键词</TableHead>
-                <TableHead className="text-right">采集数</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>错误/说明</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {history.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
-                    暂无爬取记录，点击上方「触发爬取」开始
-                  </TableCell>
-                </TableRow>
-              ) : (
-                history.map((h) => {
-                  const meta = HISTORY_STATUS_META[h.status]
-                  return (
-                    <TableRow key={h.id}>
-                      <TableCell className="text-xs font-mono text-ink-muted">{h.time}</TableCell>
-                      <TableCell className="font-medium">{h.platform}</TableCell>
-                      <TableCell className="text-ink-secondary">{h.keyword}</TableCell>
-                      <TableCell className="text-right tabular-nums font-mono">{h.count}</TableCell>
-                      <TableCell><Badge variant={meta.variant}>{meta.label}</Badge></TableCell>
-                      <TableCell className="text-xs text-ink-muted truncate max-w-[220px]">{h.error || '—'}</TableCell>
-                      <TableCell className="text-right">
-                        <Button size="sm" variant="ghost" onClick={() => setDetailRow(h)}>详情</Button>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+    
+          {/* 历史记录 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center justify-between">
+                <span>历史记录</span>
+                <span className="text-xs font-normal text-ink-faint">{history.length} 条</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>时间</TableHead>
+                    <TableHead>平台</TableHead>
+                    <TableHead>关键词</TableHead>
+                    <TableHead className="text-right">采集数</TableHead>
+                    <TableHead>状态</TableHead>
+                    <TableHead>错误/说明</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {history.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
+                        暂无爬取记录，点击上方「触发爬取」开始
                       </TableCell>
                     </TableRow>
-                  )
-                })
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                  ) : (
+                    history.map((h) => {
+                      const meta = HISTORY_STATUS_META[h.status]
+                      return (
+                        <TableRow key={h.id}>
+                          <TableCell className="text-xs font-mono text-ink-muted">{h.time}</TableCell>
+                          <TableCell className="font-medium">{h.platform}</TableCell>
+                          <TableCell className="text-ink-secondary">{h.keyword}</TableCell>
+                          <TableCell className="text-right tabular-nums font-mono">{h.count}</TableCell>
+                          <TableCell><Badge variant={meta.variant}>{meta.label}</Badge></TableCell>
+                          <TableCell className="text-xs text-ink-muted truncate max-w-[220px]">{h.error || '—'}</TableCell>
+                          <TableCell className="text-right">
+                            <Button size="sm" variant="ghost" onClick={() => setDetailRow(h)}>详情</Button>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* 调度与限频：采集上限 + 限频 + 每爬虫配置（08-27 从 settings 迁入，爬虫域一处管全） */}
