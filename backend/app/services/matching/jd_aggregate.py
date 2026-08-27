@@ -69,7 +69,9 @@ def aggregate_jd_scores(
                     "jd_id": e.position_id,
                     "jd_title": e.position_name,
                     "total_score": round(e.total_score, 4),
-                    "hit_count": len(e.matched_must),
+                    # hit_count 统一 must+nice 命中口径（与阶段 B jd_rerank 一致；
+                    # 此前仅 must，同名字段两口径——第六轮审查算法口径 4，zkt 复核）
+                    "hit_count": len(e.matched_must) + len(e.matched_nice),
                 }
                 for e in jd_evidence
             ],

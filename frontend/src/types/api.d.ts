@@ -5080,6 +5080,8 @@ export interface components {
             exp_score: number;
             /** @description 已匹配的必备技能名 */
             matched_must: string[];
+            /** @description 已匹配的加分技能名（JD 证据 hit_count 统一 must+nice 口径） */
+            matched_nice?: string[];
             /** @description 缺失的必备技能名 */
             missing_must: string[];
             /** @description 匹配摘要 */

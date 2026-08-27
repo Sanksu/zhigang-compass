@@ -126,21 +126,80 @@ def rough_select(
     与 engine.RuleBasedMatcher._rough_select 同口径：候选人技能名与 JD
     must/nice 技能名求交集个数，按命中数降序取 Top-k（0 命中仍保留少量
     兜底，避免纯新技能候选人无候选——聚合画像时代有频次/通配兜底）。
+
+    规范名口径（第六轮审查算法口径 2，zkt 复核）：此前用 strip().lower()，
+    engine 侧用 _canonical_name（别名归一+后缀清洗，Golang→Go）——注释声称
+    同口径不成立，SBERT 降级路径召回质量弱于主路径。现统一 _canonical_name。
     """
-    cand = {s.strip().lower() for s in candidate_skill_names if s and s.strip()}
+    from app.services.matching.engine import _canonical_name
+
+    cand = {_canonical_name(s) for s in candidate_skill_names if s and s.strip()}
     if not cand:
         return jd_profiles[:k]
 
     def hit_count(p: PositionProfile) -> int:
-        names = {r.skill_name.strip().lower() for r in (*p.must_skills, *p.nice_skills) if r.skill_name}
+        names = {
+            _canonical_name(r.skill_name)
+            for r in (*p.must_skills, *p.nice_skills)
+            if r.skill_name
+        }
         return len(cand & names)
 
-    scored = sorted(jd_profiles, key=hit_count, reverse=True)
+    # 命中数一次算清（此前 sorted/hits/misses 各调一次 hit_count，9,912×3 次重复）
+    scored = sorted(
+        ((hit_count(p), i, p) for i, p in enumerate(jd_profiles)),
+        key=lambda t: (-t[0], t[1]),
+    )
     # 命中 ≥1 的优先；只有全部 0 命中（纯新技能冷启动）才启用兜底
     # （保留少量低命中 JD 避免空候选），hits 非空时不混入 0 命中。
-    hits = [p for p in scored if hit_count(p) > 0]
-    misses = [p for p in scored if hit_count(p) == 0]
+    hits = [p for h, _, p in scored if h > 0]
     if hits:
         return hits[:k]
     # 全 0 命中：候选全保留（本就是冷启动低命中场景，量小无成本顾虑）
-    return misses[:k]
+    return [p for h, _, p in scored if h == 0][:k]
+
+def diversify_by_position(
+    jd_profiles: list,
+    jd_position: dict[str, str],
+    k: int,
+    top_n: int,
+) -> list:
+    """召回池岗位多样性配额（第六轮审查算法口径 1，zkt 复核）。
+
+    问题：向量召回按 JD 级相似度取 Top-K，同一大岗位族的 JD 池化向量高度
+    相似，K 席可被单一家族占满——聚合后岗位数远小于 top_n（如仅 3 岗 vs
+    期望 10）。修复：按岗位名分组轮转取 K，每岗位 cap = max(2, K//top_n)，
+    保证池内岗位数 ≥ min(可用岗位数, ceil(K/cap))，聚合层 Top-N 有岗可选。
+
+    输入序即召回相似度序（组内保持），轮转不改变组内相对顺序。
+    """
+    if k <= 0 or not jd_profiles:
+        return jd_profiles[:k]
+
+    per_pos = max(2, k // max(top_n, 1))
+    groups: dict[str, list] = {}
+    order: list[str] = []
+    for p in jd_profiles:
+        gname = jd_position.get(getattr(p, "position_id", "")) or ""
+        if not gname:
+            # 无岗位归属的 JD 不参与配额（聚合层本就丢弃），直接跳过
+            continue
+        if gname not in groups:
+            groups[gname] = []
+            order.append(gname)
+        groups[gname].append(p)
+
+    picked: list = []
+    exhausted = False
+    while len(picked) < k and not exhausted:
+        exhausted = True
+        for gname in order:
+            group = groups[gname]
+            take = group[:per_pos]
+            if take:
+                picked.extend(take)
+                groups[gname] = group[per_pos:]
+                exhausted = False
+            if len(picked) >= k:
+                break
+    return picked[:k]
