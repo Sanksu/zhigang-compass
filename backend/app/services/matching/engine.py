@@ -490,25 +490,31 @@ def _score_nice(
     candidate,
     semantic=None,
     sim_threshold: float | None = None,
-) -> float:
+) -> tuple[float, list[str]]:
     """nice 维度评分：Top-K 覆盖率 Σ(w×sim)/Σ(w)（K=NICE_TOP_K，跨源数降序）。
 
     岗位无 nice 时取 1.0 不扣分；Top-K 截断见 NICE_TOP_K 注释（长尾愿望清单
     不稀释分数），岗位 nice 池不足 K 条时退化为全量口径。source_count 平局按
     skill_name 升序截断（图谱返回序无保证，确定性边界便于复现与排查）。
+    返回 (score, matched_nice)——matched_nice 供 JD 证据 hit_count 统一
+    must+nice 口径（第六轮审查算法口径 4，zkt 复核）。
     """
     if not position.nice_skills:
-        return 1.0
+        return 1.0, []
     pool = sorted(
         position.nice_skills, key=lambda r: (-r.source_count, r.skill_name)
     )[:NICE_TOP_K]
     nice_total_weight = sum(req.weight for req in pool)
     if nice_total_weight == 0:
-        return 1.0
-    return sum(
-        req.weight * _skill_similarity(req, candidate.skills, semantic, sim_threshold)
-        for req in pool
-    ) / nice_total_weight
+        return 1.0, []
+    matched_nice: list[str] = []
+    weighted_sum = 0.0
+    for req in pool:
+        sim = _skill_similarity(req, candidate.skills, semantic, sim_threshold)
+        if sim > 0:
+            matched_nice.append(req.skill_name)
+        weighted_sum += req.weight * sim
+    return weighted_sum / nice_total_weight, matched_nice
 
 
 def _score_exp(position: PositionProfile, candidate) -> float:
@@ -558,7 +564,7 @@ def score_position(
     must_score, must_total, matched_must, missing_must = _score_must(
         position, candidate, semantic, sim_threshold
     )
-    nice_score = _score_nice(position, candidate, semantic, sim_threshold)
+    nice_score, matched_nice = _score_nice(position, candidate, semantic, sim_threshold)
     exp_score = _score_exp(position, candidate)
 
     if must_score is None:
@@ -584,6 +590,7 @@ def score_position(
         exp_score=round(exp_score, 4),
         matched_must=matched_must,
         missing_must=missing_must,
+        matched_nice=matched_nice,
         summary=_build_summary(position.name, matched_must, missing_must, must_score, nice_score, unqualified),
         unqualified=unqualified,
         radar=build_radar(

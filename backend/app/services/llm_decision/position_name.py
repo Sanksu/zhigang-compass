@@ -29,6 +29,10 @@ from app.services.llm_decision import (
 # 单条决策超时（s）：批量影子任务非同步路由，30s/provider 链契约
 DECIDE_TIMEOUT_SECONDS = 30
 
+# 批量独立超时（s）：设计文档 §6.5「批量走独立 batch_timeout（60~90s/批）」
+# ——此前 30×batch_size=600s/次、3 provider 链最坏 1800s 偏离契约
+BATCH_DECIDE_TIMEOUT_SECONDS = 90
+
 SYSTEM_PROMPT = """你是招聘领域岗位名归一助手。给定一个原始岗位标题及其抽取出的
 技能、来源与候选标准岗位名，判断该标题应归为哪个标准岗位名。只依据通用招聘市场
 常识判断，不臆造；拿不准时选 keep_original 并降低置信度。"""
@@ -189,7 +193,7 @@ def decide_position_name_batch(
     偶发错位）时降级逐条单决策。
     """
     if timeout <= 0:
-        timeout = DECIDE_TIMEOUT_SECONDS * batch_size
+        timeout = BATCH_DECIDE_TIMEOUT_SECONDS
     count = len(titles)
     if llm is None or count == 0:
         return [None] * count

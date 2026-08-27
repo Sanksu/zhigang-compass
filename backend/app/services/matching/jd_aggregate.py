@@ -50,9 +50,17 @@ def aggregate_jd_scores(
     out: list[dict] = []
     for gname, members in groups.items():
         best = max(members, key=lambda r: r.total_score)
-        jd_evidence = sorted(members, key=lambda r: r.total_score, reverse=True)[
-            :_AGGREGATE_TOP_JD_EVIDENCE
-        ]
+        # Top-2 证据按 jd_title 去重（同标题不同 jd_id 的重复挂载条目只保留最高分一条，
+        # 避免证据卡同名两行——E2E 实测「数据库管理员」两条证据同标题）
+        seen_titles: set[str] = set()
+        jd_evidence = []
+        for e in sorted(members, key=lambda r: r.total_score, reverse=True):
+            if e.position_name in seen_titles:
+                continue
+            seen_titles.add(e.position_name)
+            jd_evidence.append(e)
+            if len(jd_evidence) >= _AGGREGATE_TOP_JD_EVIDENCE:
+                break
         out.append({
             "position_id": gname,
             "position_name": gname,
@@ -69,7 +77,9 @@ def aggregate_jd_scores(
                     "jd_id": e.position_id,
                     "jd_title": e.position_name,
                     "total_score": round(e.total_score, 4),
-                    "hit_count": len(e.matched_must),
+                    # hit_count 统一 must+nice 命中口径（与阶段 B jd_rerank 一致；
+                    # 此前仅 must，同名字段两口径——第六轮审查算法口径 4，zkt 复核）
+                    "hit_count": len(e.matched_must) + len(e.matched_nice),
                 }
                 for e in jd_evidence
             ],

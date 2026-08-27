@@ -22,6 +22,7 @@ from app.api.v1.admin_routes import (
     llm_decisions,
     position_edit,
     position_reviews,
+    skill_aliases,
 )
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_permission("admin:*"))])
@@ -34,6 +35,7 @@ router.include_router(position_edit.router)
 router.include_router(config.router)
 router.include_router(dict_guard.router)
 router.include_router(llm_decisions.router)
+router.include_router(skill_aliases.router)
 router.include_router(etl.router)
 
 # 爬虫域私有符号 re-export（tests/admin/* 直连导入）
@@ -46,7 +48,7 @@ _crawl_log_events = crawl._crawl_log_events
 # 岗位审核域私有符号 re-export（tests/admin/test_positions_pending、tests/matching 直连导入）
 positions_pending = position_reviews.positions_pending
 _persist_rejected_change = position_reviews._persist_rejected_change
-_persist_position_state = position_reviews._persist_position_state
+_apply_graph_state = position_reviews._apply_graph_state
 
 # 岗位人工编辑域私有符号 re-export（tests/admin/test_position_edit 直连导入）
 validate_position_edit = position_edit.validate_position_edit

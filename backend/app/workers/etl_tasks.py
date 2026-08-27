@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable
 
@@ -615,6 +616,10 @@ _JD_TEXT_FIELDS = (
 # 裁剪防 context 溢出；JD 正文技能信息集中在前部，截尾损失可控）
 _JD_TEXT_MAX_CHARS = 20000
 
+# 学历弱维修复（对齐评测 08-25 #537 口径）：正文含任意学历关键词即认定"已有教育
+# 信号"，不再追加独立教育行——避免对已含学历的 JD 重复投喂/污染。
+_EDUCATION_KEYWORD_RE = re.compile(r"本科|大专|硕士|博士|学历|及以上|不限")
+
 
 def _build_jd_text(snapshot: dict, raw_text: str) -> str:
     """拼装 JD 抽取正文。
@@ -623,6 +628,12 @@ def _build_jd_text(snapshot: dict, raw_text: str) -> str:
     但正文字段（description/requirements）缺失时拼接结果过短无法抽取，
     此时回退 raw_text（黄金集等数据正文可能只存在 raw_text 中）。
     统一裁剪至 _JD_TEXT_MAX_CHARS（入库不再截断，抽取输入侧兜底）。
+
+    学历弱维修复（08-25 #537）：快照列表页学历（snapshot.education）非空、且拼接后
+    正文不含任何学历关键词时，在尾部追加一行独立「【教育要求】」提示。该行仅供
+    education 维度被 LLM 消费——分隔标记使其处于 skills/requirements 判段之外，
+    学历级别词按 prompt 规则不进入技能名（不污染技能/加分抽取），专治"正文缺学历词
+    但列表页标了学历"（国内源常见）的漏抽。已含学历信号的行逐字不变。
     """
     body_fields = (snapshot.get("description"), snapshot.get("requirements"))
     if not any(str(f or "").strip() for f in body_fields):
@@ -630,6 +641,9 @@ def _build_jd_text(snapshot: dict, raw_text: str) -> str:
     else:
         parts = [str(snapshot.get(f, "")).strip() for f in _JD_TEXT_FIELDS]
         text = "\n".join(p for p in parts if p)
+    edu = (snapshot.get("education") or "").strip()
+    if edu and not _EDUCATION_KEYWORD_RE.search(text):
+        text = (text or "").rstrip() + "\n【教育要求】" + edu
     return text[:_JD_TEXT_MAX_CHARS]
 
 

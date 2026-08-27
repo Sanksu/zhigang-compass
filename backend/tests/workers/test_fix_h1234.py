@@ -52,9 +52,6 @@ def test_etl_pipeline_skips_independent_schedule(monkeypatch):
     async def _stub_derive_evolved_from():
         return {}
 
-    async def _stub_load_positions_shared():
-        return []
-
     # 后续阶段任务全部桩掉（run_etl_pipeline 会引用 tasks_module.<stage>）
     class _FakeTasks:
         CDP_SPIDERS = set()
@@ -109,12 +106,9 @@ def test_etl_pipeline_skips_independent_schedule(monkeypatch):
     skill_relations_stub.sync_skill_relations = lambda session: {}
     evolved_from_stub = ModuleType("app.services.evolution.evolved_from")
     evolved_from_stub.derive_evolved_from = _stub_derive_evolved_from
-    shared_cache_stub = ModuleType("app.services.matching.shared_cache")
-    shared_cache_stub.load_positions_shared = _stub_load_positions_shared
     monkeypatch.setitem(sys.modules, "app.core.database", database_stub)
     monkeypatch.setitem(sys.modules, "app.services.kg.skill_relations", skill_relations_stub)
     monkeypatch.setitem(sys.modules, "app.services.evolution.evolved_from", evolved_from_stub)
-    monkeypatch.setitem(sys.modules, "app.services.matching.shared_cache", shared_cache_stub)
 
     result = asyncio.run(
         etl.run_etl_pipeline({}, run_date="2026-08-21", tasks_module=_FakeTasks)

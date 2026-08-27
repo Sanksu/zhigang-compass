@@ -98,23 +98,20 @@ class TestEvaluatePairsUsesRealJdSkills:
 
         通过 monkeypatch 令匹配引擎的图聚合加载器抛错，若评测误走图谱聚合则失败。
         """
-        import app.services.matching.loaders as loaders_mod
         import scripts.tune_match_weights as twn
 
         v2 = _match_v2_rows()
         weights = (0.6, 0.2, 0.2)
         threshold = 0.5
 
-        def _no_graph(*args, **kwargs):
-            raise AssertionError("评测不得读取图谱聚合（真实 JD 场景无 DB）")
+        # 方案 A（2026-08-27）：聚合岗位画像加载器已随聚合评分体系移除，
+        # evaluate_pairs 天然不触图（无 DB 依赖）。前置断言确保聚合加载符号
+        # 已被删除——若未来误加回图谱聚合读取，此处即失败。
+        import app.services.matching.loaders as loaders_mod
+        assert not hasattr(loaders_mod, "_load_positions_uncached")
+        assert not hasattr(loaders_mod, "load_positions_from_graph")
 
-        monkeypatch = pytest.MonkeyPatch()
-        monkeypatch.setattr(loaders_mod, "_load_positions_uncached", _no_graph)
-        monkeypatch.setattr(loaders_mod, "load_positions_from_graph", _no_graph)
-        try:
-            result = twn.evaluate_pairs(v2, weights, None, threshold)
-        finally:
-            monkeypatch.undo()
+        result = twn.evaluate_pairs(v2, weights, None, threshold)
         assert len(result["scores"]) == len(v2) == 384
         assert len(result["labels"]) == 384
         assert "spearman" in result and "accuracy" in result

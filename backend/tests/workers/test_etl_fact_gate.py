@@ -51,10 +51,6 @@ def _build_env(monkeypatch, *, aggregate_fails: bool):
         calls.append("evolved_from")
         return {}
 
-    async def _stub_load_positions_shared():
-        calls.append("positions_cache_prebuild")
-        return []
-
     def _make_task(name):
         async def _task(ctx, **_kwargs):
             calls.append(name)
@@ -99,13 +95,10 @@ def _build_env(monkeypatch, *, aggregate_fails: bool):
     skill_relations_stub.sync_skill_relations = lambda session: {}
     evolved_from_stub = ModuleType("app.services.evolution.evolved_from")
     evolved_from_stub.derive_evolved_from = _stub_derive
-    shared_cache_stub = ModuleType("app.services.matching.shared_cache")
-    shared_cache_stub.load_positions_shared = _stub_load_positions_shared
     for name, stub in (
         ("app.core.database", database_stub),
         ("app.services.kg.skill_relations", skill_relations_stub),
         ("app.services.evolution.evolved_from", evolved_from_stub),
-        ("app.services.matching.shared_cache", shared_cache_stub),
     ):
         monkeypatch.setitem(sys.modules, name, stub)
 
@@ -130,7 +123,6 @@ def test_fact_failure_degrades_pipeline(monkeypatch):
         "backfill_embeddings",
         "snapshot_graph",
         "evolved_from",
-        "positions_cache_prebuild",
         "discovery_daily",
         "discovery_auto_transition",
     ):

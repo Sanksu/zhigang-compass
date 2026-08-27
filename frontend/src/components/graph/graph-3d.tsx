@@ -257,13 +257,15 @@ export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
     }
   }, [data.nodes.length])
 
-  // 组件卸载时释放所有缓存的 Three.js 对象，防止显存泄漏
+  // 组件卸载时释放所有缓存的 Three.js 对象，防止显存泄漏。
+  // cleanup 一律用 effect 体内快照——refs 到 cleanup 时可能已被后续渲染改写
   useEffect(() => {
     const cache = nodeObjectCacheRef.current
+    const stateKeys = nodeStateKeyRef.current
     return () => {
       cache.forEach((obj) => disposeObject3D(obj))
       cache.clear()
-      nodeStateKeyRef.current.clear()
+      stateKeys.clear()
     }
   }, [])
 

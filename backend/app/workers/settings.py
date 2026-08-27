@@ -64,27 +64,21 @@ async def on_startup(ctx: dict) -> None:
 
     asyncio.create_task(warm_ocr())
 
-    async def warm_matching() -> None:
-        # 岗位画像共享缓存预热：首次 ARQ 匹配免冷加载（Redis 单飞构建载荷并切指针；
-        # 失败不阻塞 worker 启动，匹配请求走降级路径）
-        try:
-            from app.services.matching.shared_cache import load_positions_shared
+    async def warm_dynamic_aliases() -> None:
+        # 动态别名表（方案①）加载：worker 进程是 normalize_skill 的主消费方
+        # （ETL 抽取链）；approve 只刷新 API 进程内存，worker 靠此处 + 每轮
+        # ETL 起点刷新兜底（第六轮审查 P0-1 跨进程生效口径）。内部 fail-soft。
+        from app.services.extraction.dictionary import refresh_dynamic_aliases
 
-            await load_positions_shared()
-            logger.info("岗位画像共享缓存预热完成")
-        except Exception as error:
-            logger.warning("岗位画像预热跳过: %s", str(error)[:100])
+        loaded = await refresh_dynamic_aliases()
+        logger.info("动态别名表 worker 启动加载完成：%d 条", loaded)
 
-    asyncio.create_task(warm_matching())
+    asyncio.create_task(warm_dynamic_aliases())
 
     async def warm_jd_pool() -> None:
-        # JD 池化向量预热（阶段 C）：JD 候选模式开启时，启动即构建池化并写
-        # Redis（首建含 SBERT warm 可达数十秒——免容器重建后首个匹配请求
-        # 承担 ~226s 冷启动；指纹命中则秒级返回）。失败不阻塞 worker。
-        from app.core import runtime_config
-
-        if not runtime_config.get("match_jd_candidates_enabled", False):
-            return
+        # JD 池化向量预热（方案 A：匹配主链路恒走 JD 候选模式，池化向量为
+        # 向量预筛召回必备——启动即构建池化并写 Redis，免容器重建后首个匹配
+        # 请求承担冷启动；指纹命中则秒级返回）。失败不阻塞 worker。
         try:
             from sqlalchemy import select
 

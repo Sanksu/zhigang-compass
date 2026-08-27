@@ -145,6 +145,13 @@ async def run_etl_pipeline(
 
     results: dict = {"run_date": run_date, "stages": {}}
 
+    # 动态别名表按轮刷新（方案① 跨进程生效口径，第六轮审查 P0-1）：approve
+    # 只即时刷新 API 进程；worker 进程在此处（每轮 ETL 起点，先于抽取归一）
+    # 拉齐 skill_aliases approved 行。内部 fail-soft+warning，不阻断管线。
+    from app.services.extraction.dictionary import refresh_dynamic_aliases
+
+    await refresh_dynamic_aliases()
+
     crawl_results = []
     for spider in crawl_platforms:
         cfg = crawler_cfg.get(spider) or {}
@@ -261,15 +268,6 @@ async def run_etl_pipeline(
             derive_evolved_from(),
         )
 
-        # 阶段 14.5：岗位画像共享缓存预构建（P1）——聚合与快照完成后重建
-        # 版本化载荷并切指针（先写载荷后切指针，旧版本保持可读；失败仅记审计，
-        # 不阻塞 ETL——匹配侧按指针读取或走降级路径）
-        from app.services.matching.shared_cache import load_positions_shared
-
-        results["stages"]["positions_cache_prebuild"] = await run_stage(
-            "positions_cache_prebuild",
-            load_positions_shared(),
-        )
         # 新岗位发现消费快照窗口，同样只在事实链完整时执行
         results["stages"]["discovery_daily"] = await run_stage(
             "discovery_daily",

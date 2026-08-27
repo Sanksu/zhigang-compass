@@ -71,6 +71,32 @@ def _fetch_unormalized_skills(driver, limit: int) -> list[dict]:
         return [dict(record) for record in session.run(query, limit=limit)]
 
 
+def _fetch_alias_candidate_skills(driver, limit: int) -> list[dict]:
+    """别名回写候选池（方案① 08-26 226 实测修正）：非已知标准名的图技能节点。
+
+    未归一池（normalized_name IS NULL）在 ETL 每日归一后恒空（226 实测
+    POOL=0，3348/4399 技能非标准名）——真实别名机会在「自身归一但不是
+    标准名」的变体节点（如 Vue3/GoLang/c语言，白名单标准是 Vue.js/Go/C）。
+    按 freq 降序高频优先（价值最高）；Python 侧过滤已知标准名（Cypher
+    不知白名单）。独立新技能（AC-AC变换器等）由 LLM 判 keep（gate 只拦
+    merge 目标），不误伤。
+    """
+    from app.services.llm_decision.skill_normalize import known_standard_names
+
+    standards = known_standard_names()
+    with driver.session() as session:
+        rows = [
+            {"name": str(record["name"])}
+            for record in session.run(
+                "MATCH (s:Skill) WHERE s.name IS NOT NULL "
+                "RETURN s.name AS name ORDER BY coalesce(s.freq, 0) DESC LIMIT $pool",
+                pool=limit * 4,
+            )
+            if record["name"] and str(record["name"]) not in standards
+        ]
+    return rows[:limit]
+
+
 async def _recent_jd_rows(limit: int) -> list:
     """最近抽取 JD（快照含 extraction），供岗位名归一候选。
 
@@ -147,7 +173,12 @@ async def propose_position(
         summary["candidates"] += 1
         skills = _skills_from_extraction(extraction)
         candidates = recaller.recall(title)
-        decision = decide_position_name(title, skills, str(row["source"] or ""), candidates, llm)
+        # LLM 决策器是同步 OpenAI client（单条最坏 30s×3 provider）——必须
+        # to_thread，否则阻塞 ARQ worker 事件循环（第六轮审查 P1-2；同域
+        # 阶段 19 shadow 已用 to_thread，此前复制时遗漏）
+        decision = await asyncio.to_thread(
+            decide_position_name, title, skills, str(row["source"] or ""), candidates, llm,
+        )
         if decision is None:
             summary["llm_failed"] += 1
             continue
@@ -198,7 +229,8 @@ async def propose_skill(
         if not name:
             continue
         summary["candidates"] += 1
-        decision = decide_skill_normalize(name, llm)
+        # 同步 LLM client → to_thread（第六轮审查 P1-2，防阻塞事件循环）
+        decision = await asyncio.to_thread(decide_skill_normalize, name, llm)
         if decision is None:
             summary["llm_failed"] += 1
             continue
@@ -225,8 +257,92 @@ async def propose_skill(
     return summary
 
 
+# 别名回写置信度门槛（决策项 D4）：LLM merge confidence ≥ 0.8 才进 skill_aliases
+ALIAS_CONFIDENCE_FLOOR = 0.8
+
+
+async def propose_skill_alias(
+    llm, provider: str, model: str, run_date: str, limit: int,
+) -> dict:
+    """技能别名回写提议一轮（方案①，async 编排，写 skill_aliases)。
+
+    复用 decide_skill_normalize 的 merge 结论（别名→标准名，与 proposed_skill
+    同链），但只取 action=merge 且 confidence ≥ ALIAS_CONFIDENCE_FLOOR（D4）
+    的候选，写 skill_aliases（status=pending）供人工审批回写词典。
+    区别于 propose_skill（走 NameNormalizationRequest 图变异 R2）——别名回写
+    不改图谱拓扑，是"归一字典增强"。
+
+    D3：仅"向量不相似但语义等价"类（缩写/中英/版本）——由别名筛选（非 SBERT 聚类
+    覆盖的近义）体现；merge 到已知标准名（gate）保证不虚构。
+    """
+    from app.core.database import neo4j_driver
+    from app.services.llm_decision.skill_normalize import (
+        decide_skill_normalize,
+        skill_normalize_gate,
+    )
+
+    summary = {"candidates": 0, "proposed": 0, "blocked": 0, "llm_failed": 0, "low_conf": 0}
+    # 候选源=非标准名技能节点（08-26 226 实测未归一池恒空，改用变体节点池）
+    rows = await asyncio.to_thread(_fetch_alias_candidate_skills, neo4j_driver, limit)
+    for row in rows:
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        summary["candidates"] += 1
+        # 同步 LLM client → to_thread（第六轮审查 P1-2，防阻塞事件循环）
+        decision = await asyncio.to_thread(decide_skill_normalize, name, llm)
+        if decision is None:
+            summary["llm_failed"] += 1
+            continue
+        gate_ok, gate_reason = skill_normalize_gate(decision, name)
+        # 仅别名回写：must 是 merge 到标准名，且置信度 ≥ 门槛
+        if decision.action != "merge" or decision.confidence < ALIAS_CONFIDENCE_FLOOR:
+            summary["low_conf"] += 1
+            continue
+        if not gate_ok:
+            summary["blocked"] += 1
+            logger.info("[propose_alias] 技能 %s 拦截: %s", name, gate_reason)
+            continue
+        standard = decision.target_standard
+        # 落 LLMDecisionRecord（domain=skill_normalize, kind="alias"）——复用
+        # /admin/llm-decisions 决策页展示/审批；approve 时写 skill_aliases + reload。
+        from app.services.llm_decision import (
+            DOMAIN_SKILL_NORMALIZE,
+            STATUS_PROPOSAL,
+            build_record,
+            persist_record,
+        )
+
+        record = build_record(
+            domain=DOMAIN_SKILL_NORMALIZE,
+            entity_type="skill", entity_id=name, run_id=f"alias_propose:{run_date}",
+            input_hash=_input_hash("alias", name),
+            evidence_refs=[{"kind": "unormalized_skill", "name": name}],
+            provider=provider, model=model,
+            structured_output={
+                "action": "merge", "target_standard": standard,
+                "kind": "alias",  # 区分"别名回写" vs 归一图变异（_approve 分发按此）
+                "confidence": decision.confidence,
+            },
+            confidence=decision.confidence,
+            gate_result="pass",
+            risk_tier="R2",
+            status=STATUS_PROPOSAL,
+        )
+        await persist_record(record)
+        summary["proposed"] += 1
+        logger.info("[propose_alias] 技能 %s → %s（proposal，conf %.2f）",
+                    name, standard, decision.confidence)
+    return summary
+
+
 async def propose(limit: int = DEFAULT_LIMIT, domain: str = "all") -> dict:
-    """执行一轮名称归一提议（async，ETL worker 直调）；返回摘要。"""
+    """执行一轮名称归一提议（async，ETL worker 直调）；返回摘要。
+
+    三域编排：position/skill 走归一图变异（proposal→审批→sync 落图）；
+    alias 走别名回写（proposal→审批→skill_aliases，第六轮审查 P1-5 补齐
+    候选源断供——此前仅有手动脚本，ETL 阶段 20 不产出别名候选）。
+    """
     from app.core.database import neo4j_driver
     from app.services.extraction.llm_provider import LLMConfigurationError, LLMProviderChain
 
@@ -239,10 +355,12 @@ async def propose(limit: int = DEFAULT_LIMIT, domain: str = "all") -> dict:
     run_date = datetime.now(_CST).strftime("%Y-%m-%d")
     max_candidates = limit
     position_budget = max(5, max_candidates // 2)
-    skill_budget = max(5, max_candidates - position_budget)
+    alias_budget = max(5, max_candidates // 4)
+    skill_budget = max(5, max_candidates - position_budget - alias_budget)
 
     position: dict = {"candidates": 0, "proposed": 0, "blocked": 0, "llm_failed": 0, "recall_mode": ""}
     skill: dict = {"candidates": 0, "proposed": 0, "blocked": 0, "llm_failed": 0}
+    alias: dict = {"candidates": 0, "proposed": 0, "blocked": 0, "llm_failed": 0, "low_conf": 0}
 
     if domain in ("all", "position"):
         pool = await asyncio.to_thread(_existing_positions, neo4j_driver)
@@ -257,13 +375,18 @@ async def propose(limit: int = DEFAULT_LIMIT, domain: str = "all") -> dict:
     if domain in ("all", "skill"):
         skill = await propose_skill(llm, provider, model, run_date, skill_budget)
 
+    if domain in ("all", "alias"):
+        alias = await propose_skill_alias(llm, provider, model, run_date, alias_budget)
+
     summary = {
         "status": "ok", "run_date": run_date, "provider": provider, "model": model,
-        "position": position, "skill": skill,
+        "position": position, "skill": skill, "alias": alias,
     }
     logger.info(
-        "[propose_norm] 岗位 候选%d 提议%d 拦截%d / 技能 候选%d 提议%d 拦截%d",
+        "[propose_norm] 岗位 候选%d 提议%d 拦截%d / 技能 候选%d 提议%d 拦截%d"
+        " / 别名 候选%d 提议%d 拦截%d",
         position["candidates"], position["proposed"], position["blocked"],
         skill["candidates"], skill["proposed"], skill["blocked"],
+        alias["candidates"], alias["proposed"], alias["blocked"],
     )
     return summary

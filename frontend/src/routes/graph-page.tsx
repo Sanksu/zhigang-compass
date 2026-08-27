@@ -6,6 +6,11 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  POSITION_STATE_DOT,
+  POSITION_STATE_META,
+  type PositionState,
+} from '@/components/shared/position-state-badge'
 import { Graph2D, type Graph2DHandle } from '@/components/graph/graph-2d'
 import type { Graph3DHandle } from '@/components/graph/graph-3d'
 import { GraphAnalysisPanel } from '@/components/graph/graph-analysis-panel'
@@ -82,8 +87,9 @@ const MAX_SKILLS_PER_POSITION = 12
  */
 const DEMO_BOOKMARKS: { label: string; nodeName: string }[] = [
   { label: '算法簇', nodeName: '算法工程师' },
-  { label: '前端簇', nodeName: '前端开发工程师' },
+  { label: '大模型簇', nodeName: '大模型算法工程师' },
   { label: '数据簇', nodeName: '数据分析师' },
+  { label: '前端簇', nodeName: '前端开发工程师' },
 ]
 
 /** 非全景视图已由后端 /graph/view/{view_type} 提供（技术栈/级别/岗位中心均为服务端过滤）；
@@ -265,13 +271,15 @@ export function GraphPage() {
     }
   }, [selected])
 
-  // skill 详情视图：选中技能节点且详情已就绪（skill_id 匹配）时展示，否则视为加载中
-  const skillDetailView: SkillDetail | null =
-    selected?.type === 'skill'
-      ? skillDetail && skillDetail.skill_id === selected.id && !skillDetail.loading
-        ? skillDetail
-        : { skill_id: '', positions: [], prerequisites: [], courses: [], loading: true }
-      : null
+  // skill 详情视图：选中技能节点且详情已就绪（skill_id 匹配）时展示，否则视为加载中。
+  // 包 useMemo：条件分支构造的 loading 占位对象若每渲染重建，下游 learningPath/
+  // 导学 useMemo 依赖随之失效（第六轮审查 lint 治理）
+  const skillDetailView: SkillDetail | null = useMemo<SkillDetail | null>(() => {
+    if (selected?.type !== 'skill') return null
+    return skillDetail && skillDetail.skill_id === selected.id && !skillDetail.loading
+      ? skillDetail
+      : { skill_id: '', positions: [], prerequisites: [], courses: [], loading: true }
+  }, [selected, skillDetail])
 
   // ── 双轨制接入（task 1.1/1.3）：选中技能 → 由先修链派生学习路径 DAG + 导学面板增强 ──
   // 数据源为真实先修链（GET /graph/skill/{id}/prerequisites）：目标技能 ← 直接先修（并联），
@@ -758,7 +766,7 @@ export function GraphPage() {
           {/* 视图说明 */}
           <div className="pointer-events-none absolute bottom-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2 rounded-md border border-atlas-grid bg-canvas/88 px-3 py-2 shadow-sm backdrop-blur-xl">
             <div className="min-w-0">
-              <p className="font-mono text-[9px] tracking-[0.16em] text-atlas-muted">CURRENT BEARING / {VIEW_LABEL[view]}</p>
+              <p className="font-mono text-[9px] tracking-[0.16em] text-atlas-muted">当前视角 / {VIEW_LABEL[view]}</p>
               <p className="truncate text-[11px] text-ink-muted">{VIEW_DESC[view]}</p>
             </div>
             <div className="flex items-center gap-2 font-mono text-[10px] text-atlas-muted">
@@ -841,12 +849,12 @@ export function GraphPage() {
         <div className="space-y-2" role="listitem">
           <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">POSITION STATUS / 岗位状态色</p>
           <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-active" />活跃</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-stable" />稳定</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-emerging" />新兴</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-candidate" />候选</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-declining" />衰退</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-state-archived" />归档</span>
+            {(['active', 'stable', 'emerging', 'candidate', 'declining', 'archived'] as PositionState[]).map((s) => (
+              <span key={s} className="flex items-center gap-1">
+                <span className={`size-2 rounded-full ${POSITION_STATE_DOT[s]}`} />
+                {POSITION_STATE_META[s].label}
+              </span>
+            ))}
           </div>
         </div>      </div>
     </>

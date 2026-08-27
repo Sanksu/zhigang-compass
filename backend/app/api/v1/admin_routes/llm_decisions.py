@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_permission
 from app.core.database import get_db
 from app.models.business import LLMDecisionRecord
+from app.schemas.admin_requests import LLMDecisionReviewRequest
 
 router = APIRouter(tags=["admin-llm-decisions"])
 
@@ -83,7 +84,7 @@ async def list_llm_decisions(
     status: str = Query(default="", description="状态过滤：shadow/proposal/auto_applied/blocked 等（空=全部）"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-) -> dict:
+):
     """决策记录分页列表（倒序，只读；total 为过滤后总数，供分页条）。"""
     from sqlalchemy import func
 
@@ -97,19 +98,25 @@ async def list_llm_decisions(
         if status:
             count_stmt = count_stmt.where(LLMDecisionRecord.status == status)
         total = await session.scalar(count_stmt) or 0
-    return {
+    # ApiResponse 包装对齐契约（第六轮审查 P0-2 同类：此前裸返，前端 apiGet
+    # 取 res.data.data 得 undefined——决策页列表/汇总是 P0-2 漏网的同源断页）
+    from app.api.common import ok
+
+    return ok({
         "items": [serialize_record(r) for r in rows],
         "total": total, "limit": limit, "offset": offset,
-    }
+    })
 
 
 @router.get("/llm-decisions/summary")
-async def llm_decisions_summary() -> dict:
+async def llm_decisions_summary():
     """决策记录汇总（domain×status，验收卡片数据源，只读）。"""
+    from app.api.common import ok
     from app.core.database import async_session_factory
 
     async with async_session_factory() as session:
-        return await summarize(session)
+        # ApiResponse 包装对齐契约（同上）
+        return ok(await summarize(session))
 
 
 # ---- 审批执行通道（PR9b + PR3 c）：proposal→approved/rejected ----
@@ -129,35 +136,33 @@ async def _load_decision(session, decision_id: str):
     return await session.get(LLMDecisionRecord, decision_id)
 
 
-def _approve_common_guard(req: dict, current_user: dict) -> tuple[dict | None, str, str]:
+def _approve_common_guard(reason_raw: str, current_user: dict) -> tuple[dict | None, str, str]:
     """公共审批前置校验：返回 (None, reason, operator) 通过；(error_resp, "", "") 失败。
 
-    校验 review_reason 非空 + 操作者身份为合法 UUID（AuditLog.user_id 列约束）。
+    review_reason 非空已由 LLMDecisionReviewRequest Pydantic 强校验（P1-4），
+    此处仅做 strip 后非空复核 + 操作者 UUID 守卫（AuditLog.user_id 列约束）。
     独立成函数便于单测注入，同时避免在两个 domain 分支重复。
     """
-    import uuid as _uuid
-
+    from app.api.common import resolve_operator
     from app.core.errors import ERR_VALIDATION
     from app.schemas.common import error
 
-    reason = (req.get("review_reason") or "").strip()
+    reason = (reason_raw or "").strip()
     if not reason:
         return error(ERR_VALIDATION, "审批必须填写 review_reason"), "", ""
-    operator = current_user.get("sub") or current_user.get("user_id", "admin")
-    try:
-        _uuid.UUID(str(operator))
-    except (ValueError, AttributeError, TypeError):
-        return error(ERR_VALIDATION, f"操作者身份必须为 UUID（AuditLog.user_id 列约束），收到: {operator!r}"), "", ""
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err, "", ""
     return None, reason, operator
 
 
 @router.post("/llm-decisions/{decision_id}/approve")
 async def approve_llm_decision(
     decision_id: str,
-    req: dict,
+    req: LLMDecisionReviewRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
-) -> dict:
+):
     """批准一条图变异类 proposal（skill_relation / position_normalize / skill_normalize）。
 
     执行顺序（对齐 postmortem 003 教训）：先校验 → PG 落库（图变更持久化 +
@@ -169,7 +174,7 @@ async def approve_llm_decision(
     from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
     from app.schemas.common import error
 
-    guard, reason, operator = _approve_common_guard(req, current_user)
+    guard, reason, operator = _approve_common_guard(req.review_reason, current_user)
     if guard is not None:
         return guard
 
@@ -188,6 +193,10 @@ async def approve_llm_decision(
         return await _approve_skill_relation(db, record, reason, operator)
     if record.domain == "skill_classify":
         return await _approve_skill_classify(db, record, reason, operator)
+    # 别名回写（方案①）：skill_normalize 记录且 structured_output.kind=="alias"——
+    # 走 _approve_skill_alias（写 skill_aliases + reload），非归一图变异。
+    if record.domain == "skill_normalize" and (record.structured_output or {}).get("kind") == "alias":
+        return await _approve_skill_alias(db, record, reason, operator)
     return await _approve_normalization(db, record, reason, operator)
 
 
@@ -234,7 +243,9 @@ async def _approve_skill_relation(db, record, reason: str, operator: str) -> dic
     record.status = "approved"
     record.reviewer = operator
     record.review_reason = reason
-    record.effects_applied = True
+    # 图写由 sync_dynamic_relations 执行——approve 置 False 待落图，sync 按
+    # proposal_id 回写 True（#570 对账语义，第六轮审查此前恒 True 名不副实）
+    record.effects_applied = False
     db.add(AuditLog(
         user_id=operator, action="llm_decision_approve",
         resource="skill_relation", resource_id=str(record.id),
@@ -318,7 +329,9 @@ async def _approve_normalization(db, record, reason: str, operator: str) -> dict
     record.status = "approved"
     record.reviewer = operator
     record.review_reason = reason
-    record.effects_applied = True
+    # 图写由 sync_dynamic_normalization 执行——approve 置 False 待落图
+    # （noop/keep 分支无图变更，仍在上文置 True）
+    record.effects_applied = False
     db.add(AuditLog(
         user_id=operator, action="llm_decision_approve",
         resource=record.domain, resource_id=str(record.id),
@@ -374,7 +387,8 @@ async def _approve_skill_classify(db, record, reason: str, operator: str) -> dic
     record.status = "approved"
     record.reviewer = operator
     record.review_reason = reason
-    record.effects_applied = True
+    # 图写由 sync_dynamic_categories 执行——approve 置 False 待落图（同上）
+    record.effects_applied = False
     db.add(AuditLog(
         user_id=operator, action="llm_decision_approve",
         resource=record.domain, resource_id=str(record.id),
@@ -389,29 +403,88 @@ async def _approve_skill_classify(db, record, reason: str, operator: str) -> dic
     return ok({"decision_id": str(record.id), "category": category, "skill": skill_name})
 
 
+async def _approve_skill_alias(db, record, reason: str, operator: str) -> dict:
+    """技能别名回写批准（方案①）：写 skill_aliases(approved) + 刷新动态别名缓存。
+
+    skill_normalize 记录且 structured_output.kind=="alias"（propose_skill_alias 产出）：
+    approve 即把该"别名→标准名"写进 skill_aliases（status=approved），供
+    normalize_skill 并查（词典→动态→白名单）。standard_name 必须命中
+    known_standard_names（propose 侧 gate 已保证；此处二次校验防脏数据）。
+    图边界：别名回写不改图谱拓扑（非图变异），故落 skill_aliases 足够。
+    """
+    from app.api.common import ok
+    from app.core.errors import ERR_CONFLICT, ERR_VALIDATION
+    from app.models.business import AuditLog, SkillAlias
+    from app.schemas.common import error
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
+
+    alias = str(record.entity_id or "").strip()
+    out = record.structured_output or {}
+    standard = str(out.get("target_standard") or "").strip()
+    confidence = out.get("confidence")
+    if not alias or not standard:
+        return error(ERR_VALIDATION, "别名回写审批非法（variant/target_standard 缺失）")
+    # gate 二次校验：standard 必须命中权威标准名（`known_standard_names()`）
+    from app.services.llm_decision.skill_normalize import known_standard_names
+
+    if standard not in known_standard_names():
+        return error(ERR_VALIDATION, f"标准名 {standard!r} 不在权威标准名集合（防虚构）")
+
+    # 幂等：unique(variant) —— 已存在该 variant（pending/approved）则跳过
+    existing = (await db.scalars(
+        select(SkillAlias).where(SkillAlias.variant == alias)
+    )).first()
+    if existing is not None:
+        return error(ERR_CONFLICT, f"别名 {alias!r} 已存在（proposal {existing.proposal_id}），不可重复批准")
+
+    db.add(SkillAlias(
+        variant=alias, standard_name=standard,
+        status="approved", proposal_id=str(record.id),
+        reviewed_by=operator, review_reason=reason, confidence=confidence,
+    ))
+    record.status = "approved"
+    record.reviewer = operator
+    record.review_reason = reason
+    record.effects_applied = True
+    db.add(AuditLog(
+        user_id=operator, action="llm_decision_approve",
+        resource=record.domain, resource_id=str(record.id),
+        detail={"kind": "alias", "variant": alias, "standard": standard, "reason": reason},
+    ))
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return error(ERR_CONFLICT, "该别名已批准（并发批准冲突）")
+    # 触发 normalize_skill 动态别名表刷新：API 进程即时生效；worker 进程由
+    # on_startup + 每轮 ETL 起点刷新兜底（跨进程按轮次生效——第六轮审查 P0-1，
+    # 原 reload_dynamic_aliases 在事件循环内 asyncio.run 必抛且被静默吞掉）
+    from app.services.extraction.dictionary import refresh_dynamic_aliases
+
+    await refresh_dynamic_aliases()
+    return ok({"decision_id": str(record.id), "variant": alias, "standard": standard})
+
+
 @router.post("/llm-decisions/{decision_id}/reject")
 async def reject_llm_decision(
     decision_id: str,
-    req: dict,
+    req: LLMDecisionReviewRequest,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
-) -> dict:
+):
     """驳回一条 proposal（仅 status 流转，效果为 0）。"""
-    import uuid as _uuid
-
-    from app.api.common import ok
+    from app.api.common import ok, resolve_operator
     from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
     from app.models.business import AuditLog
     from app.schemas.common import error
 
-    reason = (req.get("review_reason") or "").strip()
+    reason = req.review_reason.strip()
     if not reason:
         return error(ERR_VALIDATION, "审批必须填写 review_reason")
-    operator = current_user.get("sub") or current_user.get("user_id", "admin")
-    try:
-        _uuid.UUID(str(operator))
-    except (ValueError, AttributeError, TypeError):
-        return error(ERR_VALIDATION, f"操作者身份必须为 UUID（AuditLog.user_id 列约束），收到: {operator!r}")
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
 
     record = await _load_decision(db, decision_id)
     if record is None:

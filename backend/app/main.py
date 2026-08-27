@@ -3,6 +3,7 @@
 启动：uv run uvicorn app.main:app --reload --port 8000
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -64,6 +65,12 @@ async def lifespan(app: FastAPI):
             raise RuntimeError(
                 "生产环境禁止 CORS 通配 *，请显式配置 cors_origins 白名单"
             )
+    # 动态别名表启动加载（方案①，第六轮审查 P0-1）：approve 端点的即时刷新
+    # 只覆盖 API 进程内存；此处保证 API 重启后缓存非空（内部 fail-soft+warning）
+    from app.services.extraction.dictionary import refresh_dynamic_aliases
+
+    loaded_aliases = await refresh_dynamic_aliases()
+    logger.info("动态别名表启动加载完成：%d 条", loaded_aliases)
     await _prewarm_semantic()
     yield
     await _shutdown_resources()
@@ -113,13 +120,26 @@ async def _prewarm_semantic() -> None:
 
     try:
         await asyncio.to_thread(SkillEmbedder.get().preload)
-        # 预热岗位画像（08-15 修复：首次 compare 的 positions 加载 +
-        # 批量 encode 实测 16s——比模型加载更长，用户"比对详情白屏"主因）。
-        # P1 起走 Redis 版本化共享缓存：冷启动构建载荷并切指针，
-        # 其他进程/worker 直接读共享载荷，不再各自全量查图。
-        from app.services.matching.shared_cache import load_positions_shared
+        # 方案 A：岗位画像来自 jd_raw 单条 JD（非图谱聚合）。预热 JD 技能池化
+        # 向量（向量预筛召回用，首建含 SBERT warm 可达数十秒——免冷启动首个
+        # 匹配请求承担）。失败静默不阻断启动；匹配侧池化不可用降级命中粗选。
+        from app.services.matching.jd_vector_recall import load_pool_vectors_cached
+        from app.core.database import redis_client
+        from app.services.matching.jd_profiles import rows_to_profiles
+        from app.models.raw import JDRaw
+        from sqlalchemy import select
+        from app.core.database import async_session_factory
 
-        await load_positions_shared()
+        async with async_session_factory() as session:
+            rows = (await session.scalars(
+                select(JDRaw)
+                .where(JDRaw.snapshot["extraction"].astext.is_not(None))
+                .order_by(JDRaw.id)
+            )).all()
+        profiles, _ = rows_to_profiles(rows)
+        await load_pool_vectors_cached(
+            profiles, SkillEmbedder.get(), redis_client,
+        )
     except Exception:
         logger.warning(
             "语义模型预热失败,匹配已降级为纯规则模式(详见 SemanticUnavailableError)",
@@ -199,6 +219,29 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 @app.get("/health")
 async def health_check():
+    """健康检查：探 PostgreSQL 目录扫描路径（2026-08-27 事故教训）。
+
+    此前 /health 只返回常量 {"status":"healthy"}，不查数据库——PG 因
+    catalog 损坏死循环烧满 CPU 时容器仍显示 healthy，前端报"推荐失败"
+    才从 UI 发现问题。本探针执行触发排序/目录扫描路径的 SQL（正是本次
+    挂死类型：ORDER BY / information_schema），DB 异常即返回 503 让
+    docker healthcheck 判 unhealthy（start_period 后由 restart 策略拉起）。
+    探针自带 3s 超时：半死 DB 下探针自身也不悬挂。
+    """
+    from sqlalchemy import text
+
+    from app.core.database import async_session_factory
+
+    try:
+        async with asyncio.timeout(3):
+            async with async_session_factory() as session:
+                await session.execute(text("SELECT count(*) FROM information_schema.tables"))
+    except Exception as exc:
+        logger.warning("/health DB 探针失败: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content=_error_body(ERR_INTERNAL, "依赖服务异常"),
+        )
     return {"status": "healthy"}
 
 

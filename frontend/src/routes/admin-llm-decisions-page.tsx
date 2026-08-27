@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ClipboardCheck, EyeOff, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { SkillAliasesTable } from '@/components/admin/llm/skill-aliases-table'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PaginationBar } from '@/components/ui/pagination'
 import {
   Table,
@@ -128,6 +131,20 @@ export function AdminLlmDecisionsPage() {
     return it.status === 'proposal'
   }
 
+  /** skill_normalize 记录的建议目标（审批关键信息：变体要并到哪）。
+   *  kind=alias（别名回写）→ target_standard；归一图变异 → canonical_name/target_standard。 */
+  function suggestTarget(it: LlmDecisionItem): { target: string; isAlias: boolean } | null {
+    if (it.domain !== 'skill_normalize') return null
+    const out = (it.structured_output ?? {}) as Record<string, unknown>
+    const target = str(out['target_standard']) || str(out['canonical_name'])
+    if (!target) return null
+    return { target, isAlias: out['kind'] === 'alias' }
+  }
+
+  function str(v: unknown): string {
+    return typeof v === 'string' ? v : ''
+  }
+
   const [reviewing, setReviewing] = useState<{ id: string; entity: string; action: 'approve' | 'reject' } | null>(null)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -166,6 +183,12 @@ export function AdminLlmDecisionsPage() {
         description="六域 LLM 决策统一透明：JD 抽取 / 名称归一 / 分类 / 治理 / 技能关系 —— shadow·提案·自动生效·硬门拦截全部可追溯可回放"
       />
 
+      <Tabs defaultValue="decisions">
+        <TabsList className="mb-2">
+          <TabsTrigger value="decisions" className="text-xs">决策与验收</TabsTrigger>
+          <TabsTrigger value="aliases" className="text-xs">动态别名表</TabsTrigger>
+        </TabsList>
+        <TabsContent value="decisions" className="space-y-6">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {cards.map((c) => (
           <Card key={c.label}>
@@ -190,32 +213,38 @@ export function AdminLlmDecisionsPage() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
-            <select
-              aria-label="域过滤"
-              className="h-8 rounded-md border bg-background px-2 text-sm"
-              value={domain}
-              onChange={(e) => applyFilter({ domain: e.target.value })}
+            <Select
+              value={domain || 'all'}
+              onValueChange={(v) => applyFilter({ domain: v === 'all' ? '' : v })}
             >
-              <option value="">全部域</option>
-              {Object.entries(DOMAIN_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="状态过滤"
-              className="h-8 rounded-md border bg-background px-2 text-sm"
-              value={status}
-              onChange={(e) => applyFilter({ status: e.target.value })}
+              <SelectTrigger aria-label="域过滤" className="h-8 w-36 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部域</SelectItem>
+                {Object.entries(DOMAIN_LABELS).map(([k, v]) => (
+                  <SelectItem key={k} value={k}>
+                    {v}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={status || 'all'}
+              onValueChange={(v) => applyFilter({ status: v === 'all' ? '' : v })}
             >
-              <option value="">全部状态</option>
-              {['shadow', 'proposal', 'auto_applied', 'blocked', 'approved', 'rejected'].map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger aria-label="状态过滤" className="h-8 w-36 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部状态</SelectItem>
+                {['shadow', 'proposal', 'auto_applied', 'blocked', 'approved', 'rejected'].map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button variant="ghost" size="sm" onClick={() => setQ('')}>
               清除
             </Button>
@@ -255,9 +284,28 @@ export function AdminLlmDecisionsPage() {
                   filtered.map((it) => (
                     <TableRow key={it.id}>
                       <TableCell>{DOMAIN_LABELS[it.domain ?? ""] ?? it.domain ?? "-"}</TableCell>
-                      <TableCell className="max-w-[220px] truncate">
-                        {it.entity_type ? `${it.entity_type}:` : ''}
-                        {it.entity_id || '-'}
+                      <TableCell className="max-w-[260px]">
+                        <div className="flex flex-col">
+                          <span className="truncate">
+                            {it.entity_type ? `${it.entity_type}:` : ''}
+                            {it.entity_id || '-'}
+                          </span>
+                          {(() => {
+                            const sug = suggestTarget(it)
+                            if (!sug) return null
+                            return (
+                              <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+                                <span className="text-state-candidate">→</span>
+                                <span className="truncate">{sug.target}</span>
+                                {sug.isAlias && (
+                                  <Badge variant="outline" className="h-4 px-1 text-[9px] text-state-emerging">
+                                    别名
+                                  </Badge>
+                                )}
+                              </span>
+                            )
+                          })()}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={`text-[10px] ${STATUS_TONE[it.status ?? ''] ?? ''}`}>
@@ -350,6 +398,11 @@ export function AdminLlmDecisionsPage() {
           </Card>
         </div>
       )}
+        </TabsContent>
+        <TabsContent value="aliases" className="space-y-6">
+          <SkillAliasesTable />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

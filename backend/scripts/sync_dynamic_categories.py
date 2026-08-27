@@ -30,8 +30,9 @@ def apply_categories(
     neo4j_session,
     dry_run: bool = False,
 ) -> dict:
-    """逐条把 Skill.category 晋升为批准值（幂等 SET）；返回统计。"""
+    """逐条把 Skill.category 晋升为批准值（幂等 SET）；返回统计（含 merged_rows）。"""
     stats = {"merged": 0, "skipped_no_node": 0}
+    merged_rows: list[dict] = []
     for row in rows:
         skill_name = str(row.get("skill_name") or "").strip()
         category = str(row.get("category") or "").strip()
@@ -51,6 +52,8 @@ def apply_categories(
             logger.warning("[sync_categories] 技能节点缺失，跳过: %s", skill_name)
             continue
         stats["merged"] += 1
+        merged_rows.append({"id": row.get("id"), "proposal_id": row.get("proposal_id")})
+    stats["merged_rows"] = merged_rows
     return stats
 
 
@@ -64,9 +67,36 @@ async def _load_approved_rows() -> list[dict]:
     async with async_session_factory() as session:
         rows = (await session.scalars(select(SkillCategoryApproval))).all()
         return [
-            {"skill_name": r.skill_name, "category": r.category, "id": str(r.id)}
+            {"skill_name": r.skill_name, "category": r.category,
+             "id": str(r.id), "proposal_id": r.proposal_id}
             for r in rows
         ]
+
+
+async def _mark_applied(merged_rows: list[dict]) -> None:
+    """落图行置 applied_to_graph=True + 源决策 effects_applied=True（对账闭环，
+    与 sync_dynamic_relations 同款——第六轮审查：docstring 声称但从不读写）。"""
+    from sqlalchemy import update
+
+    from app.core.database import async_session_factory
+    from app.models.business import LLMDecisionRecord, SkillCategoryApproval
+
+    row_ids = [m["id"] for m in merged_rows if m.get("id")]
+    proposal_ids = [m["proposal_id"] for m in merged_rows if m.get("proposal_id")]
+    async with async_session_factory() as session:
+        if row_ids:
+            await session.execute(
+                update(SkillCategoryApproval)
+                .where(SkillCategoryApproval.id.in_(row_ids))
+                .values(applied_to_graph=True)
+            )
+        if proposal_ids:
+            await session.execute(
+                update(LLMDecisionRecord)
+                .where(LLMDecisionRecord.id.in_(proposal_ids))
+                .values(effects_applied=True)
+            )
+        await session.commit()
 
 
 def main() -> None:
@@ -79,6 +109,8 @@ def main() -> None:
     rows = asyncio.run(_load_approved_rows())
     with neo4j_driver.session() as session:
         stats = apply_categories(rows, session, dry_run=args.dry_run)
+    if not args.dry_run and stats.get("merged_rows"):
+        asyncio.run(_mark_applied(stats["merged_rows"]))
     logger.info(
         "技能分类落图%s: %s", "（dry-run）" if args.dry_run else "", stats,
     )

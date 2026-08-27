@@ -86,7 +86,7 @@ source = ["app"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
-fail_under = 60
+fail_under = 70  # 第六轮审查：实际 77.57%，60 已虚低
 
 [build-system]
 requires = ["hatchling"]

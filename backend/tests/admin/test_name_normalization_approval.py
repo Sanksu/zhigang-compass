@@ -5,6 +5,8 @@ asyncio.run 直调（注入 fake async session 与 current_user，项目纯函�
 """
 
 import asyncio
+
+from app.schemas.admin_requests import LLMDecisionReviewRequest
 from types import SimpleNamespace
 
 from app.api.v1.admin_routes import llm_decisions as mod
@@ -76,7 +78,7 @@ class _FakeSession:
 
 def _approve(session, reason="归并确认", operator=_OPERATOR):
     return asyncio.run(mod.approve_llm_decision(
-        session._record.id, {"review_reason": reason},
+        session._record.id, LLMDecisionReviewRequest(review_reason=reason),
         db=session, current_user={"sub": operator, "role": "admin"},
     ))
 
@@ -97,7 +99,8 @@ class TestSkillNormalizeApprove:
         assert _code(resp) == 0
         assert session.committed is True
         assert session._record.status == "approved"
-        assert session._record.effects_applied is True
+        # 图写由 sync_* 脚本执行——approve 置 False 待落图（#570 对账语义）
+        assert session._record.effects_applied is False
         kinds = {type(obj).__name__ for obj in session.added}
         assert {"NameNormalizationRequest", "AuditLog"} <= kinds
         req = [o for o in session.added if type(o).__name__ == "NameNormalizationRequest"][0]
@@ -165,9 +168,14 @@ class TestApproveCommonGuard:
         assert _code(resp) != 0
 
     def test_requires_reason(self):
-        session = _FakeSession(_skill_record())
-        resp = _approve(session, reason="")
-        assert _code(resp) != 0
+        """空 review_reason 由 Pydantic 强校验拦截（HTTP 侧 422/4000）。"""
+        import pytest
+        from pydantic import ValidationError
+
+        from app.schemas.admin_requests import LLMDecisionReviewRequest
+
+        with pytest.raises(ValidationError):
+            LLMDecisionReviewRequest(review_reason="")
 
     def test_invalid_operator_uuid_rejected(self):
         session = _FakeSession(_skill_record())
@@ -181,7 +189,7 @@ class TestRejectEndpoint:
         """reject 对名称归一同样只做状态流转（效果为 0）。"""
         session = _FakeSession(_skill_record())
         resp = asyncio.run(mod.reject_llm_decision(
-            session._record.id, {"review_reason": "关系不成立"},
+            session._record.id, LLMDecisionReviewRequest(review_reason="关系不成立"),
             db=session, current_user={"sub": _OPERATOR, "role": "admin"},
         ))
         assert _code(resp) == 0

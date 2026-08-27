@@ -6,6 +6,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { apiGet } from '@/lib/api'
 import { AdminLlmDecisionsPage } from './admin-llm-decisions-page'
 
@@ -44,7 +45,11 @@ function afterRender(decisions: unknown[], totals: Record<string, number>) {
     }
     return { items: decisions, total: decisions.length, limit: 20, offset: 0 }
   })
-  return render(<AdminLlmDecisionsPage />)
+  return render(
+    <MemoryRouter>
+      <AdminLlmDecisionsPage />
+    </MemoryRouter>,
+  )
 }
 
 afterEach(() => {
@@ -70,9 +75,41 @@ describe('AdminLlmDecisionsPage', () => {
 
   it('错误态提示', async () => {
     mockApiGet.mockRejectedValue(new Error('network'))
-    render(<AdminLlmDecisionsPage />)
+    render(
+      <MemoryRouter>
+        <AdminLlmDecisionsPage />
+      </MemoryRouter>,
+    )
     await waitFor(() =>
       expect(screen.getByText(/决策记录加载失败/)).toBeTruthy(),
     )
+  })
+})
+describe('AdminLlmDecisionsPage 建议目标展示（方案①）', () => {
+  it('skill_normalize 别名提案显示 → 目标与别名徽标', async () => {
+    afterRender(
+      [
+        makeDecision({
+          domain: 'skill_normalize',
+          entity_type: 'skill',
+          entity_id: '.NET Framework',
+          status: 'proposal',
+          structured_output: { action: 'merge', target_standard: '.NET', kind: 'alias', confidence: 0.95 },
+        }),
+      ],
+      { proposal: 1, auto_applied: 0, blocked: 0, shadow: 0, records: 1 },
+    )
+    await waitFor(() =>
+      expect(
+        screen.getAllByText((_, el) => el?.textContent?.includes('.NET Framework') ?? false).length,
+      ).toBeGreaterThan(0),
+    )
+    expect(screen.getAllByText('.NET').length).toBeGreaterThan(0)
+    expect(screen.getByText('别名')).toBeTruthy()
+  })
+
+  it('决策页提供动态别名表跳转入口', async () => {
+    afterRender([], { proposal: 0, auto_applied: 0, blocked: 0, shadow: 0, records: 0 })
+    await waitFor(() => expect(screen.getByText('动态别名表')).toBeTruthy())
   })
 })

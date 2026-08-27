@@ -108,6 +108,10 @@ class MatchResult(BaseModel):
     exp_score: float = Field(ge=0.0, le=1.0)
     matched_must: list[str] = Field(default_factory=list, description="已匹配的必备技能名")
     missing_must: list[str] = Field(default_factory=list, description="缺失的必备技能名")
+    matched_nice: list[str] = Field(
+        default_factory=list,
+        description="已匹配的加分技能名（JD 证据 hit_count 统一 must+nice 口径）",
+    )
     summary: str = Field(default="", description="匹配摘要，供前端展示")
     unqualified: bool = Field(
         default=False,

@@ -99,7 +99,7 @@ class TestUpdateLlmConfigRoute:
         db = _FakeDB()
         req = LlmConfigIn(providers=[_provider(api_key="****secret")])  # 掩码 → 保原值
 
-        resp = asyncio.run(update_llm_config(req, db=db, current_user={"sub": "admin-01"}))
+        resp = asyncio.run(update_llm_config(req, db=db, current_user={"sub": "0356249f-9b04-47a3-a307-af6e7883f084"}))
 
         assert resp.code == 0
         # 文件已写回且旧 key 保留
@@ -109,7 +109,7 @@ class TestUpdateLlmConfigRoute:
         assert len(db.added) == 1
         audit = db.added[0]
         assert audit.action == "admin.llm_config.update"
-        assert audit.user_id == "admin-01"
+        assert audit.user_id == "0356249f-9b04-47a3-a307-af6e7883f084"
         detail_str = str(audit.detail)
         assert "sk-old-secret" not in detail_str
         assert "****secret" not in detail_str
@@ -123,7 +123,7 @@ class TestUpdateLlmConfigRoute:
         db = _FakeDB()
         req = LlmConfigIn(providers=[_provider(api_key="sk-new-plain")])
 
-        resp = asyncio.run(update_llm_config(req, db=db, current_user={"sub": "admin-01"}))
+        resp = asyncio.run(update_llm_config(req, db=db, current_user={"sub": "0356249f-9b04-47a3-a307-af6e7883f084"}))
 
         assert resp.code == 0
         assert load_llm_config(path)["providers"][0]["api_key"] == "sk-new-plain"
@@ -136,7 +136,7 @@ class TestUpdateLlmConfigRoute:
         db = _FakeDB()
         req = LlmConfigIn(providers=[_provider(api_key="sk-new-plain")])
 
-        resp = asyncio.run(update_llm_config(req, db=db, current_user={"sub": "admin-01"}))
+        resp = asyncio.run(update_llm_config(req, db=db, current_user={"sub": "0356249f-9b04-47a3-a307-af6e7883f084"}))
 
         assert resp.data["providers"][0]["api_key"].endswith("lain")
         assert "*" in resp.data["providers"][0]["api_key"]
@@ -147,7 +147,7 @@ class TestUpdateLlmConfigRoute:
         extra = {"thinking": {"type": "disabled"}}
         req = LlmConfigIn(providers=[_provider(extra_body=extra)])
 
-        asyncio.run(update_llm_config(req, db=db, current_user={"sub": "admin"}))
+        asyncio.run(update_llm_config(req, db=db, current_user={"sub": "0356249f-9b04-47a3-a307-af6e7883f084"}))
 
         assert load_llm_config(path)["providers"][0]["extra_body"] == extra
 

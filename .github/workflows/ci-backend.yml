@@ -50,3 +50,32 @@ jobs:
       - name: Import smoke check
         # 验证核心模块可正常 import（捕获循环依赖、缺失依赖等）
         run: uv run python -c "from app.main import app; print('app import OK')"
+
+  # 契约同步校验（铁律一执行点，第六轮审查）：openapi.yaml 变更必须同步再生成
+  # 前端 api.d.ts——漂移即置红（前端由 ci-frontend tsc 兜底，本 job 显式门禁）
+  contract:
+    name: Contract sync (openapi → api.d.ts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install pnpm
+        run: corepack enable
+      - name: Install deps
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Regen types and verify zero drift
+        working-directory: frontend
+        run: |
+          pnpm gen:api
+          git diff --exit-code -- src/types/api.d.ts || {
+            echo '┌────────────────────────────────────────────────┐'
+            echo '│ 契约漂移：openapi.yaml 已变、api.d.ts 未同步  │'
+            echo '│ 请运行 pnpm gen:api 并随本 PR 一并提交        │'
+            echo '└────────────────────────────────────────────────┘'
+            exit 1
+          }

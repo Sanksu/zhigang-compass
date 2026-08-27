@@ -3,6 +3,7 @@ import {
   Network,
   FileText,
   TrendingUp,
+  Radar,
   User,
   Shield,
   Users,
@@ -11,9 +12,9 @@ import {
   GitFork,
   Cpu,
   Timer,
-  Gauge,
   Database,
   Workflow,
+  ListChecks,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/constants'
@@ -57,7 +58,12 @@ export const mainNav: NavItem[] = [
     label: '演化看板',
     to: '/evolution',
     icon: TrendingUp,
-    },
+  },
+  {
+    label: '新岗位发现',
+    to: '/discovery',
+    icon: Radar,
+  },
   {
     label: '个人中心',
     to: '/profile',
@@ -66,7 +72,7 @@ export const mainNav: NavItem[] = [
     },
 ]
 
-/** 管理后台分组（08-16 层级选择结构：管理 + 配置中心，配置项按页面拆分） */
+/** 管理后台分组（08-16 层级化：管理 + 配置中心两组，可折叠；08-26 加 LLM 驱动组） */
 export const adminNavGroups: AdminNavGroup[] = [
   {
     label: '管理',
@@ -79,12 +85,17 @@ export const adminNavGroups: AdminNavGroup[] = [
     ],
   },
   {
+    label: 'LLM 驱动',
+    items: [
+      { label: '决策与验收', to: '/admin/llm-decisions', icon: ListChecks, requireRole: ['admin'] },
+    ],
+  },
+  {
     label: '配置中心',
     items: [
       { label: 'LLM 配置', to: '/admin/llm', icon: Cpu, requireRole: ['admin'] },
       { label: '任务与告警', to: '/admin/settings/tasks', icon: Timer, requireRole: ['admin'] },
-      { label: '采集与限频', to: '/admin/settings/crawl', icon: Gauge, requireRole: ['admin'] },
-      { label: '演化与缓存', to: '/admin/settings/evolution', icon: Database, requireRole: ['admin'] },
+      { label: '系统节流', to: '/admin/settings/system', icon: Database, requireRole: ['admin'] },
       { label: 'ETL 队列', to: '/admin/settings/etl', icon: Workflow, requireRole: ['admin'] },
     ],
   },

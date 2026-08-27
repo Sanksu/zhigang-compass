@@ -216,7 +216,11 @@ async def update_llm_config(
     请求体经 LlmConfigIn 强校验（422/4000）；保存成功写审计日志，
     detail 只含非敏感快照，绝不记录 api_key。
     """
-    operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    from app.api.common import resolve_operator
+
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
     try:
         saved = save_llm_config(
             _LLM_CONFIG_PATH,
@@ -280,14 +284,35 @@ async def get_runtime_config():
 
 
 @router.put("/runtime-config")
-async def update_runtime_config(req: dict):
-    """校验并持久化运行时配置（runtime_settings.json，重启后生效）。"""
+async def update_runtime_config(
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """校验并持久化运行时配置（runtime_settings.json，重启后生效）。
+
+    载体保持 dict（开放键集，逐键校验在 runtime_config.save）；第六轮审查
+    P2 补齐：与 llm-config 同级敏感操作，补审计（可改限流/灰度开关）。
+    """
+    from app.api.common import resolve_operator
     from app.core import runtime_config
 
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
     try:
         data = runtime_config.save(req)
     except ValueError as e:
         return error(ERR_VALIDATION, str(e))
     except OSError:
         return error(ERR_INTERNAL, "配置保存失败，请检查目录权限")
+    # 审计留痕（ADMIN 类）：仅记录变更键名快照，不含值（可能含调度量级）
+    changed_keys = sorted(set(req.keys())) if isinstance(req, dict) else []
+    db.add(AuditLog(
+        user_id=operator,
+        action="admin.runtime_config.update",
+        resource="runtime_settings",
+        detail={"keys": changed_keys},
+    ))
+    await db.commit()
     return ok(data=data)

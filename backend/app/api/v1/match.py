@@ -1,13 +1,12 @@
 """匹配路由：自动推荐、人岗比对。
 
-数据链路：resume_cache（候选人画像）→ Neo4j 图谱聚合岗位画像 → RuleBasedMatcher。
+数据链路：resume_cache（候选人画像）→ jd_raw 单条 JD 画像 → 评分引擎。
 契约（设计 §2.4.4）标注 recommend 为 202 异步 + task_id，当前同步执行返回结果，
 M4（8/16）迁移；同步执行后结果持久化 Redis（TTL 24h）并返回 match_id，
 供 match/result|gap|path|feedback 查询。匹配结果/反馈另按 §11.4.1 落 PostgreSQL
 （match_results / match_feedback，Redis 为主存储，落库失败不阻断响应）。
 """
 
-import asyncio
 import json
 import logging
 import time
@@ -22,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.common import owns_resume, parse_uuid, serialize_task
 from app.api.deps import require_role
 from app.core.arq_client import enqueue
-from app.core.database import async_session_factory, get_db, neo4j_driver, redis_client
+from app.core.database import async_session_factory, get_db, redis_client
 from app.core.errors import ERR_FORBIDDEN, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import (
     DiagnosisReportRecord,
@@ -34,10 +33,11 @@ from app.models.business import (
 from app.schemas.common import error, ok
 from app.services.embeddings.vector_store import PgvectorUnavailableError, load_project_vectors
 from app.services.learning_path.generator import LearningPathGenerator
-from app.services.matching.engine import RuleBasedMatcher
+from app.services.matching.jd_match import (
+    load_jd_evidence_refs,
+    score_jd_compare,
+)
 from app.services.matching.loaders import build_candidate
-from app.services.matching.shared_cache import load_positions_shared
-from app.services.matching.schemas import MatchMode, MatchRequest
 from app.services.matching.semantic import SkillEmbedder
 
 router = APIRouter()
@@ -53,49 +53,6 @@ class RecommendRequest(BaseModel):
 class CompareRequest(BaseModel):
     resume_id: str
     position_id: str
-
-
-def _load_evidence_for_position(position_id: str) -> list[dict]:
-    """查询岗位技能链路的证据引用（Skill-EVIDENCED_BY->Evidence 原始 JD）。
-
-    图谱中每个技能关联若干原始 JD 证据（ev_xxxx），返回每条技能的
-    代表性证据（每技能至多 3 条，总上限 20），供前端"证据引用"展示。
-    置信度 = 该技能证据量 / 归一化基数（8 条证据视为满置信 1.0），
-    证据越多置信度越高（反映技能支持的跨源充分度）。
-    """
-    rows: list[dict] = []
-    with neo4j_driver.session() as session:
-        recs = session.run(
-            """
-            MATCH (p:Position {id: $pid})-[:REQUIRES]->(s:Skill)-[:EVIDENCED_BY]->(e:Evidence)
-            WITH s.name AS skill, collect(DISTINCT e) AS evs
-            RETURN skill, size(evs) AS evidence_count,
-                   [e IN evs | {source: e.source, source_url: e.source_url}] AS all_samples
-            ORDER BY skill
-            """,
-            pid=position_id,
-        )
-        for rec in recs:
-            if len(rows) >= 20:
-                break
-            count = rec["evidence_count"]
-            confidence = round(min(count / 8.0, 1.0), 2)
-            # 代表证据按源去重（每源至多 1 条），避免同源 JD 重复展示
-            seen_sources: set[str] = set()
-            for s in rec["all_samples"]:
-                src = s["source"] or ""
-                if src in seen_sources:
-                    continue
-                seen_sources.add(src)
-                rows.append({
-                    "skill": rec["skill"],
-                    "source": src,
-                    "url": s["source_url"],
-                    "confidence": confidence,
-                })
-                if len(seen_sources) >= 3:
-                    break
-    return rows
 
 
 # 匹配结果 Redis 持久化 TTL：24h（契约 M4 异步链路 result/gap/path/feedback 的存储底座）
@@ -289,30 +246,25 @@ async def compare(
         logger.warning("project_embeddings 查询失败，项目比对回退文本相似度")
         project_vectors = {}
 
-    # 岗位画像经 Redis 版本化共享缓存加载（跨进程单飞，避免 API/worker
-    # 每进程各自全量查图 + SBERT 预热；Redis 故障降级进程 TTL 加载）
-    positions = await load_positions_shared()
+    # 方案 A：compare 统一到 JD 级评分。岗位画像来自 jd_raw 单条 JD（非图谱聚合），
+    # 加载该岗位名下全部 JD 评分后取真正最高分一条（score_jd_compare）。推荐列表
+    # position_id=岗位名（normalized_position），调用方直接按岗位名加载。
+    position_name = req.position_id.strip()
 
-    def _compute():
-        # 图谱加载 + SBERT 语义 + 规则匹配为 CPU/IO 密集，
-        # 放线程池避免同步 Neo4j/SBERT 阻塞事件循环
+    async def _compute():
+        # 构建候选人 + JD 级匹配为 IO 密集（DB 查询）放事件循环；评分纯计算段
+        # score_jd_compare 内部已 to_thread，无需在此再包线程
         candidate = build_candidate(cache.parsed_data)
-        target = next((p for p in positions if p.position_id == req.position_id), None)
-        if target is None:
-            return None
         semantic = SkillEmbedder.get()
-        matcher = RuleBasedMatcher(positions, semantic=semantic)
-        result = matcher.match(
-            MatchRequest(
-                candidate=candidate,
-                mode=MatchMode.COMPARE,
-                target_position_id=req.position_id,
-                project_vectors=project_vectors,
-            )
-        )[0]
+        found = await score_jd_compare(
+            db, candidate, position_name, project_vectors, semantic=semantic,
+        )
+        if found is None:
+            return None
+        target, result = found
         return candidate, target, result, semantic
 
-    computed = await asyncio.to_thread(_compute)
+    computed = await _compute()
     if computed is None:
         return error(ERR_NOT_FOUND, "岗位不存在", http_status=404)
     candidate, target, result, semantic = computed
@@ -323,11 +275,15 @@ async def compare(
         "match_id": match_id,
         "user_id": user.get("sub", ""),
         **result.model_dump(),
+        # 对外 position_id / position_name 用岗位名（与推荐列表 JD 候选模式一致，
+        # 见 jd_aggregate position_id=岗位名），避免前端显示/比较不一致
+        "position_id": position_name,
         "gaps": [g.model_dump() for g in path.gaps],
         "learning_path": [item.model_dump() for item in path.items],
         "learning_path_blocked": path.blocked,
         "learning_path_block_reason": path.block_reason,
-        "evidence_refs": await asyncio.to_thread(_load_evidence_for_position, req.position_id),
+        # 证据引用（方案 A：岗位名下 jd_raw 技能 → 采集源，替代旧 Neo4j 图谱链路）
+        "evidence_refs": await load_jd_evidence_refs(db, position_name),
     }
     await _persist_match_result(match_id, data)
     # 匹配结果落库（§11.4.1 match_results）：失败仅记日志，Redis 为主存储

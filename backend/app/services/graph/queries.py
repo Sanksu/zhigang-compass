@@ -140,6 +140,18 @@ def query_position_skills_by_necessity(session, id: str) -> dict[str, dict]:
     return skills
 
 
+def find_position_id_by_name(session, name: str) -> str | None:
+    """按岗位名反查图谱岗位 id（Position.name 唯一约束，见 schema.cypher）。
+
+    供「新岗位发现」候选按 position_name 回查技能用。无匹配返回 None。
+    """
+    rec = session.run(
+        "MATCH (p:Position {name: $name}) RETURN p.id AS id LIMIT 1",
+        name=name,
+    ).single()
+    return rec["id"] if rec else None
+
+
 def query_prereq_chain(session, skill_name: str) -> list[str]:
     """图谱先修链（线程池执行，08-14 审查）。"""
     return graph_prerequisite_chain(session, skill_name)

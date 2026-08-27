@@ -783,7 +783,6 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 
   // themeVersion 不在函数体内出现但语义必要：主题切换时 isDark() 结果变化，
   // 基础色/透明度需随 memo 重算（否则离场复位会涂错主题的底色）
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const edgeBase = useMemo(() => {
     const nodeById = new Map(data.nodes.map((node) => [node.id, node]))
     const dark = isDark()
@@ -792,6 +791,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       ...edgeBaseStyle(edge, nodeById, colors, dark, !!filterMarks.dimEdgeFlags[i]),
       dimmed: !!filterMarks.dimEdgeFlags[i],
     }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- themeVersion 语义必要（isDark 非响应式读取）
   }, [data, filterMarks, themeVersion])
 
   const hoverNodeRef = useRef<string | null>(null)
@@ -935,7 +935,11 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   }, [selectedId, data.nodes])
 
   useEffect(() => {
-    if (focusRequest) focusNode(focusRequest.id)
+    // 延迟一拍触发镜头聚焦：focusNode → applyLodBand → setLodBand 属 effect 内
+    // 同步 setState 链（会触发级联重渲染 lint），宏任务化后语义不变（请求仍逐次生效）
+    if (!focusRequest) return
+    const t = window.setTimeout(() => focusNode(focusRequest.id), 0)
+    return () => window.clearTimeout(t)
   }, [focusRequest, focusNode])
 
   return (

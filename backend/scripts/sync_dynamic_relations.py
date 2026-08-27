@@ -60,11 +60,14 @@ def apply_relations(
     先修环判定：新增 (source→target)，若 target 可沿既有先修父集到达 source
     （或语义反转已在图中存在 target→source 时由调用方前置判定），则跳过。
     本处仅防「新增边 + 既有边」成环（复用 skill_relation.prerequisite_cycle_would_create
-    语义，但基于实时图形态）。
+    语义，但基于实时图形态）。**同批成环防护**（第六轮审查）：每条 PREREQUISITE
+    落图后同步更新父集 map——此前 map 不更新，同批互逆 PREREQUISITE_OF
+    （A→B、B→A）均通过守卫成环入图。
     """
     from app.services.llm_decision.skill_relation import prerequisite_cycle_would_create
 
     stats = {"merged": 0, "skipped_no_node": 0, "cycle_blocked": 0}
+    merged_ids: list[dict] = []
     for row in rows:
         source, target = str(row.get("source_skill") or ""), str(row.get("target_skill") or "")
         relation_type = str(row.get("relation_type") or "")
@@ -94,7 +97,12 @@ def apply_relations(
         _merge_relation(neo4j_session, source, target, relation_type)
         if relation_type == _REL_ALTERNATIVE:
             _merge_relation(neo4j_session, target, source, relation_type)
+        if relation_type == _REL_PREREQUISITE:
+            # 同批成环防护：落图即更新父集，后续条目基于含新边的形态判定
+            prerequisite_map.setdefault(target, set()).add(source)
         stats["merged"] += 1
+        merged_ids.append({"id": row.get("id"), "proposal_id": row.get("proposal_id")})
+    stats["merged_rows"] = merged_ids
     return stats
 
 
@@ -107,12 +115,42 @@ async def _load_approved_rows() -> list[dict]:
 
     async with async_session_factory() as session:
         rows = (await session.scalars(select(SkillDynamicRelation))).all()
-        return [
-            {"source_skill": r.source_skill, "target_skill": r.target_skill,
-             "relation_type": r.relation_type, "direction": r.direction,
-             "id": str(r.id)}
-            for r in rows
-        ]
+    return [
+        {"source_skill": r.source_skill, "target_skill": r.target_skill,
+         "relation_type": r.relation_type, "direction": r.direction,
+         "id": str(r.id), "proposal_id": r.proposal_id}
+        for r in rows
+    ]
+
+
+async def _mark_applied(merged_rows: list[dict]) -> None:
+    """落图行置 applied_to_graph=True + 源决策 effects_applied=True（对账闭环）。
+
+    第六轮审查：docstring 声称 applied_to_graph 标记同步进度但从不读写，
+    effects_applied 在 approve 即置 True 语义漂移——现 approve 置 False（待
+    落图），此处按 proposal_id 回写 True，恢复 #570 对账语义。
+    """
+    from sqlalchemy import update
+
+    from app.core.database import async_session_factory
+    from app.models.business import LLMDecisionRecord, SkillDynamicRelation
+
+    row_ids = [m["id"] for m in merged_rows if m.get("id")]
+    proposal_ids = [m["proposal_id"] for m in merged_rows if m.get("proposal_id")]
+    async with async_session_factory() as session:
+        if row_ids:
+            await session.execute(
+                update(SkillDynamicRelation)
+                .where(SkillDynamicRelation.id.in_(row_ids))
+                .values(applied_to_graph=True)
+            )
+        if proposal_ids:
+            await session.execute(
+                update(LLMDecisionRecord)
+                .where(LLMDecisionRecord.id.in_(proposal_ids))
+                .values(effects_applied=True)
+            )
+        await session.commit()
 
 
 def main() -> None:
@@ -129,6 +167,8 @@ def main() -> None:
     with neo4j_driver.session() as session:
         prerequisite_map = _prerequisite_map(session)
         stats = apply_relations(rows, session, prerequisite_map, dry_run=args.dry_run)
+    if not args.dry_run and stats.get("merged_rows"):
+        asyncio.run(_mark_applied(stats["merged_rows"]))
     print(f"{'dry-run ' if args.dry_run else ''}同步完成: {stats}")
 
 

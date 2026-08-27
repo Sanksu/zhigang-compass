@@ -9,6 +9,8 @@
 5. normalize_position_name — 岗位名归一化（合并同义重复岗位）
 """
 
+import asyncio
+import logging
 import re
 import unicodedata
 from pathlib import Path
@@ -1098,6 +1100,10 @@ def normalize_skill(raw: str) -> str:
     alias = SKILL_ALIAS.get(raw.lower())
     if alias is not None:
         return alias
+    # 动态别名并查（方案①：LLM 发现 + 人工审批回写，读序=词典→动态→白名单）
+    dyn = _DYNAMIC_ALIAS_LOWER.get(raw.lower())
+    if dyn:
+        return dyn
     canonical = _SKILL_WHITELIST_LOWER.get(raw.lower())
     if canonical is not None:
         return canonical
@@ -1199,6 +1205,68 @@ def is_noise_skill(name: str) -> bool:
 
 # 白名单词小写 → 标准写法映射（normalize_skill 用于大小写统一）
 _SKILL_WHITELIST_LOWER: dict[str, str] = {w.lower(): w for w in SKILL_WHITELIST}
+
+
+# ── 动态别名回写（方案①：LLM 发现 + 人工审批，normalize_skill 并查）──
+# dictionary.py 是抽取/归一热路径，不能 sync 查 DB。动态别名用模块级缓存
+# （小写 variant → standard_name），由 refresh_dynamic_aliases() 从 skill_aliases
+# 表的 approved 行加载。生效口径（第六轮审查 P0-1 修复）：
+# - API 进程：lifespan 启动加载 + approve 端点 await 即时刷新；
+# - worker 进程：on_startup 加载 + 每轮 ETL 起点刷新（跨进程按轮次生效）。
+# 读序：硬编码 SKILL_ALIAS → 动态别名表 → 白名单（决策项 D5：词典→动态→SBERT）。
+_DYNAMIC_ALIAS_LOWER: dict[str, str] = {}
+
+_alias_logger = logging.getLogger(__name__)
+
+
+async def refresh_dynamic_aliases() -> int:
+    """加载 skill_aliases 表 approved 行到进程缓存（async：运行中事件循环内安全）。
+
+    返回加载数；DB 不可用/迁移未跑时保持既有缓存并 warning（热路径不因 DB
+    抖动失败，但必须可见——第六轮审查 P0-1：此前静默吞错掩盖了全链路死路）。
+    """
+    global _DYNAMIC_ALIAS_LOWER
+    try:
+        from app.core.database import async_session_factory
+        from app.models.business import SkillAlias
+        from sqlalchemy import select
+
+        async with async_session_factory() as session:
+            rows = (await session.scalars(
+                select(SkillAlias).where(SkillAlias.status == "approved")
+            )).all()
+            _DYNAMIC_ALIAS_LOWER = {
+                r.variant.strip().lower(): r.standard_name.strip() for r in rows
+            }
+        return len(_DYNAMIC_ALIAS_LOWER)
+    except Exception as exc:
+        _alias_logger.warning(
+            "[dynamic_alias] 加载失败，保持既有缓存（%d 条）：%s",
+            len(_DYNAMIC_ALIAS_LOWER), str(exc)[:120],
+        )
+        return len(_DYNAMIC_ALIAS_LOWER)
+
+
+def reload_dynamic_aliases() -> int:
+    """同步包装（脚本/CLI 等无事件循环场景）。
+
+    事件循环内调用直接抛 RuntimeError 而非静默降级——历史版本此处
+    asyncio.run 抛错被吞、缓存恒空且无任何可见信号（第六轮审查 P0-1）。
+    运行中的 async 代码请 await refresh_dynamic_aliases()。
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(refresh_dynamic_aliases())
+    raise RuntimeError(
+        "reload_dynamic_aliases 不能在运行中的事件循环内调用"
+        "（asyncio.run 必抛 RuntimeError）——请 await refresh_dynamic_aliases()"
+    )
+
+
+def dynamic_alias_lower() -> dict[str, str]:
+    """动态别名表访问点（测试可 monkeypatch；热路径只读）。"""
+    return _DYNAMIC_ALIAS_LOWER
 
 
 # ── 灰名单验证区（技能生命周期，2026-08-21 新岗位发现优化 ②）──

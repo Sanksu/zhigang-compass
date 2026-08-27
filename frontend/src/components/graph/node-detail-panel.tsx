@@ -31,9 +31,11 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { components } from '@/types/api'
-import type { NodeDetail, PositionStatus } from './types'
+import type { NodeDetail } from './types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
 import { Badge } from '@/components/ui/badge'
+import { PositionStateBadge } from '@/components/shared/position-state-badge'
+import { SkillChip } from '@/components/shared/skill-chips'
 import { Button } from '@/components/ui/button'
 import { SkeletonList } from '@/components/ui/skeleton'
 import { apiGet } from '@/lib/api'
@@ -113,24 +115,6 @@ interface NodeDetailPanelProps {
   learnedSkills?: Set<string>
 }
 
-const STATUS_LABEL: Record<PositionStatus, string> = {
-  active: '活跃',
-  candidate: '候选',
-  emerging: '新兴',
-  stable: '稳定',
-  declining: '衰退',
-  archived: '归档',
-}
-
-const STATUS_CLASS: Record<PositionStatus, string> = {
-  active: 'bg-state-active/15 text-state-active border-state-active/30',
-  candidate: 'bg-state-candidate/15 text-state-candidate border-state-candidate/30',
-  emerging: 'bg-state-emerging/15 text-state-emerging border-state-emerging/30',
-  stable: 'bg-state-stable/15 text-state-stable border-state-stable/30',
-  declining: 'bg-state-declining/15 text-state-declining border-state-declining/30',
-  archived: 'bg-state-archived/15 text-state-archived border-state-archived/30',
-}
-
 const TYPE_LABEL: Record<NodeDetail['type'], string> = {
   position: '岗位',
   skill: '技能',
@@ -169,22 +153,34 @@ export function NodeDetailPanel({
 
   // 技能节点：拉取演化信号（模块级缓存）匹配 emerging/declining 徽标。
   // setState 全部在异步回调内（effect 体内同步 setState 触发
-  // react-hooks 级联渲染 lint 错误）；徽标仅技能节点渲染，非技能节点
-  // 无需显式清空（下次技能节点命中时会重算）。
-  const [skillTrend, setSkillTrend] = useState<SkillTrendBadge>(null)
+  // react-hooks 级联渲染 lint 错误）。徽标带 key 键控：渲染侧仅在 key 与
+  // 当前节点一致时采用——切换节点/加载失败不残留上一技能的徽标（第六轮
+  // 审查前端 P2：此前 !sets 早退不清，「衰退预警」错挂新节点）。
+  const [skillTrendEntry, setSkillTrendEntry] = useState<{
+    key: string
+    badge: SkillTrendBadge
+  } | null>(null)
+  const skillTrend: SkillTrendBadge =
+    node?.type === 'skill' &&
+    skillTrendEntry?.key === node.name.toLowerCase()
+      ? skillTrendEntry.badge
+      : null
   useEffect(() => {
     let cancelled = false
     if (!node || node.type !== 'skill') return
     const key = node.name.toLowerCase()
     loadTrendSets().then((sets) => {
-      if (cancelled || !sets) return
-      setSkillTrend(
-        sets.declining.has(key)
-          ? 'declining'
-          : sets.emerging.has(key)
-            ? 'emerging'
-            : null,
-      )
+      if (cancelled) return
+      setSkillTrendEntry({
+        key,
+        badge: sets
+          ? sets.declining.has(key)
+            ? 'declining'
+            : sets.emerging.has(key)
+              ? 'emerging'
+              : null
+          : null,
+      })
     })
     return () => {
       cancelled = true
@@ -214,9 +210,7 @@ export function NodeDetailPanel({
                     {TYPE_LABEL[node.type]}
                   </Badge>
                   {node.type === 'position' && node.status && !node.isDomain && (
-                    <Badge variant="outline" className={`px-1.5 py-0 text-[10px] ${STATUS_CLASS[node.status]}`}>
-                      {STATUS_LABEL[node.status]}
-                    </Badge>
+                    <PositionStateBadge state={node.status} className="px-1.5 py-0 text-[10px]" />
                   )}
                   {node.isDomain && (
                     <Badge variant="outline" className="px-1.5 py-0 text-[10px] bg-primary/10 text-primary border-primary/30">
@@ -406,13 +400,9 @@ export function NodeDetailPanel({
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
                       {positionDetail.nice_skills.map((s) => (
-                        <button
-                          key={s.skill_id}
-                          onClick={() => onSelectSkill?.(s.skill_id, s.skill_name)}
-                          className="rounded-full border border-border px-2.5 py-1 text-[10px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle/60"
-                        >
+                        <SkillChip key={s.skill_id} tone="nice" onClick={() => onSelectSkill?.(s.skill_id, s.skill_name)}>
                           {s.skill_name}
-                        </button>
+                        </SkillChip>
                       ))}
                     </div>
                   </section>
@@ -429,12 +419,9 @@ export function NodeDetailPanel({
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
                       {positionDetail.soft_skills?.map((name) => (
-                        <span
-                          key={name}
-                          className="rounded-full border border-[#ec4899]/40 bg-[#ec4899]/5 px-2.5 py-1 text-[10px] text-ink-secondary"
-                        >
+                        <SkillChip key={name} tone="soft">
                           {name}
-                        </span>
+                        </SkillChip>
                       ))}
                     </div>
                     <p className="text-[10px] text-ink-faint">责任心/沟通能力等软性要求，与技术栈技能区分统计</p>

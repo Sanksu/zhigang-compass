@@ -479,6 +479,9 @@ paths:
                   trace_id: { type: string }
         '404':
           description: 两技能间不存在 ≤6 跳可达路径
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/graph/view/{view_type}:
     get:
@@ -631,12 +634,21 @@ paths:
               schema:
                 type: string
                 format: binary
-        '400':
-          description: resume_id 格式非法
+        '422':
+          description: resume_id 格式非法（code 4000）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '403':
           description: 非本人无权下载
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '404':
           description: 简历文件不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/resume/{resume_id}:
     get:
@@ -835,10 +847,16 @@ paths:
                   data:
                     $ref: '#/components/schemas/DiagnosisTaskResponse'
                   trace_id: { type: string }
-        '400':
-          description: 该匹配结果无差距数据
+        '422':
+          description: 该匹配结果无差距数据（code 4000）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '404':
           description: 匹配结果不存在或无权访问
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
     get:
       tags: [match]
       summary: 获取人岗比对诊断报告（只读）
@@ -862,10 +880,16 @@ paths:
                   data:
                     $ref: '#/components/schemas/DiagnosisReport'
                   trace_id: { type: string }
-        '400':
-          description: 该匹配结果无差距数据（仅人岗比对可生成诊断报告）
+        '422':
+          description: 该匹配结果无差距数据（仅人岗比对可生成诊断报告，code 4000）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '404':
           description: 匹配结果不存在或已过期；或诊断报告尚未生成（需先 POST 创建生成任务）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/match/feedback:
     post:
@@ -1036,6 +1060,9 @@ paths:
                   trace_id: { type: string }
         '404':
           description: 无图谱版本数据
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
   /api/v1/evolution/position/{id}/evolution:
     get:
       tags: [evolution]
@@ -1112,6 +1139,75 @@ paths:
                   msg: { type: string }
                   data:
                     $ref: '#/components/schemas/SkillEvolutionListData'
+                  trace_id: { type: string }
+  /api/v1/discovery/recent:
+    get:
+      tags: [discovery]
+      summary: 近期发现的新岗位及其技能（登录可见）
+      description: 读 discovery_candidates（按 detected_at 降序近 N 天），回查图谱 Position→REQUIRES→Skill 取技能清单；candidate 态尚未聚合时 skills=null + skill_pending=true 标注待审核
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema: { type: integer, default: 30, minimum: 1, maximum: 365 }
+          description: 近 N 天候选窗口
+        - name: state
+          in: query
+          required: false
+          schema: { type: string }
+          description: 按状态过滤（candidate/emerging/stable/declining），缺省不过滤
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+          description: 返回条数上限
+      responses:
+        '200':
+          description: 近 N 天新岗位候选列表（data 含 candidates/total）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/DiscoveryRecentData'
+                  trace_id: { type: string }
+  /api/v1/discovery/position-skills-delta:
+    get:
+      tags: [discovery]
+      summary: 岗位技能增减（最近两个版本快照对比，登录可见）
+      description: 取最近两期 graph_versions 快照，按岗位 source 过滤 REQUIRES 边做集合差，返回新增/移除/未变技能
+      parameters:
+        - name: position
+          in: query
+          required: true
+          schema: { type: string }
+          description: 岗位 id（pos_xxx）或岗位名（与图谱 Position.name 对齐）
+      responses:
+        '200':
+          description: 该岗位最近两版技能增减（data 含 added/removed/unchanged + 版本信息）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/PositionSkillsDeltaData'
+                  trace_id: { type: string }
+        '404':
+          description: 无图谱版本数据（快照不足 2 期）或岗位不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data: { nullable: true }
                   trace_id: { type: string }
   /api/v1/evolution/state-machine:
     get:
@@ -1214,12 +1310,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [username, password, role]
-              properties:
-                username: { type: string }
-                password: { type: string, format: password }
-                role: { type: string, enum: [admin, user, guest] }
+              $ref: '#/components/schemas/CreateUserRequest'
       responses:
         '201':
           description: 创建成功
@@ -1239,10 +1330,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                role: { type: string, enum: [admin, user, guest] }
-                status: { type: string, enum: [active, disabled] }
+              $ref: '#/components/schemas/UpdateUserRequest'
       responses:
         '200':
           description: 更新成功
@@ -1268,12 +1356,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [platform]
-              properties:
-                platform: { type: string, description: "平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx" }
-                keyword: { type: string, description: "关键词（可选，留空则采集平台热度/最新内容，08-16 起爬虫不再内置默认关键词）" }
-                city: { type: string, description: "城市（可选，海外源默认英文城市）" }
+              $ref: '#/components/schemas/CrawlTriggerRequest'
       responses:
         '202':
           description: 任务已触发（data 含 task_id/status=pending）
@@ -1342,6 +1425,9 @@ paths:
                   trace_id: { type: string }
         '404':
           description: 任务不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/admin/crawl/status:
     get:
@@ -1522,19 +1608,25 @@ paths:
           schema: { type: integer, minimum: 0, default: 0 }
       responses:
         '200':
-          description: 决策记录列表（created_at 倒序）
+          description: 决策记录列表（created_at 倒序，ApiResponse 包装）
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/LlmDecisionItem'
-                  total: { type: integer, description: 过滤后总数（分页条） }
-                  limit: { type: integer }
-                  offset: { type: integer }
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/LlmDecisionItem'
+                      total: { type: integer, description: 过滤后总数（分页条） }
+                      limit: { type: integer }
+                      offset: { type: integer }
+                  trace_id: { type: string }
 
   /api/v1/admin/llm-decisions/summary:
     get:
@@ -1542,21 +1634,27 @@ paths:
       summary: LLM 决策汇总（domain×status，验收卡片数据源，只读）
       responses:
         '200':
-          description: 按域的状态计数与总额
+          description: 按域的状态计数与总额（ApiResponse 包装）
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  by_domain:
-                    type: array
-                    description: 按域倒序（total 降序）
-                    items:
-                      $ref: '#/components/schemas/LlmDecisionDomainSummary'
-                  totals:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
                     type: object
-                    description: 全量状态计数（shadow/proposal/auto_applied/blocked/other/records）
-                    additionalProperties: { type: integer }
+                    properties:
+                      by_domain:
+                        type: array
+                        description: 按域倒序（total 降序）
+                        items:
+                          $ref: '#/components/schemas/LlmDecisionDomainSummary'
+                      totals:
+                        type: object
+                        description: 全量状态计数（shadow/proposal/auto_applied/blocked/other/records）
+                        additionalProperties: { type: integer }
+                  trace_id: { type: string }
 
   /api/v1/admin/llm-decisions/{decision_id}/approve:
     post:
@@ -1572,10 +1670,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [review_reason]
-              properties:
-                review_reason: { type: string, description: 审批理由（必填） }
+              $ref: '#/components/schemas/LLMDecisionReviewRequest'
       responses:
         '200':
           description: 批准成功（域名；skill_relation 返回 relation 形如 源->目标->类型，名称归一返回 normalization 形如 action:源->目标；skill_classify 接受 shadow 记录并返回 category/skill）
@@ -1596,6 +1691,8 @@ paths:
                       target: { type: string, description: 名称归一专用：目标名 }
                       category: { type: string, description: skill_classify 专用：批准后的权威分类 }
                       skill: { type: string, description: skill_classify 专用：技能名 }
+                      variant: { type: string, description: 技能别名回写专用（kind=alias）：别名变体 }
+                      standard: { type: string, description: 技能别名回写专用（kind=alias）：归并目标标准名 }
                   trace_id: { type: string }
 
   /api/v1/admin/llm-decisions/{decision_id}/reject:
@@ -1612,10 +1709,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [review_reason]
-              properties:
-                review_reason: { type: string }
+              $ref: '#/components/schemas/LLMDecisionReviewRequest'
       responses:
         '200':
           description: 驳回成功
@@ -1630,6 +1724,44 @@ paths:
                     type: object
                     properties:
                       decision_id: { type: string }
+                  trace_id: { type: string }
+
+  /api/v1/admin/skill-aliases:
+    get:
+      tags: [admin]
+      summary: 动态别名表列表（技能别名回写产物，normalize_skill 并查源）
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [pending, approved, rejected], description: 状态过滤（空=全部） }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        '200':
+          description: 别名表分页列表（variant→standard，approved 行为 normalize_skill 生效源）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/SkillAliasItem' }
+                      total: { type: integer }
+                      limit: { type: integer }
+                      offset: { type: integer }
                   trace_id: { type: string }
 
   /api/v1/admin/positions/{position_name}:
@@ -1656,6 +1788,9 @@ paths:
                   trace_id: { type: string }
         '404':
           description: 岗位不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
     put:
       tags: [admin]
       summary: 人工编辑岗位定义（技能增删/necessity 切换/weight 调整/文本修改），变更写入 PositionEditLog 节点
@@ -1669,26 +1804,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                skills:
-                  type: array
-                  description: 技能全量替换（缺省不变更），每项含 name/necessity/weight
-                  items:
-                    type: object
-                    required: [name, necessity, weight]
-                    properties:
-                      name: { type: string, description: 技能名 }
-                      necessity: { type: string, enum: [must, nice] }
-                      weight: { type: number, minimum: 0.0, maximum: 1.0 }
-                core_duties:
-                  type: array
-                  description: 核心职责（字符串数组，全量替换）
-                  items: { type: string }
-                scenarios:
-                  type: array
-                  description: 典型场景（字符串数组，全量替换）
-                  items: { type: string }
+              $ref: '#/components/schemas/AdminPositionEditRequest'
       responses:
         '200':
           description: 保存结果（updated/diff_summary）
@@ -1702,10 +1818,16 @@ paths:
                   data:
                     $ref: '#/components/schemas/PositionEditResult'
                   trace_id: { type: string }
-        '400':
-          description: 参数不合法（weight 越界 / necessity 非法等）
+        '422':
+          description: 参数不合法（weight 越界 / necessity 非法等，Pydantic 强校验 code 4000）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '404':
           description: 岗位不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/admin/positions/pending:
     get:
@@ -1746,11 +1868,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [action, reason]
-              properties:
-                action: { type: string, enum: [approve, reject] }
-                reason: { type: string, description: "审核理由（必填）" }
+              $ref: '#/components/schemas/AdminReviewActionRequest'
       responses:
         '200':
           description: 审核完成
@@ -1758,12 +1876,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
-        '400':
-          description: 参数不合法 / 不满足晋升条件
+        '422':
+          description: 参数不合法 / 不满足晋升条件（code 4000）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '404':
           description: 候选岗位不存在
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
         '409':
           description: 候选岗位当前状态不可审核
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/admin/positions/declining:
     get:
@@ -1794,10 +1921,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [reason]
-              properties:
-                reason: { type: string, description: "归档原因（必填，写入审计日志）" }
+              $ref: '#/components/schemas/AdminReasonRequest'
       responses:
         '200':
           description: 归档完成
@@ -1868,11 +1992,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [action]
-              properties:
-                action: { type: string, enum: [approve, reject] }
-                modified: { type: object }
+              $ref: '#/components/schemas/AdminEvolutionReviewRequest'
       responses:
         '200':
           description: 审核完成
@@ -2038,20 +2158,28 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [action, reason]
-              properties:
-                action: { type: string, enum: [approve, reject] }
-                reason: { type: string, description: 审核理由（必填） }
+              $ref: '#/components/schemas/AdminReviewActionRequest'
       responses:
         '200':
           description: 审核完成
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiResponse' }
-        '400': { description: 参数不合法 }
-        '404': { description: 提案不存在 }
-        '409': { description: 状态不可审核 / 静态停用词移除缺少受影响技能 }
+        '422':
+          description: 参数不合法（code 4000）
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
+        '404':
+          description: 提案不存在
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
+        '409':
+          description: 状态不可审核 / 静态停用词移除缺少受影响技能
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/admin/dict-guard/changes:
     get:
@@ -2096,8 +2224,16 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiResponse' }
-        '404': { description: 变更记录不存在 }
-        '409': { description: 已是回滚记录或已回滚过 }
+        '404':
+          description: 变更记录不存在
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
+        '409':
+          description: 已是回滚记录或已回滚过
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/admin/dict-guard/report/latest:
     get:
@@ -2109,7 +2245,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiResponse' }
-        '404': { description: 暂无巡检报告 }
+        '404':
+          description: 暂无巡检报告
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
 
   /api/v1/admin/dict-guard/trigger:
     post:
@@ -2122,7 +2262,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiResponse' }
-        '500': { description: 任务入队失败 }
+        '500':
+          description: 任务入队失败
+          content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApiResponse' }
 
 components:
   securitySchemes:
@@ -2216,6 +2360,71 @@ components:
         impact_stats: { type: object }
         applied_by: { type: string }
         created_at: { type: string }
+    AdminReviewActionRequest:
+      type: object
+      required: [action, reason]
+      properties:
+        action: { type: string, enum: [approve, reject], description: 审核动作 }
+        reason: { type: string, minLength: 1, maxLength: 500, description: 审核理由（必填，不能为纯空白） }
+    AdminReasonRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 500, description: 归档理由（必填，不能为纯空白） }
+    AdminEvolutionReviewRequest:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string, enum: [approve, reject] }
+        reason: { type: string, maxLength: 500, description: 审核理由（可选，缺省 admin evolution review） }
+        modified: { type: object, description: approve 时合并进候选池 features 的属性修订 }
+    LLMDecisionReviewRequest:
+      type: object
+      required: [review_reason]
+      properties:
+        review_reason: { type: string, minLength: 1, maxLength: 500, description: 审批理由（必填，不能为纯空白） }
+    CreateUserRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 100 }
+        password: { type: string, minLength: 6, maxLength: 256, format: password }
+        role: { type: string, enum: [admin, user, guest], default: user }
+    UpdateUserRequest:
+      type: object
+      description: 部分更新（未传字段不动）
+      properties:
+        role: { type: string, enum: [admin, user, guest] }
+        status: { type: string, enum: [active, disabled] }
+    AdminPositionEditRequest:
+      type: object
+      description: 岗位定义人工编辑（均可选，全空为无变更空操作）
+      properties:
+        skills:
+          type: array
+          description: 技能全量替换（缺省不变更），每项含 name/necessity/weight
+          items:
+            type: object
+            required: [name, necessity]
+            properties:
+              name: { type: string, minLength: 1, maxLength: 100, description: 技能名 }
+              necessity: { type: string, enum: [must, nice] }
+              weight: { type: number, minimum: 0.0, maximum: 1.0 }
+        core_duties:
+          type: array
+          description: 核心职责（字符串数组，全量替换）
+          items: { type: string }
+        scenarios:
+          type: array
+          description: 典型场景（字符串数组，全量替换）
+          items: { type: string }
+    CrawlTriggerRequest:
+      type: object
+      required: [platform]
+      properties:
+        platform: { type: string, minLength: 1, maxLength: 50, description: "平台 ID：boss/zhilian/monster/indeed/glassdoor/linkedin/maimai/github/stackoverflow/arxiv/icourse163/coursera/edx" }
+        keyword: { type: string, maxLength: 200, description: "关键词（可选，留空则采集平台热度/最新内容，08-16 起爬虫不再内置默认关键词）" }
+        city: { type: string, maxLength: 50, description: "城市（可选，海外源默认英文城市）" }
     ApiResponse:
       type: object
       required: [code, msg, trace_id]
@@ -3108,6 +3317,23 @@ components:
           additionalProperties: { type: integer }
         total: { type: integer }
 
+    SkillAliasItem:
+      type: object
+      description: 技能别名回写记录（skill_aliases 行，方案① #559/#561）
+      required: [id, variant, standard_name, status, created_at]
+      properties:
+        id: { type: string, description: UUID }
+        variant: { type: string, description: 别名变体（如 .NET Framework / 3D Modeling） }
+        standard_name: { type: string, description: 归并目标标准名（known_standard_names 内） }
+        status: { type: string, description: pending → approved（normalize_skill 生效）/ rejected }
+        proposal_id: { type: string, description: 来源决策记录 id（llm_decision_records） }
+        source: { type: string, description: 来源（llm_review） }
+        reviewed_by: { type: string, description: 审批人（UUID） }
+        review_reason: { type: string, description: 审批理由 }
+        confidence: { type: number, nullable: true, description: LLM merge 置信度 }
+        applied_to_graph: { type: boolean, description: 图同步进度标记（别名 approve 即生效，此字段预留） }
+        created_at: { type: string, description: ISO8601 }
+
     # ============================================================
     # 演化模块端点 data（08-14 契约补全：versions/diff/trends/signals/state-machine/watch）
     # ============================================================
@@ -3561,6 +3787,10 @@ components:
           type: array
           items: { type: string }
           description: 已匹配的必备技能名
+        matched_nice:
+          type: array
+          items: { type: string }
+          description: 已匹配的加分技能名（JD 证据 hit_count 统一 must+nice 口径）
         missing_must:
           type: array
           items: { type: string }
@@ -3819,3 +4049,91 @@ components:
           items: { $ref: '#/components/schemas/ShortestPathNode' }
           description: 节点序列（≤6 跳，可能经过 Position）
 
+
+    # ============================================================
+    # 新岗位发现端点 data（08-27：/discovery/recent + /discovery/position-skills-delta）
+    # ============================================================
+
+    DiscoverySkill:
+      type: object
+      description: 岗位技能项（图谱 Position→REQUIRES→Skill）
+      required: [skill_id, skill_name, necessity]
+      properties:
+        skill_id: { type: string }
+        skill_name: { type: string }
+        necessity: { type: string, description: must/nice/soft }
+        weight: { type: number, nullable: true }
+        level: { type: string, nullable: true }
+        source_count: { type: integer, nullable: true }
+
+    RecentDiscoveryCandidate:
+      type: object
+      description: 近期发现的新岗位候选（含技能；/discovery/recent）
+      required: [position_name, state, detected_at]
+      properties:
+        position_id: { type: string, nullable: true, description: 图谱岗位 id；未落图时为 null }
+        position_name: { type: string }
+        state: { type: string, description: candidate/emerging/stable/declining }
+        detected_at: { type: string, description: 发现时间（进入候选池） }
+        definition_draft: { type: string }
+        confidence:
+          type: object
+          additionalProperties: { type: number }
+          nullable: true
+        skills:
+          type: object
+          description: 图谱技能（must/nice/soft 分组）；candidate 未聚合时为 null
+          nullable: true
+          properties:
+            must:
+              type: array
+              items: { $ref: '#/components/schemas/DiscoverySkill' }
+            nice:
+              type: array
+              items: { $ref: '#/components/schemas/DiscoverySkill' }
+            soft:
+              type: array
+              items: { $ref: '#/components/schemas/DiscoverySkill' }
+        skill_pending: { type: boolean, description: 图内无该岗位技能（candidate 未聚合）时为 true 标注待审核 }
+
+    DiscoveryRecentData:
+      type: object
+      description: GET /discovery/recent 响应 data
+      required: [candidates, total]
+      properties:
+        candidates:
+          type: array
+          items: { $ref: '#/components/schemas/RecentDiscoveryCandidate' }
+        total: { type: integer }
+
+    PositionSkillsDelta:
+      type: object
+      description: 岗位技能增减项
+      required: [skill_id, skill_name]
+      properties:
+        skill_id: { type: string }
+        skill_name: { type: string }
+
+    PositionSkillsDeltaData:
+      type: object
+      description: GET /discovery/position-skills-delta 响应 data
+      required: [position_id, position_name, added, removed, unchanged]
+      properties:
+        position_id: { type: string }
+        position_name: { type: string }
+        from_version: { type: string, nullable: true, description: 对比基准版 id（较旧） }
+        from_created_at: { type: string, nullable: true }
+        to_version: { type: string, nullable: true, description: 目标版 id（较新） }
+        to_created_at: { type: string, nullable: true }
+        added:
+          type: array
+          items: { $ref: '#/components/schemas/PositionSkillsDelta' }
+          description: 最近两版新增技能
+        removed:
+          type: array
+          items: { $ref: '#/components/schemas/PositionSkillsDelta' }
+          description: 最近两版移除技能
+        unchanged:
+          type: array
+          items: { $ref: '#/components/schemas/PositionSkillsDelta' }
+          description: 未变技能
