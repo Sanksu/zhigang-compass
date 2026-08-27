@@ -49,6 +49,22 @@ from app.services.matching.semantic import SkillEmbedder
 
 logger = logging.getLogger(__name__)
 
+# 08-27：窄 JD 防虚高（对齐口径配套）——JD 须至少 must+nice ≥ 该数才参与匹配/评分。
+# 单技能窄 JD（如"只需 Apache Kafka"）命中即满分会系统性抬高 Top-N/详情分数并抹平
+# 岗位区分度（实测单技能 JD 使大量岗位冲到 1.0）。算法口径，默认 2，可经
+# runtime_config `match_jd_min_skills` 覆盖，需算法岗确认。
+_DEFAULT_MIN_JD_SKILLS = 2
+
+
+def _read_min_jd_skills() -> int:
+    """读取窄 JD 过滤阈值（runtime_config 可调，≥1）。"""
+    return max(1, int(runtime_config.get("match_jd_min_skills", _DEFAULT_MIN_JD_SKILLS)))
+
+
+def _jd_width(profile: PositionProfile) -> int:
+    """JD 技术技能宽度 = must + nice 技能数（软技能独立通道不计）。"""
+    return len(profile.must_skills) + len(profile.nice_skills)
+
 
 def _run_in_thread(fn):
     """CPU 密集段（SBERT/评分）放线程池，避免阻塞事件循环。"""
@@ -93,6 +109,12 @@ async def score_jd_auto(
     embedder = semantic or SkillEmbedder.get()
 
     jd_profiles, jd_position = await load_all_jd_profiles(session)
+    if not jd_profiles:
+        return []
+    # 08-27 窄 JD 防虚高：单技能窄 JD 命中即满分会系统性抬高分数、抹平岗位区分度
+    # ——recommend 与 compare 同口径先按最小技能宽度过滤（阈值 runtime_config 可调）
+    min_skills = _read_min_jd_skills()
+    jd_profiles = [p for p in jd_profiles if _jd_width(p) >= min_skills]
     if not jd_profiles:
         return []
 
@@ -219,6 +241,7 @@ async def score_jd_compare(
         .order_by(JDRaw.id)
     )).all()
 
+    min_skills = _read_min_jd_skills()
     profiles: list[PositionProfile] = []
     for row in rows:
         if (row.snapshot or {}).get("extraction") is None:
@@ -227,7 +250,8 @@ async def score_jd_compare(
             row.snapshot or {}, str(row.id),
             source=row.source or "", source_url=row.source_url or "",
         )
-        if prof is not None:
+        # 08-27 窄 JD 防虚高：与 recommend 同口径过滤单技能窄 JD（避免命中即满分）
+        if prof is not None and _jd_width(prof) >= min_skills:
             profiles.append(prof)
     if not profiles:
         return None
