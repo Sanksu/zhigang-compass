@@ -6,11 +6,13 @@
  * - GET /api/v1/discovery/position-skills-delta?position=... → 岗位技能增减（最近两版）
  */
 import { useEffect, useMemo, useState } from 'react'
-import { Sparkles, Radar, ArrowUpRight, ArrowDownRight, Minus, AlertCircle, RotateCcw } from 'lucide-react'
+import { Sparkles, Radar, ArrowUpRight, ArrowDownRight, Minus, AlertCircle } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { PositionStateBadge } from '@/components/shared/position-state-badge'
+import { SkillChip, type SkillChipTone } from '@/components/shared/skill-chips'
+import { RefreshButton } from '@/components/shared/refresh-button'
 import { cn } from '@/lib/utils'
 import { apiGet } from '@/lib/api'
 import {
@@ -26,20 +28,14 @@ function stateBadge(state: string) {
   return <PositionStateBadge state={state} className="text-[10px]" />
 }
 
-function SkillChips({ skill, tone }: { skill: { skill_name: string }[]; tone: 'must' | 'nice' | 'soft' }) {
+function SkillChips({ skill, tone }: { skill: { skill_name: string }[]; tone: SkillChipTone }) {
   if (!skill?.length) return null
-  const cls =
-    tone === 'must'
-      ? 'bg-ink text-canvas'
-      : tone === 'nice'
-        ? 'bg-subtle text-ink-secondary'
-        : 'bg-[#ec4899]/10 text-[#ec4899]'
   return (
     <div className="flex flex-wrap gap-1 mt-1">
-      {skill.map((s, i) => (
-        <span key={`${tone}-${s.skill_name}-${i}`} className={cn('rounded px-1.5 py-0.5 text-[10px]', cls)}>
+      {skill.map((s) => (
+        <SkillChip key={`${tone}-${s.skill_name}`} tone={tone}>
           {s.skill_name}
-        </span>
+        </SkillChip>
       ))}
     </div>
   )
@@ -303,10 +299,9 @@ export function DiscoveryPage() {
         title="新岗位发现"
         description="近期发现的新岗位及其技能 · 旧岗位技能增减变化"
         actions={
-          <Button variant="outline" size="sm" onClick={() => { setLoading(true); setReloadKey((k) => k + 1) }} disabled={loading}>
-            <RotateCcw className="size-3.5" />
+          <RefreshButton loading={loading} onClick={() => { setLoading(true); setReloadKey((k) => k + 1) }}>
             刷新
-          </Button>
+          </RefreshButton>
         }
       />
 
