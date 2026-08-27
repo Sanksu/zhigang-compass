@@ -81,7 +81,8 @@ class TestApproveEndpoint:
         assert _code(resp) == 0
         assert session.committed is True
         assert session._record.status == "approved"
-        assert session._record.effects_applied is True
+        # 图写由 sync_* 脚本执行——approve 置 False 待落图（#570 对账语义）
+        assert session._record.effects_applied is False
         kinds = {type(obj).__name__ for obj in session.added}
         assert {"SkillDynamicRelation", "AuditLog"} <= kinds
         dyn = [o for o in session.added if type(o).__name__ == "SkillDynamicRelation"][0]

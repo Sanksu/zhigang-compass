@@ -158,18 +158,19 @@ def apply_normalizations(rows: list[dict], neo4j_session, dry_run: bool = False)
     return stats
 
 
-async def _mark_applied(ids: list[str]) -> None:
-    """把已落图行置 applied_to_graph=True（进度标记，幂等不依赖）。
+async def _mark_applied(ids: list[str], proposal_ids: list[str] | None = None) -> None:
+    """把已落图行置 applied_to_graph=True + 源决策 effects_applied=True。
 
     仅标记「有变更意图且已成功（或幂等跳过）」的行；source 节点缺失视为已
-    完成（改名/删除后重跑），故一并标记，失败可重跑。
+    完成（改名/删除后重跑），故一并标记，失败可重跑。effects_applied 回写
+    恢复 #570 对账语义（第六轮审查：approve 改置 False 待落图）。
     """
     if not ids:
         return
     from sqlalchemy import update
 
     from app.core.database import async_session_factory
-    from app.models.business import NameNormalizationRequest
+    from app.models.business import LLMDecisionRecord, NameNormalizationRequest
 
     async with async_session_factory() as session:
         await session.execute(
@@ -177,6 +178,12 @@ async def _mark_applied(ids: list[str]) -> None:
             .where(NameNormalizationRequest.id.in_(ids))
             .values(applied_to_graph=True)
         )
+        if proposal_ids:
+            await session.execute(
+                update(LLMDecisionRecord)
+                .where(LLMDecisionRecord.id.in_(proposal_ids))
+                .values(effects_applied=True)
+            )
         await session.commit()
 
 
@@ -194,20 +201,22 @@ async def _load_rows() -> tuple[list[dict], list[str]]:
         payload = [
             {"entity_type": r.entity_type, "action": r.action,
              "source_name": r.source_name, "target_name": r.target_name,
-             "id": str(r.id)}
+             "id": str(r.id), "proposal_id": r.proposal_id}
             for r in rows
         ]
         # 有变更意图（源/目标非空且不同）且已被 sync 处理的行 id，供 applied 标记
-        applied_ids = [p["id"] for p in payload
-                       if (p["source_name"] or "") and (p["target_name"] or "")
-                       and p["source_name"] != p["target_name"]]
-        return payload, applied_ids
+        changed = [p for p in payload
+                   if (p["source_name"] or "") and (p["target_name"] or "")
+                   and p["source_name"] != p["target_name"]]
+        applied_ids = [p["id"] for p in changed]
+        proposal_ids = [p["proposal_id"] for p in changed if p.get("proposal_id")]
+        return payload, applied_ids, proposal_ids
 
 
 async def _run_sync(dry_run: bool) -> dict:
     """单事件循环同步：_load_rows + apply + _mark_applied（修复 08-26 发现的三处
     重复 asyncio.run windows asyncpg 跨 loop bug——applied_to_graph 标记失效）。"""
-    payload, applied_ids = await _load_rows()
+    payload, applied_ids, proposal_ids = await _load_rows()
     if not payload:
         return {"payload": 0}
     from app.core.database import neo4j_driver
@@ -215,7 +224,7 @@ async def _run_sync(dry_run: bool) -> dict:
     with neo4j_driver.session() as session:
         stats = apply_normalizations(payload, session, dry_run=dry_run)
     if not dry_run and applied_ids:
-        await _mark_applied(applied_ids)
+        await _mark_applied(applied_ids, proposal_ids)
     return {"payload": len(payload), **stats}
 
 
