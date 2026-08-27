@@ -169,22 +169,34 @@ export function NodeDetailPanel({
 
   // 技能节点：拉取演化信号（模块级缓存）匹配 emerging/declining 徽标。
   // setState 全部在异步回调内（effect 体内同步 setState 触发
-  // react-hooks 级联渲染 lint 错误）；徽标仅技能节点渲染，非技能节点
-  // 无需显式清空（下次技能节点命中时会重算）。
-  const [skillTrend, setSkillTrend] = useState<SkillTrendBadge>(null)
+  // react-hooks 级联渲染 lint 错误）。徽标带 key 键控：渲染侧仅在 key 与
+  // 当前节点一致时采用——切换节点/加载失败不残留上一技能的徽标（第六轮
+  // 审查前端 P2：此前 !sets 早退不清，「衰退预警」错挂新节点）。
+  const [skillTrendEntry, setSkillTrendEntry] = useState<{
+    key: string
+    badge: SkillTrendBadge
+  } | null>(null)
+  const skillTrend: SkillTrendBadge =
+    node?.type === 'skill' &&
+    skillTrendEntry?.key === node.name.toLowerCase()
+      ? skillTrendEntry.badge
+      : null
   useEffect(() => {
     let cancelled = false
     if (!node || node.type !== 'skill') return
     const key = node.name.toLowerCase()
     loadTrendSets().then((sets) => {
-      if (cancelled || !sets) return
-      setSkillTrend(
-        sets.declining.has(key)
-          ? 'declining'
-          : sets.emerging.has(key)
-            ? 'emerging'
-            : null,
-      )
+      if (cancelled) return
+      setSkillTrendEntry({
+        key,
+        badge: sets
+          ? sets.declining.has(key)
+            ? 'declining'
+            : sets.emerging.has(key)
+              ? 'emerging'
+              : null
+          : null,
+      })
     })
     return () => {
       cancelled = true

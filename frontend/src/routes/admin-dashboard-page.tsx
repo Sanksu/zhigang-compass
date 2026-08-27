@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- 导出趋势图数据常量供测试断言，HMR 粒度降级可接受 */
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import {

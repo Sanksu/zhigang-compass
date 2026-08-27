@@ -12,6 +12,7 @@
  * 状态范式：marks 为渲染期派生值（index + 已拉取 diff 缓存），effect 体内
  * 仅发起请求、setState 一律走异步回调（react-hooks/set-state-in-effect 严规）。
  */
+/* eslint-disable react-refresh/only-export-components -- 导出播放速率常量供测试断言，HMR 粒度降级可接受 */
 import { useEffect, useMemo, useState } from 'react'
 import { Pause, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'

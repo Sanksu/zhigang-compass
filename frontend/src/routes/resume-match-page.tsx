@@ -984,9 +984,14 @@ export function ResumeMatchPage() {
                                   </span>
                                   <span>
                                     趋势{' '}
-                                    <b className={((gap.trend ?? 0) >= 0 ? 'text-state-emerging' : 'text-state-archived')}>
-                                      {(gap.trend ?? 0) >= 0 ? '↑' : '↓'} {Math.round(Math.abs(gap.trend ?? 0) * 100)}
-                                    </b>
+                                    {/* L-13 修复：trend=0/null 显示持平/无数据而非恒"↑" */}
+                                    {gap.trend == null || gap.trend === 0 ? (
+                                      <b className="text-ink-muted">— 0</b>
+                                    ) : (
+                                      <b className={gap.trend > 0 ? 'text-state-emerging' : 'text-state-archived'}>
+                                        {gap.trend > 0 ? '↑' : '↓'} {Math.round(Math.abs(gap.trend) * 100)}
+                                      </b>
+                                    )}
                                   </span>
                                   <span>
                                     ROI <b className="text-ink">{((gap.roi ?? 0)).toFixed(2)}</b>

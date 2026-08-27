@@ -9,6 +9,7 @@
  * 置信度色调分级：≥0.8 强证据（绿） / ≥0.6 中证据（中性） / <0.6 弱证据（橙），
  * 无置信度时保持中性轮廓，不误导强度。
  */
+/* eslint-disable react-refresh/only-export-components -- 导出常量供测试断言，HMR 粒度降级可接受 */
 import { ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'

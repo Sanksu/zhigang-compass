@@ -266,13 +266,15 @@ export function GraphPage() {
     }
   }, [selected])
 
-  // skill 详情视图：选中技能节点且详情已就绪（skill_id 匹配）时展示，否则视为加载中
-  const skillDetailView: SkillDetail | null =
-    selected?.type === 'skill'
-      ? skillDetail && skillDetail.skill_id === selected.id && !skillDetail.loading
-        ? skillDetail
-        : { skill_id: '', positions: [], prerequisites: [], courses: [], loading: true }
-      : null
+  // skill 详情视图：选中技能节点且详情已就绪（skill_id 匹配）时展示，否则视为加载中。
+  // 包 useMemo：条件分支构造的 loading 占位对象若每渲染重建，下游 learningPath/
+  // 导学 useMemo 依赖随之失效（第六轮审查 lint 治理）
+  const skillDetailView: SkillDetail | null = useMemo<SkillDetail | null>(() => {
+    if (selected?.type !== 'skill') return null
+    return skillDetail && skillDetail.skill_id === selected.id && !skillDetail.loading
+      ? skillDetail
+      : { skill_id: '', positions: [], prerequisites: [], courses: [], loading: true }
+  }, [selected, skillDetail])
 
   // ── 双轨制接入（task 1.1/1.3）：选中技能 → 由先修链派生学习路径 DAG + 导学面板增强 ──
   // 数据源为真实先修链（GET /graph/skill/{id}/prerequisites）：目标技能 ← 直接先修（并联），
