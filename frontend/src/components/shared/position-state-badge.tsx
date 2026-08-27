@@ -31,6 +31,17 @@ export const POSITION_STATE_META: Record<
   rejected: { label: '驳回', variant: 'archived' },
 }
 
+/** 六态点色（图例/分布卡等需要色点而非徽标的场景；rejected 复用归档色） */
+export const POSITION_STATE_DOT: Record<PositionState, string> = {
+  active: 'bg-state-active',
+  candidate: 'bg-state-candidate',
+  emerging: 'bg-state-emerging',
+  stable: 'bg-state-stable',
+  declining: 'bg-state-declining',
+  archived: 'bg-state-archived',
+  rejected: 'bg-state-archived',
+}
+
 interface PositionStateBadgeProps extends Omit<BadgeProps, 'variant'> {
   /** 岗位状态键（未知值回退为 outline + 原文） */
   state: string

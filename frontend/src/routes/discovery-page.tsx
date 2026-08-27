@@ -19,7 +19,7 @@ import {
   type PositionSkillsDeltaData,
   type RecentDiscoveryCandidate,
 } from '@/components/discovery/types'
-import { MetricCard } from '@/components/evolution/shared'
+import { MetricCard } from '@/components/shared/metric-card'
 
 type Tab = 'new' | 'delta'
 
@@ -306,9 +306,9 @@ export function DiscoveryPage() {
 
       {/* 顶部指标卡 */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-        <MetricCard metric={{ key: 'total', label: '近 30 天候选', value: total, delta: 0, tone: 'stable', hint: '进入发现候选池' }} />
-        <MetricCard metric={{ key: 'skills', label: '已聚合成图', value: withSkillsCount, delta: 0, tone: 'stable', hint: '有图谱技能清单' }} />
-        <MetricCard metric={{ key: 'pending', label: '待审核', value: pendingCount, delta: 0, tone: 'declining', hint: 'candidate 态，技能待聚合' }} />
+        <MetricCard data={{ label: '近 30 天候选', value: total, delta: 0, deltaTone: 'stable', hint: '进入发现候选池', bar: true }} />
+        <MetricCard data={{ label: '已聚合成图', value: withSkillsCount, delta: 0, deltaTone: 'stable', hint: '有图谱技能清单', bar: true }} />
+        <MetricCard data={{ label: '待审核', value: pendingCount, delta: 0, deltaTone: 'declining', hint: 'candidate 态，技能待聚合', bar: true }} />
       </div>
 
       {/* Tab 切换 */}

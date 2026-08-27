@@ -3,7 +3,12 @@ import { useEffect, useState } from 'react'
 import { GitBranch, Boxes, TrendingDown } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
-import { PositionStateBadge, POSITION_STATE_META } from '@/components/shared/position-state-badge'
+import {
+  PositionStateBadge,
+  POSITION_STATE_DOT,
+  POSITION_STATE_META,
+  type PositionState,
+} from '@/components/shared/position-state-badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { apiGet, errMsg } from '@/lib/api'
 import type { components } from '@/types/api'
@@ -13,16 +18,6 @@ export type StateMachineData = components['schemas']['StateMachineData']
 
 /** 发现状态机六态（label/badge 复用 shared POSITION_STATE_META；active=图谱常态岗位，不入候选池分发） */
 const MACHINE_STATES = ['candidate', 'emerging', 'stable', 'declining', 'archived', 'rejected'] as const
-
-/** 六态分布点色（仅分发场景需要；徽标本身共用 POSITION_STATE_META.variant） */
-const STATE_DOT: Record<string, string> = {
-  candidate: 'bg-state-candidate',
-  emerging: 'bg-state-emerging',
-  stable: 'bg-state-stable',
-  declining: 'bg-state-declining',
-  archived: 'bg-state-archived',
-  rejected: 'bg-state-archived',
-}
 
 /** 六态分布 + 最近流转记录（GET /evolution/state-machine） */
 
@@ -59,7 +54,7 @@ export function StateMachineView() {
                 return (
                   <div key={state} className="rounded-md border border-border p-2.5">
                     <div className="flex items-center gap-1.5 text-xs font-medium text-ink">
-                      <span className={`size-2 rounded-full ${STATE_DOT[state]}`} />
+                      <span className={`size-2 rounded-full ${POSITION_STATE_DOT[state as PositionState] ?? ''}`} />
                       {meta.label}
                     </div>
                     <div className="mt-1 text-xl font-semibold tabular-nums">{data.states[state] ?? 0}</div>
