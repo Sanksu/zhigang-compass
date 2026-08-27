@@ -1,103 +1,18 @@
-"""matching worker 编排层测试（第六轮审查 P1-1/P1-3 回归锁 + P1-6 覆盖洼地）。
+"""matching worker 编排层测试（第六轮审查 P1-3 回归锁 + 方案 A 适配）。
 
-workers/matching.py 此前覆盖率 10%（resume_parse/_match_jd_candidates/
-match_recommend 编排全零测试）。本文件直调三个入口（fake session + mock 外设，
-对齐 dict_guard 测试模式），锁定：
-1. _load_jd_evidence_rows 每岗位独立 session（AsyncSession 禁止并发共用）；
-2. 加载失败单岗位降级为空、其余岗位不受影响；
-3. match_recommend PG 镜像失败 → rollback 后任务仍成功（PendingRollbackError
+workers/matching.py 现只保留 resume_parse / match_recommend 两入口；JD 候选评分
+抽至 jd_match.score_jd_auto（recommend 恒走 JD 级，无聚合分支）。本文件直调
+match_recommend（fake session + mock 外设，对齐 dict_guard 测试模式），锁定：
+1. match_recommend PG 镜像失败 → rollback 后任务仍成功（PendingRollbackError
    不再逃逸、task.status 不卡 running）；
-4. 匹配主流程异常 → task.status=failed 落终态。
+2. 匹配主流程异常 → task.status=failed 落终态；
+3. 缺 task 返回 failed；幂等镜像落库复用已有行。
 """
 
 import asyncio
 from types import SimpleNamespace
 
 from app.workers import matching as mw
-
-
-# ─────────────────────── P1-1：JD 证据独立 session ───────────────────────
-
-
-class _RecordingSessionFactory:
-    """并发发 session 的 fake 工厂：记录创建次数，验证不共用。"""
-
-    def __init__(self):
-        self.created = 0
-
-    def __call__(self):
-        self.created += 1
-        return _PooledSession(self.created)
-
-
-class _PooledSession:
-    def __init__(self, sid: int):
-        self.sid = sid
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return False
-
-    async def scalars(self, stmt):
-        # 模拟真实 AsyncSession 行为：同一 session 上的并发请求在 gather 下
-        # 只有串行才安全——此处按 sid 回数据，供断言各岗位拿到独立 session
-        return SimpleNamespace(all=lambda: [])
-
-
-class TestLoadJdEvidenceRows:
-    def test_each_position_gets_its_own_session(self, monkeypatch):
-        factory = _RecordingSessionFactory()
-        monkeypatch.setattr("app.core.database.async_session_factory", factory)
-
-        seen_sessions: list[int] = []
-
-        async def _fake_load(session, name, limit=None):
-            seen_sessions.append(session.sid)
-            return [{"snapshot": {}, "source": "x", "source_url": ""}]
-
-        monkeypatch.setattr(
-            "app.services.matching.jd_rerank.load_jd_rows_for_position", _fake_load,
-        )
-        results = [
-            SimpleNamespace(position_name="后端工程师"),
-            SimpleNamespace(position_name="算法工程师"),
-            SimpleNamespace(position_name="后端工程师"),  # 去重
-        ]
-        rows = asyncio.run(mw._load_jd_evidence_rows(results))
-
-        assert set(rows) == {"后端工程师", "算法工程师"}
-        assert len(seen_sessions) == 2
-        # 每岗位独立 session（P1-1：共用同一 session 时 AsyncSession 并发禁用，
-        # 除首个外全部抛错被吞 → jd_evidence 大面积静默为空）
-        assert len(set(seen_sessions)) == 2
-
-    def test_single_position_failure_degrades_to_empty(self, monkeypatch):
-        monkeypatch.setattr(
-            "app.core.database.async_session_factory", _RecordingSessionFactory(),
-        )
-
-        async def _fake_load(session, name, limit=None):
-            if name == "坏岗位":
-                raise RuntimeError("db down")
-            return [{"snapshot": {"ok": True}}]
-
-        monkeypatch.setattr(
-            "app.services.matching.jd_rerank.load_jd_rows_for_position", _fake_load,
-        )
-        results = [
-            SimpleNamespace(position_name="好岗位"),
-            SimpleNamespace(position_name="坏岗位"),
-        ]
-        rows = asyncio.run(mw._load_jd_evidence_rows(results))
-        assert rows == {"好岗位": [{"snapshot": {"ok": True}}], "坏岗位": []}
-
-    def test_empty_names_short_circuit(self):
-        assert asyncio.run(mw._load_jd_evidence_rows([])) == {}
-
-
-# ─────────────────────── P1-3：match_recommend 编排 ───────────────────────
 
 
 class _FakeMirrorSession:
@@ -160,8 +75,8 @@ def _cache_row() -> SimpleNamespace:
                            parsed_data={"skills": [{"name": "Python"}]}, version=1)
 
 
-def _patch_match_env(monkeypatch, *, match_results=None, match_error=None):
-    """mock 匹配外设：candidate 构建/画像缓存/匹配器/JD 证据/Redis。"""
+def _patch_match_env(monkeypatch, *, data_items=None, match_error=None):
+    """mock 匹配外设：候选构建/project 向量/score_jd_auto/Redis。"""
     async def _noop_load(*a, **kw):
         return {}
 
@@ -179,32 +94,18 @@ def _patch_match_env(monkeypatch, *, match_results=None, match_error=None):
         "app.services.embeddings.vector_store.load_project_vectors", _noop_load,
     )
     monkeypatch.setattr(
-        "app.services.matching.shared_cache.load_positions_shared", _noop_load,
-    )
-    monkeypatch.setattr(
         "app.services.matching.semantic.SkillEmbedder.get",
         classmethod(lambda cls: object()),
     )
 
-    class _FakeMatcher:
-        def __init__(self, positions, semantic=None):
-            pass
-
-        def match(self, request):
-            if match_error is not None:
-                raise match_error
-            return match_results or []
+    async def _fake_scorer(session, candidate, project_vectors, top_n,
+                           rough_k=None, semantic=None):
+        if match_error is not None:
+            raise match_error
+        return data_items or []
 
     monkeypatch.setattr(
-        "app.services.matching.engine.RuleBasedMatcher", _FakeMatcher,
-    )
-    monkeypatch.setattr(
-        mw, "_load_jd_evidence_rows",
-        lambda results: _noop_load(),
-    )
-    monkeypatch.setattr(
-        "app.services.matching.jd_rerank.enrich_with_jd_evidence",
-        lambda items, rows, skills: None,
+        "app.services.matching.jd_match.score_jd_auto", _fake_scorer,
     )
     fake_redis = _FakeRedis()
     monkeypatch.setattr("app.core.database.redis_client", fake_redis)
@@ -217,8 +118,8 @@ class TestMatchRecommendMirrorFailure:
         commit 抛 PendingRollbackError 逃逸，task.status 卡 running）。"""
         fake_redis = _patch_match_env(
             monkeypatch,
-            match_results=[
-                SimpleNamespace(model_dump=lambda: {"position_name": "后端工程师", "score": 0.9}),
+            data_items=[
+                {"position_name": "后端工程师", "score": 0.9},
             ],
         )
         task = _task_row()
@@ -262,3 +163,21 @@ class TestMatchRecommendMirrorFailure:
             {}, resume_id="r1", top_n=10, task_id="ghost", user_id="u1",
         ))
         assert result == {"status": "failed", "error": "TaskStatus 不存在"}
+
+    def test_deduplicated_position_name_in_mirror(self, monkeypatch):
+        """镜像落库取 data_items 首项岗位名（JD 候选模式输出同构 dict 列表）。"""
+        _patch_match_env(
+            monkeypatch,
+            data_items=[{"position_name": "算法工程师", "score": 0.7}],
+        )
+        task = _task_row()
+        session = _FakeMirrorSession(task, _cache_row())
+        monkeypatch.setattr("app.core.database.async_session_factory",
+                            lambda: session)
+
+        asyncio.run(mw.match_recommend(
+            {}, resume_id="r1", top_n=10, task_id="t1", user_id="u1",
+        ))
+        mirror_rows = [obj for obj in session.added if obj.__class__.__name__ == "MatchResultRecord"]
+        assert mirror_rows
+        assert mirror_rows[0].position_name == "算法工程师"

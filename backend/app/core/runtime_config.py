@@ -60,8 +60,8 @@ DEFAULTS: dict = {
     # 技能关系 LLM 提议（ETL 阶段 21）：共现候选 proposal 进人工审核池，默认关闭
     "skill_relation_propose_enabled": False,
     "skill_relation_propose_max_candidates": 40,
-    # 阶段 C：匹配候选切到原生 JD（灰度开关 + 粗选 K；默认 False 走聚合岗位画像）
-    "match_jd_candidates_enabled": False,
+    # 阶段 C：匹配候选统一到原生 JD（方案 A，2026-08-27）：不再有聚合岗位
+    # 灰度开关，JD 候选为唯一主路径；保留粗选 K（向量预筛召回数）
     "match_jd_rough_k": 50,
 }
 
@@ -93,7 +93,6 @@ _VALIDATORS = {
     "name_normalization_propose_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 200,
     "skill_relation_propose_enabled": lambda v: isinstance(v, bool),
     "skill_relation_propose_max_candidates": lambda v: isinstance(v, int) and 1 <= v <= 200,
-    "match_jd_candidates_enabled": lambda v: isinstance(v, bool),
     "match_jd_rough_k": lambda v: isinstance(v, int) and 1 <= v <= 2000,
 }
 

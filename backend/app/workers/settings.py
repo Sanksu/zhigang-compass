@@ -75,27 +75,10 @@ async def on_startup(ctx: dict) -> None:
 
     asyncio.create_task(warm_dynamic_aliases())
 
-    async def warm_matching() -> None:
-        # 岗位画像共享缓存预热：首次 ARQ 匹配免冷加载（Redis 单飞构建载荷并切指针；
-        # 失败不阻塞 worker 启动，匹配请求走降级路径）
-        try:
-            from app.services.matching.shared_cache import load_positions_shared
-
-            await load_positions_shared()
-            logger.info("岗位画像共享缓存预热完成")
-        except Exception as error:
-            logger.warning("岗位画像预热跳过: %s", str(error)[:100])
-
-    asyncio.create_task(warm_matching())
-
     async def warm_jd_pool() -> None:
-        # JD 池化向量预热（阶段 C）：JD 候选模式开启时，启动即构建池化并写
-        # Redis（首建含 SBERT warm 可达数十秒——免容器重建后首个匹配请求
-        # 承担 ~226s 冷启动；指纹命中则秒级返回）。失败不阻塞 worker。
-        from app.core import runtime_config
-
-        if not runtime_config.get("match_jd_candidates_enabled", False):
-            return
+        # JD 池化向量预热（方案 A：匹配主链路恒走 JD 候选模式，池化向量为
+        # 向量预筛召回必备——启动即构建池化并写 Redis，免容器重建后首个匹配
+        # 请求承担冷启动；指纹命中则秒级返回）。失败不阻塞 worker。
         try:
             from sqlalchemy import select
 
