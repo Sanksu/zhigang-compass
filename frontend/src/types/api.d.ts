@@ -1990,6 +1990,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/discovery/recent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 近期发现的新岗位及其技能（登录可见）
+         * @description 读 discovery_candidates（按 detected_at 降序近 N 天），回查图谱 Position→REQUIRES→Skill 取技能清单；candidate 态尚未聚合时 skills=null + skill_pending=true 标注待审核
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 近 N 天候选窗口 */
+                    days?: number;
+                    /** @description 按状态过滤（candidate/emerging/stable/declining），缺省不过滤 */
+                    state?: string;
+                    /** @description 返回条数上限 */
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 近 N 天新岗位候选列表（data 含 candidates/total） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["DiscoveryRecentData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/discovery/position-skills-delta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 岗位技能增减（最近两个版本快照对比，登录可见）
+         * @description 取最近两期 graph_versions 快照，按岗位 source 过滤 REQUIRES 边做集合差，返回新增/移除/未变技能
+         */
+        get: {
+            parameters: {
+                query: {
+                    /** @description 岗位 id（pos_xxx）或岗位名（与图谱 Position.name 对齐） */
+                    position: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 该岗位最近两版技能增减（data 含 added/removed/unchanged + 版本信息） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["PositionSkillsDeltaData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                /** @description 无图谱版本数据（快照不足 2 期）或岗位不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: unknown;
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/evolution/state-machine": {
         parameters: {
             query?: never;
@@ -5276,6 +5388,65 @@ export interface components {
             to: string;
             /** @description 节点序列（≤6 跳，可能经过 Position） */
             path: components["schemas"]["ShortestPathNode"][];
+        };
+        /** @description 岗位技能项（图谱 Position→REQUIRES→Skill） */
+        DiscoverySkill: {
+            skill_id: string;
+            skill_name: string;
+            /** @description must/nice/soft */
+            necessity: string;
+            weight?: number | null;
+            level?: string | null;
+            source_count?: number | null;
+        };
+        /** @description 近期发现的新岗位候选（含技能；/discovery/recent） */
+        RecentDiscoveryCandidate: {
+            /** @description 图谱岗位 id；未落图时为 null */
+            position_id?: string | null;
+            position_name: string;
+            /** @description candidate/emerging/stable/declining */
+            state: string;
+            /** @description 发现时间（进入候选池） */
+            detected_at: string;
+            definition_draft?: string;
+            confidence?: {
+                [key: string]: number;
+            } | null;
+            /** @description 图谱技能（must/nice/soft 分组）；candidate 未聚合时为 null */
+            skills?: {
+                must?: components["schemas"]["DiscoverySkill"][];
+                nice?: components["schemas"]["DiscoverySkill"][];
+                soft?: components["schemas"]["DiscoverySkill"][];
+            } | null;
+            /** @description 图内无该岗位技能（candidate 未聚合）时为 true 标注待审核 */
+            skill_pending?: boolean;
+        };
+        /** @description GET /discovery/recent 响应 data */
+        DiscoveryRecentData: {
+            candidates: components["schemas"]["RecentDiscoveryCandidate"][];
+            total: number;
+        };
+        /** @description 岗位技能增减项 */
+        PositionSkillsDelta: {
+            skill_id: string;
+            skill_name: string;
+        };
+        /** @description GET /discovery/position-skills-delta 响应 data */
+        PositionSkillsDeltaData: {
+            position_id: string;
+            position_name: string;
+            /** @description 对比基准版 id（较旧） */
+            from_version?: string | null;
+            from_created_at?: string | null;
+            /** @description 目标版 id（较新） */
+            to_version?: string | null;
+            to_created_at?: string | null;
+            /** @description 最近两版新增技能 */
+            added: components["schemas"]["PositionSkillsDelta"][];
+            /** @description 最近两版移除技能 */
+            removed: components["schemas"]["PositionSkillsDelta"][];
+            /** @description 未变技能 */
+            unchanged: components["schemas"]["PositionSkillsDelta"][];
         };
     };
     responses: {

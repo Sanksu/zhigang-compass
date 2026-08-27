@@ -1140,6 +1140,75 @@ paths:
                   data:
                     $ref: '#/components/schemas/SkillEvolutionListData'
                   trace_id: { type: string }
+  /api/v1/discovery/recent:
+    get:
+      tags: [discovery]
+      summary: 近期发现的新岗位及其技能（登录可见）
+      description: 读 discovery_candidates（按 detected_at 降序近 N 天），回查图谱 Position→REQUIRES→Skill 取技能清单；candidate 态尚未聚合时 skills=null + skill_pending=true 标注待审核
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema: { type: integer, default: 30, minimum: 1, maximum: 365 }
+          description: 近 N 天候选窗口
+        - name: state
+          in: query
+          required: false
+          schema: { type: string }
+          description: 按状态过滤（candidate/emerging/stable/declining），缺省不过滤
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+          description: 返回条数上限
+      responses:
+        '200':
+          description: 近 N 天新岗位候选列表（data 含 candidates/total）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/DiscoveryRecentData'
+                  trace_id: { type: string }
+  /api/v1/discovery/position-skills-delta:
+    get:
+      tags: [discovery]
+      summary: 岗位技能增减（最近两个版本快照对比，登录可见）
+      description: 取最近两期 graph_versions 快照，按岗位 source 过滤 REQUIRES 边做集合差，返回新增/移除/未变技能
+      parameters:
+        - name: position
+          in: query
+          required: true
+          schema: { type: string }
+          description: 岗位 id（pos_xxx）或岗位名（与图谱 Position.name 对齐）
+      responses:
+        '200':
+          description: 该岗位最近两版技能增减（data 含 added/removed/unchanged + 版本信息）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/PositionSkillsDeltaData'
+                  trace_id: { type: string }
+        '404':
+          description: 无图谱版本数据（快照不足 2 期）或岗位不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data: { nullable: true }
+                  trace_id: { type: string }
   /api/v1/evolution/state-machine:
     get:
       tags: [evolution]
@@ -3980,3 +4049,91 @@ components:
           items: { $ref: '#/components/schemas/ShortestPathNode' }
           description: 节点序列（≤6 跳，可能经过 Position）
 
+
+    # ============================================================
+    # 新岗位发现端点 data（08-27：/discovery/recent + /discovery/position-skills-delta）
+    # ============================================================
+
+    DiscoverySkill:
+      type: object
+      description: 岗位技能项（图谱 Position→REQUIRES→Skill）
+      required: [skill_id, skill_name, necessity]
+      properties:
+        skill_id: { type: string }
+        skill_name: { type: string }
+        necessity: { type: string, description: must/nice/soft }
+        weight: { type: number, nullable: true }
+        level: { type: string, nullable: true }
+        source_count: { type: integer, nullable: true }
+
+    RecentDiscoveryCandidate:
+      type: object
+      description: 近期发现的新岗位候选（含技能；/discovery/recent）
+      required: [position_name, state, detected_at]
+      properties:
+        position_id: { type: string, nullable: true, description: 图谱岗位 id；未落图时为 null }
+        position_name: { type: string }
+        state: { type: string, description: candidate/emerging/stable/declining }
+        detected_at: { type: string, description: 发现时间（进入候选池） }
+        definition_draft: { type: string }
+        confidence:
+          type: object
+          additionalProperties: { type: number }
+          nullable: true
+        skills:
+          type: object
+          description: 图谱技能（must/nice/soft 分组）；candidate 未聚合时为 null
+          nullable: true
+          properties:
+            must:
+              type: array
+              items: { $ref: '#/components/schemas/DiscoverySkill' }
+            nice:
+              type: array
+              items: { $ref: '#/components/schemas/DiscoverySkill' }
+            soft:
+              type: array
+              items: { $ref: '#/components/schemas/DiscoverySkill' }
+        skill_pending: { type: boolean, description: 图内无该岗位技能（candidate 未聚合）时为 true 标注待审核 }
+
+    DiscoveryRecentData:
+      type: object
+      description: GET /discovery/recent 响应 data
+      required: [candidates, total]
+      properties:
+        candidates:
+          type: array
+          items: { $ref: '#/components/schemas/RecentDiscoveryCandidate' }
+        total: { type: integer }
+
+    PositionSkillsDelta:
+      type: object
+      description: 岗位技能增减项
+      required: [skill_id, skill_name]
+      properties:
+        skill_id: { type: string }
+        skill_name: { type: string }
+
+    PositionSkillsDeltaData:
+      type: object
+      description: GET /discovery/position-skills-delta 响应 data
+      required: [position_id, position_name, added, removed, unchanged]
+      properties:
+        position_id: { type: string }
+        position_name: { type: string }
+        from_version: { type: string, nullable: true, description: 对比基准版 id（较旧） }
+        from_created_at: { type: string, nullable: true }
+        to_version: { type: string, nullable: true, description: 目标版 id（较新） }
+        to_created_at: { type: string, nullable: true }
+        added:
+          type: array
+          items: { $ref: '#/components/schemas/PositionSkillsDelta' }
+          description: 最近两版新增技能
+        removed:
+          type: array
+          items: { $ref: '#/components/schemas/PositionSkillsDelta' }
+          description: 最近两版移除技能
+        unchanged:
+          type: array
+          items: { $ref: '#/components/schemas/PositionSkillsDelta' }
+          description: 未变技能
