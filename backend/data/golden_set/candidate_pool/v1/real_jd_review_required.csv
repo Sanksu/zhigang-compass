@@ -1,13 +1,12 @@
 ﻿source,source_id,source_url,job_title_raw,company_name,location,salary,source_education,source_experience,text_education,text_experience,education_conflict,experience_conflict,publish_time,crawl_time,responsibilities,requirements,detail_raw_text,tags,category,_sha256,low_information,duplicate_review_required,review_reason
 zhilian,CC404298980J40856902010,https://www.zhaopin.com/jobdetail/CC404298980J40856902010.htm,嵌入式开发工程师（央企/内网开发）,北京百米互联科技有限公司,北京 海淀区,1.3-1.5万,本科,3-5年,本科,,False,False,,2026-08-15T23:00:00+08:00,"1.linux内核驱动开发
+3.新平台验证，能够独立进行新芯片、新功能的验证和开发","2.单片机开发，主要开发stm32或国产沁恒单片机开发，熟悉底层基础通信协议，拥有低功耗、USB、网络通信开发经验优先，
+4、具备良好的理解和沟通能力
+5、关注软硬件协同知识点，有一定自学能力、抗压能力，独立编程、方案设计能力强者优先","1.linux内核驱动开发
 2.单片机开发，主要开发stm32或国产沁恒单片机开发，熟悉底层基础通信协议，拥有低功耗、USB、网络通信开发经验优先，
 3.新平台验证，能够独立进行新芯片、新功能的验证和开发
 4、具备良好的理解和沟通能力
-5、关注软硬件协同知识点，有一定自学能力、抗压能力，独立编程、方案设计能力强者优先",,"1.linux内核驱动开发
-2.单片机开发，主要开发stm32或国产沁恒单片机开发，熟悉底层基础通信协议，拥有低功耗、USB、网络通信开发经验优先，
-3.新平台验证，能够独立进行新芯片、新功能的验证和开发
-4、具备良好的理解和沟通能力
-5、关注软硬件协同知识点，有一定自学能力、抗压能力，独立编程、方案设计能力强者优先",32位单片机; C语言; C++; Python,嵌入式/C++,3fc86f9d8a8c52afea1fd057a2e98c0b9f5e73709e504797fd683e8d25decfcd,True,False,low_information
+5、关注软硬件协同知识点，有一定自学能力、抗压能力，独立编程、方案设计能力强者优先",32位单片机; C语言; C++; Python,嵌入式/C++,27d2c833d9155b7f5b3895572e73a1b7da6a16b76c4ddad504a9a6fb0567dede,True,False,low_information
 zhilian,CC120834970J41013212302,https://www.zhaopin.com/jobdetail/CC120834970J41013212302.htm,软件工程师（linux驱动开发工程师）,北京计算机技术及应用研究所,北京 海淀区,1.7-2.1万,硕士,经验不限,硕士,一年以上,False,False,,2026-08-15T23:00:00+08:00,"1、linux底层驱动开发移植；
 2、linux内核定制化裁剪；
 3、驱动问题定位分析及解决。","1、熟练掌握C语言；
