@@ -91,8 +91,8 @@
 {"variant": "springcloud", "gold_standard": "Spring Cloud", "gold_action": "merge", "slice": "alias"}
 {"variant": "springmvc", "gold_standard": "Spring MVC", "gold_action": "merge", "slice": "alias"}
 {"variant": "sql", "gold_standard": "SQL", "gold_action": "merge", "slice": "alias"}
-{"variant": "sql 优化", "gold_standard": "SQL", "gold_action": "merge", "slice": "alias"}
-{"variant": "sql优化", "gold_standard": "SQL", "gold_action": "merge", "slice": "alias"}
+{"variant": "sql 优化", "gold_standard": "SQL调优", "gold_action": "merge", "slice": "alias"}
+{"variant": "sql优化", "gold_standard": "SQL调优", "gold_action": "merge", "slice": "alias"}
 {"variant": "tf", "gold_standard": "TensorFlow", "gold_action": "merge", "slice": "alias"}
 {"variant": "uniapp", "gold_standard": "uni-app", "gold_action": "merge", "slice": "alias"}
 {"variant": "vue", "gold_standard": "Vue.js", "gold_action": "merge", "slice": "alias"}
