@@ -145,10 +145,12 @@ async def position_skills_delta_summary(
     一次返回全部岗位的技能增减计数 + 可用版本列表：下拉只列有增减岗位、
     稳定面板列无增减岗位，均由本端点驱动，避免逐岗位请求。
     """
-    versions = list(await db.scalars(
+    # ⚠️ 多列 select 必须 execute().all()——scalars() 会降维成第一列标量
+    # （2026-08-28 226 实证：versions 变 id 字符串列表，older.id 直接 500）
+    versions = (await db.execute(
         select(GraphVersion.id, GraphVersion.created_at)
         .order_by(GraphVersion.created_at.desc())
-    ))
+    )).all()
     if len(versions) < 2:
         return error(ERR_NOT_FOUND, "无足够图谱版本数据（快照不足 2 期）", http_status=404)
 
@@ -202,10 +204,12 @@ async def position_skills_delta(
 ):
     """岗位技能增减（两版快照对比，缺省最近两期，可显式指定 from/to 版本）。
     """
-    versions = list(await db.scalars(
+    # ⚠️ 多列 select 必须 execute().all()——scalars() 会降维成第一列标量
+    # （2026-08-28 226 实证：versions 变 id 字符串列表，older.id 直接 500）
+    versions = (await db.execute(
         select(GraphVersion.id, GraphVersion.created_at)
         .order_by(GraphVersion.created_at.desc())
-    ))
+    )).all()
     if len(versions) < 2:
         return error(ERR_NOT_FOUND, "无足够图谱版本数据（快照不足 2 期）", http_status=404)
 
