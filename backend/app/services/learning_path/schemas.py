@@ -46,7 +46,7 @@ class GapSkill(BaseModel):
     )
     demand: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="市场需求度 0-1")
     trend: Optional[float] = Field(default=None, ge=-1.0, le=1.0, description="需求趋势 -1..1")
-    roi: Optional[float] = Field(default=None, description="ROI 指标 = (demand×trend)/cost")
+    roi: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="学习性价比 ROI 归一化 0-1（原始 (demand×(trend+1))/cost 以 0.1 为满分基准封顶，前端 ×100 显示）")
     high_roi: Optional[bool] = Field(default=None, description="是否高杠杆缺口（Top3 ROI）")
     evidence: list[MatchEvidenceItem] = Field(
         default_factory=list, description="评分/差距证据（JD 要求 vs 简历现状）"
@@ -85,7 +85,7 @@ class LearningPathItem(BaseModel):
     status: Optional[str] = Field(default=None, description="学习状态：done / doing / locked")
     demand: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="市场需求度 0-1")
     trend: Optional[float] = Field(default=None, ge=-1.0, le=1.0, description="需求趋势 -1..1")
-    roi: Optional[float] = Field(default=None, description="ROI 指标 = (demand×trend)/cost")
+    roi: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="学习性价比 ROI 归一化 0-1（原始 (demand×(trend+1))/cost 以 0.1 为满分基准封顶，前端 ×100 显示）")
     evidence: list[MatchEvidenceItem] = Field(
         default_factory=list, description="学习/评分证据"
     )

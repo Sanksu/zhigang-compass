@@ -2554,7 +2554,7 @@ components:
         # ── 数据升级（可选，后端测算回填；前端缺省 mock 兜底）──
         demand: { type: number, minimum: 0, maximum: 1, description: 市场需求度 0-1 }
         trend: { type: number, minimum: -1, maximum: 1, description: 需求趋势 -1..1 }
-        roi: { type: number, description: ROI 指标 = demand×trend/cost }
+        roi: { type: number, minimum: 0, maximum: 1, description: 学习性价比 ROI 归一化 0-1（原始 (demand×(trend+1))/cost 以 0.1 为满分基准封顶；前端 ×100 显示 0-100 分，与 demand/trend 同口径） }
         high_roi: { type: boolean, description: 是否高杠杆缺口（Top3 ROI） }
         evidence: { type: array, items: { $ref: '#/components/schemas/MatchEvidenceItem' }, description: 评分/差距证据（JD 要求 vs 简历现状） }
 
@@ -2594,7 +2594,7 @@ components:
         status: { type: string, enum: [done, doing, locked], description: 学习状态：已掌握/下一步/未解锁 }
         demand: { type: number, minimum: 0, maximum: 1, description: 市场需求度 0-1 }
         trend: { type: number, minimum: -1, maximum: 1, description: 需求趋势 -1..1 }
-        roi: { type: number, description: ROI 指标 = demand×trend/cost }
+        roi: { type: number, minimum: 0, maximum: 1, description: 学习性价比 ROI 归一化 0-1（原始 (demand×(trend+1))/cost 以 0.1 为满分基准封顶；前端 ×100 显示 0-100 分，与 demand/trend 同口径） }
         evidence: { type: array, items: { $ref: '#/components/schemas/MatchEvidenceItem' }, description: 学习/评分证据 }
 
     # ============================================================

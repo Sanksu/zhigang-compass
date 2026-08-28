@@ -4209,7 +4209,7 @@ export interface components {
             demand?: number;
             /** @description 需求趋势 -1..1 */
             trend?: number;
-            /** @description ROI 指标 = demand×trend/cost */
+            /** @description 学习性价比 ROI 归一化 0-1（原始 (demand×(trend+1))/cost 以 0.1 为满分基准封顶；前端 ×100 显示 0-100 分，与 demand/trend 同口径） */
             roi?: number;
             /** @description 是否高杠杆缺口（Top3 ROI） */
             high_roi?: boolean;
@@ -4259,7 +4259,7 @@ export interface components {
             demand?: number;
             /** @description 需求趋势 -1..1 */
             trend?: number;
-            /** @description ROI 指标 = demand×trend/cost */
+            /** @description 学习性价比 ROI 归一化 0-1（原始 (demand×(trend+1))/cost 以 0.1 为满分基准封顶；前端 ×100 显示 0-100 分，与 demand/trend 同口径） */
             roi?: number;
             /** @description 学习/评分证据 */
             evidence?: components["schemas"]["MatchEvidenceItem"][];
