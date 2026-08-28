@@ -128,7 +128,7 @@ export function EvolutionReviewTab() {
       )}
 
       {/* 统计卡（真实：待审核=队列长度；approve/reject 数由状态机分布聚合） */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
         <Card>
           <CardContent className="py-4">
             <div className="flex items-center justify-between mb-2">
