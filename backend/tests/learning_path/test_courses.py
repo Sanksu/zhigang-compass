@@ -1,8 +1,8 @@
 """课程时长解析 + 课程名门控单元测试（AL-M4-03，设计文档 §4.6）。
 
 门控测试用假语义器注入预设相似度（不加载 SBERT），覆盖 08-15 灰色带
-质量门控实证阈值：sim ∈ [0.5, 0.62) 带内仅保留质量分 ≥0.62 的课程
-（Office→Excel 0.553/q0.658 保留；多线程→高级英语 0.558/q低 拦截）。
+质量门控实证阈值与 08-28 方案 A 全域质量底线：非词面自证的语义命中一律
+要求质量分 ≥0.62（并发↔运筹学 0.806 等带外虚高误配族实证）。
 """
 
 from app.services.learning_path.courses import (
@@ -72,14 +72,18 @@ class TestTitleSimilarityGate:
             rows, "Qlik", semantic, _COURSE_TITLE_SIM_THRESHOLD, quality_map={})
         assert kept == []
 
-    def test_gray_zone_upper_bound_excluded(self):
-        """sim = 0.62 不在灰带内（[0.5, 0.62) 右开），低质量分也不拦截。"""
+    def test_band_upper_low_quality_filtered(self):
+        """sim = 0.62 带外低质量分拦截（08-28 方案 A：质量底线全域生效）。
+
+        旧口径此配对直通（[0.5,0.62) 带外无质量要求）——正是运筹学误配族
+        （sim 0.62-0.81、q≈0.52）的放行通道，方案 A 后与带内同判。
+        """
         rows = [_row("c1", "Some Course")]
         semantic = _FakeSemantic({("技能", "Some Course"): 0.62})
         quality = {("edx", "c1"): {"quality_score": 0.3}}
         kept = _filter_by_title_similarity(
             rows, "技能", semantic, _COURSE_TITLE_SIM_THRESHOLD, quality)
-        assert len(kept) == 1
+        assert kept == []
 
     def test_lexical_hit_exempted(self):
         """词面命中豁免：课程名包含技能名（缩写场景 AWS 0.472 虚低）直接保留。"""
@@ -137,6 +141,57 @@ class TestTitleSimilarityGate:
         """semantic=None（纯规则链路）不过滤——语义不可用降级行为。"""
         rows = [_row("c1", "任意课程")]
         kept = _filter_by_title_similarity(rows, "技能", None, _COURSE_TITLE_SIM_THRESHOLD)
+        assert len(kept) == 1
+
+
+class TestGlobalQualityFloor:
+    """08-28 方案 A：非词面自证的语义命中一律过质量底线（≥0.62）。
+
+    实证背景（226 全栈工程师 pos_3052 全技能扫描）：13 个中文抽象 nice 技能
+    经课程池兜底拉入运筹学/土力学/高级英语/世界史等垃圾课，sim 0.62-0.81
+    全部落在原灰色带 [0.5,0.62) 之外直通；垃圾课质量分 0.5065-0.5718。
+    """
+
+    def test_yunchou_high_sim_low_quality_filtered(self):
+        """实证误配：并发↔运筹学 sim=0.806、q=0.519 → 拦截（原口径直通）。"""
+        rows = [_row("c1", "运筹学", source="icourse163")]
+        semantic = _FakeSemantic({("并发", "运筹学"): 0.8055})
+        quality = {("icourse163", "c1"): {"quality_score": 0.5193}}
+        kept = _filter_by_title_similarity(
+            rows, "并发", semantic, _COURSE_TITLE_SIM_THRESHOLD, quality)
+        assert kept == []
+
+    def test_high_sim_missing_quality_filtered(self):
+        """带外高 sim + 质量分缺失（未评估）拦截——宁缺毋滥推广到全域。"""
+        rows = [_row("c1", "信息描述", source="icourse163")]
+        semantic = _FakeSemantic({("事务", "信息描述"): 0.70})
+        kept = _filter_by_title_similarity(
+            rows, "事务", semantic, _COURSE_TITLE_SIM_THRESHOLD, quality_map={})
+        assert kept == []
+
+    def test_high_sim_high_quality_kept(self):
+        """带外高 sim + 质量 ≥0.62 保留（语义相关且质量达标的正常命中）。"""
+        rows = [_row("c1", "Excel Skills for Business")]
+        semantic = _FakeSemantic({("Office", "Excel Skills for Business"): 0.70})
+        quality = {("edx", "c1"): {"quality_score": 0.658}}
+        kept = _filter_by_title_similarity(
+            rows, "Office", semantic, _COURSE_TITLE_SIM_THRESHOLD, quality)
+        assert len(kept) == 1
+
+    def test_lexical_hit_exempt_from_quality_floor(self):
+        """词面命中相关性自证，无质量分也保留（Docker↔Docker容器技术）。"""
+        rows = [_row("c1", "Docker容器技术", source="icourse163")]
+        semantic = _FakeSemantic({("Docker", "Docker容器技术"): 0.48})
+        kept = _filter_by_title_similarity(
+            rows, "Docker", semantic, _COURSE_TITLE_SIM_THRESHOLD, quality_map={})
+        assert len(kept) == 1
+
+    def test_quality_floor_neutral_without_quality_map(self):
+        """quality_map=None（调用方无质量数据）保持纯规则链路不过滤。"""
+        rows = [_row("c1", "运筹学", source="icourse163")]
+        semantic = _FakeSemantic({("并发", "运筹学"): 0.8055})
+        kept = _filter_by_title_similarity(
+            rows, "并发", semantic, _COURSE_TITLE_SIM_THRESHOLD)
         assert len(kept) == 1
 
 
