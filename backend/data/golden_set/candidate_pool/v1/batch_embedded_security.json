@@ -28,7 +28,7 @@
       "雷达信号处理",
       "CCS"
     ],
-    "_sha256": "5e45a1858b9e52e4c739c9e7e9c0e3c8f2a1b4d6e7f8a9b0c1d2e3f4a5b6c7d8"
+    "_sha256": "e750b7ffe99e4bf5e1634729e7f5a2fb55e6ab746eec6e4391c0954f321b69f4"
   },
   {
     "source": "zhilian",
@@ -53,7 +53,7 @@
       "C语言",
       "C++"
     ],
-    "_sha256": "d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2"
+    "_sha256": "1b1869b03778fc90f2857998adeea66f7338061ea46128b890a66b0eeb518de7"
   },
   {
     "source": "zhilian",
@@ -80,7 +80,7 @@
       "STM32",
       "ARM"
     ],
-    "_sha256": "f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4"
+    "_sha256": "25e9c268d254ff91be70ff7e4255530f34f757c879f9a2c449a957fe9c96c6db"
   },
   {
     "source": "zhilian",
@@ -104,7 +104,7 @@
     "tags": [
       "信息安全"
     ],
-    "_sha256": "b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6"
+    "_sha256": "31cfb047952c291456967c384c3fbcd49163800e3cb9b63503369aef043b065b"
   },
   {
     "source": "zhilian",
@@ -133,7 +133,7 @@
       "Nginx",
       "Linux开发"
     ],
-    "_sha256": "c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7"
+    "_sha256": "745334d676784d0b88510e3f8fa168e4b6d01340edc139f3864e275d11267efc"
   },
   {
     "source": "zhilian",
@@ -188,7 +188,7 @@
       "固件开发",
       "驱动开发"
     ],
-    "_sha256": "e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9"
+    "_sha256": "ee7f6f840eaf4fed051112c99e5399bd70485773e77d25e3f3c92b3a6da46a31"
   },
   {
     "source": "zhilian",
@@ -212,7 +212,7 @@
     "tags": [
       "C++"
     ],
-    "_sha256": "f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0"
+    "_sha256": "e7b5af0339ff486e0db99d63106ecd5e2b976693d524f1d3dda21d58a81abacf"
   },
   {
     "source": "zhilian",
@@ -243,7 +243,7 @@
       "Shell",
       "Camera驱动"
     ],
-    "_sha256": "a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1"
+    "_sha256": "5c0f2ea7b74694dda7dd02f0bdab34f53414a6ed90a20ecf105175a93b2b6a08"
   },
   {
     "source": "zhilian",
@@ -269,7 +269,7 @@
       "嵌入式技术",
       "Linux"
     ],
-    "_sha256": "b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2"
+    "_sha256": "ebccf44c67bd078c9fcf91f4e58cfc457b691aee9e6c1a2f9e718e2b79637b09"
   },
   {
     "source": "zhilian",
@@ -320,7 +320,7 @@
     "tags": [
       "32位单片机"
     ],
-    "_sha256": "d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4"
+    "_sha256": "e2712f9b89a5af743e3a4724c5c0474cac865f8bfd1786948e3c3c3bd4530eda"
   },
   {
     "source": "zhilian",
@@ -344,7 +344,7 @@
     "tags": [
       "C++"
     ],
-    "_sha256": "e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5"
+    "_sha256": "7096739817d65d4c5b1407de84261a29556ec5c9768299b53c685eefd1f2bdca"
   },
   {
     "source": "zhilian",
@@ -372,7 +372,7 @@
       "数据采集",
       "多线程"
     ],
-    "_sha256": "f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6"
+    "_sha256": "87012ff64948cc63d033df3e0c371d8a0fca0f3de50e58f40be99ae2cef3a6c0"
   },
   {
     "source": "zhilian",
@@ -396,7 +396,7 @@
     "tags": [
       "工业自动化/机器人"
     ],
-    "_sha256": "a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7"
+    "_sha256": "46825de452e5bc9d1d79107d25830c8dee74decace70a9a413f370140f3fc609"
   },
   {
     "source": "zhilian",
@@ -426,7 +426,7 @@
       "SpringBoot",
       "平台架构"
     ],
-    "_sha256": "b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8"
+    "_sha256": "365717f66449a4ef51720ee7b2e22865074eec7b76edc92d04093fb3a1b44bb7"
   },
   {
     "source": "zhilian",
@@ -450,7 +450,7 @@
     "tags": [
       "信息安全"
     ],
-    "_sha256": "c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9"
+    "_sha256": "b7b13ad3bce4ff3bcfa8bcd9c88a3ddc580f04f7e5d54bae15355031c321b1cd"
   },
   {
     "source": "zhilian",
@@ -477,7 +477,7 @@
       "IAM",
       "安全产品运维"
     ],
-    "_sha256": "d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0"
+    "_sha256": "58826b2d77de5846c5fb61971ddf2df166f22ba8c68499de16c8358bb95a4f91"
   },
   {
     "source": "zhilian",
@@ -505,7 +505,7 @@
       "SpringCloud",
       "Dubbo"
     ],
-    "_sha256": "e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1"
+    "_sha256": "496b4752c594d2ac9489d627b8d3f7fc1e502ae340e73d8e20e0dbf6a9d28ada"
   },
   {
     "source": "zhilian",
@@ -530,7 +530,7 @@
       "Java",
       "SpringBoot"
     ],
-    "_sha256": "f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2"
+    "_sha256": "b2e2aea70ed42baabb2d6b40e90a2b9e291d1279431515d375067e8d9bdd7290"
   },
   {
     "source": "zhilian",
@@ -563,7 +563,7 @@
       "Python",
       "大模型API"
     ],
-    "_sha256": "a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3"
+    "_sha256": "12f20dc6c1ca943214a7a02c1c0595450864075101b9086655edc9f4357f2556"
   },
   {
     "source": "zhilian",
@@ -591,7 +591,7 @@
       "技术团队管理",
       "特种机器人"
     ],
-    "_sha256": "b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4"
+    "_sha256": "ce7433e47f61dd5133a77f48ff6d082357c8bebae11e2655099cb49f7c408c75"
   },
   {
     "source": "zhilian",
@@ -619,7 +619,7 @@
       "32位单片机",
       "8位单片机"
     ],
-    "_sha256": "c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5"
+    "_sha256": "2c52ab213b820309853291374ecbebc846407a944ce192a78c80894517840d75"
   },
   {
     "source": "zhilian",
@@ -645,7 +645,7 @@
       "驱动开发",
       "固件开发"
     ],
-    "_sha256": "d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6"
+    "_sha256": "ec70fc6f3021b4f1415b12a8ff4dc41fa851cccb2be1c9190b38dce4ac56d373"
   },
   {
     "source": "zhilian",
@@ -672,7 +672,7 @@
       "RTOS",
       "门禁"
     ],
-    "_sha256": "e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7"
+    "_sha256": "35ad0012d8c02862147c255439999e15bbaa65f7c7d3f2ee6596baeacdd9464c"
   },
   {
     "source": "zhilian",
@@ -701,6 +701,6 @@
       "工业场景传感器应用",
       "AI工具辅助开发"
     ],
-    "_sha256": "f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8"
+    "_sha256": "1d8247a0bc48ceffd681532243215893eba415bba60fbb55e8bbbc586fc4d6a6"
   }
 ]

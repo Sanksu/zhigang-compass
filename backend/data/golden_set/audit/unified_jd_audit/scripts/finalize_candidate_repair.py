@@ -78,8 +78,12 @@ print(f"  V1目录错误拼写残留: {v1_typo}（必须=0）")
 
 
 # ================================================================ §二+§三+§四 逐条核验
+def norm_text(x):
+    # csv 字段内含 \r\n，jsonl 为 \n；哈希前必须归一，否则同记录跨文件 sha 不一致
+    return "" if x is None else str(x).replace("\r\n", "\n").replace("\r", "\n")
+
 def sha_calc(r):
-    return hashlib.sha256((text(r.get("responsibilities")) + "\n" + text(r.get("requirements"))).encode("utf-8")).hexdigest().lower()
+    return hashlib.sha256((norm_text(r.get("responsibilities")) + "\n" + norm_text(r.get("requirements"))).encode("utf-8")).hexdigest().lower()
 
 
 REQ_KW = [r"学历", r"本科", r"硕士", r"博士", r"经验", r"年以上", r"熟悉", r"精通", r"熟练", r"掌握",

@@ -31,7 +31,11 @@ TYPO = "CC404298980J40856902010"  # user prompt variant
 
 # ---------------------- helpers ----------------------
 def text(x): return "" if x is None else str(x)
-def sha(r): return hashlib.sha256((text(r.get("responsibilities")) + "\n" + text(r.get("requirements"))).encode("utf-8")).hexdigest().lower()
+def norm_text(x):
+    # CSV 字段内含 \r\n（历史 Windows 产物），jsonl 侧为 \n；不归一会导致
+    # 同一条记录在 csv 与 jsonl/manifest 两侧算出不同 _sha256
+    return "" if x is None else str(x).replace("\r\n", "\n").replace("\r", "\n")
+def sha(r): return hashlib.sha256((norm_text(r.get("responsibilities")) + "\n" + norm_text(r.get("requirements"))).encode("utf-8")).hexdigest().lower()
 
 def split_lines_preserve(s):
     """split text into list of (line_with_original_ending, ...). Returns ordered list preserving boundaries."""
@@ -102,8 +106,8 @@ def apply_fixes(record: dict) -> dict:
         "req": text(record.get("requirements")),
         "sha": text(record.get("_sha256")).lower(),
     }
-    resp = old["resp"]
-    req = old["req"]
+    resp = norm_text(old["resp"])
+    req = norm_text(old["req"])
     # Detail kept untouched.
     if sid == "CC148739350J40212149403":
         # From packet L68-82: responsibilities has 6 numbered lines (resp==detail, 226 chars).
@@ -140,7 +144,7 @@ def apply_fixes(record: dict) -> dict:
 
 
 def compute_sha(resp, req):
-    return hashlib.sha256((text(resp) + "\n" + text(req)).encode("utf-8")).hexdigest().lower()
+    return hashlib.sha256((norm_text(resp) + "\n" + norm_text(req)).encode("utf-8")).hexdigest().lower()
 
 # ---------------------- §四 apply to files ----------------------
 DATA_FILES_JSONL_JSON = []
