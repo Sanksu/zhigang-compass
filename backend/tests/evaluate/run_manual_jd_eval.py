@@ -27,6 +27,14 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+# 预标注产出用 openpyxl（评测 harness 主体仅用 stdlib，输出工作表是新增模式）
+try:
+    from openpyxl import Workbook as _Workbook  # type: ignore
+    from openpyxl.styles import Font as _XFont  # type: ignore
+except ImportError:  # pragma: no cover - 评测主体路径不应依赖 openpyxl
+    _Workbook = None  # type: ignore
+    _XFont = None  # type: ignore
+
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_XLSX = ROOT / "data" / "golden_set" / "review" / "jd_manual_review_round1.xlsx"
@@ -34,6 +42,10 @@ DEFAULT_OUTPUT = ROOT / "data" / "golden_set" / "review" / "evaluation"
 DEFAULT_REPORT_DIR = ROOT / "reports"
 # final gold 权威源（PR #316，见 data/golden_set/final/ 数据字典与导出报告）
 DEFAULT_GOLD_JSONL = ROOT / "data" / "golden_set" / "final" / "jd_golden_110.jsonl"
+# official_career_50 预标注默认输入/输出：用于 --pre-annotate 子命令
+# （--pre-annotate 独立于评测——不计算 F1，仅读源 → 跑 LLM → 写助标 xlsx 供人工校标）。
+DEFAULT_OFFICIAL_50_CLEAN = ROOT / "data" / "golden_set" / "candidate_pool" / "official_career_50" / "official_career_50_clean.jsonl"
+DEFAULT_PRE_ANNOTATE_OUTPUT = ROOT / "data" / "golden_set" / "candidate_pool" / "official_career_50" / "official_career_50_pre_annotate.xlsx"
 # final gold 为单标注员 A01 + 最终 QA（数据字典声明，不得描述为双人独立标注）
 _GOLD_ANNOTATOR = "A01"
 # 评测链证据信封版本（08-24：prompt/schema/规则链联合快照标识，随口径变更递增）
@@ -1078,6 +1090,154 @@ def write_runtime_blocker_fallback(output_dir: Path, validation: dict[str, Any],
     (output_dir / "evaluation_runtime_blocker_report.md").write_text(text + "\n", encoding="utf-8")
 
 
+
+def _load_official_50_rows(path: Path) -> list[dict[str, str]]:
+    """official_career_50 clean → 评测行 schema（无 review_gold_*，--pre-annotate 用）。
+
+    与 _load_gold_jsonl 字段映射对齐，缺省的 review_gold_* 留空字符串以兼容 _jd_text_for_eval
+    等只读 source_* 字段的下游逻辑；预标注主函数不会访问这些字段。
+    """
+    rows: list[dict[str, str]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        rows.append({
+            "sample_id": f"oc50_{item.get('source_company', '')[:6]}_{item.get('source_id', '')[-12:]}",
+            "source": str(item.get("source") or ""),
+            "source_id": str(item.get("source_id") or ""),
+            "source_url": str(item.get("source_url") or ""),
+            "job_title_raw": str(item.get("job_title_raw") or ""),
+            "detail_raw_text": str(item.get("detail_raw_text") or ""),
+            "text_education": "",
+            "source_education": str(item.get("source_education") or ""),
+            "review_gold_title": "",
+            "review_gold_skills": "",
+            "review_gold_bonus_skills": "",
+            "review_gold_education": "",
+            "review_gold_core_duties": "",
+            "review_gold_experience": "",
+            "annotator": "pre_annotate",
+        })
+    return rows
+
+
+def _to_xlsx_text(value: Any) -> str:
+    """openpyxl 单元格文本：list/dict 序列化为 JSON 字符串便于人工阅读/编辑。"""
+    if value is None:
+        return ""
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def _row_extras_lookup(official_path: Path) -> dict[str, dict[str, str]]:
+    """官方源原文字段（company/location）回查表：评测行不含此两字段，预标注 xlsx 需展示。"""
+    lookup: dict[str, dict[str, str]] = {}
+    for line in official_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        sid = str(item.get("source_id") or "")
+        lookup[sid] = {
+            "company": str(item.get("company_name") or item.get("source_company") or ""),
+            "location": str(item.get("location") or ""),
+        }
+    return lookup
+
+
+def run_pre_annotate(rows: list[dict[str, str]], output_xlsx: Path, original_jsonl: Path) -> dict[str, Any]:
+    """读 50 条原文 → 跑 LLM 抽取 → 写 xlsx 助标工作表（不计算 F1）。
+
+    工作表三段：① 原文（便于校标人对照）② LLM 预测（current_gold_*）③ 人工校标
+    留空（review_gold_* + review_status）——与现有 jd_manual_review_*.csv 同
+    字段顺序，标注完成后可走同套 review→gold 流程转 F1 评测。
+    """
+    if _Workbook is None:
+        raise RuntimeError("openpyxl is required for --pre-annotate; install openpyxl")
+    output_xlsx.parent.mkdir(parents=True, exist_ok=True)
+
+    sys.path.insert(0, str(ROOT))
+    from app.services.extraction.llm_provider import LLMProviderChain
+    provider = LLMProviderChain()
+
+    extras = _row_extras_lookup(original_jsonl)
+    extracted = _extract_all_parallel(provider, rows)
+    wb = _Workbook()
+    ws = wb.active
+    ws.title = "pre-annotate"
+    header = [
+        "sample_id", "source", "source_id", "source_url",
+        "job_title_raw", "company_name", "location", "detail_raw_text",
+        "text_education", "source_education",
+        "current_gold_title", "review_gold_title",
+        "current_gold_skills", "review_gold_skills",
+        "current_gold_bonus_skills", "review_gold_bonus_skills",
+        "current_gold_experience", "review_gold_experience",
+        "current_gold_education", "review_gold_education",
+        "current_gold_core_duties", "review_gold_core_duties",
+        "review_status", "error_type", "review_note",
+    ]
+    ws.append(header)
+    if _XFont is not None:
+        for cell in ws[1]:
+            cell.font = _XFont(bold=True)
+
+    summary = {"total": len(rows), "fallback": 0, "failed": 0, "llm_outputs": 0}
+    for row, (tracker, result, err) in zip(rows, extracted):
+        sid = row.get("source_id", "")
+        ex = extras.get(sid, {})
+        if tracker.model_output is not None and result is not None:
+            summary["llm_outputs"] += 1
+            experience = getattr(result, "experience", None)
+            current = {
+                "title": getattr(result, "title", "") or "",
+                "skills": [s.name for s in (result.skills or [])],
+                "bonus_skills": [r.skill_name for r in (result.requirements or [])
+                                 if getattr(r, "necessity", None) and r.necessity.value == "nice"],
+                "experience": ({"min_years": getattr(experience, "min_years", None),
+                                "education_hint": getattr(experience, "education_hint", None)}
+                               if experience else None),
+                "education": getattr(result, "education", None) and str(result.education) or "",
+                "core_duties": [d.text for d in (getattr(result, "core_duties", None) or [])],
+            }
+            status = ""
+        elif err:
+            summary["failed"] += 1
+            current = {"title": "", "skills": [], "bonus_skills": [], "experience": None,
+                       "education": "", "core_duties": []}
+            status = "FAILED"
+        else:
+            summary["fallback"] += 1
+            current = {"title": "", "skills": [], "bonus_skills": [], "experience": None,
+                       "education": "", "core_duties": []}
+            status = "FALLBACK"
+
+        ws.append([
+            row["sample_id"], row["source"], row["source_id"], row["source_url"],
+            row["job_title_raw"], ex.get("company", ""), ex.get("location", ""),
+            row["detail_raw_text"],
+            row.get("text_education", ""), row.get("source_education", ""),
+            _to_xlsx_text(current["title"]), "",
+            _to_xlsx_text(current["skills"]), "",
+            _to_xlsx_text(current["bonus_skills"]), "",
+            _to_xlsx_text(current["experience"]), "",
+            _to_xlsx_text(current["education"]), "",
+            _to_xlsx_text(current["core_duties"]), "",
+            status, err or "", "",
+        ])
+
+    widths = {"A": 28, "B": 12, "C": 22, "D": 56, "E": 40, "F": 16, "G": 12, "H": 60,
+              "I": 16, "J": 16, "K": 28, "L": 28, "M": 40, "N": 40, "O": 30, "P": 30,
+              "Q": 24, "R": 24, "S": 18, "T": 18, "U": 40, "V": 40, "W": 14, "X": 24, "Y": 30}
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "I2"
+    wb.save(output_xlsx)
+    summary["output"] = str(output_xlsx.relative_to(ROOT))
+    return summary
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--xlsx", type=Path, default=DEFAULT_XLSX)
@@ -1091,7 +1251,24 @@ def main() -> int:
     )
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--run", action="store_true", help="Only after preflight succeeds, call the real LLM chain.")
+    # 预标注子模式：与 F1 评测互斥；读企业官网 clean → 跑 LLM → 写助标 xlsx。
+    # 不计算 F1，产物供人工校标用，校标后转 F1 评测走 --gold-jsonl 流程。
+    pre_annotate_group = parser.add_argument_group("pre-annotate (official_career_50)")
+    pre_annotate_group.add_argument(
+        "--pre-annotate", action="store_true",
+        help="启用预标注模式：读 clean → 跑 LLM 6 维 → 写助标 xlsx（与 F1 评测互斥）。",
+    )
+    pre_annotate_group.add_argument(
+        "--pre-annotate-input", type=Path, default=DEFAULT_OFFICIAL_50_CLEAN,
+        help="official_career_50 clean JSONL 路径（默认 …/official_career_50_clean.jsonl）。",
+    )
+    pre_annotate_group.add_argument(
+        "--pre-annotate-output", type=Path, default=DEFAULT_PRE_ANNOTATE_OUTPUT,
+        help="助标 xlsx 输出路径（默认 …/official_career_50_pre_annotate.xlsx）。",
+    )
     args = parser.parse_args()
+    if args.pre_annotate and (args.gold_jsonl is not None or args.xlsx != DEFAULT_XLSX or args.run):
+        parser.error("--pre-annotate 与 --gold-jsonl/--xlsx/--run 互斥")
     if args.gold_jsonl is not None:
         rows = _load_gold_jsonl(args.gold_jsonl)
         source_desc: Path = args.gold_jsonl
@@ -1133,6 +1310,19 @@ def main() -> int:
     print(f"ARCHIVED: {archive_path.relative_to(ROOT)}")
     print("SUCCESS: real LLM predictions and metrics were written.")
     return 0
+
+    # 预标注模式：跑 LLM → 写助标 xlsx。不计算 F1、不写评测产物。
+    if args.pre_annotate:
+        if not args.pre_annotate_input.exists():
+            print(f"BLOCKED: 输入文件不存在: {args.pre_annotate_input}")
+            return 4
+        rows = _load_official_50_rows(args.pre_annotate_input)
+        summary = run_pre_annotate(rows, args.pre_annotate_output, args.pre_annotate_input)
+        print(
+            f"PRE_ANNOTATE: {summary['total']} 条 | LLM 真实输出 {summary['llm_outputs']} | "
+            f"规则兜底 {summary['fallback']} | 失败 {summary['failed']} | 输出 {summary['output']}"
+        )
+        return 0
 
 
 if __name__ == "__main__":
