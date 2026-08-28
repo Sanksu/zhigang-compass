@@ -2049,14 +2049,18 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 岗位技能增减（最近两个版本快照对比，登录可见）
-         * @description 取最近两期 graph_versions 快照，按岗位 source 过滤 REQUIRES 边做集合差，返回新增/移除/未变技能
+         * 岗位技能增减（两版快照对比，登录可见）
+         * @description 取两期 graph_versions 快照（缺省最近两期，可显式指定 from/to 版本），按岗位 source 过滤 REQUIRES 边做集合差，返回新增/移除/未变技能
          */
         get: {
             parameters: {
                 query: {
                     /** @description 岗位 id（pos_xxx）或岗位名（与图谱 Position.name 对齐） */
                     position: string;
+                    /** @description 对比基准版 id（缺省=次新版本） */
+                    from_version?: string;
+                    /** @description 目标版 id（缺省=最新版本） */
+                    to_version?: string;
                 };
                 header?: never;
                 path?: never;
@@ -2079,6 +2083,69 @@ export interface paths {
                     };
                 };
                 /** @description 无图谱版本数据（快照不足 2 期）或岗位不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: unknown;
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/discovery/position-skills-delta/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 全岗位技能增减汇总（两版快照对比，登录可见）
+         * @description 取两期 graph_versions 快照（缺省最近两期，可显式指定 from/to），一次返回全部岗位的技能增减计数与可用版本列表——供下拉仅列有增减岗位、稳定面板列无增减岗位
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 对比基准版 id（缺省=次新版本） */
+                    from_version?: string;
+                    /** @description 目标版 id（缺省=最新版本） */
+                    to_version?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 全岗位增减汇总 + 可用版本列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["PositionSkillsDeltaSummaryData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                /** @description 无图谱版本数据（快照不足 2 期）或指定版本不存在 */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -5447,6 +5514,36 @@ export interface components {
             removed: components["schemas"]["PositionSkillsDelta"][];
             /** @description 未变技能 */
             unchanged: components["schemas"]["PositionSkillsDelta"][];
+        };
+        /** @description 可用快照版本（供对比版本选择） */
+        PositionSkillsDeltaVersion: {
+            id: string;
+            created_at?: string | null;
+        };
+        /** @description 单岗位技能增减计数（两版快照对比） */
+        PositionSkillsDeltaSummaryItem: {
+            /** @description 快照 REQUIRES 边 source（岗位 id） */
+            position_id: string;
+            position_name: string;
+            /** @description 新增技能数 */
+            added: number;
+            /** @description 移除技能数 */
+            removed: number;
+            /** @description 未变技能数 */
+            unchanged: number;
+        };
+        /** @description GET /discovery/position-skills-delta/summary 响应 data */
+        PositionSkillsDeltaSummaryData: {
+            /** @description 对比基准版 id（较旧） */
+            from_version?: string | null;
+            from_created_at?: string | null;
+            /** @description 目标版 id（较新） */
+            to_version?: string | null;
+            to_created_at?: string | null;
+            /** @description 全部可用快照版本（created_at 降序） */
+            versions: components["schemas"]["PositionSkillsDeltaVersion"][];
+            /** @description 全部岗位增减计数（增减数降序，其次名称） */
+            positions: components["schemas"]["PositionSkillsDeltaSummaryItem"][];
         };
     };
     responses: {

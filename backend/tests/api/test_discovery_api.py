@@ -112,7 +112,8 @@ class TestPositionSkillsDelta:
             _version_row("v1", [("sk_py", "Python"), ("sk_vue", "Vue")], created_days_ago=1),
         ]
         resp = await discovery_mod.position_skills_delta(
-            position="p1", db=_FakeSession(rows),
+            position="p1", from_version=None, to_version=None,
+            db=_FakeSession(rows),
             user={"role": "guest", "sub": "u1"},
         )
         data = resp.data
@@ -123,11 +124,57 @@ class TestPositionSkillsDelta:
         assert [s["skill_id"] for s in data["unchanged"]] == ["sk_py"]
 
     @pytest.mark.asyncio
+    async def test_explicit_version_pair(self):
+        """显式 from/to：跨期对比 v1 → v3（跳过 v2）。"""
+        rows = [
+            _version_row("v3", [("sk_py", "Python"), ("sk_gr", "GraphQL")], created_days_ago=0),
+            _version_row("v2", [("sk_py", "Python"), ("sk_np", "numpy")], created_days_ago=1),
+            _version_row("v1", [("sk_py", "Python"), ("sk_vue", "Vue")], created_days_ago=2),
+        ]
+        resp = await discovery_mod.position_skills_delta(
+            position="p1", from_version="v1", to_version="v3", db=_FakeSession(rows),
+            user={"role": "guest", "sub": "u1"},
+        )
+        data = resp.data
+        assert (data["from_version"], data["to_version"]) == ("v1", "v3")
+        assert [s["skill_id"] for s in data["added"]] == ["sk_gr"]
+        assert [s["skill_id"] for s in data["removed"]] == ["sk_vue"]
+
+    @pytest.mark.asyncio
+    async def test_same_version_pair_404(self):
+        """from == to：404 拒绝。"""
+        rows = [
+            _version_row("v2", [], created_days_ago=0),
+            _version_row("v1", [], created_days_ago=1),
+        ]
+        resp = await discovery_mod.position_skills_delta(
+            position="p1", from_version="v1", to_version="v1",
+            db=_FakeSession(rows),
+            user={"role": "guest", "sub": "u1"},
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_unknown_version_404(self):
+        """指定不存在的版本：404。"""
+        rows = [
+            _version_row("v2", [], created_days_ago=0),
+            _version_row("v1", [], created_days_ago=1),
+        ]
+        resp = await discovery_mod.position_skills_delta(
+            position="p1", from_version="v99", to_version=None,
+            db=_FakeSession(rows),
+            user={"role": "guest", "sub": "u1"},
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
     async def test_insufficient_snapshots_404(self):
         """快照不足 2 期：404。"""
         rows = [_version_row("v1", [])]
         resp = await discovery_mod.position_skills_delta(
-            position="p1", db=_FakeSession(rows),
+            position="p1", from_version=None, to_version=None,
+            db=_FakeSession(rows),
             user={"role": "guest", "sub": "u1"},
         )
         # error() 返回 JSONResponse，status_code=404
@@ -143,7 +190,77 @@ class TestPositionSkillsDelta:
             id="v2", created_at=datetime.now(_TZ), snapshot_json={}
         )
         resp = await discovery_mod.position_skills_delta(
-            position="p1", db=_FakeSession([empty_v2, empty_v1]),
+            position="p1", from_version=None, to_version=None,
+            db=_FakeSession([empty_v2, empty_v1]),
             user={"role": "guest", "sub": "u1"},
         )
         assert resp.data["added"] == [] and resp.data["removed"] == []
+
+
+class TestPositionSkillsDeltaSummary:
+    def _two_position_rows(self):
+        """v1：p1(Java) / p2(Go)；v2：p1(Java+K8s) / p2(Go)——p1 有增减、p2 稳定。"""
+
+        def snap(entries):
+            nodes, edges = [], []
+            for pid, pname, sid, sname in entries:
+                nodes.append({"id": pid, "name": pname, "type": "position"})
+                nodes.append({"id": sid, "name": sname, "type": "skill"})
+                edges.append({"source": pid, "target": sid, "relation": "REQUIRES"})
+            return {"nodes": nodes, "edges": edges}
+
+        v1 = SimpleNamespace(
+            id="v1", created_at=datetime.now(_TZ) - timedelta(days=1),
+            snapshot_json=snap([
+                ("p1", "后端工程师", "sk_java", "Java"),
+                ("p2", "Go 工程师", "sk_go", "Go"),
+            ]),
+        )
+        v2 = SimpleNamespace(
+            id="v2", created_at=datetime.now(_TZ),
+            snapshot_json=snap([
+                ("p1", "后端工程师", "sk_java", "Java"),
+                ("p1", "后端工程师", "sk_k8s", "Kubernetes"),
+                ("p2", "Go 工程师", "sk_go", "Go"),
+            ]),
+        )
+        return [v2, v1]
+
+    @pytest.mark.asyncio
+    async def test_summary_counts_and_stable(self):
+        """汇总：p1 新增 1（有增减）、p2 全稳（0 增减）；versions 全量返回。"""
+        resp = await discovery_mod.position_skills_delta_summary(
+            from_version=None, to_version=None,
+            db=_FakeSession(self._two_position_rows()),
+            user={"role": "guest", "sub": "u1"},
+        )
+        data = resp.data
+        assert (data["from_version"], data["to_version"]) == ("v1", "v2")
+        assert [v["id"] for v in data["versions"]] == ["v2", "v1"]
+        by_name = {p["position_name"]: p for p in data["positions"]}
+        assert by_name["后端工程师"]["added"] == 1
+        assert by_name["后端工程师"]["removed"] == 0
+        assert by_name["后端工程师"]["unchanged"] == 1
+        assert by_name["Go 工程师"]["added"] == 0
+        assert by_name["Go 工程师"]["unchanged"] == 1
+        # 排序：有增减的 p1 在稳定 p2 之前
+        assert data["positions"][0]["position_name"] == "后端工程师"
+
+    @pytest.mark.asyncio
+    async def test_summary_explicit_pair(self):
+        """显式版本对生效。"""
+        resp = await discovery_mod.position_skills_delta_summary(
+            from_version="v1", to_version="v2",
+            db=_FakeSession(self._two_position_rows()),
+            user={"role": "guest", "sub": "u1"},
+        )
+        assert resp.data["from_version"] == "v1"
+
+    @pytest.mark.asyncio
+    async def test_summary_insufficient_snapshots_404(self):
+        """快照不足 2 期：404。"""
+        resp = await discovery_mod.position_skills_delta_summary(
+            db=_FakeSession([_version_row("v1", [])]),
+            user={"role": "guest", "sub": "u1"},
+        )
+        assert resp.status_code == 404

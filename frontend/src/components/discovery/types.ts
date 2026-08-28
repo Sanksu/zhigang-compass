@@ -15,3 +15,11 @@ export type PositionSkillsDelta = components['schemas']['PositionSkillsDelta']
 
 /** 后端 /discovery/position-skills-delta 返回 data */
 export type PositionSkillsDeltaData = components['schemas']['PositionSkillsDeltaData']
+
+/** 后端 /discovery/position-skills-delta/summary 返回的单岗位增减计数 */
+export type PositionSkillsDeltaSummaryItem =
+  components['schemas']['PositionSkillsDeltaSummaryItem']
+
+/** 后端 /discovery/position-skills-delta/summary 返回 data（含可用版本列表） */
+export type PositionSkillsDeltaSummaryData =
+  components['schemas']['PositionSkillsDeltaSummaryData']
