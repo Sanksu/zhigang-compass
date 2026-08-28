@@ -1194,7 +1194,7 @@ def run_pre_annotate(rows: list[dict[str, str]], output_xlsx: Path, original_jso
                 "title": getattr(result, "title", "") or "",
                 "skills": [s.name for s in (result.skills or [])],
                 "bonus_skills": [r.skill_name for r in (result.requirements or [])
-                                 if getattr(r, "necessity", None) and r.necessity.value == "nice"],
+                                 if getattr(r, "necessity", None) == "nice"],
                 "experience": ({"min_years": getattr(experience, "min_years", None),
                                 "education_hint": getattr(experience, "education_hint", None)}
                                if experience else None),
