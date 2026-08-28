@@ -633,7 +633,7 @@ export function GraphPage() {
                   {searchResults.length > 0 ? searchResults.map((result) => (
                     <button key={result.id} type="button" role="option" aria-selected="false" onClick={() => focusSkill(result.id, result.name)} className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs hover:bg-subtle">
                       <span className="font-medium text-ink">{result.name}</span>
-                      <span className="font-mono text-[10px] text-ink-faint">相关度 {(result.score * 100).toFixed(0)}</span>
+                      <span className="font-mono text-[11px] text-ink-faint">相关度 {(result.score * 100).toFixed(0)}</span>
                     </button>
                   )) : <p className="px-2.5 py-2 text-xs text-ink-muted">未找到与“{query.trim()}”相关的技能</p>}
                 </div>
@@ -642,7 +642,7 @@ export function GraphPage() {
             <div className="flex shrink-0 items-center gap-2">
               {/* 原「视图说明」面板唯一不可替代的信息：3D 锁定原因（触控/WebGL2），仅锁定时显示 */}
               {mode3dLocked && (
-                <span className="text-[10px] text-ink-faint" data-testid="graph-3d-locked-hint">
+                <span className="text-[11px] text-ink-faint" data-testid="graph-3d-locked-hint">
                   {isCoarsePointer ? '触控设备固定 2D 模式' : 'WebGL2 不可用，已降级 2D 模式'}
                 </span>
               )}
@@ -676,9 +676,9 @@ export function GraphPage() {
             </TabsList>
             <p className="truncate text-[11px] text-ink-muted" title={VIEW_DESC[view]}>{VIEW_DESC[view]}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-ink-muted" aria-label="当前图谱规模">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-muted" aria-label="当前图谱规模">
             <span className="flex items-center gap-1" title="当前视图节点数 / 图谱总节点数"><Network className="size-3" /><b className="font-mono font-medium text-ink-secondary">{data.stats.returnedNodes}</b><span>/ {data.stats.totalNodesInGraph} 节点</span></span>
-            <span className="flex items-center gap-1"><Box className="size-3" /><b className="font-mono font-medium text-ink-secondary">{data.stats.totalEdges}</b><span>边</span></span>
+            <span className="flex items-center gap-1" title={visibleData && visibleData.edges.length !== data.stats.totalEdges ? `画布渲染 ${visibleData.edges.length} 条（降噪裁剪，全量 ${data.stats.totalEdges}）` : '当前视图边数'}><Box className="size-3" /><b className="font-mono font-medium text-ink-secondary">{visibleData?.edges.length ?? data.stats.totalEdges}</b><span>边</span></span>
             {visibleData && <span><b className="font-mono font-medium text-ink-secondary">{visibleData.nodes.filter((node) => node.type === 'position').length}</b> 岗位 · <b className="font-mono font-medium text-ink-secondary">{visibleData.nodes.filter((node) => node.type === 'skill').length}</b> 技能</span>}
             {data.stats.returnedNodes < data.stats.totalNodesInGraph && <span className="rounded bg-elevated px-1.5 py-0.5">采样视图</span>}
           </div>
@@ -724,7 +724,7 @@ export function GraphPage() {
                   size="sm"
                   variant="ghost"
                   onClick={() => flyToBookmark(bookmark.nodeName)}
-                  className="h-7 px-2 text-[10px] text-ink-muted hover:text-ink"
+                  className="h-7 px-2 text-[11px] text-ink-muted hover:text-ink"
                   title={`镜头飞至${bookmark.label}（${bookmark.nodeName}）`}
                 >
                   {bookmark.label}
@@ -776,7 +776,7 @@ export function GraphPage() {
                   <X className="size-3" />
                 </button>
               </div>
-              <ul className="mt-1.5 space-y-0.5 text-[10px] text-ink-muted">
+              <ul className="mt-1.5 space-y-0.5 text-[11px] text-ink-muted">
                 {mode === '3d' ? (
                   <>
                     <li>滚轮缩放 · 拖拽空白旋转视角</li>
@@ -850,7 +850,7 @@ export function GraphPage() {
 
       <div className="mt-4 grid gap-3 rounded-lg border border-atlas-grid bg-subtle/60 p-3 text-xs text-ink-muted lg:grid-cols-2 xl:grid-cols-4" role="list" aria-label="图谱图例">
         <div className="space-y-2" role="listitem">
-          <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">MAP FEATURES / 实体</p>
+          <p className="font-mono text-[11px] tracking-[0.15em] text-atlas-muted">MAP FEATURES / 实体</p>
           <div className="flex flex-wrap gap-x-3 gap-y-1.5">
             <span className="flex items-center gap-1.5"><span className="size-3 rotate-45 bg-graph-domain" /> 职能域</span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-sm border border-atlas-ocean bg-state-stable" /> 岗位</span>
@@ -862,7 +862,7 @@ export function GraphPage() {
           </div>
         </div>
         <div className="space-y-2" role="listitem">
-          <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">RELATION SURVEY / 关系</p>
+          <p className="font-mono text-[11px] tracking-[0.15em] text-atlas-muted">RELATION SURVEY / 关系</p>
           <div className="flex flex-wrap gap-x-3 gap-y-1.5">
             <span className="flex items-center gap-1.5"><span className="h-0.5 w-5 bg-atlas-ocean" /> 必备关系</span>
             <span className="flex items-center gap-1.5"><span className="w-5 border-t border-dashed border-atlas-muted" /> 加分关系</span>
@@ -870,7 +870,7 @@ export function GraphPage() {
           </div>
         </div>
         <div className="space-y-2" role="listitem">
-          <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">SKILL CATEGORY / 技能类目</p>
+          <p className="font-mono text-[11px] tracking-[0.15em] text-atlas-muted">SKILL CATEGORY / 技能类目</p>
           <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
             {SKILL_CATEGORY_PALETTE.map((cat) => (
               <span key={cat.label} className="flex items-center gap-1">
@@ -881,7 +881,7 @@ export function GraphPage() {
           </div>
         </div>
         <div className="space-y-2" role="listitem">
-          <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">POSITION STATUS / 岗位状态色</p>
+          <p className="font-mono text-[11px] tracking-[0.15em] text-atlas-muted">POSITION STATUS / 岗位状态色</p>
           <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
             {(['active', 'stable', 'emerging', 'candidate', 'declining', 'archived'] as PositionState[]).map((s) => (
               <span key={s} className="flex items-center gap-1">
