@@ -29,7 +29,8 @@ import {
   type SkillEvidenceItem,
   type SkillPositionItem,
 } from '@/components/graph/node-detail-panel'
-import type { GraphData, GraphViewType, NodeDetail } from '@/components/graph/types'
+import type { GraphData, GraphEdge, GraphViewType, NodeDetail } from '@/components/graph/types'
+import { SKILL_CATEGORY_PALETTE } from '@/components/graph/graph-visual-tokens'
 import type { LearningPathItem } from '@/components/match/types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
 import { apiGet, ApiError } from '@/lib/api'
@@ -434,8 +435,22 @@ export function GraphPage() {
     if (view === 'techStack') {
       const nodes = data.nodes.filter((n) => n.type !== 'position' || keepPositions.has(n.id))
       const nodeIds = new Set(nodes.map((n) => n.id))
-      const edges = data.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
-      return { ...data, nodes, edges }
+      // 08-28 技术栈降噪：每技能仅保留权重 Top-K 的岗位边（该视图边为技能→岗位）。
+      // 全量 1719 边交叉成毛线团是视觉混乱主因；Top-4 裁至 ~1/4，配合边透明度渐变。
+      const TECH_STACK_EDGES_PER_SKILL = 4
+      const bySkill = new Map<string, GraphEdge[]>()
+      for (const e of data.edges) {
+        if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue
+        const list = bySkill.get(e.source)
+        if (list) list.push(e)
+        else bySkill.set(e.source, [e])
+      }
+      const kept = new Set<GraphEdge>()
+      for (const list of bySkill.values()) {
+        list.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
+        for (const e of list.slice(0, TECH_STACK_EDGES_PER_SKILL)) kept.add(e)
+      }
+      return { ...data, nodes, edges: [...kept] }
     }
 
     // 每个展开岗位：按边权重取 Top-N 技能（多岗位共享技能去重）
@@ -464,6 +479,17 @@ export function GraphPage() {
     })
     return { ...data, nodes, edges }
   }, [data, view, expandedPositions, expandedDomains, domainAgg])
+  // 技术栈视图标签降噪白名单：仅 Top-30 高频技能在 LOD band 1 常显标签
+  // （其余技能放大到 band 2 才显示；非 techStack 视图传 null 走原中位阈值口径）
+  const skillLabelTopIds = useMemo(() => {
+    if (view !== 'techStack' || !data) return null
+    const top = data.nodes
+      .filter((n) => n.type === 'skill')
+      .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      .slice(0, 30)
+    return new Set(top.map((n) => n.id))
+  }, [view, data])
+
   // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
   const webgl2Available = useMemo(() => isWebGL2Available(), [])
   // 触控设备（移动/平板，粗指针）固定 2D 模式（设计文档 §6.3：平板/移动端固定 2D）
@@ -719,6 +745,7 @@ export function GraphPage() {
               learningPath={learningPath}
               completedSkills={[]}
               evolutionMarks={evolutionMarks}
+              skillLabelTopIds={skillLabelTopIds}
               className="h-full w-full"
             />
           ) : (
@@ -821,7 +848,7 @@ export function GraphPage() {
       {/* 演化时间轴（P0-2）：版本快照滑轨 + 增删打标（接口失败静默隐藏） */}
       <EvolutionTimeline onMarksChange={setEvolutionMarks} className="mt-3" />
 
-      <div className="mt-4 grid gap-3 rounded-lg border border-atlas-grid bg-subtle/60 p-3 text-xs text-ink-muted lg:grid-cols-[1.15fr_1fr_1.2fr]" role="list" aria-label="图谱图例">
+      <div className="mt-4 grid gap-3 rounded-lg border border-atlas-grid bg-subtle/60 p-3 text-xs text-ink-muted lg:grid-cols-2 xl:grid-cols-4" role="list" aria-label="图谱图例">
         <div className="space-y-2" role="listitem">
           <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">MAP FEATURES / 实体</p>
           <div className="flex flex-wrap gap-x-3 gap-y-1.5">
@@ -840,6 +867,17 @@ export function GraphPage() {
             <span className="flex items-center gap-1.5"><span className="h-0.5 w-5 bg-atlas-ocean" /> 必备关系</span>
             <span className="flex items-center gap-1.5"><span className="w-5 border-t border-dashed border-atlas-muted" /> 加分关系</span>
             <span className="flex items-center gap-1.5"><span className="w-5 border-t border-dotted border-atlas-muted" /> 共享能力关联</span>
+          </div>
+        </div>
+        <div className="space-y-2" role="listitem">
+          <p className="font-mono text-[9px] tracking-[0.15em] text-atlas-muted">SKILL CATEGORY / 技能类目</p>
+          <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
+            {SKILL_CATEGORY_PALETTE.map((cat) => (
+              <span key={cat.label} className="flex items-center gap-1">
+                <span className="size-2 rounded-full" style={{ backgroundColor: cat.color }} />
+                {cat.label}
+              </span>
+            ))}
           </div>
         </div>
         <div className="space-y-2" role="listitem">

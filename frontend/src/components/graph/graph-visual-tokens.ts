@@ -49,3 +49,38 @@ export function graphNodeColor(theme: GraphTheme, kind: 'domain' | 'skill' | 'so
   if (kind === 'position') return GRAPH_COLOR_BY_STATUS[status]
   return THEME_COLORS[theme][kind]
 }
+
+/* 技能类目着色（08-28 技术栈视图降噪）：按图谱 skill_category 归入大类配色，
+   画布 colorOf 与图例共用本表。匹配按 contains 顺序取首个命中，未命中回落
+   默认技能色（graphNodeColor(theme, 'skill')，由调用方兜底）。 */
+export interface SkillCategoryStyle {
+  /** 命中关键词（对 skill_category 做 contains 匹配，小写比较） */
+  match: string[]
+  color: string
+  label: string
+}
+
+export const SKILL_CATEGORY_PALETTE: SkillCategoryStyle[] = [
+  { match: ['语言'], color: '#6366f1', label: '编程语言' },
+  { match: ['ai', '机器学习', '算法', '大模型', 'llm', 'nlp', '语音', '视觉'], color: '#8b5cf6', label: 'AI/算法' },
+  { match: ['前端', 'web'], color: '#0ea5e9', label: '前端' },
+  { match: ['后端', '架构', '分布式', '微服务', '中间件', '消息'], color: '#3b82f6', label: '后端/架构' },
+  { match: ['数据库', '缓存', 'sql'], color: '#14b8a6', label: '数据库/存储' },
+  { match: ['大数据', '数据工程', '数仓', 'etl'], color: '#06b6d4', label: '大数据' },
+  { match: ['云', 'devops', '运维', 'sre', '容器', 'k8s'], color: '#f59e0b', label: '云/DevOps' },
+  { match: ['安全'], color: '#ef4444', label: '安全' },
+  { match: ['测试', '质量'], color: '#84cc16', label: '测试' },
+  { match: ['移动', '客户端', 'android', 'ios', '桌面'], color: '#ec4899', label: '移动/客户端' },
+  { match: ['网络', '协议'], color: '#64748b', label: '网络/协议' },
+  { match: ['游戏', '引擎', '图形'], color: '#a855f7', label: '游戏/图形' },
+  { match: ['硬件', '芯片', '嵌入式'], color: '#78716c', label: '硬件/嵌入式' },
+]
+
+export function skillCategoryColor(category: string | null | undefined): string | null {
+  const c = (category ?? '').trim().toLowerCase()
+  if (!c) return null
+  for (const item of SKILL_CATEGORY_PALETTE) {
+    if (item.match.some((kw) => c.includes(kw))) return item.color
+  }
+  return null
+}

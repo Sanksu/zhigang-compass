@@ -16,7 +16,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphEdge, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 import type { EChartsModel } from './graph-layout'
 import { COLOR_BY_STATUS, computeFilterMarks, isSoftSkill, skillLabelThreshold } from './graph-utils'
-import { graphColors, graphNodeColor, GRAPH_OPACITY } from './graph-visual-tokens'
+import { graphColors, graphNodeColor, GRAPH_OPACITY, skillCategoryColor } from './graph-visual-tokens'
 import { buildDagGraph, type DagSkillLink, type DagSkillNode } from '@/components/learning/learning-timeline'
 import type { LearningPathItem } from '@/components/match/types'
 import { GraphFilterPanel } from './graph-filter-panel'
@@ -47,6 +47,8 @@ interface Graph2DProps {
   completedSkills?: string[]
   /** 演化时间轴标记（P0-2）：本版新增绿环 / 消亡橙虚线（打标不剔除） */
   evolutionMarks?: { addedIds: Set<string>; removedIds: Set<string> } | null
+  /** 技能标签 Top-N 白名单（技术栈视图降噪：仅集合内技能在 LOD band 1 常显标签） */
+  skillLabelTopIds?: Set<string> | null
   className?: string
 }
 
@@ -130,7 +132,13 @@ function colorOf(node: GraphNode, dark: boolean): string {
   if (node.isDomain) return graphNodeColor(theme, 'domain')
   if (node.type === 'position') return graphNodeColor(theme, 'position', node.status ?? 'candidate')
   if (isSoftSkill(node)) return graphNodeColor(theme, 'softSkill')
-  if (node.type === 'skill') return graphNodeColor(theme, 'skill')
+  if (node.type === 'skill') {
+    // 08-28 技术栈降噪：技能按类目着色（s_category 随 view 接口下发），
+    // 未收录类目回落默认技能色
+    const catColor = skillCategoryColor(node.skill_category)
+    if (catColor) return catColor
+    return graphNodeColor(theme, 'skill')
+  }
   return graphNodeColor(theme, 'evidence')
 }
 
@@ -148,8 +156,8 @@ function edgeBaseStyle(
   edge: GraphEdge,
   nodeById: Map<string, GraphNode>,
   colors: ReturnType<typeof graphColors>,
-  dark: boolean,
   dimmed: boolean,
+  weightNorm = 0,
 ) {
   const source = nodeById.get(edge.source)
   const target = nodeById.get(edge.target)
@@ -163,14 +171,19 @@ function edgeBaseStyle(
       : kind === 'must'
         ? { width: 1.5, type: 'solid' as const, color: colors.edgeStrong, curveness: 0 }
         : { width: 0.9, type: 'dashed' as const, color: colors.edgeOptional, curveness: 0 }
+  // 08-28 技术栈降噪：岗位关系边透明度/线宽按权重渐变——低权边压暗到近隐约，
+  // 高权边保持可读，悬停邻接提亮仍由 hover 直改机制叠加
+  const width =
+    kind === 'must' ? 0.7 + 1.1 * weightNorm : kind === 'nice' ? 0.5 + 0.8 * weightNorm : base.width
   return {
     kind,
     ...base,
+    width,
     opacity: dimmed
       ? FILTER_DIM_EDGE_OPACITY
       : kind === 'membership' || kind === 'shared'
         ? 0.45
-        : GRAPH_OPACITY.edge[dark ? 'dark' : 'light'] + 0.18,
+        : 0.08 + 0.42 * weightNorm,
   }
 }
 
@@ -297,6 +310,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     learningPath,
     completedSkills,
     evolutionMarks,
+    skillLabelTopIds,
     className,
   },
   ref,
@@ -623,7 +637,11 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
               : n.isDomain || n.type === 'position'
                 ? lodBand >= 0
                 : n.type === 'skill'
-                ? lodBand === 2 || (lodBand >= 1 && (n.value ?? 0) >= labelThreshold)
+                ? lodBand === 2 ||
+                  (lodBand >= 1 &&
+                    (skillLabelTopIds
+                      ? skillLabelTopIds.has(n.id)
+                      : (n.value ?? 0) >= labelThreshold))
                 : false,
           position: 'right',
           color: textColor,
@@ -661,9 +679,11 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     // 各类线宽统一固定值（演示口径）；悬停节点的关联边提亮由下方 hover 效果
     // 直改边元素实现，不进 option。
     const nodeById = new Map(data.nodes.map((node) => [node.id, node]))
+    const maxWeight = data.edges.reduce((mx, e) => Math.max(mx, e.weight ?? 0), 0)
     const links = data.edges.map((edge, index) => {
       const dimmed = filterMarks.dimEdgeFlags[index]
-      const base = edgeBaseStyle(edge, nodeById, colors, dark, dimmed)
+      const norm = maxWeight > 0 ? Math.min(1, (edge.weight ?? 0) / maxWeight) : 0
+      const base = edgeBaseStyle(edge, nodeById, colors, dimmed, norm)
       return {
         source: edge.source,
         target: edge.target,
@@ -787,8 +807,12 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const nodeById = new Map(data.nodes.map((node) => [node.id, node]))
     const dark = isDark()
     const colors = graphColors(dark ? 'dark' : 'light')
+    const maxWeight = data.edges.reduce((mx, e) => Math.max(mx, e.weight ?? 0), 0)
     return data.edges.map((edge, i) => ({
-      ...edgeBaseStyle(edge, nodeById, colors, dark, !!filterMarks.dimEdgeFlags[i]),
+      ...edgeBaseStyle(
+        edge, nodeById, colors, !!filterMarks.dimEdgeFlags[i],
+        maxWeight > 0 ? Math.min(1, (edge.weight ?? 0) / maxWeight) : 0,
+      ),
       dimmed: !!filterMarks.dimEdgeFlags[i],
     }))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- themeVersion 语义必要（isDark 非响应式读取）
