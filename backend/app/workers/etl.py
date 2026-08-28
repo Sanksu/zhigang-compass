@@ -129,7 +129,10 @@ async def run_etl_pipeline(
     domestic_platforms = ["zhilian"]
     international_platforms = ["indeed", "glassdoor"]
     trend_platforms = ["arxiv", "github", "stackoverflow"]
-    crawl_platforms = domestic_platforms + international_platforms + trend_platforms
+    # 课程源按日采集（2026-08-28 拍板）：icourse163 国内直连 / edx+coursera 走代理；
+    # 置于管线开头，与后续 enrich/load/evaluate 课程三阶段形成日级闭环
+    course_platforms = ["icourse163", "edx", "coursera"]
+    crawl_platforms = domestic_platforms + international_platforms + trend_platforms + course_platforms
     if skip_cdp:
         crawl_platforms = [
             platform
