@@ -1199,7 +1199,7 @@ def run_pre_annotate(rows: list[dict[str, str]], output_xlsx: Path, original_jso
                                 "education_hint": getattr(experience, "education_hint", None)}
                                if experience else None),
                 "education": getattr(result, "education", None) and str(result.education) or "",
-                "core_duties": [d.text for d in (getattr(result, "core_duties", None) or [])],
+                "core_duties": list(getattr(result, "core_duties", None) or []),
             }
             status = ""
         elif err:
