@@ -193,8 +193,22 @@ def _semantic_match_skill(
     return best_name if best_sim > sim_threshold else None
 
 
+def _boundary_hit(token: str, text: str) -> bool:
+    """词边界包含：token 出现且两侧相邻字符均非 ASCII 字母/数字。
+
+    08-29 iOS 误配实证：整串子串包含使 "ios" ⊂ 西语 "negocios"（Excel para
+    los negocios）构成词面命中直通，绕过全部语义/质量门控。子串会误中复合词
+    内部，同 08-18 LinkedIn 技术岗白名单 "Systematic/recruiter" 子串教训——
+    须词边界匹配。边界仅排除 ASCII 字母数字：CJK/标点/空格/首尾相邻均视为
+    边界（"RESTful技术"、"iOS开发" 等中英混排命中不受影响）。
+    """
+    if not token:
+        return False
+    return re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", text) is not None
+
+
 def _lexical_hit(skill_name: str, title: str) -> bool:
-    """强词面命中：技能名或其核心 token（≥3 字符）直接包含在课程名中。
+    """强词面命中：技能名或其核心 token（≥3 字符）以词边界包含在课程名中。
 
     背景（08-13 AWS 补采实证）：SBERT 对 "AWS" vs "AWS Cloud Technical
     Essentials" 相似度仅 0.472——缩写技能名与长课程名语义相似度虚低，
@@ -205,14 +219,16 @@ def _lexical_hit(skill_name: str, title: str) -> bool:
     "…RESTful技术"）——按非字母数字拆分 token（≥3 字符），任一 token
     命中课程名即词面相关；泛化 token（code/app/api/web 等，如
     "Claude Code" 的 "code" ∈ "No-Code…" 实证误配）不做 token 命中。
+    08-29 词边界化：包含判定从裸子串改为 _boundary_hit——"ios" ⊂
+    "negocios"、"sql" ⊂ "nosql" 类复合词内部子串不再构成词面自证。
     """
     low_skill = skill_name.lower()
     low_title = title.lower()
-    if len(skill_name) >= 3 and low_skill in low_title:
+    if len(skill_name) >= 3 and _boundary_hit(low_skill, low_title):
         return True
     tokens = re.split(r"[^a-z0-9\u4e00-\u9fff]+", low_skill)
     return any(
-        len(t) >= 3 and t not in _GENERIC_LEXICAL_TOKENS and t in low_title
+        len(t) >= 3 and t not in _GENERIC_LEXICAL_TOKENS and _boundary_hit(t, low_title)
         for t in tokens
     )
 

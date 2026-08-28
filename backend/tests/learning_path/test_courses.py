@@ -105,6 +105,21 @@ class TestTitleSimilarityGate:
         """08-16：泛化 token（code/app/api/web 等）不构成词面信号
         （Claude Code 的 "code" ∈ "No-Code…" 实证误配）；短词豁免保持。"""
         assert not _lexical_hit("Claude Code", "No-Code Machine Learning Using Amazon AWS")
+
+    def test_lexical_hit_word_boundary(self):
+        """08-29 词边界化：子串命中复合词内部不算词面自证。
+
+        226 移动端全栈实证："iOS" ⊂ 西语 "negocios"（Excel para los negocios）
+        曾词面直通 3 门 Excel 课；"sql" ⊂ "nosql" 同族。中英混排边界不受影响
+        （CJK 相邻视为边界）。"""
+        # 复合词内部子串不再命中
+        assert not _lexical_hit("iOS", "Excel para los negocios nivel intermedio")
+        assert not _lexical_hit("SQL", "NoSQL, Big Data and Spark Fundamentals")
+        assert not _lexical_hit("Java", "JavaScript Frameworks Fundamentals")
+        # 正常词边界命中不受影响
+        assert _lexical_hit("iOS", "iOS 开发实战")
+        assert _lexical_hit("iOS", "IOS Development for Beginners")
+        assert _lexical_hit("SQL", "Databases and SQL for Data Science")
         assert not _lexical_hit("Go", "Introduction to Go Programming")
 
     def test_hint_hit_low_quality_filtered(self):
