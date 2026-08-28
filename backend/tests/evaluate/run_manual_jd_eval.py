@@ -1269,6 +1269,19 @@ def main() -> int:
     args = parser.parse_args()
     if args.pre_annotate and (args.gold_jsonl is not None or args.xlsx != DEFAULT_XLSX or args.run):
         parser.error("--pre-annotate 与 --gold-jsonl/--xlsx/--run 互斥")
+    # 预标注模式：跑 LLM → 写助标 xlsx。不计算 F1、不读 xlsx/gold，须在主评测
+    # 流程之前路由，否则会触探 args.xlsx 默认路径（容器内无该文件）。
+    if args.pre_annotate:
+        if not args.pre_annotate_input.exists():
+            print(f"BLOCKED: 输入文件不存在: {args.pre_annotate_input}")
+            return 4
+        rows = _load_official_50_rows(args.pre_annotate_input)
+        summary = run_pre_annotate(rows, args.pre_annotate_output, args.pre_annotate_input)
+        print(
+            f"PRE_ANNOTATE: {summary['total']} 条 | LLM 真实输出 {summary['llm_outputs']} | "
+            f"规则兜底 {summary['fallback']} | 失败 {summary['failed']} | 输出 {summary['output']}"
+        )
+        return 0
     if args.gold_jsonl is not None:
         rows = _load_gold_jsonl(args.gold_jsonl)
         source_desc: Path = args.gold_jsonl
@@ -1310,19 +1323,6 @@ def main() -> int:
     print(f"ARCHIVED: {archive_path.relative_to(ROOT)}")
     print("SUCCESS: real LLM predictions and metrics were written.")
     return 0
-
-    # 预标注模式：跑 LLM → 写助标 xlsx。不计算 F1、不写评测产物。
-    if args.pre_annotate:
-        if not args.pre_annotate_input.exists():
-            print(f"BLOCKED: 输入文件不存在: {args.pre_annotate_input}")
-            return 4
-        rows = _load_official_50_rows(args.pre_annotate_input)
-        summary = run_pre_annotate(rows, args.pre_annotate_output, args.pre_annotate_input)
-        print(
-            f"PRE_ANNOTATE: {summary['total']} 条 | LLM 真实输出 {summary['llm_outputs']} | "
-            f"规则兜底 {summary['fallback']} | 失败 {summary['failed']} | 输出 {summary['output']}"
-        )
-        return 0
 
 
 if __name__ == "__main__":
