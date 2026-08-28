@@ -264,12 +264,12 @@ export function DictGuardTab() {
                     <TableRow key={pr.id}>
                       <TableCell className="font-medium text-ink">{pr.term}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-[10px] font-mono">
+                        <Badge variant="outline" className="text-[11px] font-mono">
                           {ENTITY_LABEL[pr.entity_type ?? 'skill'] ?? pr.entity_type ?? 'skill'}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-[11px]">
                           {ACTION_LABEL[pr.action] ?? pr.action}
                         </Badge>
                       </TableCell>
@@ -373,10 +373,10 @@ export function DictGuardTab() {
                     <TableCell className="font-medium text-ink">{c.term}</TableCell>
                     <TableCell className="text-xs">{ACTION_LABEL[c.action] ?? c.action}</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="text-[10px] font-mono">{c.source}</Badge>
+                      <Badge variant="outline" className="text-[11px] font-mono">{c.source}</Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={c.kind === 'blocked' ? 'archived' : 'emerging'} className="text-[10px]">
+                      <Badge variant={c.kind === 'blocked' ? 'archived' : 'emerging'} className="text-[11px]">
                         {c.kind === 'blocked'
                           ? '拦截'
                           : c.kind === 'protected'

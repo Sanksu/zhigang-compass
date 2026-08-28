@@ -50,7 +50,7 @@ export function CitationBadge({ source, confidence, url, title, className }: Cit
       variant="outline"
       title={title}
       className={cn(
-        'inline-flex items-center gap-1 rounded-full px-2 py-0 text-[10px] font-normal leading-4',
+        'inline-flex items-center gap-1 rounded-full px-2 py-0 text-[11px] font-normal leading-4',
         TONE_CLASS[tone],
         url && 'cursor-pointer hover:bg-subtle',
         className,
@@ -101,7 +101,7 @@ export function CitationGroup({ items, className, max }: CitationGroupProps) {
         <CitationBadge key={i} {...it} />
       ))}
       {rest > 0 && (
-        <Badge variant="outline" className="rounded-full px-2 py-0 text-[10px] text-ink-faint">
+        <Badge variant="outline" className="rounded-full px-2 py-0 text-[11px] text-ink-faint">
           +{rest}
         </Badge>
       )}

@@ -237,7 +237,7 @@ export function VersionDiffView() {
               {Object.entries(detail.stats.by_type ?? {}).map(([type, count]) => (
                 <div key={type} className="rounded-md bg-subtle p-2 text-center">
                   <div className="text-lg font-semibold tabular-nums text-ink">{count}</div>
-                  <div className="text-[10px] text-ink-muted">{type}</div>
+                  <div className="text-[11px] text-ink-muted">{type}</div>
                 </div>
               ))}
             </div>
@@ -260,15 +260,15 @@ export function VersionDiffView() {
                 <TableBody>
                   {detail.nodes.slice(0, 50).map((n) => (
                     <TableRow key={n.id}>
-                      <TableCell className="font-mono text-[10px] text-ink-muted">{n.id}</TableCell>
+                      <TableCell className="font-mono text-[11px] text-ink-muted">{n.id}</TableCell>
                       <TableCell className="text-xs font-medium text-ink">{n.name}</TableCell>
-                      <TableCell className="text-[10px] text-ink-faint">{n.type}</TableCell>
+                      <TableCell className="text-[11px] text-ink-faint">{n.type}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
               {detail.nodes.length > 50 && (
-                <p className="border-t border-border p-2 text-center text-[10px] text-ink-faint">
+                <p className="border-t border-border p-2 text-center text-[11px] text-ink-faint">
                   仅显示前 50 条，共 {detail.nodes.length} 个节点
                 </p>
               )}
@@ -323,7 +323,7 @@ function DiffTable({ items }: { items: VersionDiffItem[] }) {
             <TableCell className="font-mono text-xs text-ink-muted">{item.id}</TableCell>
             <TableCell className="font-medium text-ink">{item.name}</TableCell>
             <TableCell>
-              <Badge variant="outline" className="text-[10px] font-mono">
+              <Badge variant="outline" className="text-[11px] font-mono">
                 {typeLabel[item.type]}
               </Badge>
             </TableCell>

@@ -243,7 +243,7 @@ function CrawlLogDialog({ taskId, platformName, onClose }: {
         </DialogHeader>
         <div
           ref={boxRef}
-          className="max-h-80 min-h-32 overflow-y-auto rounded-md border border-border bg-ink/[0.03] p-2 font-mono text-[10px] leading-relaxed text-ink-secondary whitespace-pre-wrap"
+          className="max-h-80 min-h-32 overflow-y-auto rounded-md border border-border bg-ink/[0.03] p-2 font-mono text-[11px] leading-relaxed text-ink-secondary whitespace-pre-wrap"
         >
           {status === 'empty' ? (
             <span className="text-ink-faint">该平台暂无爬取记录</span>
@@ -623,7 +623,7 @@ export function AdminCrawlPage() {
                       </div>
                       <div
                         ref={logRef}
-                        className="max-h-48 overflow-y-auto rounded-md border border-border bg-ink/[0.03] p-2 font-mono text-[10px] leading-relaxed text-ink-secondary whitespace-pre-wrap"
+                        className="max-h-48 overflow-y-auto rounded-md border border-border bg-ink/[0.03] p-2 font-mono text-[11px] leading-relaxed text-ink-secondary whitespace-pre-wrap"
                       >
                         {currentTask.logs.length === 0 ? (
                           <span className="text-ink-faint">等待 worker 执行，日志将在此实时显示…</span>

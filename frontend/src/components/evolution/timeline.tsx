@@ -148,7 +148,7 @@ export function SnapshotTimelineView<T extends { points?: SnapshotPoint[] }>({
           <span className="flex items-center gap-2">
             <Icon className="size-4" />
             <span>{title}</span>
-            {subtitle && <span className="text-[10px] font-normal text-ink-faint">{subtitle}</span>}
+            {subtitle && <span className="text-[11px] font-normal text-ink-faint">{subtitle}</span>}
           </span>
           <div className="flex items-center gap-2">
             {defaults && defaults.length > 0 && (
@@ -200,7 +200,7 @@ export function SnapshotTimelineView<T extends { points?: SnapshotPoint[] }>({
           <>
             <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
               <span className="font-medium text-ink">{nameOf(data)}</span>
-              <span className="font-mono text-[10px] text-ink-faint">{idOf(data)}</span>
+              <span className="font-mono text-[11px] text-ink-faint">{idOf(data)}</span>
               <span className="text-ink-faint">· 共 {allPoints.length} 期快照</span>
             </div>
             <PointsTrendChart points={allPoints} freqLabel={freqLabel} />

@@ -124,7 +124,7 @@ export function TechnologyWatchTab() {
                     <TableRow key={`${w.skill_name}-${w.signal_source}-${w.period}-${i}`}>
                       <TableCell className="font-medium text-ink">{w.skill_name}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-[10px] font-mono">
+                        <Badge variant="outline" className="text-[11px] font-mono">
                           {WATCH_SOURCE_LABEL[w.signal_source] ?? w.signal_source}
                         </Badge>
                       </TableCell>
@@ -135,7 +135,7 @@ export function TechnologyWatchTab() {
                       <TableCell>
                         <Badge
                           variant={w.status === 'candidate_promoted' ? 'emerging' : w.status === 'archived' ? 'archived' : 'outline'}
-                          className="text-[10px]"
+                          className="text-[11px]"
                         >
                           {w.status === 'candidate_promoted' ? '候选提升' : w.status === 'archived' ? '已归档' : '观察中'}
                         </Badge>

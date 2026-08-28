@@ -330,22 +330,22 @@ export function AdminDashboardPage() {
                 }`}
               >
                 <div className="flex items-center justify-between mb-1.5">
-                  <Badge variant={src.levelVariant} className="text-[10px] leading-none px-1.5 py-0">
+                  <Badge variant={src.levelVariant} className="text-[11px] leading-none px-1.5 py-0">
                     {src.level}
                   </Badge>
                   <span className="flex items-center gap-1">
                     <span className={`size-1.5 rounded-full ${STATUS_DOT_CLASS[src.status]}`} />
-                    <span className="text-[9px] text-ink-faint">{STATUS_LABEL[src.status]}</span>
+                    <span className="text-[10px] text-ink-faint">{STATUS_LABEL[src.status]}</span>
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded border border-border bg-subtle text-[11px] font-semibold text-ink-muted">
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded border border-border bg-subtle text-[12px] font-semibold text-ink-muted">
                     {src.name.charAt(0)}
                   </span>
                   <span className="text-ink truncate font-medium">{src.name}</span>
                 </div>
                 {/* 采集指标：累计 / 今日 / 文件数 / 最近运行 */}
-                <div className="mt-2 space-y-0.5 text-[10px] text-ink-faint tabular-nums">
+                <div className="mt-2 space-y-0.5 text-[11px] text-ink-faint tabular-nums">
                   <div>
                     累计 {src.totalCount.toLocaleString()}
                     {src.todayCount > 0 && <span className="text-state-emerging"> · 今日 +{src.todayCount}</span>}
@@ -418,7 +418,7 @@ export function AdminDashboardPage() {
                     <TableRow key={log.id}>
                       <TableCell className="font-mono text-xs text-ink-muted whitespace-nowrap">{log.time}</TableCell>
                       <TableCell>
-                        <Badge variant={AUDIT_TYPE_VARIANT[log.type]} className="text-[10px] leading-none px-1.5 py-0">
+                        <Badge variant={AUDIT_TYPE_VARIANT[log.type]} className="text-[11px] leading-none px-1.5 py-0">
                           {log.type}
                         </Badge>
                       </TableCell>
@@ -453,15 +453,15 @@ export function AdminDashboardPage() {
                     <span className="text-sm font-medium">{action.label}</span>
                     {/* 审核入口显示真实待审核数（/admin/positions/pending total） */}
                     {action.id === 'goto-review' && auditQueueCount > 0 && (
-                      <span className="ml-auto rounded-full bg-state-candidate/15 px-2 py-0.5 text-[10px] font-medium text-state-candidate">
+                      <span className="ml-auto rounded-full bg-state-candidate/15 px-2 py-0.5 text-[11px] font-medium text-state-candidate">
                         {auditQueueCount}
                       </span>
                     )}
                     {message && (
-                      <span className="ml-auto text-[10px] text-state-emerging font-medium">{message}</span>
+                      <span className="ml-auto text-[11px] text-state-emerging font-medium">{message}</span>
                     )}
                   </div>
-                  <span className="text-[11px] text-ink-muted font-normal">{action.desc}</span>
+                  <span className="text-[12px] text-ink-muted font-normal">{action.desc}</span>
                 </>
               )
               return action.to ? (

@@ -31,7 +31,7 @@ const UNCHANGED_PREVIEW = 12
 const STABLE_PREVIEW = 24
 
 function stateBadge(state: string) {
-  return <PositionStateBadge state={state} className="text-[10px]" />
+  return <PositionStateBadge state={state} className="text-[11px]" />
 }
 
 function SkillChips({ skill, tone }: { skill: { skill_name: string }[]; tone: SkillChipTone }) {
@@ -93,7 +93,7 @@ function NewPositionsView({ data, loading }: { data: DiscoveryRecentData | null;
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium text-ink">{c.position_name}</span>
                   {stateBadge(c.state)}
-                  <span className="text-[10px] text-ink-faint font-mono ml-auto">
+                  <span className="text-[11px] text-ink-faint font-mono ml-auto">
                     发现于 {new Date(c.detected_at).toLocaleDateString('zh-CN')}
                   </span>
                 </div>
@@ -114,11 +114,11 @@ function NewPositionsView({ data, loading }: { data: DiscoveryRecentData | null;
                     <p className="text-xs text-ink-faint">暂无技能明细</p>
                   ) : (
                     <>
-                      <div className="text-[10px] text-ink-faint">必备技能</div>
+                      <div className="text-[11px] text-ink-faint">必备技能</div>
                       <SkillChips skill={c.skills.must ?? []} tone="must" />
-                      <div className="text-[10px] text-ink-faint mt-2">加分技能</div>
+                      <div className="text-[11px] text-ink-faint mt-2">加分技能</div>
                       <SkillChips skill={c.skills.nice ?? []} tone="nice" />
-                      <div className="text-[10px] text-ink-faint mt-2">软技能</div>
+                      <div className="text-[11px] text-ink-faint mt-2">软技能</div>
                       <SkillChips skill={c.skills.soft ?? []} tone="soft" />
                     </>
                   )}
@@ -263,7 +263,7 @@ function SkillsDeltaView() {
                     )}
                   </SelectContent>
                 </Select>
-                <span className="text-[10px] text-ink-faint">→</span>
+                <span className="text-[11px] text-ink-faint">→</span>
                 <Select value={toV || undefined} onValueChange={(v) => handleVersionChange(fromV, v)}>
                   <SelectTrigger className="h-8 w-52 text-xs" aria-label="目标快照">
                     <SelectValue placeholder="目标快照" />
@@ -275,7 +275,7 @@ function SkillsDeltaView() {
                   </SelectContent>
                 </Select>
                 {changedPositions.length === 0 && summary && (
-                  <span className="text-[10px] text-ink-faint self-center">
+                  <span className="text-[11px] text-ink-faint self-center">
                     该对比范围内无岗位技能增减
                   </span>
                 )}
@@ -319,7 +319,7 @@ function SkillsDeltaView() {
                   <div className="space-y-3">
                     {/* 全新岗位解读：目标版首次入图，无基线可比 */}
                     {delta.added.length > 0 && delta.removed.length === 0 && delta.unchanged.length === 0 && (
-                      <p className="text-[10px] text-ink-faint">
+                      <p className="text-[11px] text-ink-faint">
                         该岗位在目标快照首次出现，全部技能计为新增
                       </p>
                     )}
@@ -329,7 +329,7 @@ function SkillsDeltaView() {
                       </div>
                       <SkillChips skill={[...delta.added].sort(bySkillName)} tone="must" />
                       {delta.added.length === 0 && (
-                        <span className="text-[10px] text-ink-faint">无新增</span>
+                        <span className="text-[11px] text-ink-faint">无新增</span>
                       )}
                     </div>
                     <div>
@@ -338,12 +338,12 @@ function SkillsDeltaView() {
                       </div>
                       <div className="flex flex-wrap gap-1">
                         {[...delta.removed].sort(bySkillName).map((s, i) => (
-                          <span key={`${s.skill_id}-${i}`} className="rounded bg-state-archived/10 px-1.5 py-0.5 text-[10px] text-state-archived line-through">
+                          <span key={`${s.skill_id}-${i}`} className="rounded bg-state-archived/10 px-1.5 py-0.5 text-[11px] text-state-archived line-through">
                             {s.skill_name}
                           </span>
                         ))}
                         {delta.removed.length === 0 && (
-                          <span className="text-[10px] text-ink-faint">无移除</span>
+                          <span className="text-[11px] text-ink-faint">无移除</span>
                         )}
                       </div>
                     </div>
@@ -361,12 +361,12 @@ function SkillsDeltaView() {
                           tone="nice"
                         />
                         {delta.unchanged.length === 0 && (
-                          <span className="text-[10px] text-ink-faint">无变化</span>
+                          <span className="text-[11px] text-ink-faint">无变化</span>
                         )}
                         {delta.unchanged.length > UNCHANGED_PREVIEW && (
                           <button
                             type="button"
-                            className="text-[10px] text-primary hover:underline"
+                            className="text-[11px] text-primary hover:underline"
                             onClick={() => setUnchangedExpanded((v) => !v)}
                           >
                             {unchangedExpanded ? '收起' : `展开全部 ${delta.unchanged.length} 个`}
@@ -413,7 +413,7 @@ function SkillsDeltaView() {
               {stablePositions.length > STABLE_PREVIEW && (
                 <button
                   type="button"
-                  className="text-[10px] text-primary hover:underline"
+                  className="text-[11px] text-primary hover:underline"
                   onClick={() => setStableExpanded((v) => !v)}
                 >
                   {stableExpanded ? '收起' : `展开全部 ${stablePositions.length} 个`}

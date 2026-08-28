@@ -59,7 +59,7 @@ export function MetricCard({ data }: { data: MetricCardData }) {
             <span className="font-mono">{data.value}</span>
           )}
         </div>
-        {data.hint && <div className="mt-1 truncate text-[10px] text-ink-faint">{data.hint}</div>}
+        {data.hint && <div className="mt-1 truncate text-[11px] text-ink-faint">{data.hint}</div>}
         {data.bar && <div className={cn('mt-2 h-0.5 rounded-full', TONE_BAR[tone])} />}
       </CardContent>
     </Card>

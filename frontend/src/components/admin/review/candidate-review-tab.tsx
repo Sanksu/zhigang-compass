@@ -118,7 +118,7 @@ export function CandidateReviewTab() {
           <CardContent className="py-4">
             <div className="flex items-center justify-between mb-2">
               <ShieldAlert className="size-4 text-state-archived" />
-              <Badge variant="archived" className="text-[10px]">需复核</Badge>
+              <Badge variant="archived" className="text-[11px]">需复核</Badge>
             </div>
             <div className="text-2xl font-semibold tracking-tight tabular-nums">
               {queue.filter((q) => needsReview(q)).length}
@@ -191,10 +191,10 @@ export function CandidateReviewTab() {
                       <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
                       <TableCell>
                         <div className="flex gap-1">
-                          {item.rag_matched && <Badge variant="outline" className="text-[10px]">RAG</Badge>}
-                          {item.seed_matched && <Badge variant="outline" className="text-[10px]">种子</Badge>}
+                          {item.rag_matched && <Badge variant="outline" className="text-[11px]">RAG</Badge>}
+                          {item.seed_matched && <Badge variant="outline" className="text-[11px]">种子</Badge>}
                           {!item.rag_matched && !item.seed_matched && (
-                            <span className="text-[10px] text-ink-faint">—</span>
+                            <span className="text-[11px] text-ink-faint">—</span>
                           )}
                         </div>
                       </TableCell>
@@ -210,7 +210,7 @@ export function CandidateReviewTab() {
                           {needsReview(item) && (
                             <Badge
                               variant="archived"
-                              className="text-[10px]"
+                              className="text-[11px]"
                               title={`final_confidence < ${Math.round(REVIEW_BLOCK_THRESHOLD * 100)}%，证据不足，已阻断并需人工复核`}
                             >
                               需复核
@@ -262,7 +262,7 @@ export function CandidateReviewTab() {
                   <Badge variant="archived">rejected</Badge>
                   <span className="text-ink-faint">人工驳回</span>
                 </li>
-                <li className="pt-2 text-[11px] text-ink-faint">
+                <li className="pt-2 text-[12px] text-ink-faint">
                   审核写 AuditLog（reason 必填），Neo4j Position.status 同步由后端完成
                 </li>
               </ol>
@@ -273,7 +273,7 @@ export function CandidateReviewTab() {
             <CardHeader>
               <CardTitle className="text-sm flex items-center gap-1.5">
                 岗位定义草案
-                <Badge variant="ai" className="text-[10px]" title="由 LLM 聚合生成的定义草案，经人工审核后生效">
+                <Badge variant="ai" className="text-[11px]" title="由 LLM 聚合生成的定义草案，经人工审核后生效">
                   AI 生成
                 </Badge>
               </CardTitle>

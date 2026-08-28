@@ -127,7 +127,7 @@ export function GraphCommunityTree({ className }: GraphCommunityTreeProps) {
           <GitFork className="size-4 text-atlas-ocean" />
           社区层级视图
         </CardTitle>
-        <CardDescription className="font-mono text-[10px] tracking-[0.08em]">
+        <CardDescription className="font-mono text-[11px] tracking-[0.08em]">
           LOUVAIN DENDROGRAM / {levels.length > 0 ? `${levels.length} 层（L0 最细 → L${levels[levels.length - 1]} 最粗）` : '待加载'}
         </CardDescription>
       </CardHeader>

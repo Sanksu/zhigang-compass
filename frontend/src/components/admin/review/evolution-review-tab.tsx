@@ -143,7 +143,7 @@ export function EvolutionReviewTab() {
           <CardContent className="py-4">
             <div className="flex items-center justify-between mb-2">
               <TrendingUp className="size-4 text-ink-faint" />
-              <Badge variant="outline" className="text-[10px]">approve</Badge>
+              <Badge variant="outline" className="text-[11px]">approve</Badge>
             </div>
             <div className="text-2xl font-semibold tracking-tight tabular-nums">
               {items.filter((i) => confidenceOf(i) >= 0.6).length}
@@ -201,10 +201,10 @@ export function EvolutionReviewTab() {
                     <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
                     <TableCell>
                       <div className="flex gap-1">
-                        {item.rag_matched && <Badge variant="outline" className="text-[10px]">RAG</Badge>}
-                        {item.seed_matched && <Badge variant="outline" className="text-[10px]">种子</Badge>}
+                        {item.rag_matched && <Badge variant="outline" className="text-[11px]">RAG</Badge>}
+                        {item.seed_matched && <Badge variant="outline" className="text-[11px]">种子</Badge>}
                         {!item.rag_matched && !item.seed_matched && (
-                          <span className="text-[10px] text-ink-faint">—</span>
+                          <span className="text-[11px] text-ink-faint">—</span>
                         )}
                       </div>
                     </TableCell>
@@ -256,7 +256,7 @@ export function EvolutionReviewTab() {
                 {reviewTarget.evidence_refs.length > 0 && (
                   <div className="mt-2">
                     <div className="mb-0.5 font-medium text-ink">证据引用</div>
-                    <p className="font-mono text-[10px] text-ink-faint break-all">
+                    <p className="font-mono text-[11px] text-ink-faint break-all">
                       {reviewTarget.evidence_refs.join('、')}
                     </p>
                   </div>
@@ -376,7 +376,7 @@ export function EvolutionReviewTab() {
             {archiveTarget && (
               <div className="rounded-md bg-subtle p-3 text-xs text-ink-secondary">
                 <span className="text-ink-faint">证据引用：</span>
-                <span className="font-mono text-[10px] text-ink-faint break-all">
+                <span className="font-mono text-[11px] text-ink-faint break-all">
                   {archiveTarget.evidence_refs.length > 0 ? archiveTarget.evidence_refs.join('、') : '—'}
                 </span>
               </div>

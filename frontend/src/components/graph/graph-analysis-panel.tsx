@@ -147,10 +147,10 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
         {/* ── PageRank 技能重要性 ── */}
         <section className="border-b border-border/60 pb-4">
           <div className="mb-2 flex items-center gap-2">
-            <span className="font-mono text-[10px] text-ink-faint">01</span>
+            <span className="font-mono text-[11px] text-ink-faint">01</span>
             <GitBranch className="size-3 text-ink-faint" />
             <h4 className="text-xs font-semibold text-ink">影响力地图</h4>
-            <span className="text-[10px] text-ink-muted">PageRank Top-20</span>
+            <span className="text-[11px] text-ink-muted">PageRank Top-20</span>
           </div>
           {pagerankLoading ? (
             <div className="flex items-center gap-2 py-3 text-xs text-ink-muted">
@@ -167,9 +167,9 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
                     onClick={() => onFocusSkill(s.id, s.name)}
                     className="group flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs transition-colors hover:bg-subtle"
                   >
-                    <span className="w-5 text-right font-mono text-[10px] text-ink-faint">{i + 1}</span>
+                    <span className="w-5 text-right font-mono text-[11px] text-ink-faint">{i + 1}</span>
                     <span className="flex-1 truncate font-medium text-ink group-hover:text-ink">{s.name}</span>
-                    <span className="font-mono text-[10px] text-ink-faint">{s.score.toFixed(3)}</span>
+                    <span className="font-mono text-[11px] text-ink-faint">{s.score.toFixed(3)}</span>
                   </button>
                 </li>
               ))}
@@ -180,13 +180,13 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
         {/* ── Louvain 技能簇 ── */}
         <section className="border-b border-border/60 py-4">
           <div className="mb-2 flex items-center gap-2">
-            <span className="font-mono text-[10px] text-ink-faint">02</span>
+            <span className="font-mono text-[11px] text-ink-faint">02</span>
             <Boxes className="size-3 text-ink-faint" />
             <h4 className="text-xs font-semibold text-ink">技术栈社区</h4>
           </div>
           {levels && levels.length > 1 && (
             <div className="mb-1.5">
-              <Label htmlFor="cluster-level-select" className="text-[10px] text-ink-faint">
+              <Label htmlFor="cluster-level-select" className="text-[11px] text-ink-faint">
                 层级（dendrogram 粗→细）
               </Label>
               <Select
@@ -224,13 +224,13 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
                     <span className="flex items-center gap-1.5 shrink-0">
                       {c.needs_llm && (
                         <span
-                          className="rounded bg-ink/10 px-1 py-0.5 text-[9px] font-medium text-ink-secondary"
+                          className="rounded bg-ink/10 px-1 py-0.5 text-[10px] font-medium text-ink-secondary"
                           title={`LLM 兜底命名（触发：${c.triggers?.join('、') ?? '未知'}）`}
                         >
                           LLM
                         </span>
                       )}
-                      <span className="rounded bg-subtle px-1 py-0.5 font-mono text-[10px] text-ink-muted">{c.size}</span>
+                      <span className="rounded bg-subtle px-1 py-0.5 font-mono text-[11px] text-ink-muted">{c.size}</span>
                       <span className="text-ink-faint">▾</span>
                     </span>
                   </button>
@@ -241,17 +241,17 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
                           <button
                             key={s.id}
                             onClick={() => onFocusSkill(s.id, s.name)}
-                            className="rounded bg-subtle px-1.5 py-0.5 text-[10px] text-ink-secondary hover:bg-ink/10"
+                            className="rounded bg-subtle px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-ink/10"
                           >
                             {s.name}
                           </button>
                         ))}
                       </div>
                       {c.llm?.rationale && (
-                        <p className="mt-1.5 text-[10px] text-ink-faint italic">{c.llm.rationale}</p>
+                        <p className="mt-1.5 text-[11px] text-ink-faint italic">{c.llm.rationale}</p>
                       )}
                       {c.llm?.splits && c.llm.splits.length > 0 && (
-                        <p className="mt-1 text-[10px] text-ink-faint">
+                        <p className="mt-1 text-[11px] text-ink-faint">
                           建议拆分：{c.llm.splits.join('、')}
                         </p>
                       )}
@@ -262,7 +262,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
               {!showAllClusters && clusters.length > CLUSTER_PREVIEW_COUNT && (
                 <button
                   onClick={() => setShowAllClusters(true)}
-                  className="w-full rounded border border-border px-2 py-1 text-[10px] text-ink-muted hover:bg-subtle"
+                  className="w-full rounded border border-border px-2 py-1 text-[11px] text-ink-muted hover:bg-subtle"
                 >
                   展开更多（{clusters.length - CLUSTER_PREVIEW_COUNT}）
                 </button>
@@ -276,14 +276,14 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
         {/* ── 最短路径 ── */}
         <section className="pt-4">
           <div className="mb-2 flex items-center gap-2">
-            <span className="font-mono text-[10px] text-ink-faint">03</span>
+            <span className="font-mono text-[11px] text-ink-faint">03</span>
             <GitBranch className="size-3 text-ink-faint" />
             <h4 className="text-xs font-semibold text-ink">路径探测器</h4>
-            <span className="text-[10px] text-ink-muted">验证技能间连接</span>
+            <span className="text-[11px] text-ink-muted">验证技能间连接</span>
           </div>
           <div className="space-y-1.5">
             <div>
-              <Label className="text-[10px] text-ink-faint">起点技能</Label>
+              <Label className="text-[11px] text-ink-faint">起点技能</Label>
               <Select
                 value={fromSkill || 'none'}
                 onValueChange={(v) => {
@@ -306,7 +306,7 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
               </Select>
             </div>
             <div>
-              <Label className="text-[10px] text-ink-faint">终点技能</Label>
+              <Label className="text-[11px] text-ink-faint">终点技能</Label>
               <Select
                 value={toSkill || 'none'}
                 onValueChange={(v) => {
@@ -331,16 +331,16 @@ export function GraphAnalysisPanel({ skills, onFocusSkill, className }: GraphAna
             <Button size="sm" className="w-full h-7 text-xs" onClick={runShortestPath} disabled={pathLoading}>
               {pathLoading ? '计算中…' : '查询路径'}
             </Button>
-            {pathError && <p className="text-[11px] text-state-archived">{pathError}</p>}
+            {pathError && <p className="text-[12px] text-state-archived">{pathError}</p>}
             {path && (
               <div className="rounded border border-border p-1.5">
-                <p className="text-[10px] text-ink-faint mb-1">可达路径（{path.length} 个节点）：</p>
+                <p className="text-[11px] text-ink-faint mb-1">可达路径（{path.length} 个节点）：</p>
                 <div className="flex flex-wrap items-center gap-1">
                   {path.map((n, i) => (
                     <span key={i} className="flex items-center gap-1">
-                      {i > 0 && <span className="text-ink-faint text-[10px]">→</span>}
+                      {i > 0 && <span className="text-ink-faint text-[11px]">→</span>}
                       <span
-                        className={`rounded px-1 py-0.5 text-[10px] ${
+                        className={`rounded px-1 py-0.5 text-[11px] ${
                           n.type === 'Skill' ? 'bg-ink text-canvas' : 'bg-subtle text-ink-secondary'
                         }`}
                         title={PATH_TYPE_LABEL[n.type] ?? n.type}
