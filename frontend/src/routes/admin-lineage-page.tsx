@@ -41,7 +41,7 @@ function confidenceTone(v: number): string {
 /** 薪资异常/低置信等警示统一 badge 语义 */
 function warnBadge(variant: 'outline' | 'candidate' | 'declining', label: string) {
   return (
-    <Badge variant={variant} className="text-[10px]">
+    <Badge variant={variant} className="text-[11px]">
       {label}
     </Badge>
   )
@@ -267,7 +267,7 @@ export function AdminLineagePage() {
                     <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
                     <TableCell className="text-center tabular-nums font-mono">{item.jd_count}</TableCell>
                     <TableCell className="text-center">
-                      <Badge variant={item.source_count >= 2 ? 'stable' : 'candidate'} className="text-[10px]">
+                      <Badge variant={item.source_count >= 2 ? 'stable' : 'candidate'} className="text-[11px]">
                         {item.source_count} 源
                       </Badge>
                     </TableCell>
@@ -282,7 +282,7 @@ export function AdminLineagePage() {
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         {item.verified ? (
-                          <Badge variant="outline" className="text-[10px] text-state-stable border-state-stable/30">
+                          <Badge variant="outline" className="text-[11px] text-state-stable border-state-stable/30">
                             印证 {(item.verified_skill_ratio * 100).toFixed(0)}%
                           </Badge>
                         ) : (
@@ -348,14 +348,14 @@ export function AdminLineagePage() {
                 <div className="rounded-md bg-subtle p-3">
                   <div className="text-xs text-ink-muted mb-1">数据源</div>
                   <div className="font-mono text-sm">{detail.source_count} 个</div>
-                  <div className="text-[10px] text-ink-faint mt-0.5">{(detail.sources ?? []).join('、')}</div>
+                  <div className="text-[11px] text-ink-faint mt-0.5">{(detail.sources ?? []).join('、')}</div>
                 </div>
                 <div className="rounded-md bg-subtle p-3">
                   <div className="text-xs text-ink-muted mb-1">跨源置信度</div>
                   <div className={`font-mono text-sm ${confidenceTone(detail.confidence)}`}>
                     {Math.round(detail.confidence * 100)}%
                   </div>
-                  <div className="text-[10px] text-ink-faint mt-0.5">
+                  <div className="text-[11px] text-ink-faint mt-0.5">
                     印证 {Math.round((detail.verified_skill_ratio ?? 0) * 100)}%
                   </div>
                 </div>
@@ -364,14 +364,14 @@ export function AdminLineagePage() {
                   <div className="font-mono text-sm">
                     {detail.salary_median ? `${Math.round(detail.salary_median).toLocaleString()} 元` : '—'}
                   </div>
-                  <div className="text-[10px] text-ink-faint mt-0.5">
+                  <div className="text-[11px] text-ink-faint mt-0.5">
                     {detail.salary_outlier ? '跨平台差异 >50%' : '口径一致'}
                   </div>
                 </div>
                 <div className="rounded-md bg-subtle p-3">
                   <div className="text-xs text-ink-muted mb-1">经验分歧度</div>
                   <div className="font-mono text-sm">{detail.experience_divergence.toFixed(2)}</div>
-                  <div className="text-[10px] text-ink-faint mt-0.5">
+                  <div className="text-[11px] text-ink-faint mt-0.5">
                     {detail.experience_divergence > 0.5 ? '跨平台分歧' : '基本一致'}
                   </div>
                 </div>
@@ -383,7 +383,7 @@ export function AdminLineagePage() {
                   <div className="text-xs text-state-candidate mb-1">单源技能（未达 2 源印证，待人工审核）</div>
                   <div className="flex flex-wrap gap-1">
                     {(detail.unverified_skills ?? []).map((s) => (
-                      <Badge key={s} variant="outline" className="text-[10px]">{s}</Badge>
+                      <Badge key={s} variant="outline" className="text-[11px]">{s}</Badge>
                     ))}
                   </div>
                 </div>
@@ -411,7 +411,7 @@ export function AdminLineagePage() {
                     {(detail.records ?? []).map((rec) => (
                       <TableRow key={rec.jd_id}>
                         <TableCell>
-                          <Badge variant="outline" className="text-[10px]">{rec.source || '—'}</Badge>
+                          <Badge variant="outline" className="text-[11px]">{rec.source || '—'}</Badge>
                         </TableCell>
                         <TableCell className="text-xs text-ink-muted">{rec.city || '—'}</TableCell>
                         <TableCell className="text-xs font-mono text-ink-secondary max-w-32 truncate">
@@ -425,7 +425,7 @@ export function AdminLineagePage() {
                         </TableCell>
                         <TableCell className="text-center">
                           {rec.is_duplicate ? (
-                            <Badge variant="archived" className="text-[10px]">重复</Badge>
+                            <Badge variant="archived" className="text-[11px]">重复</Badge>
                           ) : (
                             <span className="text-xs text-ink-faint">—</span>
                           )}

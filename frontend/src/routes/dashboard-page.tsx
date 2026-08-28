@@ -289,7 +289,7 @@ export function DashboardPage() {
                       <div className="flex items-center gap-2">
                         <Icon className="size-3.5 text-ink-muted shrink-0" />
                         <p className="text-sm text-ink truncate">{act.title}</p>
-                        <span className="text-[10px] font-mono text-ink-faint ml-auto shrink-0">{act.time}</span>
+                        <span className="text-[11px] font-mono text-ink-faint ml-auto shrink-0">{act.time}</span>
                       </div>
                       <p className="text-xs text-ink-muted mt-0.5">{act.desc}</p>
                     </div>
@@ -317,7 +317,7 @@ export function DashboardPage() {
                   <div className="flex items-center gap-2 mb-1">
                     <Icon className="size-3.5 text-ink-secondary" />
                     <span className="text-sm font-medium text-ink">{link.title}</span>
-                    <Badge variant="outline" className="text-[10px] ml-auto font-mono">{link.badge}</Badge>
+                    <Badge variant="outline" className="text-[11px] ml-auto font-mono">{link.badge}</Badge>
                   </div>
                   <p className="text-xs text-ink-muted leading-relaxed">{link.desc}</p>
                 </Link>
@@ -363,7 +363,7 @@ export function DashboardPage() {
                 {sources.map((src) => (
                   <div key={src.id} className="rounded-md border p-2">
                     <div className="flex items-center justify-between">
-                      <span className="font-mono text-[10px] text-ink-faint">{src.level}</span>
+                      <span className="font-mono text-[11px] text-ink-faint">{src.level}</span>
                     </div>
                     <p className="text-ink mt-0.5 truncate">{src.name}</p>
                     <p className="text-ink-muted font-mono tabular-nums">{src.total_count.toLocaleString()}</p>

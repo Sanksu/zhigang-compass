@@ -199,16 +199,16 @@ export function EvolutionTimeline({
           }}
           className="h-1.5 flex-1 accent-primary"
         />
-        <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink-muted">
+        <span className="shrink-0 font-mono text-[12px] tabular-nums text-ink-muted">
           {index}/{versions.length - 1}
         </span>
-        <span className="hidden shrink-0 text-[11px] text-ink-secondary sm:inline">
+        <span className="hidden shrink-0 text-[12px] text-ink-secondary sm:inline">
           {marks ? `版本 ${marks.dateLabel}` : '起点（无变更标记）'}
         </span>
       </div>
       {/* 增删摘要：版本变更一句话 + 新增/消亡 chips（画布外节点也能讲完故事） */}
       {marks && (
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
           <span className="text-ink-muted" title={current?.change_summary}>
             {marks.summary || current?.change_summary || '版本快照'}
           </span>
@@ -220,13 +220,13 @@ export function EvolutionTimeline({
               {added.shown.map((n) => (
                 <span
                   key={`a-${n}`}
-                  className="rounded-full border border-state-emerging/40 bg-state-emerging/10 px-1.5 py-0 text-[10px] text-ink-secondary"
+                  className="rounded-full border border-state-emerging/40 bg-state-emerging/10 px-1.5 py-0 text-[11px] text-ink-secondary"
                 >
                   {n}
                 </span>
               ))}
               {added.rest > 0 && (
-                <span className="text-[10px] text-ink-faint">+{added.rest}</span>
+                <span className="text-[11px] text-ink-faint">+{added.rest}</span>
               )}
             </span>
           )}
@@ -238,13 +238,13 @@ export function EvolutionTimeline({
               {removed.shown.map((n) => (
                 <span
                   key={`r-${n}`}
-                  className="rounded-full border border-state-declining/40 bg-state-declining/10 px-1.5 py-0 text-[10px] text-ink-secondary"
+                  className="rounded-full border border-state-declining/40 bg-state-declining/10 px-1.5 py-0 text-[11px] text-ink-secondary"
                 >
                   {n}
                 </span>
               ))}
               {removed.rest > 0 && (
-                <span className="text-[10px] text-ink-faint">+{removed.rest}</span>
+                <span className="text-[11px] text-ink-faint">+{removed.rest}</span>
               )}
             </span>
           )}

@@ -136,7 +136,7 @@ export function SkillFlowView() {
           <span className="flex items-center gap-2">
             <GitBranch className="size-4" />
             <span>技能关联岗位变迁桑基图</span>
-            <span className="text-[10px] font-normal text-ink-faint">
+            <span className="text-[11px] font-normal text-ink-faint">
               输入技能 → 各期 Top-8 关联岗位进出与持续需求厚度
             </span>
           </span>
@@ -153,7 +153,7 @@ export function SkillFlowView() {
                 }}
               />
             )}
-            {loading && <span className="text-[10px] text-ink-faint">加载中…</span>}
+            {loading && <span className="text-[11px] text-ink-faint">加载中…</span>}
           </div>
         </CardTitle>
       </CardHeader>
@@ -168,7 +168,7 @@ export function SkillFlowView() {
         {flow && flow.nodes.length > 0 && (
           <>
             <div ref={elRef} className="h-96 w-full" />
-            <p className="mt-1 text-[10px] text-ink-faint">
+            <p className="mt-1 text-[11px] text-ink-faint">
               {flow.skill_name} · 共 {flow.periods.length} 期快照（
               {flow.periods[0] ?? '—'} → {flow.periods[flow.periods.length - 1] ?? '—'}）·
               连线粗细=左侧期次 REQUIRES 频次

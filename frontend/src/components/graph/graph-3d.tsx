@@ -435,7 +435,7 @@ export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
                 ? '技能节点'
                 : '证据节点'}
           </p>
-          <p className="mt-1 text-[10px] text-ink-faint">单击查看详情 · 双击展开/收起</p>
+          <p className="mt-1 text-[11px] text-ink-faint">单击查看详情 · 双击展开/收起</p>
         </div>
       )}
     </div>

@@ -96,7 +96,7 @@ function SignalsView() {
       return (
         <div className="py-6 text-center">
           <p className="text-xs text-ink-muted">当前窗口无统计显著涨落 —— Z-score 阈值未触发</p>
-          <p className="mt-1 text-[10px] text-ink-faint">
+          <p className="mt-1 text-[11px] text-ink-faint">
             {windowCount < 2
               ? `历史快照不足（当前 ${windowCount} 期，需 ≥2 期），冷启动阶段暂不判定`
               : `判定口径：${tone === 'emerging' ? '新兴 z > 2.0' : '衰退 z < -1.5'}（${windowCount} 期滑窗 · 频次占比归一）；涨落越过阈值后在此列出`}
@@ -126,7 +126,7 @@ function SignalsView() {
                 {s.warning && (
                   <span
                     title="证据量异常期（样本量对比告警命中），信号读数受采集波动影响，谨慎解读"
-                    className="ml-1.5 inline-flex items-center rounded-sm border border-state-declining/40 bg-state-declining/10 px-1 text-[10px] font-normal text-state-declining"
+                    className="ml-1.5 inline-flex items-center rounded-sm border border-state-declining/40 bg-state-declining/10 px-1 text-[11px] font-normal text-state-declining"
                   >
                     ⚠ 证据量异常
                   </span>
@@ -166,7 +166,7 @@ function SignalsView() {
             <CardTitle className="flex items-center gap-2 text-sm">
               <TrendingUp className="size-4 text-state-emerging" />
               <span>新兴技能 Top-10</span>
-              <span className="text-[10px] font-normal text-ink-faint">z &gt; 2.0</span>
+              <span className="text-[11px] font-normal text-ink-faint">z &gt; 2.0</span>
             </CardTitle>
           </CardHeader>
           <CardContent>{renderList(data.emerging, 'emerging', data.window_count)}</CardContent>
@@ -176,7 +176,7 @@ function SignalsView() {
             <CardTitle className="flex items-center gap-2 text-sm">
               <TrendingDown className="size-4 text-state-declining" />
               <span>衰退技能 Top-10</span>
-              <span className="text-[10px] font-normal text-ink-faint">z &lt; -1.5</span>
+              <span className="text-[11px] font-normal text-ink-faint">z &lt; -1.5</span>
             </CardTitle>
           </CardHeader>
           <CardContent>{renderList(data.declining, 'declining', data.window_count)}</CardContent>
@@ -212,7 +212,7 @@ function SkillDeclineWarningCard() {
         <CardTitle className="flex items-center gap-2 text-sm text-state-declining">
           <TrendingDown className="size-4" />
           <span>技能衰退预警 · {declining.length} 项</span>
-          <span className="text-[10px] font-normal text-ink-faint">
+          <span className="text-[11px] font-normal text-ink-faint">
             以下技能需求呈衰退信号（Z &lt; -1.5），求职者请关注学习路径中的替代技能
           </span>
         </CardTitle>
@@ -222,7 +222,7 @@ function SkillDeclineWarningCard() {
           <Badge
             key={s.skill_id}
             variant="outline"
-            className="bg-state-declining/10 text-[11px] text-state-declining"
+            className="bg-state-declining/10 text-[12px] text-state-declining"
             title={
               s.warning
                 ? `${s.skill_name}：Z=${s.z_score?.toFixed(2) ?? '—'}（证据量异常期，谨慎解读）`

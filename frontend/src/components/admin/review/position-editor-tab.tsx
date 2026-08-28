@@ -135,7 +135,7 @@ export function PositionEditorTab() {
             <Search className="size-3.5 mr-1" />
             {loading ? '加载中…' : '加载详情'}
           </Button>
-          <span className="text-[11px] text-ink-faint">
+          <span className="text-[12px] text-ink-faint">
             技能全量替换 / 文本定义更新，实际变更写入 PositionEditLog
           </span>
         </CardContent>
@@ -150,14 +150,14 @@ export function PositionEditorTab() {
                 <span>{detail.name}</span>
                 <div className="flex items-center gap-2">
                   {detail.has_edit_log && (
-                    <Badge variant="verified" className="text-[10px]" title="该岗位存在人工编辑记录（PositionEditLog）">
+                    <Badge variant="verified" className="text-[11px]" title="该岗位存在人工编辑记录（PositionEditLog）">
                       已人工校验
                     </Badge>
                   )}
-                  <Badge variant={statusVariant(detail.status)} className="text-[10px]">{detail.status}</Badge>
-                  <Badge variant="outline" className="text-[10px]">{detail.level || '—'}</Badge>
-                  <Badge variant="outline" className="text-[10px]">{detail.industry || '—'}</Badge>
-                  <Badge variant="outline" className="text-[10px]">{detail.salary_range || '—'}</Badge>
+                  <Badge variant={statusVariant(detail.status)} className="text-[11px]">{detail.status}</Badge>
+                  <Badge variant="outline" className="text-[11px]">{detail.level || '—'}</Badge>
+                  <Badge variant="outline" className="text-[11px]">{detail.industry || '—'}</Badge>
+                  <Badge variant="outline" className="text-[11px]">{detail.salary_range || '—'}</Badge>
                 </div>
               </CardTitle>
             </CardHeader>

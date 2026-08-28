@@ -561,14 +561,14 @@ export function ResumeMatchPage() {
                   </div>
                   <div className="flex items-center gap-1.5 flex-wrap">
                     {r.skills.slice(0, 8).map((s) => (
-                      <Badge key={s} variant="outline" className="text-[10px]">
+                      <Badge key={s} variant="outline" className="text-[11px]">
                         {s}
                       </Badge>
                     ))}
                     {r.skills.length > 8 && (
-                      <span className="text-[10px] text-ink-faint">+{r.skills.length - 8}</span>
+                      <span className="text-[11px] text-ink-faint">+{r.skills.length - 8}</span>
                     )}
-                    <span className="text-[10px] text-ink-faint ml-auto">
+                    <span className="text-[11px] text-ink-faint ml-auto">
                       {r.total_years} 年 · {r.education_level ?? '未知学历'}
                     </span>
                   </div>
@@ -606,7 +606,7 @@ export function ResumeMatchPage() {
               </span>
               <div className="flex items-center gap-1.5 flex-wrap">
                 {candidate.skills.slice(0, 10).map((s) => (
-                  <Badge key={s.name} variant="outline" className="text-[10px]">
+                  <Badge key={s.name} variant="outline" className="text-[11px]">
                     {s.name}
                   </Badge>
                 ))}
@@ -656,14 +656,14 @@ export function ResumeMatchPage() {
                     </span>
                   </div>
                   <div className="flex items-center gap-2 mb-1.5">
-                    <PositionStateBadge state={rec.status} label={rec.status === 'low' ? '待提升' : undefined} className="text-[10px]" />
-                    <span className="text-[10px] text-ink-faint font-mono">{rec.position_id}</span>
+                    <PositionStateBadge state={rec.status} label={rec.status === 'low' ? '待提升' : undefined} className="text-[11px]" />
+                    <span className="text-[11px] text-ink-faint font-mono">{rec.position_id}</span>
                   </div>
                   <p className="text-xs text-ink-muted line-clamp-2">{rec.summary}</p>
                   {/* JD 级证据（阶段 B）：命中岗位族内原生 JD，显示最匹配的 1-2 条 */}
                   {rec.jd_evidence.length > 0 && (
                     <div className="mt-2 space-y-1.5">
-                      <p className="text-[9px] uppercase tracking-wide text-ink-faint">JD 证据</p>
+                      <p className="text-[10px] uppercase tracking-wide text-ink-faint">JD 证据</p>
                       {rec.jd_evidence.slice(0, 2).map((ev, ei) => (
                         <div key={ei} className="rounded-md border border-border bg-background/50 px-2 py-1.5">
                           <div className="flex items-center justify-between gap-2">
@@ -676,14 +676,14 @@ export function ResumeMatchPage() {
                             >
                               {ev.jd_title}
                             </a>
-                            <span className="text-[10px] font-mono text-ink-faint shrink-0">
+                            <span className="text-[11px] font-mono text-ink-faint shrink-0">
                               命中 {ev.hit_count}/{ev.must_total + ev.nice_total}
                             </span>
                           </div>
                           {ev.hit_skills.length > 0 && (
                             <div className="mt-1 flex flex-wrap gap-1">
                               {ev.hit_skills.map((s) => (
-                                <span key={s} className="rounded bg-subtle px-1 py-0.5 text-[9px] text-ink-muted">
+                                <span key={s} className="rounded bg-subtle px-1 py-0.5 text-[10px] text-ink-muted">
                                   {s}
                                 </span>
                               ))}
@@ -701,7 +701,7 @@ export function ResumeMatchPage() {
                       { label: '经', val: rec.exp_score, color: 'bg-ink-faint' },
                     ].map((d) => (
                       <div key={d.label} className="flex items-center gap-1 flex-1">
-                        <span className="text-[9px] text-ink-faint">{d.label}</span>
+                        <span className="text-[10px] text-ink-faint">{d.label}</span>
                         <div className="flex-1 h-1 rounded-full bg-subtle overflow-hidden">
                           <div
                             className={`h-full rounded-full ${d.color}`}
@@ -749,12 +749,12 @@ export function ResumeMatchPage() {
                   {/* 主标题=岗位名（与左侧列表点选项一致）；最佳 JD 标题降级为副标 */}
                   <CardTitle className="text-base flex items-center gap-2">
                     <span>{selectedPosition.position_name}</span>
-                    <PositionStateBadge state={selectedPosition.status} label={selectedPosition.status === 'low' ? '待提升' : undefined} className="text-[10px]" />
+                    <PositionStateBadge state={selectedPosition.status} label={selectedPosition.status === 'low' ? '待提升' : undefined} className="text-[11px]" />
                   </CardTitle>
                   {/* 结果最佳 JD + 反馈 + 快照重载（POST /match/feedback / GET /match/task|result） */}
                   <div className="flex flex-wrap items-center gap-2 pt-1">
                     {matchResult.position_name && matchResult.position_name !== selectedPosition.position_name && (
-                      <span className="text-[10px] text-ink-faint">
+                      <span className="text-[11px] text-ink-faint">
                         最佳匹配 JD：<span className="font-medium text-ink-muted">{matchResult.position_name}</span>
                       </span>
                     )}
@@ -808,7 +808,7 @@ export function ResumeMatchPage() {
                           <span className="text-xs font-mono text-ink tabular-nums w-12 text-right">
                             {d.score == null ? '—' : (d.score * 100).toFixed(0)}
                           </span>
-                          <span className="text-[10px] text-ink-faint w-8">w={d.weight}</span>
+                          <span className="text-[11px] text-ink-faint w-8">w={d.weight}</span>
                         </div>
                       ))}
                       <p className="text-xs text-ink-muted pt-2 border-t border-border">
@@ -852,12 +852,12 @@ export function ResumeMatchPage() {
                   <CardTitle className="text-sm flex items-center gap-2">
                     <AlertCircle className="size-4 text-state-declining" />
                     差距分析
-                    <Badge variant="outline" className="text-[10px]">
+                    <Badge variant="outline" className="text-[11px]">
                       {matchResult.gaps.length} 项
                     </Badge>
                     <RefreshButton
                       variant="ghost"
-                      className="h-6 px-1.5 text-[10px] ml-auto"
+                      className="h-6 px-1.5 text-[11px] ml-auto"
                       onClick={refreshGaps}
                       title="从结果快照刷新差距分析"
                     >
@@ -913,26 +913,26 @@ export function ResumeMatchPage() {
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <span className="text-sm font-medium text-ink">{gap.skill}</span>
-                                  <Badge variant="outline" className="text-[10px]">
+                                  <Badge variant="outline" className="text-[11px]">
                                     {GAP_TYPE_LABEL[gap.gap_type]}
                                   </Badge>
                                   {gap.is_soft && (
-                                    <span className="inline-flex items-center rounded-full border border-[#ec4899]/40 bg-[#ec4899]/5 px-1.5 py-0 text-[10px] font-medium text-[#ec4899] dark:text-[#f472b6]">
+                                    <span className="inline-flex items-center rounded-full border border-[#ec4899]/40 bg-[#ec4899]/5 px-1.5 py-0 text-[11px] font-medium text-[#ec4899] dark:text-[#f472b6]">
                                       软技能
                                     </span>
                                   )}
                                   {gap.high_roi && (
-                                    <span className="inline-flex items-center gap-1 rounded-full border border-state-emerging/40 bg-state-emerging/10 px-1.5 py-0 text-[10px] font-medium text-state-emerging">
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-state-emerging/40 bg-state-emerging/10 px-1.5 py-0 text-[11px] font-medium text-state-emerging">
                                       <Sparkles className="size-3" />核心突破点 · 高 ROI
                                     </span>
                                   )}
-                                  <span className={`ml-auto text-[9px] font-mono ${relClass}`}>{relLabel(rel)}</span>
+                                  <span className={`ml-auto text-[10px] font-mono ${relClass}`}>{relLabel(rel)}</span>
                                 </div>
                                 {/* 双轨对比基线（task T3）：上轨=目标期望基线，下轨=实际掌握度 */}
                                 {/* 上轨：期望达到段（0→target 淡色承托）+ 目标刻度；下轨：现状填充，溢出段高亮 */}
                                 <div className="mt-2 space-y-1.5">
                                   <div className="flex items-center gap-2">
-                                    <span className="w-8 shrink-0 text-right text-[9px] text-ink-faint">要求</span>
+                                    <span className="w-8 shrink-0 text-right text-[10px] text-ink-faint">要求</span>
                                     <div className="relative h-2 flex-1 rounded-full bg-border/40">
                                       <div
                                         className={`absolute inset-y-0 left-0 rounded-l-full ${rel === 'missing' ? 'bg-state-archived/20' : rel === 'weak' ? 'bg-state-declining/20' : 'bg-state-stable/20'}`}
@@ -944,23 +944,23 @@ export function ResumeMatchPage() {
                                         title={`岗位要求 ${target}/4`}
                                       />
                                     </div>
-                                    <span className="w-6 shrink-0 text-[9px] font-mono text-ink-muted tabular-nums">
+                                    <span className="w-6 shrink-0 text-[10px] font-mono text-ink-muted tabular-nums">
                                       {target}/4
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <span className="w-8 shrink-0 text-right text-[9px] text-ink-faint">现状</span>
+                                    <span className="w-8 shrink-0 text-right text-[10px] text-ink-faint">现状</span>
                                     <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-border/40">
                                       <div
                                         className={`absolute inset-y-0 left-0 rounded-full ${relBar}`}
                                         style={{ width: `${(actual / 4) * 100}%` }}
                                       />
                                     </div>
-                                    <span className="w-6 shrink-0 text-[9px] font-mono text-ink-muted tabular-nums">
+                                    <span className="w-6 shrink-0 text-[10px] font-mono text-ink-muted tabular-nums">
                                       {actual}/4
                                     </span>
                                   </div>
-                                  <span className="flex items-center gap-1 text-[9px] text-ink-faint">
+                                  <span className="flex items-center gap-1 text-[10px] text-ink-faint">
                                     <span className={`font-mono ${relClass}`}>{relLabel(rel)}</span>
                                     <ChevronDown
                                       className={`size-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`}
@@ -972,7 +972,7 @@ export function ResumeMatchPage() {
                             {/* 展开：ROI 明细 + 证据溯源（task T3） */}
                             {expanded && (
                               <div className="mt-2 space-y-2 border-t border-border pt-2">
-                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-muted">
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-muted">
                                   <span>
                                     需求 <b className="text-ink">{Math.round((gap.demand ?? 0) * 100)}</b>
                                   </span>
@@ -1008,16 +1008,16 @@ export function ResumeMatchPage() {
                                         className="grid grid-cols-2 gap-2 rounded-md border border-border/60 p-2"
                                       >
                                         <div>
-                                          <div className="mb-0.5 flex items-center gap-1 text-[9px] font-medium text-state-archived">
+                                          <div className="mb-0.5 flex items-center gap-1 text-[10px] font-medium text-state-archived">
                                             <FileText className="size-3" />JD 要求原文
                                           </div>
-                                          <p className="text-[10px] leading-relaxed text-ink-secondary">{j}</p>
+                                          <p className="text-[11px] leading-relaxed text-ink-secondary">{j}</p>
                                         </div>
                                         <div>
-                                          <div className="mb-0.5 flex items-center gap-1 text-[9px] font-medium text-state-stable">
+                                          <div className="mb-0.5 flex items-center gap-1 text-[10px] font-medium text-state-stable">
                                             <CheckCircle2 className="size-3" />简历提取特征
                                           </div>
-                                          <p className="text-[10px] leading-relaxed text-ink-secondary">{r}</p>
+                                          <p className="text-[11px] leading-relaxed text-ink-secondary">{r}</p>
                                         </div>
                                       </div>,
                                     )
@@ -1041,7 +1041,7 @@ export function ResumeMatchPage() {
                     <span>学习路径规划</span>
                     <RefreshButton
                       variant="ghost"
-                      className="h-6 px-1.5 text-[10px] ml-auto"
+                      className="h-6 px-1.5 text-[11px] ml-auto"
                       onClick={refreshPath}
                       title="从结果快照刷新学习路径"
                     >
@@ -1087,7 +1087,7 @@ export function ResumeMatchPage() {
                     AI 诊断报告
                     <RefreshButton
                       variant="ghost"
-                      className="h-6 px-1.5 text-[10px] ml-auto"
+                      className="h-6 px-1.5 text-[11px] ml-auto"
                       onClick={loadDiagnosis}
                       disabled={diagnosisLoading}
                       title="生成/刷新诊断报告（LLM 生成，结果缓存 24h）"
@@ -1140,17 +1140,17 @@ export function ResumeMatchPage() {
                                         href={g.evidence_id}
                                         target="_blank"
                                         rel="noreferrer"
-                                        className="ml-auto flex items-center gap-0.5 text-[10px] text-ink-muted hover:text-ink underline"
+                                        className="ml-auto flex items-center gap-0.5 text-[11px] text-ink-muted hover:text-ink underline"
                                       >
                                         <ExternalLink className="size-3" />证据追溯
                                       </a>
                                     ) : (
-                                      <Badge variant="outline" className="ml-auto text-[10px] font-mono" title="证据引用">
+                                      <Badge variant="outline" className="ml-auto text-[11px] font-mono" title="证据引用">
                                         {g.evidence_id}
                                       </Badge>
                                     )
                                   ) : (
-                                    <Badge variant="outline" className="ml-auto text-[10px] text-ink-faint" title="无对应证据">
+                                    <Badge variant="outline" className="ml-auto text-[11px] text-ink-faint" title="无对应证据">
                                       无证据
                                     </Badge>
                                   )}

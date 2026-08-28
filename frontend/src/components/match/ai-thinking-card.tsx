@@ -45,7 +45,7 @@ export function AiThinkingCard({ stages, rows = 3, hint, className }: AiThinking
         </p>
       </div>
       <SkeletonList rows={rows} />
-      {hint && <p className="mt-3 text-[10px] text-ink-faint">{hint}</p>}
+      {hint && <p className="mt-3 text-[11px] text-ink-faint">{hint}</p>}
     </div>
   )
 }

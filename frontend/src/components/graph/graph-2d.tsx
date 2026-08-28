@@ -969,7 +969,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   return (
     <div className={`${viewMode === 'graph' ? 'atlas-surface' : ''} relative h-full w-full overflow-hidden ${className ?? ''}`}>
       {viewMode === 'graph' && (
-        <div className="pointer-events-none absolute inset-0 z-0 font-mono text-[9px] tracking-[0.18em] text-atlas-muted/75" aria-hidden="true">
+        <div className="pointer-events-none absolute inset-0 z-0 font-mono text-[12px] tracking-[0.18em] text-atlas-muted/75" aria-hidden="true">
           <span className="absolute left-1/2 top-3 -translate-x-1/2">N / 市场</span>
           <span className="absolute right-3 top-1/2 -translate-y-1/2 [writing-mode:vertical-rl]">E / 技术</span>
           <span className="absolute bottom-3 left-1/2 -translate-x-1/2">S / 组织</span>
@@ -979,7 +979,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       )}
       {/* task T2: 学习路径可用时提供 宏观 DAG / 全局图谱 切换 */}
       {dagEnabled && (
-        <div className="absolute left-1/2 top-3 z-30 flex -translate-x-1/2 overflow-hidden rounded-md border border-atlas-grid bg-canvas/90 shadow-sm text-[10px]">
+        <div className="absolute left-1/2 top-3 z-30 flex -translate-x-1/2 overflow-hidden rounded-md border border-atlas-grid bg-canvas/90 shadow-sm text-[12px]">
           {(
             [
               ['dag', '宏观 DAG'],

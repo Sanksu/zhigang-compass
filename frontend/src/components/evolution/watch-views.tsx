@@ -85,7 +85,7 @@ export function TechnologyWatchView() {
         <CardTitle className="flex items-center gap-2 text-sm">
           <Eye className="size-4 text-ink" />
           <span>技术热点观察池</span>
-          <span className="text-[10px] font-normal text-ink-faint">MLI 产业化拐点 · 设计文档 §7.2.5</span>
+          <span className="text-[11px] font-normal text-ink-faint">MLI 产业化拐点 · 设计文档 §7.2.5</span>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -114,7 +114,7 @@ export function TechnologyWatchView() {
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {w.sources.map((s) => (
-                        <Badge key={s} variant="outline" className="text-[10px] font-mono">
+                        <Badge key={s} variant="outline" className="text-[11px] font-mono">
                           {SOURCE_LABEL[s] ?? s}
                         </Badge>
                       ))}
@@ -122,13 +122,13 @@ export function TechnologyWatchView() {
                   </TableCell>
                   <TableCell>
                     {w.ready_to_industrialize ? (
-                      <Badge className="text-[10px] bg-state-emerging">可产业化</Badge>
+                      <Badge className="text-[11px] bg-state-emerging">可产业化</Badge>
                     ) : (
-                      <Badge variant="outline" className="text-[10px]">观察中</Badge>
+                      <Badge variant="outline" className="text-[11px]">观察中</Badge>
                     )}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={w.status === 'candidate_promoted' ? 'emerging' : 'outline'} className="text-[10px]">
+                    <Badge variant={w.status === 'candidate_promoted' ? 'emerging' : 'outline'} className="text-[11px]">
                       {w.status === 'candidate_promoted' ? '候选提升' : w.status === 'archived' ? '归档' : '观察'}
                     </Badge>
                   </TableCell>

@@ -37,7 +37,7 @@ export function StateMachineView() {
         <CardTitle className="text-sm flex items-center gap-2">
           <GitBranch className="size-4" />
           岗位状态机流转
-          <span className="text-[10px] font-normal text-ink-faint">
+          <span className="text-[11px] font-normal text-ink-faint">
             六态生命周期 · 人工审核流转记录（自动流转不写审计，见后端说明）
           </span>
         </CardTitle>
@@ -91,9 +91,9 @@ export function StateMachineView() {
                         </TableCell>
                         <TableCell className="text-xs">
                           <span className="inline-flex items-center gap-1">
-                            <PositionStateBadge state={t.from_state ?? ''} label={t.from_state ?? undefined} className="text-[9px]" />
+                            <PositionStateBadge state={t.from_state ?? ''} label={t.from_state ?? undefined} className="text-[10px]" />
                             <span className="text-ink-faint">→</span>
-                            <PositionStateBadge state={t.to_state ?? ''} label={t.to_state ?? undefined} className="text-[9px]" />
+                            <PositionStateBadge state={t.to_state ?? ''} label={t.to_state ?? undefined} className="text-[10px]" />
                           </span>
                         </TableCell>
                         <TableCell className="text-xs text-ink-secondary">{t.operator}</TableCell>
@@ -148,7 +148,7 @@ export function EvolutionEventsView() {
         <CardTitle className="flex items-center gap-2 text-sm">
           <Boxes className="size-4" />
           <span>谱系事件流</span>
-          <span className="text-[10px] font-normal text-ink-faint">
+          <span className="text-[11px] font-normal text-ink-faint">
             实体新增 / 合并 / 终结 · 自动流转不写人工审计（见后端说明）
           </span>
         </CardTitle>
@@ -184,7 +184,7 @@ export function EvolutionEventsView() {
                     <TableCell>
                       <Badge
                         variant={meta?.badge ?? 'outline'}
-                        className="text-[10px] inline-flex items-center gap-1"
+                        className="text-[11px] inline-flex items-center gap-1"
                       >
                         <span className={`size-1.5 rounded-full ${meta?.tone ?? ''}`} />
                         {meta?.label ?? ev.event_type}
@@ -198,7 +198,7 @@ export function EvolutionEventsView() {
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className="font-mono text-[10px] text-ink-faint">{ev.version_id}</TableCell>
+                    <TableCell className="font-mono text-[11px] text-ink-faint">{ev.version_id}</TableCell>
                   </TableRow>
                 )
               })}
@@ -245,7 +245,7 @@ export function DataWarningBanner({ warning }: { warning: NonNullable<EvolutionV
         {entries.map((e) => (
           <li key={e.dim} className="flex flex-wrap items-center gap-2">
             <span className="font-medium text-ink">{e.label}</span>
-            <Badge variant={e.direction === 'shrunk' ? 'declining' : 'emerging'} className="text-[10px]">
+            <Badge variant={e.direction === 'shrunk' ? 'declining' : 'emerging'} className="text-[11px]">
               {e.direction === 'shrunk' ? '萎缩' : '激增'}
             </Badge>
             <span className="font-mono text-ink-faint">

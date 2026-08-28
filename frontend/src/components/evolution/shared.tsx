@@ -101,14 +101,14 @@ export function SearchableSelect({
             {/* 选项分页（10 项一页，08-16 用户决策） */}
             {pageSize && totalPages > 1 && (
               <div className="flex items-center justify-between border-t border-border px-2 py-1.5">
-                <span className="text-[10px] text-ink-faint">
+                <span className="text-[11px] text-ink-faint">
                   第 {Math.min(optionPage, totalPages)} / {totalPages} 页 · 共 {filtered.length} 个
                 </span>
                 <div className="flex items-center gap-1">
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-6 px-2 text-[10px]"
+                    className="h-6 px-2 text-[11px]"
                     disabled={optionPage <= 1}
                     onClick={() => setOptionPage((p) => Math.max(1, p - 1))}
                   >
@@ -117,7 +117,7 @@ export function SearchableSelect({
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-6 px-2 text-[10px]"
+                    className="h-6 px-2 text-[11px]"
                     disabled={optionPage >= totalPages}
                     onClick={() => setOptionPage((p) => Math.min(totalPages, p + 1))}
                   >
