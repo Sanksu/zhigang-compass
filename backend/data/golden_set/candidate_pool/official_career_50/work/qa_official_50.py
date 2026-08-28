@@ -19,6 +19,7 @@ import hashlib
 import json
 import re
 import sys
+from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -32,6 +33,17 @@ SIX = ("source_id", "source_url", "responsibilities", "requirements", "detail_ra
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 REQ_FIELDS = ("source_id", "source_url", "job_title_raw", "company_name", "location",
               "responsibilities", "requirements", "detail_raw_text", "_sha256")
+
+
+# ---------- §二 canonical 共享兼容函数 ----------
+def is_tencent(sc: str) -> bool:
+    sc = (sc or "").strip()
+    return bool(sc) and ("Tencent" in sc or "腾讯" in sc)
+
+
+def is_bytedance(sc: str) -> bool:
+    sc = (sc or "").strip()
+    return bool(sc) and ("ByteDance" in sc or "字节" in sc or "北京字节跳动网络技术有限公司" in sc)
 
 
 # ---------- 读取 ----------
@@ -67,8 +79,9 @@ def read_jsonl(p):
 
 
 def tb_count(rows):
-    t = sum(1 for r in rows if "腾讯" in (r.get("source_company") or "") or "Tencent" in (r.get("source_company") or ""))
-    return t, len(rows)-t
+    t = sum(1 for r in rows if is_tencent(r.get("source_company") or ""))
+    b = sum(1 for r in rows if is_bytedance(r.get("source_company") or ""))
+    return t, b
 
 
 # ---------- §九 QA ----------
@@ -168,13 +181,146 @@ def main():
     qa_raw = qa(raw_rows, "RAW")
     qa_clean = qa(clean_rows, "CLEAN")
     pilot_ok, pilot_fails = pilot_check(clean_rows, pilot_rows)
+
+    # ========== §七 防回归 七条硬规则 ==========
+    print("\n========== §七 防回归检查 ==========")
+    issues_regression = []
+    # 1. source_company 允许值仅：Tencent / ByteDance （RAW & CLEAN）
+    ALLOWED_SC = {"Tencent", "ByteDance"}
+    for lbl, rows in (("RAW", raw_rows), ("CLEAN", clean_rows)):
+        bad = [(i+1, repr(r.get("source_company")), r.get("source_id"))
+               for i, r in enumerate(rows) if r.get("source_company") not in ALLOWED_SC]
+        if bad:
+            issues_regression.append(f"{lbl} source_company 含非法值: {len(bad)} 条（首5: {bad[:5]}）")
+    # 2. 总量 clean T=25 / B=25
+    ct_t = sum(1 for r in clean_rows if is_tencent(r.get("source_company", "")))
+    ct_b = sum(1 for r in clean_rows if is_bytedance(r.get("source_company", "")))
+    if ct_t != 25 or ct_b != 25:
+        issues_regression.append(f"clean 总量 T/B != 25/25（实际 {ct_t}/{ct_b}）")
+    # 3. Pilot20 前20条 T=10 / B=10
+    pt_t = sum(1 for r in clean_rows[:20] if is_tencent(r.get("source_company", "")))
+    pt_b = sum(1 for r in clean_rows[:20] if is_bytedance(r.get("source_company", "")))
+    if pt_t != 10 or pt_b != 10:
+        issues_regression.append(f"Pilot20 分段 T/B != 10/10（实际 {pt_t}/{pt_b}）")
+    # 4. 新增后30条 T=15 / B=15
+    nt_t = sum(1 for r in clean_rows[20:] if is_tencent(r.get("source_company", "")))
+    nt_b = sum(1 for r in clean_rows[20:] if is_bytedance(r.get("source_company", "")))
+    if nt_t != 15 or nt_b != 15:
+        issues_regression.append(f"新增30 分段 T/B != 15/15（实际 {nt_t}/{nt_b}）")
+    # 5. README / distribution_report 关键词黑名单（§七 防止口径/分布/临时文件说明的回归）
+    import re as _re
+    def contains_outside(text, pat, exclude_pats):
+        """text含pat且不落在exclude_pats任一场景内才返回True"""
+        m = _re.search(pat, text)
+        if not m: return False
+        for ep in exclude_pats:
+            if _re.search(ep, text): return False
+        return True
+    # 5a. README：本目录自称「黄金集」→禁止；但"Gold 110 条正式黄金集"等对Gold的引用是正确的；对work里已删除临时存档 checkpoint×4/inventory/batch_d候选池 →禁止在文件描述列表写为"仍保留"；但"已全部移除"上下文正确
+    rm_path = ROOT / "README.md"
+    if rm_path.exists():
+        txt = rm_path.read_text(encoding="utf-8")
+        # 误称：本目录自称 50 条黄金集；但对 Gold110 的定位描述「尚未进入 official Gold 110 条正式黄金集」是正确的 → 豁免
+        def find_huangjinji_errors(doc: str):
+            bad = []
+            for m in _re.finditer(r"(?:企业?官网)\s*50\s*条(?:正式)?黄金集|50条(?:正式)?黄金集|目录.*黄金集|本(?:50条)?(?:正式)?黄金集", doc):
+                s = m.start(); e = m.end()
+                left = max(0, s-80); right = min(len(doc), e+80)
+                ctx = doc[left:right]
+                if "尚未进入" in ctx or "Gold 110" in ctx or "Gold110" in ctx or "candidate_pool" in ctx.lower():
+                    continue  # 定位语境内：这是对Gold 110的说明，不是本目录自称
+                bad.append((m.group(), s))
+            return bad
+        hj = find_huangjinji_errors(txt)
+        if hj:
+            issues_regression.append(f"README 误称口径：本目录自称「黄金集」（首2处: {hj[:2]}）；应改为「正式候选数据集」")
+        # 误分布：T15+B35 型总表合计
+        if _re.search(r"(合计|最终)[^\n]{0,20}(腾讯|Tencent)[^\n0-9]{0,6}15[^\n]{0,20}(字节|ByteDance)[^\n0-9]{0,6}35", txt):
+            issues_regression.append("README 误分布：合计写成 腾讯15 + 字节35（应为25/25）")
+        if _re.search(r"Tencent\s*\*\*15\*\*\s*\+\s*ByteDance\s*\*\*35\*\*", txt):
+            issues_regression.append("README 误分布：Tencent 15 + ByteDance 35（应为25/25）")
+        # Pilot20 腾讯/Tencent =0
+        if _re.search(r"Pilot20.{0,160}(腾讯|Tencent).{0,12}(?:=|等于|:)\s*0(?!\d)", txt):
+            issues_regression.append("README 统计回归：Pilot20 腾讯/Tencent =0（应为10）")
+        # 误写：README把已删除临时文件 checkpoint×4 / inventory / batch_d候选池 列在work目录的保留清单语境下
+        # 正确语境：含"已全部移除 / 已删除 / 清理后 / 移除不保留"等说明
+        def bad_deleted_listed(doc: str, pat: str):
+            for m in _re.finditer(pat, doc):
+                ln_start = doc.rfind("\n", 0, m.start()) + 1
+                ln_end = doc.find("\n", m.end())
+                if ln_end < 0: ln_end = len(doc)
+                line = doc[ln_start:ln_end]
+                if any(k in line for k in ["移除", "已删除", "清理后", "不保留", "移去"]):
+                    continue
+                return True, line[:120]
+            return False, ""
+        for err_pat, reason in [
+            (r"checkpoint\s*[×x*]\s*4\s*/\s*inventory\s*/\s*batch_d", 'work/仍写 "checkpoint ×4 / inventory / batch_d 候选池" 在保留列表'),
+            (r"中间工作目录[^\n]*checkpoint\s*[×x*]\s*4", 'work/仍写 "中间工作目录 checkpoint×4"'),
+        ]:
+            found, snippet = bad_deleted_listed(txt, err_pat)
+            if found:
+                issues_regression.append(f"README work目录说明回归：{reason} → 片段{snippet!r}")
+    # 5b. distribution_report：阶段表数字错误（0/20、合计15/35）——使用表头匹配（紧跟标题行|阶段|...)
+    dist_path = ROOT / "official_career_50_distribution_report.md"
+    if dist_path.exists():
+        dtxt = dist_path.read_text(encoding="utf-8")
+        if _re.search(r"\|\s*Pilot20\s*\|\s*20\s*\|\s*0\s*\|\s*20\s*\|", dtxt):
+            issues_regression.append("distribution 阶段表回归：Pilot20 写成 腾讯=0/字节=20（应为10/10）")
+        if _re.search(r"\|\s*合计\s*\|\s*50\s*\|\s*15\s*\|\s*35\s*\|", dtxt):
+            issues_regression.append("distribution 阶段表回归：合计写成 腾讯15/字节35（应为25/25）")
+    # 6. publish_time 未来异常：显式报告（不得静默 PASS；允许异常存在但必须在quality_report中标注）
+    future_anoms = []
+    for i, r in enumerate(clean_rows, 1):
+        pts, cts = r.get("publish_time"), r.get("crawl_time")
+        if not pts or not cts: continue
+        try:
+            pd = datetime.fromisoformat(str(pts).replace("Z", "+00:00"))
+            cd = datetime.fromisoformat(str(cts).replace("Z", "+00:00"))
+            if pd.tzinfo is None: pd = pd.replace(tzinfo=timezone.utc)
+            if cd.tzinfo is None: cd = cd.replace(tzinfo=timezone.utc)
+            if pd > cd:
+                future_anoms.append({"line": i, "source_id": r.get("source_id"),
+                                     "publish_time": pts, "crawl_time": cts})
+        except Exception:
+            pass
+    print(f"  publish_time 未来异常数: {len(future_anoms)} 条")
+    for a in future_anoms:
+        print(f"    ⚠️ L{a['line']} sid={a['source_id']} publish={a['publish_time']} crawl={a['crawl_time']}")
+    # 质量报告必须显式标注（若文件已写，预扫描关键词）：不阻塞 exit，仅警告 + 通过最终报告
+    qpath = ROOT / "official_career_50_quality_report.md"
+    if future_anoms and qpath.exists():
+        qtxt = qpath.read_text(encoding="utf-8")
+        if "future publish_time anomaly" not in qtxt and "publish_time 未来异常" not in qtxt:
+            issues_regression.append("quality_report 未显式标注 publish_time 未来异常（§七#6 不得静默PASS）")
+    # 打印 §七 结论
+    if issues_regression:
+        for x in issues_regression:
+            print(f"  ❌ REGRESSION_FAIL: {x}")
+    else:
+        print("  ✅ §七 防回归 全部 PASS")
+
     final_report = {
         "qa_raw": qa_raw, "qa_clean": qa_clean,
         "pilot20_six_check": {"pass": pilot_ok, "failed_count": len(pilot_fails)},
+        "regression": {
+            "issues": issues_regression,
+            "segments": {
+                "clean_total": {"T": ct_t, "B": ct_b},
+                "pilot20": {"T": pt_t, "B": pt_b},
+                "new30": {"T": nt_t, "B": nt_b},
+            },
+            "publish_time_anomalies": {
+                "future_count": len(future_anoms),
+                "items": future_anoms,
+            },
+            "source_company_allowed_only": len(ALLOWED_SC) == 2 and ALLOWED_SC == {"Tencent", "ByteDance"},
+        },
     }
     with open(REPORT, "w", encoding="utf-8") as f:
         json.dump(final_report, f, ensure_ascii=False, indent=2)
     print(f"\nQA报告存档: {REPORT}")
+
     # 汇总校验
     issues = []
     for lbl, q in (("RAW", qa_raw), ("CLEAN", qa_clean)):
@@ -188,12 +334,14 @@ def main():
             if info["ok"] != 50: issues.append(f"{lbl} 必填字段{f}不完整 {info['rate']}")
     if not pilot_ok:
         issues.append("Pilot20六项保护失败")
+    if issues_regression:
+        issues.extend(["REGRESSION: " + x for x in issues_regression])
     if issues:
         print("\n⚠️ REVIEW_REQUIRED: 存在以下QA问题:")
         for it in issues: print(f"  - {it}")
         sys.exit(1)
     else:
-        print("\n🎉 §九+§十 QA 全部 PASS ✅")
+        print("\n🎉 §九+§十+§七 QA 全部 PASS ✅")
     return 0
 
 

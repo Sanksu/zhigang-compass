@@ -31,6 +31,27 @@ CK_FILES = [
 PILOT_SIX_FIELDS = ("source_id", "source_url", "responsibilities", "requirements", "detail_raw_text", "_sha256")
 
 
+# ========== §一 canonical source_company 共享兼容函数 ==========
+def is_tencent(sc: str) -> bool:
+    sc = (sc or "").strip()
+    return bool(sc) and ("Tencent" in sc or "腾讯" in sc)
+
+
+def is_bytedance(sc: str) -> bool:
+    sc = (sc or "").strip()
+    return bool(sc) and ("ByteDance" in sc or "字节" in sc or "北京字节跳动网络技术有限公司" in sc)
+
+
+def canonical_source_company(sc: str) -> str:
+    """新增30条 source_company 统一输出 canonical 英文值；
+    Pilot20 继承不走此函数。"""
+    if is_tencent(sc):
+        return "Tencent"
+    if is_bytedance(sc):
+        return "ByteDance"
+    return (sc or "").strip()
+
+
 # ========== 兼容三类JSONL读取 ==========
 def read_jsonl(path: Path):
     """兼容：1)标准real-newline JSONL；2)伪JSONL(同1物理行字面量'\\n'拼接)；3)单行单对象；
@@ -122,7 +143,7 @@ def cleanify_new(r: dict, order_global: int) -> dict:
         d = "其他"
     return {
         "source": r.get("source", "official_career_site"),
-        "source_company": ("腾讯" if is_t else ("北京字节跳动网络技术有限公司" if "字节" in sc or "ByteDance" in sc else sc)),
+        "source_company": canonical_source_company(sc),  # §一 统一 canonical 英文值：Tencent / ByteDance
         "source_id": r["source_id"],
         "source_id_method": ("postId" if is_t else "URL_path_19_digit_job_id"),
         "source_url": r["source_url"],
@@ -157,15 +178,24 @@ def main():
     p_sids = {r["source_id"] for r in pilot_rows}
     p_urls = {r["source_url"] for r in pilot_rows}
 
-    # 2. 读4个checkpoint（a/b/c/d = 7+5+5+13 = 30）
+    # 2. 读4个checkpoint（a/b/c/d = 7+5+5+13 = 30）；若checkpoint不存在（work清理后），fallback从当前OFFICIAL_RAW拆分：前20=Pilot20 后30=新增
     ck_all = []
-    for p in CK_FILES:
-        rows, errs = read_jsonl(p)
-        if errs:
-            print(f"  WARN {p.name}: parse错误 {len(errs)} 处")
-        print(f"[2] {p.name}: {len(rows)} 条")
-        ck_all.extend(rows)
-    print(f"  [2] checkpoint总计原始记录: {len(ck_all)}")
+    all_ck_exist = all(p.exists() for p in CK_FILES)
+    if all_ck_exist:
+        for p in CK_FILES:
+            rows, errs = read_jsonl(p)
+            if errs:
+                print(f"  WARN {p.name}: parse错误 {len(errs)} 处")
+            print(f"[2] {p.name}: {len(rows)} 条")
+            ck_all.extend(rows)
+        print(f"  [2] checkpoint总计原始记录: {len(ck_all)}")
+    else:
+        print("[2] checkpoint 临时文件已清理 → fallback 从 OFFICIAL_RAW 拆分：前20=Pilot20、后30=新增原始记录")
+        raw_reload, _ = read_jsonl(OFFICIAL_RAW)
+        assert len(raw_reload) == 50, f"fallback 需 OFFICIAL_RAW=50 条，实际={len(raw_reload)}"
+        ck_all = list(raw_reload[20:])
+        print(f"  [2] fallback后新增记录: {len(ck_all)} 条（期望30）")
+        assert len(ck_all) == 30, f"fallback新增条数应=30，实际={len(ck_all)}"
 
     # 3. 去重唯一性 + 与Pilot20 0重叠验证
     seen_sid = set()
@@ -183,8 +213,8 @@ def main():
     print(f"[3] 新增去重唯一后: {len(new_unique)} 条（期望30）")
     print(f"    内部重复 sid={dup_sid} url={dup_url}；与Pilot20重叠 sid={dup_p_sid} url={dup_p_url}（都应=0）")
     assert len(new_unique) == 30, f"新增唯一记录应=30，实际={len(new_unique)}"
-    t_count = sum(1 for r in new_unique if "腾讯" in (r.get("source_company") or "") or "Tencent" in (r.get("source_company") or ""))
-    b_count = len(new_unique) - t_count
+    t_count = sum(1 for r in new_unique if is_tencent(r.get("source_company") or ""))
+    b_count = sum(1 for r in new_unique if is_bytedance(r.get("source_company") or ""))
     print(f"[3] Tencent新增={t_count}（期望15） ByteDance新增={b_count}（期望15）")
     assert t_count == 15 and b_count == 15, f"T/B新增分布不满足15/15，实际T={t_count} B={b_count}"
 
@@ -193,6 +223,9 @@ def main():
     new_raw_30_with_sha = []
     for r in new_unique:
         r_copy = dict(r)
+        # §一 RAW 的新增30条 source_company 同样必须 canonical（只改元字段，不改正文/sha输入）
+        if "source_company" in r_copy:
+            r_copy["source_company"] = canonical_source_company(r_copy.get("source_company") or "")
         if "_sha256" not in r_copy or not r_copy.get("_sha256") or not SHA256_RE.match(r_copy.get("_sha256", "")):
             r_copy["_sha256"] = calc_sha256(r_copy.get("responsibilities", ""), r_copy.get("requirements", ""))
         new_raw_30_with_sha.append(r_copy)
@@ -221,8 +254,9 @@ def main():
 
     # 7. 额外：分布初检 T25/B25
     def count_tb(rows):
-        t = sum(1 for r in rows if "腾讯" in (r.get("source_company") or "") or "Tencent" in (r.get("source_company") or ""))
-        return t, len(rows)-t
+        t = sum(1 for r in rows if is_tencent(r.get("source_company") or ""))
+        b = sum(1 for r in rows if is_bytedance(r.get("source_company") or ""))
+        return t, b
     rt, rb = count_tb(raw_reload); ct, cb = count_tb(clean_reload)
     print(f"[7] RAW分布 T={rt} B={rb}（期望25/25） | CLEAN分布 T={ct} B={cb}（期望25/25）")
     if rt != 25 or rb != 25 or ct != 25 or cb != 25:
