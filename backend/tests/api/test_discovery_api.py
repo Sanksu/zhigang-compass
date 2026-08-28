@@ -58,6 +58,16 @@ def _version_skills(skills: list[tuple[str, str]]) -> dict:
     return {"nodes": nodes, "edges": edges}
 
 
+def _version_with_education(skill_pairs, edu_pairs):
+    """建含学历要求节点的快照：skill_pairs=(sid,name) 为 Skill，edu_pairs=(eid,name)
+    为 Education 节点且同被 p1 REQUIRES——技能增减必须排除后者。"""
+    snap = _version_skills(skill_pairs)
+    for eid, name in edu_pairs:
+        snap["nodes"].append({"id": eid, "name": name, "type": "Education"})
+        snap["edges"].append({"source": "p1", "target": eid, "relation": "REQUIRES"})
+    return snap
+
+
 def _version_row(vid, skills, created_days_ago=0):
     return SimpleNamespace(
         id=vid,
@@ -208,6 +218,49 @@ class TestPositionSkillsDelta:
             user={"role": "guest", "sub": "u1"},
         )
         assert resp.data["added"] == [] and resp.data["removed"] == []
+
+
+class TestEducationExcluded:
+    """REQUIRES 的 Education target（学历要求）不算技能——226 实证
+    「本科 · 计算机科学」等 ed_* 节点曾混入技能增减列表。"""
+
+    @pytest.mark.asyncio
+    async def test_detail_excludes_education(self):
+        rows = [
+            _version_row("v2", [("sk_py", "Python")], created_days_ago=0),
+            _version_row("v1", [], created_days_ago=1),
+        ]
+        # v2 额外带学历要求节点
+        rows[0].snapshot_json = _version_with_education(
+            [("sk_py", "Python")], [("ed_1", "本科 · 计算机科学"), ("ed_2", "大专")]
+        )
+        resp = await discovery_mod.position_skills_delta(
+            position="p1", from_version=None, to_version=None,
+            db=_FakeSession(rows),
+            user={"role": "guest", "sub": "u1"},
+        )
+        data = resp.data
+        assert [s["skill_id"] for s in data["added"]] == ["sk_py"]
+        assert all(not s["skill_id"].startswith("ed_") for s in data["added"])
+
+    @pytest.mark.asyncio
+    async def test_summary_excludes_education(self):
+        rows = [
+            _version_row("v2", [("sk_py", "Python")], created_days_ago=0),
+            _version_row("v1", [("sk_py", "Python")], created_days_ago=1),
+        ]
+        for r in rows:
+            r.snapshot_json = _version_with_education(
+                [("sk_py", "Python")], [("ed_1", "本科")]
+            )
+        resp = await discovery_mod.position_skills_delta_summary(
+            from_version=None, to_version=None,
+            db=_FakeSession(rows),
+            user={"role": "guest", "sub": "u1"},
+        )
+        p = resp.data["positions"][0]
+        # 学历边两版都有且不计入：未变仅 sk_py
+        assert p["added"] == 0 and p["removed"] == 0 and p["unchanged"] == 1
 
 
 class TestPositionSkillsDeltaSummary:

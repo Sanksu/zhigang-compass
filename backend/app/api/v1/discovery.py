@@ -74,8 +74,13 @@ def _position_skills_at(snapshot: dict) -> tuple[dict[str, dict[str, str]], dict
             node_by_id[str(n["id"])] = n.get("name") or str(n["id"])
     pos_skills: dict[str, dict[str, str]] = {}
     for e in _requires_edges(snapshot.get("edges", [])):
-        src = str(e.get("source", ""))
         tgt = str(e.get("target", ""))
+        # 仅统计技能（sk_ 前缀，与 trend_service A-1① 同口径）：REQUIRES 的
+        # target 还包括 Education（学历要求，如「本科 · 计算机科学」）/Tool/
+        # Certification 节点——不过滤会把学历条目当技能混进增减列表（226 实证）。
+        if not tgt.startswith("sk_"):
+            continue
+        src = str(e.get("source", ""))
         pos_skills.setdefault(src, {})[tgt] = node_by_id.get(tgt, tgt)
     return pos_skills, node_by_id
 
