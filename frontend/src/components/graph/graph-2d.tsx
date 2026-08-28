@@ -49,6 +49,9 @@ interface Graph2DProps {
   evolutionMarks?: { addedIds: Set<string>; removedIds: Set<string> } | null
   /** 技能标签 Top-N 白名单（技术栈视图降噪：仅集合内技能在 LOD band 1 常显标签） */
   skillLabelTopIds?: Set<string> | null
+  /** 环形布局（技术栈视图专用）：技能按频次顺时针排外圈、岗位聚内圈，边呈放射状。
+      固定坐标（layout:'none'）无布局抖动，演示镜头飞行稳定；缺省力导向。 */
+  ringLayout?: boolean
   className?: string
 }
 
@@ -311,6 +314,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     completedSkills,
     evolutionMarks,
     skillLabelTopIds,
+    ringLayout,
     className,
   },
   ref,
@@ -675,6 +679,35 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       }
     })
 
+    // 环形布局坐标注入（layout:'none' 直接消费节点 x/y）：
+    // 技能按频次降序顺时针铺外圈（半径 420），岗位按关联度降序铺内圈（半径 170），
+    // 同圈角间距均分——放射状边从内圈放射到外圈，"技能→服务岗位"读向清晰。
+    if (ringLayout) {
+      const skills = nodes
+        .filter((n) => n.type === 'skill')
+        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      const positions = nodes
+        .filter((n) => n.type !== 'skill')
+        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      const R_OUTER = 520
+      const R_INNER = 200
+      const place = (n: (typeof nodes)[number], radius: number, angle: number) => {
+        ;(n as GraphNode & { x?: number; y?: number }).x = radius * Math.cos(angle)
+        ;(n as GraphNode & { x?: number; y?: number }).y = radius * Math.sin(angle)
+      }
+      skills.forEach((n, i) => {
+        place(n, R_OUTER, (i / Math.max(1, skills.length)) * Math.PI * 2 - Math.PI / 2)
+      })
+      positions.forEach((n, i) => {
+        // 内圈两环：岗位多于 34 个时错层到 R_INNER*0.62，避免内圈过密
+        const twoRing = positions.length > 34
+        const ring = twoRing && i % 2 === 1 ? R_INNER * 0.62 : R_INNER
+        const count = twoRing ? Math.ceil(positions.length / 2) : positions.length
+        const idx = twoRing ? Math.floor(i / 2) : i
+        place(n, ring, (idx / Math.max(1, count)) * Math.PI * 2 + Math.PI / count)
+      })
+    }
+
     // 关系分层：域隶属=细虚线，域间共享=弱弧线，must=海图蓝实线，nice=灰蓝虚线。
     // 各类线宽统一固定值（演示口径）；悬停节点的关联边提亮由下方 hover 效果
     // 直改边元素实现，不进 option。
@@ -730,9 +763,11 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       series: [
         {
           type: 'graph',
-          layout: 'force',
+          // 环形布局：固定坐标（技能外圈按频次顺时针 / 岗位内圈），无布局抖动；
+          // 其余视图维持力导向（拖拽探索语义）
+          layout: ringLayout ? 'none' : 'force',
           roam: true,
-          draggable: true,
+          draggable: !ringLayout,
           cursor: 'pointer',
           // 镜头保持：仅首建/视图切换时重置中心，其余重建不动当前视角
           ...(resetCamera ? { center: ['50%', '50%'] as [string, string] } : {}),
@@ -740,13 +775,17 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           animation: false,
           animationDuration: 0,
           animationDurationUpdate: 0,
-          force: {
-            repulsion: isNarrow ? [160, 420] : [320, 1000],
-            edgeLength: isNarrow ? [70, 150] : [140, 300],
-            gravity: isNarrow ? 0.16 : 0.092,
-            friction: 0.2,
-            layoutAnimation: true,
-          },
+          ...(ringLayout
+            ? {}
+            : {
+                force: {
+                  repulsion: isNarrow ? [160, 420] : [320, 1000],
+                  edgeLength: isNarrow ? [70, 150] : [140, 300],
+                  gravity: isNarrow ? 0.16 : 0.092,
+                  friction: 0.2,
+                  layoutAnimation: true,
+                },
+              }),
           scaleLimit: { min: 0.2, max: 5 },
           emphasis: {
             focus: 'adjacency',
