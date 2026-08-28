@@ -988,7 +988,8 @@ export function ResumeMatchPage() {
                                     )}
                                   </span>
                                   <span>
-                                    ROI <b className="text-ink">{((gap.roi ?? 0)).toFixed(2)}</b>
+                                    {/* ROI 归一化 0-1（后端以 0.1 原始值为满分基准封顶），×100 与需求/趋势同口径 */}
+                                    ROI <b className="text-ink">{Math.round((gap.roi ?? 0) * 100)}</b>
                                   </span>
                                 </div>
                                 {/* 数据溯源（task T3）：一条 JD 要求 ↔ 对应简历特征，逐条成对展示，打破算法黑盒 */}

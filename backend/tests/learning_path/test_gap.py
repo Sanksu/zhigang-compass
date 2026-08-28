@@ -1,6 +1,7 @@
 """差距分析三态单元测试（AL-M4-03，设计文档 §9.5）。"""
 
 from app.services.learning_path.gap import analyze_gaps
+from app.services.learning_path.prerequisites import base_hours
 from app.services.learning_path.schemas import GapType
 from app.services.matching.schemas import (
     CandidateProfile,
@@ -233,6 +234,26 @@ class TestGapDataUpgrade:
         # matched 项 roi 已算（供展示），high_roi=False
         python = next(g for g in gaps if g.skill == "Python")
         assert python.roi is not None and python.high_roi is False
+
+    def test_roi_normalized_to_0_1(self, monkeypatch):
+        """roi 归一化 0-1（08-28 拍板）：原始 (demand×(trend+1))/cost 以 0.1 满分封顶。
+
+        原始值域 0.0007-0.13，两位小数展示恒为 0.00——归一后与 demand/trend
+        同 0-1 口径（前端 ×100 显示 0-100 分）。
+        """
+        monkeypatch.setattr("app.services.learning_path.gap._trend_signal", lambda sid, sc: 0.0)
+        # demand=1.0(20源)、trend=0、cost=base_hours("Java") → raw=1/cost，未封顶
+        gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 20)]))
+        raw = (1.0 * (0.0 + 1)) / base_hours("Java")
+        assert gaps[0].roi == min(1.0, raw / 0.1)
+
+    def test_roi_capped_at_full_score(self, monkeypatch):
+        """原始 roi 超过 0.1 满分基准 → 封顶 1.0（热门速成技能场景）。"""
+        monkeypatch.setattr("app.services.learning_path.gap._trend_signal", lambda sid, sc: 0.0)
+        monkeypatch.setattr("app.services.learning_path.gap.base_hours", lambda name: 10.0)
+        # raw = (1×1)/10 = 0.1 → 封顶 1.0
+        gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 20)]))
+        assert gaps[0].roi == 1.0
 
     def test_evidence_role_and_text(self):
         """evidence 含 JD 要求 + 简历现状。"""
