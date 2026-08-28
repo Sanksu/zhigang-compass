@@ -15,14 +15,27 @@ from app.api.v1 import discovery as discovery_mod
 _TZ = timezone(timedelta(hours=8))
 
 
+class _FakeResult:
+    """execute(...) 的返回：.all() 给行列表（对齐 ORM Row 行为，行带属性访问）。"""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
 class _FakeSession:
-    """按查询返回行。scalars(...) 返回可迭代 scalar 结果。"""
+    """按查询返回行。scalars(...) 返回可迭代 scalar 结果；execute(...) 返回 _FakeResult。"""
 
     def __init__(self, rows):
         self._rows = rows
 
     async def scalars(self, stmt):
         return iter(self._rows)
+
+    async def execute(self, stmt):
+        return _FakeResult(self._rows)
 
 
 def _candidate(position_name, state="candidate", detected=None):
