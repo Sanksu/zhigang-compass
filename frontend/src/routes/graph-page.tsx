@@ -746,6 +746,7 @@ export function GraphPage() {
               completedSkills={[]}
               evolutionMarks={evolutionMarks}
               skillLabelTopIds={skillLabelTopIds}
+              ringLayout={view === 'techStack'}
               className="h-full w-full"
             />
           ) : (
