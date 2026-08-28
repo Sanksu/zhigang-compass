@@ -24,6 +24,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 type Tab = 'new' | 'delta'
 
+/** 未变技能默认展示数（超过则折叠，展开按钮显示全量） */
+const UNCHANGED_PREVIEW = 12
+
 function stateBadge(state: string) {
   return <PositionStateBadge state={state} className="text-[10px]" />
 }
@@ -138,6 +141,8 @@ function SkillsDeltaView({
   const [delta, setDelta] = useState<PositionSkillsDeltaData | null>(null)
   const [deltaError, setDeltaError] = useState<string | null>(null)
   const [deltaLoading, setDeltaLoading] = useState(false)
+  // 未变技能折叠：聚合岗位技能可达上百个，全量渲染会把新增/移除挤出首屏
+  const [unchangedExpanded, setUnchangedExpanded] = useState(false)
 
   // 候选 with 图谱技能（position_id 非空）可选作 diff；无则回退到全部候选名
   const options = useMemo(() => {
@@ -176,8 +181,17 @@ function SkillsDeltaView({
     setSelected(name)
     setDelta(null)
     setDeltaError(null)
+    setUnchangedExpanded(false)
     if (name) setDeltaLoading(true)
   }
+
+  // 后端按 skill_id 排序（对用户无意义），展示前按技能名排序
+  const bySkillName = (a: { skill_name: string }, b: { skill_name: string }) =>
+    a.skill_name.localeCompare(b.skill_name, 'zh-Hans-CN')
+
+  // 快照日期（版本 id 无阅读意义，放 title 溯源）
+  const fmtSnapDate = (iso: string | null | undefined) =>
+    iso ? new Date(iso).toLocaleDateString('zh-CN') : '?'
 
   return (
     <Card>
@@ -212,8 +226,11 @@ function SkillsDeltaView({
                 </SelectContent>
               </Select>
               {delta && (
-                <span className="text-[10px] text-ink-faint self-center">
-                  {delta.from_version} → {delta.to_version}
+                <span
+                  className="text-[10px] text-ink-faint self-center"
+                  title={`${delta.from_version ?? '?'} → ${delta.to_version ?? '?'}`}
+                >
+                  {fmtSnapDate(delta.from_created_at)} → {fmtSnapDate(delta.to_created_at)} 快照
                 </span>
               )}
             </div>
@@ -225,38 +242,71 @@ function SkillsDeltaView({
               <p className="text-xs text-state-archived text-center py-6">{deltaError}</p>
             )}
             {delta && !deltaLoading && (
-              <div className="space-y-3">
-                <div>
-                  <div className="flex items-center gap-1 text-xs text-state-stable font-medium mb-1">
-                    <ArrowUpRight className="size-3.5" />新增（{delta.added.length}）
-                  </div>
-                  <SkillChips skill={delta.added} tone="must" />
-                  {delta.added.length === 0 && (
-                    <span className="text-[10px] text-ink-faint">无新增</span>
+              delta.added.length + delta.removed.length + delta.unchanged.length === 0 ? (
+                <p className="text-xs text-ink-faint text-center py-6">
+                  该岗位最近两版快照间无技能数据
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {/* 全新岗位解读：本期首次入图，无未变/移除基线 */}
+                  {delta.added.length > 0 && delta.removed.length === 0 && delta.unchanged.length === 0 && (
+                    <p className="text-[10px] text-ink-faint">
+                      该岗位为本期新入图谱，全部技能计为新增
+                    </p>
                   )}
-                </div>
-                <div>
-                  <div className="flex items-center gap-1 text-xs text-state-declining font-medium mb-1">
-                    <ArrowDownRight className="size-3.5" />移除（{delta.removed.length}）
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {delta.removed.map((s, i) => (
-                      <span key={`${s.skill_id}-${i}`} className="rounded bg-state-archived/10 px-1.5 py-0.5 text-[10px] text-state-archived line-through">
-                        {s.skill_name}
-                      </span>
-                    ))}
-                    {delta.removed.length === 0 && (
-                      <span className="text-[10px] text-ink-faint">无移除</span>
+                  <div>
+                    <div className="flex items-center gap-1 text-xs text-state-stable font-medium mb-1">
+                      <ArrowUpRight className="size-3.5" />新增（{delta.added.length}）
+                    </div>
+                    <SkillChips skill={[...delta.added].sort(bySkillName)} tone="must" />
+                    {delta.added.length === 0 && (
+                      <span className="text-[10px] text-ink-faint">无新增</span>
                     )}
                   </div>
-                </div>
-                <div>
-                  <div className="flex items-center gap-1 text-xs text-ink-muted font-medium mb-1">
-                    <Minus className="size-3.5" />未变（{delta.unchanged.length}）
+                  <div>
+                    <div className="flex items-center gap-1 text-xs text-state-declining font-medium mb-1">
+                      <ArrowDownRight className="size-3.5" />移除（{delta.removed.length}）
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {[...delta.removed].sort(bySkillName).map((s, i) => (
+                        <span key={`${s.skill_id}-${i}`} className="rounded bg-state-archived/10 px-1.5 py-0.5 text-[10px] text-state-archived line-through">
+                          {s.skill_name}
+                        </span>
+                      ))}
+                      {delta.removed.length === 0 && (
+                        <span className="text-[10px] text-ink-faint">无移除</span>
+                      )}
+                    </div>
                   </div>
-                  <SkillChips skill={delta.unchanged} tone="nice" />
+                  <div>
+                    <div className="flex items-center gap-1 text-xs text-ink-muted font-medium mb-1">
+                      <Minus className="size-3.5" />未变（{delta.unchanged.length}）
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <SkillChips
+                        skill={
+                          unchangedExpanded
+                            ? [...delta.unchanged].sort(bySkillName)
+                            : [...delta.unchanged].sort(bySkillName).slice(0, UNCHANGED_PREVIEW)
+                        }
+                        tone="nice"
+                      />
+                      {delta.unchanged.length === 0 && (
+                        <span className="text-[10px] text-ink-faint">无变化</span>
+                      )}
+                      {delta.unchanged.length > UNCHANGED_PREVIEW && (
+                        <button
+                          type="button"
+                          className="text-[10px] text-primary hover:underline"
+                          onClick={() => setUnchangedExpanded((v) => !v)}
+                        >
+                          {unchangedExpanded ? '收起' : `展开全部 ${delta.unchanged.length} 个`}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )
             )}
           </>
         )}

@@ -613,9 +613,17 @@ export function GraphPage() {
                 </div>
               )}
             </div>
-            <div className="flex shrink-0 items-center rounded-lg border border-border bg-subtle/60 p-0.5" aria-label="图谱维度">
-              <Button size="sm" variant={mode === '2d' ? 'default' : 'ghost'} onClick={() => setMode('2d')} className="h-8 px-3 text-xs" aria-label="2D">2D 分析</Button>
-              <Button size="sm" variant={mode === '3d' ? 'default' : 'ghost'} onClick={() => setMode('3d')} disabled={mode3dLocked} aria-label="3D" title={isCoarsePointer ? '触控设备固定 2D 模式（设计文档 §6.3）' : !webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : '3D 沉浸式浏览'} className="h-8 px-3 text-xs">3D 浏览</Button>
+            <div className="flex shrink-0 items-center gap-2">
+              {/* 原「视图说明」面板唯一不可替代的信息：3D 锁定原因（触控/WebGL2），仅锁定时显示 */}
+              {mode3dLocked && (
+                <span className="text-[10px] text-ink-faint" data-testid="graph-3d-locked-hint">
+                  {isCoarsePointer ? '触控设备固定 2D 模式' : 'WebGL2 不可用，已降级 2D 模式'}
+                </span>
+              )}
+              <div className="flex shrink-0 items-center rounded-lg border border-border bg-subtle/60 p-0.5" aria-label="图谱维度">
+                <Button size="sm" variant={mode === '2d' ? 'default' : 'ghost'} onClick={() => setMode('2d')} className="h-8 px-3 text-xs" aria-label="2D">2D 分析</Button>
+                <Button size="sm" variant={mode === '3d' ? 'default' : 'ghost'} onClick={() => setMode('3d')} disabled={mode3dLocked} aria-label="3D" title={isCoarsePointer ? '触控设备固定 2D 模式（设计文档 §6.3）' : !webgl2Available ? '当前环境不支持 WebGL2，已降级 2D 模式' : '3D 沉浸式浏览'} className="h-8 px-3 text-xs">3D 浏览</Button>
+              </div>
             </div>
           </div>
         }
@@ -762,18 +770,6 @@ export function GraphPage() {
               </ul>
             </div>
           )}
-
-          {/* 视图说明 */}
-          <div className="pointer-events-none absolute bottom-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2 rounded-md border border-atlas-grid bg-canvas/88 px-3 py-2 shadow-sm backdrop-blur-xl">
-            <div className="min-w-0">
-              <p className="font-mono text-[9px] tracking-[0.16em] text-atlas-muted">当前视角 / {VIEW_LABEL[view]}</p>
-              <p className="truncate text-[11px] text-ink-muted">{VIEW_DESC[view]}</p>
-            </div>
-            <div className="flex items-center gap-2 font-mono text-[10px] text-atlas-muted">
-              {view !== 'techStack' && <span>{view === 'panorama' ? `${expandedDomains.size} 域 · ${expandedPositions.size} 岗位` : `${expandedPositions.size} 岗位`}</span>}
-              {mode3dLocked && <span>{isCoarsePointer ? '触控设备固定 2D 模式' : 'WebGL2 不可用，已降级 2D 模式'}</span>}
-            </div>
-          </div>
         </Card>
 
         {/* 节点详情面板 + 图谱算法分析：桌面=右侧边栏；移动端=底部抽屉（task T4）。

@@ -107,4 +107,109 @@ describe('DiscoveryPage', () => {
     await userEvent.click(screen.getByText('技能增减'))
     expect(screen.getByText('选择岗位…')).toBeInTheDocument()
   })
+
+  // ── 技能增减展示逻辑（08-28 优化：按名排序/未变折叠/空态/新岗位解读）──
+
+  const deltaCandidate = {
+    position_id: 'pos_1',
+    position_name: '后端工程师',
+    state: 'stable',
+    detected_at: '2026-08-26T10:00:00+08:00',
+    definition_draft: '',
+    confidence: null,
+    skills: { must: [], nice: [], soft: [] },
+    skill_pending: false,
+  }
+
+  function mockDelta(delta: Record<string, unknown>) {
+    mockedApiGet.mockImplementation((path: string) => {
+      if (typeof path === 'string' && path.startsWith('/discovery/position-skills-delta')) {
+        return Promise.resolve(delta)
+      }
+      return Promise.resolve({ total: 1, candidates: [deltaCandidate] })
+    })
+  }
+
+  /** 进入技能增减 Tab 并选中岗位（Radix Select 在 jsdom 需关 pointerEvents 校验，0=跳过全部检查） */
+  async function selectPosition(name = '后端工程师') {
+    renderPage()
+    await waitFor(() => expect(screen.getByText(name)).toBeInTheDocument())
+    await userEvent.click(screen.getByText('技能增减'))
+    await userEvent.click(screen.getByRole('combobox'), { pointerEventsCheck: 0 })
+    await userEvent.click(screen.getByRole('option', { name }), { pointerEventsCheck: 0 })
+    // delta 到达的通用标记：delta 请求已发且加载态消失（三组全空时无新增/移除区块）
+    await waitFor(() =>
+      expect(mockedApiGet).toHaveBeenCalledWith(
+        expect.stringContaining('position-skills-delta'), expect.anything(),
+      ),
+    )
+    await waitFor(() => expect(screen.queryByText('加载技能增减…')).not.toBeInTheDocument())
+  }
+
+  it('增减渲染：按技能名排序展示 + 快照日期 + 未变超量折叠/展开', async () => {
+    mockDelta({
+      position_id: 'pos_1',
+      position_name: '后端工程师',
+      from_version: 'gv_1',
+      from_created_at: '2026-08-26T05:00:00+08:00',
+      to_version: 'gv_2',
+      to_created_at: '2026-08-28T05:00:00+08:00',
+      added: [
+        { skill_id: 'sk_2', skill_name: 'Zookeeper' },
+        { skill_id: 'sk_1', skill_name: 'Alpine' },
+      ],
+      removed: [{ skill_id: 'sk_3', skill_name: '老技能' }],
+      unchanged: Array.from({ length: 15 }, (_, i) => ({
+        skill_id: `sk_u${i + 1}`,
+        skill_name: `技能${String(i + 1).padStart(2, '0')}`,
+      })),
+    })
+    await selectPosition()
+    // 按技能名排序（后端按 skill_id）：Alpine 在 Zookeeper 之前
+    const addedChips = screen.getAllByText(/^(Alpine|Zookeeper)$/)
+    expect(addedChips[0]).toHaveTextContent('Alpine')
+    expect(screen.getByText('移除（1）')).toBeInTheDocument()
+    expect(screen.getByText('老技能')).toBeInTheDocument()
+    // 未变折叠：默认仅展示前 12 个，展开后全量
+    expect(screen.getByText('未变（15）')).toBeInTheDocument()
+    expect(screen.getByText('技能01')).toBeInTheDocument()
+    expect(screen.queryByText('技能13')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '展开全部 15 个' }))
+    expect(screen.getByText('技能13')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '收起' })).toBeInTheDocument()
+  })
+
+  it('全新岗位：全部技能计为新增的解读提示 + 移除/未变空态', async () => {
+    mockDelta({
+      position_id: 'pos_1',
+      position_name: '后端工程师',
+      from_version: 'gv_1',
+      from_created_at: '2026-08-26T05:00:00+08:00',
+      to_version: 'gv_2',
+      to_created_at: '2026-08-28T05:00:00+08:00',
+      added: [{ skill_id: 'sk_1', skill_name: 'Python' }],
+      removed: [],
+      unchanged: [],
+    })
+    await selectPosition()
+    expect(screen.getByText('该岗位为本期新入图谱，全部技能计为新增')).toBeInTheDocument()
+    expect(screen.getByText('无移除')).toBeInTheDocument()
+    expect(screen.getByText('无变化')).toBeInTheDocument()
+  })
+
+  it('三组全空 → 单行空态', async () => {
+    mockDelta({
+      position_id: 'pos_1',
+      position_name: '后端工程师',
+      from_version: 'gv_1',
+      from_created_at: '2026-08-26T05:00:00+08:00',
+      to_version: 'gv_2',
+      to_created_at: '2026-08-28T05:00:00+08:00',
+      added: [],
+      removed: [],
+      unchanged: [],
+    })
+    await selectPosition()
+    expect(screen.getByText('该岗位最近两版快照间无技能数据')).toBeInTheDocument()
+  })
 })
