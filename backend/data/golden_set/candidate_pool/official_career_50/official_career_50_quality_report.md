@@ -1,6 +1,6 @@
 # 企业官网 50 条正式候选数据集 — 质量报告
 
-**生成时间（北京时间）：2026-08-28 15:11**
+**生成时间（北京时间）：2026-08-28 15:44**
 
 本报告基于 `official_career_50_clean.jsonl` 重新读取 **50** 条记录计算（所有数字均为50条真实结果）。本目录属于 `candidate_pool` 阶段的正式候选数据集，尚未进入 official Gold 110 条数据集。
 
@@ -39,7 +39,7 @@
 ## 4. Pilot20 不可变保护
 
 - 六项（source_id / source_url / responsibilities / requirements / detail_raw_text / _sha256）
-  字节级 20/20 比对结果：**❌ REVIEW_REQUIRED**
+  字节级 20/20 比对结果：**✅ PASS 完全一致**
 
 ## 5. publish_time 异常专项（§五审计）
 
@@ -56,4 +56,4 @@
 
 ## 6. 结论
 - publish_time 未来异常显式报告：**✅ 已标注（共2条）**
-> 综合质量判定：**⚠️ 存在FAIL项，须REVIEW_REQUIRED**
+> 综合质量判定：**✅ READY_FOR_REVIEW（全部质量项通过；future anomaly 已按规定显式标注不删除不修改）**
