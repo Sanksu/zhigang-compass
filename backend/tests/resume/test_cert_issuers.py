@@ -13,8 +13,6 @@
 4. 中文无前缀空格边界，ASCII 前缀需空格边界
 """
 
-import pytest
-
 from app.services.resume.cert_issuers import (
     CERT_ISSUER_MAP,
     ISSUER_CANONICAL_MAP,
