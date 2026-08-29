@@ -37,8 +37,8 @@ export type GraphNode = Omit<components['schemas']['GraphNode'], 'type'> & {
   isDomain?: boolean
   memberCount?: number
   isUncategorized?: boolean
-  /** 岗位画像大类节点标记（后端 portrait_category，技能/软技能/薪资/经验/学历中环） */
-  isPortraitCategory?: boolean
+  /** 岗位画像大类节点标记（后端字段 portrait_category，技能/软技能/薪资/经验/学历中环） */
+  portrait_category?: boolean
 }
 
 /** 契约 GraphEdge（source/target/weight/necessity/level） */
