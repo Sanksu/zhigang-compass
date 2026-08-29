@@ -22,7 +22,6 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_permission
 from app.core.database import get_db
 from app.schemas.common import ok
 
