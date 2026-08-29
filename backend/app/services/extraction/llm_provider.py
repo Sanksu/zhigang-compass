@@ -93,7 +93,12 @@ def _get_redis_client():
 
         from app.core.config import settings
 
-        _redis_client = Redis.from_url(settings.redis_url, socket_connect_timeout=1)
+        # socket_timeout（第八轮 P2-17）：仅设 connect 超时只能约束握手，
+        # 连接建立后命令挂起（Redis 主从切换/网络半开）会让 fail-open 的
+        # 状态读写无限等待——补 socket_timeout=1 与 connect 超时同档兜底。
+        _redis_client = Redis.from_url(
+            settings.redis_url, socket_connect_timeout=1, socket_timeout=1,
+        )
     return _redis_client
 
 
@@ -393,13 +398,33 @@ class LLMProviderChain:
             raise LLMConfigurationError(f"LLM 配置解析失败: {e}") from e
 
     def _load_providers(self) -> list[dict]:
-        """按 priority 升序返回 enabled provider（配置已由 _load_config 读取）。"""
+        """按 priority 升序返回 enabled 且 api_key 可解析的 provider。
+
+        空 api_key 的 enabled provider 在构造时过滤（第八轮 P2-19）：
+        真实调用链构建 client 时才解析 key，空 key provider 留在链上会
+        白白消耗一轮尝试（同步路由直接失败、异步链路空转一个超时窗）。
+        过滤后列表为空 → call_sync/call_with_fallback 维持既有
+        LLMConfigurationError 语义（"未配置可用 provider"，模块头注释
+        "未配置 api_key 时抛 LLMConfigurationError"）。
+        """
         providers = [
             p for p in self._config.get("providers", [])
             if isinstance(p, dict)
         ]
         enabled = [p for p in providers if p.get("enabled")]
-        return sorted(enabled, key=lambda p: p.get("priority", 99))
+        with_key: list[dict] = []
+        dropped: list[str] = []
+        for p in enabled:
+            if _resolve_api_key(p):
+                with_key.append(p)
+            else:
+                dropped.append(str(p.get("name", "?")))
+        if dropped:
+            _logger.warning(
+                "以下 enabled provider 的 api_key 解析为空，已从重试链过滤: %s",
+                dropped,
+            )
+        return sorted(with_key, key=lambda p: p.get("priority", 99))
 
     def _load_temperature(self) -> float:
         """结构化输出温度（yaml `structured_output.temperature`，缺省 0.1）。

@@ -14,6 +14,7 @@ _query_fulltext_search / _query_skill_positions 的 Cypher 是否带状态过滤
 import pytest
 
 from app.api.v1 import graph as graph_api
+from app.services.graph.queries import _escape_lucene
 
 
 class _FakeResult:
@@ -129,6 +130,44 @@ class TestFulltextStatusFilter:
         await graph_api._query_fulltext_search("Python", "skill", "", 0, 20)
         query, _ = driver.sessions[0].queries[0]
         assert "node.status" not in query
+
+
+class TestLuceneEscape:
+    """第八轮 P2-5：全文检索 q 进 queryNodes 前的 Lucene 语法转义。"""
+
+    def test_plain_and_cjk_untouched(self):
+        # 普通词与中文（cjk 分词器按原词切分）不应被改写
+        assert _escape_lucene("Python") == "Python"
+        assert _escape_lucene("后端开发工程师") == "后端开发工程师"
+        assert _escape_lucene("C++ 开发") == "C\\+\\+ 开发"  # 仅特殊字符转义
+
+    def test_syntax_chars_escaped(self):
+        # 审查复现输入：`("` 原样进 queryNodes 会触发 GqlError→500
+        assert _escape_lucene('("Python"') == '\\(\\"Python\\"'
+        for ch in '+-!(){}[]^"~*?:/':
+            assert _escape_lucene(f"a{ch}b") == f"a\\{ch}b", ch
+
+    def test_backslash_doubled(self):
+        assert _escape_lucene("a\\b") == "a\\\\b"
+
+    def test_boolean_operators_escaped_single_amp_pipe_kept(self):
+        # && / || 操作符转义首字符；单 & / |（不构成操作符）保持原样
+        assert _escape_lucene("a&&b") == "a\\&&b"
+        assert _escape_lucene("a||b") == "a\\||b"
+        assert _escape_lucene("a&b") == "a&b"
+        assert _escape_lucene("a|b") == "a|b"
+
+    def test_empty_and_none_like(self):
+        assert _escape_lucene("") == ""
+
+    @pytest.mark.asyncio
+    async def test_fulltext_query_uses_escaped_param(self, monkeypatch):
+        """async 查询链路：queryNodes 收 $lq（转义后），不再透传原始语法字符。"""
+        driver = _install(monkeypatch)
+        await graph_api._query_fulltext_search('("Go', "position", "", 0, 20)
+        _, params = driver.sessions[0].queries[0]
+        assert params["lq"] == '\\(\\"Go'
+        assert "q" not in params  # 原始 q 不进 Cypher 参数
 
 
 class TestSkillPositionsStatusFilter:

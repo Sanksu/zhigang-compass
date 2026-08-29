@@ -71,7 +71,10 @@ async def _load_snapshots(db: AsyncSession) -> list | None:
         snapshots = rows or None
         future.set_result(snapshots)
         return snapshots
-    except Exception as exc:
+    except BaseException as exc:
+        # BaseException（第八轮 P2-6，与 graph.py single-flight 同口径）：
+        # 请求方取消时 CancelledError 不走 Exception 分支——leader 挂掉则
+        # future 永不 resolve，跟随者 await 挂死。注入异常后原样 raise。
         if not future.done():
             future.set_exception(exc)
         raise

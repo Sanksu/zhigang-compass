@@ -117,7 +117,12 @@ def _scheduled_calls(monkeypatch):
 
 
 def test_empty_list_schedules_retry_and_increments(monkeypatch, _scheduled_calls):
-    """空列表通过惰性 _call_later 调度重发，且计数递增。"""
+    """空列表通过惰性 _call_later 调度重发，且计数递增。
+
+    第八轮 P2-21：延迟回调改为包装函数（回调体内捕获 engine.schedule 异常，
+    防 spider 关闭后 unhandled error 裸抛进 reactor）——断言改为触发回调后
+    检查 engine 收到重试请求。
+    """
     spider = _make_spider()
     _patch_logger(spider, monkeypatch)
     response = _fake_response()
@@ -128,13 +133,28 @@ def test_empty_list_schedules_retry_and_increments(monkeypatch, _scheduled_calls
     assert len(_scheduled_calls) == 1
 
     args, kwargs = _scheduled_calls[0]
-    delay, callback, request, scheduled_spider = args
+    delay, callback = args
     assert kwargs == {}
     assert delay == zhilian_mod.backoff_delay(0)  # 首次退避 30s
-    assert callback == spider.crawler.engine.schedule
-    assert request.url == response.url  # 重发同一搜索 URL
-    assert request.meta == {"keyword": "Python", "city": "北京", "page": 1}
-    assert scheduled_spider is spider
+    callback()  # 退避窗口结束：请求经 engine.schedule 重入调度
+    (req,) = spider.crawler.engine.scheduled
+    assert req.url == response.url  # 重发同一搜索 URL
+    assert req.meta == {"keyword": "Python", "city": "北京", "page": 1}
+
+
+def test_delayed_retry_after_spider_close_not_raises(monkeypatch, _scheduled_calls):
+    """第八轮 P2-21：spider 关闭后延迟回调中的调度异常被捕获，不向 reactor 裸抛。"""
+    spider = _make_spider()
+    _patch_logger(spider, monkeypatch)
+    list(spider.parse(_fake_response()))
+    assert len(_scheduled_calls) == 1
+    (_, callback), _ = _scheduled_calls[0]
+
+    def _boom(request, spider_arg):
+        raise RuntimeError("engine not running")
+
+    spider.crawler.engine.schedule = _boom
+    callback()  # 不抛异常即通过（warning 已由假 logger 吸收）
 
 
 def test_empty_list_scheduler_exception_propagates(monkeypatch):

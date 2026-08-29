@@ -5,6 +5,7 @@
 → 入队 ARQ resume_parse 任务（PII 脱敏在任务内完成）。
 """
 
+import asyncio
 import hashlib
 import logging
 import uuid
@@ -169,7 +170,9 @@ async def parse_resume(
 
     _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     file_path = _UPLOAD_DIR / f"{file_hash}{suffix}"
-    file_path.write_bytes(content)
+    # 第八轮 P2-8：同步写盘放线程池——async 端点内直接 write_bytes（≤10MB）
+    # 会阻塞事件循环，压测并发上传时拖慢全部在途请求
+    await asyncio.to_thread(file_path.write_bytes, content)
 
     task = TaskStatus(
         task_type="resume_parse",

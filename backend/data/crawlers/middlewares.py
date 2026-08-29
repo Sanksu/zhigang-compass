@@ -7,6 +7,7 @@ from threading import Lock
 from urllib.parse import urlsplit
 
 import requests
+from twisted.internet import defer
 
 from crawlers.settings import (
     DEFAULT_PROXY,
@@ -113,13 +114,19 @@ class BackoffRetryMiddleware:
             f"[退避] {spider.name} 收到 {response.status}，"
             f"{('遵循 Retry-After ' + str(retry_after) + 's') if retry_after is not None else f'指数退避 {delay}s'} 后重试 {request.url}"
         )
+        # 第八轮 P1-7：Scrapy 下载中间件契约要求 process_response 返回
+        # Response / Request / Deferred——此前 return None 会让中间件管理器
+        # raise _InvalidOutput（假下载错误：日志噪音、stats 污染、errback 误触发）。
+        # 改返回挂起 Deferred：退避窗口结束后 reactor 以 retry_request 回调，
+        # 下载器拿到 Request 后交引擎重新调度（与内置 RetryMiddleware 返回
+        # Request 的路径一致）。
+        d = defer.Deferred()
         try:
-            _call_later(delay, self.crawler.engine.schedule, retry_request, spider)
+            _call_later(delay, d.callback, retry_request)
         except Exception as e:
             spider.logger.error(f"[退避] 延迟重试调度失败: {e}")
             return response
-        # 返回 None：请求已由延迟调度接管，不触发内置 RetryMiddleware 的即时重试
-        return None
+        return d
 
 
 class ProxyPoolMiddleware:

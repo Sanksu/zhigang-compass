@@ -197,8 +197,12 @@ async def fulltext_search(
         await _cache_set(cache_key, data, ttl=SEARCH_CACHE_TTL)
         future.set_result(data)
         return ok(data=data)
-    except Exception as exc:
-        future.set_exception(exc)
+    except BaseException as exc:
+        # BaseException（第八轮 P2-6）：请求方被取消时 CancelledError 不走
+        # Exception 分支——leader 挂掉则 future 永不 resolve，并发跟随者会
+        # await 挂死到超时。对未完成 future 注入异常后原样 raise，跟随者快速失败。
+        if not future.done():
+            future.set_exception(exc)
         raise
     finally:
         _inflight.pop(cache_key, None)
@@ -252,7 +256,7 @@ async def skill_courses(skill_id: str):
         return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
     courses = await load_courses_for_skill(
-        skill_id, skill["name"], top_k=None, semantic=_course_semantic())
+        skill_id, skill["name"], top_k=None, semantic=await _course_semantic())
     return ok(
         data={
             "skill_id": skill_id,
@@ -262,7 +266,7 @@ async def skill_courses(skill_id: str):
     )
 
 
-def _course_semantic() -> object | None:
+async def _course_semantic() -> object | None:
     """课程门控语义器（08-15 审查 M1：graph API 课程与 learning-path 同门控）。
 
     语义可用：P1-3 标题门控 + 灰色带质量门控全部生效（脏 LEARNABLE_VIA 边
@@ -271,7 +275,9 @@ def _course_semantic() -> object | None:
     """
     try:
         embedder = SkillEmbedder.get()
-        embedder.embed("__probe__")  # 触发惰性加载，探测模型可用性
+        # SBERT 探测推理 CPU 密集，放线程池（第八轮 P2-4：对齐同文件
+        # skill_similar 的 to_thread 口径——原同步 embed 阻塞事件循环）
+        await asyncio.to_thread(embedder.embed, "__probe__")  # 触发惰性加载，探测模型可用性
         return embedder
     except SemanticUnavailableError:
         return None
