@@ -2975,6 +2975,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/approvals/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全审批池只读汇总（跨岗位审核/字典守卫/LLM 决策/观察池/别名，供「总览」工作流面板；不改任何状态机） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 各审批流 待办/需复核/已通过 计数 + 汇总（ApiResponse 包装） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["ApprovalSummaryData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/llm-decisions/{decision_id}/approve": {
         parameters: {
             query?: never;
@@ -4957,6 +4998,34 @@ export interface components {
                 [key: string]: number;
             };
             total: number;
+        };
+        /** @description GET /admin/approvals/summary 单条审批流计数项 */
+        ApprovalStreamSummary: {
+            /** @description 稳定标识（前端深链与分组用） */
+            id: string;
+            /** @description 审批流显示名 */
+            label: string;
+            /** @description 前端深链路径（原审核页对应 Tab/独立路由） */
+            route: string;
+            /** @description 流转说明（candidate → emerging 等） */
+            description: string;
+            /** @description 待办数 */
+            pending: number;
+            /** @description 需复核/阻断数（如低置信、规则守卫触发） */
+            review: number;
+            /** @description 已通过/已生效数 */
+            approved: number;
+        };
+        /** @description GET /admin/approvals/summary data（只读汇总） */
+        ApprovalSummaryData: {
+            /** @description 全审批池汇总 */
+            summary: {
+                total_pending: number;
+                total_review: number;
+                total_approved: number;
+            };
+            /** @description 各审批流计数（按 pending 降序） */
+            streams: components["schemas"]["ApprovalStreamSummary"][];
         };
         /** @description 技能别名回写记录（skill_aliases 行，方案① */
         SkillAliasItem: {

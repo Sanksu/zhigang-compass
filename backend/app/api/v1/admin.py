@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends
 from app.api.deps import require_permission
 from app.api.v1.admin_routes import (
     accounts,
+    approval_summary,
     audit,
     config,
     crawl,
@@ -27,6 +28,7 @@ from app.api.v1.admin_routes import (
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_permission("admin:*"))])
 router.include_router(accounts.router)
+router.include_router(approval_summary.router)
 router.include_router(audit.router)
 router.include_router(crawl.router)
 router.include_router(lineage.router)
