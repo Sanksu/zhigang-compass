@@ -77,7 +77,7 @@ class SkillEmbedder:
         names 为技能名集合；已缓存的跳过。模型不可用时静默忽略——
         后续单条调用同样会捕获 SemanticUnavailableError 降级纯规则匹配。
         """
-        missing = [n.strip() for n in names if n and n.strip() not in self._cache]
+        missing = [n.strip() for n in names if n and n.strip() and n.strip() not in self._cache]
         if not missing:
             return
         try:
