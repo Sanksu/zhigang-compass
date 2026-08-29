@@ -1711,6 +1711,24 @@ paths:
                         additionalProperties: { type: integer }
                   trace_id: { type: string }
 
+  /api/v1/admin/approvals/summary:
+    get:
+      tags: [admin]
+      summary: 全审批池只读汇总（跨岗位审核/字典守卫/LLM 决策/观察池/别名，供「总览」工作流面板；不改任何状态机）
+      responses:
+        '200':
+          description: 各审批流 待办/需复核/已通过 计数 + 汇总（ApiResponse 包装）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/ApprovalSummaryData'
+                  trace_id: { type: string }
+
   /api/v1/admin/llm-decisions/{decision_id}/approve:
     post:
       tags: [admin]
@@ -3395,6 +3413,38 @@ components:
           description: status → count
           additionalProperties: { type: integer }
         total: { type: integer }
+
+    ApprovalStreamSummary:
+      type: object
+      description: GET /admin/approvals/summary 单条审批流计数项
+      required: [id, label, route, description, pending, review, approved]
+      properties:
+        id: { type: string, description: 稳定标识（前端深链与分组用） }
+        label: { type: string, description: 审批流显示名 }
+        route: { type: string, description: 前端深链路径（原审核页对应 Tab/独立路由） }
+        description: { type: string, description: 流转说明（candidate → emerging 等） }
+        pending: { type: integer, description: 待办数 }
+        review: { type: integer, description: 需复核/阻断数（如低置信、规则守卫触发） }
+        approved: { type: integer, description: 已通过/已生效数 }
+
+    ApprovalSummaryData:
+      type: object
+      description: GET /admin/approvals/summary data（只读汇总）
+      required: [summary, streams]
+      properties:
+        summary:
+          type: object
+          description: 全审批池汇总
+          required: [total_pending, total_review, total_approved]
+          properties:
+            total_pending: { type: integer }
+            total_review: { type: integer }
+            total_approved: { type: integer }
+        streams:
+          type: array
+          description: 各审批流计数（按 pending 降序）
+          items:
+            $ref: '#/components/schemas/ApprovalStreamSummary'
 
     SkillAliasItem:
       type: object
