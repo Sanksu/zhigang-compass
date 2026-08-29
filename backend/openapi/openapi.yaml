@@ -492,7 +492,7 @@ paths:
         - name: view_type
           in: path
           required: true
-          schema: { type: string, enum: [panorama, techStack, level, positionCenter, positionPortrait] }
+          schema: { type: string, enum: [panorama, techStack, positionCenter, positionPortrait] }
         - name: position
           in: query
           required: false
@@ -2520,8 +2520,8 @@ components:
 
     GraphViewType:
       type: string
-      enum: [panorama, techStack, level, positionCenter, positionPortrait]
-      description: 图谱视图类型（服务端过滤）
+      enum: [panorama, techStack, positionCenter, positionPortrait]
+      description: 图谱视图类型（服务端过滤；positionCenter 无独立页签，作为岗位画像下拉选项数据源保留）
 
     GraphNode:
       type: object

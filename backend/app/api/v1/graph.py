@@ -712,17 +712,18 @@ async def graph_shortest_path(
 
 @router.get("/view/{view_type}")
 async def graph_view(
-    view_type: Literal["panorama", "techStack", "level", "positionCenter", "positionPortrait"],
+    view_type: Literal["panorama", "techStack", "positionCenter", "positionPortrait"],
     position: Optional[str] = Query(default=None, description="岗位 id/name（positionPortrait 视图必填）"),
     limit: int = Query(default=100, ge=1, le=600),
     user: Optional[dict] = Depends(get_optional_user),
 ):
     """[M4] 视图切换（匿名可读，后端过滤，同构于全景图）。
 
-    四种视图统一返回 {view_type, nodes, edges, stats}：
-    - panorama / positionCenter: 岗位中心展开（岗位→技能）
+    三种页面视图统一返回 {view_type, nodes, edges, stats}：
+    - panorama: 域聚合下钻的岗位中心展开（岗位→技能）
     - techStack: 技能为中心，边反向为技能→岗位，节点按技能频次排序
-    - level: 岗位中心展开 + 按熟练度级别过滤（只保留明确 level 的边）
+    - positionCenter: 与 panorama 同查询的岗位中心展开——无独立页签，
+      作为岗位画像（positionPortrait）下拉岗位选项的数据源保留
     匿名/guest 仅返回 emerging/stable/declining 岗位（candidate 待审核不外宣）。
     """
     scope = _position_scope(user)
