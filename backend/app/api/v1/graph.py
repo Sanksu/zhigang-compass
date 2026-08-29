@@ -762,7 +762,10 @@ async def graph_view(
         # → 各自小节点。大类 type=attr，无数据的维度不生成。
         def _add_category(label: str) -> str:
             cat_id = f"attr_{pid}_{label}"
-            nodes.append({"id": cat_id, "name": label, "type": "attr", "skill_category": label})
+            nodes.append({
+                "id": cat_id, "name": label, "type": "attr",
+                "skill_category": label, "portrait_category": True,
+            })
             edges.append({"source": pid, "target": cat_id, "weight": 1.0})
             return cat_id
 
