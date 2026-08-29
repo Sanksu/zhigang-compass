@@ -269,6 +269,23 @@ def _course_semantic() -> object | None:
         return None
 
 
+def _parse_distributions(position: dict) -> dict:
+    """图谱 JSON 字符串属性 → 响应对象（education/experience 分布与薪资档位）。"""
+    import json as _json
+
+    out: dict = {}
+    for key in ("education_distribution", "experience_distribution", "salary_tiers"):
+        raw = position.get(key)
+        if isinstance(raw, str):
+            try:
+                out[key] = _json.loads(raw)
+            except (ValueError, TypeError):
+                out[key] = None
+        else:
+            out[key] = raw
+    return out
+
+
 def _load_position(id: str, user: Optional[dict] = None) -> dict | None:
     """按 ID 查询岗位节点基础属性（不含技能边），不存在返回 None。
 
@@ -309,11 +326,9 @@ async def position_detail(
         "salary_max": position.get("salary_max"),
         "salary_range": position.get("salary_range"),
         "salary_currency": position.get("salary_currency"),
-        # 08-29 证据计数展示：多值分布 + 证据总数（jd 条数）
+        # 08-29 证据计数展示：多值分布（Neo4j 落图为 JSON 字符串，此处还原对象）
         "evidence_count": position.get("evidence_count"),
-        "education_distribution": position.get("education_distribution"),
-        "experience_distribution": position.get("experience_distribution"),
-        "salary_tiers": position.get("salary_tiers"),
+        **_parse_distributions(position),
         "last_updated": position.get("last_updated"),
         "status": position.get("status"),
         "must_skills": skills.get("must", []),
