@@ -338,22 +338,20 @@ export function NodeDetailPanel({
               </section>
             )}
 
-            {/* 关联统计（岗位画像视图复用卡位展示大类/条目计数） */}
-            {stats && (stats.positionCount || stats.skillCount || stats.evidenceCount) && (
+            {/* 关联统计（岗位画像视图由下方「画像证据」区承载，避免低信息量卡） */}
+            {stats && !portraitMode && (stats.positionCount || stats.skillCount || stats.evidenceCount) && (
               <section className="space-y-2">
-                <h4 className="text-xs font-medium text-ink-muted">
-                  {portraitMode ? '画像构成' : '关联统计'}
-                </h4>
+                <h4 className="text-xs font-medium text-ink-muted">关联统计</h4>
                 <dl className="grid grid-cols-3 gap-2 text-center">
                   {stats.positionCount !== undefined && (
                     <div className="rounded-lg bg-subtle/60 p-2">
-                      <dt className="text-[11px] text-ink-muted">{portraitMode ? '维度大类' : '关联岗位'}</dt>
+                      <dt className="text-[11px] text-ink-muted">关联岗位</dt>
                       <dd className="text-sm font-mono text-ink tabular-nums">{stats.positionCount}</dd>
                     </div>
                   )}
-                  {stats.skillCount !== undefined && (stats.skillCount > 0 || !portraitMode) && (
+                  {stats.skillCount !== undefined && (
                     <div className="rounded-lg bg-subtle/60 p-2">
-                      <dt className="text-[11px] text-ink-muted">{portraitMode ? '画像条目' : '关联技能'}</dt>
+                      <dt className="text-[11px] text-ink-muted">关联技能</dt>
                       <dd className="text-sm font-mono text-ink tabular-nums">{stats.skillCount}</dd>
                     </div>
                   )}
@@ -387,16 +385,16 @@ export function NodeDetailPanel({
                         {positionDetail.evidence_count} 条 JD
                       </span>
                     </h4>
-                    {(positionDetail.required_years != null || positionDetail.required_education || hasEntries(positionDetail.education_distribution)) && (
+                    {(positionDetail.required_years != null || positionDetail.required_education) && (
                       <div className="flex flex-wrap gap-1.5">
                         {positionDetail.required_years != null && (
                           <Badge variant="outline" className="text-xs">
-                            {positionDetail.required_years} 年经验（中位）
+                            经验中位 {positionDetail.required_years} 年
                           </Badge>
                         )}
                         {positionDetail.required_education && (
                           <Badge variant="outline" className="text-xs">
-                            {positionDetail.required_education}（众数）
+                            学历众数 {positionDetail.required_education}
                           </Badge>
                         )}
                       </div>
@@ -418,6 +416,16 @@ export function NodeDetailPanel({
                         label="薪资"
                         entries={(positionDetail.salary_tiers ?? []).map((t) => [t.text, t.count] as [string, number])}
                       />
+                    )}
+                    {positionDetail.soft_skills && positionDetail.soft_skills.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="w-8 shrink-0 text-[11px] text-ink-faint">软技能</span>
+                        {positionDetail.soft_skills.map((s) => (
+                          <Badge key={s} variant="outline" className="border-[#ec4899]/40 bg-[#ec4899]/5 text-xs text-ink-secondary">
+                            {s}
+                          </Badge>
+                        ))}
+                      </div>
                     )}
                   </section>
                 )}
