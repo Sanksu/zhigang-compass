@@ -585,6 +585,24 @@ export function GraphPage() {
   // 选中节点的关联统计（从当前视图数据中实时计算）+ 全图最大关联度（详情条归一化基准）
   const detailStats = useMemo(() => {
     if (!selected || !data) return undefined
+    // 岗位画像视图：层级子图里关联统计口径失效（技能/条目挂大类下不直连，
+    // positionCount/skillCount/evidenceCount 恒 0 → 侧栏渲染孤立「0」卡）。
+    // 改算画像语义：维度大类数 + 画像条目数。
+    if (view === 'positionPortrait') {
+      const linkedIds = new Set<string>()
+      data.edges.forEach((e) => {
+        if (e.source === selected.id) linkedIds.add(e.target)
+        if (e.target === selected.id) linkedIds.add(e.source)
+      })
+      const linked = data.nodes.filter((n) => linkedIds.has(n.id))
+      const maxValue = Math.max(1, ...data.nodes.map((n) => n.value ?? 0))
+      return {
+        // 复用三卡位：岗位卡=画像大类数，技能卡=画像条目数，evidence 卡不渲染
+        positionCount: linked.filter((n) => n.type === 'attr').length,
+        skillCount: linked.filter((n) => n.type !== 'position' && n.type !== 'attr').length,
+        maxValue,
+      }
+    }
     const linkedIds = new Set<string>()
     data.edges.forEach((e) => {
       if (e.source === selected.id) linkedIds.add(e.target)

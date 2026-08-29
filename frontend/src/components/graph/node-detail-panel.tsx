@@ -338,20 +338,22 @@ export function NodeDetailPanel({
               </section>
             )}
 
-            {/* 关联统计 */}
+            {/* 关联统计（岗位画像视图复用卡位展示大类/条目计数） */}
             {stats && (stats.positionCount || stats.skillCount || stats.evidenceCount) && (
               <section className="space-y-2">
-                <h4 className="text-xs font-medium text-ink-muted">关联统计</h4>
+                <h4 className="text-xs font-medium text-ink-muted">
+                  {portraitMode ? '画像构成' : '关联统计'}
+                </h4>
                 <dl className="grid grid-cols-3 gap-2 text-center">
                   {stats.positionCount !== undefined && (
                     <div className="rounded-lg bg-subtle/60 p-2">
-                      <dt className="text-[11px] text-ink-muted">关联岗位</dt>
+                      <dt className="text-[11px] text-ink-muted">{portraitMode ? '维度大类' : '关联岗位'}</dt>
                       <dd className="text-sm font-mono text-ink tabular-nums">{stats.positionCount}</dd>
                     </div>
                   )}
                   {stats.skillCount !== undefined && (
                     <div className="rounded-lg bg-subtle/60 p-2">
-                      <dt className="text-[11px] text-ink-muted">关联技能</dt>
+                      <dt className="text-[11px] text-ink-muted">{portraitMode ? '画像条目' : '关联技能'}</dt>
                       <dd className="text-sm font-mono text-ink tabular-nums">{stats.skillCount}</dd>
                     </div>
                   )}
