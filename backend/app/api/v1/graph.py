@@ -157,7 +157,7 @@ async def skill_positions(
 
 @router.get("/search")
 async def fulltext_search(
-    q: str = Query(..., min_length=1),
+    q: str = Query(..., min_length=1, max_length=100),
     type_: str = Query(default="position", alias="type", enum=["position", "skill", "evidence"]),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
@@ -438,7 +438,7 @@ async def skill_evidence(skill_id: str):
 
 @router.get("/skill/similar")
 async def skill_similar(
-    skill_id: str = Query(...),
+    skill_id: str = Query(..., max_length=100),
     top_k: int = Query(default=10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ):
@@ -787,7 +787,9 @@ async def graph_shortest_path(
 @router.get("/view/{view_type}")
 async def graph_view(
     view_type: Literal["panorama", "techStack", "positionCenter", "positionPortrait"],
-    position: Optional[str] = Query(default=None, description="岗位 id/name（positionPortrait 视图必填）"),
+    position: Optional[str] = Query(
+        default=None, max_length=100,
+        description="岗位 id/name（positionPortrait 视图必填）"),
     limit: int = Query(default=100, ge=1, le=600),
     user: Optional[dict] = Depends(get_optional_user),
 ):

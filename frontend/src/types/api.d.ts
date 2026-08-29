@@ -441,7 +441,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/graph/skill/{id}/evidence": {
+    "/api/v1/graph/skill/{skill_id}/evidence": {
         parameters: {
             query?: never;
             header?: never;
@@ -454,7 +454,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    id: components["parameters"]["Id"];
+                    skill_id: components["parameters"]["SkillId"];
                 };
                 cookie?: never;
             };
@@ -484,7 +484,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/graph/skill/{id}/prerequisites": {
+    "/api/v1/graph/skill/{skill_id}/prerequisites": {
         parameters: {
             query?: never;
             header?: never;
@@ -497,7 +497,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    id: components["parameters"]["Id"];
+                    skill_id: components["parameters"]["SkillId"];
                 };
                 cookie?: never;
             };
@@ -527,7 +527,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/graph/skill/{id}/courses": {
+    "/api/v1/graph/skill/{skill_id}/courses": {
         parameters: {
             query?: never;
             header?: never;
@@ -540,7 +540,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    id: components["parameters"]["Id"];
+                    skill_id: components["parameters"]["SkillId"];
                 };
                 cookie?: never;
             };
@@ -570,7 +570,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/graph/skill/{id}/positions": {
+    "/api/v1/graph/skill/{skill_id}/positions": {
         parameters: {
             query?: never;
             header?: never;
@@ -583,7 +583,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    id: components["parameters"]["Id"];
+                    skill_id: components["parameters"]["SkillId"];
                 };
                 cookie?: never;
             };
@@ -855,8 +855,10 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description 岗位 id（positionPortrait 视图必填，其余视图忽略） */
+                    /** @description 岗位 id/name（positionPortrait 视图必填，其余视图忽略；仅 positionPortrait 视图参与缓存键） */
                     position?: string;
+                    /** @description 节点数上限，参与缓存键 */
+                    limit?: number;
                 };
                 header?: never;
                 path: {
@@ -868,6 +870,29 @@ export interface paths {
             responses: {
                 /** @description 视图数据 */
                 200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["GraphViewData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                /** @description 岗位不存在或不可见（仅 positionPortrait 视图） */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description positionPortrait 视图未指定 position 参数（code 4000） */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1286,6 +1311,33 @@ export interface paths {
                             data?: components["schemas"]["RecommendTaskResult"];
                             trace_id?: string;
                         };
+                    };
+                };
+                /** @description 非本人无权使用该简历发起匹配 */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 简历不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description resume_id 格式非法（code 4000） */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
                     };
                 };
             };
@@ -2009,6 +2061,8 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    /** @description 按岗位名称模糊过滤（08-16：下拉全量可搜索） */
+                    q?: string;
                     /** @description 页码（从 1 起） */
                     page?: number;
                     /** @description 每页条数 */
@@ -2058,6 +2112,8 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    /** @description 按技能名称模糊过滤（08-16：下拉全量可搜索） */
+                    q?: string;
                     /** @description 页码（从 1 起） */
                     page?: number;
                     /** @description 每页条数 */
@@ -4407,7 +4463,7 @@ export interface components {
             action: "approve" | "reject";
             /** @description 审核理由（可选，缺省 admin evolution review） */
             reason?: string;
-            /** @description approve 时合并进候选池 features 的属性修订 */
+            /** @description approve 时合并进候选池 features 的属性修订；允许键集=DiscoveryFeatures 字段：jd_freq_ma3/z_score/source_diversity/cross_source_consistency/arxiv_paper_count/github_star_velocity/first_seen_date（读取侧 DiscoveryFeatures(**features) 忽略未知键） */
             modified?: Record<string, never>;
         };
         LLMDecisionReviewRequest: {
@@ -4439,7 +4495,7 @@ export interface components {
                 name: string;
                 /** @enum {string} */
                 necessity: "must" | "nice";
-                weight?: number;
+                weight: number;
             }[];
             /** @description 核心职责（字符串数组，全量替换） */
             core_duties?: string[];
@@ -4474,12 +4530,12 @@ export interface components {
          * @enum {string}
          */
         GraphViewType: "panorama" | "techStack" | "positionCenter" | "positionPortrait";
-        /** @description 图谱节点（Position/Skill，匿名视角候选岗位不外宣） */
+        /** @description 图谱节点（Position/Skill/attr 属性维度，匿名视角候选岗位不外宣） */
         GraphNode: {
             id: string;
             name: string;
             /** @enum {string} */
-            type: "position" | "skill" | "evidence";
+            type: "position" | "skill" | "evidence" | "attr";
             /**
              * @description 岗位状态机（仅 position 节点；active=图谱常态岗位，非发现状态机成员）
              * @enum {string}
@@ -4489,8 +4545,14 @@ export interface components {
             domain_id?: string | null;
             /** @description 岗位职能域显示名（域代表岗位名，仅 position；未回填为 null） */
             domain_name?: string | null;
-            /** @description 技能类目（仅 skill 节点；来自 skill_whitelist.yaml 的 category，白名单外未写入为 null，「软技能」=软素质类） */
+            /** @description 技能类目（仅 skill 节点；来自 skill_whitelist.yaml 的 category，白名单外未写入为 null，「软技能」=软素质类；positionPortrait 视图 attr 节点复用承载大类名/「画像条目」） */
             skill_category?: string | null;
+            /** @description 岗位画像大类节点标记（仅 positionPortrait 视图 attr 节点：技能/软技能/薪资/经验/学历中环） */
+            portrait_category?: boolean;
+            /** @description 证据条数（仅 positionPortrait 视图 position 节点返回） */
+            evidence_count?: number | null;
+            /** @description 节点权重（positionPortrait 视图：岗位取 JD 频次、技能取边 weight） */
+            value?: number;
         };
         /** @description 图谱边（REQUIRES 关系） */
         GraphEdge: {
@@ -4627,7 +4689,7 @@ export interface components {
             /** @description 学习/评分证据 */
             evidence?: components["schemas"]["MatchEvidenceItem"][];
         };
-        /** @description 技能反向查询岗位项（GET /graph/skill/{id}/positions） */
+        /** @description 技能反向查询岗位项（GET /graph/skill/{skill_id}/positions） */
         SkillPositionItem: {
             position_id: string;
             position_name: string;
@@ -4636,7 +4698,7 @@ export interface components {
             weight: number;
             level: string;
         };
-        /** @description GET /graph/skill/{id}/positions 响应 data */
+        /** @description GET /graph/skill/{skill_id}/positions 响应 data */
         SkillPositionsData: {
             skill_id: string;
             positions: components["schemas"]["SkillPositionItem"][];
@@ -4694,7 +4756,7 @@ export interface components {
             /** @description 岗位软素质（20 项白名单封闭集，聚合层按频次降序写回；与技术栈技能分离展示） */
             soft_skills?: string[];
         };
-        /** @description 技能证据项（GET /graph/skill/{id}/evidence，EVIDENCED_BY 原始 JD） */
+        /** @description 技能证据项（GET /graph/skill/{skill_id}/evidence，EVIDENCED_BY 原始 JD） */
         SkillEvidenceItem: {
             id: string;
             source: string;
@@ -4702,7 +4764,7 @@ export interface components {
             /** @description 抓取时间 ISO8601 */
             crawled_at?: string | null;
         };
-        /** @description GET /graph/skill/{id}/evidence 响应 data */
+        /** @description GET /graph/skill/{skill_id}/evidence 响应 data */
         SkillEvidenceData: {
             skill_id: string;
             skill_name: string;
@@ -4828,7 +4890,7 @@ export interface components {
             skill_name: string;
             similar: components["schemas"]["SimilarSkillItem"][];
         };
-        /** @description 先修技能链项（GET /graph/skill/{id}/prerequisites） */
+        /** @description 先修技能链项（GET /graph/skill/{skill_id}/prerequisites） */
         PrerequisiteItem: {
             /** @description 图谱技能 ID（未建图节点为 null） */
             skill_id?: string | null;
@@ -4836,13 +4898,13 @@ export interface components {
             /** @description 先修深度（1 为直接先修） */
             depth: number;
         };
-        /** @description GET /graph/skill/{id}/prerequisites 响应 data */
+        /** @description GET /graph/skill/{skill_id}/prerequisites 响应 data */
         SkillPrerequisitesData: {
             skill_id: string;
             skill_name: string;
             prerequisites: components["schemas"]["PrerequisiteItem"][];
         };
-        /** @description GET /graph/skill/{id}/courses 响应 data（courses 复用 CourseRecommendation） */
+        /** @description GET /graph/skill/{skill_id}/courses 响应 data（courses 复用 CourseRecommendation） */
         SkillCoursesData: {
             skill_id: string;
             skill_name: string;
@@ -6053,6 +6115,7 @@ export interface components {
     };
     parameters: {
         Id: string;
+        SkillId: string;
         Page: number;
         Size: number;
     };
