@@ -246,8 +246,19 @@ class ZhilianSpider(BaseSpider):
                 )
                 # make_playwright_request 已设 dont_filter=True，重发同一 URL 不会被去重。
                 # _call_later 仅在实际重试时才加载 reactor，避免 SpiderLoader 预加载时
-                # 安装默认 reactor；不捕获调度异常，保持其向调用方传播。
-                _call_later(delay, self.crawler.engine.schedule, retry_request, self)
+                # 安装默认 reactor；调度时点的异常仍向调用方传播（既有语义）。
+                # 第八轮 P2-21：spider 在退避窗口内关闭时，engine.schedule 会在延迟
+                # 回调里抛异常（engine not running 等），无人捕获会以 unhandled
+                # error 裸抛进 reactor——回调体内捕获记 warning。
+                def _schedule_retry():
+                    try:
+                        self.crawler.engine.schedule(retry_request, self)
+                    except Exception as exc:
+                        self.logger.warning(
+                            f"[zhilian] 延迟重试调度失败（spider 可能已关闭）: {exc}"
+                        )
+
+                _call_later(delay, _schedule_retry)
                 return
             self.logger.warning(
                 f"[zhilian] 列表页无岗位数据（kw={response.meta.get('keyword')} 页={response.meta.get('page')}），"

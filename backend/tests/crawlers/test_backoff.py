@@ -2,12 +2,18 @@
 
 覆盖：退避序列计算（30→60→120→300 封顶）、429/403 拦截延迟重试、
 退避次数用尽置 dont_retry、非 429/403 不拦截。
+
+第八轮 P1-7：process_response 退避分支改返回挂起 Deferred（Scrapy 下载
+中间件契约，原 return None 触发 _InvalidOutput 假下载错误）——相关断言
+从 `out is None` 改为 Deferred + 延迟回调以重试 Request 收敛。
 """
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "data"))
+
+from twisted.internet import defer
 
 import crawlers.middlewares as middlewares
 from crawlers.middlewares import BackoffRetryMiddleware, backoff_delay, retry_after_seconds
@@ -100,21 +106,24 @@ def test_passes_non_429_403(monkeypatch):
 
 
 def test_backoff_schedules_delayed_retry(monkeypatch):
-    mw_inst, crawler, calls = _make_mw(monkeypatch)
+    mw_inst, _, calls = _make_mw(monkeypatch)
     spider = _FakeSpider()
     req = _FakeRequest()
     out = mw_inst.process_response(req, _FakeResponse(429), spider)
-    assert out is None  # 请求已由延迟调度接管
+    assert isinstance(out, defer.Deferred)  # 挂起 Deferred（P1-7 契约修复）
     assert len(calls) == 1
     delay, callback, args, kwargs = calls[0]
     assert delay == 30  # 首次退避
-    assert callback == crawler.engine.schedule
+    assert callback.__self__ is out  # 延迟回调即该 Deferred 的 callback
     assert kwargs == {}
-    retry_req, scheduled_spider = args
-    assert scheduled_spider is spider
+    (retry_req,) = args
     assert retry_req is not req
     assert retry_req.dont_filter is True
     assert retry_req.meta["backoff_count"] == 1
+    # 退避窗口结束：Deferred 以重试 Request 收敛（下载器拿到后交引擎重调度）
+    callback(retry_req)
+    assert out.called is True
+    assert out.result is retry_req
 
 
 def test_backoff_grows_exponentially(monkeypatch):
@@ -170,14 +179,14 @@ def test_retry_after_seconds_parser():
 
 def test_honors_retry_after(monkeypatch):
     """403/429 带 Retry-After 时按其建议退避（而非固定指数 30s）。"""
-    mw_inst, crawler, calls = _make_mw(monkeypatch)
+    mw_inst, _, calls = _make_mw(monkeypatch)
     spider = _FakeSpider()
     resp = _FakeResponse(429, headers={"Retry-After": b"60"})
     out = mw_inst.process_response(_FakeRequest(), resp, spider)
-    assert out is None
+    assert isinstance(out, defer.Deferred)
     assert len(calls) == 1
     assert calls[0][0] == 60
-    assert calls[0][1] == crawler.engine.schedule
+    assert calls[0][1].__self__ is out
 
 
 def test_retry_after_capped(monkeypatch):
@@ -194,5 +203,5 @@ def test_missing_retry_after_falls_back_to_backoff(monkeypatch):
     mw_inst, _, calls = _make_mw(monkeypatch)
     spider = _FakeSpider()
     out = mw_inst.process_response(_FakeRequest(), _FakeResponse(429), spider)
-    assert out is None
+    assert isinstance(out, defer.Deferred)
     assert calls[0][0] == 30
