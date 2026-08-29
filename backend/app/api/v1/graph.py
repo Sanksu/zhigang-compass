@@ -303,6 +303,11 @@ async def position_detail(
         "name": position.get("name", position["id"]),
         "required_years": position.get("required_years"),
         "required_education": position.get("required_education"),
+        # 08-29 聚合新增：salary_range 文本解析的月薪资中位区间（元）；
+        # salary_range 原文本保留（未解析成功时仍有展示值）
+        "salary_min": position.get("salary_min"),
+        "salary_max": position.get("salary_max"),
+        "salary_range": position.get("salary_range"),
         "last_updated": position.get("last_updated"),
         "status": position.get("status"),
         "must_skills": skills.get("must", []),
