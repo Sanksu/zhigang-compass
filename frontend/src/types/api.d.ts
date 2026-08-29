@@ -4363,10 +4363,15 @@ export interface components {
             name: string;
             required_years?: number | null;
             required_education?: string | null;
-            /** @description 月薪资中位下限（元，salary_range 解析，08-29 聚合新增） */
+            /** @description 月薪资中位下限（salary_range 解析，币种见 salary_currency） */
             salary_min?: number | null;
-            /** @description 月薪资中位上限（元，salary_range 解析） */
+            /** @description 月薪资中位上限（salary_range 解析，币种见 salary_currency） */
             salary_max?: number | null;
+            /**
+             * @description 薪资币种（国内外区分，08-29 拍板；CNY 优先写图）
+             * @enum {string|null}
+             */
+            salary_currency?: "CNY" | "USD" | null;
             /** @description 原始薪资文本（未解析成功的展示兜底） */
             salary_range?: string | null;
             /** @description 最近更新时间 ISO8601 */
