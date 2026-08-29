@@ -200,3 +200,50 @@ class TestSkillEmbedderPreload:
             embedder.preload()
         except Exception as e:
             pytest.fail(f"preload() 不应抛出异常: {e}")
+
+
+class TestSkillEmbedderCacheEviction:
+    """P2-10（第八轮）：名称向量缓存 LRU 上限（OrderedDict + 锁，8192 条封顶）。"""
+
+    def test_cache_evicts_oldest_beyond_cap(self, monkeypatch):
+        """超过上限淘汰最久未用项，缓存大小封顶。"""
+        from app.services.matching import semantic
+
+        monkeypatch.setattr(semantic, "_CACHE_MAX_ENTRIES", 2)
+        embedder = SkillEmbedder()
+        embedder._cache_put("a", [1.0])
+        embedder._cache_put("b", [2.0])
+        embedder._cache_put("c", [3.0])
+        assert list(embedder._cache.keys()) == ["b", "c"]  # a（最旧）被淘汰
+
+    def test_cache_hit_renews_recency(self, monkeypatch):
+        """命中续期：再次访问的条目不被淘汰（LRU 而非 FIFO）。"""
+        from app.services.matching import semantic
+
+        monkeypatch.setattr(semantic, "_CACHE_MAX_ENTRIES", 2)
+        embedder = SkillEmbedder()
+        embedder._cache_put("a", [1.0])
+        embedder._cache_put("b", [2.0])
+        embedder._cache_get("a")  # a 续期 → b 成为最久未用
+        embedder._cache_put("c", [3.0])
+        assert list(embedder._cache.keys()) == ["a", "c"]  # b 被淘汰
+
+    def test_cache_thread_safe_under_concurrent_puts(self, monkeypatch):
+        """并发写不破坏结构（_vec/similarity 经 asyncio.to_thread 并发访问场景）。"""
+        import threading
+
+        from app.services.matching import semantic
+
+        monkeypatch.setattr(semantic, "_CACHE_MAX_ENTRIES", 64)
+        embedder = SkillEmbedder()
+
+        def worker(i: int) -> None:
+            for j in range(200):
+                embedder._cache_put(f"k{i}-{j}", [float(j)])
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(embedder._cache) <= 64

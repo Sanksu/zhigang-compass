@@ -38,34 +38,41 @@ def _demand_from_source(source_count: int | None) -> float:
     return min(1.0, (source_count or 1) / _DEMAND_NORM)
 
 
-def _position_count(skill_id: str | None) -> int:
-    """技能关联岗位数：图谱 (sk:Skill {id})<-[:REQUIRES]-(p:Position) 计数。"""
-    if not skill_id:
-        return 0
+def _position_counts(skill_ids: list[str]) -> dict[str, int]:
+    """技能关联岗位数批量查询：图谱 (sk:Skill {id})<-[:REQUIRES]-(p:Position) 计数。
+
+    一次 UNWIND 取全部技能计数（第八轮 P2-13：原先每差距技能一次同步
+    Neo4j 往返，compare 详情按技能数线性放大延迟）。无关联岗位的技能
+    不出现在返回值中（调用方按 0 取）。图谱不可用不阻断差距分析
+    （trend 退化为纯 source_count 项）。
+    """
+    if not skill_ids:
+        return {}
     try:
         from app.core.database import neo4j_driver
 
         with neo4j_driver.session() as session:
-            rec = session.run(
-                "MATCH (s:Skill {id: $id})<-[:REQUIRES]-(p:Position) RETURN count(p) AS n",
-                id=skill_id,
-            ).single()
-            return int(rec["n"]) if rec else 0
+            records = session.run(
+                "UNWIND $ids AS sid "
+                "MATCH (s:Skill {id: sid})<-[:REQUIRES]-(p:Position) "
+                "RETURN sid AS sid, count(p) AS n",
+                ids=list(skill_ids),
+            ).data()
+            return {rec["sid"]: int(rec["n"]) for rec in records}
     except Exception:
-        # 图谱不可用不阻断差距分析（trend 退化为纯 source_count 项）
-        return 0
+        return {}
 
 
-def _trend_signal(skill_id: str | None, source_count: int | None) -> float:
+def _trend_signal(position_count: int, source_count: int | None) -> float:
     """需求趋势连续值（0~1）：技能扩散信号。
 
     由两项等权合成（全用现有真实数据，可解释）：
-    - 岗位扩散：被多少岗位 REQUIRES（≥10 岗位封顶 0.5）
+    - 岗位扩散：被多少岗位 REQUIRES（≥10 岗位封顶 0.5，计数由
+      _position_counts 批量预取）
     - 跨源扩散：被多少独立 JD 源要求（source_count，≥20 源封顶 0.5）
     技能被更多岗位采用且跨更多源 → 需求向上（trend 高）。
     """
-    pos = _position_count(skill_id)
-    return 0.5 * min(1.0, pos / _POSITION_DIFFUSION_NORM) + 0.5 * min(
+    return 0.5 * min(1.0, position_count / _POSITION_DIFFUSION_NORM) + 0.5 * min(
         1.0, (source_count or 1) / _DEMAND_NORM
     )
 
@@ -136,6 +143,10 @@ def analyze_gaps(candidate, position, semantic=None, sim_threshold: float | None
     gaps: list[GapSkill] = []
     # 原始 ROI 留档供 high_roi Top3 排序（roi 字段归一化后封顶会并列，见下）
     roi_raw_by_skill: dict[str, float] = {}
+    # 岗位扩散计数一次批量预取（P2-13：避免循环内逐技能同步 Neo4j 往返）
+    pos_counts = _position_counts(
+        list({req.skill_id for req in seen.values() if req.skill_id})
+    )
     for req in seen.values():
         sim, matched_skill = _best_matching_skill(
             req, candidate.skills, semantic, sim_threshold
@@ -155,7 +166,7 @@ def analyze_gaps(candidate, position, semantic=None, sim_threshold: float | None
 
         # ── 数据升级（task 2.x）──
         demand = _demand_from_source(req.source_count)
-        trend = _trend_signal(req.skill_id, req.source_count)
+        trend = _trend_signal(pos_counts.get(req.skill_id, 0), req.source_count)
         # cost：base_hours × 熟练度缺口（missing 全量，weak 减半——与 generator 学时口径一致）
         cost = base_hours(req.skill_name)
         if gap_type == GapType.WEAK:

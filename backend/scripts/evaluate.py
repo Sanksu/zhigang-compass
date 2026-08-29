@@ -4,6 +4,9 @@
 
 当前覆盖：
 - jd      JD 解析：白名单关键词基线，字段级 F1（黄金集 data/golden_set/jd_golden_100.jsonl）
+          ⚠ 双黄金集口径：jd 项沿用旧 jd_golden_100.jsonl（词面基线，历史可比，
+          切换即基线变更需另行决策）；正式人工标注集 data/golden_set/final/jd_golden_110.jsonl
+          仅由 jd_llm 盲审消费（run_manual_jd_eval.py），两集分数不可直接对比
 - jd_llm  JD 解析：真实 LLM 盲审评测（读取 tests/evaluate/run_manual_jd_eval.py --run 的
           最近归档 reports/eval_jd_llm_*.json；只读不重跑，避免重复消耗 LLM 额度）
 - match   人岗匹配：total_score 与人工标注的 Spearman 秩相关 + 分类准确率 + Top-3 推荐准确率
@@ -53,6 +56,9 @@ _JD_TARGET_F1 = 0.90
 _RESUME_TARGET_F1 = 0.90
 _MATCH_TARGET = 0.90
 
+# JD 词面基线黄金集（第八轮 P2-20 注明双口径）：jd 评测项沿用旧 100 条集
+# 保持历史可比；正式人工标注集 final/jd_golden_110.jsonl 仅 jd_llm 盲审消费，
+# 不在本脚本读取——gold 修订即基线变更，切换需另行决策，勿误读为遗漏
 _JD_GOLDEN = _BACKEND_DIR / "data" / "golden_set" / "jd_golden_100.jsonl"
 _JD_TITLE_CACHE: dict[str, str] | None = None
 

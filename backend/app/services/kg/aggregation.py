@@ -463,7 +463,8 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
     """
     positions = []
     for pos, pa in agg.items():
-        # 学历众数（并列取级别高者——排序稳定靠 Counter.most_common 计数优先）
+        # 学历众数（计数最高者；并列时取首次出现者——Counter.most_common 同计数
+        # 按首次插入序返回，不比较级别高低）
         edu_mode = pa.education_levels.most_common(1)[0][0] if pa.education_levels else None
         # 薪资按币种各自中位：CNY 优先（国内主口径），无 CNY 用 USD；
         # currency 落图供前端分组展示（绝不混算，08-29 拍板）

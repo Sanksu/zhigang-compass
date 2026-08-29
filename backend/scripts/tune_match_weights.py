@@ -167,10 +167,12 @@ def tune(pairs: list[dict], semantic, n_trials: int) -> dict:
     study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
     best = study.best_params
+    # w_exp 取「已舍入 w_must/w_nice」的补数再舍入，保证写入值 Σw 严格 =1
+    # （weights._valid_weights 第八轮起要求 Σw=1，三项独立舍入会引入 ≤0.001 偏差被拒）
     return {
         "w_must": round(best["w_must"], 3),
         "w_nice": round(best["w_nice"], 3),
-        "w_exp": round(1.0 - best["w_must"] - best["w_nice"], 3),
+        "w_exp": round(1.0 - round(best["w_must"], 3) - round(best["w_nice"], 3), 3),
         "sim_threshold": round(best["sim_threshold"], 3),
         "_spearman": study.best_value,
     }
