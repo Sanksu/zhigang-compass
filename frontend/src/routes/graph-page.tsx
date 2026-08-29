@@ -965,6 +965,7 @@ export function GraphPage() {
                         : false
                   }
                   onTogglePosition={togglePosition}
+                  portraitMode={view === 'positionPortrait'}
                   onToggleDomain={toggleDomain}
                   onSelectSkill={focusSkill}
                   onClose={() => setSelected(null)}
