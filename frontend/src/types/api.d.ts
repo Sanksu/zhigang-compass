@@ -760,7 +760,7 @@ export interface paths {
                 };
                 header?: never;
                 path: {
-                    view_type: "panorama" | "techStack" | "level" | "positionCenter" | "positionPortrait";
+                    view_type: "panorama" | "techStack" | "positionCenter" | "positionPortrait";
                 };
                 cookie?: never;
             };
@@ -4177,10 +4177,10 @@ export interface components {
             trace_id: string;
         };
         /**
-         * @description 图谱视图类型（服务端过滤）
+         * @description 图谱视图类型（服务端过滤；positionCenter 无独立页签，作为岗位画像下拉选项数据源保留）
          * @enum {string}
          */
-        GraphViewType: "panorama" | "techStack" | "level" | "positionCenter" | "positionPortrait";
+        GraphViewType: "panorama" | "techStack" | "positionCenter" | "positionPortrait";
         /** @description 图谱节点（Position/Skill，匿名视角候选岗位不外宣） */
         GraphNode: {
             id: string;

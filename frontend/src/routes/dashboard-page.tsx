@@ -146,7 +146,7 @@ const EMPTY_STATS: StatItem[] = [
 ]
 
 const QUICK_LINKS = [
-  { to: '/graph', icon: Network, title: '能力图谱', desc: '2D 力导向图为主，3D 模式可选。四种视图切换：全景 / 技术栈 / 级别 / 岗位中心', badge: '真实' },
+  { to: '/graph', icon: Network, title: '能力图谱', desc: '2D 力导向图为主，3D 模式可选。视图切换：全景 / 技术栈 / 岗位画像', badge: '真实' },
   { to: '/evolution', icon: TrendingUp, title: '演化看板', desc: '图谱版本快照追踪技能频次变化，Z-score 检测新兴/衰退技能', badge: '真实' },
   { to: '/resume-match', icon: Users, title: '简历匹配', desc: '上传简历 → LLM 解析 → 三维加权匹配 → 差距分析', badge: '真实' },
   { to: '/admin/crawl', icon: Database, title: '爬取管理', desc: '13 源采集状态 · 真实统计（DB 入库口径）', badge: 'admin' },
