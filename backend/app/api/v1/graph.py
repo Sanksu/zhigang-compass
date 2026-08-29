@@ -745,8 +745,9 @@ async def graph_view(
             return error(ERR_NOT_FOUND, "岗位不存在或不可见", http_status=404)
         record = rows[0]
         p = record["p"]
+        pid = p.get("id", position)
         nodes: list[dict] = [{
-            "id": p.get("id", position),
+            "id": pid,
             "name": p.get("name", position),
             "type": "position",
             "status": p.get("status") or "active",
@@ -754,48 +755,81 @@ async def graph_view(
             "value": p.get("freq", 0),
         }]
         edges: list[dict] = []
-        # 画像维度节点（复用 #635 证据数据）：薪资/经验/学历/规模
-        salary_text = p.get("salary_range") or (
+
+        # 层级画像（08-29 拍板）：岗位 → 大类节点（技能/软技能/薪资/经验/学历）
+        # → 各自小节点。大类 type=attr，无数据的维度不生成。
+        def _add_category(label: str) -> str:
+            cat_id = f"attr_{pid}_{label}"
+            nodes.append({"id": cat_id, "name": label, "type": "attr", "skill_category": label})
+            edges.append({"source": pid, "target": cat_id, "weight": 1.0})
+            return cat_id
+
+        def _add_child(cat_id: str, child_id: str, name: str, extra: dict | None = None):
+            node = {"id": child_id, "name": name, "type": "attr", "skill_category": "画像条目"}
+            if extra:
+                node.update(extra)
+            nodes.append(node)
+            edges.append({"source": cat_id, "target": child_id, "weight": 1.0})
+
+        # 技能大类 → 具体技能 Top-15（type=skill 保留类目着色，weight 降序）
+        skill_children = [sk for sk in (record.get("skills") or []) if sk.get("sid")]
+        if skill_children:
+            cat_id = _add_category("技能")
+            for sk in skill_children[:15]:
+                nodes.append({
+                    "id": sk["sid"],
+                    "name": sk.get("sname") or sk["sid"],
+                    "type": "skill",
+                    "skill_category": sk.get("scat"),
+                    "value": sk.get("weight", 0),
+                })
+                edges.append({
+                    "source": cat_id,
+                    "target": sk["sid"],
+                    "weight": sk.get("weight", 0.0),
+                    "necessity": sk.get("necessity", "must"),
+                    "level": sk.get("level", "中级"),
+                })
+        # 软技能大类 → soft_skills 列表逐项（type=skill + 软技能类目 → 前端粉色；
+        # 写回顺序即 JD 命中降序，无计数只展示名字）
+        soft_skills = p.get("soft_skills") or []
+        if soft_skills:
+            cat_id = _add_category("软技能")
+            for i, name in enumerate(soft_skills[:15]):
+                _add_child(cat_id, f"soft_{pid}_{i}", name,
+                           {"type": "skill", "skill_category": "软技能"})
+        # 薪资大类 → 档位 Top-5（'1-1.3万 ×9'）；无档位时单条兜底
+        # （salary_min/max 拼接或 salary_range 原文）
+        salary_tiers = p.get("salary_tiers") or []
+        salary_fallback = p.get("salary_range") or (
             f"{p.get('salary_min')}-{p.get('salary_max')}"
             f"{'元' if p.get('salary_currency') == 'CNY' else ' USD'}"
             if p.get("salary_min") is not None else None
         )
-        attrs: list[tuple[str, str]] = []
-        if p.get("salary_min") is not None or salary_text:
-            attrs.append(("薪资", salary_text or "面议"))
-        if p.get("required_years") is not None:
-            attrs.append(("经验", f'{p["required_years"]:g} 年'))
-        if p.get("required_education"):
-            attrs.append(("学历", p["required_education"]))
-        if p.get("evidence_count") is not None:
-            attrs.append(("规模", f'{p["evidence_count"]} 条 JD 证据'))
-        for idx, (label, value) in enumerate(attrs):
-            attr_id = f"attr_{p.get('id', position)}_{idx}"
-            nodes.append({
-                "id": attr_id,
-                "name": f"{label}：{value}",
-                "type": "attr",
-                "skill_category": label,
-            })
-            edges.append({"source": p.get("id", position), "target": attr_id, "weight": 1.0})
-        # 技能外环
-        for sk in record.get("skills") or []:
-            if not sk.get("sid"):
-                continue
-            nodes.append({
-                "id": sk["sid"],
-                "name": sk.get("sname") or sk["sid"],
-                "type": "skill",
-                "skill_category": sk.get("scat"),
-                "value": sk.get("weight", 0),
-            })
-            edges.append({
-                "source": p.get("id", position),
-                "target": sk["sid"],
-                "weight": sk.get("weight", 0.0),
-                "necessity": sk.get("necessity", "must"),
-                "level": sk.get("level", "中级"),
-            })
+        if salary_tiers or salary_fallback:
+            cat_id = _add_category("薪资")
+            if salary_tiers:
+                for i, tier in enumerate(salary_tiers[:5]):
+                    _add_child(cat_id, f"sal_{pid}_{i}",
+                               f'{tier.get("text", "?")} ×{tier.get("count", 0)}')
+            else:
+                _add_child(cat_id, f"sal_{pid}_fallback", salary_fallback)
+        # 经验大类 → 分布 Top-5（'3年以上 ×122'）
+        exp_dist = p.get("experience_distribution") or {}
+        if exp_dist:
+            cat_id = _add_category("经验")
+            for i, (label, cnt) in enumerate(exp_dist.items()):
+                if i >= 5:
+                    break
+                _add_child(cat_id, f"exp_{pid}_{i}", f"{label} ×{cnt}")
+        # 学历大类 → 分布 Top-5（'本科 ×245'）
+        edu_dist = p.get("education_distribution") or {}
+        if edu_dist:
+            cat_id = _add_category("学历")
+            for i, (label, cnt) in enumerate(edu_dist.items()):
+                if i >= 5:
+                    break
+                _add_child(cat_id, f"edu_{pid}_{i}", f"{label} ×{cnt}")
         data = {
             "view_type": view_type,
             "nodes": nodes,

@@ -116,7 +116,11 @@ export function GraphPage() {
   // 选项取自 /graph/view/positionCenter 的岗位节点（freq 降序），存独立 state
   // （不进 viewCacheRef——那里缓存的是画布 GraphData，选项集非画布数据）
   const [portraitPosition, setPortraitPosition] = useState('')
-  const [portraitOptions, setPortraitOptions] = useState<{ id: string; name: string }[]>([])
+  const [portraitOptions, setPortraitOptions] = useState<
+    { id: string; name: string; domainId: string; domainName: string }[]
+  >([])
+  // 岗位簇（职能域）两级下拉：簇选中后岗位选项联动过滤
+  const [portraitCluster, setPortraitCluster] = useState('')
   // 视图数据缓存（session 级，08-16 性能优化）：同视图切换回来不重复请求/转换。
   // 数据随每日 ETL 更新，session 内缓存可接受（页面刷新即失效）
   const viewCacheRef = useRef<Map<GraphViewType, GraphData>>(new Map())
@@ -249,11 +253,17 @@ export function GraphPage() {
         if (cancelled) return
         const opts = toGraphData(res)
           .nodes.filter((n) => n.type === 'position')
-          .map((n) => ({ id: n.id, name: n.name }))
+          .map((n) => ({
+            id: n.id,
+            name: n.name,
+            domainId: n.domain_id || 'dom_uncategorized',
+            domainName: n.domain_name || '待归类岗位',
+          }))
         setPortraitOptions(opts)
-        // 默认选中第一个（positionCenter 按关联频次降序，即最高频岗位）；
+        // 默认选中第一个簇（freq 最高的岗位所在簇）+ 该簇最高频岗位；
         // 已有手动选择时不覆盖
-        setPortraitPosition((prev) => prev || opts[0]?.id || '')
+        setPortraitCluster((prev) => prev || opts[0]?.domainId || '')
+        setPortraitPosition((p) => p || opts[0]?.id || '')
       })
       .catch(() => {
         // 静默：下拉空项即空态提示（见画布渲染处）
@@ -751,25 +761,53 @@ export function GraphPage() {
             </TabsList>
             <p className="truncate text-[12px] text-ink-muted" title={VIEW_DESC[view]}>{VIEW_DESC[view]}</p>
             {/* 岗位画像：岗位下拉（positionCenter 岗位集，默认选中最高频岗位） */}
-            {view === 'positionPortrait' && (
-              <Select
-                value={portraitPosition || undefined}
-                onValueChange={(v) => {
-                  // 切换岗位：同步清空选中态（详情面板不残留上一岗位的画布外节点）
-                  setSelected(null)
-                  setPortraitPosition(v)
-                }}
-              >
-                <SelectTrigger className="h-8 w-56 shrink-0 text-xs" aria-label="选择岗位">
-                  <SelectValue placeholder="选择岗位…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {portraitOptions.map((p) => (
-                    <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+            {view === 'positionPortrait' && (() => {
+              // 两级下拉：岗位簇（职能域聚合）→ 簇内岗位联动过滤
+              const clusterMap = new Map<string, string>()
+              for (const o of portraitOptions) clusterMap.set(o.domainId, o.domainName)
+              const clusters = [...clusterMap.entries()].map(([id, name]) => ({ id, name }))
+              const inCluster = portraitOptions.filter((o) => o.domainId === portraitCluster)
+              return (
+                <>
+                  <Select
+                    value={portraitCluster || undefined}
+                    onValueChange={(v) => {
+                      setSelected(null)
+                      setPortraitCluster(v)
+                      // 切簇：岗位自动切到该簇内最高频岗位（portraitOptions 已按 freq 降序）
+                      const first = portraitOptions.find((o) => o.domainId === v)
+                      setPortraitPosition(first?.id || '')
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-40 shrink-0 text-xs" aria-label="选择岗位簇">
+                      <SelectValue placeholder="选择岗位簇…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clusters.map((cl) => (
+                        <SelectItem key={cl.id} value={cl.id} className="text-xs">{cl.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={portraitPosition || undefined}
+                    onValueChange={(v) => {
+                      // 切换岗位：同步清空选中态（详情面板不残留上一岗位的画布外节点）
+                      setSelected(null)
+                      setPortraitPosition(v)
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-56 shrink-0 text-xs" aria-label="选择岗位">
+                      <SelectValue placeholder="选择岗位…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {inCluster.map((o) => (
+                        <SelectItem key={o.id} value={o.id} className="text-xs">{o.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              )
+            })()}
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-muted" aria-label="当前图谱规模">
             <span className="flex items-center gap-1" title="当前视图节点数 / 图谱总节点数"><Network className="size-3" /><b className="font-mono font-medium text-ink-secondary">{data.stats.returnedNodes}</b><span>/ {data.stats.totalNodesInGraph} 节点</span></span>

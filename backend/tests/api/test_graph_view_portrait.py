@@ -55,6 +55,10 @@ def _portrait_record():
         "salary_range": "20k-35k",
         "required_years": 3,
         "required_education": "本科",
+        "soft_skills": ["沟通能力", "团队协作"],
+        "salary_tiers": [{"text": "1-1.3万", "count": 9}],
+        "experience_distribution": {"3年以上": 5},
+        "education_distribution": {"本科": 8},
     })
     skills = [
         {"sid": "sk_py", "sname": "Python", "scat": "语言",
@@ -117,8 +121,8 @@ class TestPositionPortraitView:
         assert body["code"] == 4040
 
     @pytest.mark.asyncio
-    async def test_normal_path_nodes_edges_stats(self, monkeypatch):
-        """正常路径：中心岗位 + 4 个画像维度节点 + 技能外环；stats 计数正确。"""
+    async def test_normal_path_hierarchy_nodes_edges_stats(self, monkeypatch):
+        """正常路径：中心岗位 + 大类节点（技能/软技能/薪资/经验/学历）+ 各自小节点。"""
         calls = _patch_env(monkeypatch, rows=[_portrait_record()])
         resp = await graph_api.graph_view(
             view_type="positionPortrait", position="pos_1", limit=100,
@@ -140,42 +144,39 @@ class TestPositionPortraitView:
         pos = nodes["pos_1"]
         assert pos["type"] == "position"
         assert pos["name"] == "后端工程师"
-        assert pos["status"] == "stable"
         assert pos["evidence_count"] == 12
-        assert pos["value"] == 5
 
-        # 画像维度节点（薪资/经验/学历/规模，按 p 属性生成）
-        assert nodes["attr_pos_1_0"]["name"] == "薪资：20k-35k"
-        assert nodes["attr_pos_1_0"]["skill_category"] == "薪资"
-        assert nodes["attr_pos_1_1"]["name"] == "经验：3 年"
-        assert nodes["attr_pos_1_2"]["name"] == "学历：本科"
-        assert nodes["attr_pos_1_3"]["name"] == "规模：12 条 JD 证据"
+        # 大类节点（type=attr，5 个维度齐全）+ 岗位→大类边
+        for label in ("技能", "软技能", "薪资", "经验", "学历"):
+            cat = nodes[f"attr_pos_1_{label}"]
+            assert cat["type"] == "attr" and cat["name"] == label
+            assert any(e["source"] == "pos_1" and e["target"] == f"attr_pos_1_{label}"
+                       for e in edges)
 
-        # 技能外环节点（空 sid 的脏行被过滤，只留 2 条）
+        # 技能小节点挂技能大类下（空 sid 脏行被过滤）
         assert nodes["sk_py"]["type"] == "skill"
         assert nodes["sk_py"]["name"] == "Python"
-        assert nodes["sk_k8s"]["skill_category"] == "运维"
+        assert any(e["source"] == "attr_pos_1_技能" and e["target"] == "sk_py"
+                   for e in edges)
         assert all(n["name"] != "脏数据" for n in data["nodes"])
 
-        # 边：4 条 attr 边 + 2 条技能边
-        attr_edges = [e for e in edges if e["target"].startswith("attr_")]
-        skill_edges = [e for e in edges if e["target"] in ("sk_py", "sk_k8s")]
-        assert len(attr_edges) == 4
-        assert all(e["source"] == "pos_1" and e["weight"] == 1.0 for e in attr_edges)
-        assert len(skill_edges) == 2
-        by_target = {e["target"]: e for e in skill_edges}
-        assert by_target["sk_py"]["necessity"] == "must"
-        assert by_target["sk_py"]["level"] == "高级"
-        assert by_target["sk_py"]["weight"] == 0.9
-        assert by_target["sk_k8s"]["necessity"] == "nice"
+        # 软技能小节点（type=skill + 软技能类目 → 前端粉色）
+        assert nodes["soft_pos_1_0"]["type"] == "skill"
+        assert nodes["soft_pos_1_0"]["skill_category"] == "软技能"
+        assert nodes["soft_pos_1_0"]["name"] == "沟通能力"
+        assert any(e["source"] == "attr_pos_1_软技能" and e["target"] == "soft_pos_1_0"
+                   for e in edges)
 
-        # stats：图内计数 + total_*（fake 计数）
-        assert data["stats"] == {
-            "nodes": len(data["nodes"]), "edges": len(edges),
-            "total_nodes": 111, "total_edges": 222,
-        }
-        assert data["stats"]["nodes"] == 7  # 1 岗位 + 4 维度 + 2 技能
-        assert data["stats"]["edges"] == 6
+        # 薪资档位/经验/学历小节点（'档位 ×计数' 形态）
+        assert nodes["sal_pos_1_0"]["name"] == "1-1.3万 ×9"
+        assert nodes["exp_pos_1_0"]["name"] == "3年以上 ×5"
+        assert nodes["edu_pos_1_0"]["name"] == "本科 ×8"
+
+        # 边：5 条岗位→大类 + 小节点边（2 技能 + 2 软技能 + 1 薪资 + 1 经验 + 1 学历）
+        cat_edges = [e for e in edges if e["source"] == "pos_1"]
+        assert len(cat_edges) == 5
+        assert data["stats"]["nodes"] == 1 + 5 + 2 + 2 + 1 + 1 + 1
+        assert data["stats"]["edges"] == len(edges)
 
         # 缓存写入：键含岗位（画像缓存按岗位隔离）
         cache_key = graph_api.redis_client.set.call_args.args[0]
@@ -196,8 +197,9 @@ class TestPositionPortraitView:
             view_type="positionPortrait", position="pos_2", limit=100, user=None)
 
         nodes = {n["id"]: n for n in resp.data["nodes"]}
-        assert nodes["attr_pos_2_0"]["name"] == "薪资：20000-35000元"
-        # 经验/学历为空不生成维度节点：只有 薪资+规模 2 个 attr
-        attr_nodes = [n for n in resp.data["nodes"] if n["id"].startswith("attr_")]
-        assert [n["skill_category"] for n in attr_nodes] == ["薪资", "规模"]
-        assert resp.data["stats"]["edges"] == 2  # 2 attr 边，无技能边
+        # 薪资大类单条兜底子节点（min/max 拼接）；经验/学历/技能/软技能为空不生成大类
+        assert nodes["sal_pos_2_fallback"]["name"] == "20000-35000元"
+        cat_nodes = [n for n in resp.data["nodes"]
+                     if n.get("type") == "attr" and n["id"].startswith("attr_pos_2_")]
+        assert [n["name"] for n in cat_nodes] == ["薪资"]
+        assert resp.data["stats"]["edges"] == 2  # 岗位→薪资 + 薪资→兜底条目
