@@ -84,3 +84,35 @@ export function skillCategoryColor(category: string | null | undefined): string 
   }
   return null
 }
+
+/* 职能域社区着色（08-29 图谱优化提案③落地）：域超节点按 domain_id 稳定哈希
+   从 12 色社区色板取色——同域恒同色（跨会话/跨刷新一致），相邻哈希色相岔开，
+   15+ 域在全景图上一眼区分聚团。色板与技能类目 13 色、岗位状态 6 色错位；
+   待归类桶不走本表（保持中性灰弱化语义，见 graph-2d colorOf）。 */
+const DOMAIN_COMMUNITY_PALETTE: Record<GraphTheme, readonly string[]> = {
+  // 浅色主题：中深色调，浅底上可读且不与墨色技能节点混淆
+  light: [
+    '#4F46E5', '#0369A1', '#047857', '#B45309', '#BE185D', '#7C3AED',
+    '#0F766E', '#9F1239', '#1D4ED8', '#C2410C', '#15803D', '#5B21B6',
+  ],
+  // 暗色主题：提亮一档的同相色，深底上保持饱和可辨
+  dark: [
+    '#8B8AF8', '#38BDF8', '#34D399', '#FBBF24', '#F472B6', '#A78BFA',
+    '#2DD4BF', '#FB7185', '#60A5FA', '#FDBA74', '#4ADE80', '#C4B5FD',
+  ],
+}
+
+/** FNV-1a 32 位哈希：域 id → 色板下标（稳定，无外链依赖） */
+function domainHash(seed: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h
+}
+
+export function domainCommunityColor(seed: string, theme: GraphTheme): string {
+  const palette = DOMAIN_COMMUNITY_PALETTE[theme]
+  return palette[domainHash(seed) % palette.length]
+}

@@ -16,7 +16,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphEdge, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 import type { EChartsModel } from './graph-layout'
 import { COLOR_BY_STATUS, computeFilterMarks, isSoftSkill, skillLabelThreshold } from './graph-utils'
-import { graphColors, graphNodeColor, GRAPH_OPACITY, skillCategoryColor } from './graph-visual-tokens'
+import { domainCommunityColor, graphColors, graphNodeColor, GRAPH_OPACITY, skillCategoryColor } from './graph-visual-tokens'
 import { buildDagGraph, type DagSkillLink, type DagSkillNode } from '@/components/learning/learning-timeline'
 import type { LearningPathItem } from '@/components/match/types'
 import { GraphFilterPanel } from './graph-filter-panel'
@@ -134,7 +134,13 @@ function symbolOf(node: GraphNode): string {
 
 function colorOf(node: GraphNode, dark: boolean): string {
   const theme = dark ? 'dark' : 'light'
-  if (node.isDomain) return graphNodeColor(theme, 'domain')
+  // 职能域社区着色（提案③）：实域按 domain_id 稳定哈希取色，同域恒同色；
+  // 待归类桶保持中性靛蓝 + 虚线弱化（P1-2 语义：兜底桶不与实域抢视觉权重）
+  if (node.isDomain) {
+    return node.isUncategorized
+      ? graphNodeColor(theme, 'domain')
+      : domainCommunityColor(node.id, theme)
+  }
   if (node.type === 'position') return graphNodeColor(theme, 'position', node.status ?? 'candidate')
   if (isSoftSkill(node)) return graphNodeColor(theme, 'softSkill')
   // 画像维度属性（薪资/经验等，positionPortrait 视图）：紫罗兰区别于技能类目色
@@ -196,6 +202,24 @@ function edgeBaseStyle(
 
 function isNarrowScreen(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
+}
+
+/** 环形/层级固定坐标布局的标签象限定位：以圆心为参照，左半画布标签朝左、
+ *  右半朝右、上/下同理——防标签横穿环体与放射连线（画像分支 #645 既有口径，
+ *  08-29 抽为助手供技术栈环形分支复用）。仅改已注入 x/y 的固定坐标节点；
+ *  label 为 series data 映射层字段，不在 GraphNode 契约类型上。 */
+function applyRadialLabelPositions(
+  nodes: (GraphNode & { x?: number; y?: number; label?: { position?: string } })[],
+  cx: number,
+  cy: number,
+) {
+  for (const n of nodes) {
+    if (n.x === undefined || n.y === undefined || !n.label) continue
+    const dx = n.x - cx
+    const dy = n.y - cy
+    n.label.position =
+      Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : dy < 0 ? 'top' : 'bottom'
+  }
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -609,8 +633,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           opacity: GRAPH_OPACITY.node,
           ...(n.isDomain
             ? {
+                // 辉光随社区色（原固定 domain 靛蓝）：聚团在暗色画布上以自身色晕开
                 shadowBlur: 22,
-                shadowColor: hexToRgba(colors.domain, 0.3),
+                shadowColor: hexToRgba(colorOf(n, dark), 0.3),
               }
             : {}),
           ...(n.type === 'position' && expandedPositions?.has(n.id)
@@ -751,20 +776,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           )
         })
       }
-      // 标签按象限定位：左半画布标签朝左、右半朝右（防标签压放射连线）；
+      // 标签按象限定位（共用助手，防标签压放射连线）；
       // 大类节点标签加粗放大（维度名即分组标题）
+      applyRadialLabelPositions(nodes as (GraphNode & { x?: number; y?: number; label?: { position?: string } })[], CX, CY)
       for (const n of nodes) {
         const g = n as GraphNode & {
-          x?: number
-          y?: number
-          label?: { position?: string; fontSize?: number; fontWeight?: number }
+          label?: { fontSize?: number; fontWeight?: number }
         }
-        if (g.x === undefined || g.y === undefined || !g.label) continue
-        const dx = g.x - CX
-        const dy = g.y - CY
-        g.label.position =
-          Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : dy < 0 ? 'top' : 'bottom'
-        if ((g as GraphNode).portrait_category) {
+        if ((g as GraphNode).portrait_category && g.label) {
           g.label.fontSize = 12
           g.label.fontWeight = 600
         }
@@ -822,6 +841,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         place(n, ringR, angle)
         placedInRing += 1
       })
+      // 标签按象限定位（共用助手）：外圈技能标签朝画布外侧、内圈岗位朝圆心反方向，
+      // 避免全部朝右横穿环体与放射边（原固定 position:'right' 的遗漏面）
+      applyRadialLabelPositions(nodes as (GraphNode & { x?: number; y?: number; label?: { position?: string } })[], CX, CY)
     }
 
     // 关系分层：域隶属=细虚线，域间共享=弱弧线，must=海图蓝实线，nice=灰蓝虚线。

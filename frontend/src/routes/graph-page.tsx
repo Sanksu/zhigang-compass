@@ -970,7 +970,7 @@ export function GraphPage() {
         <div className="space-y-2" role="listitem">
           <p className="font-mono text-[12px] tracking-[0.15em] text-atlas-muted">MAP FEATURES / 实体</p>
           <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-            <span className="flex items-center gap-1.5"><span className="size-3 rotate-45 bg-graph-domain" /> 职能域</span>
+            <span className="flex items-center gap-1.5"><span className="size-3 rotate-45" style={{ background: 'conic-gradient(from 45deg, #8b8af8, #38bdf8, #34d399, #fbbf24, #f472b6, #8b8af8)' }} role="img" aria-label="职能域节点：按域社区着色（每域一色）" /> 职能域<span className="text-ink-faint">（每域一色）</span></span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-sm border border-atlas-ocean bg-state-stable" /> 岗位</span>
             <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-graph-skill" role="img" aria-label="技术技能节点" /> 技术技能</span>
             <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full border-2 border-graph-soft-skill" role="img" aria-label="软技能节点：粉色空心圆" /> 软技能</span>
