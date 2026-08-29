@@ -29,6 +29,7 @@ weight 取离散两档而非出现率连续值的原因：与匹配引擎 CII �
 
 from __future__ import annotations
 
+import json
 import re
 from app.services.kg.aggregation_data import _ALLOWED_SKILL_CATEGORIES
 
@@ -471,12 +472,18 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
         salary_max = median([s[1] for s in pa.salaries[salary_cur]]) if salary_cur else None
         # 多值画像分布（08-29 证据计数展示）：按 jd 条数降序 Top-5，
         # 未标注不入图（诚实口径——抽取覆盖面在详情页以 evidence_count 呈现）
-        edu_dist = {k: v for k, v in pa.education_levels.most_common(5)}
-        exp_dist = {k: v for k, v in pa.experience_distribution.most_common(5)}
-        salary_tiers = [
-            {"text": text, "count": cnt}
-            for text, cnt in pa.salary_text.most_common(5)
-        ]
+        # Neo4j 节点属性只收原始类型/原始数组——Map 必须序列化为 JSON 字符串
+        # （线上实证 CypherTypeError），前端 JSON.parse 消费
+        edu_dist = json.dumps(
+            {k: v for k, v in pa.education_levels.most_common(5)}, ensure_ascii=False
+        )
+        exp_dist = json.dumps(
+            {k: v for k, v in pa.experience_distribution.most_common(5)}, ensure_ascii=False
+        )
+        salary_tiers = json.dumps(
+            [{"text": t, "count": n} for t, n in pa.salary_text.most_common(5)],
+            ensure_ascii=False,
+        )
         positions.append({
             "pos": pos,
             "freq": pa.jd_count,
