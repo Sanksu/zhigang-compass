@@ -26,6 +26,7 @@ import {
   Sparkles,
   Route,
   AlertTriangle,
+  Tag,
   TrendingUp,
   TrendingDown,
 } from 'lucide-react'
@@ -145,12 +146,15 @@ const TYPE_LABEL: Record<NodeDetail['type'], string> = {
   position: '岗位',
   skill: '技能',
   evidence: '证据',
+  // 岗位画像属性维度（薪资/经验等）：无详情端点，画布层点击不选中，仅类型收编
+  attr: '画像维度',
 }
 
 const TYPE_ICON: Record<NodeDetail['type'], typeof Network> = {
   position: Network,
   skill: Cpu,
   evidence: FileText,
+  attr: Tag,
 }
 
 // 导学面板学习状态（task 1.3）：绿=已掌握 / 蓝=下一步 / 灰=未解锁

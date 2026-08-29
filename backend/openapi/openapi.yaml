@@ -492,7 +492,12 @@ paths:
         - name: view_type
           in: path
           required: true
-          schema: { type: string, enum: [panorama, techStack, level, positionCenter] }
+          schema: { type: string, enum: [panorama, techStack, level, positionCenter, positionPortrait] }
+        - name: position
+          in: query
+          required: false
+          schema: { type: string }
+          description: 岗位 id（positionPortrait 视图必填，其余视图忽略）
       responses:
         '200':
           description: 视图数据
@@ -2497,7 +2502,7 @@ components:
 
     GraphViewType:
       type: string
-      enum: [panorama, techStack, level, positionCenter]
+      enum: [panorama, techStack, level, positionCenter, positionPortrait]
       description: 图谱视图类型（服务端过滤）
 
     GraphNode:

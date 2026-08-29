@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   POSITION_STATE_DOT,
@@ -45,6 +46,7 @@ const VIEW_LABEL: Record<GraphViewType, string> = {
   techStack: '技术栈视图',
   level: '级别视图',
   positionCenter: '岗位中心',
+  positionPortrait: '岗位画像',
 }
 
 const VIEW_DESC: Record<GraphViewType, string> = {
@@ -53,6 +55,7 @@ const VIEW_DESC: Record<GraphViewType, string> = {
   techStack: 'Top 高频技能及其关联岗位（技能为中心）',
   level: '按级别（如中级）过滤的岗位-技能关系子图',
   positionCenter: '以高频岗位为中心展开岗位-技能关系',
+  positionPortrait: '单岗位画像：薪资/经验等属性维度 + 技能要求（下拉切换岗位）',
 }
 
 /** WebGL2 可用性检测 — 不可用时 3D 按钮禁用，保持 2D 模式（设计文档 §6.3） */
@@ -109,6 +112,11 @@ export function GraphPage() {
   const [mode, setMode] = useState<'2d' | '3d'>('2d')
   const [selected, setSelected] = useState<NodeDetail | null>(null)
   const [raw, setRaw] = useState<GraphData | null>(null)
+  // 岗位画像（positionPortrait）：选中的岗位 id + 下拉选项。
+  // 选项取自 /graph/view/positionCenter 的岗位节点（freq 降序），存独立 state
+  // （不进 viewCacheRef——那里缓存的是画布 GraphData，选项集非画布数据）
+  const [portraitPosition, setPortraitPosition] = useState('')
+  const [portraitOptions, setPortraitOptions] = useState<{ id: string; name: string }[]>([])
   // 视图数据缓存（session 级，08-16 性能优化）：同视图切换回来不重复请求/转换。
   // 数据随每日 ETL 更新，session 内缓存可接受（页面刷新即失效）
   const viewCacheRef = useRef<Map<GraphViewType, GraphData>>(new Map())
@@ -165,12 +173,22 @@ export function GraphPage() {
     })
   }, [])
 
+  // 岗位画像 attr 节点（薪资/经验等维度）无详情端点：点击不选中（悬停 tooltip
+  // 与邻接提亮仍可用）。setSelected 稳定 → 回调引用稳定，Graph2D 挂载 effect
+  // 不因回调换引用而反复重建图表
+  const handleSelectNode = useCallback((node: NodeDetail | null) => {
+    if (node?.type !== 'attr') setSelected(node)
+  }, [])
+
   // 视图切换 → 真实后端过滤（GET /graph/view/{view_type}），初始 panorama 同样走后端视图端点。
   // 切换视图不清 loading，数据到达后原子替换，避免闪屏。
   // 展开状态在 Tabs 事件回调中同步清空（effect 内 setState 会触发 cascading renders）
   // limit=120：techStack 全量渲染技能节点，节点数与 limit 线性相关（120→约 166 节点），
   // 控制画布规模在 ECharts force 布局可承受范围，避免主线程长时间阻塞（2026-08-08）
   useEffect(() => {
+    // 岗位画像走独立数据流（下方 effect：按选中岗位请求，绕过 viewCacheRef），
+    // 不进入本 effect 的统一视图请求/缓存逻辑
+    if (view === 'positionPortrait') return
     let cancelled = false
     // 数据到位后统一应用：设置数据 + 首屏自动展开 + 结束 loading
     const applyViewData = (g: GraphData) => {
@@ -219,6 +237,58 @@ export function GraphPage() {
       cancelled = true
     }
   }, [view])
+
+  // 岗位画像下拉选项：进入视图时从 positionCenter 视图取岗位节点（freq 降序）。
+  // session 内仅拉取一次（选项为空才请求），再次进入视图不重复请求；
+  // 失败保持空选项（下拉无项 + 画布空态），错误态由画像数据请求负责上报
+  useEffect(() => {
+    if (view !== 'positionPortrait' || portraitOptions.length > 0) return
+    let cancelled = false
+    apiGet<PanoramaData>('/graph/view/positionCenter?limit=120')
+      .then((res) => {
+        if (cancelled) return
+        const opts = toGraphData(res)
+          .nodes.filter((n) => n.type === 'position')
+          .map((n) => ({ id: n.id, name: n.name }))
+        setPortraitOptions(opts)
+        // 默认选中第一个（positionCenter 按关联频次降序，即最高频岗位）；
+        // 已有手动选择时不覆盖
+        setPortraitPosition((prev) => prev || opts[0]?.id || '')
+      })
+      .catch(() => {
+        // 静默：下拉空项即空态提示（见画布渲染处）
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [view, portraitOptions])
+
+  // 岗位画像数据：按选中岗位请求（缺 position 参数后端 400，故空选时不请求）。
+  // 岗位切换频繁，绕过 viewCacheRef 不缓存；portraitPosition / view 变化即重拉
+  useEffect(() => {
+    if (view !== 'positionPortrait' || !portraitPosition) return
+    let cancelled = false
+    apiGet<PanoramaData>('/graph/view/positionPortrait', {
+      params: { position: portraitPosition, limit: 200 },
+    })
+      .then((res) => {
+        if (cancelled) return
+        setRaw(toGraphData(res))
+        setError(null)
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setError(
+            e instanceof ApiError
+              ? { code: e.code, message: e.message }
+              : { code: 0, message: '岗位画像加载失败' },
+          )
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [view, portraitPosition])
 
   // 选中技能节点 → 并行加载反向岗位 / 先修链 / 课程 / 证据 / 相似技能（真实 API）
   // 同步 loading 态由派生值 skillDetailView 表达，effect 内仅在异步回调中 setState
@@ -424,6 +494,11 @@ export function GraphPage() {
       })
     }
 
+    // 岗位画像：后端已按选中岗位返回完整子图（中心岗位 + 属性维度 + 技能，limit=200），
+    // 前端不再做 Top-30 / Top-N 裁剪（attr 节点非技能，通用裁剪路径会误删）；
+    // 未选岗位时返回 null，画布区显示引导空态（见渲染处）
+    if (view === 'positionPortrait') return portraitPosition ? data : null
+
     const keepPositions = new Set<string>()
     data.nodes
       .filter((n) => n.type === 'position')
@@ -478,7 +553,7 @@ export function GraphPage() {
       return (a && skillIds.has(e.target)) || (b && skillIds.has(e.source))
     })
     return { ...data, nodes, edges }
-  }, [data, view, expandedPositions, expandedDomains, domainAgg])
+  }, [data, view, portraitPosition, expandedPositions, expandedDomains, domainAgg])
   // 技术栈视图标签降噪白名单：仅 Top-30 高频技能在 LOD band 1 常显标签
   // （其余技能放大到 band 2 才显示；非 techStack 视图传 null 走原中位阈值口径）
   const skillLabelTopIds = useMemo(() => {
@@ -675,6 +750,26 @@ export function GraphPage() {
               ))}
             </TabsList>
             <p className="truncate text-[12px] text-ink-muted" title={VIEW_DESC[view]}>{VIEW_DESC[view]}</p>
+            {/* 岗位画像：岗位下拉（positionCenter 岗位集，默认选中最高频岗位） */}
+            {view === 'positionPortrait' && (
+              <Select
+                value={portraitPosition || undefined}
+                onValueChange={(v) => {
+                  // 切换岗位：同步清空选中态（详情面板不残留上一岗位的画布外节点）
+                  setSelected(null)
+                  setPortraitPosition(v)
+                }}
+              >
+                <SelectTrigger className="h-8 w-56 shrink-0 text-xs" aria-label="选择岗位">
+                  <SelectValue placeholder="选择岗位…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {portraitOptions.map((p) => (
+                    <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-muted" aria-label="当前图谱规模">
             <span className="flex items-center gap-1" title="当前视图节点数 / 图谱总节点数"><Network className="size-3" /><b className="font-mono font-medium text-ink-secondary">{data.stats.returnedNodes}</b><span>/ {data.stats.totalNodesInGraph} 节点</span></span>
@@ -732,21 +827,26 @@ export function GraphPage() {
               ))}
             </div>
           )}
-          {mode === '2d' ? (
+          {view === 'positionPortrait' && !portraitPosition ? (
+            // 空态：未选岗位时不请求数据（visibleData 为 null），画布区仅显示引导提示
+            <div className="flex h-full w-full items-center justify-center text-sm text-ink-muted">
+              请选择岗位查看画像
+            </div>
+          ) : mode === '2d' ? (
             <Graph2D
               ref={graphRef}
               data={visibleData!}
               expandedPositions={expandedUnion}
               selectedId={selected?.id ?? null}
               focusRequest={focusRequest}
-              onSelectNode={setSelected}
+              onSelectNode={handleSelectNode}
               onTogglePosition={togglePosition}
               onToggleDomain={toggleDomain}
               learningPath={learningPath}
               completedSkills={[]}
               evolutionMarks={evolutionMarks}
               skillLabelTopIds={skillLabelTopIds}
-              ringLayout={view === 'techStack'}
+              ringLayout={view === 'techStack' || view === 'positionPortrait'}
               className="h-full w-full"
             />
           ) : (
@@ -757,7 +857,7 @@ export function GraphPage() {
                 expandedPositions={expandedUnion}
                 selectedId={selected?.id ?? null}
                 focusRequest={focusRequest}
-                onSelectNode={setSelected}
+                onSelectNode={handleSelectNode}
                 onTogglePosition={togglePosition}
                 onToggleDomain={toggleDomain}
                 className="h-full w-full"

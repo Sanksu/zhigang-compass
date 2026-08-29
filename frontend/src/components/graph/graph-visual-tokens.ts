@@ -27,13 +27,13 @@ export const GRAPH_COLOR_BY_STATUS: Record<PositionStatus, string> = Object.from
 const THEME_COLORS = {
   light: {
     canvas: '#F4F7FA', ink: '#172033', muted: '#66758A', border: '#DCE5EF', borderStrong: '#B8C7D8',
-    domain: '#4F46E5', skill: '#172033', softSkill: '#D9468D', evidence: '#8B98A9',
+    domain: '#4F46E5', skill: '#172033', softSkill: '#D9468D', evidence: '#8B98A9', attr: '#7C3AED',
     edge: '#B8C7D8', edgeStrong: '#315C8C', edgeOptional: '#6D87A5',
     tooltip: '#FFFFFF', tooltipBorder: '#DCE5EF', labelSurface: 'rgba(244,247,250,0.92)', selectionRing: '#315C8C',
   },
   dark: {
     canvas: '#0B1524', ink: '#E7EEF7', muted: '#9AA9BC', border: '#1D3045', borderStrong: '#40556C',
-    domain: '#8B8AF8', skill: '#E7EEF7', softSkill: '#F58FBC', evidence: '#718198',
+    domain: '#8B8AF8', skill: '#E7EEF7', softSkill: '#F58FBC', evidence: '#718198', attr: '#A78BFA',
     edge: '#40556C', edgeStrong: '#78A5D6', edgeOptional: '#91A9C5',
     tooltip: '#0F1C2D', tooltipBorder: '#40556C', labelSurface: 'rgba(11,21,36,0.92)', selectionRing: '#78A5D6',
   },
@@ -45,7 +45,7 @@ export function graphColors(theme: GraphTheme) {
   return THEME_COLORS[theme]
 }
 
-export function graphNodeColor(theme: GraphTheme, kind: 'domain' | 'skill' | 'softSkill' | 'evidence' | 'position', status: PositionStatus = 'candidate'): string {
+export function graphNodeColor(theme: GraphTheme, kind: 'domain' | 'skill' | 'softSkill' | 'evidence' | 'attr' | 'position', status: PositionStatus = 'candidate'): string {
   if (kind === 'position') return GRAPH_COLOR_BY_STATUS[status]
   return THEME_COLORS[theme][kind]
 }
