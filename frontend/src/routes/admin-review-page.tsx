@@ -1,11 +1,12 @@
 import { Navigate, useSearchParams } from 'react-router'
 import { PageHeader } from '@/components/layout/page-header'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ApprovalOverviewTab } from '@/components/admin/review/approval-overview-tab'
 import { CandidateReviewTab } from '@/components/admin/review/candidate-review-tab'
 import { EvolutionReviewTab } from '@/components/admin/review/evolution-review-tab'
 import { PositionEditorTab } from '@/components/admin/review/position-editor-tab'
 
-const VALID_TABS = ['candidate', 'evolution', 'edit'] as const
+const VALID_TABS = ['overview', 'candidate', 'evolution', 'edit'] as const
 type ReviewTab = (typeof VALID_TABS)[number]
 
 /** 观察池 / 字典守卫已迁出独立路由 /admin/review/watch、/admin/review/dict（数据语义与审批流不同） */
@@ -14,9 +15,9 @@ const LEGACY_TAB_HREF: Record<string, string> = {
   dict: '/admin/review/dict',
 }
 
-/** 解析 URL 查询参数 ?tab=，非法值回退 candidate（快捷操作可直达） */
+/** 解析 URL 查询参数 ?tab=，非法值回退 overview（总览为默认首 Tab；快捷操作可直达） */
 function tabFromQuery(raw: string | null): ReviewTab {
-  return (VALID_TABS as readonly string[]).includes(raw ?? '') ? (raw as ReviewTab) : 'candidate'
+  return (VALID_TABS as readonly string[]).includes(raw ?? '') ? (raw as ReviewTab) : 'overview'
 }
 
 /**
@@ -48,14 +49,18 @@ export function AdminReviewPage() {
     <>
       <PageHeader
         title="岗位审核"
-        description="六状态机全链路人工审核：候选晋升（candidate → emerging / rejected）· 演化晋级（emerging → stable / declining）· 衰退归档（declining → archived）· 观察池与字典守卫见独立路由"
+        description="全审批池总览 + 六状态机全链路人工审核：候选晋升（candidate → emerging / rejected）· 演化晋级（emerging → stable / declining）· 衰退归档（declining → archived）· 观察池与字典守卫见独立路由"
       />
       <Tabs value={tab} onValueChange={onTabChange}>
         <TabsList>
+          <TabsTrigger value="overview" className="text-xs">总览</TabsTrigger>
           <TabsTrigger value="candidate" className="text-xs">候选晋升审核</TabsTrigger>
           <TabsTrigger value="evolution" className="text-xs">演化审核（emerging）</TabsTrigger>
           <TabsTrigger value="edit" className="text-xs">岗位人工编辑</TabsTrigger>
         </TabsList>
+        <TabsContent value="overview">
+          <ApprovalOverviewTab />
+        </TabsContent>
         <TabsContent value="candidate">
           <CandidateReviewTab />
         </TabsContent>
