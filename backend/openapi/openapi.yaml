@@ -2694,8 +2694,9 @@ components:
         name: { type: string }
         required_years: { type: number, nullable: true }
         required_education: { type: string, nullable: true }
-        salary_min: { type: number, nullable: true, description: 月薪资中位下限（元，salary_range 解析，08-29 聚合新增） }
-        salary_max: { type: number, nullable: true, description: 月薪资中位上限（元，salary_range 解析） }
+        salary_min: { type: number, nullable: true, description: 月薪资中位下限（salary_range 解析，币种见 salary_currency） }
+        salary_max: { type: number, nullable: true, description: 月薪资中位上限（salary_range 解析，币种见 salary_currency） }
+        salary_currency: { type: string, nullable: true, enum: [CNY, USD], description: 薪资币种（国内外区分，08-29 拍板；CNY 优先写图） }
         salary_range: { type: string, nullable: true, description: 原始薪资文本（未解析成功的展示兜底） }
         last_updated: { type: string, nullable: true, description: 最近更新时间 ISO8601 }
         status: { type: string, enum: [candidate, emerging, stable, declining, archived] }

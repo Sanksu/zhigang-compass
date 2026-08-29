@@ -146,19 +146,24 @@ def _salary_to_monthly(value: float, unit: str, period: str) -> float:
                 "小时": 176.0, "hr": 176.0, "hour": 176.0}.get(period, 1.0)
 
 
-def parse_salary_range(text: str | None) -> tuple[float, float] | None:
-    """解析 salary_range 文本为 (min, max) 元/月；无法解析返回 None。
+def parse_salary_range(text: str | None) -> tuple[float, float, str] | None:
+    """解析 salary_range 文本为 (min, max, currency)；无法解析返回 None。
 
     实测语料形态（7056 条，覆盖 ~87%）：'8000-12000元'、'1-1.5万·13薪'、
     '15k-25k'、'10-20万/年'、'200-300元/天'、'$104,000-$150,000 annually'、
     '$60.90/hr-$82.30/hr'。周期缺省按月；年÷12、天/日×22、时/hr×176。
     千分位逗号剥除；'面议'/单值等不解析（宁缺毋滥）。
+
+    币种（08-29 国内外区分拍板）：$/$$/US$ → USD（美元数值原样保留，
+    不折算人民币——币种是一等维度，统计与展示按 currency 分组）；
+    ￥/¥/元/万/千 或纯数字 → CNY。
     """
     if not text:
         return None
     m = _SALARY_RANGE_RE.search(text)
     if not m:
         return None
+    currency = "USD" if re.search(r"(?:US)?\$|USD", text[: m.start() + 4], re.I) else "CNY"
     # 周期检测：范围尾部或中间的 /年 /天 /hr 小时 等（缺省按月）
     # 周期：范围尾部（/年 ·13薪）或两数之间（A/hr-B/hr）取首个命中；缺省按月
     period = ""
@@ -180,10 +185,12 @@ def parse_salary_range(text: str | None) -> tuple[float, float] | None:
     hi = _salary_to_monthly(float(m.group(3).replace(",", "")), unit_hi, period)
     if lo > hi:
         lo, hi = hi, lo
-    # 异常值护栏：折算后月薪 <500 或 >500_000 视为解析噪声
-    if hi < 500 or hi > 500_000:
+    # 异常值护栏：折算后月薪 <500 或 >500_000 视为解析噪声（币种内判断：
+    # USD 护栏放大 8 倍——美元数值天然大 7 倍左右）
+    floor, ceil = (500, 500_000) if currency == "CNY" else (1_000, 1_000_000)
+    if hi < floor or hi > ceil:
         return None
-    return (lo, hi)
+    return (lo, hi, currency)
 
 
 class PositionAgg:
@@ -198,8 +205,9 @@ class PositionAgg:
         self.exp_years: list[float] = []
         # 学历级别收集（聚合取众数写 Position.required_education）
         self.education_levels: Counter = Counter()
-        # 薪资月范围（解析 salary_range 文本 → (min, max) 元/月）
-        self.salaries: list[tuple[float, float]] = []
+        # 薪资月范围按币种分桶（解析 salary_range 文本 → (min, max)），
+        # CNY/USD 各自取中位区间写 salary_min/max + salary_currency
+        self.salaries: dict[str, list[tuple[float, float]]] = defaultdict(list)
         # 软技能白名单命中的 JD 数（写回 Position.soft_skills，设计文档 9.2 节）
         self.soft_skills: Counter = Counter()
         # 典型项目场景文本计数（写回 Position.typical_scenarios，按频次降序截断）
@@ -371,10 +379,12 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
         edu = ((ext.get("education") or {}).get("level") or "").strip()
         if edu:
             pa.education_levels[edu] += 1
-        # 薪资：salary_range 文本解析为月范围数值，聚合取中位区间
+        # 薪资：salary_range 文本解析为月范围数值，按币种分桶（08-29 国内外区分）——
+        # CNY/USD 各自取中位区间，绝不混算
         parsed = parse_salary_range(ext.get("salary_range"))
         if parsed:
-            pa.salaries.append(parsed)
+            lo, hi, cur = parsed
+            pa.salaries[cur].append((lo, hi))
         source = row.source or ""
         for skill, necessity, level in _position_skills(ext):
             sa = pa.skills[skill]
@@ -442,8 +452,11 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
     for pos, pa in agg.items():
         # 学历众数（并列取级别高者——排序稳定靠 Counter.most_common 计数优先）
         edu_mode = pa.education_levels.most_common(1)[0][0] if pa.education_levels else None
-        salary_min = median([s[0] for s in pa.salaries]) if pa.salaries else None
-        salary_max = median([s[1] for s in pa.salaries]) if pa.salaries else None
+        # 薪资按币种各自中位：CNY 优先（国内主口径），无 CNY 用 USD；
+        # currency 落图供前端分组展示（绝不混算，08-29 拍板）
+        salary_cur = "CNY" if pa.salaries.get("CNY") else ("USD" if pa.salaries.get("USD") else None)
+        salary_min = median([s[0] for s in pa.salaries[salary_cur]]) if salary_cur else None
+        salary_max = median([s[1] for s in pa.salaries[salary_cur]]) if salary_cur else None
         positions.append({
             "pos": pos,
             "freq": pa.jd_count,
@@ -451,6 +464,7 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
             "req_education": edu_mode,
             "salary_min": round(salary_min) if salary_min is not None else None,
             "salary_max": round(salary_max) if salary_max is not None else None,
+            "salary_currency": salary_cur,
             # 最近 JD 采集时间（规范化 ISO）；无 JD 时间（旧数据）回退聚合时间
             "last_updated": pa.last_crawled.isoformat() if pa.last_crawled else now,
             # 软技能按 JD 命中数降序（低频软技能不写入岗位本体）
@@ -473,6 +487,7 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
                     p.required_education = coalesce(it.req_education, p.required_education),
                     p.salary_min = coalesce(it.salary_min, p.salary_min),
                     p.salary_max = coalesce(it.salary_max, p.salary_max),
+                    p.salary_currency = coalesce(it.salary_currency, p.salary_currency),
                     p.soft_skills = it.soft_skills,
                     p.typical_scenarios = coalesce(
                         CASE WHEN size(it.typical_scenarios) > 0

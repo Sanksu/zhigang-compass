@@ -41,6 +41,8 @@ class TestParseSalaryRange:
         r = parse_salary_range(text)
         assert r is not None
         assert (round(r[0]), round(r[1])) == expected
+        # 币种识别：$ 前缀 USD，其余 CNY
+        assert r[2] == ("USD" if "$" in text or "US$" in text else "CNY")
 
     @pytest.mark.parametrize(
         "text",
@@ -48,6 +50,16 @@ class TestParseSalaryRange:
     )
     def test_unparsable_returns_none(self, text):
         assert parse_salary_range(text) is None
+
+    def test_usd_currency_detected(self):
+        """$ 前缀 → USD，数值不折算人民币（币种一等维度，08-29 拍板）。"""
+        r = parse_salary_range("$104,000-$150,000 annually")
+        assert r is not None
+        assert (round(r[0]), round(r[1]), r[2]) == (104000, 150000, "USD")
+
+    def test_cny_currency_default(self):
+        assert parse_salary_range("8000-12000元")[2] == "CNY"
+        assert parse_salary_range("2-4万")[2] == "CNY"
 
 
 def _jd(pos: str, extraction: dict, source: str = "zhilian", crawled: str = "2026-08-28T10:00:00+08:00"):
@@ -80,7 +92,22 @@ class TestAggregateEducationSalary:
         agg = build_aggregates(self._rows())
         pa = agg["Java开发工程师"]
         assert pa.education_levels.most_common(1)[0][0] == "本科"
-        assert len(pa.salaries) == 3
+        # 按币种分桶：三条例全部 CNY
+        assert len(pa.salaries["CNY"]) == 3
+        assert pa.salaries.get("USD") is None
+
+    def test_salary_buckets_by_currency(self):
+        """CNY/USD 混源岗位：各自分桶，CNY 优先写 salary_min/max（08-29 拍板）。"""
+        rows = self._rows() + [
+            _jd("Java开发工程师", {
+                "education": {"level": "本科"},
+                "salary_range": "$104,000-$150,000 annually",
+            }, source="official_career_site"),
+        ]
+        agg = build_aggregates(rows)
+        pa = agg["Java开发工程师"]
+        assert len(pa.salaries["CNY"]) == 3
+        assert len(pa.salaries["USD"]) == 1
 
     def test_anonymous_role_not_required_in_agg(self):
         """学历缺失的 JD 不计数（众数来自有值行）。"""

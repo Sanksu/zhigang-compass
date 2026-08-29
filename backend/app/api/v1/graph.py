@@ -308,6 +308,7 @@ async def position_detail(
         "salary_min": position.get("salary_min"),
         "salary_max": position.get("salary_max"),
         "salary_range": position.get("salary_range"),
+        "salary_currency": position.get("salary_currency"),
         "last_updated": position.get("last_updated"),
         "status": position.get("status"),
         "must_skills": skills.get("must", []),
