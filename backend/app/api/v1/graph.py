@@ -744,7 +744,9 @@ async def graph_view(
         if not rows:
             return error(ERR_NOT_FOUND, "岗位不存在或不可见", http_status=404)
         record = rows[0]
-        p = record["p"]
+        # salary_tiers / 分布属性在图上为 JSON 字符串（Neo4j 不收 Map），先还原
+        p = {**{k: record["p"].get(k) for k in record["p"].keys()},
+             **_parse_distributions(record["p"])}
         pid = p.get("id", position)
         nodes: list[dict] = [{
             "id": pid,
