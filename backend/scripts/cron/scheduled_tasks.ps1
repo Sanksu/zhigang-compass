@@ -26,24 +26,26 @@ $TaskPrefix = "ZhigangETL_"
 
 # 调度任务定义（对齐设计文档 §4.4）
 # 采集责任划分：
-#   - boss/zhilian/indeed/glassdoor/arxiv/github/stackoverflow 由 ETL 主管线
-#     阶段 1 统一采集，不再单独调度（避免同一平台每日重复采集）；
+#   - zhilian/indeed/glassdoor/arxiv/github/stackoverflow 及课程源（icourse163/
+#     edx/coursera，2026-08-28 起纳入主管线 course_platforms，app/workers/etl.py）
+#     由 ETL 主管线阶段 1 统一采集，不再单独调度（避免同一平台每日重复采集）；
+#   - boss 不在主管线采集列表（crawl_platforms）且无独立调度，仅能手动触发
+#     （crawl_spider.py boss，需 CDP 登录态）；
 #   - ETL 主管线自 08-21（#348）起由容器内 ARQ cron 调度，执行时间在配置中心
 #     「ETL 队列」页配置（runtime_config.etl_run_hour/minute，默认 05:00），
 #     重启 worker 后生效——本文件不再注册 ETLDaily 外部计划任务；
 #   - maimai 为夜间合规窗口（23:00 - 06:00，≤100 req/h），保持独立调度；
-#   - linkedin_public / 课程平台不在 ETL 采集列表内，保持独立调度；
+#   - linkedin_public 不在 ETL 采集列表内，保持独立调度；
 #   - 新岗位发现 + 自动流转已链入 ETL 阶段 15（快照发布之后），无需独立任务。
 $Tasks = @(
     # 脉脉夜间合规窗口（23:00）
     @{ Name = "CrawlMaimai";    Time = "23:00"; Script = "crawl_spider.py"; Args = @("maimai", "30") },
     # 国际非招聘源（北京时间 08:00 = UTC 0:00）
     @{ Name = "CrawlLinkedIn";  Time = "08:00"; Script = "crawl_spider.py"; Args = @("linkedin_public", "50", "python,java,golang,react,devops,security,embedded,data,engineer,frontend,backend"); Proxy = $true },  # 08-19 关键词轮询（技术岗聚焦）
-    # 课程平台每日同步（北京时间 10:00/10:30/11:00 错峰；08-19 由周日改为每日——
-    # 此前任务注册后从未实际触发过（Last Run=never），改为每日保证课程源持续新鲜）
-    @{ Name = "CrawlCoursera";   Time = "10:00"; Script = "crawl_spider.py"; Args = @("coursera", "100"); Proxy = $true },
-    @{ Name = "CrawlEdx";        Time = "10:30"; Script = "crawl_spider.py"; Args = @("edx", "100"); Proxy = $true },
-    @{ Name = "CrawlIcourse163"; Time = "11:00"; Script = "crawl_spider.py"; Args = @("icourse163", "100") },
+    # 课程平台（CrawlCoursera/CrawlEdx/CrawlIcourse163）任务已删除：课程源
+    # 2026-08-28 起纳入 ETL 主管线每日采集（etl.py course_platforms），
+    # 外部独立调度会造成同一源每日双跑；手动补采：
+    #   uv run python scripts\cron\crawl_spider.py <coursera|edx|icourse163> <limit>
     # 图谱健康治理（06:30，ETL 完成后；脏边/伪技能自动清理，备份 reports/graph_health_*）
     @{ Name = "GraphHealth";    Time = "06:30"; Script = "graph_health_daily.py"; Args = @() },
     # 岗位重复对治理（06:45，GraphHealth 之后；变体合并/语义提议，备份 reports/position_duplicates_*）
@@ -81,7 +83,8 @@ foreach ($task in $Tasks) {
         $cmd = "set HTTPS_PROXY=http://127.0.0.1:7890 && $cmd"
     }
 
-    # 解析时间（HH:mm）；指定 DaysOfWeek 的任务为每周触发（课程平台），否则每日
+    # 解析时间（HH:mm）；指定 DaysOfWeek 的任务为每周触发，否则每日（当前任务
+    # 均为每日触发——课程平台任务已随课程源入 ETL 主管线删除，无每周任务）
     $timeParts = $task.Time.Split(':')
     $at = "$($timeParts[0]):$($timeParts[1])"
     if ($task.DaysOfWeek) {

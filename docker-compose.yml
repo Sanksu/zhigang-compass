@@ -22,6 +22,9 @@ services:
       timeout: 10s
       retries: 10
       start_period: 30s
+    # 08-30 补齐（第八轮审查 P1-3）：infra 三服务与 api/worker 对齐——宿主机重启后
+    # 自动拉起，否则 api/worker 复活但依赖不可达反复崩溃重启
+    restart: unless-stopped
 
   postgres:
     image: pgvector/pgvector:pg15
@@ -39,6 +42,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -52,6 +56,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   api:
     build:
