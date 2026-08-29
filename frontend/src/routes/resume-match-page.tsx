@@ -144,6 +144,8 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
     learning_path_block_reason: r.learning_path_block_reason ?? null,
     // 证据引用：技能 → 原始 JD（图谱 MENTIONED_IN 链路，后端 compare 返回）
     evidence_refs: r.evidence_refs ?? [],
+    // 最佳匹配 JD 原文（compare 详情溯源，随快照持久化）
+    jd_original: r.jd_original ?? null,
   }
 }
 
@@ -183,6 +185,8 @@ export function ResumeMatchPage() {
   // 用户反馈（1=有用 / -1=没用，POST /match/feedback）
   const [feedback, setFeedback] = useState<number | null>(null)
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
+  // JD 原文展开态（compare 详情溯源面板，切岗位/重置时收起）
+  const [showJdOriginal, setShowJdOriginal] = useState(false)
   const [resumeList, setResumeList] = useState<ResumeSummary[]>([])
   const [activeResumeId, setActiveResumeId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -365,6 +369,7 @@ export function ResumeMatchPage() {
     setMatchId(null)
     setDiagnosis(null)
     setFeedback(null)
+    setShowJdOriginal(false)
     try {
       const res = await apiPost<BackendMatchResult>('/match/compare', {
         resume_id: activeResumeId,
@@ -490,6 +495,7 @@ export function ResumeMatchPage() {
     setActiveResumeId(null)
     setNotice(null)
     setExpandedGaps(new Set())
+    setShowJdOriginal(false)
   }
 
   // ===== 上传阶段 =====
@@ -758,6 +764,19 @@ export function ResumeMatchPage() {
                         最佳匹配 JD：<span className="font-medium text-ink-muted">{matchResult.position_name}</span>
                       </span>
                     )}
+                    {/* JD 原文展开开关（compare 溯源：最佳 JD 行 raw_text，后端截断 8000 字符） */}
+                    {matchResult.jd_original?.text && (
+                      <button
+                        type="button"
+                        onClick={() => setShowJdOriginal((v) => !v)}
+                        className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink transition-colors"
+                        title="查看最佳匹配 JD 的原文内容"
+                      >
+                        <FileText className="size-3" />
+                        JD 原文
+                        <ChevronDown className={`size-3 transition-transform ${showJdOriginal ? 'rotate-180' : ''}`} />
+                      </button>
+                    )}
                     <div className="flex items-center gap-1 ml-auto">
                       <Button
                         size="sm"
@@ -789,6 +808,33 @@ export function ResumeMatchPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
+                  {/* JD 原文面板（展开态）：采集源 + 原帖链接 + 正文滚动区 */}
+                  {showJdOriginal && matchResult.jd_original?.text && (
+                    <div className="mb-4 rounded-md border border-border bg-subtle/40 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <span className="flex items-center gap-1.5 text-xs font-medium text-ink">
+                          <FileText className="size-3.5 text-ink-muted" />
+                          {matchResult.jd_original.jd_title || 'JD 原文'}
+                          {matchResult.jd_original.source && (
+                            <span className="font-normal text-ink-faint">· {matchResult.jd_original.source}</span>
+                          )}
+                        </span>
+                        {matchResult.jd_original.source_url && (
+                          <a
+                            href={matchResult.jd_original.source_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-0.5 text-[11px] text-ink-muted hover:text-ink underline"
+                          >
+                            <ExternalLink className="size-3" />查看原帖
+                          </a>
+                        )}
+                      </div>
+                      <div className="max-h-64 overflow-y-auto whitespace-pre-wrap rounded-md bg-background/60 p-2.5 text-xs leading-relaxed text-ink-secondary">
+                        {matchResult.jd_original.text}
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
                     <ScoreRing score={matchResult.total_score} />
                     <div className="space-y-2">

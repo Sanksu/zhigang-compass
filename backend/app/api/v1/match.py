@@ -30,6 +30,7 @@ from app.models.business import (
     ResumeCache,
     TaskStatus,
 )
+from app.models.raw import JDRaw
 from app.schemas.common import error, ok
 from app.services.embeddings.vector_store import PgvectorUnavailableError, load_project_vectors
 from app.services.learning_path.generator import LearningPathGenerator
@@ -270,6 +271,22 @@ async def compare(
     candidate, target, result, semantic = computed
     path = await LearningPathGenerator().generate(candidate, target, semantic=semantic)
 
+    # JD 原文（compare 详情溯源）：score_jd_compare 以 str(row.id) 构建
+    # PositionProfile.position_id，按主键回读最佳 JD 行的 raw_text；正文截断
+    # 8000 字符防超大 payload，行已删除/主键异常时置 null 不阻断比对
+    jd_original = None
+    try:
+        jd_row = await db.get(JDRaw, int(target.position_id))
+    except (TypeError, ValueError):
+        jd_row = None
+    if jd_row is not None:
+        jd_original = {
+            "jd_title": str((jd_row.snapshot or {}).get("title") or target.name).strip(),
+            "source": jd_row.source or "",
+            "source_url": jd_row.source_url or "",
+            "text": (jd_row.raw_text or "").strip()[:8000],
+        }
+
     match_id = str(uuid.uuid4())
     data = {
         "match_id": match_id,
@@ -284,6 +301,8 @@ async def compare(
         "learning_path_block_reason": path.block_reason,
         # 证据引用（方案 A：岗位名下 jd_raw 技能 → 采集源，替代旧 Neo4j 图谱链路）
         "evidence_refs": await load_jd_evidence_refs(db, position_name),
+        # 最佳匹配 JD 原文（随快照持久化，GET /match/result 重载同样可见）
+        "jd_original": jd_original,
     }
     await _persist_match_result(match_id, data)
     # 匹配结果落库（§11.4.1 match_results）：失败仅记日志，Redis 为主存储

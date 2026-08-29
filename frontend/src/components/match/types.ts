@@ -150,6 +150,13 @@ export interface MatchResult {
   learning_path_block_reason?: string | null
   /** 证据引用（设计文档要求 100% 覆盖率） */
   evidence_refs: { skill: string; source: string; url: string; confidence: number }[]
+  /** 最佳匹配 JD 原文（compare 返回；旧快照/最佳 JD 行已删除为 null） */
+  jd_original?: {
+    jd_title: string
+    source: string
+    source_url: string
+    text: string
+  } | null
 }
 
 /** 简历解析后的候选人信息（页面摘要展示） */
