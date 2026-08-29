@@ -94,6 +94,7 @@ CERT_ISSUER_MAP: dict[str, str] = {
     "nist": "美国国家标准与技术研究院 (NIST)",
     "iso 27001": "ISO (国际标准化组织)",
     "iso 42001": "ISO (国际标准化组织)",
+    "iso iec": "ISO (国际标准化组织)",
     "iso27001": "ISO (国际标准化组织)",
     "soc 2": "美国注册会计师协会 (AICPA)",
     "等保": "公安部（等级保护）",
@@ -172,7 +173,6 @@ CERT_ISSUER_MAP: dict[str, str] = {
     "cfp": "CFP Board",
     "acca": "ACCA（特许公认会计师公会）",
     "frm": "GARP（全球风险专业人士协会）",
-    "精算": "北美精算师协会 (SOA)",
     "actuarial": "北美精算师协会 (SOA)",
     "基金从业": "中国证券投资基金业协会",
     "证券从业": "中国证券业协会",
@@ -188,7 +188,6 @@ CERT_ISSUER_MAP: dict[str, str] = {
     "toefl": "ETS（美国教育考试服务中心）",
     "ielts": "British Council / IDP",
     "jlpt": "JLPT（日本语能力测试）",
-    "日语": "JLPT（日本语能力测试）",
     "教师资格": "教育部",
     # ---------- 软考/职称 ----------
     "软考": "中国计算机技术职业资格（人社部/工信部）",
