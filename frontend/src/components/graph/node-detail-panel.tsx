@@ -102,7 +102,10 @@ function EvidenceRows({ label, entries }: { label: string; entries: [string, num
   )
 }
 
-/** JD 证据正文弹层：原文全文 + 出处链接（画像证据列表点开） */
+/** JD 证据正文弹层：原文全文 + 出处链接（画像证据列表点开）。
+ *
+ * 内容组件按 jdId key 重挂载：fetch 状态（loading 初始 true）随挂载重建，
+ * 避免 effect 体内同步 setState（react-hooks 级联渲染 lint）。 */
 function JdEvidenceDialog({
   jdId,
   onClose,
@@ -110,16 +113,22 @@ function JdEvidenceDialog({
   jdId: number | null
   onClose: () => void
 }) {
+  return (
+    <Dialog open={jdId != null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        {jdId != null && <JdEvidenceContent key={jdId} jdId={jdId} />}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function JdEvidenceContent({ jdId }: { jdId: number }) {
   const [detail, setDetail] = useState<JdEvidenceDetail | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (jdId == null) return
     let cancelled = false
-    setLoading(true)
-    setError(null)
-    setDetail(null)
     apiGet<JdEvidenceDetail>(`/graph/jd/${jdId}`)
       .then((res) => {
         if (!cancelled) setDetail(res)
@@ -136,54 +145,52 @@ function JdEvidenceDialog({
   }, [jdId])
 
   return (
-    <Dialog open={jdId != null} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="truncate">
-            {detail?.title || (loading ? 'JD 正文加载中…' : 'JD 证据')}
-          </DialogTitle>
-          <DialogDescription>
-            {detail
-              ? [detail.company, detail.location, detail.source]
-                  .filter(Boolean)
-                  .join(' · ')
-              : '岗位画像证据 · 原始 JD'}
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <DialogHeader>
+        <DialogTitle className="truncate">
+          {detail?.title || (loading ? 'JD 正文加载中…' : 'JD 证据')}
+        </DialogTitle>
+        <DialogDescription>
+          {detail
+            ? [detail.company, detail.location, detail.source]
+                .filter(Boolean)
+                .join(' · ')
+            : '岗位画像证据 · 原始 JD'}
+        </DialogDescription>
+      </DialogHeader>
 
-        {loading ? (
-          <p className="py-8 text-center text-sm text-ink-muted">加载正文…</p>
-        ) : error ? (
-          <p className="py-8 text-center text-sm text-state-archived">{error}</p>
-        ) : detail ? (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-muted">
-              {detail.crawled_at && <span>采集 {detail.crawled_at.slice(0, 10)}</span>}
-              {detail.is_desensitized && (
-                <Badge variant="outline" className="text-[11px]">已脱敏</Badge>
-              )}
-              {detail.source_url ? (
-                <a
-                  href={detail.source_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-0.5 text-ink underline hover:no-underline"
-                >
-                  查看出处 <ExternalLink className="size-3" />
-                </a>
-              ) : (
-                <span className="text-ink-faint">无出处链接</span>
-              )}
-            </div>
-            <div className="max-h-[55vh] overflow-y-auto rounded-md border border-border bg-subtle/40 p-3">
-              <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-secondary">
-                {detail.raw_text || '（该记录无正文文本）'}
-              </p>
-            </div>
+      {loading ? (
+        <p className="py-8 text-center text-sm text-ink-muted">加载正文…</p>
+      ) : error ? (
+        <p className="py-8 text-center text-sm text-state-archived">{error}</p>
+      ) : detail ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-muted">
+            {detail.crawled_at && <span>采集 {detail.crawled_at.slice(0, 10)}</span>}
+            {detail.is_desensitized && (
+              <Badge variant="outline" className="text-[11px]">已脱敏</Badge>
+            )}
+            {detail.source_url ? (
+              <a
+                href={detail.source_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-0.5 text-ink underline hover:no-underline"
+              >
+                查看出处 <ExternalLink className="size-3" />
+              </a>
+            ) : (
+              <span className="text-ink-faint">无出处链接</span>
+            )}
           </div>
-        ) : null}
-      </DialogContent>
-    </Dialog>
+          <div className="max-h-[55vh] overflow-y-auto rounded-md border border-border bg-subtle/40 p-3">
+            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-secondary">
+              {detail.raw_text || '（该记录无正文文本）'}
+            </p>
+          </div>
+        </div>
+      ) : null}
+    </>
   )
 }
 

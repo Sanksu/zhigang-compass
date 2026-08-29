@@ -312,37 +312,41 @@ export function GraphPage() {
   }, [view, portraitPosition])
 
   // 画像条目（薪资/经验/学历 attr 节点）→ 证据 JD 列表（/graph/position/{id}/
-  // portrait-evidence）。大类节点取该维度全部；子条目名 '1-1.3万 ×9' 去 ×N 作 label
-  const [portraitEvidence, setPortraitEvidence] = useState<PortraitEvidenceData | null>(null)
-  const [portraitEvidenceLoading, setPortraitEvidenceLoading] = useState(false)
+  // portrait-evidence）。大类节点取该维度全部；子条目名 '1-1.3万 ×9' 去 ×N 作 label。
+  // loading 由请求 key 派生（state.key ≠ 当前 key 即在加载），避免 effect 体内
+  // 同步 setState（react-hooks 级联渲染 lint）
+  const [peState, setPeState] = useState<{
+    key: string
+    data: PortraitEvidenceData | null
+    loading: boolean
+  }>({ key: '', data: null, loading: false })
 
   useEffect(() => {
     if (view !== 'positionPortrait' || !selected || selected.type !== 'attr') return
     const dimension = portraitDimension(selected)
     if (!dimension) return
+    const key = `${portraitPosition}:${dimension}:${portraitLabel(selected)}`
     let cancelled = false
-    setPortraitEvidenceLoading(true)
-    const params = new URLSearchParams({ dimension })
-    const label = portraitLabel(selected)
-    if (label) params.set('label', label)
     apiGet<PortraitEvidenceData>(
-      `/graph/position/${encodeURIComponent(portraitPosition)}/portrait-evidence?${params}`,
+      `/graph/position/${encodeURIComponent(portraitPosition)}/portrait-evidence?dimension=${dimension}${portraitLabel(selected) ? `&label=${encodeURIComponent(portraitLabel(selected))}` : ''}`,
     )
       .then((res) => {
-        if (!cancelled) setPortraitEvidence(res)
+        if (!cancelled) setPeState({ key, data: res, loading: false })
       })
       .catch(() => {
-        if (!cancelled) setPortraitEvidence(null)
-      })
-      .finally(() => {
-        if (!cancelled) setPortraitEvidenceLoading(false)
+        if (!cancelled) setPeState({ key, data: null, loading: false })
       })
     return () => {
       cancelled = true
-      setPortraitEvidence(null)
-      setPortraitEvidenceLoading(false)
     }
   }, [selected, view, portraitPosition])
+
+  const peKey =
+    view === 'positionPortrait' && selected?.type === 'attr' && portraitDimension(selected)
+      ? `${portraitPosition}:${portraitDimension(selected)}:${portraitLabel(selected)}`
+      : ''
+  const portraitEvidence = peState.key === peKey ? peState.data : null
+  const portraitEvidenceLoading = peState.key !== peKey
 
   // 选中技能节点 → 并行加载反向岗位 / 先修链 / 课程 / 证据 / 相似技能（真实 API）
   // 同步 loading 态由派生值 skillDetailView 表达，effect 内仅在异步回调中 setState
