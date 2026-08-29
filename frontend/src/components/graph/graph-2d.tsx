@@ -689,11 +689,18 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       const positions = nodes
         .filter((n) => n.type !== 'skill')
         .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-      const R_OUTER = 520
-      const R_INNER = 200
+      // none 布局数据坐标直接映射视口：原点取画布实际中心（容器像素，实时读取），
+      // ECharts series.center 对已有 roam 状态不生效（线上偏移实证）
+      const rect = containerRef.current?.getBoundingClientRect()
+      const W = rect?.width || 900
+      const H = rect?.height || 640
+      const CX = W / 2
+      const CY = H / 2
+      const R_OUTER = Math.min(W, H) * 0.46
+      const R_INNER = Math.min(W, H) * 0.18
       const place = (n: (typeof nodes)[number], radius: number, angle: number) => {
-        ;(n as GraphNode & { x?: number; y?: number }).x = radius * Math.cos(angle)
-        ;(n as GraphNode & { x?: number; y?: number }).y = radius * Math.sin(angle)
+        ;(n as GraphNode & { x?: number; y?: number }).x = CX + radius * Math.cos(angle)
+        ;(n as GraphNode & { x?: number; y?: number }).y = CY + radius * Math.sin(angle)
       }
       skills.forEach((n, i) => {
         place(n, R_OUTER, (i / Math.max(1, skills.length)) * Math.PI * 2 - Math.PI / 2)
