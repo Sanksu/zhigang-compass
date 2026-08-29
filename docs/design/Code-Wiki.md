@@ -281,7 +281,7 @@ zhigang-compass/
 | [discovery.py](../../backend/app/api/v1/discovery.py) | `/discovery` | GET `/recent`（近期发现）`/position-skills-delta`（岗位技能增量）+ `/summary` | 新岗位发现结果查询 |
 | [admin.py](../../backend/app/api/v1/admin.py) | `/admin` | **facade**：仅保留根 router（RBAC admin 依赖）并按固定顺序 include 子 router（注册顺序即匹配顺序，`/positions/pending` 先于 `/positions/{position_name}`）；re-export 测试直连的私有符号保持 import 面不变 | 管理后台聚合入口 |
 
-**admin 子域（[api/v1/admin_routes/](../../backend/app/api/v1/admin_routes/) 11 模块）**：
+**admin 子域（[api/v1/admin_routes/](../../backend/app/api/v1/admin_routes/) 13 模块）**：
 
 | 模块 | 职责 |
 |------|------|
@@ -296,6 +296,8 @@ zhigang-compass/
 | [skill_aliases.py](../../backend/app/api/v1/admin_routes/skill_aliases.py) | 技能别名动态表管理（approve 即生效免 sync） |
 | [etl.py](../../backend/app/api/v1/admin_routes/etl.py) | ETL 队列页配置（etl_run_hour/minute） |
 | [lineage.py](../../backend/app/api/v1/admin_routes/lineage.py) | 数据血缘管理/审计 |
+| [approval_summary.py](../../backend/app/api/v1/admin_routes/approval_summary.py) | 全审批池只读汇总（/admin/approvals/summary，总览工作流面板） |
+| [jd_admin.py](../../backend/app/api/v1/admin_routes/jd_admin.py) | JD 原始数据管理（/admin/jd 列表/详情/编辑/删除，content_hash 同步重算 + AuditLog） |
 
 统一响应契约 [schemas/common.py](../../backend/app/schemas/common.py)：`APIResponse[T]`（code/msg/data/trace_id）+ `ok()` / `error()` 工具函数。错误码规范见设计文档 §2.4.7（同步超时 5003、限流 4290 等）。
 
@@ -392,7 +394,7 @@ ID 格式 `{prefix}_{seq:04d}`（如 `sk_0042`），通过 Neo4j Counter 节点�
 | 模块 | 职责 |
 |------|------|
 | [llm_decision/](../../backend/app/services/llm_decision/) | **LLM 决策统一信封**：JD 抽取 / 名称归一 / 分类 / 簇命名 / 治理 / 技能关系六域的「LLM 主导 + 确定性守卫」集中裁决点，含 R0/R1/R2 风险分级路由（R0 自动 / R1 高置信自动 / R2 仅人工），是 LLM 驱动灰度的底座 |
-| [graph/](../../backend/app/services/graph/) | 图谱查询仓储层：queries/queries_async（Cypher 封装）、repository、visibility（岗位可见性分级：匿名/guest 不展示 candidate/emerging） |
+| [graph/](../../backend/app/services/graph/) | 图谱查询仓储层：queries/queries_async（Cypher 封装）、repository、visibility（岗位可见性分级：匿名/guest 不展示 candidate/emerging）、portrait_evidence（画像条目证据回溯 + jd_detail） |
 | [proficiency.py](../../backend/app/services/proficiency.py) | 技能熟练度服务（匹配维消费） |
 | [data_quality/lineage.py](../../backend/app/services/data_quality/lineage.py) | 数据血缘记录与查询（管理后台 /admin-lineage 页） |
 
@@ -465,7 +467,7 @@ Scrapy + Playwright + CDP，13 源（7 招聘 A/B/C 三级分级 + 6 非招聘�
 | [components/discovery/](../../frontend/src/components/discovery/) / [components/evolution/](../../frontend/src/components/evolution/) | 发现页组件族 / 演化可视化（桑基图 + 时间轴 + 信号面板） |
 | [components/learning/](../../frontend/src/components/learning/) / [components/match/](../../frontend/src/components/match/) / [components/resume/](../../frontend/src/components/resume/) | 学习路径 / 匹配结果（得分/差距/学习路径/诊断报告）/ 简历上传与解析 |
 | [components/shared/](../../frontend/src/components/shared/) | 跨页共享组件（空态/加载态等） |
-| [routes/](../../frontend/src/routes/) | 18 页面 + guards.tsx：dashboard / graph（2D+3D 图谱 + 岗位画像 portrait）/ evolution / resume-match / discovery（发现页）/ profile / login / register + 管理后台 10 页（admin-dashboard / admin-users / admin-crawl / admin-review 岗位审核 / admin-review-dict 字典守卫 / admin-review-watch 观察池 / admin-llm provider 配置 / admin-llm-decisions LLM 决策 / admin-lineage 数据血缘 / admin-settings 运行时配置） |
+| [routes/](../../frontend/src/routes/) | 19 页面 + guards.tsx：dashboard / graph（2D+3D 图谱 + 岗位画像 portrait）/ evolution / resume-match / discovery（发现页）/ profile / login / register + 管理后台 11 页（含 admin-jd JD 数据管理）（admin-dashboard / admin-users / admin-crawl / admin-review 岗位审核 / admin-review-dict 字典守卫 / admin-review-watch 观察池 / admin-llm provider 配置 / admin-llm-decisions LLM 决策 / admin-lineage 数据血缘 / admin-settings 运行时配置） |
 | [hooks/use-typewriter.ts](../../frontend/src/hooks/use-typewriter.ts) | AI 输出打字机效果 |
 | [store/auth.ts](../../frontend/src/store/auth.ts) | 认证 store（不存 token，token 走 httpOnly Cookie + 内存） |
 | [store/ui.ts](../../frontend/src/store/ui.ts) | UI store（sidebar 开关 + 主题切换 + localStorage 持久化） |
@@ -587,7 +589,7 @@ Neo4j 核心 `shortestPath`（深度 ≤6，沿「岗位共现 + REQUIRES」边�
 ### 6.8 前端关键模块
 
 #### `AppRouter` — [app/router.tsx](../../frontend/src/app/router.tsx)
-`createBrowserRouter` 三类路由：公开（GuestGuard）/ 受保护（AuthGuard）/ 管理员（requireRole=['admin']）。18 页 `lazy()` 懒加载。
+`createBrowserRouter` 三类路由：公开（GuestGuard）/ 受保护（AuthGuard）/ 管理员（requireRole=['admin']）。19 页 `lazy()` 懒加载。
 
 #### `apiClient` + 401 拦截器 — [lib/api.ts](../../frontend/src/lib/)
 axios 实例（`withCredentials`，30s）。401 触发 `POST /auth/refresh`，期间其他 401 入队等待，成功重放，失败跳 `/login`。

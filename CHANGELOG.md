@@ -5,6 +5,12 @@
 
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
+### 2026-08-29
+- **画像证据回溯 + JD 数据管理（#662/#663，报告 docs/reviews/全项目代码审查报告_20260829.md）**：契约先行新增 4 组端点——`GET /graph/position/{id}/portrait-evidence`（薪资/经验/学历画像条目 → 支撑 JD 列表，口径镜像 build_aggregates：SimHash 重复/归档/岗位级通胀排除一致）、`GET /graph/jd/{jd_id}`（正文全文 + 出处链接，匿名可读）、`/admin/jd` CRUD（RBAC admin:* + AuditLog，编辑重算 content_hash 同 etl_tasks._build_jd_text 同源，抽取快照不动）；前端画像侧栏证据区 + JD 正文弹层 + admin-jd 管理页（/admin/jd，侧栏「JD 数据」）。
+- **第七轮全项目审查（#664）**：8ba335f→5133f23 增量 203 commits；总评 B+ 无 P0，P1×7——画像证据通胀分母口径漂移 / jd_admin 绕过 resolve_operator / PUT 裸 dict / guest 可见 candidate（discovery+evolution 对齐 visibility 单一事实源）/ admin-jd openDetail 竞态与错误不可见 / jd_admin 零测试；**当日修复批 #665 闭环**（含 tests/admin/test_jd_admin.py 21 用例）；P2×13 择要留档（q 通配符转义随批修）；匹配侧岗位名三口径并存交张恺天复核（P2-6 算法红线）。
+- **测试补充六组（#639~#644，166 例）**：proficiency 31 / KG 聚合 34 / semantic 26 / city_index 26 / cert_issuers 36 / llm_stats 13；配套修 semantic warm() 空白串过滤与 cert_issuers 未用 import；lfcs→LFCS 映射键勘误 + 泛化键（精算/日语）治理 + iso iec 键（#658）。
+- **其他**：全审批池只读汇总端点 + 岗位审核页「总览」Tab（#659/#660）；图谱视图收敛（#652）与三视图视觉优化——职能域社区着色 + 环形布局标签象限（#661）；匹配详情最佳匹配 JD 原文展示（#654）；部署/技术文档补全（Code-Wiki 对齐当前代码 + DEPLOY 局域网运维实证 + 索引重建，#657）；图谱演变边 EVOLVED_FROM 治理留痕（#650）。
+
 ### 2026-08-27
 - **前端展示整合优化（组件统一 + 信息架构重组，PR #587 / #591~#595）**：建 `components/shared/` 共享四件套——六态岗位状态徽标 `PositionStateBadge`（契约六态 + rejected 唯一源）、技能胶囊 `SkillChip`（must/nice/soft 三色）、刷新按钮 `RefreshButton`（统一 loading+icon）、统一指标卡 `MetricCard`（融合 evolution MetricCard 与 dashboard StatItem），Badge 补 `active` 变体。**收敛**：六态徽标（resume-match/node-detail/state-views/discovery 手写 label/tone 映射移除，graph 图例为 ECharts 颜色映射按 E2E 安全保留）、技能 chips 与刷新按钮（node-detail/resume-match/discovery：差距/路径/AI 诊断/重载等复用）、仪表盘关键指标接入统一 MetricCard（StatItem 去重）。**信息架构**：演化看板 3 Tab 化（信号 / 趋势与流向 / 版本与状态机，告警与指标卡跨 Tab 置顶）；settings 瘦身——爬虫配置（采集上限/限频/每爬虫开关与独立触发时间）迁入 admin/crawl「调度与限频」Tab（自包含 `CrawlScheduleConfig`），evolution+dictguard 合并「系统节流」分节并进侧栏，删 `/admin/settings/{crawl,dictguard}` 路由；admin-review 降 3 Tab，观察池/字典守卫迁独立路由 `/admin/review/{watch,dict}`（旧 `?tab=` 重定向兼容）；skill-aliases 并入 llm-decisions「动态别名表」Tab（`/admin/skill-aliases` 重定向）。全量前端单测 + typecheck 通过，E2E 相关页面未动。
 
