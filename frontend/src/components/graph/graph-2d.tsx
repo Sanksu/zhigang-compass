@@ -964,7 +964,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 
     chart.setOption(option)
     builtRef.current = true
-  }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand, evolutionMarks])
+  }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand, evolutionMarks, ringLayout, skillLabelTopIds])
 
   // ── 悬停节点 → 关联连线提亮 ──
   // 邻接表（node id → 关联边下标）与基础视觉快照（与 option 构建同口径）：

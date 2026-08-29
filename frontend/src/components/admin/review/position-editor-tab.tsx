@@ -23,11 +23,21 @@ import {
 import { apiGet, apiPut, errMsg } from '@/lib/api'
 import type { Schema } from './review-types'
 
-/** 编辑表单技能行（PUT 提交形状：name/necessity/weight，不含只读 level） */
+/** 编辑表单技能行（PUT 提交形状：name/necessity/weight，不含只读 level）。
+ *  key 为行内稳定 id（第八轮 P2-36）：可增删行的渲染 key，删除中间行后
+ *  React 按 key 复用 DOM，输入焦点不错位；save() 显式映射时剔除，不入请求体 */
 interface SkillFormRow {
+  key: string
   name: string
   necessity: 'must' | 'nice'
   weight: number
+}
+
+/** 行 id 生成：模块级单调计数，跨加载/新增全局唯一（新增行不得与存量行撞 key） */
+let skillRowSeq = 0
+function nextRowKey(): string {
+  skillRowSeq += 1
+  return `skill-row-${skillRowSeq}`
 }
 
 type PositionDetail = Schema['PositionEditDetail']
@@ -63,7 +73,7 @@ export function PositionEditorTab() {
     try {
       const d = await apiGet<PositionDetail>(`/admin/positions/${encodeURIComponent(name)}`)
       setDetail(d)
-      setSkills(d.skills.map((s) => ({ name: s.name, necessity: s.necessity, weight: s.weight })))
+      setSkills(d.skills.map((s) => ({ key: nextRowKey(), name: s.name, necessity: s.necessity, weight: s.weight })))
       setCoreDuties(d.core_duties.join('\n'))
       setScenarios(d.scenarios.join('\n'))
     } catch (e) {
@@ -176,7 +186,7 @@ export function PositionEditorTab() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setSkills((rows) => [...rows, { name: '', necessity: 'must', weight: 1 }])}
+                  onClick={() => setSkills((rows) => [...rows, { key: nextRowKey(), name: '', necessity: 'must', weight: 1 }])}
                 >
                   <Plus className="size-3.5 mr-1" />
                   添加技能
@@ -198,7 +208,7 @@ export function PositionEditorTab() {
                   </TableHeader>
                   <TableBody>
                     {skills.map((s, i) => (
-                      <TableRow key={i}>
+                      <TableRow key={s.key}>
                         <TableCell>
                           <Input
                             value={s.name}

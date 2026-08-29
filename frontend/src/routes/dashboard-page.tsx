@@ -1,14 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { Activity, Database, GitBranch, Network, TrendingUp, Users } from 'lucide-react'
-import * as echarts from 'echarts'
+// 按需导入（第八轮 P2-32：与本仓 charts.tsx/graph-2d.tsx 口径一致，
+// 本页仅用 Bar + Grid(x/y 轴)/Legend/Tooltip 的 Canvas 渲染）
+import * as echarts from 'echarts/core'
+import { BarChart } from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { MetricCard } from '@/components/shared/metric-card'
 import { apiGet } from '@/lib/api'
-import { formatDateTime, isDark } from '@/lib/utils'
+import { escapeHtml, formatDateTime, isDark } from '@/lib/utils'
 import type { components } from '@/types/api'
+
+echarts.use([BarChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 interface StatItem {
   label: string
@@ -91,7 +98,7 @@ function VersionTrendChart({ versions }: { versions: EvolutionVersion[] }) {
           if (list.length === 0) return ''
           const v = asc.find((x) => x.version_id === list[0].name)
           const lines = [
-            `<b>${list[0].name ?? ''}</b>`,
+            `<b>${escapeHtml(list[0].name ?? '')}</b>`,
             v?.created_at ? `<span style="color:${muted};font-size:11px">${formatDateTime(v.created_at)}</span>` : '',
             ...list.map((p) => `${p.marker ?? ''}${p.seriesName}: <b>${p.value ?? 0}</b>`),
           ]

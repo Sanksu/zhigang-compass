@@ -70,6 +70,17 @@ export function AdminJdPage() {
 
   const [q, setQ] = useState('')
   const [source, setSource] = useState('')
+  // 检索防抖值（第八轮 P2-31）：输入停止 300ms 后才提交给列表请求，
+  // 避免逐键触发 /admin/jd 查询；初始值与空输入一致，不影响首屏加载
+  const [debouncedQ, setDebouncedQ] = useState('')
+  const [debouncedSource, setDebouncedSource] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQ(q.trim())
+      setDebouncedSource(source.trim())
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [q, source])
   /** 删除后手动触发列表重查（递增即 refetch） */
   const [reloadKey, setReloadKey] = useState(0)
 
@@ -87,10 +98,10 @@ export function AdminJdPage() {
 
   const params = useMemo(() => {
     const p = new URLSearchParams({ page: String(page), size: String(PAGE_SIZE) })
-    if (q.trim()) p.set('q', q.trim())
-    if (source.trim()) p.set('source', source.trim())
+    if (debouncedQ) p.set('q', debouncedQ)
+    if (debouncedSource) p.set('source', debouncedSource)
     return p.toString()
-  }, [q, source, page])
+  }, [debouncedQ, debouncedSource, page])
 
   function refresh() {
     setReloadKey((k) => k + 1)
