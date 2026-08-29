@@ -341,6 +341,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/graph/position/{id}/portrait-evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 岗位画像条目证据 JD 列表（薪资/经验/学历选中后侧栏展示）
+         * @description 按维度+条目标签回溯支撑该聚合条目的具体 JD（jd_raw 行，口径镜像 build_aggregates：SimHash 近似重复/归档/岗位级通胀排除一致）。 label 为空返回该维度全部证据 JD；jd_id 用于 GET /graph/jd/{jd_id} 取正文。
+         */
+        get: {
+            parameters: {
+                query: {
+                    /** @description 画像维度 */
+                    dimension: "salary" | "experience" | "education";
+                    /** @description 条目标签（薪资档位原文 / "3年以上" / "本科"）；缺省=该维度全部 */
+                    label?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 证据 JD 列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["PortraitEvidenceData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/graph/jd/{jd_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * JD 证据正文详情（岗位画像证据点开后的正文与出处）
+         * @description 返回 jd_raw 原文（raw_text）与出处链接（source_url）等元数据； 内容为公开招聘信息（脉脉源入库前已脱敏，is_desensitized 标注）。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jd_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description JD 正文详情 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["JdEvidenceDetail"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/graph/skill/{id}/evidence": {
         parameters: {
             query?: never;
@@ -3016,6 +3116,158 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/jd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** JD 原始数据分页列表（管理页；q 关键词匹配标题/正文，source 源过滤） */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 关键词（ILIKE 匹配 snapshot 标题与 raw_text） */
+                    q?: string;
+                    /** @description 来源平台过滤（zhilian/boss/...） */
+                    source?: string;
+                    page?: number;
+                    size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 分页列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["JdAdminPage"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/jd/{jd_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** JD 原始数据详情（含正文全文与抽取摘要，供编辑回显） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jd_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description JD 详情 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["JdAdminDetail"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        /** 编辑 JD 原始数据（raw_text/source_url 等元数据；content_hash 同步重算，抽取快照不动——重抽需手动触发；写 AuditLog） */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jd_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["JdAdminUpdate"];
+                };
+            };
+            responses: {
+                /** @description 更新后的详情 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["JdAdminDetail"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        post?: never;
+        /** 删除 JD 原始数据（写 AuditLog；图谱 Evidence 节点保留备份不联动删除） */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jd_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 删除结果 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: Record<string, never>;
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/llm-decisions/{decision_id}/approve": {
         parameters: {
             query?: never;
@@ -4456,6 +4708,112 @@ export interface components {
             skill_name: string;
             evidence: components["schemas"]["SkillEvidenceItem"][];
             evidence_count: number;
+        };
+        /** @description 画像条目证据 JD 项（GET /graph/position/{id}/portrait-evidence） */
+        PortraitEvidenceItem: {
+            /**
+             * Format: int64
+             * @description jd_raw 行 id，取正文用 GET /graph/jd/{jd_id}
+             */
+            jd_id: number;
+            /** @description 岗位名称（snapshot.title） */
+            title?: string;
+            company?: string;
+            /** @description 来源平台 */
+            source: string;
+            /** @description 出处链接（可能为空） */
+            source_url?: string;
+            crawled_at?: string;
+            /** @description 该 JD 薪资档位原文（聚合条目键） */
+            salary_text?: string;
+            /** @description 经验分布标签（如 3年以上） */
+            experience_label?: string;
+            /** @description 学历要求（大专/本科/硕士/博士） */
+            education_level?: string;
+            /** @description 正文摘要（前 120 字） */
+            snippet?: string;
+        };
+        /** @description GET /graph/position/{id}/portrait-evidence 响应 data */
+        PortraitEvidenceData: {
+            position_id: string;
+            position_name: string;
+            /** @enum {string} */
+            dimension: "salary" | "experience" | "education";
+            /** @description 命中的条目标签；空串=该维度全部 */
+            label: string;
+            /** @description 过滤后证据 JD 总数（items 截断至 limit） */
+            total: number;
+            items: components["schemas"]["PortraitEvidenceItem"][];
+        };
+        /** @description GET /graph/jd/{jd_id} 响应 data（JD 证据正文与出处） */
+        JdEvidenceDetail: {
+            /** Format: int64 */
+            id: number;
+            title?: string;
+            company?: string;
+            location?: string;
+            source: string;
+            /** @description 出处链接（可能为空） */
+            source_url?: string;
+            crawled_at?: string;
+            is_desensitized?: boolean;
+            /** @description JD 原文全文 */
+            raw_text: string;
+        };
+        /** @description JD 管理列表项（GET /admin/jd） */
+        JdAdminItem: {
+            /** Format: int64 */
+            id: number;
+            title?: string;
+            company?: string;
+            source: string;
+            source_id: string;
+            source_url?: string;
+            crawled_at?: string;
+            is_desensitized?: boolean;
+            /** @description 归一化岗位名（snapshot.normalized_position） */
+            position?: string;
+            /** @description raw_text 长度 */
+            text_length?: number;
+            /** @description 最近更新时间（编辑审计参考） */
+            updated_at?: string;
+        };
+        /** @description GET /admin/jd 响应 data */
+        JdAdminPage: {
+            total: number;
+            page: number;
+            size: number;
+            items: components["schemas"]["JdAdminItem"][];
+        };
+        /** @description GET/PUT /admin/jd/{jd_id} 响应 data */
+        JdAdminDetail: {
+            /** Format: int64 */
+            id: number;
+            title?: string;
+            company?: string;
+            location?: string;
+            source: string;
+            source_id: string;
+            source_url?: string;
+            crawled_at?: string;
+            is_desensitized?: boolean;
+            position?: string;
+            raw_text: string;
+            /** @description 抽取摘要（salary_range/education.level/experience_range，只读展示——编辑不自动重抽） */
+            extraction_summary?: {
+                salary_range?: string;
+                education_level?: string;
+                experience?: string;
+            };
+        };
+        /** @description PUT /admin/jd/{jd_id} 请求体（仅列出的字段被更新；raw_text 变更时 content_hash 同步重算） */
+        JdAdminUpdate: {
+            title?: string;
+            company?: string;
+            location?: string;
+            source_url?: string;
+            crawled_at?: string;
+            raw_text?: string;
         };
         /** @description 相似技能项（GET /graph/skill/similar，语义相似度） */
         SimilarSkillItem: {
