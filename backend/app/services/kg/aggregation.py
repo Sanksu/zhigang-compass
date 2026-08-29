@@ -197,14 +197,20 @@ class PositionAgg:
     __slots__ = (
         "jd_count", "skills", "exp_years", "soft_skills", "typical_scenarios",
         "last_crawled", "education_levels", "salaries",
+        "experience_distribution", "salary_text",
     )
 
     def __init__(self) -> None:
         self.jd_count = 0
         self.skills: dict[str, SkillAgg] = defaultdict(SkillAgg)
         self.exp_years: list[float] = []
-        # 学历级别收集（聚合取众数写 Position.required_education）
+        # 学历级别收集（聚合取众数写 Position.required_education，
+        # 并按 jd 条数落 Position.education_distribution 供前端多值+证据展示）
         self.education_levels: Counter = Counter()
+        # 经验标注分布（'3年以上' → jd 条数；未标注不入，画像展示诚实口径）
+        self.experience_distribution: Counter = Counter()
+        # 薪资原文档位计数（同币种同量级归档 → Top-3 档位 + 条数证据）
+        self.salary_text: Counter = Counter()
         # 薪资月范围按币种分桶（解析 salary_range 文本 → (min, max)），
         # CNY/USD 各自取中位区间写 salary_min/max + salary_currency
         self.salaries: dict[str, list[tuple[float, float]]] = defaultdict(list)
@@ -375,10 +381,16 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
         years = _min_experience_years(snap)
         if years is not None:
             pa.exp_years.append(years)
+            # 经验分布（原文标注口径：仅正文明确年限的 JD 计数）
+            pa.experience_distribution[f"{years:g}年以上"] += 1
         # 学历要求：抽取六维 education.level（大专/本科/硕士/博士），聚合取众数
         edu = ((ext.get("education") or {}).get("level") or "").strip()
         if edu:
             pa.education_levels[edu] += 1
+        # 薪资原文档位（解析成功为前提，原文串作档位键保留币种/形态信息）
+        salary_text = (ext.get("salary_range") or "").strip()
+        if salary_text and parse_salary_range(salary_text):
+            pa.salary_text[salary_text] += 1
         # 薪资：salary_range 文本解析为月范围数值，按币种分桶（08-29 国内外区分）——
         # CNY/USD 各自取中位区间，绝不混算
         parsed = parse_salary_range(ext.get("salary_range"))
@@ -457,11 +469,23 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
         salary_cur = "CNY" if pa.salaries.get("CNY") else ("USD" if pa.salaries.get("USD") else None)
         salary_min = median([s[0] for s in pa.salaries[salary_cur]]) if salary_cur else None
         salary_max = median([s[1] for s in pa.salaries[salary_cur]]) if salary_cur else None
+        # 多值画像分布（08-29 证据计数展示）：按 jd 条数降序 Top-5，
+        # 未标注不入图（诚实口径——抽取覆盖面在详情页以 evidence_count 呈现）
+        edu_dist = {k: v for k, v in pa.education_levels.most_common(5)}
+        exp_dist = {k: v for k, v in pa.experience_distribution.most_common(5)}
+        salary_tiers = [
+            {"text": text, "count": cnt}
+            for text, cnt in pa.salary_text.most_common(5)
+        ]
         positions.append({
             "pos": pos,
             "freq": pa.jd_count,
+            "evidence_count": pa.jd_count,
             "req_years": median(pa.exp_years) if pa.exp_years else None,
             "req_education": edu_mode,
+            "education_distribution": edu_dist,
+            "experience_distribution": exp_dist,
+            "salary_tiers": salary_tiers,
             "salary_min": round(salary_min) if salary_min is not None else None,
             "salary_max": round(salary_max) if salary_max is not None else None,
             "salary_currency": salary_cur,
@@ -485,6 +509,10 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
                     p.last_updated = it.last_updated,
                     p.required_years = coalesce(it.req_years, p.required_years),
                     p.required_education = coalesce(it.req_education, p.required_education),
+                    p.evidence_count = it.evidence_count,
+                    p.education_distribution = it.education_distribution,
+                    p.experience_distribution = it.experience_distribution,
+                    p.salary_tiers = it.salary_tiers,
                     p.salary_min = coalesce(it.salary_min, p.salary_min),
                     p.salary_max = coalesce(it.salary_max, p.salary_max),
                     p.salary_currency = coalesce(it.salary_currency, p.salary_currency),

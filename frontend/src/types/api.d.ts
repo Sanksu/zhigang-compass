@@ -4372,6 +4372,21 @@ export interface components {
              * @enum {string|null}
              */
             salary_currency?: "CNY" | "USD" | null;
+            /** @description 支撑画像的 JD 证据条数（= 聚合 jd_count） */
+            evidence_count?: number | null;
+            /** @description 学历要求分布（level → jd 条数，条数降序 Top-5） */
+            education_distribution?: {
+                [key: string]: number;
+            } | null;
+            /** @description 经验要求分布（'N年以上' → jd 条数，仅正文明确年限） */
+            experience_distribution?: {
+                [key: string]: number;
+            } | null;
+            /** @description 薪资原文档位（解析成功档 Top-5，附 jd 条数） */
+            salary_tiers?: {
+                text?: string;
+                count?: number;
+            }[] | null;
             /** @description 原始薪资文本（未解析成功的展示兜底） */
             salary_range?: string | null;
             /** @description 最近更新时间 ISO8601 */

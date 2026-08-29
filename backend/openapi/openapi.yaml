@@ -2697,6 +2697,26 @@ components:
         salary_min: { type: number, nullable: true, description: 月薪资中位下限（salary_range 解析，币种见 salary_currency） }
         salary_max: { type: number, nullable: true, description: 月薪资中位上限（salary_range 解析，币种见 salary_currency） }
         salary_currency: { type: string, nullable: true, enum: [CNY, USD], description: 薪资币种（国内外区分，08-29 拍板；CNY 优先写图） }
+        evidence_count: { type: integer, nullable: true, description: 支撑画像的 JD 证据条数（= 聚合 jd_count） }
+        education_distribution:
+          type: object
+          nullable: true
+          description: 学历要求分布（level → jd 条数，条数降序 Top-5）
+          additionalProperties: { type: integer }
+        experience_distribution:
+          type: object
+          nullable: true
+          description: 经验要求分布（'N年以上' → jd 条数，仅正文明确年限）
+          additionalProperties: { type: integer }
+        salary_tiers:
+          type: array
+          nullable: true
+          description: 薪资原文档位（解析成功档 Top-5，附 jd 条数）
+          items:
+            type: object
+            properties:
+              text: { type: string }
+              count: { type: integer }
         salary_range: { type: string, nullable: true, description: 原始薪资文本（未解析成功的展示兜底） }
         last_updated: { type: string, nullable: true, description: 最近更新时间 ISO8601 }
         status: { type: string, enum: [candidate, emerging, stable, declining, archived] }
