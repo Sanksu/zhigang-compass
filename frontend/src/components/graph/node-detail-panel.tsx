@@ -39,6 +39,13 @@ import { PositionStateBadge } from '@/components/shared/position-state-badge'
 import { SkillChip } from '@/components/shared/skill-chips'
 import { Button } from '@/components/ui/button'
 import { SkeletonList } from '@/components/ui/skeleton'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { apiGet } from '@/lib/api'
 
 type Schema = components['schemas']
@@ -50,6 +57,9 @@ export type SkillEvidenceItem = Schema['SkillEvidenceItem']
 export type SimilarSkillItem = Schema['SimilarSkillItem']
 export type PrerequisiteItem = Schema['PrerequisiteItem']
 export type SkillCourseItem = Schema['CourseRecommendation']
+export type PortraitEvidenceData = Schema['PortraitEvidenceData']
+export type PortraitEvidenceItem = Schema['PortraitEvidenceItem']
+export type JdEvidenceDetail = Schema['JdEvidenceDetail']
 
 export interface SkillDetail {
   skill_id: string
@@ -92,8 +102,166 @@ function EvidenceRows({ label, entries }: { label: string; entries: [string, num
   )
 }
 
-function loadTrendSets(): Promise<TrendSets | null> {
-  const now = Date.now()
+/** JD 证据正文弹层：原文全文 + 出处链接（画像证据列表点开）。
+ *
+ * 内容组件按 jdId key 重挂载：fetch 状态（loading 初始 true）随挂载重建，
+ * 避免 effect 体内同步 setState（react-hooks 级联渲染 lint）。 */
+function JdEvidenceDialog({
+  jdId,
+  onClose,
+}: {
+  jdId: number | null
+  onClose: () => void
+}) {
+  return (
+    <Dialog open={jdId != null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        {jdId != null && <JdEvidenceContent key={jdId} jdId={jdId} />}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function JdEvidenceContent({ jdId }: { jdId: number }) {
+  const [detail, setDetail] = useState<JdEvidenceDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    apiGet<JdEvidenceDetail>(`/graph/jd/${jdId}`)
+      .then((res) => {
+        if (!cancelled) setDetail(res)
+      })
+      .catch(() => {
+        if (!cancelled) setError('JD 正文加载失败，请重试')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [jdId])
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle className="truncate">
+          {detail?.title || (loading ? 'JD 正文加载中…' : 'JD 证据')}
+        </DialogTitle>
+        <DialogDescription>
+          {detail
+            ? [detail.company, detail.location, detail.source]
+                .filter(Boolean)
+                .join(' · ')
+            : '岗位画像证据 · 原始 JD'}
+        </DialogDescription>
+      </DialogHeader>
+
+      {loading ? (
+        <p className="py-8 text-center text-sm text-ink-muted">加载正文…</p>
+      ) : error ? (
+        <p className="py-8 text-center text-sm text-state-archived">{error}</p>
+      ) : detail ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-muted">
+            {detail.crawled_at && <span>采集 {detail.crawled_at.slice(0, 10)}</span>}
+            {detail.is_desensitized && (
+              <Badge variant="outline" className="text-[11px]">已脱敏</Badge>
+            )}
+            {detail.source_url ? (
+              <a
+                href={detail.source_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-0.5 text-ink underline hover:no-underline"
+              >
+                查看出处 <ExternalLink className="size-3" />
+              </a>
+            ) : (
+              <span className="text-ink-faint">无出处链接</span>
+            )}
+          </div>
+          <div className="max-h-[55vh] overflow-y-auto rounded-md border border-border bg-subtle/40 p-3">
+            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-secondary">
+              {detail.raw_text || '（该记录无正文文本）'}
+            </p>
+          </div>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+/** 画像条目证据 JD 列表（薪资/经验/学历 attr 节点选中时渲染） */
+function PortraitEvidenceSection({
+  evidence,
+  loading,
+}: {
+  evidence: PortraitEvidenceData | null
+  loading: boolean
+}) {
+  const [openJdId, setOpenJdId] = useState<number | null>(null)
+
+  return (
+    <section className="space-y-2">
+      <h4 className="text-xs font-medium text-ink-muted">
+        证据 JD
+        {evidence && (
+          <span className="ml-1.5 font-mono text-[11px] text-ink-faint">
+            {evidence.total} 条
+          </span>
+        )}
+      </h4>
+      {loading ? (
+        <SkeletonList rows={3} />
+      ) : !evidence || evidence.items.length === 0 ? (
+        <p className="py-1 text-xs text-ink-faint">
+          该条目暂无证据 JD（维度标注为空或 JD 已被去重/通胀排除）
+        </p>
+      ) : (
+        <>
+          <ul className="space-y-1.5">
+            {evidence.items.map((it: PortraitEvidenceItem) => (
+              <li key={it.jd_id}>
+                <button
+                  onClick={() => setOpenJdId(it.jd_id)}
+                  className="w-full rounded-lg border border-border px-2.5 py-2 text-left transition-colors hover:border-border-strong hover:bg-subtle/60"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-xs font-medium text-ink">
+                      {it.title || '（无标题）'}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-ink-faint">{it.source}</span>
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-2 text-[11px] text-ink-faint">
+                    {it.company && <span className="truncate">{it.company}</span>}
+                    {it.crawled_at && <span>{it.crawled_at.slice(0, 10)}</span>}
+                    {it.salary_text && <span className="font-mono">{it.salary_text}</span>}
+                  </div>
+                  {it.snippet && (
+                    <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-ink-faint">
+                      {it.snippet}
+                    </p>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {evidence.total > evidence.items.length && (
+            <p className="text-[11px] text-ink-faint">
+              仅展示前 {evidence.items.length} 条，共 {evidence.total} 条
+            </p>
+          )}
+          <JdEvidenceDialog jdId={openJdId} onClose={() => setOpenJdId(null)} />
+        </>
+      )}
+    </section>
+  )
+}
+
+function loadTrendSets(): Promise<TrendSets | null> {  const now = Date.now()
   if (trendSetsCache && now - trendSetsCache.at < 60_000) {
     return Promise.resolve(trendSetsCache)
   }
@@ -130,6 +298,9 @@ interface NodeDetailPanelProps {
   onTogglePosition?: (id: string) => void
   /** 岗位画像视图：隐藏关联度条与展开技能按钮（层级子图里语义不成立） */
   portraitMode?: boolean
+  /** 画像条目证据 JD 列表（薪资/经验/学历 attr 节点选中时由页面拉取传入） */
+  portraitEvidence?: PortraitEvidenceData | null
+  portraitEvidenceLoading?: boolean
   /** 域超节点双击等价的展开按钮（panorama 聚合下钻；缺省不渲染） */
   onToggleDomain?: (id: string) => void
   skillDetail?: SkillDetail | null
@@ -148,7 +319,8 @@ const TYPE_LABEL: Record<NodeDetail['type'], string> = {
   position: '岗位',
   skill: '技能',
   evidence: '证据',
-  // 岗位画像属性维度（薪资/经验等）：无详情端点，画布层点击不选中，仅类型收编
+  // 岗位画像属性维度（薪资/经验/学历）：画像视图下选中展示证据 JD，
+  // 其他视图无详情端点不选中
   attr: '画像维度',
 }
 
@@ -175,6 +347,8 @@ export function NodeDetailPanel({
   similarSkills,
   positionExpanded,
   portraitMode,
+  portraitEvidence,
+  portraitEvidenceLoading,
   onTogglePosition,
   onToggleDomain,
   onSelectSkill,
@@ -336,6 +510,14 @@ export function NodeDetailPanel({
                 <h4 className="text-xs font-medium text-ink-muted">来源</h4>
                 <p className="text-sm text-ink">{node.source}</p>
               </section>
+            )}
+
+            {/* 画像条目证据 JD（薪资/经验/学历 attr 节点选中时） */}
+            {portraitMode && node.type === 'attr' && (
+              <PortraitEvidenceSection
+                evidence={portraitEvidence ?? null}
+                loading={!!portraitEvidenceLoading}
+              />
             )}
 
             {/* 关联统计（岗位画像视图由下方「画像证据」区承载，避免低信息量卡） */}
