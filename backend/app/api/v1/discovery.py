@@ -23,7 +23,7 @@ from app.core.database import get_db, neo4j_driver
 from app.core.errors import ERR_NOT_FOUND
 from app.models.business import DiscoveryCandidate, GraphVersion
 from app.schemas.common import error, ok
-from app.services.graph import repository
+from app.services.graph import repository, visibility
 
 router = APIRouter()
 
@@ -104,9 +104,10 @@ async def discovery_recent(
     if state:
         stmt = stmt.where(DiscoveryCandidate.state == state)
     rows = list(await db.scalars(stmt))
-    # 匿名访客不外泄 candidate 待审核岗位（对齐图谱域按角色过滤口径；
-    # user 为 None 即匿名，已登录 guest 角色不受限）
-    if not user:
+    # candidate 待审核岗位不外泄：对齐图谱域单一事实源（services/graph/
+    # visibility.py）——匿名与 guest 均走 public scope（第七轮审查 P1-4，
+    # 原实现只防匿名，登录 guest 可见待审核岗位名与定义草稿）
+    if not visibility._can_view_all_positions(user):
         rows = [r for r in rows if r.state != "candidate"]
     total = len(rows)
     rows = rows[:limit]

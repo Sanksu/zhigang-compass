@@ -20,6 +20,7 @@ from app.api.deps import get_optional_user
 from app.core.database import get_db, redis_client
 from app.core.errors import ERR_NOT_FOUND
 from app.models.business import EvolutionEvent, GraphVersion
+from app.services.graph import visibility
 from app.schemas.common import error, ok
 
 router = APIRouter()
@@ -678,8 +679,10 @@ async def state_machine_overview(
         }
         for log in logs
     ]
-    # 匿名访客不外泄待审核规模与审核操作者（对齐图谱域按角色过滤口径）
-    if not user:
+    # 待审核规模与审核操作者不外泄：对齐图谱域单一事实源
+    # （services/graph/visibility.py）——匿名与 guest 均走 public scope
+    # （第七轮审查 P1-4，原实现只防匿名）
+    if not visibility._can_view_all_positions(user):
         counts["candidate"] = 0
         transitions = [
             {**t, "operator": "审核员"} for t in transitions if t["to_state"] != "candidate"
