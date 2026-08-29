@@ -309,6 +309,11 @@ async def position_detail(
         "salary_max": position.get("salary_max"),
         "salary_range": position.get("salary_range"),
         "salary_currency": position.get("salary_currency"),
+        # 08-29 证据计数展示：多值分布 + 证据总数（jd 条数）
+        "evidence_count": position.get("evidence_count"),
+        "education_distribution": position.get("education_distribution"),
+        "experience_distribution": position.get("experience_distribution"),
+        "salary_tiers": position.get("salary_tiers"),
         "last_updated": position.get("last_updated"),
         "status": position.get("status"),
         "must_skills": skills.get("must", []),

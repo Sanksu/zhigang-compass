@@ -62,13 +62,13 @@ class TestParseSalaryRange:
         assert parse_salary_range("2-4万")[2] == "CNY"
 
 
-def _jd(pos: str, extraction: dict, source: str = "zhilian", crawled: str = "2026-08-28T10:00:00+08:00"):
+def _jd(pos: str, extraction: dict, source: str = "zhilian", crawled: str = "2026-08-28T10:00:00+08:00", experience: str | None = None):
+    """experience：snapshot 顶层采集侧经验文本（_min_experience_years 消费口径）。"""
     extraction = {"position_name": pos, **extraction}
-    return SimpleNamespace(
-        source=source,
-        crawled_at=crawled,
-        snapshot={"extraction": extraction, "normalized_position": pos},
-    )
+    snap = {"extraction": extraction, "normalized_position": pos}
+    if experience is not None:
+        snap["experience"] = experience
+    return SimpleNamespace(source=source, crawled_at=crawled, snapshot=snap)
 
 
 class TestAggregateEducationSalary:
@@ -95,6 +95,33 @@ class TestAggregateEducationSalary:
         # 按币种分桶：三条例全部 CNY
         assert len(pa.salaries["CNY"]) == 3
         assert pa.salaries.get("USD") is None
+
+    def test_distributions_with_evidence_counts(self):
+        """多值画像分布：学历/经验分布计数 + 薪资原文档位（08-29 证据展示）。"""
+        rows = [
+            _jd("后端开发工程师", {
+                "education": {"level": "本科"},
+                "salary_range": "15000-25000",
+            }, experience="3-5年"),
+            _jd("后端开发工程师", {
+                "education": {"level": "本科"},
+                "salary_range": "15000-25000",
+            }),
+            _jd("后端开发工程师", {
+                "education": {"level": "大专"},
+                "salary_range": "1-1.5万",
+            }, experience="5年以上"),
+        ]
+        agg = build_aggregates(rows)
+        pa = agg["后端开发工程师"]
+        # 学历分布：本科 2 / 大专 1（计数降序）
+        edu = dict(pa.education_levels.most_common())
+        assert edu == {"本科": 2, "大专": 1}
+        # 经验分布：仅正文明确年限的计数
+        assert pa.experience_distribution == {"3年以上": 1, "5年以上": 1}
+        # 薪资档位：同档合并计数（'15000-25000'×2），异档分开
+        assert pa.salary_text["15000-25000"] == 2
+        assert pa.salary_text["1-1.5万"] == 1
 
     def test_salary_buckets_by_currency(self):
         """CNY/USD 混源岗位：各自分桶，CNY 优先写 salary_min/max（08-29 拍板）。"""

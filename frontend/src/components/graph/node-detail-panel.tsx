@@ -65,6 +65,32 @@ export interface SkillDetail {
 type TrendSets = { at: number; emerging: Set<string>; declining: Set<string> }
 let trendSetsCache: TrendSets | null = null
 let trendSetsPromise: Promise<TrendSets | null> | null = null
+/** 画像分布对象是否有有效条目（null/空对象均视为无） */
+function hasEntries(dist: Record<string, number> | null | undefined): boolean {
+  return !!dist && Object.keys(dist).length > 0
+}
+
+/** 证据行：维度标签 + 多值 Badge（值 + jd 条数计数，条数降序已由后端保证） */
+function EvidenceRows({ label, entries }: { label: string; entries: [string, number][] }) {
+  const total = entries.reduce((s, [, n]) => s + n, 0)
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="w-8 shrink-0 text-[11px] text-ink-faint">{label}</span>
+      {entries.map(([value, count]) => (
+        <Badge
+          key={value}
+          variant="outline"
+          className="text-xs"
+          title={total > 0 ? `${value}：${count} 条 JD 证据（占标注样本 ${Math.round((count / total) * 100)}%）` : `${count} 条 JD 证据`}
+        >
+          {value}
+          <span className="ml-1 font-mono text-[10px] text-ink-faint">×{count}</span>
+        </Badge>
+      ))}
+    </div>
+  )
+}
+
 function loadTrendSets(): Promise<TrendSets | null> {
   const now = Date.now()
   if (trendSetsCache && now - trendSetsCache.at < 60_000) {
@@ -343,21 +369,47 @@ export function NodeDetailPanel({
             {/* 岗位详情 */}
             {node.type === 'position' && !node.isDomain && positionDetail && (
               <>
-                {(positionDetail.required_years != null || positionDetail.required_education) && (
-                  <section className="space-y-1.5">
-                    <h4 className="text-xs font-medium text-ink-muted">任职要求</h4>
-                    <div className="flex flex-wrap gap-1.5">
-                      {positionDetail.required_years != null && (
-                        <Badge variant="outline" className="text-xs">
-                          {positionDetail.required_years} 年经验
-                        </Badge>
-                      )}
-                      {positionDetail.required_education && (
-                        <Badge variant="outline" className="text-xs">
-                          {positionDetail.required_education}
-                        </Badge>
-                      )}
-                    </div>
+                {/* 画像证据区（08-29）：多值分布 + JD 证据计数——单值众数 + 分布 Top */}
+                {positionDetail.evidence_count != null && (
+                  <section className="space-y-2">
+                    <h4 className="text-xs font-medium text-ink-muted">
+                      画像证据
+                      <span className="ml-1.5 font-mono text-[11px] text-ink-faint">
+                        {positionDetail.evidence_count} 条 JD
+                      </span>
+                    </h4>
+                    {(positionDetail.required_years != null || positionDetail.required_education || hasEntries(positionDetail.education_distribution)) && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {positionDetail.required_years != null && (
+                          <Badge variant="outline" className="text-xs">
+                            {positionDetail.required_years} 年经验（中位）
+                          </Badge>
+                        )}
+                        {positionDetail.required_education && (
+                          <Badge variant="outline" className="text-xs">
+                            {positionDetail.required_education}（众数）
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                    {hasEntries(positionDetail.education_distribution) && (
+                      <EvidenceRows
+                        label="学历"
+                        entries={Object.entries(positionDetail.education_distribution!)}
+                      />
+                    )}
+                    {hasEntries(positionDetail.experience_distribution) && (
+                      <EvidenceRows
+                        label="经验"
+                        entries={Object.entries(positionDetail.experience_distribution!)}
+                      />
+                    )}
+                    {positionDetail.salary_tiers && positionDetail.salary_tiers.length > 0 && (
+                      <EvidenceRows
+                        label="薪资"
+                        entries={(positionDetail.salary_tiers ?? []).map((t) => [t.text, t.count] as [string, number])}
+                      />
+                    )}
                   </section>
                 )}
 
@@ -380,6 +432,12 @@ export function NodeDetailPanel({
                             <span className="truncate text-xs font-medium text-ink">{s.skill_name}</span>
                             <span className="flex shrink-0 items-center gap-1.5">
                               {!!s.level && s.level !== '0' && <span className="text-[11px] text-ink-faint">{s.level}</span>}
+                              {/* JD 证据源计数（08-29 画像证据展示） */}
+                              {!!s.source_count && (
+                                <span className="text-[11px] font-mono text-ink-faint" title={`${s.source_count} 个独立 JD 源要求该技能`}>
+                                  {s.source_count} 源
+                                </span>
+                              )}
                               <span className="text-[11px] font-mono text-ink-faint">
                                 {(s.weight * 100).toFixed(0)}%
                               </span>
