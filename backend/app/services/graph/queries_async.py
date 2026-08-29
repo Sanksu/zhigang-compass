@@ -164,3 +164,28 @@ async def query_view_main(session, limit: int, status_filter: str) -> list:
     )
     # 08-18 修复：data() 的 tuple 关系会导致路由映射崩 500（同 panorama 坑）
     return await result.fetch(100000)
+
+
+async def query_view_position_portrait(session, position_id: str, limit: int, status_filter: str) -> list:
+    """岗位画像视图查询：以指定岗位为中心的画像图谱。
+
+    返回单行（fetch Record）：p（岗位本体，含画像属性）+ skills 列表
+    （按 r.weight 降序 Top-limit，元素 {sid, sname, scat, weight, necessity, level}）。
+    匿名/guest 对 candidate/archived 岗位返回空行（_position_scope 过滤）。
+    """
+    result = await session.run(
+        f"""
+        MATCH (p:Position)
+        WHERE (p.id = $pid OR p.name = $pid) AND {status_filter}
+        OPTIONAL MATCH (p)-[r:REQUIRES]->(s:Skill)
+        WITH p, r, s ORDER BY coalesce(r.weight, 0) DESC
+        WITH p, collect({{sid: s.id, sname: s.name, scat: s.category,
+                          weight: coalesce(r.weight, 0),
+                          necessity: coalesce(r.necessity, 'must'),
+                          level: r.level}})[0..$limit] AS skills
+        RETURN p, skills
+        """,
+        pid=position_id, limit=limit,
+        public_statuses=list(_PUBLIC_POSITION_STATUSES),
+    )
+    return await result.fetch(10000)

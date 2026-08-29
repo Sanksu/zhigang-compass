@@ -754,10 +754,13 @@ export interface paths {
         /** 视图切换（后端过滤） */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description 岗位 id（positionPortrait 视图必填，其余视图忽略） */
+                    position?: string;
+                };
                 header?: never;
                 path: {
-                    view_type: "panorama" | "techStack" | "level" | "positionCenter";
+                    view_type: "panorama" | "techStack" | "level" | "positionCenter" | "positionPortrait";
                 };
                 cookie?: never;
             };
@@ -4177,7 +4180,7 @@ export interface components {
          * @description 图谱视图类型（服务端过滤）
          * @enum {string}
          */
-        GraphViewType: "panorama" | "techStack" | "level" | "positionCenter";
+        GraphViewType: "panorama" | "techStack" | "level" | "positionCenter" | "positionPortrait";
         /** @description 图谱节点（Position/Skill，匿名视角候选岗位不外宣） */
         GraphNode: {
             id: string;

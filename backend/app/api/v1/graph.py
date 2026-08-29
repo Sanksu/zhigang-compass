@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_optional_user
 from app.core.database import async_neo4j_driver, get_db, neo4j_driver, redis_client
-from app.core.errors import ERR_INTERNAL, ERR_NOT_FOUND
+from app.core.errors import ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import SkillEmbedding
 from app.schemas.common import error, ok
 from app.services.graph import repository, visibility
@@ -712,7 +712,8 @@ async def graph_shortest_path(
 
 @router.get("/view/{view_type}")
 async def graph_view(
-    view_type: Literal["panorama", "techStack", "level", "positionCenter"],
+    view_type: Literal["panorama", "techStack", "level", "positionCenter", "positionPortrait"],
+    position: Optional[str] = Query(default=None, description="岗位 id/name（positionPortrait 视图必填）"),
     limit: int = Query(default=100, ge=1, le=600),
     user: Optional[dict] = Depends(get_optional_user),
 ):
@@ -725,14 +726,84 @@ async def graph_view(
     匿名/guest 仅返回 emerging/stable/declining 岗位（candidate 待审核不外宣）。
     """
     scope = _position_scope(user)
-    cache_key = f"graph:view:{view_type}:{limit}:{scope}"
+    # positionPortrait 缓存按岗位隔离（岗位切换频繁，TTL 内仍命中同岗位）
+    cache_key = f"graph:view:{view_type}:{limit}:{scope}" + (
+        f":{position}" if view_type == "positionPortrait" else ""
+    )
     cached = await redis_client.get(cache_key)
     if cached is not None:
         return ok(data=json.loads(cached))
 
     status_filter = _status_clause(scope)
 
-    if view_type == "techStack":
+    if view_type == "positionPortrait":
+        if not position:
+            return error(ERR_VALIDATION, "positionPortrait 视图必须指定 position 参数")
+        rows = await repository.query_view_position_portrait_async(
+            async_neo4j_driver, position, limit, status_filter)
+        if not rows:
+            return error(ERR_NOT_FOUND, "岗位不存在或不可见", http_status=404)
+        record = rows[0]
+        p = record["p"]
+        nodes: list[dict] = [{
+            "id": p.get("id", position),
+            "name": p.get("name", position),
+            "type": "position",
+            "status": p.get("status") or "active",
+            "evidence_count": p.get("evidence_count"),
+            "value": p.get("freq", 0),
+        }]
+        edges: list[dict] = []
+        # 画像维度节点（复用 #635 证据数据）：薪资/经验/学历/规模
+        salary_text = p.get("salary_range") or (
+            f"{p.get('salary_min')}-{p.get('salary_max')}"
+            f"{'元' if p.get('salary_currency') == 'CNY' else ' USD'}"
+            if p.get("salary_min") is not None else None
+        )
+        attrs: list[tuple[str, str]] = []
+        if p.get("salary_min") is not None or salary_text:
+            attrs.append(("薪资", salary_text or "面议"))
+        if p.get("required_years") is not None:
+            attrs.append(("经验", f'{p["required_years"]:g} 年'))
+        if p.get("required_education"):
+            attrs.append(("学历", p["required_education"]))
+        if p.get("evidence_count") is not None:
+            attrs.append(("规模", f'{p["evidence_count"]} 条 JD 证据'))
+        for idx, (label, value) in enumerate(attrs):
+            attr_id = f"attr_{p.get('id', position)}_{idx}"
+            nodes.append({
+                "id": attr_id,
+                "name": f"{label}：{value}",
+                "type": "attr",
+                "skill_category": label,
+            })
+            edges.append({"source": p.get("id", position), "target": attr_id, "weight": 1.0})
+        # 技能外环
+        for sk in record.get("skills") or []:
+            if not sk.get("sid"):
+                continue
+            nodes.append({
+                "id": sk["sid"],
+                "name": sk.get("sname") or sk["sid"],
+                "type": "skill",
+                "skill_category": sk.get("scat"),
+                "value": sk.get("weight", 0),
+            })
+            edges.append({
+                "source": p.get("id", position),
+                "target": sk["sid"],
+                "weight": sk.get("weight", 0.0),
+                "necessity": sk.get("necessity", "must"),
+                "level": sk.get("level", "中级"),
+            })
+        data = {
+            "view_type": view_type,
+            "nodes": nodes,
+            "edges": edges,
+            "stats": {"nodes": len(nodes), "edges": len(edges),
+                      **await _query_graph_counts()},
+        }
+    elif view_type == "techStack":
         rows = await _query_view_techstack(limit, status_filter)
         nodes: dict[str, dict] = {}
         edges: list[dict] = []

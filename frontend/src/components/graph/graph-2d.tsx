@@ -49,8 +49,8 @@ interface Graph2DProps {
   evolutionMarks?: { addedIds: Set<string>; removedIds: Set<string> } | null
   /** 技能标签 Top-N 白名单（技术栈视图降噪：仅集合内技能在 LOD band 1 常显标签） */
   skillLabelTopIds?: Set<string> | null
-  /** 环形布局（技术栈视图专用）：技能按频次顺时针排外圈、岗位聚内圈，边呈放射状。
-      固定坐标（layout:'none'）无布局抖动，演示镜头飞行稳定；缺省力导向。 */
+  /** 环形布局（技术栈/岗位画像视图）：技能按频次顺时针排外圈、岗位/属性维度聚内圈，
+      边呈放射状。固定坐标（layout:'none'）无布局抖动，演示镜头飞行稳定；缺省力导向。 */
   ringLayout?: boolean
   className?: string
 }
@@ -65,6 +65,8 @@ export interface Graph2DHandle {
 const SYMBOL_BY_TYPE: Record<Exclude<NodeType, 'position'>, string> = {
   skill: 'circle',
   evidence: 'diamond',
+  // 岗位画像属性维度（薪资/经验等）：方形与技能圆/证据菱形区分
+  attr: 'rect',
 }
 
 const SYMBOL_BY_STATUS: Record<PositionStatus, string> = {
@@ -135,6 +137,8 @@ function colorOf(node: GraphNode, dark: boolean): string {
   if (node.isDomain) return graphNodeColor(theme, 'domain')
   if (node.type === 'position') return graphNodeColor(theme, 'position', node.status ?? 'candidate')
   if (isSoftSkill(node)) return graphNodeColor(theme, 'softSkill')
+  // 画像维度属性（薪资/经验等，positionPortrait 视图）：紫罗兰区别于技能类目色
+  if (node.type === 'attr') return graphNodeColor(theme, 'attr')
   if (node.type === 'skill') {
     // 08-28 技术栈降噪：技能按类目着色（s_category 随 view 接口下发），
     // 未收录类目回落默认技能色
@@ -149,7 +153,7 @@ function sizeOf(node: GraphNode, displayValue?: number): number {
   // 职能域是测绘锚点：比岗位更大，并以成员数编码区域规模。
   if (node.isDomain) return Math.min(78, 48 + (node.memberCount ?? 1) * 1.5)
   const value = displayValue ?? node.value ?? 30
-  const base = node.type === 'position' ? 34 : node.type === 'skill' ? 18 : 14
+  const base = node.type === 'position' ? 34 : node.type === 'skill' ? 18 : node.type === 'attr' ? 16 : 14
   const scaled = base + (value / 100) * 18
   return Math.min(54, Math.max(14, scaled))
 }
@@ -630,15 +634,16 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         },
         label: {
           // 语义缩放 (LOD)：标签显隐由 zoom 档位驱动
-          // - band 0（zoom<0.55）：仅岗位
+          // - band 0（zoom<0.55）：仅岗位 + 画像维度属性
           // - band 1（0.55≤zoom<1.2）：岗位 + 高权重技能（≥中位阈值）
           // - band 2（zoom≥1.2）：全量（含低权技能）
           // 演化打标节点标签强制显示（不受 LOD 压制——时间轴叙事主角）
+          // 画像维度属性（薪资/经验等）与岗位同档常显——属性值即节点信息本体
           show: dimmed
             ? false
             : evolutionMarks && (evolutionMarks.addedIds.has(n.id) || evolutionMarks.removedIds.has(n.id))
               ? true
-              : n.isDomain || n.type === 'position'
+              : n.isDomain || n.type === 'position' || n.type === 'attr'
                 ? lodBand >= 0
                 : n.type === 'skill'
                 ? lodBand === 2 ||
@@ -680,12 +685,14 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     })
 
     // 环形布局坐标注入（layout:'none' 直接消费节点 x/y）：
-    // 技能按频次降序顺时针铺外圈（半径 420），岗位按关联度降序铺内圈（半径 170），
-    // 同圈角间距均分——放射状边从内圈放射到外圈，"技能→服务岗位"读向清晰。
+    // 技能按频次降序顺时针铺外圈（半径 420），岗位/画像维度节点按关联度降序铺内圈
+    // （半径 170），同圈角间距均分——放射状边从内圈放射到外圈，
+    // "技能→服务岗位 / 岗位→画像维度"读向清晰。
     if (ringLayout) {
       const skills = nodes
         .filter((n) => n.type === 'skill')
         .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      // 内圈承载岗位（技术栈视图）或 中心岗位+属性维度（岗位画像视图）
       const positions = nodes
         .filter((n) => n.type !== 'skill')
         .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
@@ -761,7 +768,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           if (params.dataType !== 'node' || !params.data) return ''
           const d = params.data as unknown as GraphNode & { displayValue?: number }
           const lines: string[] = [`<b>${escapeHtml(d.name)}</b>`]
-          lines.push(`类型: ${escapeHtml(isSoftSkill(d) ? '软技能' : d.type)}`)
+          lines.push(`类型: ${escapeHtml(d.type === 'attr' ? '画像维度' : isSoftSkill(d) ? '软技能' : d.type)}`)
           if (d.type === 'position' && d.status) lines.push(`状态: ${escapeHtml(d.status)}`)
           if (evolutionMarks?.addedIds.has(d.id))
             lines.push('<span style="color:#22c55e;font-size:11px">● 本版新增</span>')
@@ -777,7 +784,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
               ? `职能域 · ${d.memberCount ?? 0} 个岗位：双击展开/收起`
               : d.type === 'position'
                 ? '单击查看详情 · 双击展开/收起技能'
-                : '单击查看详情'
+                : d.type === 'attr'
+                  ? '岗位画像属性维度'
+                  : '单击查看详情'
           lines.push(`<span style="color:${mutedColor};font-size:11px">${hint}</span>`)
           return lines.join('<br/>')
         },
@@ -838,6 +847,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
             { name: 'skill', itemStyle: { color: colors.skill } },
             { name: 'soft', itemStyle: { color: colors.softSkill } },
             { name: 'evidence', itemStyle: { color: colors.evidence } },
+            { name: 'attr', itemStyle: { color: graphNodeColor(dark ? 'dark' : 'light', 'attr') } },
           ],
         },
       ],

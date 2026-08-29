@@ -119,3 +119,8 @@ async def query_view_techstack_async(driver, limit, status_filter) -> list:
 async def query_view_main_async(driver, limit, status_filter) -> list:
     async with driver.session() as session:
         return await queries_async.query_view_main(session, limit, status_filter)
+
+
+async def query_view_position_portrait_async(driver, position_id: str, limit: int, status_filter: str) -> list:
+    async with driver.session() as session:
+        return await queries_async.query_view_position_portrait(session, position_id, limit, status_filter)
