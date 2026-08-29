@@ -2,7 +2,8 @@
 
 各子域路由收敛至 admin_routes/ 子包：accounts（用户）/ audit（审计）/ crawl
 （爬虫）/ position_reviews（岗位审核·演化·归档·技术观察）/ position_edit
-（岗位人工编辑）/ config（LLM provider + 运行时配置）。本文件仅保留根 router
+（岗位人工编辑）/ jd_admin（JD 原始数据管理）/ config（LLM provider + 运行时
+配置）。本文件仅保留根 router
 （prefix=/admin + RBAC 依赖）并按固定顺序 include 子 router——注册顺序即
 匹配顺序，/positions/pending 必须先于 /positions/{position_name}；同时
 re-export 测试直连的私有符号，保持既有 import 面不变。
@@ -19,6 +20,7 @@ from app.api.v1.admin_routes import (
     crawl,
     dict_guard,
     etl,
+    jd_admin,
     lineage,
     llm_decisions,
     position_edit,
@@ -39,6 +41,7 @@ router.include_router(dict_guard.router)
 router.include_router(llm_decisions.router)
 router.include_router(skill_aliases.router)
 router.include_router(etl.router)
+router.include_router(jd_admin.router)
 
 # 爬虫域私有符号 re-export（tests/admin/* 直连导入）
 PLATFORM_META = crawl.PLATFORM_META

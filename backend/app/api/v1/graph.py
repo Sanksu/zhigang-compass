@@ -11,11 +11,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_optional_user
-from app.core.database import async_neo4j_driver, get_db, neo4j_driver, redis_client
+from app.core.database import (
+    async_neo4j_driver,
+    async_session_factory,
+    get_db,
+    neo4j_driver,
+    redis_client,
+)
 from app.core.errors import ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import SkillEmbedding
+from app.models.raw import JDRaw
 from app.schemas.common import error, ok
 from app.services.graph import repository, visibility
+from app.services.graph.portrait_evidence import jd_detail, portrait_evidence
 from app.services.graph_algorithms.config import load_graph_algo_config
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
@@ -335,6 +343,66 @@ async def position_detail(
         "nice_skills": skills.get("nice", []),
         "soft_skills": position.get("soft_skills") or [],
     }
+    await _cache_set(cache_key, data)
+    return ok(data=data)
+
+
+@router.get("/position/{id}/portrait-evidence")
+async def position_portrait_evidence(
+    id: str,
+    dimension: Literal["salary", "experience", "education"] = Query(...),
+    label: str = Query(default="", max_length=100),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: Optional[dict] = Depends(get_optional_user),
+):
+    """[M5] 岗位画像条目证据 JD 列表：薪资/经验/学历条目 → 支撑 JD 回溯。
+
+    label 缺省返回该维度全部证据 JD；条目口径镜像 build_aggregates
+    （SimHash 近似重复/归档/岗位级通胀排除一致），见
+    services/graph/portrait_evidence.py。匿名/guest 对 candidate/archived
+    岗位 404（同 /position/{id}）。Redis 60s 缓存按岗位+维度+标签隔离。
+    """
+    scope = _position_scope(user)
+    cache_key = f"graph:pevidence:{id}:{scope}:{dimension}:{label}:{limit}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+    position = await asyncio.to_thread(_load_position, id, user)
+    if position is None:
+        return error(ERR_NOT_FOUND, "岗位不存在或不可见", http_status=404)
+    position_name = position.get("name") or id
+
+    result = await portrait_evidence(db, position_name, dimension, label, limit)
+    data = {
+        "position_id": id,
+        "position_name": position_name,
+        "dimension": dimension,
+        "label": label,
+        "total": len(result["items"]),
+        "items": result["items"][:limit],
+    }
+    await _cache_set(cache_key, data)
+    return ok(data=data)
+
+
+@router.get("/jd/{jd_id}")
+async def jd_evidence_detail(jd_id: int):
+    """[M5] JD 证据正文详情：画像证据列表点开后的原文与出处链接。
+
+    公开招聘信息（脉脉源入库前已脱敏），匿名可读；正文为 jd_raw.raw_text。
+    """
+    cache_key = f"graph:jd:{jd_id}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+    async with async_session_factory() as session:
+        row = (await session.execute(
+            select(JDRaw).where(JDRaw.id == jd_id)
+        )).scalar_one_or_none()
+    if row is None:
+        return error(ERR_NOT_FOUND, "JD 不存在", http_status=404)
+    data = jd_detail(row)
     await _cache_set(cache_key, data)
     return ok(data=data)
 

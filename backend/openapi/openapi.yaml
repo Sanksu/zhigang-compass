@@ -240,6 +240,75 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/graph/position/{id}/portrait-evidence:
+    get:
+      tags: [graph]
+      security: []
+      summary: 岗位画像条目证据 JD 列表（薪资/经验/学历选中后侧栏展示）
+      description: >
+        按维度+条目标签回溯支撑该聚合条目的具体 JD（jd_raw 行，口径镜像
+        build_aggregates：SimHash 近似重复/归档/岗位级通胀排除一致）。
+        label 为空返回该维度全部证据 JD；jd_id 用于 GET /graph/jd/{jd_id} 取正文。
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: dimension
+          in: query
+          required: true
+          schema: { type: string, enum: [salary, experience, education] }
+          description: 画像维度
+        - name: label
+          in: query
+          required: false
+          schema: { type: string }
+          description: 条目标签（薪资档位原文 / "3年以上" / "本科"）；缺省=该维度全部
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: 证据 JD 列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/PortraitEvidenceData'
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/graph/jd/{jd_id}:
+    get:
+      tags: [graph]
+      security: []
+      summary: JD 证据正文详情（岗位画像证据点开后的正文与出处）
+      description: 返回 jd_raw 原文（raw_text）与出处链接（source_url）等元数据；
+        内容为公开招聘信息（脉脉源入库前已脱敏，is_desensitized 标注）。
+      parameters:
+        - name: jd_id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: JD 正文详情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/JdEvidenceDetail'
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/graph/skill/{id}/evidence:
     get:
       tags: [graph]
@@ -1729,6 +1798,118 @@ paths:
                     $ref: '#/components/schemas/ApprovalSummaryData'
                   trace_id: { type: string }
 
+  /api/v1/admin/jd:
+    get:
+      tags: [admin]
+      summary: JD 原始数据分页列表（管理页；q 关键词匹配标题/正文，source 源过滤）
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+          description: 关键词（ILIKE 匹配 snapshot 标题与 raw_text）
+        - name: source
+          in: query
+          required: false
+          schema: { type: string }
+          description: 来源平台过滤（zhilian/boss/...）
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: 分页列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/JdAdminPage'
+                  trace_id: { type: string }
+
+  /api/v1/admin/jd/{jd_id}:
+    get:
+      tags: [admin]
+      summary: JD 原始数据详情（含正文全文与抽取摘要，供编辑回显）
+      parameters:
+        - name: jd_id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: JD 详情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/JdAdminDetail'
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [admin]
+      summary: 编辑 JD 原始数据（raw_text/source_url 等元数据；content_hash 同步重算，抽取快照不动——重抽需手动触发；写 AuditLog）
+      parameters:
+        - name: jd_id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JdAdminUpdate' }
+      responses:
+        '200':
+          description: 更新后的详情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/JdAdminDetail'
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [admin]
+      summary: 删除 JD 原始数据（写 AuditLog；图谱 Evidence 节点保留备份不联动删除）
+      parameters:
+        - name: jd_id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 删除结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data: { type: object }
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/admin/llm-decisions/{decision_id}/approve:
     post:
       tags: [admin]
@@ -2775,6 +2956,115 @@ components:
           type: array
           items: { $ref: '#/components/schemas/SkillEvidenceItem' }
         evidence_count: { type: integer }
+
+    PortraitEvidenceItem:
+      type: object
+      description: 画像条目证据 JD 项（GET /graph/position/{id}/portrait-evidence）
+      required: [jd_id, source]
+      properties:
+        jd_id: { type: integer, format: int64, description: "jd_raw 行 id，取正文用 GET /graph/jd/{jd_id}" }
+        title: { type: string, description: "岗位名称（snapshot.title）" }
+        company: { type: string }
+        source: { type: string, description: "来源平台" }
+        source_url: { type: string, description: "出处链接（可能为空）" }
+        crawled_at: { type: string }
+        salary_text: { type: string, description: "该 JD 薪资档位原文（聚合条目键）" }
+        experience_label: { type: string, description: "经验分布标签（如 3年以上）" }
+        education_level: { type: string, description: "学历要求（大专/本科/硕士/博士）" }
+        snippet: { type: string, description: "正文摘要（前 120 字）" }
+
+    PortraitEvidenceData:
+      type: object
+      description: GET /graph/position/{id}/portrait-evidence 响应 data
+      required: [position_id, position_name, dimension, label, total, items]
+      properties:
+        position_id: { type: string }
+        position_name: { type: string }
+        dimension: { type: string, enum: [salary, experience, education] }
+        label: { type: string, description: "命中的条目标签；空串=该维度全部" }
+        total: { type: integer, description: "过滤后证据 JD 总数（items 截断至 limit）" }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PortraitEvidenceItem' }
+
+    JdEvidenceDetail:
+      type: object
+      description: GET /graph/jd/{jd_id} 响应 data（JD 证据正文与出处）
+      required: [id, source, raw_text]
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        company: { type: string }
+        location: { type: string }
+        source: { type: string }
+        source_url: { type: string, description: "出处链接（可能为空）" }
+        crawled_at: { type: string }
+        is_desensitized: { type: boolean }
+        raw_text: { type: string, description: "JD 原文全文" }
+
+    JdAdminItem:
+      type: object
+      description: JD 管理列表项（GET /admin/jd）
+      required: [id, source, source_id]
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        company: { type: string }
+        source: { type: string }
+        source_id: { type: string }
+        source_url: { type: string }
+        crawled_at: { type: string }
+        is_desensitized: { type: boolean }
+        position: { type: string, description: "归一化岗位名（snapshot.normalized_position）" }
+        text_length: { type: integer, description: "raw_text 长度" }
+        updated_at: { type: string, description: "最近更新时间（编辑审计参考）" }
+
+    JdAdminPage:
+      type: object
+      description: GET /admin/jd 响应 data
+      required: [total, page, size, items]
+      properties:
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/JdAdminItem' }
+
+    JdAdminDetail:
+      type: object
+      description: GET/PUT /admin/jd/{jd_id} 响应 data
+      required: [id, source, source_id, raw_text]
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        company: { type: string }
+        location: { type: string }
+        source: { type: string }
+        source_id: { type: string }
+        source_url: { type: string }
+        crawled_at: { type: string }
+        is_desensitized: { type: boolean }
+        position: { type: string }
+        raw_text: { type: string }
+        extraction_summary:
+          type: object
+          description: 抽取摘要（salary_range/education.level/experience_range，只读展示——编辑不自动重抽）
+          properties:
+            salary_range: { type: string }
+            education_level: { type: string }
+            experience: { type: string }
+
+    JdAdminUpdate:
+      type: object
+      description: PUT /admin/jd/{jd_id} 请求体（仅列出的字段被更新；raw_text 变更时 content_hash 同步重算）
+      properties:
+        title: { type: string }
+        company: { type: string }
+        location: { type: string }
+        source_url: { type: string }
+        crawled_at: { type: string }
+        raw_text: { type: string }
 
     SimilarSkillItem:
       type: object
