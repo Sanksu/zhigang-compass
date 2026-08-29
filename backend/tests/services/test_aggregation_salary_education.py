@@ -6,7 +6,6 @@
 import pytest
 
 from app.services.kg.aggregation import (
-    PositionAgg,
     build_aggregates,
     parse_salary_range,
 )
