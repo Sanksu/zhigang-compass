@@ -437,7 +437,9 @@ async def position_evolution(
 async def position_evolution_list(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=10, ge=1, le=50),
-    q: str | None = Query(default=None, description="按岗位名称模糊过滤（08-16：下拉全量可搜索）"),
+    q: str | None = Query(
+        default=None, max_length=100,
+        description="按岗位名称模糊过滤（08-16：下拉全量可搜索）"),
     db: AsyncSession = Depends(get_db),
     user: Optional[dict] = Depends(get_optional_user),
 ):
@@ -479,7 +481,9 @@ async def position_evolution_list(
 async def skill_evolution_list(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=10, ge=1, le=50),
-    q: str | None = Query(default=None, description="按技能名称模糊过滤（08-16：下拉全量可搜索）"),
+    q: str | None = Query(
+        default=None, max_length=100,
+        description="按技能名称模糊过滤（08-16：下拉全量可搜索）"),
     db: AsyncSession = Depends(get_db),
     user: Optional[dict] = Depends(get_optional_user),
 ):

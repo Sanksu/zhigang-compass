@@ -15,11 +15,11 @@
 
 import type { components } from '@/types/api'
 
-/** 契约 GraphNode.type（position/skill/evidence）＋ 展示层扩展 'attr'
- *  （岗位画像视图 /graph/view/positionPortrait 的属性维度节点——薪资/经验等，
- *  后端运行时返回 type='attr'，共享 GraphNode schema 枚举未收录，此处收编以
- *  驱动画布 symbol/color/size 分支与 Record 编译期完备性检查） */
-export type NodeType = NonNullable<components['schemas']['GraphNode']['type']> | 'attr'
+/** 契约 GraphNode.type（position/skill/evidence/attr——'attr' 为岗位画像视图
+ *  /graph/view/positionPortrait 的属性维度节点：薪资/经验等大类与条目，
+ *  第八轮 P2-24 契约补全后入枚举，驱动画布 symbol/color/size 分支与
+ *  Record 编译期完备性检查） */
+export type NodeType = NonNullable<components['schemas']['GraphNode']['type']>
 /** 契约 GraphNode.status（岗位五状态机） */
 export type PositionStatus = NonNullable<components['schemas']['GraphNode']['status']>
 /** 契约 GraphViewType（四种视图枚举） */
