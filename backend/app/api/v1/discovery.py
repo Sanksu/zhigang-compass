@@ -6,7 +6,7 @@
 - 岗位技能增减：graph_versions.snapshot_json（PostgreSQL 全量快照），取最近
   两期，按岗位 source 过滤 REQUIRES 边做集合差。
 
-权限：require_role("guest")（登录可见，对齐 /evolution 域）。candidate 态
+权限：get_optional_user（匿名/guest 可读，对齐 /evolution 域 08-28 游客开放）。candidate 态
 候选在图内可能为空（未聚合），用 skill_pending 标注「待审核」，不误报真实无技能。
 """
 
@@ -14,10 +14,11 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
+from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_role
+from app.api.deps import get_optional_user
 from app.core.database import get_db, neo4j_driver
 from app.core.errors import ERR_NOT_FOUND
 from app.models.business import DiscoveryCandidate, GraphVersion
@@ -91,7 +92,7 @@ async def discovery_recent(
     state: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """近期发现的新岗位及其技能（detected_at 降序近 N 天）。"""
     since = datetime.now(_TZ) - timedelta(days=days)
@@ -103,6 +104,10 @@ async def discovery_recent(
     if state:
         stmt = stmt.where(DiscoveryCandidate.state == state)
     rows = list(await db.scalars(stmt))
+    # 匿名访客不外泄 candidate 待审核岗位（对齐图谱域按角色过滤口径；
+    # user 为 None 即匿名，已登录 guest 角色不受限）
+    if not user:
+        rows = [r for r in rows if r.state != "candidate"]
     total = len(rows)
     rows = rows[:limit]
 
@@ -143,7 +148,7 @@ async def position_skills_delta_summary(
     from_version: str | None = Query(default=None, description="对比基准版 id（缺省=次新版本）"),
     to_version: str | None = Query(default=None, description="目标版 id（缺省=最新版本）"),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """全岗位技能增减汇总（两版快照对比）。
 
@@ -205,7 +210,7 @@ async def position_skills_delta(
     from_version: str | None = Query(default=None, description="对比基准版 id（缺省=次新版本）"),
     to_version: str | None = Query(default=None, description="目标版 id（缺省=最新版本）"),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """岗位技能增减（两版快照对比，缺省最近两期，可显式指定 from/to 版本）。
     """

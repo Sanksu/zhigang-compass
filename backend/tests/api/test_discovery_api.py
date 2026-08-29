@@ -32,6 +32,7 @@ class _FakeSession:
         self._rows = rows
 
     async def scalars(self, stmt):
+        # 每次调用返回新迭代器（同一 session 直调多跑端点时行可重复消费）
         return iter(self._rows)
 
     async def execute(self, stmt):
@@ -112,9 +113,23 @@ class TestDiscoveryRecent:
     async def test_candidate_without_graph_skills_marks_pending(self, monkeypatch):
         """图内无技能（candidate 未聚合）：skills=None + skill_pending=True。"""
         rows = [_candidate("量子运维工程师", state="candidate")]
-        # 图谱无该岗位 → (None, {})
-        resp = await self._run(monkeypatch, rows, skills_by_name={})
-        c = resp.data["candidates"][0]
+        # 图谱无该岗位 → (None, {})；匿名过滤 candidate 态，登录 guest 可见
+        def _fake_query_by_name(driver, name):
+            return (None, {})
+
+        monkeypatch.setattr(
+            discovery_mod.repository, "query_position_skills_by_name", _fake_query_by_name
+        )
+        anon = await discovery_mod.discovery_recent(
+            days=30, state=None, limit=20, db=_FakeSession(rows),
+            user=None,
+        )
+        assert anon.data["candidates"] == []  # 匿名不外泄待审核岗位
+        logged = await discovery_mod.discovery_recent(
+            days=30, state=None, limit=20, db=_FakeSession(rows),
+            user={"role": "guest", "sub": "u1"},
+        )
+        c = logged.data["candidates"][0]
         assert c["position_id"] is None
         assert c["skills"] is None
         assert c["skill_pending"] is True
