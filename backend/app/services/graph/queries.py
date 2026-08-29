@@ -265,7 +265,13 @@ def load_position(session, id: str, user=None) -> dict | None:
         WHERE {status_filter}
         RETURN p.id AS id, p.name AS name, p.required_years AS required_years,
                p.required_education AS required_education, p.last_updated AS last_updated,
-               p.status AS status, p.freq AS freq, p.soft_skills AS soft_skills
+               p.status AS status, p.freq AS freq, p.soft_skills AS soft_skills,
+               p.evidence_count AS evidence_count,
+               p.education_distribution AS education_distribution,
+               p.experience_distribution AS experience_distribution,
+               p.salary_tiers AS salary_tiers, p.salary_min AS salary_min,
+               p.salary_max AS salary_max, p.salary_currency AS salary_currency,
+               p.salary_range AS salary_range
         """,
         id=id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
     ).single()
