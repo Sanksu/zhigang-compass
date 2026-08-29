@@ -5397,6 +5397,17 @@ export interface components {
              */
             learning_path_block_reason: string | null;
             evidence_refs: components["schemas"]["EvidenceRef"][];
+            /** @description 最佳匹配 JD 原文（compare 详情溯源：按最佳 JD 行回读 raw_text，正文截断至 8000 字符；旧快照/最佳 JD 行已删除时为 null） */
+            jd_original?: {
+                /** @description JD 标题 */
+                jd_title: string;
+                /** @description 采集源（zhilian/boss/indeed 等） */
+                source: string;
+                /** @description JD 原文链接 */
+                source_url: string;
+                /** @description JD 原文正文（截断至 8000 字符） */
+                text: string;
+            } | null;
             /** @description JD 级证据（阶段 B：recommend 命中岗位族内原生 JD 二次精排 Top-2；compare/result 旧快照无此字段为空数组） */
             jd_evidence?: {
                 /** @description 归属岗位名 */
