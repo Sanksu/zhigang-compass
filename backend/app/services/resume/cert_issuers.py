@@ -131,7 +131,7 @@ CERT_ISSUER_MAP: dict[str, str] = {
     "rhce": "Red Hat",
     "red hat": "Red Hat",
     "lpic": "Linux Professional Institute (LPI)",
-    "lcfs": "Linux Foundation",
+    "lfcs": "Linux Foundation",
     "linux foundation": "Linux Foundation",
     "mongodb": "MongoDB",
     "elasticsearch": "Elastic",
