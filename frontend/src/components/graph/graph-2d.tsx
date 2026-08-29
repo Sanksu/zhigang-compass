@@ -690,28 +690,43 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         .filter((n) => n.type !== 'skill')
         .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
       // none 布局数据坐标直接映射视口：原点取画布实际中心（容器像素，实时读取），
-      // ECharts series.center 对已有 roam 状态不生效（线上偏移实证）
+      // ECharts series.center 对已有 roam 状态不生效（线上偏移实证）。
+      // 容量法排环：每环节点数由"节点直径 + 标签余量"的周长容量决定，
+      // 放不下就外扩一层——杜绝固定半径下的节点重叠（线上实证 30 岗挤双环）。
       const rect = containerRef.current?.getBoundingClientRect()
       const W = rect?.width || 900
       const H = rect?.height || 640
       const CX = W / 2
       const CY = H / 2
-      const R_OUTER = Math.min(W, H) * 0.46
-      const R_INNER = Math.min(W, H) * 0.18
+      const minDim = Math.min(W, H)
       const place = (n: (typeof nodes)[number], radius: number, angle: number) => {
         ;(n as GraphNode & { x?: number; y?: number }).x = CX + radius * Math.cos(angle)
         ;(n as GraphNode & { x?: number; y?: number }).y = CY + radius * Math.sin(angle)
       }
+      // 外圈技能：半径用满画布（短边 48%），120 技能节点 18px 在该半径下
+      // 弧间距 ≈ 2πR/120 ≈ 17px+ ——仍略挤，标签只留 Top-30（skillLabelTopIds）
+      const R_OUTER = minDim * 0.47
       skills.forEach((n, i) => {
         place(n, R_OUTER, (i / Math.max(1, skills.length)) * Math.PI * 2 - Math.PI / 2)
       })
-      positions.forEach((n, i) => {
-        // 内圈两环：岗位多于 34 个时错层到 R_INNER*0.62，避免内圈过密
-        const twoRing = positions.length > 34
-        const ring = twoRing && i % 2 === 1 ? R_INNER * 0.62 : R_INNER
-        const count = twoRing ? Math.ceil(positions.length / 2) : positions.length
-        const idx = twoRing ? Math.floor(i / 2) : i
-        place(n, ring, (idx / Math.max(1, count)) * Math.PI * 2 + Math.PI / count)
+      // 岗位多环：起始环 0.22×短边（给内区留呼吸空间），环间距 84px；
+      // 每环按"岗位节点上限 52px + 间距 34px"的周长容量装，装不下外扩一层
+      const NODE_GAP = 34
+      const POS_NODE_PX = 52 // 岗位节点直径上限（sizeOf 34-52）
+      let ringR = Math.max(150, minDim * 0.22)
+      let placedInRing = 0
+      let ringCapacity = Math.floor((2 * Math.PI * ringR) / (POS_NODE_PX + NODE_GAP))
+      positions.forEach((n) => {
+        if (placedInRing >= ringCapacity) {
+          ringR += 84
+          placedInRing = 0
+          ringCapacity = Math.floor((2 * Math.PI * ringR) / (34 + NODE_GAP))
+        }
+        const angle =
+          (placedInRing / Math.max(1, ringCapacity)) * Math.PI * 2 +
+          (ringR === Math.max(110, minDim * 0.14) ? 0 : Math.PI / ringCapacity)
+        place(n, ringR, angle)
+        placedInRing += 1
       })
     }
 
