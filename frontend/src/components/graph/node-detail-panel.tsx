@@ -128,6 +128,8 @@ interface NodeDetailPanelProps {
   }
   positionExpanded?: boolean
   onTogglePosition?: (id: string) => void
+  /** 岗位画像视图：隐藏关联度条与展开技能按钮（层级子图里语义不成立） */
+  portraitMode?: boolean
   /** 域超节点双击等价的展开按钮（panorama 聚合下钻；缺省不渲染） */
   onToggleDomain?: (id: string) => void
   skillDetail?: SkillDetail | null
@@ -172,6 +174,7 @@ export function NodeDetailPanel({
   skillEvidence,
   similarSkills,
   positionExpanded,
+  portraitMode,
   onTogglePosition,
   onToggleDomain,
   onSelectSkill,
@@ -290,7 +293,7 @@ export function NodeDetailPanel({
           {/* 内容 */}
           <div className="flex-1 space-y-4 overflow-y-auto p-4">
             {/* 匹配度 / 熟练度 微型进度条 */}
-            {typeof node.value === 'number' && (
+            {typeof node.value === 'number' && !(portraitMode && node.type === 'position') && (
               <section className="space-y-2 rounded-lg border border-border bg-subtle/40 p-3">
                 <div className="flex items-center gap-2 text-xs font-medium text-ink-muted">
                   <Target className="size-3.5" />
@@ -320,7 +323,7 @@ export function NodeDetailPanel({
                 {positionExpanded ? '收起画布中的域内岗位' : '在画布中展开域内岗位'}
               </Button>
             )}
-            {node.type === 'position' && !node.isDomain && onTogglePosition && (
+            {node.type === 'position' && !node.isDomain && !portraitMode && onTogglePosition && (
               <Button variant="outline" className="w-full text-xs" onClick={() => onTogglePosition(node.id)}>
                 <UnfoldVertical className="mr-1.5 size-3" />
                 {positionExpanded ? '收起画布中的技能' : '在画布中展开技能'}
