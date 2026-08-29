@@ -702,11 +702,21 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       const center = nodes.find((n) => n.type === 'position')
       // 大类按孩子数降序交替排列（孩子多的扇区彼此岔开，防上挤下空）
       const categories = nodes
-        .filter((n) => (n as GraphNode).isPortraitCategory)
+        .filter(
+          (n) =>
+            (n as GraphNode).portrait_category ||
+            (n as { portrait_category?: boolean }).portrait_category,
+        )
         .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
       const parentOf = new Map<string, string>()
+      const byParent = new Map<string, string[]>()
       for (const e of data.edges) {
-        if (categories.some((n) => n.id === e.source)) parentOf.set(e.target, e.source)
+        if (categories.some((n) => n.id === e.source)) {
+          parentOf.set(e.target, e.source)
+          const arr = byParent.get(e.source)
+          if (arr) arr.push(e.target)
+          else byParent.set(e.source, [e.target])
+        }
       }
       if (center) place(center, CX, CY)
       const R1 = minDim * 0.27
@@ -719,7 +729,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       // 小节点：父大类扇区内交替展开 + 双排错半径
       const R2 = minDim * 0.47
       for (const [catIdx, cat] of categories.entries()) {
-        const children = ((parentOf.get(cat.id) ?? []) as string[])
+        const children = ((byParent.get(cat.id) ?? []) as string[])
           .map((id) => nodes.find((n) => n.id === id))
           .filter(Boolean) as (typeof nodes)[number][]
         if (children.length === 0) continue
@@ -754,7 +764,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         const dy = g.y - CY
         g.label.position =
           Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : dy < 0 ? 'top' : 'bottom'
-        if ((g as GraphNode).isPortraitCategory) {
+        if ((g as GraphNode).portrait_category) {
           g.label.fontSize = 12
           g.label.fontWeight = 600
         }
