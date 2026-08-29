@@ -43,6 +43,10 @@ find "${STAGE}" -type d \( -name node_modules -o -name .venv -o -name __pycache_
 find "${STAGE}" -name "*.pyc" -delete 2>/dev/null || true
 rm -f "${STAGE}/backend/.env" "${STAGE}/frontend/.env" 2>/dev/null || true
 
+# 排除大型媒体交付物（PPT/视频/音频——作为独立交付物提交，不纳入源码包）
+rm -rf "${STAGE}/docs/m5/video_audio" "${STAGE}/docs/m5/video_slides" 2>/dev/null || true
+find "${STAGE}/docs/m5" \( -name "*.mp4" -o -name "*.pptx" -o -name "*.wav" -o -name "*.mp3" \) -delete 2>/dev/null || true
+
 # 打包
 tar -czf "${OUT}" -C "${STAGE}" .
 rm -rf "${STAGE}"
