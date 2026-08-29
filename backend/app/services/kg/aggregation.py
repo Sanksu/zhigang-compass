@@ -126,13 +126,80 @@ class SkillAgg:
         self.levels: list[str] = []
 
 
+_SALARY_RANGE_RE = re.compile(
+    r"[US$￥¥]?\s*([\d,]+(?:\.\d+)?)\s*(万|千|[kK])?\s*(?:元)?\s*"
+    r"(?:[-~至到–—]|to)"  # 分隔符：连字符系或英文 to（组结构不变）
+    r"\s*[US$￥¥]?\s*([\d,]+(?:\.\d+)?)\s*(万|千|[kK])?\s*(?:元)?"
+)
+_SALARY_PERIOD_RE = re.compile(r"(?:/|每)?\s*(月|年|天|日|时|小时|hr|hour)")
+
+
+def _salary_to_monthly(value: float, unit: str, period: str) -> float:
+    """数值 + 单位（万/千/k/K/空）+ 周期 → 元/月。unit 为空按 1（纯元）。
+
+    单位共享在 parse_salary_range 内完成（hi 带单位则 lo 跟随）——此处
+    不做数值量级猜测：'200-300元/天' 的 200 若猜千会放大千倍（实证坑）。
+    """
+    mult = {"万": 10000.0, "千": 1000.0, "k": 1000.0, "K": 1000.0}.get(unit, 1.0)
+    v = value * mult
+    return v * {"月": 1.0, "年": 1 / 12, "天": 22.0, "日": 22.0, "时": 176.0,
+                "小时": 176.0, "hr": 176.0, "hour": 176.0}.get(period, 1.0)
+
+
+def parse_salary_range(text: str | None) -> tuple[float, float] | None:
+    """解析 salary_range 文本为 (min, max) 元/月；无法解析返回 None。
+
+    实测语料形态（7056 条，覆盖 ~87%）：'8000-12000元'、'1-1.5万·13薪'、
+    '15k-25k'、'10-20万/年'、'200-300元/天'、'$104,000-$150,000 annually'、
+    '$60.90/hr-$82.30/hr'。周期缺省按月；年÷12、天/日×22、时/hr×176。
+    千分位逗号剥除；'面议'/单值等不解析（宁缺毋滥）。
+    """
+    if not text:
+        return None
+    m = _SALARY_RANGE_RE.search(text)
+    if not m:
+        return None
+    # 周期检测：范围尾部或中间的 /年 /天 /hr 小时 等（缺省按月）
+    # 周期：范围尾部（/年 ·13薪）或两数之间（A/hr-B/hr）取首个命中；缺省按月
+    period = ""
+    tail = _SALARY_PERIOD_RE.search(text, m.end())
+    if tail and tail.start() - m.end() <= 8:
+        period = tail.group(1) or ""
+    else:
+        mid = _SALARY_PERIOD_RE.search(text[m.start():m.end()])
+        if mid:
+            period = mid.group(1) or ""
+    # 单位推断共享：任一侧显式带单位（万/千/k），无单位侧跟随同乘
+    # （'1-1.5万' lo 同乘万；'10-20万' 同理——量级推断只对双侧无单位生效）
+    unit_lo, unit_hi = m.group(2) or "", m.group(4) or ""
+    if not unit_lo and unit_hi:
+        unit_lo = unit_hi
+    elif not unit_hi and unit_lo:
+        unit_hi = unit_lo
+    lo = _salary_to_monthly(float(m.group(1).replace(",", "")), unit_lo, period)
+    hi = _salary_to_monthly(float(m.group(3).replace(",", "")), unit_hi, period)
+    if lo > hi:
+        lo, hi = hi, lo
+    # 异常值护栏：折算后月薪 <500 或 >500_000 视为解析噪声
+    if hi < 500 or hi > 500_000:
+        return None
+    return (lo, hi)
+
+
 class PositionAgg:
-    __slots__ = ("jd_count", "skills", "exp_years", "soft_skills", "typical_scenarios", "last_crawled")
+    __slots__ = (
+        "jd_count", "skills", "exp_years", "soft_skills", "typical_scenarios",
+        "last_crawled", "education_levels", "salaries",
+    )
 
     def __init__(self) -> None:
         self.jd_count = 0
         self.skills: dict[str, SkillAgg] = defaultdict(SkillAgg)
         self.exp_years: list[float] = []
+        # 学历级别收集（聚合取众数写 Position.required_education）
+        self.education_levels: Counter = Counter()
+        # 薪资月范围（解析 salary_range 文本 → (min, max) 元/月）
+        self.salaries: list[tuple[float, float]] = []
         # 软技能白名单命中的 JD 数（写回 Position.soft_skills，设计文档 9.2 节）
         self.soft_skills: Counter = Counter()
         # 典型项目场景文本计数（写回 Position.typical_scenarios，按频次降序截断）
@@ -300,6 +367,14 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
         years = _min_experience_years(snap)
         if years is not None:
             pa.exp_years.append(years)
+        # 学历要求：抽取六维 education.level（大专/本科/硕士/博士），聚合取众数
+        edu = ((ext.get("education") or {}).get("level") or "").strip()
+        if edu:
+            pa.education_levels[edu] += 1
+        # 薪资：salary_range 文本解析为月范围数值，聚合取中位区间
+        parsed = parse_salary_range(ext.get("salary_range"))
+        if parsed:
+            pa.salaries.append(parsed)
         source = row.source or ""
         for skill, necessity, level in _position_skills(ext):
             sa = pa.skills[skill]
@@ -365,10 +440,17 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
     """
     positions = []
     for pos, pa in agg.items():
+        # 学历众数（并列取级别高者——排序稳定靠 Counter.most_common 计数优先）
+        edu_mode = pa.education_levels.most_common(1)[0][0] if pa.education_levels else None
+        salary_min = median([s[0] for s in pa.salaries]) if pa.salaries else None
+        salary_max = median([s[1] for s in pa.salaries]) if pa.salaries else None
         positions.append({
             "pos": pos,
             "freq": pa.jd_count,
             "req_years": median(pa.exp_years) if pa.exp_years else None,
+            "req_education": edu_mode,
+            "salary_min": round(salary_min) if salary_min is not None else None,
+            "salary_max": round(salary_max) if salary_max is not None else None,
             # 最近 JD 采集时间（规范化 ISO）；无 JD 时间（旧数据）回退聚合时间
             "last_updated": pa.last_crawled.isoformat() if pa.last_crawled else now,
             # 软技能按 JD 命中数降序（低频软技能不写入岗位本体）
@@ -388,6 +470,9 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
                 SET p.freq = it.freq,
                     p.last_updated = it.last_updated,
                     p.required_years = coalesce(it.req_years, p.required_years),
+                    p.required_education = coalesce(it.req_education, p.required_education),
+                    p.salary_min = coalesce(it.salary_min, p.salary_min),
+                    p.salary_max = coalesce(it.salary_max, p.salary_max),
                     p.soft_skills = it.soft_skills,
                     p.typical_scenarios = coalesce(
                         CASE WHEN size(it.typical_scenarios) > 0

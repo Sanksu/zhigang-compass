@@ -4363,6 +4363,12 @@ export interface components {
             name: string;
             required_years?: number | null;
             required_education?: string | null;
+            /** @description 月薪资中位下限（元，salary_range 解析，08-29 聚合新增） */
+            salary_min?: number | null;
+            /** @description 月薪资中位上限（元，salary_range 解析） */
+            salary_max?: number | null;
+            /** @description 原始薪资文本（未解析成功的展示兜底） */
+            salary_range?: string | null;
             /** @description 最近更新时间 ISO8601 */
             last_updated?: string | null;
             /** @enum {string} */
