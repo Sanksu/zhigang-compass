@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ExternalLink, FileText, Loader2 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -73,10 +73,14 @@ export function AdminJdPage() {
   /** 删除后手动触发列表重查（递增即 refetch） */
   const [reloadKey, setReloadKey] = useState(0)
 
-  /* 详情/编辑弹窗 */
+  /* 详情/编辑弹窗：detailSeq 时序守卫（第七轮 P1-5）——慢响应不覆盖新选择，
+     已关闭弹窗的迟到响应不重新弹开；detailError 列表级展示（P1-6，
+     加载失败时弹窗条件不成立，弹窗内错误会被吞掉） */
   const [detail, setDetail] = useState<JdAdminDetail | null>(null)
   const [form, setForm] = useState<JdEditForm | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const detailSeqRef = useRef(0)
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -113,16 +117,19 @@ export function AdminJdPage() {
   }, [params, reloadKey])
 
   async function openDetail(item: JdAdminItem) {
+    const seq = ++detailSeqRef.current
     setDetailLoading(true)
+    setDetailError(null)
     setActionError(null)
     try {
       const res = await apiGet<JdAdminDetail>(`/admin/jd/${item.id}`)
+      if (seq !== detailSeqRef.current) return // 迟到响应：已有更新选择或已关闭
       setDetail(res)
       setForm(toForm(res))
     } catch {
-      setActionError('详情加载失败，请重试')
+      if (seq === detailSeqRef.current) setDetailError('详情加载失败，请重试')
     } finally {
-      setDetailLoading(false)
+      if (seq === detailSeqRef.current) setDetailLoading(false)
     }
   }
 
@@ -196,6 +203,11 @@ export function AdminJdPage() {
             />
           </div>
 
+          {detailError && (
+            <p className="mb-3 rounded-md border border-state-archived/30 bg-state-archived/5 px-3 py-2 text-xs text-state-archived">
+              {detailError}
+            </p>
+          )}
           {loading ? (
             <p className="py-12 text-center text-sm text-ink-muted">加载 JD 数据…</p>
           ) : error ? (
@@ -269,9 +281,11 @@ export function AdminJdPage() {
         open={detail !== null || detailLoading}
         onOpenChange={(o) => {
           if (!o) {
+            detailSeqRef.current++ // 作废在途请求：迟到响应不得重新弹开已关闭弹窗
             setDetail(null)
             setForm(null)
             setActionError(null)
+            setDetailError(null)
             setConfirmDelete(false)
           }
         }}

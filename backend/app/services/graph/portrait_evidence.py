@@ -26,6 +26,7 @@ from app.services.extraction.position_normalization import (
     normalized_position_from_snapshot,
 )
 from app.services.kg.aggregation import (
+    _POSITION_INFLATION_EXCLUSION_RATIO,
     _is_inflated,
     _jd_decay_weight,
     _min_experience_years,
@@ -92,16 +93,21 @@ async def load_position_jd_rows(db: AsyncSession, position_name: str) -> list:
             continue
         if snap.get("_duplicate_of"):
             continue
-        if _jd_decay_weight(snap) == 0:
-            continue
         matched.append(row)
 
-    # 岗位级通胀排除（§4.8）：岗位内通胀 JD 占比 ≥30% 时通胀 JD 全剔除
+    # 岗位级通胀排除（§4.8）：占比分母与聚合 _inflation_stats 一致——
+    # 含归档行（jd_weight==0 的行在聚合主循环里才跳过，分母不剔除），
+    # 否则岗位存在归档 JD 时两边对「≥30% 全剔除」的触发判定会漂移
     pos_total = len(matched)
     pos_inflated = sum(1 for row in matched if _is_inflated(row.snapshot or {}))
-    if pos_total > 0 and pos_inflated / pos_total >= 0.30:
+    if (
+        pos_total > 0
+        and pos_inflated / pos_total >= _POSITION_INFLATION_EXCLUSION_RATIO
+    ):
         matched = [row for row in matched if not _is_inflated(row.snapshot or {})]
-    return matched
+
+    # 归档 JD 不参与证据列表（聚合主循环同序：通胀判定先于归档跳过）
+    return [row for row in matched if _jd_decay_weight(row.snapshot or {}) != 0]
 
 
 def _item(row: JDRaw) -> dict:

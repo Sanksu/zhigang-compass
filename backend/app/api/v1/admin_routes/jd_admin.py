@@ -17,15 +17,18 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Any
+import re
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.common import resolve_operator
 from app.api.deps import require_permission
 from app.core.database import get_db
-from app.core.errors import ERR_NOT_FOUND, ERR_VALIDATION
+from app.core.errors import ERR_NOT_FOUND
 from app.models.business import AuditLog
 from app.models.raw import JDRaw
 from app.schemas.common import error, ok
@@ -42,6 +45,46 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _EDITABLE_SNAPSHOT_FIELDS = ("title", "company", "location")
+
+
+class JdAdminUpdateIn(BaseModel):
+    """PUT /admin/jd/{jd_id} 请求体（契约 JdAdminUpdate，第七轮 P1-3 强校验）。
+
+    None=字段未提供（不更新）；空串=显式清空该字段。
+    """
+
+    title: str | None = Field(default=None, max_length=200)
+    company: str | None = Field(default=None, max_length=200)
+    location: str | None = Field(default=None, max_length=100)
+    source_url: str | None = Field(default=None, max_length=2000)
+    crawled_at: str | None = Field(default=None, max_length=40)
+    raw_text: str | None = Field(default=None, max_length=200_000)
+
+    @field_validator("crawled_at")
+    @classmethod
+    def _validate_crawled_at(cls, v: str | None) -> str | None:
+        """采集时间须为可解析时间戳（空串=清空；污染会破坏时滞衰减链路）。"""
+        if v and not _parse_crawled(v):
+            raise ValueError("crawled_at 须为可解析的时间戳格式（如 2026-08-29 12:00:00）")
+        return v
+
+    @field_validator("source_url")
+    @classmethod
+    def _validate_source_url(cls, v: str | None) -> str | None:
+        """出处链接仅接受 http(s)（前端渲染 href，杜绝 javascript: 注入面）。"""
+        if v and not re.match(r"^https?://", v):
+            raise ValueError("source_url 仅支持 http(s) 链接")
+        return v
+
+
+def _parse_crawled(text: str) -> datetime | None:
+    """宽松时间戳解析（对齐 parse_crawled_at 的常见入库格式）。"""
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text.strip(), fmt)
+        except ValueError:
+            continue
+    return None
 
 
 async def _get_row(db: AsyncSession, jd_id: int) -> JDRaw | None:
@@ -62,10 +105,12 @@ async def list_jd(
     """JD 原始数据分页列表（管理页表格）。"""
     conditions = []
     if q:
-        like = f"%{q}%"
+        # LIKE 通配符转义（%/_ 按字面匹配，\ 为 ESCAPE 默认字符需先转义）
+        literal = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{literal}%"
         conditions.append(or_(
-            JDRaw.snapshot["title"].astext.ilike(like),
-            JDRaw.raw_text.ilike(like),
+            JDRaw.snapshot["title"].astext.ilike(like, escape="\\"),
+            JDRaw.raw_text.ilike(like, escape="\\"),
         ))
     if source:
         conditions.append(JDRaw.source == source)
@@ -117,35 +162,38 @@ async def get_jd(
 @router.put("/jd/{jd_id}")
 async def update_jd(
     jd_id: int,
-    body: dict[str, Any],
+    body: JdAdminUpdateIn,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
 ):
-    """编辑 JD 元数据/正文；content_hash 同步重算，写 AuditLog。"""
-    allowed = set(_EDITABLE_SNAPSHOT_FIELDS) | {"raw_text", "source_url", "crawled_at"}
-    unknown = set(body.keys()) - allowed
-    if unknown:
-        return error(ERR_VALIDATION, f"不可编辑字段: {sorted(unknown)}")
+    """编辑 JD 元数据/正文；content_hash 同步重算，写 AuditLog。
 
+    请求体经 JdAdminUpdateIn 强校验（None=不更新，空串=显式清空）。
+    """
+    body_map = {k: v for k, v in body.model_dump().items() if v is not None}
+
+    operator, err = resolve_operator(current_user)
+    if err is not None:
+        return err
     row = await _get_row(db, jd_id)
     if row is None:
         return error(ERR_NOT_FOUND, "JD 不存在", http_status=404)
 
-    changed: dict[str, Any] = {}
+    changed: dict[str, str] = {}
     snap = dict(row.snapshot or {})
     for field in _EDITABLE_SNAPSHOT_FIELDS:
-        if field in body and body[field] != snap.get(field):
-            snap[field] = str(body[field] or "")
-            changed[field] = body[field]
-    if "raw_text" in body and body["raw_text"] != (row.raw_text or ""):
-        row.raw_text = str(body["raw_text"] or "")
+        if field in body_map and body_map[field] != snap.get(field):
+            snap[field] = body_map[field]
+            changed[field] = body_map[field]
+    if "raw_text" in body_map and body_map["raw_text"] != (row.raw_text or ""):
+        row.raw_text = body_map["raw_text"]
         changed["raw_text"] = f"<{len(row.raw_text)} 字>"
-    if "source_url" in body:
-        row.source_url = str(body["source_url"] or "")
-        changed["source_url"] = row.source_url
-    if "crawled_at" in body:
-        row.crawled_at = str(body["crawled_at"] or "")
-        changed["crawled_at"] = row.crawled_at
+    if "source_url" in body_map and body_map["source_url"] != (row.source_url or ""):
+        row.source_url = body_map["source_url"]
+        changed["source_url"] = body_map["source_url"]
+    if "crawled_at" in body_map and body_map["crawled_at"] != (row.crawled_at or ""):
+        row.crawled_at = body_map["crawled_at"]
+        changed["crawled_at"] = body_map["crawled_at"]
 
     if not changed:
         return ok(data=jd_detail(row))
@@ -157,7 +205,6 @@ async def update_jd(
             (_build_jd_text(snap, row.raw_text or "") or "").encode("utf-8")
         ).hexdigest()
 
-    operator = current_user.get("sub") or current_user.get("user_id", "admin")
     db.add(AuditLog(
         user_id=operator,
         action="admin.jd.update",
@@ -181,7 +228,9 @@ async def delete_jd(
     if row is None:
         return error(ERR_NOT_FOUND, "JD 不存在", http_status=404)
 
-    operator = current_user.get("sub") or current_user.get("user_id", "admin")
+    operator, err = resolve_operator(current_user)
+    if err is not None:
+        return err
     await db.delete(row)
     db.add(AuditLog(
         user_id=operator,
