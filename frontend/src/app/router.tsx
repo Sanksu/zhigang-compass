@@ -42,8 +42,10 @@ const protectedRoutes = [
         path: 'resume-match',
         element: <AuthGuard requireRole={['user', 'admin']}><Suspense fallback={<RouteLoading />}><ResumeMatchPage /></Suspense></AuthGuard>,
       },
-      { path: 'evolution', element: <AuthGuard><Suspense fallback={<RouteLoading />}><EvolutionPage /></Suspense></AuthGuard> },
-      { path: 'discovery', element: <AuthGuard><Suspense fallback={<RouteLoading />}><DiscoveryPage /></Suspense></AuthGuard> },
+      // 演示开放：演化看板/新岗位发现允许游客浏览（后端 get_optional_user 匿名可读，
+      // candidate 待审核数据已按匿名脱敏）；其余页面维持登录门
+      { path: 'evolution', element: <Suspense fallback={<RouteLoading />}><EvolutionPage /></Suspense> },
+      { path: 'discovery', element: <Suspense fallback={<RouteLoading />}><DiscoveryPage /></Suspense> },
       {
         path: 'profile',
         element: <AuthGuard><Suspense fallback={<RouteLoading />}><ProfilePage /></Suspense></AuthGuard>,
