@@ -18,7 +18,7 @@
 ## 快速启动
 
 ```bash
-# 启动基础设施（api/postgres/redis/neo4j 4 服务）
+# 启动 5 服务（api/postgres/redis/neo4j/worker，FastAPI 同端口托管前端）
 docker compose up -d
 
 # 后端开发
