@@ -41,6 +41,27 @@ import type { components } from '@/types/api'
 /** 3D 图谱懒加载 — Three.js 约 1.4MB，仅在用户点击"3D"时按需加载 */
 const Graph3D = lazy(() => import('@/components/graph/graph-3d').then((m) => ({ default: m.Graph3D })))
 
+type PortraitEvidenceData = components['schemas']['PortraitEvidenceData']
+
+/** 画像 attr 节点 → 证据维度（子条目按 id 前缀，大类按名称） */
+function portraitDimension(node: NodeDetail): 'salary' | 'experience' | 'education' | null {
+  if (node.id.startsWith('sal_')) return 'salary'
+  if (node.id.startsWith('exp_')) return 'experience'
+  if (node.id.startsWith('edu_')) return 'education'
+  if (node.id.startsWith('attr_')) {
+    if (node.name === '薪资') return 'salary'
+    if (node.name === '经验') return 'experience'
+    if (node.name === '学历') return 'education'
+  }
+  return null
+}
+
+/** 画像子条目 → 条目标签（'1-1.3万 ×9' → '1-1.3万'；大类节点返回空=全维度） */
+function portraitLabel(node: NodeDetail): string {
+  if (!/^(sal|exp|edu)_/.test(node.id)) return ''
+  return node.name.replace(/\s*×\d+$/, '').trim()
+}
+
 /** 页面实际渲染的视图（08-29 视图收敛：level 与 positionCenter 同查询同数据、
  *  无差异化过滤，页签移除；positionCenter 端点保留作岗位画像下拉数据源） */
 type GraphTab = Extract<GraphViewType, 'panorama' | 'techStack' | 'positionPortrait'>
@@ -173,12 +194,13 @@ export function GraphPage() {
     })
   }, [])
 
-  // 岗位画像 attr 节点（薪资/经验等维度）无详情端点：点击不选中（悬停 tooltip
-  // 与邻接提亮仍可用）。setSelected 稳定 → 回调引用稳定，Graph2D 挂载 effect
+  // 岗位画像 attr 节点（薪资/经验/学历大类与条目）：画像视图下选中后展示
+  // 证据 JD（/graph/position/{id}/portrait-evidence）；其他视图 attr 无详情
+  // 端点，仍不选中。setSelected 稳定 → 回调引用稳定，Graph2D 挂载 effect
   // 不因回调换引用而反复重建图表
   const handleSelectNode = useCallback((node: NodeDetail | null) => {
-    if (node?.type !== 'attr') setSelected(node)
-  }, [])
+    if (node && (node.type !== 'attr' || view === 'positionPortrait')) setSelected(node)
+  }, [view])
 
   // 视图切换 → 真实后端过滤（GET /graph/view/{view_type}），初始 panorama 同样走后端视图端点。
   // 切换视图不清 loading，数据到达后原子替换，避免闪屏。
@@ -288,6 +310,39 @@ export function GraphPage() {
       cancelled = true
     }
   }, [view, portraitPosition])
+
+  // 画像条目（薪资/经验/学历 attr 节点）→ 证据 JD 列表（/graph/position/{id}/
+  // portrait-evidence）。大类节点取该维度全部；子条目名 '1-1.3万 ×9' 去 ×N 作 label
+  const [portraitEvidence, setPortraitEvidence] = useState<PortraitEvidenceData | null>(null)
+  const [portraitEvidenceLoading, setPortraitEvidenceLoading] = useState(false)
+
+  useEffect(() => {
+    if (view !== 'positionPortrait' || !selected || selected.type !== 'attr') return
+    const dimension = portraitDimension(selected)
+    if (!dimension) return
+    let cancelled = false
+    setPortraitEvidenceLoading(true)
+    const params = new URLSearchParams({ dimension })
+    const label = portraitLabel(selected)
+    if (label) params.set('label', label)
+    apiGet<PortraitEvidenceData>(
+      `/graph/position/${encodeURIComponent(portraitPosition)}/portrait-evidence?${params}`,
+    )
+      .then((res) => {
+        if (!cancelled) setPortraitEvidence(res)
+      })
+      .catch(() => {
+        if (!cancelled) setPortraitEvidence(null)
+      })
+      .finally(() => {
+        if (!cancelled) setPortraitEvidenceLoading(false)
+      })
+    return () => {
+      cancelled = true
+      setPortraitEvidence(null)
+      setPortraitEvidenceLoading(false)
+    }
+  }, [selected, view, portraitPosition])
 
   // 选中技能节点 → 并行加载反向岗位 / 先修链 / 课程 / 证据 / 相似技能（真实 API）
   // 同步 loading 态由派生值 skillDetailView 表达，effect 内仅在异步回调中 setState
@@ -944,6 +999,12 @@ export function GraphPage() {
                   }
                   onTogglePosition={togglePosition}
                   portraitMode={view === 'positionPortrait'}
+                  portraitEvidence={
+                    selected?.type === 'attr' && portraitEvidence && portraitEvidence.position_id === portraitPosition
+                      ? portraitEvidence
+                      : null
+                  }
+                  portraitEvidenceLoading={portraitEvidenceLoading}
                   onToggleDomain={toggleDomain}
                   onSelectSkill={focusSkill}
                   onClose={() => setSelected(null)}
