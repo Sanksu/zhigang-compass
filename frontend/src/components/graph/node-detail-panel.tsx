@@ -351,7 +351,7 @@ export function NodeDetailPanel({
                       <dd className="text-sm font-mono text-ink tabular-nums">{stats.positionCount}</dd>
                     </div>
                   )}
-                  {stats.skillCount !== undefined && (
+                  {stats.skillCount !== undefined && (stats.skillCount > 0 || !portraitMode) && (
                     <div className="rounded-lg bg-subtle/60 p-2">
                       <dt className="text-[11px] text-ink-muted">{portraitMode ? '画像条目' : '关联技能'}</dt>
                       <dd className="text-sm font-mono text-ink tabular-nums">{stats.skillCount}</dd>
