@@ -16,7 +16,9 @@
 | `AGENTS.md` | AI 协作入口 | 智能体工作规则、铁律 |
 | **`Code-Wiki.md`（本文件）** | 代码导航 | 架构分层、模块职责、关键类/函数、依赖关系、运行方式 |
 
-> 当前项目处于 **M4 收官 + M4→M5 过渡**（2026.08.12 审计）。API 契约 58 paths 全部实现（无 501 占位），算法核心（抽取/匹配/演化/发现/图算法）均已落地并通过真实库验证。M5 打磨阶段（08.26-09.04）未开始：三项准确率 ≥90%、性能压测、部署与演示物料。
+> 当前项目处于 **M5 交付冲刺**（2026.08.29 复核）。API 契约 58 paths 全部实现，算法核心（抽取/匹配/演化/发现/图算法）均已落地并通过真实库验证。
+>
+> **2026-08-29 结构注记**：本文 §4/§5/§7 已按当前代码修订（admin API 拆入 `admin_routes/` 子包、workers 单文件拆为多模块、新增 LLM 治理底座 `services/llm_decision/` 与 `core/runtime_config.py`、前端扩至 18 页面）。08-12 审计后的功能性进展不逐条回填，以 [进度跟踪.md](../project/进度跟踪.md) 与 [CHANGELOG.md](../../CHANGELOG.md) 为准。
 
 ---
 
@@ -69,14 +71,14 @@
 │  前端 SPA（frontend/）                                          │
 │  Vite 6 + React 19 + TS strict + Tailwind v4 + shadcn 风格      │
 │  Zustand（状态）+ TanStack Query（服务端缓存）+ ECharts（图谱） │
-│  路由：公开 / 受保护 / 管理员三类，AppShell 布局，12 页面        │
+│  路由：公开 / 受保护 / 管理员三类，AppShell 布局，18 页面        │
 └───────────────────────────┬─────────────────────────────────────┘
                             │ /api/v1/*  （Vite 代理 / StaticFiles 同端口）
 ┌───────────────────────────▼─────────────────────────────────────┐
 │  API 层（backend/app/api/v1/）                                  │
 │  FastAPI + Pydantic + 统一 APIResponse 契约                     │
-│  auth / graph / match / resume / evolution / admin 六子路由     │
-│  （openapi.yaml 58 paths，M1-M4 全量交付，无占位）              │
+│  auth / graph / match / resume / evolution / discovery 六子路由 │
+│  + admin（facade，11 个子域拆入 admin_routes/ 子包）            │
 └───────────────────────────┬─────────────────────────────────────┘
                             │
 ┌───────────────────────────▼─────────────────────────────────────┐
@@ -87,6 +89,7 @@
 │                           最短路径/技能簇）                     │
 │  diagnosis（LLM 诊断报告） rag（RAG 检索）                      │
 │  embeddings（pgvector 存取） learning_path（学习路径）          │
+│  graph（图谱查询仓储/可见性） llm_decision（LLM 决策统一信封）  │
 │  data_quality（时滞/通胀/SimHash/交叉验证/多样性） alerting     │
 └─────────┬─────────────────┬─────────────────┬───────────────────┘
           │                 │                 │
@@ -105,8 +108,8 @@
                             │
 ┌───────────────────────────▼─────────────────────────────────────┐
 │  异步任务（backend/app/workers/）ARQ                            │
-│  20+ 任务：ETL 管线（run_etl_pipeline 11 阶段）/ 抽取 / 匹配 /  │
-│  简历 / 演化快照 / 发现（discovery_daily 每日 05:30）           │
+│  tasks.py 为 re-export facade，任务实现按域拆分模块：           │
+│  etl/crawl/matching/resume/快照/发现/dict_guard/LLM 提案等      │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -198,43 +201,52 @@ zhigang-compass/
 │       └── 进度跟踪.md             # 源码审计进度
 ├── frontend/                       # 前端工程
 │   ├── src/
-│   │   ├── app/                    # providers + router
-│   │   ├── components/             # layout/ + ui/ + graph/ + match/ + resume/
-│   │   ├── routes/                 # 12 个页面 + guards
+│   │   ├── app/                    # providers（QueryClient 配置）+ router
+│   │   ├── components/             # layout/ui/graph/match/resume + admin/
+│   │   │                           # discovery/evolution/learning/shared 组件族
+│   │   ├── routes/                 # 18 个页面 + guards
+│   │   ├── hooks/                  # use-typewriter 等
 │   │   ├── store/                  # auth.ts + ui.ts
-│   │   ├── lib/                    # api.ts + query-client.ts + utils.ts
+│   │   ├── lib/                    # api.ts + constants.ts + utils.ts
 │   │   ├── styles/globals.css      # 设计令牌
 │   │   └── types/api.d.ts          # OpenAPI 自动生成
+│   ├── e2e/                        # Playwright E2E（page.route mock /api/v1）
 │   ├── vite.config.ts
 │   └── package.json
 └── backend/                        # 后端 Python monorepo
     ├── app/
     │   ├── main.py                 # FastAPI 入口
-    │   ├── api/v1/                 # 6 个路由模块（auth/graph/match/resume/evolution/admin）
-    │   ├── core/                   # config / database / middleware / security
+    │   ├── api/v1/                 # 7 个路由模块（auth/graph/match/resume/
+    │   │   │                       # evolution/discovery/admin）+ deps
+    │   │   └── admin_routes/       # admin 子域拆分（11 模块，见 §5.2）
+    │   ├── core/                   # config/database/middleware/security
+    │   │                           # + arq_client/errors/logging/runtime_config
     │   ├── models/                 # SQLAlchemy 模型（raw/business/base）
     │   ├── schemas/                # APIResponse 统一响应
-    │   ├── services/               # 算法引擎（15 个子模块）
-    │   │   ├── extraction/         # JD/简历抽取管线
+    │   ├── services/               # 算法引擎（17 个子模块）
+    │   │   ├── extraction/         # JD/简历抽取 + dict_guard/skill_category_review
     │   │   ├── kg/                 # 图谱 ID 生成 + 写入 + 聚合
     │   │   ├── matching/           # 人岗匹配
     │   │   ├── evolution/          # 技能演化
     │   │   ├── discovery/          # 新岗位发现
-    │   │   ├── graph_algorithms/   # PageRank / Louvain / 最短路径 / 技能簇
+    │   │   ├── graph_algorithms/   # PageRank / Leiden / 最短路径 / 技能簇
+    │   │   ├── graph/              # 图谱查询仓储 + 可见性控制
+    │   │   ├── llm_decision/       # LLM 决策统一信封（六域风险路由，灰度底座）
     │   │   ├── diagnosis/          # LLM 诊断报告
     │   │   ├── rag/                # RAG 检索
     │   │   ├── embeddings/         # pgvector 存取
     │   │   ├── learning_path/      # 学习路径
-    │   │   ├── data_quality/       # 时滞/通胀/SimHash/交叉验证/多样性
+    │   │   ├── data_quality/       # 时滞/通胀/SimHash/交叉验证/血缘/多样性
     │   │   ├── resume/             # 简历解析（file_parser/pii_mask/reflow）
+    │   │   ├── proficiency.py      # 技能熟练度
     │   │   ├── prompts/            # 共享提示词
     │   │   └── alerting.py         # webhook 告警
-    │   └── workers/                # ARQ 异步任务（20+ 任务）
+    │   └── workers/                # ARQ 异步任务（tasks.py facade + 按域拆分）
     ├── data/crawlers/              # Scrapy 爬虫（13 源，monster 停采）
-    ├── configs/                    # 运行时权重 JSON/YAML
+    ├── configs/                    # 运行时权重 JSON/YAML + runtime_settings.json
     ├── openapi/openapi.yaml        # API 契约（58 paths）
-    ├── alembic/                    # 数据库迁移（12 个）
-    ├── scripts/                    # 运维/治理/评测脚本（40+）
+    ├── alembic/                    # 数据库迁移
+    ├── scripts/                    # 运维/治理/评测脚本（60+，cron/ 9 个）
     ├── tests/                      # 单元/集成/E2E/评测/压测
     └── pyproject.toml
 ```
@@ -251,6 +263,9 @@ zhigang-compass/
 | [database.py](../../backend/app/core/database.py) | 三库连接管理：PostgreSQL（async engine + session 工厂）、Neo4j（同步 driver）、Redis（async client）；提供 `get_db` / `get_neo4j` / `get_redis` 依赖注入 |
 | [middleware.py](../../backend/app/core/middleware.py) | 中间件链：CORS（白名单）+ GZip（>1KB）+ SecurityHeaders（CSP/HSTS/TraceID）+ RateLimitMiddleware（普通 100 req/min / LLM 10 req/min，键 `rate:{ip}:{path}`，Redis 不可用降级放行，错误码 4290） |
 | [security.py](../../backend/app/core/security.py) | JWT RS256 双 Token（access 30min / refresh 7d）+ bcrypt 密码哈希 + RBAC 四角色权限映射 |
+| [runtime_config.py](../../backend/app/core/runtime_config.py) | 运行时配置（08-16）：管理后台可编辑、持久化到 `configs/runtime_settings.json`、重启生效的非敏感运行参数（ETL 调度时刻、匹配/召回旋钮等） |
+| [arq_client.py](../../backend/app/core/arq_client.py) | ARQ 入队客户端（API 进程向 Redis db=1 投递任务） |
+| [errors.py](../../backend/app/core/errors.py) / [logging.py](../../backend/app/core/logging.py) | 统一错误码体系 / 结构化日志 |
 
 ### 5.2 API 层（[backend/app/api/v1/](../../backend/app/api/v1/)）
 
@@ -263,7 +278,24 @@ zhigang-compass/
 | [match.py](../../backend/app/api/v1/match.py) | `/match` | POST `/recommend`（ARQ 异步）`/compare` `/feedback`；GET `/task/{task_id}` `/result/{match_id}` `/result/{match_id}/diagnosis` `/result/{match_id}/gap` `/result/{match_id}/path` | 自动推荐 Top-N / 人岗比对 / LLM 诊断报告 / 差距与学习路径 |
 | [resume.py](../../backend/app/api/v1/resume.py) | `/resume` | POST `/parse`；GET `/list` `/task/{task_id}`（轮询）`/task/{task_id}/stream`（SSE 进度）`/files/{resume_id}/download`；GET+PUT+DELETE `/{resume_id}` | 简历解析（异步任务）+ 列表/编辑/删除/原文下载 |
 | [evolution.py](../../backend/app/api/v1/evolution.py) | `/evolution` | GET `/versions` `/versions/{version_id}` `/diff` `/trends` `/signals` `/state-machine` `/position/{id}/evolution` `/watch` | 图谱版本/对比/趋势/信号/状态机/岗位演化/观察池 |
-| [admin.py](../../backend/app/api/v1/admin.py) | `/admin` | users CRUD（`/users` + `/users/{id}`）；`/crawl/status` `/crawl/history` `/crawl/trigger` `/crawl/task/{id}/stream`（SSE 日志）；`/positions/pending` `/positions/{id}/review`（POST approve/reject）`/positions/{id}/archive` `/positions/{position_name}` `/positions/declining`；`/evolution/pending` `/evolution/{id}/review`；`/discovery/watch`；`/audit/logs`（≥180 天）；`/llm-config`（GET/PUT，api_key 打码） | 管理后台：账户/爬取/岗位审核/演化审核/审计/LLM provider 配置，RBAC admin |
+| [discovery.py](../../backend/app/api/v1/discovery.py) | `/discovery` | GET `/recent`（近期发现）`/position-skills-delta`（岗位技能增量）+ `/summary` | 新岗位发现结果查询 |
+| [admin.py](../../backend/app/api/v1/admin.py) | `/admin` | **facade**：仅保留根 router（RBAC admin 依赖）并按固定顺序 include 子 router（注册顺序即匹配顺序，`/positions/pending` 先于 `/positions/{position_name}`）；re-export 测试直连的私有符号保持 import 面不变 | 管理后台聚合入口 |
+
+**admin 子域（[api/v1/admin_routes/](../../backend/app/api/v1/admin_routes/) 11 模块）**：
+
+| 模块 | 职责 |
+|------|------|
+| [accounts.py](../../backend/app/api/v1/admin_routes/accounts.py) | 用户 CRUD / 角色管理 |
+| [audit.py](../../backend/app/api/v1/admin_routes/audit.py) | 审计日志查询（≥180 天） |
+| [crawl.py](../../backend/app/api/v1/admin_routes/crawl.py) | 爬取状态/历史/触发/SSE 日志流 |
+| [position_reviews.py](../../backend/app/api/v1/admin_routes/position_reviews.py) | 岗位审核（approve/reject）/ 演化审核 / 归档 / 技术热点观察 |
+| [position_edit.py](../../backend/app/api/v1/admin_routes/position_edit.py) | 岗位人工编辑（图谱变异类，R2 人工通道） |
+| [config.py](../../backend/app/api/v1/admin_routes/config.py) | LLM provider 配置（GET/PUT，api_key 打码不回显）+ 运行时配置（runtime_settings.json） |
+| [dict_guard.py](../../backend/app/api/v1/admin_routes/dict_guard.py) | 技能字典自治守卫提案审批（add_stopword 全自动 / remove/protect 人工） |
+| [llm_decisions.py](../../backend/app/api/v1/admin_routes/llm_decisions.py) | LLM 决策审计/复核（六域决策信封的管理面） |
+| [skill_aliases.py](../../backend/app/api/v1/admin_routes/skill_aliases.py) | 技能别名动态表管理（approve 即生效免 sync） |
+| [etl.py](../../backend/app/api/v1/admin_routes/etl.py) | ETL 队列页配置（etl_run_hour/minute） |
+| [lineage.py](../../backend/app/api/v1/admin_routes/lineage.py) | 数据血缘管理/审计 |
 
 统一响应契约 [schemas/common.py](../../backend/app/schemas/common.py)：`APIResponse[T]`（code/msg/data/trace_id）+ `ok()` / `error()` 工具函数。错误码规范见设计文档 §2.4.7（同步超时 5003、限流 4290 等）。
 
@@ -355,15 +387,36 @@ ID 格式 `{prefix}_{seq:04d}`（如 `sk_0042`），通过 Neo4j Counter 节点�
 | [alerting.py](../../backend/app/services/alerting.py) | webhook 告警（§4.4/§11.1）：兼容飞书/钉钉/企微机器人 POST JSON；未配置或失败仅记日志不阻塞主流程 | ✅ 完整 |
 | [prompts.py](../../backend/app/services/extraction/prompts.py) | 共享提示词（soft_skill 等跨模块复用；原 services/prompts/ 目录已整合） | ✅ 完整 |
 
+#### 5.3.9 llm_decision/ + graph/ + proficiency.py — LLM 治理底座与图谱查询仓储（08-16 后新增）
+
+| 模块 | 职责 |
+|------|------|
+| [llm_decision/](../../backend/app/services/llm_decision/) | **LLM 决策统一信封**：JD 抽取 / 名称归一 / 分类 / 簇命名 / 治理 / 技能关系六域的「LLM 主导 + 确定性守卫」集中裁决点，含 R0/R1/R2 风险分级路由（R0 自动 / R1 高置信自动 / R2 仅人工），是 LLM 驱动灰度的底座 |
+| [graph/](../../backend/app/services/graph/) | 图谱查询仓储层：queries/queries_async（Cypher 封装）、repository、visibility（岗位可见性分级：匿名/guest 不展示 candidate/emerging） |
+| [proficiency.py](../../backend/app/services/proficiency.py) | 技能熟练度服务（匹配维消费） |
+| [data_quality/lineage.py](../../backend/app/services/data_quality/lineage.py) | 数据血缘记录与查询（管理后台 /admin-lineage 页） |
+
+> extraction/ 域内同期新增：`dict_guard.py`（字典自治守卫评估）、`skill_category_review.py`（技能分类复核）、`llm_stats.py`（LLM 用量统计）、`skill_aliases` 动态别名层（词典 → 动态表 → SBERT 并查）。
+
 ### 5.4 异步任务（[backend/app/workers/](../../backend/app/workers/)）
 
-| 文件 | 职责 |
+`tasks.py` 已重构为 **re-export facade**（保持 `from app.workers.tasks import X` 的既有 import 面不变），任务实现按域拆分；`WorkerSettings` 移至 [workers/settings.py](../../backend/app/workers/settings.py)（Redis db=1 与缓存隔离、并发 10、超时 300s、重试 2 次，任务级 `job_timeout` 按函数配置）。
+
+| 模块 | 职责 |
 |------|------|
-| [tasks.py](../../backend/app/workers/tasks.py) | 20+ ARQ 任务 + `WorkerSettings`（`functions=[...]` 注册清单）：**ETL 管线** `run_etl_pipeline`（11 阶段编排：采集→清洗→抽取→入图→聚合→交叉验证→课程评估→归一化→多样性→新鲜度）+ `crawl_platform`（爬取 trigger，city 参数）+ `batch_extract`（JD 批量抽取，N 条/批一次 LLM 调用，3.2x 提速）+ `resume_parse` + `match_recommend` + `snapshot_graph`（T+1 自动快照）+ `discovery_daily`（候选池 + RAG 接地）+ `discovery_auto_transition`（状态自动流转）+ `watch_signal_daily` + `validate_temporal` / `detect_inflation` / `dedup_simhash` / `load_courses` / `evaluate_courses` / `diversity_report` / `check_data_freshness` / `aggregate_positions` / `cross_validate_jds` / `sync_skill_normalization` / `backfill_embeddings` / `check_llm_providers_health` + `on_startup` / `on_shutdown` |
+| [etl.py](../../backend/app/workers/etl.py) / [etl_tasks.py](../../backend/app/workers/etl_tasks.py) | ETL 主管线 `run_etl_pipeline_scheduled`（ARQ cron 触发，Redis 当日锁幂等）+ 13 阶段编排（采集→清洗→抽取→入图→聚合→归一化→课程评估→…→发现→dict_guard） |
+| [crawl.py](../../backend/app/workers/crawl.py) | `crawl_platform` 爬取任务（admin 触发，SSE 日志流） |
+| [matching.py](../../backend/app/workers/matching.py) | `match_recommend` 异步匹配（向量预筛 Top-K → 精评）+ `resume_parse` 简历解析任务链（LLM 抽取，`task_id = resume_id`） |
+| [quality.py](../../backend/app/workers/quality.py) | 时滞校验 / 通胀检测 / SimHash 去重 / 交叉验证 / 多样性 / 新鲜度 |
+| [courses.py](../../backend/app/workers/courses.py) | `load_courses` / `evaluate_courses` |
+| [discovery.py](../../backend/app/workers/discovery.py) | `discovery_daily`（候选池 + RAG 接地）+ 状态自动流转 |
+| [dict_guard.py](../../backend/app/workers/dict_guard.py) | 字典自治守卫每日评估（链入 ETL 末段） |
+| [llm_stats.py](../../backend/app/workers/llm_stats.py) | LLM 用量统计日报 |
+| [name_normalization_propose.py](../../backend/app/workers/name_normalization_propose.py) / [name_normalization_shadow.py](../../backend/app/workers/name_normalization_shadow.py) | 岗位名归一 proposal 生成 / 影子评估 |
+| [skill_relation_propose.py](../../backend/app/workers/skill_relation_propose.py) / [skill_category_review.py](../../backend/app/workers/skill_category_review.py) | 技能关系提案 / 技能分类复核 |
+| [diagnosis.py](../../backend/app/workers/diagnosis.py) / [utils.py](../../backend/app/workers/utils.py) | 诊断任务 / 任务工具函数 |
 
-`WorkerSettings` 定义于 [tasks.py](../../backend/app/workers/tasks.py)（L2181）：Redis db=1（与缓存隔离）、并发 10、超时 300s、重试 2 次。任务级 `job_timeout` 按函数配置（坑 22）。
-
-调度入口 [scripts/cron/](../../backend/scripts/cron/)：`etl_daily.py` / `crawl_spider.py` / `discovery_daily.py`（每日 05:30 入队） / `snapshot_daily.py` + `crontab.example` / `scheduled_tasks.ps1`。
+调度入口 [scripts/cron/](../../backend/scripts/cron/)（9 个）：`etl_daily.py`（已由 worker 内 ARQ cron 接管，保留供 `--force` 手动重跑）/ `crawl_spider.py` / `discovery_daily.py` / `snapshot_daily.py` / `dict_guard_daily.py` / `graph_health_daily.py` / `position_dup_daily.py` / `wait_etl_then_tune.py`（ETL 后自动调参 + 全量图门禁）+ `crontab.example` / `scheduled_tasks.ps1` 模板。
 
 ### 5.5 数据管线（[backend/data/crawlers/](../../backend/data/crawlers/)）
 
@@ -403,18 +456,20 @@ Scrapy + Playwright + CDP，13 源（7 招聘 A/B/C 三级分级 + 6 非招聘�
 
 | 模块 | 职责 |
 |------|------|
-| [main.tsx](../../frontend/src/main.tsx) + [app/providers.tsx](../../frontend/src/app/providers.tsx) | 入口 + Provider 链（QueryClientProvider → AppRouter） |
-| [app/router.tsx](../../frontend/src/app/router.tsx) | `createBrowserRouter`，12 页 lazy 懒加载 + AuthGuard/GuestGuard + RBAC |
-| [components/layout/](../../frontend/src/components/layout/) | AppShell / TopNav / Sidebar / PageHeader / PagePlaceholder / CompassMark（签名 SVG） |
-| [components/ui/](../../frontend/src/components/ui/) | shadcn 风格基元：Button / Card / Badge（含五状态色）/ Input |
+| [main.tsx](../../frontend/src/main.tsx) + [app/providers.tsx](../../frontend/src/app/providers.tsx) | 入口 + Provider 链（QueryClientProvider → AppRouter；TanStack Query 配置并入此处，staleTime 30s） |
+| [app/router.tsx](../../frontend/src/app/router.tsx) | `createBrowserRouter`，18 页 lazy 懒加载 + AuthGuard/GuestGuard + RBAC |
+| [components/layout/](../../frontend/src/components/layout/) | AppShell / TopNav / Sidebar / PageHeader / CompassMark（签名 SVG） |
+| [components/ui/](../../frontend/src/components/ui/) | shadcn 风格基元：Button / Card / Badge / Input / Table 等 |
 | [components/graph/](../../frontend/src/components/graph/) | 图谱组件族：graph-2d（ECharts 力导向）/ graph-3d（react-force-graph-3d，聚焦/重置视角）/ graph-analysis-panel（算法分析面板）/ node-detail-panel（节点详情）/ use-graph-pan（拖拽平移）/ graph-layout / graph-utils / types |
-| [components/match/](../../frontend/src/components/match/) | 匹配结果展示组件（得分/差距/学习路径/诊断报告） |
-| [components/resume/](../../frontend/src/components/resume/) | resume-uploader（上传组件，白名单与后端一致） |
-| [routes/](../../frontend/src/routes/) | 12 页面 + guards.tsx：dashboard / graph（2D+3D 图谱）/ evolution（演化看板）/ resume-match（简历匹配）/ profile（个人中心）/ login / register / admin-dashboard / admin-users / admin-crawl / admin-review（岗位审核）/ admin-llm（LLM provider 配置） |
+| [components/admin/](../../frontend/src/components/admin/) | 管理后台组件族：crawl 调度配置、llm/（provider 表单）、review/（审核面板） |
+| [components/discovery/](../../frontend/src/components/discovery/) / [components/evolution/](../../frontend/src/components/evolution/) | 发现页组件族 / 演化可视化（桑基图 + 时间轴 + 信号面板） |
+| [components/learning/](../../frontend/src/components/learning/) / [components/match/](../../frontend/src/components/match/) / [components/resume/](../../frontend/src/components/resume/) | 学习路径 / 匹配结果（得分/差距/学习路径/诊断报告）/ 简历上传与解析 |
+| [components/shared/](../../frontend/src/components/shared/) | 跨页共享组件（空态/加载态等） |
+| [routes/](../../frontend/src/routes/) | 18 页面 + guards.tsx：dashboard / graph（2D+3D 图谱 + 岗位画像 portrait）/ evolution / resume-match / discovery（发现页）/ profile / login / register + 管理后台 10 页（admin-dashboard / admin-users / admin-crawl / admin-review 岗位审核 / admin-review-dict 字典守卫 / admin-review-watch 观察池 / admin-llm provider 配置 / admin-llm-decisions LLM 决策 / admin-lineage 数据血缘 / admin-settings 运行时配置） |
+| [hooks/use-typewriter.ts](../../frontend/src/hooks/use-typewriter.ts) | AI 输出打字机效果 |
 | [store/auth.ts](../../frontend/src/store/auth.ts) | 认证 store（不存 token，token 走 httpOnly Cookie + 内存） |
 | [store/ui.ts](../../frontend/src/store/ui.ts) | UI store（sidebar 开关 + 主题切换 + localStorage 持久化） |
-| [lib/api.ts](../../frontend/src/lib/) | axios 实例 + 401 静默续期拦截器（refresh_token 队列） |
-| [lib/query-client.ts](../../frontend/src/lib/) | TanStack Query 配置（staleTime 30s，4xx 不重试） |
+| [lib/api.ts](../../frontend/src/lib/) | axios 实例 + 401 静默续期拦截器（refresh_token 队列）；lib/ 另有 constants.ts / utils.ts |
 | [styles/globals.css](../../frontend/src/styles/globals.css) | Tailwind v4 @theme 设计令牌 + 五状态色 + 深色模式 |
 | [types/api.d.ts](../../frontend/src/types/api.d.ts) | openapi-typescript 自动生成（58 paths 类型） |
 
@@ -532,7 +587,7 @@ Neo4j 核心 `shortestPath`（深度 ≤6，沿「岗位共现 + REQUIRES」边�
 ### 6.8 前端关键模块
 
 #### `AppRouter` — [app/router.tsx](../../frontend/src/app/router.tsx)
-`createBrowserRouter` 三类路由：公开（GuestGuard）/ 受保护（AuthGuard）/ 管理员（requireRole=['admin']）。12 页 `lazy()` 懒加载。
+`createBrowserRouter` 三类路由：公开（GuestGuard）/ 受保护（AuthGuard）/ 管理员（requireRole=['admin']）。18 页 `lazy()` 懒加载。
 
 #### `apiClient` + 401 拦截器 — [lib/api.ts](../../frontend/src/lib/)
 axios 实例（`withCredentials`，30s）。401 触发 `POST /auth/refresh`，期间其他 401 入队等待，成功重放，失败跳 `/login`。
@@ -597,6 +652,8 @@ services.diagnosis:
 | [data_quality/inflation_detector.py](../../backend/app/services/data_quality/inflation_detector.py) | [configs/inflation_weights.json](../../backend/configs/inflation_weights.json)（Optuna 调优） |
 | [learning_path](../../backend/app/services/learning_path/) | [configs/skill_prerequisites.yaml](../../backend/configs/skill_prerequisites.yaml)（40+ 技能先修字典） |
 | LLM Provider | [configs/llm_providers.yaml.example](../../backend/configs/llm_providers.yaml.example)（单一事实源模板；运行时 llm_providers.yaml 由管理后台写入，gitignore 忽略不入库） |
+| [core/runtime_config.py](../../backend/app/core/runtime_config.py) | [configs/runtime_settings.json](../../backend/configs/runtime_settings.json)（管理后台可编辑的运行时参数，重启生效） |
+| dict-guard 动态过滤 | [configs/skill_filters_dynamic.json](../../backend/configs/skill_filters_dynamic.json)（部署时预建空文件，运行时由守卫 + 审批维护，api/worker ≤30s 热同步） |
 
 ### 7.3 前端依赖
 
@@ -606,11 +663,12 @@ main.tsx → app/providers.tsx (QueryClientProvider) → app/router.tsx
                                                               │     ├─ top-nav.tsx
                                                               │     ├─ sidebar.tsx ← nav-config.ts
                                                               │     └─ page-header.tsx / page-placeholder.tsx
-                                                              ├─ routes/*.tsx (12 页 lazy) + guards.tsx
+                                                              ├─ routes/*.tsx (18 页 lazy) + guards.tsx
                                                               │     ├─ components/graph/*（2D/3D/分析面板/节点详情）
                                                               │     ├─ components/match/* + components/resume/*
-                                                              │     ├─ components/ui/* + store/auth.ts + store/ui.ts
-                                                              │     └─ lib/api.ts (axios + 401 拦截) + lib/query-client.ts
+                                                              │     │     （+ admin/discovery/evolution/learning/shared 组件族）
+                                                              │     ├─ components/ui/* + store/auth.ts + store/ui.ts + hooks/*
+                                                              │     └─ lib/api.ts (axios + 401 拦截；QueryClient 配置在 app/providers.tsx)
                                                               └─ types/api.d.ts ← openapi-typescript(../backend/openapi/openapi.yaml)
 ```
 

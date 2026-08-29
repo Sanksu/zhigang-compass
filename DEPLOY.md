@@ -1,6 +1,6 @@
 # 智岗罗盘部署说明（DEPLOY.md）
 
-> 状态：**定稿**（2026-08-15）——基于 08-13 首次容器部署演练实测（api/worker 镜像首次构建 + 5 服务全链路 12 项冒烟全通）+ 08-15 性能压测验证（TE-M5-01 前置，panorama/search P95 < 500ms @ 100 并发，见 docs/perf_baseline_20260815.md）
+> 状态：**定稿**（2026-08-15，2026-08-29 复核与最新 compose 一致并补充 §6.2 局域网运维实证）——基于 08-13 首次容器部署演练实测（api/worker 镜像首次构建 + 5 服务全链路 12 项冒烟全通）+ 08-15 性能压测验证（TE-M5-01 前置，panorama/search P95 < 500ms @ 100 并发，见 docs/perf_baseline_20260815.md）
 > 对应任务：执行计划 2.2 后端 M5「部署文档完善」+ 2.6 文档 M5「DEPLOY.md 部署说明」（DO-M5-03）
 
 ---
@@ -137,6 +137,17 @@ ETL 主管线（采集 → 去重 → LLM 抽取 → 时滞/通胀 → 入图 �
 - 已验证：`docker logs zhigang-worker` 可见 ARQ cron 注册与 ETL 入队/执行日志
 
 > 历史外部任务（Windows `scheduled_tasks.ps1` 的 `ETLDaily` / Linux `crontab.example` 的 `0 5 * * *`）已停用；`scripts/cron/etl_daily.py` 保留，供手动重跑（`--force`）。其余外部任务（maimai/linkedin/课程源、GraphHealth、PositionDup）不变。
+
+### 6.2 局域网部署运维实证（2026-08-23 起 192.168.0.226 长期运行沉淀）
+
+| 事项 | 说明与处置 |
+|------|-----------|
+| **国际源代理** | 无 Clash 的 Linux 主机上，国际源（LinkedIn/Glassdoor/Coursera/arxiv）需自建代理：226 用 v2ray（http 入站 `127.0.0.1:1083`，nohup 手动拉起），**机器重启后需手动重新拉起**；compose 侧将 `HTTPS_PROXY` 指向该端口（宿主 `.env` 插值）。国内源始终直连 |
+| **PG catalog 损坏**（08-27 实证） | 症状：简单 `ORDER BY`/`UNION`/递归 CTE/asyncpg 类型查询**挂起烧满 CPU**（load 飙至 100+，接口报「推荐失败」），而非报错。诊断：`pg_stat_activity` 配合常量 UNION 探针区分库级/实例级问题。处置：整机重启 + `REINDEX SYSTEM <db>` 根治。原则：重大库故障走 `pg_dump` → 新库 restore，不要只靠重启赌恢复 |
+| **uploads 卷属主** | 数据卷被 root 创建后容器内应用用户（非 root）写入 500：`docker exec` 进入 chown 或删除卷重建（上传目录卷） |
+| **SBERT 模型冷启动** | 首次涉及语义匹配/归一化的请求需加载模型，**50–90s 属正常**，非故障；演示/压测前先预热（任打一次 match 或学习路径请求） |
+| **前端更新不生效** | api 容器 StaticFiles 托管 `frontend/dist` 只读挂载，浏览器可能缓存旧 index.html：更新后用 `?v=` 查询参数或强刷验证，确认 `dist` 已重新 build |
+| **匹配性能旋钮** | 单 JD 匹配 rough_k 默认 50（稳态 ~6s）；若被历史配置改为 300 会退化为 ~36s——在管理后台「运行时配置」核对（冷启动池化重建 ~60s 仅在重启/JD 集变化后发生一次，演示前预热） |
 
 ## 7. 常见问题
 
