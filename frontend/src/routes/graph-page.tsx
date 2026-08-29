@@ -635,7 +635,7 @@ export function GraphPage() {
       evidenceCount: linked.filter((n) => n.type === 'evidence').length,
       maxValue,
     }
-  }, [selected, data])
+  }, [selected, data, view])
 
   // 演示视角书签：锚点以全量数据判定存在（聚合模式下岗位可能在未展开域内）；
   // 点击时若锚点岗位尚未上画布，先展开其所属域，待布局启动后再镜头飞行
