@@ -107,7 +107,7 @@ curl http://localhost:8000/health
 |---|--------|------|
 | 1 | 健康端点 | `curl http://localhost:8000/health` → `{"status":"healthy"}` |
 | 2 | 前端静态托管 | `curl http://localhost:8000/` → 智岗罗盘 index.html |
-| 3 | 图谱 panorama | `curl http://localhost:8000/api/v1/graph/panorama`（匿名，Redis 30s 缓存） |
+| 3 | 图谱 panorama | `curl http://localhost:8000/api/v1/graph/view/panorama`（匿名；08-29 视图收敛后为 /view/{view_type}，旧 /graph/panorama 已不存在） |
 | 4 | 认证链路 | `POST /api/v1/auth/login`（admin）→ `/api/v1/auth/me` |
 | 5 | 全文检索 | `GET /api/v1/graph/search?q=Python`（cjk 全文索引） |
 | 6 | worker | `docker logs zhigang-worker` → ARQ 启动 + cron 实跑 |
