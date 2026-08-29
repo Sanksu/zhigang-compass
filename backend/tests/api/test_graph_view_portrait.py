@@ -27,6 +27,9 @@ class _FakeNode:
     def __getitem__(self, key):
         return self._props[key]
 
+    def keys(self):
+        return self._props.keys()
+
     def get(self, key, default=None):
         return self._props.get(key, default)
 
