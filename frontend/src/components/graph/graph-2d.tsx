@@ -684,11 +684,69 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       }
     })
 
+    // 层级画像布局（positionPortrait 专用）：岗位居中，大类节点（技能/软技能/
+    // 薪资/经验/学历，type=attr）环绕中层，各自小节点按归属扇区排外环——
+    // 树状 hub-spoke，与节点 type 解耦（中心=position、大类=attr、小节点=其余）。
+    if (ringLayout && nodes.some((n) => n.type === 'attr')) {
+      const rect = containerRef.current?.getBoundingClientRect()
+      const W = rect?.width || 900
+      const H = rect?.height || 640
+      const CX = W / 2
+      const CY = H / 2
+      const minDim = Math.min(W, H)
+      const center = nodes.find((n) => n.type === 'position')
+      const categories = nodes.filter((n) => n.type === 'attr')
+      const place = (n: (typeof nodes)[number], x: number, y: number) => {
+        ;(n as GraphNode & { x?: number; y?: number }).x = x
+        ;(n as GraphNode & { x?: number; y?: number }).y = y
+      }
+      if (center) place(center, CX, CY)
+      // 大类节点：中层圆环均分
+      const R1 = minDim * 0.26
+      categories.forEach((n, i) => {
+        const angle = (i / Math.max(1, categories.length)) * Math.PI * 2 - Math.PI / 2
+        place(n, CX + R1 * Math.cos(angle), CY + R1 * Math.sin(angle))
+      })
+      // 小节点：按边找大类父节点，在父节点扇区内排外环
+      // （扇区角宽 = 2π/k × 0.82 留间隙；父节点角度为扇区中心）
+      const parentOf = new Map<string, string>()
+      for (const e of data.edges) {
+        if (nodes.some((n) => n.id === e.source && n.type === 'attr')) {
+          parentOf.set(e.target, e.source)
+        }
+      }
+      const R2 = minDim * 0.46
+      const sectorWidth = (Math.PI * 2) / Math.max(1, categories.length) * 0.82
+      const byParent = new Map<string, (typeof nodes)[number][]>()
+      for (const n of nodes) {
+        const parent = parentOf.get(n.id)
+        if (parent) {
+          const arr = byParent.get(parent)
+          if (arr) arr.push(n)
+          else byParent.set(parent, [n])
+        }
+      }
+      for (const [parentId, children] of byParent) {
+        const catIdx = categories.findIndex((n) => n.id === parentId)
+        if (catIdx < 0) continue
+        const centerAngle =
+          (catIdx / Math.max(1, categories.length)) * Math.PI * 2 - Math.PI / 2
+        children.forEach((n, j) => {
+          const angle =
+            centerAngle +
+            (children.length === 1
+              ? 0
+              : (j / (children.length - 1) - 0.5) * sectorWidth)
+          place(n, CX + R2 * Math.cos(angle), CY + R2 * Math.sin(angle))
+        })
+      }
+    }
+
     // 环形布局坐标注入（layout:'none' 直接消费节点 x/y）：
     // 技能按频次降序顺时针铺外圈（半径 420），岗位/画像维度节点按关联度降序铺内圈
     // （半径 170），同圈角间距均分——放射状边从内圈放射到外圈，
     // "技能→服务岗位 / 岗位→画像维度"读向清晰。
-    if (ringLayout) {
+    if (ringLayout && !nodes.some((n) => n.type === 'attr')) {
       const skills = nodes
         .filter((n) => n.type === 'skill')
         .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
