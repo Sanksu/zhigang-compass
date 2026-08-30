@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ClipboardCheck, EyeOff, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
+import { ChevronDown, ChevronRight, ClipboardCheck, EyeOff, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SkillAliasesTable } from '@/components/admin/llm/skill-aliases-table'
@@ -50,6 +50,88 @@ const TIER_TONE: Record<string, string> = {
   R0: 'text-state-stable',
   R1: 'text-state-candidate',
   R2: 'text-state-declining',
+}
+
+/** 状态语义：该状态下决策是否已产生实际变更（展开详情首行展示） */
+const STATUS_EXPLAIN: Record<string, string> = {
+  shadow: '仅落决策记录，不产生任何生效（shadow 观察模式）',
+  proposal: '待人工审批，尚未产生任何变更（操作列可批准/驳回）',
+  auto_applied: '已由自动档执行（硬门通过 + 低影响面 + 高置信），实际副作用见下方「已执行的副作用」',
+  blocked: '被硬门禁一票拦截，未执行任何变更',
+  approved: '人工批准，变更已生效',
+  rejected: '人工驳回，未产生任何变更',
+  reverted: '曾自动生效，后经人工撤销——副作用已反做，同实体不再自动执行',
+}
+
+/** structured_output 常见键的中文名（未收录键原样展示） */
+const OUTPUT_KEY_LABELS: Record<string, string> = {
+  action: '动作',
+  reason: '判断理由',
+  impact: '影响面',
+  kind: '类型',
+  term: '词条',
+  target_standard: '归一目标',
+  canonical_name: '规范名',
+  category: '建议分类',
+  skill: '技能',
+  sources: '来源',
+}
+
+function str(v: unknown): string {
+  return typeof v === 'string' ? v : ''
+}
+
+function formatValue(v: unknown): string {
+  if (v == null) return '-'
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  return JSON.stringify(v)
+}
+
+/** 动作影响说明：按域+动作给出「到底改了什么」的人类可读口径，
+ *  与后端执行代码一一对应（dict_guard._apply_cleanup / 各域 approve 通道）。
+ *  其余同类型记录据此获得同等详细说明，未收录组合回退为通用字段展示。 */
+function effectExplain(it: LlmDecisionItem): string[] {
+  const domain = it.domain ?? ''
+  const action = str((it.structured_output ?? {})['action'])
+  if (domain === 'governance') {
+    if (action === 'add_stopword') {
+      return [
+        '写入动态停用词表（blocked）：后续技能归一化链路直接拦截该词',
+        '删除图谱同名 Skill 节点及其全部关系边',
+      ]
+    }
+    if (action === 'remove_node') {
+      const label = it.entity_type === 'position' ? '岗位 Position' : '课程 Course'
+      return [`删除图谱 ${label} 节点（DETACH DELETE，连带其全部关系边）`]
+    }
+    if (action === 'remove_edge') {
+      return ['删除课程脏边 Skill-[:LEARNABLE_VIA]->Course（词条为「技能→课程」格式）']
+    }
+    if (action === 'hide_node') return ['隐藏图谱节点（数据保留，前端不再展示）']
+    if (action === 'add_blocked') return ['写入动态黑名单，抽取/归一链路拦截该词条目']
+    return []
+  }
+  if (domain === 'skill_relation') return ['批准后按关系类型在图谱建边或调整关系（源技能→目标技能→类型）']
+  if (domain === 'position_normalize') return ['批准后执行岗位名归一（别名回写/节点归并），归一产物落图']
+  if (domain === 'skill_normalize') {
+    return [
+      '批准后执行技能名归一：kind=alias 回写别名词典，归并类在图谱合并节点',
+    ]
+  }
+  if (domain === 'skill_classify') return ['批准后该分类晋升为权威 category，后续抽取/展示按此归类']
+  if (domain === 'position_classify') return ['批准后岗位归类落图']
+  if (domain === 'cluster_label') return ['批准后簇标签写入图谱，用于图谱分组展示']
+  if (domain === 'jd_extract') return ['抽取类决策仅记录 LLM 结构化输出与置信度，无独立生效动作']
+  return []
+}
+
+/** 影响说明小节标题：按当前状态区分「已发生 / 将发生 / 已反做」 */
+function effectTitle(status: string | undefined): string {
+  if (status === 'auto_applied' || status === 'approved') return '已执行的副作用'
+  if (status === 'proposal') return '批准后将执行'
+  if (status === 'reverted') return '被撤销的副作用（已反做）'
+  return '动作影响（当前未生效）'
 }
 
 /** 决策信封只读页：验收卡片（domain×status 汇总）+ 决策记录列表 */
@@ -141,8 +223,15 @@ export function AdminLlmDecisionsPage() {
     return { target, isAlias: out['kind'] === 'alias' }
   }
 
-  function str(v: unknown): string {
-    return typeof v === 'string' ? v : ''
+  /** 行内展开详情：多开（Set），便于并排比对多条记录 */
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  function toggleExpand(id: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   const [reviewing, setReviewing] = useState<{ id: string; entity: string; action: 'approve' | 'reject' } | null>(null)
@@ -257,6 +346,7 @@ export function AdminLlmDecisionsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-8" aria-label="展开详情" />
                   <TableHead>域</TableHead>
                   <TableHead>实体</TableHead>
                   <TableHead>状态</TableHead>
@@ -270,20 +360,38 @@ export function AdminLlmDecisionsPage() {
               <TableBody>
                 {loading && filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                       加载中…
                     </TableCell>
                   </TableRow>
                 ) : filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                       无匹配的决策记录
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((it) => (
-                    <TableRow key={it.id}>
-                      <TableCell>{DOMAIN_LABELS[it.domain ?? ""] ?? it.domain ?? "-"}</TableCell>
+                  filtered.map((it) => {
+                    const isOpen = expandedIds.has(it.id)
+                    const out = (it.structured_output ?? {}) as Record<string, unknown>
+                    const kvPairs = Object.entries(out)
+                    const evidence = Array.isArray(it.evidence_refs) ? it.evidence_refs : []
+                    const effects = effectExplain(it)
+                    return (
+                      <Fragment key={it.id}>
+                        <TableRow className={isOpen ? 'bg-muted/30' : undefined}>
+                          <TableCell>
+                            <button
+                              type="button"
+                              aria-expanded={isOpen}
+                              aria-label={isOpen ? '收起详情' : '展开详情'}
+                              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                              onClick={() => toggleExpand(it.id)}
+                            >
+                              {isOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                            </button>
+                          </TableCell>
+                          <TableCell>{DOMAIN_LABELS[it.domain ?? ""] ?? it.domain ?? "-"}</TableCell>
                       <TableCell className="max-w-[260px]">
                         <div className="flex flex-col">
                           <span className="truncate">
@@ -348,8 +456,75 @@ export function AdminLlmDecisionsPage() {
                           <span className="text-xs text-muted-foreground">-</span>
                         )}
                       </TableCell>
-                    </TableRow>
-                  ))
+                        </TableRow>
+                        {isOpen && (
+                          <TableRow>
+                            <TableCell colSpan={9} className="bg-muted/20 px-12 py-3">
+                              <div className="max-w-4xl space-y-2.5 text-xs leading-relaxed">
+                                <p>
+                                  <span className="mr-2 font-medium text-foreground">状态说明</span>
+                                  <span className="text-muted-foreground">
+                                    {STATUS_EXPLAIN[it.status ?? ''] ?? '—'}
+                                  </span>
+                                </p>
+                                {effects.length > 0 && (
+                                  <div>
+                                    <p className="font-medium text-foreground">{effectTitle(it.status)}</p>
+                                    <ul className="mt-1 list-disc space-y-0.5 pl-4 text-muted-foreground">
+                                      {effects.map((line) => (
+                                        <li key={line}>{line}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                {kvPairs.length > 0 && (
+                                  <div>
+                                    <p className="font-medium text-foreground">决策输出（structured_output）</p>
+                                    <div className="mt-1 space-y-0.5">
+                                      {kvPairs.map(([k, v]) => (
+                                        <p key={k} className="text-muted-foreground">
+                                          <span className="mr-2 inline-block min-w-24 font-medium text-foreground/80">
+                                            {OUTPUT_KEY_LABELS[k] ?? k}
+                                          </span>
+                                          <span className="break-all">{formatValue(v)}</span>
+                                        </p>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {evidence.length > 0 && (
+                                  <div>
+                                    <p className="font-medium text-foreground">证据引用</p>
+                                    <ul className="mt-1 list-disc space-y-0.5 pl-4 text-muted-foreground">
+                                      {evidence.map((ev, i) => {
+                                        const item = (ev ?? {}) as Record<string, unknown>
+                                        return (
+                                          <li key={i}>
+                                            {str(item['label'])}：{formatValue(item['value'])}
+                                          </li>
+                                        )
+                                      })}
+                                    </ul>
+                                  </div>
+                                )}
+                                <p className="text-muted-foreground">
+                                  运行 <span className="font-mono">{it.run_id || '-'}</span>
+                                  {' · '}{it.provider || '-'}/{it.model || '-'}
+                                  {' · '}硬门 {it.gate_result || '-'}
+                                  {it.rollback_ref ? ` · 回滚引用 ${it.rollback_ref}` : ''}
+                                </p>
+                                {it.reviewer && (
+                                  <p className="text-muted-foreground">
+                                    审核人 {it.reviewer}：{it.review_reason}
+                                  </p>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    )
+                  })
                 )}
               </TableBody>
             </Table>
