@@ -21,7 +21,7 @@ def _skill_name_by_id(snapshot: dict) -> dict[str, str]:
 
 
 def _skill_freq_windows(snapshots: list[dict]) -> dict[str, list[SkillFrequencyWindow]]:
-    """按技能聚合频次窗口序列（时间升序）。
+    """按技能聚合频次窗口序列（时间升序，全期零填充对齐）。
 
     每期快照：该技能作为 REQUIRES 目标边（target=技能）的计数即当期频次；
     快照创建时间不可用时用序号占位（仅影响展示，不影响 Z-score）。
@@ -31,10 +31,18 @@ def _skill_freq_windows(snapshots: list[dict]) -> dict[str, list[SkillFrequencyW
     与 state_machine 的 REQUIRES 过滤约定相悖（评审 A-1 负责人拍板①，
     与桑基 P1-2 同根）。旧快照边无 relation 标注则整体按历史口径兼容：
     分子全计、分母记 0（由 detector 整序列退回计数口径）。
+
+    零填充（第八轮审查 P1-6，负责人拍板方案 A）：出现过的技能在每期快照
+    都有窗口，消失期记 freq=0、分母沿用该期 REQUIRES 总数——与
+    state_machine.position_freq_windows 的岗位侧口径同构。否则技能中途
+    消失的期被跳过，detect_signals 的 seq[-1] 会拿"最后出现期"当 current，
+    declining 系统性漏检、z 在断续子序列上失真。频次归零的技能由
+    detector 既有小基数门（<MIN_FREQ_FOR_ZSCORE）落 PROTECTED，不产伪信号。
     """
-    windows: dict[str, list[SkillFrequencyWindow]] = {}
+    per_snapshot: list[tuple[str, dict[str, int], int]] = []
+    names: dict[str, str] = {}
     for snap in snapshots:
-        names = _skill_name_by_id(snap)
+        names.update(_skill_name_by_id(snap))
         edges = snap.get("edges", [])
         # 快照级判定是否携带关系标注（新旧快照形态不混布于同一版本）
         has_relations = any(e.get("relation") for e in edges)
@@ -52,17 +60,30 @@ def _skill_freq_windows(snapshots: list[dict]) -> dict[str, list[SkillFrequencyW
             if has_relations and e.get("relation") != "REQUIRES":
                 continue
             freq[target] = freq.get(target, 0) + 1
-        for skill_id, count in freq.items():
-            windows.setdefault(skill_id, []).append(
-                SkillFrequencyWindow(
-                    skill_id=skill_id,
-                    skill_name=names.get(skill_id, skill_id),
-                    window_start=snap.get("version_id", ""),
-                    window_end=snap.get("version_id", ""),
-                    frequency=count,
-                    total_requires=total_requires,
-                )
+        per_snapshot.append((snap.get("version_id", ""), freq, total_requires))
+
+    # 首次出现序构建技能清单，保持与旧实现一致的 windows 迭代顺序
+    ordered_skills: list[str] = []
+    seen: set[str] = set()
+    for _, freq, _ in per_snapshot:
+        for skill_id in freq:
+            if skill_id not in seen:
+                seen.add(skill_id)
+                ordered_skills.append(skill_id)
+
+    windows: dict[str, list[SkillFrequencyWindow]] = {}
+    for skill_id in ordered_skills:
+        windows[skill_id] = [
+            SkillFrequencyWindow(
+                skill_id=skill_id,
+                skill_name=names.get(skill_id, skill_id),
+                window_start=version_id,
+                window_end=version_id,
+                frequency=freq.get(skill_id, 0),
+                total_requires=total_requires,
             )
+            for version_id, freq, total_requires in per_snapshot
+        ]
     return windows
 
 
