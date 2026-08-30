@@ -153,7 +153,7 @@ def evaluate_matching(golden_set: list[dict]) -> dict:
     from app.services.matching.semantic import SkillEmbedder
     from app.services.matching.weights import load_sim_threshold, load_weights
 
-    from tune_match_weights import evaluate_pairs
+    from tune_match_weights import MATCH_CLASSIFY_THRESHOLD, evaluate_pairs
 
     semantic = SkillEmbedder.get()
     weights = load_weights()
@@ -162,11 +162,11 @@ def evaluate_matching(golden_set: list[dict]) -> dict:
     scores = result["scores"]
     labels = result["labels"]
 
-    # 混淆矩阵（阈值 0.5，与 evaluate_pairs 分类口径一致）
-    tp = sum(1 for s, l in zip(scores, labels) if s >= 0.5 and l == 1)
-    fp = sum(1 for s, l in zip(scores, labels) if s >= 0.5 and l == 0)
-    tn = sum(1 for s, l in zip(scores, labels) if s < 0.5 and l == 0)
-    fn = sum(1 for s, l in zip(scores, labels) if s < 0.5 and l == 1)
+    # 混淆矩阵（阈值 MATCH_CLASSIFY_THRESHOLD，与 evaluate_pairs 分类口径一致）
+    tp = sum(1 for s, l in zip(scores, labels) if s >= MATCH_CLASSIFY_THRESHOLD and l == 1)
+    fp = sum(1 for s, l in zip(scores, labels) if s >= MATCH_CLASSIFY_THRESHOLD and l == 0)
+    tn = sum(1 for s, l in zip(scores, labels) if s < MATCH_CLASSIFY_THRESHOLD and l == 0)
+    fn = sum(1 for s, l in zip(scores, labels) if s < MATCH_CLASSIFY_THRESHOLD and l == 1)
 
     # Top-3 推荐准确率（设计文档 §9.6）— 复用 evaluate.py 的实现
     from scripts.evaluate import _top3_accuracy
@@ -176,7 +176,7 @@ def evaluate_matching(golden_set: list[dict]) -> dict:
     # 错误样例
     error_cases: list[dict] = []
     for p, s, l in zip(golden_set, scores, labels):
-        is_pred_match = s >= 0.5
+        is_pred_match = s >= MATCH_CLASSIFY_THRESHOLD
         is_gold_match = l == 1
         if is_pred_match != is_gold_match and len(error_cases) < 5:
             error_cases.append({

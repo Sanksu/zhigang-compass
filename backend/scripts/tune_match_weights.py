@@ -45,6 +45,12 @@ from app.services.matching.schemas import (  # noqa: E402
 _GOLDEN_MATCH = _BACKEND_DIR / "data" / "golden_set" / "golden_set_match.jsonl"
 _WEIGHTS_PATH = _BACKEND_DIR / "configs" / "match_weights.json"
 
+# 人岗匹配「是否算匹配」的分类判定线（Acc 口径，仅评测用；生产为 top-N 排序无硬截断）。
+# 2026-08-30 阈值 PR（审计 + 仿真定参）：原 0.5 → 0.57，v2 黄金集 384 对 Acc 0.8906→0.9141（达标 ≥0.90）。
+# 依据：42 个 FP 全为 must+exp 主导（w_nice=0.044 可忽略，nice 门控无效；must 门槛会误杀 TP），
+#       唯一干净杠杆是 final total_score 上 0.554 簇与下一 TP 之间的分类间隙。
+MATCH_CLASSIFY_THRESHOLD = 0.57
+
 
 def load_pairs(path: Path) -> list[dict]:
     """加载匹配黄金集（JSONL）。"""
@@ -132,8 +138,8 @@ def evaluate_pairs(pairs: list[dict], weights, semantic, sim_threshold: float, j
         scores.append(r.total_score)
         labels.append(p["label"])
 
-    # 分类准确率：total_score ≥ 0.5 视为"匹配"
-    hits = sum(1 for s, lb in zip(scores, labels) if (s >= 0.5) == (lb == 1))
+    # 分类准确率：total_score ≥ MATCH_CLASSIFY_THRESHOLD 视为"匹配"
+    hits = sum(1 for s, lb in zip(scores, labels) if (s >= MATCH_CLASSIFY_THRESHOLD) == (lb == 1))
     accuracy = hits / len(scores) if scores else 0.0
     corr = spearmanr(scores, labels).statistic
     return {

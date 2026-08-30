@@ -43,7 +43,7 @@ from app.core.logging import setup_logging
 
 logger = setup_logging("evaluate")
 
-from scripts.tune_match_weights import evaluate_pairs, load_pairs  # noqa: E402
+from scripts.tune_match_weights import evaluate_pairs, load_pairs, MATCH_CLASSIFY_THRESHOLD  # noqa: E402
 from tests.evaluate.run_baseline import (  # noqa: E402
     _norm_skill,
     keyword_match,
@@ -286,11 +286,11 @@ def eval_match(semantic: bool, golden: Path | None = None) -> dict:
     scores = result["scores"]
     labels = result["labels"]
 
-    # 混淆矩阵（阈值 0.5，与 evaluate_pairs 分类口径一致）
-    tp = sum(1 for s, l in zip(scores, labels) if s >= 0.5 and l == 1)
-    fp = sum(1 for s, l in zip(scores, labels) if s >= 0.5 and l == 0)
-    tn = sum(1 for s, l in zip(scores, labels) if s < 0.5 and l == 0)
-    fn = sum(1 for s, l in zip(scores, labels) if s < 0.5 and l == 1)
+    # 混淆矩阵（阈值 MATCH_CLASSIFY_THRESHOLD，与 evaluate_pairs 分类口径一致）
+    tp = sum(1 for s, l in zip(scores, labels) if s >= MATCH_CLASSIFY_THRESHOLD and l == 1)
+    fp = sum(1 for s, l in zip(scores, labels) if s >= MATCH_CLASSIFY_THRESHOLD and l == 0)
+    tn = sum(1 for s, l in zip(scores, labels) if s < MATCH_CLASSIFY_THRESHOLD and l == 0)
+    fn = sum(1 for s, l in zip(scores, labels) if s < MATCH_CLASSIFY_THRESHOLD and l == 1)
 
     # Top-3 推荐准确率（设计文档 §9.6）
     top3, top3_samples = _top3_accuracy(pairs, scores)
@@ -299,7 +299,7 @@ def eval_match(semantic: bool, golden: Path | None = None) -> dict:
     jd_titles = _load_jd_titles()
     error_cases: list[dict] = []
     for p, s, l in zip(pairs, scores, labels):
-        is_pred_match = s >= 0.5
+        is_pred_match = s >= MATCH_CLASSIFY_THRESHOLD
         is_gold_match = l == 1
         if is_pred_match != is_gold_match and len(error_cases) < 5:
             error_cases.append({
