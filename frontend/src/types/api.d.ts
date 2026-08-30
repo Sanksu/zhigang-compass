@@ -3179,7 +3179,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** JD 原始数据分页列表（管理页；q 关键词匹配标题/正文，source 源过滤） */
+        /** JD 原始数据分页列表（管理页；q 关键词匹配标题/正文，source 源过滤，needs_review 筛人工复核队列） */
         get: {
             parameters: {
                 query?: {
@@ -3187,6 +3187,8 @@ export interface paths {
                     q?: string;
                     /** @description 来源平台过滤（zhilian/boss/...） */
                     source?: string;
+                    /** @description 人工复核过滤（true=质量分 <0.6 的待复核队列；false=含未打标在内的非待复核行；缺省=全部） */
+                    needs_review?: boolean;
                     page?: number;
                     size?: number;
                 };
@@ -3256,7 +3258,7 @@ export interface paths {
                 404: components["responses"]["NotFound"];
             };
         };
-        /** 编辑 JD 原始数据（raw_text/source_url 等元数据；content_hash 同步重算，抽取快照不动——重抽需手动触发；写 AuditLog） */
+        /** 编辑 JD 原始数据（raw_text/source_url 等元数据；content_hash 同步重算，抽取快照不动——重抽需手动触发；needs_review true→false 视为放行并撤销 skipped 抽取标记；写 AuditLog） */
         put: {
             parameters: {
                 query?: never;
@@ -4835,6 +4837,10 @@ export interface components {
             is_desensitized?: boolean;
             /** @description 归一化岗位名（snapshot.normalized_position） */
             position?: string;
+            /** @description 人工复核标记（爬虫质量门 quality <0.6 → 待复核，未经放行不参与 LLM 抽取） */
+            needs_review?: boolean;
+            /** @description 质量评分 [0,1]（爬虫清洗管线打分；未打标行为 null） */
+            quality?: number | null;
             /** @description raw_text 长度 */
             text_length?: number;
             /** @description 最近更新时间（编辑审计参考） */
@@ -4860,6 +4866,10 @@ export interface components {
             crawled_at?: string;
             is_desensitized?: boolean;
             position?: string;
+            /** @description 人工复核标记（爬虫质量门 quality <0.6） */
+            needs_review?: boolean;
+            /** @description 质量评分 [0,1]；未打标行为 null */
+            quality?: number | null;
             raw_text: string;
             /** @description 抽取摘要（salary_range/education.level/experience_range，只读展示——编辑不自动重抽） */
             extraction_summary?: {
@@ -4876,6 +4886,8 @@ export interface components {
             source_url?: string;
             crawled_at?: string;
             raw_text?: string;
+            /** @description 人工复核结论（缺省=不变更）。true→false 视为放行：后端同步撤销 snapshot.extraction 的 skipped 占位标记，JD 重新进入抽取游标待下轮 batch_extract 抽取；真实抽取产物不受影响；写 AuditLog */
+            needs_review?: boolean;
         };
         /** @description 相似技能项（GET /graph/skill/similar，语义相似度） */
         SimilarSkillItem: {

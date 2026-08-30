@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ExternalLink, FileText, Loader2 } from 'lucide-react'
+import { ExternalLink, FileText, Flag, Loader2 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -59,6 +59,9 @@ function toForm(detail: JdAdminDetail): JdEditForm {
  *  - 编辑：标题/公司/城市/出处链接/采集时间/正文；正文或标题类字段变更时
  *    后端同步重算 content_hash（重爬重抽链路据此判定内容已变更）
  *  - 抽取快照不自动重抽（编辑不触发 LLM），抽取摘要只读展示
+ *  - 人工复核闭环：质量分 <0.6 的 JD（needs_review）被抽取游标跳过，可按
+ *    「只看待复核」筛选，在弹窗内核对正文后「放行」——后端撤销 skipped 标记，
+ *    该行重新进入抽取队列，下轮 ETL 批抽调用 LLM 抽取并入图
  *  - 删除：写审计日志，图谱 Evidence 备份不联动删除
  */
 export function AdminJdPage() {
@@ -70,6 +73,8 @@ export function AdminJdPage() {
 
   const [q, setQ] = useState('')
   const [source, setSource] = useState('')
+  // 人工复核队列筛选：true 时请求带 needs_review=true（质量分 <0.6 待复核）
+  const [pendingOnly, setPendingOnly] = useState(false)
   // 检索防抖值（第八轮 P2-31）：输入停止 300ms 后才提交给列表请求，
   // 避免逐键触发 /admin/jd 查询；初始值与空输入一致，不影响首屏加载
   const [debouncedQ, setDebouncedQ] = useState('')
@@ -95,13 +100,18 @@ export function AdminJdPage() {
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  /* 放行（needs_review true→false）：行级按钮走二次确认弹窗，弹窗内按钮直发 */
+  const [releaseTarget, setReleaseTarget] = useState<JdAdminItem | null>(null)
+  const [releasing, setReleasing] = useState(false)
+  const [releaseError, setReleaseError] = useState<string | null>(null)
 
   const params = useMemo(() => {
     const p = new URLSearchParams({ page: String(page), size: String(PAGE_SIZE) })
     if (debouncedQ) p.set('q', debouncedQ)
     if (debouncedSource) p.set('source', debouncedSource)
+    if (pendingOnly) p.set('needs_review', 'true')
     return p.toString()
-  }, [debouncedQ, debouncedSource, page])
+  }, [debouncedQ, debouncedSource, pendingOnly, page])
 
   function refresh() {
     setReloadKey((k) => k + 1)
@@ -176,6 +186,25 @@ export function AdminJdPage() {
     }
   }
 
+  /** 放行：撤销 skipped 抽取标记重新进入抽取队列；详情弹窗开着时同步刷新详情 */
+  async function release(jdId: number) {
+    setReleasing(true)
+    setReleaseError(null)
+    try {
+      const res = await apiPut<JdAdminDetail>(`/admin/jd/${jdId}`, { needs_review: false })
+      setReleaseTarget(null)
+      if (detail?.id === jdId) {
+        setDetail(res)
+        setForm(toForm(res))
+      }
+      refresh()
+    } catch {
+      setReleaseError('放行失败，请重试')
+    } finally {
+      setReleasing(false)
+    }
+  }
+
   const dirty = detail && form && JSON.stringify(toForm(detail)) !== JSON.stringify(form)
 
   return (
@@ -212,7 +241,25 @@ export function AdminJdPage() {
               placeholder="来源平台（如 zhilian）"
               className="w-44 h-8 text-sm"
             />
+            <Button
+              size="sm"
+              variant={pendingOnly ? 'default' : 'outline'}
+              className="h-8 text-sm"
+              onClick={() => {
+                setPendingOnly(!pendingOnly)
+                setPage(1)
+              }}
+            >
+              <Flag className="mr-1 size-3.5" />
+              只看待复核
+            </Button>
           </div>
+
+          {releaseError && (
+            <p className="mb-3 rounded-md border border-state-archived/30 bg-state-archived/5 px-3 py-2 text-xs text-state-archived">
+              {releaseError}
+            </p>
+          )}
 
           {detailError && (
             <p className="mb-3 rounded-md border border-state-archived/30 bg-state-archived/5 px-3 py-2 text-xs text-state-archived">
@@ -237,6 +284,7 @@ export function AdminJdPage() {
                   <TableHead>公司</TableHead>
                   <TableHead className="text-center">来源</TableHead>
                   <TableHead>归一化岗位</TableHead>
+                  <TableHead className="text-center">质量/复核</TableHead>
                   <TableHead className="text-center">正文字数</TableHead>
                   <TableHead>采集时间</TableHead>
                   <TableHead className="text-right">操作</TableHead>
@@ -260,6 +308,16 @@ export function AdminJdPage() {
                     <TableCell className="text-xs text-ink-muted max-w-36 truncate">
                       {item.position || '—'}
                     </TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span className="font-mono text-xs tabular-nums text-ink-muted">
+                          {item.quality != null ? item.quality.toFixed(2) : '—'}
+                        </span>
+                        {item.needs_review && (
+                          <Badge variant="archived" className="text-[11px]">待复核</Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-center font-mono text-xs tabular-nums">
                       {(item.text_length ?? 0).toLocaleString()}
                     </TableCell>
@@ -267,9 +325,21 @@ export function AdminJdPage() {
                       {item.crawled_at?.slice(0, 10) || '—'}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button size="sm" variant="ghost" onClick={() => openDetail(item)}>
-                        编辑
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        {item.needs_review && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={releasing}
+                            onClick={() => setReleaseTarget(item)}
+                          >
+                            放行
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" onClick={() => openDetail(item)}>
+                          编辑
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -387,6 +457,11 @@ export function AdminJdPage() {
                 {detail.is_desensitized && (
                   <Badge variant="archived" className="text-[11px]">已脱敏</Badge>
                 )}
+                {detail.needs_review && (
+                  <Badge variant="archived" className="text-[11px]">
+                    待人工复核（质量 {detail.quality != null ? detail.quality.toFixed(2) : '—'}）
+                  </Badge>
+                )}
               </div>
 
               <label className="block space-y-1">
@@ -411,6 +486,17 @@ export function AdminJdPage() {
                 >
                   删除
                 </Button>
+                {detail.needs_review && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={releasing}
+                    onClick={() => release(detail.id)}
+                  >
+                    {releasing && <Loader2 className="mr-1 size-3 animate-spin" />}
+                    放行（重新抽取）
+                  </Button>
+                )}
                 <Button size="sm" disabled={!dirty || saving} onClick={save}>
                   {saving && <Loader2 className="mr-1 size-3 animate-spin" />}
                   {dirty ? '保存变更' : '已保存'}
@@ -437,6 +523,38 @@ export function AdminJdPage() {
             </Button>
             <Button size="sm" variant="destructive" disabled={saving} onClick={remove}>
               确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 放行二次确认（行级入口；详情弹窗内按钮直发不走此处） */}
+      <Dialog
+        open={releaseTarget !== null}
+        onOpenChange={(o) => {
+          if (!o) setReleaseTarget(null)
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>放行 JD #{releaseTarget?.id}？</DialogTitle>
+            <DialogDescription>
+              该 JD 因质量分 {releaseTarget?.quality != null ? releaseTarget.quality.toFixed(2) : '—'}{' '}
+              低于阈值（0.6）被跳过抽取。放行后撤销 skipped 标记、重新进入抽取队列，
+              下轮 ETL 批抽将调用 LLM 抽取并入图；操作写审计日志。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button size="sm" variant="outline" onClick={() => setReleaseTarget(null)}>
+              取消
+            </Button>
+            <Button
+              size="sm"
+              disabled={releasing}
+              onClick={() => releaseTarget && release(releaseTarget.id)}
+            >
+              {releasing && <Loader2 className="mr-1 size-3 animate-spin" />}
+              确认放行
             </Button>
           </DialogFooter>
         </DialogContent>
