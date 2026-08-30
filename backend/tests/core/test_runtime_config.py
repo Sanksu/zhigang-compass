@@ -85,6 +85,18 @@ class TestSave:
         with pytest.raises(ValueError):
             rc.save({"evolution_cache_ttl": 1})
 
+    def test_llm_async_wall_budget_default_and_range(self, _isolated_config):
+        """第八轮裁决②旋钮：默认 90，越界拒绝（30-600）。"""
+        assert rc.get("llm_async_wall_budget") == 90
+        rc.save({"llm_async_wall_budget": 120})
+        assert rc.get("llm_async_wall_budget") == 120
+        with pytest.raises(ValueError):
+            rc.save({"llm_async_wall_budget": 10})  # < 30：单 provider 完整超时下限
+        with pytest.raises(ValueError):
+            rc.save({"llm_async_wall_budget": 601})  # > 600
+        with pytest.raises(ValueError):
+            rc.save({"llm_async_wall_budget": "90"})
+
     def test_save_invalid_etl_rejected(self, _isolated_config):
         with pytest.raises(ValueError):
             rc.save({"etl_batch_cap": 50})  # < 100

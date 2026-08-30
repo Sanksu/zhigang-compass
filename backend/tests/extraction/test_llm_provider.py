@@ -172,6 +172,58 @@ class TestCallWithFallback:
             chain.call_with_fallback("prompt", _DemoModel)
         assert type(exc_info.value) is LLMExtractionError
 
+    def test_wall_budget_skips_remaining_providers(self, tmp_path, monkeypatch):
+        """墙钟预算耗尽（第八轮裁决②）：剩余 provider 不再尝试，记超时语义。"""
+        chain, _ = _make_chain(tmp_path)
+        called: list[str] = []
+
+        def fake_call(provider, prompt, response_model, max_retries, timeout, system_prompt=None):
+            called.append(provider["name"])
+            raise LLMTimeoutError(f"{provider['name']} 超时")
+
+        monkeypatch.setattr(chain, "_call_provider", fake_call)
+        # 伪时钟：每次读数 +100s → 首 provider 尝试后墙钟即超预算
+        counter = {"t": 0.0}
+
+        def fake_perf_counter():
+            counter["t"] += 100.0
+            return counter["t"]
+
+        monkeypatch.setattr(llm_provider_module.time, "perf_counter", fake_perf_counter)
+        with pytest.raises(LLMTimeoutError) as exc_info:
+            chain.call_with_fallback("prompt", _DemoModel, wall_budget=90)
+        # 首个 provider 恒尝试（index>1 才检查预算），backup 不再发起调用
+        assert called == ["primary"]
+        msg = str(exc_info.value)
+        assert "墙钟预算 90s 已耗尽" in msg
+        assert "剩余 1 个 provider 不再尝试" in msg
+
+    def test_wall_budget_reads_runtime_knob_when_unset(self, tmp_path, monkeypatch):
+        """wall_budget 缺省读 runtime 旋钮 llm_async_wall_budget。"""
+        chain, _ = _make_chain(tmp_path)
+        called: list[str] = []
+
+        def fake_call(provider, prompt, response_model, max_retries, timeout, system_prompt=None):
+            called.append(provider["name"])
+            raise LLMTimeoutError(f"{provider['name']} 超时")
+
+        monkeypatch.setattr(chain, "_call_provider", fake_call)
+        monkeypatch.setattr(
+            llm_provider_module.runtime_config, "get",
+            lambda key, default=None: 60 if key == "llm_async_wall_budget" else default,
+        )
+        counter = {"t": 0.0}
+
+        def fake_perf_counter():
+            counter["t"] += 100.0
+            return counter["t"]
+
+        monkeypatch.setattr(llm_provider_module.time, "perf_counter", fake_perf_counter)
+        with pytest.raises(LLMTimeoutError) as exc_info:
+            chain.call_with_fallback("prompt", _DemoModel)
+        assert called == ["primary"]
+        assert "墙钟预算 60s 已耗尽" in str(exc_info.value)
+
 
 class TestStructuredOutputParams:
     """设计文档 §6.2 参数：max_tokens=2048 / top_p=0.9，yaml 可覆盖。"""

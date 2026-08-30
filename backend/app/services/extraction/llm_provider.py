@@ -27,6 +27,7 @@ from typing import Optional, Type, TypeVar
 import yaml
 from pydantic import BaseModel, ValidationError
 
+from app.core import runtime_config
 from app.services.extraction import llm_invocation
 
 T = TypeVar("T", bound=BaseModel)
@@ -577,11 +578,16 @@ class LLMProviderChain:
         max_retries: int = VALIDATION_RETRIES,
         system_prompt: Optional[str] = None,
         timeout: Optional[int] = None,
+        wall_budget: Optional[int] = None,
     ) -> T:
         """异步/批量路由：按优先级依次尝试，任一失败（超时/限流/5xx/连接/校验）切下一个。
 
         Args:
             timeout: 单 provider 超时（秒），缺省 ASYNC_TIMEOUT_SECONDS（30s）
+            wall_budget: 整链墙钟预算（秒），缺省读 runtime 旋钮
+                llm_async_wall_budget（默认 90，§6.4"30s×3=90s 上限"口径）；
+                超预算后剩余 provider 不再尝试（记超时语义），整链失败交
+                ARQ 延迟队列重试。首个 provider 恒尝试（index>1 才检查）。
 
         运维集成（§6.5）：尝试前查熔断/退避状态，命中则跳过；429 记录指数
         退避、5xx 累计熔断计数；调用成功清除该 provider 的熔断/退避状态。
@@ -589,6 +595,9 @@ class LLMProviderChain:
         if not self._providers:
             raise LLMConfigurationError("未配置可用 provider（无 api_key 或全部禁用）")
         effective_timeout = timeout or ASYNC_TIMEOUT_SECONDS
+        budget = wall_budget if wall_budget is not None else int(
+            runtime_config.get("llm_async_wall_budget", 90)
+        )
         failures: list[str] = []
         # 失败类别统计：区分"超时/不可用"（上层映射 504）与其余失败（503 语义）。
         # 全部 provider 均因超时/熔断/退避失败 → 抛 LLMTimeoutError，使同步/异步
@@ -598,6 +607,16 @@ class LLMProviderChain:
         wall_started = time.perf_counter()
         for index, provider in enumerate(self._providers, start=1):
             name = provider.get("name", "?")
+            # 墙钟预算耗尽：剩余 provider 记超时语义后停止（第八轮裁决②）——
+            # 墙钟上界此前无强制（N 个 provider 最坏 60N 秒，仅 ARQ job_timeout
+            # 1800 兜底），与 §6.4 的 90s 口径不符
+            if index > 1 and (time.perf_counter() - wall_started) >= budget:
+                remaining = len(self._providers) - index + 1
+                failures.append(
+                    f"墙钟预算 {budget}s 已耗尽，剩余 {remaining} 个 provider 不再尝试"
+                )
+                timeout_like += remaining
+                break
             # 熔断/退避窗口内跳过该 provider，不发起调用（§6.5 运维机制）
             skip_kind = _is_skipped(name)
             if skip_kind is not None:
