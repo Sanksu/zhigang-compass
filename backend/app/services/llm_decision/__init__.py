@@ -56,6 +56,7 @@ STATUS_REJECTED = "rejected"
 STATUS_AUTO_APPLIED = "auto_applied"
 STATUS_BLOCKED = "blocked"
 STATUS_FAILED = "failed"
+STATUS_REVERTED = "reverted"  # auto_applied 已被人工撤销（治理救济通道，副作用已反做）
 
 # ---- 动作白名单 ----
 # R0：只写建议字段/语义标签，可覆盖、无副作用，验收后可自动
@@ -157,7 +158,7 @@ def build_record(
     validate_domain(domain)
     if status not in {
         STATUS_SHADOW, STATUS_PROPOSAL, STATUS_APPROVED, STATUS_REJECTED,
-        STATUS_AUTO_APPLIED, STATUS_BLOCKED, STATUS_FAILED,
+        STATUS_AUTO_APPLIED, STATUS_BLOCKED, STATUS_FAILED, STATUS_REVERTED,
     }:
         raise ValueError(f"未知决策状态 {status!r}")
     return LLMDecisionRecord(

@@ -504,3 +504,147 @@ async def reject_llm_decision(
     ))
     await db.commit()
     return ok({"decision_id": str(record.id)})
+
+# ---- 治理救济通道：auto_applied 撤销（2026-08-31 方案 A） ----
+# 此前 dict_guard 自动档（低影响+高置信的 add_stopword/remove_node/remove_edge）
+# 生效后无任何事后救济：auto_applied 不接受 approve/reject，误删只能重建图。
+# 撤销 = 反做副作用（移除动态过滤 / 按 course_raw 重建课程节点）+ status=reverted
+# （dict_guard 据此对同实体+同动作永久跳过自动档，防止次日 ETL 再删）。
+
+# 撤销时间窗（天）：超窗记录只能走重爬/重建等其他恢复路径
+_UNDO_WINDOW_DAYS = 7
+# 可反做的自动动作（与 dict_guard tier_for 自动白名单对应）
+_UNDOABLE_ACTIONS = {"add_stopword", "remove_node", "remove_edge"}
+
+
+async def _rebuild_course_nodes(term: str) -> int:
+    """按 course_raw 同名快照重建课程节点与 LEARNABLE_VIA 边。
+
+    PG 拉取走事件循环，Neo4j 同步写入放线程池（ARQ/FastAPI 心跳保护惯例）。
+    返回重建节点数；0 = course_raw 已无同名记录（重爬后由 load_courses 自然恢复）。
+    """
+    import asyncio
+
+    from app.core.database import async_session_factory, neo4j_driver
+    from app.models.raw import CourseRaw
+    from app.services.kg.kg_service import import_course
+
+    async with async_session_factory() as session:
+        rows = (await session.scalars(
+            select(CourseRaw).where(CourseRaw.snapshot["title"].astext == term)
+        )).all()
+        snapshots = [dict(r.snapshot or {}) for r in rows]
+
+    def _import_all() -> int:
+        rebuilt = 0
+        with neo4j_driver.session() as neo4j_session:
+            for snap in snapshots:
+                import_course(neo4j_session, snap)
+                rebuilt += 1
+        return rebuilt
+
+    return await asyncio.to_thread(_import_all)
+
+
+@router.post("/llm-decisions/{decision_id}/undo")
+async def undo_llm_decision(
+    decision_id: str,
+    req: LLMDecisionReviewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """撤销一条 auto_applied 治理决策（写 AuditLog；效果反做失败整体 500 不落库）。
+
+    - add_stopword：移除动态停用词条目（归一化链路立即恢复；被连带删除的技能
+      节点随后续 JD 入图/聚合自然回填，响应 notes 说明）
+    - remove_node / remove_edge（course）：按 course_raw 同名快照重建课程节点与边
+    - remove_node(position)：无自动重建路径，明确 409（走重建图恢复）
+    - 撤销后 status=reverted，dict_guard 对同实体+同动作跳过自动档
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.api.common import ok, resolve_operator
+    from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
+    from app.models.business import AuditLog
+    from app.schemas.common import error
+    from app.services.llm_decision import (
+        DOMAIN_GOVERNANCE,
+        STATUS_AUTO_APPLIED,
+        STATUS_REVERTED,
+    )
+
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
+    reason = (req.review_reason or "").strip()
+    if not reason:
+        return error(ERR_VALIDATION, "撤销必须填写 review_reason")
+
+    record = await _load_decision(db, decision_id)
+    if record is None:
+        return error(ERR_NOT_FOUND, "决策记录不存在", http_status=404)
+    if record.domain != DOMAIN_GOVERNANCE or record.status != STATUS_AUTO_APPLIED:
+        return error(
+            ERR_CONFLICT,
+            f"仅 governance 域 auto_applied 记录可撤销（当前 {record.domain}/{record.status}）",
+            http_status=409,
+        )
+    action = (record.structured_output or {}).get("action") or ""
+    if action not in _UNDOABLE_ACTIONS:
+        return error(ERR_CONFLICT, f"动作 {action!r} 不可撤销", http_status=409)
+    if action == "remove_node" and record.entity_type == "position":
+        return error(
+            ERR_CONFLICT,
+            "position 节点删除暂无自动重建路径，请通过图谱重建恢复",
+            http_status=409,
+        )
+    if record.created_at is not None:
+        age = datetime.now(timezone.utc) - record.created_at
+        if age > timedelta(days=_UNDO_WINDOW_DAYS):
+            return error(
+                ERR_CONFLICT,
+                f"已超过 {_UNDO_WINDOW_DAYS} 天撤销窗口，请走重爬/重建恢复",
+                http_status=409,
+            )
+
+    term = record.entity_id
+    notes: list[str] = []
+    filter_removed = False
+    rebuilt = 0
+    if action == "add_stopword":
+        from app.services.extraction import dynamic_filters
+
+        filter_removed = dynamic_filters.remove_entry("blocked", term)
+        notes.append("动态停用词已移除；被连带删除的技能节点随后续 JD 入图/聚合自然回填")
+    else:
+        # remove_node(course) / remove_edge（term 为『技能→课程』，取课程名）
+        target = term
+        if action == "remove_edge":
+            from app.services.extraction.dict_guard import _split_edge
+
+            _, target = _split_edge(term)
+        rebuilt = await _rebuild_course_nodes(target)
+        if rebuilt == 0:
+            notes.append("course_raw 已无同名原始记录，节点待重新采集后由课程入图任务自然恢复")
+
+    record.status = STATUS_REVERTED
+    record.reviewer = operator
+    record.review_reason = reason
+    record.rollback_ref = (
+        f"filter_removed:{filter_removed}" if action == "add_stopword" else f"course_rebuilt:{rebuilt}"
+    )
+    db.add(AuditLog(
+        user_id=operator,
+        action="llm_decision_undo",
+        resource=record.domain,
+        resource_id=str(record.id),
+        detail={"reason": reason, "action": action, "term": term,
+                "filter_removed": filter_removed, "rebuilt": rebuilt},
+    ))
+    await db.commit()
+    return ok({
+        "decision_id": str(record.id),
+        "filter_removed": filter_removed,
+        "rebuilt": rebuilt,
+        "notes": notes,
+    })

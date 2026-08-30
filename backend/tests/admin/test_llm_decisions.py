@@ -1,5 +1,6 @@
 """LLM 决策只读接口测试（PR7a：列表分页过滤 + 汇总聚合。纯函数 + fake 会话）。"""
 
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -111,3 +112,183 @@ class TestListEndpoint:
         payload = {"items": [mod.serialize_record(r) for r in out], "limit": 10, "offset": 0}
         assert payload["items"][0]["domain"] == "governance"
         assert payload["limit"] == 10
+
+
+# ---- 治理救济通道：auto_applied 撤销（2026-08-31 方案 A） ----
+
+
+def _auto_record(entity_type="course", entity_id="某课程", action="remove_node",
+                 created_at=None, domain="governance", status="auto_applied"):
+    rec = LLMDecisionRecord(
+        id="00000000-0000-0000-0000-000000000009",
+        domain=domain,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        status=status,
+        confidence=0.85,
+        risk_tier="R1",
+        gate_result="pass",
+        provider="commandcode",
+        model="m",
+        structured_output={"action": action, "reason": "孤立课程"},
+    )
+    rec.created_at = created_at or datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
+    return rec
+
+
+class _UndoFakeSession(_FakeSession):
+    """undo 端点桩：session.get 返回记录；add/commit 记账。"""
+
+    def __init__(self, record):
+        self.record = record
+        self.added = []
+        self.committed = False
+
+    async def get(self, model, key):
+        return self.record
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def commit(self):
+        self.committed = True
+
+
+_ADMIN = {"sub": "00000000-0000-0000-0000-0000000000aa", "role": "admin"}
+
+
+def _undo(db, record=None):
+    import asyncio
+
+    from app.schemas.admin_requests import LLMDecisionReviewRequest
+
+    rec = record if record is not None else db.record
+    decision_id = str(rec.id) if rec is not None else "00000000-0000-0000-0000-000000000009"
+    return asyncio.run(mod.undo_llm_decision(
+        decision_id=decision_id,
+        req=LLMDecisionReviewRequest(review_reason="误删救济"),
+        db=db,
+        current_user=_ADMIN,
+    ))
+
+
+def _resp_code(resp):
+    import json
+
+    return json.loads(resp.body)["code"]
+
+
+class TestUndoGuards:
+    def test_非governance域不可撤销(self):
+        rec = _auto_record(domain="skill_normalize", status="proposal")
+        resp = _undo(_UndoFakeSession(rec), rec)
+        assert _resp_code(resp) == 4090
+
+    def test_非auto_applied状态不可撤销(self):
+        rec = _auto_record(status="proposal")
+        resp = _undo(_UndoFakeSession(rec), rec)
+        assert _resp_code(resp) == 4090
+
+    def test_不可撤销动作409(self):
+        rec = _auto_record(action="hide_node")
+        resp = _undo(_UndoFakeSession(rec), rec)
+        assert _resp_code(resp) == 4090
+
+    def test_position节点删除409(self):
+        rec = _auto_record(entity_type="position", entity_id="脏岗位")
+        resp = _undo(_UndoFakeSession(rec), rec)
+        assert _resp_code(resp) == 4090
+
+    def test_超窗409(self):
+        old = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
+        rec = _auto_record(created_at=old)
+        resp = _undo(_UndoFakeSession(rec), rec)
+        assert _resp_code(resp) == 4090
+
+    def test_记录不存在404(self):
+        db = _UndoFakeSession(None)
+        resp = _undo(db)
+        assert _resp_code(resp) == 4040
+
+    def test_操作者非UUID不落库(self, monkeypatch):
+        import asyncio
+
+        from app.schemas.admin_requests import LLMDecisionReviewRequest
+
+        rec = _auto_record()
+        db = _UndoFakeSession(rec)
+        resp = asyncio.run(mod.undo_llm_decision(
+            decision_id=str(rec.id),
+            req=LLMDecisionReviewRequest(review_reason="x"),
+            db=db,
+            current_user={"sub": "not-a-uuid", "role": "admin"},
+        ))
+        assert _resp_code(resp) == 4000
+        assert not db.committed
+
+
+class TestUndoEffects:
+    def test_移除停用词并置reverted写审计(self, monkeypatch):
+        calls = {}
+
+        def fake_remove(kind, term):
+            calls["args"] = (kind, term)
+            return True
+
+        monkeypatch.setattr(
+            "app.services.extraction.dynamic_filters.remove_entry", fake_remove)
+        rec = _auto_record(entity_type="skill", entity_id="Asana", action="add_stopword")
+        db = _UndoFakeSession(rec)
+        resp = _undo(db)
+
+        assert calls["args"] == ("blocked", "Asana")
+        assert rec.status == "reverted"
+        assert rec.reviewer == _ADMIN["sub"]
+        assert rec.rollback_ref == "filter_removed:True"
+        assert db.committed and len(db.added) == 1
+        assert db.added[0].action == "llm_decision_undo"
+        data = json.loads(resp.body)["data"] if hasattr(resp, "body") else resp.data
+        assert data["filter_removed"] is True
+
+    def test_课程重建并回写rebuilt(self, monkeypatch):
+        async def fake_rebuild(term):
+            assert term == "某课程"
+            return 1
+
+        monkeypatch.setattr(mod, "_rebuild_course_nodes", fake_rebuild)
+        rec = _auto_record(entity_type="course", entity_id="某课程", action="remove_node")
+        db = _UndoFakeSession(rec)
+        resp = _undo(db)
+
+        assert rec.status == "reverted"
+        assert rec.rollback_ref == "course_rebuilt:1"
+        data = json.loads(resp.body)["data"] if hasattr(resp, "body") else resp.data
+        assert data["rebuilt"] == 1 and data["notes"] == []
+
+    def test_原始缺失走notes部分撤销(self, monkeypatch):
+        async def fake_rebuild(term):
+            return 0
+
+        monkeypatch.setattr(mod, "_rebuild_course_nodes", fake_rebuild)
+        rec = _auto_record()
+        db = _UndoFakeSession(rec)
+        resp = _undo(db)
+
+        assert rec.status == "reverted"
+        assert rec.rollback_ref == "course_rebuilt:0"
+        data = json.loads(resp.body)["data"] if hasattr(resp, "body") else resp.data
+        assert data["rebuilt"] == 0 and data["notes"]
+
+    def test_课程脏边撤销按课程名重建(self, monkeypatch):
+        seen = {}
+
+        async def fake_rebuild(term):
+            seen["term"] = term
+            return 2
+
+        monkeypatch.setattr(mod, "_rebuild_course_nodes", fake_rebuild)
+        rec = _auto_record(action="remove_edge", entity_id="Python→某课程")
+        db = _UndoFakeSession(rec)
+        _undo(db)
+        assert seen["term"] == "某课程"
+        assert rec.rollback_ref == "course_rebuilt:2"
