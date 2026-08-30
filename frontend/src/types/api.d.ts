@@ -5542,9 +5542,9 @@ export interface components {
             id: string;
             /** @description 岗位名称 */
             name: string;
-            /** @description 所在期次序号（0 起升序） */
+            /** @description 所在期次序号（0 起升序，空期剔除后连续） */
             period_index: number;
-            /** @description 该期该技能在此岗位的 REQUIRES 频次 */
+            /** @description 该岗位当期要求的技能总数（REQUIRES 出度，作粗细权重） */
             freq: number;
         };
         SkillFlowLink: {
@@ -5552,7 +5552,7 @@ export interface components {
             source: string;
             /** @description 右侧期次节点 id（同名岗位相邻期） */
             target: string;
-            /** @description 左侧期次频次 */
+            /** @description 左侧期次该岗位要求的技能总数（REQUIRES 出度） */
             value: number;
         };
         /** @description GET /evolution/skill/{id}/flow 响应 data（桑基图三元组） */
@@ -5560,8 +5560,10 @@ export interface components {
             skill_id: string;
             /** @description 快照中最近出现的技能名 */
             skill_name: string;
-            /** @description 期次标签（快照日期 ISO，升序，与 period_index 对齐） */
+            /** @description 期次标签（快照日期 ISO，升序，与 period_index 对齐； 该技能无关联岗位的期次整期剔除，为连续重排序号） */
             periods: (string | null)[];
+            /** @description 各期关联岗位总数（含 Top-N 之外），与 period_index 对齐 */
+            totals: number[];
             /** @description 每期 Top-N 岗位截断 */
             top?: number;
             nodes: components["schemas"]["SkillFlowNode"][];
