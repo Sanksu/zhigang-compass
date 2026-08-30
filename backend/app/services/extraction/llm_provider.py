@@ -1,8 +1,10 @@
 """LLM Provider 链（M3 参考实现，算法红线：须算法岗张恺天逐行把关）。
 
 对齐设计文档 §6.5 + AGENTS.md §6.4：
-- 读取 `configs/llm_providers.yaml`（单一事实源），provider 为任意 OpenAI 兼容 API，
-  可自由增删/调序；api_key 由管理员经 /admin/llm 后台填写并持久化到该文件
+- 读取 `configs/llm_providers.yaml`（单一事实源），provider 为任意 OpenAI 兼容 API
+  （缺省 `protocol: openai`）或 Anthropic Messages 兼容 API（`protocol: anthropic`，
+  如 z.ai Coding Plan `/api/anthropic`），可自由增删/调序；api_key 由管理员经
+  /admin/llm 后台填写并持久化到该文件
 - 按 priority 升序、enabled 过滤，按顺序依次尝试
 - instructor + Pydantic Schema 强校验（幻觉防控第一道防线），校验失败自动重试 1 次
 - 同步路由 `call_sync`：单次尝试不重试，超时即抛 `LLMTimeoutError`（同步路由 10s 上限）
@@ -107,16 +109,56 @@ def _get_redis_client():
 _client_cache: dict = {}
 _CLIENT_CACHE_MAX = 32
 
+# provider 协议（2026-08-30）：openai（缺省，OpenAI Chat Completions 兼容）|
+# anthropic（Anthropic Messages 协议，如 z.ai Coding Plan /api/anthropic）
+_PROTOCOLS = ("openai", "anthropic")
+_ANTHROPIC_VERSION_HEADER = "2023-06-01"
+
+
+def _provider_protocol(provider: dict) -> str:
+    """读取 provider 协议，缺省 openai；非法值按 openai 兜底（配置宽松解析）。"""
+    protocol = (provider.get("protocol") or "openai").strip().lower()
+    return protocol if protocol in _PROTOCOLS else "openai"
+
 
 def _build_client(provider: dict, timeout: int):
     """构建/复用 instructor client（连接复用，批量/并发场景降低握手开销）。"""
     import instructor
-    from openai import OpenAI
 
     # 逐行审查修复（2026-08-24）：与 _call_provider 同源解析——env-only provider
     # 此前直读明文得空串，真实调用链以空 key 构建 client（测试 monkeypatch 掉
     # _build_client 掩盖了该缺口，仅健康检查路径正确）
     api_key = _resolve_api_key(provider)
+    if _provider_protocol(provider) == "anthropic":
+        import anthropic as anthropic_sdk
+
+        # from_anthropic 函数身份入 key：测试 monkeypatch 换 fake 时不命中缓存
+        key = (
+            instructor.from_anthropic,
+            provider["base_url"],
+            api_key,
+            provider.get("supports_function_calling", True),
+            timeout,
+        )
+        client = _client_cache.get(key)
+        if client is None:
+            client = instructor.from_anthropic(
+                anthropic_sdk.Anthropic(
+                    base_url=key[1], api_key=key[2], timeout=timeout,
+                ),
+                mode=(
+                    instructor.Mode.ANTHROPIC_TOOLS
+                    if key[3]
+                    else instructor.Mode.ANTHROPIC_JSON
+                ),
+            )
+            if len(_client_cache) >= _CLIENT_CACHE_MAX:
+                _client_cache.pop(next(iter(_client_cache)))
+            _client_cache[key] = client
+        return client
+
+    from openai import OpenAI
+
     # from_openai 函数身份入 key：测试 monkeypatch 换 fake 时不命中缓存（每次重建）
     key = (
         instructor.from_openai,
@@ -259,25 +301,36 @@ def _clear_state(name: str) -> None:
 
 
 def check_provider_health(provider: dict, timeout: Optional[int] = None) -> bool:
-    """探测单个 provider 的 /models 端点（OpenAI 兼容）。
+    """探测单个 provider 的模型列表端点（OpenAI /models 或 Anthropic /v1/models）。
 
-    GET `{base_url}/models`（Bearer api_key）：200 → healthy，否则 unhealthy。
+    OpenAI 兼容：GET `{base_url}/models`（Bearer api_key）；
+    Anthropic 协议：GET `{base_url}/v1/models`（x-api-key + anthropic-version 头）。
+    200 → healthy，否则 unhealthy。
     结果写 Redis（`llm:health:{name}`，TTL 覆盖 2 个检查周期）；
     Redis 不可用 / 网络异常均不抛异常（健康检查为旁路增强，探测结果仍返回）。
     """
     base_url = (provider.get("base_url") or "").rstrip("/")
     api_key = _resolve_api_key(provider)
+    is_anthropic = _provider_protocol(provider) == "anthropic"
     healthy = False
     if base_url:
+        if is_anthropic:
+            url = f"{base_url}/v1/models"
+            auth_headers = (
+                {
+                    "x-api-key": api_key,
+                    "anthropic-version": _ANTHROPIC_VERSION_HEADER,
+                }
+                if api_key
+                else {}
+            )
+        else:
+            url = f"{base_url}/models"
+            auth_headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         # 部分网关（如 opencode.ai）对无 UA 的 urllib 请求返回 403，需带浏览器 UA 探测
         req = urllib.request.Request(
-            f"{base_url}/models",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "User-Agent": "zhigang-compass/1.0",
-            }
-            if api_key
-            else {"User-Agent": "zhigang-compass/1.0"},
+            url,
+            headers={**auth_headers, "User-Agent": "zhigang-compass/1.0"},
         )
         try:
             with urllib.request.urlopen(
@@ -627,19 +680,23 @@ class LLMProviderChain:
         - 5xx（APIStatusError, status_code>=500）→ LLMServerError，累计熔断
         - 其余（超时/连接/4xx/校验）保持既有 LLMTimeoutError/LLMExtractionError
         """
-        from openai import (
-            APIConnectionError,
-            APIStatusError,
-            APITimeoutError,
-            RateLimitError,
-        )
-
         api_key = _resolve_api_key(provider)
         if not api_key:
             env_hint = f"（api_key_env={provider.get('api_key_env')} 未设置或为空）" if provider.get("api_key_env") else ""
             raise LLMConfigurationError(
                 f"provider '{provider['name']}' 未配置 api_key{env_hint}"
             )
+        if _provider_protocol(provider) == "anthropic":
+            return self._call_provider_anthropic(
+                provider, prompt, response_model, max_retries, timeout, system_prompt,
+            )
+
+        from openai import (
+            APIConnectionError,
+            APIStatusError,
+            APITimeoutError,
+            RateLimitError,
+        )
 
         client = _build_client(provider, timeout)
         try:
@@ -685,6 +742,84 @@ class LLMProviderChain:
         except Exception as e:  # 外部 API/校验异常统一包装，交给重试链
             # 校验失败细分：instructor 重试耗尽（InstructorRetryException）与
             # 裸 Pydantic 校验错误 → validation_error；其余保持 extraction_error
+            outcome = _OUTCOME_EXTRACTION_ERROR
+            try:
+                from instructor.exceptions import InstructorRetryException
+
+                if isinstance(e, (InstructorRetryException,)):
+                    outcome = _OUTCOME_VALIDATION_ERROR
+            except ImportError:
+                pass
+            if isinstance(e, ValidationError):
+                outcome = _OUTCOME_VALIDATION_ERROR
+            raise _with_outcome(
+                LLMExtractionError(f"provider '{provider['name']}' 调用异常: {e}"),
+                outcome,
+            ) from e
+
+    def _call_provider_anthropic(
+        self,
+        provider: dict,
+        prompt: str,
+        response_model: Type[T],
+        max_retries: int,
+        timeout: int,
+        system_prompt: Optional[str] = None,
+    ) -> T:
+        """Anthropic Messages 协议单 provider 调用（如 z.ai Coding Plan）。
+
+        instructor from_anthropic 自动把 messages 中 role:system 提取为顶层
+        system 参数（v2 process_messages_for_anthropic），消息构造与 OpenAI
+        路径同源；异常映射语义与 _call_provider 完全一致（§6.5）。
+        注：anthropic SDK 1.x 类型化签名不含 temperature/top_p，本路径不传
+        采样参数（provider 默认值）；额外请求体经 `extra_body` 透传（如
+        GLM 思考模式 `{"thinking": {"type": "disabled"}}`）。
+        """
+        from anthropic import (
+            APIConnectionError,
+            APIStatusError,
+            APITimeoutError,
+            RateLimitError,
+        )
+
+        client = _build_client(provider, timeout)
+        try:
+            return client.messages.create(
+                model=provider["model"],
+                response_model=response_model,
+                messages=self._build_messages(prompt, system_prompt),
+                max_tokens=self._max_tokens,
+                max_retries=max_retries,
+                extra_body=provider.get("extra_body") or None,
+            )
+        except APITimeoutError as e:
+            raise _with_outcome(
+                LLMTimeoutError(f"provider '{provider['name']}' 超时（{timeout}s）"),
+                _OUTCOME_TIMEOUT,
+            ) from e
+        except RateLimitError as e:
+            raise _with_outcome(
+                LLMRateLimitError(f"provider '{provider['name']}' 触发限流(429): {e}"),
+                _OUTCOME_RATE_LIMITED,
+            ) from e
+        except APIStatusError as e:
+            if e.status_code >= 500:
+                raise _with_outcome(
+                    LLMServerError(
+                        f"provider '{provider['name']}' 服务不可用({e.status_code}): {e}"
+                    ),
+                    _OUTCOME_SERVER_ERROR,
+                ) from e
+            raise _with_outcome(
+                LLMExtractionError(f"provider '{provider['name']}' 调用失败: {e}"),
+                _OUTCOME_HTTP_4XX,
+            ) from e
+        except APIConnectionError as e:
+            raise _with_outcome(
+                LLMExtractionError(f"provider '{provider['name']}' 连接失败: {e}"),
+                _OUTCOME_CONNECTION_ERROR,
+            ) from e
+        except Exception as e:  # 外部 API/校验异常统一包装，交给重试链
             outcome = _OUTCOME_EXTRACTION_ERROR
             try:
                 from instructor.exceptions import InstructorRetryException

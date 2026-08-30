@@ -49,6 +49,7 @@ const EMPTY_FORM: FormState = {
   model: '',
   supports_function_calling: true,
   enabled: true,
+  protocol: 'openai',
 }
 
 type Feedback = { type: 'ok' | 'err'; text: string } | null
@@ -181,6 +182,7 @@ export function AdminLlmPage() {
                   <TableHead className="w-16">优先级</TableHead>
                   <TableHead>名称</TableHead>
                   <TableHead>模型</TableHead>
+                  <TableHead className="w-24">协议</TableHead>
                   <TableHead className="max-w-52">Base URL</TableHead>
                   <TableHead className="w-28">API Key</TableHead>
                   <TableHead className="w-20">状态</TableHead>
@@ -195,6 +197,13 @@ export function AdminLlmPage() {
                       <TableCell className="font-mono text-xs">{p.priority}</TableCell>
                       <TableCell className="font-medium font-mono">{p.name}</TableCell>
                       <TableCell className="font-mono text-xs">{p.model}</TableCell>
+                      <TableCell>
+                        {p.protocol === 'anthropic' ? (
+                          <Badge variant="emerging">anthropic</Badge>
+                        ) : (
+                          <span className="text-xs text-ink-muted">openai</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-xs font-mono text-ink-muted truncate max-w-52">{p.base_url}</TableCell>
                       <TableCell className="text-xs font-mono">{p.api_key ? `${p.api_key.slice(-4)}` : '未配置'}</TableCell>
                       <TableCell>
@@ -287,18 +296,33 @@ export function AdminLlmPage() {
                 placeholder={editIndex !== null ? '••••••••（不修改请留空）' : 'sk-…'}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label>Function Calling</Label>
-              <Select
-                value={form.supports_function_calling ? 'yes' : 'no'}
-                onValueChange={(v) => setForm((f) => ({ ...f, supports_function_calling: v === 'yes' }))}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="yes">支持</SelectItem>
-                  <SelectItem value="no">不支持</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>协议</Label>
+                <Select
+                  value={form.protocol === 'anthropic' ? 'anthropic' : 'openai'}
+                  onValueChange={(v) => setForm((f) => ({ ...f, protocol: v as 'openai' | 'anthropic' }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="openai">openai（Chat Completions）</SelectItem>
+                    <SelectItem value="anthropic">anthropic（Messages）</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Function Calling</Label>
+                <Select
+                  value={form.supports_function_calling ? 'yes' : 'no'}
+                  onValueChange={(v) => setForm((f) => ({ ...f, supports_function_calling: v === 'yes' }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="yes">支持</SelectItem>
+                    <SelectItem value="no">不支持</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
           <DialogFooter>

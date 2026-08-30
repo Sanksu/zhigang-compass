@@ -5362,6 +5362,12 @@ export interface components {
             model: string;
             supports_function_calling?: boolean;
             enabled: boolean;
+            /**
+             * @description API 协议（openai=Chat Completions 兼容，缺省；anthropic=Anthropic Messages 兼容，如 z.ai Coding Plan /api/anthropic）
+             * @default openai
+             * @enum {string}
+             */
+            protocol: "openai" | "anthropic";
             /** @description provider 特定请求参数（如 deepseek 关闭思考模式），编辑时须保留 */
             extra_body?: Record<string, never>;
         };
