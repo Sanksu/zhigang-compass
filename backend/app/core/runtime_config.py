@@ -69,6 +69,10 @@ DEFAULTS: dict = {
     # 每岗位评分 JD 数上限（按 updated_at 最近 N 条宽 JD）：compare 与 recommend
     # 对齐共用，防全量重评超时（850 条岗位曾致 133s；算法口径，需张恺天确认）
     "match_jd_max_per_position": 50,
+    # LLM 异步重试链墙钟预算秒（第八轮裁决②，§6.4 口径 30s×3=90s）：超预算
+    # 剩余 provider 不再尝试，整链失败交 ARQ 延迟队列重试；30s 下限=单 provider
+    # 一次完整超时，防误配成零尝试
+    "llm_async_wall_budget": 90,
 }
 
 _VALIDATORS = {
@@ -102,6 +106,7 @@ _VALIDATORS = {
     "match_jd_rough_k": lambda v: isinstance(v, int) and 1 <= v <= 2000,
     "match_jd_min_skills": lambda v: isinstance(v, int) and 1 <= v <= 20,
     "match_jd_max_per_position": lambda v: isinstance(v, int) and 1 <= v <= 1000,
+    "llm_async_wall_budget": lambda v: isinstance(v, int) and 30 <= v <= 600,
 }
 
 
