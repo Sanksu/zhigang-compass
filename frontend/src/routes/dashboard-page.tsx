@@ -1,14 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { Activity, Database, GitBranch, Network, TrendingUp, Users } from 'lucide-react'
-import * as echarts from 'echarts'
+// 按需导入（第八轮 P2-32：与本仓 charts.tsx/graph-2d.tsx 口径一致，
+// 本页仅用 Bar + Grid(x/y 轴)/Legend/Tooltip 的 Canvas 渲染）
+import * as echarts from 'echarts/core'
+import { BarChart } from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { MetricCard } from '@/components/shared/metric-card'
 import { apiGet } from '@/lib/api'
-import { formatDateTime, isDark } from '@/lib/utils'
+import { escapeHtml, formatDateTime, isDark } from '@/lib/utils'
 import type { components } from '@/types/api'
+
+echarts.use([BarChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 interface StatItem {
   label: string
@@ -91,7 +98,7 @@ function VersionTrendChart({ versions }: { versions: EvolutionVersion[] }) {
           if (list.length === 0) return ''
           const v = asc.find((x) => x.version_id === list[0].name)
           const lines = [
-            `<b>${list[0].name ?? ''}</b>`,
+            `<b>${escapeHtml(list[0].name ?? '')}</b>`,
             v?.created_at ? `<span style="color:${muted};font-size:11px">${formatDateTime(v.created_at)}</span>` : '',
             ...list.map((p) => `${p.marker ?? ''}${p.seriesName}: <b>${p.value ?? 0}</b>`),
           ]
@@ -146,7 +153,7 @@ const EMPTY_STATS: StatItem[] = [
 ]
 
 const QUICK_LINKS = [
-  { to: '/graph', icon: Network, title: '能力图谱', desc: '2D 力导向图为主，3D 模式可选。四种视图切换：全景 / 技术栈 / 级别 / 岗位中心', badge: '真实' },
+  { to: '/graph', icon: Network, title: '能力图谱', desc: '2D 力导向图为主，3D 模式可选。视图切换：全景 / 技术栈 / 岗位画像', badge: '真实' },
   { to: '/evolution', icon: TrendingUp, title: '演化看板', desc: '图谱版本快照追踪技能频次变化，Z-score 检测新兴/衰退技能', badge: '真实' },
   { to: '/resume-match', icon: Users, title: '简历匹配', desc: '上传简历 → LLM 解析 → 三维加权匹配 → 差距分析', badge: '真实' },
   { to: '/admin/crawl', icon: Database, title: '爬取管理', desc: '13 源采集状态 · 真实统计（DB 入库口径）', badge: 'admin' },
@@ -289,7 +296,7 @@ export function DashboardPage() {
                       <div className="flex items-center gap-2">
                         <Icon className="size-3.5 text-ink-muted shrink-0" />
                         <p className="text-sm text-ink truncate">{act.title}</p>
-                        <span className="text-[10px] font-mono text-ink-faint ml-auto shrink-0">{act.time}</span>
+                        <span className="text-[11px] font-mono text-ink-faint ml-auto shrink-0">{act.time}</span>
                       </div>
                       <p className="text-xs text-ink-muted mt-0.5">{act.desc}</p>
                     </div>
@@ -317,7 +324,7 @@ export function DashboardPage() {
                   <div className="flex items-center gap-2 mb-1">
                     <Icon className="size-3.5 text-ink-secondary" />
                     <span className="text-sm font-medium text-ink">{link.title}</span>
-                    <Badge variant="outline" className="text-[10px] ml-auto font-mono">{link.badge}</Badge>
+                    <Badge variant="outline" className="text-[11px] ml-auto font-mono">{link.badge}</Badge>
                   </div>
                   <p className="text-xs text-ink-muted leading-relaxed">{link.desc}</p>
                 </Link>
@@ -363,7 +370,7 @@ export function DashboardPage() {
                 {sources.map((src) => (
                   <div key={src.id} className="rounded-md border p-2">
                     <div className="flex items-center justify-between">
-                      <span className="font-mono text-[10px] text-ink-faint">{src.level}</span>
+                      <span className="font-mono text-[11px] text-ink-faint">{src.level}</span>
                     </div>
                     <p className="text-ink mt-0.5 truncate">{src.name}</p>
                     <p className="text-ink-muted font-mono tabular-nums">{src.total_count.toLocaleString()}</p>

@@ -125,18 +125,35 @@ async def _prewarm_semantic() -> None:
         # 匹配请求承担）。失败静默不阻断启动；匹配侧池化不可用降级命中粗选。
         from app.services.matching.jd_vector_recall import load_pool_vectors_cached
         from app.core.database import redis_client
-        from app.services.matching.jd_profiles import rows_to_profiles
+        from app.services.matching.jd_profiles import jd_profile_from_snapshot
         from app.models.raw import JDRaw
         from sqlalchemy import select
         from app.core.database import async_session_factory
 
+        # 第八轮 P1-5：原 select(JDRaw) 全实体 .all() 会把 raw_text 等大列
+        # 一并载入（爬虫持续入库，启动内存峰值线性恶化）。改为最小列集 +
+        # 服务端游标流式逐行构建轻量 profile（jd_profile_from_snapshot 仅
+        # 消费 id/snapshot/source/source_url，本预热不需要 jd_position 映射）。
+        profiles = []
         async with async_session_factory() as session:
-            rows = (await session.scalars(
-                select(JDRaw)
+            result = await session.stream(
+                select(
+                    JDRaw.id, JDRaw.snapshot, JDRaw.source, JDRaw.source_url,
+                )
                 .where(JDRaw.snapshot["extraction"].astext.is_not(None))
                 .order_by(JDRaw.id)
-            )).all()
-        profiles, _ = rows_to_profiles(rows)
+                .execution_options(yield_per=500),
+            )
+            try:
+                async for jd_id, snapshot, source, source_url in result:
+                    prof = jd_profile_from_snapshot(
+                        snapshot or {}, str(jd_id),
+                        source=source or "", source_url=source_url or "",
+                    )
+                    if prof is not None:
+                        profiles.append(prof)
+            finally:
+                await result.close()
         await load_pool_vectors_cached(
             profiles, SkillEmbedder.get(), redis_client,
         )

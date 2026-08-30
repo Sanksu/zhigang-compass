@@ -16,6 +16,31 @@ from app.services.graph.visibility import (
 from app.services.graph_algorithms.shortest_path import shortest_path
 from app.services.kg.skill_relations import graph_prerequisite_chain
 
+# Lucene 全文查询特殊字符（db.index.fulltext.queryNodes 的查询语法）：
+# 用户输入含这些字符时会被当作查询操作符——轻则语法报错（GqlError→500），
+# 重则被构造成通配/范围查询拖垮索引（第八轮审查 P2-5）。
+_LUCENE_SPECIAL_CHARS = set('+-!(){}[]^"~*?:\\/')
+
+
+def _escape_lucene(q: str) -> str:
+    """转义 Lucene 查询语法特殊字符（对齐 Lucene QueryParser.escape 语义）。
+
+    - 单特殊字符（`+ - ! ( ) { } [ ] ^ " ~ * ? : \\ /`）前加反斜杠；
+    - `&&` / `||` 操作符转义首个字符（单 `&` / `|` 非法不构成操作符，不动）；
+    - 其余字符（含中文、空格）原样保留——cjk 分词器按原词切分，转义不影响。
+    """
+    out: list[str] = []
+    for i, ch in enumerate(q):
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch in _LUCENE_SPECIAL_CHARS:
+            out.append("\\" + ch)
+        elif ch in "&|" and q[i + 1 : i + 2] == ch:
+            out.append("\\" + ch)
+        else:
+            out.append(ch)
+    return "".join(out)
+
 
 def query_skill_positions(session, skill_id: str, status_filter: str) -> list[dict]:
     """skill_positions 同步 Neo4j 查询（线程池执行）。"""
@@ -44,42 +69,48 @@ def query_skill_positions(session, skill_id: str, status_filter: str) -> list[di
 def query_fulltext_search(
     session, q: str, type_: str, status_clause: str, offset: int, size: int,
 ) -> tuple[list[dict], int]:
-    """fulltext_search 同步 Neo4j 查询（线程池执行，08-14 审查）。"""
+    """fulltext_search 同步 Neo4j 查询（线程池执行，08-14 审查）。
+
+    q 进 queryNodes 前经 _escape_lucene 转义（第八轮 P2-5：`("` 等 Lucene
+    语法字符触发 GqlError→500）；evidence 降级 CONTAINS 用原文（子串匹配，
+    转义反而失真）。
+    """
+    lq = _escape_lucene(q)
     if type_ in ("position", "skill"):
         index = "position_search" if type_ == "position" else "skill_search"
         result = session.run(
             f"""
-            CALL db.index.fulltext.queryNodes('{index}', $q) YIELD node, score
+            CALL db.index.fulltext.queryNodes('{index}', $lq) YIELD node, score
             {status_clause}
             RETURN node.id AS id, node.name AS name, score
             ORDER BY score DESC SKIP $offset LIMIT $size
             """,
-            q=q, offset=offset, size=size,
+            lq=lq, offset=offset, size=size,
             public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
         )
         total_row = session.run(
             f"""
-            CALL db.index.fulltext.queryNodes('{index}', $q) YIELD node
+            CALL db.index.fulltext.queryNodes('{index}', $lq) YIELD node
             {status_clause}
             RETURN count(node) AS c
             """,
-            q=q,
+            lq=lq,
             public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
         ).single()
         total = total_row["c"] if total_row else 0
     else:
         try:
             result = session.run(
-                "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
+                "CALL db.index.fulltext.queryNodes('evidence_search', $lq) "
                 "YIELD node, score "
                 "RETURN node.id AS id, node.source AS name, score "
                 "ORDER BY score DESC SKIP $offset LIMIT $size",
-                q=q, offset=offset, size=size,
+                lq=lq, offset=offset, size=size,
             )
             total_row = session.run(
-                "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
+                "CALL db.index.fulltext.queryNodes('evidence_search', $lq) "
                 "YIELD node RETURN count(node) AS c",
-                q=q,
+                lq=lq,
             ).single()
         except Exception:
             result = session.run(
@@ -265,7 +296,13 @@ def load_position(session, id: str, user=None) -> dict | None:
         WHERE {status_filter}
         RETURN p.id AS id, p.name AS name, p.required_years AS required_years,
                p.required_education AS required_education, p.last_updated AS last_updated,
-               p.status AS status, p.freq AS freq, p.soft_skills AS soft_skills
+               p.status AS status, p.freq AS freq, p.soft_skills AS soft_skills,
+               p.evidence_count AS evidence_count,
+               p.education_distribution AS education_distribution,
+               p.experience_distribution AS experience_distribution,
+               p.salary_tiers AS salary_tiers, p.salary_min AS salary_min,
+               p.salary_max AS salary_max, p.salary_currency AS salary_currency,
+               p.salary_range AS salary_range
         """,
         id=id, public_statuses=list(_PUBLIC_POSITION_STATUSES),
     ).single()

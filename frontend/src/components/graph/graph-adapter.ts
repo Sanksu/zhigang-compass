@@ -28,6 +28,8 @@ export function toGraphData(raw: GraphViewData): GraphData {
     name: node.name,
     type: node.type,
     value: degree.get(node.id) ?? 0,
+    // 岗位画像大类标记透传（positionPortrait 视图层级布局的分流依据）
+    ...(node.type === 'attr' && node.portrait_category ? { portrait_category: true } : {}),
     status: node.type === 'position' ? (isValidStatus(node.status) ? node.status : 'candidate') : undefined,
     ...(node.type === 'position'
       ? { domain_id: node.domain_id ?? undefined, domain_name: node.domain_name ?? undefined }

@@ -15,23 +15,30 @@
 
 import type { components } from '@/types/api'
 
-/** 契约 GraphNode.type（position/skill/evidence） */
+/** 契约 GraphNode.type（position/skill/evidence/attr——'attr' 为岗位画像视图
+ *  /graph/view/positionPortrait 的属性维度节点：薪资/经验等大类与条目，
+ *  第八轮 P2-24 契约补全后入枚举，驱动画布 symbol/color/size 分支与
+ *  Record 编译期完备性检查） */
 export type NodeType = NonNullable<components['schemas']['GraphNode']['type']>
 /** 契约 GraphNode.status（岗位五状态机） */
 export type PositionStatus = NonNullable<components['schemas']['GraphNode']['status']>
 /** 契约 GraphViewType（四种视图枚举） */
 export type GraphViewType = components['schemas']['GraphViewType']
 
-/** 契约 GraphNode + 前端自算度数 value（布局权重，非后端返回字段） */
-export type GraphNode = components['schemas']['GraphNode'] & {
-  /** 节点度数（toGraphData 由 edges 统计，驱动布局斥力/大小） */
+/** 契约 GraphNode + 前端扩展/自算字段：
+ *  - type 覆写为 NodeType（含展示层扩展 'attr'，见上注）
+ *  - value 节点度数（toGraphData 由 edges 统计，驱动布局斥力/大小）
+ *  - isDomain 域超节点标记（前端派生：panorama 聚合下钻，type 仍为 'position' 复用交互）
+ *  - memberCount 域内岗位数（仅域超节点）
+ *  - isUncategorized 待归类桶标记（前端派生：未回填 domain_id 的兜底域，画布弱化样式依据） */
+export type GraphNode = Omit<components['schemas']['GraphNode'], 'type'> & {
+  type: NodeType
   value?: number
-  /** 域超节点标记（前端派生：panorama 聚合下钻，type 仍为 'position' 复用交互） */
   isDomain?: boolean
-  /** 域内岗位数（仅域超节点） */
   memberCount?: number
-  /** 待归类桶标记（前端派生：未回填 domain_id 的兜底域，画布弱化样式依据） */
   isUncategorized?: boolean
+  /** 岗位画像大类节点标记（后端字段 portrait_category，技能/软技能/薪资/经验/学历中环） */
+  portrait_category?: boolean
 }
 
 /** 契约 GraphEdge（source/target/weight/necessity/level） */

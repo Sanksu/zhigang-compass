@@ -298,7 +298,7 @@ export function AdminLlmDecisionsPage() {
                                 <span className="text-state-candidate">→</span>
                                 <span className="truncate">{sug.target}</span>
                                 {sug.isAlias && (
-                                  <Badge variant="outline" className="h-4 px-1 text-[9px] text-state-emerging">
+                                  <Badge variant="outline" className="h-4 px-1 text-[10px] text-state-emerging">
                                     别名
                                   </Badge>
                                 )}
@@ -308,7 +308,7 @@ export function AdminLlmDecisionsPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={`text-[10px] ${STATUS_TONE[it.status ?? ''] ?? ''}`}>
+                        <Badge variant="outline" className={`text-[11px] ${STATUS_TONE[it.status ?? ''] ?? ''}`}>
                           {it.status}
                         </Badge>
                       </TableCell>

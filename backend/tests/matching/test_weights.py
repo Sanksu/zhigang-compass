@@ -56,9 +56,19 @@ class TestLoadWeights:
         assert load_weights() == (0.7, 0.1, 0.2)
 
     def test_partial_config_fills_defaults(self, tmp_path, monkeypatch):
-        """配置缺键时按默认值补齐。"""
-        _write_config(tmp_path, monkeypatch, '{"w_must": 0.5}')
-        assert load_weights() == (0.5, DEFAULT_WEIGHTS[1], DEFAULT_WEIGHTS[2])
+        """配置缺键时按默认值补齐（补齐后 Σw 须为 1，否则按下一用例拒绝）。"""
+        _write_config(tmp_path, monkeypatch, '{"w_must": 0.5, "w_nice": 0.3}')
+        assert load_weights() == (0.5, 0.3, DEFAULT_WEIGHTS[2])
+
+    def test_sum_above_one_falls_back_to_default(self, tmp_path, monkeypatch):
+        """P2-11：Σw>1（击穿 total_score Field(le=1.0)）→ 拒绝回退默认权重。"""
+        _write_config(tmp_path, monkeypatch, '{"w_must": 0.7, "w_nice": 0.2, "w_exp": 0.3}')
+        assert load_weights() == DEFAULT_WEIGHTS
+
+    def test_sum_below_one_falls_back_to_default(self, tmp_path, monkeypatch):
+        """P2-11：Σw<1 同样拒绝（总分系统性偏低属口径错误，不做归一化）。"""
+        _write_config(tmp_path, monkeypatch, '{"w_must": 0.5, "w_nice": 0.2, "w_exp": 0.2}')
+        assert load_weights() == DEFAULT_WEIGHTS
 
 
 class TestLoadSimThreshold:

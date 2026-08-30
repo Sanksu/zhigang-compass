@@ -148,10 +148,10 @@ async def test_graph_view_smoke_mocked(monkeypatch):
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/v1/graph/view/level")
+        resp = await client.get("/api/v1/graph/view/positionCenter")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["data"]["view_type"] == "level"
+    assert body["data"]["view_type"] == "positionCenter"
     assert body["data"]["nodes"][0]["id"] == "pos_1"
     # skill_category 透传（软技能粉色渲染数据来源，原 panorama 用例迁移至此）
     skill = next(n for n in body["data"]["nodes"] if n["type"] == "skill")

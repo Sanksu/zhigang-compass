@@ -9,6 +9,9 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { AdminReviewPage } from './admin-review-page'
 
+vi.mock('@/components/admin/review/approval-overview-tab', () => ({
+  ApprovalOverviewTab: () => <div>overview-tab-mock</div>,
+}))
 vi.mock('@/components/admin/review/candidate-review-tab', () => ({
   CandidateReviewTab: () => <div>candidate-tab-mock</div>,
 }))
@@ -30,8 +33,9 @@ const renderPage = (entry = '/admin/review') =>
 afterEach(cleanup)
 
 describe('AdminReviewPage 路由壳', () => {
-  it('渲染三个 Tab 标签（观察池/字典守卫已迁独立路由）', () => {
+  it('渲染四个 Tab 标签（总览 + 三类审核；观察池/字典守卫已迁独立路由）', () => {
     renderPage()
+    expect(screen.getByText('总览')).toBeInTheDocument()
     expect(screen.getByText('候选晋升审核')).toBeInTheDocument()
     expect(screen.getByText('演化审核（emerging）')).toBeInTheDocument()
     expect(screen.getByText('岗位人工编辑')).toBeInTheDocument()
@@ -39,10 +43,13 @@ describe('AdminReviewPage 路由壳', () => {
     expect(screen.queryByText('字典守卫')).not.toBeInTheDocument()
   })
 
-  it('默认挂载候选晋升 Tab，切换时挂载对应子组件（仅激活 Tab 渲染）', () => {
+  it('默认挂载总览 Tab，切换时挂载对应子组件（仅激活 Tab 渲染）', () => {
     renderPage()
+    expect(screen.getByText('overview-tab-mock')).toBeInTheDocument()
+    expect(screen.queryByText('candidate-tab-mock')).not.toBeInTheDocument()
+    fireEvent.mouseDown(screen.getByText('候选晋升审核'))
     expect(screen.getByText('candidate-tab-mock')).toBeInTheDocument()
-    expect(screen.queryByText('evolution-tab-mock')).not.toBeInTheDocument()
+    expect(screen.queryByText('overview-tab-mock')).not.toBeInTheDocument()
     fireEvent.mouseDown(screen.getByText('演化审核（emerging）'))
     expect(screen.getByText('evolution-tab-mock')).toBeInTheDocument()
     expect(screen.queryByText('candidate-tab-mock')).not.toBeInTheDocument()

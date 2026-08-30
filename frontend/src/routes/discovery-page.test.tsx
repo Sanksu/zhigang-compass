@@ -86,25 +86,160 @@ describe('DiscoveryPage', () => {
     expect(screen.getByText('候选')).toBeInTheDocument()
   })
 
-  it('切到技能增减 Tab → 显示选择岗位下拉', async () => {
-    mockedApiGet.mockResolvedValue({
-      total: 1,
-      candidates: [
-        {
-          position_id: 'pos_1',
-          position_name: '后端工程师',
-          state: 'stable',
-          detected_at: '2026-08-26T10:00:00+08:00',
-          definition_draft: '',
-          confidence: null,
-          skills: { must: [], nice: [], soft: [] },
-          skill_pending: false,
-        },
-      ],
+  it('切到技能增减 Tab → 自动加载快照对比并显示岗位下拉', async () => {
+    mockDeltaApi({
+      position_id: 'pos_1', position_name: '后端工程师',
+      from_version: 'v1', to_version: 'v2',
+      added: [], removed: [], unchanged: [],
     })
     renderPage()
     await waitFor(() => expect(screen.getByText('后端工程师')).toBeInTheDocument())
     await userEvent.click(screen.getByText('技能增减'))
-    expect(screen.getByText('选择岗位…')).toBeInTheDocument()
+    expect(screen.getByText('岗位技能增减（快照对比）')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByText('选择岗位（仅列有增减）…')).toBeInTheDocument(),
+    )
+    // 快照选择器渲染默认对比对（起始/目标）
+    expect(screen.getByRole('combobox', { name: '起始快照' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '目标快照' })).toBeInTheDocument()
+  })
+
+  // ── 技能增减（多快照对比版）：summary 驱动下拉过滤 + 稳定面板 + 明细渲染 ──
+
+  const deltaCandidate = {
+    position_id: 'pos_1',
+    position_name: '后端工程师',
+    state: 'stable',
+    detected_at: '2026-08-26T10:00:00+08:00',
+    definition_draft: '',
+    confidence: null,
+    skills: { must: [], nice: [], soft: [] },
+    skill_pending: false,
+  }
+
+  const summaryData = {
+    from_version: 'v1',
+    from_created_at: '2026-08-26T05:00:00+08:00',
+    to_version: 'v2',
+    to_created_at: '2026-08-28T05:00:00+08:00',
+    versions: [
+      { id: 'v2', created_at: '2026-08-28T05:00:00+08:00' },
+      { id: 'v1', created_at: '2026-08-26T05:00:00+08:00' },
+    ],
+    positions: [
+      { position_id: 'pos_1', position_name: '后端工程师', added: 2, removed: 1, unchanged: 3 },
+      { position_id: 'pos_2', position_name: 'Go 工程师', added: 0, removed: 0, unchanged: 5 },
+    ],
+  }
+
+  function mockDeltaApi(detail: Record<string, unknown>) {
+    mockedApiGet.mockImplementation((path: string) => {
+      if (typeof path === 'string' && path.endsWith('/position-skills-delta/summary')) {
+        return Promise.resolve(summaryData)
+      }
+      if (typeof path === 'string' && path.endsWith('/position-skills-delta')) {
+        return Promise.resolve(detail)
+      }
+      return Promise.resolve({ total: 1, candidates: [deltaCandidate] })
+    })
+  }
+
+  /** 进入技能增减 Tab 并打开岗位下拉（Radix Select 在 jsdom 需关 pointerEvents 校验，0=跳过全部检查） */
+  async function openPositionDropdown(detail: Record<string, unknown>) {
+    mockDeltaApi(detail)
+    renderPage()
+    await waitFor(() => expect(screen.getByText('后端工程师')).toBeInTheDocument())
+    await userEvent.click(screen.getByText('技能增减'))
+    // summary 到达的标记：岗位下拉出现（仅 summary 加载完成才渲染）
+    await waitFor(() =>
+      expect(screen.getByText('选择岗位（仅列有增减）…')).toBeInTheDocument(),
+    )
+    await userEvent.click(screen.getByRole('combobox', { name: '岗位' }), { pointerEventsCheck: 0 })
+  }
+
+  /** 在打开的下拉中选中岗位并等 detail 到达 */
+  async function selectPosition(detail: Record<string, unknown>, optionLabel: RegExp) {
+    await openPositionDropdown(detail)
+    await userEvent.click(screen.getByRole('option', { name: optionLabel }), { pointerEventsCheck: 0 })
+    // detail 到达：请求已发且加载态消失
+    await waitFor(() =>
+      expect(mockedApiGet).toHaveBeenCalledWith(
+        expect.stringContaining('position-skills-delta'),
+        expect.objectContaining({ params: expect.objectContaining({ position: 'pos_1' }) }),
+      ),
+    )
+    await waitFor(() => expect(screen.queryByText('加载技能增减…')).not.toBeInTheDocument())
+  }
+
+  it('下拉仅列有增减岗位 + 稳定面板列稳定岗位', async () => {
+    await openPositionDropdown({
+      position_id: 'pos_1', position_name: '后端工程师',
+      from_version: 'v1', to_version: 'v2',
+      added: [{ skill_id: 'sk_1', skill_name: 'Alpine' }],
+      removed: [], unchanged: [],
+    })
+    // 打开的下拉里：有增减的岗位在列（带增减计数）、稳定岗位被过滤
+    expect(screen.getByRole('option', { name: /后端工程师（\+2 −1）/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Go 工程师/ })).not.toBeInTheDocument()
+    // 不选中，直接关闭下拉
+    await userEvent.keyboard('{Escape}')
+    // 稳定面板：Go 工程师（零增减）以「N 项未变」chip 呈现
+    expect(screen.getByText('稳定岗位（无技能增减）')).toBeInTheDocument()
+    expect(screen.getByText('Go 工程师 · 5 项未变')).toBeInTheDocument()
+  })
+
+  it('明细渲染：按技能名排序 + 未变超量折叠/展开', async () => {
+    await selectPosition(
+      {
+        position_id: 'pos_1', position_name: '后端工程师',
+        from_version: 'v1', to_version: 'v2',
+        added: [
+          { skill_id: 'sk_2', skill_name: 'Zookeeper' },
+          { skill_id: 'sk_1', skill_name: 'Alpine' },
+        ],
+        removed: [{ skill_id: 'sk_3', skill_name: '老技能' }],
+        unchanged: Array.from({ length: 15 }, (_, i) => ({
+          skill_id: `sk_u${i + 1}`,
+          skill_name: `技能${String(i + 1).padStart(2, '0')}`,
+        })),
+      },
+      /后端工程师/,
+    )
+    const addedChips = screen.getAllByText(/^(Alpine|Zookeeper)$/)
+    expect(addedChips[0]).toHaveTextContent('Alpine')
+    expect(screen.getByText('移除（1）')).toBeInTheDocument()
+    expect(screen.getByText('未变（15）')).toBeInTheDocument()
+    expect(screen.getByText('技能01')).toBeInTheDocument()
+    expect(screen.queryByText('技能13')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '展开全部 15 个' }))
+    expect(screen.getByText('技能13')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '收起' })).toBeInTheDocument()
+  })
+
+  it('全新岗位：目标快照首次出现的解读提示 + 移除/未变空态', async () => {
+    await selectPosition(
+      {
+        position_id: 'pos_1', position_name: '后端工程师',
+        from_version: 'v1', to_version: 'v2',
+        added: [{ skill_id: 'sk_1', skill_name: 'Python' }],
+        removed: [], unchanged: [],
+      },
+      /后端工程师/,
+    )
+    expect(screen.getByText('该岗位在目标快照首次出现，全部技能计为新增')).toBeInTheDocument()
+    expect(screen.getByText('无移除')).toBeInTheDocument()
+    expect(screen.getByText('无变化')).toBeInTheDocument()
+  })
+
+  it('明细三组全空 → 单行空态', async () => {
+    await selectPosition(
+      {
+        position_id: 'pos_1', position_name: '后端工程师',
+        from_version: 'v1', to_version: 'v2',
+        added: [], removed: [], unchanged: [],
+      },
+      /后端工程师/,
+    )
+    expect(screen.getByText('该岗位两版快照间无技能数据')).toBeInTheDocument()
   })
 })

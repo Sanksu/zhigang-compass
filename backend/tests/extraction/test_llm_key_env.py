@@ -58,14 +58,17 @@ def _chain(tmp_path, providers):
 
 class TestCallProviderEnvResolution:
     def test_env_unset_raises_config_error_with_hint(self, tmp_path, monkeypatch):
+        """第八轮 P2-19：env 未设置的 enabled provider 在构造时即被过滤——
+        链上无可用 provider，call_sync 抛 LLMConfigurationError（既有空链
+        语义），不再走到 _call_provider 的 env 提示分支。"""
         monkeypatch.delenv("MISSING_KEY", raising=False)
         chain = _chain(tmp_path, [
             {"name": "primary", "priority": 1, "base_url": "https://a.com",
              "model": "m", "enabled": True, "api_key_env": "MISSING_KEY"},
         ])
-        with pytest.raises(LLMConfigurationError) as exc_info:
+        assert chain._providers == []  # 空 key provider 不入重试链
+        with pytest.raises(LLMConfigurationError):
             chain.call_sync("p", llm_provider_module.BaseModel)
-        assert "MISSING_KEY" in str(exc_info.value)
 
     def test_env_set_reaches_client_builder(self, tmp_path, monkeypatch):
         from pydantic import BaseModel as _Base

@@ -29,6 +29,7 @@ weight 取离散两档而非出现率连续值的原因：与匹配引擎 CII �
 
 from __future__ import annotations
 
+import json
 import re
 from app.services.kg.aggregation_data import _ALLOWED_SKILL_CATEGORIES
 
@@ -126,13 +127,94 @@ class SkillAgg:
         self.levels: list[str] = []
 
 
+_SALARY_RANGE_RE = re.compile(
+    r"[US$￥¥]?\s*([\d,]+(?:\.\d+)?)\s*(万|千|[kK])?\s*(?:元)?\s*"
+    r"(?:[-~至到–—]|to)"  # 分隔符：连字符系或英文 to（组结构不变）
+    r"\s*[US$￥¥]?\s*([\d,]+(?:\.\d+)?)\s*(万|千|[kK])?\s*(?:元)?"
+)
+_SALARY_PERIOD_RE = re.compile(r"(?:/|每)?\s*(月|年|天|日|时|小时|hr|hour)")
+
+
+def _salary_to_monthly(value: float, unit: str, period: str) -> float:
+    """数值 + 单位（万/千/k/K/空）+ 周期 → 元/月。unit 为空按 1（纯元）。
+
+    单位共享在 parse_salary_range 内完成（hi 带单位则 lo 跟随）——此处
+    不做数值量级猜测：'200-300元/天' 的 200 若猜千会放大千倍（实证坑）。
+    """
+    mult = {"万": 10000.0, "千": 1000.0, "k": 1000.0, "K": 1000.0}.get(unit, 1.0)
+    v = value * mult
+    return v * {"月": 1.0, "年": 1 / 12, "天": 22.0, "日": 22.0, "时": 176.0,
+                "小时": 176.0, "hr": 176.0, "hour": 176.0}.get(period, 1.0)
+
+
+def parse_salary_range(text: str | None) -> tuple[float, float, str] | None:
+    """解析 salary_range 文本为 (min, max, currency)；无法解析返回 None。
+
+    实测语料形态（7056 条，覆盖 ~87%）：'8000-12000元'、'1-1.5万·13薪'、
+    '15k-25k'、'10-20万/年'、'200-300元/天'、'$104,000-$150,000 annually'、
+    '$60.90/hr-$82.30/hr'。周期缺省按月；年÷12、天/日×22、时/hr×176。
+    千分位逗号剥除；'面议'/单值等不解析（宁缺毋滥）。
+
+    币种（08-29 国内外区分拍板）：$/$$/US$ → USD（美元数值原样保留，
+    不折算人民币——币种是一等维度，统计与展示按 currency 分组）；
+    ￥/¥/元/万/千 或纯数字 → CNY。
+    """
+    if not text:
+        return None
+    m = _SALARY_RANGE_RE.search(text)
+    if not m:
+        return None
+    currency = "USD" if re.search(r"(?:US)?\$|USD", text[: m.start() + 4], re.I) else "CNY"
+    # 周期检测：范围尾部或中间的 /年 /天 /hr 小时 等（缺省按月）
+    # 周期：范围尾部（/年 ·13薪）或两数之间（A/hr-B/hr）取首个命中；缺省按月
+    period = ""
+    tail = _SALARY_PERIOD_RE.search(text, m.end())
+    if tail and tail.start() - m.end() <= 8:
+        period = tail.group(1) or ""
+    else:
+        mid = _SALARY_PERIOD_RE.search(text[m.start():m.end()])
+        if mid:
+            period = mid.group(1) or ""
+    # 单位推断共享：任一侧显式带单位（万/千/k），无单位侧跟随同乘
+    # （'1-1.5万' lo 同乘万；'10-20万' 同理——量级推断只对双侧无单位生效）
+    unit_lo, unit_hi = m.group(2) or "", m.group(4) or ""
+    if not unit_lo and unit_hi:
+        unit_lo = unit_hi
+    elif not unit_hi and unit_lo:
+        unit_hi = unit_lo
+    lo = _salary_to_monthly(float(m.group(1).replace(",", "")), unit_lo, period)
+    hi = _salary_to_monthly(float(m.group(3).replace(",", "")), unit_hi, period)
+    if lo > hi:
+        lo, hi = hi, lo
+    # 异常值护栏：折算后月薪 <500 或 >500_000 视为解析噪声（币种内判断：
+    # USD 护栏放大 8 倍——美元数值天然大 7 倍左右）
+    floor, ceil = (500, 500_000) if currency == "CNY" else (1_000, 1_000_000)
+    if hi < floor or hi > ceil:
+        return None
+    return (lo, hi, currency)
+
+
 class PositionAgg:
-    __slots__ = ("jd_count", "skills", "exp_years", "soft_skills", "typical_scenarios", "last_crawled")
+    __slots__ = (
+        "jd_count", "skills", "exp_years", "soft_skills", "typical_scenarios",
+        "last_crawled", "education_levels", "salaries",
+        "experience_distribution", "salary_text",
+    )
 
     def __init__(self) -> None:
         self.jd_count = 0
         self.skills: dict[str, SkillAgg] = defaultdict(SkillAgg)
         self.exp_years: list[float] = []
+        # 学历级别收集（聚合取众数写 Position.required_education，
+        # 并按 jd 条数落 Position.education_distribution 供前端多值+证据展示）
+        self.education_levels: Counter = Counter()
+        # 经验标注分布（'3年以上' → jd 条数；未标注不入，画像展示诚实口径）
+        self.experience_distribution: Counter = Counter()
+        # 薪资原文档位计数（同币种同量级归档 → Top-3 档位 + 条数证据）
+        self.salary_text: Counter = Counter()
+        # 薪资月范围按币种分桶（解析 salary_range 文本 → (min, max)），
+        # CNY/USD 各自取中位区间写 salary_min/max + salary_currency
+        self.salaries: dict[str, list[tuple[float, float]]] = defaultdict(list)
         # 软技能白名单命中的 JD 数（写回 Position.soft_skills，设计文档 9.2 节）
         self.soft_skills: Counter = Counter()
         # 典型项目场景文本计数（写回 Position.typical_scenarios，按频次降序截断）
@@ -300,6 +382,22 @@ def build_aggregates(rows) -> dict[str, PositionAgg]:
         years = _min_experience_years(snap)
         if years is not None:
             pa.exp_years.append(years)
+            # 经验分布（原文标注口径：仅正文明确年限的 JD 计数）
+            pa.experience_distribution[f"{years:g}年以上"] += 1
+        # 学历要求：抽取六维 education.level（大专/本科/硕士/博士），聚合取众数
+        edu = ((ext.get("education") or {}).get("level") or "").strip()
+        if edu:
+            pa.education_levels[edu] += 1
+        # 薪资原文档位（解析成功为前提，原文串作档位键保留币种/形态信息）
+        salary_text = (ext.get("salary_range") or "").strip()
+        if salary_text and parse_salary_range(salary_text):
+            pa.salary_text[salary_text] += 1
+        # 薪资：salary_range 文本解析为月范围数值，按币种分桶（08-29 国内外区分）——
+        # CNY/USD 各自取中位区间，绝不混算
+        parsed = parse_salary_range(ext.get("salary_range"))
+        if parsed:
+            lo, hi, cur = parsed
+            pa.salaries[cur].append((lo, hi))
         source = row.source or ""
         for skill, necessity, level in _position_skills(ext):
             sa = pa.skills[skill]
@@ -365,10 +463,40 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
     """
     positions = []
     for pos, pa in agg.items():
+        # 学历众数（计数最高者；并列时取首次出现者——Counter.most_common 同计数
+        # 按首次插入序返回，不比较级别高低）
+        edu_mode = pa.education_levels.most_common(1)[0][0] if pa.education_levels else None
+        # 薪资按币种各自中位：CNY 优先（国内主口径），无 CNY 用 USD；
+        # currency 落图供前端分组展示（绝不混算，08-29 拍板）
+        salary_cur = "CNY" if pa.salaries.get("CNY") else ("USD" if pa.salaries.get("USD") else None)
+        salary_min = median([s[0] for s in pa.salaries[salary_cur]]) if salary_cur else None
+        salary_max = median([s[1] for s in pa.salaries[salary_cur]]) if salary_cur else None
+        # 多值画像分布（08-29 证据计数展示）：按 jd 条数降序 Top-5，
+        # 未标注不入图（诚实口径——抽取覆盖面在详情页以 evidence_count 呈现）
+        # Neo4j 节点属性只收原始类型/原始数组——Map 必须序列化为 JSON 字符串
+        # （线上实证 CypherTypeError），前端 JSON.parse 消费
+        edu_dist = json.dumps(
+            {k: v for k, v in pa.education_levels.most_common(5)}, ensure_ascii=False
+        )
+        exp_dist = json.dumps(
+            {k: v for k, v in pa.experience_distribution.most_common(5)}, ensure_ascii=False
+        )
+        salary_tiers = json.dumps(
+            [{"text": t, "count": n} for t, n in pa.salary_text.most_common(5)],
+            ensure_ascii=False,
+        )
         positions.append({
             "pos": pos,
             "freq": pa.jd_count,
+            "evidence_count": pa.jd_count,
             "req_years": median(pa.exp_years) if pa.exp_years else None,
+            "req_education": edu_mode,
+            "education_distribution": edu_dist,
+            "experience_distribution": exp_dist,
+            "salary_tiers": salary_tiers,
+            "salary_min": round(salary_min) if salary_min is not None else None,
+            "salary_max": round(salary_max) if salary_max is not None else None,
+            "salary_currency": salary_cur,
             # 最近 JD 采集时间（规范化 ISO）；无 JD 时间（旧数据）回退聚合时间
             "last_updated": pa.last_crawled.isoformat() if pa.last_crawled else now,
             # 软技能按 JD 命中数降序（低频软技能不写入岗位本体）
@@ -388,6 +516,14 @@ def write_aggregates(session, agg: dict[str, PositionAgg], now: str) -> dict:
                 SET p.freq = it.freq,
                     p.last_updated = it.last_updated,
                     p.required_years = coalesce(it.req_years, p.required_years),
+                    p.required_education = coalesce(it.req_education, p.required_education),
+                    p.evidence_count = it.evidence_count,
+                    p.education_distribution = it.education_distribution,
+                    p.experience_distribution = it.experience_distribution,
+                    p.salary_tiers = it.salary_tiers,
+                    p.salary_min = coalesce(it.salary_min, p.salary_min),
+                    p.salary_max = coalesce(it.salary_max, p.salary_max),
+                    p.salary_currency = coalesce(it.salary_currency, p.salary_currency),
                     p.soft_skills = it.soft_skills,
                     p.typical_scenarios = coalesce(
                         CASE WHEN size(it.typical_scenarios) > 0

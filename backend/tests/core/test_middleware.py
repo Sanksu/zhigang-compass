@@ -51,3 +51,11 @@ class TestCSPHeaders:
         assert "script-src 'self' 'unsafe-inline'" in csp
         assert "worker-src 'self' blob:" in csp
         assert "img-src 'self' data: https:" in csp
+
+    @pytest.mark.asyncio
+    async def test_nosniff_present(self):
+        """MIME 嗅探阻断头（resume 下载端点回放用户 Content-Type，第八轮 P2-3）。"""
+        transport = httpx.ASGITransport(app=_app())
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            headers = (await client.get("/")).headers
+        assert headers["x-content-type-options"] == "nosniff"

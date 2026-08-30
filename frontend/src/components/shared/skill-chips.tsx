@@ -21,7 +21,7 @@ interface SkillChipProps {
 
 export function SkillChip({ tone, children, onClick, title, className }: SkillChipProps) {
   const base = cn(
-    'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px]',
+    'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px]',
     onClick && 'transition-colors hover:border-border-strong hover:bg-subtle/60',
     TONE_CLASS[tone],
     className,

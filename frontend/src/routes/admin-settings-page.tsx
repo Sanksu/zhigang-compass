@@ -209,7 +209,7 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
                     placeholder={f.placeholder}
                     className="h-8 text-xs font-mono"
                   />
-                  <p className="text-[10px] text-ink-faint">{f.hint}</p>
+                  <p className="text-[11px] text-ink-faint">{f.hint}</p>
                 </div>
               ))}
             </div>

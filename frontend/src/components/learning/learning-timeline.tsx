@@ -236,12 +236,12 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
               <li key={ms.depth} className="relative pl-8">
                 {/* 阶段节点 */}
                 <div className="absolute left-0 top-0.5 flex size-5 items-center justify-center rounded-full bg-primary text-canvas ring-4 ring-canvas">
-                  <span className="text-[10px] font-semibold leading-none">{ms.depth}</span>
+                  <span className="text-[11px] font-semibold leading-none">{ms.depth}</span>
                 </div>
                 {/* 阶段标题 */}
                 <div className="mb-2 flex items-baseline gap-2">
                   <span className="text-sm font-semibold text-ink">{ms.label}</span>
-                  <span className="text-[10px] text-ink-faint">{ms.tasks.length} 项</span>
+                  <span className="text-[11px] text-ink-faint">{ms.tasks.length} 项</span>
                 </div>
 
                 {/* 任务卡列表 */}
@@ -256,13 +256,13 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="truncate text-sm font-medium text-ink">{task.skill}</span>
                             {task.priority === 'high' && (
-                              <span className="rounded-full border border-state-archived/30 bg-state-archived/10 px-1.5 py-0 text-[10px] text-state-archived">
+                              <span className="rounded-full border border-state-archived/30 bg-state-archived/10 px-1.5 py-0 text-[11px] text-state-archived">
                                 {PRIORITY_LABEL.high}
                               </span>
                             )}
                           </div>
 
-                          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-ink-faint">
+                          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-ink-faint">
                             <span className="flex items-center gap-1">
                               <Clock className="size-3" />约 {task.estimatedHours} 学时
                             </span>
@@ -284,7 +284,7 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
                                     href={c.url}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[10px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle/60"
+                                    className="flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle/60"
                                   >
                                     <BookOpen className="size-3 shrink-0 text-primary" />
                                     <span className="truncate">{c.title}</span>
@@ -293,7 +293,7 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
                                 ) : (
                                   <span
                                     key={ci}
-                                    className="flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[10px] text-ink-secondary"
+                                    className="flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-ink-secondary"
                                   >
                                     <BookOpen className="size-3 shrink-0 text-primary" />
                                     <span className="truncate">{c.title}</span>
@@ -319,7 +319,7 @@ export function LearningTimeline({ items, completedSkills, onGoToLearn, classNam
                                   if (url) window.open(url, '_blank', 'noreferrer')
                                 }
                               }}
-                              className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[10px] font-medium text-canvas transition-opacity hover:opacity-90"
+                              className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-canvas transition-opacity hover:opacity-90"
                             >
                               前往学习 <ArrowRight className="size-3" />
                             </button>

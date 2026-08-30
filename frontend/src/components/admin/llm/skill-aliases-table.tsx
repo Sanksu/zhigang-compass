@@ -142,7 +142,7 @@ export function SkillAliasesTable() {
                       </span>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={`text-[10px] ${STATUS_TONE[it.status] ?? ''}`}>
+                      <Badge variant="outline" className={`text-[11px] ${STATUS_TONE[it.status] ?? ''}`}>
                         {STATUS_LABEL[it.status] ?? it.status}
                       </Badge>
                     </TableCell>

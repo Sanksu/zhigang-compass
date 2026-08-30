@@ -243,7 +243,7 @@ function CrawlLogDialog({ taskId, platformName, onClose }: {
         </DialogHeader>
         <div
           ref={boxRef}
-          className="max-h-80 min-h-32 overflow-y-auto rounded-md border border-border bg-ink/[0.03] p-2 font-mono text-[10px] leading-relaxed text-ink-secondary whitespace-pre-wrap"
+          className="max-h-80 min-h-32 overflow-y-auto rounded-md border border-border bg-ink/[0.03] p-2 font-mono text-[11px] leading-relaxed text-ink-secondary whitespace-pre-wrap"
         >
           {status === 'empty' ? (
             <span className="text-ink-faint">该平台暂无爬取记录</span>
@@ -513,7 +513,7 @@ export function AdminCrawlPage() {
                 <CardTitle className="text-sm">手动触发爬取</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label>平台</Label>
                     <Select
@@ -593,7 +593,7 @@ export function AdminCrawlPage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
                       <div><span className="text-ink-muted">平台：</span><span className="font-medium">{currentTask.platform}</span></div>
                       <div><span className="text-ink-muted">关键词：</span><span className="font-medium">{currentTask.keyword}</span></div>
                       <div><span className="text-ink-muted">城市：</span><span className="font-medium">{currentTask.city}</span></div>
@@ -623,7 +623,7 @@ export function AdminCrawlPage() {
                       </div>
                       <div
                         ref={logRef}
-                        className="max-h-48 overflow-y-auto rounded-md border border-border bg-ink/[0.03] p-2 font-mono text-[10px] leading-relaxed text-ink-secondary whitespace-pre-wrap"
+                        className="max-h-48 overflow-y-auto rounded-md border border-border bg-ink/[0.03] p-2 font-mono text-[11px] leading-relaxed text-ink-secondary whitespace-pre-wrap"
                       >
                         {currentTask.logs.length === 0 ? (
                           <span className="text-ink-faint">等待 worker 执行，日志将在此实时显示…</span>
@@ -714,7 +714,7 @@ export function AdminCrawlPage() {
               <DialogTitle>任务详情</DialogTitle>
               <DialogDescription>task_id: {detailRow.id}</DialogDescription>
             </DialogHeader>
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <div>
                 <div className="text-xs text-ink-muted mb-0.5">时间</div>
                 <div className="font-mono text-xs text-ink-secondary">{detailRow.time}</div>

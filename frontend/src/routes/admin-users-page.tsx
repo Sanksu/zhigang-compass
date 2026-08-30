@@ -77,24 +77,20 @@ export function AdminUsersPage() {
   const [error, setError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [form, setForm] = useState({ username: '', password: '', role: 'user' as Role })
+  /** 操作后重查（递增即 refetch，挂载与刷新共用下方唯一请求路径——第八轮 P2-34） */
+  const [reloadKey, setReloadKey] = useState(0)
 
   // 自保护：当前登录管理员不可修改自己的角色/禁用自己（M6，后端同样拦截）
   const isSelf = (id: string) => id === currentUser?.id
 
-  async function load() {
-    try {
-      const res = await apiGet<components['schemas']['AdminUsersData']>('/admin/users?page=1&size=100')
-      setUsers(res.items.map(toRow))
-      setTotal(res.total)
-      setError(null)
-    } catch (e) {
-      setError(errMsg(e, '用户列表加载失败'))
-    } finally {
-      setLoading(false)
-    }
+  /** 触发列表重查（事件回调内 setState，effect 经 reloadKey 变化重发请求——
+   *  同 admin-jd-page 范式；effect 体内直接调用含 setState 的函数违反
+   *  react-hooks/set-state-in-effect，故不走 effect 调 load() 形态） */
+  function refresh() {
+    setReloadKey((k) => k + 1)
   }
 
-  // 初始加载（setState 均在异步回调内）
+  // 唯一请求路径：初始加载与操作后刷新都经此 effect（setState 均在异步回调内）
   useEffect(() => {
     let cancelled = false
     apiGet<components['schemas']['AdminUsersData']>('/admin/users?page=1&size=100')
@@ -113,7 +109,7 @@ export function AdminUsersPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [reloadKey])
 
   async function setRole(id: string, role: Role) {
     if (isSelf(id)) {
@@ -122,7 +118,7 @@ export function AdminUsersPage() {
     }
     try {
       await apiPut(`/admin/users/${id}`, { role })
-      await load()
+      refresh()
     } catch (e) {
       setError(errMsg(e, '角色更新失败'))
     }
@@ -137,7 +133,7 @@ export function AdminUsersPage() {
     if (!u) return
     try {
       await apiPut(`/admin/users/${id}`, { status: u.status === 'active' ? 'disabled' : 'active' })
-      await load()
+      refresh()
     } catch (e) {
       setError(errMsg(e, '状态更新失败'))
     }
@@ -153,7 +149,7 @@ export function AdminUsersPage() {
     if (!window.confirm(`确认删除用户「${u.username}」？将同时清除其简历原文，不可恢复`)) return
     try {
       await apiDelete(`/admin/users/${id}`)
-      await load()
+      refresh()
       setError(null)
     } catch (e) {
       setError(errMsg(e, '删除失败'))
@@ -170,7 +166,7 @@ export function AdminUsersPage() {
       })
       setForm({ username: '', password: '', role: 'user' })
       setCreateOpen(false)
-      await load()
+      refresh()
     } catch (e) {
       setError(errMsg(e, '创建失败'))
     }
@@ -200,7 +196,7 @@ export function AdminUsersPage() {
       )}
 
       {/* 统计卡（真实 users 表） */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 gap-4 mb-6 lg:grid-cols-3">
         <Card>
           <CardContent className="py-4">
             <div className="flex items-center justify-between mb-2">

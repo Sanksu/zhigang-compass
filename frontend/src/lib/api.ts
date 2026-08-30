@@ -84,11 +84,10 @@ export class ApiError extends Error {
 export function errMsg(e: unknown, fallback: string): string {
   return e instanceof ApiError ? e.message : fallback
 }
-export interface ApiResponse<T = unknown> {
-  code: number
-  msg: string
+/** ApiResponse 外壳（契约 §2.4.7 单一事实源派生，第八轮 P2-28）：
+ *  字段集跟随 openapi 生成类型，仅 data 泛型化（契约 data 为 unknown） */
+export type ApiResponse<T = unknown> = Omit<components['schemas']['ApiResponse'], 'data'> & {
   data?: T
-  trace_id: string
 }
 
 export const http: AxiosInstance = axios.create({

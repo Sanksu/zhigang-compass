@@ -203,13 +203,19 @@ async def backfill_project_embeddings(db: AsyncSession, embedder) -> dict:
         return {"written": 0, "detail": "无简历项目数据"}
 
     existing = await _existing_project_texts(db)
+    # 按简历分组（unchanged 判定需要 existing 侧索引集合做对称比较）
+    existing_by_resume: dict[str, dict[int, str]] = {}
+    for (rid, idx), text in existing.items():
+        existing_by_resume.setdefault(rid, {})[idx] = text
     changed: dict[str, list[tuple[int, str, str, str]]] = {}
     skipped = 0
     for resume_id, items in by_resume.items():
-        # 未变 = 索引集合数量一致（捕获项目增删）且每个项目文本一致
+        # 未变 = 索引集合完全一致（第八轮 P2-14：existing 多出的旧索引说明项目
+        # 已删，须走重建清出，否则旧向量残留）且每个项目文本一致
+        old_items = existing_by_resume.get(resume_id, {})
         unchanged = (
-            len(items) == sum(1 for idx, *_ in items if (resume_id, idx) in existing)
-            and all(existing.get((resume_id, idx)) == text for _, _, _, text in items)
+            {idx for idx, *_ in items} == set(old_items.keys())
+            and all(old_items.get(idx) == text for idx, _, _, text in items)
         )
         if unchanged:
             skipped += len(items)

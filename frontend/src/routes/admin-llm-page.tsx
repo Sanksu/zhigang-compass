@@ -238,7 +238,7 @@ export function AdminLlmPage() {
                 placeholder="deepseek（字母/数字/下划线/短横线）"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>优先级</Label>
                 <Input

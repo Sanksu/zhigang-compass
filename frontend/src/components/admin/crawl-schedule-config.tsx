@@ -213,7 +213,7 @@ export function CrawlScheduleConfig() {
                 placeholder="100"
                 className="h-8 text-xs font-mono"
               />
-              <p className="text-[10px] text-ink-faint">爬虫单次采集条数上限（10-1000）</p>
+              <p className="text-[11px] text-ink-faint">爬虫单次采集条数上限（10-1000）</p>
             </div>
           )}
         </CardContent>
@@ -224,7 +224,7 @@ export function CrawlScheduleConfig() {
           <CardTitle className="text-sm flex items-center gap-2">
             <Settings2 className="size-4" />
             爬虫限频
-            <Badge variant="outline" className="text-[10px] ml-auto font-mono">每源请求间隔 / 频率</Badge>
+            <Badge variant="outline" className="text-[11px] ml-auto font-mono">每源请求间隔 / 频率</Badge>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -270,7 +270,7 @@ export function CrawlScheduleConfig() {
                             onChange={(e) => setSourceField(source, 'delay_max', e.target.value)}
                             className="h-7 w-20 text-xs font-mono"
                           />
-                          <span className="text-[10px] text-ink-faint">秒</span>
+                          <span className="text-[11px] text-ink-faint">秒</span>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -287,7 +287,7 @@ export function CrawlScheduleConfig() {
           <CardTitle className="text-sm flex items-center gap-2">
             <Settings2 className="size-4" />
             每爬虫采集配置
-            <Badge variant="outline" className="text-[10px] ml-auto font-mono">开关 + 采集数量 + 独立触发时间</Badge>
+            <Badge variant="outline" className="text-[11px] ml-auto font-mono">开关 + 采集数量 + 独立触发时间</Badge>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -313,7 +313,7 @@ export function CrawlScheduleConfig() {
                     <TableRow key={s.name}>
                       <TableCell>
                         <span className="text-xs font-medium text-ink">{s.label}</span>
-                        <span className="ml-1.5 font-mono text-[10px] text-ink-faint">{s.name}</span>
+                        <span className="ml-1.5 font-mono text-[11px] text-ink-faint">{s.name}</span>
                       </TableCell>
                       <TableCell>
                         <label className="flex items-center gap-1.5 cursor-pointer">
@@ -325,7 +325,7 @@ export function CrawlScheduleConfig() {
                             }
                             className="size-3.5 accent-[var(--color-primary)]"
                           />
-                          <span className="text-[10px] text-ink-muted">{disabled ? '停用' : '启用'}</span>
+                          <span className="text-[11px] text-ink-muted">{disabled ? '停用' : '启用'}</span>
                         </label>
                       </TableCell>
                       <TableCell>
@@ -363,10 +363,10 @@ export function CrawlScheduleConfig() {
                               }
                               className="h-7 w-16 text-xs font-mono"
                             />
-                            <p className="mt-0.5 text-[9px] text-ink-faint">0=关闭 · 1-10次</p>
+                            <p className="mt-0.5 text-[10px] text-ink-faint">0=关闭 · 1-10次</p>
                           </>
                         ) : (
-                          <span className="text-[10px] text-ink-faint">–</span>
+                          <span className="text-[11px] text-ink-faint">–</span>
                         )}
                       </TableCell>
                       <TableCell>
@@ -403,9 +403,9 @@ export function CrawlScheduleConfig() {
                             className="h-7 w-14 text-xs font-mono"
                           />
                         </div>
-                        <p className="mt-0.5 text-[9px] text-ink-faint">留空=并入主管线</p>
+                        <p className="mt-0.5 text-[10px] text-ink-faint">留空=并入主管线</p>
                       </TableCell>
-                      <TableCell className="text-[10px] text-ink-faint">{s.note}</TableCell>
+                      <TableCell className="text-[11px] text-ink-faint">{s.note}</TableCell>
                     </TableRow>
                   )
                 })}
@@ -416,7 +416,7 @@ export function CrawlScheduleConfig() {
       </Card>
 
       <Card className="mb-4 border-dashed">
-        <CardContent className="py-3 text-[11px] text-ink-muted space-y-1">
+        <CardContent className="py-3 text-[12px] text-ink-muted space-y-1">
           <p className="font-medium text-ink">调度语义</p>
           <ul className="list-disc pl-4 space-y-0.5">
             <li>启用开关：默认全部启用；关闭后该源不参与 ETL 主管线与独立调度。</li>

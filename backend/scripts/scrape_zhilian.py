@@ -458,8 +458,10 @@ def build_record(source_id: str, detail: dict) -> dict | None:
     if requirements:
         detail_raw_text += "\n" + requirements
 
-    # 计算 SHA-256
-    sha256 = hashlib.sha256(detail_raw_text.encode("utf-8")).hexdigest()
+    # SHA-256 与统一审计公式对齐：恒为 SHA256(responsibilities + "\n" + requirements)。
+    # requirements 为空时也带分隔换行（与 detail_raw_text 的无尾换行形式解耦），
+    # 否则统一审计会把空 req 记录判为 SHA legacy（08-28 unified_jd_audit 口径）
+    sha256 = hashlib.sha256((responsibilities + "\n" + requirements).encode("utf-8")).hexdigest()
 
     # 提取正文中的学历和经验
     text_edu = extract_text_education(description)
@@ -508,8 +510,8 @@ def build_record(source_id: str, detail: dict) -> dict | None:
 
 
 async def main():
-    output_path = Path(
-        "d:/du_yan/jiebang_guashuai_jingsai/zhigang-compass/backend/data/golden_set/candidate_pool/v1"
+    output_path = (
+        Path(__file__).resolve().parents[1] / "data" / "golden_set" / "candidate_pool" / "v1"
     )
     output_path.mkdir(parents=True, exist_ok=True)
     output_file = output_path / "batch_frontend_test_ops.jsonl"

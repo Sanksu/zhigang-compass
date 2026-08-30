@@ -26,6 +26,7 @@ import {
   Sparkles,
   Route,
   AlertTriangle,
+  Tag,
   TrendingUp,
   TrendingDown,
 } from 'lucide-react'
@@ -38,6 +39,13 @@ import { PositionStateBadge } from '@/components/shared/position-state-badge'
 import { SkillChip } from '@/components/shared/skill-chips'
 import { Button } from '@/components/ui/button'
 import { SkeletonList } from '@/components/ui/skeleton'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { apiGet } from '@/lib/api'
 
 type Schema = components['schemas']
@@ -49,6 +57,9 @@ export type SkillEvidenceItem = Schema['SkillEvidenceItem']
 export type SimilarSkillItem = Schema['SimilarSkillItem']
 export type PrerequisiteItem = Schema['PrerequisiteItem']
 export type SkillCourseItem = Schema['CourseRecommendation']
+export type PortraitEvidenceData = Schema['PortraitEvidenceData']
+export type PortraitEvidenceItem = Schema['PortraitEvidenceItem']
+export type JdEvidenceDetail = Schema['JdEvidenceDetail']
 
 export interface SkillDetail {
   skill_id: string
@@ -65,8 +76,192 @@ export interface SkillDetail {
 type TrendSets = { at: number; emerging: Set<string>; declining: Set<string> }
 let trendSetsCache: TrendSets | null = null
 let trendSetsPromise: Promise<TrendSets | null> | null = null
-function loadTrendSets(): Promise<TrendSets | null> {
-  const now = Date.now()
+/** 画像分布对象是否有有效条目（null/空对象均视为无） */
+function hasEntries(dist: Record<string, number> | null | undefined): boolean {
+  return !!dist && Object.keys(dist).length > 0
+}
+
+/** 证据行：维度标签 + 多值 Badge（值 + jd 条数计数，条数降序已由后端保证） */
+function EvidenceRows({ label, entries }: { label: string; entries: [string, number][] }) {
+  const total = entries.reduce((s, [, n]) => s + n, 0)
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="w-8 shrink-0 text-[11px] text-ink-faint">{label}</span>
+      {entries.map(([value, count]) => (
+        <Badge
+          key={value}
+          variant="outline"
+          className="text-xs"
+          title={total > 0 ? `${value}：${count} 条 JD 证据（占标注样本 ${Math.round((count / total) * 100)}%）` : `${count} 条 JD 证据`}
+        >
+          {value}
+          <span className="ml-1 font-mono text-[10px] text-ink-faint">×{count}</span>
+        </Badge>
+      ))}
+    </div>
+  )
+}
+
+/** JD 证据正文弹层：原文全文 + 出处链接（画像证据列表点开）。
+ *
+ * 内容组件按 jdId key 重挂载：fetch 状态（loading 初始 true）随挂载重建，
+ * 避免 effect 体内同步 setState（react-hooks 级联渲染 lint）。 */
+function JdEvidenceDialog({
+  jdId,
+  onClose,
+}: {
+  jdId: number | null
+  onClose: () => void
+}) {
+  return (
+    <Dialog open={jdId != null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        {jdId != null && <JdEvidenceContent key={jdId} jdId={jdId} />}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function JdEvidenceContent({ jdId }: { jdId: number }) {
+  const [detail, setDetail] = useState<JdEvidenceDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    apiGet<JdEvidenceDetail>(`/graph/jd/${jdId}`)
+      .then((res) => {
+        if (!cancelled) setDetail(res)
+      })
+      .catch(() => {
+        if (!cancelled) setError('JD 正文加载失败，请重试')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [jdId])
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle className="truncate">
+          {detail?.title || (loading ? 'JD 正文加载中…' : 'JD 证据')}
+        </DialogTitle>
+        <DialogDescription>
+          {detail
+            ? [detail.company, detail.location, detail.source]
+                .filter(Boolean)
+                .join(' · ')
+            : '岗位画像证据 · 原始 JD'}
+        </DialogDescription>
+      </DialogHeader>
+
+      {loading ? (
+        <p className="py-8 text-center text-sm text-ink-muted">加载正文…</p>
+      ) : error ? (
+        <p className="py-8 text-center text-sm text-state-archived">{error}</p>
+      ) : detail ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-muted">
+            {detail.crawled_at && <span>采集 {detail.crawled_at.slice(0, 10)}</span>}
+            {detail.is_desensitized && (
+              <Badge variant="outline" className="text-[11px]">已脱敏</Badge>
+            )}
+            {detail.source_url ? (
+              <a
+                href={detail.source_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-0.5 text-ink underline hover:no-underline"
+              >
+                查看出处 <ExternalLink className="size-3" />
+              </a>
+            ) : (
+              <span className="text-ink-faint">无出处链接</span>
+            )}
+          </div>
+          <div className="max-h-[55vh] overflow-y-auto rounded-md border border-border bg-subtle/40 p-3">
+            <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-secondary">
+              {detail.raw_text || '（该记录无正文文本）'}
+            </p>
+          </div>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+/** 画像条目证据 JD 列表（薪资/经验/学历 attr 节点选中时渲染） */
+function PortraitEvidenceSection({
+  evidence,
+  loading,
+}: {
+  evidence: PortraitEvidenceData | null
+  loading: boolean
+}) {
+  const [openJdId, setOpenJdId] = useState<number | null>(null)
+
+  return (
+    <section className="space-y-2">
+      <h4 className="text-xs font-medium text-ink-muted">
+        证据 JD
+        {evidence && (
+          <span className="ml-1.5 font-mono text-[11px] text-ink-faint">
+            {evidence.total} 条
+          </span>
+        )}
+      </h4>
+      {loading ? (
+        <SkeletonList rows={3} />
+      ) : !evidence || evidence.items.length === 0 ? (
+        <p className="py-1 text-xs text-ink-faint">
+          该条目暂无证据 JD（维度标注为空或 JD 已被去重/通胀排除）
+        </p>
+      ) : (
+        <>
+          <ul className="space-y-1.5">
+            {evidence.items.map((it: PortraitEvidenceItem) => (
+              <li key={it.jd_id}>
+                <button
+                  onClick={() => setOpenJdId(it.jd_id)}
+                  className="w-full rounded-lg border border-border px-2.5 py-2 text-left transition-colors hover:border-border-strong hover:bg-subtle/60"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-xs font-medium text-ink">
+                      {it.title || '（无标题）'}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-ink-faint">{it.source}</span>
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-2 text-[11px] text-ink-faint">
+                    {it.company && <span className="truncate">{it.company}</span>}
+                    {it.crawled_at && <span>{it.crawled_at.slice(0, 10)}</span>}
+                    {it.salary_text && <span className="font-mono">{it.salary_text}</span>}
+                  </div>
+                  {it.snippet && (
+                    <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-ink-faint">
+                      {it.snippet}
+                    </p>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {evidence.total > evidence.items.length && (
+            <p className="text-[11px] text-ink-faint">
+              仅展示前 {evidence.items.length} 条，共 {evidence.total} 条
+            </p>
+          )}
+          <JdEvidenceDialog jdId={openJdId} onClose={() => setOpenJdId(null)} />
+        </>
+      )}
+    </section>
+  )
+}
+
+function loadTrendSets(): Promise<TrendSets | null> {  const now = Date.now()
   if (trendSetsCache && now - trendSetsCache.at < 60_000) {
     return Promise.resolve(trendSetsCache)
   }
@@ -101,6 +296,11 @@ interface NodeDetailPanelProps {
   }
   positionExpanded?: boolean
   onTogglePosition?: (id: string) => void
+  /** 岗位画像视图：隐藏关联度条与展开技能按钮（层级子图里语义不成立） */
+  portraitMode?: boolean
+  /** 画像条目证据 JD 列表（薪资/经验/学历 attr 节点选中时由页面拉取传入） */
+  portraitEvidence?: PortraitEvidenceData | null
+  portraitEvidenceLoading?: boolean
   /** 域超节点双击等价的展开按钮（panorama 聚合下钻；缺省不渲染） */
   onToggleDomain?: (id: string) => void
   skillDetail?: SkillDetail | null
@@ -119,12 +319,16 @@ const TYPE_LABEL: Record<NodeDetail['type'], string> = {
   position: '岗位',
   skill: '技能',
   evidence: '证据',
+  // 岗位画像属性维度（薪资/经验/学历）：画像视图下选中展示证据 JD，
+  // 其他视图无详情端点不选中
+  attr: '画像维度',
 }
 
 const TYPE_ICON: Record<NodeDetail['type'], typeof Network> = {
   position: Network,
   skill: Cpu,
   evidence: FileText,
+  attr: Tag,
 }
 
 // 导学面板学习状态（task 1.3）：绿=已掌握 / 蓝=下一步 / 灰=未解锁
@@ -142,6 +346,9 @@ export function NodeDetailPanel({
   skillEvidence,
   similarSkills,
   positionExpanded,
+  portraitMode,
+  portraitEvidence,
+  portraitEvidenceLoading,
   onTogglePosition,
   onToggleDomain,
   onSelectSkill,
@@ -206,31 +413,31 @@ export function NodeDetailPanel({
               <div className="min-w-0">
                 <h3 className="text-sm font-semibold text-ink truncate">{node.name}</h3>
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                  <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
                     {TYPE_LABEL[node.type]}
                   </Badge>
                   {node.type === 'position' && node.status && !node.isDomain && (
-                    <PositionStateBadge state={node.status} className="px-1.5 py-0 text-[10px]" />
+                    <PositionStateBadge state={node.status} className="px-1.5 py-0 text-[11px]" />
                   )}
                   {node.isDomain && (
-                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] bg-primary/10 text-primary border-primary/30">
+                    <Badge variant="outline" className="px-1.5 py-0 text-[11px] bg-primary/10 text-primary border-primary/30">
                       职能域 · {node.memberCount ?? 0} 岗
                     </Badge>
                   )}
                   {/* level 0/“0”=未定级噪声，不渲染（数字 0 会以字面量漏出） */}
                   {node.type === 'skill' && !!node.level && node.level !== '0' && (
-                    <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                    <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
                       {node.level}
                     </Badge>
                   )}
                   {node.type === 'skill' && skillTrend === 'emerging' && (
-                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] bg-state-emerging/15 text-state-emerging border-state-emerging/30">
+                    <Badge variant="outline" className="px-1.5 py-0 text-[11px] bg-state-emerging/15 text-state-emerging border-state-emerging/30">
                       <TrendingUp className="mr-0.5 size-3" />
                       需求上升
                     </Badge>
                   )}
                   {node.type === 'skill' && skillTrend === 'declining' && (
-                    <Badge variant="outline" className="px-1.5 py-0 text-[10px] bg-state-declining/15 text-state-declining border-state-declining/30">
+                    <Badge variant="outline" className="px-1.5 py-0 text-[11px] bg-state-declining/15 text-state-declining border-state-declining/30">
                       <TrendingDown className="mr-0.5 size-3" />
                       需求衰退预警
                     </Badge>
@@ -238,7 +445,7 @@ export function NodeDetailPanel({
                   {node.type === 'skill' && learningStatus && (
                     <Badge
                       variant="outline"
-                      className={`px-1.5 py-0 text-[10px] ${LEARNING_STATUS_META[learningStatus].className}`}
+                      className={`px-1.5 py-0 text-[11px] ${LEARNING_STATUS_META[learningStatus].className}`}
                     >
                       {LEARNING_STATUS_META[learningStatus].label}
                     </Badge>
@@ -260,7 +467,7 @@ export function NodeDetailPanel({
           {/* 内容 */}
           <div className="flex-1 space-y-4 overflow-y-auto p-4">
             {/* 匹配度 / 熟练度 微型进度条 */}
-            {typeof node.value === 'number' && (
+            {typeof node.value === 'number' && !(portraitMode && node.type === 'position') && (
               <section className="space-y-2 rounded-lg border border-border bg-subtle/40 p-3">
                 <div className="flex items-center gap-2 text-xs font-medium text-ink-muted">
                   <Target className="size-3.5" />
@@ -290,7 +497,7 @@ export function NodeDetailPanel({
                 {positionExpanded ? '收起画布中的域内岗位' : '在画布中展开域内岗位'}
               </Button>
             )}
-            {node.type === 'position' && !node.isDomain && onTogglePosition && (
+            {node.type === 'position' && !node.isDomain && !portraitMode && onTogglePosition && (
               <Button variant="outline" className="w-full text-xs" onClick={() => onTogglePosition(node.id)}>
                 <UnfoldVertical className="mr-1.5 size-3" />
                 {positionExpanded ? '收起画布中的技能' : '在画布中展开技能'}
@@ -305,26 +512,34 @@ export function NodeDetailPanel({
               </section>
             )}
 
-            {/* 关联统计 */}
-            {stats && (stats.positionCount || stats.skillCount || stats.evidenceCount) && (
+            {/* 画像条目证据 JD（薪资/经验/学历 attr 节点选中时） */}
+            {portraitMode && node.type === 'attr' && (
+              <PortraitEvidenceSection
+                evidence={portraitEvidence ?? null}
+                loading={!!portraitEvidenceLoading}
+              />
+            )}
+
+            {/* 关联统计（岗位画像视图由下方「画像证据」区承载，避免低信息量卡） */}
+            {stats && !portraitMode && (stats.positionCount || stats.skillCount || stats.evidenceCount) && (
               <section className="space-y-2">
                 <h4 className="text-xs font-medium text-ink-muted">关联统计</h4>
                 <dl className="grid grid-cols-3 gap-2 text-center">
                   {stats.positionCount !== undefined && (
                     <div className="rounded-lg bg-subtle/60 p-2">
-                      <dt className="text-[10px] text-ink-muted">关联岗位</dt>
+                      <dt className="text-[11px] text-ink-muted">关联岗位</dt>
                       <dd className="text-sm font-mono text-ink tabular-nums">{stats.positionCount}</dd>
                     </div>
                   )}
                   {stats.skillCount !== undefined && (
                     <div className="rounded-lg bg-subtle/60 p-2">
-                      <dt className="text-[10px] text-ink-muted">关联技能</dt>
+                      <dt className="text-[11px] text-ink-muted">关联技能</dt>
                       <dd className="text-sm font-mono text-ink tabular-nums">{stats.skillCount}</dd>
                     </div>
                   )}
                   {stats.evidenceCount !== undefined && (
                     <div className="rounded-lg bg-subtle/60 p-2">
-                      <dt className="text-[10px] text-ink-muted">关联证据</dt>
+                      <dt className="text-[11px] text-ink-muted">关联证据</dt>
                       <dd className="text-sm font-mono text-ink tabular-nums">{stats.evidenceCount}</dd>
                     </div>
                   )}
@@ -343,21 +558,57 @@ export function NodeDetailPanel({
             {/* 岗位详情 */}
             {node.type === 'position' && !node.isDomain && positionDetail && (
               <>
-                {(positionDetail.required_years != null || positionDetail.required_education) && (
-                  <section className="space-y-1.5">
-                    <h4 className="text-xs font-medium text-ink-muted">任职要求</h4>
-                    <div className="flex flex-wrap gap-1.5">
-                      {positionDetail.required_years != null && (
-                        <Badge variant="outline" className="text-xs">
-                          {positionDetail.required_years} 年经验
-                        </Badge>
-                      )}
-                      {positionDetail.required_education && (
-                        <Badge variant="outline" className="text-xs">
-                          {positionDetail.required_education}
-                        </Badge>
-                      )}
-                    </div>
+                {/* 画像证据区（08-29）：多值分布 + JD 证据计数——单值众数 + 分布 Top */}
+                {positionDetail.evidence_count != null && (
+                  <section className="space-y-2">
+                    <h4 className="text-xs font-medium text-ink-muted">
+                      画像证据
+                      <span className="ml-1.5 font-mono text-[11px] text-ink-faint">
+                        {positionDetail.evidence_count} 条 JD
+                      </span>
+                    </h4>
+                    {(positionDetail.required_years != null || positionDetail.required_education) && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {positionDetail.required_years != null && (
+                          <Badge variant="outline" className="text-xs">
+                            经验中位 {positionDetail.required_years} 年
+                          </Badge>
+                        )}
+                        {positionDetail.required_education && (
+                          <Badge variant="outline" className="text-xs">
+                            学历众数 {positionDetail.required_education}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                    {hasEntries(positionDetail.education_distribution) && (
+                      <EvidenceRows
+                        label="学历"
+                        entries={Object.entries(positionDetail.education_distribution!)}
+                      />
+                    )}
+                    {hasEntries(positionDetail.experience_distribution) && (
+                      <EvidenceRows
+                        label="经验"
+                        entries={Object.entries(positionDetail.experience_distribution!)}
+                      />
+                    )}
+                    {positionDetail.salary_tiers && positionDetail.salary_tiers.length > 0 && (
+                      <EvidenceRows
+                        label="薪资"
+                        entries={(positionDetail.salary_tiers ?? []).map((t) => [t.text, t.count] as [string, number])}
+                      />
+                    )}
+                    {positionDetail.soft_skills && positionDetail.soft_skills.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="w-8 shrink-0 text-[11px] text-ink-faint">软技能</span>
+                        {positionDetail.soft_skills.map((s) => (
+                          <Badge key={s} variant="outline" className="border-[#ec4899]/40 bg-[#ec4899]/5 text-xs text-ink-secondary">
+                            {s}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                   </section>
                 )}
 
@@ -365,7 +616,7 @@ export function NodeDetailPanel({
                   <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                     <Briefcase className="size-3" />
                     必备技能
-                    <span className="ml-auto font-mono text-[10px]">{positionDetail.must_skills.length}</span>
+                    <span className="ml-auto font-mono text-[11px]">{positionDetail.must_skills.length}</span>
                   </h4>
                   {positionDetail.must_skills.length === 0 ? (
                     <p className="py-1 text-xs text-ink-faint">图谱中暂无必备技能数据</p>
@@ -379,8 +630,14 @@ export function NodeDetailPanel({
                           >
                             <span className="truncate text-xs font-medium text-ink">{s.skill_name}</span>
                             <span className="flex shrink-0 items-center gap-1.5">
-                              {!!s.level && s.level !== '0' && <span className="text-[10px] text-ink-faint">{s.level}</span>}
-                              <span className="text-[10px] font-mono text-ink-faint">
+                              {!!s.level && s.level !== '0' && <span className="text-[11px] text-ink-faint">{s.level}</span>}
+                              {/* JD 证据源计数（08-29 画像证据展示） */}
+                              {!!s.source_count && (
+                                <span className="text-[11px] font-mono text-ink-faint" title={`${s.source_count} 个独立 JD 源要求该技能`}>
+                                  {s.source_count} 源
+                                </span>
+                              )}
+                              <span className="text-[11px] font-mono text-ink-faint">
                                 {(s.weight * 100).toFixed(0)}%
                               </span>
                             </span>
@@ -396,7 +653,7 @@ export function NodeDetailPanel({
                     <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                       <Briefcase className="size-3" />
                       加分技能
-                      <span className="ml-auto font-mono text-[10px]">{positionDetail.nice_skills.length}</span>
+                      <span className="ml-auto font-mono text-[11px]">{positionDetail.nice_skills.length}</span>
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
                       {positionDetail.nice_skills.map((s) => (
@@ -415,7 +672,7 @@ export function NodeDetailPanel({
                     <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                       <Briefcase className="size-3" />
                       软素质
-                      <span className="ml-auto font-mono text-[10px]">{positionDetail.soft_skills?.length}</span>
+                      <span className="ml-auto font-mono text-[11px]">{positionDetail.soft_skills?.length}</span>
                     </h4>
                     <div className="flex flex-wrap gap-1.5">
                       {positionDetail.soft_skills?.map((name) => (
@@ -424,7 +681,7 @@ export function NodeDetailPanel({
                         </SkillChip>
                       ))}
                     </div>
-                    <p className="text-[10px] text-ink-faint">责任心/沟通能力等软性要求，与技术栈技能区分统计</p>
+                    <p className="text-[11px] text-ink-faint">责任心/沟通能力等软性要求，与技术栈技能区分统计</p>
                   </section>
                 )}
               </>
@@ -490,7 +747,7 @@ export function NodeDetailPanel({
                               <button
                                 key={`${p.name}-${p.depth}`}
                                 onClick={() => onSelectSkill?.(p.skill_id ?? p.name, p.name)}
-                                className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle/60"
+                                className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle/60"
                                 title={`先学习 ${p.name}`}
                               >
                                 {p.name}
@@ -499,7 +756,7 @@ export function NodeDetailPanel({
                           </div>
                         )}
                         {learningStatus === 'locked' && (
-                          <p className="mt-1.5 text-[10px] text-ink-faint">先完成前置技能后可解锁学习</p>
+                          <p className="mt-1.5 text-[11px] text-ink-faint">先完成前置技能后可解锁学习</p>
                         )}
                       </div>
                     )
@@ -523,10 +780,10 @@ export function NodeDetailPanel({
                         >
                           <span className="truncate text-xs font-medium text-ink">{p.position_name}</span>
                           <span className="flex shrink-0 items-center gap-1">
-                            <Badge variant="outline" className="font-mono text-[10px]">
+                            <Badge variant="outline" className="font-mono text-[11px]">
                               {p.necessity === 'must' ? '必备' : '加分'}
                             </Badge>
-                            <span className="text-[10px] font-mono text-ink-faint">
+                            <span className="text-[11px] font-mono text-ink-faint">
                               {(p.weight * 100).toFixed(0)}%
                             </span>
                           </span>
@@ -558,12 +815,12 @@ export function NodeDetailPanel({
                             <div className="flex-1">
                               <div className="flex items-center gap-2">
                                 <span className="text-xs font-medium text-ink">{p.name}</span>
-                                <span className="rounded bg-subtle px-1 py-0 text-[9px] font-mono text-ink-muted">
+                                <span className="rounded bg-subtle px-1 py-0 text-[10px] font-mono text-ink-muted">
                                   深度 {p.depth}
                                 </span>
                               </div>
                               {i < skillDetail.prerequisites.length - 1 && (
-                                <div className="mt-1 flex items-center gap-1 text-[10px] text-ink-faint">
+                                <div className="mt-1 flex items-center gap-1 text-[11px] text-ink-faint">
                                   <ChevronRight className="size-3" />
                                   建议掌握后继续
                                 </div>
@@ -591,7 +848,7 @@ export function NodeDetailPanel({
                         const content = (
                           <>
                             <span className="block text-xs font-medium leading-snug text-ink">{c.title}</span>
-                            <span className="mt-1 flex items-center gap-2 text-[10px] text-ink-faint">
+                            <span className="mt-1 flex items-center gap-2 text-[11px] text-ink-faint">
                               <span>{c.platform}</span>
                               {c.hours != null && <span>· {c.hours}h</span>}
                               {c.quality_score != null && (
@@ -634,10 +891,10 @@ export function NodeDetailPanel({
                           key={s.skill_id}
                           onClick={() => onSelectSkill?.(s.skill_id, s.skill_name)}
                           title={`相似度 ${(s.similarity * 100).toFixed(0)}%`}
-                          className="flex items-center gap-1 rounded-full border border-border px-2 py-1 text-[10px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle/60"
+                          className="flex items-center gap-1 rounded-full border border-border px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:border-border-strong hover:bg-subtle/60"
                         >
                           {s.skill_name}
-                          <span className="font-mono text-[9px] text-ink-faint">
+                          <span className="font-mono text-[10px] text-ink-faint">
                             {(s.similarity * 100).toFixed(0)}
                           </span>
                         </button>
@@ -651,7 +908,7 @@ export function NodeDetailPanel({
                     <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                       <ExternalLink className="size-3" />
                       证据来源
-                      <span className="ml-auto font-mono text-[10px]">{skillEvidence.length}</span>
+                      <span className="ml-auto font-mono text-[11px]">{skillEvidence.length}</span>
                     </h4>
                     <ul className="space-y-1">
                       {skillEvidence.slice(0, 8).map((ev) => (
@@ -667,7 +924,7 @@ export function NodeDetailPanel({
                               {ev.source || '原始 JD'}
                             </span>
                             {ev.crawled_at && (
-                              <span className="shrink-0 text-[10px] font-mono text-ink-faint">
+                              <span className="shrink-0 text-[11px] font-mono text-ink-faint">
                                 {ev.crawled_at.slice(0, 10)}
                               </span>
                             )}
@@ -676,7 +933,7 @@ export function NodeDetailPanel({
                       ))}
                     </ul>
                     {skillEvidence.length > 8 && (
-                      <p className="text-[10px] text-ink-faint">仅显示前 8 条，共 {skillEvidence.length} 条</p>
+                      <p className="text-[11px] text-ink-faint">仅显示前 8 条，共 {skillEvidence.length} 条</p>
                     )}
                   </section>
                 )}

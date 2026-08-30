@@ -40,11 +40,12 @@ _COURSE_MATCH_THRESHOLD = 0.7
 # 宁可无课不可误导）。注意同语言短词虚高（语音合成↔KK音标 0.665）为已知残余。
 _COURSE_TITLE_SIM_THRESHOLD = 0.5
 
-# 灰色带质量门控（08-15 误配课程治理）：sim ∈ [0.5, 0.62) 为中英跨语言短词
-# sim 虚高残余带（多线程↔高级英语 0.558、Qlik↔简明世界史 0.551、Windsurf↔轮滑
-# 0.581 实证误配；合理灰色带 Office→Excel 0.553、推荐算法→ML 课 0.514）。
-# 带内仅保留质量分 ≥0.62 的课程，低质课程宁缺毋滥过滤。
-_GRAY_ZONE_SIM = (0.5, 0.62)
+# 质量底线门控：08-15 灰色带治理（sim ∈ [0.5,0.62) 带内查质量分）经 08-28
+# 方案 A 推广到全域——凡非词面自证（_lexical_hit）的语义命中一律要求质量分
+# ≥ 此值。背景：MiniLM 对抽象中文技能 × 无关中文课标题系统性虚高 0.62-0.81
+# （并发↔运筹学 0.806、事件驱动↔运筹学 0.807，226 全栈岗位 13 技能实证），
+# 原"带外即放行"使运筹学(q=0.519)、土力学(q=0.538)、高级英语(q=0.565) 等
+# 垃圾课直通——sim 区间无法区分相关/误配，质量分是唯一可用判别器。
 _GRAY_ZONE_Q_MIN = 0.62
 
 # 跨语言无词面交集门控（08-22 实证收紧）：技能名为纯 ASCII 且课程标题含中文、
@@ -192,8 +193,22 @@ def _semantic_match_skill(
     return best_name if best_sim > sim_threshold else None
 
 
+def _boundary_hit(token: str, text: str) -> bool:
+    """词边界包含：token 出现且两侧相邻字符均非 ASCII 字母/数字。
+
+    08-29 iOS 误配实证：整串子串包含使 "ios" ⊂ 西语 "negocios"（Excel para
+    los negocios）构成词面命中直通，绕过全部语义/质量门控。子串会误中复合词
+    内部，同 08-18 LinkedIn 技术岗白名单 "Systematic/recruiter" 子串教训——
+    须词边界匹配。边界仅排除 ASCII 字母数字：CJK/标点/空格/首尾相邻均视为
+    边界（"RESTful技术"、"iOS开发" 等中英混排命中不受影响）。
+    """
+    if not token:
+        return False
+    return re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", text) is not None
+
+
 def _lexical_hit(skill_name: str, title: str) -> bool:
-    """强词面命中：技能名或其核心 token（≥3 字符）直接包含在课程名中。
+    """强词面命中：技能名或其核心 token（≥3 字符）以词边界包含在课程名中。
 
     背景（08-13 AWS 补采实证）：SBERT 对 "AWS" vs "AWS Cloud Technical
     Essentials" 相似度仅 0.472——缩写技能名与长课程名语义相似度虚低，
@@ -204,14 +219,16 @@ def _lexical_hit(skill_name: str, title: str) -> bool:
     "…RESTful技术"）——按非字母数字拆分 token（≥3 字符），任一 token
     命中课程名即词面相关；泛化 token（code/app/api/web 等，如
     "Claude Code" 的 "code" ∈ "No-Code…" 实证误配）不做 token 命中。
+    08-29 词边界化：包含判定从裸子串改为 _boundary_hit——"ios" ⊂
+    "negocios"、"sql" ⊂ "nosql" 类复合词内部子串不再构成词面自证。
     """
     low_skill = skill_name.lower()
     low_title = title.lower()
-    if len(skill_name) >= 3 and low_skill in low_title:
+    if len(skill_name) >= 3 and _boundary_hit(low_skill, low_title):
         return True
     tokens = re.split(r"[^a-z0-9\u4e00-\u9fff]+", low_skill)
     return any(
-        len(t) >= 3 and t not in _GENERIC_LEXICAL_TOKENS and t in low_title
+        len(t) >= 3 and t not in _GENERIC_LEXICAL_TOKENS and _boundary_hit(t, low_title)
         for t in tokens
     )
 
@@ -234,7 +251,7 @@ def _lexical_hint_hit(skill_name: str, title: str) -> bool:
 
 
 def _quality_ok(r: dict, quality_map: dict | None) -> bool:
-    """课程质量分 ≥ 灰色带底线（_GRAY_ZONE_Q_MIN）；quality_map 缺失时通过。
+    """课程质量分 ≥ 底线（_GRAY_ZONE_Q_MIN）；quality_map 缺失时通过。
 
     quality_map=None（调用方未提供质量数据）保持纯规则链路不过滤，与
     semantic=None 降级行为一致；传入空 dict 时视为全部质量缺失（宁缺毋滥）。
@@ -272,11 +289,14 @@ def _filter_by_title_similarity(
     时不过滤（保持纯规则链路）。词面命中（_lexical_hit）豁免——缩写技能名
     场景语义相似度虚低但词面明确相关（如 AWS 课程）。
 
-    灰色带治理（08-15 误配课程）：sim ∈ [0.5, 0.62) 为中英跨语言短词 sim
-    虚高残余带（'多线程'↔'高级英语' 0.558、'Qlik'↔'简明世界史' 0.551、
-    'Windsurf'↔'轮滑' 0.581 实证）——该带内仅保留质量分 ≥0.62 的课程
-    （合理灰色带课程：Office→Excel 0.553/q0.658、推荐算法→ML 课 0.514/q0.703），
-    低质课程宁缺毋滥过滤（避免误导学习路径）。
+    灰色带治理 → 全域质量底线（08-15 引入，08-28 方案 A 推广）：原 sim ∈
+    [0.5, 0.62) 带内查质量分的口径经实证不完整——MiniLM 对抽象中文技能 ×
+    无关中文课标题在 0.62-0.81 带外同样系统性虚高（并发↔运筹学 0.806、
+    事件驱动↔运筹学 0.807、事务↔运筹学 0.765，226 全栈岗位 13 技能中招；
+    合理课程 Python for Everybody 0.796 与之同带，sim 区间不可分辨），垃圾课
+    借"带外=相关"假设直通。现非词面自证（_lexical_hit）的语义命中一律要求
+    质量分 ≥0.62（合理灰色带课程 Office→Excel 0.553/q0.658、推荐算法→ML
+    0.514/q0.703 不受影响；词面命中课程相关性自证，豁免）。
 
     弱词面（_lexical_hint_hit，08-15 中英豁免扩展）仅豁免 sim 阈值，质量底线
     仍生效——关键词宽泛（web/api/linux/etl），无质量门控直通会放大误配
@@ -309,7 +329,11 @@ def _filter_by_title_similarity(
             if _lexical_hint_hit(skill_name, title) and _quality_ok(r, quality_map):
                 kept.append(r)
             continue
-        if _GRAY_ZONE_SIM[0] <= sim < _GRAY_ZONE_SIM[1] and not _quality_ok(r, quality_map):
+        # 质量底线全域生效（08-28 方案 A）：非词面自证的语义命中一律要求
+        # 质量分 ≥ _GRAY_ZONE_Q_MIN——sim 区间无法区分相关/误配（并发↔运筹学
+        # 0.806 虚高 vs Python↔Python for Everybody 0.796 合理同带），质量分
+        # 是词面之外的唯一判别器；运筹学(q=0.519) 族误配全部在带外曾直通。
+        if not _quality_ok(r, quality_map):
             continue
         kept.append(r)
     return kept

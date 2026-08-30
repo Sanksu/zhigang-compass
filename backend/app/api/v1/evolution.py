@@ -10,15 +10,17 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
+from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.common import iso, paged_ok, paginate
 from app.core import runtime_config
-from app.api.deps import require_role
+from app.api.deps import get_optional_user
 from app.core.database import get_db, redis_client
 from app.core.errors import ERR_NOT_FOUND
 from app.models.business import EvolutionEvent, GraphVersion
+from app.services.graph import visibility
 from app.schemas.common import error, ok
 
 router = APIRouter()
@@ -69,7 +71,10 @@ async def _load_snapshots(db: AsyncSession) -> list | None:
         snapshots = rows or None
         future.set_result(snapshots)
         return snapshots
-    except Exception as exc:
+    except BaseException as exc:
+        # BaseException（第八轮 P2-6，与 graph.py single-flight 同口径）：
+        # 请求方取消时 CancelledError 不走 Exception 分支——leader 挂掉则
+        # future 永不 resolve，跟随者 await 挂死。注入异常后原样 raise。
         if not future.done():
             future.set_exception(exc)
         raise
@@ -129,7 +134,7 @@ async def list_versions(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """图谱版本列表（分页，按创建时间倒序）。"""
     stmt = select(GraphVersion).order_by(GraphVersion.created_at.desc())
@@ -157,7 +162,7 @@ async def version_diff(
     from_version: str = Query(..., alias="from"),
     to_version: str = Query(..., alias="to"),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """两个版本快照 Diff 对比。"""
     va = await db.get(GraphVersion, from_version)
@@ -191,7 +196,7 @@ def _annotate_anti_fluctuation(
 async def evolution_signals(
     top_n: int = Query(default=10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """新兴/衰退技能 Top-N（设计文档 §7.1 Z-score 信号）。
 
@@ -250,7 +255,7 @@ async def evolution_signals(
 async def version_detail(
     version_id: str,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """[M4] 获取版本详情：元信息 + 快照统计 + 节点列表（不含边，避免超载）。
 
@@ -290,7 +295,7 @@ async def evolution_events(
     version_id: str | None = Query(default=None, description="按版本过滤；缺省返回全部（最新在前）"),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """谱系事件流（机制补强② born/merged/ended 落库数据）。
 
@@ -411,7 +416,7 @@ def _slice_page(
 async def position_evolution(
     id: str,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """[M4] 岗位演化历史：从版本快照序列重建该岗位节点存在性与引用边数变化。
 
@@ -435,9 +440,11 @@ async def position_evolution(
 async def position_evolution_list(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=10, ge=1, le=50),
-    q: str | None = Query(default=None, description="按岗位名称模糊过滤（08-16：下拉全量可搜索）"),
+    q: str | None = Query(
+        default=None, max_length=100,
+        description="按岗位名称模糊过滤（08-16：下拉全量可搜索）"),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """岗位演化历史列表：按快照出现热度（出现期数、最新引用边数）降序分页。
 
@@ -477,9 +484,11 @@ async def position_evolution_list(
 async def skill_evolution_list(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=10, ge=1, le=50),
-    q: str | None = Query(default=None, description="按技能名称模糊过滤（08-16：下拉全量可搜索）"),
+    q: str | None = Query(
+        default=None, max_length=100,
+        description="按技能名称模糊过滤（08-16：下拉全量可搜索）"),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """技能频次趋势列表：按快照出现热度（出现期数、最新引用边数）降序分页。
 
@@ -520,7 +529,7 @@ async def skill_trends(
     skill: str,
     window: int = Query(default=90, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """技能频次趋势：从图谱版本快照序列统计该技能关联 REQUIRES 边数。
 
@@ -616,7 +625,7 @@ async def skill_flow(
     id: str,
     top: int = Query(default=8, ge=1, le=20, description="每期取频次 Top-N 岗位"),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """技能关联岗位动态变迁桑基图（列=快照期次，节点=Top-N 岗位，连线=相邻期同名岗位）。"""
     cache_key = f"evolution:flow:{id}:{top}"
@@ -635,7 +644,7 @@ async def skill_flow(
 @router.get("/state-machine")
 async def state_machine_overview(
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """[M4] 岗位状态机总览：六态分布 + 最近流转记录（登录用户可读）。
 
@@ -658,6 +667,7 @@ async def state_machine_overview(
     for state, cnt in state_rows:
         counts[state] = counts.get(state, 0) + cnt
 
+
     logs = (await db.scalars(
         select(AuditLog)
         .where(AuditLog.action == "discovery.state_transition")
@@ -676,6 +686,14 @@ async def state_machine_overview(
         }
         for log in logs
     ]
+    # 待审核规模与审核操作者不外泄：对齐图谱域单一事实源
+    # （services/graph/visibility.py）——匿名与 guest 均走 public scope
+    # （第七轮审查 P1-4，原实现只防匿名）
+    if not visibility._can_view_all_positions(user):
+        counts["candidate"] = 0
+        transitions = [
+            {**t, "operator": "审核员"} for t in transitions if t["to_state"] != "candidate"
+        ]
     return ok(data={"states": counts, "transitions": transitions})
 
 
@@ -684,7 +702,7 @@ async def technology_watch_overview(
     db: AsyncSession = Depends(get_db),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=10, ge=1, le=100),
-    user: dict = Depends(require_role("guest")),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """观察池公开摘要 + MLI 产业化拐点排名（设计文档 §7.2.5，前端看板）。
 

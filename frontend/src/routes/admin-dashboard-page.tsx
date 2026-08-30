@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- 导出趋势图数据常量供测试断言，HMR 粒度降级可接受 */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import {
   Activity,
@@ -209,17 +209,32 @@ export function AdminDashboardPage() {
     }
   }, [])
 
+  // 轮询中止标志 + 提示定时器登记（第八轮 P1-13：路由切走后停止 ETL 空轮询、
+  // 清理 flashAction 定时器，避免卸载后 setState——同 resume-match-page pollCancelledRef 范式）
+  const pollCancelledRef = useRef(false)
+  const flashTimersRef = useRef(new Set<ReturnType<typeof setTimeout>>())
+  useEffect(
+    () => () => {
+      pollCancelledRef.current = true
+      flashTimersRef.current.forEach((t) => clearTimeout(t))
+      flashTimersRef.current.clear()
+    },
+    [],
+  )
+
   /** 按钮下方一次性提示（ttlMs 后自动清除；0 = 常驻直至下次更新） */
   function flashAction(id: string, text: string, ttlMs = 4000) {
     setActionMessages((prev) => new Map(prev).set(id, text))
     if (ttlMs > 0) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
+        flashTimersRef.current.delete(timer)
         setActionMessages((prev) => {
           const next = new Map(prev)
           next.delete(id)
           return next
         })
       }, ttlMs)
+      flashTimersRef.current.add(timer)
     }
   }
 
@@ -228,14 +243,14 @@ export function AdminDashboardPage() {
   async function trackEtlTask(id: string, taskId: string) {
     for (let i = 0; i < 400; i++) {
       await new Promise((r) => setTimeout(r, 3000))
+      if (pollCancelledRef.current) return
       try {
         const t = await apiGet<components['schemas']['EtlTaskStatus']>(
           `/admin/etl/task/${taskId}`,
         )
         if (t.status === 'success') return flashAction(id, '执行完成')
         if (t.status === 'failed') return flashAction(id, '执行失败（详情见服务端日志）')
-      } catch (e) {
-        console.error(`[quick-action] ETL 状态查询失败: ${id}`, e)
+      } catch {
         return flashAction(id, '状态查询中断，请稍后刷新查看')
       }
     }
@@ -267,8 +282,7 @@ export function AdminDashboardPage() {
         await apiPost('/admin/crawl/trigger', { platform: p.id })
       }
       flashAction(id, `已入队 ${res.platforms.length} 个平台`)
-    } catch (e) {
-      console.error(`[quick-action] 失败: ${id}`, e)
+    } catch {
       flashAction(id, '触发失败')
     } finally {
       setRunningActions((prev) => {
@@ -330,22 +344,22 @@ export function AdminDashboardPage() {
                 }`}
               >
                 <div className="flex items-center justify-between mb-1.5">
-                  <Badge variant={src.levelVariant} className="text-[10px] leading-none px-1.5 py-0">
+                  <Badge variant={src.levelVariant} className="text-[11px] leading-none px-1.5 py-0">
                     {src.level}
                   </Badge>
                   <span className="flex items-center gap-1">
                     <span className={`size-1.5 rounded-full ${STATUS_DOT_CLASS[src.status]}`} />
-                    <span className="text-[9px] text-ink-faint">{STATUS_LABEL[src.status]}</span>
+                    <span className="text-[10px] text-ink-faint">{STATUS_LABEL[src.status]}</span>
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="flex size-6 shrink-0 items-center justify-center rounded border border-border bg-subtle text-[11px] font-semibold text-ink-muted">
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded border border-border bg-subtle text-[12px] font-semibold text-ink-muted">
                     {src.name.charAt(0)}
                   </span>
                   <span className="text-ink truncate font-medium">{src.name}</span>
                 </div>
                 {/* 采集指标：累计 / 今日 / 文件数 / 最近运行 */}
-                <div className="mt-2 space-y-0.5 text-[10px] text-ink-faint tabular-nums">
+                <div className="mt-2 space-y-0.5 text-[11px] text-ink-faint tabular-nums">
                   <div>
                     累计 {src.totalCount.toLocaleString()}
                     {src.todayCount > 0 && <span className="text-state-emerging"> · 今日 +{src.todayCount}</span>}
@@ -418,7 +432,7 @@ export function AdminDashboardPage() {
                     <TableRow key={log.id}>
                       <TableCell className="font-mono text-xs text-ink-muted whitespace-nowrap">{log.time}</TableCell>
                       <TableCell>
-                        <Badge variant={AUDIT_TYPE_VARIANT[log.type]} className="text-[10px] leading-none px-1.5 py-0">
+                        <Badge variant={AUDIT_TYPE_VARIANT[log.type]} className="text-[11px] leading-none px-1.5 py-0">
                           {log.type}
                         </Badge>
                       </TableCell>
@@ -453,15 +467,15 @@ export function AdminDashboardPage() {
                     <span className="text-sm font-medium">{action.label}</span>
                     {/* 审核入口显示真实待审核数（/admin/positions/pending total） */}
                     {action.id === 'goto-review' && auditQueueCount > 0 && (
-                      <span className="ml-auto rounded-full bg-state-candidate/15 px-2 py-0.5 text-[10px] font-medium text-state-candidate">
+                      <span className="ml-auto rounded-full bg-state-candidate/15 px-2 py-0.5 text-[11px] font-medium text-state-candidate">
                         {auditQueueCount}
                       </span>
                     )}
                     {message && (
-                      <span className="ml-auto text-[10px] text-state-emerging font-medium">{message}</span>
+                      <span className="ml-auto text-[11px] text-state-emerging font-medium">{message}</span>
                     )}
                   </div>
-                  <span className="text-[11px] text-ink-muted font-normal">{action.desc}</span>
+                  <span className="text-[12px] text-ink-muted font-normal">{action.desc}</span>
                 </>
               )
               return action.to ? (

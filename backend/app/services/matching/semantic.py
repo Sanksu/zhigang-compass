@@ -10,12 +10,18 @@
 """
 
 import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
 # 模型名称（设计文档 9.3 指定）与缓存目录
 MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 _CACHE_DIR = Path(__file__).resolve().parents[3] / "models" / "sbert"
+
+# 名称向量缓存上限（第八轮 P2-10）：项目自由文本技能名会持续进入缓存（每条
+# 384 float ≈ 3KB），无界增长会吃尽内存。8192 条 × ~3KB ≈ 25MB 封顶，
+# 远大于技能词典规模，正常流量命中率不受影响
+_CACHE_MAX_ENTRIES = 8192
 
 
 class SemanticUnavailableError(Exception):
@@ -32,7 +38,7 @@ class SkillEmbedder:
 
     def __init__(self) -> None:
         self._model = None
-        self._cache: dict[str, object] = {}
+        self._cache: OrderedDict[str, object] = OrderedDict()
         self._lock = threading.Lock()
 
     @classmethod
@@ -56,11 +62,29 @@ class SkillEmbedder:
                     raise SemanticUnavailableError(f"SBERT 模型加载失败: {e}") from e
         return self._model
 
+    # 缓存读写均持锁（_vec/similarity 会经 asyncio.to_thread 并发进入），
+    # OrderedDict 非线程安全；锁内只做查/存/O(1) 淘汰，不含模型推理
+    def _cache_get(self, key: str):
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)  # LRU：命中即续期
+                return self._cache[key]
+        return None
+
+    def _cache_put(self, key: str, vec) -> None:
+        with self._lock:
+            self._cache[key] = vec
+            self._cache.move_to_end(key)
+            while len(self._cache) > _CACHE_MAX_ENTRIES:
+                self._cache.popitem(last=False)  # 超限淘汰最久未用项
+
     def _vec(self, text: str) -> object:
         key = text.strip()
-        if key not in self._cache:
-            self._cache[key] = self._load().encode([key])[0]
-        return self._cache[key]
+        vec = self._cache_get(key)
+        if vec is None:
+            vec = self._load().encode([key])[0]
+            self._cache_put(key, vec)
+        return vec
 
     # ---- 对外接口 ----
 
@@ -77,7 +101,8 @@ class SkillEmbedder:
         names 为技能名集合；已缓存的跳过。模型不可用时静默忽略——
         后续单条调用同样会捕获 SemanticUnavailableError 降级纯规则匹配。
         """
-        missing = [n.strip() for n in names if n and n.strip() not in self._cache]
+        with self._lock:
+            missing = [n.strip() for n in names if n and n.strip() and n.strip() not in self._cache]
         if not missing:
             return
         try:
@@ -85,7 +110,7 @@ class SkillEmbedder:
         except Exception:
             return
         for key, vec in zip(missing, vecs):
-            self._cache[key] = vec
+            self._cache_put(key, vec)
 
     def embed(self, text: str) -> list:
         """文本 → 384 维向量（list[float]），供 pgvector 查询绑定与批量入库。
