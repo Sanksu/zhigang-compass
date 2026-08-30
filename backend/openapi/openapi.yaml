@@ -3690,6 +3690,11 @@ components:
         model: { type: string }
         supports_function_calling: { type: boolean }
         enabled: { type: boolean }
+        protocol:
+          type: string
+          enum: [openai, anthropic]
+          default: openai
+          description: API 协议（openai=Chat Completions 兼容，缺省；anthropic=Anthropic Messages 兼容，如 z.ai Coding Plan /api/anthropic）
         extra_body:
           type: object
           description: provider 特定请求参数（如 deepseek 关闭思考模式），编辑时须保留

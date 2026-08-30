@@ -16,7 +16,7 @@
 import re
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from fastapi import APIRouter, Depends
@@ -60,7 +60,7 @@ def validate_providers(providers: list) -> str | None:
     """校验 provider 列表，返回错误信息或 None。
 
     约束：非空列表；name 唯一且为安全字符；base_url 为 http(s) 地址；
-    model 非空；priority 正整数且唯一；enabled 布尔。
+    model 非空；priority 正整数且唯一；enabled 布尔；protocol 合法枚举。
     """
     if not isinstance(providers, list) or not providers:
         return "providers 必须是非空列表"
@@ -73,6 +73,7 @@ def validate_providers(providers: list) -> str | None:
         base_url = (p.get("base_url") or "").strip()
         model = (p.get("model") or "").strip()
         api_key_env = (p.get("api_key_env") or "").strip()
+        protocol = (p.get("protocol") or "").strip().lower()
         if not name:
             return f"第 {i + 1} 个 provider 缺少 name"
         if not re.match(r"^[A-Za-z0-9_-]+$", name):
@@ -86,6 +87,8 @@ def validate_providers(providers: list) -> str | None:
             return f"provider '{name}' 缺少 model"
         if api_key_env and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", api_key_env):
             return f"provider '{name}' 的 api_key_env 不是合法环境变量名"
+        if protocol and protocol not in ("openai", "anthropic"):
+            return f"provider '{name}' 的 protocol 只能是 openai 或 anthropic"
         priority = p.get("priority")
         if not isinstance(priority, int) or priority < 1:
             return f"provider '{name}' 的 priority 必须为正整数"
@@ -148,6 +151,10 @@ def save_llm_config(path: Path, providers: list) -> dict:
             api_key_env = (p.get("api_key_env") or "").strip()
             if api_key_env:
                 entry["api_key_env"] = api_key_env
+            # 协议（anthropic=Anthropic Messages 兼容，如 z.ai Coding Plan），缺省 openai 不落盘
+            protocol = (p.get("protocol") or "").strip().lower()
+            if protocol and protocol != "openai":
+                entry["protocol"] = protocol
             # provider 特定请求参数（如 deepseek 关闭思考模式 thinking.type=disabled），非 dict 忽略
             extra_body = p.get("extra_body")
             if isinstance(extra_body, dict) and extra_body:
@@ -169,7 +176,7 @@ class LlmProviderIn(BaseModel):
     """PUT /admin/llm-config 单个 provider（契约 LlmProviderConfig）。"""
 
     name: str = Field(description="provider 唯一标识")
-    base_url: str = Field(description="OpenAI 兼容 API 地址")
+    base_url: str = Field(description="OpenAI 兼容或 Anthropic 兼容 API 地址")
     model: str = Field(min_length=1, description="模型名")
     priority: int = Field(ge=1, description="尝试优先级，1 最高，列表内唯一")
     enabled: bool = Field(default=True)
@@ -177,6 +184,10 @@ class LlmProviderIn(BaseModel):
     api_key: str = Field(default="", description="留空或含掩码保持原值；明文才更新（推荐改用 api_key_env）")
     api_key_env: str = Field(default="", description="密钥环境变量名：key 经 env 注入不落盘（推荐）")
     extra_body: dict[str, Any] | None = Field(default=None)
+    protocol: Literal["openai", "anthropic"] = Field(
+        default="openai",
+        description="API 协议：openai=Chat Completions 兼容（缺省），anthropic=Anthropic Messages 兼容",
+    )
 
 
 class LlmConfigIn(BaseModel):
