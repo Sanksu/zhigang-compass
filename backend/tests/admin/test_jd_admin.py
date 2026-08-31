@@ -248,6 +248,26 @@ class TestJdReviewQueue:
         first, second = resp.data["items"]
         assert first["needs_review"] is True and first["quality"] == 0.386
         assert second["needs_review"] is False and second["quality"] is None
+        # released_at 透出：未放行行为空串
+        assert first["released_at"] in ("", None) and second["released_at"] in ("", None)
+
+    def test_列表pending_extract参数可传(self):
+        row = _row()
+        db = _FakeSession([_FakeResult(one=1), _FakeResult(rows=[row])])
+        resp = asyncio.run(mod.list_jd(
+            q="", source="", needs_review=None, pending_extract=True,
+            page=1, size=20, db=db, current_user=_ADMIN,
+        ))
+        assert resp.data["total"] == 1
+
+    def test_列表透出released_at已放行行(self):
+        row = _row(released_at="2026-08-31T10:00:00")
+        db = _FakeSession([_FakeResult(one=1), _FakeResult(rows=[row])])
+        resp = asyncio.run(mod.list_jd(
+            q="", source="", needs_review=None, page=1, size=20,
+            db=db, current_user=_ADMIN,
+        ))
+        assert resp.data["items"][0]["released_at"] == "2026-08-31T10:00:00"
 
     def test_详情含复核字段(self):
         row = _row(needs_review=True, quality="0.386")
@@ -256,7 +276,7 @@ class TestJdReviewQueue:
         assert resp.data["needs_review"] is True
         assert resp.data["quality"] == 0.386
 
-    def test_放行清除标记并撤销skipped占位重进抽取游标(self):
+    def test_放行清除标记写released_at并撤销skipped占位重进抽取游标(self):
         row = _row(needs_review=True, extraction=_SKIPPED_EXTRACTION)
         db = _FakeSession([_FakeResult(one_or_none=row)])
         body = mod.JdAdminUpdateIn(needs_review=False)
@@ -264,11 +284,14 @@ class TestJdReviewQueue:
 
         assert row.snapshot["needs_review"] is False
         assert "extraction" not in row.snapshot  # 游标条件 extraction IS NULL 重新命中
+        assert row.snapshot["released_at"]  # 放行写入时间标记（消除状态盲区）
         assert row.content_hash == "old-hash"  # 放行不改内容，指纹不变
         assert db.committed
         assert "needs_review" in db.added[0].detail["changed_fields"]
         assert "extraction_reset" in db.added[0].detail["changed_fields"]
+        assert "released_at" in db.added[0].detail["changed_fields"]
         assert resp.data["needs_review"] is False
+        assert resp.data["released_at"] == row.snapshot["released_at"]
 
     def test_放行不动真实抽取产物(self):
         real = {"method": "llm", "position_name": "Python 开发工程师"}
@@ -278,8 +301,10 @@ class TestJdReviewQueue:
             jd_id=42, body=mod.JdAdminUpdateIn(needs_review=False),
             db=db, current_user=_ADMIN,
         ))
+        # 真实抽取产物非 skipped：不放行（needs_review 标记可置 false 但不撤销抽取/不写 released_at）
         assert row.snapshot["needs_review"] is False
         assert row.snapshot["extraction"] == real
+        assert "released_at" not in row.snapshot
 
     def test_标记置真不撤销抽取(self):
         real = {"method": "llm", "position_name": "Python 开发工程师"}

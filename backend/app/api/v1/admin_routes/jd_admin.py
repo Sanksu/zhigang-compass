@@ -11,7 +11,9 @@
 - 抽取快照 snapshot.extraction 不动（重抽需手动触发 ETL，编辑不自动跑 LLM）
 - needs_review true→false 视为「放行」（人工复核闭环的唯一出口）：同步撤销
   snapshot.extraction 的 skipped 占位标记，行回到抽取游标（extraction IS NULL）
-  待下轮 batch_extract；真实抽取产物不动；needs_review 不参与 content_hash 指纹
+  待下轮 batch_extract；真实抽取产物不动；放行同时写入 snapshot.released_at
+  （供运营识别「已放行·等待重抽」的行，消除放行到重抽之间的状态盲区）；
+  needs_review 不参与 content_hash 指纹
 - 图谱 Evidence 节点为独立备份，编辑/删除不联动（删除后证据链仍可追溯）
 - 全部变更写 AuditLog（operator 取 current_user.sub，须 users.id UUID）
 """
@@ -92,6 +94,11 @@ def _parse_crawled(text: str) -> datetime | None:
     return None
 
 
+def _released_at(snap: dict) -> str:
+    """放行时间（snapshot.released_at）→ 展示字符串；从未放过行为空串。"""
+    return str(snap.get("released_at") or "")
+
+
 async def _get_row(db: AsyncSession, jd_id: int) -> JDRaw | None:
     return (await db.execute(
         select(JDRaw).where(JDRaw.id == jd_id)
@@ -107,11 +114,12 @@ def _quality_number(snap: dict) -> float | None:
 
 
 def _admin_detail(row: JDRaw) -> dict:
-    """管理侧详情 = 查看侧 jd_detail 字段 + 复核队列字段（quality/needs_review）。"""
+    """管理侧详情 = 查看侧 jd_detail 字段 + 复核队列字段（quality/needs_review/released_at）。"""
     snap = row.snapshot or {}
     data = jd_detail(row)
     data["needs_review"] = bool(snap.get("needs_review"))
     data["quality"] = _quality_number(snap)
+    data["released_at"] = _released_at(snap)
     return data
 
 
@@ -120,12 +128,13 @@ async def list_jd(
     q: str = Query(default="", max_length=200),
     source: str = Query(default="", max_length=50),
     needs_review: bool | None = Query(default=None),
+    pending_extract: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_permission("admin:*")),
 ):
-    """JD 原始数据分页列表（管理页表格；needs_review=true 筛人工复核队列）。"""
+    """JD 原始数据分页列表（管理页表格；needs_review 筛复核队列，pending_extract 筛待抽取行）。"""
     conditions = []
     if q:
         # LIKE 通配符转义（%/_ 按字面匹配，\ 为 ESCAPE 默认字符需先转义）
@@ -143,6 +152,12 @@ async def list_jd(
         conditions.append(
             flag.is_(True) if needs_review else or_(flag.is_(None), flag.is_(False))
         )
+    if pending_extract is not None:
+        # 待抽取过滤：extraction 为空的行 = 抽取游标排队（从未抽取的新行 ∪ 放行后待重抽）
+        if pending_extract:
+            conditions.append(JDRaw.snapshot["extraction"].astext.is_(None))
+        else:
+            conditions.append(JDRaw.snapshot["extraction"].astext.isnot(None))
 
     count_stmt = select(func.count()).select_from(JDRaw)
     list_stmt = select(JDRaw)
@@ -171,6 +186,7 @@ async def list_jd(
             "position": normalized_position_from_snapshot(snap),
             "needs_review": bool(snap.get("needs_review")),
             "quality": _quality_number(snap),
+            "released_at": _released_at(snap),
             "text_length": len(row.raw_text or ""),
             "updated_at": row.updated_at.isoformat() if row.updated_at else "",
         })
@@ -229,6 +245,7 @@ async def update_jd(
         # 人工复核结论：true→false 视为「放行」——撤销 skipped 抽取占位标记，
         # 行回到抽取游标（extraction IS NULL）待下轮 batch_extract；真实抽取
         # 产物不动（放行不是重抽指令）。放行不改内容，content_hash 指纹不变。
+        # 放行同时写 released_at，供识别「已放行·等待重抽」的行（消除状态盲区）。
         new_flag = bool(body_map["needs_review"])
         if new_flag != bool(snap.get("needs_review")):
             snap["needs_review"] = new_flag
@@ -236,7 +253,9 @@ async def update_jd(
             ext = snap.get("extraction")
             if not new_flag and isinstance(ext, dict) and ext.get("skipped"):
                 snap.pop("extraction", None)
+                snap["released_at"] = datetime.now().isoformat(timespec="seconds")
                 changed["extraction_reset"] = "skipped 标记已撤销，重新进入抽取游标"
+                changed["released_at"] = f"放行时间已标记 {snap['released_at']}"
 
     if not changed:
         return ok(data=_admin_detail(row))

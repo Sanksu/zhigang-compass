@@ -1864,6 +1864,11 @@ paths:
           required: false
           schema: { type: boolean }
           description: 人工复核过滤（true=质量分 <0.6 的待复核队列；false=含未打标在内的非待复核行；缺省=全部）
+        - name: pending_extract
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: 待抽取过滤（true=抽取快照 extraction 为空的排队行，含从未抽取的新行与放行后待重抽的行；缺省=全部）
         - name: page
           in: query
           required: false
@@ -3326,6 +3331,7 @@ components:
         position: { type: string, description: "归一化岗位名（snapshot.normalized_position）" }
         needs_review: { type: boolean, description: "人工复核标记（爬虫质量门 quality <0.6 → 待复核，未经放行不参与 LLM 抽取）" }
         quality: { type: number, nullable: true, description: "质量评分 [0,1]（爬虫清洗管线打分；未打标行为 null）" }
+        released_at: { type: string, nullable: true, description: "放行时间（放行走 needs_review true→false 时写入 snapshot.released_at；已放行待重抽行为非空，从未放过行为 null）" }
         text_length: { type: integer, description: "raw_text 长度" }
         updated_at: { type: string, description: "最近更新时间（编辑审计参考）" }
 
@@ -3358,6 +3364,7 @@ components:
         position: { type: string }
         needs_review: { type: boolean, description: "人工复核标记（爬虫质量门 quality <0.6）" }
         quality: { type: number, nullable: true, description: "质量评分 [0,1]；未打标行为 null" }
+        released_at: { type: string, nullable: true, description: "放行时间（放行时写入 snapshot.released_at；已放行待重抽行为非空）" }
         raw_text: { type: string }
         extraction_summary:
           type: object

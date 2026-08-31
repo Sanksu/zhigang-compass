@@ -3189,6 +3189,8 @@ export interface paths {
                     source?: string;
                     /** @description 人工复核过滤（true=质量分 <0.6 的待复核队列；false=含未打标在内的非待复核行；缺省=全部） */
                     needs_review?: boolean;
+                    /** @description 待抽取过滤（true=抽取快照 extraction 为空的排队行，含从未抽取的新行与放行后待重抽的行；缺省=全部） */
+                    pending_extract?: boolean;
                     page?: number;
                     size?: number;
                 };
@@ -5163,6 +5165,8 @@ export interface components {
             needs_review?: boolean;
             /** @description 质量评分 [0,1]（爬虫清洗管线打分；未打标行为 null） */
             quality?: number | null;
+            /** @description 放行时间（放行走 needs_review true→false 时写入 snapshot.released_at；已放行待重抽行为非空，从未放过行为 null） */
+            released_at?: string | null;
             /** @description raw_text 长度 */
             text_length?: number;
             /** @description 最近更新时间（编辑审计参考） */
@@ -5192,6 +5196,8 @@ export interface components {
             needs_review?: boolean;
             /** @description 质量评分 [0,1]；未打标行为 null */
             quality?: number | null;
+            /** @description 放行时间（放行时写入 snapshot.released_at；已放行待重抽行为非空） */
+            released_at?: string | null;
             raw_text: string;
             /** @description 抽取摘要（salary_range/education.level/experience_range，只读展示——编辑不自动重抽） */
             extraction_summary?: {
