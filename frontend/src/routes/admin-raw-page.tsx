@@ -430,7 +430,7 @@ export function AdminRawPage() {
                               {jd.needs_review && (
                                 <Badge variant="archived" className="text-[11px]">待复核</Badge>
                               )}
-                              {!jd.needs_review && jd.released_at && (
+                              {!jd.needs_review && jd.released_at && !jd.has_extraction && (
                                 <Badge variant="outline" className="text-[11px] text-state-candidate">
                                   已放行·待重抽
                                 </Badge>
