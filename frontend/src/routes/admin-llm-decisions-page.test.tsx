@@ -232,3 +232,70 @@ describe('AdminLlmDecisionsPage 真实口径卡片与治理入口', () => {
     expect(screen.getByText('驳回')).toBeTruthy()
   })
 })
+
+describe('AdminLlmDecisionsPage 岗位归一审批上下文', () => {
+  it('position_normalize 行显示归一目标与动作徽标（并入）', async () => {
+    afterRender(
+      [
+        makeDecision({
+          domain: 'position_normalize',
+          entity_type: 'position',
+          entity_id: '数据库管理员',
+          status: 'proposal',
+          risk_tier: 'R2',
+          structured_output: {
+            is_new: false,
+            keep_original: false,
+            canonical_name: 'Java开发工程师',
+            reason: '岗位标题为 Java 开发，应归为 Java开发工程师',
+          },
+        }),
+      ],
+      { proposal: 1, auto_applied: 0, blocked: 0, shadow: 0, records: 1 },
+    )
+    await waitFor(() => expect(screen.getByText('position:数据库管理员')).toBeTruthy())
+    expect(screen.getByText('Java开发工程师')).toBeTruthy()
+    expect(screen.getByText('并入')).toBeTruthy()
+  })
+
+  it('keep_original 行显示确认原样徽标且不显示归一目标', async () => {
+    afterRender(
+      [
+        makeDecision({
+          domain: 'position_normalize',
+          entity_type: 'position',
+          entity_id: '7104',
+          status: 'proposal',
+          risk_tier: 'R2',
+          structured_output: { is_new: true, keep_original: true, canonical_name: 'Oracle MSCA', reason: 'x' },
+        }),
+      ],
+      { proposal: 1, auto_applied: 0, blocked: 0, shadow: 0, records: 1 },
+    )
+    await waitFor(() => expect(screen.getByText('position:7104')).toBeTruthy())
+    expect(screen.getByText('确认原样')).toBeTruthy()
+    expect(screen.queryByText('Oracle MSCA')).toBeNull()
+  })
+
+  it('归一证据按来源+原文链接渲染（不再出现空标签「：-」）', async () => {
+    afterRender(
+      [
+        makeDecision({
+          domain: 'position_normalize',
+          entity_type: 'position',
+          entity_id: '数据库管理员',
+          status: 'proposal',
+          risk_tier: 'R2',
+          evidence_refs: [{ source: 'monster', source_url: 'https://example.com/jd/1' }],
+          structured_output: { is_new: false, keep_original: false, canonical_name: 'Java开发工程师', reason: 'x' },
+        }),
+      ],
+      { proposal: 1, auto_applied: 0, blocked: 0, shadow: 0, records: 1 },
+    )
+    await waitFor(() => expect(screen.getByText('position:数据库管理员')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    expect(screen.getByText('证据引用')).toBeTruthy()
+    expect(screen.getByText(/来源：monster/)).toBeTruthy()
+    expect(screen.getByRole('link', { name: '查看原文' }).getAttribute('href')).toBe('https://example.com/jd/1')
+  })
+})
