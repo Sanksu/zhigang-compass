@@ -9,11 +9,16 @@ import pytest
 
 from app.services.graph_algorithms.network import load_position_projection
 from scripts.sync_position_domains import (
+    ATTACH_DOMINANCE,
+    ATTACH_MIN_AFFINITY,
     GENERAL_DOMAIN_ID,
     GENERAL_DOMAIN_NAME,
     apply_domain_pins,
+    attach_fringe_position,
+    demote_small_clusters,
     guard_domain_distribution,
-    merge_singletons,
+    resolve_fringe,
+    split_backbone,
 )
 
 
@@ -52,40 +57,34 @@ class TestLoadPositionProjection:
         assert graph == {} and name_map == {}
 
 
-class TestMergeSingletons:
-    def test_sub_min_cluster_merges_to_general(self):
-        # min-cluster-size=3（08-31 默认）：单点与 2 人微簇都并入通用域
+class TestSplitBackbone:
+    def test_freq_threshold_splits_pools(self):
+        freq = {"hub": 585, "mid": 11, "thin": 5, "zero": 0}
+        backbone, fringe = split_backbone(freq, min_freq=10)
+        assert backbone == {"hub", "mid"}
+        assert fringe == {"thin", "zero"}
+
+    def test_missing_freq_counts_as_zero(self):
+        backbone, fringe = split_backbone({"a": 12}, min_freq=10)
+        assert backbone == {"a"} and fringe == set()
+
+
+class TestDemoteSmallClusters:
+    def test_sub_min_clusters_demoted_to_fringe(self):
+        # min=3：2 人簇降级进归类池（替代旧"直接并通用域"），3 人簇保留
         membership = {"p1": 0, "p2": 0, "p6": 0, "p3": 1, "p4": 1, "p5": 2}
-        name_map = {"p1": "前端开发工程师", "p2": "Vue前端开发工程师", "p6": "Angular前端开发工程师",
-                    "p3": "系统可靠性工程师", "p4": "TypeScript工程师", "p5": "Python开发工程师"}
-        freq = {"p1": 203, "p2": 5, "p6": 2, "p3": 5, "p4": 1, "p5": 162}
-        assign = merge_singletons(membership, name_map, freq)
-        assert assign["p5"] == (GENERAL_DOMAIN_ID, GENERAL_DOMAIN_NAME)
-        assert assign["p3"] == assign["p4"] == (GENERAL_DOMAIN_ID, GENERAL_DOMAIN_NAME)
-        # 多岗域：代表岗 = 域内最高 freq
-        assert assign["p1"] == assign["p2"] == assign["p6"] == ("dom_0", "前端开发工程师")
+        kept, demoted = demote_small_clusters(membership, min_cluster_size=3)
+        assert kept == {"p1": 0, "p2": 0, "p6": 0}
+        assert demoted == {"p3", "p4", "p5"}
 
-    def test_min_cluster_size_two_keeps_pair(self):
-        membership = {"p1": 0, "p2": 0, "p3": 1}
-        name_map = {"p1": "前端开发工程师", "p2": "Vue前端开发工程师", "p3": "Python开发工程师"}
-        freq = {"p1": 203, "p2": 5, "p3": 162}
-        assign = merge_singletons(membership, name_map, freq, min_cluster_size=2)
-        assert assign["p1"] == assign["p2"] == ("dom_0", "前端开发工程师")
-        assert assign["p3"] == (GENERAL_DOMAIN_ID, GENERAL_DOMAIN_NAME)
-
-    def test_freq_tie_breaks_by_name(self):
-        membership = {"p1": 0, "p2": 0}
-        name_map = {"p1": "b岗", "p2": "a岗"}
-        assign = merge_singletons(membership, name_map, {"p1": 3, "p2": 3}, min_cluster_size=2)
-        assert assign["p1"][1] == "a岗"
-
-    def test_name_missing_falls_back_to_id(self):
-        assign = merge_singletons({"p1": 0, "p2": 0}, {}, {"p1": 1}, min_cluster_size=2)
-        assert assign["p1"][1] == "p1"
+    def test_all_clusters_healthy_no_demotion(self):
+        membership = {"p1": 0, "p2": 0, "p3": 0, "p4": 1, "p5": 1, "p6": 1}
+        kept, demoted = demote_small_clusters(membership, min_cluster_size=3)
+        assert kept == membership and demoted == set()
 
 
 class TestApplyDomainPins:
-    """08-31 高频桥梁岗语义指派：微簇合并前 pinned 岗并入锚点岗所在 Leiden 簇。"""
+    """08-31 高频桥梁岗语义指派：微簇降级前 pinned 骨干岗并入锚点岗所在簇。"""
 
     def _membership(self):
         # Leiden 原始簇：0=算法簇, 1=后端 2 人簇, 2=运维 2 人簇, 3=DevOps 单点
@@ -107,26 +106,19 @@ class TestApplyDomainPins:
             "id_bigdata": "大数据开发工程师",
         }
 
-    def test_pinned_joins_anchor_cluster_and_survives_min_size(self):
+    def test_pinned_joins_anchor_cluster_and_survives_demotion(self):
         membership, warnings = apply_domain_pins(self._membership(), self._name_map())
         assert warnings == []
-        # 后端：Java 2 人簇 + Python + 大数据 = 4 人，min=3 下自持成域
+        # 后端：Java 2 人簇 + Python + 大数据 = 4 人，min=3 下降级免死
         assert membership["id_py"] == membership["id_bigdata"] == membership["id_java"]
         # 运维：DevOps 并入 运维工程师 2 人簇 = 3 人
         assert membership["id_devops"] == membership["id_ops"]
         # 算法：大模型并入算法簇
         assert membership["id_llm"] == membership["id_vision"]
 
-    def test_end_to_end_pins_before_merge_produce_semantic_domain(self):
-        from scripts.sync_position_domains import DEFAULT_MIN_CLUSTER_SIZE
-        membership, _ = apply_domain_pins(self._membership(), self._name_map())
-        freq = {"id_ops": 33, "id_dba": 29, "id_devops": 148,
-                "id_java": 463, "id_be": 585, "id_py": 290, "id_bigdata": 207,
-                "id_vision": 143, "id_auto": 15, "id_llm": 376}
-        assign = merge_singletons(membership, self._name_map(), freq, DEFAULT_MIN_CLUSTER_SIZE)
-        assert assign["id_py"] == assign["id_java"] == ("dom_1", "后端开发工程师")
-        assert assign["id_devops"] == ("dom_2", "DevOps工程师")
-        assert assign["id_llm"] == ("dom_0", "大模型算法工程师")
+        kept, demoted = demote_small_clusters(membership, min_cluster_size=3)
+        assert "id_java" in kept and "id_py" in kept
+        assert demoted == set()
 
     def test_anchor_missing_skips_with_warning(self):
         membership = self._membership()
@@ -144,6 +136,82 @@ class TestApplyDomainPins:
         del name_map["id_py"]
         _, warnings = apply_domain_pins(membership, name_map)
         assert warnings == []
+
+
+class TestAttachFringePosition:
+    """带弃权的最近域分类：阈值 + 主导性双门槛。"""
+
+    def _graph(self):
+        # Go 场景缩影：对后端域两成员强连，对 AI 簇弱连
+        return {
+            "go": {"java": 6.8, "be": 6.7, "devops": 6.5, "prompt": 2.6, "genai": 1.9},
+            "thin": {"java": 1.0, "prompt": 0.8},
+            "torn": {"java": 3.0, "prompt": 2.6},
+        }
+
+    def _domains(self):
+        return {"dom_1": ["java", "be", "devops"], "dom_2": ["prompt", "genai"]}
+
+    def test_dominant_strong_affinity_attaches(self):
+        key, scores = attach_fringe_position(self._graph(), "go", self._domains())
+        assert key == "dom_1"
+        assert scores["dom_1"] == pytest.approx(20.0)
+
+    def test_weak_affinity_abstains(self):
+        key, _ = attach_fringe_position(
+            self._graph(), "thin", self._domains(),
+            min_affinity=ATTACH_MIN_AFFINITY, dominance=ATTACH_DOMINANCE,
+        )
+        assert key is None  # 最优 1.0 < 2.0 门槛 → 弃权
+
+    def test_non_dominant_abstains_even_if_strong(self):
+        key, _ = attach_fringe_position(
+            self._graph(), "torn", self._domains(),
+            min_affinity=ATTACH_MIN_AFFINITY, dominance=ATTACH_DOMINANCE,
+        )
+        assert key is None  # 3.0 达门槛但 < 1.3×2.6 → 两域拉扯弃权
+
+    def test_no_edges_abstains(self):
+        key, scores = attach_fringe_position({"lonely": {}}, "lonely", self._domains())
+        assert key is None and scores == {"dom_1": 0.0, "dom_2": 0.0}
+
+
+class TestResolveFringe:
+    def _setup(self):
+        graph = {
+            "go": {"java": 6.8, "be": 6.7},
+            "weak": {"java": 1.0},
+        }
+        domain_members = {"dom_1": ["java", "be"]}
+        name_map = {"java": "Java开发工程师", "be": "后端开发工程师",
+                    "go": "Go开发工程师", "weak": "某低频岗"}
+        return graph, domain_members, name_map
+
+    def test_strong_attaches_weak_abstains(self):
+        graph, domain_members, name_map = self._setup()
+        assigned, abstained, warnings = resolve_fringe(
+            graph, {"go", "weak"}, domain_members, name_map, pins={},
+        )
+        assert assigned == {"go": "dom_1"}
+        assert abstained == {"weak"}
+        assert warnings == []
+
+    def test_fringe_pin_bypasses_threshold(self):
+        graph, domain_members, name_map = self._setup()
+        assigned, abstained, _ = resolve_fringe(
+            graph, {"weak"}, domain_members, name_map,
+            pins={"某低频岗": "Java开发工程师"},
+        )
+        assert assigned == {"weak": "dom_1"} and abstained == set()
+
+    def test_pin_anchor_without_domain_warns_and_falls_back(self):
+        graph, domain_members, name_map = self._setup()
+        assigned, abstained, warnings = resolve_fringe(
+            graph, {"weak"}, domain_members, name_map,
+            pins={"某低频岗": "不存在的锚点岗"},
+        )
+        assert assigned == {} and abstained == {"weak"}
+        assert any("不存在的锚点岗" in w for w in warnings)
 
 
 class TestGuardDomainDistribution:
