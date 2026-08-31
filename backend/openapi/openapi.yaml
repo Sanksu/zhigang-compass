@@ -2237,6 +2237,87 @@ paths:
                       offset: { type: integer }
                   trace_id: { type: string }
 
+  /api/v1/admin/skills:
+    get:
+      tags: [admin]
+      summary: 技能治理列表（白名单标准名 ∪ approved 别名标准名；q/分类/白名单/噪声过滤 + 分页）
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 200, description: 关键字（名称或别名模糊匹配） }
+        - name: category
+          in: query
+          required: false
+          schema: { type: string, maxLength: 100, description: 分类过滤（模糊） }
+        - name: whitelist
+          in: query
+          required: false
+          schema: { type: string, enum: [all, only, exclude], default: all, description: 白名单过滤（only=仅白名单 / exclude=仅非白名单） }
+        - name: noise
+          in: query
+          required: false
+          schema: { type: string, enum: [all, only, exclude], default: all, description: 噪声过滤（only=仅噪声 / exclude=仅非噪声） }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 200 }
+      responses:
+        '200':
+          description: 技能治理分页列表（data 含 items/total/page/size）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/SkillAdminItem' }
+                      total: { type: integer }
+                      page: { type: integer }
+                      size: { type: integer }
+                  trace_id: { type: string }
+
+  /api/v1/admin/skill-aliases/{alias_id}/review:
+    post:
+      tags: [admin]
+      summary: 别名复核（pending → approved/rejected；写 AuditLog；approved 后热刷新动态别名表即时生效）
+      parameters:
+        - name: alias_id
+          in: path
+          required: true
+          schema: { type: string, description: 别名 UUID }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SkillAliasReviewIn' }
+      responses:
+        '200':
+          description: 复核成功（data 含 id/status/approved）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data: { $ref: '#/components/schemas/SkillAliasReviewOut' }
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 仅 pending 可复核（当前状态非 pending 返回 409）
+
   /api/v1/admin/positions/{position_name}:
     get:
       tags: [admin]
@@ -4046,6 +4127,37 @@ components:
         confidence: { type: number, nullable: true, description: LLM merge 置信度 }
         applied_to_graph: { type: boolean, description: 图同步进度标记（别名 approve 即生效，此字段预留） }
         created_at: { type: string, description: ISO8601 }
+
+    SkillAdminItem:
+      type: object
+      description: 技能治理列表项（GET /admin/skills：白名单标准名 ∪ approved 别名标准名聚合）
+      required: [name, in_whitelist, is_noise]
+      properties:
+        name: { type: string, description: 技能标准名 }
+        category: { type: string, description: 分类（白名单内取 skill_whitelist.yaml category；白名单外可为空） }
+        in_whitelist: { type: boolean, description: 是否在 skill_whitelist.yaml（幻觉防控第三道防线单一事实源） }
+        is_noise: { type: boolean, description: 是否命中噪声过滤词 }
+        aliases:
+          type: array
+          description: approved 别名变体列表
+          items: { type: string }
+
+    SkillAliasReviewIn:
+      type: object
+      description: POST /admin/skill-aliases/{alias_id}/review 请求体
+      required: [approved]
+      properties:
+        approved: { type: boolean, description: true=通过并写入动态别名表 / false=驳回 }
+        reason: { type: string, maxLength: 500, description: 审批理由 }
+
+    SkillAliasReviewOut:
+      type: object
+      description: 别名复核响应 data
+      required: [id, status, approved]
+      properties:
+        id: { type: string, description: 别名 UUID }
+        status: { type: string, description: 复核后状态（approved/rejected） }
+        approved: { type: boolean }
 
     # ============================================================
     # 演化模块端点 data（08-14 契约补全：versions/diff/trends/signals/state-machine/watch）
