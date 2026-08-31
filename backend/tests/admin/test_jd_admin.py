@@ -228,3 +228,76 @@ class TestJdAdminUpdateIn:
     def test_字段超长拒绝(self):
         with pytest.raises(ValidationError):
             mod.JdAdminUpdateIn(title="长" * 201)
+
+
+_SKIPPED_EXTRACTION = {"skipped": True, "reason": "质量评分 < 0.6，需人工复核"}
+
+
+class TestJdReviewQueue:
+    """人工复核闭环（needs_review 打标 → 筛选 → 放行重进抽取游标）。"""
+
+    def test_列表透出复核字段且过滤参数可用(self):
+        flagged = _row(jd_id=1, needs_review=True, quality="0.386")
+        legacy = _row(jd_id=2)  # 旧行未打标：needs_review 键缺失、quality 键缺失
+        legacy.snapshot.pop("quality", None)
+        db = _FakeSession([_FakeResult(one=2), _FakeResult(rows=[flagged, legacy])])
+        resp = asyncio.run(mod.list_jd(
+            q="", source="", needs_review=None, page=1, size=20,
+            db=db, current_user=_ADMIN,
+        ))
+        first, second = resp.data["items"]
+        assert first["needs_review"] is True and first["quality"] == 0.386
+        assert second["needs_review"] is False and second["quality"] is None
+
+    def test_详情含复核字段(self):
+        row = _row(needs_review=True, quality="0.386")
+        db = _FakeSession([_FakeResult(one_or_none=row)])
+        resp = asyncio.run(mod.get_jd(jd_id=42, db=db, current_user=_ADMIN))
+        assert resp.data["needs_review"] is True
+        assert resp.data["quality"] == 0.386
+
+    def test_放行清除标记并撤销skipped占位重进抽取游标(self):
+        row = _row(needs_review=True, extraction=_SKIPPED_EXTRACTION)
+        db = _FakeSession([_FakeResult(one_or_none=row)])
+        body = mod.JdAdminUpdateIn(needs_review=False)
+        resp = asyncio.run(mod.update_jd(jd_id=42, body=body, db=db, current_user=_ADMIN))
+
+        assert row.snapshot["needs_review"] is False
+        assert "extraction" not in row.snapshot  # 游标条件 extraction IS NULL 重新命中
+        assert row.content_hash == "old-hash"  # 放行不改内容，指纹不变
+        assert db.committed
+        assert "needs_review" in db.added[0].detail["changed_fields"]
+        assert "extraction_reset" in db.added[0].detail["changed_fields"]
+        assert resp.data["needs_review"] is False
+
+    def test_放行不动真实抽取产物(self):
+        real = {"method": "llm", "position_name": "Python 开发工程师"}
+        row = _row(needs_review=True, extraction=real)
+        db = _FakeSession([_FakeResult(one_or_none=row)])
+        asyncio.run(mod.update_jd(
+            jd_id=42, body=mod.JdAdminUpdateIn(needs_review=False),
+            db=db, current_user=_ADMIN,
+        ))
+        assert row.snapshot["needs_review"] is False
+        assert row.snapshot["extraction"] == real
+
+    def test_标记置真不撤销抽取(self):
+        real = {"method": "llm", "position_name": "Python 开发工程师"}
+        row = _row(extraction=real)
+        db = _FakeSession([_FakeResult(one_or_none=row)])
+        asyncio.run(mod.update_jd(
+            jd_id=42, body=mod.JdAdminUpdateIn(needs_review=True),
+            db=db, current_user=_ADMIN,
+        ))
+        assert row.snapshot["needs_review"] is True
+        assert row.snapshot["extraction"] == real
+
+    def test_复核结论相同为无操作(self):
+        row = _row()  # 未打标（False），再提交 False 应无变更
+        db = _FakeSession([_FakeResult(one_or_none=row)])
+        resp = asyncio.run(mod.update_jd(
+            jd_id=42, body=mod.JdAdminUpdateIn(needs_review=False),
+            db=db, current_user=_ADMIN,
+        ))
+        assert not db.added and not db.committed
+        assert resp.data["id"] == 42
