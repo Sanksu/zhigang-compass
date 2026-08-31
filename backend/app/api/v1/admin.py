@@ -25,6 +25,7 @@ from app.api.v1.admin_routes import (
     llm_decisions,
     position_edit,
     position_reviews,
+    raw_admin,
     skill_aliases,
 )
 
@@ -42,6 +43,7 @@ router.include_router(llm_decisions.router)
 router.include_router(skill_aliases.router)
 router.include_router(etl.router)
 router.include_router(jd_admin.router)
+router.include_router(raw_admin.router)
 
 # 爬虫域私有符号 re-export（tests/admin/* 直连导入）
 PLATFORM_META = crawl.PLATFORM_META

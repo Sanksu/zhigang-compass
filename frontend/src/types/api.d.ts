@@ -3326,6 +3326,164 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/raw/{raw_type}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 课程/论文/社区信号原始数据分页列表（q 关键词匹配快照标题与正文，source 源过滤） */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 关键词（ILIKE 匹配 snapshot 标题与 raw_text） */
+                    q?: string;
+                    /** @description 来源平台过滤（icourse163/coursera/edx/arxiv/github/stackoverflow） */
+                    source?: string;
+                    page?: number;
+                    size?: number;
+                };
+                header?: never;
+                path: {
+                    raw_type: "course" | "paper" | "community";
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 分页列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["RawAdminPage"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/raw/{raw_type}/{raw_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 原始数据详情（快照全量 + 正文全文，供编辑回显） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    raw_type: "course" | "paper" | "community";
+                    raw_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 详情 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["RawAdminDetail"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        /** 编辑原始数据（title/raw_text/source_url；写 AuditLog；编辑随既有 ETL 指纹重算自然生效，图谱节点不联动） */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    raw_type: "course" | "paper" | "community";
+                    raw_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RawAdminUpdate"];
+                };
+            };
+            responses: {
+                /** @description 更新结果 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: Record<string, never>;
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        post?: never;
+        /** 删除原始数据（写 AuditLog；图谱侧节点为独立备份不联动） */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    raw_type: "course" | "paper" | "community";
+                    raw_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 删除结果 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: Record<string, never>;
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/llm-decisions/{decision_id}/approve": {
         parameters: {
             query?: never;
@@ -4944,6 +5102,54 @@ export interface components {
             raw_text?: string;
             /** @description 人工复核结论（缺省=不变更）。true→false 视为放行：后端同步撤销 snapshot.extraction 的 skipped 占位标记，JD 重新进入抽取游标待下轮 batch_extract 抽取；真实抽取产物不受影响；写 AuditLog */
             needs_review?: boolean;
+        };
+        /** @description 课程/论文/社区原始数据列表项（GET /admin/raw/{raw_type}） */
+        RawAdminItem: {
+            /** Format: int64 */
+            id: number;
+            title?: string;
+            source: string;
+            source_id: string;
+            source_url?: string;
+            crawled_at?: string;
+            is_desensitized?: boolean;
+            /** @description raw_text 长度 */
+            text_length?: number;
+            updated_at?: string;
+            /** @description 类型特有展示字段（course: quality/institution/skills_count；paper: published/authors_count；community: stars/votes/trend_type；缺失键 null） */
+            extra?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description GET /admin/raw/{raw_type} 响应 data */
+        RawAdminPage: {
+            total: number;
+            page: number;
+            size: number;
+            items: components["schemas"]["RawAdminItem"][];
+        };
+        /** @description GET/PUT /admin/raw/{raw_type}/{raw_id} 详情（快照全量 + 正文全文） */
+        RawAdminDetail: {
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            raw_type: "course" | "paper" | "community";
+            title?: string;
+            source: string;
+            source_id: string;
+            source_url?: string;
+            crawled_at?: string;
+            is_desensitized?: boolean;
+            raw_text: string;
+            snapshot?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description PUT /admin/raw/{raw_type}/{raw_id} 请求体（仅列出的字段被更新；编辑随既有 ETL 指纹重算自然生效） */
+        RawAdminUpdate: {
+            title?: string;
+            source_url?: string;
+            raw_text?: string;
         };
         /** @description 相似技能项（GET /graph/skill/similar，语义相似度） */
         SimilarSkillItem: {
