@@ -112,8 +112,9 @@ function SkillOverviewTab() {
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    apiGet<components['schemas']['SkillAdminPage']>(`/admin/skills?${params}`)
+    // loading 置位在过滤/分页事件处理器中完成（lint：effect 内同步 setState
+    // 触发级联渲染）；本 effect 只负责回落
+    apiGet<{ items: SkillAdminItem[]; total: number; page: number; size: number }>(`/admin/skills?${params}`)
       .then((res) => {
         if (cancelled) return
         setError(null)
@@ -140,6 +141,7 @@ function SkillOverviewTab() {
             onChange={(e) => {
               setQ(e.target.value)
               setPage(1)
+              setLoading(true)
             }}
             placeholder="按标准名/别名过滤"
             className="w-56 h-8 text-sm"
@@ -149,6 +151,7 @@ function SkillOverviewTab() {
             onChange={(e) => {
               setCategory(e.target.value)
               setPage(1)
+              setLoading(true)
             }}
             placeholder="按分类过滤"
             className="w-44 h-8 text-sm"
@@ -158,6 +161,7 @@ function SkillOverviewTab() {
             onValueChange={(v) => {
               setWhitelist(v)
               setPage(1)
+              setLoading(true)
             }}
           >
             <SelectTrigger aria-label="白名单过滤" className="h-8 w-36 text-sm">
@@ -174,6 +178,7 @@ function SkillOverviewTab() {
             onValueChange={(v) => {
               setNoise(v)
               setPage(1)
+              setLoading(true)
             }}
           >
             <SelectTrigger aria-label="噪声过滤" className="h-8 w-36 text-sm">
@@ -249,7 +254,7 @@ function SkillOverviewTab() {
           total={total}
           pageSize={PAGE_SIZE}
           loading={loading}
-          onPageChange={setPage}
+          onPageChange={(p) => { setPage(p); setLoading(true) }}
         />
       </CardContent>
     </Card>
@@ -293,7 +298,6 @@ function AliasReviewTab() {
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, reloadKey])
 
   async function review(item: SkillAliasItem, approved: boolean) {
@@ -314,7 +318,7 @@ function AliasReviewTab() {
     <Card>
       <CardContent className="pt-4">
         <div className="flex flex-wrap items-center gap-2 mb-4">
-          <Select value={status} onValueChange={(v) => { setStatus(v); setPage(1) }}>
+          <Select value={status} onValueChange={(v) => { setStatus(v); setPage(1); setLoading(true) }}>
             <SelectTrigger aria-label="状态过滤" className="h-8 w-36 text-sm">
               <SelectValue />
             </SelectTrigger>
@@ -410,7 +414,7 @@ function AliasReviewTab() {
           total={total}
           pageSize={PAGE_SIZE}
           loading={loading}
-          onPageChange={(p) => setPage(p)}
+          onPageChange={(p) => { setPage(p); setLoading(true) }}
         />
       </CardContent>
     </Card>
