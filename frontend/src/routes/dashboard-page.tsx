@@ -181,15 +181,13 @@ export function DashboardPage() {
   useEffect(() => {
     let cancelled = false
     Promise.allSettled([
-      // panorama 视图供「图谱节点」指标卡（节点/边数）——与图谱页共用 /graph/view
-      // 统一端点（08-23 闭环收敛：消除 /graph/panorama 与 view 双链路分叉）
-      apiGet<components['schemas']['GraphViewData']>('/graph/view/panorama?limit=200'),
-      // 采集统计需 admin 权限：游客 401 时静默降级，不触发全局登出
-      apiGet<components['schemas']['CrawlStatusData']>('/admin/crawl/status', { skipAuthRedirect: true }),
-      // 简历/采集/审计统计均需认证：游客 401 时静默降级，不触发全局登出
+      // 系统级概览接口加 60s TTL 缓存：返回时秒开，避免每次进入都重拉；
+      // resume/list 为用户私有数据，保留实时，不缓存（游客场景也看得到本人简历）
+      apiGet<components['schemas']['GraphViewData']>('/graph/view/panorama?limit=200', { ttl: 60 }),
+      apiGet<components['schemas']['CrawlStatusData']>('/admin/crawl/status', { skipAuthRedirect: true, ttl: 60 }),
       apiGet<{ items: unknown[]; total: number }>('/resume/list?limit=100', { skipAuthRedirect: true }),
-      apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=10', { skipAuthRedirect: true }),
-      apiGet<components['schemas']['AuditLogsData']>('/admin/audit/logs?page=1&size=10', { skipAuthRedirect: true }),
+      apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=10', { skipAuthRedirect: true, ttl: 60 }),
+      apiGet<components['schemas']['AuditLogsData']>('/admin/audit/logs?page=1&size=10', { skipAuthRedirect: true, ttl: 60 }),
     ]).then(([graphRes, crawlRes, resumeRes, versionRes, auditRes]) => {
       if (cancelled) return
 

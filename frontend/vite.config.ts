@@ -24,6 +24,22 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    build: {
+      // 手动分包：把稳定的大型第三方库拆成独立 chunk，浏览器长缓存命中 + 
+      // echarts/three 仅在实际用到它们的懒加载页进入时才按需下载，缩首屏体积
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined
+            if (/node_modules\/(echarts|zrender|zrender-to-canvas)\//.test(id)) return 'echarts'
+            if (/node_modules\/(three|three-stdlib|troika|@react-three|camera-controls|@tweenjs)\//.test(id)) return 'three'
+            if (/node_modules\/(axios|follow-redirects)\//.test(id)) return 'axios'
+            if (/node_modules\/(react|react-dom|react-router|react-router-dom|scheduler|zustand|@remix-run)\//.test(id)) return 'react'
+            return undefined
+          },
+        },
+      },
+    },
     test: {
       environment: 'jsdom',
       setupFiles: './src/test/setup.ts',
