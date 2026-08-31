@@ -48,6 +48,25 @@ from app.workers.tasks import (
 
 logger = logging.getLogger(__name__)
 
+# fire-and-forget 预热任务引用（第八轮 P2-18）：asyncio 官方文档——
+# create_task 返回的 Task 若无强引用，事件循环只保留弱引用，任务可能在
+# 执行途中被 GC 静默取消。保存引用 + 完成回调自清理；异常任务补 warning
+# 日志（任务体内部已各自捕获，此处兜底防"静默死"无迹可查）。
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_background(coro) -> None:
+    """启动 fire-and-forget 预热任务：保存引用防 GC，完成回调移除并记录异常。"""
+
+    def _done(task: asyncio.Task) -> None:
+        _background_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning("预热任务异常退出: %s", task.exception())
+
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_done)
+
 
 async def on_startup(ctx: dict) -> None:
     """Preload the OCR engine without blocking worker startup."""
@@ -62,7 +81,7 @@ async def on_startup(ctx: dict) -> None:
         except Exception as error:
             logger.warning("OCR 预热跳过（模型不可用）: %s", str(error)[:100])
 
-    asyncio.create_task(warm_ocr())
+    _spawn_background(warm_ocr())
 
     async def warm_dynamic_aliases() -> None:
         # 动态别名表（方案①）加载：worker 进程是 normalize_skill 的主消费方
@@ -73,7 +92,7 @@ async def on_startup(ctx: dict) -> None:
         loaded = await refresh_dynamic_aliases()
         logger.info("动态别名表 worker 启动加载完成：%d 条", loaded)
 
-    asyncio.create_task(warm_dynamic_aliases())
+    _spawn_background(warm_dynamic_aliases())
 
     async def warm_jd_pool() -> None:
         # JD 池化向量预热（方案 A：匹配主链路恒走 JD 候选模式，池化向量为
@@ -105,7 +124,7 @@ async def on_startup(ctx: dict) -> None:
         except Exception as error:
             logger.warning("JD 池化预热跳过: %s", str(error)[:100])
 
-    asyncio.create_task(warm_jd_pool())
+    _spawn_background(warm_jd_pool())
 
 
 async def on_shutdown(ctx: dict) -> None:

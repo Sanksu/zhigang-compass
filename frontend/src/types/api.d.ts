@@ -341,7 +341,107 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/graph/skill/{id}/evidence": {
+    "/api/v1/graph/position/{id}/portrait-evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 岗位画像条目证据 JD 列表（薪资/经验/学历选中后侧栏展示）
+         * @description 按维度+条目标签回溯支撑该聚合条目的具体 JD（jd_raw 行，口径镜像 build_aggregates：SimHash 近似重复/归档/岗位级通胀排除一致）。 label 为空返回该维度全部证据 JD；jd_id 用于 GET /graph/jd/{jd_id} 取正文。
+         */
+        get: {
+            parameters: {
+                query: {
+                    /** @description 画像维度 */
+                    dimension: "salary" | "experience" | "education";
+                    /** @description 条目标签（薪资档位原文 / "3年以上" / "本科"）；缺省=该维度全部 */
+                    label?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 证据 JD 列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["PortraitEvidenceData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/graph/jd/{jd_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * JD 证据正文详情（岗位画像证据点开后的正文与出处）
+         * @description 返回 jd_raw 原文（raw_text）与出处链接（source_url）等元数据； 内容为公开招聘信息（脉脉源入库前已脱敏，is_desensitized 标注）。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jd_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description JD 正文详情 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["JdEvidenceDetail"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/graph/skill/{skill_id}/evidence": {
         parameters: {
             query?: never;
             header?: never;
@@ -354,7 +454,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    id: components["parameters"]["Id"];
+                    skill_id: components["parameters"]["SkillId"];
                 };
                 cookie?: never;
             };
@@ -384,7 +484,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/graph/skill/{id}/prerequisites": {
+    "/api/v1/graph/skill/{skill_id}/prerequisites": {
         parameters: {
             query?: never;
             header?: never;
@@ -397,7 +497,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    id: components["parameters"]["Id"];
+                    skill_id: components["parameters"]["SkillId"];
                 };
                 cookie?: never;
             };
@@ -427,7 +527,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/graph/skill/{id}/courses": {
+    "/api/v1/graph/skill/{skill_id}/courses": {
         parameters: {
             query?: never;
             header?: never;
@@ -440,7 +540,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    id: components["parameters"]["Id"];
+                    skill_id: components["parameters"]["SkillId"];
                 };
                 cookie?: never;
             };
@@ -470,7 +570,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/graph/skill/{id}/positions": {
+    "/api/v1/graph/skill/{skill_id}/positions": {
         parameters: {
             query?: never;
             header?: never;
@@ -483,7 +583,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    id: components["parameters"]["Id"];
+                    skill_id: components["parameters"]["SkillId"];
                 };
                 cookie?: never;
             };
@@ -755,12 +855,14 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description 岗位 id（positionPortrait 视图必填，其余视图忽略） */
+                    /** @description 岗位 id/name（positionPortrait 视图必填，其余视图忽略；仅 positionPortrait 视图参与缓存键） */
                     position?: string;
+                    /** @description 节点数上限，参与缓存键 */
+                    limit?: number;
                 };
                 header?: never;
                 path: {
-                    view_type: "panorama" | "techStack" | "level" | "positionCenter" | "positionPortrait";
+                    view_type: "panorama" | "techStack" | "positionCenter" | "positionPortrait";
                 };
                 cookie?: never;
             };
@@ -768,6 +870,29 @@ export interface paths {
             responses: {
                 /** @description 视图数据 */
                 200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["GraphViewData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                /** @description 岗位不存在或不可见（仅 positionPortrait 视图） */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description positionPortrait 视图未指定 position 参数（code 4000） */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1186,6 +1311,33 @@ export interface paths {
                             data?: components["schemas"]["RecommendTaskResult"];
                             trace_id?: string;
                         };
+                    };
+                };
+                /** @description 非本人无权使用该简历发起匹配 */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description 简历不存在 */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
+                    };
+                };
+                /** @description resume_id 格式非法（code 4000） */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiResponse"];
                     };
                 };
             };
@@ -1909,6 +2061,8 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    /** @description 按岗位名称模糊过滤（08-16：下拉全量可搜索） */
+                    q?: string;
                     /** @description 页码（从 1 起） */
                     page?: number;
                     /** @description 每页条数 */
@@ -1958,6 +2112,8 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    /** @description 按技能名称模糊过滤（08-16：下拉全量可搜索） */
+                    q?: string;
                     /** @description 页码（从 1 起） */
                     page?: number;
                     /** @description 每页条数 */
@@ -2970,6 +3126,199 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/approvals/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全审批池只读汇总（跨岗位审核/字典守卫/LLM 决策/观察池/别名，供「总览」工作流面板；不改任何状态机） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 各审批流 待办/需复核/已通过 计数 + 汇总（ApiResponse 包装） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["ApprovalSummaryData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/jd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** JD 原始数据分页列表（管理页；q 关键词匹配标题/正文，source 源过滤） */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 关键词（ILIKE 匹配 snapshot 标题与 raw_text） */
+                    q?: string;
+                    /** @description 来源平台过滤（zhilian/boss/...） */
+                    source?: string;
+                    page?: number;
+                    size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 分页列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["JdAdminPage"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/jd/{jd_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** JD 原始数据详情（含正文全文与抽取摘要，供编辑回显） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jd_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description JD 详情 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["JdAdminDetail"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        /** 编辑 JD 原始数据（raw_text/source_url 等元数据；content_hash 同步重算，抽取快照不动——重抽需手动触发；写 AuditLog） */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jd_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["JdAdminUpdate"];
+                };
+            };
+            responses: {
+                /** @description 更新后的详情 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["JdAdminDetail"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        post?: never;
+        /** 删除 JD 原始数据（写 AuditLog；图谱 Evidence 节点保留备份不联动删除） */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    jd_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 删除结果 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: Record<string, never>;
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -4114,7 +4463,7 @@ export interface components {
             action: "approve" | "reject";
             /** @description 审核理由（可选，缺省 admin evolution review） */
             reason?: string;
-            /** @description approve 时合并进候选池 features 的属性修订 */
+            /** @description approve 时合并进候选池 features 的属性修订；允许键集=DiscoveryFeatures 字段：jd_freq_ma3/z_score/source_diversity/cross_source_consistency/arxiv_paper_count/github_star_velocity/first_seen_date（读取侧 DiscoveryFeatures(**features) 忽略未知键） */
             modified?: Record<string, never>;
         };
         LLMDecisionReviewRequest: {
@@ -4146,7 +4495,7 @@ export interface components {
                 name: string;
                 /** @enum {string} */
                 necessity: "must" | "nice";
-                weight?: number;
+                weight: number;
             }[];
             /** @description 核心职责（字符串数组，全量替换） */
             core_duties?: string[];
@@ -4177,16 +4526,16 @@ export interface components {
             trace_id: string;
         };
         /**
-         * @description 图谱视图类型（服务端过滤）
+         * @description 图谱视图类型（服务端过滤；positionCenter 无独立页签，作为岗位画像下拉选项数据源保留）
          * @enum {string}
          */
-        GraphViewType: "panorama" | "techStack" | "level" | "positionCenter" | "positionPortrait";
-        /** @description 图谱节点（Position/Skill，匿名视角候选岗位不外宣） */
+        GraphViewType: "panorama" | "techStack" | "positionCenter" | "positionPortrait";
+        /** @description 图谱节点（Position/Skill/attr 属性维度，匿名视角候选岗位不外宣） */
         GraphNode: {
             id: string;
             name: string;
             /** @enum {string} */
-            type: "position" | "skill" | "evidence";
+            type: "position" | "skill" | "evidence" | "attr";
             /**
              * @description 岗位状态机（仅 position 节点；active=图谱常态岗位，非发现状态机成员）
              * @enum {string}
@@ -4196,8 +4545,14 @@ export interface components {
             domain_id?: string | null;
             /** @description 岗位职能域显示名（域代表岗位名，仅 position；未回填为 null） */
             domain_name?: string | null;
-            /** @description 技能类目（仅 skill 节点；来自 skill_whitelist.yaml 的 category，白名单外未写入为 null，「软技能」=软素质类） */
+            /** @description 技能类目（仅 skill 节点；来自 skill_whitelist.yaml 的 category，白名单外未写入为 null，「软技能」=软素质类；positionPortrait 视图 attr 节点复用承载大类名/「画像条目」） */
             skill_category?: string | null;
+            /** @description 岗位画像大类节点标记（仅 positionPortrait 视图 attr 节点：技能/软技能/薪资/经验/学历中环） */
+            portrait_category?: boolean;
+            /** @description 证据条数（仅 positionPortrait 视图 position 节点返回） */
+            evidence_count?: number | null;
+            /** @description 节点权重（positionPortrait 视图：岗位取 JD 频次、技能取边 weight） */
+            value?: number;
         };
         /** @description 图谱边（REQUIRES 关系） */
         GraphEdge: {
@@ -4334,7 +4689,7 @@ export interface components {
             /** @description 学习/评分证据 */
             evidence?: components["schemas"]["MatchEvidenceItem"][];
         };
-        /** @description 技能反向查询岗位项（GET /graph/skill/{id}/positions） */
+        /** @description 技能反向查询岗位项（GET /graph/skill/{skill_id}/positions） */
         SkillPositionItem: {
             position_id: string;
             position_name: string;
@@ -4343,7 +4698,7 @@ export interface components {
             weight: number;
             level: string;
         };
-        /** @description GET /graph/skill/{id}/positions 响应 data */
+        /** @description GET /graph/skill/{skill_id}/positions 响应 data */
         SkillPositionsData: {
             skill_id: string;
             positions: components["schemas"]["SkillPositionItem"][];
@@ -4401,7 +4756,7 @@ export interface components {
             /** @description 岗位软素质（20 项白名单封闭集，聚合层按频次降序写回；与技术栈技能分离展示） */
             soft_skills?: string[];
         };
-        /** @description 技能证据项（GET /graph/skill/{id}/evidence，EVIDENCED_BY 原始 JD） */
+        /** @description 技能证据项（GET /graph/skill/{skill_id}/evidence，EVIDENCED_BY 原始 JD） */
         SkillEvidenceItem: {
             id: string;
             source: string;
@@ -4409,12 +4764,118 @@ export interface components {
             /** @description 抓取时间 ISO8601 */
             crawled_at?: string | null;
         };
-        /** @description GET /graph/skill/{id}/evidence 响应 data */
+        /** @description GET /graph/skill/{skill_id}/evidence 响应 data */
         SkillEvidenceData: {
             skill_id: string;
             skill_name: string;
             evidence: components["schemas"]["SkillEvidenceItem"][];
             evidence_count: number;
+        };
+        /** @description 画像条目证据 JD 项（GET /graph/position/{id}/portrait-evidence） */
+        PortraitEvidenceItem: {
+            /**
+             * Format: int64
+             * @description jd_raw 行 id，取正文用 GET /graph/jd/{jd_id}
+             */
+            jd_id: number;
+            /** @description 岗位名称（snapshot.title） */
+            title?: string;
+            company?: string;
+            /** @description 来源平台 */
+            source: string;
+            /** @description 出处链接（可能为空） */
+            source_url?: string;
+            crawled_at?: string;
+            /** @description 该 JD 薪资档位原文（聚合条目键） */
+            salary_text?: string;
+            /** @description 经验分布标签（如 3年以上） */
+            experience_label?: string;
+            /** @description 学历要求（大专/本科/硕士/博士） */
+            education_level?: string;
+            /** @description 正文摘要（前 120 字） */
+            snippet?: string;
+        };
+        /** @description GET /graph/position/{id}/portrait-evidence 响应 data */
+        PortraitEvidenceData: {
+            position_id: string;
+            position_name: string;
+            /** @enum {string} */
+            dimension: "salary" | "experience" | "education";
+            /** @description 命中的条目标签；空串=该维度全部 */
+            label: string;
+            /** @description 过滤后证据 JD 总数（items 截断至 limit） */
+            total: number;
+            items: components["schemas"]["PortraitEvidenceItem"][];
+        };
+        /** @description GET /graph/jd/{jd_id} 响应 data（JD 证据正文与出处） */
+        JdEvidenceDetail: {
+            /** Format: int64 */
+            id: number;
+            title?: string;
+            company?: string;
+            location?: string;
+            source: string;
+            /** @description 出处链接（可能为空） */
+            source_url?: string;
+            crawled_at?: string;
+            is_desensitized?: boolean;
+            /** @description JD 原文全文 */
+            raw_text: string;
+        };
+        /** @description JD 管理列表项（GET /admin/jd） */
+        JdAdminItem: {
+            /** Format: int64 */
+            id: number;
+            title?: string;
+            company?: string;
+            source: string;
+            source_id: string;
+            source_url?: string;
+            crawled_at?: string;
+            is_desensitized?: boolean;
+            /** @description 归一化岗位名（snapshot.normalized_position） */
+            position?: string;
+            /** @description raw_text 长度 */
+            text_length?: number;
+            /** @description 最近更新时间（编辑审计参考） */
+            updated_at?: string;
+        };
+        /** @description GET /admin/jd 响应 data */
+        JdAdminPage: {
+            total: number;
+            page: number;
+            size: number;
+            items: components["schemas"]["JdAdminItem"][];
+        };
+        /** @description GET/PUT /admin/jd/{jd_id} 响应 data */
+        JdAdminDetail: {
+            /** Format: int64 */
+            id: number;
+            title?: string;
+            company?: string;
+            location?: string;
+            source: string;
+            source_id: string;
+            source_url?: string;
+            crawled_at?: string;
+            is_desensitized?: boolean;
+            position?: string;
+            raw_text: string;
+            /** @description 抽取摘要（salary_range/education.level/experience_range，只读展示——编辑不自动重抽） */
+            extraction_summary?: {
+                salary_range?: string;
+                education_level?: string;
+                experience?: string;
+            };
+        };
+        /** @description PUT /admin/jd/{jd_id} 请求体（仅列出的字段被更新；raw_text 变更时 content_hash 同步重算） */
+        JdAdminUpdate: {
+            title?: string;
+            company?: string;
+            location?: string;
+            source_url?: string;
+            crawled_at?: string;
+            raw_text?: string;
         };
         /** @description 相似技能项（GET /graph/skill/similar，语义相似度） */
         SimilarSkillItem: {
@@ -4429,7 +4890,7 @@ export interface components {
             skill_name: string;
             similar: components["schemas"]["SimilarSkillItem"][];
         };
-        /** @description 先修技能链项（GET /graph/skill/{id}/prerequisites） */
+        /** @description 先修技能链项（GET /graph/skill/{skill_id}/prerequisites） */
         PrerequisiteItem: {
             /** @description 图谱技能 ID（未建图节点为 null） */
             skill_id?: string | null;
@@ -4437,13 +4898,13 @@ export interface components {
             /** @description 先修深度（1 为直接先修） */
             depth: number;
         };
-        /** @description GET /graph/skill/{id}/prerequisites 响应 data */
+        /** @description GET /graph/skill/{skill_id}/prerequisites 响应 data */
         SkillPrerequisitesData: {
             skill_id: string;
             skill_name: string;
             prerequisites: components["schemas"]["PrerequisiteItem"][];
         };
-        /** @description GET /graph/skill/{id}/courses 响应 data（courses 复用 CourseRecommendation） */
+        /** @description GET /graph/skill/{skill_id}/courses 响应 data（courses 复用 CourseRecommendation） */
         SkillCoursesData: {
             skill_id: string;
             skill_name: string;
@@ -4901,6 +5362,12 @@ export interface components {
             model: string;
             supports_function_calling?: boolean;
             enabled: boolean;
+            /**
+             * @description API 协议（openai=Chat Completions 兼容，缺省；anthropic=Anthropic Messages 兼容，如 z.ai Coding Plan /api/anthropic）
+             * @default openai
+             * @enum {string}
+             */
+            protocol: "openai" | "anthropic";
             /** @description provider 特定请求参数（如 deepseek 关闭思考模式），编辑时须保留 */
             extra_body?: Record<string, never>;
         };
@@ -4957,6 +5424,34 @@ export interface components {
                 [key: string]: number;
             };
             total: number;
+        };
+        /** @description GET /admin/approvals/summary 单条审批流计数项 */
+        ApprovalStreamSummary: {
+            /** @description 稳定标识（前端深链与分组用） */
+            id: string;
+            /** @description 审批流显示名 */
+            label: string;
+            /** @description 前端深链路径（原审核页对应 Tab/独立路由） */
+            route: string;
+            /** @description 流转说明（candidate → emerging 等） */
+            description: string;
+            /** @description 待办数 */
+            pending: number;
+            /** @description 需复核/阻断数（如低置信、规则守卫触发） */
+            review: number;
+            /** @description 已通过/已生效数 */
+            approved: number;
+        };
+        /** @description GET /admin/approvals/summary data（只读汇总） */
+        ApprovalSummaryData: {
+            /** @description 全审批池汇总 */
+            summary: {
+                total_pending: number;
+                total_review: number;
+                total_approved: number;
+            };
+            /** @description 各审批流计数（按 pending 降序） */
+            streams: components["schemas"]["ApprovalStreamSummary"][];
         };
         /** @description 技能别名回写记录（skill_aliases 行，方案① */
         SkillAliasItem: {
@@ -5328,6 +5823,17 @@ export interface components {
              */
             learning_path_block_reason: string | null;
             evidence_refs: components["schemas"]["EvidenceRef"][];
+            /** @description 最佳匹配 JD 原文（compare 详情溯源：按最佳 JD 行回读 raw_text，正文截断至 8000 字符；旧快照/最佳 JD 行已删除时为 null） */
+            jd_original?: {
+                /** @description JD 标题 */
+                jd_title: string;
+                /** @description 采集源（zhilian/boss/indeed 等） */
+                source: string;
+                /** @description JD 原文链接 */
+                source_url: string;
+                /** @description JD 原文正文（截断至 8000 字符） */
+                text: string;
+            } | null;
             /** @description JD 级证据（阶段 B：recommend 命中岗位族内原生 JD 二次精排 Top-2；compare/result 旧快照无此字段为空数组） */
             jd_evidence?: {
                 /** @description 归属岗位名 */
@@ -5615,6 +6121,7 @@ export interface components {
     };
     parameters: {
         Id: string;
+        SkillId: string;
         Page: number;
         Size: number;
     };

@@ -138,6 +138,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if settings.is_production:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
+        # resume 下载端点回放用户上传的 Content-Type，nosniff 阻断浏览器 MIME 嗅探
+        response.headers["X-Content-Type-Options"] = "nosniff"
+
         response.headers["X-Trace-ID"] = trace_id
 
         return response

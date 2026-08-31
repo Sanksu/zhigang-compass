@@ -1,6 +1,6 @@
 # 智岗罗盘部署说明（DEPLOY.md）
 
-> 状态：**定稿**（2026-08-15）——基于 08-13 首次容器部署演练实测（api/worker 镜像首次构建 + 5 服务全链路 12 项冒烟全通）+ 08-15 性能压测验证（TE-M5-01 前置，panorama/search P95 < 500ms @ 100 并发，见 docs/perf_baseline_20260815.md）
+> 状态：**定稿**（2026-08-15，2026-08-29 复核与最新 compose 一致并补充 §6.2 局域网运维实证）——基于 08-13 首次容器部署演练实测（api/worker 镜像首次构建 + 5 服务全链路 12 项冒烟全通）+ 08-15 性能压测验证（TE-M5-01 前置，panorama/search P95 < 500ms @ 100 并发，见 docs/perf_baseline_20260815.md）
 > 对应任务：执行计划 2.2 后端 M5「部署文档完善」+ 2.6 文档 M5「DEPLOY.md 部署说明」（DO-M5-03）
 
 ---
@@ -12,6 +12,8 @@
 | Docker | 24+ / Compose v2 | `docker compose version` 验证 |
 | 磁盘 | **≥ 30G 空闲** | api 镜像 site-packages 约 6.65GB（torch/paddle 主导），构建缓存另计 |
 | 网络 | Docker Hub 可达 | 基础镜像直连可拉；偶发 auth token 抖动重试即可 |
+
+> 若使用 `docker-compose.local-images.yml`（本机免构建、直拉 GHCR 预构建镜像的 override，不入库），其中 `build: !reset null` 语法要求 **Docker Compose ≥ 2.24**，低于该版本解析报错；仅用主 `docker-compose.yml` 部署则 v2 即可。
 
 ## 2. 配置准备
 
@@ -36,6 +38,8 @@ printf '{\n  "version": 0,\n  "blocked": [],\n  "protected": []\n}\n' > backend/
 |----|------|---------|
 | `SECRET_KEY` | 非 `change-me-in-production` | 启动报错退出 |
 | `ADMIN_PASSWORD` | 非 `admin123`，**必须存在** | 启动报错退出（弱口令门禁） |
+| `DEBUG` | `false`（`.env.example` 已含，勿改回 true） | 缺省为 true → 生产拒启（SQL echo 泄露 PII 至日志，app/main.py） |
+| `CORS_ORIGINS` | JSON 数组且不含 `*`（如 `["https://your.domain"]`） | 缺省含 `*` → 生产拒启（任意站点可跨域携带凭据访问，app/main.py） |
 | `POSTGRES_DSN` / `NEO4J_URI` / `REDIS_URL` | 指向实际服务 | 容器内由 compose environment 覆盖，本地开发才需改 |
 
 其余可选项（LLM provider、CDP、代理等）见 `.env.example` 注释。
@@ -92,6 +96,8 @@ docker compose ps                                    # 全部 healthy
 curl http://localhost:8000/health
 ```
 
+- ⚠️ **裸 `docker compose up -d` 会自动叠加同目录的 `docker-compose.override.yml`**（若存在——本地开发覆盖文件，把 `backend/app` 源码挂载进 api 容器，掩盖镜像与工作区代码差异）。生产/服务器部署**必须显式 `-f docker-compose.yml`**（或对应生产 compose 文件）起栈，开发机日常迭代才用裸命令。
+
 - **回填脚本检查**：CHANGELOG 对应条目若标注存量回填（如 `backfill_skill_category.py`），部署后在容器内执行一次（幂等）：`docker exec zhigang-api python scripts/backfill_xxx.py`
 - **迁移**：api ENTRYPOINT 自动执行，无需手动；但镜像必须包含新迁移文件（见 ①，迁移缺失=部署后启动失败）
 - 可选加速：`CD (images)` workflow 在 develop 的**后端相关改动**合入后把镜像推到 GHCR（`ghcr.io/sanksu/zhigang-compass-api|worker`，公开仓库免认证拉取；纯前端/文档合并不构建 12.7GB 后端镜像），可 `docker pull` + `docker tag` 为本地镜像名（`zhigang-compass-api:latest` / `zhigang-compass-worker:latest`）替代 ① 的本地构建
@@ -107,7 +113,7 @@ curl http://localhost:8000/health
 |---|--------|------|
 | 1 | 健康端点 | `curl http://localhost:8000/health` → `{"status":"healthy"}` |
 | 2 | 前端静态托管 | `curl http://localhost:8000/` → 智岗罗盘 index.html |
-| 3 | 图谱 panorama | `curl http://localhost:8000/api/v1/graph/panorama`（匿名，Redis 30s 缓存） |
+| 3 | 图谱 panorama | `curl http://localhost:8000/api/v1/graph/view/panorama`（匿名；08-29 视图收敛后路径为 /view/{view_type}，旧 /graph/panorama 已不存在） |
 | 4 | 认证链路 | `POST /api/v1/auth/login`（admin）→ `/api/v1/auth/me` |
 | 5 | 全文检索 | `GET /api/v1/graph/search?q=Python`（cjk 全文索引） |
 | 6 | worker | `docker logs zhigang-worker` → ARQ 启动 + cron 实跑 |
@@ -136,7 +142,18 @@ ETL 主管线（采集 → 去重 → LLM 抽取 → 时滞/通胀 → 入图 �
 - 当日幂等：`run_etl_pipeline_scheduled` 内部 Redis 锁（`arq:etl:run:{date}`，24h TTL），重复触发自动跳过
 - 已验证：`docker logs zhigang-worker` 可见 ARQ cron 注册与 ETL 入队/执行日志
 
-> 历史外部任务（Windows `scheduled_tasks.ps1` 的 `ETLDaily` / Linux `crontab.example` 的 `0 5 * * *`）已停用；`scripts/cron/etl_daily.py` 保留，供手动重跑（`--force`）。其余外部任务（maimai/linkedin/课程源、GraphHealth、PositionDup）不变。
+> 历史外部任务（Windows `scheduled_tasks.ps1` 的 `ETLDaily` / Linux `crontab.example` 的 `0 5 * * *`）已停用；`scripts/cron/etl_daily.py` 保留，供手动重跑（`--force`）。其余外部任务（maimai/linkedin、GraphHealth、PositionDup）不变；课程源（icourse163/edx/coursera）2026-08-28 起已纳入 ETL 主管线每日采集（`app/workers/etl.py` 的 `course_platforms`），**勿再注册外部课程采集任务，否则每日双跑**。
+
+### 6.2 局域网部署运维实证（2026-08-23 起 192.168.0.226 长期运行沉淀）
+
+| 事项 | 说明与处置 |
+|------|-----------|
+| **国际源代理** | 无 Clash 的 Linux 主机上，国际源（LinkedIn/Glassdoor/Coursera/arxiv）需自建代理：226 用 v2ray（http 入站 `127.0.0.1:1083`，nohup 手动拉起），**机器重启后需手动重新拉起**；compose 侧将 `HTTPS_PROXY` 指向该端口（宿主 `.env` 插值）。国内源始终直连 |
+| **PG catalog 损坏**（08-27 实证） | 症状：简单 `ORDER BY`/`UNION`/递归 CTE/asyncpg 类型查询**挂起烧满 CPU**（load 飙至 100+，接口报「推荐失败」），而非报错。诊断：`pg_stat_activity` 配合常量 UNION 探针区分库级/实例级问题。处置：整机重启 + `REINDEX SYSTEM <db>` 根治。原则：重大库故障走 `pg_dump` → 新库 restore，不要只靠重启赌恢复 |
+| **uploads 卷属主** | 数据卷被 root 创建后容器内应用用户（非 root）写入 500：`docker exec` 进入 chown 或删除卷重建（上传目录卷） |
+| **SBERT 模型冷启动** | 首次涉及语义匹配/归一化的请求需加载模型，**50–90s 属正常**，非故障；演示/压测前先预热（任打一次 match 或学习路径请求） |
+| **前端更新不生效** | api 容器 StaticFiles 托管 `frontend/dist` 只读挂载，浏览器可能缓存旧 index.html：更新后用 `?v=` 查询参数或强刷验证，确认 `dist` 已重新 build |
+| **匹配性能旋钮** | 单 JD 匹配 rough_k 默认 50（稳态 ~6s）；若被历史配置改为 300 会退化为 ~36s——在管理后台「运行时配置」核对（冷启动池化重建 ~60s 仅在重启/JD 集变化后发生一次，演示前预热） |
 
 ## 7. 常见问题
 

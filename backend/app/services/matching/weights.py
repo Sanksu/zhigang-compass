@@ -52,18 +52,28 @@ def _load_config_cached() -> dict:
     return _config_cache
 
 
+# 权重和校验容差（第八轮 P2-11）：浮点配置求和允许 ±1e-6 偏差
+_WEIGHT_SUM_TOLERANCE = 1e-6
+
+
 def _valid_weights(weights: tuple[float, float, float]) -> bool:
-    """权重合法要求：三个值均为有限非负数，且和 > 0（全 0 会导致匹配总分恒为 0）。"""
+    """权重合法要求：三个值均为有限非负数，且 Σw = 1（±1e-6）。
+
+    Σ≠1 属配置错误，直接拒绝回退默认权重（fail-fast，不做归一化）：
+    Σ>1 时 total_score 会击穿响应模型 Field(le=1.0) 导致匹配主链路 500；
+    Σ<1 时总分系统性偏低，评分口径失真。
+    """
     return all(
         isinstance(w, float) and w >= 0.0 and w != float("inf") and w != float("nan")
         for w in weights
-    ) and sum(weights) > 0.0
+    ) and abs(sum(weights) - 1.0) <= _WEIGHT_SUM_TOLERANCE
 
 
 def load_weights() -> tuple[float, float, float]:
     """加载运行时权重 (w_must, w_nice, w_exp)。
 
-    配置缺失、解析失败或权重全 0 时回退默认权重，防止匹配总分恒为 0。
+    配置缺失、解析失败、权重全 0 或 Σw≠1 时回退默认权重，防止匹配总分
+    恒为 0 或击穿 total_score 的 Field(le=1.0) 上界。
     """
     data = _load_config_cached()
     try:

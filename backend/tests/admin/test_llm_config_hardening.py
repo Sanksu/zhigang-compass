@@ -171,3 +171,43 @@ class TestLlmProviderInDefaults:
         assert p.supports_function_calling is True
         assert p.api_key == ""
         assert p.extra_body is None
+
+
+class TestProtocolField:
+    """protocol 字段（2026-08-30，Anthropic 协议接入）：校验 + 保存 round-trip 不丢字段。"""
+
+    def _seed(self, tmp_path, monkeypatch):
+        path = tmp_path / "llm_providers.yaml"
+        path.write_text(_YAML_SEED, encoding="utf-8")
+        monkeypatch.setattr("app.api.v1.admin_routes.config._LLM_CONFIG_PATH", path)
+        return path
+
+    def test_protocol_anthropic_roundtrip(self, tmp_path, monkeypatch):
+        path = self._seed(tmp_path, monkeypatch)
+        db = _FakeDB()
+        req = LlmConfigIn(providers=[_provider(protocol="anthropic")])
+
+        resp = asyncio.run(update_llm_config(req, db=db, current_user={"sub": "0356249f-9b04-47a3-a307-af6e7883f084"}))
+
+        assert resp.code == 0
+        assert load_llm_config(path)["providers"][0]["protocol"] == "anthropic"
+
+    def test_protocol_openai_default_not_written(self, tmp_path, monkeypatch):
+        """缺省 openai 不落盘（与既有文件形态一致，diff 干净）。"""
+        path = self._seed(tmp_path, monkeypatch)
+        db = _FakeDB()
+        req = LlmConfigIn(providers=[_provider()])
+
+        asyncio.run(update_llm_config(req, db=db, current_user={"sub": "0356249f-9b04-47a3-a307-af6e7883f084"}))
+
+        assert "protocol" not in load_llm_config(path)["providers"][0]
+
+    def test_protocol_invalid_rejected(self):
+        with pytest.raises(ValidationError):
+            LlmConfigIn(providers=[_provider(protocol="grpc")])
+
+    def test_validate_providers_protocol_rule(self):
+        from app.api.v1.admin_routes.config import validate_providers
+
+        assert validate_providers([_provider(protocol="anthropic")]) is None
+        assert "protocol" in (validate_providers([_provider(protocol="grpc")]) or "")

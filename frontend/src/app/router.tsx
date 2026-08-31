@@ -3,6 +3,7 @@ import { Navigate, createBrowserRouter, RouterProvider } from 'react-router'
 import { AppShell } from '@/components/layout/app-shell'
 import { AuthGuard, GuestGuard } from '@/routes/guards'
 import { CompassMark } from '@/components/layout/compass-mark'
+import { RouteErrorFallback } from '@/components/error-fallback'
 
 /** 路由级懒加载 — 设计文档 §10.1 React Router v7 */
 const LoginPage = lazy(() => import('@/routes/login-page').then((m) => ({ default: m.LoginPage })))
@@ -20,6 +21,7 @@ const AdminReviewPage = lazy(() => import('@/routes/admin-review-page').then((m)
 const AdminReviewWatchPage = lazy(() => import('@/routes/admin-review-watch-page').then((m) => ({ default: m.AdminReviewWatchPage })))
 const AdminReviewDictPage = lazy(() => import('@/routes/admin-review-dict-page').then((m) => ({ default: m.AdminReviewDictPage })))
 const AdminLineagePage = lazy(() => import('@/routes/admin-lineage-page').then((m) => ({ default: m.AdminLineagePage })))
+const AdminJdPage = lazy(() => import('@/routes/admin-jd-page').then((m) => ({ default: m.AdminJdPage })))
 const AdminLlmPage = lazy(() => import('@/routes/admin-llm-page').then((m) => ({ default: m.AdminLlmPage })))
 const AdminLlmDecisionsPage = lazy(() => import('@/routes/admin-llm-decisions-page').then((m) => ({ default: m.AdminLlmDecisionsPage })))
 const AdminSettingsPage = lazy(() => import('@/routes/admin-settings-page').then((m) => ({ default: m.AdminSettingsPage })))
@@ -79,6 +81,10 @@ const protectedRoutes = [
         element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminLineagePage /></Suspense></AuthGuard>,
       },
       {
+        path: 'admin/jd',
+        element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminJdPage /></Suspense></AuthGuard>,
+      },
+      {
         path: 'admin/llm',
         element: <AuthGuard requireRole={['admin']}><Suspense fallback={<RouteLoading />}><AdminLlmPage /></Suspense></AuthGuard>,
       },
@@ -124,17 +130,24 @@ const protectedRoutes = [
   },
 ]
 
+// 无路径根路由：整树错误统一冒泡至顶层 errorElement（第八轮 P1-12）——
+// 渲染期异常不再打穿成 React Router 默认英文错误页，由 RouteErrorFallback 兜底
 const router = createBrowserRouter([
   {
-    path: '/login',
-    element: <GuestGuard><Suspense fallback={<RouteLoading />}><LoginPage /></Suspense></GuestGuard>,
+    errorElement: <RouteErrorFallback />,
+    children: [
+      {
+        path: '/login',
+        element: <GuestGuard><Suspense fallback={<RouteLoading />}><LoginPage /></Suspense></GuestGuard>,
+      },
+      {
+        path: '/register',
+        element: <GuestGuard><Suspense fallback={<RouteLoading />}><RegisterPage /></Suspense></GuestGuard>,
+      },
+      ...protectedRoutes,
+      { path: '*', element: <NotFound /> },
+    ],
   },
-  {
-    path: '/register',
-    element: <GuestGuard><Suspense fallback={<RouteLoading />}><RegisterPage /></Suspense></GuestGuard>,
-  },
-  ...protectedRoutes,
-  { path: '*', element: <NotFound /> },
 ])
 
 function NotFound() {

@@ -67,12 +67,13 @@ async def _run_stage(name: str, coro) -> dict:
 # 整体跳过（治理/报告阶段不依赖当日数据完整性，继续执行）。
 _FACT_STAGES = ("dedup_simhash", "structure_load", "aggregate_positions")
 
-# 受事实门禁跳过的派生阶段：快照发布/演化推导/画像缓存/新岗位发现。
+# 受事实门禁跳过的派生阶段：快照发布/演化推导/新岗位发现。
+# （第八轮 P1-8：删除幽灵键 positions_cache_prebuild——全库无对应执行
+# 代码，degraded 时审计 dict 会写入不存在阶段的 skipped 项。）
 _FACT_GATED_STAGES = (
     "backfill_embeddings",
     "snapshot_graph",
     "evolved_from",
-    "positions_cache_prebuild",
     "discovery_daily",
     "discovery_auto_transition",
 )

@@ -11,11 +11,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_optional_user
-from app.core.database import async_neo4j_driver, get_db, neo4j_driver, redis_client
+from app.core.database import (
+    async_neo4j_driver,
+    async_session_factory,
+    get_db,
+    neo4j_driver,
+    redis_client,
+)
 from app.core.errors import ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import SkillEmbedding
+from app.models.raw import JDRaw
 from app.schemas.common import error, ok
 from app.services.graph import repository, visibility
+from app.services.graph.portrait_evidence import jd_detail, portrait_evidence
 from app.services.graph_algorithms.config import load_graph_algo_config
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
@@ -149,7 +157,7 @@ async def skill_positions(
 
 @router.get("/search")
 async def fulltext_search(
-    q: str = Query(..., min_length=1),
+    q: str = Query(..., min_length=1, max_length=100),
     type_: str = Query(default="position", alias="type", enum=["position", "skill", "evidence"]),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
@@ -189,8 +197,12 @@ async def fulltext_search(
         await _cache_set(cache_key, data, ttl=SEARCH_CACHE_TTL)
         future.set_result(data)
         return ok(data=data)
-    except Exception as exc:
-        future.set_exception(exc)
+    except BaseException as exc:
+        # BaseException（第八轮 P2-6）：请求方被取消时 CancelledError 不走
+        # Exception 分支——leader 挂掉则 future 永不 resolve，并发跟随者会
+        # await 挂死到超时。对未完成 future 注入异常后原样 raise，跟随者快速失败。
+        if not future.done():
+            future.set_exception(exc)
         raise
     finally:
         _inflight.pop(cache_key, None)
@@ -244,7 +256,7 @@ async def skill_courses(skill_id: str):
         return error(ERR_NOT_FOUND, "技能不存在", http_status=404)
 
     courses = await load_courses_for_skill(
-        skill_id, skill["name"], top_k=None, semantic=_course_semantic())
+        skill_id, skill["name"], top_k=None, semantic=await _course_semantic())
     return ok(
         data={
             "skill_id": skill_id,
@@ -254,7 +266,7 @@ async def skill_courses(skill_id: str):
     )
 
 
-def _course_semantic() -> object | None:
+async def _course_semantic() -> object | None:
     """课程门控语义器（08-15 审查 M1：graph API 课程与 learning-path 同门控）。
 
     语义可用：P1-3 标题门控 + 灰色带质量门控全部生效（脏 LEARNABLE_VIA 边
@@ -263,7 +275,9 @@ def _course_semantic() -> object | None:
     """
     try:
         embedder = SkillEmbedder.get()
-        embedder.embed("__probe__")  # 触发惰性加载，探测模型可用性
+        # SBERT 探测推理 CPU 密集，放线程池（第八轮 P2-4：对齐同文件
+        # skill_similar 的 to_thread 口径——原同步 embed 阻塞事件循环）
+        await asyncio.to_thread(embedder.embed, "__probe__")  # 触发惰性加载，探测模型可用性
         return embedder
     except SemanticUnavailableError:
         return None
@@ -339,6 +353,66 @@ async def position_detail(
     return ok(data=data)
 
 
+@router.get("/position/{id}/portrait-evidence")
+async def position_portrait_evidence(
+    id: str,
+    dimension: Literal["salary", "experience", "education"] = Query(...),
+    label: str = Query(default="", max_length=100),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: Optional[dict] = Depends(get_optional_user),
+):
+    """[M5] 岗位画像条目证据 JD 列表：薪资/经验/学历条目 → 支撑 JD 回溯。
+
+    label 缺省返回该维度全部证据 JD；条目口径镜像 build_aggregates
+    （SimHash 近似重复/归档/岗位级通胀排除一致），见
+    services/graph/portrait_evidence.py。匿名/guest 对 candidate/archived
+    岗位 404（同 /position/{id}）。Redis 60s 缓存按岗位+维度+标签隔离。
+    """
+    scope = _position_scope(user)
+    cache_key = f"graph:pevidence:{id}:{scope}:{dimension}:{label}:{limit}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+    position = await asyncio.to_thread(_load_position, id, user)
+    if position is None:
+        return error(ERR_NOT_FOUND, "岗位不存在或不可见", http_status=404)
+    position_name = position.get("name") or id
+
+    result = await portrait_evidence(db, position_name, dimension, label, limit)
+    data = {
+        "position_id": id,
+        "position_name": position_name,
+        "dimension": dimension,
+        "label": label,
+        "total": len(result["items"]),
+        "items": result["items"][:limit],
+    }
+    await _cache_set(cache_key, data)
+    return ok(data=data)
+
+
+@router.get("/jd/{jd_id}")
+async def jd_evidence_detail(jd_id: int):
+    """[M5] JD 证据正文详情：画像证据列表点开后的原文与出处链接。
+
+    公开招聘信息（脉脉源入库前已脱敏），匿名可读；正文为 jd_raw.raw_text。
+    """
+    cache_key = f"graph:jd:{jd_id}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+    async with async_session_factory() as session:
+        row = (await session.execute(
+            select(JDRaw).where(JDRaw.id == jd_id)
+        )).scalar_one_or_none()
+    if row is None:
+        return error(ERR_NOT_FOUND, "JD 不存在", http_status=404)
+    data = jd_detail(row)
+    await _cache_set(cache_key, data)
+    return ok(data=data)
+
+
 @router.get("/skill/{skill_id}/evidence")
 async def skill_evidence(skill_id: str):
     """[M4] 技能证据列表：Skill-EVIDENCED_BY->Evidence 原始 JD。"""
@@ -364,7 +438,7 @@ async def skill_evidence(skill_id: str):
 
 @router.get("/skill/similar")
 async def skill_similar(
-    skill_id: str = Query(...),
+    skill_id: str = Query(..., max_length=100),
     top_k: int = Query(default=10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ):
@@ -712,17 +786,20 @@ async def graph_shortest_path(
 
 @router.get("/view/{view_type}")
 async def graph_view(
-    view_type: Literal["panorama", "techStack", "level", "positionCenter", "positionPortrait"],
-    position: Optional[str] = Query(default=None, description="岗位 id/name（positionPortrait 视图必填）"),
+    view_type: Literal["panorama", "techStack", "positionCenter", "positionPortrait"],
+    position: Optional[str] = Query(
+        default=None, max_length=100,
+        description="岗位 id/name（positionPortrait 视图必填）"),
     limit: int = Query(default=100, ge=1, le=600),
     user: Optional[dict] = Depends(get_optional_user),
 ):
     """[M4] 视图切换（匿名可读，后端过滤，同构于全景图）。
 
-    四种视图统一返回 {view_type, nodes, edges, stats}：
-    - panorama / positionCenter: 岗位中心展开（岗位→技能）
+    三种页面视图统一返回 {view_type, nodes, edges, stats}：
+    - panorama: 域聚合下钻的岗位中心展开（岗位→技能）
     - techStack: 技能为中心，边反向为技能→岗位，节点按技能频次排序
-    - level: 岗位中心展开 + 按熟练度级别过滤（只保留明确 level 的边）
+    - positionCenter: 与 panorama 同查询的岗位中心展开——无独立页签，
+      作为岗位画像（positionPortrait）下拉岗位选项的数据源保留
     匿名/guest 仅返回 emerging/stable/declining 岗位（candidate 待审核不外宣）。
     """
     scope = _position_scope(user)

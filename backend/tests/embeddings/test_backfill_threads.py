@@ -259,3 +259,27 @@ def test_project_backfill_rebuilds_changed_resume_only(monkeypatch):
     assert embedder.embedded == ["爬虫平台：Scrapy"]
     assert len(db.executed) == 1  # 仅 r2 的删除
     assert len(db.added) == 1
+
+
+def test_project_backfill_detects_deleted_project(monkeypatch):
+    """P2-14：existing 多出的旧索引（项目已删）不得判 unchanged——重建清出残留。"""
+    db = _project_db([
+        ("r1", {"projects": [{"name": "推荐系统", "description": "协同过滤"}]}),
+    ])
+    async def _existing(db_arg):
+        # r1 原有 2 个项目，现仅剩 index 0 且文本一致（旧判定只看"当前项都在
+        # existing"，会误判 unchanged 残留 index 1 的旧向量）
+        return {
+            ("r1", 0): "推荐系统：协同过滤",
+            ("r1", 1): "旧项目：已删除",
+        }
+    monkeypatch.setattr(backfill, "_existing_project_texts", _existing)
+
+    embedder = _CountingEmbedder()
+    result = asyncio.run(backfill.backfill_project_embeddings(db, embedder))
+
+    assert result["written"] == 1
+    assert result["skipped"] == 0
+    assert embedder.embedded == ["推荐系统：协同过滤"]
+    assert len(db.executed) == 1  # r1 整份删除重建（清出 index 1 残留）
+    assert len(db.added) == 1

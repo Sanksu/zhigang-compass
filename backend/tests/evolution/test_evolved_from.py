@@ -260,3 +260,73 @@ def test_derive_real_execution_merges_edge(monkeypatch):
         "app.core.database.neo4j_driver", _FakeDriver())
     result = asyncio.run(derive_evolved_from())
     assert result["edges"] == 1
+
+
+def test_derive_real_execution_single_session_via_thread(monkeypatch):
+    """P2-12：真实执行写库经 to_thread，且多条边复用单 session（不再每边新开）。"""
+    from app.services.evolution.evolved_from import _write_evolved_edges
+
+    prev = [_pos("p1", "工程师"), _pos("p2", "数据分析")]
+    cur = [_pos("p1", "高级工程师"), _pos("p2", "大数据分析")]
+    # 高级工程师←rename←工程师；大数据分析←split←数据分析（共享"数据"+"分析"）
+
+    run_calls: list[dict] = []
+
+    class _FakeResult:
+        def single(self):
+            return {"covered": 1}
+
+    class _FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def run(self, query, **params):
+            run_calls.append(params)
+            return _FakeResult()
+
+    class _FakeDriver:
+        def __init__(self):
+            self.session_calls = 0
+
+        def session(self):
+            self.session_calls += 1
+            return _FakeSession()
+
+    driver = _FakeDriver()
+
+    def fake_session():
+        class _S:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def scalars(self, stmt):
+                return _Result([_version(1, prev), _version(2, cur)])
+        return _S()
+
+    monkeypatch.setattr(
+        "app.services.evolution.evolved_from.async_session_factory", fake_session)
+    monkeypatch.setattr("app.core.database.neo4j_driver", driver)
+
+    real_to_thread = asyncio.to_thread
+    thread_fns: list = []
+
+    async def _spy_to_thread(fn, *args, **kwargs):
+        thread_fns.append(fn)
+        return await real_to_thread(fn, *args, **kwargs)
+
+    monkeypatch.setattr(
+        "app.services.evolution.evolved_from.asyncio",
+        SimpleNamespace(to_thread=_spy_to_thread))
+
+    result = asyncio.run(derive_evolved_from())
+
+    assert result["edges"] == 2
+    assert _write_evolved_edges in thread_fns  # 同步写库经 to_thread，不阻塞事件循环
+    assert driver.session_calls == 1  # 2 条边复用同一 session
+    assert len(run_calls) == 2

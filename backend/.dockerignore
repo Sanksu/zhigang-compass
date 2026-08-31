@@ -10,3 +10,7 @@ data/*
 data/crawlers/output/
 *.md
 .DS_Store
+# JWT 私钥不入镜像（第八轮审查 P2-38）：运行时经 compose 挂载 backend/keys:/app/keys
+# 注入；Dockerfile 的 COPY keys/ 仅剩 __init__.py 等非敏感文件，本地构建不再把
+# private.pem 烤进镜像层随镜像分发
+keys/*.pem

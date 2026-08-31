@@ -1,8 +1,10 @@
 """LLM Provider 链（M3 参考实现，算法红线：须算法岗张恺天逐行把关）。
 
 对齐设计文档 §6.5 + AGENTS.md §6.4：
-- 读取 `configs/llm_providers.yaml`（单一事实源），provider 为任意 OpenAI 兼容 API，
-  可自由增删/调序；api_key 由管理员经 /admin/llm 后台填写并持久化到该文件
+- 读取 `configs/llm_providers.yaml`（单一事实源），provider 为任意 OpenAI 兼容 API
+  （缺省 `protocol: openai`）或 Anthropic Messages 兼容 API（`protocol: anthropic`，
+  如 z.ai Coding Plan `/api/anthropic`），可自由增删/调序；api_key 由管理员经
+  /admin/llm 后台填写并持久化到该文件
 - 按 priority 升序、enabled 过滤，按顺序依次尝试
 - instructor + Pydantic Schema 强校验（幻觉防控第一道防线），校验失败自动重试 1 次
 - 同步路由 `call_sync`：单次尝试不重试，超时即抛 `LLMTimeoutError`（同步路由 10s 上限）
@@ -25,6 +27,7 @@ from typing import Optional, Type, TypeVar
 import yaml
 from pydantic import BaseModel, ValidationError
 
+from app.core import runtime_config
 from app.services.extraction import llm_invocation
 
 T = TypeVar("T", bound=BaseModel)
@@ -93,7 +96,12 @@ def _get_redis_client():
 
         from app.core.config import settings
 
-        _redis_client = Redis.from_url(settings.redis_url, socket_connect_timeout=1)
+        # socket_timeout（第八轮 P2-17）：仅设 connect 超时只能约束握手，
+        # 连接建立后命令挂起（Redis 主从切换/网络半开）会让 fail-open 的
+        # 状态读写无限等待——补 socket_timeout=1 与 connect 超时同档兜底。
+        _redis_client = Redis.from_url(
+            settings.redis_url, socket_connect_timeout=1, socket_timeout=1,
+        )
     return _redis_client
 
 
@@ -102,16 +110,56 @@ def _get_redis_client():
 _client_cache: dict = {}
 _CLIENT_CACHE_MAX = 32
 
+# provider 协议（2026-08-30）：openai（缺省，OpenAI Chat Completions 兼容）|
+# anthropic（Anthropic Messages 协议，如 z.ai Coding Plan /api/anthropic）
+_PROTOCOLS = ("openai", "anthropic")
+_ANTHROPIC_VERSION_HEADER = "2023-06-01"
+
+
+def _provider_protocol(provider: dict) -> str:
+    """读取 provider 协议，缺省 openai；非法值按 openai 兜底（配置宽松解析）。"""
+    protocol = (provider.get("protocol") or "openai").strip().lower()
+    return protocol if protocol in _PROTOCOLS else "openai"
+
 
 def _build_client(provider: dict, timeout: int):
     """构建/复用 instructor client（连接复用，批量/并发场景降低握手开销）。"""
     import instructor
-    from openai import OpenAI
 
     # 逐行审查修复（2026-08-24）：与 _call_provider 同源解析——env-only provider
     # 此前直读明文得空串，真实调用链以空 key 构建 client（测试 monkeypatch 掉
     # _build_client 掩盖了该缺口，仅健康检查路径正确）
     api_key = _resolve_api_key(provider)
+    if _provider_protocol(provider) == "anthropic":
+        import anthropic as anthropic_sdk
+
+        # from_anthropic 函数身份入 key：测试 monkeypatch 换 fake 时不命中缓存
+        key = (
+            instructor.from_anthropic,
+            provider["base_url"],
+            api_key,
+            provider.get("supports_function_calling", True),
+            timeout,
+        )
+        client = _client_cache.get(key)
+        if client is None:
+            client = instructor.from_anthropic(
+                anthropic_sdk.Anthropic(
+                    base_url=key[1], api_key=key[2], timeout=timeout,
+                ),
+                mode=(
+                    instructor.Mode.ANTHROPIC_TOOLS
+                    if key[3]
+                    else instructor.Mode.ANTHROPIC_JSON
+                ),
+            )
+            if len(_client_cache) >= _CLIENT_CACHE_MAX:
+                _client_cache.pop(next(iter(_client_cache)))
+            _client_cache[key] = client
+        return client
+
+    from openai import OpenAI
+
     # from_openai 函数身份入 key：测试 monkeypatch 换 fake 时不命中缓存（每次重建）
     key = (
         instructor.from_openai,
@@ -254,25 +302,36 @@ def _clear_state(name: str) -> None:
 
 
 def check_provider_health(provider: dict, timeout: Optional[int] = None) -> bool:
-    """探测单个 provider 的 /models 端点（OpenAI 兼容）。
+    """探测单个 provider 的模型列表端点（OpenAI /models 或 Anthropic /v1/models）。
 
-    GET `{base_url}/models`（Bearer api_key）：200 → healthy，否则 unhealthy。
+    OpenAI 兼容：GET `{base_url}/models`（Bearer api_key）；
+    Anthropic 协议：GET `{base_url}/v1/models`（x-api-key + anthropic-version 头）。
+    200 → healthy，否则 unhealthy。
     结果写 Redis（`llm:health:{name}`，TTL 覆盖 2 个检查周期）；
     Redis 不可用 / 网络异常均不抛异常（健康检查为旁路增强，探测结果仍返回）。
     """
     base_url = (provider.get("base_url") or "").rstrip("/")
     api_key = _resolve_api_key(provider)
+    is_anthropic = _provider_protocol(provider) == "anthropic"
     healthy = False
     if base_url:
+        if is_anthropic:
+            url = f"{base_url}/v1/models"
+            auth_headers = (
+                {
+                    "x-api-key": api_key,
+                    "anthropic-version": _ANTHROPIC_VERSION_HEADER,
+                }
+                if api_key
+                else {}
+            )
+        else:
+            url = f"{base_url}/models"
+            auth_headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         # 部分网关（如 opencode.ai）对无 UA 的 urllib 请求返回 403，需带浏览器 UA 探测
         req = urllib.request.Request(
-            f"{base_url}/models",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "User-Agent": "zhigang-compass/1.0",
-            }
-            if api_key
-            else {"User-Agent": "zhigang-compass/1.0"},
+            url,
+            headers={**auth_headers, "User-Agent": "zhigang-compass/1.0"},
         )
         try:
             with urllib.request.urlopen(
@@ -393,13 +452,33 @@ class LLMProviderChain:
             raise LLMConfigurationError(f"LLM 配置解析失败: {e}") from e
 
     def _load_providers(self) -> list[dict]:
-        """按 priority 升序返回 enabled provider（配置已由 _load_config 读取）。"""
+        """按 priority 升序返回 enabled 且 api_key 可解析的 provider。
+
+        空 api_key 的 enabled provider 在构造时过滤（第八轮 P2-19）：
+        真实调用链构建 client 时才解析 key，空 key provider 留在链上会
+        白白消耗一轮尝试（同步路由直接失败、异步链路空转一个超时窗）。
+        过滤后列表为空 → call_sync/call_with_fallback 维持既有
+        LLMConfigurationError 语义（"未配置可用 provider"，模块头注释
+        "未配置 api_key 时抛 LLMConfigurationError"）。
+        """
         providers = [
             p for p in self._config.get("providers", [])
             if isinstance(p, dict)
         ]
         enabled = [p for p in providers if p.get("enabled")]
-        return sorted(enabled, key=lambda p: p.get("priority", 99))
+        with_key: list[dict] = []
+        dropped: list[str] = []
+        for p in enabled:
+            if _resolve_api_key(p):
+                with_key.append(p)
+            else:
+                dropped.append(str(p.get("name", "?")))
+        if dropped:
+            _logger.warning(
+                "以下 enabled provider 的 api_key 解析为空，已从重试链过滤: %s",
+                dropped,
+            )
+        return sorted(with_key, key=lambda p: p.get("priority", 99))
 
     def _load_temperature(self) -> float:
         """结构化输出温度（yaml `structured_output.temperature`，缺省 0.1）。
@@ -499,11 +578,16 @@ class LLMProviderChain:
         max_retries: int = VALIDATION_RETRIES,
         system_prompt: Optional[str] = None,
         timeout: Optional[int] = None,
+        wall_budget: Optional[int] = None,
     ) -> T:
         """异步/批量路由：按优先级依次尝试，任一失败（超时/限流/5xx/连接/校验）切下一个。
 
         Args:
             timeout: 单 provider 超时（秒），缺省 ASYNC_TIMEOUT_SECONDS（30s）
+            wall_budget: 整链墙钟预算（秒），缺省读 runtime 旋钮
+                llm_async_wall_budget（默认 90，§6.4"30s×3=90s 上限"口径）；
+                超预算后剩余 provider 不再尝试（记超时语义），整链失败交
+                ARQ 延迟队列重试。首个 provider 恒尝试（index>1 才检查）。
 
         运维集成（§6.5）：尝试前查熔断/退避状态，命中则跳过；429 记录指数
         退避、5xx 累计熔断计数；调用成功清除该 provider 的熔断/退避状态。
@@ -511,6 +595,9 @@ class LLMProviderChain:
         if not self._providers:
             raise LLMConfigurationError("未配置可用 provider（无 api_key 或全部禁用）")
         effective_timeout = timeout or ASYNC_TIMEOUT_SECONDS
+        budget = wall_budget if wall_budget is not None else int(
+            runtime_config.get("llm_async_wall_budget", 90)
+        )
         failures: list[str] = []
         # 失败类别统计：区分"超时/不可用"（上层映射 504）与其余失败（503 语义）。
         # 全部 provider 均因超时/熔断/退避失败 → 抛 LLMTimeoutError，使同步/异步
@@ -520,6 +607,16 @@ class LLMProviderChain:
         wall_started = time.perf_counter()
         for index, provider in enumerate(self._providers, start=1):
             name = provider.get("name", "?")
+            # 墙钟预算耗尽：剩余 provider 记超时语义后停止（第八轮裁决②）——
+            # 墙钟上界此前无强制（N 个 provider 最坏 60N 秒，仅 ARQ job_timeout
+            # 1800 兜底），与 §6.4 的 90s 口径不符
+            if index > 1 and (time.perf_counter() - wall_started) >= budget:
+                remaining = len(self._providers) - index + 1
+                failures.append(
+                    f"墙钟预算 {budget}s 已耗尽，剩余 {remaining} 个 provider 不再尝试"
+                )
+                timeout_like += remaining
+                break
             # 熔断/退避窗口内跳过该 provider，不发起调用（§6.5 运维机制）
             skip_kind = _is_skipped(name)
             if skip_kind is not None:
@@ -602,19 +699,23 @@ class LLMProviderChain:
         - 5xx（APIStatusError, status_code>=500）→ LLMServerError，累计熔断
         - 其余（超时/连接/4xx/校验）保持既有 LLMTimeoutError/LLMExtractionError
         """
-        from openai import (
-            APIConnectionError,
-            APIStatusError,
-            APITimeoutError,
-            RateLimitError,
-        )
-
         api_key = _resolve_api_key(provider)
         if not api_key:
             env_hint = f"（api_key_env={provider.get('api_key_env')} 未设置或为空）" if provider.get("api_key_env") else ""
             raise LLMConfigurationError(
                 f"provider '{provider['name']}' 未配置 api_key{env_hint}"
             )
+        if _provider_protocol(provider) == "anthropic":
+            return self._call_provider_anthropic(
+                provider, prompt, response_model, max_retries, timeout, system_prompt,
+            )
+
+        from openai import (
+            APIConnectionError,
+            APIStatusError,
+            APITimeoutError,
+            RateLimitError,
+        )
 
         client = _build_client(provider, timeout)
         try:
@@ -660,6 +761,84 @@ class LLMProviderChain:
         except Exception as e:  # 外部 API/校验异常统一包装，交给重试链
             # 校验失败细分：instructor 重试耗尽（InstructorRetryException）与
             # 裸 Pydantic 校验错误 → validation_error；其余保持 extraction_error
+            outcome = _OUTCOME_EXTRACTION_ERROR
+            try:
+                from instructor.exceptions import InstructorRetryException
+
+                if isinstance(e, (InstructorRetryException,)):
+                    outcome = _OUTCOME_VALIDATION_ERROR
+            except ImportError:
+                pass
+            if isinstance(e, ValidationError):
+                outcome = _OUTCOME_VALIDATION_ERROR
+            raise _with_outcome(
+                LLMExtractionError(f"provider '{provider['name']}' 调用异常: {e}"),
+                outcome,
+            ) from e
+
+    def _call_provider_anthropic(
+        self,
+        provider: dict,
+        prompt: str,
+        response_model: Type[T],
+        max_retries: int,
+        timeout: int,
+        system_prompt: Optional[str] = None,
+    ) -> T:
+        """Anthropic Messages 协议单 provider 调用（如 z.ai Coding Plan）。
+
+        instructor from_anthropic 自动把 messages 中 role:system 提取为顶层
+        system 参数（v2 process_messages_for_anthropic），消息构造与 OpenAI
+        路径同源；异常映射语义与 _call_provider 完全一致（§6.5）。
+        注：anthropic SDK 1.x 类型化签名不含 temperature/top_p，本路径不传
+        采样参数（provider 默认值）；额外请求体经 `extra_body` 透传（如
+        GLM 思考模式 `{"thinking": {"type": "disabled"}}`）。
+        """
+        from anthropic import (
+            APIConnectionError,
+            APIStatusError,
+            APITimeoutError,
+            RateLimitError,
+        )
+
+        client = _build_client(provider, timeout)
+        try:
+            return client.messages.create(
+                model=provider["model"],
+                response_model=response_model,
+                messages=self._build_messages(prompt, system_prompt),
+                max_tokens=self._max_tokens,
+                max_retries=max_retries,
+                extra_body=provider.get("extra_body") or None,
+            )
+        except APITimeoutError as e:
+            raise _with_outcome(
+                LLMTimeoutError(f"provider '{provider['name']}' 超时（{timeout}s）"),
+                _OUTCOME_TIMEOUT,
+            ) from e
+        except RateLimitError as e:
+            raise _with_outcome(
+                LLMRateLimitError(f"provider '{provider['name']}' 触发限流(429): {e}"),
+                _OUTCOME_RATE_LIMITED,
+            ) from e
+        except APIStatusError as e:
+            if e.status_code >= 500:
+                raise _with_outcome(
+                    LLMServerError(
+                        f"provider '{provider['name']}' 服务不可用({e.status_code}): {e}"
+                    ),
+                    _OUTCOME_SERVER_ERROR,
+                ) from e
+            raise _with_outcome(
+                LLMExtractionError(f"provider '{provider['name']}' 调用失败: {e}"),
+                _OUTCOME_HTTP_4XX,
+            ) from e
+        except APIConnectionError as e:
+            raise _with_outcome(
+                LLMExtractionError(f"provider '{provider['name']}' 连接失败: {e}"),
+                _OUTCOME_CONNECTION_ERROR,
+            ) from e
+        except Exception as e:  # 外部 API/校验异常统一包装，交给重试链
             outcome = _OUTCOME_EXTRACTION_ERROR
             try:
                 from instructor.exceptions import InstructorRetryException

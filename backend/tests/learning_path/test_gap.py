@@ -201,18 +201,38 @@ class TestGapDataUpgrade:
 
     def test_trend_is_continuous_diffusion(self, monkeypatch):
         """trend 连续值：岗位扩散 + 跨源扩散等权合成（非两档）。"""
-        # 无关联岗位（_position_count→0）仅跨源项：source_count=10 → 0.5×0+0.5×0.5=0.25
-        monkeypatch.setattr("app.services.learning_path.gap._position_count", lambda sid: 0)
+        # 无关联岗位（_position_counts 无记录→0）仅跨源项：source_count=10 → 0.5×0+0.5×0.5=0.25
+        monkeypatch.setattr("app.services.learning_path.gap._position_counts", lambda ids: {})
         gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 10)]))
         assert gaps[0].trend == 0.25
         # 关联 10 岗位 + 20 源 → 0.5×1 + 0.5×1 = 1.0
-        monkeypatch.setattr("app.services.learning_path.gap._position_count", lambda sid: 10)
+        monkeypatch.setattr("app.services.learning_path.gap._position_counts", lambda ids: {i: 10 for i in ids})
         gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 20)]))
         assert gaps[0].trend == 1.0
         # 关联 5 岗位 + 5 源 → 0.5×0.5 + 0.5×0.25 = 0.375
-        monkeypatch.setattr("app.services.learning_path.gap._position_count", lambda sid: 5)
+        monkeypatch.setattr("app.services.learning_path.gap._position_counts", lambda ids: {i: 5 for i in ids})
         gaps = analyze_gaps(_candidate([]), _position([self._req_src("Java", 5)]))
         assert gaps[0].trend == 0.375
+
+    def test_position_counts_batched_single_query(self, monkeypatch):
+        """P2-13：多技能差距仅一次批量岗位计数（UNWIND），不再逐技能 Neo4j 往返。"""
+        calls: list[list[str]] = []
+
+        def _fake_counts(ids):
+            calls.append(list(ids))
+            return {i: 3 for i in ids}
+
+        monkeypatch.setattr("app.services.learning_path.gap._position_counts", _fake_counts)
+        pos = _position([
+            self._req_src("Java", 5),
+            self._req_src("Go", 5),
+            self._req_src("Rust", 5),
+        ])
+        gaps = analyze_gaps(_candidate([]), pos)
+        assert len(calls) == 1
+        assert sorted(calls[0]) == ["Go", "Java", "Rust"]
+        # 关联 3 岗位 + 5 源 → 0.5×0.3 + 0.5×0.25 = 0.275
+        assert all(g.trend == 0.275 for g in gaps)
 
     def test_roi_and_high_roi_top3(self, monkeypatch):
         """roi=(demand×(trend+1))/cost；真缺口按 ROI 取 Top3 打标，matched 不打标。"""

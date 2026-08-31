@@ -41,20 +41,41 @@ import type { components } from '@/types/api'
 /** 3D 图谱懒加载 — Three.js 约 1.4MB，仅在用户点击"3D"时按需加载 */
 const Graph3D = lazy(() => import('@/components/graph/graph-3d').then((m) => ({ default: m.Graph3D })))
 
-const VIEW_LABEL: Record<GraphViewType, string> = {
+type PortraitEvidenceData = components['schemas']['PortraitEvidenceData']
+
+/** 画像 attr 节点 → 证据维度（子条目按 id 前缀，大类按名称） */
+function portraitDimension(node: NodeDetail): 'salary' | 'experience' | 'education' | null {
+  if (node.id.startsWith('sal_')) return 'salary'
+  if (node.id.startsWith('exp_')) return 'experience'
+  if (node.id.startsWith('edu_')) return 'education'
+  if (node.id.startsWith('attr_')) {
+    if (node.name === '薪资') return 'salary'
+    if (node.name === '经验') return 'experience'
+    if (node.name === '学历') return 'education'
+  }
+  return null
+}
+
+/** 画像子条目 → 条目标签（'1-1.3万 ×9' → '1-1.3万'；大类节点返回空=全维度） */
+function portraitLabel(node: NodeDetail): string {
+  if (!/^(sal|exp|edu)_/.test(node.id)) return ''
+  return node.name.replace(/\s*×\d+$/, '').trim()
+}
+
+/** 页面实际渲染的视图（08-29 视图收敛：level 与 positionCenter 同查询同数据、
+ *  无差异化过滤，页签移除；positionCenter 端点保留作岗位画像下拉数据源） */
+type GraphTab = Extract<GraphViewType, 'panorama' | 'techStack' | 'positionPortrait'>
+
+const VIEW_LABEL: Record<GraphTab, string> = {
   panorama: '全景视图',
   techStack: '技术栈视图',
-  level: '级别视图',
-  positionCenter: '岗位中心',
   positionPortrait: '岗位画像',
 }
 
-const VIEW_DESC: Record<GraphViewType, string> = {
+const VIEW_DESC: Record<GraphTab, string> = {
   // 08-22 域聚合下钻（#412）：panorama 不再是 Top-N 裁剪，全部岗位以域超节点常驻
   panorama: '全岗位按职能域聚合常驻 · 双击域展开岗位，双击岗位展开技能',
   techStack: 'Top 高频技能及其关联岗位（技能为中心）',
-  level: '按级别（如中级）过滤的岗位-技能关系子图',
-  positionCenter: '以高频岗位为中心展开岗位-技能关系',
   positionPortrait: '单岗位画像：薪资/经验等属性维度 + 技能要求（下拉切换岗位）',
 }
 
@@ -78,8 +99,6 @@ function isWebGL2Available(): boolean {
  */
 type PanoramaData = components['schemas']['GraphViewData']
 
-/** 岗位中心视图自动展开的 Top 岗位数（首屏即呈现岗位-技能关系） */
-const AUTO_EXPAND_COUNT = 6
 /** 单个岗位展开的技能数上限（防止高频岗位技能全量涌入画布造成重叠） */
 const MAX_SKILLS_PER_POSITION = 12
 
@@ -96,19 +115,17 @@ const DEMO_BOOKMARKS: { label: string; nodeName: string }[] = [
   { label: '前端簇', nodeName: '前端开发工程师' },
 ]
 
-/** 非全景视图已由后端 /graph/view/{view_type} 提供（技术栈/级别/岗位中心均为服务端过滤）；
- *  画布岗位数上限（MAX_POSITIONS=30，见 visibleData）为前端展示层裁剪——高频岗位 Top-30
- *  保底显示 + 已展开岗位必显示，低频岗位经搜索/详情面板触达（2026-08-15 画布容量限制）。 */
+/** 非全景视图均由后端 /graph/view/{view_type} 服务端过滤返回，前端仅做展示层裁剪。 */
 
 /**
  * 能力图谱页 — 设计文档 §10.3
  *
  * 数据来源：真实 API /api/v1/graph/view/{view_type}（Neo4j 聚合 + Redis 缓存，
- * 四种视图均为服务端过滤）。已实现：2D ECharts 力导向图、四种视图切换、
+ * 各视图均为服务端过滤）。已实现：2D ECharts 力导向图、视图切换、
  * 节点点击 + 详情面板、暗色模式。
  */
 export function GraphPage() {
-  const [view, setView] = useState<GraphViewType>('panorama')
+  const [view, setView] = useState<GraphTab>('panorama')
   const [mode, setMode] = useState<'2d' | '3d'>('2d')
   const [selected, setSelected] = useState<NodeDetail | null>(null)
   const [raw, setRaw] = useState<GraphData | null>(null)
@@ -177,12 +194,13 @@ export function GraphPage() {
     })
   }, [])
 
-  // 岗位画像 attr 节点（薪资/经验等维度）无详情端点：点击不选中（悬停 tooltip
-  // 与邻接提亮仍可用）。setSelected 稳定 → 回调引用稳定，Graph2D 挂载 effect
+  // 岗位画像 attr 节点（薪资/经验/学历大类与条目）：画像视图下选中后展示
+  // 证据 JD（/graph/position/{id}/portrait-evidence）；其他视图 attr 无详情
+  // 端点，仍不选中。setSelected 稳定 → 回调引用稳定，Graph2D 挂载 effect
   // 不因回调换引用而反复重建图表
   const handleSelectNode = useCallback((node: NodeDetail | null) => {
-    if (node?.type !== 'attr') setSelected(node)
-  }, [])
+    if (node && (node.type !== 'attr' || view === 'positionPortrait')) setSelected(node)
+  }, [view])
 
   // 视图切换 → 真实后端过滤（GET /graph/view/{view_type}），初始 panorama 同样走后端视图端点。
   // 切换视图不清 loading，数据到达后原子替换，避免闪屏。
@@ -202,13 +220,6 @@ export function GraphPage() {
         // 聚合下钻：全部岗位以域超节点常驻；首屏自动展开最大域呈现岗位层
         const agg = aggregateByDomain(g)
         if (agg.supernodes[0]) setExpandedDomains(new Set([agg.supernodes[0].id]))
-      } else if (view !== 'techStack') {
-        const top = g.nodes
-          .filter((n) => n.type === 'position')
-          .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-          .slice(0, AUTO_EXPAND_COUNT)
-          .map((n) => n.id)
-        setExpandedPositions(new Set(top))
       }
       setLoading(false)
     }
@@ -299,6 +310,43 @@ export function GraphPage() {
       cancelled = true
     }
   }, [view, portraitPosition])
+
+  // 画像条目（薪资/经验/学历 attr 节点）→ 证据 JD 列表（/graph/position/{id}/
+  // portrait-evidence）。大类节点取该维度全部；子条目名 '1-1.3万 ×9' 去 ×N 作 label。
+  // loading 由请求 key 派生（state.key ≠ 当前 key 即在加载），避免 effect 体内
+  // 同步 setState（react-hooks 级联渲染 lint）
+  const [peState, setPeState] = useState<{
+    key: string
+    data: PortraitEvidenceData | null
+    loading: boolean
+  }>({ key: '', data: null, loading: false })
+
+  useEffect(() => {
+    if (view !== 'positionPortrait' || !selected || selected.type !== 'attr') return
+    const dimension = portraitDimension(selected)
+    if (!dimension) return
+    const key = `${portraitPosition}:${dimension}:${portraitLabel(selected)}`
+    let cancelled = false
+    apiGet<PortraitEvidenceData>(
+      `/graph/position/${encodeURIComponent(portraitPosition)}/portrait-evidence?dimension=${dimension}${portraitLabel(selected) ? `&label=${encodeURIComponent(portraitLabel(selected))}` : ''}`,
+    )
+      .then((res) => {
+        if (!cancelled) setPeState({ key, data: res, loading: false })
+      })
+      .catch(() => {
+        if (!cancelled) setPeState({ key, data: null, loading: false })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selected, view, portraitPosition])
+
+  const peKey =
+    view === 'positionPortrait' && selected?.type === 'attr' && portraitDimension(selected)
+      ? `${portraitPosition}:${portraitDimension(selected)}:${portraitLabel(selected)}`
+      : ''
+  const portraitEvidence = peState.key === peKey ? peState.data : null
+  const portraitEvidenceLoading = peState.key !== peKey
 
   // 选中技能节点 → 并行加载反向岗位 / 先修链 / 课程 / 证据 / 相似技能（真实 API）
   // 同步 loading 态由派生值 skillDetailView 表达，effect 内仅在异步回调中 setState
@@ -440,7 +488,7 @@ export function GraphPage() {
   const domainAgg = useMemo(() => (data ? aggregateByDomain(data) : null), [data])
 
   // 点击搜索结果 / 相似技能 / 岗位必备技能 → 选中技能节点 + 定位画布
-  // 岗位中心视图下技能需先展开其所属岗位（取权重最高的关联岗位，即该技能最核心的簇），
+  // panorama 下技能需先展开其所属岗位（取权重最高的关联岗位，即该技能最核心的簇），
   // 再触发 Graph2D.focusNode 居中高亮；技术栈视图技能已全量展示，直接聚焦。
   const focusSkill = useCallback(
     (id: string, name: string) => {
@@ -477,92 +525,63 @@ export function GraphPage() {
     [view, data, domainAgg, expandedDomains],
   )
 
-  // 画布可见数据：
-  // - techStack（技能为中心）：全量展示技能+边，不做岗位过滤
-  // - 岗位中心视图：展示岗位节点 + 已展开岗位的技能（单岗位技能数上限防重叠）
+  // 画布可见数据（08-29 视图收敛后仅三个页签视图）：
+  // - panorama：域聚合三级下钻（域超节点 → 展开域 → 展开岗位技能）
+  // - techStack（技能为中心）：岗位 Top-30 保底 + 每技能 Top-K 岗位边降噪
+  // - 岗位画像：后端已按选中岗位返回完整子图，前端不再裁剪
   // 展开态高亮集合：展开的岗位 ∪ 展开的域超节点（画布共用白边+辉光视觉）
   const expandedUnion = useMemo(
     () => new Set([...expandedPositions, ...expandedDomains]),
     [expandedPositions, expandedDomains],
   )
-  // 岗位显示数量限制（Top-30 按关联度降序 + 展开的岗位必显示，2026-08-15）：
-  // 岗位中心/技术栈视图岗位全量 100+，物理上放不下岗位防重叠所需间距
-  // （enforceSpread minGap 60 → 每岗位约 1.06 万 px²，画布仅 ~54 万 px² 容量 ~30 岗位），
-  // 且全量渲染节点爆炸不可读。低频岗位不显示，可在搜索/详情面板中触达。
-  // panorama 视图 08-22 起改域聚合下钻（全岗位以超节点常驻，见 domainAgg），
-  // 本裁剪仅作用于 level/positionCenter 视图。
-  const MAX_POSITIONS = 30
   const visibleData = useMemo<GraphData | null>(() => {
     if (!data) return null
-
-    // panorama：三级下钻——域超节点（全部岗位可见）→ 展开域 → 展开岗位技能
-    if (view === 'panorama' && domainAgg) {
-      return buildDomainView(data, domainAgg, {
-        expandedDomains,
-        expandedPositions,
-        maxSkillsPerPosition: MAX_SKILLS_PER_POSITION,
-      })
-    }
 
     // 岗位画像：后端已按选中岗位返回完整子图（中心岗位 + 属性维度 + 技能，limit=200），
     // 前端不再做 Top-30 / Top-N 裁剪（attr 节点非技能，通用裁剪路径会误删）；
     // 未选岗位时返回 null，画布区显示引导空态（见渲染处）
     if (view === 'positionPortrait') return portraitPosition ? data : null
 
-    const keepPositions = new Set<string>()
-    data.nodes
-      .filter((n) => n.type === 'position')
-      .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-      .slice(0, MAX_POSITIONS)
-      .forEach((p) => keepPositions.add(p.id))
-    expandedPositions.forEach((id) => keepPositions.add(id))
-
-    if (view === 'techStack') {
-      const nodes = data.nodes.filter((n) => n.type !== 'position' || keepPositions.has(n.id))
-      const nodeIds = new Set(nodes.map((n) => n.id))
-      // 08-28 技术栈降噪：每技能仅保留权重 Top-K 的岗位边（该视图边为技能→岗位）。
-      // 全量 1719 边交叉成毛线团是视觉混乱主因；Top-4 裁至 ~1/4，配合边透明度渐变。
-      const TECH_STACK_EDGES_PER_SKILL = 4
-      const bySkill = new Map<string, GraphEdge[]>()
-      for (const e of data.edges) {
-        if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue
-        const list = bySkill.get(e.source)
-        if (list) list.push(e)
-        else bySkill.set(e.source, [e])
-      }
-      const kept = new Set<GraphEdge>()
-      for (const list of bySkill.values()) {
-        list.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
-        for (const e of list.slice(0, TECH_STACK_EDGES_PER_SKILL)) kept.add(e)
-      }
-      return { ...data, nodes, edges: [...kept] }
+    // panorama：三级下钻——域超节点（全部岗位可见）→ 展开域 → 展开岗位技能。
+    // data 非空 ⇒ domainAgg 非空（二者同源 memo），断言仅为类型收窄
+    if (view === 'panorama') {
+      return buildDomainView(data, domainAgg!, {
+        expandedDomains,
+        expandedPositions,
+        maxSkillsPerPosition: MAX_SKILLS_PER_POSITION,
+      })
     }
 
-    // 每个展开岗位：按边权重取 Top-N 技能（多岗位共享技能去重）
-    const perPositionSkills = new Map<string, string[]>()
-    for (const pid of expandedPositions) {
-      const ranked = data.edges
-        .filter((e) => e.source === pid || e.target === pid)
-        .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
-      const skills: string[] = []
-      for (const e of ranked) {
-        if (skills.length >= MAX_SKILLS_PER_POSITION) break
-        const sid = e.source === pid ? e.target : e.source
-        if (!skills.includes(sid)) skills.push(sid)
-      }
-      perPositionSkills.set(pid, skills)
-    }
-    const skillIds = new Set([...perPositionSkills.values()].flat())
-    const nodes = data.nodes.filter((n) =>
-      n.type === 'position' ? keepPositions.has(n.id) : skillIds.has(n.id),
+    // techStack：岗位显示数量限制（Top-30 按关联度降序，2026-08-15 画布容量限制）：
+    // 岗位全量 100+，物理上放不下岗位防重叠所需间距
+    // （enforceSpread minGap 60 → 每岗位约 1.06 万 px²，画布仅 ~54 万 px² 容量 ~30 岗位），
+    // 且全量渲染节点爆炸不可读。低频岗位不显示，可在搜索/详情面板中触达。
+    const MAX_POSITIONS = 30
+    const keepPositions = new Set<string>(
+      data.nodes
+        .filter((n) => n.type === 'position')
+        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+        .slice(0, MAX_POSITIONS)
+        .map((p) => p.id),
     )
-    // 只保留两端都可见的边（岗位-技能关系，且岗位在显示集、技能在展开上限内）
-    const edges = data.edges.filter((e) => {
-      const a = keepPositions.has(e.source)
-      const b = keepPositions.has(e.target)
-      return (a && skillIds.has(e.target)) || (b && skillIds.has(e.source))
-    })
-    return { ...data, nodes, edges }
+    const nodes = data.nodes.filter((n) => n.type !== 'position' || keepPositions.has(n.id))
+    const nodeIds = new Set(nodes.map((n) => n.id))
+    // 08-28 技术栈降噪：每技能仅保留权重 Top-K 的岗位边（该视图边为技能→岗位）。
+    // 全量 1719 边交叉成毛线团是视觉混乱主因；Top-4 裁至 ~1/4，配合边透明度渐变。
+    const TECH_STACK_EDGES_PER_SKILL = 4
+    const bySkill = new Map<string, GraphEdge[]>()
+    for (const e of data.edges) {
+      if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue
+      const list = bySkill.get(e.source)
+      if (list) list.push(e)
+      else bySkill.set(e.source, [e])
+    }
+    const kept = new Set<GraphEdge>()
+    for (const list of bySkill.values()) {
+      list.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0))
+      for (const e of list.slice(0, TECH_STACK_EDGES_PER_SKILL)) kept.add(e)
+    }
+    return { ...data, nodes, edges: [...kept] }
   }, [data, view, portraitPosition, expandedPositions, expandedDomains, domainAgg])
   // 技术栈视图标签降噪白名单：仅 Top-30 高频技能在 LOD band 1 常显标签
   // （其余技能放大到 band 2 才显示；非 techStack 视图传 null 走原中位阈值口径）
@@ -767,13 +786,13 @@ export function GraphPage() {
           setSelected(null)
           setExpandedPositions(new Set())
           setExpandedDomains(new Set())
-          setView(value as GraphViewType)
+          setView(value as GraphTab)
         }}
       >
         <div className="mb-3 flex flex-col gap-3 rounded-xl border border-border bg-subtle/40 px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
             <TabsList className="h-auto w-full justify-start overflow-x-auto bg-canvas p-1 sm:w-auto">
-              {(Object.keys(VIEW_LABEL) as GraphViewType[]).map((item) => (
+              {(Object.keys(VIEW_LABEL) as GraphTab[]).map((item) => (
                 <TabsTrigger key={item} value={item} className="whitespace-nowrap px-3 text-xs" title={VIEW_DESC[item]}>{VIEW_LABEL[item]}</TabsTrigger>
               ))}
             </TabsList>
@@ -984,6 +1003,12 @@ export function GraphPage() {
                   }
                   onTogglePosition={togglePosition}
                   portraitMode={view === 'positionPortrait'}
+                  portraitEvidence={
+                    selected?.type === 'attr' && portraitEvidence && portraitEvidence.position_id === portraitPosition
+                      ? portraitEvidence
+                      : null
+                  }
+                  portraitEvidenceLoading={portraitEvidenceLoading}
                   onToggleDomain={toggleDomain}
                   onSelectSkill={focusSkill}
                   onClose={() => setSelected(null)}
@@ -1010,7 +1035,7 @@ export function GraphPage() {
         <div className="space-y-2" role="listitem">
           <p className="font-mono text-[12px] tracking-[0.15em] text-atlas-muted">MAP FEATURES / 实体</p>
           <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-            <span className="flex items-center gap-1.5"><span className="size-3 rotate-45 bg-graph-domain" /> 职能域</span>
+            <span className="flex items-center gap-1.5"><span className="size-3 rotate-45" style={{ background: 'conic-gradient(from 45deg, #8b8af8, #38bdf8, #34d399, #fbbf24, #f472b6, #8b8af8)' }} role="img" aria-label="职能域节点：按域社区着色（每域一色）" /> 职能域<span className="text-ink-faint">（每域一色）</span></span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-3.5 rounded-sm border border-atlas-ocean bg-state-stable" /> 岗位</span>
             <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-graph-skill" role="img" aria-label="技术技能节点" /> 技术技能</span>
             <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full border-2 border-graph-soft-skill" role="img" aria-label="软技能节点：粉色空心圆" /> 软技能</span>

@@ -113,7 +113,8 @@ class TestDiscoveryRecent:
     async def test_candidate_without_graph_skills_marks_pending(self, monkeypatch):
         """图内无技能（candidate 未聚合）：skills=None + skill_pending=True。"""
         rows = [_candidate("量子运维工程师", state="candidate")]
-        # 图谱无该岗位 → (None, {})；匿名过滤 candidate 态，登录 guest 可见
+        # 图谱无该岗位 → (None, {})；candidate 不外泄：匿名与 guest 均过滤
+        # （第七轮 P1-4：对齐 visibility 单一事实源，guest 原可越权看到待审核岗）
         def _fake_query_by_name(driver, name):
             return (None, {})
 
@@ -125,11 +126,17 @@ class TestDiscoveryRecent:
             user=None,
         )
         assert anon.data["candidates"] == []  # 匿名不外泄待审核岗位
-        logged = await discovery_mod.discovery_recent(
+        guest = await discovery_mod.discovery_recent(
             days=30, state=None, limit=20, db=_FakeSession(rows),
             user={"role": "guest", "sub": "u1"},
         )
-        c = logged.data["candidates"][0]
+        assert guest.data["candidates"] == []  # guest 同样不外泄（P1-4 修复）
+        # user 角色及以上可见；该 candidate 图内无技能 → 标注待审核
+        user = await discovery_mod.discovery_recent(
+            days=30, state=None, limit=20, db=_FakeSession(rows),
+            user={"role": "user", "sub": "u1"},
+        )
+        c = user.data["candidates"][0]
         assert c["position_id"] is None
         assert c["skills"] is None
         assert c["skill_pending"] is True

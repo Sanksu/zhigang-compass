@@ -172,6 +172,58 @@ class TestCallWithFallback:
             chain.call_with_fallback("prompt", _DemoModel)
         assert type(exc_info.value) is LLMExtractionError
 
+    def test_wall_budget_skips_remaining_providers(self, tmp_path, monkeypatch):
+        """墙钟预算耗尽（第八轮裁决②）：剩余 provider 不再尝试，记超时语义。"""
+        chain, _ = _make_chain(tmp_path)
+        called: list[str] = []
+
+        def fake_call(provider, prompt, response_model, max_retries, timeout, system_prompt=None):
+            called.append(provider["name"])
+            raise LLMTimeoutError(f"{provider['name']} 超时")
+
+        monkeypatch.setattr(chain, "_call_provider", fake_call)
+        # 伪时钟：每次读数 +100s → 首 provider 尝试后墙钟即超预算
+        counter = {"t": 0.0}
+
+        def fake_perf_counter():
+            counter["t"] += 100.0
+            return counter["t"]
+
+        monkeypatch.setattr(llm_provider_module.time, "perf_counter", fake_perf_counter)
+        with pytest.raises(LLMTimeoutError) as exc_info:
+            chain.call_with_fallback("prompt", _DemoModel, wall_budget=90)
+        # 首个 provider 恒尝试（index>1 才检查预算），backup 不再发起调用
+        assert called == ["primary"]
+        msg = str(exc_info.value)
+        assert "墙钟预算 90s 已耗尽" in msg
+        assert "剩余 1 个 provider 不再尝试" in msg
+
+    def test_wall_budget_reads_runtime_knob_when_unset(self, tmp_path, monkeypatch):
+        """wall_budget 缺省读 runtime 旋钮 llm_async_wall_budget。"""
+        chain, _ = _make_chain(tmp_path)
+        called: list[str] = []
+
+        def fake_call(provider, prompt, response_model, max_retries, timeout, system_prompt=None):
+            called.append(provider["name"])
+            raise LLMTimeoutError(f"{provider['name']} 超时")
+
+        monkeypatch.setattr(chain, "_call_provider", fake_call)
+        monkeypatch.setattr(
+            llm_provider_module.runtime_config, "get",
+            lambda key, default=None: 60 if key == "llm_async_wall_budget" else default,
+        )
+        counter = {"t": 0.0}
+
+        def fake_perf_counter():
+            counter["t"] += 100.0
+            return counter["t"]
+
+        monkeypatch.setattr(llm_provider_module.time, "perf_counter", fake_perf_counter)
+        with pytest.raises(LLMTimeoutError) as exc_info:
+            chain.call_with_fallback("prompt", _DemoModel)
+        assert called == ["primary"]
+        assert "墙钟预算 60s 已耗尽" in str(exc_info.value)
+
 
 class TestStructuredOutputParams:
     """设计文档 §6.2 参数：max_tokens=2048 / top_p=0.9，yaml 可覆盖。"""
@@ -567,3 +619,199 @@ class TestCallProviderErrorMapping:
         with pytest.raises(LLMExtractionError) as exc_info:
             chain._call_provider(self._provider(), "p", _DemoModel, 0, 10)
         assert type(exc_info.value) is LLMExtractionError
+
+
+class TestAnthropicProtocol:
+    """protocol: anthropic 分支（2026-08-30，z.ai Coding Plan 接入）。
+
+    覆盖：client 构建（from_anthropic + 模式映射 + 缓存隔离）、调用路径
+    （messages.create）、异常映射与 OpenAI 路径同语义、链级协议混排。
+    """
+
+    def _anthropic_provider(self, **extra):
+        provider = {
+            "name": "zai",
+            "base_url": "https://api.z.ai/api/anthropic",
+            "api_key": "k-zai",
+            "model": "glm-5.3-flash",
+            "protocol": "anthropic",
+        }
+        provider.update(extra)
+        return provider
+
+    def _install_fake_anthropic(self, monkeypatch, result=None, exc=None):
+        import instructor
+
+        calls: list[dict] = []
+
+        class _FakeMessages:
+            def create(self, **kwargs):
+                calls.append(kwargs)
+                if exc is not None:
+                    raise exc
+                return result if result is not None else _DemoModel(value="ok")
+
+        fake = SimpleNamespace(messages=_FakeMessages())
+        captured: dict = {}
+
+        def fake_from_anthropic(client, mode=None, **kw):
+            captured["mode"] = mode
+            return fake
+
+        monkeypatch.setattr(instructor, "from_anthropic", fake_from_anthropic)
+        return fake, captured, calls
+
+    def test_build_client_uses_from_anthropic_tools_mode(self, tmp_path, monkeypatch):
+        import instructor
+
+        _, captured, _ = self._install_fake_anthropic(monkeypatch)
+        client = llm_provider_module._build_client(self._anthropic_provider(), 10)
+        assert client is not None
+        assert captured["mode"] == instructor.Mode.ANTHROPIC_TOOLS
+
+    def test_build_client_json_mode_when_no_function_calling(self, tmp_path, monkeypatch):
+        import instructor
+
+        _, captured, _ = self._install_fake_anthropic(monkeypatch)
+        provider = self._anthropic_provider(supports_function_calling=False)
+        llm_provider_module._build_client(provider, 10)
+        assert captured["mode"] == instructor.Mode.ANTHROPIC_JSON
+
+    def test_client_cache_isolated_by_protocol(self, monkeypatch):
+
+        self._install_fake_anthropic(monkeypatch)
+        anthropic_provider = self._anthropic_provider()
+        openai_provider = {k: v for k, v in anthropic_provider.items() if k != "protocol"}
+        c1 = llm_provider_module._build_client(anthropic_provider, 10)
+        c2 = llm_provider_module._build_client(openai_provider, 10)
+        assert c1 is not c2  # 同 base_url 不同协议不共享缓存
+
+    def test_call_provider_routes_to_messages_create(self, tmp_path, monkeypatch):
+        chain, _ = _make_chain(tmp_path)
+        fake, _, calls = self._install_fake_anthropic(monkeypatch)
+        result = chain._call_provider(
+            self._anthropic_provider(), "p", _DemoModel, 0, 10, system_prompt="sys"
+        )
+        assert result.value == "ok"
+        assert len(calls) == 1
+        assert calls[0]["model"] == "glm-5.3-flash"
+        assert calls[0]["response_model"] is _DemoModel
+        assert fake is not None
+
+    def test_fallback_switches_from_anthropic_to_openai(self, tmp_path, monkeypatch, _fake_store):
+        path = tmp_path / "llm.yaml"
+        _write_config(path, [
+            self._anthropic_provider(priority=1),
+            {"name": "backup", "priority": 2, "api_key": "k2", "enabled": True},
+        ])
+        chain = LLMProviderChain(config_path=path)
+
+        def fake_call(provider, prompt, response_model, max_retries, timeout, system_prompt=None):
+            if provider.get("protocol") == "anthropic":
+                raise LLMRateLimitError("429 限流")
+            return _DemoModel(value="ok")
+
+        monkeypatch.setattr(chain, "_call_provider", fake_call)
+        assert chain.call_with_fallback("prompt", _DemoModel).value == "ok"
+
+    def test_429_maps_to_rate_limit_error(self, tmp_path, monkeypatch):
+        import httpx
+
+        from anthropic import RateLimitError
+
+        chain, _ = _make_chain(tmp_path)
+        resp = httpx.Response(429, request=httpx.Request("POST", "http://test"))
+        self._install_fake_anthropic(
+            monkeypatch, exc=RateLimitError("限流", response=resp, body=None)
+        )
+        with pytest.raises(LLMRateLimitError):
+            chain._call_provider(self._anthropic_provider(), "p", _DemoModel, 0, 10)
+
+    def test_5xx_maps_to_server_error(self, tmp_path, monkeypatch):
+        import httpx
+
+        from anthropic import APIStatusError
+
+        chain, _ = _make_chain(tmp_path)
+        resp = httpx.Response(500, request=httpx.Request("POST", "http://test"))
+        self._install_fake_anthropic(
+            monkeypatch, exc=APIStatusError("服务不可用", response=resp, body=None)
+        )
+        with pytest.raises(LLMServerError):
+            chain._call_provider(self._anthropic_provider(), "p", _DemoModel, 0, 10)
+
+    def test_4xx_stays_generic_extraction_error(self, tmp_path, monkeypatch):
+        import httpx
+
+        from anthropic import APIStatusError
+
+        chain, _ = _make_chain(tmp_path)
+        resp = httpx.Response(400, request=httpx.Request("POST", "http://test"))
+        self._install_fake_anthropic(
+            monkeypatch, exc=APIStatusError("请求错误", response=resp, body=None)
+        )
+        with pytest.raises(LLMExtractionError) as exc_info:
+            chain._call_provider(self._anthropic_provider(), "p", _DemoModel, 0, 10)
+        assert type(exc_info.value) is LLMExtractionError
+
+    def test_timeout_maps_to_timeout_error(self, tmp_path, monkeypatch):
+        import httpx
+
+        from anthropic import APITimeoutError
+
+        chain, _ = _make_chain(tmp_path)
+        self._install_fake_anthropic(
+            monkeypatch, exc=APITimeoutError(httpx.Request("POST", "http://test"))
+        )
+        with pytest.raises(LLMTimeoutError):
+            chain._call_provider(self._anthropic_provider(), "p", _DemoModel, 0, 10)
+
+
+class TestAnthropicHealthCheck:
+    """protocol: anthropic 的健康探针走 /v1/models + x-api-key + anthropic-version。"""
+
+    def _fake_response(self, status):
+        class _R:
+            def __init__(self, s):
+                self.status = s
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        return _R(status)
+
+    def test_probe_url_and_headers(self, monkeypatch, _fake_store):
+        captured: dict = {}
+
+        def fake_urlopen(req, timeout):
+            captured["url"] = req.full_url
+            captured["headers"] = {k.lower(): v for k, v in req.header_items()}
+            return self._fake_response(200)
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        provider = {
+            "name": "zai",
+            "base_url": "https://api.z.ai/api/anthropic",
+            "api_key": "k-zai",
+            "protocol": "anthropic",
+        }
+        assert check_provider_health(provider) is True
+        assert captured["url"] == "https://api.z.ai/api/anthropic/v1/models"
+        assert captured["headers"]["x-api-key"] == "k-zai"
+        assert captured["headers"]["anthropic-version"] == "2023-06-01"
+
+    def test_non_200_marks_unhealthy(self, monkeypatch, _fake_store):
+        monkeypatch.setattr(
+            "urllib.request.urlopen", lambda req, timeout: self._fake_response(404)
+        )
+        provider = {
+            "name": "zai",
+            "base_url": "https://api.z.ai/api/anthropic",
+            "api_key": "k-zai",
+            "protocol": "anthropic",
+        }
+        assert check_provider_health(provider) is False
+        assert _fake_store.data["llm:health:zai"] == "0"

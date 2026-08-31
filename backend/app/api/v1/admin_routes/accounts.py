@@ -8,7 +8,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.common import iso, paged_ok, paginate, resolve_operator
+from app.api.common import iso, paged_ok, paginate, parse_uuid, resolve_operator
 from app.api.deps import require_permission
 from app.core.database import get_db
 from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND, ERR_VALIDATION
@@ -28,13 +28,18 @@ async def list_users(
     current_user: dict = Depends(require_permission("admin:*")),
 ):
     """用户列表（分页）。"""
+    # 第八轮 P2-7：审计操作者统一 resolve_operator 守卫（sub 缺失时回退
+    # 空串会撞 AuditLog.user_id UUID 列约束 500，与其余 admin 写端点对齐）
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
     stmt = select(User).order_by(User.created_at.desc())
     rows, total = await paginate(
         db, stmt, page, size, count_stmt=select(func.count()).select_from(User)
     )
     # M5 修复：管理域四端点全量审计（合规留痕，低频管理动作可接受）
     db.add(AuditLog(
-        user_id=current_user.get("sub", ""),
+        user_id=operator,
         action="admin.user.list",
         resource="user",
         resource_id="*",
@@ -97,6 +102,11 @@ async def update_user(
     operator, operator_err = resolve_operator(current_user)
     if operator_err is not None:
         return operator_err
+    # 第八轮 P2-7：非法 UUID 先行校验（db.get(User, 非法串) 会撞 UUID 列
+    # 解析异常直接 500），与 resume/match 域 parse_uuid 口径一致
+    user_id = parse_uuid(user_id)
+    if user_id is None:
+        return error(ERR_VALIDATION, "user_id 格式非法")
     user = await db.get(User, user_id)
     if user is None:
         return error(ERR_NOT_FOUND, "用户不存在", http_status=404)
@@ -137,6 +147,15 @@ async def disable_user(
     audit_logs 无外键约束（索引仅加速查询），物理删除不阻塞历史审计保留。
     返回 204 无 body，错误以 HTTPException 携带 400/404 语义。
     """
+    # 第八轮 P2-7：操作者守卫 + 非法 UUID 先行校验。守卫错误直接返回
+    # JSONResponse（FastAPI 显式 Response 覆盖声明的 204，与其余 admin
+    # 端点一致）；user_id 校验错误沿用本端点 HTTPException 口径
+    operator, operator_err = resolve_operator(current_user)
+    if operator_err is not None:
+        return operator_err
+    user_id = parse_uuid(user_id)
+    if user_id is None:
+        raise HTTPException(status_code=400, detail="user_id 格式非法")
     if user_id == current_user.get("sub"):
         raise HTTPException(status_code=400, detail="不能删除当前登录账户")
     user = await db.get(User, user_id)
@@ -146,7 +165,7 @@ async def disable_user(
     await db.execute(sa_delete(ResumeFile).where(ResumeFile.user_id == user_id))
     # M5 修复：GDPR/PIPL 物理删除是最敏感操作，补审计（删除前记录目标用户信息）
     db.add(AuditLog(
-        user_id=current_user.get("sub", ""),
+        user_id=operator,
         action="admin.user.delete",
         resource="user",
         resource_id=user_id,

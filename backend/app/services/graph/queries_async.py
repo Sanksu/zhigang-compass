@@ -15,6 +15,7 @@ TTL 语义 / 结果结构与 sync 版本完全一致，仅把 session.run 改 aw
 """
 
 
+from app.services.graph.queries import _escape_lucene
 from app.services.graph.visibility import (
     _PUBLIC_POSITION_STATUSES,
 )
@@ -47,42 +48,48 @@ async def query_skill_positions(session, skill_id: str, status_filter: str) -> l
 async def query_fulltext_search(
     session, q: str, type_: str, status_clause: str, offset: int, size: int,
 ) -> tuple[list[dict], int]:
-    """fulltext_search 异步查询（全文索引 + evidence 降级，与 sync 一致）。"""
+    """fulltext_search 异步查询（全文索引 + evidence 降级，与 sync 一致）。
+
+    q 进 queryNodes 前经 _escape_lucene 转义（第八轮 P2-5，与 sync 版一致：
+    `("` 等 Lucene 语法字符触发 GqlError→500）；evidence 降级 CONTAINS
+    用原文（子串匹配，转义反而失真）。
+    """
+    lq = _escape_lucene(q)
     if type_ in ("position", "skill"):
         index = "position_search" if type_ == "position" else "skill_search"
         result = await session.run(
             f"""
-            CALL db.index.fulltext.queryNodes('{index}', $q) YIELD node, score
+            CALL db.index.fulltext.queryNodes('{index}', $lq) YIELD node, score
             {status_clause}
             RETURN node.id AS id, node.name AS name, score
             ORDER BY score DESC SKIP $offset LIMIT $size
             """,
-            q=q, offset=offset, size=size,
+            lq=lq, offset=offset, size=size,
             public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
         )
         total_row = await (await session.run(
             f"""
-            CALL db.index.fulltext.queryNodes('{index}', $q) YIELD node
+            CALL db.index.fulltext.queryNodes('{index}', $lq) YIELD node
             {status_clause}
             RETURN count(node) AS c
             """,
-            q=q,
+            lq=lq,
             public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
         )).single()
         total = total_row["c"] if total_row else 0
     else:
         try:
             result = await session.run(
-                "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
+                "CALL db.index.fulltext.queryNodes('evidence_search', $lq) "
                 "YIELD node, score "
                 "RETURN node.id AS id, node.source AS name, score "
                 "ORDER BY score DESC SKIP $offset LIMIT $size",
-                q=q, offset=offset, size=size,
+                lq=lq, offset=offset, size=size,
             )
             total_row = await (await session.run(
-                "CALL db.index.fulltext.queryNodes('evidence_search', $q) "
+                "CALL db.index.fulltext.queryNodes('evidence_search', $lq) "
                 "YIELD node RETURN count(node) AS c",
-                q=q,
+                lq=lq,
             )).single()
         except Exception:
             result = await session.run(

@@ -18,6 +18,7 @@
 """
 
 
+import asyncio
 from collections import Counter
 
 from sqlalchemy import delete, select
@@ -89,6 +90,45 @@ def _position_nodes(snapshot: dict) -> dict[str, str]:
     }
 
 
+# 单条演化边写入 Cypher（_write_evolved_edges 逐条复用同一 session 执行）
+_EVOLVE_EDGE_CYPHER = """
+// 旧岗位已从当前图谱消失（快照全量导出），按快照 id 重建为 legacy 节点后再建边。
+// 08-14 修复：SET name 前检查同名节点占用（ETL 重跑后新聚合可能已建同名岗位，
+// UNIQUE name 约束冲突会中断整个 ETL——AS400 应用程序 案例）——被占用则跳过改名
+// （保留 legacy 状态，该条演化边不建，宁缺毋滥）。
+MERGE (b:Position {id: $old_id})
+SET b.status = 'legacy'
+WITH b
+OPTIONAL MATCH (taken:Position {name: $old})
+WHERE taken <> b
+WITH b, taken
+WHERE taken IS NULL
+SET b.name = $old
+WITH b
+MATCH (a:Position {id: $new_id})
+MERGE (a)-[r:EVOLVED_FROM]->(b)
+SET r.version = $version, r.change_type = $change_type
+RETURN count(r) AS covered
+"""
+
+
+def _write_evolved_edges(edge_params: list[dict]) -> int:
+    """同步 Neo4j 批量写演化边（单 session 复用，避免每条边新开会话）。
+
+    仅经 asyncio.to_thread 调用（async 上下文直接调同步 driver 会阻塞
+    事件循环，第八轮 P2-12）。驱动懒导入以兼容测试对
+    app.core.database.neo4j_driver 的 monkeypatch。
+    """
+    from app.core.database import neo4j_driver
+
+    covered_total = 0
+    with neo4j_driver.session() as ns:
+        for params in edge_params:
+            result = ns.run(_EVOLVE_EDGE_CYPHER, **params).single()
+            covered_total += int(result["covered"]) if result else 0
+    return covered_total
+
+
 async def derive_evolved_from(dry_run: bool = False) -> dict:
     """基于最近两个版本快照推导 EVOLVED_FROM 边（幂等 MERGE）。
 
@@ -99,8 +139,6 @@ async def derive_evolved_from(dry_run: bool = False) -> dict:
     Returns:
         {"versions": [v_prev, v_cur], "edges": n, "skipped": n}
     """
-    from app.core.database import neo4j_driver
-
     async with async_session_factory() as session:
         versions = (await session.scalars(
             select(GraphVersion).order_by(GraphVersion.created_at.asc())
@@ -125,6 +163,9 @@ async def derive_evolved_from(dry_run: bool = False) -> dict:
     edges = 0
     skipped = 0
     matched_gone_by_new: dict[str, list[str]] = {}
+    # 候选边参数（Cypher 见 _EVOLVE_EDGE_CYPHER）：循环内只收集，写库统一
+    # 经 to_thread 单 session 批量执行（P2-12：async 内裸用同步 driver 会阻塞事件循环）
+    edge_params: list[dict] = []
     for new in new_names:
         new_id = cur_name_to_id.get(new)
         if new_id is None:
@@ -146,31 +187,13 @@ async def derive_evolved_from(dry_run: bool = False) -> dict:
             if dry_run:
                 edges += 1
                 continue
-            with neo4j_driver.session() as ns:
-                result = ns.run(
-                    """
-                    // 旧岗位已从当前图谱消失（快照全量导出），按快照 id 重建为 legacy 节点后再建边。
-                    // 08-14 修复：SET name 前检查同名节点占用（ETL 重跑后新聚合可能已建同名岗位，
-                    // UNIQUE name 约束冲突会中断整个 ETL——AS400 应用程序 案例）——被占用则跳过改名
-                    // （保留 legacy 状态，该条演化边不建，宁缺毋滥）。
-                    MERGE (b:Position {id: $old_id})
-                    SET b.status = 'legacy'
-                    WITH b
-                    OPTIONAL MATCH (taken:Position {name: $old})
-                    WHERE taken <> b
-                    WITH b, taken
-                    WHERE taken IS NULL
-                    SET b.name = $old
-                    WITH b
-                    MATCH (a:Position {id: $new_id})
-                    MERGE (a)-[r:EVOLVED_FROM]->(b)
-                    SET r.version = $version, r.change_type = $change_type
-                    RETURN count(r) AS covered
-                    """,
-                    old_id=old_id, old=old, new_id=new_id,
-                    version=cur_version, change_type=change_type,
-                ).single()
-                edges += int(result["covered"]) if result else 0
+            edge_params.append({
+                "old_id": old_id, "old": old, "new_id": new_id,
+                "version": cur_version, "change_type": change_type,
+            })
+
+    if edge_params:
+        edges += await asyncio.to_thread(_write_evolved_edges, edge_params)
 
     # 机制补强②：谱系事件 born/merged/ended 落库（D4：当前版本命中样本量告警 data_warning
     # → 抑制 ended，防"采集停摆被误报为岗位消亡"——与机制补强①联动）

@@ -20,6 +20,7 @@ from app.api.deps import get_optional_user
 from app.core.database import get_db, redis_client
 from app.core.errors import ERR_NOT_FOUND
 from app.models.business import EvolutionEvent, GraphVersion
+from app.services.graph import visibility
 from app.schemas.common import error, ok
 
 router = APIRouter()
@@ -70,7 +71,10 @@ async def _load_snapshots(db: AsyncSession) -> list | None:
         snapshots = rows or None
         future.set_result(snapshots)
         return snapshots
-    except Exception as exc:
+    except BaseException as exc:
+        # BaseException（第八轮 P2-6，与 graph.py single-flight 同口径）：
+        # 请求方取消时 CancelledError 不走 Exception 分支——leader 挂掉则
+        # future 永不 resolve，跟随者 await 挂死。注入异常后原样 raise。
         if not future.done():
             future.set_exception(exc)
         raise
@@ -436,7 +440,9 @@ async def position_evolution(
 async def position_evolution_list(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=10, ge=1, le=50),
-    q: str | None = Query(default=None, description="按岗位名称模糊过滤（08-16：下拉全量可搜索）"),
+    q: str | None = Query(
+        default=None, max_length=100,
+        description="按岗位名称模糊过滤（08-16：下拉全量可搜索）"),
     db: AsyncSession = Depends(get_db),
     user: Optional[dict] = Depends(get_optional_user),
 ):
@@ -478,7 +484,9 @@ async def position_evolution_list(
 async def skill_evolution_list(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=10, ge=1, le=50),
-    q: str | None = Query(default=None, description="按技能名称模糊过滤（08-16：下拉全量可搜索）"),
+    q: str | None = Query(
+        default=None, max_length=100,
+        description="按技能名称模糊过滤（08-16：下拉全量可搜索）"),
     db: AsyncSession = Depends(get_db),
     user: Optional[dict] = Depends(get_optional_user),
 ):
@@ -678,8 +686,10 @@ async def state_machine_overview(
         }
         for log in logs
     ]
-    # 匿名访客不外泄待审核规模与审核操作者（对齐图谱域按角色过滤口径）
-    if not user:
+    # 待审核规模与审核操作者不外泄：对齐图谱域单一事实源
+    # （services/graph/visibility.py）——匿名与 guest 均走 public scope
+    # （第七轮审查 P1-4，原实现只防匿名）
+    if not visibility._can_view_all_positions(user):
         counts["candidate"] = 0
         transitions = [
             {**t, "operator": "审核员"} for t in transitions if t["to_state"] != "candidate"

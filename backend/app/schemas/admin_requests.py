@@ -37,10 +37,20 @@ class AdminReasonRequest(BaseModel):
 
 
 class AdminEvolutionReviewRequest(BaseModel):
-    """演化审核：reason 可选（缺省 'admin evolution review'），modified 为属性修订。"""
+    """演化审核：reason 可选（缺省 'admin evolution review'），modified 为属性修订。
+
+    modified 为裸 dict（第八轮 P2-27：读取侧 position_reviews.review_evolution 合并进
+    features 后以 DiscoveryFeatures(**features) 消费，Pydantic 忽略未知键，故保持
+    dict 载体不加模型）。允许键集=DiscoveryFeatures 字段：jd_freq_ma3 / z_score /
+    source_diversity / cross_source_consistency / arxiv_paper_count /
+    github_star_velocity / first_seen_date（app/services/discovery/schemas.py）。
+    """
     action: Literal["approve", "reject"]
     reason: Optional[str] = Field(default=None, max_length=500)
-    modified: Optional[dict] = Field(default=None, description="approve 时合并进候选池 features 的属性修订")
+    modified: Optional[dict] = Field(
+        default=None,
+        description="approve 时合并进候选池 features 的属性修订；键集见类 docstring（DiscoveryFeatures 字段）",
+    )
 
 
 class LLMDecisionReviewRequest(BaseModel):
