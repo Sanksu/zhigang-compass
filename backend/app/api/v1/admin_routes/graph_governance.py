@@ -47,13 +47,14 @@ def group_domains(rows: list[dict], top_members: int = _TOP_MEMBERS) -> list[dic
         groups.setdefault(dom, {"name": r.get("dname") or "", "members": []})
         groups[dom]["members"].append(
             {"name": r["name"], "freq": int(r.get("freq") or 0),
-             "source": r.get("source")}
+             "source": r.get("source"), "score": r.get("score")}
         )
     domains = []
     for dom_id, g in groups.items():
         members = sorted(
             g["members"], key=lambda m: (-m["freq"], m["name"]),
         )
+        # 通用弃权域不截断：弃权原因需逐岗可见（可解释性口径）
         source_counts: dict[str, int] = {}
         for m in g["members"]:
             key = m["source"] or "unknown"
@@ -62,7 +63,7 @@ def group_domains(rows: list[dict], top_members: int = _TOP_MEMBERS) -> list[dic
             "domain_id": dom_id,
             "domain_name": g["name"],
             "member_count": len(members),
-            "members": members[:top_members],
+            "members": members if dom_id == GENERAL_DOMAIN_ID else members[:top_members],
             "source_counts": dict(sorted(source_counts.items(), key=lambda kv: -kv[1])),
             "is_general": dom_id == GENERAL_DOMAIN_ID,
         })
@@ -98,7 +99,8 @@ def _load_domain_rows() -> list[dict]:
             MATCH (p:Position) WHERE p.domain_id IS NOT NULL
             RETURN p.name AS name, p.domain_id AS dom,
                    p.domain_name AS dname, coalesce(p.freq, 0) AS freq,
-                   p.domain_source AS source
+                   p.domain_source AS source,
+                   p.domain_score AS score
             """
         ).data()
 
