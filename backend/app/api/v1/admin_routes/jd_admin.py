@@ -187,6 +187,7 @@ async def list_jd(
             "needs_review": bool(snap.get("needs_review")),
             "quality": _quality_number(snap),
             "released_at": _released_at(snap),
+            "has_extraction": "extraction" in snap,
             "text_length": len(row.raw_text or ""),
             "updated_at": row.updated_at.isoformat() if row.updated_at else "",
         })

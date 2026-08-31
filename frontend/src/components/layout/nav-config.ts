@@ -73,7 +73,7 @@ export const mainNav: NavItem[] = [
     },
 ]
 
-/** 管理后台分组（08-16 层级化：管理 + 配置中心两组，可折叠；08-26 加 LLM 驱动组） */
+/** 管理后台分组（08-16 层级化：管理 + 配置中心两组，可折叠；09-01 低频治理页收进总览统一入口） */
 export const adminNavGroups: AdminNavGroup[] = [
   {
     label: '管理',

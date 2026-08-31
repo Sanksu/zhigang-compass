@@ -5259,6 +5259,8 @@ export interface components {
             quality?: number | null;
             /** @description 放行时间（放行走 needs_review true→false 时写入 snapshot.released_at；已放行待重抽行为非空，从未放过行为 null） */
             released_at?: string | null;
+            /** @description 是否已有抽取快照（extraction 键存在；重抽成功后 released_at 清除且该字段为 true，徽标据此不误显） */
+            has_extraction?: boolean;
             /** @description raw_text 长度 */
             text_length?: number;
             /** @description 最近更新时间（编辑审计参考） */
