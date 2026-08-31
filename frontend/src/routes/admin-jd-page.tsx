@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { ExternalLink, FileText, Flag, Loader2 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -71,13 +72,16 @@ export function AdminJdPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [q, setQ] = useState('')
+  // ?q= 预填（原始数据页 JD tab 点行跳转携带标题）
+  const [searchParams] = useSearchParams()
+  const [q, setQ] = useState(searchParams.get('q') ?? '')
   const [source, setSource] = useState('')
   // 人工复核队列筛选：true 时请求带 needs_review=true（质量分 <0.6 待复核）
   const [pendingOnly, setPendingOnly] = useState(false)
   // 检索防抖值（第八轮 P2-31）：输入停止 300ms 后才提交给列表请求，
   // 避免逐键触发 /admin/jd 查询；初始值与空输入一致，不影响首屏加载
-  const [debouncedQ, setDebouncedQ] = useState('')
+  // 预填词直接进入防抖值，首屏即按该词过滤（300ms 防抖只对后续输入生效）
+  const [debouncedQ, setDebouncedQ] = useState(searchParams.get('q') ?? '')
   const [debouncedSource, setDebouncedSource] = useState('')
   useEffect(() => {
     const timer = setTimeout(() => {

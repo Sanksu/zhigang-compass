@@ -23,16 +23,18 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useNavigate } from 'react-router'
 import { apiDelete, apiGet, apiPut } from '@/lib/api'
 import type { components } from '@/types/api'
 
 type RawAdminPage = components['schemas']['RawAdminPage']
 type RawAdminItem = components['schemas']['RawAdminItem']
+type JdAdminItem = components['schemas']['JdAdminItem']
 type RawAdminDetail = components['schemas']['RawAdminDetail']
 
 const PAGE_SIZE = 20
 
-type RawType = 'course' | 'paper' | 'community'
+type RawType = 'jd' | 'course' | 'paper' | 'community'
 
 interface ExtraColumn {
   key: string
@@ -44,6 +46,13 @@ const num = (v: unknown) => (v == null ? '—' : String(v))
 
 /** 每个 tab 的类型特有列（extra 由后端 _extra_fields 计算） */
 const TAB_CONFIG: Record<RawType, { label: string; sourcePlaceholder: string; extraColumns: ExtraColumn[] }> = {
+  jd: {
+    label: 'JD',
+    sourcePlaceholder: '来源（zhilian/boss…）',
+    // JD 特有口径（needs_review 复核放行/归一化岗位/质量筛选）在专用 JD 数据页，
+    // 本 tab 仅列表检索，点行跳转 /admin/jd 操作
+    extraColumns: [],
+  },
   course: {
     label: '课程',
     sourcePlaceholder: '来源（icourse163）',
@@ -95,8 +104,9 @@ function toForm(detail: RawAdminDetail): RawEditForm {
  * 指纹重算自然生效，图谱侧节点为独立备份不联动。
  */
 export function AdminRawPage() {
-  const [rawType, setRawType] = useState<RawType>('course')
-  const [items, setItems] = useState<RawAdminItem[]>([])
+  const navigate = useNavigate()
+  const [rawType, setRawType] = useState<RawType>('jd')
+  const [items, setItems] = useState<RawAdminItem[] | JdAdminItem[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
@@ -140,7 +150,10 @@ export function AdminRawPage() {
     let cancelled = false
     // loading 置位在 tab 切换的事件处理器中完成（lint：effect 内同步 setState
     // 触发级联渲染）；本 effect 只负责回落
-    apiGet<RawAdminPage>(`/admin/raw/${rawType}?${params}`)
+    // jd tab 复用 jd_admin 端点（needs_review/position 等字段为 RawAdminItem 展示面的超集，
+    // 类型此处窄化统一；其余 tab 走通用 raw 端点）
+    const url = rawType === 'jd' ? `/admin/jd?${params}` : `/admin/raw/${rawType}?${params}`
+    apiGet<RawAdminPage>(url)
       .then((res) => {
         if (cancelled) return
         setError(null)
@@ -213,7 +226,7 @@ export function AdminRawPage() {
     <>
       <PageHeader
         title="原始数据管理"
-        description="课程 / 论文 / 社区信号三类 raw 表治理：列表检索 / 标题与出处编辑 / 删除（全部变更写审计日志；JD 原始数据走专用 JD 数据页）"
+        description="JD / 课程 / 论文 / 社区信号四类 raw 表治理：列表检索 / 标题与出处编辑 / 删除（全部变更写审计日志；JD 详情编辑与复核放行在 JD 数据页）"
       />
 
       <Card>
@@ -278,7 +291,7 @@ export function AdminRawPage() {
               </TableHeader>
               <TableBody>
                 {items.map((item) => {
-                  const extra = (item.extra ?? {}) as Record<string, unknown>
+                  const extra = ((item as RawAdminItem).extra ?? {}) as Record<string, unknown>
                   return (
                     <TableRow key={item.id}>
                       <TableCell className="text-center font-mono text-xs text-ink-muted tabular-nums">
@@ -303,22 +316,33 @@ export function AdminRawPage() {
                         {item.crawled_at?.slice(0, 10) || '—'}
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button size="sm" variant="ghost" onClick={() => openDetail(item)}>
-                            编辑
-                          </Button>
+                        {rawType === 'jd' ? (
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="text-state-archived"
-                            onClick={() => {
-                              setActionError(null)
-                              setDeleteTarget(item)
-                            }}
+                            className="h-7 text-xs text-state-candidate"
+                            onClick={() => navigate(`/admin/jd?q=${encodeURIComponent(item.title || '')}`)}
                           >
-                            <Trash2 className="size-3.5" />
+                            去 JD 数据页
                           </Button>
-                        </div>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1">
+                            <Button size="sm" variant="ghost" onClick={() => openDetail(item)}>
+                              编辑
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-state-archived"
+                              onClick={() => {
+                                setActionError(null)
+                                setDeleteTarget(item)
+                              }}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        )}
                       </TableCell>
                     </TableRow>
                   )
