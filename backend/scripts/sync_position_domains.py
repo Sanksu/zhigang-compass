@@ -7,8 +7,11 @@ community_id 靠稀疏技能社区继承只落进 2-3 个技术大杂烩桶。
 
 本脚本对「岗位-岗位投影图」（共享技能加权，load_position_projection）
 跑 Leiden，直接得到岗位职能域，回填 Position 节点属性：
-- `domain_id`：`dom_{cluster}`；单点簇（跨域桥梁岗/长尾）合并为 `dom_general`
+- `domain_id`：`dom_{cluster}`；成员数 < min-cluster-size（默认 3）的微簇
+  （跨域桥梁岗/长尾）合并为 `dom_general`
 - `domain_name`：域内最高 freq 岗位名（代表岗，前端超节点标签）
+- 高频桥梁岗语义指派（PINNED_DOMAIN_ANCHORS）：被 Leiden 撕成单点的
+  高频岗（大模型算法工程师/Python开发工程师 等）按锚点岗并入语义域
 
 消费：能力图谱域聚合下钻（GraphNode.domain_id/domain_name 契约字段）。
 幂等可重复执行；岗位聚合变化（ETL 后）需重跑。
@@ -21,7 +24,7 @@ community_id 靠稀疏技能社区继承只落进 2-3 个技术大杂烩桶。
   回退代表岗名。prompt 属算法核心红线，改动须张恺天 review。
 
 用法：
-    uv run python scripts/sync_position_domains.py            # 默认 resolution=1.55
+    uv run python scripts/sync_position_domains.py            # 默认 resolution=1.55, min-cluster-size=3
     uv run python scripts/sync_position_domains.py --resolution 1.45
     uv run python scripts/sync_position_domains.py --llm-name # 语义域名
 """
@@ -45,9 +48,24 @@ logger = setup_logging("sync_position_domains")
 # 归算法域、前端/硬件/教育各自成簇共 12 个语义簇；1.6 过细（Python/大模型/
 # DevOps 桥梁岗被撕成单点），1.3 偏粗（金融混入 IT 系统管理）
 DEFAULT_RESOLUTION = 1.55
+# 微簇门禁：成员数 < 该值的簇并入通用域。2 人微簇（如 08-31 前的「系统可靠性」域
+# =系统可靠性工程师+TypeScript工程师）是垃圾画像/单条 JD 噪声放大的温床，
+# 撑不起一个语义域。08-31 由「仅合并单点」收紧为「<3 全并入」
+DEFAULT_MIN_CLUSTER_SIZE = 3
 # 单点簇合并域（桥梁岗 Python/大模型/DevOps/网络安全 + 长尾低频岗）
 GENERAL_DOMAIN_ID = "dom_general"
 GENERAL_DOMAIN_NAME = "通用与其他岗位"
+# 高频桥梁岗语义指派（2026-08-31 治理，算法口径变更已知会张恺天）：
+# 技能横跨多域的桥梁岗常被 Leiden 撕成小簇落通用域，freq 最高的展示位反而
+# 语义缺失（大模型算法工程师 freq=376 全图第 5 却挂「通用与其他岗位」）。
+# 在微簇合并前把 pinned 岗并入锚点岗（图内稳定高频岗）所在簇——合流后
+# 成员数凑满 min-cluster-size 即可自持成语义域；锚点缺位时跳过并告警。
+PINNED_DOMAIN_ANCHORS: dict[str, str] = {
+    "大模型算法工程师": "机器视觉算法工程师",  # → 智能算法域
+    "Python开发工程师": "Java开发工程师",      # → 后端开发域
+    "大数据开发工程师": "Java开发工程师",      # → 后端开发域
+    "DevOps工程师": "运维工程师",              # → 系统运维域
+}
 # 门禁：最大域占比超限或语义域过少视为参数退化，拒绝写库
 _MAX_DOMAIN_RATIO = 0.5
 _MIN_SEMANTIC_DOMAINS = 5
@@ -210,12 +228,15 @@ def merge_singletons(
     membership: dict[str, int],
     name_map: dict[str, str],
     freq: dict[str, int],
+    min_cluster_size: int = DEFAULT_MIN_CLUSTER_SIZE,
 ) -> dict[str, tuple[str, str]]:
     """Leiden 划分 → 岗位 → (domain_id, domain_name) 映射（纯函数，供单测）。
 
-    单点簇合并为通用域：跨域桥梁岗（技能横跨多域，被各簇拉扯后独立）与
-    长尾低频岗语义上本就无稳定同域伙伴。多岗域命名 = 域内最高 freq 岗位名
-    （freq 缺失按 0，按 name 稳定排序保证确定性）。
+    成员数 < min_cluster_size 的簇并入通用域：跨域桥梁岗（技能横跨多域，
+    被各簇拉扯后独立）与长尾低频岗语义上本就无稳定同域伙伴；2 人微簇
+    （08-31 前的「系统可靠性」域）是单条 JD 噪声放大的温床，撑不起语义域。
+    多岗域命名 = 域内最高 freq 岗位名（freq 缺失按 0，按 name 稳定排序保证
+    确定性）。
     """
     by_cluster: dict[int, list[str]] = {}
     for pid, cid in membership.items():
@@ -224,8 +245,9 @@ def merge_singletons(
     result: dict[str, tuple[str, str]] = {}
     domain_names: dict[int, str] = {}
     for cid, members in by_cluster.items():
-        if len(members) == 1:
-            result[members[0]] = (GENERAL_DOMAIN_ID, GENERAL_DOMAIN_NAME)
+        if len(members) < min_cluster_size:
+            for pid in members:
+                result[pid] = (GENERAL_DOMAIN_ID, GENERAL_DOMAIN_NAME)
             continue
         rep = sorted(members, key=lambda p: (-freq.get(p, 0), name_map.get(p, p)))[0]
         domain_names[cid] = name_map.get(rep, rep)
@@ -234,6 +256,37 @@ def merge_singletons(
             for pid in members:
                 result[pid] = (f"dom_{cid}", domain_names[cid])
     return result
+
+
+def apply_domain_pins(
+    membership: dict[str, int],
+    name_map: dict[str, str],
+    pins: dict[str, str] | None = None,
+) -> tuple[dict[str, int], list[str]]:
+    """高频桥梁岗语义指派（纯函数，供单测）：pinned 岗并入锚点岗所在 Leiden 簇。
+
+    在 merge_singletons 的微簇合并**之前**执行：pinned 岗与锚点簇合流后
+    成员数凑满 min-cluster-size，桥梁岗自身的小簇即可自持成语义域
+    （如 Python/大数据并入 Java 簇成后端域）。锚点岗或 pinned 岗不在本次
+    划分、或二者同岗时跳过并返回告警（调用方记日志），不阻断同步。
+    返回 (新 membership, 告警列表)。
+    """
+    if pins is None:
+        pins = PINNED_DOMAIN_ANCHORS
+    pid_by_name = {name_map.get(pid, pid): pid for pid in membership}
+    warnings: list[str] = []
+    for pos, anchor in pins.items():
+        if pos == anchor:
+            continue
+        anchor_pid = pid_by_name.get(anchor)
+        pos_pid = pid_by_name.get(pos)
+        if pos_pid is None:
+            continue  # 不在划分中（无投影边/已下线），由孤立岗兜底阶段处理
+        if anchor_pid is None or anchor_pid not in membership:
+            warnings.append(f"锚点岗「{anchor}」不在本次划分，{pos} 保持原簇")
+            continue
+        membership[pos_pid] = membership[anchor_pid]
+    return membership, warnings
 
 
 def guard_domain_distribution(assign: dict[str, tuple[str, str]]) -> dict:
@@ -261,8 +314,12 @@ def guard_domain_distribution(assign: dict[str, tuple[str, str]]) -> dict:
     return stats
 
 
-def sync_position_domains(resolution: float, llm_name: bool = False) -> dict:
-    """加载岗位投影 → Leiden → 门禁 → 回填 Position.domain_id/domain_name。
+def sync_position_domains(
+    resolution: float,
+    llm_name: bool = False,
+    min_cluster_size: int = DEFAULT_MIN_CLUSTER_SIZE,
+) -> dict:
+    """加载岗位投影 → Leiden → 微簇合并 → 语义指派 → 门禁 → 回填。
 
     llm_name=True 时先经单次 LLM 调用生成语义域名（失败回退代表岗名）。
     """
@@ -281,7 +338,10 @@ def sync_position_domains(resolution: float, llm_name: bool = False) -> dict:
         freq = {r["id"]: int(r["f"] or 0) for r in freq_rows}
 
     membership = leiden(graph, resolution=resolution)
-    assign = merge_singletons(membership, name_map, freq)
+    membership, pin_warnings = apply_domain_pins(membership, name_map)
+    for w in pin_warnings:
+        logger.warning("[语义指派] %s", w)
+    assign = merge_singletons(membership, name_map, freq, min_cluster_size)
     stats = guard_domain_distribution(assign)
 
     if llm_name:
@@ -349,10 +409,13 @@ def sync_position_domains(resolution: float, llm_name: bool = False) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="岗位职能域同步（岗位投影 Leiden）")
     parser.add_argument("--resolution", type=float, default=DEFAULT_RESOLUTION)
+    parser.add_argument("--min-cluster-size", type=int, default=DEFAULT_MIN_CLUSTER_SIZE,
+                        help=f"小于该成员数的簇并入通用域（默认 {DEFAULT_MIN_CLUSTER_SIZE}）")
     parser.add_argument("--llm-name", action="store_true",
                         help="LLM 语义域名（失败回退代表岗名）")
     args = parser.parse_args()
-    sync_position_domains(args.resolution, llm_name=args.llm_name)
+    sync_position_domains(args.resolution, llm_name=args.llm_name,
+                          min_cluster_size=args.min_cluster_size)
 
 
 if __name__ == "__main__":

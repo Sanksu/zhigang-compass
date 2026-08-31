@@ -266,6 +266,32 @@ class TestNormalizePositionName:
         assert normalize_position_name("开发") == ""
         assert normalize_position_name("工程师") == ""
 
+    def test_company_name_positions_blocked(self):
+        # 岗位域治理（2026-08-31）：雇主名被抽成岗位名，整个岗位名就是公司名时拦截
+        assert normalize_position_name("Clay") == ""
+        assert normalize_position_name("GSBOA") == ""
+        assert normalize_position_name("Corebridge") == ""
+        assert normalize_position_name("Hannaford") == ""
+        assert normalize_position_name("Medbio") == ""
+
+    def test_nontech_occupation_positions_blocked(self):
+        # 岗位域治理（2026-08-31）：国际源单条 JD 产出的非技术职业岗，
+        # 图谱存量由 delete_junk_positions.py 清理，此处拦复发
+        assert normalize_position_name("B级卡车司机") == ""
+        assert normalize_position_name("CDL-A司机") == ""
+        assert normalize_position_name("SAT辅导教师") == ""
+        assert normalize_position_name("QC") == ""
+        assert normalize_position_name("IPQC") == ""
+        assert normalize_position_name("APP推广") == ""
+        assert normalize_position_name("行业BD") == ""
+        assert normalize_position_name("GTM商务拓展") == ""
+        assert normalize_position_name("Receptionist") == ""
+        assert normalize_position_name("Electrician") == ""
+        assert normalize_position_name("Pharmacist") == ""
+        assert normalize_position_name("IT") == ""
+        # 复合词不受精确拦截影响
+        assert normalize_position_name("IT平台与自动化") != ""
+
     def test_internship_filtered(self):
         # 实习类岗位不入图（招聘形态，非正式岗位族）
         assert normalize_position_name("财务分析师实习生") == ""
