@@ -142,12 +142,19 @@ export function AdminGraphGovernancePage() {
                 </span>
               </div>
               <div className="mt-1 flex flex-wrap gap-1">
-                {(d.members ?? []).map((m) => (
-                  <span key={m.name} className="text-xs text-ink-muted bg-bg-subtle rounded px-1.5 py-0.5">
-                    {m.name}
-                    {m.source === 'pin' || m.source === 'pin_cluster' || m.source === 'leftover_pin' ? '※' : ''}
-                  </span>
-                ))}
+                {(d.members ?? []).map((m) => {
+                  const label = SOURCE_LABELS[m.source ?? ''] ?? m.source
+                  const tip = `${label ?? '未知来源'}${m.score != null ? ` · 亲和度 ${m.score}` : ''}`
+                  const governed = m.source === 'pin' || m.source === 'pin_cluster' || m.source === 'leftover_pin'
+                  return (
+                    <span key={m.name}
+                      title={`${m.name}：${tip}`}
+                      className="text-xs text-ink-muted bg-bg-subtle rounded px-1.5 py-0.5">
+                      {m.name}
+                      {governed ? '※' : ''}
+                    </span>
+                  )
+                })}
                 {(d.member_count ?? 0) > (d.members ?? []).length && (
                   <span className="text-xs text-ink-muted">…共 {d.member_count} 岗</span>
                 )}
@@ -155,9 +162,20 @@ export function AdminGraphGovernancePage() {
             </div>
           ))}
           {generalDomain && (
-            <div className="text-xs text-ink-muted">
-              通用弃权域 {generalDomain.member_count} 岗（证据不足或无同族，诚实不强行归属）
-              {' · ' + Object.entries(generalDomain.source_counts ?? {}).map(([k, n]) => `${SOURCE_LABELS[k] ?? k}×${n}`).join(' · ')}
+            <div className="mt-3">
+              <div className="text-xs text-ink-muted mb-1">
+                通用弃权域 {generalDomain.member_count} 岗（证据不足或无同族，诚实不强行归属）
+                {' · ' + Object.entries(generalDomain.source_counts ?? {}).map(([k, n]) => `${SOURCE_LABELS[k] ?? k}×${n}`).join(' · ')}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {(generalDomain.members ?? []).map((m) => (
+                  <span key={m.name}
+                    title={`${SOURCE_LABELS[m.source ?? ''] ?? '未知'}${m.source === 'general_pin' ? '（治理声明）' : ''}`}
+                    className="text-xs text-ink-muted bg-bg-subtle rounded px-1.5 py-0.5">
+                    {m.name} · {SOURCE_LABELS[m.source ?? ''] ?? '未知'}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </CardContent>
