@@ -100,6 +100,7 @@ class CommunityTrendItem(_BaseItem):
     # ---- 通用内容 ----
     title = Field()             # 仓库名（github）/ 问题标题（stackoverflow）
     description = Field()       # 仓库描述 / 问题摘要
+    readme = Field()            # 仓库 README 正文（github 补抓，解决"无正文"）
     url = Field()               # 仓库/问题 URL
 
     # ---- GitHub 趋势指标 ----
