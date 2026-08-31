@@ -4376,8 +4376,8 @@ components:
       properties:
         id: { type: string, description: "岗位节点 ID@期次序号，如 pos_abc::3" }
         name: { type: string, description: 岗位名称 }
-        period_index: { type: integer, description: 所在期次序号（0 起升序） }
-        freq: { type: integer, description: 该期该技能在此岗位的 REQUIRES 频次 }
+        period_index: { type: integer, description: 所在期次序号（0 起升序，空期剔除后连续） }
+        freq: { type: integer, description: 该岗位当期要求的技能总数（REQUIRES 出度，作粗细权重） }
 
     SkillFlowLink:
       type: object
@@ -4385,19 +4385,24 @@ components:
       properties:
         source: { type: string, description: 左侧期次节点 id }
         target: { type: string, description: 右侧期次节点 id（同名岗位相邻期） }
-        value: { type: integer, description: 左侧期次频次 }
+        value: { type: integer, description: 左侧期次该岗位要求的技能总数（REQUIRES 出度） }
 
     SkillFlowData:
       type: object
       description: GET /evolution/skill/{id}/flow 响应 data（桑基图三元组）
-      required: [skill_id, skill_name, periods, nodes, links]
+      required: [skill_id, skill_name, periods, totals, nodes, links]
       properties:
         skill_id: { type: string }
         skill_name: { type: string, description: 快照中最近出现的技能名 }
         periods:
           type: array
-          description: 期次标签（快照日期 ISO，升序，与 period_index 对齐）
+          description: 期次标签（快照日期 ISO，升序，与 period_index 对齐；
+            该技能无关联岗位的期次整期剔除，为连续重排序号）
           items: { type: string, nullable: true }
+        totals:
+          type: array
+          description: 各期关联岗位总数（含 Top-N 之外），与 period_index 对齐
+          items: { type: integer }
         top: { type: integer, description: 每期 Top-N 岗位截断 }
         nodes:
           type: array
