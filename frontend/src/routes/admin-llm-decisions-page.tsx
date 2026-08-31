@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, ClipboardCheck, EyeOff, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { useNavigate } from 'react-router'
+import { ChevronDown, ChevronRight, ClipboardCheck, EyeOff, Gavel, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SkillAliasesTable } from '@/components/admin/llm/skill-aliases-table'
@@ -148,6 +149,7 @@ export function AdminLlmDecisionsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const isDesktop = useIsDesktop()
+  const navigate = useNavigate()
 
   const params = useMemo(() => {
     const p = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String((page - 1) * PAGE_SIZE) })
@@ -197,11 +199,23 @@ export function AdminLlmDecisionsPage() {
   }
 
   const totals = summary?.totals ?? null
-  const cards = [
-    { label: '待审提案', value: totals?.proposal ?? 0, tone: 'text-state-candidate', icon: ClipboardCheck },
-    { label: '自动生效', value: totals?.auto_applied ?? 0, tone: 'text-state-stable', icon: ShieldCheck },
-    { label: '硬门拦截', value: totals?.blocked ?? 0, tone: 'text-state-declining', icon: ShieldAlert },
-    { label: 'Shadow 记录', value: totals?.shadow ?? 0, tone: 'text-state-emerging', icon: EyeOff },
+  // 卡片=真实可操作口径：治理（governance）提案不在本页审批（队列在字典治理页
+  // dict_proposals），单列并给跳转；「待审提案」只计本页有批准/驳回按钮的域
+  const byDomain = summary?.by_domain ?? []
+  const statusOf = (d: string) => byDomain.find((x) => x.domain === d)?.by_status ?? {}
+  const mutablePending =
+    (['skill_relation', 'position_normalize', 'skill_normalize'] as const).reduce(
+      (n, d) => n + (statusOf(d)['proposal'] ?? 0),
+      0,
+    ) + (statusOf('skill_classify')['shadow'] ?? 0)
+  const govPending = statusOf('governance')['proposal'] ?? 0
+
+  const cards: { label: string; value: number; tone: string; icon: typeof ShieldCheck; filter?: { domain?: string; status?: string } }[] = [
+    { label: '待审提案（本页可批驳）', value: mutablePending, tone: 'text-state-candidate', icon: ClipboardCheck, filter: { status: 'proposal' } },
+    { label: '治理提案（字典治理页处理）', value: govPending, tone: 'text-state-declining', icon: Gavel, filter: { domain: 'governance', status: 'proposal' } },
+    { label: '自动生效', value: totals?.auto_applied ?? 0, tone: 'text-state-stable', icon: ShieldCheck, filter: { status: 'auto_applied' } },
+    { label: '硬门拦截', value: totals?.blocked ?? 0, tone: 'text-state-declining', icon: ShieldAlert, filter: { status: 'blocked' } },
+    { label: 'Shadow 记录', value: totals?.shadow ?? 0, tone: 'text-state-emerging', icon: EyeOff, filter: { status: 'shadow' } },
   ]
 
   const filtered = q.trim()
@@ -289,9 +303,14 @@ export function AdminLlmDecisionsPage() {
           <TabsTrigger value="aliases" className="text-xs">动态别名表</TabsTrigger>
         </TabsList>
         <TabsContent value="decisions" className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
         {cards.map((c) => (
-          <Card key={c.label}>
+          <Card
+            key={c.label}
+            className={c.filter ? 'cursor-pointer transition-colors hover:border-ink-secondary/40' : undefined}
+            onClick={c.filter ? () => applyFilter(c.filter!) : undefined}
+            title={c.filter ? '点击按此状态过滤列表' : undefined}
+          >
             <CardContent className="flex items-center gap-3 p-4">
               <c.icon className={`h-8 w-8 ${c.tone}`} />
               <div>
@@ -463,6 +482,15 @@ export function AdminLlmDecisionsPage() {
                               驳回
                             </Button>
                           </div>
+                        ) : it.domain === 'governance' && it.status === 'proposal' ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs text-state-candidate"
+                            onClick={() => navigate('/admin/review/dict')}
+                          >
+                            字典治理审核
+                          </Button>
                         ) : undoableAction(it) ? (
                           <Button
                             size="sm"
@@ -621,6 +649,27 @@ export function AdminLlmDecisionsPage() {
                               驳回
                             </Button>
                           </div>
+                        ) : it.domain === 'governance' && it.status === 'proposal' ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs text-state-candidate"
+                            onClick={() => navigate('/admin/review/dict')}
+                          >
+                            字典治理审核
+                          </Button>
+                        ) : undoableAction(it) ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs text-state-declining"
+                            onClick={() => {
+                              setActionError(null)
+                              setReviewing({ id: it.id, entity: `${it.entity_type ?? ''}:${it.entity_id ?? ''}`, action: 'undo' })
+                            }}
+                          >
+                            撤销
+                          </Button>
                         ) : null}
                       </div>
                     </div>

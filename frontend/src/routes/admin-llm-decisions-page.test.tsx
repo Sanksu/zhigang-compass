@@ -38,10 +38,17 @@ function makeDecision(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function afterRender(decisions: unknown[], totals: Record<string, number>) {
+function afterRender(
+  decisions: unknown[],
+  totals: Record<string, number>,
+  byDomain?: { domain: string; by_status: Record<string, number>; total: number }[],
+) {
   mockApiGet.mockImplementation(async (url: string) => {
     if (url.startsWith('/admin/llm-decisions/summary')) {
-      return { by_domain: [{ domain: 'governance', by_status: { auto_applied: 1 }, total: 1 }], totals }
+      return {
+        by_domain: byDomain ?? [{ domain: 'governance', by_status: { auto_applied: 1 }, total: 1 }],
+        totals,
+      }
     }
     return { items: decisions, total: decisions.length, limit: 20, offset: 0 }
   })
@@ -185,5 +192,43 @@ describe('AdminLlmDecisionsPage 详情展开', () => {
     expect(screen.queryByText(/副作用/)).toBeNull()
     expect(screen.getByText('决策输出（structured_output）')).toBeTruthy()
     expect(screen.getByText('x')).toBeTruthy()
+  })
+})
+
+describe('AdminLlmDecisionsPage 真实口径卡片与治理入口', () => {
+  const byDomainFull: { domain: string; by_status: Record<string, number>; total: number }[] = [
+    { domain: 'governance', by_status: { proposal: 51, auto_applied: 11 }, total: 62 },
+    { domain: 'skill_relation', by_status: { proposal: 69 }, total: 69 },
+    { domain: 'position_normalize', by_status: { proposal: 38 }, total: 38 },
+    { domain: 'skill_normalize', by_status: { proposal: 10 }, total: 10 },
+    { domain: 'skill_classify', by_status: { shadow: 38 }, total: 38 },
+  ]
+
+  it('治理提案单独成卡，不计入本页待审提案', async () => {
+    afterRender([], { proposal: 168, auto_applied: 11, blocked: 3, shadow: 70, records: 250 }, byDomainFull)
+    await waitFor(() => expect(screen.getByText('治理提案（字典治理页处理）')).toBeTruthy())
+    expect(screen.getByText('待审提案（本页可批驳）')).toBeTruthy()
+    // 本页可批驳 = 69+38+10+38（skill_classify shadow）= 155；治理 51 单列不混入
+    expect(screen.getByText('155')).toBeTruthy()
+    expect(screen.getByText('51')).toBeTruthy()
+  })
+
+  it('governance proposal 行显示字典治理审核入口而非批准/驳回', async () => {
+    afterRender(
+      [makeDecision({ domain: 'governance', entity_type: 'skill', entity_id: '性能调优', status: 'proposal', risk_tier: 'R2' })],
+      { proposal: 1, auto_applied: 0, blocked: 0, shadow: 0, records: 1 },
+    )
+    await waitFor(() => expect(screen.getByText('skill:性能调优')).toBeTruthy())
+    expect(screen.queryByText('批准')).toBeNull()
+    expect(screen.getByText('字典治理审核')).toBeTruthy()
+  })
+
+  it('可审批域 proposal 行仍显示批准/驳回', async () => {
+    afterRender(
+      [makeDecision({ domain: 'skill_relation', entity_type: 'skill', entity_id: 'Python', status: 'proposal', risk_tier: 'R2' })],
+      { proposal: 1, auto_applied: 0, blocked: 0, shadow: 0, records: 1 },
+    )
+    await waitFor(() => expect(screen.getByText('批准')).toBeTruthy())
+    expect(screen.getByText('驳回')).toBeTruthy()
   })
 })
