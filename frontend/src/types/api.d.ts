@@ -3704,6 +3704,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 技能治理列表（白名单标准名 ∪ approved 别名标准名；q/分类/白名单/噪声过滤 + 分页） */
+        get: {
+            parameters: {
+                query?: {
+                    q?: string;
+                    category?: string;
+                    whitelist?: "all" | "only" | "exclude";
+                    noise?: "all" | "only" | "exclude";
+                    page?: number;
+                    size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 技能治理分页列表（data 含 items/total/page/size） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: {
+                                items?: components["schemas"]["SkillAdminItem"][];
+                                total?: number;
+                                page?: number;
+                                size?: number;
+                            };
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skill-aliases/{alias_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 别名复核（pending → approved/rejected；写 AuditLog；approved 后热刷新动态别名表即时生效） */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    alias_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SkillAliasReviewIn"];
+                };
+            };
+            responses: {
+                /** @description 复核成功（data 含 id/status/approved） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillAliasReviewOut"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+                /** @description 仅 pending 可复核（当前状态非 pending 返回 409） */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/positions/{position_name}": {
         parameters: {
             query?: never;
@@ -5151,36 +5259,6 @@ export interface components {
             source_url?: string;
             raw_text?: string;
         };
-        /** @description 技能治理列表项（GET /admin/skills：白名单标准名 ∪ approved 别名标准名聚合） */
-        SkillAdminItem: {
-            name: string;
-            /** @description 分类（白名单内取 skill_whitelist.yaml category；白名单外可为空） */
-            category?: string;
-            /** @description 是否在 skill_whitelist.yaml（幻觉防控第三道防线单一事实源） */
-            in_whitelist: boolean;
-            /** @description 是否命中噪声过滤词 */
-            is_noise: boolean;
-            /** @description approved 别名变体列表 */
-            aliases?: string[];
-        };
-        /** @description GET /admin/skills 响应 data */
-        SkillAdminPage: {
-            total: number;
-            page: number;
-            size: number;
-            items: components["schemas"]["SkillAdminItem"][];
-        };
-        /** @description POST /admin/skill-aliases/{alias_id}/review 请求体 */
-        SkillAliasReviewIn: {
-            approved: boolean;
-            reason?: string;
-        };
-        /** @description 别名复核响应 data */
-        SkillAliasReviewOut: {
-            id: string;
-            status: string;
-            approved: boolean;
-        };
         /** @description 相似技能项（GET /graph/skill/similar，语义相似度） */
         SimilarSkillItem: {
             skill_id: string;
@@ -5781,6 +5859,34 @@ export interface components {
             applied_to_graph?: boolean;
             /** @description ISO8601 */
             created_at: string;
+        };
+        /** @description 技能治理列表项（GET /admin/skills：白名单标准名 ∪ approved 别名标准名聚合） */
+        SkillAdminItem: {
+            /** @description 技能标准名 */
+            name: string;
+            /** @description 分类（白名单内取 skill_whitelist.yaml category；白名单外可为空） */
+            category?: string;
+            /** @description 是否在 skill_whitelist.yaml（幻觉防控第三道防线单一事实源） */
+            in_whitelist: boolean;
+            /** @description 是否命中噪声过滤词 */
+            is_noise: boolean;
+            /** @description approved 别名变体列表 */
+            aliases?: string[];
+        };
+        /** @description POST /admin/skill-aliases/{alias_id}/review 请求体 */
+        SkillAliasReviewIn: {
+            /** @description true=通过并写入动态别名表 / false=驳回 */
+            approved: boolean;
+            /** @description 审批理由 */
+            reason?: string;
+        };
+        /** @description 别名复核响应 data */
+        SkillAliasReviewOut: {
+            /** @description 别名 UUID */
+            id: string;
+            /** @description 复核后状态（approved/rejected） */
+            status: string;
+            approved: boolean;
         };
         /** @description 图谱版本列表项（GET /evolution/versions） */
         EvolutionVersion: {
