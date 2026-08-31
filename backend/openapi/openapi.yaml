@@ -2031,6 +2031,45 @@ paths:
                       decision_id: { type: string }
                   trace_id: { type: string }
 
+  /api/v1/admin/llm-decisions/{decision_id}/undo:
+    post:
+      tags: [admin]
+      summary: 撤销一条 auto_applied 治理决策（governance 域，7 天窗口内）——反做动态过滤/重建课程节点，dict_guard 不再对同实体自动执行；写 AuditLog
+      parameters:
+        - name: decision_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMDecisionReviewRequest'
+      responses:
+        '200':
+          description: 撤销成功（undo 明细：filter_removed 动态条目是否移除 / rebuilt 重建课程节点数 / notes 部分撤销说明）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      decision_id: { type: string }
+                      filter_removed: { type: boolean, description: add_stopword 专用：动态停用词条目已移除 }
+                      rebuilt: { type: integer, description: remove_node/remove_edge(course) 专用：按 course_raw 同名快照重建的课程节点数 }
+                      notes:
+                        type: array
+                        description: 部分撤销说明（如 course_raw 已无同名记录，节点待重新采集后由课程入图任务自然恢复）
+                        items: { type: string }
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/admin/skill-aliases:
     get:
       tags: [admin]
@@ -3753,7 +3792,7 @@ components:
         confidence: { type: number, nullable: true }
         gate_result: { type: string, description: pass/blocked }
         risk_tier: { type: string, description: R0/R1/R2/blocked }
-        status: { type: string, description: shadow/proposal/auto_applied/blocked/rejected/approved/failed }
+        status: { type: string, description: shadow/proposal/auto_applied/blocked/rejected/approved/failed/reverted（reverted=自动生效已被人工撤销） }
         reviewer: { type: string }
         review_reason: { type: string }
         effects_applied: { type: boolean }

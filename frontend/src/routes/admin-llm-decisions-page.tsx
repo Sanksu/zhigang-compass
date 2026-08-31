@@ -45,6 +45,7 @@ const STATUS_TONE: Record<string, string> = {
   blocked: 'text-state-declining',
   rejected: 'text-state-declining',
   approved: 'text-state-stable',
+  reverted: 'text-state-emerging',
 }
 
 const TIER_TONE: Record<string, string> = {
@@ -133,6 +134,14 @@ export function AdminLlmDecisionsPage() {
     return it.status === 'proposal'
   }
 
+  // 治理救济：governance 域 auto_applied 且动作为可反做集合 → 可撤销（7 天窗口由后端校验）
+  const UNDOABLE_ACTIONS = ['add_stopword', 'remove_node', 'remove_edge']
+  function undoableAction(it: LlmDecisionItem): boolean {
+    if (it.domain !== 'governance' || it.status !== 'auto_applied') return false
+    const action = str((it.structured_output ?? {})['action'])
+    return UNDOABLE_ACTIONS.includes(action)
+  }
+
   /** skill_normalize 记录的建议目标（审批关键信息：变体要并到哪）。
    *  kind=alias（别名回写）→ target_standard；归一图变异 → canonical_name/target_standard。 */
   function suggestTarget(it: LlmDecisionItem): { target: string; isAlias: boolean } | null {
@@ -147,7 +156,7 @@ export function AdminLlmDecisionsPage() {
     return typeof v === 'string' ? v : ''
   }
 
-  const [reviewing, setReviewing] = useState<{ id: string; entity: string; action: 'approve' | 'reject' } | null>(null)
+  const [reviewing, setReviewing] = useState<{ id: string; entity: string; action: 'approve' | 'reject' | 'undo' } | null>(null)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -240,7 +249,7 @@ export function AdminLlmDecisionsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部状态</SelectItem>
-                {['shadow', 'proposal', 'auto_applied', 'blocked', 'approved', 'rejected'].map((s) => (
+                {['shadow', 'proposal', 'auto_applied', 'blocked', 'approved', 'rejected', 'reverted'].map((s) => (
                   <SelectItem key={s} value={s}>
                     {s}
                   </SelectItem>
@@ -346,6 +355,18 @@ export function AdminLlmDecisionsPage() {
                               驳回
                             </Button>
                           </div>
+                        ) : undoableAction(it) ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs text-state-declining"
+                            onClick={() => {
+                              setActionError(null)
+                              setReviewing({ id: it.id, entity: `${it.entity_type ?? ''}:${it.entity_id ?? ''}`, action: 'undo' })
+                            }}
+                          >
+                            撤销
+                          </Button>
                         ) : (
                           <span className="text-xs text-muted-foreground">-</span>
                         )}
@@ -446,11 +467,17 @@ export function AdminLlmDecisionsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60" role="dialog" aria-modal="true">
           <Card className="w-full max-w-md">
             <CardHeader>
-              <CardTitle>{reviewing.action === 'approve' ? '批准' : '驳回'}决策记录</CardTitle>
+              <CardTitle>
+                {reviewing.action === 'approve' ? '批准' : reviewing.action === 'undo' ? '撤销自动生效' : '驳回'}决策记录
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                {reviewing.action === 'approve' ? '批准后' : '驳回将仅流转状态'}：{' '}
+                {reviewing.action === 'approve'
+                  ? '批准后'
+                  : reviewing.action === 'undo'
+                    ? '撤销将反做治理副作用（移除动态过滤 / 重建课程节点），同实体不再自动执行：'
+                    : '驳回将仅流转状态'}:{' '}
                 <span className="font-mono text-xs">{reviewing.entity}</span>
               </p>
               <Input

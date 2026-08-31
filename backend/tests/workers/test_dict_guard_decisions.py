@@ -60,9 +60,9 @@ class _FakeSessionF:
         self.committed = True
 
 
-def _run(decisions, tmp_path=None):
+def _run(decisions, tmp_path=None, session=None):
     fake_llm = _FakeLLM(decisions)
-    session = _FakeSessionF()
+    session = session or _FakeSessionF()
     persisted: list = []
 
     async def _fake_persist(record):
@@ -178,3 +178,27 @@ class TestUnifiedRiskRouting:
         assert summary["auto_applied"]
         assert summary["record_failed"] == 1
         assert session.committed is True
+
+class TestRevertedSkip:
+    def test_人工撤销后同实体动作跳过自动与提案(self, tmp_path):
+        """治理救济通道：同实体+同动作曾有 reverted 记录 → 不自动生效、不重复提案。"""
+        decisions = [
+            DictGuardDecision(action="remove_node", term="脏课程", entity_type="course",
+                              reason="孤立课程", confidence=0.9),
+            DictGuardDecision(action="add_stopword", term="测试词B", reason="噪音",
+                              confidence=0.9),
+        ]
+
+        class _RevertedSession(_FakeSessionF):
+            async def scalar(self, stmt):
+                return SimpleNamespace(id="rev-1", status="reverted")  # 任何前查均命中
+
+        summary, persisted, session = _run(decisions, tmp_path=tmp_path,
+                                           session=_RevertedSession())
+        assert summary["auto_applied"] == []
+        assert summary["proposals"] == 0
+        assert persisted == []
+        skipped_terms = {s["term"] for s in summary["skipped"]}
+        assert {"脏课程", "测试词B"} <= skipped_terms
+        assert all("撤销" in s["reason"] for s in summary["skipped"])
+        assert not session.committed or session.added == []

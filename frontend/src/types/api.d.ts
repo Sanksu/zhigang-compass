@@ -3440,6 +3440,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/llm-decisions/{decision_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 撤销一条 auto_applied 治理决策（governance 域，7 天窗口内）——反做动态过滤/重建课程节点，dict_guard 不再对同实体自动执行；写 AuditLog */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    decision_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["LLMDecisionReviewRequest"];
+                };
+            };
+            responses: {
+                /** @description 撤销成功（undo 明细：filter_removed 动态条目是否移除 / rebuilt 重建课程节点数 / notes 部分撤销说明） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: {
+                                decision_id?: string;
+                                /** @description add_stopword 专用：动态停用词条目已移除 */
+                                filter_removed?: boolean;
+                                /** @description remove_node/remove_edge(course) 专用：按 course_raw 同名快照重建的课程节点数 */
+                                rebuilt?: number;
+                                /** @description 部分撤销说明（如 course_raw 已无同名记录，节点待重新采集后由课程入图任务自然恢复） */
+                                notes?: string[];
+                            };
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/skill-aliases": {
         parameters: {
             query?: never;
@@ -5415,7 +5471,7 @@ export interface components {
             gate_result?: string;
             /** @description R0/R1/R2/blocked */
             risk_tier?: string;
-            /** @description shadow/proposal/auto_applied/blocked/rejected/approved/failed */
+            /** @description shadow/proposal/auto_applied/blocked/rejected/approved/failed/reverted（reverted=自动生效已被人工撤销） */
             status: string;
             reviewer?: string;
             review_reason?: string;

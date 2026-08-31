@@ -101,7 +101,7 @@ async def dict_guard_daily(ctx: dict) -> dict:
     from sqlalchemy import select
 
     from app.core.database import async_session_factory, neo4j_driver
-    from app.models.business import DictChangeLog, DictProposal
+    from app.models.business import DictChangeLog, DictProposal, LLMDecisionRecord
     from app.services.extraction.dictionary import (
         _ALIAS_STANDARDS,
         SKILL_STOPWORDS,
@@ -205,6 +205,26 @@ async def dict_guard_daily(ctx: dict) -> dict:
             gate_ok, gate_reason = hard_gate(dec.action, dec.term, dec.entity_type)
             impact = await _estimate_impact(dec.term, dec.entity_type, dec.action)
             impact_nodes = impact.get("graph_nodes", 1)
+
+            # 人工撤销优先（治理救济通道 2026-08-31）：同实体+同动作曾有
+            # status=reverted 记录 → 不再自动执行也不重复提案，尊重人工决定
+            # （否则撤销次日被每日 ETL 重新评估、高置信下再度自动生效）。
+            from app.services.llm_decision import DOMAIN_GOVERNANCE, STATUS_REVERTED
+
+            prior_undo = await session.scalar(
+                select(LLMDecisionRecord).where(
+                    LLMDecisionRecord.domain == DOMAIN_GOVERNANCE,
+                    LLMDecisionRecord.status == STATUS_REVERTED,
+                    LLMDecisionRecord.entity_type == dec.entity_type,
+                    LLMDecisionRecord.entity_id == dec.term,
+                ).order_by(LLMDecisionRecord.created_at.desc()).limit(1)
+            )
+            if prior_undo is not None:
+                skipped.append({"term": dec.term, "action": dec.action,
+                                "entity_type": dec.entity_type,
+                                "reason": "同实体决策曾被人工撤销（reverted），跳过"})
+                continue
+
             tier = tier_for(dec.action, gate_ok, impact_nodes, dec.confidence)
 
             if tier == "skip":
