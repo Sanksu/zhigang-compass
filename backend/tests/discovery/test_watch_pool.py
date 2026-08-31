@@ -126,9 +126,40 @@ class TestAggregation:
         assert extract_skills("boss", snap) == ["Python", "PyTorch"]
 
     def test_extract_skills_community(self):
+        # github：language + tags 经跨语言口径对齐后落到标准技能名
         snap = {"language": "Python", "tags": ["machine-learning", "nlp"]}
         got = extract_skills("github", snap)
-        assert "Python" in got and "machine-learning" in got
+        assert "Python" in got  # language 编程语言保留
+        assert "机器学习" in got and "自然语言处理" in got  # 英文 tag 已对齐中文技能名
+        assert "machine-learning" not in got and "nlp" not in got  # 原始英文 token 不再出现
+
+    def test_extract_skills_arxiv_category_mapping(self):
+        # arxiv 学科分类码 → 中文技能名（口径对齐，修复 arxiv_anomaly 全 false 根因）
+        snap = {"categories": ["cs.LG", "stat.ML"], "language": "en"}
+        got = extract_skills("arxiv", snap)
+        assert "机器学习" in got
+        assert len(got) == 1  # cs.lg 与 stat.ml 归一后去重合并
+
+    def test_extract_skills_arxiv_language_is_noise(self):
+        # arxiv language 是论文书写语言，非技术技能，不入信号
+        snap = {"categories": ["cs.CV"], "language": "English"}
+        got = extract_skills("arxiv", snap)
+        assert "English" not in got
+        assert "计算机视觉" in got
+
+    def test_extract_skills_community_dedupe_and_noise(self):
+        # 同技能多 tag 去重；噪音词（如岗位名/经验描述）被剔除
+        snap = {"language": "Python", "tags": ["Python", "nlp", "算法工程师", "熟悉Redis"]}
+        got = extract_skills("github", snap)
+        assert got.count("Python") == 1
+        assert "自然语言处理" in got
+        assert "算法工程师" not in got and "熟悉Redis" not in got
+
+    def test_extract_skills_community_size_case_insensitive(self):
+        # 别名键大小写不敏感：cs.lg / cs.lG 均可命中映射
+        a = extract_skills("arxiv", {"categories": ["cs.lg"]})
+        b = extract_skills("arxiv", {"categories": ["cs.LG"]})
+        assert a == ["机器学习"] and b == ["机器学习"]
 
     def test_aggregate_by_skill_source(self):
         rows = [
@@ -231,7 +262,8 @@ class TestAnomalyFlags:
         return aggregate_weekly_freqs(rows)
 
     def test_arxiv_hit_github_miss(self):
-        flags = anomaly_flags(self._freqs(), {"cs.AI"})
+        # cs.AI 聚合后归一为"机器学习"（JD 词典标准名），anomaly_flags 以标准技能名入参
+        flags = anomaly_flags(self._freqs(), {"机器学习"})
         assert flags["arxiv"] is True
         assert flags["github"] is False
 
@@ -244,7 +276,7 @@ class TestAnomalyFlags:
 
     def test_any_skill_hits(self):
         # 技能集中任一命中即标记该源异常
-        flags = anomaly_flags(self._freqs(), {"无关技能", "cs.AI"})
+        flags = anomaly_flags(self._freqs(), {"无关技能", "机器学习"})
         assert flags["arxiv"] is True
 
     def test_both_sources_hit(self):
@@ -254,7 +286,7 @@ class TestAnomalyFlags:
             rows += [_Row("arxiv", {"categories": ["cs.LG"]}, date) for _ in range(n)]
             rows += [_Row("github", {"language": "Python"}, date) for _ in range(n)]
         freqs = aggregate_weekly_freqs(rows)
-        flags = anomaly_flags(freqs, {"cs.LG", "Python"})
+        flags = anomaly_flags(freqs, {"机器学习", "Python"})
         assert flags == {"arxiv": True, "github": True}
 
 
