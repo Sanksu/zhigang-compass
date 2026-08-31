@@ -51,6 +51,14 @@ def _fingerprint(snap: dict, fields: tuple[str, ...]) -> str:
 _ENRICH_RETRY_DELAY_SECONDS = 3600   # 失败后延迟 1 小时重试
 _ENRICH_MAX_FAILS = 3                # 累计失败 3 次放弃
 
+# 滞后重抽（08-31）：LLM 正常判定"无技能"（宁少勿滥空数组）时不立即永久标记，
+# 而是进入冷却后重抽池（区别于 LLM 异常失败路径的 1h/3 次）。延迟 24h 后再次
+# 尝试，累计 _EMPTY_MAX_RETRIES 次仍为空才永久放弃（防无限重抽）。与 error 路径
+# 共用 skills_enrich_fails 计数（同一"未产出技能"尝试口径），但放弃阈值与冷却
+# 时长独立配置。
+_EMPTY_RETRY_DELAY_SECONDS = 86400   # 判定为空后延迟 24 小时重抽
+_EMPTY_MAX_RETRIES = 2               # 判定为空累计 2 次后放弃（共 3 次机会）
+
 
 async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
     """新采集课程技能标签补全（T-05，2026-08-15）。
@@ -149,6 +157,8 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
             enriched += 1
             # 标记已处理，防每次 ETL 对同一课程重复调用 LLM
             snap["skills_enriched"] = True
+            # 滞后重抽成功后清除旧的冷却时间戳（计数保留供排查）
+            snap.pop("skills_retry_at", None)
         elif llm is None:
             # LLM 不可用（skipped_no_llm）：不写标记——配置恢复后自动重试，
             # 避免"LLM 缺失期间误标已处理"导致课程永久无标签
@@ -157,8 +167,18 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
             # 异常失败（未达放弃上限）：不写标记——retry_at 到期后重入队
             pass
         else:
-            # LLM 正常判定无技能（宁少勿滥空数组）：标记防重复调用
-            snap["skills_enriched"] = True
+            # LLM 正常判定无技能（宁少勿滥空数组）：不立即永久标记，进入滞后
+            # 重抽池——写计数 + 24h 冷却时间戳，原点 skills_enriched IS NULL
+            # 保持入选资格，待冷却到期重抽；达上限才永久放弃（防无限重抽）。
+            empty_fails = int(snap.get("skills_enrich_fails") or 0) + 1
+            snap["skills_enrich_fails"] = empty_fails
+            if empty_fails >= _EMPTY_MAX_RETRIES:
+                snap["skills_enriched"] = True
+            else:
+                snap["skills_retry_at"] = (
+                    datetime.now(timezone(timedelta(hours=8)))
+                    + timedelta(seconds=_EMPTY_RETRY_DELAY_SECONDS)
+                ).isoformat()
         updates[row.id] = snap
     if updates:
         # 08-15 修复：此前在已关闭的 session 的 ORM 对象上改 snapshot 后于新
