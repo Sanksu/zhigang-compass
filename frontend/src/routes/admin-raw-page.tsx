@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ExternalLink, FileText, Flag, Loader2, Trash2 } from 'lucide-react'
+import { Clock, ExternalLink, FileText, Flag, Loader2, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -149,6 +149,8 @@ export function AdminRawPage() {
 
   // JD 专属：仅对待复核（质量 <0.6）行的复核队列筛选
   const [pendingOnly, setPendingOnly] = useState(false)
+  // JD 专属：待抽取筛选（extraction 为空的行，含从未抽取的新行与放行后待重抽的行）
+  const [pendingExtract, setPendingExtract] = useState(false)
 
   const [reloadKey, setReloadKey] = useState(0)
 
@@ -170,8 +172,9 @@ export function AdminRawPage() {
     if (debouncedQ) p.set('q', debouncedQ)
     if (debouncedSource) p.set('source', debouncedSource)
     if (isJd && pendingOnly) p.set('needs_review', 'true')
+    if (isJd && pendingExtract) p.set('pending_extract', 'true')
     return p.toString()
-  }, [debouncedQ, debouncedSource, pendingOnly, page, isJd])
+  }, [debouncedQ, debouncedSource, pendingOnly, pendingExtract, page, isJd])
 
   function refresh() {
     setReloadKey((k) => k + 1)
@@ -333,11 +336,27 @@ export function AdminRawPage() {
                 className="h-8 text-sm"
                 onClick={() => {
                   setPendingOnly(!pendingOnly)
+                  if (!pendingOnly) setPendingExtract(false)
                   setPage(1)
                 }}
               >
                 <Flag className="mr-1 size-3.5" />
                 只看待复核
+              </Button>
+            )}
+            {isJd && (
+              <Button
+                size="sm"
+                variant={pendingExtract ? 'default' : 'outline'}
+                className="h-8 text-sm"
+                onClick={() => {
+                  setPendingExtract(!pendingExtract)
+                  if (!pendingExtract) setPendingOnly(false)
+                  setPage(1)
+                }}
+              >
+                <Clock className="mr-1 size-3.5" />
+                待抽取
               </Button>
             )}
             <span className="text-xs font-normal text-ink-faint">共 {total} 条</span>
@@ -410,6 +429,11 @@ export function AdminRawPage() {
                               </span>
                               {jd.needs_review && (
                                 <Badge variant="archived" className="text-[11px]">待复核</Badge>
+                              )}
+                              {!jd.needs_review && jd.released_at && (
+                                <Badge variant="outline" className="text-[11px] text-state-candidate">
+                                  已放行·待重抽
+                                </Badge>
                               )}
                             </div>
                           </TableCell>
