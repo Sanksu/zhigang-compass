@@ -15,6 +15,7 @@ import {
   Database,
   Workflow,
   ListChecks,
+  Wrench,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/constants'
@@ -83,6 +84,7 @@ export const adminNavGroups: AdminNavGroup[] = [
       { label: '岗位审核', to: '/admin/review', icon: CheckSquare, requireRole: ['admin'] },
       { label: '数据血缘', to: '/admin/lineage', icon: GitFork, requireRole: ['admin'] },
       { label: '原始数据', to: '/admin/raw', icon: Database, requireRole: ['admin'] },
+      { label: '技能治理', to: '/admin/skills', icon: Wrench, requireRole: ['admin'] },
     ],
   },
   {

@@ -27,6 +27,7 @@ from app.api.v1.admin_routes import (
     position_reviews,
     raw_admin,
     skill_aliases,
+    skills,
 )
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_permission("admin:*"))])
@@ -41,6 +42,7 @@ router.include_router(config.router)
 router.include_router(dict_guard.router)
 router.include_router(llm_decisions.router)
 router.include_router(skill_aliases.router)
+router.include_router(skills.router)
 router.include_router(etl.router)
 router.include_router(jd_admin.router)
 router.include_router(raw_admin.router)

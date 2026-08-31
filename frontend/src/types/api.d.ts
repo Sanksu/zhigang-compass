@@ -5151,6 +5151,36 @@ export interface components {
             source_url?: string;
             raw_text?: string;
         };
+        /** @description 技能治理列表项（GET /admin/skills：白名单标准名 ∪ approved 别名标准名聚合） */
+        SkillAdminItem: {
+            name: string;
+            /** @description 分类（白名单内取 skill_whitelist.yaml category；白名单外可为空） */
+            category?: string;
+            /** @description 是否在 skill_whitelist.yaml（幻觉防控第三道防线单一事实源） */
+            in_whitelist: boolean;
+            /** @description 是否命中噪声过滤词 */
+            is_noise: boolean;
+            /** @description approved 别名变体列表 */
+            aliases?: string[];
+        };
+        /** @description GET /admin/skills 响应 data */
+        SkillAdminPage: {
+            total: number;
+            page: number;
+            size: number;
+            items: components["schemas"]["SkillAdminItem"][];
+        };
+        /** @description POST /admin/skill-aliases/{alias_id}/review 请求体 */
+        SkillAliasReviewIn: {
+            approved: boolean;
+            reason?: string;
+        };
+        /** @description 别名复核响应 data */
+        SkillAliasReviewOut: {
+            id: string;
+            status: string;
+            approved: boolean;
+        };
         /** @description 相似技能项（GET /graph/skill/similar，语义相似度） */
         SimilarSkillItem: {
             skill_id: string;
