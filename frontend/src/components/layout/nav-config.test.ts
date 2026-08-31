@@ -13,14 +13,14 @@ describe('nav-config 与设计文档 §10.2 路由表对齐', () => {
     expect(mainNav.find((i) => i.to === '/discovery')?.requireRole).toBeUndefined()
   })
 
-it('管理导航三组：管理 + LLM 驱动 + 配置中心，共 12 项全部仅 admin（08-31 JD 数据并入原始数据页 + 技能治理页）', () => {
+it('管理导航三组：管理 + LLM 驱动 + 配置中心，共 13 项全部仅 admin（08-31 域治理页 + JD 数据并入原始数据页 + 技能治理页）', () => {
     const adminNav = adminNavGroups.flatMap((g) => g.items)
     expect(adminNavGroups.map((g) => g.label)).toEqual(['管理', 'LLM 驱动', '配置中心'])
-    expect(adminNav).toHaveLength(12)
+    expect(adminNav).toHaveLength(13)
     expect(adminNav.every((i) => i.requireRole?.includes('admin'))).toBe(true)
     expect(adminNav.map((i) => i.to)).toEqual([
       '/admin', '/admin/users', '/admin/crawl', '/admin/review', '/admin/lineage', '/admin/raw', '/admin/skills',
-      '/admin/llm-decisions',
+      '/admin/llm-decisions', '/admin/graph-governance',
       '/admin/llm',
       '/admin/settings/tasks', '/admin/settings/system', '/admin/settings/etl',
     ])

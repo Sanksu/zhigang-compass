@@ -1755,6 +1755,48 @@ paths:
                     $ref: '#/components/schemas/LlmConfig'
                   trace_id: { type: string }
 
+  /api/v1/admin/graph-governance/summary:
+    get:
+      tags: [admin]
+      summary: 岗位域治理总览（域划分 + 基准得分 + 待审自审数，只读）
+      responses:
+        '200':
+          description: 域治理总览（ApiResponse 包装）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/GraphGovernanceSummary'
+                  trace_id: { type: string }
+
+  /api/v1/admin/graph-governance/resync:
+    post:
+      tags: [admin]
+      summary: 触发岗位域重同步（骨干域+归类制，LLM 命名+自审；后台执行）
+      description: >
+        以 BackgroundTask 执行 scripts.sync_position_domains 同款主流程
+        （resolution=1.55, llm_name=True, 自审开启）。同一时刻仅允许一个
+        重同步任务（进行中重复触发返回 409）。完成后前端轮询 summary。
+      responses:
+        '200':
+          description: 已受理（ApiResponse 包装）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/GraphGovernanceResyncResult'
+                  trace_id: { type: string }
+        '409':
+          description: 已有重同步任务进行中
+
   /api/v1/admin/llm-decisions:
     get:
       tags: [admin]
@@ -4034,6 +4076,58 @@ components:
     # ============================================================
     # LLM 决策与验收（08-24 决策信封：GET /admin/llm-decisions* 只读）
     # ============================================================
+
+    GraphGovernanceDomain:
+      type: object
+      description: 单个语义域（骨干簇或归类归并结果）
+      properties:
+        domain_id: { type: string, description: "域键 dom_{cid} 或 dom_general" }
+        domain_name: { type: string, description: LLM 语义域名或代表岗名 }
+        member_count: { type: integer }
+        members:
+          type: array
+          description: 成员岗位名（按 freq 降序，截断至 top 12）
+          items: { type: string }
+        is_general: { type: boolean, description: 是否为通用弃权域 }
+
+    GraphGovernanceSummary:
+      type: object
+      description: 岗位域治理总览
+      properties:
+        positions: { type: integer, description: 已划分岗位总数 }
+        semantic_domains: { type: integer, description: 语义域数（不含通用域） }
+        general_count: { type: integer, description: 通用弃权域岗位数 }
+        resync_running: { type: boolean, description: 是否有重同步任务进行中 }
+        last_resync: { type: string, nullable: true, description: 最近一次完成时间 ISO8601，无记录为 null }
+        benchmark:
+          type: object
+          nullable: true
+          description: 共成员基准评测（基准文件缺失/无可评行时为 null）
+          properties:
+            evaluated: { type: integer }
+            strict_accuracy: { type: number }
+            pairwise_f1: { type: number }
+            failures:
+              type: array
+              description: 未通过行（position/expect/detail/note）
+              items:
+                type: object
+                properties:
+                  position: { type: string }
+                  expect: { type: string }
+                  detail: { type: string }
+                  note: { type: string }
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphGovernanceDomain'
+        membership_pending: { type: integer, description: cluster_membership 待审记录数 }
+
+    GraphGovernanceResyncResult:
+      type: object
+      properties:
+        started: { type: boolean, description: 已受理后台执行 }
+        message: { type: string }
 
     LlmDecisionItem:
       type: object
