@@ -37,6 +37,8 @@ from app.workers.crawl import (
     crawl_scheduler as crawl_scheduler,
 )
 from app.workers.courses import (
+    _EMPTY_MAX_RETRIES as _EMPTY_MAX_RETRIES,
+    _EMPTY_RETRY_DELAY_SECONDS as _EMPTY_RETRY_DELAY_SECONDS,
     _ENRICH_MAX_FAILS as _ENRICH_MAX_FAILS,
     _ENRICH_RETRY_DELAY_SECONDS as _ENRICH_RETRY_DELAY_SECONDS,
     enrich_course_skills as enrich_course_skills,

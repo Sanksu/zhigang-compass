@@ -15,6 +15,7 @@ import {
   Database,
   Workflow,
   ListChecks,
+  Wrench,
   type LucideIcon,
 } from 'lucide-react'
 import type { Role } from '@/lib/constants'
@@ -72,7 +73,7 @@ export const mainNav: NavItem[] = [
     },
 ]
 
-/** 管理后台分组（08-16 层级化：管理 + 配置中心两组，可折叠；08-26 加 LLM 驱动组） */
+/** 管理后台分组（08-16 层级化：管理 + 配置中心两组，可折叠；09-01 低频治理页收进总览统一入口） */
 export const adminNavGroups: AdminNavGroup[] = [
   {
     label: '管理',
@@ -82,13 +83,15 @@ export const adminNavGroups: AdminNavGroup[] = [
       { label: '爬取管理', to: '/admin/crawl', icon: Bot, requireRole: ['admin'] },
       { label: '岗位审核', to: '/admin/review', icon: CheckSquare, requireRole: ['admin'] },
       { label: '数据血缘', to: '/admin/lineage', icon: GitFork, requireRole: ['admin'] },
-      { label: 'JD 数据', to: '/admin/jd', icon: FileText, requireRole: ['admin'] },
+      { label: '原始数据', to: '/admin/raw', icon: Database, requireRole: ['admin'] },
+      { label: '技能治理', to: '/admin/skills', icon: Wrench, requireRole: ['admin'] },
     ],
   },
   {
     label: 'LLM 驱动',
     items: [
       { label: '决策与验收', to: '/admin/llm-decisions', icon: ListChecks, requireRole: ['admin'] },
+      { label: '图谱域治理', to: '/admin/graph-governance', icon: Network, requireRole: ['admin'] },
     ],
   },
   {

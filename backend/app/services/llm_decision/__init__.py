@@ -27,6 +27,7 @@ DOMAIN_POSITION_NORMALIZE = "position_normalize"
 DOMAIN_SKILL_NORMALIZE = "skill_normalize"
 DOMAIN_POSITION_CLASSIFY = "position_classify"
 DOMAIN_CLUSTER_LABEL = "cluster_label"
+DOMAIN_CLUSTER_MEMBERSHIP = "cluster_membership"
 DOMAIN_SKILL_CLASSIFY = "skill_classify"
 DOMAIN_GOVERNANCE = "governance"
 DOMAIN_SKILL_RELATION = "skill_relation"
@@ -37,6 +38,7 @@ DOMAINS: frozenset[str] = frozenset({
     DOMAIN_SKILL_NORMALIZE,
     DOMAIN_POSITION_CLASSIFY,
     DOMAIN_CLUSTER_LABEL,
+    DOMAIN_CLUSTER_MEMBERSHIP,
     DOMAIN_SKILL_CLASSIFY,
     DOMAIN_GOVERNANCE,
     DOMAIN_SKILL_RELATION,
@@ -56,6 +58,7 @@ STATUS_REJECTED = "rejected"
 STATUS_AUTO_APPLIED = "auto_applied"
 STATUS_BLOCKED = "blocked"
 STATUS_FAILED = "failed"
+STATUS_REVERTED = "reverted"  # auto_applied 已被人工撤销（治理救济通道，副作用已反做）
 
 # ---- 动作白名单 ----
 # R0：只写建议字段/语义标签，可覆盖、无副作用，验收后可自动
@@ -157,7 +160,7 @@ def build_record(
     validate_domain(domain)
     if status not in {
         STATUS_SHADOW, STATUS_PROPOSAL, STATUS_APPROVED, STATUS_REJECTED,
-        STATUS_AUTO_APPLIED, STATUS_BLOCKED, STATUS_FAILED,
+        STATUS_AUTO_APPLIED, STATUS_BLOCKED, STATUS_FAILED, STATUS_REVERTED,
     }:
         raise ValueError(f"未知决策状态 {status!r}")
     return LLMDecisionRecord(

@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/table'
 import { apiGet } from '@/lib/api'
 import type { Schema } from './review-types'
+import { useIsDesktop } from '@/hooks/use-media-query'
 
 type WatchRow = Schema['WatchItem']
 
@@ -45,6 +46,7 @@ export function TechnologyWatchTab() {
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState('')
   const [sourceFilter, setSourceFilter] = useState('')
+  const isDesktop = useIsDesktop()
 
   const PAGE_SIZE = 50
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -108,45 +110,82 @@ export function TechnologyWatchTab() {
             {items.length === 0 ? (
               <p className="py-10 text-center text-xs text-ink-faint">暂无观察池信号（依赖每日观察池任务）</p>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>技能</TableHead>
-                    <TableHead>信号源</TableHead>
-                    <TableHead>信号值</TableHead>
-                    <TableHead>周期</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>最近信号</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {items.map((w, i) => (
-                    <TableRow key={`${w.skill_name}-${w.signal_source}-${w.period}-${i}`}>
-                      <TableCell className="font-medium text-ink">{w.skill_name}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-[11px] font-mono">
-                          {WATCH_SOURCE_LABEL[w.signal_source] ?? w.signal_source}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-mono tabular-nums text-ink-muted">
-                        {typeof w.signal_value === 'number' ? w.signal_value.toFixed(3) : w.signal_value}
-                      </TableCell>
-                      <TableCell className="text-xs text-ink-muted font-mono">{w.period}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={w.status === 'candidate_promoted' ? 'emerging' : w.status === 'archived' ? 'archived' : 'outline'}
-                          className="text-[11px]"
-                        >
-                          {w.status === 'candidate_promoted' ? '候选提升' : w.status === 'archived' ? '已归档' : '观察中'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-ink-faint font-mono">
-                        {w.last_signal_at ? w.last_signal_at.slice(0, 16).replace('T', ' ') : '—'}
-                      </TableCell>
+              isDesktop ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>技能</TableHead>
+                      <TableHead>信号源</TableHead>
+                      <TableHead>信号值</TableHead>
+                      <TableHead>周期</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>最近信号</TableHead>
                     </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {items.map((w, i) => (
+                      <TableRow key={`${w.skill_name}-${w.signal_source}-${w.period}-${i}`}>
+                        <TableCell className="font-medium text-ink">{w.skill_name}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-[11px] font-mono">
+                            {WATCH_SOURCE_LABEL[w.signal_source] ?? w.signal_source}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono tabular-nums text-ink-muted">
+                          {typeof w.signal_value === 'number' ? w.signal_value.toFixed(3) : w.signal_value}
+                        </TableCell>
+                        <TableCell className="text-xs text-ink-muted font-mono">{w.period}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={w.status === 'candidate_promoted' ? 'emerging' : w.status === 'archived' ? 'archived' : 'outline'}
+                            className="text-[11px]"
+                          >
+                            {w.status === 'candidate_promoted' ? '候选提升' : w.status === 'archived' ? '已归档' : '观察中'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-ink-faint font-mono">
+                          {w.last_signal_at ? w.last_signal_at.slice(0, 16).replace('T', ' ') : '—'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="space-y-3 px-4 py-2">
+                  {items.map((w, i) => (
+                    <div
+                      key={`${w.skill_name}-${w.signal_source}-${w.period}-${i}`}
+                      className="rounded-lg border border-border bg-canvas p-4 space-y-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-ink">{w.skill_name}</div>
+                          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                            <Badge variant="outline" className="text-[10px] font-mono">
+                              {WATCH_SOURCE_LABEL[w.signal_source] ?? w.signal_source}
+                            </Badge>
+                            <Badge
+                              variant={w.status === 'candidate_promoted' ? 'emerging' : w.status === 'archived' ? 'archived' : 'outline'}
+                              className="text-[10px]"
+                            >
+                              {w.status === 'candidate_promoted' ? '候选提升' : w.status === 'archived' ? '已归档' : '观察中'}
+                            </Badge>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-mono tabular-nums text-sm text-ink-muted">
+                            {typeof w.signal_value === 'number' ? w.signal_value.toFixed(3) : w.signal_value}
+                          </div>
+                          <div className="text-[10px] text-ink-faint">{w.period}</div>
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-ink-faint font-mono">
+                        最近信号：{w.last_signal_at ? w.last_signal_at.slice(0, 16).replace('T', ' ') : '—'}
+                      </div>
+                    </div>
                   ))}
-                </TableBody>
-              </Table>
+                </div>
+              )
             )}
             {/* 翻页：总条数 > 每页 50 时出现（后端 /admin/discovery/watch 已分页） */}
             {total > PAGE_SIZE && (

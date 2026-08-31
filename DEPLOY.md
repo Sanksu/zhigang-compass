@@ -1,6 +1,6 @@
 # 智岗罗盘部署说明（DEPLOY.md）
 
-> 状态：**定稿**（2026-08-15，2026-08-29 复核与最新 compose 一致并补充 §6.2 局域网运维实证）——基于 08-13 首次容器部署演练实测（api/worker 镜像首次构建 + 5 服务全链路 12 项冒烟全通）+ 08-15 性能压测验证（TE-M5-01 前置，panorama/search P95 < 500ms @ 100 并发，见 docs/perf_baseline_20260815.md）
+> 状态：**定稿**（2026-08-15，2026-08-31 复核与最新 compose 一致：5 服务全部对齐 `restart: unless-stopped`（08-30 补齐 neo4j），补充 §6.2 局域网运维实证）——基于 08-13 首次容器部署演练实测（api/worker 镜像首次构建 + 5 服务全链路 12 项冒烟全通）+ 08-15 性能压测验证（TE-M5-01 前置，panorama/search P95 < 500ms @ 100 并发，见 docs/perf_baseline_20260815.md）
 > 对应任务：执行计划 2.2 后端 M5「部署文档完善」+ 2.6 文档 M5「DEPLOY.md 部署说明」（DO-M5-03）
 
 ---
@@ -130,7 +130,8 @@ curl http://localhost:8000/health
 | 查看日志 | `docker compose logs -f api` / `-f worker` |
 | 重启单服务 | `docker compose restart api` |
 | 更新代码 | 见 **§3.1 合并 ≠ 部署清单**（pull → build → 前置检查 → up） |
-| 数据备份 | `pg_dump`（PostgreSQL）+ `neo4j-admin dump`（Neo4j）；数据卷：`pg_data` / `neo4j_data` / `neo4j_logs` / `redis_data` |
+| 数据备份 | `pg_dump`（PostgreSQL）+ `neo4j-admin dump`（Neo4j）；数据卷：`pg_data` / `neo4j_data` / `neo4j_logs` / `redis_data` / `uploads_data` |
+| 重启策略 | 5 服务全部 `restart: unless-stopped`：宿主机重启后自动拉起，进程异常退出自动重启 |
 
 ### 6.1 ETL 调度（容器内 ARQ cron，08-21 #348）
 

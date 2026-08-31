@@ -23,8 +23,10 @@ ehthumbs.db
 *.sublime-workspace
 *.sublime-project
 
-# Trae IDE 本地配置（不进入版本控制）
+# Trae IDE 本地配置与产物（不进入版本控制）
 .trae/
+.trae-html-share-packages/
+.uploads/
 
 # ---------- Python ----------
 __pycache__/
@@ -97,6 +99,9 @@ dist/
 dist-ssr/
 build/
 *.local
+
+# pnpm 全局 store（本地缓存，不进入版本控制）
+.pnpm-store/
 
 # 前端测试与缓存
 coverage/

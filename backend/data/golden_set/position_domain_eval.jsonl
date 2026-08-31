@@ -1,0 +1,73 @@
+{"_meta": {"file": "position_domain_eval", "version": "2026-08-31.draft1", "status": "DRAFT 待人工复核（AI 起草，负责人/算法岗逐条确认后升 frozen）", "口径": "共成员关系断言——position 应与 same_domain_as 中每个锚点岗同属一个语义域（expect=domain），或应落入通用与其他域/弃权（expect=general）。断言与域名解耦，域名由 LLM 生成可变，锚点岗选高频稳定岗。", "锚点选择": "freq≥10 的高频稳定岗；弱锚定条目在 note 标注", "复核要点": "弱锚定条目：全栈工程师/鸿蒙全栈/C++开发工程师/AI基础设施工程师/网络工程师归族口径"}}
+{"position": "React前端开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "技术栈细分族"}
+{"position": "Vue前端开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "技术栈细分族"}
+{"position": "Angular前端开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "技术栈细分族"}
+{"position": "移动前端开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "移动端开发归前端族"}
+{"position": "TypeScript工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "名实口径 TS 属前端栈；其 JD 画像偏测试属上游数据问题（08-31 案例原错配系统可靠性）"}
+{"position": "全栈工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "弱锚定：国内全栈 JD 多以前端为基座；zkt 可复核"}
+{"position": "Node.js全栈工程师", "same_domain_as": ["全栈工程师"], "expect": "domain", "note": "全栈族"}
+{"position": "鸿蒙全栈工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "弱锚定：鸿蒙生态≈移动端族；现行误落教育管理域"}
+{"position": "WebGL开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "前端图形族"}
+{"position": "大模型算法工程师", "same_domain_as": ["机器视觉算法工程师"], "expect": "domain", "note": "算法族锚点（08-31 pin 治理后已归位）"}
+{"position": "机器人算法工程师", "same_domain_as": ["机器视觉算法工程师"], "expect": "domain", "note": "算法细分族"}
+{"position": "自动驾驶算法工程师", "same_domain_as": ["机器视觉算法工程师"], "expect": "domain", "note": "算法细分族"}
+{"position": "语音算法工程师", "same_domain_as": ["机器视觉算法工程师"], "expect": "domain", "note": "算法细分族"}
+{"position": "推荐搜索算法工程师", "same_domain_as": ["机器视觉算法工程师"], "expect": "domain", "note": "算法细分族"}
+{"position": "算法工程师", "same_domain_as": ["机器视觉算法工程师"], "expect": "domain", "note": "通才算法岗归算法域（失真兜底族历史节点，freq=97 勿删）"}
+{"position": "数据科学家", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "数据分析族"}
+{"position": "量化分析师", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "分析细分族"}
+{"position": "财务分析师", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "分析细分族"}
+{"position": "商业智能分析师", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "分析细分族"}
+{"position": "市场分析师", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "分析细分族"}
+{"position": "业务分析师", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "分析细分族"}
+{"position": "精算分析师", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "分析细分族"}
+{"position": "信贷分析师", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "分析细分族"}
+{"position": "投资分析师", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "分析细分族"}
+{"position": "生物统计师", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "分析细分族"}
+{"position": "首席统计师", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "分析细分族"}
+{"position": "保险分析师", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "分析细分族（_ANALYST_SUB_FAMILIES 承接口径）"}
+{"position": "DevOps工程师", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "运维族（08-31 pin 治理后已归位）"}
+{"position": "数据库管理员", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "运维族"}
+{"position": "网络工程师", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "弱锚定：网络属基础设施族；现行与运维分立，zkt 可复核"}
+{"position": "WebSphere管理员", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "中间件运维"}
+{"position": "IT平台与自动化", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "IT 基础设施"}
+{"position": "桌面工程师", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "桌面/终端支持"}
+{"position": "AI基础设施工程师", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "弱锚定：AI Infra 技能栈(K8s/GPU/监控)靠近 DevOps；现行误落前端域"}
+{"position": "AI与HPC可观测性", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "可观测性属运维族；现行误落教育域"}
+{"position": "生物信息学 QA", "same_domain_as": ["测试工程师"], "expect": "domain", "note": "QA 归测试族"}
+{"position": "C++开发工程师", "same_domain_as": ["嵌入式开发工程师"], "expect": "domain", "note": "弱锚定：C++ 通才语义，按系统/嵌入式语境归族；zkt 复核"}
+{"position": "FPGA验证", "same_domain_as": ["嵌入式开发工程师"], "expect": "domain", "note": "芯片验证族"}
+{"position": "IC验证", "same_domain_as": ["嵌入式开发工程师"], "expect": "domain", "note": "芯片验证族"}
+{"position": "GPU验证", "same_domain_as": ["嵌入式开发工程师"], "expect": "domain", "note": "芯片验证族"}
+{"position": "FPGA设计研究", "same_domain_as": ["嵌入式开发工程师"], "expect": "domain", "note": "芯片验证族"}
+{"position": "EDA工作流优化", "same_domain_as": ["嵌入式开发工程师"], "expect": "domain", "note": "芯片设计工具流；现行误落数据分析域"}
+{"position": "Go开发工程师", "same_domain_as": ["Java开发工程师", "后端开发工程师"], "expect": "domain", "note": "08-31 案例原错配生成式AI应用开发簇；其投影最强邻居全在后端（Java 6.8/后端 6.7/DevOps 6.5）"}
+{"position": "Python开发工程师", "same_domain_as": ["Java开发工程师"], "expect": "domain", "note": "后端族（08-31 pin 治理后已归位）"}
+{"position": "大数据开发工程师", "same_domain_as": ["Java开发工程师"], "expect": "domain", "note": "后端族（08-31 pin 治理后已归位）"}
+{"position": "产品经理", "expect": "general", "note": "产品域未成型，弃权诚实（现行误落数据分析域）"}
+{"position": "网络安全工程师", "expect": "general", "note": "安全域未成型（freq=98 单列过早）"}
+{"position": "移动网络安全工程师", "expect": "general", "note": "安全域未成型（现行误落前端域）"}
+{"position": "项目经理", "expect": "general", "note": "管理族未成型"}
+{"position": "CT技师", "expect": "general", "note": "医学影像无同族"}
+{"position": "计算生物学家", "expect": "general", "note": "计算生物无同族"}
+{"position": "生化工程师", "expect": "general", "note": "生物工程无同族（'生化'已入停用词，存量节点 freq=1 待衰减）"}
+{"position": "生物光学工程师", "expect": "general", "note": "生物工程无同族"}
+{"position": "系统可靠性工程师", "expect": "general", "note": "可靠性工程无同族，弃权（08-31 案例微簇域已消解）"}
+{"position": "游戏开发工程师", "expect": "general", "note": "游戏开发无同族（freq=1）"}
+{"position": "开发者体验工程师", "expect": "general", "note": "DX 无同族（'开发者体验'已入停用词，存量待衰减）"}
+{"position": "中学STEM教师", "expect": "general", "note": "教育族未成型"}
+{"position": "技术教师", "expect": "general", "note": "教育族未成型"}
+{"position": "STEM科技教育讲师", "expect": "general", "note": "教育族未成型"}
+{"position": "创始工程师", "expect": "general", "note": "通才创业岗（'创始'已入停用词，存量 freq=16 待衰减）"}
+{"position": "GenAI/AgenticAI", "expect": "general", "note": "freq=1 画像稀薄，弃权"}
+{"position": "AIGEO优化", "expect": "general", "note": "freq=1 新兴词无同族"}
+{"position": "AI与数据系统", "expect": "general", "note": "freq=1 复合碎片"}
+{"position": "VDC助理", "expect": "general", "note": "freq=1 建筑信息化无同族"}
+{"position": "Palantir管理员", "expect": "general", "note": "低频专名岗（'Palantir 管理员'已入停用词，无空格变体漏网）"}
+{"position": "SAP集成", "expect": "general", "note": "低频企业应用岗"}
+{"position": "People应用", "expect": "general", "note": "低频企业应用岗"}
+{"position": "Murex应用", "expect": "general", "note": "低频企业应用岗"}
+{"position": "CMBS交易员", "expect": "general", "note": "交易≠分析"}
+{"position": "可持续发展分析师", "expect": "general", "note": "_ANALYST_SUB_FAMILIES 承接但 freq=1 无同域伙伴"}
+{"position": "NPISMT工艺", "expect": "general", "note": "制造业工艺无同族"}
+{"position": "PDV/CVD设备", "expect": "general", "note": "半导体设备无同族"}

@@ -20,6 +20,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { apiGet } from '@/lib/api'
 import { formatDateTime } from '@/lib/utils'
+import { useIsDesktop } from '@/hooks/use-media-query'
 import type { components } from '@/types/api'
 
 type SkillAliasItem = components['schemas']['SkillAliasItem']
@@ -45,6 +46,7 @@ export function SkillAliasesTable() {
   const [status, setStatus] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const isDesktop = useIsDesktop()
 
   const params = useMemo(() => {
     const p = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String((page - 1) * PAGE_SIZE) })
@@ -74,7 +76,7 @@ export function SkillAliasesTable() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between space-y-0">
         <CardTitle>别名记录</CardTitle>
         <div className="flex flex-wrap items-center gap-2">
           <Select
@@ -84,7 +86,7 @@ export function SkillAliasesTable() {
               setPage(1)
             }}
           >
-            <SelectTrigger aria-label="状态过滤" className="h-8 w-36 text-sm">
+            <SelectTrigger aria-label="状态过滤" className="h-8 w-full sm:w-36 text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -105,7 +107,7 @@ export function SkillAliasesTable() {
       <CardContent>
         {error ? (
           <p className="py-8 text-center text-sm text-state-declining">{error}</p>
-        ) : (
+        ) : isDesktop ? (
           <Table>
             <TableHeader>
               <TableRow>
@@ -157,6 +159,41 @@ export function SkillAliasesTable() {
               )}
             </TableBody>
           </Table>
+        ) : (
+          <div className="space-y-3">
+            {loading ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+            ) : items.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                暂无别名记录——审批技能名归一（别名）提案后产生
+              </p>
+            ) : (
+              items.map((it) => (
+                <div key={it.id} className="rounded-lg border border-border p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-sm text-ink truncate">{it.variant}</span>
+                    <Badge variant="outline" className={`text-[11px] ${STATUS_TONE[it.status] ?? ''}`}>
+                      {STATUS_LABEL[it.status] ?? it.status}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-ink-muted">
+                    <ArrowRight className="h-3 w-3 shrink-0 text-state-candidate" />
+                    <span className="truncate">{it.standard_name}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-ink-muted">
+                    <span>置信度：<span className="font-mono">{it.confidence != null ? it.confidence.toFixed(2) : '-'}</span></span>
+                    <span>审批人：<span>{it.reviewed_by || '-'}</span></span>
+                  </div>
+                  {it.review_reason && (
+                    <p className="text-xs text-ink-faint border-t border-border pt-1.5">{it.review_reason}</p>
+                  )}
+                  <div className="text-[11px] text-ink-faint font-mono">
+                    {it.created_at ? formatDateTime(it.created_at) : '-'}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         )}
         <PaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
       </CardContent>

@@ -21,8 +21,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Reveal } from '@/components/ui/reveal'
 import { apiGet } from '@/lib/api'
 import { formatDateTime } from '@/lib/utils'
+import { useIsDesktop } from '@/hooks/use-media-query'
 import type { components } from '@/types/api'
 
 type LineagePositionsData = components['schemas']['LineagePositionsData']
@@ -64,6 +66,7 @@ export function AdminLineagePage() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const isDesktop = useIsDesktop()
 
   /* 过滤条件：关键字 / 仅已验证 / 仅低置信 */
   const [q, setQ] = useState('')
@@ -140,68 +143,79 @@ export function AdminLineagePage() {
 
       {/* 血缘总览统计（真实 lineage_summary） */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center justify-between mb-2">
-              <Network className="size-4 text-ink-faint" />
-              <span className="text-xs font-mono text-ink-muted">GROUPS</span>
-            </div>
-            <div className="text-2xl font-semibold tracking-tight tabular-nums">
-              {summary?.groups ?? '—'}
-            </div>
-            <div className="text-xs text-ink-muted mt-1">岗位分组数</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center justify-between mb-2">
-              <Database className="size-4 text-ink-faint" />
-              <span className="text-xs font-mono text-ink-muted">JD</span>
-            </div>
-            <div className="text-2xl font-semibold tracking-tight tabular-nums">
-              {summary?.jd_count?.toLocaleString() ?? '—'}
-            </div>
-            <div className="text-xs text-ink-muted mt-1">覆盖证据 JD</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center justify-between mb-2">
-              <FileSearch className="size-4 text-ink-faint" />
-              <span className="text-xs font-mono text-ink-muted">MULTI</span>
-            </div>
-            <div className="text-2xl font-semibold tracking-tight tabular-nums">
-              {summary?.multi_source ?? '—'}
-            </div>
-            <div className="text-xs text-ink-muted mt-1">≥2 独立源印证</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center justify-between mb-2">
-              <ShieldCheck className="size-4 text-ink-faint" />
-              <span className="text-xs font-mono text-ink-muted">OK</span>
-            </div>
-            <div className="text-2xl font-semibold tracking-tight tabular-nums">
-              {summary?.verified ?? '—'}
-            </div>
-            <div className="text-xs text-ink-muted mt-1">已验证（跨源）</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center justify-between mb-2">
-              <TriangleAlert className="size-4 text-ink-faint" />
-              <span className="text-xs font-mono text-ink-muted">&lt;0.6</span>
-            </div>
-            <div className="text-2xl font-semibold tracking-tight tabular-nums">
-              {summary?.below_confidence ?? '—'}
-            </div>
-            <div className="text-xs text-ink-muted mt-1">低置信待复核</div>
-          </CardContent>
-        </Card>
+        <Reveal delay={0} className="h-full">
+          <Card className="h-full">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between mb-2">
+                <Network className="size-4 text-ink-faint" />
+                <span className="text-xs font-mono text-ink-muted">GROUPS</span>
+              </div>
+              <div className="text-2xl font-semibold tracking-tight tabular-nums">
+                {summary?.groups ?? '—'}
+              </div>
+              <div className="text-xs text-ink-muted mt-1">岗位分组数</div>
+            </CardContent>
+          </Card>
+        </Reveal>
+        <Reveal delay={90} className="h-full">
+          <Card className="h-full">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between mb-2">
+                <Database className="size-4 text-ink-faint" />
+                <span className="text-xs font-mono text-ink-muted">JD</span>
+              </div>
+              <div className="text-2xl font-semibold tracking-tight tabular-nums">
+                {summary?.jd_count?.toLocaleString() ?? '—'}
+              </div>
+              <div className="text-xs text-ink-muted mt-1">覆盖证据 JD</div>
+            </CardContent>
+          </Card>
+        </Reveal>
+        <Reveal delay={180} className="h-full">
+          <Card className="h-full">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between mb-2">
+                <FileSearch className="size-4 text-ink-faint" />
+                <span className="text-xs font-mono text-ink-muted">MULTI</span>
+              </div>
+              <div className="text-2xl font-semibold tracking-tight tabular-nums">
+                {summary?.multi_source ?? '—'}
+              </div>
+              <div className="text-xs text-ink-muted mt-1">≥2 独立源印证</div>
+            </CardContent>
+          </Card>
+        </Reveal>
+        <Reveal delay={270} className="h-full">
+          <Card className="h-full">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between mb-2">
+                <ShieldCheck className="size-4 text-ink-faint" />
+                <span className="text-xs font-mono text-ink-muted">OK</span>
+              </div>
+              <div className="text-2xl font-semibold tracking-tight tabular-nums">
+                {summary?.verified ?? '—'}
+              </div>
+              <div className="text-xs text-ink-muted mt-1">已验证（跨源）</div>
+            </CardContent>
+          </Card>
+        </Reveal>
+        <Reveal delay={360} className="h-full">
+          <Card className="h-full">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between mb-2">
+                <TriangleAlert className="size-4 text-ink-faint" />
+                <span className="text-xs font-mono text-ink-muted">&lt;0.6</span>
+              </div>
+              <div className="text-2xl font-semibold tracking-tight tabular-nums">
+                {summary?.below_confidence ?? '—'}
+              </div>
+              <div className="text-xs text-ink-muted mt-1">低置信待复核</div>
+            </CardContent>
+          </Card>
+        </Reveal>
       </div>
 
+      <Reveal delay={380}>
       <Card>
         <CardHeader>
           <CardTitle className="text-sm flex items-center justify-between">
@@ -216,7 +230,7 @@ export function AdminLineagePage() {
               value={q}
               onChange={(e) => onFilterChange({ q: e.target.value })}
               placeholder="按岗位名关键字过滤"
-              className="w-56 h-8 text-sm"
+              className="w-full sm:w-56 h-8 text-sm"
             />
             <Button
               size="sm"
@@ -247,7 +261,7 @@ export function AdminLineagePage() {
                 血缘数据由 ETL cross_validate_jds 按已抽取 jd_raw 记录生成，冷启动阶段可能为空（属预期）
               </p>
             </div>
-          ) : (
+          ) : isDesktop ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -305,6 +319,46 @@ export function AdminLineagePage() {
                 ))}
               </TableBody>
             </Table>
+          ) : (
+            <div className="space-y-3">
+              {items.map((item) => (
+                <div key={item.position_name} className="rounded-lg border border-border p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-sm text-ink truncate">{item.position_name}</span>
+                    <span className={`font-mono tabular-nums text-sm ${confidenceTone(item.confidence)}`}>
+                      {Math.round(item.confidence * 100)}%
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-ink-muted">
+                    <Badge variant={item.source_count >= 2 ? 'stable' : 'candidate'} className="text-[11px]">
+                      {item.source_count} 源
+                    </Badge>
+                    <span>JD {item.jd_count}</span>
+                    <span className="truncate">{(item.cities ?? []).join(' / ') || '—'}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {item.verified ? (
+                      <Badge variant="outline" className="text-[11px] text-state-stable border-state-stable/30">
+                        印证 {(item.verified_skill_ratio * 100).toFixed(0)}%
+                      </Badge>
+                    ) : (
+                      warnBadge('candidate', '单源待审')
+                    )}
+                    {item.salary_outlier && warnBadge('declining', '薪资异常')}
+                    {item.experience_divergence > 0.5 && warnBadge('declining', '经验分歧')}
+                    {item.confidence < 0.6 && warnBadge('declining', '低置信')}
+                  </div>
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-border">
+                    <span className="text-xs font-mono text-ink-muted">
+                      {item.salary_median ? `${Math.round(item.salary_median).toLocaleString()}/月` : '—'}
+                    </span>
+                    <Button size="sm" variant="ghost" onClick={() => openDetail(item)}>
+                      溯源
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
 
           <PaginationBar
@@ -316,6 +370,7 @@ export function AdminLineagePage() {
           />
         </CardContent>
       </Card>
+      </Reveal>
 
       {/* 详情弹窗：组级校验 + 证据 JD 血缘链明细（溯源到原始来源） */}
       <Dialog
@@ -395,6 +450,7 @@ export function AdminLineagePage() {
                   证据 JD 血缘链（{(detail.records ?? []).length} 条，按入库序）
                 </div>
                 <div className="max-h-[45vh] overflow-auto rounded-md border border-border">
+                {isDesktop ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -455,6 +511,48 @@ export function AdminLineagePage() {
                     )}
                   </TableBody>
                 </Table>
+                ) : (
+                  <div className="space-y-2 p-2">
+                    {(detail.records ?? []).length === 0 ? (
+                      <p className="text-center text-sm text-ink-faint py-6">组内无证据 JD 记录</p>
+                    ) : (detail.records ?? []).map((rec) => (
+                      <div key={rec.jd_id} className="rounded-md border border-border p-2.5 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <Badge variant="outline" className="text-[11px]">{rec.source || '—'}</Badge>
+                          {rec.is_duplicate ? (
+                            <Badge variant="archived" className="text-[11px]">重复</Badge>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-ink-muted">
+                          <span>{rec.city || '—'}</span>
+                          <span className="font-mono">{rec.salary || '—'}</span>
+                        </div>
+                        <div className="text-[11px] text-ink-faint font-mono">
+                          {rec.crawled_at ? formatDateTime(rec.crawled_at) : '—'}
+                        </div>
+                        {(rec.skills ?? []).length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {(rec.skills ?? []).map((s) => (
+                              <span key={s} className="rounded bg-subtle px-1 py-0.5 text-[10px] text-ink-muted">{s}</span>
+                            ))}
+                          </div>
+                        )}
+                        {rec.source_url ? (
+                          <a
+                            href={rec.source_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs text-ink underline hover:no-underline"
+                          >
+                            原始 JD ↗
+                          </a>
+                        ) : (
+                          <span className="text-xs text-ink-faint">无 URL</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 </div>
               </div>
             </div>

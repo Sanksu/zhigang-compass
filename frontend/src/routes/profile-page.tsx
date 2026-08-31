@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ROLES } from '@/lib/constants'
 import { PageHeader } from '@/components/layout/page-header'
+import { Reveal } from '@/components/ui/reveal'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -243,6 +244,7 @@ export function ProfilePage() {
     <div className="space-y-6">
       <PageHeader title="个人中心" description="账户信息与简历管理" />
 
+      <Reveal delay={0}>
       {/* Toast 通知 */}
       {toast && (
         <div className="rounded-md border border-state-candidate/20 bg-state-candidate/5 px-4 py-3 text-sm text-state-candidate">
@@ -277,126 +279,184 @@ export function ProfilePage() {
             </CardContent>
           </Card>
 
-          {/* ── 个人信息编辑区 ── */}
-          <Card>
-            <CardHeader>
-              <CardTitle>基本信息</CardTitle>
-              <CardDescription>编辑你的个人资料信息</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3">
-                <Label htmlFor="profile-username">用户名</Label>
-                <Input id="profile-username" value={profile?.username ?? ''} disabled />
-              </div>
-              <div className="grid gap-3">
-                <Label htmlFor="profile-email">邮箱</Label>
-                <Input id="profile-email" value={email} onChange={(e) => setEmail(e.target.value)} />
-              </div>
-              <div className="grid gap-3">
-                <Label htmlFor="profile-phone">联系电话</Label>
-                <Input id="profile-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
-              </div>
-              <div className="grid gap-3">
-                <Label htmlFor="profile-bio">个人简介</Label>
-                <Textarea id="profile-bio" value={bio} onChange={(e) => setBio(e.target.value)} rows={3} />
-              </div>
-              {saveError && <p className="text-sm text-state-archived">{saveError}</p>}
-              <Button onClick={handleSaveProfile} disabled={saving}>
-                {saving ? '保存中…' : '保存修改'}
-              </Button>
-            </CardContent>
-          </Card>
+          {/* ── 个人信息 + 修改密码（桌面双列，移动端堆叠） ── */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>基本信息</CardTitle>
+                <CardDescription>编辑你的个人资料信息</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3">
+                  <Label htmlFor="profile-username">用户名</Label>
+                  <Input id="profile-username" value={profile?.username ?? ''} disabled />
+                </div>
+                <div className="grid gap-3">
+                  <Label htmlFor="profile-email">邮箱</Label>
+                  <Input id="profile-email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                </div>
+                <div className="grid gap-3">
+                  <Label htmlFor="profile-phone">联系电话</Label>
+                  <Input id="profile-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+                </div>
+                <div className="grid gap-3">
+                  <Label htmlFor="profile-bio">个人简介</Label>
+                  <Textarea id="profile-bio" value={bio} onChange={(e) => setBio(e.target.value)} rows={3} />
+                </div>
+                {saveError && <p className="text-sm text-state-archived">{saveError}</p>}
+                <Button onClick={handleSaveProfile} disabled={saving}>
+                  {saving ? '保存中…' : '保存修改'}
+                </Button>
+              </CardContent>
+            </Card>
 
-          {/* ── 修改密码区 ── */}
-          <Card>
-            <CardHeader>
-              <CardTitle>修改密码</CardTitle>
-              <CardDescription>定期更换密码可以提高账户安全性</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3">
-                <Label htmlFor="old-pwd">原密码</Label>
-                <Input id="old-pwd" type="password" value={oldPwd} onChange={(e) => setOldPwd(e.target.value)} />
-              </div>
-              <div className="grid gap-3">
-                <Label htmlFor="new-pwd">新密码</Label>
-                <Input id="new-pwd" type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} />
-              </div>
-              <div className="grid gap-3">
-                <Label htmlFor="confirm-pwd">确认新密码</Label>
-                <Input id="confirm-pwd" type="password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} />
-              </div>
-              {pwdError && <p className="text-sm text-state-archived">{pwdError}</p>}
-              {pwdSuccess && <p className="text-sm text-state-candidate">密码修改成功</p>}
-              <Button onClick={handleChangePassword} disabled={pwdSubmitting}>
-                {pwdSubmitting ? '提交中…' : '修改密码'}
-              </Button>
-            </CardContent>
-          </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>修改密码</CardTitle>
+                <CardDescription>定期更换密码可以提高账户安全性</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3">
+                  <Label htmlFor="old-pwd">原密码</Label>
+                  <Input id="old-pwd" type="password" value={oldPwd} onChange={(e) => setOldPwd(e.target.value)} />
+                </div>
+                <div className="grid gap-3">
+                  <Label htmlFor="new-pwd">新密码</Label>
+                  <Input id="new-pwd" type="password" value={newPwd} onChange={(e) => setNewPwd(e.target.value)} />
+                </div>
+                <div className="grid gap-3">
+                  <Label htmlFor="confirm-pwd">确认新密码</Label>
+                  <Input id="confirm-pwd" type="password" value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)} />
+                </div>
+                {pwdError && <p className="text-sm text-state-archived">{pwdError}</p>}
+                {pwdSuccess && <p className="text-sm text-state-candidate">密码修改成功</p>}
+                <Button onClick={handleChangePassword} disabled={pwdSubmitting}>
+                  {pwdSubmitting ? '提交中…' : '修改密码'}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
 
-          {/* ── 简历管理列表 ── */}
+          {/* ── 简历管理列表（桌面表格 / 移动端卡片） ── */}
           <Card>
             <CardHeader>
               <CardTitle>简历管理</CardTitle>
               <CardDescription>已上传的简历文件列表</CardDescription>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>文件名</TableHead>
-                    <TableHead>技能</TableHead>
-                    <TableHead>更新时间</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {resumes.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="max-w-64 truncate font-medium text-ink">{r.file_name}</TableCell>
-                      <TableCell className="text-ink-secondary">
-                        {(r.skills ?? []).slice(0, 5).join('、') || '—'}
-                      </TableCell>
-                      <TableCell className="text-ink-secondary">
-                        {r.updated_at ? r.updated_at.slice(0, 16).replace('T', ' ') : '—'}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => handleViewResume(r)}>
-                            查看
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={deletingId === r.id}
-                            onClick={() => handleDownloadResume(r)}
-                          >
-                            {deletingId === r.id ? '下载中…' : '下载'}
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => handleEditResume(r)}>
-                            编辑
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={deletingId === r.id}
-                            onClick={() => handleDeleteResume(r.id)}
-                          >
-                            {deletingId === r.id ? '删除中…' : '删除'}
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {resumes.length === 0 && (
+              {/* 桌面端：表格视图 */}
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-ink-muted">
-                        暂无简历记录，可前往「简历匹配」页上传
-                      </TableCell>
+                      <TableHead>文件名</TableHead>
+                      <TableHead>技能</TableHead>
+                      <TableHead>更新时间</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
                     </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {resumes.map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell className="max-w-64 truncate font-medium text-ink">{r.file_name}</TableCell>
+                        <TableCell className="text-ink-secondary">
+                          {(r.skills ?? []).slice(0, 5).join('、') || '—'}
+                        </TableCell>
+                        <TableCell className="text-ink-secondary">
+                          {r.updated_at ? r.updated_at.slice(0, 16).replace('T', ' ') : '—'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => handleViewResume(r)}>
+                              查看
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={deletingId === r.id}
+                              onClick={() => handleDownloadResume(r)}
+                            >
+                              {deletingId === r.id ? '下载中…' : '下载'}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleEditResume(r)}>
+                              编辑
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={deletingId === r.id}
+                              onClick={() => handleDeleteResume(r.id)}
+                            >
+                              {deletingId === r.id ? '删除中…' : '删除'}
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {resumes.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center text-ink-muted">
+                          暂无简历记录，可前往「简历匹配」页上传
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* 移动端：卡片视图 */}
+              <div className="space-y-3 md:hidden">
+                {resumes.map((r) => (
+                  <div
+                    key={r.id}
+                    className="rounded-lg border border-border bg-canvas p-4 space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium text-ink">{r.file_name}</div>
+                        <div className="mt-0.5 text-xs text-ink-muted">
+                          {r.updated_at ? r.updated_at.slice(0, 16).replace('T', ' ') : '—'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-xs text-ink-secondary">
+                      <span className="text-ink-faint">技能：</span>
+                      {(r.skills ?? []).slice(0, 3).join('、') || '—'}
+                      {(r.skills ?? []).length > 3 && ` 等 ${r.skills?.length} 项`}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      <Button variant="outline" size="sm" onClick={() => handleViewResume(r)}>
+                        查看
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={deletingId === r.id}
+                        onClick={() => handleDownloadResume(r)}
+                      >
+                        {deletingId === r.id ? '下载中…' : '下载'}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => handleEditResume(r)}>
+                        编辑
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-state-archived"
+                        disabled={deletingId === r.id}
+                        onClick={() => handleDeleteResume(r.id)}
+                      >
+                        {deletingId === r.id ? '删除中…' : '删除'}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {resumes.length === 0 && (
+                  <div className="py-8 text-center text-sm text-ink-muted">
+                    暂无简历记录，可前往「简历匹配」页上传
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </>
@@ -448,7 +508,8 @@ export function ProfilePage() {
             </div>
           </div>
         </DialogContent>
-      </Dialog>
+        </Dialog>
+      </Reveal>
     </div>
   )
 }

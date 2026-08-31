@@ -20,12 +20,15 @@ from app.api.v1.admin_routes import (
     crawl,
     dict_guard,
     etl,
+    graph_governance,
     jd_admin,
     lineage,
     llm_decisions,
     position_edit,
     position_reviews,
+    raw_admin,
     skill_aliases,
+    skills,
 )
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_permission("admin:*"))])
@@ -33,6 +36,7 @@ router.include_router(accounts.router)
 router.include_router(approval_summary.router)
 router.include_router(audit.router)
 router.include_router(crawl.router)
+router.include_router(graph_governance.router)
 router.include_router(lineage.router)
 router.include_router(position_reviews.router)
 router.include_router(position_edit.router)
@@ -40,8 +44,10 @@ router.include_router(config.router)
 router.include_router(dict_guard.router)
 router.include_router(llm_decisions.router)
 router.include_router(skill_aliases.router)
+router.include_router(skills.router)
 router.include_router(etl.router)
 router.include_router(jd_admin.router)
+router.include_router(raw_admin.router)
 
 # 爬虫域私有符号 re-export（tests/admin/* 直连导入）
 PLATFORM_META = crawl.PLATFORM_META

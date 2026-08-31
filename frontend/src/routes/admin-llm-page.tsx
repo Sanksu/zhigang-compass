@@ -29,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Reveal } from '@/components/ui/reveal'
 import { apiGet, apiPut } from '@/lib/api'
 import type { components } from '@/types/api'
 
@@ -145,6 +146,7 @@ export function AdminLlmPage() {
       />
 
       {/* 安全与范围提示 */}
+      <Reveal delay={380}>
       <div className="mb-6 flex items-start gap-2 rounded-md border border-border bg-subtle px-4 py-3 text-xs text-ink-secondary leading-relaxed">
         <Cpu className="size-4 mt-0.5 shrink-0" />
         <span>
@@ -152,6 +154,7 @@ export function AdminLlmPage() {
           超时/限流/降级/恢复等高级参数在 yaml 中维护，不在此页面编辑。
         </span>
       </div>
+      </Reveal>
 
       {feedback && (
         <div
@@ -163,6 +166,7 @@ export function AdminLlmPage() {
         </div>
       )}
 
+      <Reveal delay={500}>
       <Card>
         <CardHeader>
           <CardTitle className="text-sm flex items-center justify-between">
@@ -176,59 +180,109 @@ export function AdminLlmPage() {
           ) : sorted.length === 0 ? (
             <div className="py-8 text-center text-sm text-ink-muted">暂无 Provider，点击「新增 Provider」添加</div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-16">优先级</TableHead>
-                  <TableHead>名称</TableHead>
-                  <TableHead>模型</TableHead>
-                  <TableHead className="w-24">协议</TableHead>
-                  <TableHead className="max-w-52">Base URL</TableHead>
-                  <TableHead className="w-28">API Key</TableHead>
-                  <TableHead className="w-20">状态</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              {/* 桌面端：表格视图 */}
+              <div className="hidden lg:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-16">优先级</TableHead>
+                      <TableHead>名称</TableHead>
+                      <TableHead>模型</TableHead>
+                      <TableHead className="w-24">协议</TableHead>
+                      <TableHead className="max-w-52">Base URL</TableHead>
+                      <TableHead className="w-28">API Key</TableHead>
+                      <TableHead className="w-20">状态</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sorted.map((p) => {
+                      const originalIndex = providers.findIndex((x) => x === p)
+                      return (
+                        <TableRow key={p.name}>
+                          <TableCell className="font-mono text-xs">{p.priority}</TableCell>
+                          <TableCell className="font-medium font-mono">{p.name}</TableCell>
+                          <TableCell className="font-mono text-xs">{p.model}</TableCell>
+                          <TableCell>
+                            {p.protocol === 'anthropic' ? (
+                              <Badge variant="emerging">anthropic</Badge>
+                            ) : (
+                              <span className="text-xs text-ink-muted">openai</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs font-mono text-ink-muted truncate max-w-52">{p.base_url}</TableCell>
+                          <TableCell className="text-xs font-mono">{p.api_key ? `${p.api_key.slice(-4)}` : '未配置'}</TableCell>
+                          <TableCell>
+                            <Badge variant={p.enabled === false ? 'archived' : 'emerging'}>
+                              {p.enabled === false ? '停用' : '启用'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-2">
+                              <Button size="sm" variant="outline" onClick={() => openEdit(originalIndex)}>
+                                编辑
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => removeProvider(originalIndex)}>
+                                删除
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* 移动端：卡片视图 */}
+              <div className="space-y-3 lg:hidden">
                 {sorted.map((p) => {
                   const originalIndex = providers.findIndex((x) => x === p)
                   return (
-                    <TableRow key={p.name}>
-                      <TableCell className="font-mono text-xs">{p.priority}</TableCell>
-                      <TableCell className="font-medium font-mono">{p.name}</TableCell>
-                      <TableCell className="font-mono text-xs">{p.model}</TableCell>
-                      <TableCell>
-                        {p.protocol === 'anthropic' ? (
-                          <Badge variant="emerging">anthropic</Badge>
-                        ) : (
-                          <span className="text-xs text-ink-muted">openai</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-xs font-mono text-ink-muted truncate max-w-52">{p.base_url}</TableCell>
-                      <TableCell className="text-xs font-mono">{p.api_key ? `${p.api_key.slice(-4)}` : '未配置'}</TableCell>
-                      <TableCell>
-                        <Badge variant={p.enabled === false ? 'archived' : 'emerging'}>
-                          {p.enabled === false ? '停用' : '启用'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-end gap-2">
-                          <Button size="sm" variant="outline" onClick={() => openEdit(originalIndex)}>
-                            编辑
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => removeProvider(originalIndex)}>
-                            删除
-                          </Button>
+                    <div
+                      key={p.name}
+                      className="rounded-lg border border-border bg-canvas p-4 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium font-mono text-ink">{p.name}</span>
+                            <Badge variant={p.enabled === false ? 'archived' : 'emerging'}>
+                              {p.enabled === false ? '停用' : '启用'}
+                            </Badge>
+                          </div>
+                          <div className="mt-1 text-xs font-mono text-ink-faint">
+                            #{p.priority} · {p.model}
+                            {p.protocol === 'anthropic' && (
+                              <Badge variant="emerging" className="ml-1">anthropic</Badge>
+                            )}
+                          </div>
                         </div>
-                      </TableCell>
-                    </TableRow>
+                      </div>
+                      <div className="text-xs font-mono text-ink-muted truncate" title={p.base_url}>
+                        {p.base_url}
+                      </div>
+                      <div className="text-xs text-ink-faint">
+                        API Key：{p.api_key ? `••••${p.api_key.slice(-4)}` : '未配置'}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        <Button size="sm" variant="outline" onClick={() => openEdit(originalIndex)}>
+                          编辑
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => removeProvider(originalIndex)}>
+                          删除
+                        </Button>
+                      </div>
+                    </div>
                   )
                 })}
-              </TableBody>
-            </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
+      </Reveal>
 
       {/* 编辑 / 新增 Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

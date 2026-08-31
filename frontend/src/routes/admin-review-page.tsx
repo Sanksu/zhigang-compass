@@ -1,5 +1,6 @@
 import { Navigate, useSearchParams } from 'react-router'
 import { PageHeader } from '@/components/layout/page-header'
+import { Reveal } from '@/components/ui/reveal'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ApprovalOverviewTab } from '@/components/admin/review/approval-overview-tab'
 import { CandidateReviewTab } from '@/components/admin/review/candidate-review-tab'
@@ -51,26 +52,28 @@ export function AdminReviewPage() {
         title="岗位审核"
         description="全审批池总览 + 六状态机全链路人工审核：候选晋升（candidate → emerging / rejected）· 演化晋级（emerging → stable / declining）· 衰退归档（declining → archived）· 观察池与字典守卫见独立路由"
       />
-      <Tabs value={tab} onValueChange={onTabChange}>
-        <TabsList>
-          <TabsTrigger value="overview" className="text-xs">总览</TabsTrigger>
-          <TabsTrigger value="candidate" className="text-xs">候选晋升审核</TabsTrigger>
-          <TabsTrigger value="evolution" className="text-xs">演化审核（emerging）</TabsTrigger>
-          <TabsTrigger value="edit" className="text-xs">岗位人工编辑</TabsTrigger>
-        </TabsList>
-        <TabsContent value="overview">
-          <ApprovalOverviewTab />
-        </TabsContent>
-        <TabsContent value="candidate">
-          <CandidateReviewTab />
-        </TabsContent>
-        <TabsContent value="evolution">
-          <EvolutionReviewTab />
-        </TabsContent>
-        <TabsContent value="edit">
-          <PositionEditorTab />
-        </TabsContent>
-      </Tabs>
+      <Reveal delay={380}>
+        <Tabs value={tab} onValueChange={onTabChange}>
+          <TabsList>
+            <TabsTrigger value="overview" className="text-xs">总览</TabsTrigger>
+            <TabsTrigger value="candidate" className="text-xs">候选晋升审核</TabsTrigger>
+            <TabsTrigger value="evolution" className="text-xs">演化审核（emerging）</TabsTrigger>
+            <TabsTrigger value="edit" className="text-xs">岗位人工编辑</TabsTrigger>
+          </TabsList>
+          <TabsContent value="overview">
+            <ApprovalOverviewTab />
+          </TabsContent>
+          <TabsContent value="candidate">
+            <CandidateReviewTab />
+          </TabsContent>
+          <TabsContent value="evolution">
+            <EvolutionReviewTab />
+          </TabsContent>
+          <TabsContent value="edit">
+            <PositionEditorTab />
+          </TabsContent>
+        </Tabs>
+      </Reveal>
     </>
   )
 }

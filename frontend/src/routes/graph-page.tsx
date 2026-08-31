@@ -31,11 +31,12 @@ import {
   type SkillPositionItem,
 } from '@/components/graph/node-detail-panel'
 import type { GraphData, GraphEdge, GraphViewType, NodeDetail } from '@/components/graph/types'
-import { SKILL_CATEGORY_PALETTE } from '@/components/graph/graph-visual-tokens'
+import { PORTRAIT_DIM_PALETTE, SKILL_CATEGORY_PALETTE } from '@/components/graph/graph-visual-tokens'
 import type { LearningPathItem } from '@/components/match/types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
+import { SkeletonLine } from '@/components/ui/skeleton'
 import { apiGet, ApiError } from '@/lib/api'
-import { cn } from '@/lib/utils'
+import { cn, isDark } from '@/lib/utils'
 import type { components } from '@/types/api'
 
 /** 3D 图谱懒加载 — Three.js 约 1.4MB，仅在用户点击"3D"时按需加载 */
@@ -138,6 +139,9 @@ export function GraphPage() {
   >([])
   // 岗位簇（职能域）两级下拉：簇选中后岗位选项联动过滤
   const [portraitCluster, setPortraitCluster] = useState('')
+  // 岗位画像切换加载：切换岗位时置 true，数据到达后 false——画布右上角显示
+  // 轻量加载提示（消除切换岗位时"旧图保持→数据到达瞬间替换"的突兀感）
+  const [portraitLoading, setPortraitLoading] = useState(false)
   // 视图数据缓存（session 级，08-16 性能优化）：同视图切换回来不重复请求/转换。
   // 数据随每日 ETL 更新，session 内缓存可接受（页面刷新即失效）
   const viewCacheRef = useRef<Map<GraphViewType, GraphData>>(new Map())
@@ -289,6 +293,11 @@ export function GraphPage() {
   useEffect(() => {
     if (view !== 'positionPortrait' || !portraitPosition) return
     let cancelled = false
+    // 切换加载态置位宏任务化：避免 effect 内同步 setState（级联渲染 lint）；
+    // 数据到达后清除（catch 同样清除，失败后画布回到旧数据但提示由 error 表达）
+    const t = window.setTimeout(() => {
+      if (!cancelled) setPortraitLoading(true)
+    }, 0)
     apiGet<PanoramaData>('/graph/view/positionPortrait', {
       params: { position: portraitPosition, limit: 200 },
     })
@@ -306,8 +315,13 @@ export function GraphPage() {
           )
         }
       })
+      .finally(() => {
+        window.clearTimeout(t)
+        if (!cancelled) setPortraitLoading(false)
+      })
     return () => {
       cancelled = true
+      window.clearTimeout(t)
     }
   }, [view, portraitPosition])
 
@@ -686,11 +700,35 @@ export function GraphPage() {
 
   // 加载 / 错误 / 空态
   if (loading) {
+    // 整体加载增强：骨架屏模拟图谱画布（工具栏行 + 图例行 + 主体区），
+    // 比纯文字 spinner 更有"即将成形"的预期；spinner 居中叠加提示
     return (
-      <Card className="h-[640px] flex items-center justify-center text-sm text-ink-muted">
-        <div className="flex items-center gap-3">
-          <div className="size-6 rounded-full border-2 border-ink border-t-transparent animate-spin" />
-          正在加载图谱全景…
+      <Card className="h-[min(720px,calc(100dvh-210px))] min-h-[560px] overflow-hidden border-atlas-grid">
+        <div className="flex h-full flex-col gap-4 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <SkeletonLine className="h-8 w-56" />
+            <div className="flex gap-2">
+              <SkeletonLine className="h-8 w-24" />
+              <SkeletonLine className="h-8 w-24" />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <SkeletonLine className="h-7 w-24" />
+            <SkeletonLine className="h-7 w-24" />
+            <SkeletonLine className="h-7 w-24" />
+          </div>
+          <div className="relative flex flex-1 items-center justify-center rounded-xl border border-atlas-grid bg-subtle/30">
+            <div className="flex items-center gap-3 text-sm text-ink-muted">
+              <div className="size-6 rounded-full border-2 border-ink border-t-transparent animate-spin" />
+              正在加载图谱全景…
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <SkeletonLine className="h-4 w-20" />
+            <SkeletonLine className="h-4 w-20" />
+            <SkeletonLine className="h-4 w-20" />
+            <SkeletonLine className="h-4 w-24" />
+          </div>
         </div>
       </Card>
     )
@@ -714,7 +752,10 @@ export function GraphPage() {
   }
 
   return (
-    <>
+    // 加载完成入场：从骨架屏切换到真实内容时整体淡入（该树分支从 loading
+    // return 切到本分支即新挂载，fade-in 天然触发一次；后续视图切换不清
+    // loading、不重挂载，动画不重放——只做首屏加载过渡）
+    <div className="animate-in fade-in-0 duration-300">
       <PageHeader
         title="能力图谱"
         description="从职能域进入岗位，再沿技能关系定位能力要求与演化信号"
@@ -809,7 +850,10 @@ export function GraphPage() {
                   <Select
                     value={portraitCluster || undefined}
                     onValueChange={(v) => {
+                      // 切换簇：清空选中态与展开态，避免上一岗位的画布外节点 / 展开残留
                       setSelected(null)
+                      setExpandedPositions(new Set())
+                      setExpandedDomains(new Set())
                       setPortraitCluster(v)
                       // 切簇：岗位自动切到该簇内最高频岗位（portraitOptions 已按 freq 降序）
                       const first = portraitOptions.find((o) => o.domainId === v)
@@ -828,8 +872,10 @@ export function GraphPage() {
                   <Select
                     value={portraitPosition || undefined}
                     onValueChange={(v) => {
-                      // 切换岗位：同步清空选中态（详情面板不残留上一岗位的画布外节点）
+                      // 切换岗位：同步清空选中态与展开态（详情面板/展开不残留上一岗位）
                       setSelected(null)
+                      setExpandedPositions(new Set())
+                      setExpandedDomains(new Set())
                       setPortraitPosition(v)
                     }}
                   >
@@ -939,6 +985,13 @@ export function GraphPage() {
               />
             </Suspense>
           )}
+          {/* 岗位画像切换加载覆盖：切换岗位期间轻量提示（消除"旧图保持→瞬间替换"突兀感） */}
+          {view === 'positionPortrait' && portraitLoading && (
+            <div className="absolute right-3 top-12 z-10 flex items-center gap-2 rounded-md border border-border bg-canvas/90 px-2.5 py-1.5 shadow-sm backdrop-blur text-xs text-ink-muted animate-in fade-in-0 duration-200">
+              <div className="size-3.5 rounded-full border-2 border-ink border-t-transparent animate-spin" />
+              加载岗位画像…
+            </div>
+          )}
           {/* 画布操作提示（可关闭） */}
           {showOperationHint && (
             <div className="absolute top-14 right-2 z-10 max-w-[180px] rounded-md border border-border bg-canvas/90 backdrop-blur px-2.5 py-2 shadow-sm">
@@ -987,7 +1040,10 @@ export function GraphPage() {
               className={focusMode ? 'h-full shadow-lg' : 'h-[640px]'}
             >
               <TabsContent value="detail" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
-                <NodeDetailPanel
+                {/* 详情面板过渡动画：节点切换时（key 变化）内容区淡入+轻微上移，
+                    弱化"点击节点→内容瞬变"的生硬感（岗位画像证据切换同样生效） */}
+                <div key={selected?.id ?? 'empty'} className="h-full animate-in fade-in-0 slide-in-from-bottom-1 duration-300">
+                  <NodeDetailPanel
                   node={selected}
                   stats={detailStats}
                   skillDetail={skillDetailView}
@@ -1015,6 +1071,7 @@ export function GraphPage() {
                   learningStatus={skillLearningStatus}
                   learnedSkills={learnedSkills}
                 />
+                </div>
               </TabsContent>
               <TabsContent value="analysis" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
                 <GraphAnalysisPanel
@@ -1063,6 +1120,27 @@ export function GraphPage() {
             ))}
           </div>
         </div>
+        {view === 'positionPortrait' && (() => {
+          const dimPalette = PORTRAIT_DIM_PALETTE[isDark() ? 'dark' : 'light']
+          const dims = [
+            ['salary', '薪资', dimPalette.salary],
+            ['experience', '经验', dimPalette.experience],
+            ['education', '学历', dimPalette.education],
+          ] as const
+          return (
+            <div className="space-y-2" role="listitem">
+              <p className="font-mono text-[12px] tracking-[0.15em] text-atlas-muted">PORTRAIT DIMENSION / 画像维度</p>
+              <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
+                {dims.map(([key, label, color]) => (
+                  <span key={key} className="flex items-center gap-1">
+                    <span className="size-2 rounded-full" style={{ backgroundColor: color }} />
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
         <div className="space-y-2" role="listitem">
           <p className="font-mono text-[12px] tracking-[0.15em] text-atlas-muted">POSITION STATUS / 岗位状态色</p>
           <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
@@ -1074,6 +1152,6 @@ export function GraphPage() {
             ))}
           </div>
         </div>      </div>
-    </>
+    </div>
   )
 }

@@ -1755,6 +1755,48 @@ paths:
                     $ref: '#/components/schemas/LlmConfig'
                   trace_id: { type: string }
 
+  /api/v1/admin/graph-governance/summary:
+    get:
+      tags: [admin]
+      summary: 岗位域治理总览（域划分 + 基准得分 + 待审自审数，只读）
+      responses:
+        '200':
+          description: 域治理总览（ApiResponse 包装）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/GraphGovernanceSummary'
+                  trace_id: { type: string }
+
+  /api/v1/admin/graph-governance/resync:
+    post:
+      tags: [admin]
+      summary: 触发岗位域重同步（骨干域+归类制，LLM 命名+自审；后台执行）
+      description: >
+        以 BackgroundTask 执行 scripts.sync_position_domains 同款主流程
+        （resolution=1.55, llm_name=True, 自审开启）。同一时刻仅允许一个
+        重同步任务（进行中重复触发返回 409）。完成后前端轮询 summary。
+      responses:
+        '200':
+          description: 已受理（ApiResponse 包装）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/GraphGovernanceResyncResult'
+                  trace_id: { type: string }
+        '409':
+          description: 已有重同步任务进行中
+
   /api/v1/admin/llm-decisions:
     get:
       tags: [admin]
@@ -1847,7 +1889,7 @@ paths:
   /api/v1/admin/jd:
     get:
       tags: [admin]
-      summary: JD 原始数据分页列表（管理页；q 关键词匹配标题/正文，source 源过滤）
+      summary: JD 原始数据分页列表（管理页；q 关键词匹配标题/正文，source 源过滤，needs_review 筛人工复核队列）
       parameters:
         - name: q
           in: query
@@ -1859,6 +1901,16 @@ paths:
           required: false
           schema: { type: string }
           description: 来源平台过滤（zhilian/boss/...）
+        - name: needs_review
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: 人工复核过滤（true=质量分 <0.6 的待复核队列；false=含未打标在内的非待复核行；缺省=全部）
+        - name: pending_extract
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: 待抽取过滤（true=抽取快照 extraction 为空的排队行，含从未抽取的新行与放行后待重抽的行；缺省=全部）
         - name: page
           in: query
           required: false
@@ -1907,7 +1959,7 @@ paths:
           $ref: '#/components/responses/NotFound'
     put:
       tags: [admin]
-      summary: 编辑 JD 原始数据（raw_text/source_url 等元数据；content_hash 同步重算，抽取快照不动——重抽需手动触发；写 AuditLog）
+      summary: 编辑 JD 原始数据（raw_text/source_url 等元数据；content_hash 同步重算，抽取快照不动——重抽需手动触发；needs_review true→false 视为放行并撤销 skipped 抽取标记；写 AuditLog）
       parameters:
         - name: jd_id
           in: path
@@ -1938,6 +1990,135 @@ paths:
       summary: 删除 JD 原始数据（写 AuditLog；图谱 Evidence 节点保留备份不联动删除）
       parameters:
         - name: jd_id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 删除结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data: { type: object }
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/admin/raw/{raw_type}:
+    get:
+      tags: [admin]
+      summary: 课程/论文/社区信号原始数据分页列表（q 关键词匹配快照标题与正文，source 源过滤）
+      parameters:
+        - name: raw_type
+          in: path
+          required: true
+          schema: { type: string, enum: [course, paper, community] }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+          description: 关键词（ILIKE 匹配 snapshot 标题与 raw_text）
+        - name: source
+          in: query
+          required: false
+          schema: { type: string }
+          description: 来源平台过滤（icourse163/coursera/edx/arxiv/github/stackoverflow）
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: 分页列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/RawAdminPage'
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/admin/raw/{raw_type}/{raw_id}:
+    get:
+      tags: [admin]
+      summary: 原始数据详情（快照全量 + 正文全文，供编辑回显）
+      parameters:
+        - name: raw_type
+          in: path
+          required: true
+          schema: { type: string, enum: [course, paper, community] }
+        - name: raw_id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 详情
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/RawAdminDetail'
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [admin]
+      summary: 编辑原始数据（title/raw_text/source_url；写 AuditLog；编辑随既有 ETL 指纹重算自然生效，图谱节点不联动）
+      parameters:
+        - name: raw_type
+          in: path
+          required: true
+          schema: { type: string, enum: [course, paper, community] }
+        - name: raw_id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RawAdminUpdate' }
+      responses:
+        '200':
+          description: 更新结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data: { type: object }
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [admin]
+      summary: 删除原始数据（写 AuditLog；图谱侧节点为独立备份不联动）
+      parameters:
+        - name: raw_type
+          in: path
+          required: true
+          schema: { type: string, enum: [course, paper, community] }
+        - name: raw_id
           in: path
           required: true
           schema: { type: integer, format: int64 }
@@ -2026,6 +2207,45 @@ paths:
                       decision_id: { type: string }
                   trace_id: { type: string }
 
+  /api/v1/admin/llm-decisions/{decision_id}/undo:
+    post:
+      tags: [admin]
+      summary: 撤销一条 auto_applied 治理决策（governance 域，7 天窗口内）——反做动态过滤/重建课程节点，dict_guard 不再对同实体自动执行；写 AuditLog
+      parameters:
+        - name: decision_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMDecisionReviewRequest'
+      responses:
+        '200':
+          description: 撤销成功（undo 明细：filter_removed 动态条目是否移除 / rebuilt 重建课程节点数 / notes 部分撤销说明）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      decision_id: { type: string }
+                      filter_removed: { type: boolean, description: add_stopword 专用：动态停用词条目已移除 }
+                      rebuilt: { type: integer, description: remove_node/remove_edge(course) 专用：按 course_raw 同名快照重建的课程节点数 }
+                      notes:
+                        type: array
+                        description: 部分撤销说明（如 course_raw 已无同名记录，节点待重新采集后由课程入图任务自然恢复）
+                        items: { type: string }
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/admin/skill-aliases:
     get:
       tags: [admin]
@@ -2063,6 +2283,87 @@ paths:
                       limit: { type: integer }
                       offset: { type: integer }
                   trace_id: { type: string }
+
+  /api/v1/admin/skills:
+    get:
+      tags: [admin]
+      summary: 技能治理列表（白名单标准名 ∪ approved 别名标准名；q/分类/白名单/噪声过滤 + 分页）
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 200, description: 关键字（名称或别名模糊匹配） }
+        - name: category
+          in: query
+          required: false
+          schema: { type: string, maxLength: 100, description: 分类过滤（模糊） }
+        - name: whitelist
+          in: query
+          required: false
+          schema: { type: string, enum: [all, only, exclude], default: all, description: 白名单过滤（only=仅白名单 / exclude=仅非白名单） }
+        - name: noise
+          in: query
+          required: false
+          schema: { type: string, enum: [all, only, exclude], default: all, description: 噪声过滤（only=仅噪声 / exclude=仅非噪声） }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 200 }
+      responses:
+        '200':
+          description: 技能治理分页列表（data 含 items/total/page/size）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/SkillAdminItem' }
+                      total: { type: integer }
+                      page: { type: integer }
+                      size: { type: integer }
+                  trace_id: { type: string }
+
+  /api/v1/admin/skill-aliases/{alias_id}/review:
+    post:
+      tags: [admin]
+      summary: 别名复核（pending → approved/rejected；写 AuditLog；approved 后热刷新动态别名表即时生效）
+      parameters:
+        - name: alias_id
+          in: path
+          required: true
+          schema: { type: string, description: 别名 UUID }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SkillAliasReviewIn' }
+      responses:
+        '200':
+          description: 复核成功（data 含 id/status/approved）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data: { $ref: '#/components/schemas/SkillAliasReviewOut' }
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 仅 pending 可复核（当前状态非 pending 返回 409）
 
   /api/v1/admin/positions/{position_name}:
     get:
@@ -3051,10 +3352,19 @@ components:
         company: { type: string }
         location: { type: string }
         source: { type: string }
+        source_id: { type: string, description: "源平台标识（source 平台内的 ID）" }
         source_url: { type: string, description: "出处链接（可能为空）" }
         crawled_at: { type: string }
         is_desensitized: { type: boolean }
         raw_text: { type: string, description: "JD 原文全文" }
+        position: { type: string, description: "归一化岗位名（snapshot.normalized_position，可空）" }
+        extraction_summary:
+          type: object
+          description: 抽取快照汇总（管理侧展示用，可空字段由核对空串兜底）
+          properties:
+            salary_range: { type: string, description: "薪资区间（raw 文案，可空串）" }
+            education_level: { type: string, description: "学历层（label，可空串）" }
+            experience: { type: string, description: "经验要求（text，可空串）" }
 
     JdAdminItem:
       type: object
@@ -3070,6 +3380,10 @@ components:
         crawled_at: { type: string }
         is_desensitized: { type: boolean }
         position: { type: string, description: "归一化岗位名（snapshot.normalized_position）" }
+        needs_review: { type: boolean, description: "人工复核标记（爬虫质量门 quality <0.6 → 待复核，未经放行不参与 LLM 抽取）" }
+        quality: { type: number, nullable: true, description: "质量评分 [0,1]（爬虫清洗管线打分；未打标行为 null）" }
+        released_at: { type: string, nullable: true, description: "放行时间（放行走 needs_review true→false 时写入 snapshot.released_at；已放行待重抽行为非空，从未放过行为 null）" }
+        has_extraction: { type: boolean, description: "是否已有抽取快照（extraction 键存在；重抽成功后 released_at 清除且该字段为 true，徽标据此不误显）" }
         text_length: { type: integer, description: "raw_text 长度" }
         updated_at: { type: string, description: "最近更新时间（编辑审计参考）" }
 
@@ -3100,6 +3414,9 @@ components:
         crawled_at: { type: string }
         is_desensitized: { type: boolean }
         position: { type: string }
+        needs_review: { type: boolean, description: "人工复核标记（爬虫质量门 quality <0.6）" }
+        quality: { type: number, nullable: true, description: "质量评分 [0,1]；未打标行为 null" }
+        released_at: { type: string, nullable: true, description: "放行时间（放行时写入 snapshot.released_at；已放行待重抽行为非空）" }
         raw_text: { type: string }
         extraction_summary:
           type: object
@@ -3118,6 +3435,64 @@ components:
         location: { type: string }
         source_url: { type: string }
         crawled_at: { type: string }
+        raw_text: { type: string }
+        needs_review:
+          type: boolean
+          description: "人工复核结论（缺省=不变更）。true→false 视为放行：后端同步撤销 snapshot.extraction 的 skipped 占位标记，JD 重新进入抽取游标待下轮 batch_extract 抽取；真实抽取产物不受影响；写 AuditLog"
+
+    RawAdminItem:
+      type: object
+      description: 课程/论文/社区原始数据列表项（GET /admin/raw/{raw_type}）
+      required: [id, source, source_id]
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        source: { type: string }
+        source_id: { type: string }
+        source_url: { type: string }
+        crawled_at: { type: string }
+        is_desensitized: { type: boolean }
+        text_length: { type: integer, description: "raw_text 长度" }
+        updated_at: { type: string }
+        extra:
+          type: object
+          description: "类型特有展示字段（course: quality/institution/skills_count；paper: published/authors_count；community: stars/votes/trend_type；缺失键 null）"
+          additionalProperties: true
+
+    RawAdminPage:
+      type: object
+      description: GET /admin/raw/{raw_type} 响应 data
+      required: [total, page, size, items]
+      properties:
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/RawAdminItem' }
+
+    RawAdminDetail:
+      type: object
+      description: GET/PUT /admin/raw/{raw_type}/{raw_id} 详情（快照全量 + 正文全文）
+      required: [id, raw_type, source, source_id, raw_text]
+      properties:
+        id: { type: integer, format: int64 }
+        raw_type: { type: string, enum: [course, paper, community] }
+        title: { type: string }
+        source: { type: string }
+        source_id: { type: string }
+        source_url: { type: string }
+        crawled_at: { type: string }
+        is_desensitized: { type: boolean }
+        raw_text: { type: string }
+        snapshot: { type: object, additionalProperties: true }
+
+    RawAdminUpdate:
+      type: object
+      description: PUT /admin/raw/{raw_type}/{raw_id} 请求体（仅列出的字段被更新；编辑随既有 ETL 指纹重算自然生效）
+      properties:
+        title: { type: string }
+        source_url: { type: string }
         raw_text: { type: string }
 
     SimilarSkillItem:
@@ -3712,6 +4087,68 @@ components:
     # LLM 决策与验收（08-24 决策信封：GET /admin/llm-decisions* 只读）
     # ============================================================
 
+    GraphGovernanceDomain:
+      type: object
+      description: 单个语义域（骨干簇或归类归并结果）
+      properties:
+        domain_id: { type: string, description: "域键 dom_{cid} 或 dom_general" }
+        domain_name: { type: string, description: LLM 语义域名或代表岗名 }
+        member_count: { type: integer }
+        members:
+          type: array
+          description: 成员（按 freq 降序，截断至 top 12），含归类依据来源与亲和度得分
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              freq: { type: integer }
+              source: { type: string, description: "归类依据：backbone骨干簇/pin_cluster骨干指派/pin治理指派/attach阈值归类/leftover_pin兜底指派/general_pin治理弃权/below_affinity证据不足/not_dominant多域拉扯/no_edges零投影边/leftover_no_edges投影外零证据" }
+              score: { type: number, nullable: true, description: 归类亲和度得分（治理指派/骨干为 null） }
+        source_counts:
+          type: object
+          description: 全成员来源分布（source → 数量）
+          additionalProperties: { type: integer }
+        is_general: { type: boolean, description: 是否为通用弃权域 }
+
+    GraphGovernanceSummary:
+      type: object
+      description: 岗位域治理总览
+      properties:
+        positions: { type: integer, description: 已划分岗位总数 }
+        semantic_domains: { type: integer, description: 语义域数（不含通用域） }
+        general_count: { type: integer, description: 通用弃权域岗位数 }
+        resync_running: { type: boolean, description: 是否有重同步任务进行中 }
+        last_resync: { type: string, nullable: true, description: 最近一次完成时间 ISO8601，无记录为 null }
+        benchmark:
+          type: object
+          nullable: true
+          description: 共成员基准评测（基准文件缺失/无可评行时为 null）
+          properties:
+            evaluated: { type: integer }
+            strict_accuracy: { type: number }
+            pairwise_f1: { type: number }
+            failures:
+              type: array
+              description: 未通过行（position/expect/detail/note）
+              items:
+                type: object
+                properties:
+                  position: { type: string }
+                  expect: { type: string }
+                  detail: { type: string }
+                  note: { type: string }
+        domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphGovernanceDomain'
+        membership_pending: { type: integer, description: cluster_membership 待审记录数 }
+
+    GraphGovernanceResyncResult:
+      type: object
+      properties:
+        started: { type: boolean, description: 已受理后台执行 }
+        message: { type: string }
+
     LlmDecisionItem:
       type: object
       description: 六域 LLM 决策记录（llm_decision_records 行）
@@ -3741,7 +4178,7 @@ components:
         confidence: { type: number, nullable: true }
         gate_result: { type: string, description: pass/blocked }
         risk_tier: { type: string, description: R0/R1/R2/blocked }
-        status: { type: string, description: shadow/proposal/auto_applied/blocked/rejected/approved/failed }
+        status: { type: string, description: shadow/proposal/auto_applied/blocked/rejected/approved/failed/reverted（reverted=自动生效已被人工撤销） }
         reviewer: { type: string }
         review_reason: { type: string }
         effects_applied: { type: boolean }
@@ -3811,6 +4248,37 @@ components:
         confidence: { type: number, nullable: true, description: LLM merge 置信度 }
         applied_to_graph: { type: boolean, description: 图同步进度标记（别名 approve 即生效，此字段预留） }
         created_at: { type: string, description: ISO8601 }
+
+    SkillAdminItem:
+      type: object
+      description: 技能治理列表项（GET /admin/skills：白名单标准名 ∪ approved 别名标准名聚合）
+      required: [name, in_whitelist, is_noise]
+      properties:
+        name: { type: string, description: 技能标准名 }
+        category: { type: string, description: 分类（白名单内取 skill_whitelist.yaml category；白名单外可为空） }
+        in_whitelist: { type: boolean, description: 是否在 skill_whitelist.yaml（幻觉防控第三道防线单一事实源） }
+        is_noise: { type: boolean, description: 是否命中噪声过滤词 }
+        aliases:
+          type: array
+          description: approved 别名变体列表
+          items: { type: string }
+
+    SkillAliasReviewIn:
+      type: object
+      description: POST /admin/skill-aliases/{alias_id}/review 请求体
+      required: [approved]
+      properties:
+        approved: { type: boolean, description: true=通过并写入动态别名表 / false=驳回 }
+        reason: { type: string, maxLength: 500, description: 审批理由 }
+
+    SkillAliasReviewOut:
+      type: object
+      description: 别名复核响应 data
+      required: [id, status, approved]
+      properties:
+        id: { type: string, description: 别名 UUID }
+        status: { type: string, description: 复核后状态（approved/rejected） }
+        approved: { type: boolean }
 
     # ============================================================
     # 演化模块端点 data（08-14 契约补全：versions/diff/trends/signals/state-machine/watch）

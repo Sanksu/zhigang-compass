@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Activity, Database, Gauge } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
+import { Reveal } from '@/components/ui/reveal'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CrawlScheduleConfig } from '@/components/admin/crawl-schedule-config'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -8,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { cn } from '@/lib/utils'
 import {
   Select,
   SelectContent,
@@ -430,12 +432,15 @@ export function AdminCrawlPage() {
         <TabsContent value="realtime">
           {/* 顶部指标卡（真实 raw 表 + output 统计）——共享 MetricCard 统一形态 */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            {metrics.map((m) => (
-              <MetricCard key={m.id} data={m} />
+            {metrics.map((m, i) => (
+              <Reveal key={m.id} delay={i * 90} className="h-full">
+                <MetricCard data={m} className="h-full" />
+              </Reveal>
             ))}
           </div>
 
           {/* 平台状态表 */}
+          <Reveal delay={380}>
           <Card className="mb-6">
             <CardHeader>
               <CardTitle className="text-sm flex items-center justify-between">
@@ -447,68 +452,132 @@ export function AdminCrawlPage() {
               {loading ? (
                 <p className="py-8 text-center text-sm text-ink-muted">加载真实采集状态…</p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>平台名</TableHead>
-                      <TableHead>等级</TableHead>
-                      <TableHead>状态</TableHead>
-                      <TableHead className="text-right">今日采集</TableHead>
-                      <TableHead className="text-right">累计采集</TableHead>
-                      <TableHead>最后运行</TableHead>
-                      <TableHead className="text-right">操作</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+                <>
+                  {/* 桌面端：表格视图 */}
+                  <div className="hidden lg:block">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>平台名</TableHead>
+                          <TableHead>等级</TableHead>
+                          <TableHead>状态</TableHead>
+                          <TableHead className="text-right">今日采集</TableHead>
+                          <TableHead className="text-right">累计采集</TableHead>
+                          <TableHead>最后运行</TableHead>
+                          <TableHead className="text-right">操作</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {platforms.map((p) => {
+                          const meta = STATUS_META[platformStatus(p, history)]
+                          return (
+                            <TableRow key={p.id} className={p.status === 'archived' ? 'opacity-50' : ''}>
+                              <TableCell className="font-medium">{p.name}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={LEVEL_CLASS[p.level]}>{p.level}</Badge>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={meta.variant}>{meta.label}</Badge>
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums font-mono">{p.todayCount.toLocaleString()}</TableCell>
+                              <TableCell className="text-right tabular-nums font-mono text-ink-muted">{p.totalCount.toLocaleString()}</TableCell>
+                              <TableCell className="text-xs text-ink-muted font-mono">{p.lastRun}</TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={p.status === 'archived' || isBusy}
+                                    onClick={() => triggerCrawl(p.id)}
+                                  >
+                                    触发
+                                  </Button>
+                                  <Button size="sm" variant="ghost" onClick={() => setLogDialog({
+                                    platformName: p.name,
+                                    taskId: history.find((h) => h.platformKey === p.id)?.id ?? null,
+                                  })}>日志</Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                        {platforms.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
+                              暂无采集记录，请先运行爬虫
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {/* 移动端：卡片视图 */}
+                  <div className="space-y-3 lg:hidden">
                     {platforms.map((p) => {
                       const meta = STATUS_META[platformStatus(p, history)]
                       return (
-                        <TableRow key={p.id} className={p.status === 'archived' ? 'opacity-50' : ''}>
-                          <TableCell className="font-medium">{p.name}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={LEVEL_CLASS[p.level]}>{p.level}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={meta.variant}>{meta.label}</Badge>
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums font-mono">{p.todayCount.toLocaleString()}</TableCell>
-                          <TableCell className="text-right tabular-nums font-mono text-ink-muted">{p.totalCount.toLocaleString()}</TableCell>
-                          <TableCell className="text-xs text-ink-muted font-mono">{p.lastRun}</TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={p.status === 'archived' || isBusy}
-                                onClick={() => triggerCrawl(p.id)}
-                              >
-                                触发
-                              </Button>
-                              <Button size="sm" variant="ghost" onClick={() => setLogDialog({
-                                platformName: p.name,
-                                taskId: history.find((h) => h.platformKey === p.id)?.id ?? null,
-                              })}>日志</Button>
+                        <div
+                          key={p.id}
+                          className={cn(
+                            'rounded-lg border border-border bg-canvas p-4 space-y-3',
+                            p.status === 'archived' && 'opacity-50',
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-ink">{p.name}</span>
+                                <Badge variant="outline" className={LEVEL_CLASS[p.level]}>{p.level}</Badge>
+                              </div>
+                              <div className="mt-1">
+                                <Badge variant={meta.variant}>{meta.label}</Badge>
+                              </div>
                             </div>
-                          </TableCell>
-                        </TableRow>
+                            <div className="text-right">
+                              <div className="text-lg font-semibold tabular-nums font-mono text-ink">
+                                {p.todayCount.toLocaleString()}
+                              </div>
+                              <div className="text-[11px] text-ink-faint">今日采集</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between text-xs text-ink-faint">
+                            <span>累计 {p.totalCount.toLocaleString()}</span>
+                            <span className="font-mono">{p.lastRun}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={p.status === 'archived' || isBusy}
+                              onClick={() => triggerCrawl(p.id)}
+                            >
+                              触发采集
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setLogDialog({
+                              platformName: p.name,
+                              taskId: history.find((h) => h.platformKey === p.id)?.id ?? null,
+                            })}>查看日志</Button>
+                          </div>
+                        </div>
                       )
                     })}
                     {platforms.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
-                          暂无采集记录，请先运行爬虫
-                        </TableCell>
-                      </TableRow>
+                      <div className="py-8 text-center text-sm text-ink-faint">
+                        暂无采集记录，请先运行爬虫
+                      </div>
                     )}
-                  </TableBody>
-                </Table>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
+          </Reveal>
     
           {/* 手动触发表单 + 当前任务进度 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-            <Card>
+            <Reveal delay={500} className="h-full">
+            <Card className="h-full">
               <CardHeader>
                 <CardTitle className="text-sm">手动触发爬取</CardTitle>
               </CardHeader>
@@ -566,8 +635,10 @@ export function AdminCrawlPage() {
                 </Button>
               </CardContent>
             </Card>
+            </Reveal>
     
-            <Card>
+            <Reveal delay={620} className="h-full">
+            <Card className="h-full">
               <CardHeader>
                 <CardTitle className="text-sm flex items-center justify-between">
                   <span>当前任务</span>
@@ -636,9 +707,11 @@ export function AdminCrawlPage() {
                 )}
               </CardContent>
             </Card>
+            </Reveal>
           </div>
     
           {/* 历史记录 */}
+          <Reveal delay={740}>
           <Card>
             <CardHeader>
               <CardTitle className="text-sm flex items-center justify-between">
@@ -647,52 +720,102 @@ export function AdminCrawlPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>时间</TableHead>
-                    <TableHead>平台</TableHead>
-                    <TableHead>关键词</TableHead>
-                    <TableHead className="text-right">采集数</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>错误/说明</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {history.length === 0 ? (
+              {/* 桌面端：表格视图 */}
+              <div className="hidden lg:block">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
-                        暂无爬取记录，点击上方「触发爬取」开始
-                      </TableCell>
+                      <TableHead>时间</TableHead>
+                      <TableHead>平台</TableHead>
+                      <TableHead>关键词</TableHead>
+                      <TableHead className="text-right">采集数</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>错误/说明</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
                     </TableRow>
-                  ) : (
-                    history.map((h) => {
-                      const meta = HISTORY_STATUS_META[h.status]
-                      return (
-                        <TableRow key={h.id}>
-                          <TableCell className="text-xs font-mono text-ink-muted">{h.time}</TableCell>
-                          <TableCell className="font-medium">{h.platform}</TableCell>
-                          <TableCell className="text-ink-secondary">{h.keyword}</TableCell>
-                          <TableCell className="text-right tabular-nums font-mono">{h.count}</TableCell>
-                          <TableCell><Badge variant={meta.variant}>{meta.label}</Badge></TableCell>
-                          <TableCell className="text-xs text-ink-muted truncate max-w-[220px]">{h.error || '—'}</TableCell>
-                          <TableCell className="text-right">
-                            <Button size="sm" variant="ghost" onClick={() => setDetailRow(h)}>详情</Button>
-                          </TableCell>
-                        </TableRow>
-                      )
-                    })
-                  )}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {history.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
+                          暂无爬取记录，点击上方「触发爬取」开始
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      history.map((h) => {
+                        const meta = HISTORY_STATUS_META[h.status]
+                        return (
+                          <TableRow key={h.id}>
+                            <TableCell className="text-xs font-mono text-ink-muted">{h.time}</TableCell>
+                            <TableCell className="font-medium">{h.platform}</TableCell>
+                            <TableCell className="text-ink-secondary">{h.keyword}</TableCell>
+                            <TableCell className="text-right tabular-nums font-mono">{h.count}</TableCell>
+                            <TableCell><Badge variant={meta.variant}>{meta.label}</Badge></TableCell>
+                            <TableCell className="text-xs text-ink-muted truncate max-w-[220px]">{h.error || '—'}</TableCell>
+                            <TableCell className="text-right">
+                              <Button size="sm" variant="ghost" onClick={() => setDetailRow(h)}>详情</Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* 移动端：卡片视图 */}
+              <div className="space-y-3 lg:hidden">
+                {history.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-ink-faint">
+                    暂无爬取记录，点击上方「触发爬取」开始
+                  </div>
+                ) : (
+                  history.map((h) => {
+                    const meta = HISTORY_STATUS_META[h.status]
+                    return (
+                      <div
+                        key={h.id}
+                        className="rounded-lg border border-border bg-canvas p-4 space-y-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-ink">{h.platform}</span>
+                              <Badge variant={meta.variant}>{meta.label}</Badge>
+                            </div>
+                            <div className="text-[11px] text-ink-faint font-mono mt-0.5">{h.time}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-lg font-semibold tabular-nums font-mono text-ink">
+                              {h.count}
+                            </div>
+                            <div className="text-[11px] text-ink-faint">采集数</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-ink-muted">
+                          <span>关键词：<span className="text-ink-secondary">{h.keyword}</span></span>
+                        </div>
+                        {h.error && (
+                          <p className="text-xs text-ink-muted border-t border-border pt-1.5 truncate">{h.error}</p>
+                        )}
+                        <Button size="sm" variant="outline" className="w-full" onClick={() => setDetailRow(h)}>
+                          查看详情
+                        </Button>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
             </CardContent>
           </Card>
+          </Reveal>
         </TabsContent>
 
         {/* 调度与限频：采集上限 + 限频 + 每爬虫配置（08-27 从 settings 迁入，爬虫域一处管全） */}
         <TabsContent value="schedule">
-          <CrawlScheduleConfig />
+          <Reveal delay={380}>
+            <CrawlScheduleConfig />
+          </Reveal>
         </TabsContent>
       </Tabs>
 

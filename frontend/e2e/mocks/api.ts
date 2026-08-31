@@ -87,6 +87,49 @@ const AUDIT_LOGS = {
   total: 1,
 }
 
+/** LLM 决策记录 fixture（响应式 E2E：验证桌面 Table / 移动卡片双模式切换） */
+const LLM_DECISIONS = {
+  items: [
+    {
+      id: 'dec-1',
+      domain: 'skill_normalize',
+      entity_type: 'skill',
+      entity_id: 'react.js',
+      run_id: 'run-001',
+      status: 'proposal',
+      risk_tier: 'R1',
+      confidence: 0.82,
+      provider: 'mock-provider',
+      created_at: '2026-08-29T08:00:00Z',
+    },
+  ],
+  total: 1,
+  limit: 20,
+  offset: 0,
+}
+
+const LLM_DECISIONS_SUMMARY = {
+  by_domain: [],
+  totals: { proposal: 1, auto_applied: 0, blocked: 0, shadow: 0 },
+}
+
+/** 爬虫历史记录 fixture（响应式 E2E：验证桌面 Table / 移动卡片双模式切换） */
+const CRAWL_HISTORY = {
+  items: [
+    {
+      id: 'task-001',
+      platform: 'boss',
+      platform_name: 'BOSS 直聘',
+      keyword: 'Python',
+      items: 42,
+      status: 'success',
+      error: '',
+      created_at: '2026-08-29T08:00:00Z',
+    },
+  ],
+  total: 1,
+}
+
 /** 安装拦截：后续所有测试请求先过 fixture 分发（须在 goto 前调用）；每次安装复位登录态。 */
 export function installApiMock(page: Page): void {
   authed = false
@@ -135,6 +178,11 @@ export function installApiMock(page: Page): void {
     if (method === 'GET' && p === '/resume/list') return authed ? fulfill(RESUME_LIST) : unauthorized()
     if (method === 'GET' && p === '/evolution/versions') return authed ? fulfill(EVOLUTION_VERSIONS) : unauthorized()
     if (method === 'GET' && p === '/admin/audit/logs') return authed ? fulfill(AUDIT_LOGS) : unauthorized()
+
+    // 响应式 E2E fixture（admin 端点，需登录）
+    if (method === 'GET' && p === '/admin/llm-decisions/summary') return authed ? fulfill(LLM_DECISIONS_SUMMARY) : unauthorized()
+    if (method === 'GET' && p.startsWith('/admin/llm-decisions')) return authed ? fulfill(LLM_DECISIONS) : unauthorized()
+    if (method === 'GET' && p === '/admin/crawl/history') return authed ? fulfill(CRAWL_HISTORY) : unauthorized()
 
     // 未匹配端点：404 业务码（页面既有降级路径处理，不阻塞）
     return route.fulfill({

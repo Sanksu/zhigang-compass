@@ -190,3 +190,27 @@ describe('DictGuardTab 字典守卫', () => {
     expect(screen.getByText('字典守卫巡检已提交，等待 worker 执行；稍后可查看报告')).toBeInTheDocument()
   })
 })
+
+describe('DictGuardTab 变更审计理由展示', () => {
+  it('审计理由全量换行展示（不再单行截断）', async () => {
+    const longReason =
+      '该课程为专升本备考督学班，面向学历提升考试而非可雇佣技能培训，且完全孤立无边，属低质主题词课程，' +
+      '应删除孤立课程节点。理由长度超过 200px 单行宽度，必须完整可读而非省略号截断。'
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.startsWith('/admin/dict-guard/proposals')) {
+        return Promise.resolve({ items: [], total: 0, page: 1, size: 20 })
+      }
+      if (url.startsWith('/admin/dict-guard/changes')) {
+        return Promise.resolve({ items: [{ ...changeLog(), reason: longReason }], total: 1, page: 1, size: 20 })
+      }
+      if (url.startsWith('/admin/dict-guard/report/latest')) {
+        return Promise.resolve(REPORT)
+      }
+      return Promise.reject(new Error(`unexpected url ${url}`))
+    })
+    render(<DictGuardTab />)
+    const cell = await screen.findByText(longReason)
+    expect(cell.className).not.toContain('truncate')
+    expect(cell.className).toContain('whitespace-normal')
+  })
+})

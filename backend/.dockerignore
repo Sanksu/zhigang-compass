@@ -7,6 +7,9 @@ __pycache__
 tests/
 data/*
 !data/crawlers/
+!data/golden_set/
+data/golden_set/*
+!data/golden_set/position_domain_eval.jsonl
 data/crawlers/output/
 *.md
 .DS_Store

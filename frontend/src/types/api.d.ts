@@ -3031,6 +3031,98 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/graph-governance/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 岗位域治理总览（域划分 + 基准得分 + 待审自审数，只读） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 域治理总览（ApiResponse 包装） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["GraphGovernanceSummary"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/graph-governance/resync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 触发岗位域重同步（骨干域+归类制，LLM 命名+自审；后台执行）
+         * @description 以 BackgroundTask 执行 scripts.sync_position_domains 同款主流程 （resolution=1.55, llm_name=True, 自审开启）。同一时刻仅允许一个 重同步任务（进行中重复触发返回 409）。完成后前端轮询 summary。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 已受理（ApiResponse 包装） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["GraphGovernanceResyncResult"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                /** @description 已有重同步任务进行中 */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/llm-decisions": {
         parameters: {
             query?: never;
@@ -3179,7 +3271,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** JD 原始数据分页列表（管理页；q 关键词匹配标题/正文，source 源过滤） */
+        /** JD 原始数据分页列表（管理页；q 关键词匹配标题/正文，source 源过滤，needs_review 筛人工复核队列） */
         get: {
             parameters: {
                 query?: {
@@ -3187,6 +3279,10 @@ export interface paths {
                     q?: string;
                     /** @description 来源平台过滤（zhilian/boss/...） */
                     source?: string;
+                    /** @description 人工复核过滤（true=质量分 <0.6 的待复核队列；false=含未打标在内的非待复核行；缺省=全部） */
+                    needs_review?: boolean;
+                    /** @description 待抽取过滤（true=抽取快照 extraction 为空的排队行，含从未抽取的新行与放行后待重抽的行；缺省=全部） */
+                    pending_extract?: boolean;
                     page?: number;
                     size?: number;
                 };
@@ -3256,7 +3352,7 @@ export interface paths {
                 404: components["responses"]["NotFound"];
             };
         };
-        /** 编辑 JD 原始数据（raw_text/source_url 等元数据；content_hash 同步重算，抽取快照不动——重抽需手动触发；写 AuditLog） */
+        /** 编辑 JD 原始数据（raw_text/source_url 等元数据；content_hash 同步重算，抽取快照不动——重抽需手动触发；needs_review true→false 视为放行并撤销 skipped 抽取标记；写 AuditLog） */
         put: {
             parameters: {
                 query?: never;
@@ -3297,6 +3393,164 @@ export interface paths {
                 header?: never;
                 path: {
                     jd_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 删除结果 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: Record<string, never>;
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/raw/{raw_type}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 课程/论文/社区信号原始数据分页列表（q 关键词匹配快照标题与正文，source 源过滤） */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 关键词（ILIKE 匹配 snapshot 标题与 raw_text） */
+                    q?: string;
+                    /** @description 来源平台过滤（icourse163/coursera/edx/arxiv/github/stackoverflow） */
+                    source?: string;
+                    page?: number;
+                    size?: number;
+                };
+                header?: never;
+                path: {
+                    raw_type: "course" | "paper" | "community";
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 分页列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["RawAdminPage"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/raw/{raw_type}/{raw_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 原始数据详情（快照全量 + 正文全文，供编辑回显） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    raw_type: "course" | "paper" | "community";
+                    raw_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 详情 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["RawAdminDetail"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        /** 编辑原始数据（title/raw_text/source_url；写 AuditLog；编辑随既有 ETL 指纹重算自然生效，图谱节点不联动） */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    raw_type: "course" | "paper" | "community";
+                    raw_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RawAdminUpdate"];
+                };
+            };
+            responses: {
+                /** @description 更新结果 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: Record<string, never>;
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        post?: never;
+        /** 删除原始数据（写 AuditLog；图谱侧节点为独立备份不联动） */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    raw_type: "course" | "paper" | "community";
+                    raw_id: number;
                 };
                 cookie?: never;
             };
@@ -3438,6 +3692,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/llm-decisions/{decision_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 撤销一条 auto_applied 治理决策（governance 域，7 天窗口内）——反做动态过滤/重建课程节点，dict_guard 不再对同实体自动执行；写 AuditLog */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    decision_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["LLMDecisionReviewRequest"];
+                };
+            };
+            responses: {
+                /** @description 撤销成功（undo 明细：filter_removed 动态条目是否移除 / rebuilt 重建课程节点数 / notes 部分撤销说明） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: {
+                                decision_id?: string;
+                                /** @description add_stopword 专用：动态停用词条目已移除 */
+                                filter_removed?: boolean;
+                                /** @description remove_node/remove_edge(course) 专用：按 course_raw 同名快照重建的课程节点数 */
+                                rebuilt?: number;
+                                /** @description 部分撤销说明（如 course_raw 已无同名记录，节点待重新采集后由课程入图任务自然恢复） */
+                                notes?: string[];
+                            };
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/skill-aliases": {
         parameters: {
             query?: never;
@@ -3482,6 +3792,114 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 技能治理列表（白名单标准名 ∪ approved 别名标准名；q/分类/白名单/噪声过滤 + 分页） */
+        get: {
+            parameters: {
+                query?: {
+                    q?: string;
+                    category?: string;
+                    whitelist?: "all" | "only" | "exclude";
+                    noise?: "all" | "only" | "exclude";
+                    page?: number;
+                    size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 技能治理分页列表（data 含 items/total/page/size） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: {
+                                items?: components["schemas"]["SkillAdminItem"][];
+                                total?: number;
+                                page?: number;
+                                size?: number;
+                            };
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skill-aliases/{alias_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 别名复核（pending → approved/rejected；写 AuditLog；approved 后热刷新动态别名表即时生效） */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    alias_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SkillAliasReviewIn"];
+                };
+            };
+            responses: {
+                /** @description 复核成功（data 含 id/status/approved） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillAliasReviewOut"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+                /** @description 仅 pending 可复核（当前状态非 pending 返回 409） */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -4815,12 +5233,25 @@ export interface components {
             company?: string;
             location?: string;
             source: string;
+            /** @description 源平台标识（source 平台内的 ID） */
+            source_id?: string;
             /** @description 出处链接（可能为空） */
             source_url?: string;
             crawled_at?: string;
             is_desensitized?: boolean;
             /** @description JD 原文全文 */
             raw_text: string;
+            /** @description 归一化岗位名（snapshot.normalized_position，可空） */
+            position?: string;
+            /** @description 抽取快照汇总（管理侧展示用，可空字段由核对空串兜底） */
+            extraction_summary?: {
+                /** @description 薪资区间（raw 文案，可空串） */
+                salary_range?: string;
+                /** @description 学历层（label，可空串） */
+                education_level?: string;
+                /** @description 经验要求（text，可空串） */
+                experience?: string;
+            };
         };
         /** @description JD 管理列表项（GET /admin/jd） */
         JdAdminItem: {
@@ -4835,6 +5266,14 @@ export interface components {
             is_desensitized?: boolean;
             /** @description 归一化岗位名（snapshot.normalized_position） */
             position?: string;
+            /** @description 人工复核标记（爬虫质量门 quality <0.6 → 待复核，未经放行不参与 LLM 抽取） */
+            needs_review?: boolean;
+            /** @description 质量评分 [0,1]（爬虫清洗管线打分；未打标行为 null） */
+            quality?: number | null;
+            /** @description 放行时间（放行走 needs_review true→false 时写入 snapshot.released_at；已放行待重抽行为非空，从未放过行为 null） */
+            released_at?: string | null;
+            /** @description 是否已有抽取快照（extraction 键存在；重抽成功后 released_at 清除且该字段为 true，徽标据此不误显） */
+            has_extraction?: boolean;
             /** @description raw_text 长度 */
             text_length?: number;
             /** @description 最近更新时间（编辑审计参考） */
@@ -4860,6 +5299,12 @@ export interface components {
             crawled_at?: string;
             is_desensitized?: boolean;
             position?: string;
+            /** @description 人工复核标记（爬虫质量门 quality <0.6） */
+            needs_review?: boolean;
+            /** @description 质量评分 [0,1]；未打标行为 null */
+            quality?: number | null;
+            /** @description 放行时间（放行时写入 snapshot.released_at；已放行待重抽行为非空） */
+            released_at?: string | null;
             raw_text: string;
             /** @description 抽取摘要（salary_range/education.level/experience_range，只读展示——编辑不自动重抽） */
             extraction_summary?: {
@@ -4875,6 +5320,56 @@ export interface components {
             location?: string;
             source_url?: string;
             crawled_at?: string;
+            raw_text?: string;
+            /** @description 人工复核结论（缺省=不变更）。true→false 视为放行：后端同步撤销 snapshot.extraction 的 skipped 占位标记，JD 重新进入抽取游标待下轮 batch_extract 抽取；真实抽取产物不受影响；写 AuditLog */
+            needs_review?: boolean;
+        };
+        /** @description 课程/论文/社区原始数据列表项（GET /admin/raw/{raw_type}） */
+        RawAdminItem: {
+            /** Format: int64 */
+            id: number;
+            title?: string;
+            source: string;
+            source_id: string;
+            source_url?: string;
+            crawled_at?: string;
+            is_desensitized?: boolean;
+            /** @description raw_text 长度 */
+            text_length?: number;
+            updated_at?: string;
+            /** @description 类型特有展示字段（course: quality/institution/skills_count；paper: published/authors_count；community: stars/votes/trend_type；缺失键 null） */
+            extra?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description GET /admin/raw/{raw_type} 响应 data */
+        RawAdminPage: {
+            total: number;
+            page: number;
+            size: number;
+            items: components["schemas"]["RawAdminItem"][];
+        };
+        /** @description GET/PUT /admin/raw/{raw_type}/{raw_id} 详情（快照全量 + 正文全文） */
+        RawAdminDetail: {
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            raw_type: "course" | "paper" | "community";
+            title?: string;
+            source: string;
+            source_id: string;
+            source_url?: string;
+            crawled_at?: string;
+            is_desensitized?: boolean;
+            raw_text: string;
+            snapshot?: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description PUT /admin/raw/{raw_type}/{raw_id} 请求体（仅列出的字段被更新；编辑随既有 ETL 指纹重算自然生效） */
+        RawAdminUpdate: {
+            title?: string;
+            source_url?: string;
             raw_text?: string;
         };
         /** @description 相似技能项（GET /graph/skill/similar，语义相似度） */
@@ -5375,6 +5870,63 @@ export interface components {
         LlmConfig: {
             providers: components["schemas"]["LlmProviderConfig"][];
         };
+        /** @description 单个语义域（骨干簇或归类归并结果） */
+        GraphGovernanceDomain: {
+            /** @description 域键 dom_{cid} 或 dom_general */
+            domain_id?: string;
+            /** @description LLM 语义域名或代表岗名 */
+            domain_name?: string;
+            member_count?: number;
+            /** @description 成员（按 freq 降序，截断至 top 12），含归类依据来源与亲和度得分 */
+            members?: {
+                name?: string;
+                freq?: number;
+                /** @description 归类依据：backbone骨干簇/pin_cluster骨干指派/pin治理指派/attach阈值归类/leftover_pin兜底指派/general_pin治理弃权/below_affinity证据不足/not_dominant多域拉扯/no_edges零投影边/leftover_no_edges投影外零证据 */
+                source?: string;
+                /** @description 归类亲和度得分（治理指派/骨干为 null） */
+                score?: number | null;
+            }[];
+            /** @description 全成员来源分布（source → 数量） */
+            source_counts?: {
+                [key: string]: number;
+            };
+            /** @description 是否为通用弃权域 */
+            is_general?: boolean;
+        };
+        /** @description 岗位域治理总览 */
+        GraphGovernanceSummary: {
+            /** @description 已划分岗位总数 */
+            positions?: number;
+            /** @description 语义域数（不含通用域） */
+            semantic_domains?: number;
+            /** @description 通用弃权域岗位数 */
+            general_count?: number;
+            /** @description 是否有重同步任务进行中 */
+            resync_running?: boolean;
+            /** @description 最近一次完成时间 ISO8601，无记录为 null */
+            last_resync?: string | null;
+            /** @description 共成员基准评测（基准文件缺失/无可评行时为 null） */
+            benchmark?: {
+                evaluated?: number;
+                strict_accuracy?: number;
+                pairwise_f1?: number;
+                /** @description 未通过行（position/expect/detail/note） */
+                failures?: {
+                    position?: string;
+                    expect?: string;
+                    detail?: string;
+                    note?: string;
+                }[];
+            } | null;
+            domains?: components["schemas"]["GraphGovernanceDomain"][];
+            /** @description cluster_membership 待审记录数 */
+            membership_pending?: number;
+        };
+        GraphGovernanceResyncResult: {
+            /** @description 已受理后台执行 */
+            started?: boolean;
+            message?: string;
+        };
         /** @description 六域 LLM 决策记录（llm_decision_records 行） */
         LlmDecisionItem: {
             /** @description UUID */
@@ -5403,7 +5955,7 @@ export interface components {
             gate_result?: string;
             /** @description R0/R1/R2/blocked */
             risk_tier?: string;
-            /** @description shadow/proposal/auto_applied/blocked/rejected/approved/failed */
+            /** @description shadow/proposal/auto_applied/blocked/rejected/approved/failed/reverted（reverted=自动生效已被人工撤销） */
             status: string;
             reviewer?: string;
             review_reason?: string;
@@ -5477,6 +6029,34 @@ export interface components {
             applied_to_graph?: boolean;
             /** @description ISO8601 */
             created_at: string;
+        };
+        /** @description 技能治理列表项（GET /admin/skills：白名单标准名 ∪ approved 别名标准名聚合） */
+        SkillAdminItem: {
+            /** @description 技能标准名 */
+            name: string;
+            /** @description 分类（白名单内取 skill_whitelist.yaml category；白名单外可为空） */
+            category?: string;
+            /** @description 是否在 skill_whitelist.yaml（幻觉防控第三道防线单一事实源） */
+            in_whitelist: boolean;
+            /** @description 是否命中噪声过滤词 */
+            is_noise: boolean;
+            /** @description approved 别名变体列表 */
+            aliases?: string[];
+        };
+        /** @description POST /admin/skill-aliases/{alias_id}/review 请求体 */
+        SkillAliasReviewIn: {
+            /** @description true=通过并写入动态别名表 / false=驳回 */
+            approved: boolean;
+            /** @description 审批理由 */
+            reason?: string;
+        };
+        /** @description 别名复核响应 data */
+        SkillAliasReviewOut: {
+            /** @description 别名 UUID */
+            id: string;
+            /** @description 复核后状态（approved/rejected） */
+            status: string;
+            approved: boolean;
         };
         /** @description 图谱版本列表项（GET /evolution/versions） */
         EvolutionVersion: {
