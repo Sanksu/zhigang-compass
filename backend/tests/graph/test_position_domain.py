@@ -18,6 +18,7 @@ from scripts.sync_position_domains import (
     demote_small_clusters,
     guard_domain_distribution,
     resolve_fringe,
+    resolve_leftover_pins,
     split_backbone,
 )
 
@@ -327,3 +328,28 @@ class TestDomainDecisionRecords:
         script._try_persist_domain_records(
             {"数据分析师": "金融数据分析"}, {"数据分析师": ["数据分析师"]}, object(),
         )  # 不抛异常即通过
+
+
+class TestResolveLeftoverPins:
+    """投影外孤立岗 pin 兜底：治理声明覆盖「无投影边」的技术盲区。"""
+
+    def _assign(self):
+        return {"id_fe": ("dom_1", "前端开发"), "id_be": ("dom_2", "后端开发")}
+
+    def _name_map(self):
+        return {"id_fe": "前端开发工程师", "id_be": "后端开发工程师"}
+
+    def test_pinned_leftover_follows_anchor_domain(self):
+        rows = [{"id": "id_ts", "name": "TypeScript工程师"}]
+        pins = {"TypeScript工程师": "前端开发工程师"}
+        out = resolve_leftover_pins(rows, self._assign(), self._name_map(), pins)
+        assert out == [("id_ts", ("dom_1", "前端开发"))]
+
+    def test_general_pin_leftover_not_claimed(self):
+        rows = [{"id": "id_cmbs", "name": "CMBS交易员"}]
+        pins = {"CMBS交易员": "__general__"}
+        assert resolve_leftover_pins(rows, self._assign(), self._name_map(), pins) == []
+
+    def test_missing_anchor_leftover_not_claimed(self):
+        rows = [{"id": "id_x", "name": "某孤立岗"}]
+        assert resolve_leftover_pins(rows, self._assign(), self._name_map(), {}) == []

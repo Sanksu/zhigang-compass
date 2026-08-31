@@ -92,6 +92,29 @@ PINNED_DOMAIN_ANCHORS: dict[str, str] = {
     "Murex应用": GENERAL_PIN,
     "AI与数据系统": GENERAL_PIN,
     "生化工程师": GENERAL_PIN,
+    "CMBS交易员": GENERAL_PIN,
+    # —— 基准收口批（2026-08-31，簇级归类两轮探针否决后的治理层兜底）——
+    # 候选方案②（微簇池化/人均亲和度）经探针实证 2/14 与 11/26，负例分数
+    # 高于正例、分布完全重叠：薄画像岗的连边证据不携带域语义，拓扑不可分。
+    # 以下各岗语义归属无争议（与 position_domain_eval.jsonl 断言一致），
+    # 以治理声明覆盖拓扑归类；锚点均取目标域骨干成员。pins 为可撤销治理
+    # 状态：未来真实 JD 增长改变画像后可逐条复核解除。
+    "TypeScript工程师": "前端开发工程师",
+    "Node.js全栈工程师": "全栈工程师",
+    "鸿蒙全栈工程师": "前端开发工程师",
+    "WebGL开发工程师": "前端开发工程师",
+    "推荐搜索算法工程师": "机器视觉算法工程师",
+    "保险分析师": "数据分析师",
+    "生物信息学 QA": "测试工程师",
+    "IC验证": "嵌入式开发工程师",
+    "GPU验证": "嵌入式开发工程师",
+    "EDA工作流优化": "嵌入式开发工程师",
+    "网络工程师": "运维工程师",
+    "WebSphere管理员": "运维工程师",
+    "IT平台与自动化": "运维工程师",
+    "桌面工程师": "运维工程师",
+    "AI基础设施工程师": "运维工程师",
+    "AI与HPC可观测性": "运维工程师",
 }
 # 门禁：最大域占比超限或语义域过少视为参数退化，拒绝写库
 _MAX_DOMAIN_RATIO = 0.5
@@ -399,6 +422,34 @@ def domain_members_all(domain_members: dict[str, list[str]], fringe_ids: set[str
     return all_ids
 
 
+def resolve_leftover_pins(
+    leftover_rows: list[dict],
+    assign: dict[str, tuple[str, str]],
+    name_map: dict[str, str],
+    pins: dict[str, str] | None = None,
+) -> list[tuple[str, tuple[str, str]]]:
+    """投影外孤立岗的 pin 兜底（纯函数，供单测）。
+
+    无合格投影边的岗位（<2 共享技能）不进骨干/归类流程，但治理声明的
+    归属仍应生效：带非 GENERAL_PIN 锚点的孤立岗跟随锚点岗当前域；
+    锚点无域或 GENERAL_PIN 落通用域。返回 (岗位id, 域二元组) 列表。
+    """
+    if pins is None:
+        pins = PINNED_DOMAIN_ANCHORS
+    pid_by_name = {name_map.get(pid, pid): pid for pid in assign}
+    out: list[tuple[str, tuple[str, str]]] = []
+    for row in leftover_rows:
+        name = row.get("name") or ""
+        anchor = pins.get(name)
+        if not anchor or anchor == GENERAL_PIN:
+            continue
+        anchor_pid = pid_by_name.get(anchor)
+        dom = assign.get(anchor_pid) if anchor_pid else None
+        if dom:
+            out.append((row["id"], dom))
+    return out
+
+
 def guard_domain_distribution(assign: dict[str, tuple[str, str]]) -> dict:
     """写库前门禁（与 guard_community_distribution 同模式）：参数退化拒绝写库。
 
@@ -526,9 +577,23 @@ def sync_position_domains(
     )
 
     # 回填：属性覆盖写（对齐删除语义——不在本次划分中的岗位清空域属性，
-    # 防止已下线/改聚合的岗位残留旧域；随后对无合格投影边的公开岗位兜底
-    # 归入通用域，保证公开岗位域覆盖率 100%）
+    # 防止已下线/改聚合的岗位残留旧域）。投影外孤立岗（无合格投影边）
+    # 先走 pin 兜底跟随锚点域，其余落通用域，保证公开岗位域覆盖率 100%。
     with neo4j_driver.session() as session:
+        leftover_rows = session.run(
+            """
+            MATCH (p:Position)
+            WHERE p.status IN $statuses AND NOT p.id IN $ids
+            RETURN p.id AS id, p.name AS name
+            """,
+            statuses=_PUBLIC_STATUSES,
+            ids=list(assign),
+        ).data()
+        leftover_pinned = resolve_leftover_pins(leftover_rows, assign, name_map)
+        for pid, dom in leftover_pinned:
+            assign[pid] = dom
+        if leftover_pinned:
+            logger.info("投影外孤立岗 pin 兜底：%s 岗", len(leftover_pinned))
         session.run(
             """
             MATCH (p:Position)
