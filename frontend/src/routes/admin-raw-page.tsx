@@ -138,7 +138,8 @@ export function AdminRawPage() {
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    // loading 置位在 tab 切换的事件处理器中完成（lint：effect 内同步 setState
+    // 触发级联渲染）；本 effect 只负责回落
     apiGet<RawAdminPage>(`/admin/raw/${rawType}?${params}`)
       .then((res) => {
         if (cancelled) return
@@ -217,7 +218,7 @@ export function AdminRawPage() {
 
       <Card>
         <CardContent className="pt-4">
-          <Tabs value={rawType} onValueChange={(v) => { setRawType(v as RawType); setPage(1); setSource('') }}>
+          <Tabs value={rawType} onValueChange={(v) => { setRawType(v as RawType); setPage(1); setSource(''); setQ(''); setLoading(true) }}>
             <TabsList className="mb-4">
               {(Object.keys(TAB_CONFIG) as RawType[]).map((t) => (
                 <TabsTrigger key={t} value={t} className="text-xs">
