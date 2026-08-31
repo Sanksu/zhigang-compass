@@ -431,6 +431,7 @@ def sync_position_domains(
     backbone_min_freq: int = BACKBONE_MIN_FREQ,
     attach_min_affinity: float = ATTACH_MIN_AFFINITY,
     attach_dominance: float = ATTACH_DOMINANCE,
+    audit_membership: bool = True,
 ) -> dict:
     """骨干成域 → 语义命名 → 待归类（pin 覆盖/阈值归类/弃权）→ 门禁 → 回填。"""
     from app.core.database import neo4j_driver
@@ -567,6 +568,21 @@ def sync_position_domains(
             )
             logger.info("孤立岗兜底：%d 岗归 %s", leftover, GENERAL_DOMAIN_ID)
     logger.info("Position.domain_id/domain_name 回填完成：%s 岗", len(assign))
+
+    # 语义域成员资格 LLM 自审（PR-C）：可疑成员/不内聚域落审批队列，
+    # 只检测不改写，任何失败不阻塞域同步
+    if audit_membership:
+        from app.services.graph_algorithms.domain_audit import run_membership_audit
+
+        audit_domains: dict[str, list[str]] = {}
+        for pid, (dom_id, dom_name) in assign.items():
+            if dom_id != GENERAL_DOMAIN_ID:
+                audit_domains.setdefault(dom_name, []).append(name_map.get(pid, pid))
+        try:
+            flagged = run_membership_audit(audit_domains)
+            logger.info("成员资格自审完成：%s 条待审记录", flagged)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[membership_audit] 自审异常（不阻塞）: %s", e)
     return stats
 
 
@@ -583,6 +599,8 @@ def main() -> None:
                         help=f"归类主导性比例（默认 {ATTACH_DOMINANCE}）")
     parser.add_argument("--llm-name", action="store_true",
                         help="LLM 语义域名（失败回退代表岗名）")
+    parser.add_argument("--no-audit-membership", action="store_true",
+                        help="关闭语义域成员资格 LLM 自审（默认开启，失败不阻塞）")
     args = parser.parse_args()
     sync_position_domains(
         args.resolution, llm_name=args.llm_name,
@@ -590,6 +608,7 @@ def main() -> None:
         backbone_min_freq=args.backbone_min_freq,
         attach_min_affinity=args.attach_min_affinity,
         attach_dominance=args.attach_dominance,
+        audit_membership=not args.no_audit_membership,
     )
 
 

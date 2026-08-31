@@ -34,6 +34,7 @@ const DOMAIN_LABELS: Record<string, string> = {
   skill_normalize: '技能名归一',
   position_classify: '岗位分类',
   cluster_label: '簇命名',
+  cluster_membership: '簇成员自审',
   skill_classify: '技能分类',
   governance: '自动化治理',
   skill_relation: '技能关系',
@@ -80,6 +81,8 @@ const OUTPUT_KEY_LABELS: Record<string, string> = {
   sources: '来源',
   keep_original: '保留原名',
   is_new: '新岗位',
+  coherent: '语义内聚',
+  suspicious: '可疑成员',
 }
 
 /** evidence_refs 条目键的中文名（按域异构：governance={label,value}、
@@ -138,6 +141,12 @@ function effectExplain(it: LlmDecisionItem): string[] {
   if (domain === 'skill_classify') return ['批准后该分类晋升为权威 category，后续抽取/展示按此归类']
   if (domain === 'position_classify') return ['批准后岗位归类落图']
   if (domain === 'cluster_label') return ['批准后簇标签写入图谱，用于图谱分组展示']
+  if (domain === 'cluster_membership') {
+    return [
+      '成员自审仅检测与留痕，批准/驳回均不改动图谱归属',
+      '批准=确认错配记录在案（修复走 pins 治理层）；驳回=判定误报关单',
+    ]
+  }
   if (domain === 'jd_extract') return ['抽取类决策仅记录 LLM 结构化输出与置信度，无独立生效动作']
   return []
 }
@@ -237,7 +246,7 @@ export function AdminLlmDecisionsPage() {
 
   // 可批准/驳回状态：proposal（规范人工档）或 skill_classify 的 shadow（验收档晋升权威）
   function canReview(it: LlmDecisionItem): boolean {
-    const mutable = ['skill_relation', 'position_normalize', 'skill_normalize', 'skill_classify']
+    const mutable = ['skill_relation', 'position_normalize', 'skill_normalize', 'skill_classify', 'cluster_membership']
     if (!mutable.includes(it.domain ?? '')) return false
     if (it.domain === 'skill_classify') return it.status === 'shadow'
     return it.status === 'proposal'
