@@ -700,6 +700,9 @@ _COMPANY_NAME_STOPWORDS: frozenset[str] = frozenset({
     "Amazon", "Amazon.com", "Apple", "Avantor", "Binance", "Deloitte",
     "Google", "JPMorganChase", "Microsoft", "NVIDIA", "Nex", "Nomura",
     "Novartis", "Point72", "Raytheon", "Ripple", "Starbucks", "TYCHON", "Verse",
+    # 岗位域治理（2026-08-31）：linkedin/indeed/glassdoor 单条 JD 把雇主名抽成
+    # 岗位名（图谱实存低频单例，由 scripts/delete_junk_positions.py 一次性清理）
+    "Clay", "Corebridge", "GSBOA", "Hannaford", "Medbio",
 })
 
 
@@ -825,6 +828,17 @@ _POSITION_STOPWORDS: set[str] = {
     "IT支持", "IT 支持", "IT 系统", "IT站点", "IT研发系统",
     "IT站点技术支持", "IT流程自动化",
     "CMDB发现", "AR/VR设计验证", "Gemini 应用合作伙伴", "GRC自动化",
+    # 岗位域治理（2026-08-31）：国际源（linkedin_public/indeed/glassdoor）单条
+    # JD 产出的非技术职业岗与无信息量泛词，图谱低频单例由
+    # scripts/delete_junk_positions.py 一次性清理，此处防复发。
+    # 全部精确匹配拦截，复合词不受影响（"IT平台与自动化"、"QC工程师"上游
+    # 剥壳到核心词时仍会被本表拦住——那正是要拦的碎片形态）
+    "B级卡车司机", "CDL-A司机", "CDL-A卡车司机", "SAT辅导教师",
+    "CNC机械师", "CNC路由器操作员", "QC", "IPQC",
+    "房地产合作与批量MDU销售副总裁", "APP推广", "ECMO项目协调员", "START协调员",
+    "市场营销与CRM", "行业BD", "GTM商务拓展", "IT",
+    "Receptionist", "Clerk", "Installer", "Electrician", "Locksmith",
+    "Pharmacist", "SeniorMeatCutter", "Expeditor",
 } | set(_COMPANY_NAME_STOPWORDS)
 
 
