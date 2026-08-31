@@ -78,6 +78,19 @@ const OUTPUT_KEY_LABELS: Record<string, string> = {
   category: '建议分类',
   skill: '技能',
   sources: '来源',
+  keep_original: '保留原名',
+  is_new: '新岗位',
+}
+
+/** evidence_refs 条目键的中文名（按域异构：governance={label,value}、
+ *  名称归一={source,source_url}、技能关系={kind,name,count,...}） */
+const EVIDENCE_KEY_LABELS: Record<string, string> = {
+  source: '来源',
+  kind: '类型',
+  name: '名称',
+  count: '数量',
+  position: '岗位',
+  req_count: '引用数',
 }
 
 function str(v: unknown): string {
@@ -238,14 +251,23 @@ export function AdminLlmDecisionsPage() {
     return UNDOABLE_ACTIONS.includes(action)
   }
 
-  /** skill_normalize 记录的建议目标（审批关键信息：变体要并到哪）。
-   *  kind=alias（别名回写）→ target_standard；归一图变异 → canonical_name/target_standard。 */
-  function suggestTarget(it: LlmDecisionItem): { target: string; isAlias: boolean } | null {
-    if (it.domain !== 'skill_normalize') return null
+  /** 名称归一域的审批关键信息（与后端 parse_normalization 同口径，人工凭此判断批什么）：
+   *  position_normalize：keep_original→确认原样（批准无图变更）；is_new→改名到新标准名；否则并入已有标准名。
+   *  skill_normalize：kind=alias→别名回写；action=merge→归并。 */
+  function normalizationTarget(it: LlmDecisionItem): { target: string; badge: string } | null {
     const out = (it.structured_output ?? {}) as Record<string, unknown>
-    const target = str(out['target_standard']) || str(out['canonical_name'])
-    if (!target) return null
-    return { target, isAlias: out['kind'] === 'alias' }
+    if (it.domain === 'skill_normalize') {
+      const target = str(out['target_standard']) || str(out['canonical_name'])
+      if (!target) return null
+      return { target, badge: out['kind'] === 'alias' ? '别名' : '归并' }
+    }
+    if (it.domain === 'position_normalize') {
+      if (out['keep_original'] === true) return { target: '', badge: '确认原样' }
+      const target = str(out['canonical_name'])
+      if (!target) return null
+      return { target, badge: out['is_new'] === true ? '改名' : '并入' }
+    }
+    return null
   }
 
   /** 行内展开详情：多开（Set），便于并排比对多条记录 */
@@ -429,17 +451,19 @@ export function AdminLlmDecisionsPage() {
                             {it.entity_id || '-'}
                           </span>
                           {(() => {
-                            const sug = suggestTarget(it)
+                            const sug = normalizationTarget(it)
                             if (!sug) return null
                             return (
                               <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-                                <span className="text-state-candidate">→</span>
-                                <span className="truncate">{sug.target}</span>
-                                {sug.isAlias && (
-                                  <Badge variant="outline" className="h-4 px-1 text-[10px] text-state-emerging">
-                                    别名
-                                  </Badge>
+                                {sug.target && (
+                                  <>
+                                    <span className="text-state-candidate">→</span>
+                                    <span className="truncate">{sug.target}</span>
+                                  </>
                                 )}
+                                <Badge variant="outline" className="h-4 shrink-0 px-1 text-[10px] text-state-emerging">
+                                  {sug.badge}
+                                </Badge>
                               </span>
                             )
                           })()}
@@ -549,9 +573,29 @@ export function AdminLlmDecisionsPage() {
                                     <ul className="mt-1 list-disc space-y-0.5 pl-4 text-muted-foreground">
                                       {evidence.map((ev, i) => {
                                         const item = (ev ?? {}) as Record<string, unknown>
+                                        // 证据条目按域异构（键形态见 EVIDENCE_KEY_LABELS）：
+                                        // 逐键通用渲染，带 source_url 的渲染成可点击原文链接
+                                        const pairs = Object.entries(item).filter(([k]) => k !== 'source_url')
                                         return (
-                                          <li key={i}>
-                                            {str(item['label'])}：{formatValue(item['value'])}
+                                          <li key={i} className="break-all">
+                                            {pairs.length > 0
+                                              ? pairs
+                                                  .map(([k, v]) => `${EVIDENCE_KEY_LABELS[k] ?? k}：${formatValue(v)}`)
+                                                  .join('　')
+                                              : formatValue(item)}
+                                            {typeof item['source_url'] === 'string' && (
+                                              <>
+                                                {' '}
+                                                <a
+                                                  href={item['source_url'] as string}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                  className="underline hover:no-underline"
+                                                >
+                                                  查看原文
+                                                </a>
+                                              </>
+                                            )}
                                           </li>
                                         )
                                       })}
@@ -587,7 +631,7 @@ export function AdminLlmDecisionsPage() {
                 <p className="py-8 text-center text-sm text-muted-foreground">无匹配的决策记录</p>
               ) : (
                 filtered.map((it) => {
-                  const sug = suggestTarget(it)
+                  const sug = normalizationTarget(it)
                   return (
                     <div key={it.id} className="rounded-lg border border-border p-3 space-y-2">
                       <div className="flex items-center justify-between gap-2">
@@ -605,13 +649,15 @@ export function AdminLlmDecisionsPage() {
                         </span>
                         {sug && (
                           <span className="flex items-center gap-1 truncate text-xs text-muted-foreground mt-0.5">
-                            <span className="text-state-candidate">→</span>
-                            <span className="truncate">{sug.target}</span>
-                            {sug.isAlias && (
-                              <Badge variant="outline" className="h-4 px-1 text-[10px] text-state-emerging">
-                                别名
-                              </Badge>
+                            {sug.target && (
+                              <>
+                                <span className="text-state-candidate">→</span>
+                                <span className="truncate">{sug.target}</span>
+                              </>
                             )}
+                            <Badge variant="outline" className="h-4 shrink-0 px-1 text-[10px] text-state-emerging">
+                              {sug.badge}
+                            </Badge>
                           </span>
                         )}
                       </div>
