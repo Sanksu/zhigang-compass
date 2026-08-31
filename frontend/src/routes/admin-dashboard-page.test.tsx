@@ -1,22 +1,24 @@
 /**
  * 管理仪表盘快捷操作面板结构测试（08-15 补全后锁定；08-16 6 项；08-22 ETL
- * 触发三连后 9 项）。
+ * 触发三连后 9 项；09-01 收编低频治理页后 12 项）。
  *
  * 背景：快捷操作区曾只有 1 个"触发全量爬取"，管理入口（审核/爬取管理/
  * LLM/用户/系统配置）需跳转侧边栏——补全为触发 + 导航后，本测试防止面板
  * 再次退化或导航目标指向不存在的路由；08-22 新增 ETL 触发型按钮
  * （数据清洗/聚合入图/完整管线），锁定与后端白名单 job 的对应关系。
+ * 09-01 侧边栏精简低频治理页（数据血缘/原始数据/技能治理），改由本面板
+ * 作为统一入口，导航项增至 11 项。
  */
 import { describe, expect, it } from 'vitest'
 import { ETL_ACTION_JOBS, QUICK_ACTIONS } from './admin-dashboard-page'
 
 describe('QUICK_ACTIONS 快捷操作面板', () => {
-  it('补全为 12 项：4 触发 + 8 导航', () => {
-    expect(QUICK_ACTIONS).toHaveLength(12)
+  it('15 项：4 触发 + 11 导航（09-01 收编低频治理页）', () => {
+    expect(QUICK_ACTIONS).toHaveLength(15)
     const triggers = QUICK_ACTIONS.filter((a) => !a.to)
     const navs = QUICK_ACTIONS.filter((a) => a.to)
     expect(triggers).toHaveLength(4)
-    expect(navs).toHaveLength(8)
+    expect(navs).toHaveLength(11)
     expect(triggers.map((t) => t.id)).toEqual(
       expect.arrayContaining(['crawl', 'etl-clean', 'etl-graph', 'etl-full']),
     )
@@ -27,11 +29,13 @@ describe('QUICK_ACTIONS 快捷操作面板', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it('导航目标均为已注册的管理路由', () => {
+  it('导航目标均为已注册的管理路由（含收编的治理页）', () => {
     const navs = QUICK_ACTIONS.filter((a) => a.to).map((a) => a.to)
     expect(navs).toEqual(
       expect.arrayContaining(['/admin/review', '/admin/review?tab=dict', '/admin/crawl', '/admin/llm', '/admin/llm-decisions', '/admin/users', '/admin/settings/tasks']),
     )
+    // 侧边栏已精简的低频治理页：统一入口应补齐这三处
+    expect(navs).toEqual(expect.arrayContaining(['/admin/lineage', '/admin/raw', '/admin/skills']))
   })
 
   it('每项均有图标/标签/描述（卡片渲染字段齐全）', () => {

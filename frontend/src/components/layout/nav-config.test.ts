@@ -13,7 +13,7 @@ describe('nav-config 与设计文档 §10.2 路由表对齐', () => {
     expect(mainNav.find((i) => i.to === '/discovery')?.requireRole).toBeUndefined()
   })
 
-it('管理导航三组：管理 + LLM 驱动 + 配置中心，共 12 项全部仅 admin（08-31 JD 数据并入原始数据页 + 技能治理页）', () => {
+it('管理导航三组：管理 + LLM 驱动 + 配置中心，共 12 项全部仅 admin（09-01 治理页恢复侧边栏入口）', () => {
     const adminNav = adminNavGroups.flatMap((g) => g.items)
     expect(adminNavGroups.map((g) => g.label)).toEqual(['管理', 'LLM 驱动', '配置中心'])
     expect(adminNav).toHaveLength(12)

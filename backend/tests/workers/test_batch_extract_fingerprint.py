@@ -169,3 +169,22 @@ class TestCursorRowFingerprint:
         assert result["succeeded"] == 1
         assert unextracted[0].content_hash == _content_hash(snap, "RAW")
         assert result["re_extracted"] == 0
+
+    def test_released_row_clears_released_at_after_success(self):
+        """放行后待重抽的行（released_at 有、无 extraction）重抽成功 → released_at 清除。
+
+        徽标闭环：released_at 使命是标识「放行→等待重抽」中间态，重抽完成即移除，
+        避免管理页「已放行·待重抽」徽标在重抽后永久残留。
+        """
+        snap = {**_jd_snapshot("负责后端开发"), "released_at": "2026-08-31T10:00:00"}
+        unextracted = [SimpleNamespace(
+            id=2, snapshot=dict(snap), raw_text="RAW",
+            source="boss", source_url="http://x/jd", crawled_at="2026-08-23T00:00:00+08:00",
+            content_hash="",
+        )]
+        result, _, _ = _run(unextracted, [])
+        assert result["succeeded"] == 1
+        # 重抽成功：released_at 清除（放行标记闭环）
+        assert "released_at" not in unextracted[0].snapshot
+        # 抽取产物正常落库
+        assert unextracted[0].snapshot["extraction"]["position_name"] == "Java 后端开发工程师"

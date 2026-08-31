@@ -3332,6 +3332,7 @@ components:
         needs_review: { type: boolean, description: "人工复核标记（爬虫质量门 quality <0.6 → 待复核，未经放行不参与 LLM 抽取）" }
         quality: { type: number, nullable: true, description: "质量评分 [0,1]（爬虫清洗管线打分；未打标行为 null）" }
         released_at: { type: string, nullable: true, description: "放行时间（放行走 needs_review true→false 时写入 snapshot.released_at；已放行待重抽行为非空，从未放过行为 null）" }
+        has_extraction: { type: boolean, description: "是否已有抽取快照（extraction 键存在；重抽成功后 released_at 清除且该字段为 true，徽标据此不误显）" }
         text_length: { type: integer, description: "raw_text 长度" }
         updated_at: { type: string, description: "最近更新时间（编辑审计参考）" }
 
