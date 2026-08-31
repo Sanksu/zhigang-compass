@@ -31,11 +31,11 @@ import {
   type SkillPositionItem,
 } from '@/components/graph/node-detail-panel'
 import type { GraphData, GraphEdge, GraphViewType, NodeDetail } from '@/components/graph/types'
-import { SKILL_CATEGORY_PALETTE } from '@/components/graph/graph-visual-tokens'
+import { PORTRAIT_DIM_PALETTE, SKILL_CATEGORY_PALETTE } from '@/components/graph/graph-visual-tokens'
 import type { LearningPathItem } from '@/components/match/types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
 import { apiGet, ApiError } from '@/lib/api'
-import { cn } from '@/lib/utils'
+import { cn, isDark } from '@/lib/utils'
 import type { components } from '@/types/api'
 
 /** 3D 图谱懒加载 — Three.js 约 1.4MB，仅在用户点击"3D"时按需加载 */
@@ -296,6 +296,15 @@ export function GraphPage() {
         if (cancelled) return
         setRaw(toGraphData(res))
         setError(null)
+        // 中心岗位聚焦增强：画像数据就绪后把镜头对准中心岗位节点并放大
+        // （放大倍率低于选中态 2.4，弱于聚焦但强化"画像主体"视觉焦点）。
+        // 宏任务化——画布 setOption 在渲染后执行，且避免 effect 内同步 setState 链
+        window.setTimeout(() => {
+          if (cancelled) return
+          const g = toGraphData(res)
+          const center = g.nodes.find((n) => n.type === 'position' && n.id === portraitPosition)
+          if (center) setFocusRequest((prev) => ({ id: center.id, ts: (prev?.ts ?? 0) + 1 }))
+        }, 0)
       })
       .catch((e) => {
         if (!cancelled) {
@@ -809,7 +818,10 @@ export function GraphPage() {
                   <Select
                     value={portraitCluster || undefined}
                     onValueChange={(v) => {
+                      // 切换簇：清空选中态与展开态，避免上一岗位的画布外节点 / 展开残留
                       setSelected(null)
+                      setExpandedPositions(new Set())
+                      setExpandedDomains(new Set())
                       setPortraitCluster(v)
                       // 切簇：岗位自动切到该簇内最高频岗位（portraitOptions 已按 freq 降序）
                       const first = portraitOptions.find((o) => o.domainId === v)
@@ -828,8 +840,10 @@ export function GraphPage() {
                   <Select
                     value={portraitPosition || undefined}
                     onValueChange={(v) => {
-                      // 切换岗位：同步清空选中态（详情面板不残留上一岗位的画布外节点）
+                      // 切换岗位：同步清空选中态与展开态（详情面板/展开不残留上一岗位）
                       setSelected(null)
+                      setExpandedPositions(new Set())
+                      setExpandedDomains(new Set())
                       setPortraitPosition(v)
                     }}
                   >
@@ -987,7 +1001,10 @@ export function GraphPage() {
               className={focusMode ? 'h-full shadow-lg' : 'h-[640px]'}
             >
               <TabsContent value="detail" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
-                <NodeDetailPanel
+                {/* 详情面板过渡动画：节点切换时（key 变化）内容区淡入+轻微上移，
+                    弱化"点击节点→内容瞬变"的生硬感（岗位画像证据切换同样生效） */}
+                <div key={selected?.id ?? 'empty'} className="h-full animate-in fade-in-0 slide-in-from-bottom-1 duration-300">
+                  <NodeDetailPanel
                   node={selected}
                   stats={detailStats}
                   skillDetail={skillDetailView}
@@ -1015,6 +1032,7 @@ export function GraphPage() {
                   learningStatus={skillLearningStatus}
                   learnedSkills={learnedSkills}
                 />
+                </div>
               </TabsContent>
               <TabsContent value="analysis" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
                 <GraphAnalysisPanel
@@ -1063,6 +1081,27 @@ export function GraphPage() {
             ))}
           </div>
         </div>
+        {view === 'positionPortrait' && (() => {
+          const dimPalette = PORTRAIT_DIM_PALETTE[isDark() ? 'dark' : 'light']
+          const dims = [
+            ['salary', '薪资', dimPalette.salary],
+            ['experience', '经验', dimPalette.experience],
+            ['education', '学历', dimPalette.education],
+          ] as const
+          return (
+            <div className="space-y-2" role="listitem">
+              <p className="font-mono text-[12px] tracking-[0.15em] text-atlas-muted">PORTRAIT DIMENSION / 画像维度</p>
+              <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
+                {dims.map(([key, label, color]) => (
+                  <span key={key} className="flex items-center gap-1">
+                    <span className="size-2 rounded-full" style={{ backgroundColor: color }} />
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
         <div className="space-y-2" role="listitem">
           <p className="font-mono text-[12px] tracking-[0.15em] text-atlas-muted">POSITION STATUS / 岗位状态色</p>
           <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
