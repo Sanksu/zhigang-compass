@@ -1,8 +1,8 @@
 /**
- * 原始数据管理页测试（/admin/raw，#697 + #698 JD tab 并入）
+ * 原始数据管理页测试（/admin/raw，JD 完整能力并入）
  *
- * 覆盖：JD tab 默认态复用 /admin/jd 端点加载列表、JD 行操作列为
- * 「去 JD 数据页」跳转（带 ?q= 预填）、其余 tab 走通用端点且含编辑/删除。
+ * 覆盖：JD tab 默认态复用 /admin/jd 端点加载列表并渲染归一化岗位/质量复核/正文字数列、
+ * 待复核行含放行与编辑（无跳转按钮）；切课程 tab 走通用端点且显示类型特有列。
  * 直接 mock @/lib/api + react-router navigate。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -32,7 +32,7 @@ function jdItem(overrides: Record<string, unknown> = {}) {
     crawled_at: '2026-08-30 10:00:00',
     is_desensitized: false,
     position: 'Python 开发工程师',
-    needs_review: false,
+    needs_review: true,
     quality: 0.9,
     text_length: 100,
     updated_at: '2026-08-30T12:00:00',
@@ -81,16 +81,25 @@ describe('AdminRawPage JD tab', () => {
   it('默认 JD tab 调用 /admin/jd 端点并渲染列表', async () => {
     setup()
     await waitFor(() => expect(mockApiGet).toHaveBeenCalledWith('/admin/jd?page=1&size=20'))
-    await waitFor(() => expect(screen.getByText('Python 开发工程师')).toBeTruthy())
+    // 标题列 + 归一化岗位列各渲染一次岗位名
+    await waitFor(() => expect(screen.getAllByText('Python 开发工程师').length).toBeGreaterThanOrEqual(2))
   })
 
-  it('JD 行操作列为「去 JD 数据页」跳转（携带标题预填），无编辑/删除', async () => {
+  it('JD 行渲染归一化岗位/质量复核/正文字数列，待复核含放行与编辑（无跳转）', async () => {
     setup()
-    const link = await screen.findByText('去 JD 数据页')
-    expect(link).toBeTruthy()
-    expect(screen.queryByText('编辑')).toBeNull()
-    // JD 行不触发 raw 详情/删除路径
-    expect(mockApiGet).not.toHaveBeenCalledWith('/admin/raw/jd?page=1&size=20')
+    await screen.findByText('待复核')
+    // 类型特有列表头
+    expect(screen.getByText('公司')).toBeTruthy()
+    expect(screen.getByText('归一化岗位')).toBeTruthy()
+    expect(screen.getByText('质量/复核')).toBeTruthy()
+    expect(screen.getByText('正文字数')).toBeTruthy()
+    // 质量分 0.9 → 0.90；正文长度 100
+    expect(screen.getByText('0.90')).toBeTruthy()
+    expect(screen.getByText('100')).toBeTruthy()
+    // 待复核行：放行 + 编辑，不再出现「去 JD 数据页」跳转
+    expect(screen.getByText('放行')).toBeTruthy()
+    expect(screen.getByText('编辑')).toBeTruthy()
+    expect(screen.queryByText('去 JD 数据页')).toBeNull()
   })
 
   it('切到课程 tab 走通用端点且显示类型特有列', async () => {
@@ -99,13 +108,14 @@ describe('AdminRawPage JD tab', () => {
     const user = userEvent.setup()
     setup()
     // 先确保初始 JD 列表加载完成，再切 tab，避免点击落入首帧异步竞态
-    await screen.findByText('Python 开发工程师')
+    await screen.findByText('待复核')
     await user.click(screen.getByRole('tab', { name: '课程' }))
     await waitFor(() => expect(mockApiGet.mock.calls.some((c) => String(c[0]).startsWith('/admin/raw/course'))).toBe(true), { timeout: 3000 })
     await waitFor(() => expect(screen.getByText('机器学习入门')).toBeTruthy())
+    // 课程类型特有列：质量 quality、机构 institution
     expect(screen.getByText('0.95')).toBeTruthy()
     expect(screen.getByText('某大学')).toBeTruthy()
-    // 非 JD 行恢复编辑/删除操作
+    // 非 JD 行恢复编辑操作
     expect(screen.getByText('编辑')).toBeTruthy()
   })
 })
