@@ -128,18 +128,10 @@ body {
   min-height: 100vh;
 }
 
-/* 图谱画布容器：仅保留方位椭圆环（::before）；浅蓝底色、网格与中线装饰已按演示口径移除 */
+/* 图谱画布容器：浅蓝底色、网格、中线与方位椭圆环装饰均已按演示口径移除，
+   画布保持纯净，仅节点/边渲染 */
 .atlas-surface {
   isolation: isolate;
-}
-
-.atlas-surface::before {
-  content: '';
-  position: absolute;
-  pointer-events: none;
-  inset: 13% 22%;
-  border: 1px solid color-mix(in srgb, var(--color-atlas-grid) 78%, transparent);
-  border-radius: 50%;
 }
 
 /* 滚动条 — 细线样式 */
