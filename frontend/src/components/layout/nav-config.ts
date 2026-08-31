@@ -82,7 +82,6 @@ export const adminNavGroups: AdminNavGroup[] = [
       { label: '爬取管理', to: '/admin/crawl', icon: Bot, requireRole: ['admin'] },
       { label: '岗位审核', to: '/admin/review', icon: CheckSquare, requireRole: ['admin'] },
       { label: '数据血缘', to: '/admin/lineage', icon: GitFork, requireRole: ['admin'] },
-      { label: 'JD 数据', to: '/admin/jd', icon: FileText, requireRole: ['admin'] },
       { label: '原始数据', to: '/admin/raw', icon: Database, requireRole: ['admin'] },
     ],
   },
