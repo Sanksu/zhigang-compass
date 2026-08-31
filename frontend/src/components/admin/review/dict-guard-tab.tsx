@@ -465,7 +465,8 @@ export function DictGuardTab() {
                                   : c.kind}
                         </Badge>
                       </TableCell>
-                      <TableCell className="max-w-[200px] truncate text-xs text-ink-muted">{c.reason || '—'}</TableCell>
+                      {/* 审计理由全量换行展示（DB text 全量存储，截断会丢审核依据；同 proposals 列口径） */}
+                      <TableCell className="max-w-[320px] whitespace-normal text-xs text-ink-muted">{c.reason || '—'}</TableCell>
                       <TableCell className="text-xs text-ink-muted font-mono">{c.applied_by}</TableCell>
                       <TableCell className="text-xs text-ink-faint font-mono">
                         {c.created_at ? String(c.created_at).slice(0, 16).replace('T', ' ') : '—'}
