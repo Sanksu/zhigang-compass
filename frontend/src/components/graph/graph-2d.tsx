@@ -16,7 +16,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphEdge, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
 import type { EChartsModel } from './graph-layout'
 import { COLOR_BY_STATUS, computeFilterMarks, isSoftSkill, skillLabelThreshold } from './graph-utils'
-import { domainCommunityColor, graphColors, graphNodeColor, GRAPH_OPACITY, skillCategoryColor } from './graph-visual-tokens'
+import { domainCommunityColor, graphColors, graphNodeColor, GRAPH_OPACITY, portraitDimensionColor, skillCategoryColor } from './graph-visual-tokens'
 import { buildDagGraph, type DagSkillLink, type DagSkillNode } from '@/components/learning/learning-timeline'
 import type { LearningPathItem } from '@/components/match/types'
 import { GraphFilterPanel } from './graph-filter-panel'
@@ -143,8 +143,11 @@ function colorOf(node: GraphNode, dark: boolean): string {
   }
   if (node.type === 'position') return graphNodeColor(theme, 'position', node.status ?? 'candidate')
   if (isSoftSkill(node)) return graphNodeColor(theme, 'softSkill')
-  // 画像维度属性（薪资/经验等，positionPortrait 视图）：紫罗兰区别于技能类目色
-  if (node.type === 'attr') return graphNodeColor(theme, 'attr')
+  // 画像维度属性（薪资/经验等，positionPortrait 视图）：按维度分类着色，
+  // 非画像维度 attr 回落统一紫罗兰（graphNodeColor attr）
+  if (node.type === 'attr') {
+    return portraitDimensionColor(node.id, node.name, theme) ?? graphNodeColor(theme, 'attr')
+  }
   if (node.type === 'skill') {
     // 08-28 技术栈降噪：技能按类目着色（s_category 随 view 接口下发），
     // 未收录类目回落默认技能色
@@ -865,6 +868,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       }
     })
 
+    // 岗位画像视图判定：环形布局 + 存在 attr 维度节点（薪资/经验/学历）。
+    // 用于该视图专属的入场动画与中心岗位聚焦；techStack 环形无 attr 不算
+    const portraitView = ringLayout && nodes.some((n) => n.type === 'attr')
+
     const option: echarts.EChartsCoreOption = {
       backgroundColor: 'transparent',
       tooltip: {
@@ -912,9 +919,22 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           // 镜头保持：仅首建/视图切换时重置中心，其余重建不动当前视角
           ...(resetCamera ? { center: ['50%', '50%'] as [string, string] } : {}),
           labelLayout: { hideOverlap: true },
-          animation: false,
-          animationDuration: 0,
-          animationDurationUpdate: 0,
+          // 岗位画像视图（ringLayout + attr 维度节点）：启用切换/入场过渡动画——
+          // 切换岗位时新节点淡入缩放入场，弱化"整图瞬变"的生硬感；其余视图
+          // （力导向 / techStack 环形）保持 animation:false 以稳定布局与镜头
+          ...(portraitView
+            ? {
+                animation: true,
+                animationDuration: 600,
+                animationEasing: 'cubicOut',
+                animationDurationUpdate: 500,
+                animationEasingUpdate: 'cubicInOut',
+              }
+            : {
+                animation: false,
+                animationDuration: 0,
+                animationDurationUpdate: 0,
+              }),
           ...(ringLayout
             ? {}
             : {
