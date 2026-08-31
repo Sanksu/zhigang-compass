@@ -29,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Reveal } from '@/components/ui/reveal'
 import { apiGet, apiPut } from '@/lib/api'
 import type { components } from '@/types/api'
 
@@ -145,6 +146,7 @@ export function AdminLlmPage() {
       />
 
       {/* 安全与范围提示 */}
+      <Reveal delay={380}>
       <div className="mb-6 flex items-start gap-2 rounded-md border border-border bg-subtle px-4 py-3 text-xs text-ink-secondary leading-relaxed">
         <Cpu className="size-4 mt-0.5 shrink-0" />
         <span>
@@ -152,6 +154,7 @@ export function AdminLlmPage() {
           超时/限流/降级/恢复等高级参数在 yaml 中维护，不在此页面编辑。
         </span>
       </div>
+      </Reveal>
 
       {feedback && (
         <div
@@ -163,6 +166,7 @@ export function AdminLlmPage() {
         </div>
       )}
 
+      <Reveal delay={500}>
       <Card>
         <CardHeader>
           <CardTitle className="text-sm flex items-center justify-between">
@@ -278,6 +282,7 @@ export function AdminLlmPage() {
           )}
         </CardContent>
       </Card>
+      </Reveal>
 
       {/* 编辑 / 新增 Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

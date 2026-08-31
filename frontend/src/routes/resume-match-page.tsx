@@ -11,6 +11,7 @@ import { ScoreRing, RadarChart, SkillHeatmap } from '@/components/match/charts'
 import { AiThinkingCard } from '@/components/match/ai-thinking-card'
 import { CitationBadge } from '@/components/ui/citation-badge'
 import { LearningTimeline } from '@/components/learning/learning-timeline'
+import { Reveal } from '@/components/ui/reveal'
 import { useTypewriter } from '@/hooks/use-typewriter'
 import {
   type BackendDiagnosisReport,
@@ -625,7 +626,8 @@ export function ResumeMatchPage() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
+      <Reveal delay={120}>
+        <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
         {/* 左栏：Top-N 推荐列表 */}
         <Card className="h-fit">
           <CardHeader className="pb-3">
@@ -1281,6 +1283,7 @@ export function ResumeMatchPage() {
           )}
         </div>
       </div>
+      </Reveal>
     </>
   )
 }

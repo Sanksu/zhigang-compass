@@ -11,6 +11,7 @@ import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { MetricCard } from '@/components/shared/metric-card'
+import { Reveal } from '@/components/ui/reveal'
 import { apiGet } from '@/lib/api'
 import { escapeHtml, formatDateTime, isDark } from '@/lib/utils'
 import type { components } from '@/types/api'
@@ -252,25 +253,28 @@ export function DashboardPage() {
         description="多源异构驱动的岗位能力动态演化与人岗匹配系统"
       />
 
-      {/* 关键指标卡片（真实数据）——复用 shared MetricCard（统一指标卡形态） */}
+      {/* 关键指标卡片（真实数据）——复用 shared MetricCard（统一指标卡形态）；分级入场：卡片逐个错峰浮现 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {stats.map((stat) => (
-          <MetricCard
-            key={stat.label}
-            data={{
-              label: stat.label,
-              value: stat.value,
-              delta: stat.delta,
-              deltaTone: stat.deltaType === 'up' ? 'emerging' : 'muted',
-              hint: stat.hint,
-              icon: stat.icon,
-            }}
-          />
+        {stats.map((stat, i) => (
+          <Reveal key={stat.label} delay={i * 90} className="h-full">
+            <MetricCard
+              className="h-full"
+              data={{
+                label: stat.label,
+                value: stat.value,
+                delta: stat.delta,
+                deltaTone: stat.deltaType === 'up' ? 'emerging' : 'muted',
+                hint: stat.hint,
+                icon: stat.icon,
+              }}
+            />
+          </Reveal>
         ))}
       </div>
 
       {/* 最近活动（真实版本发布 + 登录审计） + 快捷入口 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <Reveal delay={360}>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-sm flex items-center justify-between">
@@ -333,9 +337,11 @@ export function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+      </Reveal>
 
       {/* 图谱版本演化趋势（与「图谱版本」指标卡同源，无需额外端点） */}
-      <Card className="mt-4">
+      <Reveal delay={460} className="mt-4">
+        <Card>
         <CardHeader>
           <CardTitle className="text-sm flex items-center gap-2">
             <TrendingUp className="size-4" />
@@ -349,9 +355,11 @@ export function DashboardPage() {
           <VersionTrendChart versions={versions} />
         </CardContent>
       </Card>
+      </Reveal>
 
       {/* 数据源底座（真实采集统计） */}
-      <Card className="mt-4">
+      <Reveal delay={560} className="mt-4">
+        <Card>
         <CardHeader>
           <CardTitle className="text-sm flex items-center gap-2">
             <Database className="size-4" />
@@ -394,6 +402,7 @@ export function DashboardPage() {
           })()}
         </CardContent>
       </Card>
+      </Reveal>
     </>
   )
 }

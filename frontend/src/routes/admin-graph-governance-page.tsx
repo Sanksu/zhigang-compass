@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Reveal } from '@/components/ui/reveal'
 import { apiGet, apiPost } from '@/lib/api'
 import type { components } from '@/types/api'
 
@@ -108,21 +109,22 @@ export function AdminGraphGovernancePage() {
       {notice && <Card><CardContent className="text-ink-muted text-sm py-3">{notice}</CardContent></Card>}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card><CardHeader><CardTitle className="text-sm text-ink-muted">已划分岗位</CardTitle></CardHeader>
-          <CardContent className="text-2xl font-semibold">{data?.positions ?? '—'}</CardContent></Card>
-        <Card><CardHeader><CardTitle className="text-sm text-ink-muted">语义域</CardTitle></CardHeader>
-          <CardContent className="text-2xl font-semibold">{data?.semantic_domains ?? '—'}</CardContent></Card>
-        <Card><CardHeader><CardTitle className="text-sm text-ink-muted">弃权（通用域）</CardTitle></CardHeader>
-          <CardContent className="text-2xl font-semibold">{data?.general_count ?? '—'}</CardContent></Card>
-        <Card><CardHeader><CardTitle className="text-sm text-ink-muted">基准严格通过率</CardTitle></CardHeader>
+        <Reveal delay={0} className="h-full"><Card className="h-full"><CardHeader><CardTitle className="text-sm text-ink-muted">已划分岗位</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold">{data?.positions ?? '—'}</CardContent></Card></Reveal>
+        <Reveal delay={90} className="h-full"><Card className="h-full"><CardHeader><CardTitle className="text-sm text-ink-muted">语义域</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold">{data?.semantic_domains ?? '—'}</CardContent></Card></Reveal>
+        <Reveal delay={180} className="h-full"><Card className="h-full"><CardHeader><CardTitle className="text-sm text-ink-muted">弃权（通用域）</CardTitle></CardHeader>
+          <CardContent className="text-2xl font-semibold">{data?.general_count ?? '—'}</CardContent></Card></Reveal>
+        <Reveal delay={270} className="h-full"><Card className="h-full"><CardHeader><CardTitle className="text-sm text-ink-muted">基准严格通过率</CardTitle></CardHeader>
           <CardContent className="text-2xl font-semibold">
             {pct(data?.benchmark?.strict_accuracy)}
             <div className="text-xs text-ink-muted font-normal">
               共成员对级 F1 {data?.benchmark?.pairwise_f1 != null ? data.benchmark.pairwise_f1.toFixed(3) : 'n/a'}
             </div>
-          </CardContent></Card>
+          </CardContent></Card></Reveal>
       </div>
 
+      <Reveal delay={380}>
       <Card>
         <CardHeader><CardTitle className="text-base">语义域划分</CardTitle></CardHeader>
         <CardContent className="space-y-3">
@@ -180,8 +182,10 @@ export function AdminGraphGovernancePage() {
           )}
         </CardContent>
       </Card>
+      </Reveal>
 
       {failures.length > 0 && (
+        <Reveal delay={500}>
         <Card>
           <CardHeader><CardTitle className="text-base">基准未通过项（{failures.length}）</CardTitle></CardHeader>
           <CardContent className="space-y-1.5">
@@ -196,6 +200,7 @@ export function AdminGraphGovernancePage() {
             )}
           </CardContent>
         </Card>
+        </Reveal>
       )}
     </div>
   )

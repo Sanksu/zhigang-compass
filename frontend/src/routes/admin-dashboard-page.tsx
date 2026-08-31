@@ -18,6 +18,7 @@ import {
   Wrench,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
+import { Reveal } from '@/components/ui/reveal'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -307,7 +308,7 @@ export function AdminDashboardPage() {
 
       {/* 顶部概述指标卡（真实数据派生） */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        {stats.map((stat) => {
+        {stats.map((stat, i) => {
           const Icon = stat.icon
           const deltaColor =
             stat.deltaType === 'up'
@@ -316,22 +317,25 @@ export function AdminDashboardPage() {
                 ? 'text-state-declining'
                 : 'text-ink-muted'
           return (
-            <Card key={stat.label}>
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between mb-2">
-                  <Icon className="size-4 text-ink-faint" />
-                  <span className={`text-xs font-mono ${deltaColor}`}>{stat.delta}</span>
-                </div>
-                <div className="text-2xl font-semibold tracking-tight tabular-nums">{stat.value}</div>
-                <div className="text-xs text-ink-muted mt-1">{stat.label}</div>
-              </CardContent>
-            </Card>
+            <Reveal key={stat.label} delay={i * 90} className="h-full">
+              <Card className="h-full">
+                <CardContent className="py-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <Icon className="size-4 text-ink-faint" />
+                    <span className={`text-xs font-mono ${deltaColor}`}>{stat.delta}</span>
+                  </div>
+                  <div className="text-2xl font-semibold tracking-tight tabular-nums">{stat.value}</div>
+                  <div className="text-xs text-ink-muted mt-1">{stat.label}</div>
+                </CardContent>
+              </Card>
+            </Reveal>
           )
         })}
       </div>
 
       {/* 数据源运行状态网格（真实 /admin/crawl/status） */}
-      <Card className="mb-6">
+      <Reveal delay={380}>
+        <Card className="mb-6">
         <CardHeader>
           <CardTitle className="text-sm flex items-center gap-2">
             <Database className="size-4" />
@@ -382,80 +386,86 @@ export function AdminDashboardPage() {
           </div>
         </CardContent>
       </Card>
+      </Reveal>
 
       {/* 审核队列 + 审计日志 两列布局 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         {/* 审核队列摘要（/admin/positions/pending，LLM 信号未上线为空） */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center justify-between">
-              <span>审核队列摘要</span>
-              <span className="text-xs font-normal text-ink-faint">{auditQueueCount} 条待处理</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {auditQueueCount === 0 ? (
-              <div className="py-12 text-center text-sm text-ink-faint">
-                暂无待审核岗位 · 新岗位信号由 LLM 抽取 + 发现检测器产出（M3/M4 交付）
-                <div className="mt-2">
-                  <Button size="sm" variant="outline" asChild>
-                    <Link to="/admin/review">前往审核页</Link>
-                  </Button>
+        <Reveal delay={500} className="h-full">
+          <Card className="h-full">
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center justify-between">
+                <span>审核队列摘要</span>
+                <span className="text-xs font-normal text-ink-faint">{auditQueueCount} 条待处理</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {auditQueueCount === 0 ? (
+                <div className="py-12 text-center text-sm text-ink-faint">
+                  暂无待审核岗位 · 新岗位信号由 LLM 抽取 + 发现检测器产出（M3/M4 交付）
+                  <div className="mt-2">
+                    <Button size="sm" variant="outline" asChild>
+                      <Link to="/admin/review">前往审核页</Link>
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <p className="text-sm text-ink-muted py-8 text-center">{auditQueueCount} 条待审核，前往审核页处理</p>
-            )}
-          </CardContent>
-        </Card>
+              ) : (
+                <p className="text-sm text-ink-muted py-8 text-center">{auditQueueCount} 条待审核，前往审核页处理</p>
+              )}
+            </CardContent>
+          </Card>
+        </Reveal>
 
         {/* 系统审计日志（真实 /admin/audit/logs） */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center justify-between">
-              <span>系统审计日志</span>
-              <span className="text-xs font-normal text-ink-faint">最近 {auditLogs.length} 条</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {auditLogs.length === 0 ? (
-              <p className="py-12 text-center text-sm text-ink-faint">
-                暂无审计日志 · 登录 / 管理操作将写入 audit_logs 表
-              </p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>时间</TableHead>
-                    <TableHead>操作类型</TableHead>
-                    <TableHead>操作人</TableHead>
-                    <TableHead>详情</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {auditLogs.slice(0, 5).map((log) => (
-                    <TableRow key={log.id}>
-                      <TableCell className="font-mono text-xs text-ink-muted whitespace-nowrap">{log.time}</TableCell>
-                      <TableCell>
-                        <Badge variant={AUDIT_TYPE_VARIANT[log.type]} className="text-[11px] leading-none px-1.5 py-0">
-                          {log.type}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-ink-secondary">{log.operator}</TableCell>
-                      <TableCell className="text-xs text-ink max-w-[200px] truncate" title={log.detail}>
-                        {log.detail}
-                      </TableCell>
+        <Reveal delay={620} className="h-full">
+          <Card className="h-full">
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center justify-between">
+                <span>系统审计日志</span>
+                <span className="text-xs font-normal text-ink-faint">最近 {auditLogs.length} 条</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {auditLogs.length === 0 ? (
+                <p className="py-12 text-center text-sm text-ink-faint">
+                  暂无审计日志 · 登录 / 管理操作将写入 audit_logs 表
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>时间</TableHead>
+                      <TableHead>操作类型</TableHead>
+                      <TableHead>操作人</TableHead>
+                      <TableHead>详情</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {auditLogs.slice(0, 5).map((log) => (
+                      <TableRow key={log.id}>
+                        <TableCell className="font-mono text-xs text-ink-muted whitespace-nowrap">{log.time}</TableCell>
+                        <TableCell>
+                          <Badge variant={AUDIT_TYPE_VARIANT[log.type]} className="text-[11px] leading-none px-1.5 py-0">
+                            {log.type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-ink-secondary">{log.operator}</TableCell>
+                        <TableCell className="text-xs text-ink max-w-[200px] truncate" title={log.detail}>
+                          {log.detail}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </Reveal>
       </div>
 
       {/* 快捷操作区：触发型（爬取）+ 导航型（审核/爬取管理/LLM/用户） */}
-      <Card>
+      <Reveal delay={740}>
+        <Card>
         <CardHeader>
           <CardTitle className="text-sm">快捷操作</CardTitle>
         </CardHeader>
@@ -502,6 +512,7 @@ export function AdminDashboardPage() {
           </div>
         </CardContent>
       </Card>
+      </Reveal>
     </>
   )
 }
