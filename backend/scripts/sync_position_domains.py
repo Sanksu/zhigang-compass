@@ -317,18 +317,19 @@ def apply_domain_pins(
     membership: dict[str, int],
     name_map: dict[str, str],
     pins: dict[str, str] | None = None,
-) -> tuple[dict[str, int], list[str]]:
+) -> tuple[dict[str, int], list[str], set[str]]:
     """骨干岗语义指派（纯函数，供单测）：pinned 岗并入锚点岗所在 Leiden 簇。
 
     在微簇降级之前执行：pinned 岗与锚点簇合流后成员数凑满 min-cluster-size，
     桥梁岗自身的小簇即可自持成语义域。锚点岗或 pinned 岗不在骨干划分、
     或二者同岗时跳过并返回告警（调用方记日志），不阻断同步。
-    返回 (新 membership, 告警列表)。
+    返回 (新 membership, 告警列表, 被指派的岗位集合)。
     """
     if pins is None:
         pins = PINNED_DOMAIN_ANCHORS
     pid_by_name = {name_map.get(pid, pid): pid for pid in membership}
     warnings: list[str] = []
+    pinned: set[str] = set()
     for pos, anchor in pins.items():
         if pos == anchor:
             continue
@@ -340,7 +341,8 @@ def apply_domain_pins(
             warnings.append(f"锚点岗「{anchor}」不在骨干划分，{pos} 保持原簇")
             continue
         membership[pos_pid] = membership[anchor_pid]
-    return membership, warnings
+        pinned.add(pos_pid)
+    return membership, warnings, pinned
 
 
 def attach_fringe_position(
@@ -349,13 +351,15 @@ def attach_fringe_position(
     domain_members: dict[str, list[str]],
     min_affinity: float = ATTACH_MIN_AFFINITY,
     dominance: float = ATTACH_DOMINANCE,
-) -> tuple[str | None, dict[str, float]]:
+) -> tuple[str | None, dict[str, float], str]:
     """带弃权的最近域分类（纯函数，供单测）。
 
     连接强度 = Σ 对域内成员的投影边权。最优域需 ≥ min_affinity 且
     ≥ 次优域 × dominance（次优为 0 时只看绝对门槛）才归入；否则弃权
     （返回 None）。同分按域名键稳定排序保证确定性。
-    返回 (归入域键 | None, 全部域得分)。
+    返回 (归入域键 | None, 全部域得分, 弃权原因)。
+    弃权原因：no_edges（与任何域零连接）/ below_affinity（最优强度不足）/
+    not_dominant（多域拉扯，最优未达次优 dominance 比例）；归入时为空串。
     """
     neighbors = graph.get(pid, {})
     scores = {
@@ -363,15 +367,17 @@ def attach_fringe_position(
         for key, members in domain_members.items()
     }
     if not scores:
-        return None, scores
+        return None, scores, "no_edges"
     ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
     best_key, best = ranked[0]
     second = ranked[1][1] if len(ranked) > 1 else 0.0
+    if best <= 0:
+        return None, scores, "no_edges"
     if best < min_affinity:
-        return None, scores
+        return None, scores, "below_affinity"
     if second > 0 and best < dominance * second:
-        return None, scores
-    return best_key, scores
+        return None, scores, "not_dominant"
+    return best_key, scores, ""
 
 
 def resolve_fringe(
@@ -382,12 +388,13 @@ def resolve_fringe(
     min_affinity: float = ATTACH_MIN_AFFINITY,
     dominance: float = ATTACH_DOMINANCE,
     pins: dict[str, str] | None = None,
-) -> tuple[dict[str, str], set[str], list[str]]:
+) -> tuple[dict[str, dict], dict[str, str], list[str]]:
     """待归类池批量归类（纯函数，供单测）：pin 覆盖 → 阈值归类 → 弃权。
 
     pins：GENERAL_PIN 锚点=强制弃权（声明无正确归属域）；其余锚点绕过
     阈值直接并入锚点岗所在域，锚点不在任何语义域时告警并走正常归类。
-    返回 (pid→域键, 弃权集合, 告警列表)。
+    返回 (归类结果 pid→{dom,score,alt,source}, 弃权 pid→原因, 告警列表)。
+    source：pin（治理指派）/ attach（阈值归类）。
     """
     if pins is None:
         pins = PINNED_DOMAIN_ANCHORS
@@ -395,29 +402,37 @@ def resolve_fringe(
     pid_to_domain = {
         pid: key for key, members in domain_members.items() for pid in members
     }
-    assigned: dict[str, str] = {}
-    abstained: set[str] = set()
+    assigned: dict[str, dict] = {}
+    abstained: dict[str, str] = {}
     warnings: list[str] = []
     for pid in sorted(fringe_ids):
         pos_name = name_map.get(pid, pid)
         anchor = pins.get(pos_name)
         if anchor == GENERAL_PIN:
-            abstained.add(pid)
+            abstained[pid] = "general_pin"
             continue
         if anchor and pos_name != anchor:
             anchor_pid = pid_by_name.get(anchor)
             target = pid_to_domain.get(anchor_pid) if anchor_pid else None
             if target:
-                assigned[pid] = target
+                assigned[pid] = {
+                    "dom": target, "source": "pin",
+                    "score": None, "alt": None,
+                }
                 continue
             warnings.append(f"锚点岗「{anchor}」无语义域，{pos_name} 走正常归类")
-        key, _scores = attach_fringe_position(
+        key, scores, reason = attach_fringe_position(
             graph, pid, domain_members, min_affinity, dominance,
         )
         if key:
-            assigned[pid] = key
+            ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
+            alt = ranked[1][1] if len(ranked) > 1 else None
+            assigned[pid] = {
+                "dom": key, "source": "attach",
+                "score": round(scores[key], 4), "alt": round(alt, 4) if alt else None,
+            }
         else:
-            abstained.add(pid)
+            abstained[pid] = reason
     return assigned, abstained, warnings
 
 
@@ -510,7 +525,7 @@ def sync_position_domains(
     subgraph = {pid: {nb: w for nb, w in graph[pid].items() if nb in backbone}
                 for pid in backbone}
     membership = leiden(subgraph, resolution=resolution)
-    membership, pin_warnings = apply_domain_pins(membership, name_map)
+    membership, pin_warnings, cluster_pinned = apply_domain_pins(membership, name_map)
     for w in pin_warnings:
         logger.warning("[骨干指派] %s", w)
     membership, demoted = demote_small_clusters(membership, min_cluster_size)
@@ -562,9 +577,22 @@ def sync_position_domains(
     for pid, (dom_id, dom_name) in backbone_assign.items():
         dom_name_by_id.setdefault(dom_id, dom_name)
 
+    # 逐岗归类依据（可解释性）：source 分类 + 亲和度得分/次优，随岗位落图
+    sources: dict[str, str] = {}
+    scores: dict[str, tuple[float | None, float | None]] = {}
+    for pid, (dom_id, _n) in backbone_assign.items():
+        sources[pid] = "pin_cluster" if pid in cluster_pinned else "backbone"
+        scores[pid] = (None, None)
+    for pid, decision in assigned.items():
+        sources[pid] = decision["source"]
+        scores[pid] = (decision["score"], decision["alt"])
+    for pid, reason in abstained.items():
+        sources[pid] = reason
+        scores[pid] = (None, None)
+
     assign: dict[str, tuple[str, str]] = dict(backbone_assign)
-    for pid, dom_id in assigned.items():
-        assign[pid] = (dom_id, dom_name_by_id[dom_id])
+    for pid, decision in assigned.items():
+        assign[pid] = (decision["dom"], dom_name_by_id[decision["dom"]])
     for pid in abstained:
         assign[pid] = (GENERAL_DOMAIN_ID, GENERAL_DOMAIN_NAME)
 
@@ -599,13 +627,24 @@ def sync_position_domains(
         leftover_pinned = resolve_leftover_pins(leftover_rows, assign, name_map)
         for pid, dom in leftover_pinned:
             assign[pid] = dom
+            sources[pid] = "leftover_pin"
+            scores[pid] = (None, None)
+        for r in leftover_rows:
+            pid = r["id"]
+            if pid in assign:
+                continue
+            assign[pid] = (GENERAL_DOMAIN_ID, GENERAL_DOMAIN_NAME)
+            sources[pid] = "leftover_no_edges"
+            scores[pid] = (None, None)
         if leftover_pinned:
             logger.info("投影外孤立岗 pin 兜底：%s 岗", len(leftover_pinned))
         session.run(
             """
             MATCH (p:Position)
             WHERE p.domain_id IS NOT NULL AND NOT p.id IN $ids
-            SET p.domain_id = null, p.domain_name = null
+            SET p.domain_id = null, p.domain_name = null,
+                p.domain_source = null, p.domain_score = null,
+                p.domain_alternative = null
             """,
             ids=list(assign),
         )
@@ -613,32 +652,18 @@ def sync_position_domains(
             """
             UNWIND $rows AS row
             MATCH (p:Position {id: row.id})
-            SET p.domain_id = row.dom_id, p.domain_name = row.dom_name
+            SET p.domain_id = row.dom_id, p.domain_name = row.dom_name,
+                p.domain_source = row.source,
+                p.domain_score = row.score,
+                p.domain_alternative = row.alt
             """,
             rows=[
-                {"id": pid, "dom_id": dom_id, "dom_name": dom_name}
+                {"id": pid, "dom_id": dom_id, "dom_name": dom_name,
+                 "source": sources.get(pid), "score": scores.get(pid, (None, None))[0],
+                 "alt": scores.get(pid, (None, None))[1]}
                 for pid, (dom_id, dom_name) in assign.items()
             ],
         )
-        leftover = session.run(
-            """
-            MATCH (p:Position)
-            WHERE p.domain_id IS NULL AND p.status IN $statuses
-            RETURN count(p) AS n
-            """,
-            statuses=_PUBLIC_STATUSES,
-        ).single()["n"]
-        if leftover:
-            session.run(
-                """
-                MATCH (p:Position)
-                WHERE p.domain_id IS NULL AND p.status IN $statuses
-                SET p.domain_id = $gid, p.domain_name = $gname
-                """,
-                statuses=_PUBLIC_STATUSES,
-                gid=GENERAL_DOMAIN_ID, gname=GENERAL_DOMAIN_NAME,
-            )
-            logger.info("孤立岗兜底：%d 岗归 %s", leftover, GENERAL_DOMAIN_ID)
     logger.info("Position.domain_id/domain_name 回填完成：%s 岗", len(assign))
 
     # 语义域成员资格 LLM 自审（PR-C）：可疑成员/不内聚域落审批队列，

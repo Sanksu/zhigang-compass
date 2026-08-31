@@ -108,8 +108,9 @@ class TestApplyDomainPins:
         }
 
     def test_pinned_joins_anchor_cluster_and_survives_demotion(self):
-        membership, warnings = apply_domain_pins(self._membership(), self._name_map())
+        membership, warnings, pinned = apply_domain_pins(self._membership(), self._name_map())
         assert warnings == []
+        assert pinned == {"id_py", "id_bigdata", "id_devops", "id_llm"}
         # 后端：Java 2 人簇 + Python + 大数据 = 4 人，min=3 下降级免死
         assert membership["id_py"] == membership["id_bigdata"] == membership["id_java"]
         # 运维：DevOps 并入 运维工程师 2 人簇 = 3 人
@@ -126,7 +127,7 @@ class TestApplyDomainPins:
         name_map = self._name_map()
         del membership["id_vision"]
         del name_map["id_vision"]
-        _, warnings = apply_domain_pins(membership, name_map)
+        _, warnings, _pinned = apply_domain_pins(membership, name_map)
         assert any("机器视觉算法工程师" in w for w in warnings)
         assert membership["id_llm"] == 4  # 保持原簇
 
@@ -135,7 +136,7 @@ class TestApplyDomainPins:
         name_map = self._name_map()
         del membership["id_py"]
         del name_map["id_py"]
-        _, warnings = apply_domain_pins(membership, name_map)
+        _, warnings, _pinned = apply_domain_pins(membership, name_map)
         assert warnings == []
 
 
@@ -154,27 +155,28 @@ class TestAttachFringePosition:
         return {"dom_1": ["java", "be", "devops"], "dom_2": ["prompt", "genai"]}
 
     def test_dominant_strong_affinity_attaches(self):
-        key, scores = attach_fringe_position(self._graph(), "go", self._domains())
-        assert key == "dom_1"
+        key, scores, reason = attach_fringe_position(self._graph(), "go", self._domains())
+        assert key == "dom_1" and reason == ""
         assert scores["dom_1"] == pytest.approx(20.0)
 
     def test_weak_affinity_abstains(self):
-        key, _ = attach_fringe_position(
+        key, _, reason = attach_fringe_position(
             self._graph(), "thin", self._domains(),
             min_affinity=ATTACH_MIN_AFFINITY, dominance=ATTACH_DOMINANCE,
         )
-        assert key is None  # 最优 1.0 < 2.0 门槛 → 弃权
+        assert key is None and reason == "below_affinity"  # 最优 1.0 < 2.0 门槛
 
     def test_non_dominant_abstains_even_if_strong(self):
-        key, _ = attach_fringe_position(
+        key, _, reason = attach_fringe_position(
             self._graph(), "torn", self._domains(),
             min_affinity=ATTACH_MIN_AFFINITY, dominance=ATTACH_DOMINANCE,
         )
-        assert key is None  # 3.0 达门槛但 < 1.3×2.6 → 两域拉扯弃权
+        assert key is None and reason == "not_dominant"  # 3.0 达门槛但 < 1.3×2.6
 
     def test_no_edges_abstains(self):
-        key, scores = attach_fringe_position({"lonely": {}}, "lonely", self._domains())
-        assert key is None and scores == {"dom_1": 0.0, "dom_2": 0.0}
+        key, scores, reason = attach_fringe_position({"lonely": {}}, "lonely", self._domains())
+        assert key is None and reason == "no_edges"
+        assert scores == {"dom_1": 0.0, "dom_2": 0.0}
 
 
 class TestResolveFringe:
@@ -193,8 +195,10 @@ class TestResolveFringe:
         assigned, abstained, warnings = resolve_fringe(
             graph, {"go", "weak"}, domain_members, name_map, pins={},
         )
-        assert assigned == {"go": "dom_1"}
-        assert abstained == {"weak"}
+        assert assigned["go"]["dom"] == "dom_1"
+        assert assigned["go"]["source"] == "attach"
+        assert assigned["go"]["score"] == pytest.approx(13.5)
+        assert abstained["weak"] == "below_affinity"
         assert warnings == []
 
     def test_fringe_pin_bypasses_threshold(self):
@@ -203,7 +207,17 @@ class TestResolveFringe:
             graph, {"weak"}, domain_members, name_map,
             pins={"某低频岗": "Java开发工程师"},
         )
-        assert assigned == {"weak": "dom_1"} and abstained == set()
+        assert assigned["weak"] == {"dom": "dom_1", "source": "pin",
+                                    "score": None, "alt": None}
+        assert abstained == {}
+
+    def test_general_pin_forces_abstain(self):
+        graph, domain_members, name_map = self._setup()
+        assigned, abstained, _ = resolve_fringe(
+            graph, {"weak"}, domain_members, name_map,
+            pins={"某低频岗": "__general__"},
+        )
+        assert assigned == {} and abstained["weak"] == "general_pin"
 
     def test_pin_anchor_without_domain_warns_and_falls_back(self):
         graph, domain_members, name_map = self._setup()
@@ -211,7 +225,7 @@ class TestResolveFringe:
             graph, {"weak"}, domain_members, name_map,
             pins={"某低频岗": "不存在的锚点岗"},
         )
-        assert assigned == {} and abstained == {"weak"}
+        assert assigned == {} and abstained["weak"] == "below_affinity"
         assert any("不存在的锚点岗" in w for w in warnings)
 
 

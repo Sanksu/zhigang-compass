@@ -5864,8 +5864,19 @@ export interface components {
             /** @description LLM 语义域名或代表岗名 */
             domain_name?: string;
             member_count?: number;
-            /** @description 成员岗位名（按 freq 降序，截断至 top 12） */
-            members?: string[];
+            /** @description 成员（按 freq 降序，截断至 top 12），含归类依据来源与亲和度得分 */
+            members?: {
+                name?: string;
+                freq?: number;
+                /** @description 归类依据：backbone骨干簇/pin_cluster骨干指派/pin治理指派/attach阈值归类/leftover_pin兜底指派/general_pin治理弃权/below_affinity证据不足/not_dominant多域拉扯/no_edges零投影边/leftover_no_edges投影外零证据 */
+                source?: string;
+                /** @description 归类亲和度得分（治理指派/骨干为 null） */
+                score?: number | null;
+            }[];
+            /** @description 全成员来源分布（source → 数量） */
+            source_counts?: {
+                [key: string]: number;
+            };
             /** @description 是否为通用弃权域 */
             is_general?: boolean;
         };

@@ -35,23 +35,36 @@ _resync_state = {"running": False, "last_resync": None}
 
 
 def group_domains(rows: list[dict], top_members: int = _TOP_MEMBERS) -> list[dict]:
-    """Neo4j 行（name/dom/dname/freq）→ 域列表（纯函数，供单测）。
+    """Neo4j 行（name/dom/dname/freq/source）→ 域列表（纯函数，供单测）。
 
     语义域按成员数降序，通用域恒排末位；域内成员按 freq 降序截断。
+    每个成员携带 domain_source（归类依据分类），source_counts 为全成员
+    来源分布（骨干/治理指派/归类/兜底/各类弃权原因）。
     """
     groups: dict[str, dict] = {}
     for r in rows:
         dom = r["dom"] or GENERAL_DOMAIN_ID
         groups.setdefault(dom, {"name": r.get("dname") or "", "members": []})
-        groups[dom]["members"].append((r["name"], int(r.get("freq") or 0)))
+        groups[dom]["members"].append(
+            {"name": r["name"], "freq": int(r.get("freq") or 0),
+             "source": r.get("source"), "score": r.get("score")}
+        )
     domains = []
     for dom_id, g in groups.items():
-        members = sorted(g["members"], key=lambda t: (-t[1], t[0]))
+        members = sorted(
+            g["members"], key=lambda m: (-m["freq"], m["name"]),
+        )
+        # 通用弃权域不截断：弃权原因需逐岗可见（可解释性口径）
+        source_counts: dict[str, int] = {}
+        for m in g["members"]:
+            key = m["source"] or "unknown"
+            source_counts[key] = source_counts.get(key, 0) + 1
         domains.append({
             "domain_id": dom_id,
             "domain_name": g["name"],
             "member_count": len(members),
-            "members": [n for n, _ in members[:top_members]],
+            "members": members if dom_id == GENERAL_DOMAIN_ID else members[:top_members],
+            "source_counts": dict(sorted(source_counts.items(), key=lambda kv: -kv[1])),
             "is_general": dom_id == GENERAL_DOMAIN_ID,
         })
     domains.sort(key=lambda d: (d["is_general"], -d["member_count"], d["domain_id"]))
@@ -85,7 +98,9 @@ def _load_domain_rows() -> list[dict]:
             """
             MATCH (p:Position) WHERE p.domain_id IS NOT NULL
             RETURN p.name AS name, p.domain_id AS dom,
-                   p.domain_name AS dname, coalesce(p.freq, 0) AS freq
+                   p.domain_name AS dname, coalesce(p.freq, 0) AS freq,
+                   p.domain_source AS source,
+                   p.domain_score AS score
             """
         ).data()
 

@@ -766,19 +766,22 @@ export function ResumeMatchPage() {
                         最佳匹配 JD：<span className="font-medium text-ink-muted">{matchResult.position_name}</span>
                       </span>
                     )}
-                    {/* JD 原文展开开关（compare 溯源：最佳 JD 行 raw_text，后端截断 8000 字符） */}
-                    {matchResult.jd_original?.text && (
-                      <button
-                        type="button"
-                        onClick={() => setShowJdOriginal((v) => !v)}
-                        className="inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink transition-colors"
-                        title="查看最佳匹配 JD 的原文内容"
-                      >
-                        <FileText className="size-3" />
-                        JD 原文
-                        <ChevronDown className={`size-3 transition-transform ${showJdOriginal ? 'rotate-180' : ''}`} />
-                      </button>
-                    )}
+                    {/* JD 原文展开开关（compare 溯源：最佳 JD 行 raw_text，后端截断 8000 字符）——与反馈按钮同级显式按钮 */}
+                    <div className="flex items-center gap-1">
+                      {matchResult.jd_original?.text && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className={`h-7 px-2 text-xs ${showJdOriginal ? 'border-ai text-ai' : ''}`}
+                          title="查看最佳匹配 JD 的原文内容"
+                          onClick={() => setShowJdOriginal((v) => !v)}
+                        >
+                          <FileText className="size-3.5 mr-1" />
+                          JD 原文
+                          <ChevronDown className={`size-3 ml-1 transition-transform ${showJdOriginal ? 'rotate-180' : ''}`} />
+                        </Button>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1 ml-auto">
                       <Button
                         size="sm"
