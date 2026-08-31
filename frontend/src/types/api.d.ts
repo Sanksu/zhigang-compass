@@ -3031,6 +3031,98 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/graph-governance/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 岗位域治理总览（域划分 + 基准得分 + 待审自审数，只读） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 域治理总览（ApiResponse 包装） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["GraphGovernanceSummary"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/graph-governance/resync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 触发岗位域重同步（骨干域+归类制，LLM 命名+自审；后台执行）
+         * @description 以 BackgroundTask 执行 scripts.sync_position_domains 同款主流程 （resolution=1.55, llm_name=True, 自审开启）。同一时刻仅允许一个 重同步任务（进行中重复触发返回 409）。完成后前端轮询 summary。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 已受理（ApiResponse 包装） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["GraphGovernanceResyncResult"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                /** @description 已有重同步任务进行中 */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/llm-decisions": {
         parameters: {
             query?: never;
@@ -5764,6 +5856,52 @@ export interface components {
         /** @description GET/PUT /admin/llm-config 响应/请求 data */
         LlmConfig: {
             providers: components["schemas"]["LlmProviderConfig"][];
+        };
+        /** @description 单个语义域（骨干簇或归类归并结果） */
+        GraphGovernanceDomain: {
+            /** @description 域键 dom_{cid} 或 dom_general */
+            domain_id?: string;
+            /** @description LLM 语义域名或代表岗名 */
+            domain_name?: string;
+            member_count?: number;
+            /** @description 成员岗位名（按 freq 降序，截断至 top 12） */
+            members?: string[];
+            /** @description 是否为通用弃权域 */
+            is_general?: boolean;
+        };
+        /** @description 岗位域治理总览 */
+        GraphGovernanceSummary: {
+            /** @description 已划分岗位总数 */
+            positions?: number;
+            /** @description 语义域数（不含通用域） */
+            semantic_domains?: number;
+            /** @description 通用弃权域岗位数 */
+            general_count?: number;
+            /** @description 是否有重同步任务进行中 */
+            resync_running?: boolean;
+            /** @description 最近一次完成时间 ISO8601，无记录为 null */
+            last_resync?: string | null;
+            /** @description 共成员基准评测（基准文件缺失/无可评行时为 null） */
+            benchmark?: {
+                evaluated?: number;
+                strict_accuracy?: number;
+                pairwise_f1?: number;
+                /** @description 未通过行（position/expect/detail/note） */
+                failures?: {
+                    position?: string;
+                    expect?: string;
+                    detail?: string;
+                    note?: string;
+                }[];
+            } | null;
+            domains?: components["schemas"]["GraphGovernanceDomain"][];
+            /** @description cluster_membership 待审记录数 */
+            membership_pending?: number;
+        };
+        GraphGovernanceResyncResult: {
+            /** @description 已受理后台执行 */
+            started?: boolean;
+            message?: string;
         };
         /** @description 六域 LLM 决策记录（llm_decision_records 行） */
         LlmDecisionItem: {

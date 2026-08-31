@@ -91,6 +91,7 @@ export const adminNavGroups: AdminNavGroup[] = [
     label: 'LLM 驱动',
     items: [
       { label: '决策与验收', to: '/admin/llm-decisions', icon: ListChecks, requireRole: ['admin'] },
+      { label: '图谱域治理', to: '/admin/graph-governance', icon: Network, requireRole: ['admin'] },
     ],
   },
   {
