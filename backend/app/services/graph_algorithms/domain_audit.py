@@ -73,11 +73,7 @@ def audit_domain_membership(
     import json as _json
 
     from app.services.extraction.llm_invocation import invocation_scope
-    from app.services.extraction.llm_provider import (
-        LLMConfigurationError,
-        LLMExtractionError,
-        LLMProviderChain,
-    )
+    from app.services.extraction.llm_provider import LLMProviderChain
 
     if not domains:
         return []
