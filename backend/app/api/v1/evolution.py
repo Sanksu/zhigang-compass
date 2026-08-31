@@ -571,49 +571,75 @@ def _build_skill_flow(
 ) -> dict:
     """从快照序列构建技能关联岗位动态变迁桑基图数据。
 
-    逐期统计各岗位对该技能的 REQUIRES 频次，取 Top-N 岗位入列；
-    相邻期次同名岗位连线（值=左侧期次频次）——纵向看单岗位持续需求厚度，
+    逐期统计要求该技能的岗位，权重=岗位当期 REQUIRES 出度（当期要求的技能
+    总数）——真实快照边按 (岗位, 技能) 去重后逐岗位恒为 1，出度是快照内
+    唯一有区分度的确定性权重；按 (-出度, 岗位名) 取 Top-N 入列，连线值=
+    左侧期次该岗位出度。相邻期次同名岗位连线——纵向看单岗位持续需求厚度，
     横向看关联岗位的进出（无连线的期次即新进入/已离开 Top 榜）。
+    该技能无关联岗位的期次整期剔除（早期稀疏快照不产生空列），period_index
+    与 periods 为剔除后重排的连续序号；totals 为各期关联岗位总数（Top-N 之外
+    仍有需求）。
     """
-    periods: list[str | None] = []
-    per_period: list[tuple[Counter, dict]] = []  # (岗位→频次, id→名称)
+    kept: list[tuple[str | None, list[tuple[str, str, int]], int]] = []
+    # (日期, [(岗位id, 岗位名, 出度) Top-N 升序列入, 关联岗位总数])
     skill_name = skill_id
     for v in snapshots:
         snap = v.snapshot_json or {}
-        nodes = {n.get("id"): n.get("name") for n in snap.get("nodes", []) if isinstance(n, dict)}
-        # 仅 REQUIRES 边（P1-2）：技能→技能边 target 同为 sk_ 前缀，不过滤会
-        # 以「岗位」身份混入桑基图，与 docstring/前端文案「REQUIRES 频次」不符
-        freq = Counter(
-            e.get("source")
-            for e in _requires_edges(snap.get("edges", []))
-            if e.get("target") == skill_id
+        nodes = [
+            n for n in snap.get("nodes", [])
+            if isinstance(n, dict) and n.get("id") and n.get("type") == "position"
+        ]
+        names = {n["id"]: n.get("name") for n in nodes}
+        pos_ids = set(names)
+        for n in snap.get("nodes", []):
+            if isinstance(n, dict) and n.get("id") == skill_id and n.get("name"):
+                skill_name = n["name"]
+                break
+        edges = _requires_edges(snap.get("edges", []))
+        # 出度按岗位节点过滤：旧快照无 relation 标注时，技能→技能边
+        # （source=sk_ 前缀）不得计入岗位出度（P1-2 同根）
+        degree = Counter(
+            e.get("source") for e in edges if e.get("source") in pos_ids
         )
-        if skill_id in nodes and nodes[skill_id]:
-            skill_name = nodes[skill_id]
-        periods.append(v.created_at.date().isoformat() if v.created_at else None)
-        per_period.append((freq, nodes))
+        assoc = {
+            e.get("source")
+            for e in edges
+            if e.get("target") == skill_id and e.get("source") in pos_ids
+        }
+        if not assoc:
+            continue
+        ranked = sorted(
+            ((pid, names.get(pid) or pid, degree[pid]) for pid in assoc),
+            key=lambda t: (-t[2], t[1]),
+        )
+        kept.append((
+            v.created_at.date().isoformat() if v.created_at else None,
+            ranked[:top_n],
+            len(assoc),
+        ))
 
     flow_nodes: list[dict] = []
     flow_links: list[dict] = []
-    for i, (freq, names) in enumerate(per_period):
-        for pid, f in freq.most_common(top_n):
+    for i, (_, ranked, _total) in enumerate(kept):
+        for pid, name, deg in ranked:
             flow_nodes.append({
                 "id": f"{pid}::{i}",
-                "name": names.get(pid) or pid,
+                "name": name,
                 "period_index": i,
-                "freq": f,
+                "freq": deg,
             })
     node_ids = {n["id"] for n in flow_nodes}
-    for i in range(len(per_period) - 1):
-        for pid, f in per_period[i][0].most_common(top_n):
+    for i in range(len(kept) - 1):
+        for pid, _name, deg in kept[i][1]:
             cur, nxt = f"{pid}::{i}", f"{pid}::{i + 1}"
             if cur in node_ids and nxt in node_ids:
-                flow_links.append({"source": cur, "target": nxt, "value": f})
+                flow_links.append({"source": cur, "target": nxt, "value": deg})
 
     return {
         "skill_id": skill_id,
         "skill_name": skill_name,
-        "periods": periods,
+        "periods": [k[0] for k in kept],
+        "totals": [k[2] for k in kept],
         "top": top_n,
         "nodes": flow_nodes,
         "links": flow_links,
@@ -623,11 +649,11 @@ def _build_skill_flow(
 @router.get("/skill/{id}/flow")
 async def skill_flow(
     id: str,
-    top: int = Query(default=8, ge=1, le=20, description="每期取频次 Top-N 岗位"),
+    top: int = Query(default=8, ge=1, le=20, description="每期取出度 Top-N 岗位"),
     db: AsyncSession = Depends(get_db),
     user: Optional[dict] = Depends(get_optional_user),
 ):
-    """技能关联岗位动态变迁桑基图（列=快照期次，节点=Top-N 岗位，连线=相邻期同名岗位）。"""
+    """技能关联岗位动态变迁桑基图（列=非空快照期次，节点=当期出度 Top-N 岗位，连线=相邻期同名岗位，粗细=岗位要求技能数）。"""
     cache_key = f"evolution:flow:{id}:{top}"
     cached = await _cache_get_json(cache_key)
     if cached is not None:
