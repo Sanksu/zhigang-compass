@@ -136,7 +136,7 @@ class TestEnrichRetry:
         result, sess = _run([_course("c1", "课程A")], empty=True)
         assert result["failed"] == 0
         snap = sess[0].snapshot
-        assert snap["skills_enrich_fails"] == 1
+        assert snap["skills_enrich_empty_fails"] == 1
         assert "skills_enriched" not in snap  # 未永久标记（重试点保留资格）
         retry_at = datetime.fromisoformat(snap["skills_retry_at"])
         # 滞后冷却 = 24h（未来）
@@ -145,14 +145,25 @@ class TestEnrichRetry:
 
     def test_empty_judged_at_max_gives_up(self):
         """判定为空累计达上限：永久标记（放弃，防无限重抽）。"""
-        snap = {"title": "课程A", "skills_enrich_fails": _EMPTY_MAX_RETRIES - 1}
+        snap = {"title": "课程A", "skills_enrich_empty_fails": _EMPTY_MAX_RETRIES - 1}
         result, sess = _run([_course("c1", "课程A", snap)], empty=True)
         assert sess[0].snapshot["skills_enriched"] is True
-        assert sess[0].snapshot["skills_enrich_fails"] == _EMPTY_MAX_RETRIES
+        assert sess[0].snapshot["skills_enrich_empty_fails"] == _EMPTY_MAX_RETRIES
+
+    def test_error_and_empty_counts_are_independent(self):
+        """P1：既有 error 计数不抬高空路径放弃——首个空不永久标记、error 计数不受影响。"""
+        snap = {"title": "课程A", "skills_enrich_fails": 1}  # 历史 1 次 LLM 异常失败
+        result, sess = _run([_course("c1", "课程A", snap)], empty=True)
+        assert result["failed"] == 0
+        now_snap = sess[0].snapshot
+        assert now_snap["skills_enrich_fails"] == 1          # error 计数独立保留
+        assert now_snap["skills_enrich_empty_fails"] == 1     # 空计数从 0 起算
+        assert "skills_enriched" not in now_snap              # 未过早永久放弃
+        assert "skills_retry_at" in now_snap                  # 进入 24h 滞后重抽
 
     def test_empty_judged_then_success_clears_retry(self):
         """滞后冷却重抽后成功：写 skills + 标记完成，清除 retry 状态。"""
-        snap = {"title": "课程A", "skills_enrich_fails": 1}
+        snap = {"title": "课程A", "skills_enrich_empty_fails": 1}
         # 重抽时 LLM 命中技能 → 成功
         result, sess = _run([_course("c1", "课程A", snap)])
         assert result["enriched"] == 1

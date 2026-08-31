@@ -53,9 +53,10 @@ _ENRICH_MAX_FAILS = 3                # 累计失败 3 次放弃
 
 # 滞后重抽（08-31）：LLM 正常判定"无技能"（宁少勿滥空数组）时不立即永久标记，
 # 而是进入冷却后重抽池（区别于 LLM 异常失败路径的 1h/3 次）。延迟 24h 后再次
-# 尝试，累计 _EMPTY_MAX_RETRIES 次仍为空才永久放弃（防无限重抽）。与 error 路径
-# 共用 skills_enrich_fails 计数（同一"未产出技能"尝试口径），但放弃阈值与冷却
-# 时长独立配置。
+# 尝试，累计 _EMPTY_MAX_RETRIES 次仍为空才永久放弃（防无限重抽）。空判定与异常
+# 失败各自独立计数（skills_enrich_empty_fails / skills_enrich_fails，08-31 修复：
+# 共用 skills_enrich_fails 会让历史 error 抬高空路径放弃计数——1 error + 首个空即
+# 误判永久放弃，违背"共 3 次机会"语义），放弃阈值与冷却时长独立配置。
 _EMPTY_RETRY_DELAY_SECONDS = 86400   # 判定为空后延迟 24 小时重抽
 _EMPTY_MAX_RETRIES = 2               # 判定为空累计 2 次后放弃（共 3 次机会）
 
@@ -170,8 +171,10 @@ async def enrich_course_skills(ctx: dict, limit: int | None = None) -> dict:
             # LLM 正常判定无技能（宁少勿滥空数组）：不立即永久标记，进入滞后
             # 重抽池——写计数 + 24h 冷却时间戳，原点 skills_enriched IS NULL
             # 保持入选资格，待冷却到期重抽；达上限才永久放弃（防无限重抽）。
-            empty_fails = int(snap.get("skills_enrich_fails") or 0) + 1
-            snap["skills_enrich_fails"] = empty_fails
+            # 空判定独立计数（与技能失败 skills_enrich_fails 分开）：历史 error
+            # 不抬高空阈值，首个空从 0 起算，达 _EMPTY_MAX_RETRIES 才永久放弃
+            empty_fails = int(snap.get("skills_enrich_empty_fails") or 0) + 1
+            snap["skills_enrich_empty_fails"] = empty_fails
             if empty_fails >= _EMPTY_MAX_RETRIES:
                 snap["skills_enriched"] = True
             else:

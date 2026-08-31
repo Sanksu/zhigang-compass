@@ -87,11 +87,14 @@ async def apply() -> int:
     if not ids:
         print("无待重置课程，跳过")
         return 0
-    # 条件删除 skills_enriched / skills_retry_at（保留 skills_enrich_fails 供排查）
-    # 幂等：仅命中 still skills_enriched=true 的行
+    # 条件删除 skills_enriched / skills_retry_at / skills_enrich_empty_fails
+    # （幂等：仅命中 still skills_enriched=true 的行）。skills_enrich_fails 保留
+    # 供排查；skills_enrich_empty_fails 一并清除——重抽池内空判定从 0 起算，
+    # 否则重置后旧空计数会使其以极低机会过早再度永久放弃。
     statement = (
         "UPDATE course_raw "
-        "SET snapshot = snapshot - 'skills_enriched' - 'skills_retry_at', "
+        "SET snapshot = snapshot - 'skills_enriched' - 'skills_retry_at' "
+        "           - 'skills_enrich_empty_fails', "
         "    updated_at = now() "
         "WHERE id = ANY(:ids) "
         "  AND snapshot->>'skills_enriched' = 'true'"
