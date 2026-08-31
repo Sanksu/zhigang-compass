@@ -268,6 +268,20 @@ class TestJdReviewQueue:
             db=db, current_user=_ADMIN,
         ))
         assert resp.data["items"][0]["released_at"] == "2026-08-31T10:00:00"
+        # 默认 _row 含 extraction 键 → has_extraction=True（前端据此不误显待重抽徽标）
+        assert resp.data["items"][0]["has_extraction"] is True
+
+    def test_列表透出has_extraction未抽取行(self):
+        # 放行后待重抽：released_at 有、extraction 键被移除 → has_extraction=False
+        row = _row(released_at="2026-08-31T10:00:00")
+        row.snapshot.pop("extraction", None)
+        db = _FakeSession([_FakeResult(one=1), _FakeResult(rows=[row])])
+        resp = asyncio.run(mod.list_jd(
+            q="", source="", needs_review=None, page=1, size=20,
+            db=db, current_user=_ADMIN,
+        ))
+        assert resp.data["items"][0]["released_at"] == "2026-08-31T10:00:00"
+        assert resp.data["items"][0]["has_extraction"] is False
 
     def test_详情含复核字段(self):
         row = _row(needs_review=True, quality="0.386")

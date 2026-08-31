@@ -971,6 +971,12 @@ async def batch_extract(
                     )
                 # 入图成功后才写 extraction 标记：先标记后入图会让失败记录
                 # extraction 落库，下次批跑 `extraction IS NULL` 不再选中，图数据永久缺失
+                # 重抽成功后清除 released_at：放行标记的使命是标识「放行→等待重抽」
+                # 的中间态，重抽完成即闭环，避免管理页「已放行·待重抽」徽标永久残留
+                if "released_at" in normalized_snapshot:
+                    normalized_snapshot = {
+                        k: v for k, v in normalized_snapshot.items() if k != "released_at"
+                    }
                 row.snapshot = normalized_snapshot
                 results["processed"] += 1
                 results["succeeded"] += 1
