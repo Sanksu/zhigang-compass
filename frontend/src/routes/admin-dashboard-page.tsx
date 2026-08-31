@@ -7,6 +7,7 @@ import {
   ClipboardCheck,
   Database,
   Filter,
+  GitFork,
   Globe,
   Network,
   RefreshCw,
@@ -14,6 +15,7 @@ import {
   Shield,
   Users,
   Workflow,
+  Wrench,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -118,6 +120,9 @@ export const QUICK_ACTIONS: {
   { id: 'goto-settings', label: '系统配置', icon: Settings2, desc: '运行时参数 · 重启生效', to: '/admin/settings/tasks' },
   { id: 'goto-dictguard-settings', label: '系统节流', icon: Shield, desc: '演化缓存 + 驳回冷却期 · 重启生效', to: '/admin/settings/system' },
   { id: 'goto-users', label: '用户管理', icon: Users, desc: '账号 · 角色 · 状态', to: '/admin/users' },
+  { id: 'goto-lineage', label: '数据血缘', icon: GitFork, desc: '岗位-技能-课程链路溯源', to: '/admin/lineage' },
+  { id: 'goto-raw', label: '原始数据', icon: Database, desc: 'JD/课程/论文/社区信号四类 raw 治理', to: '/admin/raw' },
+  { id: 'goto-skills', label: '技能治理', icon: Wrench, desc: '白名单∪别名总览 · 别名复核', to: '/admin/skills' },
 ]
 
 /** ETL 触发型快捷操作 → 后端白名单 job（契约 POST /admin/etl/trigger） */
@@ -297,7 +302,7 @@ export function AdminDashboardPage() {
     <>
       <PageHeader
         title="管理后台"
-        description="系统总览 · 源状态 · 审核队列 · 审计日志 · 快捷操作"
+        description="管理统一入口 · 系统总览 · 源状态 · 审核队列 · 审计日志 · 全部管理功能快捷导航"
       />
 
       {/* 顶部概述指标卡（真实数据派生） */}
