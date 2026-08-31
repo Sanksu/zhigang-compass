@@ -243,75 +243,141 @@ export function AdminUsersPage() {
           {loading ? (
             <p className="py-8 text-center text-sm text-ink-muted">加载中…</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>用户名</TableHead>
-                  <TableHead>角色</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>创建时间</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              {/* 桌面端：表格视图 */}
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>用户名</TableHead>
+                      <TableHead>角色</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>创建时间</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {users.map((u) => {
+                      const roleMeta = ROLE_VARIANT[u.role]
+                      const statusMeta = STATUS_META[u.status]
+                      return (
+                        <TableRow key={u.id}>
+                          <TableCell className="font-medium font-mono">{u.username}</TableCell>
+                          <TableCell>
+                            <Badge variant={roleMeta}>{ROLES[u.role]}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
+                          </TableCell>
+                          <TableCell className="text-xs font-mono text-ink-muted">{u.createdAt}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-2">
+                              <Select value={u.role} onValueChange={(v) => setRole(u.id, v as Role)} disabled={isSelf(u.id)}>
+                                <SelectTrigger className="h-8 w-24">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {(Object.keys(ROLES) as Role[]).map((r) => (
+                                    <SelectItem key={r} value={r}>{ROLES[r]}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <Button
+                                size="sm"
+                                variant={u.status === 'active' ? 'outline' : 'default'}
+                                onClick={() => toggleStatus(u.id)}
+                                disabled={isSelf(u.id)}
+                                title={isSelf(u.id) ? '不能操作当前登录账户' : undefined}
+                              >
+                                {u.status === 'active' ? '禁用' : '启用'}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-state-archived hover:text-state-archived"
+                                onClick={() => deleteUser(u.id)}
+                                disabled={isSelf(u.id)}
+                                title={isSelf(u.id) ? '不能操作当前登录账户' : undefined}
+                              >
+                                删除
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                    {users.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-sm text-ink-faint py-8">
+                          暂无用户
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* 移动端：卡片视图 */}
+              <div className="space-y-3 md:hidden">
                 {users.map((u) => {
                   const roleMeta = ROLE_VARIANT[u.role]
                   const statusMeta = STATUS_META[u.status]
                   return (
-                    <TableRow key={u.id}>
-                      <TableCell className="font-medium font-mono">{u.username}</TableCell>
-                      <TableCell>
-                        <Badge variant={roleMeta}>{ROLES[u.role]}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
-                      </TableCell>
-                      <TableCell className="text-xs font-mono text-ink-muted">{u.createdAt}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-end gap-2">
-                          <Select value={u.role} onValueChange={(v) => setRole(u.id, v as Role)} disabled={isSelf(u.id)}>
-                            <SelectTrigger className="h-8 w-24">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {(Object.keys(ROLES) as Role[]).map((r) => (
-                                <SelectItem key={r} value={r}>{ROLES[r]}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Button
-                            size="sm"
-                            variant={u.status === 'active' ? 'outline' : 'default'}
-                            onClick={() => toggleStatus(u.id)}
-                            disabled={isSelf(u.id)}
-                            title={isSelf(u.id) ? '不能操作当前登录账户' : undefined}
-                          >
-                            {u.status === 'active' ? '禁用' : '启用'}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-state-archived hover:text-state-archived"
-                            onClick={() => deleteUser(u.id)}
-                            disabled={isSelf(u.id)}
-                            title={isSelf(u.id) ? '不能操作当前登录账户' : undefined}
-                          >
-                            删除
-                          </Button>
+                    <div
+                      key={u.id}
+                      className="rounded-lg border border-border bg-canvas p-4 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium font-mono text-ink">{u.username}</div>
+                          <div className="mt-0.5 flex items-center gap-2">
+                            <Badge variant={roleMeta}>{ROLES[u.role]}</Badge>
+                            <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
+                          </div>
                         </div>
-                      </TableCell>
-                    </TableRow>
+                        <div className="text-right text-xs font-mono text-ink-faint whitespace-nowrap">
+                          {u.createdAt}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        <Select value={u.role} onValueChange={(v) => setRole(u.id, v as Role)} disabled={isSelf(u.id)}>
+                          <SelectTrigger className="h-8 w-24">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(Object.keys(ROLES) as Role[]).map((r) => (
+                              <SelectItem key={r} value={r}>{ROLES[r]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          size="sm"
+                          variant={u.status === 'active' ? 'outline' : 'default'}
+                          onClick={() => toggleStatus(u.id)}
+                          disabled={isSelf(u.id)}
+                        >
+                          {u.status === 'active' ? '禁用' : '启用'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-state-archived"
+                          onClick={() => deleteUser(u.id)}
+                          disabled={isSelf(u.id)}
+                        >
+                          删除
+                        </Button>
+                      </div>
+                    </div>
                   )
                 })}
                 {users.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center text-sm text-ink-faint py-8">
-                      暂无用户
-                    </TableCell>
-                  </TableRow>
+                  <div className="py-8 text-center text-sm text-ink-faint">
+                    暂无用户
+                  </div>
                 )}
-              </TableBody>
-            </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

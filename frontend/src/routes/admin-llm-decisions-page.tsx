@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/table'
 import { apiGet, apiPost } from '@/lib/api'
 import { formatDateTime } from '@/lib/utils'
+import { useIsDesktop } from '@/hooks/use-media-query'
 import type { components } from '@/types/api'
 
 type LlmDecisionItem = components['schemas']['LlmDecisionItem']
@@ -63,6 +64,7 @@ export function AdminLlmDecisionsPage() {
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const isDesktop = useIsDesktop()
 
   const params = useMemo(() => {
     const p = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String((page - 1) * PAGE_SIZE) })
@@ -204,12 +206,12 @@ export function AdminLlmDecisionsPage() {
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between space-y-0">
           <CardTitle>决策记录</CardTitle>
           <div className="flex flex-wrap items-center gap-2">
             <Input
               placeholder="搜索 entity / run_id"
-              className="h-8 w-52"
+              className="h-8 w-full sm:w-52"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -217,7 +219,7 @@ export function AdminLlmDecisionsPage() {
               value={domain || 'all'}
               onValueChange={(v) => applyFilter({ domain: v === 'all' ? '' : v })}
             >
-              <SelectTrigger aria-label="域过滤" className="h-8 w-36 text-sm">
+              <SelectTrigger aria-label="域过滤" className="h-8 w-full sm:w-36 text-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -233,7 +235,7 @@ export function AdminLlmDecisionsPage() {
               value={status || 'all'}
               onValueChange={(v) => applyFilter({ status: v === 'all' ? '' : v })}
             >
-              <SelectTrigger aria-label="状态过滤" className="h-8 w-36 text-sm">
+              <SelectTrigger aria-label="状态过滤" className="h-8 w-full sm:w-36 text-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -253,7 +255,7 @@ export function AdminLlmDecisionsPage() {
         <CardContent>
           {error ? (
             <p className="py-8 text-center text-sm text-state-declining">{error}</p>
-          ) : (
+          ) : isDesktop ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -353,6 +355,83 @@ export function AdminLlmDecisionsPage() {
                 )}
               </TableBody>
             </Table>
+          ) : (
+            <div className="space-y-3">
+              {loading ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
+              ) : filtered.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">无匹配的决策记录</p>
+              ) : (
+                filtered.map((it) => {
+                  const sug = suggestTarget(it)
+                  return (
+                    <div key={it.id} className="rounded-lg border border-border p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-ink">
+                          {DOMAIN_LABELS[it.domain ?? ''] ?? it.domain ?? '-'}
+                        </span>
+                        <Badge variant="outline" className={`text-[11px] ${STATUS_TONE[it.status ?? ''] ?? ''}`}>
+                          {it.status}
+                        </Badge>
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-sm text-ink">
+                          {it.entity_type ? `${it.entity_type}:` : ''}
+                          {it.entity_id || '-'}
+                        </span>
+                        {sug && (
+                          <span className="flex items-center gap-1 truncate text-xs text-muted-foreground mt-0.5">
+                            <span className="text-state-candidate">→</span>
+                            <span className="truncate">{sug.target}</span>
+                            {sug.isAlias && (
+                              <Badge variant="outline" className="h-4 px-1 text-[10px] text-state-emerging">
+                                别名
+                              </Badge>
+                            )}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-ink-muted">
+                        <span>风险档：<span className={`font-semibold ${TIER_TONE[it.risk_tier ?? ''] ?? ''}`}>{it.risk_tier || '-'}</span></span>
+                        <span>置信度：<span className="font-mono">{it.confidence != null ? it.confidence.toFixed(2) : '-'}</span></span>
+                        <span>Provider：<span>{it.provider || '-'}</span></span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-border">
+                        <span className="text-[11px] text-ink-faint font-mono">
+                          {it.created_at ? formatDateTime(it.created_at) : '-'}
+                        </span>
+                        {canReview(it) ? (
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs"
+                              onClick={() => {
+                                setActionError(null)
+                                setReviewing({ id: it.id, entity: `${it.entity_type ?? ''}:${it.entity_id ?? ''}`, action: 'approve' })
+                              }}
+                            >
+                              批准
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 text-xs text-state-declining"
+                              onClick={() => {
+                                setActionError(null)
+                                setReviewing({ id: it.id, entity: `${it.entity_type ?? ''}:${it.entity_id ?? ''}`, action: 'reject' })
+                              }}
+                            >
+                              驳回
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
           )}
           <PaginationBar
             page={page}

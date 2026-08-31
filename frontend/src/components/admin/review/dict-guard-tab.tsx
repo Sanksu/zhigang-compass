@@ -23,6 +23,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { apiGet, apiPost, errMsg } from '@/lib/api'
 import type { Schema } from './review-types'
+import { useMediaQuery } from '@/hooks/use-media-query'
 
 type Proposal = Schema['DictProposalItem']
 type ChangeLog = Schema['DictChangeLogItem']
@@ -84,6 +85,7 @@ export function DictGuardTab() {
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [triggering, setTriggering] = useState(false)
+  const isDesktop = useMediaQuery('(min-width: 1024px)', true)
 
   const PAGE_SIZE = 20
 
@@ -244,55 +246,129 @@ export function DictGuardTab() {
               暂无{statusFilter === 'pending' ? '待审' : ''}提案（remove/protect 及超阈值调整会进入此处人工审批）
             </p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>词条</TableHead>
-                  <TableHead>对象</TableHead>
-                  <TableHead>动作</TableHead>
-                  <TableHead>理由</TableHead>
-                  <TableHead>置信度</TableHead>
-                  <TableHead>影响面</TableHead>
-                  <TableHead>批次</TableHead>
-                  {statusFilter === 'pending' && <TableHead className="text-right">操作</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            isDesktop ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>词条</TableHead>
+                    <TableHead>对象</TableHead>
+                    <TableHead>动作</TableHead>
+                    <TableHead>理由</TableHead>
+                    <TableHead>置信度</TableHead>
+                    <TableHead>影响面</TableHead>
+                    <TableHead>批次</TableHead>
+                    {statusFilter === 'pending' && <TableHead className="text-right">操作</TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {proposals.map((pr) => {
+                    const victim = victimOf(pr.evidence)
+                    return (
+                      <TableRow key={pr.id}>
+                        <TableCell className="font-medium text-ink">{pr.term}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-[11px] font-mono">
+                            {ENTITY_LABEL[pr.entity_type ?? 'skill'] ?? pr.entity_type ?? 'skill'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-[11px]">
+                            {ACTION_LABEL[pr.action] ?? pr.action}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="max-w-[240px] text-xs text-ink-muted">
+                          {pr.reason || '—'}
+                          {victim && (
+                            <span className="ml-1 text-state-declining">（误杀：{victim}）</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-mono tabular-nums text-xs text-ink-muted">
+                          {typeof pr.llm_confidence === 'number' ? pr.llm_confidence.toFixed(2) : '—'}
+                        </TableCell>
+                        <TableCell className="font-mono tabular-nums text-xs text-ink-muted" title="图谱同名节点 / 命中 JD">
+                          图 {(pr.impact_stats as Record<string, number>)?.graph_nodes ?? 0} · JD{' '}
+                          {(pr.impact_stats as Record<string, number>)?.jd_snapshots ?? 0}
+                        </TableCell>
+                        <TableCell className="text-xs text-ink-faint font-mono">{pr.run_date}</TableCell>
+                        {statusFilter === 'pending' && (
+                          <TableCell className="text-right">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => {
+                                setReviewTarget(pr)
+                                setReviewAction('approve')
+                                setReason('')
+                              }}
+                            >
+                              通过
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="ml-1 h-7 px-2 text-xs text-state-archived hover:text-state-archived"
+                              onClick={() => {
+                                setReviewTarget(pr)
+                                setReviewAction('reject')
+                                setReason('')
+                              }}
+                            >
+                              驳回
+                            </Button>
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="space-y-3 px-4 py-2">
                 {proposals.map((pr) => {
                   const victim = victimOf(pr.evidence)
                   return (
-                    <TableRow key={pr.id}>
-                      <TableCell className="font-medium text-ink">{pr.term}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-[11px] font-mono">
-                          {ENTITY_LABEL[pr.entity_type ?? 'skill'] ?? pr.entity_type ?? 'skill'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-[11px]">
-                          {ACTION_LABEL[pr.action] ?? pr.action}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="max-w-[240px] text-xs text-ink-muted">
+                    <div
+                      key={pr.id}
+                      className="rounded-lg border border-border bg-canvas p-4 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-ink">{pr.term}</div>
+                          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                            <Badge variant="outline" className="text-[10px] font-mono">
+                              {ENTITY_LABEL[pr.entity_type ?? 'skill'] ?? pr.entity_type ?? 'skill'}
+                            </Badge>
+                            <Badge variant="outline" className="text-[10px]">
+                              {ACTION_LABEL[pr.action] ?? pr.action}
+                            </Badge>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-mono tabular-nums text-xs text-ink-muted">
+                            {typeof pr.llm_confidence === 'number' ? pr.llm_confidence.toFixed(2) : '—'}
+                          </div>
+                          <div className="text-[10px] text-ink-faint">置信度</div>
+                        </div>
+                      </div>
+                      <div className="text-xs text-ink-muted line-clamp-2">
                         {pr.reason || '—'}
                         {victim && (
-                          <span className="ml-1 text-state-declining">（误杀：{victim}）</span>
+                          <span className="text-state-declining">（误杀：{victim}）</span>
                         )}
-                      </TableCell>
-                      <TableCell className="font-mono tabular-nums text-xs text-ink-muted">
-                        {typeof pr.llm_confidence === 'number' ? pr.llm_confidence.toFixed(2) : '—'}
-                      </TableCell>
-                      <TableCell className="font-mono tabular-nums text-xs text-ink-muted" title="图谱同名节点 / 命中 JD">
-                        图 {(pr.impact_stats as Record<string, number>)?.graph_nodes ?? 0} · JD{' '}
-                        {(pr.impact_stats as Record<string, number>)?.jd_snapshots ?? 0}
-                      </TableCell>
-                      <TableCell className="text-xs text-ink-faint font-mono">{pr.run_date}</TableCell>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-ink-faint">
+                        <span className="font-mono">
+                          图 {(pr.impact_stats as Record<string, number>)?.graph_nodes ?? 0} · JD {(pr.impact_stats as Record<string, number>)?.jd_snapshots ?? 0}
+                        </span>
+                        <span className="font-mono">{pr.run_date}</span>
+                      </div>
                       {statusFilter === 'pending' && (
-                        <TableCell className="text-right">
+                        <div className="flex gap-1.5 pt-1">
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-7 px-2 text-xs"
+                            className="flex-1 h-7 text-xs"
                             onClick={() => {
                               setReviewTarget(pr)
                               setReviewAction('approve')
@@ -303,8 +379,8 @@ export function DictGuardTab() {
                           </Button>
                           <Button
                             size="sm"
-                            variant="ghost"
-                            className="ml-1 h-7 px-2 text-xs text-state-archived hover:text-state-archived"
+                            variant="outline"
+                            className="flex-1 h-7 text-xs text-state-archived"
                             onClick={() => {
                               setReviewTarget(pr)
                               setReviewAction('reject')
@@ -313,13 +389,13 @@ export function DictGuardTab() {
                           >
                             驳回
                           </Button>
-                        </TableCell>
+                        </div>
                       )}
-                    </TableRow>
+                    </div>
                   )
                 })}
-              </TableBody>
-            </Table>
+              </div>
+            )
           )}
           {proposalTotal > PAGE_SIZE && (
             <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
@@ -354,59 +430,114 @@ export function DictGuardTab() {
           {changes.length === 0 ? (
             <p className="py-8 text-center text-xs text-ink-faint">暂无变更记录</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>词条</TableHead>
-                  <TableHead>动作</TableHead>
-                  <TableHead>来源</TableHead>
-                  <TableHead>类型</TableHead>
-                  <TableHead>理由</TableHead>
-                  <TableHead>操作人</TableHead>
-                  <TableHead>时间</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            isDesktop ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>词条</TableHead>
+                    <TableHead>动作</TableHead>
+                    <TableHead>来源</TableHead>
+                    <TableHead>类型</TableHead>
+                    <TableHead>理由</TableHead>
+                    <TableHead>操作人</TableHead>
+                    <TableHead>时间</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {changes.map((c) => (
+                    <TableRow key={c.id}>
+                      <TableCell className="font-medium text-ink">{c.term}</TableCell>
+                      <TableCell className="text-xs">{ACTION_LABEL[c.action] ?? c.action}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[11px] font-mono">{c.source}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={c.kind === 'blocked' ? 'archived' : 'emerging'} className="text-[11px]">
+                          {c.kind === 'blocked'
+                            ? '拦截'
+                            : c.kind === 'protected'
+                              ? '保护'
+                              : c.kind === 'node'
+                                ? '节点'
+                                : c.kind === 'edge'
+                                  ? '脏边'
+                                  : c.kind}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="max-w-[200px] truncate text-xs text-ink-muted">{c.reason || '—'}</TableCell>
+                      <TableCell className="text-xs text-ink-muted font-mono">{c.applied_by}</TableCell>
+                      <TableCell className="text-xs text-ink-faint font-mono">
+                        {c.created_at ? String(c.created_at).slice(0, 16).replace('T', ' ') : '—'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {c.action !== 'rollback' && c.kind !== 'node' && c.kind !== 'edge' && (
+                          <Button
+                            size="sm" variant="ghost" className="h-7 px-2 text-xs text-ink-muted hover:text-ink"
+                            onClick={() => rollback(c)}
+                          >
+                            回滚
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="space-y-3 px-4 py-2">
                 {changes.map((c) => (
-                  <TableRow key={c.id}>
-                    <TableCell className="font-medium text-ink">{c.term}</TableCell>
-                    <TableCell className="text-xs">{ACTION_LABEL[c.action] ?? c.action}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-[11px] font-mono">{c.source}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={c.kind === 'blocked' ? 'archived' : 'emerging'} className="text-[11px]">
-                        {c.kind === 'blocked'
-                          ? '拦截'
-                          : c.kind === 'protected'
-                            ? '保护'
-                            : c.kind === 'node'
-                              ? '节点'
-                              : c.kind === 'edge'
-                                ? '脏边'
-                                : c.kind}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="max-w-[200px] truncate text-xs text-ink-muted">{c.reason || '—'}</TableCell>
-                    <TableCell className="text-xs text-ink-muted font-mono">{c.applied_by}</TableCell>
-                    <TableCell className="text-xs text-ink-faint font-mono">
-                      {c.created_at ? String(c.created_at).slice(0, 16).replace('T', ' ') : '—'}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {c.action !== 'rollback' && c.kind !== 'node' && c.kind !== 'edge' && (
+                  <div
+                    key={c.id}
+                    className="rounded-lg border border-border bg-canvas p-4 space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-ink">{c.term}</div>
+                        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs text-ink-secondary">
+                            {ACTION_LABEL[c.action] ?? c.action}
+                          </span>
+                          <Badge variant="outline" className="text-[10px] font-mono">{c.source}</Badge>
+                          <Badge variant={c.kind === 'blocked' ? 'archived' : 'emerging'} className="text-[10px]">
+                            {c.kind === 'blocked'
+                              ? '拦截'
+                              : c.kind === 'protected'
+                                ? '保护'
+                                : c.kind === 'node'
+                                  ? '节点'
+                                  : c.kind === 'edge'
+                                    ? '脏边'
+                                    : c.kind}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-xs text-ink-muted line-clamp-2">
+                      {c.reason || '—'}
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-ink-faint">
+                      <span className="font-mono">{c.applied_by}</span>
+                      <span className="font-mono">
+                        {c.created_at ? String(c.created_at).slice(0, 16).replace('T', ' ') : '—'}
+                      </span>
+                    </div>
+                    {c.action !== 'rollback' && c.kind !== 'node' && c.kind !== 'edge' && (
+                      <div className="pt-1">
                         <Button
-                          size="sm" variant="ghost" className="h-7 px-2 text-xs text-ink-muted hover:text-ink"
+                          size="sm"
+                          variant="outline"
+                          className="w-full h-7 text-xs"
                           onClick={() => rollback(c)}
                         >
                           回滚
                         </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
+                      </div>
+                    )}
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            )
           )}
           {changeTotal > PAGE_SIZE && (
             <div className="flex items-center justify-between border-t border-border px-4 py-2.5">

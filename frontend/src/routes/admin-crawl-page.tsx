@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { cn } from '@/lib/utils'
 import {
   Select,
   SelectContent,
@@ -447,61 +448,123 @@ export function AdminCrawlPage() {
               {loading ? (
                 <p className="py-8 text-center text-sm text-ink-muted">加载真实采集状态…</p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>平台名</TableHead>
-                      <TableHead>等级</TableHead>
-                      <TableHead>状态</TableHead>
-                      <TableHead className="text-right">今日采集</TableHead>
-                      <TableHead className="text-right">累计采集</TableHead>
-                      <TableHead>最后运行</TableHead>
-                      <TableHead className="text-right">操作</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+                <>
+                  {/* 桌面端：表格视图 */}
+                  <div className="hidden lg:block">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>平台名</TableHead>
+                          <TableHead>等级</TableHead>
+                          <TableHead>状态</TableHead>
+                          <TableHead className="text-right">今日采集</TableHead>
+                          <TableHead className="text-right">累计采集</TableHead>
+                          <TableHead>最后运行</TableHead>
+                          <TableHead className="text-right">操作</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {platforms.map((p) => {
+                          const meta = STATUS_META[platformStatus(p, history)]
+                          return (
+                            <TableRow key={p.id} className={p.status === 'archived' ? 'opacity-50' : ''}>
+                              <TableCell className="font-medium">{p.name}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={LEVEL_CLASS[p.level]}>{p.level}</Badge>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={meta.variant}>{meta.label}</Badge>
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums font-mono">{p.todayCount.toLocaleString()}</TableCell>
+                              <TableCell className="text-right tabular-nums font-mono text-ink-muted">{p.totalCount.toLocaleString()}</TableCell>
+                              <TableCell className="text-xs text-ink-muted font-mono">{p.lastRun}</TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={p.status === 'archived' || isBusy}
+                                    onClick={() => triggerCrawl(p.id)}
+                                  >
+                                    触发
+                                  </Button>
+                                  <Button size="sm" variant="ghost" onClick={() => setLogDialog({
+                                    platformName: p.name,
+                                    taskId: history.find((h) => h.platformKey === p.id)?.id ?? null,
+                                  })}>日志</Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                        {platforms.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
+                              暂无采集记录，请先运行爬虫
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {/* 移动端：卡片视图 */}
+                  <div className="space-y-3 lg:hidden">
                     {platforms.map((p) => {
                       const meta = STATUS_META[platformStatus(p, history)]
                       return (
-                        <TableRow key={p.id} className={p.status === 'archived' ? 'opacity-50' : ''}>
-                          <TableCell className="font-medium">{p.name}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={LEVEL_CLASS[p.level]}>{p.level}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={meta.variant}>{meta.label}</Badge>
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums font-mono">{p.todayCount.toLocaleString()}</TableCell>
-                          <TableCell className="text-right tabular-nums font-mono text-ink-muted">{p.totalCount.toLocaleString()}</TableCell>
-                          <TableCell className="text-xs text-ink-muted font-mono">{p.lastRun}</TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={p.status === 'archived' || isBusy}
-                                onClick={() => triggerCrawl(p.id)}
-                              >
-                                触发
-                              </Button>
-                              <Button size="sm" variant="ghost" onClick={() => setLogDialog({
-                                platformName: p.name,
-                                taskId: history.find((h) => h.platformKey === p.id)?.id ?? null,
-                              })}>日志</Button>
+                        <div
+                          key={p.id}
+                          className={cn(
+                            'rounded-lg border border-border bg-canvas p-4 space-y-3',
+                            p.status === 'archived' && 'opacity-50',
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-ink">{p.name}</span>
+                                <Badge variant="outline" className={LEVEL_CLASS[p.level]}>{p.level}</Badge>
+                              </div>
+                              <div className="mt-1">
+                                <Badge variant={meta.variant}>{meta.label}</Badge>
+                              </div>
                             </div>
-                          </TableCell>
-                        </TableRow>
+                            <div className="text-right">
+                              <div className="text-lg font-semibold tabular-nums font-mono text-ink">
+                                {p.todayCount.toLocaleString()}
+                              </div>
+                              <div className="text-[11px] text-ink-faint">今日采集</div>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between text-xs text-ink-faint">
+                            <span>累计 {p.totalCount.toLocaleString()}</span>
+                            <span className="font-mono">{p.lastRun}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={p.status === 'archived' || isBusy}
+                              onClick={() => triggerCrawl(p.id)}
+                            >
+                              触发采集
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setLogDialog({
+                              platformName: p.name,
+                              taskId: history.find((h) => h.platformKey === p.id)?.id ?? null,
+                            })}>查看日志</Button>
+                          </div>
+                        </div>
                       )
                     })}
                     {platforms.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
-                          暂无采集记录，请先运行爬虫
-                        </TableCell>
-                      </TableRow>
+                      <div className="py-8 text-center text-sm text-ink-faint">
+                        暂无采集记录，请先运行爬虫
+                      </div>
                     )}
-                  </TableBody>
-                </Table>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -647,45 +710,92 @@ export function AdminCrawlPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>时间</TableHead>
-                    <TableHead>平台</TableHead>
-                    <TableHead>关键词</TableHead>
-                    <TableHead className="text-right">采集数</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>错误/说明</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {history.length === 0 ? (
+              {/* 桌面端：表格视图 */}
+              <div className="hidden lg:block">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
-                        暂无爬取记录，点击上方「触发爬取」开始
-                      </TableCell>
+                      <TableHead>时间</TableHead>
+                      <TableHead>平台</TableHead>
+                      <TableHead>关键词</TableHead>
+                      <TableHead className="text-right">采集数</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>错误/说明</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
                     </TableRow>
-                  ) : (
-                    history.map((h) => {
-                      const meta = HISTORY_STATUS_META[h.status]
-                      return (
-                        <TableRow key={h.id}>
-                          <TableCell className="text-xs font-mono text-ink-muted">{h.time}</TableCell>
-                          <TableCell className="font-medium">{h.platform}</TableCell>
-                          <TableCell className="text-ink-secondary">{h.keyword}</TableCell>
-                          <TableCell className="text-right tabular-nums font-mono">{h.count}</TableCell>
-                          <TableCell><Badge variant={meta.variant}>{meta.label}</Badge></TableCell>
-                          <TableCell className="text-xs text-ink-muted truncate max-w-[220px]">{h.error || '—'}</TableCell>
-                          <TableCell className="text-right">
-                            <Button size="sm" variant="ghost" onClick={() => setDetailRow(h)}>详情</Button>
-                          </TableCell>
-                        </TableRow>
-                      )
-                    })
-                  )}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {history.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center text-sm text-ink-faint py-8">
+                          暂无爬取记录，点击上方「触发爬取」开始
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      history.map((h) => {
+                        const meta = HISTORY_STATUS_META[h.status]
+                        return (
+                          <TableRow key={h.id}>
+                            <TableCell className="text-xs font-mono text-ink-muted">{h.time}</TableCell>
+                            <TableCell className="font-medium">{h.platform}</TableCell>
+                            <TableCell className="text-ink-secondary">{h.keyword}</TableCell>
+                            <TableCell className="text-right tabular-nums font-mono">{h.count}</TableCell>
+                            <TableCell><Badge variant={meta.variant}>{meta.label}</Badge></TableCell>
+                            <TableCell className="text-xs text-ink-muted truncate max-w-[220px]">{h.error || '—'}</TableCell>
+                            <TableCell className="text-right">
+                              <Button size="sm" variant="ghost" onClick={() => setDetailRow(h)}>详情</Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* 移动端：卡片视图 */}
+              <div className="space-y-3 lg:hidden">
+                {history.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-ink-faint">
+                    暂无爬取记录，点击上方「触发爬取」开始
+                  </div>
+                ) : (
+                  history.map((h) => {
+                    const meta = HISTORY_STATUS_META[h.status]
+                    return (
+                      <div
+                        key={h.id}
+                        className="rounded-lg border border-border bg-canvas p-4 space-y-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-ink">{h.platform}</span>
+                              <Badge variant={meta.variant}>{meta.label}</Badge>
+                            </div>
+                            <div className="text-[11px] text-ink-faint font-mono mt-0.5">{h.time}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-lg font-semibold tabular-nums font-mono text-ink">
+                              {h.count}
+                            </div>
+                            <div className="text-[11px] text-ink-faint">采集数</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-ink-muted">
+                          <span>关键词：<span className="text-ink-secondary">{h.keyword}</span></span>
+                        </div>
+                        {h.error && (
+                          <p className="text-xs text-ink-muted border-t border-border pt-1.5 truncate">{h.error}</p>
+                        )}
+                        <Button size="sm" variant="outline" className="w-full" onClick={() => setDetailRow(h)}>
+                          查看详情
+                        </Button>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

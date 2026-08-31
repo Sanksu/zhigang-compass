@@ -1,19 +1,41 @@
 import '@testing-library/jest-dom/vitest'
 
 // jsdom 缺 matchMedia（主题/响应式/暗色订阅逻辑依赖）；默认浅色偏好，测试可覆写
+// 模拟桌面视口宽度 1280px，使 md/lg/xl 等 Tailwind 断点在测试中均命中（组件测试默认桌面布局）
 if (!window.matchMedia) {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
-    value: (query: string): MediaQueryList => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
-    }) as MediaQueryList,
+    value: (query: string): MediaQueryList => {
+      // 解析 min-width / max-width，模拟 1280px 视口宽度
+      let matches = false
+      const minWidthMatch = query.match(/\(min-width:\s*(\d+)px\)/)
+      const maxWidthMatch = query.match(/\(max-width:\s*(\d+)px\)/)
+      const viewportWidth = 1280
+
+      if (minWidthMatch && maxWidthMatch) {
+        const minW = Number(minWidthMatch[1])
+        const maxW = Number(maxWidthMatch[1])
+        matches = viewportWidth >= minW && viewportWidth <= maxW
+      } else if (minWidthMatch) {
+        matches = viewportWidth >= Number(minWidthMatch[1])
+      } else if (maxWidthMatch) {
+        matches = viewportWidth <= Number(maxWidthMatch[1])
+      } else if (query.includes('prefers-color-scheme: dark')) {
+        matches = false // 默认浅色主题
+      } else if (query.includes('prefers-reduced-motion')) {
+        matches = false
+      }
+      return {
+        matches,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      } as MediaQueryList
+    },
   })
 }
 
