@@ -5,7 +5,7 @@
  * 直接 mock @/lib/api（未引入 MSW）。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { apiGet } from '@/lib/api'
 import { AdminLlmDecisionsPage } from './admin-llm-decisions-page'
@@ -111,5 +111,79 @@ describe('AdminLlmDecisionsPage 建议目标展示（方案①）', () => {
   it('决策页提供动态别名表跳转入口', async () => {
     afterRender([], { proposal: 0, auto_applied: 0, blocked: 0, shadow: 0, records: 0 })
     await waitFor(() => expect(screen.getByText('动态别名表')).toBeTruthy())
+  })
+})
+
+describe('AdminLlmDecisionsPage 详情展开', () => {
+  it('governance auto_applied 展开显示已执行副作用与决策输出', async () => {
+    afterRender(
+      [
+        makeDecision({
+          entity_type: 'course',
+          entity_id: '2027年山西专升本系统督学班',
+          structured_output: {
+            action: 'remove_node',
+            reason: '专升本督学班非技能培训且完全孤立',
+            impact: { graph_nodes: 1, jd_snapshots: 0 },
+          },
+          evidence_refs: [{ label: '边数(入+出)', value: 0 }],
+        }),
+      ],
+      { proposal: 0, auto_applied: 1, blocked: 0, shadow: 0, records: 1 },
+    )
+    await waitFor(() => expect(screen.getByText('course:2027年山西专升本系统督学班')).toBeTruthy())
+
+    // 默认收起：副作用说明不可见
+    expect(screen.queryByText('已执行的副作用')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    expect(screen.getByText('已执行的副作用')).toBeTruthy()
+    expect(screen.getByText(/删除图谱 课程 Course 节点/)).toBeTruthy()
+    expect(screen.getByText('专升本督学班非技能培训且完全孤立')).toBeTruthy()
+    expect(screen.getByText(/状态说明/)).toBeTruthy()
+    expect(screen.getByText(/边数\(入\+出\)/)).toBeTruthy()
+
+    // 收起后详情消失
+    fireEvent.click(screen.getByRole('button', { name: '收起详情' }))
+    expect(screen.queryByText('已执行的副作用')).toBeNull()
+  })
+
+  it('proposal 域展开显示批准后将执行的影响', async () => {
+    afterRender(
+      [
+        makeDecision({
+          domain: 'skill_normalize',
+          entity_type: 'skill',
+          entity_id: '.NET Framework',
+          status: 'proposal',
+          risk_tier: 'R2',
+          structured_output: { action: 'merge', target_standard: '.NET', kind: 'alias' },
+        }),
+      ],
+      { proposal: 1, auto_applied: 0, blocked: 0, shadow: 0, records: 1 },
+    )
+    await waitFor(() =>
+      expect(
+        screen.getAllByText((_, el) => el?.textContent?.includes('.NET Framework') ?? false).length,
+      ).toBeGreaterThan(0),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    expect(screen.getByText('批准后将执行')).toBeTruthy()
+    expect(screen.getByText(/回写别名词典/)).toBeTruthy()
+    expect(screen.getByText('待人工审批，尚未产生任何变更（操作列可批准/驳回）')).toBeTruthy()
+  })
+
+  it('未知动作组合回退为通用字段展示（不渲染影响小节）', async () => {
+    afterRender(
+      [makeDecision({ status: 'shadow', structured_output: { custom_field: 'x' } })],
+      { proposal: 0, auto_applied: 0, blocked: 0, shadow: 1, records: 1 },
+    )
+    await waitFor(() => expect(screen.getByText('skill:测试词A')).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    expect(screen.queryByText(/副作用/)).toBeNull()
+    expect(screen.getByText('决策输出（structured_output）')).toBeTruthy()
+    expect(screen.getByText('x')).toBeTruthy()
   })
 })
