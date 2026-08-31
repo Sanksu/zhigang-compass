@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Reveal } from '@/components/ui/reveal'
 import { cn } from '@/lib/utils'
 import { apiGet } from '@/lib/api'
 import type { components } from '@/types/api'
@@ -333,13 +334,16 @@ export function EvolutionPage() {
       {versions[0]?.data_warning && <DataWarningBanner warning={versions[0].data_warning} />}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        {metrics.map((m) => (
-          <MetricCard key={m.label} data={m} />
+        {metrics.map((m, i) => (
+          <Reveal key={m.label} delay={i * 90} className="h-full">
+            <MetricCard className="h-full" data={m} />
+          </Reveal>
         ))}
       </div>
 
       {/* 演化看板 4 区块按 信号 / 趋势与流向 / 版本与状态机 分组，不再无限下滑 */}
-      <Tabs value={tab} onValueChange={onTabChange}>
+      <Reveal delay={380}>
+        <Tabs value={tab} onValueChange={onTabChange}>
         <TabsList className="mb-4">
           <TabsTrigger value="signals" className="text-xs">信号</TabsTrigger>
           <TabsTrigger value="trend" className="text-xs">趋势与流向</TabsTrigger>
@@ -367,6 +371,7 @@ export function EvolutionPage() {
           <EvolutionEventsView />
         </TabsContent>
       </Tabs>
+      </Reveal>
     </>
   )
 }

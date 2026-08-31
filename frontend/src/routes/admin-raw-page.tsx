@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Clock, ExternalLink, FileText, Flag, Loader2, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
+import { Reveal } from '@/components/ui/reveal'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -297,6 +298,7 @@ export function AdminRawPage() {
         description="JD / 课程 / 论文 / 社区信号四类 raw 表治理：列表检索 / 标题与出处编辑 / 删除（全部变更写审计日志；JD 附归一化岗位、质量复核与放行）"
       />
 
+      <Reveal delay={380}>
       <Card>
         <CardContent className="pt-4">
           <Tabs value={rawType} onValueChange={(v) => { setRawType(v as RawType); setPage(1); setSource(''); setQ(''); setLoading(true) }}>
@@ -510,6 +512,7 @@ export function AdminRawPage() {
           />
         </CardContent>
       </Card>
+      </Reveal>
 
       {/* 详情/编辑弹窗 */}
       <Dialog

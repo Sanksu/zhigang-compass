@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Tag, X } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
+import { Reveal } from '@/components/ui/reveal'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -67,13 +68,15 @@ export function AdminSkillsPage() {
         title="技能治理"
         description="技能归一化治理：白名单 ∪ 生效别名的聚合浏览与过滤，以及别名回写的复核处置（approve 即时写入动态别名表生效）"
       />
-      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList className="mb-4">
-          <TabsTrigger value="overview" className="text-xs">技能总览</TabsTrigger>
-          <TabsTrigger value="aliases" className="text-xs">别名复核</TabsTrigger>
-        </TabsList>
-      </Tabs>
-      {tab === 'overview' ? <SkillOverviewTab /> : <AliasReviewTab />}
+      <Reveal delay={380}>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+          <TabsList className="mb-4">
+            <TabsTrigger value="overview" className="text-xs">技能总览</TabsTrigger>
+            <TabsTrigger value="aliases" className="text-xs">别名复核</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {tab === 'overview' ? <SkillOverviewTab /> : <AliasReviewTab />}
+      </Reveal>
     </>
   )
 }

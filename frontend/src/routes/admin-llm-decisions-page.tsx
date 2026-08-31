@@ -18,6 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Reveal } from '@/components/ui/reveal'
 import { apiGet, apiPost } from '@/lib/api'
 import { formatDateTime } from '@/lib/utils'
 import { useIsDesktop } from '@/hooks/use-media-query'
@@ -335,10 +336,10 @@ export function AdminLlmDecisionsPage() {
         </TabsList>
         <TabsContent value="decisions" className="space-y-6">
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
-        {cards.map((c) => (
+        {cards.map((c, i) => (
+          <Reveal key={c.label} delay={i * 90} className="h-full">
           <Card
-            key={c.label}
-            className={c.filter ? 'cursor-pointer transition-colors hover:border-ink-secondary/40' : undefined}
+            className={`h-full ${c.filter ? 'cursor-pointer transition-colors hover:border-ink-secondary/40' : ''}`}
             onClick={c.filter ? () => applyFilter(c.filter!) : undefined}
             title={c.filter ? '点击按此状态过滤列表' : undefined}
           >
@@ -350,9 +351,11 @@ export function AdminLlmDecisionsPage() {
               </div>
             </CardContent>
           </Card>
+          </Reveal>
         ))}
       </div>
 
+      <Reveal delay={380}>
       <Card>
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between space-y-0">
           <CardTitle>决策记录</CardTitle>
@@ -741,6 +744,7 @@ export function AdminLlmDecisionsPage() {
           />
         </CardContent>
       </Card>
+      </Reveal>
 
       {reviewing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60" role="dialog" aria-modal="true">
@@ -785,7 +789,9 @@ export function AdminLlmDecisionsPage() {
       )}
         </TabsContent>
         <TabsContent value="aliases" className="space-y-6">
+          <Reveal delay={380}>
           <SkillAliasesTable />
+          </Reveal>
         </TabsContent>
       </Tabs>
     </div>

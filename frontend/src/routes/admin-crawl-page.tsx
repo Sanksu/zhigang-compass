@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Activity, Database, Gauge } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
+import { Reveal } from '@/components/ui/reveal'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CrawlScheduleConfig } from '@/components/admin/crawl-schedule-config'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -431,12 +432,15 @@ export function AdminCrawlPage() {
         <TabsContent value="realtime">
           {/* 顶部指标卡（真实 raw 表 + output 统计）——共享 MetricCard 统一形态 */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            {metrics.map((m) => (
-              <MetricCard key={m.id} data={m} />
+            {metrics.map((m, i) => (
+              <Reveal key={m.id} delay={i * 90} className="h-full">
+                <MetricCard data={m} className="h-full" />
+              </Reveal>
             ))}
           </div>
 
           {/* 平台状态表 */}
+          <Reveal delay={380}>
           <Card className="mb-6">
             <CardHeader>
               <CardTitle className="text-sm flex items-center justify-between">
@@ -568,10 +572,12 @@ export function AdminCrawlPage() {
               )}
             </CardContent>
           </Card>
+          </Reveal>
     
           {/* 手动触发表单 + 当前任务进度 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-            <Card>
+            <Reveal delay={500} className="h-full">
+            <Card className="h-full">
               <CardHeader>
                 <CardTitle className="text-sm">手动触发爬取</CardTitle>
               </CardHeader>
@@ -629,8 +635,10 @@ export function AdminCrawlPage() {
                 </Button>
               </CardContent>
             </Card>
+            </Reveal>
     
-            <Card>
+            <Reveal delay={620} className="h-full">
+            <Card className="h-full">
               <CardHeader>
                 <CardTitle className="text-sm flex items-center justify-between">
                   <span>当前任务</span>
@@ -699,9 +707,11 @@ export function AdminCrawlPage() {
                 )}
               </CardContent>
             </Card>
+            </Reveal>
           </div>
     
           {/* 历史记录 */}
+          <Reveal delay={740}>
           <Card>
             <CardHeader>
               <CardTitle className="text-sm flex items-center justify-between">
@@ -798,11 +808,14 @@ export function AdminCrawlPage() {
               </div>
             </CardContent>
           </Card>
+          </Reveal>
         </TabsContent>
 
         {/* 调度与限频：采集上限 + 限频 + 每爬虫配置（08-27 从 settings 迁入，爬虫域一处管全） */}
         <TabsContent value="schedule">
-          <CrawlScheduleConfig />
+          <Reveal delay={380}>
+            <CrawlScheduleConfig />
+          </Reveal>
         </TabsContent>
       </Tabs>
 

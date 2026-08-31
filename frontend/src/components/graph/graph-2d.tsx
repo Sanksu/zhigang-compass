@@ -1106,8 +1106,11 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           // （力导向 / techStack 环形）保持 animation:false 以稳定布局与镜头
           // 动画柔和化：duration 拉长、缓动用加急四阶（quarticOut 收尾更平滑），
           // animationDelay 按节点索引逐级错峰（中心岗位→大类→外环依次浮现，
-          // 避免整组节点同时缩放的"齐冲"生硬感）
-          ...(portraitView
+          // 避免整组节点同时缩放的"齐冲"生硬感）。
+          // reduced-motion 降级：系统偏好减少动画时关闭入场过渡（直接无动画上图），
+          // 与 flyTo 镜头飞行（_flyTo 已接 prefers-reduced-motion）口径一致
+          ...(portraitView &&
+          !window.matchMedia('(prefers-reduced-motion: reduce)').matches
             ? {
                 animation: true,
                 animationDuration: 800,

@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { Reveal } from '@/components/ui/reveal'
 import { apiGet, apiPut, errMsg } from '@/lib/api'
 import type { components } from '@/types/api'
 
@@ -172,6 +173,7 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
   return (
     <>
       <PageHeader title={meta.title} description={meta.desc} />
+      <Reveal delay={380}>
       <Card className="mb-4">
         <CardContent className="py-3 flex items-center gap-2 text-xs text-ink-muted">
           <Settings2 className="size-4 shrink-0" />
@@ -181,6 +183,7 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
           </span>
         </CardContent>
       </Card>
+      </Reveal>
 
       {feedback && (
         <div className={`mb-4 rounded-md px-3 py-2 text-xs ${feedback.type === 'ok' ? 'bg-subtle text-state-stable' : 'bg-subtle text-state-archived'}`}>
@@ -188,6 +191,7 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
         </div>
       )}
 
+      <Reveal delay={500}>
       <Card className="mb-4">
         <CardHeader>
           <CardTitle className="text-sm flex items-center gap-2">
@@ -216,7 +220,9 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
           )}
         </CardContent>
       </Card>
+      </Reveal>
 
+      <Reveal delay={620}>
       <div className="flex items-center gap-2">
         <Button size="sm" className="h-8" onClick={save} disabled={saving || loading}>
           <Save className="size-3.5 mr-1" />
@@ -227,6 +233,7 @@ export function AdminSettingsPage({ section }: { section: SettingsSection }) {
           恢复默认
         </Button>
       </div>
+      </Reveal>
     </>
   )
 }

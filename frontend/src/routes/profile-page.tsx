@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ROLES } from '@/lib/constants'
 import { PageHeader } from '@/components/layout/page-header'
+import { Reveal } from '@/components/ui/reveal'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -243,6 +244,7 @@ export function ProfilePage() {
     <div className="space-y-6">
       <PageHeader title="个人中心" description="账户信息与简历管理" />
 
+      <Reveal delay={0}>
       {/* Toast 通知 */}
       {toast && (
         <div className="rounded-md border border-state-candidate/20 bg-state-candidate/5 px-4 py-3 text-sm text-state-candidate">
@@ -506,7 +508,8 @@ export function ProfilePage() {
             </div>
           </div>
         </DialogContent>
-      </Dialog>
+        </Dialog>
+      </Reveal>
     </div>
   )
 }

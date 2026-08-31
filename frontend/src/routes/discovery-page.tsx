@@ -20,6 +20,7 @@ import {
   type PositionSkillsDeltaSummaryData,
 } from '@/components/discovery/types'
 import { MetricCard } from '@/components/shared/metric-card'
+import { Reveal } from '@/components/ui/reveal'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 type Tab = 'new' | 'delta'
@@ -71,13 +72,14 @@ function NewPositionsView({ data, loading }: { data: DiscoveryRecentData | null;
 
   return (
     <div className="space-y-2">
-      {data.candidates.map((c) => {
+      {data.candidates.map((c, i) => {
         const isOpen = expanded.has(c.position_name)
         const mustCount = c.skills?.must?.length ?? 0
         const niceCount = c.skills?.nice?.length ?? 0
         return (
-          <Card key={c.position_name}>
-            <CardContent className="py-3">
+          <Reveal key={c.position_name} delay={i * 60}>
+            <Card>
+              <CardContent className="py-3">
               <button
                 type="button"
                 className="w-full text-left"
@@ -125,7 +127,8 @@ function NewPositionsView({ data, loading }: { data: DiscoveryRecentData | null;
                 </div>
               )}
             </CardContent>
-          </Card>
+            </Card>
+          </Reveal>
         )
       })}
     </div>
@@ -238,9 +241,10 @@ function SkillsDeltaView() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">岗位技能增减（快照对比）</CardTitle>
+      <Reveal delay={0}>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">岗位技能增减（快照对比）</CardTitle>
           <CardDescription>
             任选两个图谱版本快照对比；下拉仅列出该对比范围内有技能增减的岗位
           </CardDescription>
@@ -381,9 +385,11 @@ function SkillsDeltaView() {
           )}
         </CardContent>
       </Card>
+      </Reveal>
 
       {/* 稳定面板：两版间技能集合完全一致（有技能且零增减）的岗位 */}
-      <Card>
+      <Reveal delay={140}>
+        <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">稳定岗位（无技能增减）</CardTitle>
           <CardDescription>
@@ -423,6 +429,7 @@ function SkillsDeltaView() {
           )}
         </CardContent>
       </Card>
+      </Reveal>
     </div>
   )
 }
@@ -473,9 +480,18 @@ export function DiscoveryPage() {
 
       {/* 顶部指标卡 */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-        <MetricCard data={{ label: '近 30 天候选', value: total, delta: 0, deltaTone: 'stable', hint: '进入发现候选池', bar: true }} />
-        <MetricCard data={{ label: '已聚合成图', value: withSkillsCount, delta: 0, deltaTone: 'stable', hint: '有图谱技能清单', bar: true }} />
-        <MetricCard data={{ label: '待审核', value: pendingCount, delta: 0, deltaTone: 'declining', hint: 'candidate 态，技能待聚合', bar: true }} />
+        {([
+          { label: '近 30 天候选', value: total, hint: '进入发现候选池', tone: 'stable' },
+          { label: '已聚合成图', value: withSkillsCount, hint: '有图谱技能清单', tone: 'stable' },
+          { label: '待审核', value: pendingCount, hint: 'candidate 态，技能待聚合', tone: 'declining' },
+        ] as { label: string; value: number; hint: string; tone: 'stable' | 'declining' }[]).map((s, i) => (
+          <Reveal key={s.label} delay={i * 90} className="h-full">
+            <MetricCard
+              className="h-full"
+              data={{ label: s.label, value: s.value, delta: 0, deltaTone: s.tone, hint: s.hint, bar: true }}
+            />
+          </Reveal>
+        ))}
       </div>
 
       {/* Tab 切换 */}

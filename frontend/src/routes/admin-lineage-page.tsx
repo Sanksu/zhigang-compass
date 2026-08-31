@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Reveal } from '@/components/ui/reveal'
 import { apiGet } from '@/lib/api'
 import { formatDateTime } from '@/lib/utils'
 import { useIsDesktop } from '@/hooks/use-media-query'
@@ -142,68 +143,79 @@ export function AdminLineagePage() {
 
       {/* 血缘总览统计（真实 lineage_summary） */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center justify-between mb-2">
-              <Network className="size-4 text-ink-faint" />
-              <span className="text-xs font-mono text-ink-muted">GROUPS</span>
-            </div>
-            <div className="text-2xl font-semibold tracking-tight tabular-nums">
-              {summary?.groups ?? '—'}
-            </div>
-            <div className="text-xs text-ink-muted mt-1">岗位分组数</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center justify-between mb-2">
-              <Database className="size-4 text-ink-faint" />
-              <span className="text-xs font-mono text-ink-muted">JD</span>
-            </div>
-            <div className="text-2xl font-semibold tracking-tight tabular-nums">
-              {summary?.jd_count?.toLocaleString() ?? '—'}
-            </div>
-            <div className="text-xs text-ink-muted mt-1">覆盖证据 JD</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center justify-between mb-2">
-              <FileSearch className="size-4 text-ink-faint" />
-              <span className="text-xs font-mono text-ink-muted">MULTI</span>
-            </div>
-            <div className="text-2xl font-semibold tracking-tight tabular-nums">
-              {summary?.multi_source ?? '—'}
-            </div>
-            <div className="text-xs text-ink-muted mt-1">≥2 独立源印证</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center justify-between mb-2">
-              <ShieldCheck className="size-4 text-ink-faint" />
-              <span className="text-xs font-mono text-ink-muted">OK</span>
-            </div>
-            <div className="text-2xl font-semibold tracking-tight tabular-nums">
-              {summary?.verified ?? '—'}
-            </div>
-            <div className="text-xs text-ink-muted mt-1">已验证（跨源）</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center justify-between mb-2">
-              <TriangleAlert className="size-4 text-ink-faint" />
-              <span className="text-xs font-mono text-ink-muted">&lt;0.6</span>
-            </div>
-            <div className="text-2xl font-semibold tracking-tight tabular-nums">
-              {summary?.below_confidence ?? '—'}
-            </div>
-            <div className="text-xs text-ink-muted mt-1">低置信待复核</div>
-          </CardContent>
-        </Card>
+        <Reveal delay={0} className="h-full">
+          <Card className="h-full">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between mb-2">
+                <Network className="size-4 text-ink-faint" />
+                <span className="text-xs font-mono text-ink-muted">GROUPS</span>
+              </div>
+              <div className="text-2xl font-semibold tracking-tight tabular-nums">
+                {summary?.groups ?? '—'}
+              </div>
+              <div className="text-xs text-ink-muted mt-1">岗位分组数</div>
+            </CardContent>
+          </Card>
+        </Reveal>
+        <Reveal delay={90} className="h-full">
+          <Card className="h-full">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between mb-2">
+                <Database className="size-4 text-ink-faint" />
+                <span className="text-xs font-mono text-ink-muted">JD</span>
+              </div>
+              <div className="text-2xl font-semibold tracking-tight tabular-nums">
+                {summary?.jd_count?.toLocaleString() ?? '—'}
+              </div>
+              <div className="text-xs text-ink-muted mt-1">覆盖证据 JD</div>
+            </CardContent>
+          </Card>
+        </Reveal>
+        <Reveal delay={180} className="h-full">
+          <Card className="h-full">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between mb-2">
+                <FileSearch className="size-4 text-ink-faint" />
+                <span className="text-xs font-mono text-ink-muted">MULTI</span>
+              </div>
+              <div className="text-2xl font-semibold tracking-tight tabular-nums">
+                {summary?.multi_source ?? '—'}
+              </div>
+              <div className="text-xs text-ink-muted mt-1">≥2 独立源印证</div>
+            </CardContent>
+          </Card>
+        </Reveal>
+        <Reveal delay={270} className="h-full">
+          <Card className="h-full">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between mb-2">
+                <ShieldCheck className="size-4 text-ink-faint" />
+                <span className="text-xs font-mono text-ink-muted">OK</span>
+              </div>
+              <div className="text-2xl font-semibold tracking-tight tabular-nums">
+                {summary?.verified ?? '—'}
+              </div>
+              <div className="text-xs text-ink-muted mt-1">已验证（跨源）</div>
+            </CardContent>
+          </Card>
+        </Reveal>
+        <Reveal delay={360} className="h-full">
+          <Card className="h-full">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between mb-2">
+                <TriangleAlert className="size-4 text-ink-faint" />
+                <span className="text-xs font-mono text-ink-muted">&lt;0.6</span>
+              </div>
+              <div className="text-2xl font-semibold tracking-tight tabular-nums">
+                {summary?.below_confidence ?? '—'}
+              </div>
+              <div className="text-xs text-ink-muted mt-1">低置信待复核</div>
+            </CardContent>
+          </Card>
+        </Reveal>
       </div>
 
+      <Reveal delay={380}>
       <Card>
         <CardHeader>
           <CardTitle className="text-sm flex items-center justify-between">
@@ -358,6 +370,7 @@ export function AdminLineagePage() {
           />
         </CardContent>
       </Card>
+      </Reveal>
 
       {/* 详情弹窗：组级校验 + 证据 JD 血缘链明细（溯源到原始来源） */}
       <Dialog

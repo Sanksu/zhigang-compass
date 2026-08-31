@@ -33,11 +33,11 @@ export interface MetricCardData {
   bar?: boolean
 }
 
-export function MetricCard({ data }: { data: MetricCardData }) {
+export function MetricCard({ data, className }: { data: MetricCardData; className?: string }) {
   const Icon = data.icon
   const tone = data.deltaTone ?? 'muted'
   return (
-    <Card>
+    <Card className={className}>
       <CardContent className="py-4">
         {/* flex-wrap：窄卡（移动端 2 列 / 中宽度 4 列）放不下时 delta 徽标换行，
             而非把中文标签挤到 1ch 逐字竖排（中文无空格，min-content=单字宽） */}
