@@ -20,6 +20,7 @@ from app.api.v1.admin_routes import (
     crawl,
     dict_guard,
     etl,
+    graph_governance,
     jd_admin,
     lineage,
     llm_decisions,
@@ -35,6 +36,7 @@ router.include_router(accounts.router)
 router.include_router(approval_summary.router)
 router.include_router(audit.router)
 router.include_router(crawl.router)
+router.include_router(graph_governance.router)
 router.include_router(lineage.router)
 router.include_router(position_reviews.router)
 router.include_router(position_edit.router)
