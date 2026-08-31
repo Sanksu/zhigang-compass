@@ -1,32 +1,33 @@
 # -*- coding: utf-8 -*-
-"""岗位职能域同步（岗位投影 Leiden，08-22 Leiden 质量修复）。
+"""岗位职能域同步（骨干域 + 归类制，2026-08-31 重构）。
 
-背景：技能共现图的 Leiden 社区对"岗位域"不可用——min_weight 过滤后仅 7%
-技能有社区，金融类岗位技能边全 nice（因子 0.2）整域被滤出图外，岗位
-community_id 靠稀疏技能社区继承只落进 2-3 个技术大杂烩桶。
+架构（对齐分类学正统做法，替代"全员聚类"）：
 
-本脚本对「岗位-岗位投影图」（共享技能加权，load_position_projection）
-跑 Leiden，直接得到岗位职能域，回填 Position 节点属性：
-- `domain_id`：`dom_{cluster}`；成员数 < min-cluster-size（默认 3）的微簇
-  （跨域桥梁岗/长尾）合并为 `dom_general`
-- `domain_name`：域内最高 freq 岗位名（代表岗，前端超节点标签）
-- 高频桥梁岗语义指派（PINNED_DOMAIN_ANCHORS）：被 Leiden 撕成单点的
-  高频岗（大模型算法工程师/Python开发工程师 等）按锚点岗并入语义域
+1. 骨干成域：freq ≥ BACKBONE_MIN_FREQ 的高置信岗位构成投影子图跑 Leiden——
+   这一层边稠证据实，划分稳定；成员 < min-cluster-size 的骨干簇降级为
+   待归类池（不再直接进通用域）。
+2. 其余归类：低频/降级岗位不做聚类，做带弃权的最近域分类——对每个域算
+   连接强度（Σ 投影边权），最优域强度 ≥ attach-min-affinity 且领先次优域
+   dominance 比例才归入；否则诚实弃权落「通用与其他岗位」。
+   freq=1 岗位在结构上凑不出"域"，微簇域（系统可靠性二人域 / AI 碎片簇
+   拐走 Go 案例的镜像）从舞台层面消失。
 
-消费：能力图谱域聚合下钻（GraphNode.domain_id/domain_name 契约字段）。
+回填 Position 节点属性：
+- `domain_id`：骨干簇 `dom_{cid}` 或 `dom_general`
+- `domain_name`：LLM 语义域名（--llm-name，失败回退代表岗名）
+- pins 语义双层化：骨干岗=簇成员覆盖（Leiden 后、降级前）；待归类岗=
+  归类目标覆盖（绕过阈值直接并入锚点域，锚点缺域则告警保持弃权）
+
+08-31 基线（共成员基准 data/golden_set/position_domain_eval.jsonl）：
+全员聚类架构 strict 55.6% / pairwise F1 0.552；本架构以基准评测验收。
+
+门禁：最大域占比超限或语义域过少视为参数退化，拒绝写库。
 幂等可重复执行；岗位聚合变化（ETL 后）需重跑。
 
-08-24 补强：
-- 孤立岗兜底：投影图只含「共享技能≥2」的岗位对，无合格边的岗位不进图
-  （实测 42 岗因此无域）。写回后对仍无域的公开状态岗位统一归 dom_general。
-- --llm-name：单次 LLM 调用为各语义簇起短职能域名（如「金融数据分析」），
-  替代代表岗名带来的「域名=具体岗位」错位；失败/重名/与成员岗同名均
-  回退代表岗名。prompt 属算法核心红线，改动须张恺天 review。
-
 用法：
-    uv run python scripts/sync_position_domains.py            # 默认 resolution=1.55, min-cluster-size=3
-    uv run python scripts/sync_position_domains.py --resolution 1.45
-    uv run python scripts/sync_position_domains.py --llm-name # 语义域名
+    uv run python scripts/sync_position_domains.py            # 默认参数
+    uv run python scripts/sync_position_domains.py --llm-name # LLM 语义域名
+    uv run python scripts/evaluate_position_domains.py        # 基准评测验收
 """
 
 import argparse
@@ -43,28 +44,54 @@ from app.core.logging import setup_logging
 
 logger = setup_logging("sync_position_domains")
 
-# 投影图 Leiden 分辨率：08-22 真实图网格搜（1.3/1.45/1.55/1.6）的甜点——
-# 1.55 时金融/数据分析 19 岗成簇（投资/精算/策略/成本/信贷全聚齐）、语音算法
-# 归算法域、前端/硬件/教育各自成簇共 12 个语义簇；1.6 过细（Python/大模型/
-# DevOps 桥梁岗被撕成单点），1.3 偏粗（金融混入 IT 系统管理）
+# 投影图 Leiden 分辨率：08-22 真实图网格搜（1.3/1.45/1.55/1.6）的甜点。
+# 08-31 骨干化后在 min_freq=3 骨干上复验仍为甜点（6 簇：前端/后端/算法芯片/
+# 数据分析/运维 + 杂簇残余），更细则降级洪水、更粗则前端后端合并
 DEFAULT_RESOLUTION = 1.55
-# 微簇门禁：成员数 < 该值的簇并入通用域。2 人微簇（如 08-31 前的「系统可靠性」域
-# =系统可靠性工程师+TypeScript工程师）是垃圾画像/单条 JD 噪声放大的温床，
-# 撑不起一个语义域。08-31 由「仅合并单点」收紧为「<3 全并入」
+# 骨干门频：freq≥3 的岗位进骨干 Leiden（2026-08-31 骨干域+归类制）。
+# 实证 freq≥10 会把前端技术栈细分族（React/Vue/移动前端 freq 2-6）切进
+# 归类池，前端枢纽因失族群而孤立降级——族群质量恰是域凝聚力的来源
+BACKBONE_MIN_FREQ = 3
+# 骨干簇最小成员数：< 该值的簇降级为待归类池（不直接进通用域）
 DEFAULT_MIN_CLUSTER_SIZE = 3
-# 单点簇合并域（桥梁岗 Python/大模型/DevOps/网络安全 + 长尾低频岗）
+# 归类门槛：最优域连接强度 ≥ 该值才考虑归入。2.0 实证被 nice 共享
+# 堆砌（7×0.3=2.1）混入大量弱证据归类（弃权行准确率 63%），提到 3.0
+# 要求 ≈2 条 must 共享或 1 must+7 nice
+ATTACH_MIN_AFFINITY = 3.0
+# 归类主导性：最优域需 ≥ 次优域 × 该比例，防"两域拉扯"误归
+ATTACH_DOMINANCE = 1.3
+# 通用弃权域
 GENERAL_DOMAIN_ID = "dom_general"
 GENERAL_DOMAIN_NAME = "通用与其他岗位"
+# 强制弃权 pin 的特殊锚点值：声明"该岗无正确归属域，一律弃权"
+GENERAL_PIN = "__general__"
 # 高频桥梁岗语义指派（2026-08-31 治理，算法口径变更已知会张恺天）：
-# 技能横跨多域的桥梁岗常被 Leiden 撕成小簇落通用域，freq 最高的展示位反而
-# 语义缺失（大模型算法工程师 freq=376 全图第 5 却挂「通用与其他岗位」）。
-# 在微簇合并前把 pinned 岗并入锚点岗（图内稳定高频岗）所在簇——合流后
-# 成员数凑满 min-cluster-size 即可自持成语义域；锚点缺位时跳过并告警。
+# 技能横跨多域的桥梁岗常被 Leiden 撕成小簇，freq 最高的展示位反而语义缺失
+# （大模型算法工程师 freq=376 全图第 5 却挂「通用与其他岗位」）。骨干岗在
+# 微簇降级前并入锚点岗所在簇（合流后凑满 min-cluster-size 自持成域）；
+# 待归类岗绕过归类阈值直接并入锚点域。锚点缺位时跳过并告警。
 PINNED_DOMAIN_ANCHORS: dict[str, str] = {
     "大模型算法工程师": "机器视觉算法工程师",  # → 智能算法域
     "Python开发工程师": "Java开发工程师",      # → 后端开发域
     "大数据开发工程师": "Java开发工程师",      # → 后端开发域
     "DevOps工程师": "运维工程师",              # → 系统运维域
+    # Go 案例补录（2026-08-31）：RB 期望度惩罚把 Go 推进低度数 AI 碎片簇，
+    # 其投影最强邻居全在后端（Java 6.8/后端 6.7/DevOps 6.5），语义无悬念
+    "Go开发工程师": "Java开发工程师",          # → 后端开发域
+    # React 前端栈族归位（2026-08-31 骨干化实证）：骨干 Leiden 把它和
+    # AI基础设施/创始工程师凑成杂簇，栈族语义无悬念归前端
+    "React前端开发工程师": "Vue前端开发工程师",  # → 前端开发域
+    # 通才算法桥梁岗（freq=97，骨干降级后乱归实证）：语义无悬念归算法域
+    "算法工程师": "机器视觉算法工程师",
+    # 强制弃权（GENERAL_PIN）：无正确归属域的语义孤岗，落通用域诚实展示。
+    # 探针实证（2026-08-31）：它们的连接证据真实但无差别指向枢纽域
+    # （share 与正例完全重叠），纯拓扑归类不可分，属治理声明层职责
+    "产品经理": GENERAL_PIN,
+    "创始工程师": GENERAL_PIN,
+    "SAP集成": GENERAL_PIN,
+    "Murex应用": GENERAL_PIN,
+    "AI与数据系统": GENERAL_PIN,
+    "生化工程师": GENERAL_PIN,
 }
 # 门禁：最大域占比超限或语义域过少视为参数退化，拒绝写库
 _MAX_DOMAIN_RATIO = 0.5
@@ -224,38 +251,36 @@ def _try_persist_domain_records(
             logger.warning("[domain_label] 决策记录落库失败（不影响命名回写）: %s", e)
 
 
-def merge_singletons(
-    membership: dict[str, int],
-    name_map: dict[str, str],
+def split_backbone(
     freq: dict[str, int],
-    min_cluster_size: int = DEFAULT_MIN_CLUSTER_SIZE,
-) -> dict[str, tuple[str, str]]:
-    """Leiden 划分 → 岗位 → (domain_id, domain_name) 映射（纯函数，供单测）。
+    min_freq: int = BACKBONE_MIN_FREQ,
+) -> tuple[set[str], set[str]]:
+    """按 freq 分骨干/待归类两池（纯函数，供单测）。freq 缺失按 0。"""
+    backbone = {pid for pid, f in freq.items() if (f or 0) >= min_freq}
+    fringe = set(freq) - backbone
+    return backbone, fringe
 
-    成员数 < min_cluster_size 的簇并入通用域：跨域桥梁岗（技能横跨多域，
-    被各簇拉扯后独立）与长尾低频岗语义上本就无稳定同域伙伴；2 人微簇
-    （08-31 前的「系统可靠性」域）是单条 JD 噪声放大的温床，撑不起语义域。
-    多岗域命名 = 域内最高 freq 岗位名（freq 缺失按 0，按 name 稳定排序保证
-    确定性）。
+
+def demote_small_clusters(
+    membership: dict[str, int],
+    min_cluster_size: int = DEFAULT_MIN_CLUSTER_SIZE,
+) -> tuple[dict[str, int], set[str]]:
+    """骨干内 < min_cluster_size 的簇降级为待归类池（纯函数，供单测）。
+
+    替代旧 merge_singletons 的"直接并通用域"：降级岗位回到归类流程，
+    仍有机会凭连接强度进入语义域；实在无归属由弃权兜底，口径更诚实。
+    返回 (缩小的 membership, 降级岗位集合)。
     """
     by_cluster: dict[int, list[str]] = {}
     for pid, cid in membership.items():
         by_cluster.setdefault(cid, []).append(pid)
 
-    result: dict[str, tuple[str, str]] = {}
-    domain_names: dict[int, str] = {}
+    demoted: set[str] = set()
     for cid, members in by_cluster.items():
         if len(members) < min_cluster_size:
-            for pid in members:
-                result[pid] = (GENERAL_DOMAIN_ID, GENERAL_DOMAIN_NAME)
-            continue
-        rep = sorted(members, key=lambda p: (-freq.get(p, 0), name_map.get(p, p)))[0]
-        domain_names[cid] = name_map.get(rep, rep)
-    for cid, members in by_cluster.items():
-        if cid in domain_names:
-            for pid in members:
-                result[pid] = (f"dom_{cid}", domain_names[cid])
-    return result
+            demoted.update(members)
+    kept = {pid: cid for pid, cid in membership.items() if pid not in demoted}
+    return kept, demoted
 
 
 def apply_domain_pins(
@@ -263,12 +288,11 @@ def apply_domain_pins(
     name_map: dict[str, str],
     pins: dict[str, str] | None = None,
 ) -> tuple[dict[str, int], list[str]]:
-    """高频桥梁岗语义指派（纯函数，供单测）：pinned 岗并入锚点岗所在 Leiden 簇。
+    """骨干岗语义指派（纯函数，供单测）：pinned 岗并入锚点岗所在 Leiden 簇。
 
-    在 merge_singletons 的微簇合并**之前**执行：pinned 岗与锚点簇合流后
-    成员数凑满 min-cluster-size，桥梁岗自身的小簇即可自持成语义域
-    （如 Python/大数据并入 Java 簇成后端域）。锚点岗或 pinned 岗不在本次
-    划分、或二者同岗时跳过并返回告警（调用方记日志），不阻断同步。
+    在微簇降级之前执行：pinned 岗与锚点簇合流后成员数凑满 min-cluster-size，
+    桥梁岗自身的小簇即可自持成语义域。锚点岗或 pinned 岗不在骨干划分、
+    或二者同岗时跳过并返回告警（调用方记日志），不阻断同步。
     返回 (新 membership, 告警列表)。
     """
     if pins is None:
@@ -281,12 +305,98 @@ def apply_domain_pins(
         anchor_pid = pid_by_name.get(anchor)
         pos_pid = pid_by_name.get(pos)
         if pos_pid is None:
-            continue  # 不在划分中（无投影边/已下线），由孤立岗兜底阶段处理
+            continue  # 不在骨干划分（待归类岗走归类层 pin / 不在图则兜底）
         if anchor_pid is None or anchor_pid not in membership:
-            warnings.append(f"锚点岗「{anchor}」不在本次划分，{pos} 保持原簇")
+            warnings.append(f"锚点岗「{anchor}」不在骨干划分，{pos} 保持原簇")
             continue
         membership[pos_pid] = membership[anchor_pid]
     return membership, warnings
+
+
+def attach_fringe_position(
+    graph: dict[str, dict[str, float]],
+    pid: str,
+    domain_members: dict[str, list[str]],
+    min_affinity: float = ATTACH_MIN_AFFINITY,
+    dominance: float = ATTACH_DOMINANCE,
+) -> tuple[str | None, dict[str, float]]:
+    """带弃权的最近域分类（纯函数，供单测）。
+
+    连接强度 = Σ 对域内成员的投影边权。最优域需 ≥ min_affinity 且
+    ≥ 次优域 × dominance（次优为 0 时只看绝对门槛）才归入；否则弃权
+    （返回 None）。同分按域名键稳定排序保证确定性。
+    返回 (归入域键 | None, 全部域得分)。
+    """
+    neighbors = graph.get(pid, {})
+    scores = {
+        key: sum(neighbors.get(m, 0.0) for m in members)
+        for key, members in domain_members.items()
+    }
+    if not scores:
+        return None, scores
+    ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
+    best_key, best = ranked[0]
+    second = ranked[1][1] if len(ranked) > 1 else 0.0
+    if best < min_affinity:
+        return None, scores
+    if second > 0 and best < dominance * second:
+        return None, scores
+    return best_key, scores
+
+
+def resolve_fringe(
+    graph: dict[str, dict[str, float]],
+    fringe_ids: set[str],
+    domain_members: dict[str, list[str]],
+    name_map: dict[str, str],
+    min_affinity: float = ATTACH_MIN_AFFINITY,
+    dominance: float = ATTACH_DOMINANCE,
+    pins: dict[str, str] | None = None,
+) -> tuple[dict[str, str], set[str], list[str]]:
+    """待归类池批量归类（纯函数，供单测）：pin 覆盖 → 阈值归类 → 弃权。
+
+    pins：GENERAL_PIN 锚点=强制弃权（声明无正确归属域）；其余锚点绕过
+    阈值直接并入锚点岗所在域，锚点不在任何语义域时告警并走正常归类。
+    返回 (pid→域键, 弃权集合, 告警列表)。
+    """
+    if pins is None:
+        pins = PINNED_DOMAIN_ANCHORS
+    pid_by_name = {name_map.get(pid, pid): pid for pid in domain_members_all(domain_members, fringe_ids)}
+    pid_to_domain = {
+        pid: key for key, members in domain_members.items() for pid in members
+    }
+    assigned: dict[str, str] = {}
+    abstained: set[str] = set()
+    warnings: list[str] = []
+    for pid in sorted(fringe_ids):
+        pos_name = name_map.get(pid, pid)
+        anchor = pins.get(pos_name)
+        if anchor == GENERAL_PIN:
+            abstained.add(pid)
+            continue
+        if anchor and pos_name != anchor:
+            anchor_pid = pid_by_name.get(anchor)
+            target = pid_to_domain.get(anchor_pid) if anchor_pid else None
+            if target:
+                assigned[pid] = target
+                continue
+            warnings.append(f"锚点岗「{anchor}」无语义域，{pos_name} 走正常归类")
+        key, _scores = attach_fringe_position(
+            graph, pid, domain_members, min_affinity, dominance,
+        )
+        if key:
+            assigned[pid] = key
+        else:
+            abstained.add(pid)
+    return assigned, abstained, warnings
+
+
+def domain_members_all(domain_members: dict[str, list[str]], fringe_ids: set[str]) -> set[str]:
+    """骨干成员 ∪ 待归类池（供 pid_by_name 反查的键空间）。"""
+    all_ids = set(fringe_ids)
+    for members in domain_members.values():
+        all_ids.update(members)
+    return all_ids
 
 
 def guard_domain_distribution(assign: dict[str, tuple[str, str]]) -> dict:
@@ -318,11 +428,11 @@ def sync_position_domains(
     resolution: float,
     llm_name: bool = False,
     min_cluster_size: int = DEFAULT_MIN_CLUSTER_SIZE,
+    backbone_min_freq: int = BACKBONE_MIN_FREQ,
+    attach_min_affinity: float = ATTACH_MIN_AFFINITY,
+    attach_dominance: float = ATTACH_DOMINANCE,
 ) -> dict:
-    """加载岗位投影 → Leiden → 微簇合并 → 语义指派 → 门禁 → 回填。
-
-    llm_name=True 时先经单次 LLM 调用生成语义域名（失败回退代表岗名）。
-    """
+    """骨干成域 → 语义命名 → 待归类（pin 覆盖/阈值归类/弃权）→ 门禁 → 回填。"""
     from app.core.database import neo4j_driver
     from app.services.graph_algorithms.leiden import leiden
     from app.services.graph_algorithms.network import load_position_projection
@@ -337,25 +447,79 @@ def sync_position_domains(
         ).data()
         freq = {r["id"]: int(r["f"] or 0) for r in freq_rows}
 
-    membership = leiden(graph, resolution=resolution)
+    backbone, fringe = split_backbone(freq, backbone_min_freq)
+    subgraph = {pid: {nb: w for nb, w in graph[pid].items() if nb in backbone}
+                for pid in backbone}
+    membership = leiden(subgraph, resolution=resolution)
     membership, pin_warnings = apply_domain_pins(membership, name_map)
     for w in pin_warnings:
-        logger.warning("[语义指派] %s", w)
-    assign = merge_singletons(membership, name_map, freq, min_cluster_size)
-    stats = guard_domain_distribution(assign)
+        logger.warning("[骨干指派] %s", w)
+    membership, demoted = demote_small_clusters(membership, min_cluster_size)
+    # 强制弃权 pin（GENERAL_PIN）的骨干岗移出骨干划分，进归类池后直接弃权
+    general_pinned = {
+        pid for pid in membership
+        if PINNED_DOMAIN_ANCHORS.get(name_map.get(pid, pid)) == GENERAL_PIN
+    }
+    if general_pinned:
+        for pid in general_pinned:
+            del membership[pid]
+        demoted |= general_pinned
+    if demoted:
+        logger.info("骨干降级 %s 岗进入归类池", len(demoted))
 
+    # 骨干簇代表岗 → (dom_id, 代表岗名)；LLM 命名后替换域名字段
+    by_cluster: dict[int, list[str]] = {}
+    for pid, cid in membership.items():
+        by_cluster.setdefault(cid, []).append(pid)
+    backbone_assign: dict[str, tuple[str, str]] = {}
+    for cid, members in by_cluster.items():
+        rep = sorted(members, key=lambda p: (-freq.get(p, 0), name_map.get(p, p)))[0]
+        for pid in members:
+            backbone_assign[pid] = (f"dom_{cid}", name_map.get(rep, rep))
+
+    naming: dict[str, str] = {}
     if llm_name:
-        members_by_key, _ = _naming_input(assign, name_map)
+        members_by_key, _ = _naming_input(backbone_assign, name_map)
         naming = llm_domain_names(members_by_key)
         if naming:
-            assign = {
+            backbone_assign = {
                 pid: (dom_id, naming.get(dom_name, dom_name))
-                for pid, (dom_id, dom_name) in assign.items()
+                for pid, (dom_id, dom_name) in backbone_assign.items()
             }
             logger.info("语义域名生效：%d/%d 簇", len(naming), len(members_by_key))
 
+    domain_members: dict[str, list[str]] = {}
+    for pid, (dom_id, _name) in backbone_assign.items():
+        domain_members.setdefault(dom_id, []).append(pid)
+    fringe_all = fringe | demoted
+    assigned, abstained, attach_warnings = resolve_fringe(
+        graph, fringe_all, domain_members, name_map,
+        attach_min_affinity, attach_dominance,
+    )
+    for w in attach_warnings:
+        logger.warning("[归类指派] %s", w)
+
+    dom_name_by_id: dict[str, str] = {}
+    for pid, (dom_id, dom_name) in backbone_assign.items():
+        dom_name_by_id.setdefault(dom_id, dom_name)
+
+    assign: dict[str, tuple[str, str]] = dict(backbone_assign)
+    for pid, dom_id in assigned.items():
+        assign[pid] = (dom_id, dom_name_by_id[dom_id])
+    for pid in abstained:
+        assign[pid] = (GENERAL_DOMAIN_ID, GENERAL_DOMAIN_NAME)
+
+    stats = guard_domain_distribution(assign)
+    stats.update({
+        "backbone": len(backbone),
+        "demoted": len(demoted),
+        "attached": len(assigned),
+        "abstained": len(abstained),
+    })
     logger.info(
-        "岗位域划分：%s 岗 / %s 域（语义域 %s，最大域占比 %.1f%%，resolution=%s）",
+        "岗位域划分：骨干 %s（降级 %s）/ 归类 %s / 弃权 %s → %s 岗 %s 域"
+        "（语义域 %s，最大域占比 %.1f%%，resolution=%s）",
+        stats["backbone"], stats["demoted"], stats["attached"], stats["abstained"],
         stats["positions"], stats["domains"], stats["semantic_domains"],
         stats["max_domain_ratio"] * 100, resolution,
     )
@@ -407,15 +571,26 @@ def sync_position_domains(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="岗位职能域同步（岗位投影 Leiden）")
+    parser = argparse.ArgumentParser(description="岗位职能域同步（骨干域+归类制）")
     parser.add_argument("--resolution", type=float, default=DEFAULT_RESOLUTION)
+    parser.add_argument("--backbone-min-freq", type=int, default=BACKBONE_MIN_FREQ,
+                        help=f"freq≥该值的岗位进骨干 Leiden（默认 {BACKBONE_MIN_FREQ}）")
     parser.add_argument("--min-cluster-size", type=int, default=DEFAULT_MIN_CLUSTER_SIZE,
-                        help=f"小于该成员数的簇并入通用域（默认 {DEFAULT_MIN_CLUSTER_SIZE}）")
+                        help=f"骨干簇小于该成员数降级进归类池（默认 {DEFAULT_MIN_CLUSTER_SIZE}）")
+    parser.add_argument("--attach-min-affinity", type=float, default=ATTACH_MIN_AFFINITY,
+                        help=f"归类最低连接强度（默认 {ATTACH_MIN_AFFINITY}）")
+    parser.add_argument("--attach-dominance", type=float, default=ATTACH_DOMINANCE,
+                        help=f"归类主导性比例（默认 {ATTACH_DOMINANCE}）")
     parser.add_argument("--llm-name", action="store_true",
                         help="LLM 语义域名（失败回退代表岗名）")
     args = parser.parse_args()
-    sync_position_domains(args.resolution, llm_name=args.llm_name,
-                          min_cluster_size=args.min_cluster_size)
+    sync_position_domains(
+        args.resolution, llm_name=args.llm_name,
+        min_cluster_size=args.min_cluster_size,
+        backbone_min_freq=args.backbone_min_freq,
+        attach_min_affinity=args.attach_min_affinity,
+        attach_dominance=args.attach_dominance,
+    )
 
 
 if __name__ == "__main__":

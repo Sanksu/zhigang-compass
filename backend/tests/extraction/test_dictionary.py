@@ -289,6 +289,8 @@ class TestNormalizePositionName:
         assert normalize_position_name("Electrician") == ""
         assert normalize_position_name("Pharmacist") == ""
         assert normalize_position_name("IT") == ""
+        # 复合形漏网补录（2026-08-31）：精确匹配拦不住"提示词"的 AI 前缀变体
+        assert normalize_position_name("AI提示词") == ""
         # 复合词不受精确拦截影响
         assert normalize_position_name("IT平台与自动化") != ""
 
