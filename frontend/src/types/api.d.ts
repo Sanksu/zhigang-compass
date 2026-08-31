@@ -5233,12 +5233,25 @@ export interface components {
             company?: string;
             location?: string;
             source: string;
+            /** @description 源平台标识（source 平台内的 ID） */
+            source_id?: string;
             /** @description 出处链接（可能为空） */
             source_url?: string;
             crawled_at?: string;
             is_desensitized?: boolean;
             /** @description JD 原文全文 */
             raw_text: string;
+            /** @description 归一化岗位名（snapshot.normalized_position，可空） */
+            position?: string;
+            /** @description 抽取快照汇总（管理侧展示用，可空字段由核对空串兜底） */
+            extraction_summary?: {
+                /** @description 薪资区间（raw 文案，可空串） */
+                salary_range?: string;
+                /** @description 学历层（label，可空串） */
+                education_level?: string;
+                /** @description 经验要求（text，可空串） */
+                experience?: string;
+            };
         };
         /** @description JD 管理列表项（GET /admin/jd） */
         JdAdminItem: {

@@ -3352,10 +3352,19 @@ components:
         company: { type: string }
         location: { type: string }
         source: { type: string }
+        source_id: { type: string, description: "源平台标识（source 平台内的 ID）" }
         source_url: { type: string, description: "出处链接（可能为空）" }
         crawled_at: { type: string }
         is_desensitized: { type: boolean }
         raw_text: { type: string, description: "JD 原文全文" }
+        position: { type: string, description: "归一化岗位名（snapshot.normalized_position，可空）" }
+        extraction_summary:
+          type: object
+          description: 抽取快照汇总（管理侧展示用，可空字段由核对空串兜底）
+          properties:
+            salary_range: { type: string, description: "薪资区间（raw 文案，可空串）" }
+            education_level: { type: string, description: "学历层（label，可空串）" }
+            experience: { type: string, description: "经验要求（text，可空串）" }
 
     JdAdminItem:
       type: object
