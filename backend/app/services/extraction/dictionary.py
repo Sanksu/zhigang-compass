@@ -839,6 +839,9 @@ _POSITION_STOPWORDS: set[str] = {
     "市场营销与CRM", "行业BD", "GTM商务拓展", "IT",
     "Receptionist", "Clerk", "Installer", "Electrician", "Locksmith",
     "Pharmacist", "SeniorMeatCutter", "Expeditor",
+    # 停用词精确匹配的复合形漏网补录（2026-08-31）："提示词"已拦但"AI提示词"
+    # 漏网，图谱实证该节点 JD 实为后端向 AI 应用岗，纯碎片
+    "AI提示词",
 } | set(_COMPANY_NAME_STOPWORDS)
 
 
