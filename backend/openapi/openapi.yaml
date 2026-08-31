@@ -4087,8 +4087,18 @@ components:
         member_count: { type: integer }
         members:
           type: array
-          description: 成员岗位名（按 freq 降序，截断至 top 12）
-          items: { type: string }
+          description: 成员（按 freq 降序，截断至 top 12），含归类依据来源与亲和度得分
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              freq: { type: integer }
+              source: { type: string, description: "归类依据：backbone骨干簇/pin_cluster骨干指派/pin治理指派/attach阈值归类/leftover_pin兜底指派/general_pin治理弃权/below_affinity证据不足/not_dominant多域拉扯/no_edges零投影边/leftover_no_edges投影外零证据" }
+              score: { type: number, nullable: true, description: 归类亲和度得分（治理指派/骨干为 null） }
+        source_counts:
+          type: object
+          description: 全成员来源分布（source → 数量）
+          additionalProperties: { type: integer }
         is_general: { type: boolean, description: 是否为通用弃权域 }
 
     GraphGovernanceSummary:

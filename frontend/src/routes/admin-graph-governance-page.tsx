@@ -16,6 +16,20 @@ function pct(v: number | null | undefined): string {
   return typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : 'n/a'
 }
 
+/** 归类依据来源 → 展示文案 */
+const SOURCE_LABELS: Record<string, string> = {
+  backbone: '骨干簇',
+  pin_cluster: '骨干指派',
+  pin: '治理指派',
+  attach: '阈值归类',
+  leftover_pin: '兜底指派',
+  general_pin: '治理弃权',
+  below_affinity: '证据不足',
+  not_dominant: '多域拉扯',
+  no_edges: '零投影边',
+  leftover_no_edges: '投影外零证据',
+}
+
 /** 图谱域治理页（2026-08-31 域治理 PR 链前端入口）：
  * 域划分总览 + 共成员基准得分 + 自审待审徽标 + 后台重同步触发 */
 export function AdminGraphGovernancePage() {
@@ -121,10 +135,18 @@ export function AdminGraphGovernancePage() {
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">{d.domain_name ?? d.domain_id}</span>
                 <Badge variant="outline">{d.member_count ?? 0}</Badge>
+                <span className="text-xs text-ink-muted ml-auto">
+                  {Object.entries(d.source_counts ?? {})
+                    .map(([k, n]) => `${SOURCE_LABELS[k] ?? k}×${n}`)
+                    .join(' · ')}
+                </span>
               </div>
               <div className="mt-1 flex flex-wrap gap-1">
                 {(d.members ?? []).map((m) => (
-                  <span key={m} className="text-xs text-ink-muted bg-bg-subtle rounded px-1.5 py-0.5">{m}</span>
+                  <span key={m.name} className="text-xs text-ink-muted bg-bg-subtle rounded px-1.5 py-0.5">
+                    {m.name}
+                    {m.source === 'pin' || m.source === 'pin_cluster' || m.source === 'leftover_pin' ? '※' : ''}
+                  </span>
                 ))}
                 {(d.member_count ?? 0) > (d.members ?? []).length && (
                   <span className="text-xs text-ink-muted">…共 {d.member_count} 岗</span>
@@ -135,6 +157,7 @@ export function AdminGraphGovernancePage() {
           {generalDomain && (
             <div className="text-xs text-ink-muted">
               通用弃权域 {generalDomain.member_count} 岗（证据不足或无同族，诚实不强行归属）
+              {' · ' + Object.entries(generalDomain.source_counts ?? {}).map(([k, n]) => `${SOURCE_LABELS[k] ?? k}×${n}`).join(' · ')}
             </div>
           )}
         </CardContent>

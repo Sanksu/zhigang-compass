@@ -9,10 +9,10 @@ from app.api.v1.admin_routes import graph_governance as mod
 
 def _rows():
     return [
-        {"name": "前端开发工程师", "dom": "dom_1", "dname": "前端开发", "freq": 597},
-        {"name": "React前端开发工程师", "dom": "dom_1", "dname": "前端开发", "freq": 6},
-        {"name": "数据分析师", "dom": "dom_2", "dname": "数据分析", "freq": 281},
-        {"name": "CT技师", "dom": "dom_general", "dname": "通用与其他岗位", "freq": 2},
+        {"name": "前端开发工程师", "dom": "dom_1", "dname": "前端开发", "freq": 597, "source": "backbone"},
+        {"name": "React前端开发工程师", "dom": "dom_1", "dname": "前端开发", "freq": 6, "source": "pin"},
+        {"name": "数据分析师", "dom": "dom_2", "dname": "数据分析", "freq": 281, "source": "backbone"},
+        {"name": "CT技师", "dom": "dom_general", "dname": "通用与其他岗位", "freq": 2, "source": None},
     ]
 
 
@@ -22,7 +22,9 @@ class TestGroupDomains:
         assert [d["domain_id"] for d in domains] == ["dom_1", "dom_2", "dom_general"]
         front = domains[0]
         assert front["member_count"] == 2
-        assert front["members"] == ["前端开发工程师", "React前端开发工程师"]
+        assert [m["name"] for m in front["members"]] == ["前端开发工程师", "React前端开发工程师"]
+        assert front["members"][0]["source"] == "backbone"
+        assert front["source_counts"] == {"backbone": 1, "pin": 1}
         assert front["is_general"] is False
         assert domains[-1]["is_general"] is True
 
@@ -34,9 +36,9 @@ class TestGroupDomains:
         domains = mod.group_domains(rows, top_members=12)
         big = next(d for d in domains if d["domain_id"] == "dom_9")
         assert big["member_count"] == 15 and len(big["members"]) == 12
-        assert big["members"][0] == "岗14"
+        assert big["members"][0]["name"] == "岗14"
         orphan = next(d for d in domains if d["domain_id"] == mod.GENERAL_DOMAIN_ID)
-        assert orphan["members"] == ["无域岗"]
+        assert [m["name"] for m in orphan["members"]] == ["无域岗"]
 
 
 class TestAssembleSummary:
