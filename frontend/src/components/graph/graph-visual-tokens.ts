@@ -116,3 +116,39 @@ export function domainCommunityColor(seed: string, theme: GraphTheme): string {
   const palette = DOMAIN_COMMUNITY_PALETTE[theme]
   return palette[domainHash(seed) % palette.length]
 }
+
+/* 岗位画像维度分类着色（薪资/经验/学历）：画像视图属性大类按维度取色，
+   与统一 attr 紫罗兰区分——三类维度一眼可辨。色板与技能/域/状态色错位。
+   PORTRAIT_DIM_PALETTE 导出供画布着色与页面图例共用单一事实源。 */
+export const PORTRAIT_DIM_PALETTE: Record<GraphTheme, Record<'salary' | 'experience' | 'education', string>> = {
+  light: {
+    salary: '#0EA5E9', // 薪资：青蓝
+    experience: '#F59E0B', // 经验：琥珀
+    education: '#10B981', // 学历：翠绿
+  },
+  dark: {
+    salary: '#38BDF8',
+    experience: '#FBBF24',
+    education: '#34D399',
+  },
+}
+
+export type PortraitDimension = 'salary' | 'experience' | 'education'
+
+/** 画像 attr 节点 → 维度色；非画像维度节点（无 id 前缀匹配）回落统一 attr 色 */
+export function portraitDimensionColor(
+  nodeId: string,
+  nodeName: string,
+  theme: GraphTheme,
+): string | null {
+  const dim: PortraitDimension | null =
+    nodeId.startsWith('sal_') || nodeName === '薪资'
+      ? 'salary'
+      : nodeId.startsWith('exp_') || nodeName === '经验'
+        ? 'experience'
+        : nodeId.startsWith('edu_') || nodeName === '学历'
+          ? 'education'
+          : null
+  if (!dim) return null
+  return PORTRAIT_DIM_PALETTE[theme][dim]
+}

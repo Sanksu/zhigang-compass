@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -70,14 +69,9 @@ def audit_domain_membership(
     timeout: int = 60,
 ) -> list[MembershipVerdict]:
     """批量 LLM 内聚性裁决；任何失败返回 []（调用方记日志，不阻塞同步）。"""
-    import json as _json
 
     from app.services.extraction.llm_invocation import invocation_scope
-    from app.services.extraction.llm_provider import (
-        LLMConfigurationError,
-        LLMExtractionError,
-        LLMProviderChain,
-    )
+    from app.services.extraction.llm_provider import LLMProviderChain
 
     if not domains:
         return []

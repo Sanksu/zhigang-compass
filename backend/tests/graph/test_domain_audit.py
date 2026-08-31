@@ -90,7 +90,6 @@ class TestPersistMembershipFlags:
 
         monkeypatch.setattr("app.services.llm_decision.persist_record", _fake_persist)
 
-        import app.services.graph_algorithms.domain_audit as mod
 
         class _Engine:
             dispose = staticmethod(_fake_dispose)
