@@ -1,4 +1,4 @@
-{"_meta": {"file": "position_domain_eval", "version": "2026-08-31.draft1", "status": "DRAFT 待人工复核（AI 起草，负责人/算法岗逐条确认后升 frozen）", "口径": "共成员关系断言——position 应与 same_domain_as 中每个锚点岗同属一个语义域（expect=domain），或应落入通用与其他域/弃权（expect=general）。断言与域名解耦，域名由 LLM 生成可变，锚点岗选高频稳定岗。", "锚点选择": "freq≥10 的高频稳定岗；弱锚定条目在 note 标注", "复核要点": "弱锚定条目：全栈工程师/鸿蒙全栈/C++开发工程师/AI基础设施工程师/网络工程师归族口径"}}
+{"_meta": {"file": "position_domain_eval", "version": "2026-09-01.frozen1", "status": "frozen（负责人 Sanksu 2026-09-01 拍板认可全部断言；弱锚定 5 行——全栈/鸿蒙/C++/AI基础设施/网络工程师 归族口径——保留观察待 zkt 异步复核，见 docs/reviews/域治理算法复核包_20260901.md 拍板表）", "口径": "共成员关系断言——position 应与 same_domain_as 中每个锚点岗同属一个语义域（expect=domain），或应落入通用与其他域/弃权（expect=general）。断言与域名解耦，域名由 LLM 生成可变，锚点岗选高频稳定岗。", "锚点选择": "freq≥10 的高频稳定岗；弱锚定条目在 note 标注", "复核要点": "弱锚定条目：全栈工程师/鸿蒙全栈/C++开发工程师/AI基础设施工程师/网络工程师归族口径", "approved_by": "Sanksu（项目负责人）", "approved_at": "2026-09-01"}}
 {"position": "React前端开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "技术栈细分族"}
 {"position": "Vue前端开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "技术栈细分族"}
 {"position": "Angular前端开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "技术栈细分族"}
