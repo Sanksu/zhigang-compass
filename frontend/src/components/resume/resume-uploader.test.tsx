@@ -33,10 +33,17 @@ describe('ResumeUploader 文件校验', () => {
     expect(onFileSelected).toHaveBeenCalledTimes(1)
   })
 
-  it('非法扩展名拒绝并提示', () => {
+  it('文本文件（.txt）也接受', () => {
     const onFileSelected = vi.fn()
     const { container } = render(<ResumeUploader onFileSelected={onFileSelected} />)
     pickFile(container, makeFile('resume.txt', 'text/plain'))
+    expect(onFileSelected).toHaveBeenCalledTimes(1)
+  })
+
+  it('非法扩展名拒绝并提示', () => {
+    const onFileSelected = vi.fn()
+    const { container } = render(<ResumeUploader onFileSelected={onFileSelected} />)
+    pickFile(container, makeFile('resume.exe', 'application/x-msdownload'))
     expect(onFileSelected).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent('不支持的文件类型')
   })
