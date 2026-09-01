@@ -4780,6 +4780,13 @@ components:
         evidence_refs:
           type: array
           items: { $ref: '#/components/schemas/EvidenceRef' }
+        domain_name:
+          type: string
+          nullable: true
+          description: 岗位职能域（域治理成果接入，按岗位名取图谱 domain_name；无域/查询失败为 null，前端不渲染）
+        jd_compared:
+          type: integer
+          description: "JD 级评分溯源：total_score 为同岗最近 N 条宽 JD（上限 max_jds）中的最高分，N=参与评分条数"
         jd_original:
           type: object
           nullable: true
@@ -4790,6 +4797,7 @@ components:
             source: { type: string, description: 采集源（zhilian/boss/indeed 等） }
             source_url: { type: string, description: JD 原文链接 }
             text: { type: string, description: JD 原文正文（截断至 8000 字符） }
+            score: { type: number, description: 该 JD 的匹配得分（=同岗最高分 total_score，评分溯源） }
         jd_evidence:
           type: array
           description: "JD 级证据（阶段 B：recommend 命中岗位族内原生 JD 二次精排 Top-2；compare/result 旧快照无此字段为空数组）"

@@ -6405,6 +6405,10 @@ export interface components {
              */
             learning_path_block_reason: string | null;
             evidence_refs: components["schemas"]["EvidenceRef"][];
+            /** @description 岗位职能域（域治理成果接入，按岗位名取图谱 domain_name；无域/查询失败为 null，前端不渲染） */
+            domain_name?: string | null;
+            /** @description JD 级评分溯源：total_score 为同岗最近 N 条宽 JD（上限 max_jds）中的最高分，N=参与评分条数 */
+            jd_compared?: number;
             /** @description 最佳匹配 JD 原文（compare 详情溯源：按最佳 JD 行回读 raw_text，正文截断至 8000 字符；旧快照/最佳 JD 行已删除时为 null） */
             jd_original?: {
                 /** @description JD 标题 */
@@ -6415,6 +6419,8 @@ export interface components {
                 source_url: string;
                 /** @description JD 原文正文（截断至 8000 字符） */
                 text: string;
+                /** @description 该 JD 的匹配得分（=同岗最高分 total_score，评分溯源） */
+                score?: number;
             } | null;
             /** @description JD 级证据（阶段 B：recommend 命中岗位族内原生 JD 二次精排 Top-2；compare/result 旧快照无此字段为空数组） */
             jd_evidence?: {

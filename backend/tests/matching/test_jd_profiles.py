@@ -110,3 +110,40 @@ class TestAggregate:
         """无岗位名归属的 JD（normalized_position 空）不参与岗位聚合（被排除）。"""
         out = aggregate_jd_scores([self._result("9", "JD-X", 0.5)], {"9": ""}, top_n=1)
         assert out == []
+
+class TestExperienceRangeMapping:
+    """2026-09-01 修复：experience_range{min_years} → required_years 映射。
+
+    抽取 schema 输出 experience_range 而引擎读 required_years，字段名错位
+    导致 exp_score 恒满分（全库填充率 0）。
+    """
+
+    def _snapshot(self, extraction: dict) -> dict:
+        return {
+            "title": "测试工程师",
+            "normalized_position": "测试工程师",
+            "extraction": {
+                "skills": [{"name": "Python", "necessity": "must", "level": "熟练"}],
+                **extraction,
+            },
+        }
+
+    def test_min_years_maps_to_required_years(self):
+        snap = self._snapshot({"experience_range": {"min_years": 5, "max_years": None}})
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        assert prof.required_years == 5
+
+    def test_range_takes_lower_bound(self):
+        snap = self._snapshot({"experience_range": {"min_years": 3, "max_years": 5}})
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        assert prof.required_years == 3
+
+    def test_no_range_returns_none(self):
+        snap = self._snapshot({})
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        assert prof.required_years is None
+
+    def test_zero_min_years_treated_as_none(self):
+        snap = self._snapshot({"experience_range": {"min_years": 0, "max_years": None}})
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        assert prof.required_years is None

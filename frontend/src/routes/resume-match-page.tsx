@@ -145,6 +145,10 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
     learning_path_block_reason: r.learning_path_block_reason ?? null,
     // 证据引用：技能 → 原始 JD（图谱 MENTIONED_IN 链路，后端 compare 返回）
     evidence_refs: r.evidence_refs ?? [],
+    // 岗位域徽标（域治理成果接入）
+    domain_name: r.domain_name ?? null,
+    // JD 级评分溯源：total_score = 同岗 jd_compared 条 JD 中的最高分
+    jd_compared: r.jd_compared ?? null,
     // 最佳匹配 JD 原文（compare 详情溯源，随快照持久化）
     jd_original: r.jd_original ?? null,
   }
@@ -665,7 +669,13 @@ export function ResumeMatchPage() {
                   </div>
                   <div className="flex items-center gap-2 mb-1.5">
                     <PositionStateBadge state={rec.status} label={rec.status === 'low' ? '待提升' : undefined} className="text-[11px]" />
-                    <span className="text-[11px] text-ink-faint font-mono">{rec.position_id}</span>
+                    {/* 岗位域徽标（域治理成果接入；无域不渲染） */}
+                    {rec.domain_name && (
+                      <span className="text-[10px] text-ink-muted border border-border rounded px-1 py-px">
+                        {rec.domain_name}
+                      </span>
+                    )}
+                    <span className="text-[11px] text-ink-faint font-mono truncate">{rec.position_id}</span>
                   </div>
                   <p className="text-xs text-ink-muted line-clamp-2">{rec.summary}</p>
                   {/* JD 级证据（阶段 B）：命中岗位族内原生 JD，显示最匹配的 1-2 条 */}
@@ -757,6 +767,11 @@ export function ResumeMatchPage() {
                   {/* 主标题=岗位名（与左侧列表点选项一致）；最佳 JD 标题降级为副标 */}
                   <CardTitle className="text-base flex items-center gap-2">
                     <span>{selectedPosition.position_name}</span>
+                    {matchResult.domain_name && (
+                      <span className="text-[10px] text-ink-muted border border-border rounded px-1 py-px">
+                        {matchResult.domain_name}
+                      </span>
+                    )}
                     <PositionStateBadge state={selectedPosition.status} label={selectedPosition.status === 'low' ? '待提升' : undefined} className="text-[11px]" />
                   </CardTitle>
                   {/* 结果最佳 JD + 反馈 + 快照重载（POST /match/feedback / GET /match/task|result） */}
@@ -813,15 +828,24 @@ export function ResumeMatchPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {/* JD 原文面板（展开态）：采集源 + 原帖链接 + 正文滚动区 */}
+                  {/* JD 原文面板（展开态）：评分溯源 + 采集源 + 原帖链接 + 正文滚动区 */}
                   {showJdOriginal && matchResult.jd_original?.text && (
                     <div className="mb-4 rounded-md border border-border bg-subtle/40 p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                        <span className="flex items-center gap-1.5 text-xs font-medium text-ink">
+                        <span className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-ink">
                           <FileText className="size-3.5 text-ink-muted" />
                           {matchResult.jd_original.jd_title || 'JD 原文'}
                           {matchResult.jd_original.source && (
                             <span className="font-normal text-ink-faint">· {matchResult.jd_original.source}</span>
+                          )}
+                          {typeof matchResult.jd_original.score === 'number' && (
+                            <span
+                              className="font-normal text-ink-faint"
+                              title="compare 为 JD 级评分：同岗每条 JD 单独评分取最高分，本面板即该条最佳 JD"
+                            >
+                              · 匹配得分 {Math.round(matchResult.jd_original.score * 100)}
+                              {matchResult.jd_compared ? `（同岗 ${matchResult.jd_compared} 条 JD 中最佳）` : ''}
+                            </span>
                           )}
                         </span>
                         {matchResult.jd_original.source_url && (
