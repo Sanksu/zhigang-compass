@@ -110,14 +110,59 @@ class TestApproveSkillAlias:
         assert result.status_code == 422
         assert db.committed is False
 
-    def test_approve_duplicate_variant(self, monkeypatch):
-        """unique(variant)：已存在该 variant → 冲突（409 早退，不触发缓存刷新）。"""
+    def test_approve_duplicate_approved_variant(self, monkeypatch):
+        """unique(variant)：同名已生效（approved）→ 冲突 409（防重复批准）。"""
         from app.services.llm_decision import skill_normalize as sn
 
         monkeypatch.setattr(sn, "known_standard_names", lambda: {"JavaScript"})
-        existing = SimpleNamespace(variant="JS", proposal_id="old", standard_name="JavaScript")
+        existing = SimpleNamespace(variant="JS", proposal_id="old", standard_name="JavaScript",
+                                   status="approved", reviewed_by="", review_reason="",
+                                   confidence=None)
         rec = _alias_record()
         db = _FakeSession(rec, existing_aliases=[existing])
         result = asyncio.run(mod._approve_skill_alias(db, rec, "同意", _OPERATOR))
         assert result.status_code == 409
         assert db.committed is False
+
+    def test_approve_rejected_variant_rejected(self, monkeypatch):
+        """同名已驳回（rejected）→ 冲突 409（已驳回不可批准）。"""
+        from app.services.llm_decision import skill_normalize as sn
+
+        monkeypatch.setattr(sn, "known_standard_names", lambda: {"JavaScript"})
+        existing = SimpleNamespace(variant="JS", proposal_id="old", standard_name="JavaScript",
+                                   status="rejected", reviewed_by="", review_reason="",
+                                   confidence=None)
+        rec = _alias_record()
+        db = _FakeSession(rec, existing_aliases=[existing])
+        result = asyncio.run(mod._approve_skill_alias(db, rec, "同意", _OPERATOR))
+        assert result.status_code == 409
+        assert db.committed is False
+
+    def test_approve_pending_variant_upgrades_to_approved(self, monkeypatch):
+        """方案 A：同名 pending 待审行由决策页批准 → 升级为 approved（不 409）。"""
+        from app.services.llm_decision import skill_normalize as sn
+        from app.services.extraction import dictionary as dict_mod
+
+        monkeypatch.setattr(sn, "known_standard_names", lambda: {"JavaScript"})
+        refresh_calls: list[int] = []
+
+        async def _refresh_spy() -> int:
+            refresh_calls.append(1)
+            return 1
+
+        monkeypatch.setattr(dict_mod, "refresh_dynamic_aliases", _refresh_spy)
+
+        existing = SimpleNamespace(variant="JS", proposal_id="propose-1", standard_name="JavaScript",
+                                   status="pending", reviewed_by="", review_reason="",
+                                   confidence=0.9)
+        rec = _alias_record()
+        db = _FakeSession(rec, existing_aliases=[existing])
+        result = asyncio.run(mod._approve_skill_alias(db, rec, "同意", _OPERATOR))
+        assert result.data["variant"] == "JS"
+        assert db.committed is True
+        # pending 行被就地升级，不新增行
+        assert existing.status == "approved"
+        assert existing.reviewed_by == _OPERATOR
+        alias_added = [a for a in db.added if a.__class__.__name__ == "SkillAlias"]
+        assert alias_added == []  # 只更新既有行，不新建
+        assert refresh_calls == [1]
