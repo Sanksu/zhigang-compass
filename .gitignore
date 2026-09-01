@@ -197,6 +197,14 @@ reference/
 # ---------- 临时文件 ----------
 temp/
 
+# 本地 build/临时产物（避免误提交噪音）
+backend/.tmp/
+frontend/dist.old/
+frontend/dist.old*/
+/zhigang-compass-*.tar.gz
+# 本机部署 override（不入库，文件头有说明）
+/docker-compose.local-images.yml
+
 # ---------- AI 会话产物（根目录验证截图 / Playwright MCP / pytest basetemp） ----------
 /*.png
 .playwright-mcp/
