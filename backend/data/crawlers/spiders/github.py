@@ -42,6 +42,26 @@ GITHUB_SEARCH_API = "https://api.github.com/search/repositories"
 # 默认时间窗口（daily/weekly/monthly）
 DEFAULT_SINCE = "daily"
 
+# 各 since 的回看深度（小时）。daily 原为 24h，但实测 GitHub Search `created:`
+# 索引对新建仓库有约 24-28h 滞后，叠加 stars>=20 阈值后固定日历窗口在上午常落空；
+# 上调到 36h 兜底（跨过滞后阈值，仍属"近 1.5 天"，周频次聚合去重吸收重叠）。
+_LOOKBACK_HOURS = {"daily": 36, "weekly": 7 * 24, "monthly": 30 * 24}
+
+
+def _created_boundary(lookback_hours: int) -> str:
+    """生成 created 查询的时间边界：相对当前时刻的滑动回看（UTC、带时间成分）。
+
+    修复（2026-09-01 掉量根因）：原实现用 ``today.date() - timedelta(days=window)``
+    作固定**日历日期起点**，查询窗口实际深度随触发时刻在约 8-35h 间浮动；GitHub
+    Search 的 ``created:`` 对新建仓库有约 24-28h 索引滞后 + stars>=20 阈值 → 窗口
+    不足 ~28h（上午 05-11 点）返回空 items（200 OK 空集，不触发 429/5xx 重试），
+    造成 github 每日早晨稳定掉量。改为相对当前时刻回看，任意触发时刻深度一致。
+    """
+    return (
+        datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 # 默认语言过滤：空 = 全局热度（不限语言，窗口内 star 最高 top 100）。
 # 传 -a languages=python,java 时按语言分别取热度（每语言 20，合计 ≤100）
 DEFAULT_LANGUAGES: list[str] = []
@@ -115,10 +135,10 @@ class GithubSpider(Spider):
             yield request
 
     def start_requests(self):
-        # since 语义 → created 窗口：daily=1 天 / weekly=7 天 / monthly=30 天
-        window = {"daily": 1, "weekly": 7, "monthly": 30}.get(self.since, 7)
-        created = (datetime.now(timezone(timedelta(hours=8))).date()
-                   - timedelta(days=window)).isoformat()
+        # since 语义 → created 回看窗口（2026-09-01 修复时段性掉量）：改为相对
+        # 当前时刻的滑动回看（UTC 带时间），daily 加深到 36h 跨过 `created:` 索引滞后，
+        # 摆脱"固定日历起点 + 上午早跑 → 空窗口"的稳定掉量（详见 _created_boundary）
+        created = _created_boundary(_LOOKBACK_HOURS.get(self.since, 7 * 24))
 
         if not self.languages:
             # 全局热度：不限语言，窗口内 star 最高的仓库（单次采集上限内）。
