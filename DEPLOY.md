@@ -102,6 +102,24 @@ curl http://localhost:8000/health
 - **迁移**：api ENTRYPOINT 自动执行，无需手动；但镜像必须包含新迁移文件（见 ①，迁移缺失=部署后启动失败）
 - 可选加速：`CD (images)` workflow 在 develop 的**后端相关改动**合入后把镜像推到 GHCR（`ghcr.io/sanksu/zhigang-compass-api|worker`，公开仓库免认证拉取；纯前端/文档合并不构建 12.7GB 后端镜像），可 `docker pull` + `docker tag` 为本地镜像名（`zhigang-compass-api:latest` / `zhigang-compass-worker:latest`）替代 ① 的本地构建
 
+### 3.1.1 部署说明（GHCR 镜像路径，2026-09-01）
+
+> 走 GHCR 预构建镜像 + `docker-compose.local-images.yml` override（**免本地 12.7GB 构建，与生产镜像同源**）。本 override 不入库（.gitignore，根目录手建，见 `docker-compose.local-images.yml` 头注）。
+
+**部署（服务器/演示机）**：
+```bash
+cp docker-compose.local-images.yml .   # 若未建（api/worker 设为 ghcr.io/sanksu/...:develop）
+docker pull ghcr.io/sanksu/zhigang-compass-api:develop
+docker pull ghcr.io/sanksu/zhigang-compass-worker:develop
+docker compose -f docker-compose.yml -f docker-compose.local-images.yml up -d --force-recreate api worker
+```
+
+**与 3.1 本地构建的关系**：3.1 是默认路径（`build`），3.1.1 是加速/应急路径——**两条路径只能同时用一条**（override 会 `build: !reset null` 关闭本地构建）。若启用 override，3.1 的 `docker compose build` 会被覆盖。
+
+> ⚠️ **部署漂移教训（08-31）**：并行会话可能用裸 `docker compose up -d`（不挂 override + 本地构建 + `backend/app` 热挂载覆盖镜像），导致栈实际跑的是**工作区旧分支源码**而非 develop 镜像。诊断：`docker inspect <api> --format '{{.Config.Image}}'` 是否 `ghcr.io/sanksu/...`；容器是否含 `/app/app` bind mount。**修复：用上命令重建**。
+
+> ⚠️ **匹配权重 w_edu**：`configs/match_weights.json` 现为 BT v4（`w_edu=0.15`）。若对 education 进评分有异议，改 w_edu 为 0（或删该键即回退三维）并重启 api 即可，无需改代码——单点回退。
+
 ## 4. 初始化
 
 - **数据库迁移**：自动（见上）
@@ -145,11 +163,11 @@ ETL 主管线（采集 → 去重 → LLM 抽取 → 时滞/通胀 → 入图 �
 
 > 历史外部任务（Windows `scheduled_tasks.ps1` 的 `ETLDaily` / Linux `crontab.example` 的 `0 5 * * *`）已停用；`scripts/cron/etl_daily.py` 保留，供手动重跑（`--force`）。其余外部任务（maimai/linkedin、GraphHealth、PositionDup）不变；课程源（icourse163/edx/coursera）2026-08-28 起已纳入 ETL 主管线每日采集（`app/workers/etl.py` 的 `course_platforms`），**勿再注册外部课程采集任务，否则每日双跑**。
 
-### 6.2 局域网部署运维实证（2026-08-23 起 192.168.0.226 长期运行沉淀）
+### 6.2 服务器部署运维实证（2026-08-23 起长期运行沉淀）
 
 | 事项 | 说明与处置 |
 |------|-----------|
-| **国际源代理** | 无 Clash 的 Linux 主机上，国际源（LinkedIn/Glassdoor/Coursera/arxiv）需自建代理：226 用 v2ray（http 入站 `127.0.0.1:1083`，nohup 手动拉起），**机器重启后需手动重新拉起**；compose 侧将 `HTTPS_PROXY` 指向该端口（宿主 `.env` 插值）。国内源始终直连 |
+| **国际源代理** | 无 Clash 的 Linux 主机上，国际源（LinkedIn/Glassdoor/Coursera/arxiv）需自建代理：用 v2ray（http 入站 `127.0.0.1:1083`，nohup 手动拉起），**机器重启后需手动重新拉起**；compose 侧将 `HTTPS_PROXY` 指向该端口（宿主 `.env` 插值）。国内源始终直连 |
 | **PG catalog 损坏**（08-27 实证） | 症状：简单 `ORDER BY`/`UNION`/递归 CTE/asyncpg 类型查询**挂起烧满 CPU**（load 飙至 100+，接口报「推荐失败」），而非报错。诊断：`pg_stat_activity` 配合常量 UNION 探针区分库级/实例级问题。处置：整机重启 + `REINDEX SYSTEM <db>` 根治。原则：重大库故障走 `pg_dump` → 新库 restore，不要只靠重启赌恢复 |
 | **uploads 卷属主** | 数据卷被 root 创建后容器内应用用户（非 root）写入 500：`docker exec` 进入 chown 或删除卷重建（上传目录卷） |
 | **SBERT 模型冷启动** | 首次涉及语义匹配/归一化的请求需加载模型，**50–90s 属正常**，非故障；演示/压测前先预热（任打一次 match 或学习路径请求） |
