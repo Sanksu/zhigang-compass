@@ -568,7 +568,15 @@ def score_position(
     exp_score = _score_exp(position, candidate)
 
     if must_score is None:
-        base_total = (nice_score * w_nice + exp_score * w_exp) / (w_nice + w_exp)
+        # 无门槛岗位：须有技能信号。当经验要求缺失（required_years=None，
+        # 即岗位无准入年限信息）时，exp 无信号、恒 1.0——若仍以重归一参与会令
+        # exp 占 86.7% 权重主导分数，掩盖技能区分（P1 修复，2026-09-01：
+        # 技术岗 exp 提取缺口曾使"经验恒满"虚抬无门槛技术岗到 0.87+）。
+        # 故无门槛 + 无年限 → 纯 nice（技能）决定；有年限才让 exp 同步参与。
+        if position.required_years is None:
+            base_total = nice_score
+        else:
+            base_total = (nice_score * w_nice + exp_score * w_exp) / (w_nice + w_exp)
     else:
         base_total = must_score * w_must + nice_score * w_nice + exp_score * w_exp
 

@@ -224,9 +224,17 @@ class PositionAgg:
 
 
 def _min_experience_years(snapshot: dict) -> float | None:
-    """解析 JD 经验要求最小年限（如 "3-5年" → 3.0），无法解析返回 None。"""
-    m = re.search(r"(\d+)", str(snapshot.get("experience") or ""))
-    return float(m.group(1)) if m else None
+    """解析 JD 经验要求最小年限（extraction.experience_range.min_years）。
+
+    抽取链路（prompts 规则 11）把"X 年以上 / X-Y 年"落到 extraction.experience_range，
+    本函数是该字段的单一消费口（P0 字段失联修复）。无明确年限返回 None
+    （≠ 0 年，勿默认成 0，避免经验维度对无准入岗位误判满分）。
+    """
+    erf = ((snapshot.get("extraction") or {}).get("experience_range") or {})
+    if not isinstance(erf, dict):
+        return None
+    mn = erf.get("min_years")
+    return float(mn) if isinstance(mn, (int, float)) and mn > 0 else None
 
 
 def _position_skills(ext: dict) -> list[tuple[str, str, str]]:
