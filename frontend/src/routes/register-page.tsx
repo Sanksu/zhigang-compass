@@ -40,7 +40,8 @@ export function RegisterPage() {
         username: username.trim(),
         password,
       })
-      navigate('/login', { replace: true })
+      // 携带用户名跳登录：注册→登录不重输用户名（密码出于安全不回传）
+      navigate('/login', { replace: true, state: { username: username.trim() } })
     } catch (err) {
       setError(errMsg(err, '注册失败，请稍后重试'))
     } finally {
@@ -55,7 +56,7 @@ export function RegisterPage() {
           <CompassMark size="lg" className="text-ink" />
           <div className="text-center">
             <h1 className="text-xl font-semibold tracking-tight">智岗罗盘</h1>
-            <p className="text-sm text-ink-muted">多源异构驱动的岗位能力动态演化系统</p>
+            <p className="text-sm text-ink-muted">多源异构驱动的岗位能力动态演化与人岗匹配系统</p>
           </div>
         </div>
 

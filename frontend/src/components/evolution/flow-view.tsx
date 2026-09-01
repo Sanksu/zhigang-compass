@@ -1,6 +1,12 @@
 /** 演化视图组件（从 evolution-page.tsx 抽出，第六轮审查拆分：页面 ≤800 行惯例）。 */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import { SankeyChart } from 'echarts/charts'
+import { GraphicComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+// GraphicComponent：期次轴日期条经 option.graphic 直绘
+echarts.use([SankeyChart, GraphicComponent, TooltipComponent, CanvasRenderer])
 import { GitBranch } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'

@@ -14,7 +14,7 @@ import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphEdge, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
-import type { EChartsModel } from './graph-layout'
+import { enforceSpread, hasPositionOverlap, type EChartsModel } from './graph-layout'
 import { COLOR_BY_STATUS, computeFilterMarks, isSoftSkill, skillLabelThreshold } from './graph-utils'
 import { domainCommunityColor, graphColors, graphNodeColor, GRAPH_OPACITY, portraitDimensionColor, skillCategoryColor } from './graph-visual-tokens'
 import { buildDagGraph, type DagSkillLink, type DagSkillNode } from '@/components/learning/learning-timeline'
@@ -512,25 +512,34 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   // parsePercent 当作 0.x 像素，镜头每次都锚到图原点外，全图被推出画布外。
   const focusNode = useCallback(
     (id: string) => {
-      const chart = chartRef.current
-      if (!chart) return
-      const point = resolveNodePoint(id)
-      if (!point) return
-      chart.setOption({
-        series: [{ zoom: 2.4, center: point, animationDurationUpdate: 0 }],
-      })
-      // 编程式聚焦放大也会改变 zoom 档位——同步 LOD（前端聚焦到 2.4 → 全量标签）
-      applyLodBand(2.4)
-      // 定位目标常随岗位/域刚展开上画布，力导向仍在迭代、坐标持续漂移——
-      // 800ms 后按最新坐标校正一次镜头（漂移 ≤8px 视为已静止，不重设）
-      window.setTimeout(() => {
-        const settled = resolveNodePoint(id)
-        if (!settled || !chartRef.current) return
-        if (Math.abs(settled[0] - point[0]) <= 8 && Math.abs(settled[1] - point[1]) <= 8) return
-        chartRef.current.setOption({
-          series: [{ zoom: 2.4, center: settled, animationDurationUpdate: 0 }],
+      let attempts = 0
+      const tryFocus = () => {
+        const chart = chartRef.current
+        if (!chart) return
+        const point = resolveNodePoint(id)
+        if (!point) {
+          // 目标常随岗位/域刚展开上画布，坐标尚未生成——与 flyTo 同口径短间隔重试，
+          // 否则搜索定位静默失效
+          if (++attempts < FLY_MAX_ATTEMPTS) window.setTimeout(tryFocus, 250)
+          return
+        }
+        chart.setOption({
+          series: [{ zoom: 2.4, center: point, animationDurationUpdate: 0 }],
         })
-      }, 800)
+        // 编程式聚焦放大也会改变 zoom 档位——同步 LOD（前端聚焦到 2.4 → 全量标签）
+        applyLodBand(2.4)
+        // 定位目标常随岗位/域刚展开上画布，力导向仍在迭代、坐标持续漂移——
+        // 800ms 后按最新坐标校正一次镜头（漂移 ≤8px 视为已静止，不重设）
+        window.setTimeout(() => {
+          const settled = resolveNodePoint(id)
+          if (!settled || !chartRef.current) return
+          if (Math.abs(settled[0] - point[0]) <= 8 && Math.abs(settled[1] - point[1]) <= 8) return
+          chartRef.current.setOption({
+            series: [{ zoom: 2.4, center: settled, animationDurationUpdate: 0 }],
+          })
+        }, 800)
+      }
+      tryFocus()
     },
     [resolveNodePoint, applyLodBand],
   )
@@ -610,7 +619,13 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     })
 
     chart.getZr().on('dblclick', (params) => {
-      if (!params.target) resetView()
+      if (!params.target) {
+        // 仅在视角已缩放时才复位：默认缩放下双击空白（演示中习惯性操作）不应触发镜头跳变
+        const opt = chart.getOption() as { series?: { zoom?: number }[] }
+        const zoom = opt.series?.[0]?.zoom
+        if (typeof zoom === 'number' && Math.abs(zoom - 1) < 0.01) return
+        resetView()
+      }
     })
 
     // ── 语义缩放 (LOD)：监听 roam（平移/缩放）更新标签档位 ──
@@ -635,7 +650,18 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 
   useEffect(() => {
     if (!containerRef.current) return
-    const ro = new ResizeObserver(() => {
+    let lastW = 0
+    let lastH = 0
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect
+      if (!box) return
+      const w = Math.round(box.width)
+      const h = Math.round(box.height)
+      // 尺寸未变的 RO tick 直接忽略：size 递增会驱动主 effect 全量 setOption 重建，
+      // 拖拽窗口期间的连续无变化回调是可感知的掉帧源
+      if (w === lastW && h === lastH) return
+      lastW = w
+      lastH = h
       chartRef.current?.resize()
       setSize((s) => s + 1)
     })
@@ -1054,6 +1080,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       backgroundColor: 'transparent',
       tooltip: {
         trigger: 'item',
+        // 画布 Card 为 overflow-hidden，靠边节点的 tooltip 不加 confine 会被裁切
+        confine: true,
         backgroundColor: colors.tooltip,
         borderColor: colors.tooltipBorder,
         borderWidth: 1,
@@ -1173,6 +1201,20 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 
     chart.setOption(option)
     builtRef.current = true
+
+    // 力导向布局收敛后重叠兜底（graph-layout 工具重新接线）：force 不感知节点大小，
+    // 首屏自动展开最大域后岗位大节点可能互相叠压。仅首建/视图切换（resetCamera）
+    // 的力导向视图安排一次延迟检测——筛选/LOD 重建保留既有坐标不重跑；仍有重叠对
+    // 时以 300ms 平滑动画推开（animate 防静止硬跳，2026-08-15 修复口径）
+    if (resetCamera && !ringLayout) {
+      window.setTimeout(() => {
+        const c = chartRef.current
+        if (!c || c.isDisposed()) return
+        if (hasPositionOverlap(c, 60)) {
+          enforceSpread(c, { minGap: 60, animate: true, duration: 300 })
+        }
+      }, 2500)
+    }
   }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand, evolutionMarks, ringLayout, skillLabelTopIds])
 
   // ── 悬停节点 → 关联连线提亮 ──

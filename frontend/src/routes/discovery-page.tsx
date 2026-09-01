@@ -488,7 +488,7 @@ export function DiscoveryPage() {
           <Reveal key={s.label} delay={i * 90} className="h-full">
             <MetricCard
               className="h-full"
-              data={{ label: s.label, value: s.value, delta: 0, deltaTone: s.tone, hint: s.hint, bar: true }}
+              data={{ label: s.label, value: s.value, deltaTone: s.tone, hint: s.hint, bar: true }}
             />
           </Reveal>
         ))}

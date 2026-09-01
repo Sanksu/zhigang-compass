@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { Activity, Database, GitBranch, Network, TrendingUp, Users } from 'lucide-react'
 // 按需导入（第八轮 P2-32：与本仓 charts.tsx/graph-2d.tsx 口径一致，
@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { MetricCard } from '@/components/shared/metric-card'
 import { Reveal } from '@/components/ui/reveal'
+import { useAuthStore } from '@/store/auth'
 import { apiGet } from '@/lib/api'
 import { escapeHtml, formatDateTime, isDark } from '@/lib/utils'
 import type { components } from '@/types/api'
@@ -177,6 +178,13 @@ export function DashboardPage() {
   const [versions, setVersions] = useState<EvolutionVersion[]>([])
   const [sourceCount, setSourceCount] = useState(0)
   const [crawlAvailable, setCrawlAvailable] = useState(false)
+  const userRole = useAuthStore((s) => s.user?.role)
+  // admin 专属快捷入口（/admin/*）按角色过滤：非 admin 点击会被路由守卫静默弹回首页，
+  // 与侧边栏的角色隔离口径（sidebar 不渲染管理分组）保持一致
+  const quickLinks = useMemo(
+    () => QUICK_LINKS.filter((l) => !l.to.startsWith('/admin') || userRole === 'admin'),
+    [userRole],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -209,7 +217,7 @@ export function DashboardPage() {
       setStats([
         { label: '图谱节点', value: graph ? String(graph.nodes) : '—', delta: `${graph?.edges ?? 0} 边`, icon: Network, hint: 'Neo4j 岗位-技能关系', deltaType: graph ? 'up' : 'neutral' },
         { label: '累计采集量', value: collectOk ? collectTotal.toLocaleString() : '—', delta: collectOk ? `${platforms.length} 源` : '—', icon: Database, hint: 'DB 入库总量（JD/课程/论文/社区）', deltaType: platforms.length ? 'up' : 'neutral' },
-        { label: '已解析简历', value: String(resumeTotal), delta: 'resume_cache', icon: Users, hint: '可发起真实匹配', deltaType: resumeTotal ? 'up' : 'neutral' },
+        { label: '已解析简历', value: String(resumeTotal), delta: '可发起匹配', icon: Users, hint: '上传后 LLM 解析入库', deltaType: resumeTotal ? 'up' : 'neutral' },
         { label: '图谱版本', value: String(versions.length), delta: versions[0]?.version_id ?? '—', icon: GitBranch, hint: 'T+1 快照 · 可 diff', deltaType: versions.length ? 'up' : 'neutral' },
       ])
 
@@ -315,7 +323,7 @@ export function DashboardPage() {
             <CardTitle className="text-sm">快捷入口</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {QUICK_LINKS.map((link) => {
+            {quickLinks.map((link) => {
               const Icon = link.icon
               return (
                 <Link

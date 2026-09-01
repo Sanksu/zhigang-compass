@@ -148,6 +148,8 @@ export function GraphPage() {
   const [loading, setLoading] = useState(true)
   // 错误含业务码（08-14 审查：此前仅存 message，4040 与后端未启动混淆归因）
   const [error, setError] = useState<{ code: number; message: string } | null>(null)
+  // 视图重载令牌：错误态"重试"按钮触发视图 effect 重跑（画像数据流见渲染处单独处理）
+  const [reloadToken, setReloadToken] = useState(0)
   // 全文检索（GET /graph/search）
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<components['schemas']['SearchResultItem'][]>([])
@@ -255,7 +257,7 @@ export function GraphPage() {
     return () => {
       cancelled = true
     }
-  }, [view])
+  }, [view, reloadToken])
 
   // 岗位画像下拉选项：进入视图时从 positionCenter 视图取岗位节点（freq 降序）。
   // session 内仅拉取一次（选项为空才请求），再次进入视图不重复请求；
@@ -471,14 +473,20 @@ export function GraphPage() {
     setSearchDone(true)
     const seq = ++searchSeqRef.current
     setSearching(true)
-    apiGet<components['schemas']['SearchResultsData']>(
-      `/graph/search?q=${encodeURIComponent(term)}&type=skill&size=8`,
-    )
-      .then((r) => {
-        if (searchSeqRef.current === seq) setSearchResults(r.items)
-      })
-      .catch(() => {
-        if (searchSeqRef.current === seq) setSearchResults([])
+    // 技能 + 岗位双通道并发（后端 type 为单值枚举），按相关度合并排序——
+    // "搜岗位→定位"是答辩最自然的演示动作，仅搜技能会漏掉岗位名查询
+    const fetchType = (type: 'skill' | 'position') =>
+      apiGet<components['schemas']['SearchResultsData']>(
+        `/graph/search?q=${encodeURIComponent(term)}&type=${type}&size=8`,
+      )
+        .then((r) => r.items)
+        .catch(() => [] as components['schemas']['SearchResultItem'][])
+    Promise.all([fetchType('skill'), fetchType('position')])
+      .then(([skills, positions]) => {
+        if (searchSeqRef.current !== seq) return
+        setSearchResults(
+          [...skills, ...positions].sort((a, b) => b.score - a.score).slice(0, 8),
+        )
       })
       .finally(() => {
         if (searchSeqRef.current === seq) setSearching(false)
@@ -532,6 +540,28 @@ export function GraphPage() {
               })
             }
           }
+        }
+      }
+      setFocusRequest((prev) => ({ id, ts: (prev?.ts ?? 0) + 1 }))
+    },
+    [view, data, domainAgg, expandedDomains],
+  )
+
+  // 点击岗位搜索结果 → 选中岗位节点 + 展开所属域 + 定位画布。
+  // panorama 聚合模式下岗位仅在其域展开后才上画布，故先展开域再触发 focusRequest
+  const focusPosition = useCallback(
+    (id: string, name: string) => {
+      setSelected({ id, name, type: 'position' })
+      if (view === 'panorama' && domainAgg && data) {
+        const target = data.nodes.find((n) => n.id === id || n.name === name)
+        const dom = target ? domainAgg.domainOfPosition.get(target.id) : undefined
+        if (dom && !expandedDomains.has(dom)) {
+          setExpandedDomains((prev) => {
+            if (prev.has(dom)) return prev
+            const next = new Set(prev)
+            next.add(dom)
+            return next
+          })
         }
       }
       setFocusRequest((prev) => ({ id, ts: (prev?.ts ?? 0) + 1 }))
@@ -736,9 +766,28 @@ export function GraphPage() {
 
   if (error) {
     return (
-      <Card className="h-[640px] flex items-center justify-center text-sm text-state-archived">
-        {error.message}
-        {error.code === 4040 ? '（未找到对应数据）' : '（请确认后端服务与数据库已启动）'}
+      <Card className="h-[640px] flex flex-col items-center justify-center gap-3 text-sm text-state-archived">
+        <p>
+          {error.message}
+          {error.code === 4040 ? '（未找到对应数据）' : '（请确认后端服务与数据库已启动）'}
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setError(null)
+            if (view === 'positionPortrait') {
+              // 画像数据流由 [view, portraitPosition] 驱动，重试令牌无法触达，整页刷新兜底
+              window.location.reload()
+              return
+            }
+            setLoading(true)
+            setReloadToken((t) => t + 1)
+          }}
+        >
+          <RotateCcw className="size-3.5 mr-1" />
+          重试
+        </Button>
       </Card>
     )
   }
@@ -780,10 +829,10 @@ export function GraphPage() {
                     setSearchDone(false)
                   }
                 }}
-                placeholder="搜索技能并定位关系"
+                placeholder="搜索技能或岗位，回车定位"
                 className="h-9 pl-8 pr-16 text-xs"
                 role="combobox"
-                aria-label="搜索图谱技能"
+                aria-label="搜索图谱技能或岗位"
                 aria-expanded={searchResults.length > 0 || (searchDone && !searching && !!query.trim())}
                 aria-controls="graph-search-results"
                 aria-autocomplete="list"
@@ -794,11 +843,27 @@ export function GraphPage() {
               {(searchResults.length > 0 || (searchDone && !searching && query.trim())) && (
                 <div id="graph-search-results" role="listbox" className="absolute right-0 top-11 z-40 w-full overflow-hidden rounded-lg border border-border bg-canvas p-1 shadow-lg">
                   {searchResults.length > 0 ? searchResults.map((result) => (
-                    <button key={result.id} type="button" role="option" aria-selected="false" onClick={() => focusSkill(result.id, result.name)} className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs hover:bg-subtle">
-                      <span className="font-medium text-ink">{result.name}</span>
+                    <button
+                      key={`${result.type}:${result.id}`}
+                      type="button"
+                      role="option"
+                      aria-selected="false"
+                      onClick={() =>
+                        result.type === 'position'
+                          ? focusPosition(result.id, result.name)
+                          : focusSkill(result.id, result.name)
+                      }
+                      className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs hover:bg-subtle"
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="shrink-0 rounded bg-subtle px-1 py-px text-[10px] text-ink-muted">
+                          {result.type === 'position' ? '岗位' : '技能'}
+                        </span>
+                        <span className="truncate font-medium text-ink">{result.name}</span>
+                      </span>
                       <span className="font-mono text-[12px] text-ink-faint">相关度 {(result.score * 100).toFixed(0)}</span>
                     </button>
-                  )) : <p className="px-2.5 py-2 text-xs text-ink-muted">未找到与“{query.trim()}”相关的技能</p>}
+                  )) : <p className="px-2.5 py-2 text-xs text-ink-muted">未找到与“{query.trim()}”相关的技能或岗位</p>}
                 </div>
               )}
             </div>
