@@ -1,5 +1,7 @@
 """阶段 C 内核测试：JD → PositionProfile、预筛、岗位聚合（纯函数，无 DB）。"""
 
+from pathlib import Path
+
 from app.services.matching.jd_profiles import jd_profile_from_snapshot, rough_select
 from app.services.matching.schemas import MatchResult
 from app.services.matching.jd_aggregate import aggregate_jd_scores
@@ -190,3 +192,32 @@ class TestEducationPassthrough:
         prof = jd_profile_from_snapshot(snap, "jd-1")
         # "不限"原样透传：_edu_level 不识别 → education 雷达维 null（不判分）
         assert prof.required_education == "不限"
+
+
+class TestEducationSemanticsContract:
+    """教育匹配语义契约对拍（education_semantics_v1）：实现 vs 冻结语义。
+
+    金标由 generate_education_semantics.py 按负责人拍板的近似规则冻结，
+    实现改动（_edu_level 词表/_education_score 规则）导致对拍失败时，
+    须走语义变更流程（zkt 复核 + 版本升级），不得静默改期望值。
+    """
+
+    def test_contract_conformance(self):
+        import json
+        from app.services.matching.engine import _education_score
+
+        golden = (
+            Path(__file__).resolve().parents[2] / "data" / "golden_set" / "education_semantics_v1.jsonl"
+        )
+        rows = [
+            json.loads(l) for l in golden.read_text(encoding="utf-8").splitlines()
+            if l.strip() and not any(k.startswith("_") for k in json.loads(l))
+        ]
+        assert rows, "教育语义金标为空"
+        mismatches = []
+        for r in rows:
+            got = _education_score(r["jd_requirement"], r["candidate_level"])
+            exp = r["expected_score"]
+            if got != exp:
+                mismatches.append(f"{r['jd_requirement']}×{r['candidate_level']}: 期望 {exp} 实际 {got}")
+        assert not mismatches, f"教育语义契约失配: {mismatches}"
