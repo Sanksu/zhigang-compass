@@ -96,6 +96,24 @@ def load_sim_threshold() -> float:
         return SIM_THRESHOLD_DEFAULT
 
 
+def load_edu_weight() -> float | None:
+    """加载 education 第四维权重 w_edu（2026-09-01 BT 四维重调）。
+
+    配置显式给出 w_edu 且 ∈[0,1] 时返回该值（引擎据此启用第四维凸组合）；
+    未配置/非法返回 None（三维口径，向后兼容——旧配置文件零行为变更）。
+    w_edu 与三维权重独立：引擎侧以 (1-w_edu) 凸组合叠加，不要求四维 Σ=1。
+    """
+    data = _load_config_cached()
+    try:
+        raw = data.get("w_edu")
+        if raw is None:
+            return None
+        w = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return w if 0.0 <= w <= 1.0 else None
+
+
 # 领域跨簇语义黑名单默认（与 configs/domain_sem_blocklist.json 缺失时保持一致）
 DOMAIN_BLOCKLIST_DEFAULT = (("制造业", "电商"),)
 

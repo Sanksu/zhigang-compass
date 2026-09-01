@@ -16,7 +16,12 @@ from app.services.matching.schemas import (
     Necessity,
     PositionProfile,
 )
-from app.services.matching.weights import load_domain_sem_blocklist, load_sim_threshold, load_weights
+from app.services.matching.weights import (
+    load_domain_sem_blocklist,
+    load_edu_weight,
+    load_sim_threshold,
+    load_weights,
+)
 from app.services.proficiency import proficiency_factor
 
 logger = logging.getLogger(__name__)
@@ -536,6 +541,7 @@ def score_position(
     semantic=None,
     sim_threshold: float | None = None,
     project_vectors=None,
+    w_edu_override: float | None = None,
 ) -> MatchResult:
     """单岗位三维评分（设计文档 9.4 节）。
 
@@ -561,6 +567,10 @@ def score_position(
         sim_threshold: 语义命中阈值，None 时从 configs/match_weights.json 读取
     """
     w_must, w_nice, w_exp = weights or load_weights()
+    # education 第四维（2026-09-01 BT 四维重调实验）：w_edu 仅在配置显式给出
+    # 且权重合法时启用；缺省 None → 完全等价三维口径（向后兼容，零行为变更）。
+    # 学历分无信号（任一侧无法映射层级）时不参与加权，其余三维按原口径重归一。
+    w_edu = w_edu_override if w_edu_override is not None else (load_edu_weight() if weights is None else None)
     position = apply_cii_correction(position)
 
     must_score, must_total, matched_must, missing_must = _score_must(
@@ -568,6 +578,7 @@ def score_position(
     )
     nice_score, matched_nice = _score_nice(position, candidate, semantic, sim_threshold)
     exp_score = _score_exp(position, candidate)
+    edu_score = _education_score(position.required_education, candidate.education_level)
 
     if must_score is None:
         # 无门槛岗位：须有技能信号。当经验要求缺失（required_years=None，
@@ -581,6 +592,12 @@ def score_position(
             base_total = (nice_score * w_nice + exp_score * w_exp) / (w_nice + w_exp)
     else:
         base_total = must_score * w_must + nice_score * w_nice + exp_score * w_exp
+
+    # education 加权（w_edu 启用且双方学历信号有效时）：对 base_total 做凸组合
+    # 重归一——edu 无信号时维持原 base_total（不稀释三维口径）
+    if w_edu is not None and w_edu > 0 and edu_score is not None:
+        keep = 1.0 - w_edu
+        base_total = base_total * keep + edu_score * w_edu
 
     if (must_total > 0 and must_score == 0.0) or (
         must_total == 0 and nice_score < NO_MUST_NICE_FLOOR

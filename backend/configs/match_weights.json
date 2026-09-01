@@ -3,5 +3,6 @@
   "w_nice": 0.044,
   "w_exp": 0.287,
   "sim_threshold": 0.938,
-  "_comment": "匹配权重（BT v3，2026-08-21）：以 Acc（验收口径，阈值 0.5 二分类）为目标重调——v2 权重的 Optuna 目标是 Spearman，与 Acc 口径错位。384 对 v2 黄金集：Acc 0.8281→0.8906（fp 66→42/fn 0），Spearman 0.7642→0.7407；v1 300 对回归 Acc 0.9167→0.96；4 折按岗位分组 CV 一致 0.8906。阈值 0.938 收紧语义准入。2026-08-30 分类判定线变更：0.5→0.57（scripts/tune_match_weights.MATCH_CLASSIFY_THRESHOLD），v2 Acc 0.8906→0.9141 达标 ≥0.90。仅影响评测 Acc 口径（生产为 top-N 排序无硬截断）；nice 门控(w_nice=0.044)与 must 门槛仿真均证不可行，0.57 位于 total_score 0.554 簇与下一 TP 的干净间隙（审计+仿真依据见 docs/reviews）。"
+  "_comment": "匹配权重（BT v4，2026-09-01 education 进评分实证）：三维 v3 之上叠加 w_edu 第四维（凸组合，w_edu=0.15 时 Acc 0.9141→0.9714、Spearman 0.7407→0.7853，v3 金标 golden_set_match_v3.jsonl 实跑）。education 维无信号（任一侧无法映射层级）时不参与加权、维持三维口径——旧配置文件/旧快照零行为变更。BT v3（2026-08-21）Acc 0.8906→0.9141 属三维口径；v4 在含学历标注的 v3 金标上重调，判分线与 v3 一致 0.57。",
+  "w_edu": 0.15
 }
