@@ -847,7 +847,7 @@ ALERT_WEBHOOK_URL=                   # 飞书/钉钉/企微机器人 webhook，�
 - ✅ 测试：后端 1168 用例（17 deselected，integration 隔离）/ 前端 28 测试文件 + Playwright E2E
 - ✅ 运维：Docker Compose 5 服务 + 镜像瘦身 + webhook 告警 + 容器化采集 + 限流（100/10 req/min）
 
-**首轮评测基线**（08.07，`scripts/evaluate.py --task all`）：JD 解析 F1=0.6112（关键词基线，未达标 0.90，M5 补 LLM 在线评测）、简历提取 F1=1.0（50 条）、人岗匹配 Spearman=0.8805 / Accuracy=0.96。
+**首轮评测基线（08.07，历史轨迹，已被后续取代）**（`scripts/evaluate.py --task all`）：JD 解析 F1=0.6112（关键词基线，未达标 0.90，M5 补 LLM 在线评测）、简历提取 F1=1.0（50 条）、人岗匹配 Spearman=0.8805 / Accuracy=0.96。**当前主口径见 §5.3.3 与 [评测报告_初审版_20260901](../reviews/评测报告_初审版_20260901.md)（匹配 BT v4 0.9714）**。
 
 ### 9.2 下一步该怎么做（按优先级）
 

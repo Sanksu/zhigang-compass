@@ -1,8 +1,8 @@
 /* 智岗罗盘答辩 PPT 终稿构建脚本（DO-M5-01）
  * 视觉体系：深蓝主色（Navy）+ 产品信号绿点缀（Emerald）+ AI 生成概念图
  * 画布 13.33×7.5in；字体 微软雅黑 + 宋体（标题）
- * 09-01 口径同步：aligned F1 0.9632（三跑中位）/ 简历 0.987（precision 1.0）/
- * 匹配 Acc 0.9141（Top-3 100%，eval_20260830.json）/ 5 骨干职能域+通用域（08-31 治理）/ 三视图（08-29 收敛）
+ * 09-01 口径同步：aligned F1 0.9629（词面豁免口径）/ 简历 0.988 /
+ * 匹配 Acc 0.9714（BT v4，golden_set_match_v3 384 对含学历维度）/ 5 骨干职能域+通用域（08-31 治理）/ 三视图（08-29 收敛）
  */
 const pptxgen = require("pptxgenjs");
 
@@ -210,7 +210,7 @@ function shot43(s, file, x, y, w) {
     if (i < 2) s.addText("→", { x: x + 3.92, y: 3.05, w: 0.36, h: 0.5, fontSize: 20, fontFace: FONT_BODY, bold: true, color: ACCENT_D, margin: 0, align: "center" });
   });
   s.addText("评测闭环：110 条正式黄金集（人工标注）LLM 盲审", { x: M, y: 4.5, w: 8, h: 0.35, fontSize: 14, fontFace: FONT_BODY, bold: true, color: INK, margin: 0 });
-  stat(s, M, 4.95, 2.6, "0.9632", "技能 aligned F1（目标 ≥0.90）", { numSize: 36, color: ACCENT_D });
+  stat(s, M, 4.95, 2.6, "0.9629", "技能 aligned F1（目标 ≥0.90）", { numSize: 36, color: ACCENT_D });
   stat(s, M + 2.8, 4.95, 2.6, "< 1%", "幻觉 FP 率", { numSize: 36 });
   stat(s, M + 5.6, 4.95, 2.6, "0.8865", "raw F1（未对齐口径）", { numSize: 36 });
   s.addText("口径说明：跨源一致性为每日计算并在看板展示（透明可查），自动硬门控列入后续路线图", { x: 8.6, y: 5.05, w: 4.2, h: 1.1, fontSize: 11.5, fontFace: FONT_BODY, color: MUTED, margin: 0, valign: "top" });
@@ -328,9 +328,9 @@ function shot43(s, file, x, y, w) {
     "全部指标均以人工标注或专家定稿为真值，非自评",
   ], M, 1.5, CW, 1.35, { fontSize: 14 });
   const metrics = [
-    ["0.9632", "JD 解析 aligned F1", "110 条 gold 三跑一致 · 目标 0.90"],
-    ["0.987", "简历解析 F1", "50 条 · 零幻觉误报"],
-    ["0.9141", "人岗匹配 Acc", "384 对黄金集 · Top-3 命中 100%"],
+    ["0.9629", "JD 解析 aligned F1", "110 条 gold 词面豁免口径 · 目标 0.90"],
+    ["0.988", "简历解析 F1", "50 条"],
+    ["0.9714", "人岗匹配 Acc", "384 对黄金集含学历维度（BT v4）"],
     ["96.7%", "学习路径合理性", "30 案例专家定稿"],
   ];
   metrics.forEach((m, i) => {
@@ -430,8 +430,8 @@ function shot43(s, file, x, y, w) {
   const s = base();
   title(s, "RESULTS", "关键成果数据");
   const res = [
-    ["0.9632", "JD 解析 aligned F1", "≥0.90 达标"],
-    ["0.9141", "人岗匹配 Acc", "384 对黄金集 · Top-3 命中 100%"],
+    ["0.9629", "JD 解析 aligned F1", "≥0.90 达标"],
+    ["0.9714", "人岗匹配 Acc", "384 对黄金集含学历维度（BT v4）"],
     ["96.7%", "学习路径合理性", "30 案例专家定稿"],
     ["91.7%", "技能分类视图覆盖", "权威覆盖 12.8% → 23.9%"],
     ["430ms", "图谱全景 P95", "100 并发 · 目标 <2s"],
@@ -479,7 +479,7 @@ function shot43(s, file, x, y, w) {
   s.addText("全链路闭环 · 评测达标 · 演示就绪", { x: M, y: 1.4, w: CW, h: 0.8, fontSize: 34, fontFace: FONT_HEAD, bold: true, color: "FFFFFF", margin: 0 });
   bullets(s, [
     "采集 → 图谱 → 抽取 → 匹配 → 演化 → 学习路径，55 天完成全链路真实数据闭环",
-    "四项核心指标全部达标：JD 解析 0.9632 · 匹配 0.9141 · 学习路径 96.7% · P95 430ms",
+    "四项核心指标全部达标：JD 解析 0.9629 · 匹配 0.9714 · 学习路径 96.7% · P95 430ms",
     "展望：新岗位自动发现（种子引导 + 自动判定）· 数字化迁移领域扩展",
   ], M, 2.6, CW, 1.9, { fontSize: 15.5, color: "D8E4F0", gap: 12 });
   s.addText("感谢各位评委聆听", { x: M, y: 5.4, w: CW, h: 0.9, fontSize: 30, fontFace: FONT_HEAD, bold: true, color: "FFFFFF", margin: 0 });
