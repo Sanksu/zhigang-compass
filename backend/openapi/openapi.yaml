@@ -4784,6 +4784,13 @@ components:
           type: string
           nullable: true
           description: 岗位职能域（域治理成果接入，按岗位名取图谱 domain_name；无域/查询失败为 null，前端不渲染）
+        weights:
+          type: object
+          description: 实际评分权重（BT v3，configs/match_weights.json）
+          properties:
+            must: { type: number }
+            nice: { type: number }
+            exp: { type: number }
         jd_compared:
           type: integer
           description: "JD 级评分溯源：total_score 为同岗最近 N 条宽 JD（上限 max_jds）中的最高分，N=参与评分条数"

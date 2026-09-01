@@ -147,6 +147,8 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
     evidence_refs: r.evidence_refs ?? [],
     // 岗位域徽标（域治理成果接入）
     domain_name: r.domain_name ?? null,
+    // 实际评分权重（BT v3，三维分解展示真实口径）
+    weights: r.weights ?? null,
     // JD 级评分溯源：total_score = 同岗 jd_compared 条 JD 中的最高分
     jd_compared: r.jd_compared ?? null,
     // 最佳匹配 JD 原文（compare 详情溯源，随快照持久化）
@@ -868,9 +870,9 @@ export function ResumeMatchPage() {
                     <ScoreRing score={matchResult.total_score} />
                     <div className="space-y-2">
                       {[
-                        { label: '必备技能', score: matchResult.must_score, weight: '0.6' },
-                        { label: '加分技能', score: matchResult.nice_score, weight: '0.2' },
-                        { label: '工作经验', score: matchResult.exp_score, weight: '0.2' },
+                        { label: '必备技能', score: matchResult.must_score, w: matchResult.weights?.must },
+                        { label: '加分技能', score: matchResult.nice_score, w: matchResult.weights?.nice },
+                        { label: '工作经验', score: matchResult.exp_score, w: matchResult.weights?.exp },
                       ].map((d) => (
                         <div key={d.label} className="flex items-center gap-2">
                           <span className="text-xs text-ink-muted w-20">{d.label}</span>
@@ -883,7 +885,9 @@ export function ResumeMatchPage() {
                           <span className="text-xs font-mono text-ink tabular-nums w-12 text-right">
                             {d.score == null ? '—' : (d.score * 100).toFixed(0)}
                           </span>
-                          <span className="text-[11px] text-ink-faint w-8">w={d.weight}</span>
+                          <span className="text-[11px] text-ink-faint w-10 text-right">
+                            {d.w != null ? `权重 ${Math.round(d.w * 100)}%` : ''}
+                          </span>
                         </div>
                       ))}
                       <p className="text-xs text-ink-muted pt-2 border-t border-border">

@@ -44,6 +44,7 @@ from app.services.matching.jd_match import (
     score_jd_compare,
 )
 from app.services.matching.loaders import build_candidate
+from app.services.matching.weights import load_weights
 from app.services.matching.semantic import SkillEmbedder
 
 router = APIRouter()
@@ -308,6 +309,10 @@ async def compare(
             "score": round(result.total_score, 4),
         }
 
+    # 实际评分权重（BT v3）透出：前端三维分解展示真实口径（此前前端硬编码
+    # 0.6/0.2/0.2 与配置不符）
+    w_must, w_nice, w_exp = load_weights()
+
     match_id = str(uuid.uuid4())
     data = {
         "match_id": match_id,
@@ -318,6 +323,8 @@ async def compare(
         "position_id": position_name,
         # 岗位域徽标（域治理成果接入；无域为 null）
         "domain_name": domain_name,
+        # 实际评分权重（BT v3），前端展示真实口径
+        "weights": {"must": round(w_must, 4), "nice": round(w_nice, 4), "exp": round(w_exp, 4)},
         # JD 级评分溯源：total_score 为同岗 jd_compared 条 JD 中的最高分
         "jd_compared": jd_compared,
         "gaps": [g.model_dump() for g in path.gaps],

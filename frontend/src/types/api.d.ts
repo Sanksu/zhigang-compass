@@ -6407,6 +6407,12 @@ export interface components {
             evidence_refs: components["schemas"]["EvidenceRef"][];
             /** @description 岗位职能域（域治理成果接入，按岗位名取图谱 domain_name；无域/查询失败为 null，前端不渲染） */
             domain_name?: string | null;
+            /** @description 实际评分权重（BT v3，configs/match_weights.json） */
+            weights?: {
+                must?: number;
+                nice?: number;
+                exp?: number;
+            };
             /** @description JD 级评分溯源：total_score 为同岗最近 N 条宽 JD（上限 max_jds）中的最高分，N=参与评分条数 */
             jd_compared?: number;
             /** @description 最佳匹配 JD 原文（compare 详情溯源：按最佳 JD 行回读 raw_text，正文截断至 8000 字符；旧快照/最佳 JD 行已删除时为 null） */
