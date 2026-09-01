@@ -521,7 +521,8 @@ export function NodeDetailPanel({
             )}
 
             {/* 关联统计（岗位画像视图由下方「画像证据」区承载，避免低信息量卡） */}
-            {stats && !portraitMode && (stats.positionCount || stats.skillCount || stats.evidenceCount) && (
+            {/* 域超节点不在全量 data.edges 中，三计数恒 0；数字 0 直渲会漏字面量「0」，须布尔化 */}
+            {stats && !portraitMode && !!(stats.positionCount || stats.skillCount || stats.evidenceCount) && (
               <section className="space-y-2">
                 <h4 className="text-xs font-medium text-ink-muted">关联统计</h4>
                 <dl className="grid grid-cols-3 gap-2 text-center">
