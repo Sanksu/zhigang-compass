@@ -29,6 +29,20 @@ logger = logging.getLogger(__name__)
 _SOFT_SKILL_CATEGORY = "soft-skills"
 
 
+def _min_experience_years(snapshot: dict) -> Optional[float]:
+    """解析 JD 经验要求最小年限（extraction.experience_range.min_years）。
+
+    抽取链路（prompts 规则 11）把"X 年以上 / X-Y 年"落到 extraction.experience_range，
+    与聚合层 _min_experience_years 同口径（P0 字段失联修复：此前读取一个从未抽取
+    的字段导致 required_years 恒 null）。无明确年限返回 None，勿默认 0。
+    """
+    erf = ((snapshot or {}).get("extraction") or {}).get("experience_range") or {}
+    if not isinstance(erf, dict):
+        return None
+    mn = erf.get("min_years")
+    return float(mn) if isinstance(mn, (int, float)) and mn > 0 else None
+
+
 def jd_profile_from_snapshot(
     snapshot: dict,
     jd_id: str,
@@ -85,7 +99,7 @@ def jd_profile_from_snapshot(
         name=title,
         must_skills=musts,
         nice_skills=nices,
-        required_years=extraction.get("required_years"),
+        required_years=_min_experience_years(snapshot),
         industry=extraction.get("industry") or None,
         typical_scenarios=[str(s) for s in (extraction.get("typical_scenarios") or []) if s],
         soft_requirements=softs,

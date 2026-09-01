@@ -59,8 +59,15 @@ class TestEntryLabel:
         snap = _snapshot()
         assert entry_label(snap, "experience") == "3年以上"
 
-    def test_experience_label_missing_years(self):
+    def test_experience_label_from_extraction_range(self):
+        """经验标签来自 extraction.experience_range（权威抽取字段），
+        即便列表页 experience 文本为空也以抽取为准（P0 口径）。"""
         snap = _snapshot(experience="")
+        assert entry_label(snap, "experience") == "3年以上"
+
+    def test_experience_label_missing_years(self):
+        """抽取无经验年限 → 经验标签为空（不落条目）。"""
+        snap = _snapshot(experience="", extraction={"education": {"level": "本科"}})
         assert entry_label(snap, "experience") == ""
 
     def test_education_label_from_extraction(self):

@@ -13,7 +13,8 @@ def _snap(title, skills, reqs=None, position_name="后端开发工程师", years
         "extraction": {
             "skills": [{"name": s} for s in skills],
             "requirements": [{"skill_name": s} for s in (reqs or [])],
-            "required_years": years,
+            # P0 协议：经验年限由 extraction.experience_range.min_years 承载（原 required_years 从未被抽取）
+            "experience_range": {"min_years": years},
             "industry": "IT",
             "typical_scenarios": scenarios or [],
         },
@@ -41,6 +42,27 @@ class TestJdProfile:
     def test_no_skills_returns_none(self):
         assert jd_profile_from_snapshot({"extraction": {}}, "1") is None
         assert jd_profile_from_snapshot({}, "1") is None
+
+    def test_years_from_experience_range_min_years(self):
+        """P0：required_years 取自 extraction.experience_range.min_years。"""
+        snap = _snap("JD-Y", ["Python"], years=5)
+        prof = jd_profile_from_snapshot(snap, "1")
+        assert prof.required_years == 5
+
+    def test_missing_experience_range_yields_none_years(self):
+        """P0：无经验区间 → required_years=None（表示无准入年限，≠0）。"""
+        snap = _snap("JD-N", ["Python"], years=3)
+        snap["extraction"].pop("experience_range", None)
+        prof = jd_profile_from_snapshot(snap, "1")
+        assert prof.required_years is None
+
+    def test_invalid_min_years_yields_none(self):
+        """P0：min_years 为 0/负数/非数值 → None（不误判为有年限）。"""
+        for bad in (0, -1, "abc", None):
+            snap = _snap("JD-B", ["Python"])
+            snap["extraction"]["experience_range"] = {"min_years": bad}
+            prof = jd_profile_from_snapshot(snap, "1")
+            assert prof.required_years is None, f"min_years={bad}"
 
 
 class TestRoughSelect:
