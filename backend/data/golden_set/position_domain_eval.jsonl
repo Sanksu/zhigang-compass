@@ -1,12 +1,12 @@
-{"_meta": {"file": "position_domain_eval", "version": "2026-09-01.frozen1", "status": "frozen（负责人 Sanksu 2026-09-01 拍板认可全部断言；弱锚定 5 行——全栈/鸿蒙/C++/AI基础设施/网络工程师 归族口径——保留观察待 zkt 异步复核，见 docs/reviews/域治理算法复核包_20260901.md 拍板表）", "口径": "共成员关系断言——position 应与 same_domain_as 中每个锚点岗同属一个语义域（expect=domain），或应落入通用与其他域/弃权（expect=general）。断言与域名解耦，域名由 LLM 生成可变，锚点岗选高频稳定岗。", "锚点选择": "freq≥10 的高频稳定岗；弱锚定条目在 note 标注", "复核要点": "弱锚定条目：全栈工程师/鸿蒙全栈/C++开发工程师/AI基础设施工程师/网络工程师归族口径", "approved_by": "Sanksu（项目负责人）", "approved_at": "2026-09-01"}}
+{"_meta": {"file": "position_domain_eval", "version": "2026-09-01.frozen2", "status": "frozen2（负责人 Sanksu 2026-09-01 弱锚定异步复核完成：5 行全栈/鸿蒙/C++/AI基础设施/网络工程师 拓扑证据见 note，维持原断言；复核前基准 100%（72/72））", "口径": "共成员关系断言——position 应与 same_domain_as 中每个锚点岗同属一个语义域（expect=domain），或应落入通用与其他域/弃权（expect=general）。断言与域名解耦，域名由 LLM 生成可变，锚点岗选高频稳定岗。", "锚点选择": "freq≥10 的高频稳定岗；弱锚定条目在 note 标注", "复核要点": "弱锚定条目：全栈工程师/鸿蒙全栈/C++开发工程师/AI基础设施工程师/网络工程师归族口径", "approved_by": "Sanksu（项目负责人）", "approved_at": "2026-09-01"}}
 {"position": "React前端开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "技术栈细分族"}
 {"position": "Vue前端开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "技术栈细分族"}
 {"position": "Angular前端开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "技术栈细分族"}
 {"position": "移动前端开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "移动端开发归前端族"}
 {"position": "TypeScript工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "名实口径 TS 属前端栈；其 JD 画像偏测试属上游数据问题（08-31 案例原错配系统可靠性）"}
-{"position": "全栈工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "弱锚定：国内全栈 JD 多以前端为基座；zkt 可复核"}
+{"position": "全栈工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "弱锚定已复核（2026-09-01）：前后端均衡（must 前 4 后 4），拓扑最优域=后端(195.7)/前端(100.8)=1.94；归前端为治理决策（域名已确立）非算法结论"}
 {"position": "Node.js全栈工程师", "same_domain_as": ["全栈工程师"], "expect": "domain", "note": "全栈族"}
-{"position": "鸿蒙全栈工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "弱锚定：鸿蒙生态≈移动端族；现行误落教育管理域"}
+{"position": "鸿蒙全栈工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "弱锚定已复核（2026-09-01）：两域拉扯 1.16（后端10.8/前端9.3），归前端为治理决策"}
 {"position": "WebGL开发工程师", "same_domain_as": ["前端开发工程师"], "expect": "domain", "note": "前端图形族"}
 {"position": "大模型算法工程师", "same_domain_as": ["机器视觉算法工程师"], "expect": "domain", "note": "算法族锚点（08-31 pin 治理后已归位）"}
 {"position": "机器人算法工程师", "same_domain_as": ["机器视觉算法工程师"], "expect": "domain", "note": "算法细分族"}
@@ -28,14 +28,14 @@
 {"position": "保险分析师", "same_domain_as": ["数据分析师"], "expect": "domain", "note": "分析细分族（_ANALYST_SUB_FAMILIES 承接口径）"}
 {"position": "DevOps工程师", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "运维族（08-31 pin 治理后已归位）"}
 {"position": "数据库管理员", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "运维族"}
-{"position": "网络工程师", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "弱锚定：网络属基础设施族；现行与运维分立，zkt 可复核"}
+{"position": "网络工程师", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "弱锚定已复核（2026-09-01）：近随机 1.02（运维41.0/后端40.3），pin 兜底归运维为治理决策"}
 {"position": "WebSphere管理员", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "中间件运维"}
 {"position": "IT平台与自动化", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "IT 基础设施"}
 {"position": "桌面工程师", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "桌面/终端支持"}
-{"position": "AI基础设施工程师", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "弱锚定：AI Infra 技能栈(K8s/GPU/监控)靠近 DevOps；现行误落前端域"}
+{"position": "AI基础设施工程师", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "弱锚定已复核（2026-09-01）：两域拉扯 1.28（后端31.8/算法24.9），归运维为治理决策"}
 {"position": "AI与HPC可观测性", "same_domain_as": ["运维工程师"], "expect": "domain", "note": "可观测性属运维族；现行误落教育域"}
 {"position": "生物信息学 QA", "same_domain_as": ["测试工程师"], "expect": "domain", "note": "QA 归测试族"}
-{"position": "C++开发工程师", "same_domain_as": ["嵌入式开发工程师"], "expect": "domain", "note": "弱锚定：C++ 通才语义，按系统/嵌入式语境归族；zkt 复核"}
+{"position": "C++开发工程师", "same_domain_as": ["嵌入式开发工程师"], "expect": "domain", "note": "弱锚定已复核（2026-09-01）：两域拉扯 1.11（算法28.2/后端25.5），骨干聚类归算法"}
 {"position": "FPGA验证", "same_domain_as": ["嵌入式开发工程师"], "expect": "domain", "note": "芯片验证族"}
 {"position": "IC验证", "same_domain_as": ["嵌入式开发工程师"], "expect": "domain", "note": "芯片验证族"}
 {"position": "GPU验证", "same_domain_as": ["嵌入式开发工程师"], "expect": "domain", "note": "芯片验证族"}
