@@ -16,6 +16,7 @@ sys.path.insert(0, str(_BACKEND / "data"))
 from crawlers.spiders.github import (
     MIN_STARS,
     GithubSpider,
+    _created_boundary,
     _is_spam_repo,
 )
 
@@ -162,11 +163,42 @@ class TestGithubQuality:
             assert "sort=stars" in req.url
 
     def test_since_window_mapping(self):
-        """since 窗口映射到 created 参数（daily=1 天）。"""
+        """daily 回看窗口为相对当前时刻的 36h（跨过 GitHub `created:` 索引滞后）。
+
+        2026-09-01 掉量修复：原固定日历日期起点使上午早跑窗口 <28h 落空；
+        现改为 UTC 滑动时间戳，任意触发时刻深度一致，且早于当前时刻。
+        """
+        import re
+        from datetime import datetime, timezone
+
+        from crawlers.spiders.github import _LOOKBACK_HOURS
+
         spider = _make_spider()
         req = list(spider.start_requests())[0]
+        query = self._query(req)
 
-        assert "created:>20" in self._query(req)
+        # 回看起点 = 当前 UTC 时刻 - daily 回看深度（36h）；查询含完整时间戳 + Z
+        expect_start = datetime.now(timezone.utc).timestamp() - _LOOKBACK_HOURS["daily"] * 3600
+        assert "created:>" in query
+        m = re.search(r"created:>(\S+)", query)
+        assert m and m.group(1).endswith("Z"), query  # 时间戳为 UTC（Z）且带时间成分
+        ts = datetime.strptime(
+            m.group(1), "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=timezone.utc).timestamp()
+        # 允许 1 分钟时钟偏差：本应在当前时刻前 36h ±1min
+        assert abs(expect_start - ts) < 60, (expect_start, ts)
+
+    def test_created_boundary_is_utc_trailing(self):
+        """_created_boundary 返回 UTC、相对传入回看深度的滑动时间戳。"""
+        from datetime import datetime, timezone
+
+        boundary = _created_boundary(36)
+        # ISO-8601 Z 格式
+        assert boundary.endswith("Z") and "T" in boundary
+        parsed = datetime.strptime(boundary, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        # 早于当前 UTC 时刻约 36h
+        seconds = (datetime.now(timezone.utc) - parsed).total_seconds()
+        assert 35 * 3600 <= seconds <= 37 * 3600
 
     def test_no_token_no_auth_header(self, monkeypatch):
         """未配置 GITHUB_TOKEN 时请求不带 Authorization（维持匿名）。"""
