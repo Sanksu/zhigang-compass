@@ -147,3 +147,46 @@ class TestExperienceRangeMapping:
         snap = self._snapshot({"experience_range": {"min_years": 0, "max_years": None}})
         prof = jd_profile_from_snapshot(snap, "jd-1")
         assert prof.required_years is None
+
+
+class TestEducationPassthrough:
+    """2026-09-01 同款字段错位修复：extraction.education.level → required_education。
+
+    学历雷达维此前恒 null（JD 级画像未透传学历要求，抽取填充率 57%）。
+    """
+
+    def test_level_passthrough(self):
+        snap = {
+            "title": "Java开发工程师",
+            "normalized_position": "后端开发工程师",
+            "extraction": {
+                "skills": [{"name": "Java", "necessity": "must", "level": "熟练"}],
+                "education": {"level": "本科"},
+            },
+        }
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        assert prof.required_education == "本科"
+
+    def test_missing_education_is_none(self):
+        snap = {
+            "title": "Java开发工程师",
+            "normalized_position": "后端开发工程师",
+            "extraction": {
+                "skills": [{"name": "Java", "necessity": "must", "level": "熟练"}],
+            },
+        }
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        assert prof.required_education is None
+
+    def test_buxian_kept_for_edu_level_semantics(self):
+        snap = {
+            "title": "Java开发工程师",
+            "normalized_position": "后端开发工程师",
+            "extraction": {
+                "skills": [{"name": "Java", "necessity": "must", "level": "熟练"}],
+                "education": {"level": "不限"},
+            },
+        }
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        # "不限"原样透传：_edu_level 不识别 → education 雷达维 null（不判分）
+        assert prof.required_education == "不限"
