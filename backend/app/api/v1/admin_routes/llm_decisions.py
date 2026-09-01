@@ -404,12 +404,14 @@ async def _approve_skill_classify(db, record, reason: str, operator: str) -> dic
 
 
 async def _approve_skill_alias(db, record, reason: str, operator: str) -> dict:
-    """技能别名回写批准（方案①）：写 skill_aliases(approved) + 刷新动态别名缓存。
+    """技能别名回写批准：落/更新 skill_aliases(approved) + 刷新动态别名缓存。
 
     skill_normalize 记录且 structured_output.kind=="alias"（propose_skill_alias 产出）：
-    approve 即把该"别名→标准名"写进 skill_aliases（status=approved），供
+    approve 即把该"别名→标准名"落 skill_aliases（status=approved），供
     normalize_skill 并查（词典→动态→白名单）。standard_name 必须命中
     known_standard_names（propose 侧 gate 已保证；此处二次校验防脏数据）。
+    幂等（unique(variant)）：同名 pending 待审行升级为 approved（方案 A 打通
+    「技能治理→别名复核」的双轨），已生效/已驳回则拒绝；无行时才新建。
     图边界：别名回写不改图谱拓扑（非图变异），故落 skill_aliases 足够。
     """
     from app.api.common import ok
@@ -431,18 +433,29 @@ async def _approve_skill_alias(db, record, reason: str, operator: str) -> dict:
     if standard not in known_standard_names():
         return error(ERR_VALIDATION, f"标准名 {standard!r} 不在权威标准名集合（防虚构）")
 
-    # 幂等：unique(variant) —— 已存在该 variant（pending/approved）则跳过
+    # 幂等：unique(variant)——同名已有行一律不重复新建；已生效/已驳回则拒绝，
+    # 仅对 pending 待审行执行"批准"（写入 proposal_id/review 信息，套 upsurge到 approved）。
     existing = (await db.scalars(
         select(SkillAlias).where(SkillAlias.variant == alias)
     )).first()
     if existing is not None:
-        return error(ERR_CONFLICT, f"别名 {alias!r} 已存在（proposal {existing.proposal_id}），不可重复批准")
-
-    db.add(SkillAlias(
-        variant=alias, standard_name=standard,
-        status="approved", proposal_id=str(record.id),
-        reviewed_by=operator, review_reason=reason, confidence=confidence,
-    ))
+        if existing.status == "approved":
+            return error(ERR_CONFLICT, f"别名 {alias!r} 已生效，不可重复批准")
+        if existing.status == "rejected":
+            return error(ERR_CONFLICT, f"别名 {alias!r} 已驳回，不可批准")
+        # pending 待审行：本决策页批准等价"复核通过"，更新为 approved
+        existing.status = "approved"
+        existing.reviewed_by = operator
+        existing.review_reason = reason
+        existing.confidence = confidence
+        existing.proposal_id = str(record.id)
+        db.add(existing)
+    else:
+        db.add(SkillAlias(
+            variant=alias, standard_name=standard,
+            status="approved", proposal_id=str(record.id),
+            reviewed_by=operator, review_reason=reason, confidence=confidence,
+        ))
     record.status = "approved"
     record.reviewer = operator
     record.review_reason = reason
