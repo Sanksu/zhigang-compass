@@ -210,7 +210,7 @@ async def _align_scores_with_full_jd(
         )
         if found is None:
             continue
-        _, best_result = found
+        _, best_result, _compared = found
         item.update({
             "total_score": round(best_result.total_score, 4),
             "must_score": best_result.must_score,
@@ -257,7 +257,7 @@ async def score_jd_compare(
     保证列表分数与详情同口径单 JD。最高分口径 = 最近 N 条宽 JD 中的最高分，
     非全局全量（SQL 侧同步 limit 兜底，防大岗位全量拉取 snapshot）。
 
-    返回 (最佳 PositionProfile, 最佳 MatchResult)；无该岗位 JD 返回 None。
+    返回 (最佳 PositionProfile, 最佳 MatchResult, 参与评分 JD 条数)；无该岗位 JD 返回 None。
     """
     embedder = semantic or SkillEmbedder.get()
     min_skills = _read_min_jd_skills()
@@ -300,7 +300,12 @@ async def score_jd_compare(
                 best, best_profile = result, prof
         return best_profile, best
 
-    return await _run_in_thread(_score)
+    best_profile, best = await _run_in_thread(_score)
+    if best_profile is None or best is None:
+        return None
+    # 评分溯源（2026-09-01）：同岗参与评分的 JD 条数，供前端展示
+    # 「同岗 N 条 JD 中的最佳匹配」
+    return best_profile, best, len(profiles)
 
 
 async def load_jd_evidence_refs(

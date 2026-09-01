@@ -117,7 +117,7 @@ class TestScoreJdCompare:
             )
 
         monkeypatch.setattr(jd_match, "score_position", _fake_score)
-        best, result = asyncio.run(jd_match.score_jd_compare(
+        best, result, _compared = asyncio.run(jd_match.score_jd_compare(
             _FakeSession(rows), _candidate(["Python", "Docker"]), "后端工程师", {},
         ))
         # 高分 JD（全栈，技能更多）胜出：result=0.92，best 为全栈 JD
@@ -151,7 +151,7 @@ class TestScoreJdCompare:
             )
 
         monkeypatch.setattr(jd_match, "score_position", _fake_score)
-        best, _ = asyncio.run(jd_match.score_jd_compare(
+        best, _, _c = asyncio.run(jd_match.score_jd_compare(
             _FakeSession([ok_row, no_ext_row]), _candidate(["Java"]), "后端工程师", {},
         ))
         # 只有 1 条带 extraction 的参与评分（无 extraction 行跳过）
@@ -226,7 +226,7 @@ class TestNarrowJdFilter:
             )
 
         monkeypatch.setattr(jd_match, "score_position", _fake_score)
-        best, result = asyncio.run(jd_match.score_jd_compare(
+        best, result, _compared = asyncio.run(jd_match.score_jd_compare(
             _FakeSession(rows), _candidate(["Python"]), "后端工程师", {},
         ))
         assert "后端 JD-窄" not in scored_names  # 窄 JD 未参与评分
@@ -337,7 +337,7 @@ class TestAlignScoresWithFullJd:
         )
 
         async def _fake_compare(session, candidate, position_name, project_vectors, semantic=None, sim_threshold=None):
-            return (None, best)
+            return (None, best, 0)
 
         monkeypatch.setattr(jd_match, "score_jd_compare", _fake_compare)
         out = asyncio.run(jd_match._align_scores_with_full_jd(

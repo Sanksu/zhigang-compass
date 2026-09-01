@@ -21,7 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.common import owns_resume, parse_uuid, serialize_task
 from app.api.deps import require_role
 from app.core.arq_client import enqueue
-from app.core.database import async_session_factory, get_db, redis_client
+from app.core.database import (
+    async_neo4j_driver,
+    async_session_factory,
+    get_db,
+    redis_client,
+)
 from app.core.errors import ERR_FORBIDDEN, ERR_NOT_FOUND, ERR_VALIDATION
 from app.models.business import (
     DiagnosisReportRecord,
@@ -262,14 +267,28 @@ async def compare(
         )
         if found is None:
             return None
-        target, result = found
-        return candidate, target, result, semantic
+        target, result, jd_compared = found
+        return candidate, target, result, jd_compared, semantic
 
     computed = await _compute()
     if computed is None:
         return error(ERR_NOT_FOUND, "岗位不存在", http_status=404)
-    candidate, target, result, semantic = computed
+    candidate, target, result, jd_compared, semantic = computed
     path = await LearningPathGenerator().generate(candidate, target, semantic=semantic)
+
+    # 岗位域归属（2026-09-01 域治理成果接入）：图谱 Position.domain_name 按
+    # 岗位名取域徽标；无域（弃权池/未同步）为 null，前端不渲染
+    domain_name = None
+    try:
+        async with async_neo4j_driver.session() as session:
+            record = await session.run(
+                "MATCH (p:Position {name: $name}) RETURN p.domain_name AS d",
+                name=position_name,
+            )
+            row = await record.single()
+            domain_name = row["d"] if row is not None else None
+    except Exception:
+        logger.warning("[match/compare] 域归属查询失败，忽略")
 
     # JD 原文（compare 详情溯源）：score_jd_compare 以 str(row.id) 构建
     # PositionProfile.position_id，按主键回读最佳 JD 行的 raw_text；正文截断
@@ -285,6 +304,8 @@ async def compare(
             "source": jd_row.source or "",
             "source_url": jd_row.source_url or "",
             "text": (jd_row.raw_text or "").strip()[:8000],
+            # 评分溯源（2026-09-01）：result.total_score 即最佳 JD 的得分
+            "score": round(result.total_score, 4),
         }
 
     match_id = str(uuid.uuid4())
@@ -295,6 +316,10 @@ async def compare(
         # 对外 position_id / position_name 用岗位名（与推荐列表 JD 候选模式一致，
         # 见 jd_aggregate position_id=岗位名），避免前端显示/比较不一致
         "position_id": position_name,
+        # 岗位域徽标（域治理成果接入；无域为 null）
+        "domain_name": domain_name,
+        # JD 级评分溯源：total_score 为同岗 jd_compared 条 JD 中的最高分
+        "jd_compared": jd_compared,
         "gaps": [g.model_dump() for g in path.gaps],
         "learning_path": [item.model_dump() for item in path.items],
         "learning_path_blocked": path.blocked,

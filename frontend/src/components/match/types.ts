@@ -28,6 +28,8 @@ export type ResumeSummary = components['schemas']['ResumeSummaryItem']
 export interface RecommendItem {
   position_id: string
   position_name: string
+  /** 岗位职能域（域治理成果接入；无域为 null/undefined 不渲染） */
+  domain_name?: string | null
   total_score: number
   /** 岗位无必备技能门槛时为 null（A1 口径：无信息不判分，总分重归一） */
   must_score: number | null
@@ -150,12 +152,18 @@ export interface MatchResult {
   learning_path_block_reason?: string | null
   /** 证据引用（设计文档要求 100% 覆盖率） */
   evidence_refs: { skill: string; source: string; url: string; confidence: number }[]
+  /** 岗位职能域（域治理成果接入；无域/查询失败为 null 不渲染） */
+  domain_name?: string | null
+  /** JD 级评分溯源：total_score 为同岗 jd_compared 条 JD 中的最高分 */
+  jd_compared?: number | null
   /** 最佳匹配 JD 原文（compare 返回；旧快照/最佳 JD 行已删除为 null） */
   jd_original?: {
     jd_title: string
     source: string
     source_url: string
     text: string
+    /** 该 JD 的匹配得分（=同岗最高分 total_score，评分溯源） */
+    score?: number
   } | null
 }
 
