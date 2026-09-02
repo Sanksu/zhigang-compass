@@ -41,8 +41,8 @@ jobs:
       - name: Run tests
         env:
           APP_ENV: test
-        # 覆盖率门禁：--cov=app 启用测量，fail_under=60 阈值由 pyproject.toml
-        # [tool.coverage.report] 声明式配置（设计文档 §15.3 验收 ≥60%）。
+        # 覆盖率门禁：--cov=app 启用测量，fail_under=70 阈值由 pyproject.toml
+        # [tool.coverage.report] 声明式配置（实测 77.57%，第六轮审查将 60 提至 70）。
         # L-16：返回码 5（未收集到测试用例）同样置红——collection 清空（如
         # conftest 报错、marker 误排除全部用例）曾是假绿通道
         run: uv run pytest -q --cov=app --cov-report=term-missing
