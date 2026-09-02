@@ -283,6 +283,10 @@ function SkillDeclineWarningCard() {
 
 export function EvolutionPage() {
   const [versions, setVersions] = useState<EvolutionVersion[]>([])
+  // 版本总数（分页 total）：size=30 的页长会截断 versions.length，指标卡须展示真实总数
+  const [versionTotal, setVersionTotal] = useState(0)
+  // 新兴/衰退信号数（与 SignalsView 共享 loadSignals 60s 缓存，真实指标替代恒 '—' 占位卡）
+  const [signalCount, setSignalCount] = useState<number | null>(null)
   // Tab 以 URL ?tab= 为单一来源（对齐 admin-review-page 口径）：刷新/分享链接
   // 直达目标 Tab；默认 signals 不写 query，保持 URL 干净
   const [searchParams, setSearchParams] = useSearchParams()
@@ -297,25 +301,39 @@ export function EvolutionPage() {
     }, { replace: true })
   }
 
-  // 加载真实版本列表（顶部指标 + diff 下拉共用），按 version_id 降序保证稳定
+  // 加载真实版本列表（顶部指标 + diff 下拉共用），按 version_id 降序保证稳定。
+  // 60s TTL：Tab 来回切换不重复拉取、不闪「加载中」（对齐仪表盘缓存口径）
   useEffect(() => {
-    apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=30')
-      .then((res) => setVersions([...res.items].sort((a, b) => b.version_id.localeCompare(a.version_id))))
+    apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=30', { ttl: 60 })
+      .then((res) => {
+        setVersions([...res.items].sort((a, b) => b.version_id.localeCompare(a.version_id)))
+        setVersionTotal(res.total ?? res.items.length)
+      })
       .catch(() => {
         /* diff 视图内会提示错误 */
       })
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    loadSignals().then((r) => {
+      if (!cancelled && r) setSignalCount((r.emerging?.length ?? 0) + (r.declining?.length ?? 0))
+    })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const metrics = useMemo<MetricCardData[]>(() => {
     const latest = versions[0]
     return [
       // delta 仅在语义明确时展示（如最新版新增节点数）；总数/版本号/信号数配 delta 会渲染出无意义的 "+N"/"0" 徽标
-      { label: '图谱版本数', value: versions.length, hint: 'T+1 05:00 发布 · 保留 90 天', bar: true },
+      { label: '图谱版本数', value: versionTotal || versions.length, hint: 'T+1 05:00 发布 · 保留 90 天', bar: true },
       { label: '当前版本号', value: latest?.version_id ?? '—', hint: latest?.change_summary || '暂无版本快照', bar: true },
-      { label: '最新版本节点变化', value: latest ? latest.node_added + latest.node_changed : 0, delta: latest?.node_added ?? 0, deltaTone: 'emerging', hint: `新增 ${latest?.node_added ?? 0} · 变化 ${latest?.node_changed ?? 0}`, bar: true },
-      { label: '新兴/衰退信号', value: '—', hint: '下方"新兴/衰退技能 Top-10"实时展示', bar: true },
+      { label: '最新版本节点变化', value: latest ? latest.node_added + latest.node_changed : 0, delta: latest && latest.node_added > 0 ? latest.node_added : undefined, deltaTone: 'emerging', hint: `新增 ${latest?.node_added ?? 0} · 变化 ${latest?.node_changed ?? 0}`, bar: true },
+      { label: '新兴/衰退信号', value: signalCount ?? '—', hint: '下方"新兴/衰退技能 Top-10"实时展示', bar: true },
     ]
-  }, [versions])
+  }, [versions, versionTotal, signalCount])
 
   return (
     <>

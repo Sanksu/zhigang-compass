@@ -8,7 +8,12 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { isDark } from '@/lib/utils'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import { TreeChart } from 'echarts/charts'
+import { TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([TreeChart, TooltipComponent, CanvasRenderer])
 import { GitFork, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useUIStore } from '@/store/ui'

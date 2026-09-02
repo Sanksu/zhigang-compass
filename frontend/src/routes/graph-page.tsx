@@ -146,8 +146,13 @@ export function GraphPage() {
   // 数据随每日 ETL 更新，session 内缓存可接受（页面刷新即失效）
   const viewCacheRef = useRef<Map<GraphViewType, GraphData>>(new Map())
   const [loading, setLoading] = useState(true)
+  // 视图就绪键：viewReady !== view 即该视图数据在途（非缓存切换时画布叠轻量加载角标，
+  // 旧视图数据保持可见避免闪屏；岗位画像有自己的切换提示不走此键）
+  const [viewReady, setViewReady] = useState<GraphTab>('panorama')
   // 错误含业务码（08-14 审查：此前仅存 message，4040 与后端未启动混淆归因）
   const [error, setError] = useState<{ code: number; message: string } | null>(null)
+  // 视图重载令牌：错误态"重试"按钮触发视图 effect 重跑（画像数据流见渲染处单独处理）
+  const [reloadToken, setReloadToken] = useState(0)
   // 全文检索（GET /graph/search）
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<components['schemas']['SearchResultItem'][]>([])
@@ -220,6 +225,7 @@ export function GraphPage() {
     const applyViewData = (g: GraphData) => {
       setRaw(g)
       setError(null)
+      setViewReady(view)
       if (view === 'panorama') {
         // 聚合下钻：全部岗位以域超节点常驻；首屏自动展开最大域呈现岗位层
         const agg = aggregateByDomain(g)
@@ -227,10 +233,26 @@ export function GraphPage() {
       }
       setLoading(false)
     }
+    // 空闲预热技术栈视图缓存：全景渲染稳定后 1.5s 后台拉取并转换入缓存，
+    // 首次切技术栈页签即秒开（预热失败静默，进入视图时正常加载）
+    const warmTechStackCache = () => {
+      if (view !== 'panorama' || viewCacheRef.current.has('techStack')) return
+      window.setTimeout(() => {
+        if (cancelled || viewCacheRef.current.has('techStack')) return
+        apiGet<PanoramaData>('/graph/view/techStack?limit=120')
+          .then((res) => {
+            if (!cancelled) viewCacheRef.current.set('techStack', toGraphData(res))
+          })
+          .catch(() => {
+            /* 预热失败静默：进入技术栈视图时由主链路正常请求 */
+          })
+      }, 1500)
+    }
     const cached = viewCacheRef.current.get(view)
     if (cached) {
       // 命中缓存：跳过网络请求与转换（08-16 性能优化）
       applyViewData(cached)
+      warmTechStackCache()
       return
     }
     apiGet<PanoramaData>(`/graph/view/${view}?limit=120`)
@@ -239,9 +261,11 @@ export function GraphPage() {
         const g = toGraphData(res)
         viewCacheRef.current.set(view, g)
         applyViewData(g)
+        warmTechStackCache()
       })
       .catch((e) => {
         if (!cancelled) {
+          setViewReady(view)
           setError(
             e instanceof ApiError
               ? { code: e.code, message: e.message }
@@ -255,7 +279,10 @@ export function GraphPage() {
     return () => {
       cancelled = true
     }
-  }, [view])
+  }, [view, reloadToken])
+
+  // 非缓存视图数据在途（如首次进入技术栈）：画布叠轻量加载角标
+  const viewLoading = view !== 'positionPortrait' && viewReady !== view
 
   // 岗位画像下拉选项：进入视图时从 positionCenter 视图取岗位节点（freq 降序）。
   // session 内仅拉取一次（选项为空才请求），再次进入视图不重复请求；
@@ -471,14 +498,20 @@ export function GraphPage() {
     setSearchDone(true)
     const seq = ++searchSeqRef.current
     setSearching(true)
-    apiGet<components['schemas']['SearchResultsData']>(
-      `/graph/search?q=${encodeURIComponent(term)}&type=skill&size=8`,
-    )
-      .then((r) => {
-        if (searchSeqRef.current === seq) setSearchResults(r.items)
-      })
-      .catch(() => {
-        if (searchSeqRef.current === seq) setSearchResults([])
+    // 技能 + 岗位双通道并发（后端 type 为单值枚举），按相关度合并排序——
+    // "搜岗位→定位"是答辩最自然的演示动作，仅搜技能会漏掉岗位名查询
+    const fetchType = (type: 'skill' | 'position') =>
+      apiGet<components['schemas']['SearchResultsData']>(
+        `/graph/search?q=${encodeURIComponent(term)}&type=${type}&size=8`,
+      )
+        .then((r) => r.items)
+        .catch(() => [] as components['schemas']['SearchResultItem'][])
+    Promise.all([fetchType('skill'), fetchType('position')])
+      .then(([skills, positions]) => {
+        if (searchSeqRef.current !== seq) return
+        setSearchResults(
+          [...skills, ...positions].sort((a, b) => b.score - a.score).slice(0, 8),
+        )
       })
       .finally(() => {
         if (searchSeqRef.current === seq) setSearching(false)
@@ -532,6 +565,28 @@ export function GraphPage() {
               })
             }
           }
+        }
+      }
+      setFocusRequest((prev) => ({ id, ts: (prev?.ts ?? 0) + 1 }))
+    },
+    [view, data, domainAgg, expandedDomains],
+  )
+
+  // 点击岗位搜索结果 → 选中岗位节点 + 展开所属域 + 定位画布。
+  // panorama 聚合模式下岗位仅在其域展开后才上画布，故先展开域再触发 focusRequest
+  const focusPosition = useCallback(
+    (id: string, name: string) => {
+      setSelected({ id, name, type: 'position' })
+      if (view === 'panorama' && domainAgg && data) {
+        const target = data.nodes.find((n) => n.id === id || n.name === name)
+        const dom = target ? domainAgg.domainOfPosition.get(target.id) : undefined
+        if (dom && !expandedDomains.has(dom)) {
+          setExpandedDomains((prev) => {
+            if (prev.has(dom)) return prev
+            const next = new Set(prev)
+            next.add(dom)
+            return next
+          })
         }
       }
       setFocusRequest((prev) => ({ id, ts: (prev?.ts ?? 0) + 1 }))
@@ -743,9 +798,28 @@ export function GraphPage() {
 
   if (error) {
     return (
-      <Card className="h-[640px] flex items-center justify-center text-sm text-state-archived">
-        {error.message}
-        {error.code === 4040 ? '（未找到对应数据）' : '（请确认后端服务与数据库已启动）'}
+      <Card className="h-[640px] flex flex-col items-center justify-center gap-3 text-sm text-state-archived">
+        <p>
+          {error.message}
+          {error.code === 4040 ? '（未找到对应数据）' : '（请确认后端服务与数据库已启动）'}
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setError(null)
+            if (view === 'positionPortrait') {
+              // 画像数据流由 [view, portraitPosition] 驱动，重试令牌无法触达，整页刷新兜底
+              window.location.reload()
+              return
+            }
+            setLoading(true)
+            setReloadToken((t) => t + 1)
+          }}
+        >
+          <RotateCcw className="size-3.5 mr-1" />
+          重试
+        </Button>
       </Card>
     )
   }
@@ -787,10 +861,10 @@ export function GraphPage() {
                     setSearchDone(false)
                   }
                 }}
-                placeholder="搜索技能并定位关系"
+                placeholder="搜索技能或岗位，回车定位"
                 className="h-9 pl-8 pr-16 text-xs"
                 role="combobox"
-                aria-label="搜索图谱技能"
+                aria-label="搜索图谱技能或岗位"
                 aria-expanded={searchResults.length > 0 || (searchDone && !searching && !!query.trim())}
                 aria-controls="graph-search-results"
                 aria-autocomplete="list"
@@ -801,11 +875,27 @@ export function GraphPage() {
               {(searchResults.length > 0 || (searchDone && !searching && query.trim())) && (
                 <div id="graph-search-results" role="listbox" className="absolute right-0 top-11 z-40 w-full overflow-hidden rounded-lg border border-border bg-canvas p-1 shadow-lg">
                   {searchResults.length > 0 ? searchResults.map((result) => (
-                    <button key={result.id} type="button" role="option" aria-selected="false" onClick={() => focusSkill(result.id, result.name)} className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs hover:bg-subtle">
-                      <span className="font-medium text-ink">{result.name}</span>
+                    <button
+                      key={`${result.type}:${result.id}`}
+                      type="button"
+                      role="option"
+                      aria-selected="false"
+                      onClick={() =>
+                        result.type === 'position'
+                          ? focusPosition(result.id, result.name)
+                          : focusSkill(result.id, result.name)
+                      }
+                      className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs hover:bg-subtle"
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="shrink-0 rounded bg-subtle px-1 py-px text-[10px] text-ink-muted">
+                          {result.type === 'position' ? '岗位' : '技能'}
+                        </span>
+                        <span className="truncate font-medium text-ink">{result.name}</span>
+                      </span>
                       <span className="font-mono text-[12px] text-ink-faint">相关度 {(result.score * 100).toFixed(0)}</span>
                     </button>
-                  )) : <p className="px-2.5 py-2 text-xs text-ink-muted">未找到与“{query.trim()}”相关的技能</p>}
+                  )) : <p className="px-2.5 py-2 text-xs text-ink-muted">未找到与“{query.trim()}”相关的技能或岗位</p>}
                 </div>
               )}
             </div>
@@ -834,7 +924,12 @@ export function GraphPage() {
           setSelected(null)
           setExpandedPositions(new Set())
           setExpandedDomains(new Set())
-          setView(value as GraphTab)
+          const next = value as GraphTab
+          // 缓存命中的视图同步标记就绪（effect 会同步 applyViewData），
+          // 避免缓存秒切时加载角标闪一帧；未缓存视图保持 viewReady 不变 →
+          // viewLoading 为真，数据在途时画布显示轻量加载角标
+          if (viewCacheRef.current.has(next)) setViewReady(next)
+          setView(next)
         }}
       >
         <div className="mb-3 flex flex-col gap-3 rounded-xl border border-border bg-subtle/40 px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
@@ -974,7 +1069,14 @@ export function GraphPage() {
               completedSkills={[]}
               evolutionMarks={evolutionMarks}
               skillLabelTopIds={skillLabelTopIds}
-              ringLayout={view === 'techStack' || view === 'positionPortrait'}
+              // 环形布局须与视图数据匹配时才启用（viewReady 就绪键）：避免首次点击
+              // 技术栈/画像页签时 data 仍是旧视图（全景）而 ringLayout 已为 true——
+              // 环形坐标分支只覆盖 skill/position，旧视图的其余节点落到原点糊成一团，
+              // 等新数据到达重建后才散开（即"首点糊→延迟正常"）。视角/渲染与
+              // 数据不同步是根因，加载角标只提示不阻断此错误渲染。
+              ringLayout={
+                (view === 'techStack' || view === 'positionPortrait') && viewReady === view
+              }
               className="h-full w-full"
             />
           ) : (
@@ -997,6 +1099,14 @@ export function GraphPage() {
             <div className="absolute right-3 top-12 z-10 flex items-center gap-2 rounded-md border border-border bg-canvas/90 px-2.5 py-1.5 shadow-sm backdrop-blur text-xs text-ink-muted animate-in fade-in-0 duration-200">
               <div className="size-3.5 rounded-full border-2 border-ink border-t-transparent animate-spin" />
               加载岗位画像…
+            </div>
+          )}
+          {/* 视图切换加载覆盖：非缓存视图（如首次进入技术栈）数据在途时轻量提示；
+              旧视图数据保持可见不闪屏，全景就绪后已后台预热技术栈缓存故通常秒切 */}
+          {viewLoading && (
+            <div className="absolute right-3 top-12 z-10 flex items-center gap-2 rounded-md border border-border bg-canvas/90 px-2.5 py-1.5 shadow-sm backdrop-blur text-xs text-ink-muted animate-in fade-in-0 duration-200">
+              <div className="size-3.5 rounded-full border-2 border-ink border-t-transparent animate-spin" />
+              加载{VIEW_LABEL[view]}…
             </div>
           )}
           {/* 画布操作提示（可关闭） */}
