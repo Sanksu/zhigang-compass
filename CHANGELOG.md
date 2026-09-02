@@ -5,6 +5,9 @@
 
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
+### 2026-09-02
+- **同岗位下各 JD 匹配评分明细（下拉逐条查看）**：契约先行在 `MatchResult` 增加 `jd_breakdown`（该岗位各 JD 按分降序：jd_id/标题/三维分/命中数）与 `resume_id`，新增 `GET /match/result/{match_id}/jd/{jd_id}` 单 JD 详情（三维得分/差距/学习路径/原文，并入当前岗位详情）——`score_jd_compare` 现返回全部评分 JD 降序列表（原仅取最高分一条），新增 `score_jd_one` 按 id 评分单条 JD；前端比对详情头部加「切换 JD」下拉，切换即加载对应 JD 详情（岗位级字段域/权重/证据保持来源岗位）。含 3 条新单测，jd_match + api smoke 226 passed。
+
 ### 2026-08-29
 - **画像证据回溯 + JD 数据管理（#662/#663，报告 docs/reviews/全项目代码审查报告_20260829.md）**：契约先行新增 4 组端点——`GET /graph/position/{id}/portrait-evidence`（薪资/经验/学历画像条目 → 支撑 JD 列表，口径镜像 build_aggregates：SimHash 重复/归档/岗位级通胀排除一致）、`GET /graph/jd/{jd_id}`（正文全文 + 出处链接，匿名可读）、`/admin/jd` CRUD（RBAC admin:* + AuditLog，编辑重算 content_hash 同 etl_tasks._build_jd_text 同源，抽取快照不动）；前端画像侧栏证据区 + JD 正文弹层 + admin-jd 管理页（/admin/jd，侧栏「JD 数据」）。
 - **第七轮全项目审查（#664）**：8ba335f→5133f23 增量 203 commits；总评 B+ 无 P0，P1×7——画像证据通胀分母口径漂移 / jd_admin 绕过 resolve_operator / PUT 裸 dict / guest 可见 candidate（discovery+evolution 对齐 visibility 单一事实源）/ admin-jd openDetail 竞态与错误不可见 / jd_admin 零测试；**当日修复批 #665 闭环**（含 tests/admin/test_jd_admin.py 21 用例）；P2×13 择要留档（q 通配符转义随批修）；匹配侧岗位名三口径并存交张恺天复核（P2-6 算法红线）。

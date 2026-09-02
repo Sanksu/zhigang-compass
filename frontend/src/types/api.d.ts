@@ -1485,6 +1485,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/match/result/{match_id}/jd/{jd_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取比对岗位下某条 JD 的详情（下拉逐条查看各 JD 评分/差距/路径） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                    /** @description 原生 JD 主键 id（来自 compare 响应 jd_breakdown[].jd_id） */
+                    jd_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 单 JD 匹配详情（并入当前岗位详情展示；岗位级字段 domain_name/weights 不变） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["MatchResult"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/match/result/{match_id}/gap": {
         parameters: {
             query?: never;
@@ -6354,6 +6399,8 @@ export interface components {
             match_id: string;
             /** @description 归属用户（compare 同步返回） */
             user_id?: string;
+            /** @description 候选人简历 ID（供 /match/result/{match_id}/jd/{jd_id} 切换单 JD 详情时重建候选人；compare 同步返回，旧快照为 null） */
+            resume_id?: string | null;
             position_id: string;
             position_name: string;
             /** @description 综合得分 [0,1] */
@@ -6415,6 +6462,23 @@ export interface components {
             };
             /** @description JD 级评分溯源：total_score 为同岗最近 N 条宽 JD（上限 max_jds）中的最高分，N=参与评分条数 */
             jd_compared?: number;
+            /** @description 同岗位下各 JD 匹配评分排名（按分降序参与评分集；前端下拉逐条查看各 JD 详情，切换调用 /match/result/{match_id}/jd/{jd_id}） */
+            jd_breakdown?: {
+                /** @description 原生 JD 主键 id */
+                jd_id?: string;
+                /** @description JD 标题 */
+                jd_title?: string;
+                /** @description 该 JD 综合得分 [0,1] */
+                total_score?: number;
+                /** @description 该 JD 必备技能匹配分 [0,1]；无门槛为 null */
+                must_score?: number | null;
+                /** @description 该 JD 加分技能匹配分 [0,1] */
+                nice_score?: number;
+                /** @description 该 JD 经验匹配分 [0,1] */
+                exp_score?: number;
+                /** @description 命中技能数（must+nice） */
+                hit_count?: number;
+            }[];
             /** @description 最佳匹配 JD 原文（compare 详情溯源：按最佳 JD 行回读 raw_text，正文截断至 8000 字符；旧快照/最佳 JD 行已删除时为 null） */
             jd_original?: {
                 /** @description JD 标题 */

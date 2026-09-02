@@ -42,6 +42,7 @@ from app.services.learning_path.generator import LearningPathGenerator
 from app.services.matching.jd_match import (
     load_jd_evidence_refs,
     score_jd_compare,
+    score_jd_one,
 )
 from app.services.matching.loaders import build_candidate
 from app.services.matching.weights import load_weights
@@ -268,13 +269,13 @@ async def compare(
         )
         if found is None:
             return None
-        target, result, jd_compared = found
-        return candidate, target, result, jd_compared, semantic
+        target, result, scored_items, jd_compared = found
+        return candidate, target, result, scored_items, jd_compared, semantic
 
     computed = await _compute()
     if computed is None:
         return error(ERR_NOT_FOUND, "岗位不存在", http_status=404)
-    candidate, target, result, jd_compared, semantic = computed
+    candidate, target, result, scored_items, jd_compared, semantic = computed
     path = await LearningPathGenerator().generate(candidate, target, semantic=semantic)
 
     # 岗位域归属（2026-09-01 域治理成果接入）：图谱 Position.domain_name 按
@@ -313,10 +314,26 @@ async def compare(
     # 0.6/0.2/0.2 与配置不符）
     w_must, w_nice, w_exp = load_weights()
 
+    # 该岗位下全部已评分 JD 排名（前端下拉逐条查看各 JD 详情；scored_items 已按分降序）
+    jd_breakdown = [
+        {
+            "jd_id": prof.position_id,
+            "jd_title": res.position_name,
+            "total_score": round(res.total_score, 4),
+            "must_score": res.must_score,
+            "nice_score": round(res.nice_score, 4),
+            "exp_score": round(res.exp_score, 4),
+            "hit_count": len(res.matched_must) + len(res.matched_nice),
+        }
+        for prof, res in scored_items
+    ]
+
     match_id = str(uuid.uuid4())
     data = {
         "match_id": match_id,
         "user_id": user.get("sub", ""),
+        # 用于下拉切换单 JD 详情时重建候选人（/match/result/{match_id}/jd/{jd_id}）
+        "resume_id": resume_id,
         **result.model_dump(),
         # 对外 position_id / position_name 用岗位名（与推荐列表 JD 候选模式一致，
         # 见 jd_aggregate position_id=岗位名），避免前端显示/比较不一致
@@ -327,6 +344,8 @@ async def compare(
         "weights": {"must": round(w_must, 4), "nice": round(w_nice, 4), "exp": round(w_exp, 4)},
         # JD 级评分溯源：total_score 为同岗 jd_compared 条 JD 中的最高分
         "jd_compared": jd_compared,
+        # 同岗下各 JD 评分排名（下拉切换）
+        "jd_breakdown": jd_breakdown,
         "gaps": [g.model_dump() for g in path.gaps],
         "learning_path": [item.model_dump() for item in path.items],
         "learning_path_blocked": path.blocked,
@@ -407,6 +426,81 @@ async def match_result(match_id: str, user: dict = Depends(require_role("user"))
     """[M4] 获取匹配结果（recommend/compare 返回的 match_id，仅限本人结果）。"""
     data = await _load_or_404(match_id, user)
     return ok(data=data)
+
+
+async def _compose_jd_detail(
+    db: AsyncSession,
+    candidate,
+    target,
+    result,
+    semantic,
+) -> dict:
+    """单条 JD 详情（下拉切换用）：三维得分 + 差距 + 学习路径 + JD 原文。
+
+    组装口径与 compare 对"最佳 JD"一致，供同岗位名下的单 JD 切换复用。
+    不含岗位级字段（domain_name/weights/evidence_refs），由前端并入原详情。
+    """
+    path = await LearningPathGenerator().generate(candidate, target, semantic=semantic)
+    jd_original = None
+    try:
+        jd_row = await db.get(JDRaw, int(target.position_id))
+    except (TypeError, ValueError):
+        jd_row = None
+    if jd_row is not None:
+        jd_original = {
+            "jd_title": str((jd_row.snapshot or {}).get("title") or target.name).strip(),
+            "source": jd_row.source or "",
+            "source_url": jd_row.source_url or "",
+            "text": (jd_row.raw_text or "").strip()[:8000],
+            "score": round(result.total_score, 4),
+        }
+    body = result.model_dump()
+    body.pop("position_id", None)  # 岗位 id 由外层岗位名统一维护，避免覆盖
+    return {
+        **body,
+        "position_name": target.name,
+        "gaps": [g.model_dump() for g in path.gaps],
+        "learning_path": [item.model_dump() for item in path.items],
+        "learning_path_blocked": path.blocked,
+        "learning_path_block_reason": path.block_reason,
+        "jd_original": jd_original,
+    }
+
+
+@router.get("/result/{match_id}/jd/{jd_id}")
+async def match_result_jd_detail(
+    match_id: str,
+    jd_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_role("user")),
+):
+    """[M5] 获取比对岗位下某条 JD 的详情（下拉逐条查看）。
+
+    用 match:result 快照内的 resume_id + position 重建候选人，对选定 jd_id 单条
+    评分并生成差距/学习路径/原文，返回与该 JD 一一对应的详情（前端并入当前岗位
+    详情展示；岗位级字段如 domain_name/weights 不变）。
+    """
+    data = await _load_or_404(match_id, user)
+    resume_id = data.get("resume_id")
+    if not resume_id:
+        return error(ERR_NOT_FOUND, "该匹配快照无 JD 明细所需信息", http_status=404)
+    cache = await db.get(ResumeCache, resume_id)
+    if cache is None:
+        return error(ERR_NOT_FOUND, "简历不存在或已删除", http_status=404)
+
+    candidate = build_candidate(cache.parsed_data)
+    semantic = SkillEmbedder.get()
+    try:
+        project_vectors = await load_project_vectors(db, resume_id)
+    except PgvectorUnavailableError:
+        project_vectors = {}
+    found = await score_jd_one(db, candidate, jd_id, project_vectors, semantic=semantic)
+    if found is None:
+        return error(ERR_NOT_FOUND, "该 JD 不存在或无抽取快照", http_status=404)
+    target, result = found
+    payload = await _compose_jd_detail(db, candidate, target, result, semantic)
+    payload["position_id"] = data.get("position_id") or ""
+    return ok(data=payload)
 
 
 @router.get("/result/{match_id}/gap")

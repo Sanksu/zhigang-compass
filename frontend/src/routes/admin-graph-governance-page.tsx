@@ -40,37 +40,54 @@ export function AdminGraphGovernancePage() {
   const [resyncing, setResyncing] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
 
-  // 拉取 + 轮询共用：running=true 时 3s 轮询直至后台任务结束
+  // 首屏加载一次：展示当前总览并检测是否已有后台重同步在跑
   useEffect(() => {
     let cancelled = false
+    apiGet<GovernanceSummary>('/admin/graph-governance/summary')
+      .then((res) => {
+        if (cancelled) return
+        setError(null)
+        setData(res)
+        setLoading(false)
+        setResyncing(res.resync_running ?? false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setError('加载域治理总览失败，请稍后重试')
+        setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  // 仅重同步进行中每 3s 轮询直至结束（避免空闲持续请求压力）
+  useEffect(() => {
+    if (!resyncing) return
+    let cancelled = false
     const tick = () => {
-      apiGet<{ data: GovernanceSummary }>('/admin/graph-governance/summary')
+      apiGet<GovernanceSummary>('/admin/graph-governance/summary')
         .then((res) => {
           if (cancelled) return
           setError(null)
-          setData(res.data)
-          setLoading(false)
-          const running = res.data?.resync_running ?? false
+          setData(res)
+          const running = res.resync_running ?? false
           setResyncing((prev) => (prev !== running ? running : prev))
         })
         .catch(() => {
           if (cancelled) return
           setError('加载域治理总览失败，请稍后重试')
-          setLoading(false)
         })
     }
-    tick()
     const timer = setInterval(tick, 3000)
     return () => { cancelled = true; clearInterval(timer) }
-  }, [])
+  }, [resyncing])
 
   async function triggerResync() {
     setNotice(null)
     try {
-      const res = await apiPost<{ data: ResyncResult }>('/admin/graph-governance/resync')
-      if (res.data?.started) {
+      const res = await apiPost<ResyncResult>('/admin/graph-governance/resync')
+      if (res.started) {
         setResyncing(true)
-        setNotice(res.data.message ?? '重同步已受理')
+        setNotice(res.message ?? '重同步已受理')
       }
     } catch {
       setNotice('触发失败：可能已有任务进行中')

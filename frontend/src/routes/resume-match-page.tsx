@@ -46,6 +46,14 @@ const GAP_TYPE_LABEL = {
   matched: '已具备',
 } as const
 
+/** 同岗位下各 JD 评分条目（下拉切换；compare 响应 jd_breakdown，按分降序） */
+type JdBreakdownItem = {
+  jd_id: string
+  jd_title: string
+  total_score?: number
+  hit_count?: number
+}
+
 // ============================================================
 // 真实后端数据 → 前端展示结构
 // ============================================================
@@ -194,6 +202,10 @@ export function ResumeMatchPage() {
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
   // JD 原文展开态（compare 详情溯源面板，切岗位/重置时收起）
   const [showJdOriginal, setShowJdOriginal] = useState(false)
+  // 同岗位下各 JD 评分排名（下拉逐条查看各 JD 详情；compare 返回，按分降序）
+  const [jdBreakdown, setJdBreakdown] = useState<JdBreakdownItem[]>([])
+  // 下拉当前选中 JD（默认最佳 JD）
+  const [selectedJdId, setSelectedJdId] = useState<string | null>(null)
   const [resumeList, setResumeList] = useState<ResumeSummary[]>([])
   const [activeResumeId, setActiveResumeId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -393,12 +405,17 @@ export function ResumeMatchPage() {
     setFeedback(null)
     setShowJdOriginal(false)
     setDetailError(null)
+    setJdBreakdown([])
+    setSelectedJdId(null)
     try {
       const res = await apiPost<BackendMatchResult>('/match/compare', {
         resume_id: activeResumeId,
         position_id: rec.position_id,
       })
       setMatchId(res.match_id ?? null)
+      const bd = (res.jd_breakdown ?? []) as JdBreakdownItem[]
+      setJdBreakdown(bd)
+      setSelectedJdId(bd[0]?.jd_id ?? null)
       setMatchResult(toMatchResult(res))
     } catch (e) {
       // 置 detailError（非 notice）：右栏渲染错误卡 + 重试按钮，避免整栏空白
@@ -421,12 +438,43 @@ export function ResumeMatchPage() {
       }
       const res = await apiGet<BackendMatchResult>(`/match/result/${matchId}`)
       if (res.position_id) {
+        const bd = (res.jd_breakdown ?? []) as JdBreakdownItem[]
+        setJdBreakdown(bd)
+        setSelectedJdId((cur) => cur ?? bd[0]?.jd_id ?? null)
         setMatchResult(toMatchResult(res))
         setFeedback(null)
         setNotice('已从结果快照刷新（无需重新计算）')
       }
     } catch (e) {
       setNotice(errMsg(e, '快照刷新失败（结果可能已过期，请重新比对）'))
+    }
+  }
+
+  // 各 JD 详情独立刷新（GET /match/result/{match_id}/jd/{jd_id}）
+  async function loadJdDetail(jdId: string) {
+    if (!matchId || jdId === selectedJdId) return
+    setLoadingDetail(true)
+    setShowJdOriginal(false)
+    try {
+      const payload = await apiGet<BackendMatchResult>(`/match/result/${matchId}/jd/${jdId}`)
+      setSelectedJdId(jdId)
+      setMatchResult((prev) => {
+        const adapted = toMatchResult(payload)
+        // 切换 JD 只换 JD 相关字段；岗位级字段（域/权重/证据/同岗数）保持来源岗位
+        return prev
+          ? {
+              ...adapted,
+              domain_name: prev.domain_name,
+              weights: prev.weights,
+              evidence_refs: prev.evidence_refs,
+              jd_compared: prev.jd_compared,
+            }
+          : adapted
+      })
+    } catch (e) {
+      setNotice(errMsg(e, '加载该 JD 详情失败'))
+    } finally {
+      setLoadingDetail(false)
     }
   }
 
@@ -858,6 +906,25 @@ export function ResumeMatchPage() {
                       <span className="text-[11px] text-ink-faint">
                         最佳匹配 JD：<span className="font-medium text-ink-muted">{matchResult.position_name}</span>
                       </span>
+                    )}
+                    {/* 同岗位下各 JD 切换（下拉逐条查看各 JD 详情；仅 1 条或旧快照无此字段时隐藏） */}
+                    {jdBreakdown.length > 1 && (
+                      <label className="flex items-center gap-1 text-[11px] text-ink-faint">
+                        切换 JD：
+                        <select
+                          className="h-7 max-w-[230px] rounded-md border border-border bg-background px-1.5 text-xs text-ink focus:outline-none"
+                          value={selectedJdId ?? ''}
+                          onChange={(e) => void loadJdDetail(e.target.value)}
+                          disabled={loadingDetail}
+                          title="切换该岗位下不同 JD，查看各自评分与差距/学习路径"
+                        >
+                          {jdBreakdown.map((j) => (
+                            <option key={j.jd_id} value={j.jd_id}>
+                              {j.jd_title}（{j.total_score != null ? Math.round(j.total_score * 100) : '--'} 分）
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     )}
                     {/* JD 原文展开开关（compare 溯源：最佳 JD 行 raw_text，后端截断 8000 字符）——与反馈按钮同级显式按钮 */}
                     <div className="flex items-center gap-1">
