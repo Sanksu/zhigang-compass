@@ -110,6 +110,13 @@ def _get_redis_client():
 _client_cache: dict = {}
 _CLIENT_CACHE_MAX = 32
 
+# 裸文本 client 缓存（方案 A，2026-09）：instructor client 的 create 强制要求
+# response_model，裸文本路由须用原生 SDK client（anthropic.Anthropic / openai.OpenAI）。
+# 单独缓存互不复用，key 含 protocol 区分两类协议同 base_url；上限与 instructor 缓存
+# 同档，防超时/地址变化导致的膨胀
+_raw_client_cache: dict = {}
+_RAW_CLIENT_CACHE_MAX = 32
+
 # provider 协议（2026-08-30）：openai（缺省，OpenAI Chat Completions 兼容）|
 # anthropic（Anthropic Messages 协议，如 z.ai Coding Plan /api/anthropic）
 _PROTOCOLS = ("openai", "anthropic")
@@ -181,6 +188,41 @@ def _build_client(provider: dict, timeout: int):
         if len(_client_cache) >= _CLIENT_CACHE_MAX:
             _client_cache.pop(next(iter(_client_cache)))
         _client_cache[key] = client
+    return client
+
+
+def _get_raw_client(provider: dict, timeout: int):
+    """构建/复用裸文本路由的原生 SDK client（方案 A，2026-09）。
+
+    与 `_build_client`（instructor 包装，create 强制要求 response_model）互补：
+    裸文本调用不经结构化校验，直接用 `anthropic.Anthropic` / `openai.OpenAI`
+    原生 client。按 (protocol, base_url, api_key, timeout) 复用，独立缓存放互干扰。
+    """
+    protocol = _provider_protocol(provider)
+    api_key = _resolve_api_key(provider)
+    key = (
+        "raw", protocol,
+        provider.get("base_url", ""),
+        api_key,
+        timeout,
+    )
+    client = _raw_client_cache.get(key)
+    if client is None:
+        if protocol == "anthropic":
+            import anthropic as anthropic_sdk
+
+            client = anthropic_sdk.Anthropic(
+                base_url=key[2], api_key=key[3], timeout=timeout,
+            )
+        else:
+            from openai import OpenAI
+
+            client = OpenAI(
+                base_url=key[2], api_key=key[3], timeout=timeout,
+            )
+        if len(_raw_client_cache) >= _RAW_CLIENT_CACHE_MAX:
+            _raw_client_cache.pop(next(iter(_raw_client_cache)))
+        _raw_client_cache[key] = client
     return client
 
 
@@ -841,16 +883,8 @@ class LLMProviderChain:
             RateLimitError,
         )
         try:
+            client = _get_raw_client(provider, timeout)
             if _provider_protocol(provider) == "anthropic":
-                # 裸文本不能用 instructor 包装 client（其 create 强制要求
-                # response_model），直接构建原生 anthropic SDK client
-                import anthropic as anthropic_sdk
-
-                client = anthropic_sdk.Anthropic(
-                    base_url=provider["base_url"],
-                    api_key=api_key,
-                    timeout=timeout,
-                )
                 msg = client.messages.create(
                     model=provider["model"],
                     messages=messages,
@@ -861,11 +895,6 @@ class LLMProviderChain:
                     b.text for b in msg.content if getattr(b, "type", "") == "text"
                 )
                 return text.strip()
-            from openai import OpenAI
-
-            client = OpenAI(
-                base_url=provider["base_url"], api_key=api_key, timeout=timeout,
-            )
             comp = client.chat.completions.create(
                 model=provider["model"],
                 messages=messages,
