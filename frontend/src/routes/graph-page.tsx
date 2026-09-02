@@ -142,6 +142,11 @@ export function GraphPage() {
   // 岗位画像切换加载：切换岗位时置 true，数据到达后 false——画布右上角显示
   // 轻量加载提示（消除切换岗位时"旧图保持→数据到达瞬间替换"的突兀感）
   const [portraitLoading, setPortraitLoading] = useState(false)
+  // 岗位画像子图数据（独立于共享 raw）：按当前选中岗位加载，避免切换瞬间用旧
+  // （techStack/panorama）画布数据渲染成"先技术栈后画像"的闪现；未就绪为 null。
+  const [portraitData, setPortraitData] = useState<GraphData | null>(null)
+  // 岗位原始 JD 列表（画像侧栏「原始 JD」下拉数据源，GET /graph/position/{id}/jds）
+  const [positionJds, setPositionJds] = useState<components['schemas']['PositionRawJdListData'] | null>(null)
   // 视图数据缓存（session 级，08-16 性能优化）：同视图切换回来不重复请求/转换。
   // 数据随每日 ETL 更新，session 内缓存可接受（页面刷新即失效）
   const viewCacheRef = useRef<Map<GraphViewType, GraphData>>(new Map())
@@ -330,7 +335,9 @@ export function GraphPage() {
     })
       .then((res) => {
         if (cancelled) return
-        setRaw(toGraphData(res))
+        // 写入独立 portraitData，不覆盖共享 raw：否则切换瞬间画布会用旧的
+        // techStack/panorama 数据渲染一帧（"先技术栈后画像"闪现）
+        setPortraitData(toGraphData(res))
         setError(null)
       })
       .catch((e) => {
@@ -349,6 +356,28 @@ export function GraphPage() {
     return () => {
       cancelled = true
       window.clearTimeout(t)
+    }
+  }, [view, portraitPosition])
+
+  // 岗位画像：加载当前画像岗位的原始 JD 列表（侧栏「原始 JD」下拉数据源）
+  useEffect(() => {
+    if (view !== 'positionPortrait' || !portraitPosition) {
+      setPositionJds(null)
+      return
+    }
+    let cancelled = false
+    apiGet<components['schemas']['PositionRawJdListData']>(
+      `/graph/position/${encodeURIComponent(portraitPosition)}/jds`,
+      { params: { limit: 100 } },
+    )
+      .then((r) => {
+        if (!cancelled) setPositionJds(r)
+      })
+      .catch(() => {
+        if (!cancelled) setPositionJds(null)
+      })
+    return () => {
+      cancelled = true
     }
   }, [view, portraitPosition])
 
@@ -410,11 +439,26 @@ export function GraphPage() {
     const similar = apiGet<{ similar: SimilarSkillItem[] }>(`/graph/skill/similar?skill_id=${sid}&top_k=6`)
       .then((r) => r.similar)
       .catch(() => [] as SimilarSkillItem[])
-    Promise.all([positions, prerequisites, courses, evidence, similar]).then(([p, prereq, c, ev, sim]) => {
-      if (!cancelled) {
-        setSkillDetail({ skill_id: selected.id, positions: p, prerequisites: prereq, courses: c, loading: false })
-        setSkillEvidence(ev)
-        setSimilarSkills(sim)
+    // 5 个详情接口用 Promise.all 并发；任一个迟迟不回则整体永不 settle → 技能详情
+    // 恒停 loading 占位（用户感知为"无详情内容"）。加超时兜底：8s 未全部返回则以
+    // 空数据收尾（明确空态而非永久骨架），杜绝整段空白。
+    const results = Promise.all([positions, prerequisites, courses, evidence, similar]).then(
+      ([p, prereq, c, ev, sim]) => ({ ok: true as const, p, prereq, c, ev, sim }),
+    )
+    const timedOut = new Promise<{ ok: false }>((resolve) =>
+      window.setTimeout(() => resolve({ ok: false }), 8000),
+    )
+    Promise.race([results, timedOut]).then((res) => {
+      if (cancelled) return
+      if (res.ok) {
+        setSkillDetail({ skill_id: selected.id, positions: res.p, prerequisites: res.prereq, courses: res.c, loading: false })
+        setSkillEvidence(res.ev)
+        setSimilarSkills(res.sim)
+      } else {
+        // 超时：不卡骨架，落明确定空态（各处显示"暂无"占位）
+        setSkillDetail({ skill_id: selected.id, positions: [], prerequisites: [], courses: [], loading: false })
+        setSkillEvidence([])
+        setSimilarSkills([])
       }
     })
     return () => {
@@ -608,8 +652,8 @@ export function GraphPage() {
 
     // 岗位画像：后端已按选中岗位返回完整子图（中心岗位 + 属性维度 + 技能，limit=200），
     // 前端不再做 Top-30 / Top-N 裁剪（attr 节点非技能，通用裁剪路径会误删）；
-    // 未选岗位时返回 null，画布区显示引导空态（见渲染处）
-    if (view === 'positionPortrait') return portraitPosition ? data : null
+    // 未选岗位或画像数据未就绪时返回 null（画布显示加载/引导空态，绝不渲染旧视图数据）
+    if (view === 'positionPortrait') return portraitPosition ? portraitData : null
 
     // panorama：三级下钻——域超节点（全部岗位可见）→ 展开域 → 展开岗位技能。
     // data 非空 ⇒ domainAgg 非空（二者同源 memo），断言仅为类型收窄
@@ -621,10 +665,12 @@ export function GraphPage() {
       })
     }
 
-    // techStack：岗位显示数量限制（Top-30 按关联度降序，2026-08-15 画布容量限制）：
-    // 岗位全量 100+，物理上放不下岗位防重叠所需间距
-    // （enforceSpread minGap 60 → 每岗位约 1.06 万 px²，画布仅 ~54 万 px² 容量 ~30 岗位），
-    // 且全量渲染节点爆炸不可读。低频岗位不显示，可在搜索/详情面板中触达。
+    // techStack 降噪（2026-09-02 组合调优）：
+    // - 岗位 Top-30 按关联度降序（2026-08-15 画布容量限制：岗位全量 100+，
+    //   物理上放不下岗位防重叠所需间距 enforceSpread minGap 60 → 每岗位约
+    //   1.06 万 px²，画布仅 ~54 万 px² 容量 ~30 岗位，且全量渲染不可读）——
+    //   低频岗位不显示，可在搜索/详情面板中触达
+    // - 技能 Top-60：低频技能裁剪（全量 120 仍致环带过密；被裁技能保留搜索触达）
     const MAX_POSITIONS = 30
     const keepPositions = new Set<string>(
       data.nodes
@@ -633,11 +679,25 @@ export function GraphPage() {
         .slice(0, MAX_POSITIONS)
         .map((p) => p.id),
     )
-    const nodes = data.nodes.filter((n) => n.type !== 'position' || keepPositions.has(n.id))
+    const MAX_SKILLS = 60
+    const keepSkills = new Set<string>(
+      data.nodes
+        .filter((n) => n.type === 'skill')
+        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+        .slice(0, MAX_SKILLS)
+        .map((n) => n.id),
+    )
+    const nodes = data.nodes.filter(
+      (n) =>
+        (n.type === 'position' && keepPositions.has(n.id)) ||
+        (n.type === 'skill' && keepSkills.has(n.id)) ||
+        (n.type !== 'position' && n.type !== 'skill'),
+    )
     const nodeIds = new Set(nodes.map((n) => n.id))
     // 08-28 技术栈降噪：每技能仅保留权重 Top-K 的岗位边（该视图边为技能→岗位）。
-    // 全量 1719 边交叉成毛线团是视觉混乱主因；Top-4 裁至 ~1/4，配合边透明度渐变。
-    const TECH_STACK_EDGES_PER_SKILL = 4
+    // 全量 1719 边交叉成毛线团是视觉混乱主因；09-02 Top-4 → Top-3 进一步收束，
+    // 配合边透明度渐变。被裁技能/岗位边经 nodeIds 过滤自然剔除。
+    const TECH_STACK_EDGES_PER_SKILL = 3
     const bySkill = new Map<string, GraphEdge[]>()
     for (const e of data.edges) {
       if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue
@@ -651,15 +711,15 @@ export function GraphPage() {
       for (const e of list.slice(0, TECH_STACK_EDGES_PER_SKILL)) kept.add(e)
     }
     return { ...data, nodes, edges: [...kept] }
-  }, [data, view, portraitPosition, expandedPositions, expandedDomains, domainAgg])
-  // 技术栈视图标签降噪白名单：仅 Top-30 高频技能在 LOD band 1 常显标签
+  }, [data, view, portraitPosition, portraitData, expandedPositions, expandedDomains, domainAgg])
+  // 技术栈视图标签降噪白名单：仅 Top-20 高频技能在 LOD band 1 常显标签
   // （其余技能放大到 band 2 才显示；非 techStack 视图传 null 走原中位阈值口径）
   const skillLabelTopIds = useMemo(() => {
     if (view !== 'techStack' || !data) return null
     const top = data.nodes
       .filter((n) => n.type === 'skill')
       .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-      .slice(0, 30)
+      .slice(0, 20)
     return new Set(top.map((n) => n.id))
   }, [view, data])
 
@@ -1050,13 +1110,15 @@ export function GraphPage() {
               ))}
             </div>
           )}
-          {view === 'positionPortrait' && !portraitPosition ? (
-            // 空态：未选岗位时不请求数据（visibleData 为 null），画布区仅显示引导提示
+          {view === 'positionPortrait' && (!portraitPosition || !portraitData) ? (
+            // 画像空态/加载：未选岗位显示引导；已选但数据未就绪显示加载占位。
+            // 两者都绝不渲染 Graph2D（避免用旧 techStack/panorama 数据闪现）。
             <div className="flex h-full w-full items-center justify-center text-sm text-ink-muted">
-              请选择岗位查看画像
+              {portraitPosition ? '画像加载中…' : '请选择岗位查看画像'}
             </div>
           ) : mode === '2d' ? (
             <Graph2D
+              key={view}
               ref={graphRef}
               data={visibleData!}
               expandedPositions={expandedUnion}
@@ -1176,6 +1238,11 @@ export function GraphPage() {
                   }
                   onTogglePosition={togglePosition}
                   portraitMode={view === 'positionPortrait'}
+                  positionJds={
+                    view === 'positionPortrait' && selected?.type === 'position'
+                      ? positionJds
+                      : null
+                  }
                   portraitEvidence={
                     selected?.type === 'attr' && portraitEvidence && portraitEvidence.position_id === portraitPosition
                       ? portraitEvidence
@@ -1194,6 +1261,7 @@ export function GraphPage() {
                 <GraphAnalysisPanel
                   skills={data.nodes.filter((n) => n.type === 'skill').map((n) => ({ id: n.id, name: n.name }))}
                   onFocusSkill={focusSkill}
+                  className="rounded-none border-0 bg-canvas shadow-none"
                 />
                 <GraphCommunityTree className="mt-3" />
               </TabsContent>

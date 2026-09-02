@@ -189,7 +189,8 @@ async def query_view_position_portrait(session, position_id: str, limit: int, st
         WITH p, collect({{sid: s.id, sname: s.name, scat: s.category,
                           weight: coalesce(r.weight, 0),
                           necessity: coalesce(r.necessity, 'must'),
-                          level: r.level}})[0..$limit] AS skills
+                          level: r.level,
+                          scount: coalesce(r.source_count, 1)}})[0..$limit] AS skills
         RETURN p, skills
         """,
         pid=position_id, limit=limit,

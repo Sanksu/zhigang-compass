@@ -571,6 +571,46 @@ class LLMProviderChain:
         _record_attempt("sync", provider, attempt=1, started=started)
         return result
 
+    def call_text_sync(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """裸文本同步路由：返回纯文本内容，不经 instructor 结构化校验。
+
+        用于技能解释等"输出为自由文本"的场景——instructor 结构化模型在
+        模型未发 tool call 时会把纯文本判为空列表（校验失败），而此类输出
+        本就是一段文本，无需套 schema。仅尝试主 provider，超时即抛
+        `LLMTimeoutError`；失败语义/熔断/退避与 `call_sync` 完全一致。
+        """
+        if not self._providers:
+            raise LLMConfigurationError("未配置可用 provider（无 api_key 或全部禁用）")
+        provider = self._providers[0]
+        name = provider.get("name", "?")
+        skip_kind = _is_skipped(name)
+        if skip_kind is not None:
+            _record_attempt("sync", provider, attempt=0, started=None,
+                            exc=_with_outcome(
+                                LLMTimeoutError(f"{skip_kind} 窗口跳过"),
+                                f"{skip_kind}_skipped",
+                            ))
+            raise LLMTimeoutError(f"主 provider '{name}' 处于熔断/退避窗口，跳过")
+        started = time.perf_counter()
+        try:
+            text = self._call_provider_text(
+                provider, prompt, SYNC_TIMEOUT_SECONDS, system_prompt,
+            )
+        except LLMRateLimitError as e:
+            _record_429(name)
+            _record_attempt("sync", provider, attempt=1, started=started, exc=e)
+            raise LLMTimeoutError(str(e)) from e
+        except LLMServerError as e:
+            _record_5xx(name)
+            _record_attempt("sync", provider, attempt=1, started=started, exc=e)
+            raise LLMTimeoutError(str(e)) from e
+        except LLMExtractionError as e:
+            _record_attempt("sync", provider, attempt=1, started=started, exc=e)
+            raise
+        _clear_state(name)
+        _record_attempt("sync", provider, attempt=1, started=started)
+        return text
+
     def call_with_fallback(
         self,
         prompt: str,
@@ -774,6 +814,92 @@ class LLMProviderChain:
             raise _with_outcome(
                 LLMExtractionError(f"provider '{provider['name']}' 调用异常: {e}"),
                 outcome,
+            ) from e
+
+    def _call_provider_text(
+        self,
+        provider: dict,
+        prompt: str,
+        timeout: int,
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        """调用单个 provider 返回裸文本（不经 instructor schema 校验）。
+
+        复用同一 client（错误映射/降级语义与 `_call_provider` 对齐），仅不传
+        `response_model`，取生成的文本内容。兼容 openai / anthropic 两种协议。
+        """
+        api_key = _resolve_api_key(provider)
+        if not api_key:
+            raise LLMConfigurationError(
+                f"provider '{provider['name']}' 未配置 api_key"
+            )
+        messages = self._build_messages(prompt, system_prompt)
+        from openai import (
+            APIConnectionError,
+            APIStatusError,
+            APITimeoutError,
+            RateLimitError,
+        )
+        try:
+            if _provider_protocol(provider) == "anthropic":
+                # 裸文本不能用 instructor 包装 client（其 create 强制要求
+                # response_model），直接构建原生 anthropic SDK client
+                import anthropic as anthropic_sdk
+
+                client = anthropic_sdk.Anthropic(
+                    base_url=provider["base_url"],
+                    api_key=api_key,
+                    timeout=timeout or ASYNC_TIMEOUT_SECONDS,
+                )
+                msg = client.messages.create(
+                    model=provider["model"],
+                    messages=messages,
+                    max_tokens=self._max_tokens,
+                    extra_body=provider.get("extra_body") or None,
+                )
+                text = "".join(
+                    b.text for b in msg.content if getattr(b, "type", "") == "text"
+                )
+                return text.strip()
+            from openai import OpenAI
+
+            client = OpenAI(
+                base_url=provider["base_url"], api_key=api_key, timeout=timeout or ASYNC_TIMEOUT_SECONDS,
+            )
+            comp = client.chat.completions.create(
+                model=provider["model"],
+                messages=messages,
+                temperature=self._temperature,
+                max_tokens=self._max_tokens,
+                top_p=self._top_p,
+                extra_body=provider.get("extra_body") or None,
+            )
+            text = (comp.choices[0].message.content or "").strip()
+            return text
+        except APITimeoutError as e:
+            raise _with_outcome(
+                LLMTimeoutError(f"provider '{provider['name']}' 超时（{timeout}s）"),
+                _OUTCOME_TIMEOUT,
+            ) from e
+        except RateLimitError as e:
+            raise _with_outcome(
+                LLMRateLimitError(f"provider '{provider['name']}' 触发限流(429): {e}"),
+                _OUTCOME_RATE_LIMITED,
+            ) from e
+        except APIStatusError as e:
+            if e.status_code >= 500:
+                raise _with_outcome(
+                    LLMServerError(f"provider '{provider['name']}' 服务不可用({e.status_code}): {e}"),
+                    _OUTCOME_SERVER_ERROR,
+                ) from e
+            raise _with_outcome(
+                LLMExtractionError(f"provider '{provider['name']}' 调用失败: {e}"),
+                _OUTCOME_HTTP_4XX,
+            ) from e
+        except APIConnectionError as e:
+            raise _with_outcome(
+                LLMExtractionError(f"provider '{provider['name']}' 连接失败: {e}"),
+                _OUTCOME_CONNECTION_ERROR,
             ) from e
 
     def _call_provider_anthropic(

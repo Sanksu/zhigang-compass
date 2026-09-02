@@ -17,11 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.common import resolve_operator
 from app.api.deps import require_permission
-from app.core.database import get_db
+from app.core.database import async_session_factory, get_db
 from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND
-from app.models.business import AuditLog, SkillAlias
+from app.models.business import AuditLog, LLMDecisionRecord, SkillAlias
 from app.schemas.common import error, ok
 from app.services.extraction.dictionary import refresh_dynamic_aliases
+from app.services.llm_decision import DOMAIN_SKILL_ALIAS
 
 router = APIRouter(tags=["admin-skill-aliases"])
 
@@ -120,4 +121,15 @@ async def review_skill_alias(
     await db.commit()
     if body.approved:
         await refresh_dynamic_aliases()
+        # 别名生效 → 入 LLM 决策与验收台（domain=skill_alias，只读展示勿审批）
+        async with async_session_factory() as session2:
+            session2.add(LLMDecisionRecord(
+                domain=DOMAIN_SKILL_ALIAS,
+                entity_type="skill",
+                entity_id=row.standard_name or "",
+                structured_output={"variant": row.variant, "standard_name": row.standard_name},
+                status="approved",
+                effects_applied=True,
+            ))
+            await session2.commit()
     return ok(data={"id": str(row.id), "status": row.status, "approved": body.approved})
