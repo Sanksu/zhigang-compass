@@ -289,6 +289,31 @@ async def score_jd_compare(
     if not profiles:
         return None
 
+    # 语义预热（2026-09-02 性能优化）：评分前批量 encode 候选 + 全部 JD 技能，
+    # 避免 _score 逐条 similarity 时每条即时前向推理（50 条 JD × 数百技能对，
+    # 冷缓存下 29s）。warm 一次 batch encode（~20s）后评分全命中缓存 → ~4.5s。
+    # 纯性能：向量值与逐条 encode 结果一致，匹配语义不变；embedder 无 warm
+    # 方法（旧版）时跳过。
+    try:
+        _warm_callable = getattr(embedder, "warm", None)
+        if callable(_warm_callable):
+            _skill_names: set[str] = set()
+            for prof in profiles:
+                for sk in prof.must_skills:
+                    if sk.skill_name:
+                        _skill_names.add(sk.skill_name)
+                for sk in prof.nice_skills:
+                    if sk.skill_name:
+                        _skill_names.add(sk.skill_name)
+            for sk in candidate.skills:
+                if sk.skill_name:
+                    _skill_names.add(sk.skill_name)
+            if _skill_names:
+                await _run_in_thread(lambda: _warm_callable(list(_skill_names)))
+    except Exception:
+        # warm 失败不阻断评分（模型不可用会降级纯规则，见 _skill_similarity）
+        pass
+
     def _score():
         scored_items: list[tuple[PositionProfile, MatchResult]] = []
         best_profile: PositionProfile | None = None
