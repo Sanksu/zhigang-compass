@@ -900,6 +900,29 @@ paths:
                   data:
                     $ref: '#/components/schemas/MatchResultList'
                   trace_id: { type: string }
+  /api/v1/match/result/{match_id}/jd/{jd_id}:
+    get:
+      tags: [match]
+      summary: 获取比对岗位下某条 JD 的详情（下拉逐条查看各 JD 评分/差距/路径）
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - in: path
+          name: jd_id
+          required: true
+          schema: { type: string }
+          description: 原生 JD 主键 id（来自 compare 响应 jd_breakdown[].jd_id）
+      responses:
+        '200':
+          description: 单 JD 匹配详情（并入当前岗位详情展示；岗位级字段 domain_name/weights 不变）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data: { $ref: '#/components/schemas/MatchResult' }
+                  trace_id: { type: string }
   /api/v1/match/result/{match_id}/gap:
     get:
       tags: [match]
@@ -4728,6 +4751,7 @@ components:
       properties:
         match_id: { type: string, description: 结果快照 ID（持久化后供 /match/result 系列查询） }
         user_id: { type: string, description: 归属用户（compare 同步返回） }
+        resume_id: { type: string, nullable: true, description: "候选人简历 ID（供 /match/result/{match_id}/jd/{jd_id} 切换单 JD 详情时重建候选人；compare 同步返回，旧快照为 null）" }
         position_id: { type: string }
         position_name: { type: string }
         total_score: { type: number, description: "综合得分 [0,1]" }
@@ -4794,6 +4818,19 @@ components:
         jd_compared:
           type: integer
           description: "JD 级评分溯源：total_score 为同岗最近 N 条宽 JD（上限 max_jds）中的最高分，N=参与评分条数"
+        jd_breakdown:
+          type: array
+          description: "同岗位下各 JD 匹配评分排名（按分降序参与评分集；前端下拉逐条查看各 JD 详情，切换调用 /match/result/{match_id}/jd/{jd_id}）"
+          items:
+            type: object
+            properties:
+              jd_id: { type: string, description: 原生 JD 主键 id }
+              jd_title: { type: string, description: JD 标题 }
+              total_score: { type: number, description: "该 JD 综合得分 [0,1]" }
+              must_score: { type: number, nullable: true, description: "该 JD 必备技能匹配分 [0,1]；无门槛为 null" }
+              nice_score: { type: number, description: "该 JD 加分技能匹配分 [0,1]" }
+              exp_score: { type: number, description: "该 JD 经验匹配分 [0,1]" }
+              hit_count: { type: integer, description: 命中技能数（must+nice） }
         jd_original:
           type: object
           nullable: true
