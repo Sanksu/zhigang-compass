@@ -610,8 +610,15 @@ export function GraphPage() {
 
   // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
   const webgl2Available = useMemo(() => isWebGL2Available(), [])
-  // 触控设备（移动/平板，粗指针）固定 2D 模式（设计文档 §6.3：平板/移动端固定 2D）
-  const isCoarsePointer = useMemo(() => window.matchMedia('(pointer: coarse)').matches, [])
+  // 触控设备（移动/平板，粗指针）固定 2D 模式（设计文档 §6.3：平板/移动端固定 2D）。
+  // 响应式监听：平板旋转/插拔鼠标等 pointer 特性变化时实时更新（挂载时判定一次会过期）
+  const [isCoarsePointer, setIsCoarsePointer] = useState(() => window.matchMedia('(pointer: coarse)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse)')
+    const onChange = () => setIsCoarsePointer(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
   /** 3D 模式是否被锁定（WebGL2 不可用或触控设备） */
   const mode3dLocked = !webgl2Available || isCoarsePointer
 

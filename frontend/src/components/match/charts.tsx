@@ -200,8 +200,20 @@ export function RadarChart({ data, className }: RadarChartProps) {
   const ref = useEChart(
     () => ({
       backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'item',
+        // 雷达悬停明细：逐维展示候选人满足度与达标基线（基线为归一化参考线，非逐岗位数据）
+        formatter: (p: EChartsParam) => {
+          const seriesName = typeof p.name === 'string' ? p.name : ''
+          const vals = Array.isArray(p.value) ? (p.value as (number | null)[]) : []
+          const lines = data.map(
+            (d, i) => `${escapeHtml(d.name)}：候选人 ${vals[i] ?? '—'} / 基线 ${d.required}`,
+          )
+          return [`<b>${escapeHtml(seriesName)}</b>`, ...lines].join('<br/>')
+        },
+      },
       legend: {
-        data: ['候选人', '岗位要求'],
+        data: ['候选人', '达标基线'],
         bottom: 0,
         textStyle: { color: mutedColor, fontSize: 11 },
         itemWidth: 14,
@@ -229,7 +241,7 @@ export function RadarChart({ data, className }: RadarChartProps) {
             },
             {
               value: data.map((d) => d.required),
-              name: '岗位要求',
+              name: '达标基线',
               itemStyle: { color: '#3b82f6' },
               areaStyle: { color: 'rgba(59, 130, 246, 0.10)' },
               lineStyle: { width: 2, type: 'dashed' },

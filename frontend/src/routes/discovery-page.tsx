@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react'
 import { Sparkles, Radar, ArrowUpRight, ArrowDownRight, Minus, AlertCircle } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
+import { formatDateTime } from '@/lib/utils'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { PositionStateBadge } from '@/components/shared/position-state-badge'
@@ -96,7 +97,7 @@ function NewPositionsView({ data, loading }: { data: DiscoveryRecentData | null;
                   <span className="text-sm font-medium text-ink">{c.position_name}</span>
                   {stateBadge(c.state)}
                   <span className="text-[11px] text-ink-faint font-mono ml-auto">
-                    发现于 {new Date(c.detected_at).toLocaleDateString('zh-CN')}
+                    发现于 {formatDateTime(c.detected_at)}
                   </span>
                 </div>
                 {c.skill_pending ? (
@@ -223,8 +224,7 @@ function SkillsDeltaView() {
     a.skill_name.localeCompare(b.skill_name, 'zh-Hans-CN')
 
   // 快照日期（版本 id 无阅读意义，放 title 溯源）
-  const fmtSnapDate = (iso: string | null | undefined) =>
-    iso ? new Date(iso).toLocaleDateString('zh-CN') : '?'
+  const fmtSnapDate = (iso: string | null | undefined) => formatDateTime(iso)
 
   const versionOptions = summary?.versions ?? []
   // 下拉仅显示有增减的岗位；稳定岗位归入下方独立面板

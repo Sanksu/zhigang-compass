@@ -1322,6 +1322,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const dark = isDark()
     let phase = 0
     const timer = window.setInterval(() => {
+      // 页面不可见时暂停脉冲：100ms interval 常驻是隐形 CPU 消耗，切走后无渲染收益
+      if (document.hidden) return
       phase = (phase + 1) % 16
       const glow = 8 + ((Math.sin((phase / 16) * Math.PI * 2) + 1) / 2) * 16
       const chart = chartRef.current

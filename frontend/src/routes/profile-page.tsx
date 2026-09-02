@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogDescription,
@@ -25,6 +26,7 @@ import {
 } from '@/components/ui/table'
 import type { ResumeSummary } from '@/components/match/types'
 import {apiDelete, apiGet, apiPost, apiPut, getAccessToken, errMsg} from '@/lib/api'
+import { formatDateTime } from '@/lib/utils'
 import type { components } from '@/types/api'
 
 /** /auth/me 返回的用户资料（契约 User） */
@@ -59,6 +61,8 @@ export function ProfilePage() {
   const [selectedParsed, setSelectedParsed] = useState<Record<string, unknown> | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  /* 删除确认（Dialog 替代原生 window.confirm，与全站弹窗风格统一） */
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
   /* 简历编辑（PUT /resume/{id}，编辑 skills 字段） */
   const [editOpen, setEditOpen] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
@@ -164,9 +168,8 @@ export function ProfilePage() {
     }
   }
 
-  /* ── 简历删除 ── */
+  /* ── 简历删除（确认经 deleteTarget Dialog，确认后执行） ── */
   async function handleDeleteResume(id: string) {
-    if (!window.confirm('确认删除该简历？删除后不可恢复')) return
     setDeletingId(id)
     try {
       await apiDelete(`/resume/${id}`)
@@ -363,7 +366,7 @@ export function ProfilePage() {
                           {(r.skills ?? []).slice(0, 5).join('、') || '—'}
                         </TableCell>
                         <TableCell className="text-ink-secondary">
-                          {r.updated_at ? r.updated_at.slice(0, 16).replace('T', ' ') : '—'}
+                          {r.updated_at ? formatDateTime(r.updated_at) : '—'}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
@@ -384,8 +387,9 @@ export function ProfilePage() {
                             <Button
                               variant="ghost"
                               size="sm"
+                              className="text-state-archived"
                               disabled={deletingId === r.id}
-                              onClick={() => handleDeleteResume(r.id)}
+                              onClick={() => setDeleteTarget({ id: r.id, name: r.file_name })}
                             >
                               {deletingId === r.id ? '删除中…' : '删除'}
                             </Button>
@@ -415,7 +419,7 @@ export function ProfilePage() {
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-medium text-ink">{r.file_name}</div>
                         <div className="mt-0.5 text-xs text-ink-muted">
-                          {r.updated_at ? r.updated_at.slice(0, 16).replace('T', ' ') : '—'}
+                          {r.updated_at ? formatDateTime(r.updated_at) : '—'}
                         </div>
                       </div>
                     </div>
@@ -444,7 +448,7 @@ export function ProfilePage() {
                         size="sm"
                         className="text-state-archived"
                         disabled={deletingId === r.id}
-                        onClick={() => handleDeleteResume(r.id)}
+                        onClick={() => setDeleteTarget({ id: r.id, name: r.file_name })}
                       >
                         {deletingId === r.id ? '删除中…' : '删除'}
                       </Button>
@@ -508,6 +512,36 @@ export function ProfilePage() {
             </div>
           </div>
         </DialogContent>
+        </Dialog>
+
+        {/* ── 简历删除确认 Dialog（替代原生 window.confirm） ── */}
+        <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>确认删除简历</DialogTitle>
+              <DialogDescription className="break-all">
+                「{deleteTarget?.name ?? ''}」删除后不可恢复，且会同时删除落盘文件，确定删除？
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" size="sm" onClick={() => setDeleteTarget(null)}>
+                取消
+              </Button>
+              <Button
+                size="sm"
+                className="text-state-archived"
+                disabled={deleteTarget ? deletingId === deleteTarget.id : false}
+                onClick={() => {
+                  if (!deleteTarget) return
+                  const { id } = deleteTarget
+                  setDeleteTarget(null)
+                  void handleDeleteResume(id)
+                }}
+              >
+                {deletingId ? '删除中…' : '确认删除'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
         </Dialog>
       </Reveal>
     </div>
