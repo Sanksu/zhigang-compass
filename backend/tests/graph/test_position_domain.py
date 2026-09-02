@@ -367,3 +367,63 @@ class TestResolveLeftoverPins:
     def test_missing_anchor_leftover_not_claimed(self):
         rows = [{"id": "id_x", "name": "某孤立岗"}]
         assert resolve_leftover_pins(rows, self._assign(), self._name_map(), {}) == []
+
+
+# ---- 显式语义域（2026-09-02 细分阶段 1）----
+# 验证 SEGREGATED_DOMAINS 成员：拓扑不可分（08-31 探针）、LLM 语义归类高置信
+# （position_classify 探针 R3 0.85-0.98），由治理声明固化归入显式域。
+# 边界：历史上被 GENERAL_PIN 弃权的成员撤销弃权；清单外 GENERAL_PIN 不受影响。
+from scripts.sync_position_domains import (
+    SEGREGATED_DOMAINS,
+    _SEGREGATED_MEMBER_NAMES,
+)
+
+
+class TestSegregatedDomains:
+    def _name_map(self):
+        return {
+            "id_sec": "网络安全工程师", "id_msec": "移动网络安全工程师",
+            "id_genai": "GenAI/AgenticAI", "id_aigc": "AIGC抽卡师", "id_ai": "AI与数据系统",
+            "id_sap": "SAP集成", "id_murex": "Murex应用", "id_pacs": "PACS与企业影像管理员",
+            "id_pm": "产品经理", "id_pg": "项目经理",
+            "id_cmbs": "CMBS交易员", "id_biochem": "生化工程师",
+        }
+
+    def test_segregated_domains_defined(self):
+        assert set(SEGREGATED_DOMAINS) == {
+            "dom_security", "dom_ai_app", "dom_ent_app", "dom_prod_mgmt",
+        }
+        # 域成员均已明确列出，无空域
+        for spec in SEGREGATED_DOMAINS.values():
+            assert spec["members"]
+            assert spec["name"]
+
+    def test_segregated_members_union(self):
+        # 集合应含全部成员名单
+        assert _SEGREGATED_MEMBER_NAMES == {
+            "网络安全工程师", "移动网络安全工程师",
+            "GenAI/AgenticAI", "AIGC抽卡师", "AI与数据系统",
+            "SAP集成", "Murex应用", "PACS与企业影像管理员", "People应用",
+            "产品经理", "项目经理",
+        }
+
+    def test_sync_assigns_segregated_members(self):
+        """同步时显式域成员被覆盖归入显式域（source=domain_pin，覆盖弃权/拓扑结果）。
+        清单外弃权岗不受影响。"""
+        # name → pid（正确方向）；只放入清单内成员「网络安全工程师」与清单外弃权岗
+        assign = {
+            "id_sec": ("dom_1", "基础设施运维"),       # 拓扑误归运维
+            "id_cmbs": (GENERAL_DOMAIN_ID, GENERAL_DOMAIN_NAME),  # 清单外弃权保留
+        }
+        sources = {"id_sec": "attach", "id_cmbs": "general_pin"}
+        name_to_pid = {"网络安全工程师": "id_sec"}
+        for dom_id, spec in SEGREGATED_DOMAINS.items():
+            for name in spec["members"]:
+                pid = name_to_pid.get(name)
+                if pid:
+                    assign[pid] = (dom_id, spec["name"])
+                    sources[pid] = "domain_pin"
+        assert assign["id_sec"] == ("dom_security", "网络安全")
+        assert sources["id_sec"] == "domain_pin"
+        assert assign["id_cmbs"] == (GENERAL_DOMAIN_ID, GENERAL_DOMAIN_NAME)
+        assert sources["id_cmbs"] == "general_pin"

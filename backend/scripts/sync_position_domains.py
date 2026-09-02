@@ -65,6 +65,41 @@ GENERAL_DOMAIN_ID = "dom_general"
 GENERAL_DOMAIN_NAME = "通用与其他岗位"
 # 强制弃权 pin 的特殊锚点值：声明"该岗无正确归属域，一律弃权"
 GENERAL_PIN = "__general__"
+
+# 显式语义域（2026-09-02 域细分阶段 1，负责人批准；评估报告
+# backend/reports/域细分重新评估_20260902.md）：
+# 通用与其他桶的桥梁岗拓扑不可分（08-31 探针），但 LLM 语义归类探针
+# （position_classify，3 轮 99 次，产物 llm_classify_eval_r1/r2r3_20260902.json）
+# 在候选清单提供新域后给出高置信稳定归属（0.75-0.98）。这些岗位 freq 不足
+# 或拓扑离心，骨干 Leiden 不产生这些域，故以显式成员清单构建域单元：
+# 同步时成员直接归入显式域（source=domain_pin），从骨干/归类流程中隔离。
+# 域名即治理定名（LLM 命名对 2-4 岗小域不稳定，回退权在清单修订）。
+SEGREGATED_DOMAINS: dict[str, dict] = {
+    "dom_security": {
+        "name": "网络安全",
+        "members": ["网络安全工程师", "移动网络安全工程师"],
+    },
+    "dom_ai_app": {
+        "name": "AI应用与智能体",
+        "members": ["GenAI/AgenticAI", "AIGC抽卡师", "AI与数据系统"],
+    },
+    "dom_ent_app": {
+        "name": "企业应用与系统",
+        "members": ["SAP集成", "Murex应用", "PACS与企业影像管理员", "People应用"],
+    },
+    "dom_prod_mgmt": {
+        "name": "产品与项目管理",
+        "members": ["产品经理", "项目经理"],
+    },
+}
+# 显式域成员名单中、历史上被 GENERAL_PIN 强制弃权的岗位：本次细分撤销其
+# 弃权声明（语义域成立后弃权依据消失）。清单外岗位的 GENERAL_PIN 不受影响。
+_SEGREGATED_MEMBER_NAMES: set[str] = {
+    name for spec in SEGREGATED_DOMAINS.values() for name in spec["members"]
+}
+# 显式域不作为归类池 attach 的目标域（阶段 1 仅固化已评估成员；未来成员
+# 增长经评估扩充清单后再开放）
+_SEGREGATED_ATTACHABLE = False
 # 高频桥梁岗语义指派（2026-08-31 治理，算法口径变更已知会张恺天）：
 # 技能横跨多域的桥梁岗常被 Leiden 撕成小簇，freq 最高的展示位反而语义缺失
 # （大模型算法工程师 freq=376 全图第 5 却挂「通用与其他岗位」）。骨干岗在
@@ -515,6 +550,12 @@ def sync_position_domains(
         graph, name_map = load_position_projection(session)
         if not graph:
             raise ValueError("岗位投影图为空（Neo4j 不可达或无共享技能岗位对）")
+        # 全量公开岗位名→id（显式域覆盖用：投影外孤立岗也可能在显式域清单内）
+        public_rows = session.run(
+            "MATCH (p:Position) WHERE p.status IN $statuses RETURN p.id AS id, p.name AS name",
+            statuses=_PUBLIC_STATUSES,
+        ).data()
+        public_pid_by_name = {r["name"]: r["id"] for r in public_rows if r["name"]}
         freq_rows = session.run(
             "MATCH (p:Position) WHERE p.id IN $ids RETURN p.id AS id, coalesce(p.freq, 0) AS f",
             ids=list(graph),
@@ -638,6 +679,23 @@ def sync_position_domains(
             scores[pid] = (None, None)
         if leftover_pinned:
             logger.info("投影外孤立岗 pin 兜底：%s 岗", len(leftover_pinned))
+
+        # 显式语义域成员覆盖（2026-09-02 细分阶段 1）：在完整的 assign（含投影外
+        # 孤立岗）之上，把域成员直接按治理定名归入显式域——覆盖拓扑归类/弃权/通用
+        # 弃权的结果。这些岗位拓扑不可分（08-31 探针），由 LLM 语义归类（position_
+        # classify 探针 R3 0.85-0.98）+ 人工审批赋义。其 GENERAL_PIN 弃权声明随之撤销。
+        # 用全量公开岗位名→id（public_pid_by_name），投影外孤立岗也能命中。
+        if SEGREGATED_DOMAINS:
+            for dom_id, spec in SEGREGATED_DOMAINS.items():
+                for member_name in spec["members"]:
+                    pid = public_pid_by_name.get(member_name)
+                    if pid is None:
+                        logger.warning("[显式域] 成员「%s」不在公开岗位中，跳过", member_name)
+                        continue
+                    assign[pid] = (dom_id, spec["name"])
+                    sources[pid] = "domain_pin"
+                    scores[pid] = (None, None)
+
         session.run(
             """
             MATCH (p:Position)
