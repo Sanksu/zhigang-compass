@@ -970,7 +970,7 @@ export function ResumeMatchPage() {
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm">能力对比</CardTitle>
-                    <CardDescription>候选人能力 vs 岗位要求（含熟练度满足度对比）</CardDescription>
+                    <CardDescription>候选人满足度 vs 达标基线（基线为归一化参考线：加分 80 / 经验 85，其余 100）</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <RadarChart data={matchResult.radar} />
