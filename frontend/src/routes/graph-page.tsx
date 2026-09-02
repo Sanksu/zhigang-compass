@@ -19,6 +19,7 @@ import { GraphCommunityTree } from '@/components/graph/graph-community-tree'
 import { GraphDetailRail } from '@/components/graph/graph-detail-rail'
 import { toGraphData } from '@/components/graph/graph-adapter'
 import { aggregateByDomain, buildDomainView } from '@/components/graph/graph-domain'
+import { groupPositionsBySubgroup } from '@/components/graph/graph-subgroup'
 import { EvolutionTimeline, type EvolutionMarks } from '@/components/graph/evolution-timeline'
 import {
   NodeDetailPanel,
@@ -500,6 +501,18 @@ export function GraphPage() {
 
   // 域聚合（panorama 专用）：全部岗位按 domain_id 分组为超节点 + 域间共享技能边
   const domainAgg = useMemo(() => (data ? aggregateByDomain(data) : null), [data])
+
+  // 域内岗位的技术栈二级分组（仅全景视图）：从岗位→技能边提取专属技能词归组，
+  // 供域超节点详情面板展示「域内岗位 · 技术栈分组」。纯展示层，不改后端域划分。
+  // 未选中域超节点时不计算（节省开销）；选中时按该域成员计算。
+  const domainSubgroups = useMemo(() => {
+    if (view !== 'panorama' || !data || !domainAgg) return undefined
+    if (selected?.type !== 'position' || !selected.isDomain) return undefined
+    const positionsByDomain = domainAgg.positionsByDomain.get(selected.id)
+    if (!positionsByDomain || positionsByDomain.length === 0) return undefined
+    const skills = data.nodes.filter((n) => n.type === 'skill')
+    return groupPositionsBySubgroup(positionsByDomain, data.edges, skills)
+  }, [view, data, domainAgg, selected])
 
   // 点击搜索结果 / 相似技能 / 岗位必备技能 → 选中技能节点 + 定位画布
   // panorama 下技能需先展开其所属岗位（取权重最高的关联岗位，即该技能最核心的簇），
@@ -1070,6 +1083,8 @@ export function GraphPage() {
                   onClose={() => setSelected(null)}
                   learningStatus={skillLearningStatus}
                   learnedSkills={learnedSkills}
+                  domainSubgroups={domainSubgroups}
+                  domainExpanded={selected?.isDomain ? expandedDomains.has(selected.id) : false}
                 />
                 </div>
               </TabsContent>

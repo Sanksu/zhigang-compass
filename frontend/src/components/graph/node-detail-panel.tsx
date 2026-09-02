@@ -303,6 +303,11 @@ interface NodeDetailPanelProps {
   portraitEvidenceLoading?: boolean
   /** 域超节点双击等价的展开按钮（panorama 聚合下钻；缺省不渲染） */
   onToggleDomain?: (id: string) => void
+  /** 域内岗位的子组归组结果（graph-page 经 graph-subgroup.groupPositionsBySubgroup 计算；
+   *  仅全景域超节点传入，展示「域内技术栈二级分组」——纯展示层，不改后端域划分） */
+  domainSubgroups?: { label: string; positions: { id: string; name: string }[] }[]
+  /** 域超节点是否展开（画布展开态，用于子分组标题的展开提示） */
+  domainExpanded?: boolean
   skillDetail?: SkillDetail | null
   positionDetail?: PositionDetail | null
   skillEvidence?: SkillEvidenceItem[]
@@ -355,6 +360,8 @@ export function NodeDetailPanel({
   onClose,
   learningStatus,
   learnedSkills,
+  domainSubgroups,
+  domainExpanded,
 }: NodeDetailPanelProps) {
   const Icon = node ? TYPE_ICON[node.type] : Network
 
@@ -502,6 +509,36 @@ export function NodeDetailPanel({
                 <UnfoldVertical className="mr-1.5 size-3" />
                 {positionExpanded ? '收起画布中的技能' : '在画布中展开技能'}
               </Button>
+            )}
+
+            {/* 域超节点：域内岗位的技术栈二级分组（纯展示层，不改后端域划分）。
+                经 graph-subgroup.groupPositionsBySubgroup 归组——用领域专属关键词
+                而非宽泛基础词，避免"推荐搜索含 PyTorch 误归视觉"类误报；
+                未命中专属词岗位（通用算法）落「通用/其他」兜底。可答辩。 */}
+            {node.type === 'position' && node.isDomain && domainSubgroups && domainSubgroups.length > 0 && (
+              <section className="space-y-2">
+                <h4 className="text-xs font-medium text-ink-muted">
+                  域内岗位 · 技术栈分组
+                  {domainExpanded && <span className="ml-1 text-[11px] font-normal text-ink-faint">（画布已展开）</span>}
+                </h4>
+                <div className="space-y-2">
+                  {domainSubgroups.map((sg) => (
+                    <div key={sg.label} className="rounded-md border border-border/60 px-2.5 py-1.5">
+                      <p className="text-[11px] font-medium text-ink-secondary">
+                        {sg.label}
+                        <span className="ml-1.5 font-mono text-[10px] text-ink-faint">{sg.positions.length} 岗</span>
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {sg.positions.map((p) => (
+                          <span key={p.id} className="rounded bg-subtle px-1.5 py-0.5 text-[11px] text-ink-muted">
+                            {p.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
             )}
 
             {/* 来源 */}
