@@ -31,7 +31,7 @@ import {
   type SkillEvidenceItem,
   type SkillPositionItem,
 } from '@/components/graph/node-detail-panel'
-import type { GraphData, GraphEdge, GraphViewType, NodeDetail } from '@/components/graph/types'
+import type { DisplayGraphEdge, GraphData, GraphEdge, GraphNode, GraphViewType, NodeDetail } from '@/components/graph/types'
 import { PORTRAIT_DIM_PALETTE, SKILL_CATEGORY_PALETTE } from '@/components/graph/graph-visual-tokens'
 import type { LearningPathItem } from '@/components/match/types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
@@ -572,11 +572,67 @@ export function GraphPage() {
     // panorama：三级下钻——域超节点（全部岗位可见）→ 展开域 → 展开岗位技能。
     // data 非空 ⇒ domainAgg 非空（二者同源 memo），断言仅为类型收窄
     if (view === 'panorama') {
-      return buildDomainView(data, domainAgg!, {
+      const base = buildDomainView(data, domainAgg!, {
         expandedDomains,
         expandedPositions,
         maxSkillsPerPosition: MAX_SKILLS_PER_POSITION,
       })
+      // 域内技术栈子簇（2026-09-02 细分落点）：展开域后，域内岗位按技术栈
+      // 子组聚合成二级簇节点（如算法域 → 大模型/LLM、计算机视觉、芯片/嵌入/
+      // 验证），岗位隶属边从「域→岗位」改挂「子簇→岗位」——画布上直接看到
+      // 域内细分，而非只在详情面板读文字。纯展示层，不改后端 domain_id。
+      // 约束：≥4 岗的域才拆、拆出 ≥2 个子组、单子簇 ≥2 岗（防碎片化）；
+      // 通用域（dom_general）为跨领域诚实混排桶，保持不拆。
+      const skills = data.nodes.filter((n) => n.type === 'skill')
+      const subNodes: GraphNode[] = []
+      const subEdges: DisplayGraphEdge[] = []
+      const regroupedPositions = new Set<string>()
+      for (const dom of expandedDomains) {
+        if (dom === 'dom_general') continue
+        const members = domainAgg!.positionsByDomain.get(dom)
+        if (!members || members.length < 4) continue
+        const groups = groupPositionsBySubgroup(members, data.edges, skills)
+        const meaningful = groups.filter((g) => g.positions.length >= 2)
+        if (meaningful.length < 2) continue // 全挤一组或只剩零星单岗：无细分价值
+        const supernode = base.nodes.find((n) => n.id === dom)
+        for (const g of meaningful) {
+          const sid = `${dom}::sub::${g.label}`
+          subNodes.push({
+            id: sid,
+            name: g.label,
+            type: 'position',
+            isDomain: true,
+            memberCount: g.positions.length,
+            value: g.positions.length,
+            domain_id: dom,
+            domain_name: supernode?.name ?? dom,
+          })
+          subEdges.push({
+            source: dom,
+            target: sid,
+            weight: 3,
+            necessity: 'must',
+            isDomainEdge: true,
+          })
+          for (const p of g.positions) {
+            subEdges.push({ source: sid, target: p.id, weight: 3, necessity: 'must' })
+            regroupedPositions.add(p.id)
+          }
+        }
+      }
+      if (subNodes.length > 0) {
+        // 岗位已改挂子簇：移除「展开域→岗位」直连边（避免同一岗位双重隶属）
+        const regroupedEdges = base.edges.filter((e) => {
+          if (!regroupedPositions.has(e.target)) return true
+          return !expandedDomains.has(e.source)
+        })
+        return {
+          ...base,
+          nodes: [...base.nodes, ...subNodes],
+          edges: [...regroupedEdges, ...subEdges],
+        }
+      }
+      return base
     }
 
     // techStack：岗位显示数量限制（Top-30 按关联度降序，2026-08-15 画布容量限制）：
