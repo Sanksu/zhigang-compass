@@ -146,6 +146,9 @@ export function GraphPage() {
   // 数据随每日 ETL 更新，session 内缓存可接受（页面刷新即失效）
   const viewCacheRef = useRef<Map<GraphViewType, GraphData>>(new Map())
   const [loading, setLoading] = useState(true)
+  // 视图就绪键：viewReady !== view 即该视图数据在途（非缓存切换时画布叠轻量加载角标，
+  // 旧视图数据保持可见避免闪屏；岗位画像有自己的切换提示不走此键）
+  const [viewReady, setViewReady] = useState<GraphTab>('panorama')
   // 错误含业务码（08-14 审查：此前仅存 message，4040 与后端未启动混淆归因）
   const [error, setError] = useState<{ code: number; message: string } | null>(null)
   // 视图重载令牌：错误态"重试"按钮触发视图 effect 重跑（画像数据流见渲染处单独处理）
@@ -222,6 +225,7 @@ export function GraphPage() {
     const applyViewData = (g: GraphData) => {
       setRaw(g)
       setError(null)
+      setViewReady(view)
       if (view === 'panorama') {
         // 聚合下钻：全部岗位以域超节点常驻；首屏自动展开最大域呈现岗位层
         const agg = aggregateByDomain(g)
@@ -229,10 +233,26 @@ export function GraphPage() {
       }
       setLoading(false)
     }
+    // 空闲预热技术栈视图缓存：全景渲染稳定后 1.5s 后台拉取并转换入缓存，
+    // 首次切技术栈页签即秒开（预热失败静默，进入视图时正常加载）
+    const warmTechStackCache = () => {
+      if (view !== 'panorama' || viewCacheRef.current.has('techStack')) return
+      window.setTimeout(() => {
+        if (cancelled || viewCacheRef.current.has('techStack')) return
+        apiGet<PanoramaData>('/graph/view/techStack?limit=120')
+          .then((res) => {
+            if (!cancelled) viewCacheRef.current.set('techStack', toGraphData(res))
+          })
+          .catch(() => {
+            /* 预热失败静默：进入技术栈视图时由主链路正常请求 */
+          })
+      }, 1500)
+    }
     const cached = viewCacheRef.current.get(view)
     if (cached) {
       // 命中缓存：跳过网络请求与转换（08-16 性能优化）
       applyViewData(cached)
+      warmTechStackCache()
       return
     }
     apiGet<PanoramaData>(`/graph/view/${view}?limit=120`)
@@ -241,9 +261,11 @@ export function GraphPage() {
         const g = toGraphData(res)
         viewCacheRef.current.set(view, g)
         applyViewData(g)
+        warmTechStackCache()
       })
       .catch((e) => {
         if (!cancelled) {
+          setViewReady(view)
           setError(
             e instanceof ApiError
               ? { code: e.code, message: e.message }
@@ -258,6 +280,9 @@ export function GraphPage() {
       cancelled = true
     }
   }, [view, reloadToken])
+
+  // 非缓存视图数据在途（如首次进入技术栈）：画布叠轻量加载角标
+  const viewLoading = view !== 'positionPortrait' && viewReady !== view
 
   // 岗位画像下拉选项：进入视图时从 positionCenter 视图取岗位节点（freq 降序）。
   // session 内仅拉取一次（选项为空才请求），再次进入视图不重复请求；
@@ -640,8 +665,15 @@ export function GraphPage() {
 
   // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
   const webgl2Available = useMemo(() => isWebGL2Available(), [])
-  // 触控设备（移动/平板，粗指针）固定 2D 模式（设计文档 §6.3：平板/移动端固定 2D）
-  const isCoarsePointer = useMemo(() => window.matchMedia('(pointer: coarse)').matches, [])
+  // 触控设备（移动/平板，粗指针）固定 2D 模式（设计文档 §6.3：平板/移动端固定 2D）。
+  // 响应式监听：平板旋转/插拔鼠标等 pointer 特性变化时实时更新（挂载时判定一次会过期）
+  const [isCoarsePointer, setIsCoarsePointer] = useState(() => window.matchMedia('(pointer: coarse)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse)')
+    const onChange = () => setIsCoarsePointer(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
   /** 3D 模式是否被锁定（WebGL2 不可用或触控设备） */
   const mode3dLocked = !webgl2Available || isCoarsePointer
 
@@ -892,7 +924,12 @@ export function GraphPage() {
           setSelected(null)
           setExpandedPositions(new Set())
           setExpandedDomains(new Set())
-          setView(value as GraphTab)
+          const next = value as GraphTab
+          // 缓存命中的视图同步标记就绪（effect 会同步 applyViewData），
+          // 避免缓存秒切时加载角标闪一帧；未缓存视图保持 viewReady 不变 →
+          // viewLoading 为真，数据在途时画布显示轻量加载角标
+          if (viewCacheRef.current.has(next)) setViewReady(next)
+          setView(next)
         }}
       >
         <div className="mb-3 flex flex-col gap-3 rounded-xl border border-border bg-subtle/40 px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1032,7 +1069,14 @@ export function GraphPage() {
               completedSkills={[]}
               evolutionMarks={evolutionMarks}
               skillLabelTopIds={skillLabelTopIds}
-              ringLayout={view === 'techStack' || view === 'positionPortrait'}
+              // 环形布局须与视图数据匹配时才启用（viewReady 就绪键）：避免首次点击
+              // 技术栈/画像页签时 data 仍是旧视图（全景）而 ringLayout 已为 true——
+              // 环形坐标分支只覆盖 skill/position，旧视图的其余节点落到原点糊成一团，
+              // 等新数据到达重建后才散开（即"首点糊→延迟正常"）。视角/渲染与
+              // 数据不同步是根因，加载角标只提示不阻断此错误渲染。
+              ringLayout={
+                (view === 'techStack' || view === 'positionPortrait') && viewReady === view
+              }
               className="h-full w-full"
             />
           ) : (
@@ -1055,6 +1099,14 @@ export function GraphPage() {
             <div className="absolute right-3 top-12 z-10 flex items-center gap-2 rounded-md border border-border bg-canvas/90 px-2.5 py-1.5 shadow-sm backdrop-blur text-xs text-ink-muted animate-in fade-in-0 duration-200">
               <div className="size-3.5 rounded-full border-2 border-ink border-t-transparent animate-spin" />
               加载岗位画像…
+            </div>
+          )}
+          {/* 视图切换加载覆盖：非缓存视图（如首次进入技术栈）数据在途时轻量提示；
+              旧视图数据保持可见不闪屏，全景就绪后已后台预热技术栈缓存故通常秒切 */}
+          {viewLoading && (
+            <div className="absolute right-3 top-12 z-10 flex items-center gap-2 rounded-md border border-border bg-canvas/90 px-2.5 py-1.5 shadow-sm backdrop-blur text-xs text-ink-muted animate-in fade-in-0 duration-200">
+              <div className="size-3.5 rounded-full border-2 border-ink border-t-transparent animate-spin" />
+              加载{VIEW_LABEL[view]}…
             </div>
           )}
           {/* 画布操作提示（可关闭） */}

@@ -1129,23 +1129,31 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           // 镜头保持：仅首建/视图切换时重置中心，其余重建不动当前视角
           ...(resetCamera ? { center: ['50%', '50%'] as [string, string] } : {}),
           labelLayout: { hideOverlap: true },
-          // 岗位画像视图（ringLayout + attr 维度节点）：启用切换/入场过渡动画——
-          // 切换岗位时新节点依次淡入缩放入场，弱化"整图瞬变"的生硬感；其余视图
-          // （力导向 / techStack 环形）保持 animation:false 以稳定布局与镜头
-          // 动画柔和化：duration 拉长、缓动用加急四阶（quarticOut 收尾更平滑），
-          // animationDelay 按节点索引逐级错峰（中心岗位→大类→外环依次浮现，
-          // 避免整组节点同时缩放的"齐冲"生硬感）。
-          // reduced-motion 降级：系统偏好减少动画时关闭入场过渡（直接无动画上图），
-          // 与 flyTo 镜头飞行（_flyTo 已接 prefers-reduced-motion）口径一致
-          ...(portraitView &&
-          !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          // 入场过渡动画（ringLayout 两视图专用）：弱化"整图瞬变"的生硬感——
+          // - 岗位画像（ringLayout+attr 维度）：切换岗位时新节点依次淡入缩放入场，
+          //   duration 800 / update 600 / delay 逐级错峰（中心岗位→大类→外环依次浮现）
+          // - 技术栈环形（layout:'none' 固定坐标）：首建 600ms 入场 + delay 按节点
+          //   索引错峰（环上波扫浮现）；update 保持 0——筛选/LOD/主题重建不重放
+          //   动画、镜头与布局稳定
+          // - 力导向视图维持 animation:false（布局收敛中，动画会放大抖动）
+          // reduced-motion 降级：系统偏好减少动画时全部关闭入场过渡（直接无动画
+          // 上图），与 flyTo 镜头飞行（已接 prefers-reduced-motion）口径一致
+          ...(ringLayout && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
             ? {
                 animation: true,
-                animationDuration: 800,
                 animationEasing: 'quarticOut',
-                animationDurationUpdate: 600,
-                animationEasingUpdate: 'quarticInOut',
-                animationDelay: (idx: number) => Math.min(450, idx * 22),
+                ...(portraitView
+                  ? {
+                      animationDuration: 800,
+                      animationDurationUpdate: 600,
+                      animationEasingUpdate: 'quarticInOut',
+                      animationDelay: (idx: number) => Math.min(450, idx * 22),
+                    }
+                  : {
+                      animationDuration: 600,
+                      animationDurationUpdate: 0,
+                      animationDelay: (idx: number) => Math.min(480, idx * 6),
+                    }),
               }
             : {
                 animation: false,
@@ -1364,6 +1372,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const dark = isDark()
     let phase = 0
     const timer = window.setInterval(() => {
+      // 页面不可见时暂停脉冲：100ms interval 常驻是隐形 CPU 消耗，切走后无渲染收益
+      if (document.hidden) return
       phase = (phase + 1) % 16
       const glow = 8 + ((Math.sin((phase / 16) * Math.PI * 2) + 1) / 2) * 16
       const chart = chartRef.current

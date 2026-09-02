@@ -43,18 +43,18 @@ export const mainNav: NavItem[] = [
     label: '仪表盘',
     to: '/',
     icon: LayoutDashboard,
-    },
+  },
   {
     label: '能力图谱',
     to: '/graph',
     icon: Network,
-    },
+  },
   {
     label: '简历匹配',
     to: '/resume-match',
     icon: FileText,
     requireRole: ['user', 'admin'],
-    },
+  },
   {
     label: '演化看板',
     to: '/evolution',
@@ -70,7 +70,7 @@ export const mainNav: NavItem[] = [
     to: '/profile',
     icon: User,
     requireRole: ['user', 'admin'],
-    },
+  },
 ]
 
 /** 管理后台分组（08-16 层级化：管理 + 配置中心两组，可折叠；09-01 低频治理页收进总览统一入口） */

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { GitBranch, Boxes, TrendingDown } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
+import { formatDateTime } from '@/lib/utils'
 import {
   PositionStateBadge,
   POSITION_STATE_DOT,
@@ -84,7 +85,7 @@ export function StateMachineView() {
                     {data.transitions.map((t) => (
                       <TableRow key={t.id}>
                         <TableCell className="text-xs font-mono text-ink-muted whitespace-nowrap">
-                          {t.created_at ? t.created_at.replace('T', ' ').slice(0, 16) : '—'}
+                          {t.created_at ? formatDateTime(t.created_at) : '—'}
                         </TableCell>
                         <TableCell className="text-xs font-medium text-ink max-w-40 truncate">
                           {t.position_name}
@@ -179,7 +180,7 @@ export function EvolutionEventsView() {
                 return (
                   <TableRow key={ev.id}>
                     <TableCell className="text-xs font-mono text-ink-muted whitespace-nowrap">
-                      {ev.created_at ? ev.created_at.replace('T', ' ').slice(0, 16) : '—'}
+                      {ev.created_at ? formatDateTime(ev.created_at) : '—'}
                     </TableCell>
                     <TableCell>
                       <Badge
