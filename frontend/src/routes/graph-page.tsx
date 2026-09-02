@@ -503,14 +503,26 @@ export function GraphPage() {
   const domainAgg = useMemo(() => (data ? aggregateByDomain(data) : null), [data])
 
   // 域内岗位的技术栈二级分组（仅全景视图）：从岗位→技能边提取专属技能词归组，
-  // 供域超节点详情面板展示「域内岗位 · 技术栈分组」。纯展示层，不改后端域划分。
-  // 未选中域超节点时不计算（节省开销）；选中时按该域成员计算。
+  // 供域超节点/子簇节点详情面板展示「域内岗位 · 技术栈分组」。纯展示层，不改后端域划分。
+  // 选中域超节点 → 按域成员归组；选中子簇节点（id 含 ::sub::）→ 按子簇成员归组
+  //（子簇成员从当前画布数据的子簇隶属边反查，visibleData 即 data）。
   const domainSubgroups = useMemo(() => {
     if (view !== 'panorama' || !data || !domainAgg) return undefined
     if (selected?.type !== 'position' || !selected.isDomain) return undefined
+    const skills = data.nodes.filter((n) => n.type === 'skill')
+    // 子簇节点：成员 = data.edges 中「子簇→岗位」的 target 岗位
+    if (selected.id.includes('::sub::')) {
+      const memberIds = new Set(
+        data.edges.filter((e) => e.source === selected.id).map((e) => e.target),
+      )
+      const members = data.nodes.filter((n) => memberIds.has(n.id))
+      if (members.length === 0) return undefined
+      // 子簇本身已是分组，面板展示该子簇成员（单组）与组内技能构成
+      const grouped = groupPositionsBySubgroup(members, data.edges, skills)
+      return grouped.length > 0 ? grouped : undefined
+    }
     const positionsByDomain = domainAgg.positionsByDomain.get(selected.id)
     if (!positionsByDomain || positionsByDomain.length === 0) return undefined
-    const skills = data.nodes.filter((n) => n.type === 'skill')
     return groupPositionsBySubgroup(positionsByDomain, data.edges, skills)
   }, [view, data, domainAgg, selected])
 
