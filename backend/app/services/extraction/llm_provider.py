@@ -849,7 +849,7 @@ class LLMProviderChain:
                 client = anthropic_sdk.Anthropic(
                     base_url=provider["base_url"],
                     api_key=api_key,
-                    timeout=timeout or ASYNC_TIMEOUT_SECONDS,
+                    timeout=timeout,
                 )
                 msg = client.messages.create(
                     model=provider["model"],
@@ -864,7 +864,7 @@ class LLMProviderChain:
             from openai import OpenAI
 
             client = OpenAI(
-                base_url=provider["base_url"], api_key=api_key, timeout=timeout or ASYNC_TIMEOUT_SECONDS,
+                base_url=provider["base_url"], api_key=api_key, timeout=timeout,
             )
             comp = client.chat.completions.create(
                 model=provider["model"],
@@ -900,6 +900,11 @@ class LLMProviderChain:
             raise _with_outcome(
                 LLMExtractionError(f"provider '{provider['name']}' 连接失败: {e}"),
                 _OUTCOME_CONNECTION_ERROR,
+            ) from e
+        except Exception as e:  # 外部 API/意外异常统一包装，交给重试链（与 _call_provider 一致）
+            raise _with_outcome(
+                LLMExtractionError(f"provider '{provider['name']}' 调用异常: {e}"),
+                _OUTCOME_EXTRACTION_ERROR,
             ) from e
 
     def _call_provider_anthropic(
