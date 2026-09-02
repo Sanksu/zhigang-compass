@@ -35,6 +35,8 @@ export interface RecommendItem {
   must_score: number | null
   nice_score: number
   exp_score: number
+  /** 学历匹配分（第四维 BT v4）；任一侧学历层级无法映射时为 null，不参与总分加权 */
+  edu_score?: number | null
   summary: string
   /** 岗位状态（后端未产出，按分数映射展示：≥0.6 stable / ≥0.4 declining / <0.4 low） */
   status: 'stable' | 'emerging' | 'declining' | 'low'
@@ -141,6 +143,8 @@ export interface MatchResult {
   must_score: number | null
   nice_score: number
   exp_score: number
+  /** 学历匹配分（第四维 BT v4）；任一侧学历层级无法映射时为 null（不参与总分加权） */
+  edu_score?: number | null
   summary: string
   radar: RadarDimension[]
   skill_matrix: SkillMatrixItem[]
@@ -154,8 +158,8 @@ export interface MatchResult {
   evidence_refs: { skill: string; source: string; url: string; confidence: number }[]
   /** 岗位职能域（域治理成果接入；无域/查询失败为 null 不渲染） */
   domain_name?: string | null
-  /** 实际评分权重（BT v3：configs/match_weights.json） */
-  weights?: { must?: number; nice?: number; exp?: number } | null
+  /** 实际评分权重（BT v4：configs/match_weights.json；edu 为第四维凸组合权重，未配置为 null/缺省） */
+  weights?: { must?: number; nice?: number; exp?: number; edu?: number | null } | null
   /** JD 级评分溯源：total_score 为同岗 jd_compared 条 JD 中的最高分 */
   jd_compared?: number | null
   /** 最佳匹配 JD 原文（compare 返回；旧快照/最佳 JD 行已删除为 null） */

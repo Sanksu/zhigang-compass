@@ -45,7 +45,7 @@ from app.services.matching.jd_match import (
     score_jd_one,
 )
 from app.services.matching.loaders import build_candidate
-from app.services.matching.weights import load_weights
+from app.services.matching.weights import load_edu_weight, load_weights
 from app.services.matching.semantic import SkillEmbedder
 
 router = APIRouter()
@@ -310,9 +310,10 @@ async def compare(
             "score": round(result.total_score, 4),
         }
 
-    # 实际评分权重（BT v3）透出：前端三维分解展示真实口径（此前前端硬编码
-    # 0.6/0.2/0.2 与配置不符）
+    # 实际评分权重（BT v4）透出：前端四维分解展示真实口径（此前前端硬编码
+    # 0.6/0.2/0.2 与配置不符）；edu 为第四维凸组合权重，未配置/非法时为 None
     w_must, w_nice, w_exp = load_weights()
+    w_edu = load_edu_weight()
 
     # 该岗位下全部已评分 JD 排名（前端下拉逐条查看各 JD 详情；scored_items 已按分降序）
     jd_breakdown = [
@@ -340,8 +341,13 @@ async def compare(
         "position_id": position_name,
         # 岗位域徽标（域治理成果接入；无域为 null）
         "domain_name": domain_name,
-        # 实际评分权重（BT v3），前端展示真实口径
-        "weights": {"must": round(w_must, 4), "nice": round(w_nice, 4), "exp": round(w_exp, 4)},
+        # 实际评分权重（BT v4），前端展示真实口径（含第四维学历）
+        "weights": {
+            "must": round(w_must, 4),
+            "nice": round(w_nice, 4),
+            "exp": round(w_exp, 4),
+            "edu": round(w_edu, 4) if w_edu is not None else None,
+        },
         # JD 级评分溯源：total_score 为同岗 jd_compared 条 JD 中的最高分
         "jd_compared": jd_compared,
         # 同岗下各 JD 评分排名（下拉切换）

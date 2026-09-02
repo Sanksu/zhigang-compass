@@ -6410,6 +6410,8 @@ export interface components {
             /** @description 加分技能匹配分 [0,1]，Top-K 覆盖口径（考核跨源数最高的前 10 条加分项） */
             nice_score: number;
             exp_score: number;
+            /** @description 学历匹配分（第四维，BT v4，2026-09-01）[0,1]；任一侧学历层级无法映射时为 null（不参与总分加权） */
+            edu_score?: number | null;
             /** @description 已匹配的必备技能名 */
             matched_must: string[];
             /** @description 已匹配的加分技能名（JD 证据 hit_count 统一 must+nice 口径） */
@@ -6454,11 +6456,12 @@ export interface components {
             evidence_refs: components["schemas"]["EvidenceRef"][];
             /** @description 岗位职能域（域治理成果接入，按岗位名取图谱 domain_name；无域/查询失败为 null，前端不渲染） */
             domain_name?: string | null;
-            /** @description 实际评分权重（BT v3，configs/match_weights.json） */
+            /** @description 实际评分权重（BT v4，configs/match_weights.json）：must/nice/exp 三维（和为 1）+ edu 第四维凸组合权重（w_edu，未配置/非法为 null，此时总分纯三维口径） */
             weights?: {
                 must?: number;
                 nice?: number;
                 exp?: number;
+                edu?: number | null;
             };
             /** @description JD 级评分溯源：total_score 为同岗最近 N 条宽 JD（上限 max_jds）中的最高分，N=参与评分条数 */
             jd_compared?: number;

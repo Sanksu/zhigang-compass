@@ -143,6 +143,7 @@ function toMatchResult(r: BackendMatchResult): MatchResult {
     must_score: r.must_score,
     nice_score: r.nice_score,
     exp_score: r.exp_score,
+    edu_score: r.edu_score ?? null,
     summary: r.summary,
     radar: radarDims,
     skill_matrix: skill_matrix,
@@ -940,6 +941,9 @@ export function ResumeMatchPage() {
                         { label: '必备技能', score: matchResult.must_score, w: matchResult.weights?.must },
                         { label: '加分技能', score: matchResult.nice_score, w: matchResult.weights?.nice },
                         { label: '工作经验', score: matchResult.exp_score, w: matchResult.weights?.exp },
+                        ...(matchResult.edu_score != null
+                          ? [{ label: '学历背景', score: matchResult.edu_score, w: matchResult.weights?.edu }]
+                          : []),
                       ].map((d) => (
                         <div key={d.label} className="flex items-center gap-2">
                           <span className="text-xs text-ink-muted w-20">{d.label}</span>
