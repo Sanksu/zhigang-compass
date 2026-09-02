@@ -36,7 +36,13 @@ VALID_TRANSITIONS: dict[PositionState, set[PositionState]] = {
 }
 
 # 转换阈值（设计文档 7.2.4 阈值表 + 7.2.1 状态机表）
-EMERGING_MIN_CONFIDENCE = 0.6      # candidate → emerging
+# candidate → emerging：0.6 → 0.55（2026-09-02 审计，P1）。根因：growth 维在
+# "观测期首现后即进入平台期"的岗位上天然归零（快照频次末尾平稳，末窗==前窗，
+# norm(growth)=0），导致 base = 0.4×norm(ma3) + 0.3×norm(src) 恒卡在 0.55；
+# 改 growth 窗口（末窗 vs N 窗）仅能救回有上升脉冲的 CT技师，对 IT/
+# AI基础设施工程师（一入池即高位平稳）无效。此类岗位已由存量排除 + 跨源≥2
+# 双重防线把关，0.55 是这批"观测期新岗"的真实分布下限，放宽一格可放行。
+EMERGING_MIN_CONFIDENCE = 0.55     # candidate → emerging（08-01 初版 0.6，09-02 调至 0.55）
 EMERGING_MIN_SOURCES = 2
 STABLE_MIN_JD_COUNT = 5            # emerging → stable：jd_count ≥ 5（§7.2.1 表格）
 STABLE_MAX_WINDOW_VOLATILITY = 0.25  # 连续 2 窗口波动 < 25%
@@ -47,6 +53,14 @@ STABLE_MAX_SKILL_NOVELTY = 0.2     # skill_novelty 阈值（08-15 需求调整�
 DECLINE_WINDOW_DROP = 0.40         # 连续 3 窗口频次下降 > 40%
 DECLINE_WINDOW_COUNT = 3
 RECOVERY_WINDOW_COUNT = 2          # z_score > 0 连续 2 窗口回升
+
+# 方案 A（2026-09-02）：图谱 active/存量聚合岗的衰退判定。
+# 存量聚合岗无候选池证据锚点，仅凭 jd_publish_windows 补 0 序列会误判——
+# 实测 63 个 active 岗里 7 个 dr=1.0，但全是"仅 1 条观测期外旧 JD、末窗补 0"
+# 的伪影（可持续发展分析师/GPU验证/保险分析师等，发布日均在 07-14~07-25）。
+# 判定需 jd_count 证据量门槛（与 STABLE_MIN_JD_COUNT 同源 5）：只有真实 JD
+# 证据量的存量岗才允许判衰退，单条快照补 0 的伪影岗位一律跳过。
+DECLINE_MIN_ASSET_JD = 5           # 存量岗判衰退的最小 JD 证据量（防补0伪影）
 
 _TZ_CN = timezone(timedelta(hours=8))
 
@@ -297,6 +311,63 @@ def evaluate_auto_transition(
             logger.debug("  → stable（最近%d窗口 z>0 回升）", RECOVERY_WINDOW_COUNT)
             return PositionState.STABLE
     logger.debug("  → 不迁移")
+    return None
+
+
+def evaluate_active_decline(
+    windows: WindowFreq,
+    jd_count: int,
+    source_diversity: int,
+) -> Optional[PositionState]:
+    """图谱存量聚合岗（active/legacy 无候选池行）的衰退判定（方案 A，2026-09-02）。
+
+    与状态机的 evaluate_auto_transition 不同：存量岗没有候选池证据锚点，
+    仅凭 jd_publish_windows 的 30 天窗口序列判定。该序列对"岗位近期无发布"
+    会在末尾补 0,而采集期外/数据稀疏的岗位会因此产生伪影 dr=1.0——
+    实测 63 个 active 岗里 7 个（可持续发展分析师/GPU验证/保险分析师等，
+    jd_cnt=1、发布日 07-14~07-25、观测期 08-02 之前）全部是这种假信号。
+
+    为此加两道存量岗专属门控：
+    1. jd_count >= DECLINE_MIN_ASSET_JD（5）：只对真实 JD 证据量的岗位开放,
+       单条旧 JD 补 0 的伪影岗跳过——与 stable 的 STABLE_MIN_JD_COUNT 同源,
+       保证"证据充分才判衰退"。
+    2. 窗口序列 >= 2 期 + 连续 3 窗口累计下降 > 40%：与状态机判定同阈值
+       （DECLINE_WINDOW_DROP / DECLINE_WINDOW_COUNT）。
+
+    Args:
+        windows: 30 天窗口频次序列（jd_publish_windows 产出）
+        jd_count: jd_raw 中该岗位真实 JD 数（防伪影证据量门槛）
+        source_diversity: JD 独立源数（源多样性 < 2 的存量岗不判衰退，
+            避免单源低证据岗位被误标）
+
+    Returns:
+        PositionState.DECLINING 或 None
+    """
+    if jd_count < DECLINE_MIN_ASSET_JD:
+        logger.debug(
+            "active_decline 跳过: %s jd_count=%d < %d（证据量不足，防补0伪影）",
+            windows, jd_count, DECLINE_MIN_ASSET_JD,
+        )
+        return None
+    if source_diversity < EMERGING_MIN_SOURCES:
+        logger.debug(
+            "active_decline 跳过: 源多样性=%d < %d（单源低证据不判衰退）",
+            source_diversity, EMERGING_MIN_SOURCES,
+        )
+        return None
+    if len(windows.freqs) < 2:
+        logger.debug(
+            "active_decline 跳过: 窗口序列 %s（<2 期，冷启动不武断判定）",
+            windows.freqs,
+        )
+        return None
+    rate = decline_rate(windows, DECLINE_WINDOW_COUNT)
+    if rate > DECLINE_WINDOW_DROP:
+        logger.debug(
+            "active_decline → declining（最近%d窗口下降率 %.3f > %s）",
+            DECLINE_WINDOW_COUNT, rate, DECLINE_WINDOW_DROP,
+        )
+        return PositionState.DECLINING
     return None
 
 

@@ -33,6 +33,14 @@ MIN_JD_FREQ_MA3 = 10
 # 3 源门槛会永久拦截"单源或双源新出现"的岗位，与成熟岗位排除机制配合后安全）
 MIN_SOURCE_COLD_START = 2
 
+# 观测期首现岗专用通道（P0，2026-09-02）：用于 _is_post_start_unverified 判定。
+# 观测起点后首现的岗位，若源多样性 >= 2 且 JD 频次 >= 5，即入候选池——不依赖
+# Z-score（实测这类岗位首现后频次平稳，z_last 恒 0.6-0.9 永不过 1.5）。此通道
+# 解决"观测期新岗进不了候选池"的发现失效，同时保持"存量排除"与"跨源验证"两条
+# 既有防线。
+EMERGING_SOURCE_DIVERSITY = 2   # 跨源验证下限（与冷启动一致，且与 emerging 晋升一致）
+MIN_POST_START_JD = 5           # JD 量下限（与稳定态 jd_count>=5 门槛同源，见 §7.2.1）
+
 # 项目统一时区 UTC+8
 _TZ_CN = timezone(timedelta(hours=8))
 
@@ -135,6 +143,18 @@ def _is_mature_position(inp: DiscoveryInput) -> bool:
     return inp.first_seen_date < inp.observation_start
 
 
+def _is_post_start_unverified(inp: DiscoveryInput) -> bool:
+    """是否"观测起点后首现 + 尚未被 Z-score/冷启动验证"的岗位。
+
+    即存量排除通过、且首个观测日不早于观测窗口起点——这类岗位是系统观测期内
+    新出现的候选，Z-score 对它们因首现后即平稳而失效，需走源多样性 + JD 量通道。
+    缺 observation_start（观测起点未知）时不启用（不武断判定）。
+    """
+    if not inp.observation_start or not inp.first_seen_date:
+        return False
+    return inp.first_seen_date >= inp.observation_start
+
+
 class DiscoveryDetector:
     """新岗位发现检测器。
 
@@ -158,6 +178,16 @@ class DiscoveryDetector:
                 candidates.append(self._build_candidate(inp))
         return candidates
 
+    @staticmethod
+    def _build_candidate(inp: DiscoveryInput) -> CandidatePosition:
+        return CandidatePosition(
+            candidate_id=f"cand-{uuid4().hex[:12]}",
+            position_name=inp.position_name,
+            state=PositionState.CANDIDATE,
+            features=inp.features,
+            detected_at=datetime.now(_TZ_CN).isoformat(timespec="seconds"),
+        )
+
     def _passes(self, inp: DiscoveryInput) -> bool:
         """阶段一门控：先排除存量成熟岗位，再 Z-score 门控为主，z_score 不可算时冷启动兜底。
 
@@ -172,10 +202,24 @@ class DiscoveryDetector:
         冷启动不再以 history_days 天数判定——天数 <60 但 z_score 已由多期快照
         算出时，应直接使用 Z-score（修复：此前 history_days<60 强制禁用 Z-score
         导致 candidate 发现失效）。
+
+        观测期首现岗专用通道（P0，2026-09-02）：存量排除后，观测窗口起点之后
+        首次出现的岗位（first_seen_date >= observation_start）不应因 Z-score 平庸
+        而被永久挡在门外——它们确实是"观测期内新出现"，只缺"跨源验证"。此通道
+        用源多样性 + JD 量门槛入池，替代对这类岗位毫无区分度的 Z-score 主判定。
         """
         if _is_mature_position(inp):
             return False
         if passes_gate(inp.features, inp.history_days):
+            return True
+        # 观测期首现岗：实测快照频次末尾平稳，z_last 普遍 0.6-0.9，永不过 1.5
+        # 保守分支；但多已 src>=2，走冷启动又因窗口>=2 不可用。源多样性 + JD 量
+        # 双门槛入池（与 emerging 晋升的跨源验证、stable 的 jd_count>=5 同源）。
+        if (
+            _is_post_start_unverified(inp)
+            and inp.features.source_diversity >= EMERGING_SOURCE_DIVERSITY
+            and (inp.features.jd_freq_ma3 or 0) >= MIN_POST_START_JD
+        ):
             return True
         if (
             inp.features.z_score is None
@@ -186,16 +230,6 @@ class DiscoveryDetector:
                 inp.cold_successes, inp.cold_total, inp.features.source_diversity
             )
         return False
-
-    @staticmethod
-    def _build_candidate(inp: DiscoveryInput) -> CandidatePosition:
-        return CandidatePosition(
-            candidate_id=f"cand-{uuid4().hex[:12]}",
-            position_name=inp.position_name,
-            state=PositionState.CANDIDATE,
-            features=inp.features,
-            detected_at=datetime.now(_TZ_CN).isoformat(timespec="seconds"),
-        )
 
     async def ground_with_rag(
         self,
