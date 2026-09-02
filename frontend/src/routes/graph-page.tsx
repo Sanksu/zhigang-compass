@@ -1062,7 +1062,14 @@ export function GraphPage() {
               completedSkills={[]}
               evolutionMarks={evolutionMarks}
               skillLabelTopIds={skillLabelTopIds}
-              ringLayout={view === 'techStack' || view === 'positionPortrait'}
+              // 环形布局须与视图数据匹配时才启用（viewReady 就绪键）：避免首次点击
+              // 技术栈/画像页签时 data 仍是旧视图（全景）而 ringLayout 已为 true——
+              // 环形坐标分支只覆盖 skill/position，旧视图的其余节点落到原点糊成一团，
+              // 等新数据到达重建后才散开（即"首点糊→延迟正常"）。视角/渲染与
+              // 数据不同步是根因，加载角标只提示不阻断此错误渲染。
+              ringLayout={
+                (view === 'techStack' || view === 'positionPortrait') && viewReady === view
+              }
               className="h-full w-full"
             />
           ) : (
