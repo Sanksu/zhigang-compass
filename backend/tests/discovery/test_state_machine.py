@@ -13,6 +13,7 @@ from app.services.discovery.state_machine import (
     can_promote_to_emerging,
     decline_rate,
     evaluate_auto_transition,
+    evaluate_active_decline,
     freq_z_scores,
     has_recovery,
     jd_publish_windows,
@@ -463,6 +464,66 @@ class TestPromoteToEmerging:
     def test_no_confidence_score(self):
         c = _candidate(PositionState.CANDIDATE, source_diversity=3, confidence=None)
         assert can_promote_to_emerging(c) is False
+
+    def test_confidence_055_boundary(self):
+        """置信度门槛 0.6→0.55（P1，2026-09-02）：恰好 0.55 可晋升。
+
+        背景：观测期首现岗的 growth 维天然归零（快照末尾平稳），base =
+        0.4×norm(ma3) + 0.3×norm(src) 恒卡 0.55——改 growth 窗口仅救回有上升
+        脉冲的岗位，对一入池即高位平稳者无效。此类岗位已由存量排除 + 跨源≥2
+        双重防线把关，0.55 是这批岗位的真实分布下限，放宽一格可放行。
+        """
+        c = _candidate(PositionState.CANDIDATE, source_diversity=2, confidence=0.55)
+        assert can_promote_to_emerging(c) is True
+        # 稍低于 0.55 仍拦截
+        c_below = _candidate(PositionState.CANDIDATE, source_diversity=2, confidence=0.54)
+        assert can_promote_to_emerging(c_below) is False
+
+
+class TestActiveDecline:
+    """图谱存量聚合岗衰退判定（方案 A，2026-09-02）。
+
+    evaluate_active_decline 为图谱 active/legacy（无候选池行）岗位的专属衰退判定。
+    与状态机 evaluate_auto_transition 不同：存量岗无候选池证据锚点，仅凭
+    jd_publish_windows 补 0 序列会误判——必须靠 jd_count>=5 + 源>=2 + 窗口>=2
+    三道门控排除"单条观测期外旧 JD、末窗补 0"的伪影（实测 7 个 dr=1.0 全此类）。
+    """
+
+    def test_real_decline_detected(self):
+        """连续 3 窗口下降 >40% + 证据充分 → declining。"""
+        w = WindowFreq([10.0, 8.0, 5.0])  # 下降率 (10-5)/10 = 50% > 40%
+        assert evaluate_active_decline(w, jd_count=8, source_diversity=3) == PositionState.DECLINING
+
+    def test_single_jd_artifact_not_detected(self):
+        """伪影岗：仅 1 条 JD、末窗补 0，dr=1.0 但证据量不足 → 不判衰退。"""
+        w = WindowFreq([1.0, 0.0])  # 补 0 伪影，dr=1.0
+        # jd_count=1 < 5：防伪影门控拦住，不误标
+        assert evaluate_active_decline(w, jd_count=1, source_diversity=2) is None
+
+    def test_insufficient_windows_not_detected(self):
+        """窗口序列 <2 期 → 数据不足不武断判定。"""
+        w = WindowFreq([5.0])
+        assert evaluate_active_decline(w, jd_count=8, source_diversity=3) is None
+
+    def test_single_source_not_detected(self):
+        """源多样性 <2 → 单源低证据存量岗不判衰退。"""
+        w = WindowFreq([10.0, 6.0, 5.0])
+        assert evaluate_active_decline(w, jd_count=8, source_diversity=1) is None
+
+    def test_stable_going_up_not_detected(self):
+        """存量岗频次上升 → decline_rate 为负，不判衰退。"""
+        w = WindowFreq([5.0, 8.0, 12.0])  # 上升
+        assert evaluate_active_decline(w, jd_count=10, source_diversity=3) is None
+
+    def test_boundary_40_percent_detected(self):
+        """下降率恰好略超 40% → declining（边界）。"""
+        w = WindowFreq([10.0, 10.0, 5.0])  # (10-5)/10 = 50% > 40%
+        assert evaluate_active_decline(w, jd_count=6, source_diversity=2) == PositionState.DECLINING
+
+    def test_below_40_percent_not_detected(self):
+        """下降率低于 40% → 不判衰退（未到阈值）。"""
+        w = WindowFreq([10.0, 9.0, 7.0])  # (10-7)/10 = 30% < 40%
+        assert evaluate_active_decline(w, jd_count=8, source_diversity=3) is None
 
 
 class TestTransitionValidation:
