@@ -81,7 +81,7 @@ SEGREGATED_DOMAINS: dict[str, dict] = {
     },
     "dom_ai_app": {
         "name": "AI应用与智能体",
-        "members": ["GenAI/AgenticAI", "AIGC抽卡师", "AI与数据系统"],
+        "members": ["GenAI/AgenticAI", "AIGC抽卡师", "AI与数据系统", "创始工程师"],
     },
     "dom_ent_app": {
         "name": "企业应用与系统",
@@ -122,12 +122,15 @@ PINNED_DOMAIN_ANCHORS: dict[str, str] = {
     # 探针实证（2026-08-31）：它们的连接证据真实但无差别指向枢纽域
     # （share 与正例完全重叠），纯拓扑归类不可分，属治理声明层职责
     "产品经理": GENERAL_PIN,
-    "创始工程师": GENERAL_PIN,
     "SAP集成": GENERAL_PIN,
     "Murex应用": GENERAL_PIN,
     "AI与数据系统": GENERAL_PIN,
     "生化工程师": GENERAL_PIN,
     "CMBS交易员": GENERAL_PIN,
+    # 阶段 2（2026-09-02，LLM 语义归类探针 phase2 产物）：IT现场服务（0.85×2）、
+    # Palantir管理员（0.75/0.6）稳定判定归「基础设施运维」，pin 到运维域锚点。
+    "IT现场服务": "运维工程师",
+    "Palantir管理员": "运维工程师",
     # —— 基准收口批（2026-08-31，簇级归类两轮探针否决后的治理层兜底）——
     # 候选方案②（微簇池化/人均亲和度）经探针实证 2/14 与 11/26，负例分数
     # 高于正例、分布完全重叠：薄画像岗的连边证据不携带域语义，拓扑不可分。
