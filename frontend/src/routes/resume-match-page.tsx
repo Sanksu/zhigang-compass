@@ -209,6 +209,10 @@ export function ResumeMatchPage() {
   const [resumeList, setResumeList] = useState<ResumeSummary[]>([])
   const [activeResumeId, setActiveResumeId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // compare 失败独立于 notice：右栏错误卡需带重试入口（仅置 notice 会让右栏纯空白）
+  const [detailError, setDetailError] = useState<string | null>(null)
+  // 简历解析进度（SSE progress 帧的 0-100；null=尚未收到进度帧）
+  const [parseProgress, setParseProgress] = useState<number | null>(null)
   // recommend 异步任务进行中（渲染分阶段加载卡，替代素文案条）
   const [recommending, setRecommending] = useState(false)
   // 差距展开溯源（task T3）：被展开的技能集
@@ -235,6 +239,7 @@ export function ResumeMatchPage() {
   // 上传简历 → 真实异步解析 + SSE 进度推送（GET /resume/task/{id}/stream）
   async function handleFileSelected(file: File) {
     setNotice(null)
+    setParseProgress(null)
     setStage('parsing')
     try {
       const form = new FormData()
@@ -283,6 +288,16 @@ export function ResumeMatchPage() {
         for (const frame of frames) {
           const event = frame.match(/^event:\s*(.+)$/m)?.[1]
           const data = frame.match(/^data:\s*(.+)$/m)?.[1]
+          if (event === 'progress' && data) {
+            // progress 帧载荷为完整任务对象（后端 serialize_task），取 0-100 数字驱动进度提示
+            try {
+              const p = JSON.parse(data)?.progress
+              if (typeof p === 'number') setParseProgress(Math.round(p))
+            } catch {
+              /* 非 JSON progress 帧忽略 */
+            }
+            continue
+          }
           if (event === 'done' && data) {
             // done 事件 data 为完整任务载荷，result.resume_id 为新解析简历画像 ID；
             // 刷新已有简历列表并直接触发推荐，避免用户整页刷新后才可发起匹配
@@ -389,6 +404,7 @@ export function ResumeMatchPage() {
     setDiagnosis(null)
     setFeedback(null)
     setShowJdOriginal(false)
+    setDetailError(null)
     setJdBreakdown([])
     setSelectedJdId(null)
     try {
@@ -402,7 +418,8 @@ export function ResumeMatchPage() {
       setSelectedJdId(bd[0]?.jd_id ?? null)
       setMatchResult(toMatchResult(res))
     } catch (e) {
-      setNotice(errMsg(e, '比对失败'))
+      // 置 detailError（非 notice）：右栏渲染错误卡 + 重试按钮，避免整栏空白
+      setDetailError(errMsg(e, '比对失败，请稍后重试'))
     } finally {
       setLoadingDetail(false)
     }
@@ -549,6 +566,7 @@ export function ResumeMatchPage() {
     setFeedback(null)
     setActiveResumeId(null)
     setNotice(null)
+    setDetailError(null)
     setExpandedGaps(new Set())
     setShowJdOriginal(false)
   }
@@ -565,7 +583,7 @@ export function ResumeMatchPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-sm">简历上传</CardTitle>
-              <CardDescription>支持 PDF / Word / 图片，≤ 10MB · PII 脱敏后送入 LLM</CardDescription>
+              <CardDescription>支持 PDF / Word / 文本 / 图片，≤ 10MB · PII 脱敏后送入 LLM</CardDescription>
             </CardHeader>
             <CardContent>
               <ResumeUploader
@@ -577,6 +595,18 @@ export function ResumeMatchPage() {
                   stages={['正在召回岗位候选 JD…', '正在逐条三维评分…', '正在聚合岗位并对齐分数…']}
                   rows={3}
                   hint="全量 JD 真实匹配，通常 10~60 秒"
+                  className="py-4"
+                />
+              ) : stage === 'parsing' ? (
+                // 解析等待全程有反馈（替代此前上传后的静默死等）
+                <AiThinkingCard
+                  stages={['解析任务已提交，排队等待中…', '正在抽取简历结构与技能画像…', 'LLM 正在识别技能、学历与项目经历…', '正在写入简历库…']}
+                  rows={3}
+                  hint={
+                    parseProgress != null
+                      ? `解析进度 ${parseProgress}%（LLM 解析通常 10~30 秒）`
+                      : 'LLM 解析通常 10~30 秒，请勿关闭或刷新页面'
+                  }
                   className="py-4"
                 />
               ) : (
@@ -656,6 +686,13 @@ export function ResumeMatchPage() {
         }
       />
 
+      {/* 提示条（反馈/刷新确认/失败原因等）：matched 阶段此前不渲染 notice，所有提示静默丢失 */}
+      {notice && (
+        <p className="text-xs text-ink-muted mb-3 border border-border rounded-md p-2 bg-subtle">
+          {notice}
+        </p>
+      )}
+
       {/* 候选人画像摘要 */}
       {candidate && (
         <Card className="mb-4">
@@ -691,6 +728,11 @@ export function ResumeMatchPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
+            {recommendations.length === 0 && (
+              <p className="text-xs text-ink-faint py-10 text-center">
+                未找到匹配岗位，可更换简历重试，或稍后再试
+              </p>
+            )}
             {recommendations.map((rec) => {
               const isSelected = selectedPosition?.position_id === rec.position_id
               const scoreColor =
@@ -715,6 +757,7 @@ export function ResumeMatchPage() {
                     <span className="text-sm font-medium text-ink truncate">{rec.position_name}</span>
                     <span className={`text-sm font-mono font-semibold tabular-nums ${scoreColor}`}>
                       {(rec.total_score * 100).toFixed(0)}
+                      <span className="text-[10px] font-normal">%</span>
                     </span>
                   </div>
                   <div className="flex items-center gap-2 mb-1.5">
@@ -725,9 +768,19 @@ export function ResumeMatchPage() {
                         {rec.domain_name}
                       </span>
                     )}
-                    <span className="text-[11px] text-ink-faint font-mono truncate">{rec.position_id}</span>
                   </div>
                   <p className="text-xs text-ink-muted line-clamp-2">{rec.summary}</p>
+                  {/* 关键差距预告：进入详情前先看到缺口 Top-3（技能缺失项展示清晰） */}
+                  {rec.key_gaps.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                      <span className="text-[10px] text-ink-faint shrink-0">差距</span>
+                      {rec.key_gaps.map((s) => (
+                        <span key={s} className="rounded bg-state-archived/10 px-1 py-0.5 text-[10px] text-state-archived">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {/* JD 级证据（阶段 B）：命中岗位族内原生 JD，显示最匹配的 1-2 条 */}
                   {rec.jd_evidence.length > 0 && (
                     <div className="mt-2 space-y-1.5">
@@ -803,7 +856,30 @@ export function ResumeMatchPage() {
                 <AiThinkingCard
                   stages={['正在运行人岗匹配引擎…', '正在计算三维得分与技能矩阵…', '正在生成比对详情…']}
                   rows={4}
+                  hint="通常 6~15 秒，首次运行需预热模型（可达 1 分钟）"
                 />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* 比对失败 / 结果未就绪兜底卡：替代此前 compare 抛错后右栏整栏空白（无错误无重试） */}
+          {selectedPosition && !loadingDetail && !matchResult && (
+            <Card className="border-dashed">
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <AlertCircle className="size-6 text-state-archived mb-2" />
+                <p className="text-sm text-ink">{detailError ? '人岗比对失败' : '正在准备比对结果…'}</p>
+                <p className="text-xs text-ink-muted mt-1 max-w-md break-all">
+                  {detailError ?? '若长时间无响应，请点击重试'}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-4"
+                  onClick={() => handleSelectPosition(selectedPosition)}
+                >
+                  <RotateCcw className="size-3.5 mr-1" />
+                  重试比对
+                </Button>
               </CardContent>
             </Card>
           )}
@@ -934,7 +1010,13 @@ export function ResumeMatchPage() {
                     </div>
                   )}
                   <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
-                    <ScoreRing score={matchResult.total_score} />
+                    <div>
+                      <ScoreRing score={matchResult.total_score} />
+                      {/* 口径说明：列表分（recommend 单 JD 速览）与详情分（compare 全量重算）可能略有差异 */}
+                      <p className="text-center text-[10px] text-ink-faint -mt-1" title="详情分按该岗位最佳匹配 JD 全量重算，可能与左侧列表速览分存在正常偏差">
+                        按最佳匹配 JD 全量重算
+                      </p>
+                    </div>
                     <div className="space-y-2">
                       {[
                         { label: '必备技能', score: matchResult.must_score, w: matchResult.weights?.must },
@@ -950,7 +1032,7 @@ export function ResumeMatchPage() {
                             />
                           </div>
                           <span className="text-xs font-mono text-ink tabular-nums w-12 text-right">
-                            {d.score == null ? '—' : (d.score * 100).toFixed(0)}
+                            {d.score == null ? '—' : `${(d.score * 100).toFixed(0)}%`}
                           </span>
                           <span className="text-[11px] text-ink-faint w-10 text-right">
                             {d.w != null ? `权重 ${Math.round(d.w * 100)}%` : ''}
@@ -970,7 +1052,7 @@ export function ResumeMatchPage() {
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm">能力对比</CardTitle>
-                    <CardDescription>候选人满足度 vs 达标基线（基线为归一化参考线：加分 80 / 经验 85，其余 100）</CardDescription>
+                    <CardDescription>候选人能力 vs 岗位要求（含熟练度满足度对比）</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <RadarChart data={matchResult.radar} />
@@ -1119,24 +1201,42 @@ export function ResumeMatchPage() {
                             {expanded && (
                               <div className="mt-2 space-y-2 border-t border-border pt-2">
                                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-muted">
-                                  <span>
+                                  <span title="需求度：该技能在本岗位族采集 JD 中的出现广度（0-100），越高说明市场要求越普遍">
                                     需求 <b className="text-ink">{Math.round((gap.demand ?? 0) * 100)}</b>
                                   </span>
-                                  <span>
+                                  <span title="趋势热度：图谱岗位覆盖与数据源热度综合归一（0-100）">
                                     趋势{' '}
-                                    {/* L-13 修复：trend=0/null 显示持平/无数据而非恒"↑" */}
-                                    {gap.trend == null || gap.trend === 0 ? (
-                                      <b className="text-ink-muted">— 0</b>
+                                    {/* L-13 修复：trend 无数据与持平分开表达，避免恒"↑"与怪异"— 0" */}
+                                    {gap.trend == null ? (
+                                      <b className="text-ink-muted">暂无数据</b>
+                                    ) : gap.trend === 0 ? (
+                                      <b className="text-ink-muted">持平</b>
                                     ) : (
                                       <b className={gap.trend > 0 ? 'text-state-emerging' : 'text-state-archived'}>
                                         {gap.trend > 0 ? '↑' : '↓'} {Math.round(Math.abs(gap.trend) * 100)}
                                       </b>
                                     )}
                                   </span>
-                                  <span>
+                                  <span
+                                    title="学习回报率：需求 × 趋势 ÷ 学习成本，归一 0-100；越高越值得优先补齐"
+                                  >
                                     {/* ROI 归一化 0-1（后端以 0.1 原始值为满分基准封顶），×100 与需求/趋势同口径 */}
                                     ROI <b className="text-ink">{Math.round((gap.roi ?? 0) * 100)}</b>
                                   </span>
+                                  {rel !== 'matched' && (
+                                    <button
+                                      type="button"
+                                      className="ml-auto flex items-center gap-0.5 text-[11px] text-ink-muted underline underline-offset-2 hover:text-ink"
+                                      onClick={() =>
+                                        document
+                                          .getElementById('learning-path-card')
+                                          ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                                      }
+                                    >
+                                      查看补齐课程
+                                      <ArrowRight className="size-3" />
+                                    </button>
+                                  )}
                                 </div>
                                 {/* 数据溯源（task T3）：一条 JD 要求 ↔ 对应简历特征，逐条成对展示，打破算法黑盒 */}
                                 {(() => {
@@ -1180,8 +1280,9 @@ export function ResumeMatchPage() {
                 </CardContent>
               </Card>
 
-              {/* 学习路径规划（双轨制：先修拓扑分层 → 阶段时间轴；已匹配技能标记已掌握） */}
-              <Card>
+              {/* 学习路径规划（双轨制：先修拓扑分层 → 阶段时间轴；已匹配技能标记已掌握）。
+                  id 供差距展开区「查看补齐课程」锚点滚动定位 */}
+              <Card id="learning-path-card" className="scroll-mt-4">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm flex items-center gap-2">
                     <span>学习路径规划</span>
@@ -1231,13 +1332,6 @@ export function ResumeMatchPage() {
                   <CardTitle className="text-sm flex items-center gap-2">
                     <Sparkles className="size-4 text-state-emerging" />
                     AI 诊断报告
-                    {/* AI 生成内容标注（内容合规划线：LLM 产出对用户显式标识） */}
-                    <span
-                      className="rounded border border-state-emerging/40 bg-state-emerging/10 px-1 py-px text-[10px] font-normal text-state-emerging"
-                      title="本报告由大模型基于图谱匹配结果生成，供参考；关键结论可经证据引用回溯原始 JD"
-                    >
-                      AI 生成
-                    </span>
                     <RefreshButton
                       variant="ghost"
                       className="h-6 px-1.5 text-[11px] ml-auto"
