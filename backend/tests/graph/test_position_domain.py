@@ -402,7 +402,7 @@ class TestSegregatedDomains:
         # 集合应含全部成员名单
         assert _SEGREGATED_MEMBER_NAMES == {
             "网络安全工程师", "移动网络安全工程师",
-            "GenAI/AgenticAI", "AIGC抽卡师", "AI与数据系统",
+            "GenAI/AgenticAI", "AIGC抽卡师", "AI与数据系统", "创始工程师",
             "SAP集成", "Murex应用", "PACS与企业影像管理员", "People应用",
             "产品经理", "项目经理",
         }
