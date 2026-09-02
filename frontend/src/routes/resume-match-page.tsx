@@ -1164,6 +1164,13 @@ export function ResumeMatchPage() {
                   <CardTitle className="text-sm flex items-center gap-2">
                     <Sparkles className="size-4 text-state-emerging" />
                     AI 诊断报告
+                    {/* AI 生成内容标注（内容合规划线：LLM 产出对用户显式标识） */}
+                    <span
+                      className="rounded border border-state-emerging/40 bg-state-emerging/10 px-1 py-px text-[10px] font-normal text-state-emerging"
+                      title="本报告由大模型基于图谱匹配结果生成，供参考；关键结论可经证据引用回溯原始 JD"
+                    >
+                      AI 生成
+                    </span>
                     <RefreshButton
                       variant="ghost"
                       className="h-6 px-1.5 text-[11px] ml-auto"

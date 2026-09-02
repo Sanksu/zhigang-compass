@@ -47,6 +47,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { apiGet } from '@/lib/api'
+import { formatDateTime } from '@/lib/utils'
 
 type Schema = components['schemas']
 
@@ -559,6 +560,15 @@ export function NodeDetailPanel({
             {/* 岗位详情 */}
             {node.type === 'position' && !node.isDomain && positionDetail && (
               <>
+                {/* 数据新鲜度（动态感知可视化）：last_updated=该岗位最近一次 JD 采集入库时间 */}
+                {positionDetail.last_updated && (
+                  <p
+                    className="text-[11px] text-ink-faint"
+                    title="该岗位画像源自最近采集的 JD 数据；系统每日 T+1 05:00 发布图谱快照，岗位能力定义随之动态更新"
+                  >
+                    数据更新于 {formatDateTime(positionDetail.last_updated)} · 每日 T+1 快照
+                  </p>
+                )}
                 {/* 画像证据区（08-29）：多值分布 + JD 证据计数——单值众数 + 分布 Top */}
                 {positionDetail.evidence_count != null && (
                   <section className="space-y-2">
