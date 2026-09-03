@@ -149,6 +149,7 @@ def _candidate_row(name: str = "RAG", state: str = "emerging", confidence: float
         seed_matched=True,
         rag_matched=True,
         definition_draft="RAG 工程师负责检索增强生成系统的构建与优化。",
+        definition_structured={"core_duties": [], "typical_scenarios": []},
     )
 
 

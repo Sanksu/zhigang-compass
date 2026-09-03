@@ -38,6 +38,7 @@ import {
   type ReviewItem,
 } from './review-types'
 import { useIsDesktop } from '@/hooks/use-media-query'
+import { StructuredDefinition } from './definition-block'
 
 /**
  * 候选晋升审核 Tab — 设计文档 §7.2.2 + AL-M4-01
@@ -335,6 +336,9 @@ export function CandidateReviewTab() {
                   <p className="max-h-40 overflow-auto text-xs text-ink-secondary leading-relaxed">
                     {reviewTarget.definition_draft || '（无定义草案）'}
                   </p>
+                  <div className="text-xs text-ink-secondary leading-relaxed">
+                    <StructuredDefinition data={reviewTarget.definition_structured} />
+                  </div>
                   {reviewTarget.evidence_refs.length > 0 && (
                     <CitationGroup
                       className="border-t border-border pt-2"
@@ -380,6 +384,11 @@ export function CandidateReviewTab() {
             <div className="rounded-md bg-subtle p-3 text-xs text-ink-secondary">
               <div className="mb-1 font-medium text-ink">定义草案</div>
               <p className="leading-relaxed">{reviewTarget?.definition_draft || '（无定义草案）'}</p>
+              {reviewTarget && (
+                <div className="mt-2">
+                  <StructuredDefinition data={reviewTarget.definition_structured} />
+                </div>
+              )}
               {reviewTarget && reviewTarget.evidence_refs.length > 0 && (
                 <div className="mt-2">
                   <div className="mb-1 font-medium text-ink">证据引用</div>

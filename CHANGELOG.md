@@ -6,6 +6,7 @@
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
 ### 2026-09-03
+- **赛题缺口补齐批次（定义结构化/级别视图/交叉验证门控）**：对照赛题 XH-202621 逐条审计后的三缺口闭环——① **新岗位定义五字段结构化**（契约 PositionDefinition + 迁移 20260903_002 `definition_structured` JSONB；grounding LLM 升级为 summary/core_duties/typical_scenarios 结构化输出（NLI 门控覆盖全部结构化字段，技能两项一律取图谱 REQUIRES 证据边不采信 LLM）；/discovery/recent 组装五字段 definition（落图后图谱属性优先，candidate 未落图回退 LLM 草案）；admin 审核项透出 definition_structured；前端发现页/审核页渲染职责与场景）。② **图谱按级别过滤视图**（赛题「按技术栈和级别切换视图」——/graph/view/{panorama,techStack} 增 `level` 参数（Literal 初/中/高/专家），Cypher 热次统计与明细双段同过滤（含 main 视图无 WHERE 场景补 WHERE 子句）；前端全景/技术栈视图新增级别筛选下拉（切换失效视图缓存+清选中态），适配器透传边 level）。③ **交叉验证入图门控（审查 H5 闭环）**：ETL 顺序修正 cross_validate 先于 aggregate_positions，聚合消费组级置信度拦截低置信 JD（既有 ≥0.6/新兴 candidate/emerging ≥0.5，`filter_rows_for_aggregation`；无验证结果的历史 JD 放行并计数），门控统计并入阶段返回；evaluate.py 报告将 JD 词面基线行改标「参考口径（不设达标线）」避免与 LLM 盲审达标行混淆；测试数据交付物落盘 `backend/data/test_artifacts/`（1 新岗位含五字段定义 + 1 既有岗位含能力图谱与 changes 标注），设计文档 §4.5/§17.3 同步对齐。含新增/扩展测试 30+ 例（grounding 结构化/discovery API 组装/upsert 持久化/级别过滤 Cypher 断言/门控分级与任务消费/管线顺序断言/smoke mock 对齐），前后端全量测试+typecheck 通过。⚠️ 模型变更（迁移 20260903_002，已标注）+ 聚合门控涉及业务正确性，需 @zkt-sky 复核。
 
 - **课程源调度口径收口（对齐 TODO-CRS-01）**：确认课程源（coursera/edx/icourse163）按 08-28 拍板**按日采集**已并入主管线（etl.py course\_platforms，无需周调度）；移除 update\_status.\_WEEKLY\_SOURCES 周更假设，新鲜度阈值统一 T+1 日级（\_freshness\_threshold 恒返回 1 天），避免断更 7 天才告警与日级闭环不一致。进度跟踪.md §七·五 TODO-CRS-01 标记已解决。
 

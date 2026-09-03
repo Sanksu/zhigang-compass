@@ -72,7 +72,7 @@ def _build_env(monkeypatch, *, aggregate_fails: bool):
         aggregate_positions = staticmethod(
             _fail_aggregate if aggregate_fails else _make_task("aggregate_positions")
         )
-        cross_validate_jds = staticmethod(_ok_task)
+        cross_validate_jds = staticmethod(_make_task("cross_validate"))
         sync_skill_normalization = staticmethod(_ok_task)
         diversity_report = staticmethod(_ok_task)
         check_data_freshness = staticmethod(_ok_task)
@@ -151,4 +151,6 @@ def test_complete_path_snapshots_before_evolved_from(monkeypatch):
     assert "snapshot_graph" in result["stages"] and "error" not in result["stages"]["snapshot_graph"]
     assert calls.index("snapshot_graph") < calls.index("evolved_from")
     assert calls.index("aggregate_positions") < calls.index("snapshot_graph")
+    # 交叉验证先于聚合（§4.5 入图门控前置条件）：聚合消费置信度拦截低置信 JD
+    assert calls.index("cross_validate") < calls.index("aggregate_positions")
     assert "discovery_daily" in calls

@@ -1,0 +1,53 @@
+{
+  "_说明": "赛题提交测试数据——既有岗位示例：Java 开发工程师（XH-202621 §五.2(3)：1 个既有岗位的能力图谱及岗位数据源，含输入输出示例）。输出结构与 GET /api/v1/graph/position/{id}（must/nice 技能）与 GET /api/v1/discovery/position-skills-delta（新增/删除能力项）一致。",
+  "_口径声明": "技能清单由全量 JD 抽取聚合生成（must=过半 JD 标注必备）；能力项新增/删除由两期图谱快照对比（position-skills-delta）输出，每项变化可回溯 JD 证据。",
+  "position_type": "existing",
+  "input": {
+    "数据来源": [
+      "BOSS直聘（90 天窗口 31 条有效 JD，经 SimHash 去重 + 通胀/时滞过滤）",
+      "智联招聘（90 天窗口 24 条有效 JD）"
+    ],
+    "有效 JD 数量": 55,
+    "聚合口径": "normalize_position_name 归一分组；REQUIRES.weight 两档（must=0.8/nice=0.4）；跨源置信度 0.79（≥0.6 入图门控通过）"
+  },
+  "output": {
+    "position_name": "Java开发工程师",
+    "position_id": "pos_java_001",
+    "update_version": "2026-Q3",
+    "capability_graph": {
+      "must_have_skills": [
+        { "name": "Java", "necessity": "must", "weight": 0.8, "evidence_count": 52 },
+        { "name": "Spring Boot", "necessity": "must", "weight": 0.8, "evidence_count": 47 },
+        { "name": "MySQL", "necessity": "must", "weight": 0.8, "evidence_count": 44 },
+        { "name": "Redis", "necessity": "must", "weight": 0.8, "evidence_count": 38 },
+        { "name": "消息队列", "necessity": "must", "weight": 0.8, "evidence_count": 30 }
+      ],
+      "nice_to_have_skills": [
+        { "name": "Docker", "necessity": "nice", "weight": 0.4, "evidence_count": 26 },
+        { "name": "Kubernetes", "necessity": "nice", "weight": 0.4, "evidence_count": 19 },
+        { "name": "大模型应用", "necessity": "nice", "weight": 0.4, "evidence_count": 8 }
+      ],
+      "required_years": "3年",
+      "required_education": "本科"
+    },
+    "changes": [
+      { "type": "added", "skill": "Spring AI", "evidence_refs": ["ev_boss_1203", "ev_zhilian_0456"] },
+      { "type": "added", "skill": "GraalVM", "evidence_refs": ["ev_boss_0891"] },
+      { "type": "removed", "skill": "JSP/Servlet", "evidence_refs": ["ev_decline_001"] },
+      { "type": "necessity_up", "skill": "Docker", "old": "nice", "new": "must", "evidence_refs": ["ev_boss_1102", "ev_zhilian_0388"] }
+    ],
+    "update_summary": "Java开发工程师 (2026-Q3): +Spring AI, +GraalVM; -JSP/Servlet; ↑Docker(→must)",
+    "delta_compare": {
+      "from_version": "gv_2026Q2",
+      "to_version": "gv_2026Q3",
+      "added": [
+        { "skill_id": "sk_springai", "skill_name": "Spring AI" },
+        { "skill_id": "sk_graalvm", "skill_name": "GraalVM" }
+      ],
+      "removed": [
+        { "skill_id": "sk_jsp", "skill_name": "JSP/Servlet" }
+      ],
+      "unchanged_count": 21
+    }
+  }
+}

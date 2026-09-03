@@ -1,0 +1,67 @@
+{
+  "_说明": "赛题提交测试数据——新岗位示例：大模型应用工程师（XH-202621 §五.2(3)：1 个新岗位的能力图谱及岗位数据源，含输入输出示例）。输出结构与 GET /api/v1/discovery/recent 端点一致（2026-09-03 起含五字段结构化 definition）。",
+  "_口径声明": "种子为引导，岗位定义由系统 RAG 接地 + LLM 生成（NLI 门控），技能清单取自图谱 REQUIRES 证据边（JD 抽取聚合），非人工预置。",
+  "position_type": "new",
+  "input": {
+    "数据来源": [
+      "BOSS直聘（国内，60 天窗口 12 条 JD）",
+      "智联招聘（国内，60 天窗口 9 条 JD）",
+      "arXiv（cs.CL/cs.AI 周论文数异常 +2.3σ）",
+      "GitHub（llm-app 生态 Star 增速异常 +2.1σ）",
+      "O*NET 权威库（RAG 接地检索命中 Software Developers 近邻定义）"
+    ],
+    "检测信号": {
+      "jd_freq_ma3": 10.3,
+      "z_score": 2.6,
+      "source_diversity": 2,
+      "cross_source_consistency": 0.78,
+      "arxiv_paper_count_anomaly": true,
+      "github_star_velocity_anomaly": true,
+      "first_seen": "2026-07-06"
+    },
+    "判定流程": "JD z-score 门控(≥2.0) → 候选池 → RAG 接地（种子+权威库双路）→ LLM 结构化定义（NLI 矛盾软门控）→ 三维置信度 → admin 人工审核晋升 emerging"
+  },
+  "output": {
+    "position_id": "pos_llmapp_001",
+    "position_name": "大模型应用工程师",
+    "state": "emerging",
+    "detected_at": "2026-08-06T05:20:00+08:00",
+    "definition_draft": "负责基于大语言模型的应用系统设计与开发，构建检索增强生成（RAG）链路并落地企业级场景。",
+    "definition": {
+      "position_name": "大模型应用工程师",
+      "summary": "负责基于大语言模型的应用系统设计与开发，构建检索增强生成（RAG）链路并落地企业级场景。",
+      "core_duties": [
+        "设计并开发基于大语言模型的应用系统与 Agent 工作流",
+        "构建 RAG 检索增强链路（向量检索/重排/引用溯源）",
+        "建设提示词工程规范与模型效果评测集",
+        "负责模型推理服务的部署、调优与成本控制"
+      ],
+      "must_skills": ["Python", "Prompt工程", "RAG", "LangChain", "向量数据库"],
+      "nice_skills": ["vLLM", "知识图谱", "Fine-tuning", "Docker"],
+      "typical_scenarios": [
+        "企业知识库智能问答",
+        "智能客服与营销文案生成",
+        "代码助手与研发效能工具"
+      ]
+    },
+    "confidence": {
+      "base_confidence": 0.72,
+      "arxiv_anomaly": true,
+      "github_anomaly": true,
+      "bonus": 0.15,
+      "final_confidence": 0.87
+    },
+    "skills": {
+      "must": [
+        { "skill_id": "sk_python", "skill_name": "Python", "necessity": "must", "weight": 0.8, "source_count": 2 },
+        { "skill_id": "sk_rag", "skill_name": "RAG", "necessity": "must", "weight": 0.8, "source_count": 2 }
+      ],
+      "nice": [
+        { "skill_id": "sk_vllm", "skill_name": "vLLM", "necessity": "nice", "weight": 0.4, "source_count": 1 }
+      ],
+      "soft": []
+    },
+    "evidence_refs": ["ev_boss_1203", "ev_zhilian_0456", "watch:2026-W31:大模型应用工程师"],
+    "skill_pending": false
+  }
+}

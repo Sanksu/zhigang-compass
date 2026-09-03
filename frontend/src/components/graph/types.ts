@@ -73,7 +73,7 @@ export interface NodeDetail {
   /** 域超节点（isDomain 时不走 /graph/position/{id} 详情，本地渲染域信息） */
   isDomain?: boolean
   memberCount?: number
-  /** 技能级别（后端 view 端点未返回，面板预留展示） */
+  /** 技能熟练度级别（REQUIRES.level，边属性；级别筛选视图下经选中边聚合，预留） */
   level?: string
   /** 证据来源（后端 view 端点未返回，面板预留展示） */
   source?: string

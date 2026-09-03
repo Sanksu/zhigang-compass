@@ -102,6 +102,7 @@ async def positions_pending(
             "seed_matched": c.seed_matched,
             "rag_matched": c.rag_matched,
             "definition_draft": c.definition_draft,
+            "definition_structured": c.definition_structured,
             "detected_at": c.detected_at,
             "updated_at": iso(c.updated_at),
         }
@@ -259,6 +260,7 @@ async def evolution_pending(
             "seed_matched": c.seed_matched,
             "rag_matched": c.rag_matched,
             "definition_draft": c.definition_draft,
+            "definition_structured": c.definition_structured,
             "detected_at": c.detected_at,
             "updated_at": iso(c.updated_at),
         }
