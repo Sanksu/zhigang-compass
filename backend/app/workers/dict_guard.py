@@ -317,6 +317,12 @@ async def dict_guard_daily(ctx: dict) -> dict:
             record_failed += 1
             logger.warning("[dict_guard] 决策记录落库失败（不影响既有链路）: %s", e)
 
+    # ---- 4.5 副作用巡检重试（2026-09-03 非原子性处理）----
+    # 已批准但副作用失败（effects_applied=False）的提案：幂等重试补齐动态词表 /
+    # Neo4j 清理（与 admin 审批共用 apply_review_effect，杜绝语义分叉），每日一次、
+    # 上限 _EFFECT_MAX_RETRY 次；达上限或缺审计记录者交人工（进 skipped 留痕）。
+    reconcile = await _reconcile_failed_effects()
+
     # ---- 5. 报告 + 告警 ----
     summary = {
         "status": "ok",
@@ -327,6 +333,7 @@ async def dict_guard_daily(ctx: dict) -> dict:
         "auto_applied": auto_applied,
         "proposals": proposal_count,
         "record_failed": record_failed,
+        "reconcile": reconcile,
         "skipped": skipped[:20],
     }
     _write_report(summary)
@@ -357,6 +364,90 @@ async def dict_guard_daily(ctx: dict) -> dict:
 
         await send_alert(event, f"{message}（详见 reports/dict_guard_{run_date}.json）")
     return summary
+
+
+# 副作用失败提案的最大自动重试次数（每日巡检一次，达上限后交人工排查）
+_EFFECT_MAX_RETRY = 3
+
+
+async def _reconcile_failed_effects() -> dict:
+    """巡检补做已批准但副作用失败的提案（非原子性处理，幂等重试）。
+
+    仅处理 status=approved 且 effects_applied IS False 的提案——这些是 2026-09-03
+    以后副作用失败并被持久化的行（旧 archived 的 approved 提案 effects_applied 为
+    NULL，按已生效处理，不做重放，避免对存量已删图谱误删/重复操作）。
+
+    副作用执行与 admin 审批共用 apply_review_effect（kind/term 取自该提案的
+    DictChangeLog 审计记录，kind 区分 remove_stopword 的 blocked/protected 形态、
+    term 为效应词 含 stopword-误杀 victim）。
+    """
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.business import DictChangeLog, DictProposal
+    from app.services.dict_guard_effect import apply_review_effect
+
+    reconciled = 0
+    still_failed = 0
+    skipped = 0
+    async with async_session_factory() as session:
+        rows = (
+            await session.scalars(
+                select(DictProposal).where(
+                    DictProposal.status == "approved",
+                    DictProposal.effects_applied.is_(False),
+                ).order_by(DictProposal.reviewed_at.asc())
+            )
+        ).all()
+        for row in rows:
+            retry = row.effects_retry_count or 0
+            if retry >= _EFFECT_MAX_RETRY:
+                skipped += 1
+                continue
+            chg = await session.scalar(
+                select(DictChangeLog)
+                .where(DictChangeLog.proposal_id == row.id)
+                .order_by(DictChangeLog.created_at.desc())
+                .limit(1)
+            )
+            if chg is None or not chg.kind:
+                # 缺审计记录无法确定副作用形态：不盲目重放（防误删），交人工
+                row.effects_retry_count = _EFFECT_MAX_RETRY
+                row.effects_error = "缺少关联审计(DictChangeLog)，停止自动重试（交人工核查）"
+                skipped += 1
+                continue
+            try:
+                effect = await asyncio.to_thread(
+                    apply_review_effect,
+                    action=row.action,
+                    entity_type=row.entity_type,
+                    kind=chg.kind,
+                    term=chg.term,
+                    reason="reconciliation_retry",
+                )
+                row.impact_stats = {**(row.impact_stats or {}), **effect}
+                row.effects_applied = True
+                row.effects_error = ""
+                row.effects_retry_count = retry + 1
+                reconciled += 1
+                logger.info(
+                    "[dict_guard] 副作用重试成功 proposal=%s term=%s", row.id, row.term,
+                )
+            except Exception as exc:
+                row.effects_retry_count = retry + 1
+                row.effects_error = f"{type(exc).__name__}: {str(exc)[:300]}"
+                still_failed += 1
+                logger.warning(
+                    "[dict_guard] 副作用重试失败(%d/%d) proposal=%s term=%s: %s",
+                    row.effects_retry_count, _EFFECT_MAX_RETRY, row.id, row.term, exc,
+                )
+        await session.commit()
+    return {
+        "reconciled": reconciled,
+        "still_failed": still_failed,
+        "skipped": skipped,
+        "max_retry": _EFFECT_MAX_RETRY,
+    }
 
 
 def _fetch_suspect_rows(driver, limit: int) -> list[dict]:

@@ -534,6 +534,14 @@ class DictProposal(Base):
     reviewed_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     review_reason: Mapped[str] = mapped_column(String(500), default="", nullable=False)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 副作用执行态（2026-09-03 非原子性处理）：approve 的副作用（动态词表 / Neo4j
+    # 清理）不可回滚且可能失败，跨 PG/Neo4j/Redis 无法单事务——将成功/失败持久化，
+    # 供每日巡检幂等重试（effects_applied=False 的已批准提案补齐副作用使对账可落地）。
+    # None = 未进入 approve 副作用（pending/rejected）；True = 副作用已生效；
+    # False = 副作用失败待重试。
+    effects_applied: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    effects_error: Mapped[str] = mapped_column(String(1000), default="", nullable=False)
+    effects_retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
