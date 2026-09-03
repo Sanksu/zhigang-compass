@@ -18,20 +18,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { apiGet, apiPost, apiPut } from '@/lib/api'
+import { useSkillDescriptions } from '@/hooks/use-skill-descriptions'
 
 interface SkillGovItem {
   name: string
 }
-interface DescEntry {
-  override?: string
-  builtin?: string
-}
 
 /** 原始数据页「技能」页签：仅技能解释（展示 / 编辑 / LLM 补齐）。 */
 export function RawSkillGovernance() {
+  const { descMap, reloadDescs } = useSkillDescriptions()
   const [q, setQ] = useState('')
   const [skills, setSkills] = useState<SkillGovItem[]>([])
-  const [descMap, setDescMap] = useState<Record<string, DescEntry>>({})
   const [backfilling, setBackfilling] = useState(false)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
@@ -43,20 +40,7 @@ export function RawSkillGovernance() {
   // LLM 补齐确认对话框
   const [confirmBackfill, setConfirmBackfill] = useState(false)
 
-  const reloadDescs = useCallback(() => {
-    apiGet<{
-      items: { skill_name: string; override_desc: string | null; builtin_desc: string | null }[]
-    }>('/admin/skill-descriptions?limit=1000')
-      .then((r) => {
-        const m: Record<string, DescEntry> = {}
-        for (const it of r.items)
-          m[it.skill_name] = { override: it.override_desc ?? undefined, builtin: it.builtin_desc ?? undefined }
-        setDescMap(m)
-      })
-      .catch(() => setDescMap({}))
-  }, [])
-
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true)
     const params = new URLSearchParams({ page: '1', size: '100' })
     if (q.trim()) params.set('q', q.trim())
@@ -64,12 +48,12 @@ export function RawSkillGovernance() {
       .then((s) => setSkills(s.items))
       .catch(() => setSkills([]))
       .finally(() => setLoading(false))
-  }
+  }, [q])
   useEffect(() => {
     reloadDescs()
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 初始加载触发 loading 状态
-    load()
-  }, [q, reloadDescs])
+    // 微任务调度：避免 effect 内同步 setState（react-hooks/set-state-in-effect）
+    void Promise.resolve().then(load)
+  }, [q, reloadDescs, load])
 
   const openEdit = (name: string, current?: string) => {
     setEditing({ name, current })
@@ -85,7 +69,7 @@ export function RawSkillGovernance() {
     setSaving(true)
     try {
       await apiPut(`/admin/skill-descriptions/${encodeURIComponent(editing.name)}`, { description: text })
-      setDescMap((prev) => ({ ...prev, [editing.name]: { ...(prev[editing.name] ?? {}), override: text } }))
+      reloadDescs()
       setEditing(null)
       setNotice('已保存')
     } catch {

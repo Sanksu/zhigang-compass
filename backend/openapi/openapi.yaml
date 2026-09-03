@@ -2409,7 +2409,7 @@ paths:
         - name: limit
           in: query
           required: false
-          schema: { type: integer, default: 50, minimum: 1, maximum: 500 }
+          schema: { type: integer, default: 200, minimum: 1, maximum: 500 }
       responses:
         '200':
           description: 补齐结果统计
@@ -2422,6 +2422,39 @@ paths:
                   msg: { type: string }
                   data:
                     $ref: '#/components/schemas/SkillDescriptionBackfillData'
+  /api/v1/admin/skills/{name}/noise:
+    put:
+      tags: [admin]
+      summary: 标记/取消某技能为噪声（写动态 blocked 层 + skill_noise 决策记录，即时生效）
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [noise]
+              properties:
+                noise: { type: boolean }
+      responses:
+        '200':
+          description: 标记结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      noise: { type: boolean }
   /api/v1/admin/skills:
     get:
       tags: [admin]

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Check, Tag, X } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Reveal } from '@/components/ui/reveal'
@@ -18,6 +18,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiGet, apiPost } from '@/lib/api'
+import { useSkillDescriptions } from '@/hooks/use-skill-descriptions'
 import { formatDateTime } from '@/lib/utils'
 import type { components } from '@/types/api'
 
@@ -136,22 +137,7 @@ function SkillOverviewTab() {
   }, [params])
 
   // ── 技能解释：只读展示（编辑/补齐已移至「原始数据管理 → 技能治理」） ──
-  const [descMap, setDescMap] = useState<Record<string, { override?: string; builtin?: string }>>({})
-  const reloadDescs = useCallback(() => {
-    apiGet<{
-      items: { skill_name: string; override_desc: string | null; builtin_desc: string | null }[]
-    }>('/admin/skill-descriptions?limit=1000')
-      .then((r) => {
-        const m: Record<string, { override?: string; builtin?: string }> = {}
-        for (const it of r.items)
-          m[it.skill_name] = { override: it.override_desc ?? undefined, builtin: it.builtin_desc ?? undefined }
-        setDescMap(m)
-      })
-      .catch(() => setDescMap({}))
-  }, [])
-  useEffect(() => {
-    reloadDescs()
-  }, [reloadDescs])
+  const { descMap } = useSkillDescriptions()
 
   return (
     <Card>

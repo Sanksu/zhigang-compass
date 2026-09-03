@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from app.api.common import resolve_operator
 from app.api.deps import require_permission
 from app.core.database import async_session_factory
+from app.core.errors import ERR_VALIDATION
 from app.models.business import LLMDecisionRecord
 from app.schemas.common import error, ok
 from app.services.extraction.dynamic_filters import add_entry, remove_entry
@@ -39,7 +40,7 @@ async def set_skill_noise(
         return err
     term = name.strip()
     if not term:
-        return error(0, "技能名不能为空")
+        return error(ERR_VALIDATION, "技能名不能为空")
     if body.noise:
         add_entry("blocked", term, reason="技能治理手动标记噪声", source="manual", operator=operator)
     else:

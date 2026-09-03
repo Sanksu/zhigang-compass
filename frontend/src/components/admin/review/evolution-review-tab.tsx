@@ -33,6 +33,7 @@ import {
   type Schema,
   type EvolutionItem,
   type DecliningItem,
+  type ReviewItem,
 } from './review-types'
 import { useIsDesktop } from '@/hooks/use-media-query'
 
@@ -60,6 +61,9 @@ export function EvolutionReviewTab() {
   const [archiveTarget, setArchiveTarget] = useState<DecliningItem | null>(null)
   const [archiveReason, setArchiveReason] = useState('')
   const [archiving, setArchiving] = useState(false)
+  /* 已晋级 stable 岗位列表（对照 emerging 队列，展示稳定岗位画像全集） */
+  const [stableItems, setStableItems] = useState<ReviewItem[]>([])
+  const [stableLoading, setStableLoading] = useState(true)
   const isDesktop = useIsDesktop()
 
   const load = () => {
@@ -76,9 +80,17 @@ export function EvolutionReviewTab() {
       .finally(() => setDecliningLoading(false))
   }
 
+  const loadStable = () => {
+    apiGet<Schema['DiscoveryCandidateData']>('/admin/positions/pending?state=stable&size=100')
+      .then((res) => setStableItems(res.items))
+      .catch(() => setStableItems([]))
+      .finally(() => setStableLoading(false))
+  }
+
   useEffect(() => {
     load()
     loadDeclining()
+    loadStable()
   }, [])
 
   async function submitReview(action: 'approve' | 'reject') {
@@ -449,6 +461,91 @@ export function EvolutionReviewTab() {
                         <Archive className="size-3.5 mr-1" />
                         确认归档
                       </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 已晋级 stable 岗位列表（对照 emerging 队列，展示稳定岗位画像全集，GET /admin/positions/pending?state=stable） */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <CheckCircle2 className="size-4 text-state-stable" />
+              已晋级 stable 岗位
+            </span>
+            <span className="text-xs font-normal text-ink-faint">{stableItems.length} 个稳定岗位</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {stableLoading ? (
+            <p className="py-8 text-center text-sm text-ink-muted">加载 stable 岗位…</p>
+          ) : stableItems.length === 0 ? (
+            <div className="py-8 text-center text-sm text-ink-faint">
+              <p>暂无 stable 岗位</p>
+              <p className="text-xs mt-2">
+                已确认晋级的岗位将在这里展示（六状态机 stable 态）
+              </p>
+            </div>
+          ) : (
+            isDesktop ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>岗位名</TableHead>
+                    <TableHead>命中信号</TableHead>
+                    <TableHead>发现时间</TableHead>
+                    <TableHead>置信度</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {stableItems.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          {item.rag_matched && <Badge variant="outline" className="text-[11px]">RAG</Badge>}
+                          {item.seed_matched && <Badge variant="outline" className="text-[11px]">种子</Badge>}
+                          {!item.rag_matched && !item.seed_matched && (
+                            <span className="text-[11px] text-ink-faint">—</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs font-mono text-ink-muted">{item.detected_at}</TableCell>
+                      <TableCell>
+                        <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
+                          {Math.round(confidenceOf(item) * 100)}%
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="space-y-3">
+                {stableItems.map((item) => (
+                  <div key={item.id} className="rounded-lg border border-border bg-canvas p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-ink truncate">{item.position_name}</div>
+                        <div className="mt-1 flex items-center gap-1">
+                          {item.rag_matched && <Badge variant="outline" className="text-[10px]">RAG</Badge>}
+                          {item.seed_matched && <Badge variant="outline" className="text-[10px]">种子</Badge>}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
+                          {Math.round(confidenceOf(item) * 100)}%
+                        </div>
+                        <div className="text-[10px] text-ink-faint">置信度</div>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-ink-faint font-mono">
+                      发现于 {item.detected_at}
                     </div>
                   </div>
                 ))}
