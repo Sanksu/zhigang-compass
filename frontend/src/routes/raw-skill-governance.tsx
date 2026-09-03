@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,7 +40,7 @@ export function RawSkillGovernance() {
   // LLM 补齐确认对话框
   const [confirmBackfill, setConfirmBackfill] = useState(false)
 
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true)
     const params = new URLSearchParams({ page: '1', size: '100' })
     if (q.trim()) params.set('q', q.trim())
@@ -48,11 +48,12 @@ export function RawSkillGovernance() {
       .then((s) => setSkills(s.items))
       .catch(() => setSkills([]))
       .finally(() => setLoading(false))
-  }
+  }, [q])
   useEffect(() => {
     reloadDescs()
-    load()
-  }, [q, reloadDescs])
+    // 微任务调度：避免 effect 内同步 setState（react-hooks/set-state-in-effect）
+    void Promise.resolve().then(load)
+  }, [q, reloadDescs, load])
 
   const openEdit = (name: string, current?: string) => {
     setEditing({ name, current })
