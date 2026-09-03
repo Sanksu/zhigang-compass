@@ -183,6 +183,24 @@ def find_position_id_by_name(session, name: str) -> str | None:
     return rec["id"] if rec else None
 
 
+def query_position_definition_by_name(session, name: str) -> dict:
+    """按岗位名查结构化定义图源属性（core_duties/scenarios；定义五字段组装用）。
+
+    无图内岗位返回 {}；属性缺失按空列表归一。
+    """
+    rec = session.run(
+        "MATCH (p:Position {name: $name}) "
+        "RETURN p.core_duties AS core_duties, p.scenarios AS scenarios LIMIT 1",
+        name=name,
+    ).single()
+    if rec is None:
+        return {}
+    return {
+        "core_duties": rec["core_duties"] or [],
+        "scenarios": rec["scenarios"] or [],
+    }
+
+
 def query_prereq_chain(session, skill_name: str) -> list[str]:
     """图谱先修链（线程池执行，08-14 审查）。"""
     return graph_prerequisite_chain(session, skill_name)
@@ -240,35 +258,48 @@ def query_shortest_path(session, from_skill: str, to_skill: str, statuses) -> li
     return shortest_path(session, from_skill, to_skill, position_statuses=statuses)
 
 
-def query_view_techstack(session, limit: int, status_filter: str) -> list:
-    """techStack 视图查询（线程池执行，08-14 低优先批次）。"""
+def query_view_techstack(
+    session, limit: int, status_filter: str, level: str | None = None
+) -> list:
+    """techStack 视图查询（线程池执行；level=熟练度过滤，与 async 一致）。"""
+    params = {"limit": limit, "public_statuses": list(_PUBLIC_POSITION_STATUSES)}
+    if level:
+        params["level"] = level
+    level_clause = "AND coalesce(r.level, '') = $level" if level else ""
     return list(session.run(
         f"""
         MATCH (s:Skill)<-[r:REQUIRES]-(p:Position)
-        WHERE {status_filter}
+        WHERE {status_filter} {level_clause}
         WITH s, count(p) AS heat
         ORDER BY heat DESC LIMIT $limit
         MATCH (s)<-[r:REQUIRES]-(p:Position)
-        WHERE {status_filter}
+        WHERE {status_filter} {level_clause}
         RETURN s.id AS sid, s.name AS sname,
                s.category AS s_category,
                p.id AS pid, p.name AS pname, p.status AS pstatus, r
         """,
-        limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
+        **params,
     ))
 
 
-def query_view_main(session, limit: int, status_filter: str) -> list:
-    """positionCenter/level/panorama 视图查询（线程池执行）。"""
+def query_view_main(
+    session, limit: int, status_filter: str, level: str | None = None
+) -> list:
+    """positionCenter/level/panorama 视图查询（线程池执行；level=熟练度过滤）。"""
+    params = {"limit": limit, "public_statuses": list(_PUBLIC_POSITION_STATUSES)}
+    if level:
+        params["level"] = level
+    level_clause = "WHERE coalesce(r.level, '') = $level" if level else ""
     return list(session.run(
         f"""
         MATCH (p:Position)
         WHERE {status_filter}
         WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
         MATCH (p)-[r:REQUIRES]->(s:Skill)
+        {level_clause}
         RETURN p, s, r
         """,
-        limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
+        **params,
     ))
 
 

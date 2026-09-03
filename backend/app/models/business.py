@@ -284,6 +284,9 @@ class DiscoveryCandidate(Base):
     seed_matched: Mapped[bool] = mapped_column(Boolean, default=False)
     rag_matched: Mapped[bool] = mapped_column(Boolean, default=False)
     definition_draft: Mapped[str] = mapped_column(Text, default="")
+    # 结构化定义草案（core_duties/typical_scenarios；赛题五字段中技能两项
+    # 展示时从图谱 REQUIRES 证据边取，不入本列）
+    definition_structured: Mapped[dict] = mapped_column(JSONB, default=dict)
     detected_at: Mapped[str] = mapped_column(String(40), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

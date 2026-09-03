@@ -22,13 +22,13 @@ import asyncio
 import json
 import logging
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 from app.services.kg.fulltext import sanitize_fulltext
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -427,22 +427,32 @@ async def search_authoritative(
     return merged
 
 
-_DEFINITION_SYSTEM_PROMPT = """你是岗位定义专家。根据岗位名称与参考信息，\
-用中文撰写简洁的岗位定义草案（1-3 句话）。参考信息可能是英文 O*NET 定义，\
-请翻译并结合岗位名凝练成中文。只输出定义本身，不要前缀如"岗位定义："。"""
+_DEFINITION_SYSTEM_PROMPT = """你是岗位定义专家。根据岗位名称与参考信息，输出岗位结构化定义：\
+summary 为一句话中文定义草案（1-3 句）；core_duties 为核心职责列表（2-6 条，每条一句话）；\
+typical_scenarios 为典型行业应用场景列表（1-4 条，仅当参考信息可提炼时输出，否则为空数组）。\
+参考信息可能是英文 O*NET 定义，请翻译并结合岗位名凝练成中文。不得编造参考信息中不存在的\
+职责或场景。summary 只输出定义本身，不要前缀如"岗位定义："。"""
 
 _DEFINITION_TASK_TEMPLATE = """岗位名称：{position_name}
 
 参考信息（英文权威定义，请翻译并凝练）：
 {reference}
 
-输出中文岗位定义草案："""
+输出岗位结构化定义（summary/core_duties/typical_scenarios）："""
 
 
-class _DefinitionDraft(BaseModel):
-    """LLM 定义草案输出约束（幻觉防控第一道防线：JSON Schema 强校验）。"""
+class _DefinitionStructured(BaseModel):
+    """LLM 结构化岗位定义输出约束（幻觉防控第一道防线：JSON Schema 强校验）。
 
-    text: str
+    赛题五字段中技能两项（必备/加分）不采信 LLM 生成，展示时一律取图谱
+    REQUIRES 证据边（第三道防线白名单），本模型仅承载摘要/职责/场景三项。
+    """
+
+    text: str = Field(default="", description="一句话岗位定义草案（1-3 句）")
+    core_duties: list[str] = Field(default_factory=list, description="核心职责（2-6 条）")
+    typical_scenarios: list[str] = Field(
+        default_factory=list, description="典型行业应用场景（1-4 条）"
+    )
 
 
 @dataclass
@@ -452,11 +462,28 @@ class _DefinitionResult:
     text: 最终定义草案
     source: 产出来源（llm=LLM 生成；occupation/seed=参考原文兜底）
     nli_contradicted: 是否因 NLI 矛盾检测被截断回退参考原文（软门控打标）
+    core_duties / typical_scenarios: LLM 结构化生成（NLI 门控通过才有值）
     """
 
     text: str
     source: str = "reference"
     nli_contradicted: bool = False
+    core_duties: list[str] = field(default_factory=list)
+    typical_scenarios: list[str] = field(default_factory=list)
+
+
+def _clean_str_list(items: list, cap: int) -> list[str]:
+    """清洗 LLM 列表输出：去空/去重/截断到上限（约束幻觉产出体量）。"""
+    out: list[str] = []
+    for item in items or []:
+        if not isinstance(item, str):
+            continue
+        s = item.strip()
+        if s and s not in out:
+            out.append(s)
+        if len(out) >= cap:
+            break
+    return out
 
 
 # NLI 软门控重采样指令：首稿被 NLI 判为可疑/矛盾时，要求 LLM 严格对齐
@@ -502,7 +529,7 @@ async def _generate_definition(
                         _DEFINITION_TASK_TEMPLATE.format(
                             position_name=position_name, reference=reference
                         ),
-                        _DefinitionDraft,
+                        _DefinitionStructured,
                         system_prompt=(
                             _DEFINITION_SYSTEM_PROMPT
                             if attempt == 0
@@ -512,15 +539,26 @@ async def _generate_definition(
                 text = (draft.text or "").strip()
                 if not text:
                     break
-                result = detect_contradiction(reference, text)
+                # NLI 门控对象 = 摘要 + 职责 + 场景拼接（一次检测覆盖全部结构化输出）
+                structured_text = " ".join(
+                    [text, *draft.core_duties, *draft.typical_scenarios]
+                )
+                result = detect_contradiction(reference, structured_text)
                 if result.label == "contradiction":
                     # 确认矛盾 → 强制截断回退参考原文 + 打标（软门控，不再重采样）
                     return _DefinitionResult(
                         text=reference, source=source, nli_contradicted=True
                     )
                 if result.score < SUSPICIOUS_THRESHOLD:
-                    # 无矛盾信号（entailment/neutral）→ 放行
-                    return _DefinitionResult(text=text, source="llm")
+                    # 无矛盾信号（entailment/neutral）→ 放行（含结构化字段）
+                    return _DefinitionResult(
+                        text=text,
+                        source="llm",
+                        core_duties=_clean_str_list(draft.core_duties, cap=6),
+                        typical_scenarios=_clean_str_list(
+                            draft.typical_scenarios, cap=4
+                        ),
+                    )
                 if attempt == 0:
                     # 可疑（未达确认级）→ 触发一次重采样（软门控第一级）
                     continue
@@ -589,6 +627,8 @@ async def ground_with_rag(
         definition=definition.text,
         definition_source=definition.source,
         nli_contradicted=definition.nli_contradicted,
+        core_duties=definition.core_duties,
+        typical_scenarios=definition.typical_scenarios,
     )
 
 

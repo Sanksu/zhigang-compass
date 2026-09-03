@@ -127,14 +127,14 @@ def _query_shortest_path(from_skill: str, to_skill: str, statuses) -> list | Non
     return repository.query_shortest_path(neo4j_driver, from_skill, to_skill, statuses)
 
 
-async def _query_view_techstack(limit: int, status_filter: str) -> list:
+async def _query_view_techstack(limit: int, status_filter: str, level: str | None = None) -> list:
     """techStack 视图热路径查询（P2：async Neo4j 驱动直查）。"""
-    return await repository.query_view_techstack_async(async_neo4j_driver, limit, status_filter)
+    return await repository.query_view_techstack_async(async_neo4j_driver, limit, status_filter, level)
 
 
-async def _query_view_main(limit: int, status_filter: str) -> list:
+async def _query_view_main(limit: int, status_filter: str, level: str | None = None) -> list:
     """positionCenter/level/panorama 视图热路径查询（P2：async Neo4j 驱动直查）。"""
-    return await repository.query_view_main_async(async_neo4j_driver, limit, status_filter)
+    return await repository.query_view_main_async(async_neo4j_driver, limit, status_filter, level)
 
 
 @router.get("/skill/{skill_id}/positions")
@@ -858,6 +858,9 @@ async def graph_view(
         default=None, max_length=100,
         description="岗位 id/name（positionPortrait 视图必填）"),
     limit: int = Query(default=100, ge=1, le=600),
+    level: Optional[Literal["初级", "中级", "高级", "专家"]] = Query(
+        default=None,
+        description="熟练度级别过滤（REQUIRES.level；panorama/techStack 生效）"),
     user: Optional[dict] = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -874,7 +877,7 @@ async def graph_view(
     # positionPortrait 缓存按岗位隔离（岗位切换频繁，TTL 内仍命中同岗位）
     cache_key = f"graph:view:{view_type}:{limit}:{scope}" + (
         f":{position}" if view_type == "positionPortrait" else ""
-    )
+    ) + (f":lv-{level}" if level and view_type in ("panorama", "techStack") else "")
     cached = await redis_client.get(cache_key)
     if cached is not None:
         return ok(data=json.loads(cached))
@@ -995,7 +998,7 @@ async def graph_view(
                       **await _query_graph_counts()},
         }
     elif view_type == "techStack":
-        rows = await _query_view_techstack(limit, status_filter)
+        rows = await _query_view_techstack(limit, status_filter, level)
         nodes: dict[str, dict] = {}
         edges: list[dict] = []
         for record in rows:
@@ -1027,7 +1030,8 @@ async def graph_view(
                       **await _query_graph_counts()},
         }
     else:
-        rows = await _query_view_main(limit, status_filter)
+        # panorama/positionCenter：level 过滤仅对 REQUIRES 边生效（岗位节点保留）
+        rows = await _query_view_main(limit, status_filter, level)
         nodes = {}
         edges = []
         for record in rows:

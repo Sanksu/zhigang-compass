@@ -112,8 +112,9 @@ async def discovery_recent(
     total = len(rows)
     rows = rows[:limit]
 
-    # 批量回查图谱技能：按 position_name → id → must/nice/soft
+    # 批量回查图谱技能 + 定义属性：按 position_name → id → must/nice/soft、core_duties/scenarios
     skills_by_name: dict[str, dict] = {}
+    props_by_name: dict[str, dict] = {}
     id_by_name: dict[str, str] = {}
     # Neo4j 查询为同步 CPU/IO，放线程池
     def _load_skills():
@@ -123,8 +124,36 @@ async def discovery_recent(
             )
             id_by_name[r.position_name] = pid
             skills_by_name[r.position_name] = skills
+            props_by_name[r.position_name] = repository.query_position_definition_by_name(
+                neo4j_driver, r.position_name
+            )
 
     await asyncio.to_thread(_load_skills)
+
+    def _compose_definition(r) -> dict:
+        """组装赛题五字段结构化定义。
+
+        职责/场景：岗位已落图时以图谱属性为准（JD 聚合 + 人工优化结果），
+        candidate 未落图时回退 RAG 阶段二 LLM 结构化草案；
+        必备/加分技能一律取图谱 REQUIRES 证据边，不采信 LLM 生成（第三道防线）。
+        """
+        st = r.definition_structured or {}
+        props = props_by_name.get(r.position_name) or {}
+        skills = skills_by_name.get(r.position_name) or {}
+        return {
+            "position_name": r.position_name,
+            "summary": r.definition_draft or "",
+            "core_duties": list(props.get("core_duties") or st.get("core_duties") or []),
+            "must_skills": [
+                s["skill_name"] for s in skills.get("must", []) if s.get("skill_name")
+            ],
+            "nice_skills": [
+                s["skill_name"] for s in skills.get("nice", []) if s.get("skill_name")
+            ],
+            "typical_scenarios": list(
+                props.get("scenarios") or st.get("typical_scenarios") or []
+            ),
+        }
 
     candidates = []
     for r in rows:
@@ -136,6 +165,7 @@ async def discovery_recent(
             "state": r.state,
             "detected_at": r.detected_at,
             "definition_draft": r.definition_draft or "",
+            "definition": _compose_definition(r),
             "confidence": r.confidence,
             "skills": skills if has_skills else None,
             # 图内无该岗位技能（candidate 未聚合/无 JD 证据）→ 标注待审核，不误报真实无技能

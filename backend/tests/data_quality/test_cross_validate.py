@@ -6,7 +6,11 @@
 import pytest
 
 from app.services.data_quality.cross_validate import (
+    CONFIDENCE_GRAPH_MIN,
+    EMERGING_CONFIDENCE_GRAPH_MIN,
+    aggregation_gate_min,
     build_position_groups,
+    filter_rows_for_aggregation,
     parse_monthly_salary,
     validate_group,
 )
@@ -163,3 +167,56 @@ class TestCrossCitySalarySmoothing:
         result = validate_group("Java开发工程师", group)
         assert result.salary_outlier is True
         assert result.cities == []
+
+
+class TestAggregationGate:
+    """入图置信度门控（§4.5，H5 闭环：第二道防线由只算不拦改为门禁）。"""
+
+    @staticmethod
+    def _row(confidence, position_name="Java开发工程师"):
+        from types import SimpleNamespace
+        cv = (
+            {"confidence": confidence, "position_name": position_name}
+            if confidence is not None
+            else None
+        )
+        snap = {"extraction": {"requirements": []}}
+        if cv is not None:
+            snap["cross_validation"] = cv
+        return SimpleNamespace(snapshot=snap, source="boss")
+
+    def test_single_source_low_confidence_blocked(self):
+        """单源组（置信度上限 0.333 < 0.6）不参与聚合。"""
+        rows = [self._row(0.333), self._row(0.333)]
+        kept, stats = filter_rows_for_aggregation(rows, set())
+        assert kept == []
+        assert stats["blocked_jds"] == 2
+        assert stats["blocked_positions"] == 1
+
+    def test_multi_source_high_confidence_passes(self):
+        """双源一致组（≥0.6）正常放行。"""
+        rows = [self._row(0.787)]
+        kept, stats = filter_rows_for_aggregation(rows, set())
+        assert len(kept) == 1
+        assert stats["blocked_jds"] == 0
+
+    def test_emerging_position_uses_relaxed_threshold(self):
+        """新兴岗位阈值下调至 0.5：置信度 0.55 的组既不被既有阈值拦、被新兴阈值放行。"""
+        row_existing = self._row(0.55, position_name="Java开发工程师")
+        row_emerging = self._row(0.55, position_name="大模型应用工程师")
+        kept, _ = filter_rows_for_aggregation([row_existing, row_emerging], {"大模型应用工程师"})
+        assert [r for r in kept] == [row_emerging]
+
+    def test_unvalidated_rows_pass_with_count(self):
+        """snapshot 无 cross_validation（历史数据）放行并计数，不静默拦截。"""
+        rows = [self._row(None)]
+        kept, stats = filter_rows_for_aggregation(rows, set())
+        assert len(kept) == 1
+        assert stats["unvalidated_jds"] == 1
+        assert stats["blocked_jds"] == 0
+
+    def test_gate_min_by_state(self):
+        assert aggregation_gate_min("emerging") == EMERGING_CONFIDENCE_GRAPH_MIN == 0.5
+        assert aggregation_gate_min("candidate") == 0.5
+        assert aggregation_gate_min("stable") == CONFIDENCE_GRAPH_MIN == 0.6
+        assert aggregation_gate_min(None) == 0.6

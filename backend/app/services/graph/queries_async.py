@@ -138,38 +138,56 @@ async def query_graph_counts(session) -> dict:
     return {"total_nodes": n, "total_edges": max(e, e2)}
 
 
-async def query_view_techstack(session, limit: int, status_filter: str) -> list:
-    """techStack 视图异步查询（技能频次排序 + 状态过滤，与 sync 一致）。"""
+def _level_clause(level: str | None) -> str:
+    """熟练度级别过滤子句（REQUIRES.level；缺省不过滤）。"""
+    return "AND coalesce(r.level, '') = $level" if level else ""
+
+
+async def query_view_techstack(
+    session, limit: int, status_filter: str, level: str | None = None
+) -> list:
+    """techStack 视图异步查询（技能频次排序 + 状态/级别过滤，与 sync 一致）。"""
+    params = {"limit": limit, "public_statuses": list(_PUBLIC_POSITION_STATUSES)}
+    if level:
+        params["level"] = level
     result = await session.run(
         f"""
         MATCH (s:Skill)<-[r:REQUIRES]-(p:Position)
-        WHERE {status_filter}
+        WHERE {status_filter} {_level_clause(level)}
         WITH s, count(p) AS heat
         ORDER BY heat DESC LIMIT $limit
         MATCH (s)<-[r:REQUIRES]-(p:Position)
-        WHERE {status_filter}
+        WHERE {status_filter} {_level_clause(level)}
         RETURN s.id AS sid, s.name AS sname,
                s.category AS s_category,
                p.id AS pid, p.name AS pname, p.status AS pstatus, r
         """,
-        limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
+        **params,
     )
     # 08-18 修复：与 panorama 同坑——async driver 的 data() 会把 Relationship
     # 反序列化为 tuple，路由层 record["r"].get() 崩 500；fetch() 保留 Record
     return await result.fetch(100000)
 
 
-async def query_view_main(session, limit: int, status_filter: str) -> list:
+async def query_view_main(
+    session, limit: int, status_filter: str, level: str | None = None
+) -> list:
     """positionCenter/level/panorama 视图异步查询（与 sync 一致）。"""
+    params = {"limit": limit, "public_statuses": list(_PUBLIC_POSITION_STATUSES)}
+    if level:
+        params["level"] = level
+    # MATCH 后无既有 WHERE，级别子句需自带 WHERE 关键字
+    level_clause = "WHERE coalesce(r.level, '') = $level" if level else ""
     result = await session.run(
         f"""
         MATCH (p:Position)
         WHERE {status_filter}
         WITH p ORDER BY coalesce(p.freq, 0) DESC, p.name LIMIT $limit
         MATCH (p)-[r:REQUIRES]->(s:Skill)
+        {level_clause}
         RETURN p, s, r
         """,
-        limit=limit, public_statuses=list(_PUBLIC_POSITION_STATUSES),
+        **params,
     )
     # 08-18 修复：data() 的 tuple 关系会导致路由映射崩 500（同 panorama 坑）
     return await result.fetch(100000)

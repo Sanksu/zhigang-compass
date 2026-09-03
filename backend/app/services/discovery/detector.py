@@ -256,5 +256,7 @@ class DiscoveryDetector:
                 "seed_matched": result.seed_matched,
                 "rag_matched": result.rag_matched,
                 "definition_draft": result.definition,
+                "core_duties": result.core_duties,
+                "typical_scenarios": result.typical_scenarios,
             }
         )

@@ -158,6 +158,9 @@ export function GraphPage() {
   const [error, setError] = useState<{ code: number; message: string } | null>(null)
   // 视图重载令牌：错误态"重试"按钮触发视图 effect 重跑（画像数据流见渲染处单独处理）
   const [reloadToken, setReloadToken] = useState(0)
+  // 熟练度级别筛选（赛题「按技术栈和级别切换视图」）：''=全部；
+  // 仅 panorama/techStack 生效（后端按 REQUIRES.level 过滤边与热次统计）
+  const [levelFilter, setLevelFilter] = useState<'' | '初级' | '中级' | '高级' | '专家'>('')
   // 全文检索（GET /graph/search）
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<components['schemas']['SearchResultItem'][]>([])
@@ -241,7 +244,7 @@ export function GraphPage() {
     // 空闲预热技术栈视图缓存：全景渲染稳定后 1.5s 后台拉取并转换入缓存，
     // 首次切技术栈页签即秒开（预热失败静默，进入视图时正常加载）
     const warmTechStackCache = () => {
-      if (view !== 'panorama' || viewCacheRef.current.has('techStack')) return
+      if (view !== 'panorama' || levelFilter || viewCacheRef.current.has('techStack')) return
       window.setTimeout(() => {
         if (cancelled || viewCacheRef.current.has('techStack')) return
         apiGet<PanoramaData>('/graph/view/techStack?limit=120')
@@ -260,7 +263,8 @@ export function GraphPage() {
       warmTechStackCache()
       return
     }
-    apiGet<PanoramaData>(`/graph/view/${view}?limit=120`)
+    const levelQ = levelFilter ? `&level=${encodeURIComponent(levelFilter)}` : ''
+    apiGet<PanoramaData>(`/graph/view/${view}?limit=120${levelQ}`)
       .then((res) => {
         if (cancelled) return
         const g = toGraphData(res)
@@ -284,7 +288,7 @@ export function GraphPage() {
     return () => {
       cancelled = true
     }
-  }, [view, reloadToken])
+  }, [view, reloadToken, levelFilter])
 
   // 非缓存视图数据在途（如首次进入技术栈）：画布叠轻量加载角标
   const viewLoading = view !== 'positionPortrait' && viewReady !== view
@@ -1001,6 +1005,31 @@ export function GraphPage() {
               ))}
             </TabsList>
             <p className="truncate text-[12px] text-ink-muted" title={VIEW_DESC[view]}>{VIEW_DESC[view]}</p>
+            {/* 熟练度级别筛选（panorama/techStack）：后端按 REQUIRES.level 过滤边与热次 */}
+            {(view === 'panorama' || view === 'techStack') && (
+              <Select
+                value={levelFilter || 'all'}
+                onValueChange={(v) => {
+                  // 切级别：清选中/展开态与视图缓存（缓存键不含 level，须失效重建）
+                  setSelected(null)
+                  setExpandedPositions(new Set())
+                  setExpandedDomains(new Set())
+                  viewCacheRef.current.clear()
+                  setLevelFilter(v === 'all' ? '' : (v as '初级' | '中级' | '高级' | '专家'))
+                }}
+              >
+                <SelectTrigger className="h-8 w-32 shrink-0 text-xs" aria-label="熟练度级别">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">全部级别</SelectItem>
+                  <SelectItem value="初级" className="text-xs">初级</SelectItem>
+                  <SelectItem value="中级" className="text-xs">中级</SelectItem>
+                  <SelectItem value="高级" className="text-xs">高级</SelectItem>
+                  <SelectItem value="专家" className="text-xs">专家</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
             {/* 岗位画像：岗位下拉（positionCenter 岗位集，默认选中最高频岗位） */}
             {view === 'positionPortrait' && (() => {
               // 两级下拉：岗位簇（职能域聚合）→ 簇内岗位联动过滤

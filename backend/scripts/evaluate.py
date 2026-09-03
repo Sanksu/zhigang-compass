@@ -356,6 +356,17 @@ def generate_html_report(report: dict) -> str:
                 f"<td><span class='badge skip'>跳过</span></td></tr>"
             )
             continue
+        if task_name == "jd":
+            # 词面基线=历史可比的参考口径（第八轮 P2-20 双口径注明），不挂 ≥0.90
+            # 达标线——赛题「JD 解析准确率≥90%」的达标口径为 LLM 盲审行（词面真值
+            # 对齐，PR #330），避免基线行被误读为「JD 解析未达标」
+            overview_rows.append(
+                f"<tr><td>{task_label}</td><td>{esc(r.get('method', ''))}</td>"
+                f"<td>{r.get('samples', '-')}</td><td>F1={r['f1']:.4f}</td>"
+                f"<td>参考口径（不设达标线；达标口径见 LLM 盲审行）</td>"
+                f"<td><span class='badge skip'>参考</span></td></tr>"
+            )
+            continue
         if task_name == "match":
             metric = f"Spearman={r['spearman']:.4f}<br>Accuracy={r['accuracy']:.4f}"
             if r.get("top3_accuracy") is not None:

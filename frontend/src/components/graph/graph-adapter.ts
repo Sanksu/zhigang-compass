@@ -45,6 +45,8 @@ export function toGraphData(raw: GraphViewData): GraphData {
     target: edge.target,
     necessity: edge.necessity === 'nice' ? 'nice' : 'must',
     weight: edge.weight,
+    // 熟练度级别（REQUIRES.level）：级别筛选视图的数据依据，透传给详情面板
+    level: edge.level ?? undefined,
   }))
 
   return {

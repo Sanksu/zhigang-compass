@@ -909,6 +909,12 @@ export interface paths {
                     position?: string;
                     /** @description 节点数上限，参与缓存键 */
                     limit?: number;
+                    /**
+                     * @description 技能熟练度级别过滤（REQUIRES.level，JD 抽取聚合并写入边属性）。
+                     *     panorama/techStack 视图生效：边与热次统计均按级别过滤；
+                     *     positionPortrait/positionCenter 忽略。缺省不过滤；参与缓存键。
+                     */
+                    level?: "初级" | "中级" | "高级" | "专家";
                 };
                 header?: never;
                 path: {
@@ -941,7 +947,7 @@ export interface paths {
                         "application/json": components["schemas"]["ApiResponse"];
                     };
                 };
-                /** @description positionPortrait 视图未指定 position 参数（code 4000） */
+                /** @description positionPortrait 视图未指定 position 参数，或 level 非枚举值（code 4000） */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -6009,6 +6015,11 @@ export interface components {
             rag_matched?: boolean;
             /** @description 岗位定义草案（pending/evolution） */
             definition_draft?: string;
+            /** @description 结构化定义草案（core_duties/typical_scenarios，RAG 阶段二 LLM 生成；未生成时为 null） */
+            definition_structured?: {
+                core_duties?: string[];
+                typical_scenarios?: string[];
+            } | null;
             detected_at: string | null;
             updated_at?: string | null;
         };
@@ -6952,6 +6963,25 @@ export interface components {
             level?: string | null;
             source_count?: number | null;
         };
+        /**
+         * @description 岗位结构化定义（赛题五字段：岗位名称/核心职责/必备技能/加分技能/典型行业应用场景）。
+         *     summary 为一句话定义（RAG+LLM 生成，NLI 门控）；core_duties/typical_scenarios
+         *     由 LLM 结构化生成、岗位落图后以图谱属性（含人工优化）为准；
+         *     must_skills/nice_skills 一律取图谱 REQUIRES 证据边，不采信 LLM 生成（幻觉防控第三道防线）。
+         */
+        PositionDefinition: {
+            position_name: string;
+            /** @description 一句话岗位定义草案 */
+            summary: string;
+            /** @description 核心职责（2-6 条） */
+            core_duties?: string[];
+            /** @description 必备技能（图谱 necessity=must） */
+            must_skills?: string[];
+            /** @description 加分技能（图谱 necessity=nice） */
+            nice_skills?: string[];
+            /** @description 典型行业应用场景 */
+            typical_scenarios?: string[];
+        };
         /** @description 近期发现的新岗位候选（含技能；/discovery/recent） */
         RecentDiscoveryCandidate: {
             /** @description 图谱岗位 id；未落图时为 null */
@@ -6962,6 +6992,7 @@ export interface components {
             /** @description 发现时间（进入候选池） */
             detected_at: string;
             definition_draft?: string;
+            definition?: components["schemas"]["PositionDefinition"];
             confidence?: {
                 [key: string]: number;
             } | null;

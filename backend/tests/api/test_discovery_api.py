@@ -39,12 +39,13 @@ class _FakeSession:
         return _FakeResult(self._rows)
 
 
-def _candidate(position_name, state="candidate", detected=None):
+def _candidate(position_name, state="candidate", detected=None, definition_structured=None):
     return SimpleNamespace(
         position_name=position_name,
         state=state,
         detected_at=detected or "2026-08-26T10:00:00+08:00",
         definition_draft=f"{position_name} 定义草案",
+        definition_structured=definition_structured,
         confidence={"grounding": 0.8},
     )
 
@@ -78,14 +79,21 @@ def _version_row(vid, skills, created_days_ago=0):
 
 
 class TestDiscoveryRecent:
-    async def _run(self, monkeypatch, rows, *, skills_by_name=None):
+    async def _run(self, monkeypatch, rows, *, skills_by_name=None, props_by_name=None):
         skills_by_name = skills_by_name or {}
+        props_by_name = props_by_name or {}
 
         def _fake_query_by_name(driver, name):
             return skills_by_name.get(name, (None, {}))
 
+        def _fake_query_definition(driver, name):
+            return props_by_name.get(name, {})
+
         monkeypatch.setattr(
             discovery_mod.repository, "query_position_skills_by_name", _fake_query_by_name
+        )
+        monkeypatch.setattr(
+            discovery_mod.repository, "query_position_definition_by_name", _fake_query_definition
         )
         return await discovery_mod.discovery_recent(
             days=30, state=None, limit=20, db=_FakeSession(rows),
@@ -118,8 +126,14 @@ class TestDiscoveryRecent:
         def _fake_query_by_name(driver, name):
             return (None, {})
 
+        def _fake_query_definition(driver, name):
+            return {}
+
         monkeypatch.setattr(
             discovery_mod.repository, "query_position_skills_by_name", _fake_query_by_name
+        )
+        monkeypatch.setattr(
+            discovery_mod.repository, "query_position_definition_by_name", _fake_query_definition
         )
         anon = await discovery_mod.discovery_recent(
             days=30, state=None, limit=20, db=_FakeSession(rows),
@@ -140,6 +154,66 @@ class TestDiscoveryRecent:
         assert c["position_id"] is None
         assert c["skills"] is None
         assert c["skill_pending"] is True
+
+    @pytest.mark.asyncio
+    async def test_definition_composes_five_fields_graph_first(self, monkeypatch):
+        """五字段定义：已落图岗位以图谱属性为准（含人工优化），技能取图谱证据边。"""
+        rows = [_candidate(
+            "后端工程师", state="stable",
+            definition_structured={
+                "core_duties": ["LLM 草案职责"],
+                "typical_scenarios": ["LLM 草案场景"],
+            },
+        )]
+        skills = {
+            "must": [{"skill_id": "sk_1", "skill_name": "Java"}],
+            "nice": [{"skill_id": "sk_2", "skill_name": "Docker"}],
+        }
+        resp = await self._run(
+            monkeypatch, rows,
+            skills_by_name={"后端工程师": ("pos_1", skills)},
+            props_by_name={"后端工程师": {
+                "core_duties": ["设计并维护服务端系统"],
+                "scenarios": ["电商平台后端研发"],
+            }},
+        )
+        d = resp.data["candidates"][0]["definition"]
+        assert d["position_name"] == "后端工程师"
+        assert d["summary"] == "后端工程师 定义草案"
+        assert d["core_duties"] == ["设计并维护服务端系统"]  # 图谱优先于 LLM 草案
+        assert d["typical_scenarios"] == ["电商平台后端研发"]
+        assert d["must_skills"] == ["Java"]
+        assert d["nice_skills"] == ["Docker"]
+
+    @pytest.mark.asyncio
+    async def test_definition_falls_back_to_llm_structured(self, monkeypatch):
+        """未落图候选（无图谱属性/技能）：职责/场景回退 LLM 结构化草案。"""
+        rows = [_candidate(
+            "大模型应用工程师", state="emerging",
+            definition_structured={
+                "core_duties": ["构建 RAG 应用"],
+                "typical_scenarios": ["企业知识库问答"],
+            },
+        )]
+        resp = await self._run(monkeypatch, rows)
+        d = resp.data["candidates"][0]["definition"]
+        assert d["core_duties"] == ["构建 RAG 应用"]
+        assert d["typical_scenarios"] == ["企业知识库问答"]
+        assert d["must_skills"] == []
+        assert d["nice_skills"] == []
+
+    @pytest.mark.asyncio
+    async def test_definition_empty_when_no_structured_and_no_graph(self, monkeypatch):
+        """无 LLM 结构化且未落图：五字段齐全但职责/场景/技能为空，summary 仍回显草案。"""
+        # candidate 态对 guest 不可见（P1-4），用 emerging 态验证组装兜底
+        rows = [_candidate("未知岗位", state="emerging")]
+        resp = await self._run(monkeypatch, rows)
+        d = resp.data["candidates"][0]["definition"]
+        assert d["summary"] == "未知岗位 定义草案"
+        assert d["core_duties"] == []
+        assert d["must_skills"] == []
+        assert d["nice_skills"] == []
+        assert d["typical_scenarios"] == []
 
     @pytest.mark.asyncio
     async def test_empty_candidates(self, monkeypatch):

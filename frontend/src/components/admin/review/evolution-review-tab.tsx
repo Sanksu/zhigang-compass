@@ -36,6 +36,7 @@ import {
   type ReviewItem,
 } from './review-types'
 import { useIsDesktop } from '@/hooks/use-media-query'
+import { StructuredDefinition } from './definition-block'
 
 /**
  * 演化审核 Tab — 设计文档 §7.3 + M4
@@ -315,6 +316,9 @@ export function EvolutionReviewTab() {
               <div className="rounded-md bg-subtle p-3 text-xs text-ink-secondary">
                 <div className="mb-1 font-medium text-ink">岗位定义草案</div>
                 <p className="leading-relaxed">{reviewTarget.definition_draft || '（无定义草案）'}</p>
+                <div className="mt-2">
+                  <StructuredDefinition data={reviewTarget.definition_structured} />
+                </div>
                 {reviewTarget.evidence_refs.length > 0 && (
                   <div className="mt-2">
                     <div className="mb-0.5 font-medium text-ink">证据引用</div>

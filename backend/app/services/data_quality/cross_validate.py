@@ -20,7 +20,9 @@ from app.services.data_quality.schemas import CrossValidationResult
 
 # ── 设计文档 §4.5 / 附录阈值 ──
 VERIFIED_MIN_SOURCES = 2       # 技能 ≥2 独立源印证
-CONFIDENCE_GRAPH_MIN = 0.6     # 数据源入图谱置信度下限
+CONFIDENCE_GRAPH_MIN = 0.6     # 数据源入图谱置信度下限（既有岗位）
+# 新兴岗位入图阈值下调（§4.5：避免误杀新趋势；candidate/emerging 态适用）
+EMERGING_CONFIDENCE_GRAPH_MIN = 0.5
 SALARY_OUTLIER_RATIO = 1.5     # 薪资中位数差异 >50%（max/min > 1.5）
 FRESH_DAYS = 7                 # 时效新鲜窗口（天）
 
@@ -150,6 +152,46 @@ def build_position_groups(records: list[dict]) -> dict[str, list[dict]]:
             continue
         groups.setdefault(pos, []).append(rec)
     return groups
+
+
+def aggregation_gate_min(state: str | None) -> float:
+    """入图置信度门控阈值分级（§4.5）：新兴岗位（candidate/emerging）0.5，其余 0.6。"""
+    if state in ("candidate", "emerging"):
+        return EMERGING_CONFIDENCE_GRAPH_MIN
+    return CONFIDENCE_GRAPH_MIN
+
+
+def filter_rows_for_aggregation(rows, emerging_names: set[str]) -> tuple[list, dict]:
+    """跨源置信度入图门控（§4.5，审查 H5 闭环：第二道防线由"只算不拦"改为门禁）。
+
+    逐 JD 读取 `snapshot.cross_validation`（validate_group 的组级结果，同组
+    共享），置信度低于岗位阈值（新兴 0.5 / 既有 0.6）的 JD 不参与聚合。
+    snapshot 无 cross_validation（管线未跑/历史数据）时放行并计数——生产管线
+    已保证 cross_validate 先于 aggregate_positions 执行。
+
+    返回 (放行 rows, 门控统计)：blocked_jds/blocked_positions 为被拦 JD 数与
+    岗位数，unvalidated_jds 为无验证结果放行数。
+    """
+    kept: list = []
+    blocked_positions: set[str] = set()
+    stats = {"blocked_jds": 0, "blocked_positions": 0, "unvalidated_jds": 0}
+    for row in rows:
+        snap = row.snapshot or {}
+        cv = snap.get("cross_validation") or {}
+        conf = cv.get("confidence")
+        if conf is None:
+            stats["unvalidated_jds"] += 1
+            kept.append(row)
+            continue
+        pos = cv.get("position_name") or ""
+        threshold = aggregation_gate_min("emerging" if pos in emerging_names else None)
+        if conf < threshold:
+            stats["blocked_jds"] += 1
+            blocked_positions.add(pos)
+            continue
+        kept.append(row)
+    stats["blocked_positions"] = len(blocked_positions)
+    return kept, stats
 
 
 def validate_group(position_name: str, group: list[dict]) -> CrossValidationResult:

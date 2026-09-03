@@ -547,6 +547,7 @@ async def discovery_auto_transition(ctx: dict) -> dict:
                 continue
 
             features = DiscoveryFeatures(**row.features)
+            _st = row.definition_structured or {}
             candidate = CandidatePosition(
                 candidate_id=row.id,
                 position_name=row.position_name,
@@ -557,6 +558,8 @@ async def discovery_auto_transition(ctx: dict) -> dict:
                 seed_matched=row.seed_matched,
                 rag_matched=row.rag_matched,
                 definition_draft=row.definition_draft,
+                core_duties=_st.get("core_duties") or [],
+                typical_scenarios=_st.get("typical_scenarios") or [],
             )
             # z_scores 由频次序列自身重建（freq_z_scores）：declining 岗位回升
             # 时最近 2 窗口 z > 0，触发 declining → stable 自动回迁
@@ -709,6 +712,14 @@ async def _upsert_candidate(session, cand) -> None:
         "definition_draft": cand.definition_draft,
         "detected_at": cand.detected_at,
     }
+    # 结构化定义仅在本次确有产出时覆盖：discovery_daily 每日重跑，
+    # LLM 当日不可用时不得用空对象抹掉历史结构化草案
+    _structured = {
+        "core_duties": getattr(cand, "core_duties", None) or [],
+        "typical_scenarios": getattr(cand, "typical_scenarios", None) or [],
+    }
+    if _structured["core_duties"] or _structured["typical_scenarios"]:
+        payload["definition_structured"] = _structured
     if row is None:
         session.add(DiscoveryCandidate(id=cand.candidate_id, position_name=cand.position_name, **payload))
     else:

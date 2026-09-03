@@ -216,8 +216,10 @@ async def run_etl_pipeline(
         ("enrich_course_skills", tasks_module.enrich_course_skills),
         ("load_courses", tasks_module.load_courses),
         ("evaluate_courses", tasks_module.evaluate_courses),
-        ("aggregate_positions", tasks_module.aggregate_positions),
+        # 交叉验证先于聚合（§4.5 入图门控前置条件，H5 闭环）：聚合消费
+        # snapshot.cross_validation 的置信度做低置信 JD 拦截
         ("cross_validate", tasks_module.cross_validate_jds),
+        ("aggregate_positions", tasks_module.aggregate_positions),
         ("skill_normalization", tasks_module.sync_skill_normalization),
         ("diversity_report", tasks_module.diversity_report),
         ("check_data_freshness", tasks_module.check_data_freshness),

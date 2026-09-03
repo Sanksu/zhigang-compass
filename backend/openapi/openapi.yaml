@@ -607,6 +607,14 @@ paths:
           required: false
           schema: { type: integer, minimum: 1, maximum: 600, default: 100 }
           description: 节点数上限，参与缓存键
+        - name: level
+          in: query
+          required: false
+          schema: { type: string, enum: [初级, 中级, 高级, 专家], maxLength: 10 }
+          description: |
+            技能熟练度级别过滤（REQUIRES.level，JD 抽取聚合并写入边属性）。
+            panorama/techStack 视图生效：边与热次统计均按级别过滤；
+            positionPortrait/positionCenter 忽略。缺省不过滤；参与缓存键。
       responses:
         '200':
           description: 视图数据
@@ -621,7 +629,7 @@ paths:
                     $ref: '#/components/schemas/GraphViewData'
                   trace_id: { type: string }
         '422':
-          description: positionPortrait 视图未指定 position 参数（code 4000）
+          description: positionPortrait 视图未指定 position 参数，或 level 非枚举值（code 4000）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiResponse' }
@@ -4088,6 +4096,17 @@ components:
         seed_matched: { type: boolean, description: 种子岗位命中（pending/evolution） }
         rag_matched: { type: boolean, description: RAG 检索命中（pending/evolution） }
         definition_draft: { type: string, description: 岗位定义草案（pending/evolution） }
+        definition_structured:
+          type: object
+          nullable: true
+          description: 结构化定义草案（core_duties/typical_scenarios，RAG 阶段二 LLM 生成；未生成时为 null）
+          properties:
+            core_duties:
+              type: array
+              items: { type: string }
+            typical_scenarios:
+              type: array
+              items: { type: string }
         detected_at: { type: string, nullable: true }
         updated_at: { type: string, nullable: true }
 
@@ -5288,6 +5307,34 @@ components:
         level: { type: string, nullable: true }
         source_count: { type: integer, nullable: true }
 
+    PositionDefinition:
+      type: object
+      description: |
+        岗位结构化定义（赛题五字段：岗位名称/核心职责/必备技能/加分技能/典型行业应用场景）。
+        summary 为一句话定义（RAG+LLM 生成，NLI 门控）；core_duties/typical_scenarios
+        由 LLM 结构化生成、岗位落图后以图谱属性（含人工优化）为准；
+        must_skills/nice_skills 一律取图谱 REQUIRES 证据边，不采信 LLM 生成（幻觉防控第三道防线）。
+      required: [position_name, summary]
+      properties:
+        position_name: { type: string }
+        summary: { type: string, description: 一句话岗位定义草案 }
+        core_duties:
+          type: array
+          items: { type: string }
+          description: 核心职责（2-6 条）
+        must_skills:
+          type: array
+          items: { type: string }
+          description: 必备技能（图谱 necessity=must）
+        nice_skills:
+          type: array
+          items: { type: string }
+          description: 加分技能（图谱 necessity=nice）
+        typical_scenarios:
+          type: array
+          items: { type: string }
+          description: 典型行业应用场景
+
     RecentDiscoveryCandidate:
       type: object
       description: 近期发现的新岗位候选（含技能；/discovery/recent）
@@ -5298,6 +5345,8 @@ components:
         state: { type: string, description: candidate/emerging/stable/declining }
         detected_at: { type: string, description: 发现时间（进入候选池） }
         definition_draft: { type: string }
+        definition:
+          $ref: '#/components/schemas/PositionDefinition'
         confidence:
           type: object
           additionalProperties: { type: number }

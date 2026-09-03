@@ -112,7 +112,37 @@ function NewPositionsView({ data, loading }: { data: DiscoveryRecentData | null;
                 )}
               </button>
               {isOpen && (
-                <div className="mt-2 border-t border-border pt-2">
+                <div className="mt-2 border-t border-border pt-2 space-y-2">
+                  {/* 岗位结构化定义（赛题五字段：职责/场景 + 一句话定义；技能见下方图谱证据边） */}
+                  {c.definition?.summary && (
+                    <p className="text-xs text-ink-secondary leading-relaxed">{c.definition.summary}</p>
+                  )}
+                  {(c.definition?.core_duties?.length ?? 0) > 0 && (
+                    <div>
+                      <div className="text-[11px] text-ink-faint">核心职责</div>
+                      <ul className="mt-1 space-y-0.5">
+                        {c.definition!.core_duties!.map((d, j) => (
+                          <li key={j} className="text-xs text-ink-muted flex gap-1.5">
+                            <span className="text-ink-faint select-none">·</span>
+                            <span>{d}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {(c.definition?.typical_scenarios?.length ?? 0) > 0 && (
+                    <div>
+                      <div className="text-[11px] text-ink-faint">典型行业应用场景</div>
+                      <ul className="mt-1 space-y-0.5">
+                        {c.definition!.typical_scenarios!.map((s, j) => (
+                          <li key={j} className="text-xs text-ink-muted flex gap-1.5">
+                            <span className="text-ink-faint select-none">·</span>
+                            <span>{s}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   {c.skill_pending || !c.skills ? (
                     <p className="text-xs text-ink-faint">暂无技能明细</p>
                   ) : (

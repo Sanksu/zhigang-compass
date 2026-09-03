@@ -81,6 +81,14 @@ class CandidatePosition(BaseModel):
     seed_matched: bool = Field(default=False, description="是否匹配预置种子列表")
     rag_matched: bool = Field(default=False, description="是否匹配权威岗位库（RAG 接地）")
     definition_draft: str = Field(default="", description="RAG 阶段二生成的岗位定义草案（种子/权威库命中时）")
+    core_duties: list[str] = Field(
+        default_factory=list,
+        description="核心职责草案（LLM 结构化生成；赛题岗位定义五字段之一）",
+    )
+    typical_scenarios: list[str] = Field(
+        default_factory=list,
+        description="典型行业应用场景草案（LLM 结构化生成；赛题岗位定义五字段之一）",
+    )
 
 
 class RagGroundingResult(BaseModel):
@@ -102,4 +110,12 @@ class RagGroundingResult(BaseModel):
     nli_contradicted: bool = Field(
         default=False,
         description="NLI 矛盾检测软门控是否触发：LLM 草案与参考基座冲突，截断回退参考原文",
+    )
+    core_duties: list[str] = Field(
+        default_factory=list,
+        description="核心职责（LLM 结构化生成，NLI 门控通过时非空）",
+    )
+    typical_scenarios: list[str] = Field(
+        default_factory=list,
+        description="典型行业应用场景（LLM 结构化生成，NLI 门控通过时非空）",
     )
