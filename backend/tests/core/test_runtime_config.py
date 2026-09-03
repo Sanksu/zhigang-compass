@@ -86,14 +86,14 @@ class TestSave:
             rc.save({"evolution_cache_ttl": 1})
 
     def test_llm_async_wall_budget_default_and_range(self, _isolated_config):
-        """第八轮裁决②旋钮：默认 90，越界拒绝（30-600）。"""
+        """第八轮裁决②旋钮：默认 90，越界拒绝（30-90，对齐 §6.4 口径上限）。"""
         assert rc.get("llm_async_wall_budget") == 90
-        rc.save({"llm_async_wall_budget": 120})
-        assert rc.get("llm_async_wall_budget") == 120
         with pytest.raises(ValueError):
             rc.save({"llm_async_wall_budget": 10})  # < 30：单 provider 完整超时下限
         with pytest.raises(ValueError):
-            rc.save({"llm_async_wall_budget": 601})  # > 600
+            rc.save({"llm_async_wall_budget": 91})  # > 90：超 §6.4 口径上限
+        with pytest.raises(ValueError):
+            rc.save({"llm_async_wall_budget": 601})  # 远超上限同样拒绝
         with pytest.raises(ValueError):
             rc.save({"llm_async_wall_budget": "90"})
 

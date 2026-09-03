@@ -82,6 +82,32 @@ describe('api 便捷方法', () => {
   })
 })
 
+describe('GET 并发去重与缓存 key', () => {
+  it('同 url+params 的并发请求合并为一次网络请求', async () => {
+    adapter.mockResolvedValue(ok(apiOk({ v: 1 })))
+    await Promise.all([
+      apiGet('/x', { params: { page: 1 } }),
+      apiGet('/x', { params: { page: 1 } }),
+    ])
+    expect(adapter).toHaveBeenCalledTimes(1)
+  })
+
+  it('params 序列化失败（toJSON 抛错）时不合并，各自独立发请求', async () => {
+    adapter.mockResolvedValue(ok(apiOk({ v: 1 })))
+    const unserializable = {
+      page: 1,
+      toJSON() {
+        throw new TypeError('unserializable params')
+      },
+    }
+    await Promise.all([
+      apiGet('/x', { params: unserializable }),
+      apiGet('/x', { params: unserializable }),
+    ])
+    expect(adapter).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('响应拦截器：业务错误与网络错误', () => {
   it('code !== 0 抛 ApiError（携带 code/msg/traceId/status）', async () => {
     adapter.mockResolvedValue(ok({ code: 4001, msg: '参数错误', trace_id: 't2' }))

@@ -201,6 +201,8 @@ export async function apiGet<T>(url: string, config?: AxiosRequestConfig): Promi
 const _inFlight = new Map<string, Promise<unknown>>()
 const _getCache = new Map<string, { expires: number; data: unknown }>()
 
+let _unserializableSeq = 0
+
 /** GET 缓存/去重 key：url + 序列化 params（query string 形式的 url 本身已含参数） */
 function getKey(url: string, config?: AxiosRequestConfig): string {
   const params = config?.params
@@ -208,7 +210,9 @@ function getKey(url: string, config?: AxiosRequestConfig): string {
   try {
     return `${url}\u0000${JSON.stringify(params)}`
   } catch {
-    return url
+    // 序列化失败不能与裸 url 共享 key（否则不同请求被误合并）：递增序号
+    // 保证每次 key 唯一 → 各自独立发请求（审查④）
+    return `${url}\u0000\u0000unserializable#${++_unserializableSeq}`
   }
 }
 

@@ -428,7 +428,8 @@ async def _reconcile_failed_effects() -> dict:
                 row.impact_stats = {**(row.impact_stats or {}), **effect}
                 row.effects_applied = True
                 row.effects_error = ""
-                row.effects_retry_count = retry + 1
+                # 审查⑥：成功不占失败重试额度——retry 仅计失败次数，成功后
+                # 递增会挤占后续真实失败的自动重试次数
                 reconciled += 1
                 logger.info(
                     "[dict_guard] 副作用重试成功 proposal=%s term=%s", row.id, row.term,
