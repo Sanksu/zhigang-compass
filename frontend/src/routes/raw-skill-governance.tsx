@@ -67,6 +67,7 @@ export function RawSkillGovernance() {
   }
   useEffect(() => {
     reloadDescs()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 初始加载触发 loading 状态
     load()
   }, [q, reloadDescs])
 

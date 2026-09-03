@@ -362,6 +362,7 @@ export function GraphPage() {
   // 岗位画像：加载当前画像岗位的原始 JD 列表（侧栏「原始 JD」下拉数据源）
   useEffect(() => {
     if (view !== 'positionPortrait' || !portraitPosition) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 视图切换清除旧画像 JD 残留
       setPositionJds(null)
       return
     }
