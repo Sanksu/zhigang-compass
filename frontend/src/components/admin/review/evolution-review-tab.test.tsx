@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { apiGet, apiPut } from '@/lib/api'
 import { EvolutionReviewTab } from './evolution-review-tab'
+import type { ReviewItem } from './review-types'
 
 vi.mock('@/lib/api', () => ({
   apiGet: vi.fn(),
