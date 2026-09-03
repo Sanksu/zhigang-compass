@@ -9,6 +9,7 @@ import types
 
 import pytest
 
+import app.core.database as db_mod
 import app.workers.dict_guard as wg
 from app.services import dict_guard_effect as effect
 
@@ -44,7 +45,6 @@ class _Sess:
     def __init__(self, rows, changelogs):
         self.rows = rows
         self._chg = iter(changelogs)
-        self._seen = 0
         self.committed = 0
 
     async def __aenter__(self):
@@ -54,7 +54,6 @@ class _Sess:
         return False
 
     async def scalars(self, stmt):
-        self._seen += 1
         return _Scalars(self.rows)
 
     async def scalar(self, stmt):
@@ -64,12 +63,22 @@ class _Sess:
         self.committed += 1
 
 
+@pytest.fixture
+def fake_session(monkeypatch):
+    """把 async_session_factory 指向测试可注入的 fake session。"""
+    def _set(sess):
+        monkeypatch.setattr(db_mod, "async_session_factory", lambda: sess)
+        return sess
+
+    return _set
+
+
 @pytest.mark.asyncio
-async def test_reconcile_retries_failed_and_sets_applied_true(monkeypatch):
+async def test_reconcile_retries_failed_and_sets_applied_true(fake_session, monkeypatch):
     """副作用重试成功 → 提案 effects_applied 翻 True、清空错误、计数+1。"""
     row = _proposal()
     monkeypatch.setattr(effect, "apply_review_effect", lambda **kw: {"removed_nodes": 2})
-    sess = _Sess([row], [_changelog()])
+    sess = fake_session(_Sess([row], [_changelog()]))
     res = await wg._reconcile_failed_effects()
     assert res["reconciled"] == 1
     assert row.effects_applied is True
@@ -79,18 +88,20 @@ async def test_reconcile_retries_failed_and_sets_applied_true(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reconcile_skips_when_retry_cap_reached(monkeypatch):
+async def test_reconcile_skips_when_retry_cap_reached(fake_session):
     """重试次数达上限 → 跳过、不改状态（交人工）。"""
     row = _proposal(effects_retry_count=wg._EFFECT_MAX_RETRY)
+    fake_session(_Sess([row], [_changelog()]))
     res = await wg._reconcile_failed_effects()
     assert res["reconciled"] == 0 and res["skipped"] == 1
     assert row.effects_applied is False
 
 
 @pytest.mark.asyncio
-async def test_reconcile_skips_missing_changelog(monkeypatch):
+async def test_reconcile_skips_missing_changelog(fake_session):
     """缺关联审计记录 → 无法确定副作用形态，不盲目重放（防误删），交人工。"""
     row = _proposal()
+    fake_session(_Sess([row], [None]))
     res = await wg._reconcile_failed_effects()
     assert res["reconciled"] == 0 and res["skipped"] == 1
     assert row.effects_retry_count == wg._EFFECT_MAX_RETRY  # 封顶交人工
@@ -98,10 +109,14 @@ async def test_reconcile_skips_missing_changelog(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reconcile_keeps_failed_on_retry_error(monkeypatch):
+async def test_reconcile_keeps_failed_on_retry_error(fake_session, monkeypatch):
     """重试再次抛异常 → 仍置 False、计数+1、错误更新（下次再来）。"""
     row = _proposal(effects_retry_count=1)
-    monkeypatch.setattr(effect, "apply_review_effect", lambda **kw: (_ for _ in ()).throw(RuntimeError("still down")))
+    monkeypatch.setattr(
+        effect, "apply_review_effect",
+        lambda **kw: (_ for _ in ()).throw(RuntimeError("still down")),
+    )
+    fake_session(_Sess([row], [_changelog()]))
     res = await wg._reconcile_failed_effects()
     assert res["still_failed"] == 1
     assert row.effects_applied is False
