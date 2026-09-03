@@ -6,6 +6,7 @@
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
 ### 2026-09-02
+- **学历维度计入综合得分明细展示**：契约先行在 `MatchResult` 增加顶层 `edu_score`（第四维 BT v4，任一侧学历层级无法映射为 null，不参与总分加权），`weights` 增加 `edu`（w_edu 凸组合权重，未配置/非法为 null）——`score_position` 构造结果时透出 `edu_score`，compare 响应汇总 `weights.edu`；前端「综合得分」明细卡新增「学历背景」条（与必备/加分/经验并列，展示分数与权重，无信号时隐藏）。含既有 matching 219 + jd_match/api smoke 用例全通过。
 - **同岗位下各 JD 匹配评分明细（下拉逐条查看）**：契约先行在 `MatchResult` 增加 `jd_breakdown`（该岗位各 JD 按分降序：jd_id/标题/三维分/命中数）与 `resume_id`，新增 `GET /match/result/{match_id}/jd/{jd_id}` 单 JD 详情（三维得分/差距/学习路径/原文，并入当前岗位详情）——`score_jd_compare` 现返回全部评分 JD 降序列表（原仅取最高分一条），新增 `score_jd_one` 按 id 评分单条 JD；前端比对详情头部加「切换 JD」下拉，切换即加载对应 JD 详情（岗位级字段域/权重/证据保持来源岗位）。含 3 条新单测，jd_match + api smoke 226 passed。
 
 ### 2026-08-29

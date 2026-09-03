@@ -106,6 +106,10 @@ class MatchResult(BaseModel):
     )
     nice_score: float = Field(ge=0.0, le=1.0)
     exp_score: float = Field(ge=0.0, le=1.0)
+    edu_score: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0,
+        description="学历匹配分（第四维，2026-09-01 BT v4）；任一侧学历层级无法映射时为 None（不参与总分加权）",
+    )
     matched_must: list[str] = Field(default_factory=list, description="已匹配的必备技能名")
     missing_must: list[str] = Field(default_factory=list, description="缺失的必备技能名")
     matched_nice: list[str] = Field(

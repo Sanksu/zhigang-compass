@@ -615,6 +615,7 @@ def score_position(
         must_score=round(must_score, 4) if must_score is not None else None,
         nice_score=round(nice_score, 4),
         exp_score=round(exp_score, 4),
+        edu_score=round(edu_score, 4) if edu_score is not None else None,
         matched_must=matched_must,
         missing_must=missing_must,
         matched_nice=matched_nice,

@@ -4758,6 +4758,7 @@ components:
         must_score: { type: number, nullable: true, description: "必备技能匹配分 [0,1]；岗位无必备技能门槛时为 null（无信息不判分，总分在 nice/exp 上重归一）" }
         nice_score: { type: number, description: "加分技能匹配分 [0,1]，Top-K 覆盖口径（考核跨源数最高的前 10 条加分项）" }
         exp_score: { type: number }
+        edu_score: { type: number, nullable: true, description: "学历匹配分（第四维，BT v4，2026-09-01）[0,1]；任一侧学历层级无法映射时为 null（不参与总分加权）" }
         matched_must:
           type: array
           items: { type: string }
@@ -4810,11 +4811,12 @@ components:
           description: 岗位职能域（域治理成果接入，按岗位名取图谱 domain_name；无域/查询失败为 null，前端不渲染）
         weights:
           type: object
-          description: 实际评分权重（BT v3，configs/match_weights.json）
+          description: "实际评分权重（BT v4，configs/match_weights.json）：must/nice/exp 三维（和为 1）+ edu 第四维凸组合权重（w_edu，未配置/非法为 null，此时总分纯三维口径）"
           properties:
             must: { type: number }
             nice: { type: number }
             exp: { type: number }
+            edu: { type: number, nullable: true }
         jd_compared:
           type: integer
           description: "JD 级评分溯源：total_score 为同岗最近 N 条宽 JD（上限 max_jds）中的最高分，N=参与评分条数"
