@@ -79,4 +79,6 @@ export interface NodeDetail {
   source?: string
   value?: number
   description?: string
+  /** 岗位画像独有：该技能被当前岗位几个独立 JD 直接要求（后端 REQUIRES.source_count） */
+  jd_source_count?: number
 }

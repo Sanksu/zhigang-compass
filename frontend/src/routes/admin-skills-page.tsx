@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Tag, X } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { Reveal } from '@/components/ui/reveal'
@@ -135,6 +135,24 @@ function SkillOverviewTab() {
     }
   }, [params])
 
+  // ── 技能解释：只读展示（编辑/补齐已移至「原始数据管理 → 技能治理」） ──
+  const [descMap, setDescMap] = useState<Record<string, { override?: string; builtin?: string }>>({})
+  const reloadDescs = useCallback(() => {
+    apiGet<{
+      items: { skill_name: string; override_desc: string | null; builtin_desc: string | null }[]
+    }>('/admin/skill-descriptions?limit=1000')
+      .then((r) => {
+        const m: Record<string, { override?: string; builtin?: string }> = {}
+        for (const it of r.items)
+          m[it.skill_name] = { override: it.override_desc ?? undefined, builtin: it.builtin_desc ?? undefined }
+        setDescMap(m)
+      })
+      .catch(() => setDescMap({}))
+  }, [])
+  useEffect(() => {
+    reloadDescs()
+  }, [reloadDescs])
+
   return (
     <Card>
       <CardContent className="pt-4">
@@ -167,7 +185,7 @@ function SkillOverviewTab() {
               setLoading(true)
             }}
           >
-            <SelectTrigger aria-label="白名单过滤" className="h-8 w-36 text-sm">
+            <SelectTrigger aria-label="白名单过滤" className="h-8 w-full sm:w-36 text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -184,7 +202,7 @@ function SkillOverviewTab() {
               setLoading(true)
             }}
           >
-            <SelectTrigger aria-label="噪声过滤" className="h-8 w-36 text-sm">
+            <SelectTrigger aria-label="噪声过滤" className="h-8 w-full sm:w-36 text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -211,6 +229,7 @@ function SkillOverviewTab() {
                 <TableHead className="text-center">噪声</TableHead>
                 <TableHead className="w-44">分类</TableHead>
                 <TableHead>别名（生效）</TableHead>
+                <TableHead className="w-64">技能解释</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -245,6 +264,14 @@ function SkillOverviewTab() {
                     ) : (
                       <span className="text-xs text-ink-faint">—</span>
                     )}
+                  </TableCell>
+                  <TableCell className="max-w-64">
+                    <p
+                      className="truncate text-xs text-ink-secondary"
+                      title={descMap[it.name]?.override ?? descMap[it.name]?.builtin ?? undefined}
+                    >
+                      {descMap[it.name]?.override ?? descMap[it.name]?.builtin ?? '（空）'}
+                    </p>
                   </TableCell>
                 </TableRow>
               ))}
@@ -322,7 +349,7 @@ function AliasReviewTab() {
       <CardContent className="pt-4">
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <Select value={status} onValueChange={(v) => { setStatus(v); setPage(1); setLoading(true) }}>
-            <SelectTrigger aria-label="状态过滤" className="h-8 w-36 text-sm">
+            <SelectTrigger aria-label="状态过滤" className="h-8 w-full sm:w-36 text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

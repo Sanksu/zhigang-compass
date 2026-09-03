@@ -57,40 +57,42 @@ async def query_fulltext_search(
     lq = _escape_lucene(q)
     if type_ in ("position", "skill"):
         index = "position_search" if type_ == "position" else "skill_search"
+        # 2026-09-02 P99 优化：数据页与 total 合并为单次 fulltext 索引调用
+        #（原为同索引查询跑两遍：数据 + count）。fulltext 命中集有限（几十~几百），
+        # collect 全集再内存分页与旧两查结果一致（同分节点排列可不同，均正确）。
         result = await session.run(
             f"""
             CALL db.index.fulltext.queryNodes('{index}', $lq) YIELD node, score
             {status_clause}
-            RETURN node.id AS id, node.name AS name, score
-            ORDER BY score DESC SKIP $offset LIMIT $size
+            ORDER BY score DESC
+            WITH collect({{id: node.id, name: node.name, score: score}}) AS hits,
+                 count(node) AS total
+            RETURN total,
+                   [x IN range($offset, $offset + $size - 1) WHERE x < size(hits) | hits[x]] AS page
             """,
             lq=lq, offset=offset, size=size,
             public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
         )
-        total_row = await (await session.run(
-            f"""
-            CALL db.index.fulltext.queryNodes('{index}', $lq) YIELD node
-            {status_clause}
-            RETURN count(node) AS c
-            """,
-            lq=lq,
-            public_statuses=list(_PUBLIC_POSITION_STATUSES) if status_clause else None,
-        )).single()
-        total = total_row["c"] if total_row else 0
+        record = await result.single()
+        if record is None:
+            return [], 0
+        return record["page"], record["total"]
     else:
         try:
             result = await session.run(
                 "CALL db.index.fulltext.queryNodes('evidence_search', $lq) "
                 "YIELD node, score "
-                "RETURN node.id AS id, node.source AS name, score "
-                "ORDER BY score DESC SKIP $offset LIMIT $size",
+                "ORDER BY score DESC "
+                "WITH collect({id: node.id, name: node.source, score: score}) AS hits, "
+                "count(node) AS total "
+                "RETURN total, [x IN range($offset, $offset + $size - 1) "
+                "WHERE x < size(hits) | hits[x]] AS page",
                 lq=lq, offset=offset, size=size,
             )
-            total_row = await (await session.run(
-                "CALL db.index.fulltext.queryNodes('evidence_search', $lq) "
-                "YIELD node RETURN count(node) AS c",
-                lq=lq,
-            )).single()
+            record = await result.single()
+            if record is None:
+                return [], 0
+            return record["page"], record["total"]
         except Exception:
             result = await session.run(
                 """
@@ -189,7 +191,8 @@ async def query_view_position_portrait(session, position_id: str, limit: int, st
         WITH p, collect({{sid: s.id, sname: s.name, scat: s.category,
                           weight: coalesce(r.weight, 0),
                           necessity: coalesce(r.necessity, 'must'),
-                          level: r.level}})[0..$limit] AS skills
+                          level: r.level,
+                          scount: coalesce(r.source_count, 1)}})[0..$limit] AS skills
         RETURN p, skills
         """,
         pid=position_id, limit=limit,

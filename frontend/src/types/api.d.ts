@@ -341,6 +341,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/graph/position/{id}/jds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 岗位原始 JD 列表（含全文；画像侧栏「原始 JD」下拉数据源）
+         * @description 按岗位返回参与聚合的原始 JD 及正文（口径镜像 build_aggregates： SimHash 近似重复/归档/岗位级通胀排除一致，最新优先），供前端下拉选中后 展开 JD 全文。data.items 元素复用 JdEvidenceDetail（含 raw_text）。
+         */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    offset?: number;
+                };
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 岗位原始 JD 列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["PositionRawJdListData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/graph/position/{id}/portrait-evidence": {
         parameters: {
             query?: never;
@@ -3843,6 +3893,140 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/skill-descriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 技能解释列表（DB 覆盖 / 内置词典 / 空；供技能页编辑展示） */
+        get: {
+            parameters: {
+                query?: {
+                    q?: string;
+                    limit?: number;
+                    offset?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 技能及其解释来源列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillDescriptionListData"];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skill-descriptions/{skill_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 保存某技能解释（后台人工编辑，写 skill_descriptions 覆盖） */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    skill_name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        description: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description 保存结果 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillDescriptionUpsertData"];
+                        };
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/skill-descriptions/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 触发 LLM 补齐解释为空的技能（写 DB，source=llm；可能耗时） */
+        post: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 补齐结果统计 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["SkillDescriptionBackfillData"];
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/skills": {
         parameters: {
             query?: never;
@@ -5014,6 +5198,10 @@ export interface components {
             portrait_category?: boolean;
             /** @description 证据条数（仅 positionPortrait 视图 position 节点返回） */
             evidence_count?: number | null;
+            /** @description 该技能被当前岗位几个独立 JD 直接要求（仅 positionPortrait 视图 skill 节点；REQUIRES.source_count） */
+            jd_source_count?: number | null;
+            /** @description 节点描述（仅 positionPortrait 视图 skill 节点：由类目/JD 支撑数等整合的一段技能说明） */
+            description?: string | null;
             /** @description 节点权重（positionPortrait 视图：岗位取 JD 频次、技能取边 weight） */
             value?: number;
         };
@@ -5257,6 +5445,17 @@ export interface components {
             education_level?: string;
             /** @description 正文摘要（前 120 字） */
             snippet?: string;
+        };
+        /** @description 岗位原始 JD 列表（GET /graph/position/{id}/jds） */
+        PositionRawJdListData: {
+            position_id: string;
+            position_name: string;
+            /** @description 该岗位参与聚合的 JD 总数 */
+            total: number;
+            offset?: number;
+            limit?: number;
+            /** @description 原始 JD 及正文（javax JdEvidenceDetail，含 raw_text） */
+            items: components["schemas"]["JdEvidenceDetail"][];
         };
         /** @description GET /graph/position/{id}/portrait-evidence 响应 data */
         PortraitEvidenceData: {
@@ -5976,7 +6175,7 @@ export interface components {
         LlmDecisionItem: {
             /** @description UUID */
             id: string;
-            /** @description jd_extract/position_normalize/skill_normalize/position_classify/cluster_label/skill_classify/governance/skill_relation */
+            /** @description jd_extract/position_normalize/skill_normalize/position_classify/cluster_label/skill_classify/governance/skill_relation/skill_noise/skill_alias */
             domain: string;
             entity_type?: string;
             entity_id?: string;
@@ -6087,6 +6286,46 @@ export interface components {
             is_noise: boolean;
             /** @description approved 别名变体列表 */
             aliases?: string[];
+        };
+        /** @description 技能解释列表项（GET /admin/skill-descriptions） */
+        SkillDescriptionListItem: {
+            /** @description 技能名（图 Skill.name） */
+            skill_name: string;
+            /** @description DB 覆盖解释（skill_descriptions，人工/LLM 写入）；null=未覆盖 */
+            override_desc?: string | null;
+            /** @description 内置词典解释（SKILL_DESCRIPTIONS）；仅展示/兜底，编辑时写入 override */
+            builtin_desc?: string | null;
+            /**
+             * @description 解释来源：db=DB 覆盖 / builtin=内置词典 / 空串=无
+             * @enum {string}
+             */
+            source: "db" | "builtin" | "";
+        };
+        /** @description GET /admin/skill-descriptions 响应 data */
+        SkillDescriptionListData: {
+            total: number;
+            offset?: number;
+            limit?: number;
+            items: components["schemas"]["SkillDescriptionListItem"][];
+        };
+        /** @description PUT /admin/skill-descriptions/{skill_name} 响应 data */
+        SkillDescriptionUpsertData: {
+            skill_name: string;
+            description: string;
+            source: string;
+        };
+        /** @description POST /admin/skill-descriptions/backfill 响应 data */
+        SkillDescriptionBackfillData: {
+            /** @description 本次成功生成的解释条数 */
+            generated: number;
+            /** @description 失败条数 */
+            failed?: number;
+            /** @description 当前缺口总数（无 DB 覆盖且非内置词典） */
+            total_missing: number;
+            /** @description 本次处理上限 */
+            limit: number;
+            /** @description 提示（无缺口时） */
+            message?: string | null;
         };
         /** @description POST /admin/skill-aliases/{alias_id}/review 请求体 */
         SkillAliasReviewIn: {
@@ -6410,6 +6649,8 @@ export interface components {
             /** @description 加分技能匹配分 [0,1]，Top-K 覆盖口径（考核跨源数最高的前 10 条加分项） */
             nice_score: number;
             exp_score: number;
+            /** @description 学历匹配分（第四维，BT v4，2026-09-01）[0,1]；任一侧学历层级无法映射时为 null（不参与总分加权） */
+            edu_score?: number | null;
             /** @description 已匹配的必备技能名 */
             matched_must: string[];
             /** @description 已匹配的加分技能名（JD 证据 hit_count 统一 must+nice 口径） */
@@ -6454,11 +6695,12 @@ export interface components {
             evidence_refs: components["schemas"]["EvidenceRef"][];
             /** @description 岗位职能域（域治理成果接入，按岗位名取图谱 domain_name；无域/查询失败为 null，前端不渲染） */
             domain_name?: string | null;
-            /** @description 实际评分权重（BT v3，configs/match_weights.json） */
+            /** @description 实际评分权重（BT v4，configs/match_weights.json）：must/nice/exp 三维（和为 1）+ edu 第四维凸组合权重（w_edu，未配置/非法为 null，此时总分纯三维口径） */
             weights?: {
                 must?: number;
                 nice?: number;
                 exp?: number;
+                edu?: number | null;
             };
             /** @description JD 级评分溯源：total_score 为同岗最近 N 条宽 JD（上限 max_jds）中的最高分，N=参与评分条数 */
             jd_compared?: number;

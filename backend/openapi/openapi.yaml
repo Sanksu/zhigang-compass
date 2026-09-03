@@ -240,6 +240,41 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/graph/position/{id}/jds:
+    get:
+      tags: [graph]
+      security: []
+      summary: 岗位原始 JD 列表（含全文；画像侧栏「原始 JD」下拉数据源）
+      description: >
+        按岗位返回参与聚合的原始 JD 及正文（口径镜像 build_aggregates：
+        SimHash 近似重复/归档/岗位级通胀排除一致，最新优先），供前端下拉选中后
+        展开 JD 全文。data.items 元素复用 JdEvidenceDetail（含 raw_text）。
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: 岗位原始 JD 列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/PositionRawJdListData'
+                  trace_id: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/graph/position/{id}/portrait-evidence:
     get:
       tags: [graph]
@@ -2307,6 +2342,86 @@ paths:
                       offset: { type: integer }
                   trace_id: { type: string }
 
+  /api/v1/admin/skill-descriptions:
+    get:
+      tags: [admin]
+      summary: 技能解释列表（DB 覆盖 / 内置词典 / 空；供技能页编辑展示）
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 100, description: 技能名关键字过滤 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 200, minimum: 1, maximum: 1000 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+      responses:
+        '200':
+          description: 技能及其解释来源列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/SkillDescriptionListData'
+  /api/v1/admin/skill-descriptions/{skill_name}:
+    put:
+      tags: [admin]
+      summary: 保存某技能解释（后台人工编辑，写 skill_descriptions 覆盖）
+      parameters:
+        - name: skill_name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description]
+              properties:
+                description: { type: string }
+      responses:
+        '200':
+          description: 保存结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/SkillDescriptionUpsertData'
+  /api/v1/admin/skill-descriptions/backfill:
+    post:
+      tags: [admin]
+      summary: 触发 LLM 补齐解释为空的技能（写 DB，source=llm；可能耗时）
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 500 }
+      responses:
+        '200':
+          description: 补齐结果统计
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/SkillDescriptionBackfillData'
   /api/v1/admin/skills:
     get:
       tags: [admin]
@@ -3096,6 +3211,8 @@ components:
         skill_category: { type: string, nullable: true, description: "技能类目（仅 skill 节点；来自 skill_whitelist.yaml 的 category，白名单外未写入为 null，「软技能」=软素质类；positionPortrait 视图 attr 节点复用承载大类名/「画像条目」）" }
         portrait_category: { type: boolean, description: "岗位画像大类节点标记（仅 positionPortrait 视图 attr 节点：技能/软技能/薪资/经验/学历中环）" }
         evidence_count: { type: integer, nullable: true, description: "证据条数（仅 positionPortrait 视图 position 节点返回）" }
+        jd_source_count: { type: integer, nullable: true, description: "该技能被当前岗位几个独立 JD 直接要求（仅 positionPortrait 视图 skill 节点；REQUIRES.source_count）" }
+        description: { type: string, nullable: true, description: "节点描述（仅 positionPortrait 视图 skill 节点：由类目/JD 支撑数等整合的一段技能说明）" }
         value: { type: number, description: "节点权重（positionPortrait 视图：岗位取 JD 频次、技能取边 weight）" }
 
     GraphEdge:
@@ -3350,6 +3467,21 @@ components:
         experience_label: { type: string, description: "经验分布标签（如 3年以上）" }
         education_level: { type: string, description: "学历要求（大专/本科/硕士/博士）" }
         snippet: { type: string, description: "正文摘要（前 120 字）" }
+
+    PositionRawJdListData:
+      type: object
+      description: 岗位原始 JD 列表（GET /graph/position/{id}/jds）
+      required: [position_id, position_name, total, items]
+      properties:
+        position_id: { type: string }
+        position_name: { type: string }
+        total: { type: integer, description: 该岗位参与聚合的 JD 总数 }
+        offset: { type: integer }
+        limit: { type: integer }
+        items:
+          type: array
+          description: 原始 JD 及正文（javax JdEvidenceDetail，含 raw_text）
+          items: { $ref: '#/components/schemas/JdEvidenceDetail' }
 
     PortraitEvidenceData:
       type: object
@@ -4178,7 +4310,7 @@ components:
       required: [id, domain, status, created_at]
       properties:
         id: { type: string, description: UUID }
-        domain: { type: string, description: jd_extract/position_normalize/skill_normalize/position_classify/cluster_label/skill_classify/governance/skill_relation }
+        domain: { type: string, description: jd_extract/position_normalize/skill_normalize/position_classify/cluster_label/skill_classify/governance/skill_relation/skill_noise/skill_alias }
         entity_type: { type: string }
         entity_id: { type: string }
         run_id: { type: string }
@@ -4285,6 +4417,48 @@ components:
           type: array
           description: approved 别名变体列表
           items: { type: string }
+
+    SkillDescriptionListItem:
+      type: object
+      description: 技能解释列表项（GET /admin/skill-descriptions）
+      required: [skill_name, source]
+      properties:
+        skill_name: { type: string, description: 技能名（图 Skill.name） }
+        override_desc: { type: string, nullable: true, description: DB 覆盖解释（skill_descriptions，人工/LLM 写入）；null=未覆盖 }
+        builtin_desc: { type: string, nullable: true, description: 内置词典解释（SKILL_DESCRIPTIONS）；仅展示/兜底，编辑时写入 override }
+        source: { type: string, enum: [db, builtin, ""], description: 解释来源：db=DB 覆盖 / builtin=内置词典 / 空串=无 }
+
+    SkillDescriptionListData:
+      type: object
+      description: GET /admin/skill-descriptions 响应 data
+      required: [total, items]
+      properties:
+        total: { type: integer }
+        offset: { type: integer }
+        limit: { type: integer }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/SkillDescriptionListItem' }
+
+    SkillDescriptionUpsertData:
+      type: object
+      description: PUT /admin/skill-descriptions/{skill_name} 响应 data
+      required: [skill_name, description, source]
+      properties:
+        skill_name: { type: string }
+        description: { type: string }
+        source: { type: string }
+
+    SkillDescriptionBackfillData:
+      type: object
+      description: POST /admin/skill-descriptions/backfill 响应 data
+      required: [generated, total_missing, limit]
+      properties:
+        generated: { type: integer, description: 本次成功生成的解释条数 }
+        failed: { type: integer, description: 失败条数 }
+        total_missing: { type: integer, description: 当前缺口总数（无 DB 覆盖且非内置词典） }
+        limit: { type: integer, description: 本次处理上限 }
+        message: { type: string, nullable: true, description: 提示（无缺口时） }
 
     SkillAliasReviewIn:
       type: object
@@ -4758,6 +4932,7 @@ components:
         must_score: { type: number, nullable: true, description: "必备技能匹配分 [0,1]；岗位无必备技能门槛时为 null（无信息不判分，总分在 nice/exp 上重归一）" }
         nice_score: { type: number, description: "加分技能匹配分 [0,1]，Top-K 覆盖口径（考核跨源数最高的前 10 条加分项）" }
         exp_score: { type: number }
+        edu_score: { type: number, nullable: true, description: "学历匹配分（第四维，BT v4，2026-09-01）[0,1]；任一侧学历层级无法映射时为 null（不参与总分加权）" }
         matched_must:
           type: array
           items: { type: string }
@@ -4810,11 +4985,12 @@ components:
           description: 岗位职能域（域治理成果接入，按岗位名取图谱 domain_name；无域/查询失败为 null，前端不渲染）
         weights:
           type: object
-          description: 实际评分权重（BT v3，configs/match_weights.json）
+          description: "实际评分权重（BT v4，configs/match_weights.json）：must/nice/exp 三维（和为 1）+ edu 第四维凸组合权重（w_edu，未配置/非法为 null，此时总分纯三维口径）"
           properties:
             must: { type: number }
             nice: { type: number }
             exp: { type: number }
+            edu: { type: number, nullable: true }
         jd_compared:
           type: integer
           description: "JD 级评分溯源：total_score 为同岗最近 N 条宽 JD（上限 max_jds）中的最高分，N=参与评分条数"

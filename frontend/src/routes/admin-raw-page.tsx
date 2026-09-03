@@ -25,6 +25,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiDelete, apiGet, apiPut } from '@/lib/api'
+import { RawSkillGovernance } from './raw-skill-governance'
 import type { components } from '@/types/api'
 
 type RawAdminPage = components['schemas']['RawAdminPage']
@@ -129,6 +130,7 @@ function detailToForm(detail: JdAdminDetail | RawAdminDetail): EditForm {
  */
 export function AdminRawPage() {
   const [rawType, setRawType] = useState<RawType>('jd')
+  const [skillGov, setSkillGov] = useState(false)
   const isJd = rawType === 'jd'
   const [items, setItems] = useState<RawAdminItem[] | JdAdminItem[]>([])
   const [total, setTotal] = useState(0)
@@ -301,7 +303,11 @@ export function AdminRawPage() {
       <Reveal delay={380}>
       <Card>
         <CardContent className="pt-4">
-          <Tabs value={rawType} onValueChange={(v) => { setRawType(v as RawType); setPage(1); setSource(''); setQ(''); setLoading(true) }}>
+          <Tabs value={skillGov ? 'skills' : rawType} onValueChange={(v) => {
+            if (v === 'skills') { setSkillGov(true); return }
+            setSkillGov(false)
+            setRawType(v as RawType); setPage(1); setSource(''); setQ(''); setLoading(true)
+          }}>
             <TabsList className="mb-4">
               <TabsTrigger value="jd" className="text-xs">JD</TabsTrigger>
               {(Object.keys(TAB_CONFIG) as Exclude<RawType, 'jd'>[]).map((t) => (
@@ -309,8 +315,11 @@ export function AdminRawPage() {
                   {TAB_CONFIG[t].label}
                 </TabsTrigger>
               ))}
+              <TabsTrigger value="skills" className="text-xs">技能</TabsTrigger>
             </TabsList>
           </Tabs>
+          {skillGov ? <RawSkillGovernance /> : (
+          <>
 
           <div className="flex flex-wrap items-center gap-2 mb-4">
             <Input
@@ -510,6 +519,8 @@ export function AdminRawPage() {
             loading={loading}
             onPageChange={setPage}
           />
+          </>
+          )}
         </CardContent>
       </Card>
       </Reveal>

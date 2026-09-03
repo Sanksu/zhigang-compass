@@ -31,6 +31,8 @@ DOMAIN_CLUSTER_MEMBERSHIP = "cluster_membership"
 DOMAIN_SKILL_CLASSIFY = "skill_classify"
 DOMAIN_GOVERNANCE = "governance"
 DOMAIN_SKILL_RELATION = "skill_relation"
+DOMAIN_SKILL_NOISE = "skill_noise"
+DOMAIN_SKILL_ALIAS = "skill_alias"
 
 DOMAINS: frozenset[str] = frozenset({
     DOMAIN_JD_EXTRACT,
@@ -42,6 +44,8 @@ DOMAINS: frozenset[str] = frozenset({
     DOMAIN_SKILL_CLASSIFY,
     DOMAIN_GOVERNANCE,
     DOMAIN_SKILL_RELATION,
+    DOMAIN_SKILL_NOISE,
+    DOMAIN_SKILL_ALIAS,
 })
 
 # ---- 风险档位 ----

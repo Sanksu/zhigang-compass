@@ -424,6 +424,25 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
+  // 渲染中的 graph data 数组引用（option data: nodes 使用同一批对象）；拖拽碰撞
+  // 推开时直接改其坐标并用 setOption 引用同一数组做 name-diff 更新，保证生效且
+  // 与渲染数据一致（getRawDataItem 拿到的是 ECharts 内部副本，改写不落回渲染源）
+  const renderNodesRef = useRef<GraphNode[]>([])
+  // 环形视图（techStack/岗位画像）进入过渡：进入视图时容器以淡入+轻微缩放接入，
+  // 与 ECharts 节点生长衔接成连贯入场，避免"整图直接硬出现再补生长"的割裂感。
+  // 用"复位再重放 animation"而非 key 重挂容器——重挂会重建 ECharts 实例致图丢失。
+  const [playRingIn, setPlayRingIn] = useState(true)
+  const ringIntroHandledRef = useRef(false)
+  useEffect(() => {
+    if (!ringIntroHandledRef.current) {
+      ringIntroHandledRef.current = true
+      return
+    }
+    if (!ringLayout) return
+    setPlayRingIn(false)
+    const id = requestAnimationFrame(() => setPlayRingIn(true))
+    return () => cancelAnimationFrame(id)
+  }, [ringLayout])
   const [themeVersion, setThemeVersion] = useState(0)
   const [isNarrow, setIsNarrow] = useState(() => isNarrowScreen())
   const [minWeight, setMinWeight] = useState(0)
@@ -606,6 +625,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           value: d.displayValue ?? d.value,
           isDomain: d.isDomain,
           memberCount: d.memberCount,
+          description: d.description ?? undefined,
+          jd_source_count: d.jd_source_count ?? undefined,
         })
       }
     })
@@ -636,6 +657,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     }
     chart.on('roam', onRoam)
 
+    // ── 拖拽推开：统一 force 布局后由力导向引擎接管（拖到任意节点时相邻节点
+    // 被力场实时排斥推开），不再需要 layout:'none' 下的手动 dragend 分离。
+
     chart.getZr().on('click', (params) => {
       if (!params.target) onSelectNode(null)
     })
@@ -646,7 +670,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       chart.dispose()
       chartRef.current = null
     }
-  }, [onSelectNode, onTogglePosition, onToggleDomain, resetView, applyLodBand])
+  }, [onSelectNode, onTogglePosition, onToggleDomain, resetView, applyLodBand, ringLayout])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -1034,7 +1058,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         if (placedInRing >= ringCapacity) {
           ringR = Math.min(POS_MAX_RING_R, ringR + 84)
           placedInRing = 0
-          ringCapacity = Math.max(1, Math.floor((2 * Math.PI * ringR) / (34 + NODE_GAP)))
+          ringCapacity = Math.max(1, Math.floor((2 * Math.PI * ringR) / (POS_NODE_PX + NODE_GAP)))
         }
         // 环内从目标角度起始排（避免整环都从 0° 起、岗位偏移到对侧），
         // 无目标角度的岗位仍按原均分逻辑（环错位 180° 防内外环同位重叠）
@@ -1046,6 +1070,41 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         place(n, ringR, angle)
         placedInRing += 1
       })
+
+      // 岗位节点防重叠斥力分离（几何后处理）：目标角度驱动的岗位排布可能让
+      // 同一环内相邻岗位或内外环同位岗位间距不足（岗位节点 34-54px，目标角度
+      // 相近者尤其）。此处对岗位两两检测：间距 < 半径和 + 间隙则沿连线方向
+      // 双向推开，迭代收敛。纯几何修正，不改节点结构/圆环整体——区别于
+      // force 布局图的 enforceSpread（chart 层访问私有 API），这里直接在
+      // nodes.x/y 上推进（layout:'none' 直接消费这些坐标）。半径取自 sizeOf。
+      const posNodes = nodes.filter((nn) => nn.type === 'position') as (GraphNode & {
+        x?: number
+        y?: number
+      })[]
+      const POS_MIN_GAP = 30
+      const POS_SEP_ITER = 6
+      for (let it = 0; it < POS_SEP_ITER; it++) {
+        for (let i = 0; i < posNodes.length; i++) {
+          const a = posNodes[i]
+          if (a.x == null || a.y == null) continue
+          for (let j = i + 1; j < posNodes.length; j++) {
+            const b = posNodes[j]
+            if (b.x == null || b.y == null) continue
+            const dx = b.x - a.x
+            const dy = b.y - a.y
+            const dist = Math.sqrt(dx * dx + dy * dy)
+            const minDist = sizeOf(a) / 2 + sizeOf(b) / 2 + POS_MIN_GAP
+            if (dist < 1 || dist >= minDist) continue
+            const push = (minDist - dist) / 2
+            const nx = dx / dist
+            const ny = dy / dist
+            a.x -= nx * push
+            a.y -= ny * push
+            b.x += nx * push
+            b.y += ny * push
+          }
+        }
+      }
       // 标签按象限定位（共用助手）：外圈技能标签朝画布外侧、内圈岗位朝圆心反方向，
       // 避免全部朝右横穿环体与放射边（原固定 position:'right' 的遗漏面）
       applyRadialLabelPositions(nodes as (GraphNode & { x?: number; y?: number; label?: { position?: string } })[], CX, CY)
@@ -1116,29 +1175,29 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       series: [
         {
           type: 'graph',
-          // 环形布局：固定坐标（技能外圈按频次顺时针 / 岗位内圈），无布局抖动；
-          // 其余视图维持力导向（拖拽探索语义）
+          // 回退为混合布局：techStack/岗位画像（ringLayout）恢复 layout:'none'
+          // 固定坐标——坐标已按"岗位内圈、技能外圈"预计算注入，形态稳定不变形；
+          // 其余视图（全景等）保持力导向拖拽探索语义。固定坐标下的推拉交互
+          // 不稳定，本轮不再强求（拖拽探索交由力导向视图提供）。
           layout: ringLayout ? 'none' : 'force',
           roam: true,
-          // 岗位画像视图（layout:'none'）同样允许拖拽：ECharts 5.5 graph 系列对
-          // 'none' 布局内置 drag→setItemLayout→updateLayout 的联动（连带边更新），
-          // 拖拽后不重建 option 则坐标在画布内持续保留；techStack 环形保持固定
-          // 不可拖（布局语义：技能簇聚簇与岗位对齐关系稳定）
-          draggable: !ringLayout || portraitView,
+          // 固定坐标视图仍允许拖动微调（漂浮语义）；力导向视图天然可拖
+          draggable: !ringLayout || portraitView || techStackRing,
           cursor: 'pointer',
           // 镜头保持：仅首建/视图切换时重置中心，其余重建不动当前视角
           ...(resetCamera ? { center: ['50%', '50%'] as [string, string] } : {}),
           labelLayout: { hideOverlap: true },
-          // 入场过渡动画（ringLayout 两视图专用）：弱化"整图瞬变"的生硬感——
-          // - 岗位画像（ringLayout+attr 维度）：切换岗位时新节点依次淡入缩放入场，
-          //   duration 800 / update 600 / delay 逐级错峰（中心岗位→大类→外环依次浮现）
-          // - 技术栈环形（layout:'none' 固定坐标）：首建 600ms 入场 + delay 按节点
-          //   索引错峰（环上波扫浮现）；update 保持 0——筛选/LOD/主题重建不重放
-          //   动画、镜头与布局稳定
-          // - 力导向视图维持 animation:false（布局收敛中，动画会放大抖动）
-          // reduced-motion 降级：系统偏好减少动画时全部关闭入场过渡（直接无动画
-          // 上图），与 flyTo 镜头飞行（已接 prefers-reduced-motion）口径一致
-          ...(ringLayout && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+// 环形视图（techStack 技术栈 / portraitView 岗位画像）启用切换/入场过渡
+          // 动画——岗位画像切换时新节点依次淡入缩放入场，弱化"整图瞬变"生硬感；
+          // techStack 首次进入同样按序浮现（各视图相对 EDGE 调整见下方呼号，不动
+          // 存量 layout/镜头口径）。力导向视图保持 animation:false 以稳定布局与镜头
+          // 动画柔和化：duration 拉长、缓动用加急四阶（quarticOut 收尾更平滑），
+          // animationDelay 按节点索引逐级错峰（中心岗位→大类→外环依次浮现，
+          // 避免整组节点同时缩放的"齐冲"生硬感）。
+          // reduced-motion 降级：系统偏好减少动画时关闭入场过渡（直接无动画上图），
+          // 与 flyTo 镜头飞行（_flyTo 已接 prefers-reduced-motion）口径一致
+          ...(ringLayout &&
+          !window.matchMedia('(prefers-reduced-motion: reduce)').matches
             ? {
                 animation: true,
                 animationEasing: 'quarticOut',
@@ -1206,6 +1265,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         },
       ],
     }
+
+    renderNodesRef.current = nodes
 
     chart.setOption(option)
     builtRef.current = true
@@ -1418,7 +1479,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   }, [focusRequest, focusNode])
 
   return (
-    <div className={`${viewMode === 'graph' ? 'atlas-surface' : ''} relative h-full w-full overflow-hidden ${className ?? ''}`}>
+    <>
+      <style>{`@keyframes graph-load-in{from{opacity:0}to{opacity:1}}`}</style>
+      <div className={`${viewMode === 'graph' ? 'atlas-surface' : ''} relative h-full w-full overflow-hidden ${className ?? ''}`}>
       {viewMode === 'graph' && (
         <div className="pointer-events-none absolute inset-0 z-0 font-mono text-[12px] tracking-[0.18em] text-atlas-muted/75" aria-hidden="true">
           <span className="absolute left-1/2 top-3 -translate-x-1/2">N / 市场</span>
@@ -1465,7 +1528,21 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         visibleCount={filterMarks.visibleNodes}
         hiddenCount={data.nodes.length - filterMarks.visibleNodes}
       />
-      <div ref={containerRef} className="h-full w-full" />
+      <div
+        ref={containerRef}
+        className="h-full w-full"
+        style={
+          ringLayout &&
+          playRingIn &&
+          !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? {
+                opacity: 0,
+                animation: 'graph-load-in 0.3s ease-out forwards',
+              }
+            : undefined
+        }
+      />
     </div>
+    </>
   )
 })

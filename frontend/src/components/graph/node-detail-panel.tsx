@@ -27,6 +27,7 @@ import {
   Route,
   AlertTriangle,
   Tag,
+  Info,
   TrendingUp,
   TrendingDown,
 } from 'lucide-react'
@@ -302,6 +303,8 @@ interface NodeDetailPanelProps {
   /** 画像条目证据 JD 列表（薪资/经验/学历 attr 节点选中时由页面拉取传入） */
   portraitEvidence?: PortraitEvidenceData | null
   portraitEvidenceLoading?: boolean
+  /** 岗位画像中心岗位的原始 JD 列表（GET /graph/position/{id}/jds，侧栏「原始 JD」下拉数据源） */
+  positionJds?: components['schemas']['PositionRawJdListData'] | null
   /** 域超节点双击等价的展开按钮（panorama 聚合下钻；缺省不渲染） */
   onToggleDomain?: (id: string) => void
   skillDetail?: SkillDetail | null
@@ -314,6 +317,40 @@ interface NodeDetailPanelProps {
   learningStatus?: LearningStatus
   /** 已掌握技能集（How to Start 判断前置是否就绪） */
   learnedSkills?: Set<string>
+}
+
+/* 岗位画像中心岗位：原始 JD 下拉（选择后展开正文） */
+function PositionRawJdsList({ items }: { items: components['schemas']['JdEvidenceDetail'][] }) {
+  const [selected, setSelected] = useState(-1)
+  return (
+    <section className="space-y-2">
+      <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
+        <FileText className="size-3" />
+        原始 JD
+      </h4>
+      <select
+        value={selected}
+        onChange={(e) => setSelected(Number(e.target.value))}
+        className="w-full rounded-md border border-border bg-subtle px-2 py-1.5 text-xs text-ink"
+      >
+        <option value={-1}>选择一份原始 JD（共 {items.length}）</option>
+        {items.map((it, i) => (
+          <option key={it.id ?? i} value={i}>
+            {it.title || it.company || `JD #${it.id}`}
+            {it.company ? ` · ${it.company}` : ''}
+          </option>
+        ))}
+      </select>
+      {selected >= 0 && items[selected] && (
+        <details className="rounded-md border border-border bg-subtle/40 text-xs">
+          <summary className="cursor-pointer px-2.5 py-2 text-ink-secondary">展开 JD 原文</summary>
+          <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap px-2.5 pb-2.5 font-mono text-[11px] leading-relaxed text-ink-secondary">
+            {items[selected].raw_text || '暂无正文'}
+          </pre>
+        </details>
+      )}
+    </section>
+  )
 }
 
 const TYPE_LABEL: Record<NodeDetail['type'], string> = {
@@ -350,6 +387,7 @@ export function NodeDetailPanel({
   portraitMode,
   portraitEvidence,
   portraitEvidenceLoading,
+  positionJds,
   onTogglePosition,
   onToggleDomain,
   onSelectSkill,
@@ -698,9 +736,34 @@ export function NodeDetailPanel({
               </>
             )}
 
+            {/* 岗位画像中心岗位：原始 JD 下拉（选择后展开正文） */}
+            {portraitMode &&
+              node.type === 'position' &&
+              positionJds &&
+              positionJds.items.length > 0 && (
+                <PositionRawJdsList items={positionJds.items} />
+              )}
+
             {/* 技能详情 */}
             {node.type === 'skill' && skillDetail && (
               <>
+                {node.description && (
+                  <section className="space-y-2">
+                    <h4 className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
+                      <Info className="size-3" />
+                      技能说明
+                    </h4>
+                    <p className="text-xs leading-relaxed text-ink-secondary">{node.description}</p>
+                  </section>
+                )}
+                {portraitMode && typeof node.jd_source_count === 'number' && (
+                  <div className="flex items-center justify-between rounded-md border border-border bg-subtle/40 px-2.5 py-2 text-xs">
+                    <span className="text-ink-muted">JD 支撑</span>
+                    <span className="font-mono text-ink">
+                      {node.jd_source_count} 个 JD 直接要求该技能
+                    </span>
+                  </div>
+                )}
                 {/* 导学面板（task 1.3）：为什么学 → 目标/需求对齐
                     H3 修复:删除按技能名哈希编造的"需求%/市场趋势"展示——契约中
                     demand/trend 仅存在于 GapSkill/LearningPathItem,图谱五个钻取

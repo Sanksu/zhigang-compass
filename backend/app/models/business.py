@@ -777,3 +777,28 @@ class SkillAlias(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class SkillDescription(Base):
+    """技能解释覆盖（管理员编辑 / LLM 补齐写入，可持久化）。
+
+    优先级：SkillDescription（DB 覆盖）> 内置词典 SKILL_DESCRIPTIONS > 整合模板。
+    """
+
+    __tablename__ = "skill_descriptions"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    skill_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(20), default="manual", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+    __table_args__ = (
+        UniqueConstraint("skill_name", name="uq_skill_description_name"),
+    )
