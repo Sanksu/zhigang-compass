@@ -30,8 +30,17 @@ export interface EChartsModel {
       count(): number
       /** 原始数据项（含自定义字段如 symbolSize） */
       getRawDataItem(idx: number): Record<string, unknown> | undefined
-      /** 节点图形元素（新兴岗位脉冲直改 shadow 用；元素随主 option 重建换代，每 tick 重取） */
-      getItemGraphicEl(idx: number): { shadowBlur: number; shadowColor: string; dirty(): void } | null
+      /** 节点图形元素（新兴岗位脉冲直改 shadow 用；元素随主 option 重建换代，每 tick 重取）。
+       *  额外暴露 x/y/position：zrender 图元当前渲染坐标（拖拽后实时，优先于内部
+       *  layout 读取），仅供 dragend 重叠分离取被拖节点位置用。 */
+      getItemGraphicEl(idx: number): {
+        shadowBlur: number
+        shadowColor: string
+        dirty: () => void
+        x?: number
+        y?: number
+        position?: [number, number] | number[] | undefined
+      } | null
     }
   } | null
 }

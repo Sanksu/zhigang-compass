@@ -28,6 +28,8 @@ from app.api.v1.admin_routes import (
     position_reviews,
     raw_admin,
     skill_aliases,
+    skill_descriptions,
+    skill_noise,
     skills,
 )
 
@@ -44,6 +46,8 @@ router.include_router(config.router)
 router.include_router(dict_guard.router)
 router.include_router(llm_decisions.router)
 router.include_router(skill_aliases.router)
+router.include_router(skill_descriptions.router)
+router.include_router(skill_noise.router)
 router.include_router(skills.router)
 router.include_router(etl.router)
 router.include_router(jd_admin.router)

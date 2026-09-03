@@ -7,6 +7,7 @@
 
 ### 2026-09-02
 - **学历维度计入综合得分明细展示**：契约先行在 `MatchResult` 增加顶层 `edu_score`（第四维 BT v4，任一侧学历层级无法映射为 null，不参与总分加权），`weights` 增加 `edu`（w_edu 凸组合权重，未配置/非法为 null）——`score_position` 构造结果时透出 `edu_score`，compare 响应汇总 `weights.edu`；前端「综合得分」明细卡新增「学历背景」条（与必备/加分/经验并列，展示分数与权重，无信号时隐藏）。含既有 matching 219 + jd_match/api smoke 用例全通过。
+- **技能解释 LLM 补齐修复 + 治理接口 + graph 前端优化（PR #762）**：① **补齐接口崩溃修复**（TypeError: object list can't be used in await）——`repository.query_all_skills` 系同步函数却被误 `await`，列表端点与补齐端点双双 500，去 `await` 恢复；② **补齐失败校验误报修复**（算法质心）：模式返回纯文本而未发 tool call 时 instructor 判空列表致 5/条失败——`LLMProviderChain` 新增裸文本同步路由 `call_text_sync` + `_call_provider_text`（不经 instructor 结构化校验，复用异常映射/熔断/退避语义），补齐改走该路由；③ **补齐批量 50→200**（前端可多次触发）；④ **client 缓存复用（方案 A）**：新增独立 `_raw_client_cache` + `_get_raw_client` 缓存原生 SDK client（instructor client 强制要求 response_model 不可用于裸文本），连接复用对齐 `_build_client` 原则，容器内实测二次命中不新增；⑤ 配套新增 skill_descriptions / skill_noise 治理接口与 LLM 决策记录、graph 技术栈/岗位画像动画与拖拽推开、节点详情面板增强；openapi 契约 + api.d.ts 再生成。**算法红线留痕：llm_provider.py 改动（call_text_sync/_call_provider_text/_get_raw_client）待张恺天复核合入**
 - **同岗位下各 JD 匹配评分明细（下拉逐条查看）**：契约先行在 `MatchResult` 增加 `jd_breakdown`（该岗位各 JD 按分降序：jd_id/标题/三维分/命中数）与 `resume_id`，新增 `GET /match/result/{match_id}/jd/{jd_id}` 单 JD 详情（三维得分/差距/学习路径/原文，并入当前岗位详情）——`score_jd_compare` 现返回全部评分 JD 降序列表（原仅取最高分一条），新增 `score_jd_one` 按 id 评分单条 JD；前端比对详情头部加「切换 JD」下拉，切换即加载对应 JD 详情（岗位级字段域/权重/证据保持来源岗位）。含 3 条新单测，jd_match + api smoke 226 passed。
 
 ### 2026-08-29

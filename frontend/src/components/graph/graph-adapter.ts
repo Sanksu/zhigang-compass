@@ -33,7 +33,12 @@ export function toGraphData(raw: GraphViewData): GraphData {
     status: node.type === 'position' ? (isValidStatus(node.status) ? node.status : 'candidate') : undefined,
     ...(node.type === 'position'
       ? { domain_id: node.domain_id ?? undefined, domain_name: node.domain_name ?? undefined }
-      : { skill_category: node.skill_category ?? undefined }),
+      : {
+          skill_category: node.skill_category ?? undefined,
+          // 岗位画像技能：透传 description（技能说明）与 jd_source_count（JD 支撑数）
+          description: node.description ?? undefined,
+          jd_source_count: node.jd_source_count ?? undefined,
+        }),
   }))
   const edges: GraphEdge[] = raw.edges.map((edge) => ({
     source: edge.source,

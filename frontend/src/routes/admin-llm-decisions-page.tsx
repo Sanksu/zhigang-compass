@@ -39,6 +39,8 @@ const DOMAIN_LABELS: Record<string, string> = {
   skill_classify: '技能分类',
   governance: '自动化治理',
   skill_relation: '技能关系',
+  skill_noise: '技能治理噪声',
+  skill_alias: '别名生效',
 }
 
 const STATUS_TONE: Record<string, string> = {
