@@ -5,6 +5,10 @@
 
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
+### 2026-09-03
+- **课程源调度口径收口（对齐 TODO-CRS-01）**：确认课程源（coursera/edx/icourse163）按 08-28 拍板**按日采集**已并入主管线（etl.py course_platforms，无需周调度）；移除 update_status._WEEKLY_SOURCES 周更假设，新鲜度阈值统一 T+1 日级（_freshness_threshold 恒返回 1 天），避免断更 7 天才告警与日级闭环不一致。进度跟踪.md §七·五 TODO-CRS-01 标记已解决。
+- **存量孤岛课程技能回填（清孤立课 558 门，脚本 [backfill_course_islands.py](../../backend/scripts/backfill_course_islands.py)）**：存量课程（无 LEARNABLE_VIA 边）culp 根因=旧版 enrich 对 skills_enriched=true 永久标记 + 7 天年龄窗口屏蔽存量 + 回填未落；脚本不受 7 天窗口限制、复用 extract_course_skills + import_course，对全部空技能课程做一次性LLM 抽取并**分批提交（每 10 门一 commit PG + 建 Neo4j 边，可中断恢复）**，LLM 判空者清永久标记保留重试。**生产实跑（09-03，容器内脱离终端）：目标 797 门 → 抽到技能并建边 795、LLM 判空 2、入图 0 失败；Neo4j 孤岛 558→24 门（icourse163 20/edx 3/coursera 1）**。⚠️ **算法红线留痕：LLM 课程技能抽取/批量建边改动，待算法岗 @zkt-sky 复核**。
+
 ### 2026-09-02
 - **学历维度计入综合得分明细展示**：契约先行在 `MatchResult` 增加顶层 `edu_score`（第四维 BT v4，任一侧学历层级无法映射为 null，不参与总分加权），`weights` 增加 `edu`（w_edu 凸组合权重，未配置/非法为 null）——`score_position` 构造结果时透出 `edu_score`，compare 响应汇总 `weights.edu`；前端「综合得分」明细卡新增「学历背景」条（与必备/加分/经验并列，展示分数与权重，无信号时隐藏）。含既有 matching 219 + jd_match/api smoke 用例全通过。
 - **技能解释 LLM 补齐修复 + 治理接口 + graph 前端优化（PR #762）**：① **补齐接口崩溃修复**（TypeError: object list can't be used in await）——`repository.query_all_skills` 系同步函数却被误 `await`，列表端点与补齐端点双双 500，去 `await` 恢复；② **补齐失败校验误报修复**（算法质心）：模式返回纯文本而未发 tool call 时 instructor 判空列表致 5/条失败——`LLMProviderChain` 新增裸文本同步路由 `call_text_sync` + `_call_provider_text`（不经 instructor 结构化校验，复用异常映射/熔断/退避语义），补齐改走该路由；③ **补齐批量 50→200**（前端可多次触发）；④ **client 缓存复用（方案 A）**：新增独立 `_raw_client_cache` + `_get_raw_client` 缓存原生 SDK client（instructor client 强制要求 response_model 不可用于裸文本），连接复用对齐 `_build_client` 原则，容器内实测二次命中不新增；⑤ 配套新增 skill_descriptions / skill_noise 治理接口与 LLM 决策记录、graph 技术栈/岗位画像动画与拖拽推开、节点详情面板增强；openapi 契约 + api.d.ts 再生成。**算法红线留痕：llm_provider.py 改动（call_text_sync/_call_provider_text/_get_raw_client）待张恺天复核合入**
