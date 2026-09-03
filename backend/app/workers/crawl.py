@@ -52,7 +52,14 @@ CDP_SPIDERS = {"boss", "monster", "glassdoor", "maimai"}
 _CRAWL_TIMEOUT_SEC = 900
 # 单源超时上限（秒）。zhilian 详情补抓 8-15s/条限速，max_results=200 有界
 # 正常耗时约 1.6h（5760s）——超时须 > 正常耗时（防误杀），仍兜底挂死。
-_CRAWL_TIMEOUT_BY_SPIDER = {"zhilian": 7200}
+# 课程源 09-03 起放宽：icourse163/edx/coursera 走海外代理较慢，900s 恒误杀；
+# 对齐 zhilian 的"超时 > 正常耗时"原则，放宽到 5400s（90min）且不阻塞 JD 链路。
+_CRAWL_TIMEOUT_BY_SPIDER = {
+    "zhilian": 7200,
+    "edx": 5400,
+    "coursera": 5400,
+    "icourse163": 5400,
+}
 
 
 def _crawl_timeout(spider_name: str) -> int:
