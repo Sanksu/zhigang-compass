@@ -98,6 +98,9 @@ def _patch_env(monkeypatch, rows):
     monkeypatch.setattr(graph_api, "_query_graph_counts", fake_counts)
     monkeypatch.setattr(graph_api, "redis_client", redis)
     monkeypatch.setattr(graph_api, "async_neo4j_driver", SimpleNamespace())
+    # PR #762: graph_view 新增 _load_desc_overrides(db) 调用，mock 为空表
+    monkeypatch.setattr(graph_api, "_load_desc_overrides",
+                        AsyncMock(return_value={}))
     return calls
 
 
