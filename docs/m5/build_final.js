@@ -3,6 +3,8 @@
  * 画布 13.33×7.5in；字体 微软雅黑 + 宋体（标题）
  * 09-01 口径同步：aligned F1 0.9629（词面豁免口径）/ 简历 0.988 /
  * 匹配 Acc 0.9714（BT v4，golden_set_match_v3 384 对含学历维度）/ 5 骨干职能域+通用域（08-31 治理）/ 三视图（08-29 收敛）
+ * 09-03 口径更新：aligned F1 0.9632（08-28 正式验收三跑极差 0）/ 10 职能域（5 骨干 + 4 显式语义域 + 通用，09-02 细分 frozen4）/
+ * 数据截至 graph_v20260903（17705 节点/73575 边，120 岗位/5916 技能）
  */
 const pptxgen = require("pptxgenjs");
 
@@ -185,7 +187,7 @@ function shot43(s, file, x, y, w) {
     "关系：REQUIRES（权重 + 必要性）· LEARNABLE_VIA · EVOLVED_FROM",
     "岗位名归一化：技术栈细分保留（如 React 前端工程师）+ 失真兜底族技能路由",
     "cjk 全文索引内建于 Neo4j——中文检索零额外服务（替代 Elasticsearch）",
-    "5 大骨干职能域 + 通用域兜底（LLM 语义命名 + 归类制治理），归类依据逐岗可查",
+    "10 职能域常驻（5 大骨干 + 4 显式语义域：网络安全/AI应用与智能体/企业应用与系统/产品与项目管理 + 通用兜底），归类依据逐岗可查",
   ], M, 1.85, 5.9, 4.6, { fontSize: 14 });
 })();
 
@@ -210,7 +212,7 @@ function shot43(s, file, x, y, w) {
     if (i < 2) s.addText("→", { x: x + 3.92, y: 3.05, w: 0.36, h: 0.5, fontSize: 20, fontFace: FONT_BODY, bold: true, color: ACCENT_D, margin: 0, align: "center" });
   });
   s.addText("评测闭环：110 条正式黄金集（人工标注）LLM 盲审", { x: M, y: 4.5, w: 8, h: 0.35, fontSize: 14, fontFace: FONT_BODY, bold: true, color: INK, margin: 0 });
-  stat(s, M, 4.95, 2.6, "0.9629", "技能 aligned F1（目标 ≥0.90）", { numSize: 36, color: ACCENT_D });
+  stat(s, M, 4.95, 2.6, "0.9632", "技能 aligned F1（目标 ≥0.90）", { numSize: 36, color: ACCENT_D });
   stat(s, M + 2.8, 4.95, 2.6, "< 1%", "幻觉 FP 率", { numSize: 36 });
   stat(s, M + 5.6, 4.95, 2.6, "0.8865", "raw F1（未对齐口径）", { numSize: 36 });
   s.addText("口径说明：跨源一致性为每日计算并在看板展示（透明可查），自动硬门控列入后续路线图", { x: 8.6, y: 5.05, w: 4.2, h: 1.1, fontSize: 11.5, fontFace: FONT_BODY, color: MUTED, margin: 0, valign: "top" });
@@ -328,7 +330,7 @@ function shot43(s, file, x, y, w) {
     "全部指标均以人工标注或专家定稿为真值，非自评",
   ], M, 1.5, CW, 1.35, { fontSize: 14 });
   const metrics = [
-    ["0.9629", "JD 解析 aligned F1", "110 条 gold 词面豁免口径 · 目标 0.90"],
+    ["0.9632", "JD 解析 aligned F1", "110 条 gold 词面豁免口径 · 目标 0.90"],
     ["0.988", "简历解析 F1", "50 条"],
     ["0.9714", "人岗匹配 Acc", "384 对黄金集含学历维度（BT v4）"],
     ["96.7%", "学习路径合理性", "30 案例专家定稿"],
@@ -367,7 +369,7 @@ function shot43(s, file, x, y, w) {
   const s = base();
   title(s, "DATA SCALE", "数据规模（实况快照）");
   const tiles = [
-    ["4,393", "Skill 技能节点"], ["140", "Position 岗位节点"], ["1,473", "课程（三门平台）"],
+    ["5,916", "Skill 技能节点"], ["120", "Position 岗位节点"], ["1,473", "课程（三门平台）"],
     ["9,820", "jd_raw 全量抽取"], ["177", "先修链技能字典"], ["110 + 50", "JD / 简历黄金集"],
   ];
   tiles.forEach((t, i) => {
@@ -376,8 +378,8 @@ function shot43(s, file, x, y, w) {
     s.addText(t[0], { x, y: y + 0.28, w, h: 0.8, fontSize: 38, fontFace: FONT_HEAD, bold: true, color: NAVY, align: "center", margin: 0 });
     s.addText(t[1], { x, y: y + 1.14, w, h: 0.4, fontSize: 13, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
   });
-  s.addText("另有：5 大骨干职能域 + 通用域兜底（LLM 语义命名 + 归类制）· 技能分类权威覆盖 23.9%（用户可见视图 91.7%）· 匹配黄金对 v1/v2 684 组", { x: M, y: 6.15, w: CW, h: 0.6, fontSize: 12.5, fontFace: FONT_BODY, color: MUTED, margin: 0, valign: "top" });
-  s.addText("注：数据截至 08-29 图谱治理快照，汇报前以 graph_versions 最新快照复核", { x: M, y: 6.85, w: CW, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: "9AA9BA", margin: 0 });
+  s.addText("另有：10 职能域（5 大骨干 + 4 显式语义域 + 通用兜底）· 技能分类权威覆盖 23.9%（用户可见视图 91.7%）· 匹配黄金对 v1/v2 684 组", { x: M, y: 6.15, w: CW, h: 0.6, fontSize: 12.5, fontFace: FONT_BODY, color: MUTED, margin: 0, valign: "top" });
+  s.addText("注：数据截至 graph_v20260903 快照（17705 节点/73575 边）", { x: M, y: 6.85, w: CW, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: "9AA9BA", margin: 0 });
 })();
 
 /* ========== 16 团队分工 ========== */
@@ -430,7 +432,7 @@ function shot43(s, file, x, y, w) {
   const s = base();
   title(s, "RESULTS", "关键成果数据");
   const res = [
-    ["0.9629", "JD 解析 aligned F1", "≥0.90 达标"],
+    ["0.9632", "JD 解析 aligned F1", "≥0.90 达标"],
     ["0.9714", "人岗匹配 Acc", "384 对黄金集含学历维度（BT v4）"],
     ["96.7%", "学习路径合理性", "30 案例专家定稿"],
     ["91.7%", "技能分类视图覆盖", "权威覆盖 12.8% → 23.9%"],
@@ -479,7 +481,7 @@ function shot43(s, file, x, y, w) {
   s.addText("全链路闭环 · 评测达标 · 演示就绪", { x: M, y: 1.4, w: CW, h: 0.8, fontSize: 34, fontFace: FONT_HEAD, bold: true, color: "FFFFFF", margin: 0 });
   bullets(s, [
     "采集 → 图谱 → 抽取 → 匹配 → 演化 → 学习路径，55 天完成全链路真实数据闭环",
-    "四项核心指标全部达标：JD 解析 0.9629 · 匹配 0.9714 · 学习路径 96.7% · P95 430ms",
+    "四项核心指标全部达标：JD 解析 0.9632 · 匹配 0.9714 · 学习路径 96.7% · P95 430ms",
     "展望：新岗位自动发现（种子引导 + 自动判定）· 数字化迁移领域扩展",
   ], M, 2.6, CW, 1.9, { fontSize: 15.5, color: "D8E4F0", gap: 12 });
   s.addText("感谢各位评委聆听", { x: M, y: 5.4, w: CW, h: 0.9, fontSize: 30, fontFace: FONT_HEAD, bold: true, color: "FFFFFF", margin: 0 });
