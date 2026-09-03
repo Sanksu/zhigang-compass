@@ -83,6 +83,12 @@ services:
       ARQ_REDIS_URL: redis://redis:6379/1  # 08-15 修复：env_file 的 ARQ_REDIS_URL=localhost 覆盖 ARQ 队列（容器内 localhost=自身），任务入队 Connection refused
       # 前端静态资源挂载点（backend/.env 的相对路径 ../frontend/dist 在容器内不成立）
       FRONTEND_DIST_DIR: /app/frontend-dist
+      # SBERT 离线加载（2026-09-02 性能优化）：模型已在 backend/models/sbert 本地
+      # 挂载（见 volumes），强制 HF 库只用本地缓存、绝不联网下载——此前每次都走
+      # HuggingFace（无 token 限速）导致首个 compare 800000 (80s) 级冷启动。
+      # 匹配语义不受影响（模型文件齐全，同模型同权重），仅禁联网。
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
     depends_on:
       postgres:
         condition: service_healthy
