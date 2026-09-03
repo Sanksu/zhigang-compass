@@ -112,4 +112,4 @@
 
 ---
 
-**配套文档**：设计文档（docs/design/设计文档.md）· 执行计划（docs/design/执行计划.md）· 变更日志（CHANGELOG.md）
+**配套文档**：设计文档（docs/design/设计文档.md）· 变更日志（CHANGELOG.md）

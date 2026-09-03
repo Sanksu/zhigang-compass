@@ -1,7 +1,6 @@
 # 智岗罗盘部署说明（DEPLOY.md）
 
-> 状态：**定稿**（2026-08-15 首版；08-31 复核与最新 compose 一致：5 服务全部对齐 `restart: unless-stopped`（08-30 补齐 neo4j），补充 §6.2 局域网运维实证；09-01 补全 §3.2 GHCR 镜像部署路径与 §3.3 回滚）——基于 08-13 首次容器部署演练实测（api/worker 镜像首次构建 + 5 服务全链路 12 项冒烟全通）+ 08-15 性能压测验证（TE-M5-01 前置，panorama/search P95 < 500ms @ 100 并发，见 docs/perf_baseline_20260815.md）
-> 对应任务：执行计划 2.2 后端 M5「部署文档完善」+ 2.6 文档 M5「DEPLOY.md 部署说明」（DO-M5-03）
+> 状态：**定稿**（2026-08-15 首版；08-31 复核与最新 compose 一致：5 服务全部对齐 `restart: unless-stopped`（08-30 补齐 neo4j），补充 §6.2 局域网运维实证；09-01 补全 §3.2 GHCR 镜像部署路径与 §3.3 回滚）——基于 08-13 首次容器部署演练实测（api/worker 镜像首次构建 + 5 服务全链路 12 项冒烟全通）+ 08-15 性能压测验证（TE-M5-01 前置，panorama/search P95 < 500ms @ 100 并发）
 
 ---
 
@@ -158,7 +157,7 @@ docker pull ghcr.io/sanksu/zhigang-compass-api:sha-<good_commit>
 docker compose -f docker-compose.yml -f docker-compose.local-images.yml up -d --force-recreate
 ```
 
-- **表结构不随镜像回滚**：迁移为前向设计，旧镜像启动仍会执行 `alembic upgrade head` 到最新 head；若需连表结构一起回退属破坏性操作（`alembic downgrade`），交付/演示窗口禁用（冷启动指南「录制前红线」同口径）
+- **表结构不随镜像回滚**：迁移为前向设计，旧镜像启动仍会执行 `alembic upgrade head` 到最新 head；若需连表结构一起回退属破坏性操作（`alembic downgrade`），交付/演示窗口禁用
 - 本地构建路径的等价回滚：`git checkout <good_commit>` 后按 §3.1 ①③④ 重建
 
 ### 3.1.1 部署说明（GHCR 镜像路径，2026-09-01）
@@ -195,9 +194,9 @@ docker compose -f docker-compose.yml -f docker-compose.local-images.yml up -d --
 | 5 | 全文检索 | `GET /api/v1/graph/search?q=Python`（cjk 全文索引） |
 | 6 | worker | `docker logs zhigang-worker` → ARQ 启动 + cron 实跑 |
 
-首次完整演练（2026-08-13）12 项冒烟全通过，详见进度跟踪 §6.0.3。
+首次完整演练（2026-08-13）12 项冒烟全通过。
 
-**性能验证（2026-08-15）**：Locust 100 并发 3 分钟——panorama P95 430ms / search P95 390ms（目标 <2s，达标），详见 `docs/perf_baseline_20260815.md`。
+**性能验证（2026-08-15）**：Locust 100 并发 3 分钟——panorama P95 430ms / search P95 390ms（目标 <2s，达标）。
 
 ## 6. 运维
 
@@ -288,4 +287,4 @@ grounding 双路检索中 Neo4j 不可达自动降级 ILIKE（设计内，不阻
 
 ---
 
-> 补充：环境变量完整清单与本地开发配置见 `docs/guides/团队启动指南.md`；从零环境/空库到产出可用数据的冷启动流程（爬虫前置 + bootstrap 13 阶段）见 `docs/guides/冷启动指南.md`；架构与部署设计见 `docs/design/设计文档.md` §11。
+> 补充：架构与部署设计见 `docs/design/设计文档.md` §11。

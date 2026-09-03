@@ -10,7 +10,6 @@
 
 | 入口 | 说明 |
 |------|------|
-| [AGENTS.md](AGENTS.md) | AI 智能体协作入口（铁律、模块导航、上下文加载清单） |
 | [docs/README.md](docs/README.md) | 文档索引（按角色推荐阅读路径） |
 | [docs/project/项目概览.md](docs/project/项目概览.md) | 项目定位、技术栈、里程碑、评分维度 |
 | [docs/design/设计文档.md](docs/design/设计文档.md) | 系统设计方案（单一事实源） |
@@ -28,4 +27,4 @@ cd backend && uv run uvicorn app.main:app --reload --port 8000
 cd frontend && pnpm install && pnpm dev
 ```
 
-详细环境配置见 [docs/guides/团队启动指南.md](docs/guides/团队启动指南.md)。
+详细环境配置见 [DEPLOY.md](DEPLOY.md)。
