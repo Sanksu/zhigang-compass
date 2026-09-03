@@ -11,16 +11,18 @@ from datetime import datetime, timedelta, timezone
 
 # T+1 承诺阈值：某来源数据距今天数 ≤ 1 天视为新鲜（每日发布）
 _T1_DAYS = 1.0
-# 周更源（课程平台按周发布）：按 T+1 恒判过期 → 每日 ETL 告警疲劳
-# （08-14 审查：按源分组阈值，周更源 7 天内视为新鲜）
-_WEEKLY_SOURCES = frozenset({"coursera", "edx", "icourse163"})
-_WEEKLY_DAYS = 7.0
 _TZ_CN = timezone(timedelta(hours=8))
 
 
 def _freshness_threshold(source: str) -> float:
-    """按来源取新鲜度阈值（周更源 7 天，其余 T+1）。"""
-    return _WEEKLY_DAYS if source in _WEEKLY_SOURCES else _T1_DAYS
+    """按来源取新鲜度阈值（统一 T+1 日级）。
+
+    课程源（coursera/edx/icourse163）08-28 已并入主管线**按日采集**
+    （etl.py course_platforms），故不再按周更放宽——否则断更 7 天才会告警，
+    与日级闭环口径不一致（原 _WEEKLY_SOURCES 周更假设于 08-21 TODO-CRS-01
+    记录、08-28 拍板按日采集后移除）。
+    """
+    return _T1_DAYS
 
 
 def parse_crawled_at(value: str | None) -> datetime | None:
