@@ -199,3 +199,28 @@ async def query_view_position_portrait(session, position_id: str, limit: int, st
         public_statuses=list(_PUBLIC_POSITION_STATUSES),
     )
     return await result.fetch(10000)
+
+
+async def query_stable_positions(session) -> list[dict]:
+    """图谱留存 stable 岗位节点（GET /admin/positions/stable 并集取数用）。
+
+    与候选池 stable 行按岗位名去重后，候选池无同名行的节点以 source=graph
+    并入"已晋级 stable 岗位"全集。图谱节点无候选池画像字段，仅返回
+    name / state_updated_at / freq 供列表展示。
+    """
+    result = await session.run(
+        """
+        MATCH (p:Position) WHERE p.status = 'stable'
+        RETURN p.name AS name, p.state_updated_at AS state_updated_at,
+               coalesce(p.freq, 0) AS freq
+        ORDER BY p.name
+        """
+    )
+    items: list[dict] = []
+    async for rec in result:
+        items.append({
+            "name": rec["name"],
+            "state_updated_at": rec.get("state_updated_at"),
+            "freq": rec.get("freq", 0),
+        })
+    return items

@@ -11,11 +11,14 @@ export const GRAPH_STATUS_ORDER = [
   'archived',
 ] as const satisfies readonly PositionStatus[]
 
+/* 岗位状态 6 色：active/candidate 曾同为中灰（#64748B/#71717A）几乎不可分，
+   现活跃=亮紫、候选=浅灰，色相+明度双维拉开；与稳定蓝/新兴绿/衰退琥珀/
+   归档红四色保持错位。 */
 export const GRAPH_STATUS_META: Record<PositionStatus, { label: string; color: string }> = {
-  active: { label: '活跃', color: '#64748B' },
+  active: { label: '活跃', color: '#A855F7' },
   stable: { label: '稳定', color: '#3B82F6' },
   emerging: { label: '新兴', color: '#10B981' },
-  candidate: { label: '候选', color: '#71717A' },
+  candidate: { label: '候选', color: '#94A3B8' },
   declining: { label: '衰退', color: '#F59E0B' },
   archived: { label: '归档', color: '#EF4444' },
 }

@@ -19,6 +19,9 @@ export type EvolutionItem = Schema['DiscoveryCandidateItem']
 /** 后端 /admin/positions/declining 项（declining 待归档，契约 DiscoveryCandidateItem） */
 export type DecliningItem = Schema['DiscoveryCandidateItem']
 
+/** 后端 /admin/positions/stable 并集项（契约 StablePositionItem：候选池 ∪ 图谱留存） */
+export type StableItem = Schema['StablePositionItem']
+
 /** 综合置信度（后端 confidence 为多维对象，取 final_confidence 或 0.5 中性值） */
 export function confidenceOf(item: ReviewItem): number {
   const c = item.confidence
@@ -27,6 +30,19 @@ export function confidenceOf(item: ReviewItem): number {
     if (typeof score === 'number') return score
   }
   return 0.5
+}
+
+/**
+ * stable 并集项置信度（GET /admin/positions/stable）：
+ * 仅 pool 来源有 confidence（graph 来源为 null），无则返回 null（前端显示 —）。
+ */
+export function stableConfidenceOf(item: StableItem): number | null {
+  const c = item.confidence
+  if (c && typeof c === 'object') {
+    const score = (c as Record<string, unknown>).final_confidence
+    if (typeof score === 'number') return score
+  }
+  return null
 }
 
 /**

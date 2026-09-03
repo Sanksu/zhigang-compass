@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { apiGet, apiPut } from '@/lib/api'
 import { EvolutionReviewTab } from './evolution-review-tab'
-import type { ReviewItem } from './review-types'
+import type { StableItem } from './review-types'
 
 vi.mock('@/lib/api', () => ({
   apiGet: vi.fn(),
@@ -45,7 +45,7 @@ function makeDeclining() {
 }
 
 /** 按 URL 分发三类 GET 响应 */
-function mockBoth(evo = [makeEvo()], declining = [makeDeclining()], stable: ReviewItem[] = []) {
+function mockBoth(evo = [makeEvo()], declining = [makeDeclining()], stable: StableItem[] = []) {
   mockApiGet.mockImplementation((url: string) => {
     const u = String(url)
     if (u.includes('/admin/evolution/pending')) {
@@ -54,8 +54,8 @@ function mockBoth(evo = [makeEvo()], declining = [makeDeclining()], stable: Revi
     if (u.includes('/admin/positions/declining')) {
       return Promise.resolve({ items: declining, total: declining.length, page: 1, size: 50 })
     }
-    // /admin/positions/pending?state=stable：默认空，避免与 declining 文本重复
-    return Promise.resolve({ items: stable, total: stable.length, page: 1, size: 50 })
+    // /admin/positions/stable：默认空，避免与 declining 文本重复
+    return Promise.resolve({ items: stable, total: stable.length })
   })
 }
 
@@ -75,7 +75,7 @@ describe('EvolutionReviewTab 演化审核 + 衰退归档', () => {
       expect.arrayContaining([
         '/admin/evolution/pending',
         '/admin/positions/declining',
-        '/admin/positions/pending?state=stable&size=100',
+        '/admin/positions/stable',
       ]),
     )
     expect(await screen.findByText('AI 推理优化工程师')).toBeInTheDocument()
