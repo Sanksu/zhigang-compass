@@ -30,10 +30,11 @@ import { apiGet, apiPut, errMsg } from '@/lib/api'
 import {
   confidenceOf,
   CONFIDENCE_TONE,
+  stableConfidenceOf,
   type Schema,
   type EvolutionItem,
   type DecliningItem,
-  type ReviewItem,
+  type StableItem,
 } from './review-types'
 import { useIsDesktop } from '@/hooks/use-media-query'
 
@@ -46,6 +47,17 @@ import { useIsDesktop } from '@/hooks/use-media-query'
  * - reject  → 确认衰退 declining
  * reason 可选（后端默认写入 "admin evolution review"）。
  */
+
+/** stable 并集项置信度单元格：仅 pool 来源有值，graph 来源显示 — */
+function StableConfidence({ item }: { item: StableItem }) {
+  const sc = stableConfidenceOf(item)
+  if (sc == null) return <span className="text-xs text-ink-faint">—</span>
+  return (
+    <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(sc)}`}>
+      {Math.round(sc * 100)}%
+    </span>
+  )
+}
 export function EvolutionReviewTab() {
   const [items, setItems] = useState<EvolutionItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -61,8 +73,9 @@ export function EvolutionReviewTab() {
   const [archiveTarget, setArchiveTarget] = useState<DecliningItem | null>(null)
   const [archiveReason, setArchiveReason] = useState('')
   const [archiving, setArchiving] = useState(false)
-  /* 已晋级 stable 岗位列表（对照 emerging 队列，展示稳定岗位画像全集） */
-  const [stableItems, setStableItems] = useState<ReviewItem[]>([])
+  /* 已晋级 stable 岗位列表（对照 emerging 队列，展示稳定岗位画像全集；
+     GET /admin/positions/stable = 候选池 ∪ 图谱留存并集，source 区分来源） */
+  const [stableItems, setStableItems] = useState<StableItem[]>([])
   const [stableLoading, setStableLoading] = useState(true)
   const isDesktop = useIsDesktop()
 
@@ -81,7 +94,7 @@ export function EvolutionReviewTab() {
   }
 
   const loadStable = () => {
-    apiGet<Schema['DiscoveryCandidateData']>('/admin/positions/pending?state=stable&size=100')
+    apiGet<Schema['StablePositionData']>('/admin/positions/stable')
       .then((res) => setStableItems(res.items))
       .catch(() => setStableItems([]))
       .finally(() => setStableLoading(false))
@@ -470,7 +483,8 @@ export function EvolutionReviewTab() {
         </CardContent>
       </Card>
 
-      {/* 已晋级 stable 岗位列表（对照 emerging 队列，展示稳定岗位画像全集，GET /admin/positions/pending?state=stable） */}
+      {/* 已晋级 stable 岗位列表（对照 emerging 队列，展示稳定岗位画像全集；
+          GET /admin/positions/stable = 候选池 ∪ 图谱留存并集） */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm flex items-center justify-between">
@@ -488,7 +502,7 @@ export function EvolutionReviewTab() {
             <div className="py-8 text-center text-sm text-ink-faint">
               <p>暂无 stable 岗位</p>
               <p className="text-xs mt-2">
-                已确认晋级的岗位将在这里展示（六状态机 stable 态）
+                已确认晋级的岗位将在这里展示（六状态机 stable 态 + 图谱留存节点）
               </p>
             </div>
           ) : (
@@ -497,29 +511,39 @@ export function EvolutionReviewTab() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>岗位名</TableHead>
+                    <TableHead>来源</TableHead>
                     <TableHead>命中信号</TableHead>
-                    <TableHead>发现时间</TableHead>
+                    <TableHead>晋级时间</TableHead>
                     <TableHead>置信度</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {stableItems.map((item) => (
-                    <TableRow key={item.id}>
+                    <TableRow key={item.position_name}>
                       <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
                       <TableCell>
-                        <div className="flex gap-1">
-                          {item.rag_matched && <Badge variant="outline" className="text-[11px]">RAG</Badge>}
-                          {item.seed_matched && <Badge variant="outline" className="text-[11px]">种子</Badge>}
-                          {!item.rag_matched && !item.seed_matched && (
-                            <span className="text-[11px] text-ink-faint">—</span>
-                          )}
-                        </div>
+                        <Badge variant={item.source === 'pool' ? 'stable' : 'outline'} className="text-[11px]">
+                          {item.source === 'pool' ? '状态机' : '图谱留存'}
+                        </Badge>
                       </TableCell>
-                      <TableCell className="text-xs font-mono text-ink-muted">{item.detected_at}</TableCell>
                       <TableCell>
-                        <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
-                          {Math.round(confidenceOf(item) * 100)}%
-                        </span>
+                        {item.source === 'pool' ? (
+                          <div className="flex gap-1">
+                            {item.rag_matched && <Badge variant="outline" className="text-[11px]">RAG</Badge>}
+                            {item.seed_matched && <Badge variant="outline" className="text-[11px]">种子</Badge>}
+                            {!item.rag_matched && !item.seed_matched && (
+                              <span className="text-[11px] text-ink-faint">—</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-ink-faint">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs font-mono text-ink-muted">
+                        {item.source === 'graph' ? (item.state_updated_at ?? '—') : (item.detected_at ?? '—')}
+                      </TableCell>
+                      <TableCell>
+                        <StableConfidence item={item} />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -528,24 +552,31 @@ export function EvolutionReviewTab() {
             ) : (
               <div className="space-y-3">
                 {stableItems.map((item) => (
-                  <div key={item.id} className="rounded-lg border border-border bg-canvas p-4 space-y-3">
+                  <div key={item.position_name} className="rounded-lg border border-border bg-canvas p-4 space-y-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="font-medium text-ink truncate">{item.position_name}</div>
                         <div className="mt-1 flex items-center gap-1">
-                          {item.rag_matched && <Badge variant="outline" className="text-[10px]">RAG</Badge>}
-                          {item.seed_matched && <Badge variant="outline" className="text-[10px]">种子</Badge>}
+                          <Badge variant={item.source === 'pool' ? 'stable' : 'outline'} className="text-[10px]">
+                            {item.source === 'pool' ? '状态机' : '图谱留存'}
+                          </Badge>
+                          {item.source === 'pool' && item.rag_matched && (
+                            <Badge variant="outline" className="text-[10px]">RAG</Badge>
+                          )}
+                          {item.source === 'pool' && item.seed_matched && (
+                            <Badge variant="outline" className="text-[10px]">种子</Badge>
+                          )}
                         </div>
                       </div>
                       <div className="text-right shrink-0">
-                        <div className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
-                          {Math.round(confidenceOf(item) * 100)}%
-                        </div>
+                        <StableConfidence item={item} />
                         <div className="text-[10px] text-ink-faint">置信度</div>
                       </div>
                     </div>
                     <div className="text-[11px] text-ink-faint font-mono">
-                      发现于 {item.detected_at}
+                      {item.source === 'graph'
+                        ? `图谱状态更新于 ${item.state_updated_at ?? '—'}`
+                        : `发现于 ${item.detected_at ?? '—'}`}
                     </div>
                   </div>
                 ))}
