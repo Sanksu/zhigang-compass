@@ -47,9 +47,8 @@ export function useSkillDescriptions() {
     }
   }, [])
 
-  // 外部刷新（保存/LLM 补齐后）：主动置 loading 同步是允许的（非 effect 内调用）
+  // 外部刷新（保存/LLM 补齐后）：直接重拉，保持展示无需翻转 loading
   const reloadDescs = useCallback(() => {
-    setLoading(true)
     loadDescs(setDescMap)
   }, [])
 
