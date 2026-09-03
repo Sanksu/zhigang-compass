@@ -207,6 +207,33 @@ class TestAggregationGate:
         kept, _ = filter_rows_for_aggregation([row_existing, row_emerging], {"大模型应用工程师"})
         assert [r for r in kept] == [row_emerging]
 
+    def test_emerging_gate_falls_back_to_snapshot_position(self):
+        """历史行 cv 缺 position_name → 回退快照归一岗位判新兴阈值（§4.5）。
+
+        0.55 ≥ 新兴 0.5 应放行（回退前一律按既有 0.6 拦截）；0.45 仍被新兴
+        阈值拦截，证明兜底只补岗位名、不放松门控。
+        """
+        from types import SimpleNamespace
+
+        from app.services.extraction.position_normalization import (
+            POSITION_NORMALIZATION_VERSION,
+        )
+
+        def _legacy_row(confidence):
+            snap = {
+                "extraction": {"requirements": []},
+                "normalized_position": "大模型应用工程师",
+                "normalized_position_meta": {"version": POSITION_NORMALIZATION_VERSION},
+                "cross_validation": {"confidence": confidence},
+            }
+            return SimpleNamespace(snapshot=snap, source="boss")
+
+        kept, _ = filter_rows_for_aggregation([_legacy_row(0.55)], {"大模型应用工程师"})
+        assert len(kept) == 1
+        kept2, stats = filter_rows_for_aggregation([_legacy_row(0.45)], {"大模型应用工程师"})
+        assert kept2 == []
+        assert stats["blocked_jds"] == 1
+
     def test_unvalidated_rows_pass_with_count(self):
         """snapshot 无 cross_validation（历史数据）放行并计数，不静默拦截。"""
         rows = [self._row(None)]

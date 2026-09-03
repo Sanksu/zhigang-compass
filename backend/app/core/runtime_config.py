@@ -106,7 +106,7 @@ _VALIDATORS = {
     "match_jd_rough_k": lambda v: isinstance(v, int) and 1 <= v <= 2000,
     "match_jd_min_skills": lambda v: isinstance(v, int) and 1 <= v <= 20,
     "match_jd_max_per_position": lambda v: isinstance(v, int) and 1 <= v <= 1000,
-    "llm_async_wall_budget": lambda v: isinstance(v, int) and 30 <= v <= 600,
+    "llm_async_wall_budget": lambda v: isinstance(v, int) and 30 <= v <= 90,
 }
 
 

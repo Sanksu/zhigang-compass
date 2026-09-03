@@ -75,7 +75,7 @@ def fake_session(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_reconcile_retries_failed_and_sets_applied_true(fake_session, monkeypatch):
-    """副作用重试成功 → 提案 effects_applied 翻 True、清空错误、计数+1。"""
+    """副作用重试成功 → 提案 effects_applied 翻 True、清空错误；失败计数不递增。"""
     row = _proposal()
     monkeypatch.setattr(effect, "apply_review_effect", lambda **kw: {"removed_nodes": 2})
     sess = fake_session(_Sess([row], [_changelog()]))
@@ -83,6 +83,7 @@ async def test_reconcile_retries_failed_and_sets_applied_true(fake_session, monk
     assert res["reconciled"] == 1
     assert row.effects_applied is True
     assert row.effects_error == ""
+    assert row.effects_retry_count == 0  # 成功不占失败重试计数
     assert row.impact_stats["removed_nodes"] == 2
     assert sess.committed == 1
 
