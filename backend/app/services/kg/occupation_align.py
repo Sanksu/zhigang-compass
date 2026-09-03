@@ -57,6 +57,13 @@ class OccupationAligner:
             cls._instance = cls()
         return cls._instance
 
+    def preload(self) -> None:
+        """预热 occupations 权威清单（启动时加载，免首次对齐冷查询数百 ms）。"""
+        try:
+            self._load_occupations()
+        except Exception:
+            pass  # 预热失败静默：首次 align() 时仍会按 TTL 正常加载
+
     # ---- occupations 加载（进程级 TTL 缓存） ----
 
     def _load_from_pg(self) -> list[dict] | None:

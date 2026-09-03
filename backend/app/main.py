@@ -157,6 +157,22 @@ async def _prewarm_semantic() -> None:
         await load_pool_vectors_cached(
             profiles, SkillEmbedder.get(), redis_client,
         )
+
+        # 技能向量批量预热（09-02 compare 冷启动优化）：首 compare 的语义相似度
+        # 会对全部技能对即时 encode（实测容器内首查 24s），批量 warm 后评分循环
+        # 全命中进程内缓存（实测复查 0.86s）。技能名与池化向量同源，顺路收集。
+        skill_names: set[str] = set()
+        for prof in profiles:
+            for sk in (*prof.must_skills, *prof.nice_skills):
+                if sk.skill_name:
+                    skill_names.add(sk.skill_name)
+        if skill_names:
+            await asyncio.to_thread(SkillEmbedder.get().warm, sorted(skill_names))
+
+        # Occupation 对齐器预热（_occupations TTL 懒加载，首次消费数百 ms）
+        from app.services.kg.occupation_align import OccupationAligner
+
+        OccupationAligner.get().preload()
     except Exception:
         logger.warning(
             "语义模型预热失败,匹配已降级为纯规则模式(详见 SemanticUnavailableError)",
