@@ -33,8 +33,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 全文检索缓存 TTL（08-18 TTL 风暴治理：60s → 300s）
-SEARCH_CACHE_TTL = 300
+# 全文检索缓存 TTL（08-18 TTL 风暴治理：60s → 300s；09-02 P99 优化 → 900s：
+# 搜索词重复度高（真实用户/压测同词），延长命中窗把并发 miss 频率降为 1/3；
+# 图数据变更时 invalidate_graph_caches 会主动清缓存，长 TTL 无脏读风险）
+SEARCH_CACHE_TTL = 900
 
 # 缓存穿透合并（08-15 压测扩容）：TTL 失效瞬间 100 并发同时 miss 打
 # Neo4j（to_thread 线程池饱和 → P95 20s 长尾根因）。in-flight 表让同 key

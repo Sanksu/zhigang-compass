@@ -62,7 +62,7 @@ class GraphUser(HttpUser):
     @task(3)
     def panorama(self):
         with self.client.get(
-            "/api/v1/graph/panorama", name="panorama", catch_response=True
+            "/api/v1/graph/view/panorama", name="panorama", catch_response=True
         ) as resp:
             judge_status(resp)
 
