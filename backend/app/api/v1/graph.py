@@ -97,22 +97,6 @@ def _query_position_skills_by_necessity(id: str) -> dict[str, dict]:
     return repository.query_position_skills_by_necessity(neo4j_driver, id)
 
 
-def _skill_portrait_desc(sk: dict) -> str:
-    """岗位画像技能详述：优先取内置词典的专业解释；未收录回退整合模板。"""
-    name = str(sk.get("sname") or "").strip().lower()
-    cached = SKILL_DESCRIPTIONS.get(name)
-    if cached:
-        return cached
-    scat = str(sk.get("scat") or "通用")
-    scount = int(sk.get("scount") or 1)
-    need_word = "必备" if sk.get("necessity", "must") == "must" else "加分"
-    return (
-        f"属于「{scat}」类目，当前岗位共有 {scount} 个独立 JD 直接要求该技能"
-        f"（{need_word}）。掌握该技能可直接提升本岗位的必备/加分匹配分，并按其先修链"
-        f"逐步补齐前置技能。"
-    )
-
-
 def _query_prereq_chain(skill_name: str) -> list[str]:
     """图谱先修链（线程池执行，08-14 审查）。"""
     return repository.query_prereq_chain(neo4j_driver, skill_name)

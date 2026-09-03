@@ -151,6 +151,13 @@ function effectExplain(it: LlmDecisionItem): string[] {
     ]
   }
   if (domain === 'jd_extract') return ['抽取类决策仅记录 LLM 结构化输出与置信度，无独立生效动作']
+  if (domain === 'skill_noise') {
+    const noise = it.structured_output?.['noise']
+    return noise === false
+      ? ['取消噪声标记：从动态 blocked 层移除该技能，恢复归一/抽取可见']
+      : ['标记为噪声：写入动态 blocked 层，后续技能归一化链路直接拦截该词']
+  }
+  if (domain === 'skill_alias') return ['别名生效：该别名回写标准词映射，抽取/归一链路按标准词归一']
   return []
 }
 
