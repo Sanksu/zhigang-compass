@@ -82,7 +82,6 @@ async def test_reconcile_retries_failed_and_sets_applied_true(monkeypatch):
 async def test_reconcile_skips_when_retry_cap_reached(monkeypatch):
     """重试次数达上限 → 跳过、不改状态（交人工）。"""
     row = _proposal(effects_retry_count=wg._EFFECT_MAX_RETRY)
-    sess = _Sess([row], [_changelog()])
     res = await wg._reconcile_failed_effects()
     assert res["reconciled"] == 0 and res["skipped"] == 1
     assert row.effects_applied is False
@@ -92,7 +91,6 @@ async def test_reconcile_skips_when_retry_cap_reached(monkeypatch):
 async def test_reconcile_skips_missing_changelog(monkeypatch):
     """缺关联审计记录 → 无法确定副作用形态，不盲目重放（防误删），交人工。"""
     row = _proposal()
-    sess = _Sess([row], [None])
     res = await wg._reconcile_failed_effects()
     assert res["reconciled"] == 0 and res["skipped"] == 1
     assert row.effects_retry_count == wg._EFFECT_MAX_RETRY  # 封顶交人工
@@ -104,7 +102,6 @@ async def test_reconcile_keeps_failed_on_retry_error(monkeypatch):
     """重试再次抛异常 → 仍置 False、计数+1、错误更新（下次再来）。"""
     row = _proposal(effects_retry_count=1)
     monkeypatch.setattr(effect, "apply_review_effect", lambda **kw: (_ for _ in ()).throw(RuntimeError("still down")))
-    sess = _Sess([row], [_changelog()])
     res = await wg._reconcile_failed_effects()
     assert res["still_failed"] == 1
     assert row.effects_applied is False
