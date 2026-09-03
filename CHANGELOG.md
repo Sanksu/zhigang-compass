@@ -8,6 +8,7 @@
 ### 2026-09-03
 - **课程源调度口径收口（对齐 TODO-CRS-01）**：确认课程源（coursera/edx/icourse163）按 08-28 拍板**按日采集**已并入主管线（etl.py course_platforms，无需周调度）；移除 update_status._WEEKLY_SOURCES 周更假设，新鲜度阈值统一 T+1 日级（_freshness_threshold 恒返回 1 天），避免断更 7 天才告警与日级闭环不一致。进度跟踪.md §七·五 TODO-CRS-01 标记已解决。
 - **存量孤岛课程技能回填（清孤立课 558 门，脚本 [backfill_course_islands.py](../../backend/scripts/backfill_course_islands.py)）**：存量课程（无 LEARNABLE_VIA 边）culp 根因=旧版 enrich 对 skills_enriched=true 永久标记 + 7 天年龄窗口屏蔽存量 + 回填未落；脚本不受 7 天窗口限制、复用 extract_course_skills + import_course，对全部空技能课程做一次性LLM 抽取并**分批提交（每 10 门一 commit PG + 建 Neo4j 边，可中断恢复）**，LLM 判空者清永久标记保留重试。**生产实跑（09-03，容器内脱离终端）：目标 797 门 → 抽到技能并建边 795、LLM 判空 2、入图 0 失败；Neo4j 孤岛 558→24 门（icourse163 20/edx 3/coursera 1）**。⚠️ **算法红线留痕：LLM 课程技能抽取/批量建边改动，待算法岗 @zkt-sky 复核**。
+- **dict-guard 审批非原子性处理（副作用持久化 + 巡检自动重试）**：跨 PG/Neo4j/Redis 无分布式事务，approve 副作用（动态词表 / Neo4j 清理）失败此前仅瞬时响应。本次：副作用统一收敛至 [dict_guard_effect.py](../../backend/app/services/dict_guard_effect.py)（admin 审批与巡检重试共用，杜绝语义分叉）；DictProposal 新增 effects_applied / effects_error / effects_retry_count 持久化失败标记；**admin 审批副作用成功置 True、失败置 False+错误摘要**；**dict_guard_daily 每日巡检幂等重试失败提案（≤3 次，缺审计记录不盲目重放防误删）**。含 6 组新/改单测。⚠️ 模型变更（迁移 20260903_001，已标注）+ 字典自治改动，需 @zkt-sky 复核。
 
 ### 2026-09-02
 - **学历维度计入综合得分明细展示**：契约先行在 `MatchResult` 增加顶层 `edu_score`（第四维 BT v4，任一侧学历层级无法映射为 null，不参与总分加权），`weights` 增加 `edu`（w_edu 凸组合权重，未配置/非法为 null）——`score_position` 构造结果时透出 `edu_score`，compare 响应汇总 `weights.edu`；前端「综合得分」明细卡新增「学历背景」条（与必备/加分/经验并列，展示分数与权重，无信号时隐藏）。含既有 matching 219 + jd_match/api smoke 用例全通过。

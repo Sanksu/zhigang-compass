@@ -24,6 +24,7 @@ from app.core.errors import ERR_CONFLICT, ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALID
 from app.models.business import AuditLog, DictChangeLog, DictProposal
 from app.schemas.admin_requests import AdminReviewActionRequest
 from app.schemas.common import error
+from app.services.dict_guard_effect import apply_review_effect
 from app.services.extraction import dynamic_filters as dyn
 from app.services.extraction.dictionary import SKILL_STOPWORDS
 
@@ -34,69 +35,6 @@ logger = logging.getLogger(__name__)
 # 巡检报告目录（backend/reports，与 workers/dict_guard.py 写入侧同约定；
 # 模块级便于测试注入 tmp_path）
 _REPORT_DIR = Path(__file__).resolve().parents[4] / "reports"
-
-
-def _cleanup_skill_nodes(term: str) -> int:
-    """scoped 清理：删除与停用词同名的 Skill 节点（与 auto 路径 workers/dict_guard 同语义）。"""
-    from app.core.database import neo4j_driver
-
-    with neo4j_driver.session() as session:
-        record = session.run(
-            "MATCH (s:Skill {name: $term}) DETACH DELETE s RETURN count(s) AS n",
-            term=term,
-        ).single()
-        return record["n"] if record else 0
-
-
-def _cleanup_position_node(term: str) -> int:
-    """删除脏岗位节点（DETACH 连带 REQUIRES 等边）。"""
-    from app.core.database import neo4j_driver
-
-    with neo4j_driver.session() as session:
-        record = session.run(
-            "MATCH (p:Position {name: $term}) DETACH DELETE p RETURN count(p) AS n",
-            term=term,
-        ).single()
-        return record["n"] if record else 0
-
-
-def _cleanup_course_node(term: str) -> int:
-    """删除孤立脏课程节点（DETACH 连带 LEARNABLE_VIA 等边）。"""
-    from app.core.database import neo4j_driver
-
-    with neo4j_driver.session() as session:
-        record = session.run(
-            "MATCH (c:Course {name: $term}) DETACH DELETE c RETURN count(c) AS n",
-            term=term,
-        ).single()
-        return record["n"] if record else 0
-
-
-def _cleanup_course_edge(term: str) -> int:
-    """删除课程脏边『技能→课程』（LEARNABLE_VIA，不删课程节点）。"""
-    from app.core.database import neo4j_driver
-
-    source, target = term.split("→", 1) if "→" in term else (term, "")
-    with neo4j_driver.session() as session:
-        record = session.run(
-            "MATCH (s:Skill {name: $source})-[r:LEARNABLE_VIA]->(c:Course {name: $target}) "
-            "DELETE r RETURN count(r) AS n",
-            source=source, target=target,
-        ).single()
-        return record["n"] if record else 0
-
-
-def _cleanup_by_proposal(row) -> tuple[str, int]:
-    """按提案 action/entity_type 分派清理动作；返回 (kind, 受影响单元数)。"""
-    if row.action == "add_stopword":
-        return "blocked", _cleanup_skill_nodes(row.term)
-    if row.action == "remove_node":
-        if row.entity_type == "position":
-            return "node", _cleanup_position_node(row.term)
-        return "node", _cleanup_course_node(row.term)
-    if row.action == "remove_edge":
-        return "edge", _cleanup_course_edge(row.term)
-    return "blocked", 0
 
 
 def _victim_of(evidence: list | dict | None) -> str:
@@ -242,42 +180,47 @@ async def review_proposal(
     ))
     await db.commit()
 
-    # ── 副作用阶段（不可回滚操作放最后）：失败不回滚已批准的状态，以日志 +
-    #    effects_applied=False 透出，由巡检报告对账兜底
+    # ── 副作用阶段（不可回滚操作放最后）：失败不回滚已批准的状态，而是把
+    #    effects_applied=False + 错误摘要**持久化**到提案（2026-09-03 非原子性
+    #    处理），供每日巡检幂等重试补齐；成功则置 True。对账不再是瞬时响应。
     if action == "approve":
         try:
-            if row.action == "add_stopword":
-                dyn.add_entry("blocked", row.term, reason=reason, source="dict_guard_review")
-                removed = await asyncio.to_thread(_cleanup_skill_nodes, row.term)
-                row.impact_stats = {**(row.impact_stats or {}), "removed_nodes": removed}
-            elif row.action == "remove_stopword":
-                if effect_kind == "blocked":
-                    dyn.remove_entry("blocked", row.term)
-                else:
-                    dyn.add_entry("protected", effect_term, reason=reason, source="dict_guard_review")
-            elif row.action == "protect_whitelist":
-                dyn.add_entry("protected", row.term, reason=reason, source="dict_guard_review")
-            else:  # remove_node / remove_edge
-                _, removed = await asyncio.to_thread(_cleanup_by_proposal, row)
-                row.impact_stats = {
-                    **(row.impact_stats or {}), "removed_units": removed, "kind": effect_kind,
-                }
+            effect = await asyncio.to_thread(
+                apply_review_effect,
+                action=row.action,
+                entity_type=row.entity_type,
+                kind=effect_kind,
+                term=effect_term,
+                reason=reason,
+            )
+            row.impact_stats = {**(row.impact_stats or {}), **effect}
+            row.effects_applied = True
+            row.effects_error = ""
             if changelog_row is not None:
-                # session 内持久对象直接改属性即脏标记，无需重复 add
                 changelog_row.impact_stats = row.impact_stats or {}
             await db.commit()
-        except Exception:
-            logger.exception("dict_guard 审批副作用执行失败 proposal=%s term=%s", row.id, row.term)
+        except Exception as exc:
+            logger.exception(
+                "dict_guard 审批副作用执行失败（已持久化待巡检重试）proposal=%s term=%s",
+                row.id, row.term,
+            )
+            row.effects_applied = False
+            row.effects_error = f"{type(exc).__name__}: {str(exc)[:300]}"
+            await db.commit()
             return ok(
                 data={
                     "id": row.id, "term": row.term, "action": row.action,
                     "status": row.status, "effects_applied": False,
                 },
-                msg=f"已批准但副作用执行失败（详见服务日志，待巡检对账）: {row.term}",
+                msg=f"已批准但副作用执行失败（已记录，将由每日巡检自动重试）: {row.term}",
             )
 
     return ok(
-        data={"id": row.id, "term": row.term, "action": row.action, "status": row.status},
+        data={
+            "id": row.id, "term": row.term, "action": row.action,
+            "status": row.status,
+            **({"effects_applied": row.effects_applied} if action == "approve" else {}),
+        },
         msg=f"已{'批准执行' if action == 'approve' else '驳回'}: {row.term}",
     )
 
