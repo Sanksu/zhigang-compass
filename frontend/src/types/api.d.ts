@@ -4492,6 +4492,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/positions/stable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 已晋级 stable 岗位全集（候选池 ∪ 图谱留存并集）
+         * @description 与 /positions/pending?state=stable（纯候选池）不同：本端点把图谱
+         *     Position.status='stable' 且候选池无同名行的"留存节点"一并返回
+         *     （按岗位名去重，候选池优先）。图谱不可达时降级为候选池子集。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description stable 岗位并集列表 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code?: number;
+                            msg?: string;
+                            data?: components["schemas"]["StablePositionData"];
+                            trace_id?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/evolution/pending": {
         parameters: {
             query?: never;
@@ -6029,6 +6075,38 @@ export interface components {
             total: number;
             page: number;
             size: number;
+        };
+        /**
+         * @description 已晋级 stable 岗位并集项（GET /admin/positions/stable）：
+         *     source=pool 为候选池状态机行（完整画像）；source=graph 为图谱留存节点
+         *     （候选池无同名行，仅 name/state_updated_at/freq）
+         */
+        StablePositionItem: {
+            position_name: string;
+            /**
+             * @description pool=候选池状态机行；graph=图谱留存节点（无候选池行）
+             * @enum {string}
+             */
+            source: "pool" | "graph";
+            /** @enum {string} */
+            state: "stable";
+            /** @description 多维置信度对象（含 final_confidence，仅 pool 来源） */
+            confidence?: Record<string, never> | null;
+            /** @description 种子岗位命中（仅 pool 来源） */
+            seed_matched?: boolean | null;
+            /** @description RAG 检索命中（仅 pool 来源） */
+            rag_matched?: boolean | null;
+            /** @description 发现时间（仅 pool 来源） */
+            detected_at?: string | null;
+            /** @description 图谱状态更新时间（仅 graph 来源） */
+            state_updated_at?: string | null;
+            /** @description 图谱岗位频次（仅 graph 来源） */
+            freq?: number | null;
+        };
+        /** @description GET /admin/positions/stable 响应 data（无分页，集合较小） */
+        StablePositionData: {
+            items: components["schemas"]["StablePositionItem"][];
+            total: number;
         };
         /** @description 技术信号监控项（GET /admin/discovery/watch） */
         WatchItem: {

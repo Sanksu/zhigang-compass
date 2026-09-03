@@ -381,6 +381,66 @@ async def positions_declining(
     return paged_ok(items, total, page, size)
 
 
+@router.get("/positions/stable")
+async def positions_stable(
+    db: AsyncSession = Depends(get_db),
+):
+    """已晋级 stable 岗位全集 = 候选池 stable ∪ 图谱留存 stable（并集按名去重）。
+
+    与 /positions/pending?state=stable（纯候选池）不同：本端点把图谱
+    Position.status='stable' 且候选池无同名行的"留存节点"一并返回——
+    这类节点无候选池画像（confidence/证据/发现时间），仅展示
+    name/state_updated_at/freq，source='graph' 区分。图谱不可达时降级为
+    候选池子集（空图谱并集，不影响列表主功能）。
+    """
+    from app.core.database import async_neo4j_driver
+    from app.models.business import DiscoveryCandidate
+    from app.services.graph import repository
+
+    pool_rows = (await db.scalars(
+        select(DiscoveryCandidate).where(DiscoveryCandidate.state == "stable")
+    )).all()
+
+    graph_nodes: list[dict] = []
+    try:
+        graph_nodes = await repository.query_stable_positions_async(async_neo4j_driver)
+    except Exception as exc:
+        logger.warning("positions_stable: 图谱查询失败，降级为候选池子集: %s", exc)
+
+    pool_names = {row.position_name for row in pool_rows}
+    items = [
+        {
+            "position_name": row.position_name,
+            "source": "pool",
+            "state": row.state,
+            "confidence": row.confidence,
+            "seed_matched": row.seed_matched,
+            "rag_matched": row.rag_matched,
+            "detected_at": row.detected_at,
+            "state_updated_at": None,
+            "freq": None,
+        }
+        for row in pool_rows
+    ]
+    for node in graph_nodes:
+        name = node.get("name")
+        if not name or name in pool_names:
+            continue
+        items.append({
+            "position_name": name,
+            "source": "graph",
+            "state": "stable",
+            "confidence": None,
+            "seed_matched": None,
+            "rag_matched": None,
+            "detected_at": None,
+            "state_updated_at": node.get("state_updated_at"),
+            "freq": node.get("freq"),
+        })
+    items.sort(key=lambda it: (it["source"] != "pool", it["position_name"]))
+    return ok(data={"items": items, "total": len(items)})
+
+
 @router.put("/positions/{candidate_id}/archive")
 async def archive_position(
     candidate_id: str,

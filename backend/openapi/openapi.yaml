@@ -2710,6 +2710,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiResponse'
 
+  /api/v1/admin/positions/stable:
+    get:
+      tags: [admin]
+      summary: 已晋级 stable 岗位全集（候选池 ∪ 图谱留存并集）
+      description: |
+        与 /positions/pending?state=stable（纯候选池）不同：本端点把图谱
+        Position.status='stable' 且候选池无同名行的"留存节点"一并返回
+        （按岗位名去重，候选池优先）。图谱不可达时降级为候选池子集。
+      responses:
+        '200':
+          description: stable 岗位并集列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  msg: { type: string }
+                  data:
+                    $ref: '#/components/schemas/StablePositionData'
+                  trace_id: { type: string }
+
   /api/v1/admin/evolution/pending:
     get:
       tags: [admin]
@@ -4121,6 +4143,46 @@ components:
         total: { type: integer }
         page: { type: integer }
         size: { type: integer }
+
+    StablePositionItem:
+      type: object
+      required: [position_name, source, state]
+      description: |
+        已晋级 stable 岗位并集项（GET /admin/positions/stable）：
+        source=pool 为候选池状态机行（完整画像）；source=graph 为图谱留存节点
+        （候选池无同名行，仅 name/state_updated_at/freq）
+      properties:
+        position_name: { type: string }
+        source:
+          type: string
+          enum: [pool, graph]
+          description: pool=候选池状态机行；graph=图谱留存节点（无候选池行）
+        state: { type: string, enum: [stable] }
+        confidence:
+          type: object
+          nullable: true
+          description: 多维置信度对象（含 final_confidence，仅 pool 来源）
+        seed_matched: { type: boolean, nullable: true, description: 种子岗位命中（仅 pool 来源） }
+        rag_matched: { type: boolean, nullable: true, description: RAG 检索命中（仅 pool 来源） }
+        detected_at: { type: string, nullable: true, description: 发现时间（仅 pool 来源） }
+        state_updated_at:
+          type: string
+          nullable: true
+          description: 图谱状态更新时间（仅 graph 来源）
+        freq:
+          type: integer
+          nullable: true
+          description: 图谱岗位频次（仅 graph 来源）
+
+    StablePositionData:
+      type: object
+      description: GET /admin/positions/stable 响应 data（无分页，集合较小）
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/StablePositionItem' }
+        total: { type: integer }
 
     WatchItem:
       type: object
