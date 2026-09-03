@@ -15,6 +15,8 @@
 
 - **岗位审核「已晋级 stable」列表改图谱∪候选池并集取数**：契约先行新增 `GET /admin/positions/stable`——返回**候选池 stable ∪ 图谱留存 stable**（按岗位名去重、候选池优先、`source` 标记来源），图谱 `Position.status='stable'` 且候选池无同名行的"留存节点"以 `source=graph` 并入（仅展示 name/state\_updated\_at/freq，无候选池画像字段）；图谱不可达降级为候选池子集。前端演化审核 Tab 的 stable 列表改取并集端点，新增「来源」列（状态机/图谱留存徽标），graph 项置信度显示 —。**背景**：图谱留存与状态机两域本可按设计不一致（active 存量岗不入池 / candidate 无图节点），但 stable 图谱节点若出现无候选池行（脚本操作/归一化改名分歧）此前会在列表漏显；本次并集后不遗漏，与方案A存量岗衰退通道（自动 upsert 进池）互相印证。含后端 4 组新单测 + 前端 typecheck/测试通过；线上实测两域 stable 各 26 完全一致。
 
+- **数据快照入库（`snapshots/`，Git LFS，跳过冷启动部署）**：将本机运行环境最新完整数据导出为快照入仓库——`snapshots/pg.dump`（PostgreSQL `pg_dump -Fc`，129MB）+ `snapshots/neo4j.dump`（`neo4j-admin database dump`，44MB），经 **Git LFS** 托管（pg.dump 超 GitHub 100MB 单文件限制）。新增一键导入 `scripts/restore_snapshot.sh`（停依赖 → `pg_restore --clean` → `neo4j-admin database load` → 重启）与 DEPLOY.md §6.0、snapshots/README.md（含重新导出步骤）。**价值**：新部署跳过冷启动（爬虫 + bootstrap 13 阶段需数天）直接获得可用数据（图谱 118 岗位节点 / JD 11115 条 / 演化快照 27 期）。**附带修复**：导出后重启 api 暴露镜像过期问题（api:latest 缺 `20260903_001` 迁移，DB 已处该修订 → alembic 启动失败），`docker compose build api worker` 重建镜像后恢复 healthy。
+
 ### 2026-09-02
 
 - **学历维度计入综合得分明细展示**：契约先行在 `MatchResult` 增加顶层 `edu_score`（第四维 BT v4，任一侧学历层级无法映射为 null，不参与总分加权），`weights` 增加 `edu`（w\_edu 凸组合权重，未配置/非法为 null）——`score_position` 构造结果时透出 `edu_score`，compare 响应汇总 `weights.edu`；前端「综合得分」明细卡新增「学历背景」条（与必备/加分/经验并列，展示分数与权重，无信号时隐藏）。含既有 matching 219 + jd\_match/api smoke 用例全通过。

@@ -209,7 +209,24 @@ docker compose -f docker-compose.yml -f docker-compose.local-images.yml up -d --
 | 更新代码 | 见 **§3.1 合并 ≠ 部署清单**（pull → build → 前置检查 → up）；GHCR 镜像路径见 §3.2 |
 | 回滚 | 镜像 `sha-<commit>` 标签指回已知良好提交 + `up -d --force-recreate`，见 **§3.3**（表结构不随镜像回滚） |
 | 数据备份 | `pg_dump`（PostgreSQL）+ `neo4j-admin dump`（Neo4j）；数据卷：`pg_data` / `neo4j_data` / `neo4j_logs` / `redis_data` / `uploads_data` |
+| **快照导入**（跳过冷启动） | `bash scripts/restore_snapshot.sh`（从 `snapshots/` 恢复 PG + Neo4j 全量，见 §6.0） |
 | 重启策略 | 5 服务全部 `restart: unless-stopped`：宿主机重启后自动拉起，进程异常退出自动重启 |
+
+### 6.0 数据快照导入（2026-09-03）
+
+`snapshots/` 目录内置本机导出的完整数据快照（`pg.dump` 129MB + `neo4j.dump` 44MB，Git LFS 托管），新部署 **跳过冷启动**（爬虫 + bootstrap 13 阶段需数天）直接获得可用数据：图谱 118 岗位节点 / JD 11115 条 / 演化快照 27 期。
+
+```bash
+# 克隆后先拉取 LFS 二进制
+git lfs pull
+
+# 一键导入（Linux/226 部署机）
+bash scripts/restore_snapshot.sh
+```
+
+- 前置：`docker compose` 5 服务镜像已构建（api/worker 需含 `20260903_001` 及此前全部迁移，旧镜像会因 alembic 找不到 DB 已处修订而启动失败——重建镜像即可）
+- 导入会**覆盖**现有 PG 数据与 Neo4j 图谱（`pg_restore --clean` / `neo4j-admin database load --overwrite-destination`）
+- 快照内容与重新导出步骤见 [`snapshots/README.md`](./snapshots/README.md)；交付演示前建议重新导出最新快照
 
 ### 6.1 ETL 调度（容器内 ARQ cron，08-21 #348）
 
