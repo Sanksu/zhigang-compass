@@ -200,7 +200,7 @@ function stat(s, x, y, w, num, label, opts = {}) {
   s.addText("▲ 真实简历 → Top-10 岗位推荐（JD 级评分，附原始 JD 证据）", { x: 6.7, y: 5.28, w: 6.1, h: 0.3, fontSize: 12, fontFace: FONT, color: MUTED, align: "center", margin: 0 });
   bullets(s, [
     "三维加权：必备技能（must/nice 加权命中）+ 经验 + 学历，差距三态诊断",
-    "语义增强：SBERT 多语言向量 + Bradley-Terry 权重学习（Spearman 0.88）",
+    "语义增强：SBERT 多语言向量 + Bradley-Terry 权重学习（Spearman 0.7853）",
     "纠偏机制：技能通胀修正（CII）+ 时效衰减 + 跨域降权",
     "JD 级评分口径：推荐列表与详情同源同分——对齐「最匹配的那条真实 JD」",
     "双模式：批量推荐（Top-N）+ 单点比对（差距分析 + 学习路径）",
