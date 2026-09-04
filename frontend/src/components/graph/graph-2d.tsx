@@ -165,13 +165,16 @@ function sizeOf(node: GraphNode, displayValue?: number): number {
   return Math.min(54, Math.max(14, scaled))
 }
 
-/** 单条边的基础视觉（宽/色/线型/透明度）——option 构建与悬停离场复位共用一套口径 */
+/** 单条边的基础视觉（宽/色/线型/透明度）——option 构建与悬停离场复位共用一套口径。
+ *  boost=全景（力导向）视图提亮档：低权必备边 0.08 起步在密集画布上近不可见，
+ *  抬高透明度下限并加粗线宽；技术栈环形视图走自身降噪，不传 boost。 */
 function edgeBaseStyle(
   edge: GraphEdge,
   nodeById: Map<string, GraphNode>,
   colors: ReturnType<typeof graphColors>,
   dimmed: boolean,
   weightNorm = 0,
+  boost = false,
 ) {
   const source = nodeById.get(edge.source)
   const target = nodeById.get(edge.target)
@@ -188,7 +191,13 @@ function edgeBaseStyle(
   // 08-28 技术栈降噪：岗位关系边透明度/线宽按权重渐变——低权边压暗到近隐约，
   // 高权边保持可读，悬停邻接提亮仍由 hover 直改机制叠加
   const width =
-    kind === 'must' ? 0.7 + 1.1 * weightNorm : kind === 'nice' ? 0.5 + 0.8 * weightNorm : base.width
+    kind === 'must'
+      ? (boost ? 1.0 : 0.7) + 1.1 * weightNorm
+      : kind === 'nice'
+        ? (boost ? 0.7 : 0.5) + 0.8 * weightNorm
+        : boost
+          ? base.width + 0.2
+          : base.width
   return {
     kind,
     ...base,
@@ -196,8 +205,10 @@ function edgeBaseStyle(
     opacity: dimmed
       ? FILTER_DIM_EDGE_OPACITY
       : kind === 'membership' || kind === 'shared'
-        ? 0.45
-        : 0.08 + 0.42 * weightNorm,
+        ? boost
+          ? 0.6
+          : 0.45
+        : (boost ? 0.22 : 0.08) + 0.46 * weightNorm,
   }
 }
 
@@ -851,9 +862,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     })
 
     // 层级画像布局（positionPortrait 专用）：岗位居中，大类节点（技能/软技能/
-    // 薪资/经验/学历，portrait_category 标记）环绕中层，各自小节点按归属大类
-    // 扇区排外环——扇区内按计数降序交替向两侧展开（最大条目居中贴父连线）、
-    // 超过 8 个双排错半径防标签互压。
+    // 薪资/经验/学历，portrait_category 标记）中层圆环均分，各自小节点按归属
+    // 大类扇区等角顺排外环——08-29 初版对称口径（f468efb7 的降序左右交替 +
+    // 双排错半径使版式不对称，09-04 用户要求回退固定对称版式）。
     if (ringLayout && nodes.some((n) => n.type === 'attr')) {
       const rect = containerRef.current?.getBoundingClientRect()
       const W = rect?.width || 900
@@ -866,14 +877,11 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         ;(n as GraphNode & { x?: number; y?: number }).y = y
       }
       const center = nodes.find((n) => n.type === 'position')
-      // 大类按孩子数降序交替排列（孩子多的扇区彼此岔开，防上挤下空）
-      const categories = nodes
-        .filter(
-          (n) =>
-            (n as GraphNode).portrait_category ||
-            (n as { portrait_category?: boolean }).portrait_category,
-        )
-        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      const categories = nodes.filter(
+        (n) =>
+          (n as GraphNode).portrait_category ||
+          (n as { portrait_category?: boolean }).portrait_category,
+      )
       const parentOf = new Map<string, string>()
       const byParent = new Map<string, string[]>()
       for (const e of data.edges) {
@@ -885,37 +893,42 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         }
       }
       if (center) place(center, CX, CY)
-      const R1 = minDim * 0.27
-      // 大类从 0°（右，E/技术方向）起顺时针交替：第 1 大类右侧、第 2 大类左侧……
+      // 大类节点：中层圆环均分，自顶部（12 点方向）起顺时针等角——对称固定
+      const R1 = minDim * 0.26
       categories.forEach((n, i) => {
-        const turn = Math.ceil(i / 2) * (i % 2 === 0 ? 1 : -1)
-        const angle = turn * (Math.PI * 2) / Math.max(1, categories.length)
+        const angle = (i / Math.max(1, categories.length)) * Math.PI * 2 - Math.PI / 2
         place(n, CX + R1 * Math.cos(angle), CY + R1 * Math.sin(angle))
       })
-      // 小节点：父大类扇区内交替展开 + 双排错半径
-      const R2 = minDim * 0.47
+      // 小节点：父大类扇区内等角顺排（扇区角宽 = 2π/k × 0.82 留间隙）。
+      // 容量法多环防重叠：每环按"节点 24px + 标签间距 20px"的扇区弧长容量装，
+      // 放不下外扩一圈（环距 64px）——圈越大容量越大必然收敛；环内仍等角均分，
+      // 不同大类的扇区互不侵入，子节点/相邻类之间均不重叠。
+      const R2 = minDim * 0.46
+      const sectorWidth = (Math.PI * 2) / Math.max(1, categories.length) * 0.82
+      const CHILD_PITCH = 44
+      const CHILD_RING_STEP = 64
       for (const [catIdx, cat] of categories.entries()) {
         const children = ((byParent.get(cat.id) ?? []) as string[])
           .map((id) => nodes.find((n) => n.id === id))
           .filter(Boolean) as (typeof nodes)[number][]
         if (children.length === 0) continue
-        const turn = Math.ceil(catIdx / 2) * (catIdx % 2 === 0 ? 1 : -1)
-        const sectorCenter = turn * (Math.PI * 2) / Math.max(1, categories.length)
-        const sectorWidth = (Math.PI * 2) / Math.max(1, categories.length) * 0.8
-        const twoRows = children.length > 8
-        children.forEach((n, j) => {
-          // 计数降序已由后端保证：最大的孩子居中，向两侧交替展开
-          const side = j % 2 === 0 ? 1 : -1
-          const step = Math.floor((j + 1) / 2)
-          const offset =
-            children.length === 1 ? 0 : (step / Math.ceil(children.length / 2)) * (sectorWidth / 2) * side
-          const radius = twoRows && j % 2 === 1 ? R2 * 1.16 : R2
-          place(
-            n,
-            CX + radius * Math.cos(sectorCenter + offset),
-            CY + radius * Math.sin(sectorCenter + offset),
-          )
-        })
+        const centerAngle = (catIdx / Math.max(1, categories.length)) * Math.PI * 2 - Math.PI / 2
+        let placed = 0
+        let ring = 0
+        while (placed < children.length) {
+          const r = R2 + ring * CHILD_RING_STEP
+          const cap = Math.max(1, Math.floor((r * sectorWidth) / CHILD_PITCH))
+          const batch = children.slice(placed, placed + cap)
+          batch.forEach((n, idx) => {
+            const angle =
+              batch.length === 1
+                ? centerAngle
+                : centerAngle + (idx / (batch.length - 1) - 0.5) * sectorWidth
+            place(n, CX + r * Math.cos(angle), CY + r * Math.sin(angle))
+          })
+          placed += batch.length
+          ring += 1
+        }
       }
       // 标签按象限定位（共用助手，防标签压放射连线）；
       // 大类节点标签加粗放大（维度名即分组标题）
@@ -1107,7 +1120,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const links = data.edges.map((edge, index) => {
       const dimmed = filterMarks.dimEdgeFlags[index]
       const norm = maxWeight > 0 ? Math.min(1, (edge.weight ?? 0) / maxWeight) : 0
-      const base = edgeBaseStyle(edge, nodeById, colors, dimmed, norm)
+      const base = edgeBaseStyle(edge, nodeById, colors, dimmed, norm, !ringLayout)
       // 技术栈视图连线优化：nice（加分）边加曲线使交叉边分叉错开，减弱毛线球感；
       // 技术栈视图用 applyTechStackDenoise 逐级压暗（弱权/加分近背景，高权必备醒目）
       const curveness = techStackRing && !dimmed && base.kind === 'nice' ? 0.16 : base.curveness
@@ -1164,8 +1177,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           // 不稳定，本轮不再强求（拖拽探索交由力导向视图提供）。
           layout: ringLayout ? 'none' : 'force',
           roam: true,
-          // 固定坐标视图仍允许拖动微调（漂浮语义）；力导向视图天然可拖
-          draggable: !ringLayout || portraitView || techStackRing,
+          // 岗位画像固定排布不可拖（节点位置须稳定）；技术栈环形保留拖动微调（漂浮语义）；力导向视图天然可拖
+          draggable: !ringLayout || techStackRing,
           cursor: 'pointer',
           // 镜头保持：仅首建/视图切换时重置中心，其余重建不动当前视角
           ...(resetCamera ? { center: ['50%', '50%'] as [string, string] } : {}),
@@ -1298,6 +1311,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       const base = edgeBaseStyle(
         edge, nodeById, colors, !!filterMarks.dimEdgeFlags[i],
         maxWeight > 0 ? Math.min(1, (edge.weight ?? 0) / maxWeight) : 0,
+        !ringLayout,
       )
       const dimmed = !!filterMarks.dimEdgeFlags[i]
       const norm = maxWeight > 0 ? Math.min(1, (edge.weight ?? 0) / maxWeight) : 0

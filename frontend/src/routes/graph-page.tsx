@@ -1157,13 +1157,17 @@ export function GraphPage() {
               learningPath={learningPath}
               completedSkills={[]}
               skillLabelTopIds={skillLabelTopIds}
-              // 环形布局须与视图数据匹配时才启用（viewReady 就绪键）：避免首次点击
-              // 技术栈/画像页签时 data 仍是旧视图（全景）而 ringLayout 已为 true——
-              // 环形坐标分支只覆盖 skill/position，旧视图的其余节点落到原点糊成一团，
-              // 等新数据到达重建后才散开（即"首点糊→延迟正常"）。视角/渲染与
-              // 数据不同步是根因，加载角标只提示不阻断此错误渲染。
+              // 环形布局须与视图数据匹配：技术栈走 viewReady 门禁（避免首次点击
+              // 页签时 data 仍是旧视图（全景）而 ringLayout 已为 true——环形坐标
+              // 分支只覆盖 skill/position，旧视图的其余节点落到原点糊成一团）。
+              // 岗位画像不能沿用该门禁：其独立数据流从不写 viewReady，沿用则
+              // ringLayout 恒 false → 画像退化为可拖力导向散团（0905 用户实查
+              // 回归）；画像本身可见数据在子图就绪前为 null（画布不渲染旧视图），
+              // 无"糊一团"风险，故以 portraitData 就绪为门。
               ringLayout={
-                (view === 'techStack' || view === 'positionPortrait') && viewReady === view
+                view === 'positionPortrait'
+                  ? !!portraitData
+                  : view === 'techStack' && viewReady === view
               }
               className="h-full w-full"
             />

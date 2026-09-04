@@ -98,8 +98,12 @@ COPY data/crawlers/ ./data/crawlers/
 ENV PYTHONPATH=/app:/app/data
 
 # dict-guard 运行时需在 configs/ 下创建 skill_filters_dynamic.json（COPY 产物
-# 默认 root 属主，app 用户不可写）——目录属主预先让渡给 app 用户
-RUN mkdir -p /app/configs /app/reports && chown -R app:app /app/configs /app/reports
+# 默认 root 属主，app 用户不可写）——目录属主预先让渡给 app 用户。
+# /app/uploads 必须在镜像内预建为 app 属主：uploads_data 具名卷首次挂载时
+# Docker 按镜像内目录属主 copy-up，缺失则挂载点落为 root:root，运行时
+# app 用户写简历文件直接 PermissionError（09-04 事故）
+RUN mkdir -p /app/configs /app/reports /app/uploads && \
+    chown -R app:app /app/configs /app/reports /app/uploads
 
 USER app
 

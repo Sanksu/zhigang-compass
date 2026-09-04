@@ -75,6 +75,10 @@
 
 /* 深色模式 — 在 .dark 下覆盖设计令牌 */
 .dark {
+  /* 原生控件跟随深色渲染：否则 select/option 弹层保持 UA 白底，
+     而文字继承 text-ink 变白，出现白字白底 */
+  color-scheme: dark;
+
   --color-canvas: #09090b;
   --color-subtle: #18181b;
   --color-elevated: #27272a;
@@ -114,6 +118,9 @@
 }
 
 html {
+  /* 锚定浅色原生控件（配合 .dark 下的 color-scheme: dark），
+     避免 OS 深色偏好污染浅色主题下的 select 弹层 */
+  color-scheme: light;
   font-family: var(--font-sans);
   font-feature-settings: 'cv01', 'cv02', 'cv03', 'cv04', 'ss01';
   -webkit-font-smoothing: antialiased;
