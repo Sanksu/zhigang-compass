@@ -5,6 +5,7 @@
 # - 二进制文件禁止行尾转换
 * text=auto
 *.ps1 text eol=crlf
+*.sh text eol=lf
 *.png binary
 *.jpg binary
 *.jpeg binary
