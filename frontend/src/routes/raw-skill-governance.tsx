@@ -18,16 +18,21 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { apiGet, apiPost, apiPut } from '@/lib/api'
+import { PaginationBar } from '@/components/ui/pagination'
 import { useSkillDescriptions } from '@/hooks/use-skill-descriptions'
 
 interface SkillGovItem {
   name: string
 }
 
+const PAGE_SIZE = 20
+
 /** 原始数据页「技能」页签：仅技能解释（展示 / 编辑 / LLM 补齐）。 */
 export function RawSkillGovernance() {
   const { descMap, reloadDescs } = useSkillDescriptions()
   const [q, setQ] = useState('')
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
   const [skills, setSkills] = useState<SkillGovItem[]>([])
   const [backfilling, setBackfilling] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -42,13 +47,19 @@ export function RawSkillGovernance() {
 
   const load = useCallback(() => {
     setLoading(true)
-    const params = new URLSearchParams({ page: '1', size: '100' })
+    const params = new URLSearchParams({ page: String(page), size: String(PAGE_SIZE) })
     if (q.trim()) params.set('q', q.trim())
-    apiGet<{ items: SkillGovItem[] }>(`/admin/skills?${params}`)
-      .then((s) => setSkills(s.items))
-      .catch(() => setSkills([]))
+    apiGet<{ total: number; items: SkillGovItem[] }>(`/admin/skills?${params}`)
+      .then((s) => {
+        setSkills(s.items)
+        setTotal(s.total ?? s.items.length)
+      })
+      .catch(() => {
+        setSkills([])
+        setTotal(0)
+      })
       .finally(() => setLoading(false))
-  }, [q])
+  }, [q, page])
   useEffect(() => {
     reloadDescs()
     // 微任务调度：避免 effect 内同步 setState（react-hooks/set-state-in-effect）
@@ -103,7 +114,15 @@ export function RawSkillGovernance() {
         </Button>
       </div>
 
-        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="按技能名过滤" className="h-8 w-64 text-sm" />
+        <Input
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value)
+            setPage(1)
+          }}
+          placeholder="按技能名过滤"
+          className="h-8 w-64 text-sm"
+        />
 
         {notice && <p className="text-xs text-ink-secondary">{notice}</p>}
 
@@ -146,6 +165,8 @@ export function RawSkillGovernance() {
             </TableBody>
           </Table>
         )}
+
+        <PaginationBar page={page} total={total} pageSize={PAGE_SIZE} loading={loading} onPageChange={setPage} />
 
         {/* 编辑技能解释 */}
         <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
