@@ -62,6 +62,18 @@ if [ ! -f "$KEYS_DIR/private.pem" ] || [ ! -f "$KEYS_DIR/public.pem" ]; then
 fi
 DICT_FILE="$ROOT/backend/configs/skill_filters_dynamic.json"
 [ -f "$DICT_FILE" ] || printf '{\n  "version": 0,\n  "blocked": [],\n  "protected": []\n}\n' > "$DICT_FILE"
+# 新鲜环境引导（批次 A 欠账补齐，2026-09-04）：llm_providers.yaml/runtime_settings.json 是
+# compose 单文件挂载点，缺文件时 Docker 会建同名目录，容器内读到目录导致配置加载/写入失败
+# （08-22 部署教训同型）——从 .example 模板就位；无 key 时 LLM 自动降级规则抽取，不阻塞启动。
+LLM_CFG="$ROOT/backend/configs/llm_providers.yaml"
+[ -f "$LLM_CFG" ] || { cp "$ROOT/backend/configs/llm_providers.yaml.example" "$LLM_CFG"; echo "      已从模板生成 backend/configs/llm_providers.yaml（未配置 key 时 LLM 降级规则抽取，健康检查不受影响）"; }
+RUNTIME_CFG="$ROOT/backend/configs/runtime_settings.json"
+[ -f "$RUNTIME_CFG" ] || { cp "$ROOT/backend/configs/runtime_settings.json.example" "$RUNTIME_CFG"; echo "      已从模板生成 backend/configs/runtime_settings.json"; }
+SBERT_DIR="$ROOT/backend/models/sbert"
+if [ ! -d "$SBERT_DIR" ] || [ -z "$(ls -A "$SBERT_DIR" 2>/dev/null)" ]; then
+  echo "      警告：backend/models/sbert 缺失——语义匹配/归一化将降级为纯规则（快照导入与健康检查不受影响）"
+  echo "            需要语义匹配请放置 SBERT 模型后重启（首次匹配请求加载约 50-90s 属正常）"
+fi
 
 cd "$ROOT"
 NEO4J_VOLUME="${NEO4J_VOLUME:-zhigang-compass_neo4j_data}"
