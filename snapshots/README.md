@@ -8,8 +8,8 @@
 
 | 文件 | 格式 | 说明 | 大小 |
 |------|------|------|------|
-| `pg.dump` | PostgreSQL `pg_dump -Fc`（custom） | 全量 PG：JD 原始数据 / 抽取 / 候选池 / 图谱版本快照 / 用户等 | 129MB |
-| `neo4j.dump` | `neo4j-admin database dump`（DZV1） | 图谱：Position/Skill/Course/Evidence 节点与关系 | 44MB |
+| `pg.dump` | PostgreSQL `pg_dump -Fc`（custom） | 全量 PG：JD 原始数据 / 抽取 / 候选池 / 图谱版本快照 / 用户等 | 123MB |
+| `neo4j.dump` | `neo4j-admin database dump`（DZV1） | 图谱：Position/Skill/Course/Evidence 节点与关系 | 42MB |
 
 ## 导入
 

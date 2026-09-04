@@ -214,7 +214,7 @@ docker compose -f docker-compose.yml -f docker-compose.local-images.yml up -d --
 
 ### 6.0 数据快照导入（2026-09-03）
 
-`snapshots/` 目录内置本机导出的完整数据快照（`pg.dump` 129MB + `neo4j.dump` 44MB，Git LFS 托管），新部署 **跳过冷启动**（爬虫 + bootstrap 13 阶段需数天）直接获得可用数据：图谱 118 岗位节点 / JD 11115 条 / 演化快照 27 期。
+`snapshots/` 目录内置本机导出的完整数据快照（`pg.dump` 123MB + `neo4j.dump` 42MB，Git LFS 托管），新部署 **跳过冷启动**（爬虫 + bootstrap 13 阶段需数天）直接获得可用数据：图谱 118 岗位节点 / JD 11115 条 / 演化快照 27 期。
 
 ```bash
 # 克隆后先拉取 LFS 二进制
@@ -227,6 +227,45 @@ bash scripts/restore_snapshot.sh
 - 前置：`docker compose` 5 服务镜像已构建（api/worker 需含 `20260903_001` 及此前全部迁移，旧镜像会因 alembic 找不到 DB 已处修订而启动失败——重建镜像即可）
 - 导入会**覆盖**现有 PG 数据与 Neo4j 图谱（`pg_restore --clean` / `neo4j-admin database load --overwrite-destination`）
 - 快照内容与重新导出步骤见 [`snapshots/README.md`](./snapshots/README.md)；交付演示前建议重新导出最新快照
+
+#### 6.0.1 手工恢复步骤（Win/Linux 通用，等效一键脚本）
+
+若不便运行 bash 脚本（如 Windows 主机 / 自定义卷名），可按下述命令手工恢复。**卷名以 `docker volume ls` 实际为准**（compose 项目名不同则前缀不同，本仓库默认 `zhigang-compass_`）：
+
+```bash
+# ① 停依赖服务（Neo4j 离线 load 前必须停止；PG 恢复期间 api/worker 也建议停）
+docker compose stop api worker neo4j
+
+# ② 恢复 PostgreSQL（pg_restore 恢复 custom dump，--clean 覆盖旧数据）
+docker cp snapshots/pg.dump zhigang-postgres:/tmp/pg.dump
+docker compose exec -T postgres pg_restore --clean --if-exists -U zhigang -d zhigang /tmp/pg.dump
+docker compose exec -T postgres rm -f /tmp/pg.dump
+# 验证：docker compose exec -T postgres psql -U zhigang -d zhigang -c "select count(*) from jd_raw;"
+
+# ③ 恢复 Neo4j（数据卷挂到镜像默认路径，离线 load）
+docker run --rm \
+  -v zhigang-compass_neo4j_data:/var/lib/neo4j/data \
+  -v "$(pwd)/snapshots":/dump \
+  --entrypoint "" neo4j:5 \
+  neo4j-admin database load --from-path=/dump --database=neo4j --overwrite-destination=true
+
+# ④ 启动全部服务并验证
+docker compose up -d
+docker compose ps                       # 全部 healthy
+curl http://localhost:8000/health       # {"status":"healthy"}
+```
+
+**关键点与排错**：
+
+| 问题 | 处置 |
+|------|------|
+| `docker volume ls` 无 `zhigang-compass_neo4j_data` | 项目名不同（compose 目录名/`name:` 字段决定），按实际卷名替换 ③ 中 `-v` 参数；`docker compose config` 可查实际卷名 |
+| Neo4j load 报 `database already exists` | 卷内已有旧库，先 `--overwrite-destination=true`（脚本已含）；仍失败则先停全部服务再 load |
+| PG `pg_restore` 权限/连接失败 | 确认 `-U zhigang -d zhigang`（与 compose `POSTGRES_USER/POSTGRES_DB` 一致）；postgres 容器需健康后再恢复 |
+| 导入后 api 启动失败 | 多为镜像缺迁移文件（§6.0 前置说明），重建镜像后 `up -d --force-recreate api worker` |
+| 导入后图谱为空 | 多为 Neo4j load 挂到错误卷（数据落空卷），按「无 `zhigang-compass_neo4j_data`」行核对卷名后重试 |
+
+**Windows 场景补充**：`$(pwd)` 在 PowerShell 下不展开，改用绝对路径或 `(Get-Location).Path`；`docker cp` 路径用正斜杠。其余命令（compose/exec/run）跨平台一致。
 
 ### 6.1 ETL 调度（容器内 ARQ cron，08-21 #348）
 
