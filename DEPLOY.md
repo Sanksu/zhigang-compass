@@ -226,6 +226,7 @@ bash scripts/restore_snapshot.sh
 
 - 前置：`docker compose` 5 服务镜像已构建（api/worker 需含 `20260903_001` 及此前全部迁移，旧镜像会因 alembic 找不到 DB 已处修订而启动失败——重建镜像即可）
 - 导入会**覆盖**现有 PG 数据与 Neo4j 图谱（`pg_restore --clean` / `neo4j-admin database load --overwrite-destination`）
+- 交付提交包用户（非 git 克隆）：源码包不含 dump（数据在提交包 `6-测试数据/数据快照/`）。先 `cp <提交包>/6-测试数据/数据快照/*.dump <源码>/snapshots/`，再走一键脚本或下方手工步骤，其余完全相同
 - 快照内容与重新导出步骤见 [`snapshots/README.md`](./snapshots/README.md)；交付演示前建议重新导出最新快照
 
 #### 6.0.1 手工恢复步骤（Win/Linux 通用，等效一键脚本）
