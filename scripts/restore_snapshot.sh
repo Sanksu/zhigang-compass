@@ -82,13 +82,21 @@ done
 echo "[5/6] 导入快照：停 api/worker/neo4j → pg_restore → neo4j-admin load ..."
 docker compose stop api worker neo4j >/dev/null 2>&1 || true
 docker cp "$SNAP_DIR/pg.dump" zhigang-postgres:/tmp/pg.dump
-docker compose exec -T postgres pg_restore --clean --if-exists -U zhigang -d zhigang /tmp/pg.dump
-docker compose exec -T postgres rm -f /tmp/pg.dump
-docker run --rm \
+# Git Bash(MSYS) 会把 / 开头的参数转换成宿主 Windows 路径：容器内路径需禁用转换，-v 宿主路径需转 C:/ 形式
+docker_native() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) MSYS_NO_PATHCONV=1 "$@" ;;
+    *) "$@" ;;
+  esac
+}
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) SNAP_DIR_MOUNT="$(cygpath -m "$SNAP_DIR")" ;; *) SNAP_DIR_MOUNT="$SNAP_DIR" ;; esac
+docker_native docker compose exec -T postgres pg_restore --clean --if-exists -U zhigang -d zhigang /tmp/pg.dump
+docker_native docker compose exec -T postgres rm -f /tmp/pg.dump
+docker_native docker run --rm \
   -v "$NEO4J_VOLUME":/var/lib/neo4j/data \
-  -v "$SNAP_DIR":/dump:ro \
+  -v "$SNAP_DIR_MOUNT":/dump:ro \
   --entrypoint "" neo4j:5 \
-  neo4j-admin database load --from-path=/dump --database=neo4j --overwrite-destination=true
+  neo4j-admin database load --from-path=/dump --overwrite-destination=true neo4j
 
 echo "[6/6] 启动全栈并等待 /health（api 加载 SBERT 模型，最长约 4 分钟）..."
 docker compose up -d
