@@ -862,9 +862,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     })
 
     // 层级画像布局（positionPortrait 专用）：岗位居中，大类节点（技能/软技能/
-    // 薪资/经验/学历，portrait_category 标记）环绕中层，各自小节点按归属大类
-    // 扇区排外环——扇区内按计数降序交替向两侧展开（最大条目居中贴父连线）、
-    // 超过 8 个双排错半径防标签互压。
+    // 薪资/经验/学历，portrait_category 标记）中层圆环均分，各自小节点按归属
+    // 大类扇区等角顺排外环——08-29 初版对称口径（f468efb7 的降序左右交替 +
+    // 双排错半径使版式不对称，09-04 用户要求回退固定对称版式）。
     if (ringLayout && nodes.some((n) => n.type === 'attr')) {
       const rect = containerRef.current?.getBoundingClientRect()
       const W = rect?.width || 900
@@ -877,14 +877,11 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         ;(n as GraphNode & { x?: number; y?: number }).y = y
       }
       const center = nodes.find((n) => n.type === 'position')
-      // 大类按孩子数降序交替排列（孩子多的扇区彼此岔开，防上挤下空）
-      const categories = nodes
-        .filter(
-          (n) =>
-            (n as GraphNode).portrait_category ||
-            (n as { portrait_category?: boolean }).portrait_category,
-        )
-        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      const categories = nodes.filter(
+        (n) =>
+          (n as GraphNode).portrait_category ||
+          (n as { portrait_category?: boolean }).portrait_category,
+      )
       const parentOf = new Map<string, string>()
       const byParent = new Map<string, string[]>()
       for (const e of data.edges) {
@@ -896,36 +893,26 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         }
       }
       if (center) place(center, CX, CY)
-      const R1 = minDim * 0.27
-      // 大类从 0°（右，E/技术方向）起顺时针交替：第 1 大类右侧、第 2 大类左侧……
+      // 大类节点：中层圆环均分，自顶部（12 点方向）起顺时针等角——对称固定
+      const R1 = minDim * 0.26
       categories.forEach((n, i) => {
-        const turn = Math.ceil(i / 2) * (i % 2 === 0 ? 1 : -1)
-        const angle = turn * (Math.PI * 2) / Math.max(1, categories.length)
+        const angle = (i / Math.max(1, categories.length)) * Math.PI * 2 - Math.PI / 2
         place(n, CX + R1 * Math.cos(angle), CY + R1 * Math.sin(angle))
       })
-      // 小节点：父大类扇区内交替展开 + 双排错半径
-      const R2 = minDim * 0.47
+      // 小节点：父大类扇区内等角顺排外环（扇区角宽 = 2π/k × 0.82 留间隙）
+      const R2 = minDim * 0.46
+      const sectorWidth = (Math.PI * 2) / Math.max(1, categories.length) * 0.82
       for (const [catIdx, cat] of categories.entries()) {
         const children = ((byParent.get(cat.id) ?? []) as string[])
           .map((id) => nodes.find((n) => n.id === id))
           .filter(Boolean) as (typeof nodes)[number][]
         if (children.length === 0) continue
-        const turn = Math.ceil(catIdx / 2) * (catIdx % 2 === 0 ? 1 : -1)
-        const sectorCenter = turn * (Math.PI * 2) / Math.max(1, categories.length)
-        const sectorWidth = (Math.PI * 2) / Math.max(1, categories.length) * 0.8
-        const twoRows = children.length > 8
+        const centerAngle = (catIdx / Math.max(1, categories.length)) * Math.PI * 2 - Math.PI / 2
         children.forEach((n, j) => {
-          // 计数降序已由后端保证：最大的孩子居中，向两侧交替展开
-          const side = j % 2 === 0 ? 1 : -1
-          const step = Math.floor((j + 1) / 2)
-          const offset =
-            children.length === 1 ? 0 : (step / Math.ceil(children.length / 2)) * (sectorWidth / 2) * side
-          const radius = twoRows && j % 2 === 1 ? R2 * 1.16 : R2
-          place(
-            n,
-            CX + radius * Math.cos(sectorCenter + offset),
-            CY + radius * Math.sin(sectorCenter + offset),
-          )
+          const angle =
+            centerAngle +
+            (children.length === 1 ? 0 : (j / (children.length - 1) - 0.5) * sectorWidth)
+          place(n, CX + R2 * Math.cos(angle), CY + R2 * Math.sin(angle))
         })
       }
       // 标签按象限定位（共用助手，防标签压放射连线）；
