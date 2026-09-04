@@ -214,7 +214,7 @@ docker compose -f docker-compose.yml -f docker-compose.local-images.yml up -d --
 
 ### 6.0 数据快照导入（2026-09-03）
 
-`snapshots/` 目录内置本机导出的完整数据快照（`pg.dump` 123MB + `neo4j.dump` 42MB，Git LFS 托管），新部署 **跳过冷启动**（爬虫 + bootstrap 13 阶段需数天）直接获得可用数据：图谱 118 岗位节点 / JD 11115 条 / 演化快照 27 期。
+`snapshots/` 目录内置本机导出的完整数据快照（`pg.dump` 129MB + `neo4j.dump` 44MB，Git LFS 托管），新部署 **跳过冷启动**（爬虫 + bootstrap 13 阶段需数天）直接获得可用数据：图谱 118 岗位节点 / JD 11115 条 / 演化快照 27 期。
 
 ```bash
 # 克隆后先拉取 LFS 二进制
@@ -248,7 +248,7 @@ docker run --rm \
   -v zhigang-compass_neo4j_data:/var/lib/neo4j/data \
   -v "$(pwd)/snapshots":/dump \
   --entrypoint "" neo4j:5 \
-  neo4j-admin database load --from-path=/dump --database=neo4j --overwrite-destination=true
+  neo4j-admin database load --from-path=/dump --overwrite-destination=true neo4j
 
 # ④ 启动全部服务并验证
 docker compose up -d

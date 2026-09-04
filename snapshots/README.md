@@ -36,7 +36,7 @@ docker run --rm \
   -v zhigang-compass_neo4j_data:/var/lib/neo4j/data \
   -v "$(pwd)/snapshots":/dump \
   --entrypoint "" neo4j:5 \
-  neo4j-admin database load --from-path=/dump --database=neo4j --overwrite-destination=true
+  neo4j-admin database load --from-path=/dump --overwrite-destination=true neo4j
 
 # 4. 启动
 docker compose up -d

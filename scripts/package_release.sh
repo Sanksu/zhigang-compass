@@ -49,9 +49,6 @@ find "${STAGE}/docs/m5" \( -name "*.mp4" -o -name "*.pptx" -o -name "*.wav" -o -
 # 排除数据快照 dump（#786 Git LFS 大文件，173MB——数据快照作为独立交付物提交，
 # 恢复走 scripts/restore_snapshot.sh + 云盘独立附件，不纳入源码包）
 rm -f "${STAGE}/snapshots/pg.dump" "${STAGE}/snapshots/neo4j.dump" 2>/dev/null || true
-# 排除数据快照 dump（#786 Git LFS 大文件，173MB——数据快照作为独立交付物提交，
-# 恢复走 scripts/restore_snapshot.sh + 云盘独立附件，不纳入源码包）
-rm -f "${STAGE}/snapshots/pg.dump" "${STAGE}/snapshots/neo4j.dump" 2>/dev/null || true
 
 # 打包
 tar -czf "${OUT}" -C "${STAGE}" .

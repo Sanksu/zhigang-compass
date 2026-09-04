@@ -104,7 +104,7 @@ for i in $(seq 1 120); do
   if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
     echo "完成：全栈已就绪（http://localhost:8000），数据与图谱均为快照全量。"
     echo "  - 前端 Web UI（可选）：cd frontend && pnpm install && pnpm build，产物经挂载即时生效，无需重跑本脚本"
-    echo "  - LLM 增强等功能需在 backend/.env 配置 LLM_API_KEY（快照导入与健康检查不依赖它）"
+    echo "  - LLM 增强需配置 backend/configs/llm_providers.yaml（未配置时自动降级规则抽取，快照导入与健康检查不依赖它）"
     exit 0
   fi
   sleep 2
