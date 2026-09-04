@@ -4,7 +4,7 @@
  * 09-01 口径同步：aligned F1 0.9629（词面豁免口径）/ 简历 0.988 /
  * 匹配 Acc 0.9714（BT v4，golden_set_match_v3 384 对含学历维度）/ 5 骨干职能域+通用域（08-31 治理）/ 三视图（08-29 收敛）
  * 09-03 口径更新（对齐口径速查，单一事实源见下方 CAL 常量）：JD aligned F1 0.9632 / 10 职能域 /
- * 数据截至 graph_v20260903 快照（17705 节点/73575 边 · 120 岗位/5916 技能）
+ * 09-04 实查口径：数据截至 graph_v20260903 快照（22570 节点/77065 边 · 118 岗位/7342 技能 · 先修链字典 242 · 累计入库 17250）
  */
 const pptxgen = require("pptxgenjs");
 
@@ -23,9 +23,10 @@ const CAL = {
   DOMAINS: "10 职能域",
   DOMAINS_FULL: "5 大骨干 + 4 显式语义域（网络安全/AI应用与智能体/企业应用与系统/产品与项目管理）+ 通用兜底",
   SNAP: "graph_v20260903",
-  SKILLS: "5,916",
-  POSITIONS: "120",
-  NODES_EDGES: "17705 节点/73575 边",
+  SKILLS: "7,342",
+  POSITIONS: "118",
+  NODES_EDGES: "22570 节点/77065 边",
+  INGESTED: "17,250",
 };
 
 // 调色板
@@ -57,8 +58,8 @@ function base(dark = false) {
   pageNo += 1;
   const s = p.addSlide();
   s.background = { color: dark ? BG_DARK : BG };
-  if (pageNo > 1 && pageNo < 20) {
-    s.addText(`${pageNo} / 20`, { x: W - 1.3, y: 0.38, w: 0.9, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: "9AA9BA", align: "right", margin: 0 });
+  if (pageNo > 1 && pageNo < 19) {
+    s.addText(`${pageNo} / 19`, { x: W - 1.3, y: 0.38, w: 0.9, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: "9AA9BA", align: "right", margin: 0 });
   }
   return s;
 }
@@ -91,8 +92,6 @@ function shot43(s, file, x, y, w) {
 /* ========== 1 封面（深底 + 图谱全景） ========== */
 (() => {
   const s = base(true);
-  s.addImage({ path: IMG + "bg-cover_16x9.jpg", x: 0, y: 0, w: W, h: H, sizing: { type: "cover", w: W, h: H } });
-  s.addShape(p.shapes.RECTANGLE, { x: 0, y: 0, w: W, h: H, fill: { color: BG_DARK, transparency: 35 } });
   s.addText("科大讯飞挑战杯 · 揭榜挂帅    项目编号 XH-202621", { x: M, y: 1.5, w: CW, h: 0.4, fontSize: 14, fontFace: FONT_BODY, color: "8FD4BC", charSpacing: 2, margin: 0 });
   s.addText("智岗罗盘", { x: M, y: 2.35, w: CW, h: 1.25, fontSize: 66, fontFace: FONT_HEAD, bold: true, color: "FFFFFF", charSpacing: 8, margin: 0 });
   s.addText("多源异构驱动的岗位能力动态演化与人岗匹配系统", { x: M, y: 3.8, w: CW, h: 0.55, fontSize: 22, fontFace: FONT_BODY, color: "D8E4F0", margin: 0 });
@@ -166,30 +165,59 @@ function shot43(s, file, x, y, w) {
   });
 })();
 
-/* ========== 5 数据采集与治理 ========== */
+/* ========== 5 全流程链路（新增） ========== */
 (() => {
   const s = base();
-  title(s, "DATA COLLECTION", "数据采集与治理 · 13 源三级分级");
+  title(s, "END-TO-END PIPELINE", "全流程链路 · 从多源采集到用户视图");
+  const steps = [
+    ["01", "多源采集", "13 源 A/B/C 分级 + 信号层\n代理池三梯队 · robots 合规"],
+    ["02", "清洗去重", "质量评分 · SimHash 语义去重\n时效加权 · 长度过滤"],
+    ["03", "原始库落库", "PostgreSQL 四大 raw 表\n累计入库 17,250 条"],
+    ["04", "LLM 结构化抽取", "三道防线防幻觉\n六域决策信封全量落库可回放"],
+    ["05", "图谱构建", "Neo4j 22,570 节点 / 77,065 边\n快照版本化 graph_v*"],
+    ["06", "匹配 / 演化引擎", "技能级三维评分\n双信号岗位生命周期检测"],
+    ["07", "学习路径", "先修链拓扑排序 · 242 技能字典\n课程 LEARNABLE_VIA · 甘特学时"],
+    ["08", "前端三视图", "全景 / 技术栈 / 岗位画像\nReact 19 + ECharts"],
+  ];
+  const w = 2.95, gap = 0.14, rh = 1.9, rowY = [1.75, 4.15];
+  steps.forEach((st, i) => {
+    const x = M + (i % 4) * (w + gap), y = rowY[Math.floor(i / 4)];
+    s.addShape(p.shapes.ROUNDED_RECTANGLE, { x, y, w, h: rh, fill: { color: i === 4 ? TINT : TINT2 }, line: { color: "D7E2ED", width: 0.75 }, rectRadius: 0.08 });
+    s.addText(st[0], { x: x + 0.22, y: y + 0.16, w: 0.9, h: 0.5, fontSize: 22, fontFace: FONT_HEAD, bold: true, color: i === 4 ? ACCENT_D : "B9CBDD", margin: 0 });
+    s.addText(st[1], { x: x + 0.22, y: y + 0.66, w: w - 0.44, h: 0.36, fontSize: 14.5, fontFace: FONT_BODY, bold: true, color: NAVY, margin: 0 });
+    s.addText(st[2], { x: x + 0.22, y: y + 1.06, w: w - 0.44, h: 0.72, fontSize: 11, fontFace: FONT_BODY, color: MUTED, margin: 0, valign: "top" });
+    if (i % 4 < 3) s.addText("→", { x: x + w - 0.03, y: y + rh / 2 - 0.25, w: 0.2, h: 0.5, fontSize: 15, fontFace: FONT_BODY, bold: true, color: ACCENT_D, align: "center", valign: "middle", margin: 0 });
+  });
+  s.addText("↓", { x: W - M - 0.5, y: 3.6, w: 0.5, h: 0.5, fontSize: 18, fontFace: FONT_BODY, bold: true, color: ACCENT_D, align: "center", valign: "middle", margin: 0 });
+  s.addShape(p.shapes.ROUNDED_RECTANGLE, { x: M, y: 6.3, w: CW, h: 0.62, fill: { color: TINT }, line: { color: "C9D7E5", width: 0.75 }, rectRadius: 0.06 });
+  s.addText("数据流：17,250 条原始数据 → LLM 结构化抽取（每条断言可回指原始 JD）→ 图谱 22,570 节点/77,065 边 → 四源每日一致性校验 → 用户视图", { x: M + 0.25, y: 6.3, w: CW - 0.5, h: 0.62, fontSize: 12.5, fontFace: FONT_BODY, color: INK, valign: "middle", margin: 0 });
+})();
+
+/* ========== 6 数据采集与治理 ========== */
+(() => {
+  const s = base();
+  title(s, "DATA COLLECTION", "数据采集与治理 · 招聘源 A/B/C 分级 + 信号层");
   // 左侧：分级图示
   const tiers = [
-    ["A 级（核心招聘）", "智联招聘 · 脉脉", ACCENT_D],
-    ["B 级（课程/社区）", "Coursera · edX · MOOC · GitHub · Stack Overflow", NAVY],
-    ["C 级（权威/趋势）", "国家职业分类 · arXiv · 行业报告", NAVY_MID],
+    ["A 级（核心招聘）", "智联招聘 · BOSS直聘（暂停 · 可逆恢复）· Monster（08.06 停采）", ACCENT_D],
+    ["B 级（国际招聘）", "Indeed · Glassdoor", NAVY],
+    ["C 级（社区/公开页）", "脉脉（夜间实验）· LinkedIn 公开页", NAVY_MID],
+    ["信号层（课程/权威/趋势）", "MOOC · Coursera · edX · arXiv · GitHub/Stack Overflow · 国家职业分类 CSV", MUTED],
   ];
   tiers.forEach((t, i) => {
-    const y = 1.7 + i * 1.15;
-    s.addShape(p.shapes.ROUNDED_RECTANGLE, { x: M, y, w: 5.9, h: 0.9, fill: { color: i === 0 ? TINT : TINT2 }, line: { color: "D7E2ED", width: 0.75 }, rectRadius: 0.06 });
-    s.addText(t[0], { x: M + 0.25, y: y + 0.12, w: 2.5, h: 0.35, fontSize: 13, fontFace: FONT_BODY, bold: true, color: t[2], margin: 0 });
-    s.addText(t[1], { x: M + 0.25, y: y + 0.48, w: 5.4, h: 0.32, fontSize: 12, fontFace: FONT_BODY, color: MUTED, margin: 0 });
+    const y = 1.62 + i * 0.95;
+    s.addShape(p.shapes.ROUNDED_RECTANGLE, { x: M, y, w: 5.9, h: 0.8, fill: { color: i === 0 ? TINT : TINT2 }, line: { color: "D7E2ED", width: 0.75 }, rectRadius: 0.06 });
+    s.addText(t[0], { x: M + 0.25, y: y + 0.08, w: 3.0, h: 0.32, fontSize: 12.5, fontFace: FONT_BODY, bold: true, color: t[2], margin: 0 });
+    s.addText(t[1], { x: M + 0.25, y: y + 0.42, w: 5.4, h: 0.32, fontSize: 11, fontFace: FONT_BODY, color: MUTED, margin: 0 });
   });
   bullets(s, [
     "国内直连 + 国际代理池三梯队：随机轮换 → 失败剔除 → 直连兜底",
     "清洗管线：长度过滤 → 质量评分 → SimHash 语义去重 → 时效加权",
     "合规红线：robots.txt 遵循 + 请求间隔 + 官方 API 条款背书",
-    "累计入库 15,293 条（JD / 课程 / 论文 / 社区），全链路可审计",
+    "累计入库 " + CAL.INGESTED + " 条（JD 11,115 · 课程 1,754 · 论文 2,429 · 社区 1,952），09-04 实查全链路可审计",
   ], M, 5.4, 5.9, 1.8, { fontSize: 13 });
   // 右侧：架构流程
-  shot(s, "image-evolution_16x9.jpg", 6.7, 1.72, 6.1);
+  shot(s, "image-pipeline_16x9.jpg", 6.7, 1.72, 6.1);
   s.addText("▲ 数据治理管线：采集 → 清洗 → 去重 → 质量评分", { x: 6.7, y: 5.28, w: 6.1, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
 })();
 
@@ -200,8 +228,8 @@ function shot43(s, file, x, y, w) {
   shot(s, "image-graph_16x9.jpg", 6.7, 1.72, 6.1);
   s.addText("▲ 力导向图谱：岗位 / 技能 / 课程 / 证据 多实体异构网络", { x: 6.7, y: 5.28, w: 6.1, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
   bullets(s, [
-    "实体：Position / Skill / Course / Evidence / Occupation（对接国家职业分类 1639+）",
-    "关系：REQUIRES（权重 + 必要性）· LEARNABLE_VIA · EVOLVED_FROM",
+    "实体：Position / Skill / Course / Evidence / Occupation（对接国家职业分类 3,240）",
+    "关系：REQUIRES 11,714（权重+必要性）· LEARNABLE_VIA 9,741 · PREREQUISITE_OF 288 · EVIDENCED_BY 47,911 证据链",
     "岗位名归一化：技术栈细分保留（如 React 前端工程师）+ 失真兜底族技能路由",
     "cjk 全文索引内建于 Neo4j——中文检索零额外服务（替代 Elasticsearch）",
     CAL.DOMAINS + "（" + CAL.DOMAINS_FULL + "），归类依据逐岗可查",
@@ -228,11 +256,16 @@ function shot43(s, file, x, y, w) {
     s.addText(st[1], { x: x + 0.24, y: 3.24, w: 3.4, h: 0.7, fontSize: 12.5, fontFace: FONT_BODY, color: MUTED, margin: 0, valign: "top" });
     if (i < 2) s.addText("→", { x: x + 3.92, y: 3.05, w: 0.36, h: 0.5, fontSize: 20, fontFace: FONT_BODY, bold: true, color: ACCENT_D, margin: 0, align: "center" });
   });
-  s.addText("评测闭环：110 条正式黄金集（人工标注）LLM 盲审", { x: M, y: 4.5, w: 8, h: 0.35, fontSize: 14, fontFace: FONT_BODY, bold: true, color: INK, margin: 0 });
-  stat(s, M, 4.95, 2.6, CAL.JD_F1, "技能 aligned F1（目标 ≥0.90）", { numSize: 36, color: ACCENT_D });
-  stat(s, M + 2.8, 4.95, 2.6, "< 1%", "幻觉 FP 率", { numSize: 36 });
-  stat(s, M + 5.6, 4.95, 2.6, "0.8865", "raw F1（未对齐口径）", { numSize: 36 });
-  s.addText("口径说明：跨源一致性为每日计算并在看板展示（透明可查），自动硬门控列入后续路线图", { x: 8.6, y: 5.05, w: 4.2, h: 1.1, fontSize: 11.5, fontFace: FONT_BODY, color: MUTED, margin: 0, valign: "top" });
+  s.addShape(p.shapes.ROUNDED_RECTANGLE, { x: M, y: 4.32, w: CW, h: 0.62, fill: { color: TINT2 }, line: { color: "BFDCCE", width: 0.75 }, rectRadius: 0.06 });
+  s.addText([
+    { text: "自动治理 + 人工审核：", options: { bold: true, color: ACCENT_D } },
+    { text: "六域决策信封全量落库——auto_applied 自动入图 · proposal 进管理后台审核队列人工复核 · dict-guard 动态词典拦截，每条决策可回放审计", options: { color: INK } },
+  ], { x: M + 0.25, y: 4.32, w: CW - 0.5, h: 0.62, fontSize: 12.5, fontFace: FONT_BODY, valign: "middle", margin: 0 });
+  s.addText("评测闭环：110 条正式黄金集（人工标注）LLM 盲审", { x: M, y: 5.1, w: 8, h: 0.35, fontSize: 14, fontFace: FONT_BODY, bold: true, color: INK, margin: 0 });
+  stat(s, M, 5.5, 2.6, CAL.JD_F1, "技能 aligned F1（目标 ≥0.90）", { numSize: 36, color: ACCENT_D });
+  stat(s, M + 2.8, 5.5, 2.6, "< 1%", "幻觉 FP 率", { numSize: 36 });
+  stat(s, M + 5.6, 5.5, 2.6, "0.8865", "raw F1（未对齐口径）", { numSize: 36 });
+  s.addText("口径说明：跨源一致性为每日计算并在看板展示（透明可查），自动硬门控列入后续路线图", { x: 8.6, y: 5.62, w: 4.2, h: 1.1, fontSize: 11.5, fontFace: FONT_BODY, color: MUTED, margin: 0, valign: "top" });
   s.addText("Source: 110 条 gold 人工标注盲审（词面真值对齐口径）", { x: M, y: 6.85, w: 8, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: "9AA9BA", margin: 0 });
 })();
 
@@ -282,7 +315,7 @@ function shot43(s, file, x, y, w) {
   s.addText("▲ 先修链拓扑排序 + 学时甘特呈现 · 课程 LEARNABLE_VIA 匹配", { x: 6.7, y: 6.4, w: 6.1, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
   bullets(s, [
     "差距诊断：missing / weak 分级 + ROI 优先级排序（需求度 × 趋势 ÷ 成本）",
-    "先修链展开（177 技能字典）+ 拓扑排序，分阶段学时甘特呈现",
+    "先修链展开（242 技能字典）+ 拓扑排序，分阶段学时甘特呈现",
     "课程匹配：图谱 LEARNABLE_VIA + 语义兜底 + 中英词面豁免 + 灰色带质量门控",
     "专家评审定稿：30 案例合理性 96.7%（course 语义 0.879 / hours 0.916）",
   ], M, 1.85, 5.9, 4.6, { fontSize: 14 });
@@ -292,21 +325,29 @@ function shot43(s, file, x, y, w) {
 (() => {
   const s = base();
   title(s, "FRONTEND", "前端可视化 · React 19 + ECharts");
-  shot(s, "image-graph_16x9.jpg", M, 1.8, 7.2);
-  s.addText("▲ 2D 力导向图谱全景 · ≥100 节点 @ 60fps", { x: M, y: 6.0, w: 7.2, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
-  // 右侧三卡片
   const views = [
-    ["三视图切换", "panorama · techStack\npositionPortrait"],
-    ["匹配可视化", "环形图 · 雷达图\n热力图 · 甘特图"],
-    ["响应式适配", "深浅双主题\n平板/移动 2D 固定"],
+    ["image-graph_16x9.jpg", "全景视图 panorama", "2D 力导向异构图谱\n≥100 节点 @ 60fps"],
+    ["image-techstack_16x9.jpg", "技术栈视图 techStack", "技能 → 岗位关联聚合\n热点技术栈一屏总览"],
+    ["image-portrait_16x9.jpg", "岗位画像 positionPortrait", "单岗位能力雷达\n技能要求 + 差距诊断"],
   ];
   views.forEach((v, i) => {
-    const y = 1.8 + i * 1.45;
-    s.addShape(p.shapes.ROUNDED_RECTANGLE, { x: 8.0, y, w: 4.8, h: 1.25, fill: { color: TINT2 }, line: { color: "D7E2ED", width: 0.75 }, rectRadius: 0.06 });
-    s.addText(v[0], { x: 8.2, y: y + 0.15, w: 4.4, h: 0.35, fontSize: 14, fontFace: FONT_BODY, bold: true, color: NAVY, margin: 0 });
-    s.addText(v[1], { x: 8.2, y: y + 0.52, w: 4.4, h: 0.6, fontSize: 12, fontFace: FONT_BODY, color: MUTED, margin: 0 });
+    const w = 3.95, x = M + i * (w + 0.14);
+    shot(s, v[0], x, 1.75, w);
+    s.addText(v[1], { x, y: 4.15, w, h: 0.35, fontSize: 14.5, fontFace: FONT_BODY, bold: true, color: NAVY, align: "center", margin: 0 });
+    s.addText(v[2], { x, y: 4.52, w, h: 0.62, fontSize: 11.5, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
   });
-  s.addText("3D 可选（动态加载，WebGL2 不可用自动降级 2D）", { x: 8.0, y: 6.25, w: 4.8, h: 0.3, fontSize: 11.5, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
+  const extras = [
+    ["匹配可视化", "环形图 · 雷达图 · 热力图 · 甘特图"],
+    ["响应式适配", "深浅双主题 · 平板/移动 2D 固定"],
+    ["3D 可选", "动态加载 · WebGL2 不可用自动降级 2D"],
+  ];
+  extras.forEach((v, i) => {
+    const w = 3.95, x = M + i * (w + 0.14), y = 5.45;
+    s.addShape(p.shapes.ROUNDED_RECTANGLE, { x, y, w, h: 1.05, fill: { color: TINT2 }, line: { color: "D7E2ED", width: 0.75 }, rectRadius: 0.06 });
+    s.addText(v[0], { x: x + 0.25, y: y + 0.14, w: w - 0.5, h: 0.32, fontSize: 13, fontFace: FONT_BODY, bold: true, color: NAVY, margin: 0 });
+    s.addText(v[1], { x: x + 0.25, y: y + 0.5, w: w - 0.5, h: 0.42, fontSize: 11.5, fontFace: FONT_BODY, color: MUTED, margin: 0 });
+  });
+  s.addText("▲ 三视图均为界面概念图，真实截图以系统演示为准", { x: M, y: 6.75, w: CW, h: 0.3, fontSize: 11, fontFace: FONT_BODY, color: "9AA9BA", align: "center", margin: 0 });
 })();
 
 /* ========== 12 性能与压测 ========== */
@@ -386,8 +427,8 @@ function shot43(s, file, x, y, w) {
   const s = base();
   title(s, "DATA SCALE", "数据规模（实况快照）");
   const tiles = [
-    [CAL.SKILLS, "Skill 技能节点"], [CAL.POSITIONS, "Position 岗位节点"], ["1,473", "课程（三门平台）"],
-    ["9,820", "jd_raw 全量抽取"], ["177", "先修链技能字典"], ["110 + 50", "JD / 简历黄金集"],
+    [CAL.SKILLS, "Skill 技能节点"], [CAL.POSITIONS, "Position 岗位节点"], ["1,754", "课程（三门平台）"],
+    ["11,115", "jd_raw 全量抽取"], ["242", "先修链技能字典"], ["110 + 50", "JD / 简历黄金集"],
   ];
   tiles.forEach((t, i) => {
     const w = 3.95, x = M + (i % 3) * (w + 0.14), y = 1.8 + Math.floor(i / 3) * 2.1;
@@ -396,52 +437,7 @@ function shot43(s, file, x, y, w) {
     s.addText(t[1], { x, y: y + 1.14, w, h: 0.4, fontSize: 13, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
   });
   s.addText("另有：" + CAL.DOMAINS + "（" + CAL.DOMAINS_FULL + "）· 技能分类权威覆盖 23.9%（用户可见视图 91.7%）· 匹配黄金对 v1/v2 684 组", { x: M, y: 6.15, w: CW, h: 0.6, fontSize: 12.5, fontFace: FONT_BODY, color: MUTED, margin: 0, valign: "top" });
-  s.addText("注：数据截至 " + CAL.SNAP + " 快照（" + CAL.NODES_EDGES + "）", { x: M, y: 6.85, w: CW, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: "9AA9BA", margin: 0 });
-})();
-
-/* ========== 16 团队分工 ========== */
-(() => {
-  const s = base();
-  title(s, "TEAM", "团队分工 · 6 人协作");
-  const team = [
-    ["黄唐尧", "前端", "图谱可视化 / 交互 / 匹配页"],
-    ["马兴达", "后端", "API 服务 / 部署 / 数据库"],
-    ["张恺天", "算法", "图谱构建 / 匹配引擎 / 演化算法"],
-    ["刘琪", "数据", "13 源采集 / 清洗管线 / 数据治理"],
-    ["王鹏羽", "测试", "评测体系 / 性能压测 / 黄金集"],
-    ["张怀伟", "文档", "方案文档 / PPT / 演示视频"],
-  ];
-  team.forEach((t, i) => {
-    const w = 3.95, x = M + (i % 3) * (w + 0.14), y = 1.8 + Math.floor(i / 3) * 2.35;
-    s.addShape(p.shapes.ROUNDED_RECTANGLE, { x, y, w, h: 2.1, fill: { color: TINT2 }, line: { color: "D7E2ED", width: 0.75 }, rectRadius: 0.08 });
-    s.addShape(p.shapes.OVAL, { x: x + 0.3, y: y + 0.32, w: 0.78, h: 0.78, fill: { color: i % 2 ? NAVY_MID : NAVY } });
-    s.addText(t[1].charAt(0), { x: x + 0.3, y: y + 0.32, w: 0.78, h: 0.78, fontSize: 22, fontFace: FONT_HEAD, bold: true, color: "FFFFFF", align: "center", valign: "middle", margin: 0 });
-    s.addText(t[0], { x: x + 1.25, y: y + 0.34, w: 2.5, h: 0.42, fontSize: 17, fontFace: FONT_BODY, bold: true, color: INK, margin: 0 });
-    s.addText(t[1] + "负责人", { x: x + 1.25, y: y + 0.78, w: 2.5, h: 0.32, fontSize: 12, fontFace: FONT_BODY, color: ACCENT_D, bold: true, margin: 0 });
-    s.addText(t[2], { x: x + 0.3, y: y + 1.3, w: w - 0.6, h: 0.6, fontSize: 12.5, fontFace: FONT_BODY, color: MUTED, margin: 0, valign: "top" });
-  });
-})();
-
-/* ========== 17 项目里程碑 ========== */
-(() => {
-  const s = base();
-  title(s, "MILESTONES", "项目里程碑 · 55 天全链路交付");
-  const ms = [
-    ["M1-M2", "07.13-08.05", "方案设计 + 核心实现\n采集 / 图谱 / 抽取 / 匹配 / 演化"],
-    ["M3", "08.06-15", "功能完善 + 评测体系\n学习路径专家定稿 96.7%"],
-    ["M4", "08.16-25", "打磨 + 审查 + 性能\n12 高危修复 · P95 达标"],
-    ["M5", "08.26-09.04", "准确率收尾 + 交付物料\nPPT / 视频 / 源码包"],
-  ];
-  s.addShape(p.shapes.LINE, { x: M + 0.4, y: 2.75, w: CW - 0.8, h: 0, line: { color: "C9D7E5", width: 2 } });
-  ms.forEach((m, i) => {
-    const w = 2.9, x = M + 0.15 + i * (w + 0.12);
-    s.addShape(p.shapes.OVAL, { x: x + w / 2 - 0.09, y: 2.66, w: 0.18, h: 0.18, fill: { color: i === 3 ? ACCENT : NAVY } });
-    s.addText(m[0], { x, y: 1.95, w, h: 0.5, fontSize: 22, fontFace: FONT_HEAD, bold: true, color: i === 3 ? ACCENT_D : NAVY, align: "center", margin: 0 });
-    s.addText(m[1], { x, y: 2.98, w, h: 0.32, fontSize: 12, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
-    s.addShape(p.shapes.ROUNDED_RECTANGLE, { x, y: 3.45, w, h: 1.7, fill: { color: i === 3 ? TINT : TINT2 }, line: { color: "D7E2ED", width: 0.75 }, rectRadius: 0.08 });
-    s.addText(m[2], { x: x + 0.2, y: 3.62, w: w - 0.4, h: 1.4, fontSize: 12.5, fontFace: FONT_BODY, color: INK, margin: 0, valign: "top" });
-  });
-  s.addText("全程：480+ PR · CI 全绿门禁 · 六轮全项目代码审查 · 双机部署实测", { x: M, y: 5.7, w: CW, h: 0.4, fontSize: 14, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
+  s.addText("注：09-04 实查 · 数据截至 " + CAL.SNAP + " 快照（" + CAL.NODES_EDGES + "）", { x: M, y: 6.85, w: CW, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: "9AA9BA", margin: 0 });
 })();
 
 /* ========== 18 关键成果数据 ========== */
@@ -492,8 +488,6 @@ function shot43(s, file, x, y, w) {
 /* ========== 20 总结与展望（深底收尾） ========== */
 (() => {
   const s = base(true);
-  s.addImage({ path: IMG + "bg-closing_16x9.jpg", x: 0, y: 0, w: W, h: H, sizing: { type: "cover", w: W, h: H } });
-  s.addShape(p.shapes.RECTANGLE, { x: 0, y: 0, w: W, h: H, fill: { color: BG_DARK, transparency: 40 } });
   s.addText("SUMMARY", { x: M, y: 1.0, w: 6, h: 0.35, fontSize: 12, fontFace: FONT_BODY, color: "8FD4BC", bold: true, charSpacing: 3, margin: 0 });
   s.addText("全链路闭环 · 评测达标 · 演示就绪", { x: M, y: 1.4, w: CW, h: 0.8, fontSize: 34, fontFace: FONT_HEAD, bold: true, color: "FFFFFF", margin: 0 });
   bullets(s, [
@@ -505,4 +499,4 @@ function shot43(s, file, x, y, w) {
   s.addText("智岗罗盘团队 · XH-202621 · 2026.09", { x: M, y: 6.4, w: CW, h: 0.4, fontSize: 13, fontFace: FONT_BODY, color: "9FB4CC", margin: 0 });
 })();
 
-p.writeFile({ fileName: "智岗罗盘_答辩PPT_终稿.pptx" }).then(() => console.log("PPT done: 20 slides"));
+p.writeFile({ fileName: "智岗罗盘_答辩PPT_终稿.pptx" }).then(() => console.log("PPT done: 19 slides"));
