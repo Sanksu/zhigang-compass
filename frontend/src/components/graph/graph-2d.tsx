@@ -165,13 +165,16 @@ function sizeOf(node: GraphNode, displayValue?: number): number {
   return Math.min(54, Math.max(14, scaled))
 }
 
-/** 单条边的基础视觉（宽/色/线型/透明度）——option 构建与悬停离场复位共用一套口径 */
+/** 单条边的基础视觉（宽/色/线型/透明度）——option 构建与悬停离场复位共用一套口径。
+ *  boost=全景（力导向）视图提亮档：低权必备边 0.08 起步在密集画布上近不可见，
+ *  抬高透明度下限并加粗线宽；技术栈环形视图走自身降噪，不传 boost。 */
 function edgeBaseStyle(
   edge: GraphEdge,
   nodeById: Map<string, GraphNode>,
   colors: ReturnType<typeof graphColors>,
   dimmed: boolean,
   weightNorm = 0,
+  boost = false,
 ) {
   const source = nodeById.get(edge.source)
   const target = nodeById.get(edge.target)
@@ -188,7 +191,13 @@ function edgeBaseStyle(
   // 08-28 技术栈降噪：岗位关系边透明度/线宽按权重渐变——低权边压暗到近隐约，
   // 高权边保持可读，悬停邻接提亮仍由 hover 直改机制叠加
   const width =
-    kind === 'must' ? 0.7 + 1.1 * weightNorm : kind === 'nice' ? 0.5 + 0.8 * weightNorm : base.width
+    kind === 'must'
+      ? (boost ? 1.0 : 0.7) + 1.1 * weightNorm
+      : kind === 'nice'
+        ? (boost ? 0.7 : 0.5) + 0.8 * weightNorm
+        : boost
+          ? base.width + 0.2
+          : base.width
   return {
     kind,
     ...base,
@@ -196,8 +205,10 @@ function edgeBaseStyle(
     opacity: dimmed
       ? FILTER_DIM_EDGE_OPACITY
       : kind === 'membership' || kind === 'shared'
-        ? 0.45
-        : 0.08 + 0.42 * weightNorm,
+        ? boost
+          ? 0.6
+          : 0.45
+        : (boost ? 0.22 : 0.08) + 0.46 * weightNorm,
   }
 }
 
@@ -1107,7 +1118,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const links = data.edges.map((edge, index) => {
       const dimmed = filterMarks.dimEdgeFlags[index]
       const norm = maxWeight > 0 ? Math.min(1, (edge.weight ?? 0) / maxWeight) : 0
-      const base = edgeBaseStyle(edge, nodeById, colors, dimmed, norm)
+      const base = edgeBaseStyle(edge, nodeById, colors, dimmed, norm, !ringLayout)
       // 技术栈视图连线优化：nice（加分）边加曲线使交叉边分叉错开，减弱毛线球感；
       // 技术栈视图用 applyTechStackDenoise 逐级压暗（弱权/加分近背景，高权必备醒目）
       const curveness = techStackRing && !dimmed && base.kind === 'nice' ? 0.16 : base.curveness
@@ -1164,8 +1175,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           // 不稳定，本轮不再强求（拖拽探索交由力导向视图提供）。
           layout: ringLayout ? 'none' : 'force',
           roam: true,
-          // 固定坐标视图仍允许拖动微调（漂浮语义）；力导向视图天然可拖
-          draggable: !ringLayout || portraitView || techStackRing,
+          // 岗位画像固定排布不可拖（节点位置须稳定）；技术栈环形保留拖动微调（漂浮语义）；力导向视图天然可拖
+          draggable: !ringLayout || techStackRing,
           cursor: 'pointer',
           // 镜头保持：仅首建/视图切换时重置中心，其余重建不动当前视角
           ...(resetCamera ? { center: ['50%', '50%'] as [string, string] } : {}),
@@ -1298,6 +1309,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       const base = edgeBaseStyle(
         edge, nodeById, colors, !!filterMarks.dimEdgeFlags[i],
         maxWeight > 0 ? Math.min(1, (edge.weight ?? 0) / maxWeight) : 0,
+        !ringLayout,
       )
       const dimmed = !!filterMarks.dimEdgeFlags[i]
       const norm = maxWeight > 0 ? Math.min(1, (edge.weight ?? 0) / maxWeight) : 0
