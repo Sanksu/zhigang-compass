@@ -899,21 +899,36 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         const angle = (i / Math.max(1, categories.length)) * Math.PI * 2 - Math.PI / 2
         place(n, CX + R1 * Math.cos(angle), CY + R1 * Math.sin(angle))
       })
-      // 小节点：父大类扇区内等角顺排外环（扇区角宽 = 2π/k × 0.82 留间隙）
+      // 小节点：父大类扇区内等角顺排（扇区角宽 = 2π/k × 0.82 留间隙）。
+      // 容量法多环防重叠：每环按"节点 24px + 标签间距 20px"的扇区弧长容量装，
+      // 放不下外扩一圈（环距 64px）——圈越大容量越大必然收敛；环内仍等角均分，
+      // 不同大类的扇区互不侵入，子节点/相邻类之间均不重叠。
       const R2 = minDim * 0.46
       const sectorWidth = (Math.PI * 2) / Math.max(1, categories.length) * 0.82
+      const CHILD_PITCH = 44
+      const CHILD_RING_STEP = 64
       for (const [catIdx, cat] of categories.entries()) {
         const children = ((byParent.get(cat.id) ?? []) as string[])
           .map((id) => nodes.find((n) => n.id === id))
           .filter(Boolean) as (typeof nodes)[number][]
         if (children.length === 0) continue
         const centerAngle = (catIdx / Math.max(1, categories.length)) * Math.PI * 2 - Math.PI / 2
-        children.forEach((n, j) => {
-          const angle =
-            centerAngle +
-            (children.length === 1 ? 0 : (j / (children.length - 1) - 0.5) * sectorWidth)
-          place(n, CX + R2 * Math.cos(angle), CY + R2 * Math.sin(angle))
-        })
+        let placed = 0
+        let ring = 0
+        while (placed < children.length) {
+          const r = R2 + ring * CHILD_RING_STEP
+          const cap = Math.max(1, Math.floor((r * sectorWidth) / CHILD_PITCH))
+          const batch = children.slice(placed, placed + cap)
+          batch.forEach((n, idx) => {
+            const angle =
+              batch.length === 1
+                ? centerAngle
+                : centerAngle + (idx / (batch.length - 1) - 0.5) * sectorWidth
+            place(n, CX + r * Math.cos(angle), CY + r * Math.sin(angle))
+          })
+          placed += batch.length
+          ring += 1
+        }
       }
       // 标签按象限定位（共用助手，防标签压放射连线）；
       // 大类节点标签加粗放大（维度名即分组标题）
