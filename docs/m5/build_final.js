@@ -217,7 +217,7 @@ function shot43(s, file, x, y, w) {
     "累计入库 " + CAL.INGESTED + " 条（JD 11,115 · 课程 1,754 · 论文 2,429 · 社区 1,952），09-04 实查全链路可审计",
   ], M, 5.4, 5.9, 1.8, { fontSize: 13 });
   // 右侧：架构流程
-  shot(s, "image-evolution_16x9.jpg", 6.7, 1.72, 6.1);
+  shot(s, "image-pipeline_16x9.jpg", 6.7, 1.72, 6.1);
   s.addText("▲ 数据治理管线：采集 → 清洗 → 去重 → 质量评分", { x: 6.7, y: 5.28, w: 6.1, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
 })();
 
