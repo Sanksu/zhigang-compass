@@ -231,7 +231,7 @@ bash scripts/restore_snapshot.sh
 
 #### 6.0.1 手工恢复步骤（Win/Linux 通用，等效一键脚本）
 
-若不便运行 bash 脚本（如 Windows 主机 / 自定义卷名），可按下述命令手工恢复。**卷名以 `docker volume ls` 实际为准**（compose 项目名不同则前缀不同，本仓库默认 `zhigang-compass_`）：
+若不便运行 bash 脚本（如 Windows 主机 / 自定义卷名），可按下述命令手工恢复。一键脚本在此之上还自动完成镜像构建与配置引导（`backend/.env`、JWT 密钥、`skill_filters_dynamic.json`），手工路径请先完成 §2 前置。**卷名以 `docker volume ls` 实际为准**（compose 项目名不同则前缀不同，本仓库默认 `zhigang-compass_`）：
 
 ```bash
 # ① 停依赖服务（Neo4j 离线 load 前必须停止；PG 恢复期间 api/worker 也建议停）

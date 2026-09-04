@@ -5,6 +5,10 @@
 
 ## M5（2026-08-26 — 09-04）：交付冲刺
 
+### 2026-09-04
+
+- **一键初始化脚本升级（restore_snapshot.sh 参数化 + 全流程自动化）**：脚本从「仅恢复快照」升级为**克隆/解压源码后的一键部署入口**——① 快照目录改为可选位置参数（缺省 `snapshots/`；交付提交包用户直接传 `6-测试数据/数据快照` 目录，免手工拷贝 dump）；② 自动完成镜像构建（`docker compose build`）与配置引导（`backend/.env` 自模板生成并注入随机 SECRET_KEY/ADMIN_PASSWORD（密码仅输出一次）、JWT 密钥对 openssl 现场生成、`skill_filters_dynamic.json` 空层预建——三项均为 compose env_file/api 生产 fail-fast 前置）；③ 导入前后置等待（pg_isready 轮询、/health 最长 4 分钟）与 fail-fast 排错指引。仓库根定位改为向上查找 docker-compose.yml（源码树外运行给出明确报错）。DEPLOY.md §6/§6.0/§6.0.1 与 snapshots/README.md 同步更新。冒测：bash -n / 快照目录不存在早退 / 源码树外运行早退 三项通过。
+
 ### 2026-09-03
 - **赛题缺口补齐批次（定义结构化/级别视图/交叉验证门控）**：对照赛题 XH-202621 逐条审计后的三缺口闭环——① **新岗位定义五字段结构化**（契约 PositionDefinition + 迁移 20260903_002 `definition_structured` JSONB；grounding LLM 升级为 summary/core_duties/typical_scenarios 结构化输出（NLI 门控覆盖全部结构化字段，技能两项一律取图谱 REQUIRES 证据边不采信 LLM）；/discovery/recent 组装五字段 definition（落图后图谱属性优先，candidate 未落图回退 LLM 草案）；admin 审核项透出 definition_structured；前端发现页/审核页渲染职责与场景）。② **图谱按级别过滤视图**（赛题「按技术栈和级别切换视图」——/graph/view/{panorama,techStack} 增 `level` 参数（Literal 初/中/高/专家），Cypher 热次统计与明细双段同过滤（含 main 视图无 WHERE 场景补 WHERE 子句）；前端全景/技术栈视图新增级别筛选下拉（切换失效视图缓存+清选中态），适配器透传边 level）。③ **交叉验证入图门控（审查 H5 闭环）**：ETL 顺序修正 cross_validate 先于 aggregate_positions，聚合消费组级置信度拦截低置信 JD（既有 ≥0.6/新兴 candidate/emerging ≥0.5，`filter_rows_for_aggregation`；无验证结果的历史 JD 放行并计数），门控统计并入阶段返回；evaluate.py 报告将 JD 词面基线行改标「参考口径（不设达标线）」避免与 LLM 盲审达标行混淆；测试数据交付物落盘 `backend/data/test_artifacts/`（1 新岗位含五字段定义 + 1 既有岗位含能力图谱与 changes 标注），设计文档 §4.5/§17.3 同步对齐。含新增/扩展测试 30+ 例（grounding 结构化/discovery API 组装/upsert 持久化/级别过滤 Cypher 断言/门控分级与任务消费/管线顺序断言/smoke mock 对齐），前后端全量测试+typecheck 通过。⚠️ 模型变更（迁移 20260903_002，已标注）+ 聚合门控涉及业务正确性，需 @zkt-sky 复核。
 

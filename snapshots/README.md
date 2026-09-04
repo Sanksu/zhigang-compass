@@ -13,10 +13,11 @@
 
 ## 导入
 
-一键导入（Linux/226 部署机）：
+一键导入（自动构建镜像、引导 `.env`/JWT 密钥/dict-guard 空层、导入、健康检查；Linux/226 部署机）：
 
 ```bash
-bash scripts/restore_snapshot.sh
+bash scripts/restore_snapshot.sh                  # 缺省读本目录（snapshots/）
+bash scripts/restore_snapshot.sh <其他快照目录>   # 交付提交包用户直接传 6-测试数据/数据快照 目录，免拷贝
 ```
 
 或手工步骤（Win/Linux 通用）：
