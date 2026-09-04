@@ -26,9 +26,6 @@ vi.mock('@/components/graph/graph-community-tree', () => ({
 vi.mock('@/components/graph/graph-detail-rail', () => ({
   GraphDetailRail: () => null,
 }))
-vi.mock('@/components/graph/evolution-timeline', () => ({
-  EvolutionTimeline: () => null,
-}))
 
 const mockedApiGet = apiGet as unknown as ReturnType<typeof vi.fn>
 
