@@ -71,7 +71,7 @@ docker compose ps             # 全部 healthy 即就绪
 ```
 
 - api 容器 ENTRYPOINT **自动执行 `alembic upgrade head`**（无需手动迁移）
-- 首次启动约 40–60s（镜像构建另计；healthcheck start-period 10s）
+- 首次启动约 40–60s（镜像构建另计；healthcheck start-period 90s，api 加载 SBERT 模型预留）
 
 ### 3.1 日常更新部署（⚠️ 合并 ≠ 部署）
 
@@ -214,7 +214,7 @@ docker compose -f docker-compose.yml -f docker-compose.local-images.yml up -d --
 
 ### 6.0 数据快照导入（2026-09-03）
 
-`snapshots/` 目录内置本机导出的完整数据快照（`pg.dump` 129MB + `neo4j.dump` 44MB，Git LFS 托管），新部署 **跳过冷启动**（爬虫 + bootstrap 13 阶段需数天）直接获得可用数据：图谱 118 岗位节点 / JD 11115 条 / 演化快照 27 期。
+`snapshots/` 目录内置本机导出的完整数据快照（`pg.dump` 123MB + `neo4j.dump` 42MB，Git LFS 托管），新部署 **跳过冷启动**（爬虫 + bootstrap 13 阶段需数天）直接获得可用数据：图谱 118 岗位节点 / JD 11115 条 / 演化快照 27 期。
 
 ```bash
 # 克隆后先拉取 LFS 二进制
