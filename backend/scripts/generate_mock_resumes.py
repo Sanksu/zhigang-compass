@@ -153,8 +153,6 @@ SCANNED_SOURCE_KEY = "backend"
 
 def _wrap(text: str, font, max_w: int) -> list[str]:
     """按像素宽度折行。"""
-    from PIL import ImageFont
-
     lines, cur = [], ""
     for ch in text:
         if font.getlength(cur + ch) > max_w:
@@ -167,7 +165,7 @@ def _wrap(text: str, font, max_w: int) -> list[str]:
     return lines or [""]
 
 
-def _draw_resume_image(person: dict, objective: str, blocks: list) -> "PIL.Image.Image":
+def _draw_resume_image(person: dict, objective: str, blocks: list):
     """按真实简历版式渲染白底图片：居中姓名头 + 章节分隔线 + 时间线条目。"""
     from PIL import Image, ImageDraw, ImageFont
 
