@@ -2,15 +2,27 @@
 
 - GET /admin/skill-aliases：别名回写记录分页列表（status 过滤，倒序）。
   approved 行即 normalize_skill 并查生效源（词典→动态→白名单读序）。
+- POST /admin/skill-aliases/{alias_id}/review：别名复核（pending→approved/rejected）
+  供技能治理页人工处置，写 AuditLog；approved 后热刷新动态别名表即时生效。
 
-只读，不触发写操作（写入方=propose 脚本 pending + approve 端点 approved）。
+只读列举；写入方=propose 脚本 pending + 复核端点为 approved/rejected。
 """
 
-from fastapi import APIRouter, Query
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.business import SkillAlias
+from app.api.common import resolve_operator
+from app.api.deps import require_permission
+from app.core.database import async_session_factory, get_db
+from app.core.errors import ERR_CONFLICT, ERR_NOT_FOUND
+from app.models.business import AuditLog, LLMDecisionRecord, SkillAlias
+from app.schemas.common import error, ok
+from app.services.extraction.dictionary import refresh_dynamic_aliases
+from app.services.llm_decision import DOMAIN_SKILL_ALIAS
 
 router = APIRouter(tags=["admin-skill-aliases"])
 
@@ -69,3 +81,55 @@ async def list_skill_aliases(
         "items": [serialize_alias(r) for r in rows],
         "total": total, "limit": limit, "offset": offset,
     })
+
+
+class SkillAliasReviewIn(BaseModel):
+    """POST /admin/skill-aliases/{alias_id}/review 请求体。"""
+
+    approved: bool
+    reason: str = Field(default="", max_length=500)
+
+
+@router.post("/skill-aliases/{alias_id}/review")
+async def review_skill_alias(
+    alias_id: str,
+    body: SkillAliasReviewIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_permission("admin:*")),
+):
+    """别名复核：pending → approved/rejected。写 AuditLog；approved 后热刷新动态别名表。"""
+    operator, err = resolve_operator(current_user)
+    if err is not None:
+        return err
+    row = (await db.execute(
+        select(SkillAlias).where(SkillAlias.id == alias_id)
+    )).scalar_one_or_none()
+    if row is None:
+        return error(ERR_NOT_FOUND, "别名不存在", http_status=404)
+    if row.status != "pending":
+        return error(ERR_CONFLICT, f"仅 pending 可复核，当前 {row.status}", http_status=409)
+    row.status = "approved" if body.approved else "rejected"
+    row.reviewed_by = operator
+    row.review_reason = body.reason
+    db.add(AuditLog(
+        user_id=operator,
+        action="admin.skill_alias.review",
+        resource="skill_aliases",
+        resource_id=str(row.id),
+        detail={"approved": body.approved, "variant": row.variant, "standard_name": row.standard_name},
+    ))
+    await db.commit()
+    if body.approved:
+        await refresh_dynamic_aliases()
+        # 别名生效 → 入 LLM 决策与验收台（domain=skill_alias，只读展示勿审批）
+        async with async_session_factory() as session2:
+            session2.add(LLMDecisionRecord(
+                domain=DOMAIN_SKILL_ALIAS,
+                entity_type="skill",
+                entity_id=row.standard_name or "",
+                structured_output={"variant": row.variant, "standard_name": row.standard_name},
+                status="approved",
+                effects_applied=True,
+            ))
+            await session2.commit()
+    return ok(data={"id": str(row.id), "status": row.status, "approved": body.approved})

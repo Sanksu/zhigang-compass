@@ -2,6 +2,7 @@
 
 from app.services.evolution.schemas import SkillEvolutionTrend
 from app.services.evolution.trend_service import (
+    _skill_freq_windows,
     detect_signals_from_snapshots,
     rank_signals,
 )
@@ -96,3 +97,52 @@ def test_rank_signals_uses_abs_z_as_secondary_key():
     # 修复前：confidence 并列时稳定排序保留输入序（sk_x 在前）；修复后：|z| 强者在前
     emerging = rank_signals(signals, "emerging", top_n=10)
     assert [s.skill_id for s in emerging][0] == "sk_y"
+
+
+def test_windows_zero_filled_across_all_snapshots():
+    """零填充（第八轮 P1-6）：出现过的技能每期都有窗口，消失期 freq=0。"""
+    snapshots = [
+        _snapshot("v1", {"sk_a": 20, "sk_b": 5}),
+        _snapshot("v2", {"sk_a": 18}),  # sk_b 本期消失
+        _snapshot("v3", {"sk_a": 22}),  # sk_b 持续消失
+    ]
+    windows = _skill_freq_windows(snapshots)
+    assert [w.frequency for w in windows["sk_a"]] == [20, 18, 22]
+    assert [w.frequency for w in windows["sk_b"]] == [5, 0, 0]
+    assert [w.window_start for w in windows["sk_b"]] == ["v1", "v2", "v3"]
+
+
+def test_disappeared_skill_current_reflects_latest_snapshot():
+    """技能最新期消失：current 取真实最新期（freq=0 落小基数保护），不再拿最后出现期伪装在场。"""
+    snapshots = [
+        _snapshot("v1", {"sk_old": 30, "sk_stable": 20}),
+        _snapshot("v2", {"sk_old": 28, "sk_stable": 20}),
+        _snapshot("v3", {"sk_stable": 20}),  # sk_old 彻底消失
+    ]
+    signals = detect_signals_from_snapshots(snapshots)
+    by_id = {s.skill_id: s for s in signals}
+    # 修复前：current=28（最后出现期），伪 stable；修复后：current_freq=0，小基数门 → PROTECTED
+    assert by_id["sk_old"].current_freq == 0
+    assert by_id["sk_old"].trend == SkillEvolutionTrend.PROTECTED
+    assert by_id["sk_old"].z_score is None
+    # 在场技能不受影响
+    assert by_id["sk_stable"].trend == SkillEvolutionTrend.STABLE
+
+
+def test_mid_gap_zero_counts_into_mean_std():
+    """中途断档：零值如实计入 μ/σ（序列 [40,0,40,40,12] → z=-0.9 stable），不在断续子序列上放大 z。"""
+    snapshots = [
+        _snapshot("v1", {"sk_g": 40}),
+        _snapshot("v2", {}),  # 断档期（快照本身无该技能边）
+        _snapshot("v3", {"sk_g": 40}),
+        _snapshot("v4", {"sk_g": 40}),
+        _snapshot("v5", {"sk_g": 12}),  # 回落但仍 ≥10（避小基数门）
+    ]
+    signals = detect_signals_from_snapshots(snapshots)
+    by_id = {s.skill_id: s for s in signals}
+    # historical=[40,0,40,40] → mean=30, std=20 → z=(12-30)/20=-0.9：真实断档拉宽 σ，
+    # 轻微回落不再被断续子序列放大成伪 declining
+    assert by_id["sk_g"].historical_mean == 30.0
+    assert by_id["sk_g"].historical_std == 20.0
+    assert by_id["sk_g"].z_score == -0.9
+    assert by_id["sk_g"].trend == SkillEvolutionTrend.STABLE

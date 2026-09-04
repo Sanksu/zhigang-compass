@@ -206,9 +206,9 @@ async def apply_manifest(path: Path, expect_updated: int) -> None:
         SET snapshot = jsonb_set(
                 jsonb_set(
                     COALESCE(snapshot, '{}'::jsonb), '{normalized_position}',
-                    to_jsonb(:value::text), true),
+                    to_jsonb(CAST(:value AS text)), true),
                 '{normalized_position_meta}',
-                jsonb_build_object('version', :version::text), true),
+                jsonb_build_object('version', CAST(:version AS text)), true),
             updated_at = now()
         WHERE id = :id
           AND snapshot ? 'extraction'
@@ -313,7 +313,7 @@ async def rollback_manifest(path: Path) -> None:
     statement = text(
         """
         UPDATE jd_raw
-        SET snapshot = :old_snapshot::jsonb, updated_at = now()
+        SET snapshot = CAST(:old_snapshot AS jsonb), updated_at = now()
         WHERE id = :id
           AND snapshot->>'normalized_position' = :new_value
           AND COALESCE(snapshot->'normalized_position_meta'->>'version', '') = :new_version

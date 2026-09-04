@@ -13,11 +13,16 @@ vi.mock('@/lib/api', () => ({
   apiGet: vi.fn(),
 }))
 
-// echarts 在 jsdom 环境不可用（无 canvas），mock init/setOption/dispose
+// echarts 在 jsdom 环境不可用（无 canvas），mock init/setOption/dispose。
+// 组件已按需导入（echarts/core + TreeChart），mock 须对齐各模块路径
 const chartMock = { setOption: vi.fn(), resize: vi.fn(), dispose: vi.fn() }
-vi.mock('echarts', () => ({
+vi.mock('echarts/core', () => ({
   init: vi.fn(() => chartMock),
+  use: vi.fn(),
 }))
+vi.mock('echarts/charts', () => ({ TreeChart: {} }))
+vi.mock('echarts/components', () => ({ TooltipComponent: {} }))
+vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
 
 const mockApiGet = vi.mocked(apiGet)
 

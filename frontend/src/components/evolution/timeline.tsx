@@ -1,7 +1,12 @@
 /** 演化视图组件（从 evolution-page.tsx 抽出，第六轮审查拆分：页面 ≤800 行惯例）。 */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Play, Pause, TrendingUp } from 'lucide-react'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import { LineChart } from 'echarts/charts'
+import { TooltipComponent, GridComponent, DataZoomComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([LineChart, TooltipComponent, GridComponent, DataZoomComponent, CanvasRenderer])
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

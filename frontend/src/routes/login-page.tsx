@@ -20,7 +20,9 @@ export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const setUser = useAuthStore((s) => s.setUser)
-  const [username, setUsername] = useState('')
+  // 注册成功跳转携带的用户名：注册→登录免重输
+  const registerPrefill = (location.state as { username?: string } | null)?.username ?? ''
+  const [username, setUsername] = useState(registerPrefill)
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -53,7 +55,7 @@ export function LoginPage() {
           <CompassMark size="lg" className="text-ink" />
           <div className="text-center">
             <h1 className="text-xl font-semibold tracking-tight">智岗罗盘</h1>
-            <p className="text-sm text-ink-muted">多源异构驱动的岗位能力动态演化系统</p>
+            <p className="text-sm text-ink-muted">多源异构驱动的岗位能力动态演化与人岗匹配系统</p>
           </div>
         </div>
 
@@ -100,8 +102,8 @@ export function LoginPage() {
         </Card>
 
         <p className="text-center text-xs text-ink-faint">
-          访客可直接浏览 <a href="/graph" className="underline hover:text-ink">能力图谱</a> · 还没有账户？{' '}
-          <a href="/register" className="underline hover:text-ink">立即注册</a>
+          能力图谱与演化看板可访客直接浏览 <a href="/graph" className="underline hover:text-ink">能力图谱</a> ·
+          简历匹配需登录 · 还没有账户？ <a href="/register" className="underline hover:text-ink">立即注册</a>
         </p>
       </div>
     </div>

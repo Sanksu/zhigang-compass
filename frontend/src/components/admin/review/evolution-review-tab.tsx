@@ -30,10 +30,14 @@ import { apiGet, apiPut, errMsg } from '@/lib/api'
 import {
   confidenceOf,
   CONFIDENCE_TONE,
+  stableConfidenceOf,
   type Schema,
   type EvolutionItem,
   type DecliningItem,
+  type StableItem,
 } from './review-types'
+import { useIsDesktop } from '@/hooks/use-media-query'
+import { StructuredDefinition } from './definition-block'
 
 /**
  * 演化审核 Tab — 设计文档 §7.3 + M4
@@ -44,6 +48,17 @@ import {
  * - reject  → 确认衰退 declining
  * reason 可选（后端默认写入 "admin evolution review"）。
  */
+
+/** stable 并集项置信度单元格：仅 pool 来源有值，graph 来源显示 — */
+function StableConfidence({ item }: { item: StableItem }) {
+  const sc = stableConfidenceOf(item)
+  if (sc == null) return <span className="text-xs text-ink-faint">—</span>
+  return (
+    <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(sc)}`}>
+      {Math.round(sc * 100)}%
+    </span>
+  )
+}
 export function EvolutionReviewTab() {
   const [items, setItems] = useState<EvolutionItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -59,6 +74,11 @@ export function EvolutionReviewTab() {
   const [archiveTarget, setArchiveTarget] = useState<DecliningItem | null>(null)
   const [archiveReason, setArchiveReason] = useState('')
   const [archiving, setArchiving] = useState(false)
+  /* 已晋级 stable 岗位列表（对照 emerging 队列，展示稳定岗位画像全集；
+     GET /admin/positions/stable = 候选池 ∪ 图谱留存并集，source 区分来源） */
+  const [stableItems, setStableItems] = useState<StableItem[]>([])
+  const [stableLoading, setStableLoading] = useState(true)
+  const isDesktop = useIsDesktop()
 
   const load = () => {
     apiGet<Schema['DiscoveryCandidateData']>('/admin/evolution/pending')
@@ -74,9 +94,17 @@ export function EvolutionReviewTab() {
       .finally(() => setDecliningLoading(false))
   }
 
+  const loadStable = () => {
+    apiGet<Schema['StablePositionData']>('/admin/positions/stable')
+      .then((res) => setStableItems(res.items))
+      .catch(() => setStableItems([]))
+      .finally(() => setStableLoading(false))
+  }
+
   useEffect(() => {
     load()
     loadDeclining()
+    loadStable()
   }, [])
 
   async function submitReview(action: 'approve' | 'reject') {
@@ -185,43 +213,91 @@ export function EvolutionReviewTab() {
               </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>岗位名</TableHead>
-                  <TableHead>命中信号</TableHead>
-                  <TableHead>发现时间</TableHead>
-                  <TableHead>置信度</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        {item.rag_matched && <Badge variant="outline" className="text-[11px]">RAG</Badge>}
-                        {item.seed_matched && <Badge variant="outline" className="text-[11px]">种子</Badge>}
-                        {!item.rag_matched && !item.seed_matched && (
-                          <span className="text-[11px] text-ink-faint">—</span>
+            isDesktop ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>岗位名</TableHead>
+                    <TableHead>命中信号</TableHead>
+                    <TableHead>发现时间</TableHead>
+                    <TableHead>置信度</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          {item.rag_matched && <Badge variant="outline" className="text-[11px]">RAG</Badge>}
+                          {item.seed_matched && <Badge variant="outline" className="text-[11px]">种子</Badge>}
+                          {!item.rag_matched && !item.seed_matched && (
+                            <span className="text-[11px] text-ink-faint">—</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs font-mono text-ink-muted">{item.detected_at}</TableCell>
+                      <TableCell>
+                        {confidenceOf(item) >= 0.5 ? (
+                          <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
+                            {Math.round(confidenceOf(item) * 100)}%
+                          </span>
+                        ) : (
+                          <span className="text-xs text-ink-faint">—</span>
                         )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setReviewTarget(item)
+                            setReason('')
+                            setNotice(null)
+                          }}
+                        >
+                          审核
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="space-y-3">
+                {items.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-lg border border-border bg-canvas p-4 space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-ink truncate">{item.position_name}</div>
+                        <div className="mt-1 flex items-center gap-1">
+                          {item.rag_matched && <Badge variant="outline" className="text-[10px]">RAG</Badge>}
+                          {item.seed_matched && <Badge variant="outline" className="text-[10px]">种子</Badge>}
+                        </div>
                       </div>
-                    </TableCell>
-                    <TableCell className="text-xs font-mono text-ink-muted">{item.detected_at}</TableCell>
-                    <TableCell>
-                      {confidenceOf(item) >= 0.5 ? (
-                        <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
-                          {Math.round(confidenceOf(item) * 100)}%
-                        </span>
-                      ) : (
-                        <span className="text-xs text-ink-faint">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
+                      <div className="text-right shrink-0">
+                        {confidenceOf(item) >= 0.5 ? (
+                          <div className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
+                            {Math.round(confidenceOf(item) * 100)}%
+                          </div>
+                        ) : (
+                          <div className="text-xs text-ink-faint">—</div>
+                        )}
+                        <div className="text-[10px] text-ink-faint">置信度</div>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-ink-faint font-mono">
+                      发现于 {item.detected_at}
+                    </div>
+                    <div className="pt-1">
                       <Button
                         size="sm"
                         variant="outline"
+                        className="w-full"
                         onClick={() => {
                           setReviewTarget(item)
                           setReason('')
@@ -230,11 +306,11 @@ export function EvolutionReviewTab() {
                       >
                         审核
                       </Button>
-                    </TableCell>
-                  </TableRow>
+                    </div>
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            )
           )}
         </CardContent>
       </Card>
@@ -253,6 +329,9 @@ export function EvolutionReviewTab() {
               <div className="rounded-md bg-subtle p-3 text-xs text-ink-secondary">
                 <div className="mb-1 font-medium text-ink">岗位定义草案</div>
                 <p className="leading-relaxed">{reviewTarget.definition_draft || '（无定义草案）'}</p>
+                <div className="mt-2">
+                  <StructuredDefinition data={reviewTarget.definition_structured} />
+                </div>
                 {reviewTarget.evidence_refs.length > 0 && (
                   <div className="mt-2">
                     <div className="mb-0.5 font-medium text-ink">证据引用</div>
@@ -317,34 +396,79 @@ export function EvolutionReviewTab() {
               </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>岗位名</TableHead>
-                  <TableHead>发现时间</TableHead>
-                  <TableHead>置信度</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            isDesktop ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>岗位名</TableHead>
+                    <TableHead>发现时间</TableHead>
+                    <TableHead>置信度</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {decliningItems.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
+                      <TableCell className="text-xs font-mono text-ink-muted">{item.detected_at}</TableCell>
+                      <TableCell>
+                        {confidenceOf(item) >= 0.5 ? (
+                          <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
+                            {Math.round(confidenceOf(item) * 100)}%
+                          </span>
+                        ) : (
+                          <span className="text-xs text-ink-faint">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-state-archived"
+                          onClick={() => {
+                            setArchiveTarget(item)
+                            setArchiveReason('')
+                            setNotice(null)
+                          }}
+                        >
+                          <Archive className="size-3.5 mr-1" />
+                          确认归档
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="space-y-3">
                 {decliningItems.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
-                    <TableCell className="text-xs font-mono text-ink-muted">{item.detected_at}</TableCell>
-                    <TableCell>
-                      {confidenceOf(item) >= 0.5 ? (
-                        <span className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
-                          {Math.round(confidenceOf(item) * 100)}%
-                        </span>
-                      ) : (
-                        <span className="text-xs text-ink-faint">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
+                  <div
+                    key={item.id}
+                    className="rounded-lg border border-border bg-canvas p-4 space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-ink truncate">{item.position_name}</div>
+                        <div className="mt-1 text-[11px] text-ink-faint font-mono">
+                          发现于 {item.detected_at}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        {confidenceOf(item) >= 0.5 ? (
+                          <div className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
+                            {Math.round(confidenceOf(item) * 100)}%
+                          </div>
+                        ) : (
+                          <div className="text-xs text-ink-faint">—</div>
+                        )}
+                        <div className="text-[10px] text-ink-faint">置信度</div>
+                      </div>
+                    </div>
+                    <div className="pt-1">
                       <Button
                         size="sm"
                         variant="outline"
-                        className="text-state-archived"
+                        className="w-full text-state-archived"
                         onClick={() => {
                           setArchiveTarget(item)
                           setArchiveReason('')
@@ -354,11 +478,114 @@ export function EvolutionReviewTab() {
                         <Archive className="size-3.5 mr-1" />
                         确认归档
                       </Button>
-                    </TableCell>
-                  </TableRow>
+                    </div>
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            )
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 已晋级 stable 岗位列表（对照 emerging 队列，展示稳定岗位画像全集；
+          GET /admin/positions/stable = 候选池 ∪ 图谱留存并集） */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <CheckCircle2 className="size-4 text-state-stable" />
+              已晋级 stable 岗位
+            </span>
+            <span className="text-xs font-normal text-ink-faint">{stableItems.length} 个稳定岗位</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {stableLoading ? (
+            <p className="py-8 text-center text-sm text-ink-muted">加载 stable 岗位…</p>
+          ) : stableItems.length === 0 ? (
+            <div className="py-8 text-center text-sm text-ink-faint">
+              <p>暂无 stable 岗位</p>
+              <p className="text-xs mt-2">
+                已确认晋级的岗位将在这里展示（六状态机 stable 态 + 图谱留存节点）
+              </p>
+            </div>
+          ) : (
+            isDesktop ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>岗位名</TableHead>
+                    <TableHead>来源</TableHead>
+                    <TableHead>命中信号</TableHead>
+                    <TableHead>晋级时间</TableHead>
+                    <TableHead>置信度</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {stableItems.map((item) => (
+                    <TableRow key={item.position_name}>
+                      <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
+                      <TableCell>
+                        <Badge variant={item.source === 'pool' ? 'stable' : 'outline'} className="text-[11px]">
+                          {item.source === 'pool' ? '状态机' : '图谱留存'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {item.source === 'pool' ? (
+                          <div className="flex gap-1">
+                            {item.rag_matched && <Badge variant="outline" className="text-[11px]">RAG</Badge>}
+                            {item.seed_matched && <Badge variant="outline" className="text-[11px]">种子</Badge>}
+                            {!item.rag_matched && !item.seed_matched && (
+                              <span className="text-[11px] text-ink-faint">—</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-ink-faint">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs font-mono text-ink-muted">
+                        {item.source === 'graph' ? (item.state_updated_at ?? '—') : (item.detected_at ?? '—')}
+                      </TableCell>
+                      <TableCell>
+                        <StableConfidence item={item} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="space-y-3">
+                {stableItems.map((item) => (
+                  <div key={item.position_name} className="rounded-lg border border-border bg-canvas p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-ink truncate">{item.position_name}</div>
+                        <div className="mt-1 flex items-center gap-1">
+                          <Badge variant={item.source === 'pool' ? 'stable' : 'outline'} className="text-[10px]">
+                            {item.source === 'pool' ? '状态机' : '图谱留存'}
+                          </Badge>
+                          {item.source === 'pool' && item.rag_matched && (
+                            <Badge variant="outline" className="text-[10px]">RAG</Badge>
+                          )}
+                          {item.source === 'pool' && item.seed_matched && (
+                            <Badge variant="outline" className="text-[10px]">种子</Badge>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <StableConfidence item={item} />
+                        <div className="text-[10px] text-ink-faint">置信度</div>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-ink-faint font-mono">
+                      {item.source === 'graph'
+                        ? `图谱状态更新于 ${item.state_updated_at ?? '—'}`
+                        : `发现于 ${item.detected_at ?? '—'}`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
           )}
         </CardContent>
       </Card>

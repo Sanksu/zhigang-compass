@@ -121,6 +121,21 @@ def _complete_recommend_result(
     return {**(previous or {}), "match_id": match_id, "top_n": top_n}
 
 
+async def _load_position_domains() -> dict[str, str]:
+    """图谱岗位名 → 职能域名（2026-09-01 域治理成果接入推荐徽标）。"""
+    from app.core.database import async_neo4j_driver
+
+    out: dict[str, str] = {}
+    async with async_neo4j_driver.session() as session:
+        result = await session.run(
+            "MATCH (p:Position) WHERE p.domain_name IS NOT NULL "
+            "RETURN p.name AS name, p.domain_name AS d"
+        )
+        async for rec in result:
+            out[rec["name"]] = rec["d"]
+    return out
+
+
 async def match_recommend(
     ctx: dict,
     resume_id: str,
@@ -164,6 +179,17 @@ async def match_recommend(
             data_items = await score_jd_auto(
                 session, candidate, project_vectors, top_n,
             )
+
+            # 岗位域徽标（2026-09-01 域治理成果接入）：按岗位名从图谱取
+            # domain_name，一次查询批量注入；无域/图谱不可达为 null 不渲染
+            try:
+                domain_map = await _load_position_domains()
+                for item in data_items:
+                    item["domain_name"] = domain_map.get(
+                        item.get("position_name") or item.get("position_id")
+                    )
+            except Exception:
+                pass  # 域徽标为增强信息，失败不阻塞推荐
 
             match_id = str(uuid.uuid4())
 

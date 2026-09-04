@@ -261,6 +261,43 @@ async def propose_skill(
 ALIAS_CONFIDENCE_FLOOR = 0.8
 
 
+async def _persist_alias_pending(
+    variant: str, standard: str, proposal_id: str, confidence: float | None,
+    session=None,
+) -> bool:
+    """幂等写 skill_aliases(pending)，供「技能治理 → 别名复核」待审处置。
+
+    语义：LLM 发现待审别名（variant→standard）作为人工审批的事实源落表。
+    同一 variant 已存在（pending/approved/rejected）时跳过，不重复建行
+    （unique(variant)）；返回是否新建。session 缺省自开异步会话（调用方
+    无会话时），测试可注入 fake session 隔离 DB。
+    """
+    from sqlalchemy import select
+
+    from app.models.business import SkillAlias
+
+    async def _run(session):
+        existing = (await session.scalars(
+            select(SkillAlias).where(SkillAlias.variant == variant)
+        )).first()
+        if existing is not None:
+            return False
+        session.add(SkillAlias(
+            variant=variant, standard_name=standard,
+            status="pending", proposal_id=proposal_id,
+            confidence=confidence,
+        ))
+        await session.commit()
+        return True
+
+    if session is not None:
+        return await _run(session)
+    from app.core.database import async_session_factory
+
+    async with async_session_factory() as s:
+        return await _run(s)
+
+
 async def propose_skill_alias(
     llm, provider: str, model: str, run_date: str, limit: int,
 ) -> dict:
@@ -329,7 +366,13 @@ async def propose_skill_alias(
             risk_tier="R2",
             status=STATUS_PROPOSAL,
         )
-        await persist_record(record)
+        rec_id = await persist_record(record)
+        # 同名 pending 复用（幂等）：同一 variant 已有行则跳过，不重复建待审
+        # （unique(variant) 约束下避免并发/重跑冲突）。尚未建行的才落 pending。
+        await _persist_alias_pending(
+            variant=name, standard=standard,
+            proposal_id=rec_id, confidence=decision.confidence,
+        )
         summary["proposed"] += 1
         logger.info("[propose_alias] 技能 %s → %s（proposal，conf %.2f）",
                     name, standard, decision.confidence)

@@ -971,6 +971,12 @@ async def batch_extract(
                     )
                 # 入图成功后才写 extraction 标记：先标记后入图会让失败记录
                 # extraction 落库，下次批跑 `extraction IS NULL` 不再选中，图数据永久缺失
+                # 重抽成功后清除 released_at：放行标记的使命是标识「放行→等待重抽」
+                # 的中间态，重抽完成即闭环，避免管理页「已放行·待重抽」徽标永久残留
+                if "released_at" in normalized_snapshot:
+                    normalized_snapshot = {
+                        k: v for k, v in normalized_snapshot.items() if k != "released_at"
+                    }
                 row.snapshot = normalized_snapshot
                 results["processed"] += 1
                 results["succeeded"] += 1
@@ -995,15 +1001,30 @@ async def aggregate_positions(ctx: dict) -> dict:
     全量重算，幂等（覆盖写回 Neo4j）：
     - Position.freq / required_years / last_updated
     - REQUIRES.weight / necessity / source_count
+
+    入图门控（§4.5，审查 H5 闭环）：跨源置信度低于阈值的 JD 不参与聚合
+    （既有岗位 ≥0.6 / 新兴岗位 ≥0.5）；管线已保证 cross_validate 先行。
     """
 
     from app.core.database import async_session_factory, neo4j_driver
+    from app.models.business import DiscoveryCandidate
+    from app.services.data_quality.cross_validate import filter_rows_for_aggregation
     from app.services.kg.aggregation import build_aggregates, write_aggregates
 
     async with async_session_factory() as session:
         rows = (await session.scalars(
             select(JDRaw).where(JDRaw.snapshot["extraction"].astext.isnot(None))
         )).all()
+        # 新兴岗位名集合（§4.5 阈值分级）：candidate/emerging 态适用 0.5 宽松阈值
+        emerging_names = set((await session.scalars(
+            select(DiscoveryCandidate.position_name)
+            .where(DiscoveryCandidate.state.in_(["candidate", "emerging"]))
+        )).all())
+
+    # 门控过滤为纯 CPU 遍历，放线程池（对齐 build_aggregates 同款处理）
+    rows, gate_stats = await asyncio.to_thread(
+        filter_rows_for_aggregation, rows, emerging_names
+    )
 
     now = datetime.now(timezone(timedelta(hours=8))).isoformat()
     # 08-15 审查 M2：build_aggregates 为万级 JD 的同步 CPU 聚合（归一化/权重
@@ -1015,7 +1036,8 @@ async def aggregate_positions(ctx: dict) -> dict:
         with neo4j_driver.session() as session:
             return write_aggregates(session, agg, now)
 
-    return await asyncio.to_thread(_write)
+    result = await asyncio.to_thread(_write)
+    return {**result, **gate_stats}
 
 
 async def cross_validate_jds(ctx: dict, limit: int | None = None) -> dict:

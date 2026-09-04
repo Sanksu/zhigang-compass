@@ -21,6 +21,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiGet, apiPut, errMsg } from '@/lib/api'
+import { useIsDesktop } from '@/hooks/use-media-query'
 import type { Schema } from './review-types'
 
 /** 编辑表单技能行（PUT 提交形状：name/necessity/weight，不含只读 level）。
@@ -60,6 +61,7 @@ export function PositionEditorTab() {
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [diffSummary, setDiffSummary] = useState<string | null>(null)
+  const isDesktop = useIsDesktop()
 
   async function loadDetail() {
     const name = positionName.trim()
@@ -197,64 +199,123 @@ export function PositionEditorTab() {
               {skills.length === 0 ? (
                 <p className="py-8 text-center text-sm text-ink-faint">该岗位暂无技能要求，可点击「添加技能」</p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>技能名</TableHead>
-                      <TableHead className="w-40">necessity</TableHead>
-                      <TableHead className="w-32">weight（0-1）</TableHead>
-                      <TableHead className="w-10" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+                isDesktop ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>技能名</TableHead>
+                        <TableHead className="w-40">necessity</TableHead>
+                        <TableHead className="w-32">weight（0-1）</TableHead>
+                        <TableHead className="w-10" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {skills.map((s, i) => (
+                        <TableRow key={i}>
+                          <TableCell>
+                            <Input
+                              value={s.name}
+                              onChange={(e) => updateSkill(i, { name: e.target.value })}
+                              className="h-8"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Select
+                              value={s.necessity}
+                              onValueChange={(v) => updateSkill(i, { necessity: v as SkillFormRow['necessity'] })}
+                            >
+                              <SelectTrigger className="h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="must">must（必备）</SelectItem>
+                                <SelectItem value="nice">nice（加分）</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={1}
+                              step={0.1}
+                              value={s.weight}
+                              onChange={(e) => updateSkill(i, { weight: Number(e.target.value) })}
+                              className="h-8"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-ink-faint hover:text-state-archived"
+                              onClick={() => setSkills((rows) => rows.filter((_, idx) => idx !== i))}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="space-y-3 px-4 py-2">
                     {skills.map((s, i) => (
-                      <TableRow key={s.key}>
-                        <TableCell>
-                          <Input
-                            value={s.name}
-                            onChange={(e) => updateSkill(i, { name: e.target.value })}
-                            className="h-8"
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Select
-                            value={s.necessity}
-                            onValueChange={(v) => updateSkill(i, { necessity: v as SkillFormRow['necessity'] })}
-                          >
-                            <SelectTrigger className="h-8">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="must">must（必备）</SelectItem>
-                              <SelectItem value="nice">nice（加分）</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            min={0}
-                            max={1}
-                            step={0.1}
-                            value={s.weight}
-                            onChange={(e) => updateSkill(i, { weight: Number(e.target.value) })}
-                            className="h-8"
-                          />
-                        </TableCell>
-                        <TableCell>
+                      <div
+                        key={i}
+                        className="rounded-lg border border-border bg-canvas p-4 space-y-3"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <label className="text-xs text-ink-muted mb-1 block">技能名</label>
+                            <Input
+                              value={s.name}
+                              onChange={(e) => updateSkill(i, { name: e.target.value })}
+                              className="h-8"
+                            />
+                          </div>
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
-                            className="text-ink-faint hover:text-state-archived"
+                            className="h-8 text-state-archived shrink-0 mt-5"
                             onClick={() => setSkills((rows) => rows.filter((_, idx) => idx !== i))}
                           >
                             <Trash2 className="size-3.5" />
                           </Button>
-                        </TableCell>
-                      </TableRow>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs text-ink-muted mb-1 block">necessity</label>
+                            <Select
+                              value={s.necessity}
+                              onValueChange={(v) => updateSkill(i, { necessity: v as SkillFormRow['necessity'] })}
+                            >
+                              <SelectTrigger className="h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="must">must（必备）</SelectItem>
+                                <SelectItem value="nice">nice（加分）</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-xs text-ink-muted mb-1 block">weight</label>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={1}
+                              step={0.1}
+                              value={s.weight}
+                              onChange={(e) => updateSkill(i, { weight: Number(e.target.value) })}
+                              className="h-8"
+                            />
+                          </div>
+                        </div>
+                      </div>
                     ))}
-                  </TableBody>
-                </Table>
+                  </div>
+                )
               )}
             </CardContent>
           </Card>

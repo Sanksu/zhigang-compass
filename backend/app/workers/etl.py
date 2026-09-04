@@ -61,11 +61,13 @@ async def _run_stage(name: str, coro) -> dict:
         return {"error": f"{type(error).__name__}: {str(error)[:300]}"}
 
 
-# 事实阶段（08-23 全流程闭环审查 P0）：去重/LLM 抽取入图/岗位聚合构成图谱
-# 事实链——任一失败意味着当日图谱不完整。此时发布新快照会让演化 Z-score
+# 事实阶段（08-23 全流程闭环审查 P0）：去重/LLM 抽取入图/交叉验证/岗位聚合构成
+# 图谱事实链——任一失败意味着当日图谱不完整。此时发布新快照会让演化 Z-score
 # 序列和岗位发现消费一个"部分失败被当作新事实"的版本，因此下游派生阶段
 # 整体跳过（治理/报告阶段不依赖当日数据完整性，继续执行）。
-_FACT_STAGES = ("dedup_simhash", "structure_load", "aggregate_positions")
+# 2026-09-04 批次B：cross_validate 纳入事实链——验证服务故障不再静默放行未验证
+# JD 全量入图（此前仅保证执行顺序、无失败门禁，审查 P1-A）。
+_FACT_STAGES = ("dedup_simhash", "structure_load", "cross_validate", "aggregate_positions")
 
 # 受事实门禁跳过的派生阶段：快照发布/演化推导/新岗位发现。
 # （第八轮 P1-8：删除幽灵键 positions_cache_prebuild——全库无对应执行
@@ -216,8 +218,10 @@ async def run_etl_pipeline(
         ("enrich_course_skills", tasks_module.enrich_course_skills),
         ("load_courses", tasks_module.load_courses),
         ("evaluate_courses", tasks_module.evaluate_courses),
-        ("aggregate_positions", tasks_module.aggregate_positions),
+        # 交叉验证先于聚合（§4.5 入图门控前置条件，H5 闭环）：聚合消费
+        # snapshot.cross_validation 的置信度做低置信 JD 拦截
         ("cross_validate", tasks_module.cross_validate_jds),
+        ("aggregate_positions", tasks_module.aggregate_positions),
         ("skill_normalization", tasks_module.sync_skill_normalization),
         ("diversity_report", tasks_module.diversity_report),
         ("check_data_freshness", tasks_module.check_data_freshness),

@@ -200,7 +200,7 @@ function stat(s, x, y, w, num, label, opts = {}) {
   s.addText("▲ 真实简历 → Top-10 岗位推荐（JD 级评分，附原始 JD 证据）", { x: 6.7, y: 5.28, w: 6.1, h: 0.3, fontSize: 12, fontFace: FONT, color: MUTED, align: "center", margin: 0 });
   bullets(s, [
     "三维加权：必备技能（must/nice 加权命中）+ 经验 + 学历，差距三态诊断",
-    "语义增强：SBERT 多语言向量 + Bradley-Terry 权重学习（Spearman 0.88）",
+    "语义增强：SBERT 多语言向量 + Bradley-Terry 权重学习（Spearman 0.7853）",
     "纠偏机制：技能通胀修正（CII）+ 时效衰减 + 跨域降权",
     "JD 级评分口径：推荐列表与详情同源同分——对齐「最匹配的那条真实 JD」",
     "双模式：批量推荐（Top-N）+ 单点比对（差距分析 + 学习路径）",
@@ -300,7 +300,7 @@ function stat(s, x, y, w, num, label, opts = {}) {
   const metrics = [
     ["0.9629", "JD 解析 aligned F1", "110 条 gold · 目标 0.90"],
     ["0.988", "简历解析 F1", "字段级抽取真值"],
-    ["0.8906", "人岗匹配 Acc", "BT 权重 v2 · 384 对 · Top-3 1.0"],
+    ["0.9714", "人岗匹配 Acc", "BT v4 · 384 对含学历维度"],
     ["96.7%", "学习路径合理性", "30 案例专家定稿"],
   ];
   metrics.forEach((m, i) => {
@@ -401,7 +401,7 @@ function stat(s, x, y, w, num, label, opts = {}) {
   title(s, "RESULTS", "关键成果数据");
   const res = [
     ["0.9629", "JD 解析 aligned F1", "≥0.90 达标"],
-    ["0.8906", "人岗匹配 Acc", "BT 权重 v2 · Spearman 0.88"],
+    ["0.9714", "人岗匹配 Acc", "BT v4 · Spearman 0.7853"],
     ["96.7%", "学习路径合理性", "30 案例专家定稿"],
     ["91.7%", "技能分类视图覆盖", "权威覆盖 12.8% → 23.9%"],
     ["430ms", "图谱全景 P95", "100 并发 · 目标 <2s"],
@@ -449,7 +449,7 @@ function stat(s, x, y, w, num, label, opts = {}) {
   s.addText("全链路闭环 · 评测达标 · 演示就绪", { x: M, y: 1.4, w: 12.3, h: 0.8, fontSize: 34, fontFace: FONT, bold: true, color: "FFFFFF", margin: 0 });
   bullets(s, [
     "采集 → 图谱 → 抽取 → 匹配 → 演化 → 学习路径，55 天完成全链路真实数据闭环",
-    "四项核心指标全部达标：JD 解析 0.9629 · 匹配 0.8906 · 学习路径 96.7% · P95 430ms",
+    "四项核心指标全部达标：JD 解析 0.9629 · 匹配 0.9714 · 学习路径 96.7% · P95 430ms",
     "展望：新岗位自动发现（种子引导 + 自动判定）· 数字化迁移领域扩展",
   ], M, 2.6, 12.3, 1.9, { fontSize: 15.5, color: "D8E4F0", gap: 12 });
   s.addText("感谢各位评委聆听", { x: M, y: 5.4, w: 12.3, h: 0.9, fontSize: 30, fontFace: FONT, bold: true, color: "FFFFFF", margin: 0 });

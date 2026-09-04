@@ -39,9 +39,16 @@ for extra in docs/m5 docs/perf_baseline_20260815.md CHANGELOG.md glossary.md; do
 done
 
 # 排除构建产物与敏感文件（双保险：archive 已排除，这里处理补充文件）
-find "${STAGE}" -type d \( -name node_modules -o -name .venv -o -name __pycache__ -o -name .pytest_tmp -o -name dist \) -prune -exec rm -rf {} + 2>/dev/null || true
+find "${STAGE}" -type d \( -name node_modules -o -name .venv -o -name __pycache__ -o -name .pytest_tmp -o -name dist -o -name .pnpm-store -o -name .trae-html-share-packages -o -name .uploads \) -prune -exec rm -rf {} + 2>/dev/null || true
 find "${STAGE}" -name "*.pyc" -delete 2>/dev/null || true
 rm -f "${STAGE}/backend/.env" "${STAGE}/frontend/.env" 2>/dev/null || true
+
+# 排除大型媒体交付物（PPT/视频/音频——作为独立交付物提交，不纳入源码包）
+rm -rf "${STAGE}/docs/m5/video_audio" "${STAGE}/docs/m5/video_slides" 2>/dev/null || true
+find "${STAGE}/docs/m5" \( -name "*.mp4" -o -name "*.pptx" -o -name "*.wav" -o -name "*.mp3" \) -delete 2>/dev/null || true
+# 排除数据快照 dump（#786 Git LFS 大文件，共 165MB=pg.dump 123MB+neo4j.dump 42MB——数据快照
+# 作为独立交付物提交，恢复走 scripts/restore_snapshot.sh + 云盘独立附件，不纳入源码包）
+rm -f "${STAGE}/snapshots/pg.dump" "${STAGE}/snapshots/neo4j.dump" 2>/dev/null || true
 
 # 打包
 tar -czf "${OUT}" -C "${STAGE}" .

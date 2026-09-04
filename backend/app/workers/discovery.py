@@ -129,6 +129,30 @@ def _position_skill_novelty(
     return out
 
 
+def _fetch_graph_position_names(session) -> list[str]:
+    """拉取图谱全部 Position 岗位名（方案 A，2026-09-02）。
+
+    供 discovery_auto_transition 对"图谱存量聚合岗（active/legacy，无候选池行）"
+    做衰退判定——此类岗位不在候选池，状态机的 auto_transition 扫不到它们，
+    导致市场需求骤降时永远停留 active 而不转 declining（方案 A 修复的目标）。
+    图谱不可达返回空列表（调用方按无数据中性处理，不阻塞流转）。
+
+    Args:
+        session: Neo4j 会话（同步）
+
+    Returns:
+        图谱岗位名列表（去重）
+    """
+    try:
+        rows = session.run(
+            "MATCH (p:Position) RETURN p.name AS name"
+        ).data()
+    except Exception as exc:
+        logger.warning("_fetch_graph_position_names: 图谱查询失败: %s", exc)
+        return []
+    return [r["name"] for r in rows if r.get("name")]
+
+
 # 项目统一时区 UTC+8（与 services 层常量一致，first_seen/观测起点均按东八区取日期）
 _TZ_CN = timezone(timedelta(hours=8))
 
@@ -269,7 +293,28 @@ async def discovery_daily(ctx: dict) -> dict:
     inputs = []
     # 岗位 → 快照环比增长率（置信度三维加权 §7.2.4 用，见下方 compute_confidence）
     growth_by_position: dict[str, float] = {}
+    # 池中已晋升岗位集合（P0 通道防误伤，2026-09-02）：P0 让"观测期首现 + src≥2 +
+    # ma3≥5"的岗位入候选池，但已晋升（emerging/stable/rejected/declining）的岗位
+    # 同样满足这些条件——若不排除，会被 P0 当作 candidate 重新发现并污染其
+    # features/confidence（_upsert_candidate 对已晋升岗仅保护 state，其余字段仍覆盖）。
+    # 跳过已晋升岗，让 detector 只对"未入池或仍在 candidate"的岗位跑 P0 通道。
+    from app.services.discovery.schemas import PositionState
+    _NON_CANDIDATE_STATES = {
+        PositionState.EMERGING.value,
+        PositionState.STABLE.value,
+        PositionState.DECLINING.value,
+        PositionState.REJECTED.value,
+        PositionState.ARCHIVED.value,
+    }
+    async with async_session_factory() as session:
+        _promoted_names = set((await session.scalars(
+            select(DiscoveryCandidate.position_name).where(
+                DiscoveryCandidate.state.in_(_NON_CANDIDATE_STATES)
+            )
+        )).all())
     for name, stat in position_stats.items():
+        if name in _promoted_names:
+            continue
         freq = float(stat["count"])
         freqs = freq_windows.get(name, [])
         # 快照窗口 ≥ 2 期时用真实 Z-score/MA3/环比；否则保持保守冷启动信号
@@ -431,8 +476,8 @@ async def discovery_auto_transition(ctx: dict) -> dict:
     from app.core.database import async_session_factory, neo4j_driver
     from app.services.discovery.schemas import CandidatePosition, DiscoveryFeatures, PositionState
     from app.services.discovery.state_machine import (
-        WindowFreq, decline_rate, evaluate_auto_transition, freq_z_scores,
-        PositionStateMachine, jd_publish_windows, window_volatility,
+        WindowFreq, decline_rate, evaluate_auto_transition, evaluate_active_decline,
+        freq_z_scores, PositionStateMachine, jd_publish_windows, window_volatility,
     )
     from app.services.extraction.position_normalization import normalized_position_from_snapshot
 
@@ -502,6 +547,7 @@ async def discovery_auto_transition(ctx: dict) -> dict:
                 continue
 
             features = DiscoveryFeatures(**row.features)
+            _st = row.definition_structured or {}
             candidate = CandidatePosition(
                 candidate_id=row.id,
                 position_name=row.position_name,
@@ -512,6 +558,8 @@ async def discovery_auto_transition(ctx: dict) -> dict:
                 seed_matched=row.seed_matched,
                 rag_matched=row.rag_matched,
                 definition_draft=row.definition_draft,
+                core_duties=_st.get("core_duties") or [],
+                typical_scenarios=_st.get("typical_scenarios") or [],
             )
             # z_scores 由频次序列自身重建（freq_z_scores）：declining 岗位回升
             # 时最近 2 窗口 z > 0，触发 declining → stable 自动回迁
@@ -551,6 +599,85 @@ async def discovery_auto_transition(ctx: dict) -> dict:
                 "from_state": candidate.state.value,
                 "to_state": updated.state.value,
             })
+
+        # ── 3. 图谱存量聚合岗衰退判定（方案 A，2026-09-02）──
+        # 状态机只扫候选池 emerging/stable/declining，图谱 active/legacy 存量岗
+        # 不在候选池，市场需求骤降时永远停留 active 而不转 declining。本段对
+        # 图谱全部 Position 岗位名（不含候选池已可迁移者）用 evaluate_active_decline
+        # 判定：命中 declining 则 persist（Neo4j Position.status=declining）+ 候选池
+        # upsert 对齐（否则又制造图谱 declining vs 池无记录的账目分裂）。
+        # 防伪影：存量岗无候选池证据锚点，仅凭 jd 窗口补 0 序列会误判——
+        # evaluate_active_decline 内含 jd_count>=5 + 源>=2 + 窗口>=2 三道门控，
+        # 排除"仅 1 条观测期外旧 JD、末窗补 0"的伪影岗（实测 7 个 dr=1.0 全此类）。
+        # 排除全部候选池已有行岗位（含 candidate/rejected），避免和发现流程冲突。
+        _pool_promoted = {row.position_name for row in all_rows}
+        try:
+            with neo4j_driver.session() as neo4j_session:
+                graph_names = await asyncio.to_thread(
+                    _fetch_graph_position_names, neo4j_session,
+                )
+        except Exception as exc:
+            _logger.warning("auto_transition: 图谱岗位名查询失败，跳过存量岗衰退判定: %s", exc)
+            graph_names = []
+
+        for name in graph_names:
+            if name in _pool_promoted:
+                continue  # 候选池已管理（含 candidate/emerging/stable/rejected 等），走上面的状态机
+            if name not in daily_freqs:
+                _logger.info(
+                    "auto_transition 存量岗跳过: %s（jd_raw 无已抽取记录，数据不足）",
+                    name,
+                )
+                continue
+            freqs = freq_windows.get(name, [])
+            if len(freqs) < 2:
+                _logger.info(
+                    "auto_transition 存量岗跳过: %s 窗口序列 %s（<2 期，冷启动不武断判定）",
+                    name, freqs,
+                )
+                continue
+            jd_count = sum(daily_freqs.get(name, {}).values())
+            src_div = len(
+                {row.source for row in jd_rows
+                 if normalized_position_from_snapshot(row.snapshot) == name}
+            )
+            windows = WindowFreq(freqs=freqs, z_scores=freq_z_scores(freqs))
+            target = evaluate_active_decline(windows, jd_count, src_div)
+            _logger.info(
+                "auto_transition 存量岗: %s 窗口=%s decline_rate=%.3f jd=%d src=%d → %s",
+                name, freqs, decline_rate(windows), jd_count, src_div,
+                target.value if target else "不迁移",
+            )
+            if target is None:
+                continue
+
+            # 组装候选池候选（存量 active 岗以 stable 态进入允许的 declining 转换；
+            # legacy/archived 等终态不入此路径）
+            legacy_cand = CandidatePosition(
+                candidate_id=f"cand-legacy-{name}",
+                position_name=name,
+                state=PositionState.STABLE,
+                features=DiscoveryFeatures(
+                    jd_freq_ma3=float(sum(freqs[-3:]) / 3 if len(freqs) >= 3 else (sum(freqs) / len(freqs))),
+                    source_diversity=src_div,
+                ),
+                detected_at=datetime.now(_TZ_CN).isoformat(timespec="seconds"),
+                evidence_refs=[],
+            )
+
+            def _persist_legacy() -> CandidatePosition:
+                with neo4j_driver.session() as neo4j_session:
+                    return machine.persist(
+                        neo4j_session, legacy_cand, target, operator="system",
+                    )
+
+            updated = await asyncio.to_thread(_persist_legacy)
+            await _upsert_candidate(session, updated)
+            transitions.append({
+                "position_name": name,
+                "from_state": PositionState.ACTIVE.value,
+                "to_state": updated.state.value,
+            })
         await session.commit()
 
     return {
@@ -585,6 +712,14 @@ async def _upsert_candidate(session, cand) -> None:
         "definition_draft": cand.definition_draft,
         "detected_at": cand.detected_at,
     }
+    # 结构化定义仅在本次确有产出时覆盖：discovery_daily 每日重跑，
+    # LLM 当日不可用时不得用空对象抹掉历史结构化草案
+    _structured = {
+        "core_duties": getattr(cand, "core_duties", None) or [],
+        "typical_scenarios": getattr(cand, "typical_scenarios", None) or [],
+    }
+    if _structured["core_duties"] or _structured["typical_scenarios"]:
+        payload["definition_structured"] = _structured
     if row is None:
         session.add(DiscoveryCandidate(id=cand.candidate_id, position_name=cand.position_name, **payload))
     else:

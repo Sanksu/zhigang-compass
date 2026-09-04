@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { apiGet, apiPut } from '@/lib/api'
 import { EvolutionReviewTab } from './evolution-review-tab'
+import type { StableItem } from './review-types'
 
 vi.mock('@/lib/api', () => ({
   apiGet: vi.fn(),
@@ -43,13 +44,18 @@ function makeDeclining() {
   }
 }
 
-/** 按 URL 分发两种 GET 响应 */
-function mockBoth(evo = [makeEvo()], declining = [makeDeclining()]) {
+/** 按 URL 分发三类 GET 响应 */
+function mockBoth(evo = [makeEvo()], declining = [makeDeclining()], stable: StableItem[] = []) {
   mockApiGet.mockImplementation((url: string) => {
-    if (String(url).includes('/admin/evolution/pending')) {
+    const u = String(url)
+    if (u.includes('/admin/evolution/pending')) {
       return Promise.resolve({ items: evo, total: evo.length, page: 1, size: 50 })
     }
-    return Promise.resolve({ items: declining, total: declining.length, page: 1, size: 50 })
+    if (u.includes('/admin/positions/declining')) {
+      return Promise.resolve({ items: declining, total: declining.length, page: 1, size: 50 })
+    }
+    // /admin/positions/stable：默认空，避免与 declining 文本重复
+    return Promise.resolve({ items: stable, total: stable.length })
   })
 }
 
@@ -63,10 +69,14 @@ describe('EvolutionReviewTab 演化审核 + 衰退归档', () => {
   it('初始并发请求演化队列与衰退归档', async () => {
     mockBoth()
     render(<EvolutionReviewTab />)
-    await waitFor(() => expect(mockApiGet).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(mockApiGet).toHaveBeenCalledTimes(3))
     const urls = mockApiGet.mock.calls.map((c) => String(c[0]))
     expect(urls).toEqual(
-      expect.arrayContaining(['/admin/evolution/pending', '/admin/positions/declining']),
+      expect.arrayContaining([
+        '/admin/evolution/pending',
+        '/admin/positions/declining',
+        '/admin/positions/stable',
+      ]),
     )
     expect(await screen.findByText('AI 推理优化工程师')).toBeInTheDocument()
     expect(screen.getByText('传统 BI 报表工程师')).toBeInTheDocument()

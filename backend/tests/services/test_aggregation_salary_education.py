@@ -63,11 +63,14 @@ class TestParseSalaryRange:
 
 
 def _jd(pos: str, extraction: dict, source: str = "zhilian", crawled: str = "2026-08-28T10:00:00+08:00", experience: str | None = None):
-    """experience：snapshot 顶层采集侧经验文本（_min_experience_years 消费口径）。"""
+    """experience：写入 extraction.experience_range.min_years（P0 协议，min_years 消费口径）。"""
+    if experience is not None:
+        # "3-5年"、"5年以上" → 取最小年限数值
+        import re
+        m = re.search(r"(\d+)", experience)
+        extraction = {"experience_range": {"min_years": int(m.group(1))}, **extraction}
     extraction = {"position_name": pos, **extraction}
     snap = {"extraction": extraction, "normalized_position": pos}
-    if experience is not None:
-        snap["experience"] = experience
     return SimpleNamespace(source=source, crawled_at=crawled, snapshot=snap)
 
 

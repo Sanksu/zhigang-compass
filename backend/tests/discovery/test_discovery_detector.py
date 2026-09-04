@@ -248,6 +248,100 @@ class TestMaturePositionExclusion:
         assert [c.position_name for c in candidates] == ["新出现低频岗位"]
 
 
+class TestPostStartChannel:
+    """观测期首现岗专用通道（P0，2026-09-02）。
+
+    first_seen_date >= observation_start（观测期内首现）的岗位，Z-score 因首现后
+    即平稳而失效（z_last 恒 0.6-0.9 永不过 1.5 保守分支），但多已 src>=2。此通道
+    用源多样性 + JD 量双门槛入池，替代对这类岗位毫无区分度的 Z-score 主判定。
+    """
+
+    def test_post_start_multisource_low_z_promotes_via_channel(self):
+        """观测期首现 + src>=2 + ma3>=5，即便 z 平庸也入池（新通道）。"""
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "系统可靠性工程师",
+                    _features(z_score=0.9, source_diversity=2, jd_freq_ma3=6),
+                    90,
+                    first_seen_date="2026-08-07",
+                    observation_start="2026-08-02",
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert [c.position_name for c in candidates] == ["系统可靠性工程师"]
+
+    def test_post_start_single_source_not_promoted(self):
+        """观测期首现但仅单源 → 新通道不放行（跨源验证防线保留）。"""
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "单源岗位",
+                    _features(z_score=0.9, source_diversity=1, jd_freq_ma3=6),
+                    90,
+                    first_seen_date="2026-08-07",
+                    observation_start="2026-08-02",
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert candidates == []
+
+    def test_post_start_low_jd_not_promoted(self):
+        """观测期首现但 ma3 < 5 → 新通道不放行（JD 量门槛）。"""
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "低量岗位",
+                    _features(z_score=0.9, source_diversity=2, jd_freq_ma3=4),
+                    90,
+                    first_seen_date="2026-08-07",
+                    observation_start="2026-08-02",
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert candidates == []
+
+    def test_mature_position_even_with_channel_excluded(self):
+        """存量成熟岗位即使 src>=2 且 ma3>=5，也被成熟排除拦截（新通道不豁免）。"""
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "存量成熟岗",
+                    _features(z_score=0.9, source_diversity=2, jd_freq_ma3=6),
+                    90,
+                    first_seen_date="2026-07-01",
+                    observation_start="2026-08-02",
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert candidates == []
+
+    def test_missing_observation_start_channel_disabled(self):
+        """observation_start 未知时新通道不启用（不武断判定）。"""
+        detector = DiscoveryDetector()
+        provider = _FakeProvider(
+            [
+                DiscoveryInput(
+                    "无观测起点",
+                    _features(z_score=0.9, source_diversity=2, jd_freq_ma3=6),
+                    90,
+                    first_seen_date="2026-08-07",
+                    observation_start=None,
+                )
+            ]
+        )
+        candidates = detector.detect_candidates(provider)
+        assert candidates == []
+
+
 class TestPostDateMissingFallback:
     """post_date 缺失兜底排除（2026-08-11）：post_date 缺失岗位首次观测日靠
     入库日兜底，若入库日 == 采集首日，视为起步期存量排除。"""

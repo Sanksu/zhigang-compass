@@ -33,13 +33,20 @@ export function toGraphData(raw: GraphViewData): GraphData {
     status: node.type === 'position' ? (isValidStatus(node.status) ? node.status : 'candidate') : undefined,
     ...(node.type === 'position'
       ? { domain_id: node.domain_id ?? undefined, domain_name: node.domain_name ?? undefined }
-      : { skill_category: node.skill_category ?? undefined }),
+      : {
+          skill_category: node.skill_category ?? undefined,
+          // 岗位画像技能：透传 description（技能说明）与 jd_source_count（JD 支撑数）
+          description: node.description ?? undefined,
+          jd_source_count: node.jd_source_count ?? undefined,
+        }),
   }))
   const edges: GraphEdge[] = raw.edges.map((edge) => ({
     source: edge.source,
     target: edge.target,
     necessity: edge.necessity === 'nice' ? 'nice' : 'must',
     weight: edge.weight,
+    // 熟练度级别（REQUIRES.level）：级别筛选视图的数据依据，透传给详情面板
+    level: edge.level ?? undefined,
   }))
 
   return {

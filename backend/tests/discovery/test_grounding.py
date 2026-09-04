@@ -171,6 +171,56 @@ class TestGenerateDefinition:
         assert draft.text == "Design and develop software systems."
         assert draft.source == "occupation"
 
+    def test_structured_fields_pass_through_on_clean_draft(self):
+        """无矛盾草案：核心职责/典型场景随草案一并放行（去重去空）。"""
+        reference = "负责基于大语言模型的应用系统设计与开发，服务企业知识库场景。"
+        occupation = {"code": "15-1252.00", "name": "LLM App", "definition": reference}
+
+        class _StructuredLLM:
+            def extract_structured(self, prompt, response_model, system_prompt=None, **kwargs):
+                return response_model(
+                    text="负责大模型应用系统设计与开发。",
+                    core_duties=["设计 RAG 链路", " 设计 RAG 链路 ", "", "开发评测集", "部署调优", "多余项"],
+                    typical_scenarios=["企业知识库问答", "企业知识库问答", "智能客服"],
+                )
+
+        draft = self._run(_generate_definition("大模型应用工程师", None, occupation, _StructuredLLM()))
+        assert draft.source == "llm"
+        assert draft.nli_contradicted is False
+        assert draft.core_duties == ["设计 RAG 链路", "开发评测集", "部署调优", "多余项"]
+        assert draft.typical_scenarios == ["企业知识库问答", "智能客服"]
+
+    def test_structured_fields_dropped_on_contradiction_fallback(self):
+        """确认级矛盾截断回退参考原文：结构化职责/场景一并丢弃（不落半可信产出）。"""
+        reference = "岗位要求具备 Python 编程能力，负责推荐系统开发。"
+        occupation = {"code": "15-1252.00", "name": "ML", "definition": reference}
+
+        class _ConfirmedContradictionLLM:
+            def extract_structured(self, prompt, response_model, system_prompt=None, **kwargs):
+                return response_model(
+                    text="该岗位不需要 Python 编程能力。",
+                    core_duties=["虚构职责"],
+                    typical_scenarios=["虚构场景"],
+                )
+
+        draft = self._run(_generate_definition("ML", None, occupation, _ConfirmedContradictionLLM()))
+        assert draft.text == reference
+        assert draft.nli_contradicted is True
+        assert draft.core_duties == []
+        assert draft.typical_scenarios == []
+
+    def test_reference_fallback_carries_no_structured_fields(self):
+        """无 LLM 降级路径：仅回退参考原文，结构化字段为空（不以规则臆造）。"""
+        occupation = {
+            "code": "15-1252.00",
+            "name": "Software Developers",
+            "definition": "Design and develop software systems.",
+        }
+        draft = self._run(_generate_definition("软件开发工程师", None, occupation, None))
+        assert draft.source == "occupation"
+        assert draft.core_duties == []
+        assert draft.typical_scenarios == []
+
     def test_nli_contradiction_triggers_resample_then_fallback(self):
         """NLI 矛盾软门控：首稿含否定断言（可疑级）→ 触发重采样；重采样后
         仍可疑 → 截断回退参考原文 + 打标（幻觉防控核心闭环）。"""

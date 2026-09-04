@@ -17,7 +17,53 @@ import statistics
 from datetime import datetime
 from typing import Protocol
 
-from app.services.extraction.dictionary import is_noise_skill
+from app.services.extraction.dictionary import is_noise_skill, normalize_skill
+
+
+# 社区/学术源 → 统一技能名的跨语言映射（2026-09-01 口径对齐）。
+# 动机：arxiv/github/stackoverflow 的 categories/language/tags 多为英文 token
+# （如 arxiv 分类码 "cs.LG"、github 标签 "machine-learning"），而 JD 侧抽取的
+# 技能名多为中文（"机器学习"）。两者不经对齐无法在 (skill, source) 周频次中
+# 相交，导致 arxiv_anomaly 长期全 false、github 命中率极低——社区信号"检测到
+# 但用不上"。此处先把社区斜名映射到与 JD 一致的技能名，再交 normalize_skill
+# 做大小写/白名单统一，最终与 position_skills 对齐。仅覆盖 normalize_skill 未收录、
+# 但社区高频出现的高价值词条，避免无谓膨胀共享技能词典。
+COMMUNITY_SKILL_ALIAS: dict[str, str] = {
+    # arxiv 学科分类码 → 技术方向（arXiv 五大学科二级分类，映射到项目既有技能名）。
+    # 注意：勿映射到被 SKILL_STOPWORDS 停用的泛词（如"人工智能"在停用词表，
+    # JD 词典不使用，映射了也会被 is_noise_skill 丢弃）。
+    "cs.ai": "机器学习",
+    "cs.lg": "机器学习",
+    "cs.cv": "计算机视觉",
+    "cs.cl": "自然语言处理",
+    "cs.cr": "网络安全",
+    "cs.ne": "深度学习",
+    "cs.pl": "程序设计",
+    "cs.dc": "分布式系统",
+    "cs.db": "数据库",
+    "cs.se": "软件工程",
+    "cs.ds": "数据结构",
+    "cs.hc": "人机交互",
+    "cs.mm": "多媒体",
+    "cs.ro": "机器人",
+    "cs.cy": "信息安全",
+    "stat.ml": "机器学习",
+    "eess.as": "语音识别",
+    "eess.iv": "计算机视觉",
+    # github / stackoverflow 常见英文标签 → 技能名（normalize_skill 未收录的）
+    "machine-learning": "机器学习",
+    "deep-learning": "深度学习",
+    "computer-vision": "计算机视觉",
+    "natural-language-processing": "自然语言处理",
+    "nlp": "自然语言处理",
+    "data-science": "数据科学",
+    "big-data": "大数据",
+    "neural-network": "神经网络",
+    "reinforcement-learning": "强化学习",
+    "distributed-systems": "分布式系统",
+}
+# 规范化键（全小写），兼容 visualize 时大小写不一致
+_COMMUNITY_ALIAS_LOWER: dict[str, str] = {k.lower(): v for k, v in COMMUNITY_SKILL_ALIAS.items()}
 
 
 # ---- 阈值常量（设计文档 §7.2.5 条件监测矩阵）----
@@ -63,6 +109,25 @@ def _week_key(iso: str) -> str:
         return iso[:10]  # 退化：按日聚合
 
 
+def _normalize_community_token(out: list[str], seen: set[str], token: str) -> None:
+    """把一个社区源 token 归一化为统一技能名后追加（去重 + 去噪音）。
+
+    顺序：社区跨语言映射（_COMMUNITY_ALIAS_LOWER）→ normalize_skill 统一
+    （大小写/白名单）→ is_noise_skill 剔除噪音词。使 arxiv category / github
+    tag 等英文 token 落到与 JD 侧一致的技能名，才能与 position_skills 相交。
+    已映射到空/被否为噪技能的直接丢弃，不污染频次聚合。
+    """
+    if not isinstance(token, str) or not token.strip():
+        return
+    mapped = _COMMUNITY_ALIAS_LOWER.get(token.strip().lower())
+    canon = normalize_skill(mapped if mapped is not None else token)
+    if not canon or is_noise_skill(canon):
+        return
+    if canon not in seen:
+        seen.add(canon)
+        out.append(canon)
+
+
 def extract_skills(source: str, snapshot: dict) -> list[str]:
     """从 raw 行 snapshot 提取技能名集合（按源结构不同）。"""
     snap = snapshot or {}
@@ -70,17 +135,24 @@ def extract_skills(source: str, snapshot: dict) -> list[str]:
         # CourseItem.skills：技能标签列表
         return [s for s in (snap.get("skills") or []) if isinstance(s, str) and s]
     if source in ("arxiv", "github", "stackoverflow"):
-        # paper 用 categories；github/so 用 language + tags
+        # arxiv 用 categories（学科分类码）；github/so 用 language + tags。
+        # 口径对齐：社区/学术 token 统一经 _normalize_community_token 落到标准技能名。
         out: list[str] = []
+        seen: set[str] = set()
         cats = snap.get("categories") or []
         if isinstance(cats, list):
-            out.extend(c for c in cats if isinstance(c, str) and c)
-        lang = snap.get("language")
-        if isinstance(lang, str) and lang:
-            out.append(lang)
+            for c in cats:
+                _normalize_community_token(out, seen, c)
         tags = snap.get("tags") or []
         if isinstance(tags, list):
-            out.extend(t for t in tags if isinstance(t, str) and t)
+            for t in tags:
+                _normalize_community_token(out, seen, t)
+        # arxiv 的 language 是论文书写语言（en/zh），非技术技能，不入信号；
+        # github/so 的 language 是编程语言，属真实技能，纳入（社区标注口径差异）
+        if source != "arxiv":
+            lang = snap.get("language")
+            if isinstance(lang, str) and lang:
+                _normalize_community_token(out, seen, lang)
         return out
     # jd 源：LLM 抽取结果 skills（batch_extract 落 snapshot.extraction.skills）。
     # LLM 误抽的岗位名碎片/经验描述（如"算法工程师""熟悉Redis"）在 STOPWORDS

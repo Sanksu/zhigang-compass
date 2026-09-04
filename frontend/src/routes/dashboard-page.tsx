@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { Activity, Database, GitBranch, Network, TrendingUp, Users } from 'lucide-react'
 // 按需导入（第八轮 P2-32：与本仓 charts.tsx/graph-2d.tsx 口径一致，
@@ -11,6 +11,8 @@ import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { MetricCard } from '@/components/shared/metric-card'
+import { Reveal } from '@/components/ui/reveal'
+import { useAuthStore } from '@/store/auth'
 import { apiGet } from '@/lib/api'
 import { escapeHtml, formatDateTime, isDark } from '@/lib/utils'
 import type { components } from '@/types/api'
@@ -176,19 +178,24 @@ export function DashboardPage() {
   const [versions, setVersions] = useState<EvolutionVersion[]>([])
   const [sourceCount, setSourceCount] = useState(0)
   const [crawlAvailable, setCrawlAvailable] = useState(false)
+  const userRole = useAuthStore((s) => s.user?.role)
+  // admin 专属快捷入口（/admin/*）按角色过滤：非 admin 点击会被路由守卫静默弹回首页，
+  // 与侧边栏的角色隔离口径（sidebar 不渲染管理分组）保持一致
+  const quickLinks = useMemo(
+    () => QUICK_LINKS.filter((l) => !l.to.startsWith('/admin') || userRole === 'admin'),
+    [userRole],
+  )
 
   useEffect(() => {
     let cancelled = false
     Promise.allSettled([
-      // panorama 视图供「图谱节点」指标卡（节点/边数）——与图谱页共用 /graph/view
-      // 统一端点（08-23 闭环收敛：消除 /graph/panorama 与 view 双链路分叉）
-      apiGet<components['schemas']['GraphViewData']>('/graph/view/panorama?limit=200'),
-      // 采集统计需 admin 权限：游客 401 时静默降级，不触发全局登出
-      apiGet<components['schemas']['CrawlStatusData']>('/admin/crawl/status', { skipAuthRedirect: true }),
-      // 简历/采集/审计统计均需认证：游客 401 时静默降级，不触发全局登出
+      // 系统级概览接口加 60s TTL 缓存：返回时秒开，避免每次进入都重拉；
+      // resume/list 为用户私有数据，保留实时，不缓存（游客场景也看得到本人简历）
+      apiGet<components['schemas']['GraphViewData']>('/graph/view/panorama?limit=200', { ttl: 60 }),
+      apiGet<components['schemas']['CrawlStatusData']>('/admin/crawl/status', { skipAuthRedirect: true, ttl: 60 }),
       apiGet<{ items: unknown[]; total: number }>('/resume/list?limit=100', { skipAuthRedirect: true }),
-      apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=10', { skipAuthRedirect: true }),
-      apiGet<components['schemas']['AuditLogsData']>('/admin/audit/logs?page=1&size=10', { skipAuthRedirect: true }),
+      apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=10', { skipAuthRedirect: true, ttl: 60 }),
+      apiGet<components['schemas']['AuditLogsData']>('/admin/audit/logs?page=1&size=10', { skipAuthRedirect: true, ttl: 60 }),
     ]).then(([graphRes, crawlRes, resumeRes, versionRes, auditRes]) => {
       if (cancelled) return
 
@@ -210,7 +217,7 @@ export function DashboardPage() {
       setStats([
         { label: '图谱节点', value: graph ? String(graph.nodes) : '—', delta: `${graph?.edges ?? 0} 边`, icon: Network, hint: 'Neo4j 岗位-技能关系', deltaType: graph ? 'up' : 'neutral' },
         { label: '累计采集量', value: collectOk ? collectTotal.toLocaleString() : '—', delta: collectOk ? `${platforms.length} 源` : '—', icon: Database, hint: 'DB 入库总量（JD/课程/论文/社区）', deltaType: platforms.length ? 'up' : 'neutral' },
-        { label: '已解析简历', value: String(resumeTotal), delta: 'resume_cache', icon: Users, hint: '可发起真实匹配', deltaType: resumeTotal ? 'up' : 'neutral' },
+        { label: '已解析简历', value: String(resumeTotal), delta: '可发起匹配', icon: Users, hint: '上传后 LLM 解析入库', deltaType: resumeTotal ? 'up' : 'neutral' },
         { label: '图谱版本', value: String(versions.length), delta: versions[0]?.version_id ?? '—', icon: GitBranch, hint: 'T+1 快照 · 可 diff', deltaType: versions.length ? 'up' : 'neutral' },
       ])
 
@@ -252,25 +259,28 @@ export function DashboardPage() {
         description="多源异构驱动的岗位能力动态演化与人岗匹配系统"
       />
 
-      {/* 关键指标卡片（真实数据）——复用 shared MetricCard（统一指标卡形态） */}
+      {/* 关键指标卡片（真实数据）——复用 shared MetricCard（统一指标卡形态）；分级入场：卡片逐个错峰浮现 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {stats.map((stat) => (
-          <MetricCard
-            key={stat.label}
-            data={{
-              label: stat.label,
-              value: stat.value,
-              delta: stat.delta,
-              deltaTone: stat.deltaType === 'up' ? 'emerging' : 'muted',
-              hint: stat.hint,
-              icon: stat.icon,
-            }}
-          />
+        {stats.map((stat, i) => (
+          <Reveal key={stat.label} delay={i * 90} className="h-full">
+            <MetricCard
+              className="h-full"
+              data={{
+                label: stat.label,
+                value: stat.value,
+                delta: stat.delta,
+                deltaTone: stat.deltaType === 'up' ? 'emerging' : 'muted',
+                hint: stat.hint,
+                icon: stat.icon,
+              }}
+            />
+          </Reveal>
         ))}
       </div>
 
       {/* 最近活动（真实版本发布 + 登录审计） + 快捷入口 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <Reveal delay={360}>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-sm flex items-center justify-between">
@@ -313,7 +323,7 @@ export function DashboardPage() {
             <CardTitle className="text-sm">快捷入口</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {QUICK_LINKS.map((link) => {
+            {quickLinks.map((link) => {
               const Icon = link.icon
               return (
                 <Link
@@ -333,9 +343,11 @@ export function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+      </Reveal>
 
       {/* 图谱版本演化趋势（与「图谱版本」指标卡同源，无需额外端点） */}
-      <Card className="mt-4">
+      <Reveal delay={460} className="mt-4">
+        <Card>
         <CardHeader>
           <CardTitle className="text-sm flex items-center gap-2">
             <TrendingUp className="size-4" />
@@ -349,9 +361,11 @@ export function DashboardPage() {
           <VersionTrendChart versions={versions} />
         </CardContent>
       </Card>
+      </Reveal>
 
       {/* 数据源底座（真实采集统计） */}
-      <Card className="mt-4">
+      <Reveal delay={560} className="mt-4">
+        <Card>
         <CardHeader>
           <CardTitle className="text-sm flex items-center gap-2">
             <Database className="size-4" />
@@ -394,6 +408,7 @@ export function DashboardPage() {
           })()}
         </CardContent>
       </Card>
+      </Reveal>
     </>
   )
 }

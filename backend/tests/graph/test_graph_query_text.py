@@ -102,6 +102,44 @@ class TestViewStatusFilter:
         assert params["public_statuses"] == list(graph_api._PUBLIC_POSITION_STATUSES)
 
 
+class TestViewLevelFilter:
+    """熟练度级别过滤（赛题「按技术栈和级别切换视图」，缺口2）。
+
+    level 给定时两个视图的 Cypher 都必须带 coalesce(r.level) 过滤子句，
+    且 techStack 的热次统计（首个 MATCH）与明细（第二个 MATCH）同过滤；
+    缺省时不得出现 level 子句与参数。
+    """
+
+    @pytest.mark.asyncio
+    async def test_techstack_level_filters_both_matches(self, monkeypatch):
+        driver = _install(monkeypatch)
+        await graph_api._query_view_techstack(
+            50, "p.status IN $public_statuses", level="高级"
+        )
+        query, params = driver.sessions[0].queries[0]
+        assert query.count("AND coalesce(r.level, '') = $level") == 2  # 热次 + 明细
+        assert params["level"] == "高级"
+
+    @pytest.mark.asyncio
+    async def test_main_view_level_filters_edges(self, monkeypatch):
+        driver = _install(monkeypatch)
+        await graph_api._query_view_main(50, "p.status IN $public_statuses", level="初级")
+        query, params = driver.sessions[0].queries[0]
+        # main 视图 MATCH 后无既有 WHERE，级别子句自带 WHERE 关键字
+        assert "WHERE coalesce(r.level, '') = $level" in query
+        assert params["level"] == "初级"
+
+    @pytest.mark.asyncio
+    async def test_no_level_clause_without_level(self, monkeypatch):
+        driver = _install(monkeypatch)
+        await graph_api._query_view_techstack(50, "p.status IN $public_statuses")
+        await graph_api._query_view_main(50, "p.status IN $public_statuses")
+        for session in driver.sessions:
+            query, params = session.queries[0]
+            assert "r.level" not in query
+            assert "level" not in params
+
+
 class TestSkillCategoryExposure:
     """techStack 视图 Cypher 须带回技能类目（软技能/技术栈区分展示的数据来源）。"""
 

@@ -14,9 +14,9 @@ import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { GraphData, GraphEdge, GraphNode, NodeDetail, NodeType, PositionStatus } from './types'
-import type { EChartsModel } from './graph-layout'
+import { enforceSpread, hasPositionOverlap, type EChartsModel } from './graph-layout'
 import { COLOR_BY_STATUS, computeFilterMarks, isSoftSkill, skillLabelThreshold } from './graph-utils'
-import { domainCommunityColor, graphColors, graphNodeColor, GRAPH_OPACITY, skillCategoryColor } from './graph-visual-tokens'
+import { domainCommunityColor, graphColors, graphNodeColor, GRAPH_OPACITY, portraitDimensionColor, skillCategoryColor } from './graph-visual-tokens'
 import { buildDagGraph, type DagSkillLink, type DagSkillNode } from '@/components/learning/learning-timeline'
 import type { LearningPathItem } from '@/components/match/types'
 import { GraphFilterPanel } from './graph-filter-panel'
@@ -45,8 +45,6 @@ interface Graph2DProps {
   learningPath?: LearningPathItem[]
   /** 已掌握技能集（DAG 节点灰/蓝/绿编码依据） */
   completedSkills?: string[]
-  /** 演化时间轴标记（P0-2）：本版新增绿环 / 消亡橙虚线（打标不剔除） */
-  evolutionMarks?: { addedIds: Set<string>; removedIds: Set<string> } | null
   /** 技能标签 Top-N 白名单（技术栈视图降噪：仅集合内技能在 LOD band 1 常显标签） */
   skillLabelTopIds?: Set<string> | null
   /** 环形布局（技术栈/岗位画像视图）：技能按频次顺时针排外圈、岗位/属性维度聚内圈，
@@ -143,8 +141,11 @@ function colorOf(node: GraphNode, dark: boolean): string {
   }
   if (node.type === 'position') return graphNodeColor(theme, 'position', node.status ?? 'candidate')
   if (isSoftSkill(node)) return graphNodeColor(theme, 'softSkill')
-  // 画像维度属性（薪资/经验等，positionPortrait 视图）：紫罗兰区别于技能类目色
-  if (node.type === 'attr') return graphNodeColor(theme, 'attr')
+  // 画像维度属性（薪资/经验等，positionPortrait 视图）：按维度分类着色，
+  // 非画像维度 attr 回落统一紫罗兰（graphNodeColor attr）
+  if (node.type === 'attr') {
+    return portraitDimensionColor(node.id, node.name, theme) ?? graphNodeColor(theme, 'attr')
+  }
   if (node.type === 'skill') {
     // 08-28 技术栈降噪：技能按类目着色（s_category 随 view 接口下发），
     // 未收录类目回落默认技能色
@@ -164,13 +165,16 @@ function sizeOf(node: GraphNode, displayValue?: number): number {
   return Math.min(54, Math.max(14, scaled))
 }
 
-/** 单条边的基础视觉（宽/色/线型/透明度）——option 构建与悬停离场复位共用一套口径 */
+/** 单条边的基础视觉（宽/色/线型/透明度）——option 构建与悬停离场复位共用一套口径。
+ *  boost=全景（力导向）视图提亮档：低权必备边 0.08 起步在密集画布上近不可见，
+ *  抬高透明度下限并加粗线宽；技术栈环形视图走自身降噪，不传 boost。 */
 function edgeBaseStyle(
   edge: GraphEdge,
   nodeById: Map<string, GraphNode>,
   colors: ReturnType<typeof graphColors>,
   dimmed: boolean,
   weightNorm = 0,
+  boost = false,
 ) {
   const source = nodeById.get(edge.source)
   const target = nodeById.get(edge.target)
@@ -187,7 +191,13 @@ function edgeBaseStyle(
   // 08-28 技术栈降噪：岗位关系边透明度/线宽按权重渐变——低权边压暗到近隐约，
   // 高权边保持可读，悬停邻接提亮仍由 hover 直改机制叠加
   const width =
-    kind === 'must' ? 0.7 + 1.1 * weightNorm : kind === 'nice' ? 0.5 + 0.8 * weightNorm : base.width
+    kind === 'must'
+      ? (boost ? 1.0 : 0.7) + 1.1 * weightNorm
+      : kind === 'nice'
+        ? (boost ? 0.7 : 0.5) + 0.8 * weightNorm
+        : boost
+          ? base.width + 0.2
+          : base.width
   return {
     kind,
     ...base,
@@ -195,9 +205,23 @@ function edgeBaseStyle(
     opacity: dimmed
       ? FILTER_DIM_EDGE_OPACITY
       : kind === 'membership' || kind === 'shared'
-        ? 0.45
-        : 0.08 + 0.42 * weightNorm,
+        ? boost
+          ? 0.6
+          : 0.45
+        : (boost ? 0.22 : 0.08) + 0.46 * weightNorm,
   }
+}
+
+/** 技术栈环形视图边降噪（08-31 #713 后继续收紧）：主视觉由「高权必备边」承担，
+ *  低权必备与加分边逐级压暗成背景，避免 479 条高密度边在中心叠成"灰雾"。
+ *  - must 必备边：按权重做对比强化（weak→近隐、strong→醒目）
+ *  - nice/其他边：整体更弱，只随权重缓升且明显低于必备边
+ *  静态 option 构建与悬停离场复位共用，悬停一次后复位仍是同一降噪值，
+ *  不会让弱边"复活"变明显。 */
+function applyTechStackDenoise(baseOpacity: number, norm: number, kind: string): number {
+  return kind === 'must'
+    ? baseOpacity * (0.55 + 0.9 * norm)
+    : Math.min(baseOpacity, 0.07 + norm * 0.12)
 }
 
 function isNarrowScreen(): boolean {
@@ -227,6 +251,66 @@ function hexToRgba(hex: string, alpha: number): string {
   if (!m) return hex
   const n = parseInt(m[1], 16)
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`
+}
+
+// ── 属性维度长标签自动换行（画像视图薪资/经验/学历等）──────────────────
+// 货币范围类标签（如 "200.00-260,000 USD annually×2"）单行横向溢出会压到
+// 邻近节点；按近似显示宽度分多行。CJK 逐字算宽 2，ASCII/数字/半角标点按 1。
+function labelCharWidth(ch: string): number {
+  return /[\u2e80-\u9fff\uf900-\ufaff]/.test(ch) ? 2 : 1
+}
+
+function wrapByWidth(text: string, maxWidth: number): string[] {
+  const lines: string[] = []
+  let cur = ''
+  let w = 0
+  const flush = () => {
+    if (cur) {
+      lines.push(cur)
+      cur = ''
+      w = 0
+    }
+  }
+  // 按空格拆 token：尽量在词/段边界断行，货币范围等数字串作为整段保留不劈开
+  // （避免原逐字符切分把 "226,100.00" 拦腰拆成两行）。罕见超长 token 才强制按字切分。
+  for (const token of text.split(' ')) {
+    const tw = [...token].reduce((acc, ch) => acc + labelCharWidth(ch), 0)
+    const gap = cur ? 1 : 0
+    if (w + gap + tw > maxWidth) flush()
+    if (tw > maxWidth) {
+      flush()
+      let piece = ''
+      let pw = 0
+      for (const ch of token) {
+        const cw = labelCharWidth(ch)
+        if (pw + cw > maxWidth && piece) {
+          lines.push(piece)
+          piece = ''
+          pw = 0
+        }
+        piece += ch
+        pw += cw
+      }
+      if (piece) lines.push(piece)
+      continue
+    }
+    cur += (cur ? ' ' : '') + token
+    w += gap + tw
+  }
+  if (cur) lines.push(cur)
+  return lines
+}
+
+/** 画像维度子节点（attr，非大类）长标签换行：计数后缀（×N）置于末行，
+ *  读归属更清晰；短标签（含后缀后仍放得下）保持单行，避免无谓换行。 */
+function wrapDimensionLabel(name: string, maxWidth = 14): string {
+  const m = /^(.*?)([×x]\d{1,3})\s*$/.exec(name)
+  const body = (m ? m[1] : name).trim()
+  const suffix = m ? m[2] : ''
+  const widthOf = (s: string) => [...s].reduce((acc, ch) => acc + labelCharWidth(ch), 0)
+  if (widthOf(body) + widthOf(suffix) <= maxWidth) return name
+  const lines = wrapByWidth(body, maxWidth)
+  return suffix ? [...lines, suffix].join('\n') : lines.join('\n')
 }
 
 /** 宏观 DAG option：按拓扑层做分层定位 + 状态配色 + 先修有向箭头（lr 布局） */
@@ -340,7 +424,6 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     onToggleDomain,
     learningPath,
     completedSkills,
-    evolutionMarks,
     skillLabelTopIds,
     ringLayout,
     className,
@@ -349,6 +432,25 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
+  // 渲染中的 graph data 数组引用（option data: nodes 使用同一批对象）；拖拽碰撞
+  // 推开时直接改其坐标并用 setOption 引用同一数组做 name-diff 更新，保证生效且
+  // 与渲染数据一致（getRawDataItem 拿到的是 ECharts 内部副本，改写不落回渲染源）
+  const renderNodesRef = useRef<GraphNode[]>([])
+  // 环形视图（techStack/岗位画像）进入过渡：进入视图时容器以淡入+轻微缩放接入，
+  // 与 ECharts 节点生长衔接成连贯入场，避免"整图直接硬出现再补生长"的割裂感。
+  // 用"复位再重放 animation"而非 key 重挂容器——重挂会重建 ECharts 实例致图丢失。
+  const [playRingIn, setPlayRingIn] = useState(true)
+  const ringIntroHandledRef = useRef(false)
+  useEffect(() => {
+    if (!ringIntroHandledRef.current) {
+      ringIntroHandledRef.current = true
+      return
+    }
+    if (!ringLayout) return
+    setPlayRingIn(false)
+    const id = requestAnimationFrame(() => setPlayRingIn(true))
+    return () => cancelAnimationFrame(id)
+  }, [ringLayout])
   const [themeVersion, setThemeVersion] = useState(0)
   const [isNarrow, setIsNarrow] = useState(() => isNarrowScreen())
   const [minWeight, setMinWeight] = useState(0)
@@ -437,25 +539,34 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   // parsePercent 当作 0.x 像素，镜头每次都锚到图原点外，全图被推出画布外。
   const focusNode = useCallback(
     (id: string) => {
-      const chart = chartRef.current
-      if (!chart) return
-      const point = resolveNodePoint(id)
-      if (!point) return
-      chart.setOption({
-        series: [{ zoom: 2.4, center: point, animationDurationUpdate: 0 }],
-      })
-      // 编程式聚焦放大也会改变 zoom 档位——同步 LOD（前端聚焦到 2.4 → 全量标签）
-      applyLodBand(2.4)
-      // 定位目标常随岗位/域刚展开上画布，力导向仍在迭代、坐标持续漂移——
-      // 800ms 后按最新坐标校正一次镜头（漂移 ≤8px 视为已静止，不重设）
-      window.setTimeout(() => {
-        const settled = resolveNodePoint(id)
-        if (!settled || !chartRef.current) return
-        if (Math.abs(settled[0] - point[0]) <= 8 && Math.abs(settled[1] - point[1]) <= 8) return
-        chartRef.current.setOption({
-          series: [{ zoom: 2.4, center: settled, animationDurationUpdate: 0 }],
+      let attempts = 0
+      const tryFocus = () => {
+        const chart = chartRef.current
+        if (!chart) return
+        const point = resolveNodePoint(id)
+        if (!point) {
+          // 目标常随岗位/域刚展开上画布，坐标尚未生成——与 flyTo 同口径短间隔重试，
+          // 否则搜索定位静默失效
+          if (++attempts < FLY_MAX_ATTEMPTS) window.setTimeout(tryFocus, 250)
+          return
+        }
+        chart.setOption({
+          series: [{ zoom: 2.4, center: point, animationDurationUpdate: 0 }],
         })
-      }, 800)
+        // 编程式聚焦放大也会改变 zoom 档位——同步 LOD（前端聚焦到 2.4 → 全量标签）
+        applyLodBand(2.4)
+        // 定位目标常随岗位/域刚展开上画布，力导向仍在迭代、坐标持续漂移——
+        // 800ms 后按最新坐标校正一次镜头（漂移 ≤8px 视为已静止，不重设）
+        window.setTimeout(() => {
+          const settled = resolveNodePoint(id)
+          if (!settled || !chartRef.current) return
+          if (Math.abs(settled[0] - point[0]) <= 8 && Math.abs(settled[1] - point[1]) <= 8) return
+          chartRef.current.setOption({
+            series: [{ zoom: 2.4, center: settled, animationDurationUpdate: 0 }],
+          })
+        }, 800)
+      }
+      tryFocus()
     },
     [resolveNodePoint, applyLodBand],
   )
@@ -522,6 +633,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           value: d.displayValue ?? d.value,
           isDomain: d.isDomain,
           memberCount: d.memberCount,
+          description: d.description ?? undefined,
+          jd_source_count: d.jd_source_count ?? undefined,
         })
       }
     })
@@ -535,7 +648,13 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     })
 
     chart.getZr().on('dblclick', (params) => {
-      if (!params.target) resetView()
+      if (!params.target) {
+        // 仅在视角已缩放时才复位：默认缩放下双击空白（演示中习惯性操作）不应触发镜头跳变
+        const opt = chart.getOption() as { series?: { zoom?: number }[] }
+        const zoom = opt.series?.[0]?.zoom
+        if (typeof zoom === 'number' && Math.abs(zoom - 1) < 0.01) return
+        resetView()
+      }
     })
 
     // ── 语义缩放 (LOD)：监听 roam（平移/缩放）更新标签档位 ──
@@ -545,6 +664,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       if (typeof zoom === 'number') applyLodBand(zoom)
     }
     chart.on('roam', onRoam)
+
+    // ── 拖拽推开：统一 force 布局后由力导向引擎接管（拖到任意节点时相邻节点
+    // 被力场实时排斥推开），不再需要 layout:'none' 下的手动 dragend 分离。
 
     chart.getZr().on('click', (params) => {
       if (!params.target) onSelectNode(null)
@@ -556,11 +678,22 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       chart.dispose()
       chartRef.current = null
     }
-  }, [onSelectNode, onTogglePosition, onToggleDomain, resetView, applyLodBand])
+  }, [onSelectNode, onTogglePosition, onToggleDomain, resetView, applyLodBand, ringLayout])
 
   useEffect(() => {
     if (!containerRef.current) return
-    const ro = new ResizeObserver(() => {
+    let lastW = 0
+    let lastH = 0
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect
+      if (!box) return
+      const w = Math.round(box.width)
+      const h = Math.round(box.height)
+      // 尺寸未变的 RO tick 直接忽略：size 递增会驱动主 effect 全量 setOption 重建，
+      // 拖拽窗口期间的连续无变化回调是可感知的掉帧源
+      if (w === lastW && h === lastH) return
+      lastW = w
+      lastH = h
       chartRef.current?.resize()
       setSize((s) => s + 1)
     })
@@ -613,7 +746,30 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const mutedColor = colors.muted
     const borderColor = colors.border
     const labelThreshold = skillLabelThreshold(data.nodes)
+    // 岗位画像视图判定：环形布局 + 存在 attr 维度节点（薪资/经验/学历）。
+    // 用于该视图专属的入场动画、中心岗位聚焦、悬浮动画与节点拖拽；
+    // techStack 环形无 attr 不算。提前计算供 nodes 映射与 series 配置复用。
+    const portraitView = ringLayout && data.nodes.some((n) => n.type === 'attr')
 
+    // 技术栈视图标签优化：每个类目组的代表技能（组内 Top-2）纳入常显白名单，
+    // 与 graph-page 的全局 Top-30 并集——保证每个类目在 LOD band 1 都有标签代表，
+    // 而不是只有全局高频技能（低频类目会整组无标签）
+    let categoryRepIds: Set<string> | null = null
+    if (ringLayout && !data.nodes.some((n) => n.type === 'attr')) {
+      categoryRepIds = new Set<string>()
+      const byCat = new Map<string, GraphNode[]>()
+      for (const n of data.nodes) {
+        if (n.type !== 'skill') continue
+        const key = skillCategoryColor(n.skill_category) ?? 'other'
+        const arr = byCat.get(key)
+        if (arr) arr.push(n)
+        else byCat.set(key, [n])
+      }
+      for (const arr of byCat.values()) {
+        arr.sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+        for (const n of arr.slice(0, 2)) categoryRepIds.add(n.id)
+      }
+    }
     const nodes = data.nodes.map((n) => {
       const dimmed = filterMarks.dimNodeIds.has(n.id)
       return {
@@ -648,13 +804,6 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
             : {}),
           // 待归类桶弱化（P1-2）：虚线描边 + 降透明度，兜底域不与实域抢视觉权重
           ...(n.isUncategorized && !dimmed ? { borderType: 'dashed' as const, borderWidth: 2, opacity: 0.6 } : {}),
-          // 演化时间轴打标（P0-2）：本版新增绿环高亮 / 消亡橙虚线（打标不剔除）
-          ...(evolutionMarks?.addedIds.has(n.id) && !dimmed
-            ? { borderColor: '#22c55e', borderWidth: 3, shadowBlur: 18, shadowColor: 'rgba(34,197,94,0.7)' }
-            : {}),
-          ...(evolutionMarks?.removedIds.has(n.id) && !dimmed
-            ? { borderColor: '#f97316', borderWidth: 2, borderType: 'dashed' as const }
-            : {}),
           ...(dimmed ? { opacity: FILTER_DIM_OPACITY } : {}),
         },
         label: {
@@ -662,21 +811,18 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           // - band 0（zoom<0.55）：仅岗位 + 画像维度属性
           // - band 1（0.55≤zoom<1.2）：岗位 + 高权重技能（≥中位阈值）
           // - band 2（zoom≥1.2）：全量（含低权技能）
-          // 演化打标节点标签强制显示（不受 LOD 压制——时间轴叙事主角）
           // 画像维度属性（薪资/经验等）与岗位同档常显——属性值即节点信息本体
           show: dimmed
             ? false
-            : evolutionMarks && (evolutionMarks.addedIds.has(n.id) || evolutionMarks.removedIds.has(n.id))
-              ? true
-              : n.isDomain || n.type === 'position' || n.type === 'attr'
-                ? lodBand >= 0
-                : n.type === 'skill'
-                ? lodBand === 2 ||
-                  (lodBand >= 1 &&
-                    (skillLabelTopIds
-                      ? skillLabelTopIds.has(n.id)
-                      : (n.value ?? 0) >= labelThreshold))
-                : false,
+            : n.isDomain || n.type === 'position' || n.type === 'attr'
+              ? lodBand >= 0
+              : n.type === 'skill'
+              ? lodBand === 2 ||
+                (lodBand >= 1 &&
+                  ((skillLabelTopIds?.has(n.id) ?? false) ||
+                    (categoryRepIds?.has(n.id) ?? false) ||
+                    (!skillLabelTopIds && !categoryRepIds && (n.value ?? 0) >= labelThreshold)))
+              : false,
           position: 'right',
           color: textColor,
           fontSize: 11,
@@ -689,7 +835,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
               ? `{a|${n.name} · ${n.memberCount ?? 0} 岗}`
               : n.type === 'position'
                 ? `{a|${n.name}}`
-                : n.name,
+                : n.type === 'attr' && !(n as GraphNode).portrait_category
+                  ? wrapDimensionLabel(n.name)
+                  : n.name,
           rich: {
             a: { fontWeight: 600, fontSize: 12 },
           },
@@ -699,6 +847,10 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         emphasis: {
           focus: 'adjacency',
           blurScope: 'coordinateSystem',
+          // 岗位画像视图悬浮动画：节点 hover 放大 1.25×（覆盖系列默认 1.1×，
+          // 放大更醒目）+ shadowBlur 辉光 + 邻接边提亮，三者同现形成明确的
+          // "被聚焦"反馈；仅画像视图开启，其余视图保持默认 1.1× 克制缩放
+          ...(portraitView ? { scale: 1.25 } : {}),
           itemStyle: {
             shadowBlur: 24,
             shadowColor: colorOf(n, dark),
@@ -710,9 +862,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     })
 
     // 层级画像布局（positionPortrait 专用）：岗位居中，大类节点（技能/软技能/
-    // 薪资/经验/学历，portrait_category 标记）环绕中层，各自小节点按归属大类
-    // 扇区排外环——扇区内按计数降序交替向两侧展开（最大条目居中贴父连线）、
-    // 超过 8 个双排错半径防标签互压。
+    // 薪资/经验/学历，portrait_category 标记）中层圆环均分，各自小节点按归属
+    // 大类扇区等角顺排外环——08-29 初版对称口径（f468efb7 的降序左右交替 +
+    // 双排错半径使版式不对称，09-04 用户要求回退固定对称版式）。
     if (ringLayout && nodes.some((n) => n.type === 'attr')) {
       const rect = containerRef.current?.getBoundingClientRect()
       const W = rect?.width || 900
@@ -725,14 +877,11 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         ;(n as GraphNode & { x?: number; y?: number }).y = y
       }
       const center = nodes.find((n) => n.type === 'position')
-      // 大类按孩子数降序交替排列（孩子多的扇区彼此岔开，防上挤下空）
-      const categories = nodes
-        .filter(
-          (n) =>
-            (n as GraphNode).portrait_category ||
-            (n as { portrait_category?: boolean }).portrait_category,
-        )
-        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      const categories = nodes.filter(
+        (n) =>
+          (n as GraphNode).portrait_category ||
+          (n as { portrait_category?: boolean }).portrait_category,
+      )
       const parentOf = new Map<string, string>()
       const byParent = new Map<string, string[]>()
       for (const e of data.edges) {
@@ -744,37 +893,42 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         }
       }
       if (center) place(center, CX, CY)
-      const R1 = minDim * 0.27
-      // 大类从 0°（右，E/技术方向）起顺时针交替：第 1 大类右侧、第 2 大类左侧……
+      // 大类节点：中层圆环均分，自顶部（12 点方向）起顺时针等角——对称固定
+      const R1 = minDim * 0.26
       categories.forEach((n, i) => {
-        const turn = Math.ceil(i / 2) * (i % 2 === 0 ? 1 : -1)
-        const angle = turn * (Math.PI * 2) / Math.max(1, categories.length)
+        const angle = (i / Math.max(1, categories.length)) * Math.PI * 2 - Math.PI / 2
         place(n, CX + R1 * Math.cos(angle), CY + R1 * Math.sin(angle))
       })
-      // 小节点：父大类扇区内交替展开 + 双排错半径
-      const R2 = minDim * 0.47
+      // 小节点：父大类扇区内等角顺排（扇区角宽 = 2π/k × 0.82 留间隙）。
+      // 容量法多环防重叠：每环按"节点 24px + 标签间距 20px"的扇区弧长容量装，
+      // 放不下外扩一圈（环距 64px）——圈越大容量越大必然收敛；环内仍等角均分，
+      // 不同大类的扇区互不侵入，子节点/相邻类之间均不重叠。
+      const R2 = minDim * 0.46
+      const sectorWidth = (Math.PI * 2) / Math.max(1, categories.length) * 0.82
+      const CHILD_PITCH = 44
+      const CHILD_RING_STEP = 64
       for (const [catIdx, cat] of categories.entries()) {
         const children = ((byParent.get(cat.id) ?? []) as string[])
           .map((id) => nodes.find((n) => n.id === id))
           .filter(Boolean) as (typeof nodes)[number][]
         if (children.length === 0) continue
-        const turn = Math.ceil(catIdx / 2) * (catIdx % 2 === 0 ? 1 : -1)
-        const sectorCenter = turn * (Math.PI * 2) / Math.max(1, categories.length)
-        const sectorWidth = (Math.PI * 2) / Math.max(1, categories.length) * 0.8
-        const twoRows = children.length > 8
-        children.forEach((n, j) => {
-          // 计数降序已由后端保证：最大的孩子居中，向两侧交替展开
-          const side = j % 2 === 0 ? 1 : -1
-          const step = Math.floor((j + 1) / 2)
-          const offset =
-            children.length === 1 ? 0 : (step / Math.ceil(children.length / 2)) * (sectorWidth / 2) * side
-          const radius = twoRows && j % 2 === 1 ? R2 * 1.16 : R2
-          place(
-            n,
-            CX + radius * Math.cos(sectorCenter + offset),
-            CY + radius * Math.sin(sectorCenter + offset),
-          )
-        })
+        const centerAngle = (catIdx / Math.max(1, categories.length)) * Math.PI * 2 - Math.PI / 2
+        let placed = 0
+        let ring = 0
+        while (placed < children.length) {
+          const r = R2 + ring * CHILD_RING_STEP
+          const cap = Math.max(1, Math.floor((r * sectorWidth) / CHILD_PITCH))
+          const batch = children.slice(placed, placed + cap)
+          batch.forEach((n, idx) => {
+            const angle =
+              batch.length === 1
+                ? centerAngle
+                : centerAngle + (idx / (batch.length - 1) - 0.5) * sectorWidth
+            place(n, CX + r * Math.cos(angle), CY + r * Math.sin(angle))
+          })
+          placed += batch.length
+          ring += 1
+        }
       }
       // 标签按象限定位（共用助手，防标签压放射连线）；
       // 大类节点标签加粗放大（维度名即分组标题）
@@ -791,21 +945,11 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     }
 
     // 环形布局坐标注入（layout:'none' 直接消费节点 x/y）：
-    // 技能按频次降序顺时针铺外圈（半径 420），岗位/画像维度节点按关联度降序铺内圈
-    // （半径 170），同圈角间距均分——放射状边从内圈放射到外圈，
-    // "技能→服务岗位 / 岗位→画像维度"读向清晰。
+    // 技能按类目聚簇铺外圈（同类技能连续占一段弧，一眼看技术版图），
+    // 岗位按关联度降序铺内圈，同圈角间距均分——放射状边从内圈放射到外圈，
+    // "技能→服务岗位"读向清晰。容量法排环：每环节点数由"节点直径 + 标签
+    // 余量"的周长容量决定，放不下就外扩一层——杜绝固定半径下的节点重叠。
     if (ringLayout && !nodes.some((n) => n.type === 'attr')) {
-      const skills = nodes
-        .filter((n) => n.type === 'skill')
-        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-      // 内圈承载岗位（技术栈视图）或 中心岗位+属性维度（岗位画像视图）
-      const positions = nodes
-        .filter((n) => n.type !== 'skill')
-        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-      // none 布局数据坐标直接映射视口：原点取画布实际中心（容器像素，实时读取），
-      // ECharts series.center 对已有 roam 状态不生效（线上偏移实证）。
-      // 容量法排环：每环节点数由"节点直径 + 标签余量"的周长容量决定，
-      // 放不下就外扩一层——杜绝固定半径下的节点重叠（线上实证 30 岗挤双环）。
       const rect = containerRef.current?.getBoundingClientRect()
       const W = rect?.width || 900
       const H = rect?.height || 640
@@ -816,31 +960,151 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         ;(n as GraphNode & { x?: number; y?: number }).x = CX + radius * Math.cos(angle)
         ;(n as GraphNode & { x?: number; y?: number }).y = CY + radius * Math.sin(angle)
       }
-      // 外圈技能：半径用满画布（短边 48%），120 技能节点 18px 在该半径下
-      // 弧间距 ≈ 2πR/120 ≈ 17px+ ——仍略挤，标签只留 Top-30（skillLabelTopIds）
-      const R_OUTER = minDim * 0.47
-      skills.forEach((n, i) => {
-        place(n, R_OUTER, (i / Math.max(1, skills.length)) * Math.PI * 2 - Math.PI / 2)
+
+      // 技能按类目聚簇：SKILL_CATEGORY_PALETTE 的类目匹配技能 skill_category，
+      // 命中即归组（同色），未命中归"其他"。组内按频次降序；组间按成员数降序，
+      // 每组连续占外圈一段弧（段长 ∝ 组内技能数）——同类技能挨在一起，
+      // 一眼看清技术版图的类目构成。
+      const skills = nodes
+        .filter((n) => n.type === 'skill')
+        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      const skillGroups = new Map<string, (typeof nodes)[number][]>()
+      for (const n of skills) {
+        const color = skillCategoryColor(n.skill_category)
+        // 用类目色作为分组 key：同色即同类（与画布着色口径一致）
+        const key = color ?? 'other'
+        const arr = skillGroups.get(key)
+        if (arr) arr.push(n)
+        else skillGroups.set(key, [n])
+      }
+      const groups = [...skillGroups.entries()].sort((a, b) => b[1].length - a[1].length)
+      // 外圈技能多环排布（拥挤优化）：120 技能挤一圈弧间距仅 ~15px 过挤。
+      // 每环按"技能节点 24px + 间距 20px"的周长容量装，放不下外扩一层；
+      // 每个类目组尽量连续占当前环一段弧（同色技能挨一起），超容量的组拆到
+      // 下一环续排——同类仍连续、环间自然分层，彻底消除单环拥挤。
+      const SKILL_NODE_PX = 24
+      const SKILL_GAP = 20
+      const SKILL_RING_STEP = 64
+      let outerRingR = minDim * 0.47
+      let placedOnRing = 0
+      let outerRingCapacity = Math.floor((2 * Math.PI * outerRingR) / (SKILL_NODE_PX + SKILL_GAP))
+      // 每个技能节点的放置角度（跨环累计，先铺满第一环再外扩）
+      const skillAngles: { n: (typeof nodes)[number]; angle: number; r: number }[] = []
+      for (const [, group] of groups) {
+        for (const n of group) {
+          if (placedOnRing >= outerRingCapacity) {
+            outerRingR += SKILL_RING_STEP
+            placedOnRing = 0
+            outerRingCapacity = Math.max(
+              1,
+              Math.floor((2 * Math.PI * outerRingR) / (SKILL_NODE_PX + SKILL_GAP)),
+            )
+          }
+          skillAngles.push({
+            n,
+            angle:
+              (placedOnRing / Math.max(1, outerRingCapacity)) * Math.PI * 2 -
+              Math.PI / 2,
+            r: outerRingR,
+          })
+          placedOnRing += 1
+        }
+      }
+      for (const { n, angle, r } of skillAngles) place(n, r, angle)
+
+      // 岗位内圈：按"目标角度"排序铺多环（环间距 84px）——每个岗位的目标角度
+      // 由其关联技能（edges 中 target=该岗位）的放置角度按权重加权平均求得，
+      // 使岗位落在其高频技能簇的方向上：放射边更短、交叉更少、岗位-技能簇
+      // 视觉汇聚，比纯均分分布更贴合"岗位服务哪些技术"的语义。
+      // 容量法：每环按"岗位节点上限 52px + 间距 34px"的周长容量装，装不下外扩一层
+      const positions = nodes
+        .filter((n) => n.type !== 'skill')
+        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+      // skillId → 放置角度（取自技能环铺排结果）
+      const skillAngleOf = new Map<string, number>()
+      for (const { n, angle } of skillAngles) skillAngleOf.set(n.id, angle)
+      // 岗位 → 目标角度（关联技能角度加权平均；无关联回落 null → 保持原均分排序）
+      const positionTargetAngle = new Map<string, number>()
+      for (const p of positions) {
+        let sum = 0
+        let weightSum = 0
+        for (const e of data.edges) {
+          if (e.target !== p.id) continue
+          const angle = skillAngleOf.get(e.source)
+          if (angle === undefined) continue
+          const w = e.weight ?? 1
+          sum += angle * w
+          weightSum += w
+        }
+        if (weightSum > 0) positionTargetAngle.set(p.id, sum / weightSum)
+      }
+      const positionsSorted = [...positions].sort((a, b) => {
+        const ta = positionTargetAngle.get(a.id)
+        const tb = positionTargetAngle.get(b.id)
+        if (ta === undefined && tb === undefined) return (b.value ?? 0) - (a.value ?? 0)
+        if (ta === undefined) return 1
+        if (tb === undefined) return -1
+        return ta - tb
       })
-      // 岗位多环：起始环 0.22×短边（给内区留呼吸空间），环间距 84px；
-      // 每环按"岗位节点上限 52px + 间距 34px"的周长容量装，装不下外扩一层
       const NODE_GAP = 34
       const POS_NODE_PX = 52 // 岗位节点直径上限（sizeOf 34-52）
+      // 岗位内圈半径封顶：外圈技能从 0.47×短边起排，岗位环须 ≤0.42×短边，
+      // 中间留 ~5% 间隙避免内外环节点/标签相互挤压
+      const POS_MAX_RING_R = minDim * 0.42
       let ringR = Math.max(150, minDim * 0.22)
       let placedInRing = 0
       let ringCapacity = Math.floor((2 * Math.PI * ringR) / (POS_NODE_PX + NODE_GAP))
-      positions.forEach((n) => {
+      positionsSorted.forEach((n) => {
         if (placedInRing >= ringCapacity) {
-          ringR += 84
+          ringR = Math.min(POS_MAX_RING_R, ringR + 84)
           placedInRing = 0
-          ringCapacity = Math.floor((2 * Math.PI * ringR) / (34 + NODE_GAP))
+          ringCapacity = Math.max(1, Math.floor((2 * Math.PI * ringR) / (POS_NODE_PX + NODE_GAP)))
         }
+        // 环内从目标角度起始排（避免整环都从 0° 起、岗位偏移到对侧），
+        // 无目标角度的岗位仍按原均分逻辑（环错位 180° 防内外环同位重叠）
+        const start = positionTargetAngle.get(n.id) ?? 0
         const angle =
+          start +
           (placedInRing / Math.max(1, ringCapacity)) * Math.PI * 2 +
           (ringR === Math.max(110, minDim * 0.14) ? 0 : Math.PI / ringCapacity)
         place(n, ringR, angle)
         placedInRing += 1
       })
+
+      // 岗位节点防重叠斥力分离（几何后处理）：目标角度驱动的岗位排布可能让
+      // 同一环内相邻岗位或内外环同位岗位间距不足（岗位节点 34-54px，目标角度
+      // 相近者尤其）。此处对岗位两两检测：间距 < 半径和 + 间隙则沿连线方向
+      // 双向推开，迭代收敛。纯几何修正，不改节点结构/圆环整体——区别于
+      // force 布局图的 enforceSpread（chart 层访问私有 API），这里直接在
+      // nodes.x/y 上推进（layout:'none' 直接消费这些坐标）。半径取自 sizeOf。
+      const posNodes = nodes.filter((nn) => nn.type === 'position') as (GraphNode & {
+        x?: number
+        y?: number
+      })[]
+      const POS_MIN_GAP = 30
+      const POS_SEP_ITER = 6
+      for (let it = 0; it < POS_SEP_ITER; it++) {
+        for (let i = 0; i < posNodes.length; i++) {
+          const a = posNodes[i]
+          if (a.x == null || a.y == null) continue
+          for (let j = i + 1; j < posNodes.length; j++) {
+            const b = posNodes[j]
+            if (b.x == null || b.y == null) continue
+            const dx = b.x - a.x
+            const dy = b.y - a.y
+            const dist = Math.sqrt(dx * dx + dy * dy)
+            const minDist = sizeOf(a) / 2 + sizeOf(b) / 2 + POS_MIN_GAP
+            if (dist < 1 || dist >= minDist) continue
+            const push = (minDist - dist) / 2
+            const nx = dx / dist
+            const ny = dy / dist
+            a.x -= nx * push
+            a.y -= ny * push
+            b.x += nx * push
+            b.y += ny * push
+          }
+        }
+      }
       // 标签按象限定位（共用助手）：外圈技能标签朝画布外侧、内圈岗位朝圆心反方向，
       // 避免全部朝右横穿环体与放射边（原固定 position:'right' 的遗漏面）
       applyRadialLabelPositions(nodes as (GraphNode & { x?: number; y?: number; label?: { position?: string } })[], CX, CY)
@@ -851,16 +1115,22 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     // 直改边元素实现，不进 option。
     const nodeById = new Map(data.nodes.map((node) => [node.id, node]))
     const maxWeight = data.edges.reduce((mx, e) => Math.max(mx, e.weight ?? 0), 0)
+    // 技术栈视图标志：环形布局且无 attr 节点（只有技能+岗位）
+    const techStackRing = ringLayout && !nodes.some((n) => n.type === 'attr')
     const links = data.edges.map((edge, index) => {
       const dimmed = filterMarks.dimEdgeFlags[index]
       const norm = maxWeight > 0 ? Math.min(1, (edge.weight ?? 0) / maxWeight) : 0
-      const base = edgeBaseStyle(edge, nodeById, colors, dimmed, norm)
+      const base = edgeBaseStyle(edge, nodeById, colors, dimmed, norm, !ringLayout)
+      // 技术栈视图连线优化：nice（加分）边加曲线使交叉边分叉错开，减弱毛线球感；
+      // 技术栈视图用 applyTechStackDenoise 逐级压暗（弱权/加分近背景，高权必备醒目）
+      const curveness = techStackRing && !dimmed && base.kind === 'nice' ? 0.16 : base.curveness
+      const opacity = techStackRing && !dimmed ? applyTechStackDenoise(base.opacity, norm, base.kind) : base.opacity
       return {
         source: edge.source,
         target: edge.target,
         value: edge.weight,
         silent: dimmed,
-        lineStyle: { width: base.width, type: base.type, color: base.color, curveness: base.curveness, opacity: base.opacity },
+        lineStyle: { width: base.width, type: base.type, color: base.color, curveness, opacity },
         emphasis: { lineStyle: { opacity: 0.95, width: 2.4, color: base.kind === 'nice' ? colors.edgeOptional : colors.edgeStrong } },
       }
     })
@@ -869,6 +1139,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       backgroundColor: 'transparent',
       tooltip: {
         trigger: 'item',
+        // 画布 Card 为 overflow-hidden，靠边节点的 tooltip 不加 confine 会被裁切
+        confine: true,
         backgroundColor: colors.tooltip,
         borderColor: colors.tooltipBorder,
         borderWidth: 1,
@@ -879,10 +1151,6 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           const lines: string[] = [`<b>${escapeHtml(d.name)}</b>`]
           lines.push(`类型: ${escapeHtml(d.type === 'attr' ? '画像维度' : isSoftSkill(d) ? '软技能' : d.type)}`)
           if (d.type === 'position' && d.status) lines.push(`状态: ${escapeHtml(d.status)}`)
-          if (evolutionMarks?.addedIds.has(d.id))
-            lines.push('<span style="color:#22c55e;font-size:11px">● 本版新增</span>')
-          else if (evolutionMarks?.removedIds.has(d.id))
-            lines.push('<span style="color:#f97316;font-size:11px">◌ 本版消亡</span>')
           if (d.type === 'skill' && d.skill_category && !isSoftSkill(d)) {
             lines.push(`类目: ${escapeHtml(d.skill_category)}`)
           }
@@ -903,18 +1171,50 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       series: [
         {
           type: 'graph',
-          // 环形布局：固定坐标（技能外圈按频次顺时针 / 岗位内圈），无布局抖动；
-          // 其余视图维持力导向（拖拽探索语义）
+          // 回退为混合布局：techStack/岗位画像（ringLayout）恢复 layout:'none'
+          // 固定坐标——坐标已按"岗位内圈、技能外圈"预计算注入，形态稳定不变形；
+          // 其余视图（全景等）保持力导向拖拽探索语义。固定坐标下的推拉交互
+          // 不稳定，本轮不再强求（拖拽探索交由力导向视图提供）。
           layout: ringLayout ? 'none' : 'force',
           roam: true,
-          draggable: !ringLayout,
+          // 岗位画像固定排布不可拖（节点位置须稳定）；技术栈环形保留拖动微调（漂浮语义）；力导向视图天然可拖
+          draggable: !ringLayout || techStackRing,
           cursor: 'pointer',
           // 镜头保持：仅首建/视图切换时重置中心，其余重建不动当前视角
           ...(resetCamera ? { center: ['50%', '50%'] as [string, string] } : {}),
           labelLayout: { hideOverlap: true },
-          animation: false,
-          animationDuration: 0,
-          animationDurationUpdate: 0,
+// 环形视图（techStack 技术栈 / portraitView 岗位画像）启用切换/入场过渡
+          // 动画——岗位画像切换时新节点依次淡入缩放入场，弱化"整图瞬变"生硬感；
+          // techStack 首次进入同样按序浮现（各视图相对 EDGE 调整见下方呼号，不动
+          // 存量 layout/镜头口径）。力导向视图保持 animation:false 以稳定布局与镜头
+          // 动画柔和化：duration 拉长、缓动用加急四阶（quarticOut 收尾更平滑），
+          // animationDelay 按节点索引逐级错峰（中心岗位→大类→外环依次浮现，
+          // 避免整组节点同时缩放的"齐冲"生硬感）。
+          // reduced-motion 降级：系统偏好减少动画时关闭入场过渡（直接无动画上图），
+          // 与 flyTo 镜头飞行（_flyTo 已接 prefers-reduced-motion）口径一致
+          ...(ringLayout &&
+          !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? {
+                animation: true,
+                animationEasing: 'quarticOut',
+                ...(portraitView
+                  ? {
+                      animationDuration: 800,
+                      animationDurationUpdate: 600,
+                      animationEasingUpdate: 'quarticInOut',
+                      animationDelay: (idx: number) => Math.min(450, idx * 22),
+                    }
+                  : {
+                      animationDuration: 600,
+                      animationDurationUpdate: 0,
+                      animationDelay: (idx: number) => Math.min(480, idx * 6),
+                    }),
+              }
+            : {
+                animation: false,
+                animationDuration: 0,
+                animationDurationUpdate: 0,
+              }),
           ...(ringLayout
             ? {}
             : {
@@ -962,9 +1262,25 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
       ],
     }
 
+    renderNodesRef.current = nodes
+
     chart.setOption(option)
     builtRef.current = true
-  }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand, evolutionMarks, ringLayout, skillLabelTopIds])
+
+    // 力导向布局收敛后重叠兜底（graph-layout 工具重新接线）：force 不感知节点大小，
+    // 首屏自动展开最大域后岗位大节点可能互相叠压。仅首建/视图切换（resetCamera）
+    // 的力导向视图安排一次延迟检测——筛选/LOD 重建保留既有坐标不重跑；仍有重叠对
+    // 时以 300ms 平滑动画推开（animate 防静止硬跳，2026-08-15 修复口径）
+    if (resetCamera && !ringLayout) {
+      window.setTimeout(() => {
+        const c = chartRef.current
+        if (!c || c.isDisposed()) return
+        if (hasPositionOverlap(c, 60)) {
+          enforceSpread(c, { minGap: 60, animate: true, duration: 300 })
+        }
+      }, 2500)
+    }
+  }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand, ringLayout, skillLabelTopIds])
 
   // ── 悬停节点 → 关联连线提亮 ──
   // 邻接表（node id → 关联边下标）与基础视觉快照（与 option 构建同口径）：
@@ -988,15 +1304,26 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const dark = isDark()
     const colors = graphColors(dark ? 'dark' : 'light')
     const maxWeight = data.edges.reduce((mx, e) => Math.max(mx, e.weight ?? 0), 0)
-    return data.edges.map((edge, i) => ({
-      ...edgeBaseStyle(
+    // 与主 option 的 links 同口径：技术栈视图 nice 边压低透明度/加曲线，
+    // 悬停离场复位时涂回一致值，避免"悬停一次后低权边变明显"
+    const techStackRing = ringLayout && !data.nodes.some((n) => n.type === 'attr')
+    return data.edges.map((edge, i) => {
+      const base = edgeBaseStyle(
         edge, nodeById, colors, !!filterMarks.dimEdgeFlags[i],
         maxWeight > 0 ? Math.min(1, (edge.weight ?? 0) / maxWeight) : 0,
-      ),
-      dimmed: !!filterMarks.dimEdgeFlags[i],
-    }))
+        !ringLayout,
+      )
+      const dimmed = !!filterMarks.dimEdgeFlags[i]
+      const norm = maxWeight > 0 ? Math.min(1, (edge.weight ?? 0) / maxWeight) : 0
+      return {
+        ...base,
+        curveness: techStackRing && !dimmed && base.kind === 'nice' ? 0.16 : base.curveness,
+        opacity: techStackRing && !dimmed ? applyTechStackDenoise(base.opacity, norm, base.kind) : base.opacity,
+        dimmed,
+      }
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- themeVersion 语义必要（isDark 非响应式读取）
-  }, [data, filterMarks, themeVersion])
+  }, [data, filterMarks, themeVersion, ringLayout])
 
   const hoverNodeRef = useRef<string | null>(null)
   const hoverEdgesRef = useRef<number[] | null>(null)
@@ -1103,6 +1430,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     const dark = isDark()
     let phase = 0
     const timer = window.setInterval(() => {
+      // 页面不可见时暂停脉冲：100ms interval 常驻是隐形 CPU 消耗，切走后无渲染收益
+      if (document.hidden) return
       phase = (phase + 1) % 16
       const glow = 8 + ((Math.sin((phase / 16) * Math.PI * 2) + 1) / 2) * 16
       const chart = chartRef.current
@@ -1147,7 +1476,9 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
   }, [focusRequest, focusNode])
 
   return (
-    <div className={`${viewMode === 'graph' ? 'atlas-surface' : ''} relative h-full w-full overflow-hidden ${className ?? ''}`}>
+    <>
+      <style>{`@keyframes graph-load-in{from{opacity:0}to{opacity:1}}`}</style>
+      <div className={`${viewMode === 'graph' ? 'atlas-surface' : ''} relative h-full w-full overflow-hidden ${className ?? ''}`}>
       {viewMode === 'graph' && (
         <div className="pointer-events-none absolute inset-0 z-0 font-mono text-[12px] tracking-[0.18em] text-atlas-muted/75" aria-hidden="true">
           <span className="absolute left-1/2 top-3 -translate-x-1/2">N / 市场</span>
@@ -1194,7 +1525,21 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         visibleCount={filterMarks.visibleNodes}
         hiddenCount={data.nodes.length - filterMarks.visibleNodes}
       />
-      <div ref={containerRef} className="h-full w-full" />
+      <div
+        ref={containerRef}
+        className="h-full w-full"
+        style={
+          ringLayout &&
+          playRingIn &&
+          !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? {
+                opacity: 0,
+                animation: 'graph-load-in 0.3s ease-out forwards',
+              }
+            : undefined
+        }
+      />
     </div>
+    </>
   )
 })

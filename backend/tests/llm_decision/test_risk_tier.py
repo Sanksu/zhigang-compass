@@ -122,6 +122,7 @@ class TestBuildRecord:
     def test_domain_set_membership(self):
         assert ld.DOMAINS == frozenset({
             "jd_extract", "position_normalize", "skill_normalize",
-            "position_classify", "cluster_label", "skill_classify",
-            "governance", "skill_relation",
+            "position_classify", "cluster_label", "cluster_membership",
+            "skill_classify", "governance", "skill_relation",
+            "skill_noise", "skill_alias",
         })

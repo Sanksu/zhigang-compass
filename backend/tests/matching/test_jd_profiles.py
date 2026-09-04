@@ -1,5 +1,7 @@
 """阶段 C 内核测试：JD → PositionProfile、预筛、岗位聚合（纯函数，无 DB）。"""
 
+from pathlib import Path
+
 from app.services.matching.jd_profiles import jd_profile_from_snapshot, rough_select
 from app.services.matching.schemas import MatchResult
 from app.services.matching.jd_aggregate import aggregate_jd_scores
@@ -13,7 +15,8 @@ def _snap(title, skills, reqs=None, position_name="后端开发工程师", years
         "extraction": {
             "skills": [{"name": s} for s in skills],
             "requirements": [{"skill_name": s} for s in (reqs or [])],
-            "required_years": years,
+            # P0 协议：经验年限由 extraction.experience_range.min_years 承载（原 required_years 从未被抽取）
+            "experience_range": {"min_years": years},
             "industry": "IT",
             "typical_scenarios": scenarios or [],
         },
@@ -41,6 +44,27 @@ class TestJdProfile:
     def test_no_skills_returns_none(self):
         assert jd_profile_from_snapshot({"extraction": {}}, "1") is None
         assert jd_profile_from_snapshot({}, "1") is None
+
+    def test_years_from_experience_range_min_years(self):
+        """P0：required_years 取自 extraction.experience_range.min_years。"""
+        snap = _snap("JD-Y", ["Python"], years=5)
+        prof = jd_profile_from_snapshot(snap, "1")
+        assert prof.required_years == 5
+
+    def test_missing_experience_range_yields_none_years(self):
+        """P0：无经验区间 → required_years=None（表示无准入年限，≠0）。"""
+        snap = _snap("JD-N", ["Python"], years=3)
+        snap["extraction"].pop("experience_range", None)
+        prof = jd_profile_from_snapshot(snap, "1")
+        assert prof.required_years is None
+
+    def test_invalid_min_years_yields_none(self):
+        """P0：min_years 为 0/负数/非数值 → None（不误判为有年限）。"""
+        for bad in (0, -1, "abc", None):
+            snap = _snap("JD-B", ["Python"])
+            snap["extraction"]["experience_range"] = {"min_years": bad}
+            prof = jd_profile_from_snapshot(snap, "1")
+            assert prof.required_years is None, f"min_years={bad}"
 
 
 class TestRoughSelect:
@@ -88,3 +112,112 @@ class TestAggregate:
         """无岗位名归属的 JD（normalized_position 空）不参与岗位聚合（被排除）。"""
         out = aggregate_jd_scores([self._result("9", "JD-X", 0.5)], {"9": ""}, top_n=1)
         assert out == []
+
+class TestExperienceRangeMapping:
+    """2026-09-01 修复：experience_range{min_years} → required_years 映射。
+
+    抽取 schema 输出 experience_range 而引擎读 required_years，字段名错位
+    导致 exp_score 恒满分（全库填充率 0）。
+    """
+
+    def _snapshot(self, extraction: dict) -> dict:
+        return {
+            "title": "测试工程师",
+            "normalized_position": "测试工程师",
+            "extraction": {
+                "skills": [{"name": "Python", "necessity": "must", "level": "熟练"}],
+                **extraction,
+            },
+        }
+
+    def test_min_years_maps_to_required_years(self):
+        snap = self._snapshot({"experience_range": {"min_years": 5, "max_years": None}})
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        assert prof.required_years == 5
+
+    def test_range_takes_lower_bound(self):
+        snap = self._snapshot({"experience_range": {"min_years": 3, "max_years": 5}})
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        assert prof.required_years == 3
+
+    def test_no_range_returns_none(self):
+        snap = self._snapshot({})
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        assert prof.required_years is None
+
+    def test_zero_min_years_treated_as_none(self):
+        snap = self._snapshot({"experience_range": {"min_years": 0, "max_years": None}})
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        assert prof.required_years is None
+
+
+class TestEducationPassthrough:
+    """2026-09-01 同款字段错位修复：extraction.education.level → required_education。
+
+    学历雷达维此前恒 null（JD 级画像未透传学历要求，抽取填充率 57%）。
+    """
+
+    def test_level_passthrough(self):
+        snap = {
+            "title": "Java开发工程师",
+            "normalized_position": "后端开发工程师",
+            "extraction": {
+                "skills": [{"name": "Java", "necessity": "must", "level": "熟练"}],
+                "education": {"level": "本科"},
+            },
+        }
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        assert prof.required_education == "本科"
+
+    def test_missing_education_is_none(self):
+        snap = {
+            "title": "Java开发工程师",
+            "normalized_position": "后端开发工程师",
+            "extraction": {
+                "skills": [{"name": "Java", "necessity": "must", "level": "熟练"}],
+            },
+        }
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        assert prof.required_education is None
+
+    def test_buxian_kept_for_edu_level_semantics(self):
+        snap = {
+            "title": "Java开发工程师",
+            "normalized_position": "后端开发工程师",
+            "extraction": {
+                "skills": [{"name": "Java", "necessity": "must", "level": "熟练"}],
+                "education": {"level": "不限"},
+            },
+        }
+        prof = jd_profile_from_snapshot(snap, "jd-1")
+        # "不限"原样透传：_edu_level 不识别 → education 雷达维 null（不判分）
+        assert prof.required_education == "不限"
+
+
+class TestEducationSemanticsContract:
+    """教育匹配语义契约对拍（education_semantics_v1）：实现 vs 冻结语义。
+
+    金标由 generate_education_semantics.py 按负责人拍板的近似规则冻结，
+    实现改动（_edu_level 词表/_education_score 规则）导致对拍失败时，
+    须走语义变更流程（zkt 复核 + 版本升级），不得静默改期望值。
+    """
+
+    def test_contract_conformance(self):
+        import json
+        from app.services.matching.engine import _education_score
+
+        golden = (
+            Path(__file__).resolve().parents[2] / "data" / "golden_set" / "education_semantics_v1.jsonl"
+        )
+        rows = [
+            json.loads(l) for l in golden.read_text(encoding="utf-8").splitlines()
+            if l.strip() and not any(k.startswith("_") for k in json.loads(l))
+        ]
+        assert rows, "教育语义金标为空"
+        mismatches = []
+        for r in rows:
+            got = _education_score(r["jd_requirement"], r["candidate_level"])
+            exp = r["expected_score"]
+            if got != exp:
+                mismatches.append(f"{r['jd_requirement']}×{r['candidate_level']}: 期望 {exp} 实际 {got}")
+        assert not mismatches, f"教育语义契约失配: {mismatches}"

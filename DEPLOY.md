@@ -1,6 +1,6 @@
 # 智岗罗盘部署说明（DEPLOY.md）
 
-> 状态：**定稿**（2026-08-15，2026-08-29 复核与最新 compose 一致并补充 §6.2 局域网运维实证）——基于 08-13 首次容器部署演练实测（api/worker 镜像首次构建 + 5 服务全链路 12 项冒烟全通）+ 08-15 性能压测验证（TE-M5-01 前置，panorama/search P95 < 500ms @ 100 并发，见 docs/perf_baseline_20260815.md）
+> 状态：**定稿**（2026-08-15 首版；08-31 复核与最新 compose 一致：5 服务全部对齐 `restart: unless-stopped`（08-30 补齐 neo4j），补充 §6.2 局域网运维实证；09-01 补全 §3.2 GHCR 镜像部署路径与 §3.3 回滚）——基于 08-13 首次容器部署演练实测（api/worker 镜像首次构建 + 5 服务全链路 12 项冒烟全通）+ 08-15 性能压测验证（TE-M5-01 前置，panorama/search P95 < 500ms @ 100 并发，见 docs/perf_baseline_20260815.md）
 > 对应任务：执行计划 2.2 后端 M5「部署文档完善」+ 2.6 文档 M5「DEPLOY.md 部署说明」（DO-M5-03）
 
 ---
@@ -55,7 +55,7 @@ HTTP_PROXY=
 CDP_PROXY=
 ```
 
-置空后国内源（智联/BOSS/脉脉/中国大学MOOC）直连正常，国际源（LinkedIn/Glassdoor/Coursera/arxiv 等）在无代理网络下尽力直连。已有 override 文件（如 `docker-compose.images.yml`）里 `environment: HTTPS_PROXY: ""` 同样有效。
+置空后国内源（智联/BOSS/脉脉/中国大学MOOC）直连正常，国际源（LinkedIn/Glassdoor/Coursera/arxiv 等）在无代理网络下尽力直连。任何 override 文件里 `environment: HTTPS_PROXY: ""` 同样有效。
 
 **前端产物**（api 容器以只读卷挂载托管）：
 
@@ -71,7 +71,7 @@ docker compose ps             # 全部 healthy 即就绪
 ```
 
 - api 容器 ENTRYPOINT **自动执行 `alembic upgrade head`**（无需手动迁移）
-- 首次启动约 40–60s（镜像构建另计；healthcheck start-period 10s）
+- 首次启动约 40–60s（镜像构建另计；healthcheck start-period 90s，api 加载 SBERT 模型预留）
 
 ### 3.1 日常更新部署（⚠️ 合并 ≠ 部署）
 
@@ -100,7 +100,84 @@ curl http://localhost:8000/health
 
 - **回填脚本检查**：CHANGELOG 对应条目若标注存量回填（如 `backfill_skill_category.py`），部署后在容器内执行一次（幂等）：`docker exec zhigang-api python scripts/backfill_xxx.py`
 - **迁移**：api ENTRYPOINT 自动执行，无需手动；但镜像必须包含新迁移文件（见 ①，迁移缺失=部署后启动失败）
-- 可选加速：`CD (images)` workflow 在 develop 的**后端相关改动**合入后把镜像推到 GHCR（`ghcr.io/sanksu/zhigang-compass-api|worker`，公开仓库免认证拉取；纯前端/文档合并不构建 12.7GB 后端镜像），可 `docker pull` + `docker tag` 为本地镜像名（`zhigang-compass-api:latest` / `zhigang-compass-worker:latest`）替代 ① 的本地构建
+- **镜像加速/免构建路径**：`CD (images)` workflow 在 develop 的**后端相关改动**合入后把镜像推到 GHCR（公开仓库免认证拉取），可直拉预构建镜像替代 ① 的本地 12.7GB 构建——完整流程、判别陷阱与回滚见 **§3.2 / §3.3**
+
+### 3.2 镜像部署路径（GHCR 预构建，226 同源）
+
+api/worker 共用同一 Dockerfile（仅 entrypoint 不同），`CD (images)` 一次构建按四标签推送：`ghcr.io/sanksu/zhigang-compass-api|worker:develop`（浮动）+ `:sha-<commit>`（不可变）。**注意 workflow 触发条件是 `paths: backend/**`**——纯前端/文档合并不会出新镜像，此类合并只需重建 `frontend/dist`。
+
+免本地构建 = 用镜像 override 把 `build:` 换成 `image:`。该文件不入库（`.gitignore` 忽略），部署机按需自建（226 与本机同名同内容，仅代理语义差异见 §6.2）：
+
+```yaml
+# docker-compose.local-images.yml —— 本机部署专用 override（不入库）
+services:
+  api:
+    build: !reset null
+    image: ghcr.io/sanksu/zhigang-compass-api:develop
+  worker:
+    build: !reset null
+    image: ghcr.io/sanksu/zhigang-compass-worker:develop
+```
+
+```bash
+git checkout develop && git pull
+
+# ① 先 pull 后 up——顺序不能反（见下方陷阱）
+docker pull ghcr.io/sanksu/zhigang-compass-api:develop
+docker pull ghcr.io/sanksu/zhigang-compass-worker:develop
+
+# ② --force-recreate 确保容器换到新镜像；显式 -f 叠加 override
+docker compose -f docker-compose.yml -f docker-compose.local-images.yml up -d --force-recreate
+docker compose ps                                   # 全部 healthy
+docker exec zhigang-api sh -c "uv run alembic current"   # 应为 alembic/versions 最新 head
+```
+
+> ⚠️ **旧镜像缓存陷阱（2026-08-30 实证）**：`:develop` 是浮动标签，**pull 未完成就 `up -d` 会继续跑本地旧镜像**且无任何提示。判别：`docker image inspect ghcr.io/sanksu/zhigang-compass-api:develop --format '{{.Created}}'` 应为本次合并对应的 CD run 时间；仍旧则重新 pull 再 `--force-recreate`。
+
+- entrypoint 自动执行 `alembic upgrade head`：换新镜像重启即完成迁移，**全新空库也会自动建表**，无需任何手动迁移步骤
+- `build: !reset null` 语法要求 Docker Compose ≥ 2.24（§1），低于该版本解析报错
+- 代理差异：镜像路径与本地构建路径的 `HTTPS_PROXY` 语义完全一致（compose 默认值/根 `.env` 插值），226 指向宿主 v2ray、本机 Docker Desktop 指向 Clash，见 §2 代理与 §6.2
+
+### 3.3 回滚
+
+镜像按 commit 留有不可变 `sha-<commit>` 标签，回滚 = 把 override 的 `image` 标签指到已知良好提交后重建：
+
+```yaml
+# docker-compose.local-images.yml（回滚态）
+services:
+  api:
+    build: !reset null
+    image: ghcr.io/sanksu/zhigang-compass-api:sha-<good_commit>
+  worker:
+    build: !reset null
+    image: ghcr.io/sanksu/zhigang-compass-worker:sha-<good_commit>
+```
+
+```bash
+docker pull ghcr.io/sanksu/zhigang-compass-api:sha-<good_commit>
+docker compose -f docker-compose.yml -f docker-compose.local-images.yml up -d --force-recreate
+```
+
+- **表结构不随镜像回滚**：迁移为前向设计，旧镜像启动仍会执行 `alembic upgrade head` 到最新 head；若需连表结构一起回退属破坏性操作（`alembic downgrade`），交付/演示窗口禁用（冷启动指南「录制前红线」同口径）
+- 本地构建路径的等价回滚：`git checkout <good_commit>` 后按 §3.1 ①③④ 重建
+
+### 3.1.1 部署说明（GHCR 镜像路径，2026-09-01）
+
+> 走 GHCR 预构建镜像 + `docker-compose.local-images.yml` override（**免本地 12.7GB 构建，与生产镜像同源**）。本 override 不入库（.gitignore，根目录手建，见 `docker-compose.local-images.yml` 头注）。
+
+**部署（服务器/演示机）**：
+```bash
+cp docker-compose.local-images.yml .   # 若未建（api/worker 设为 ghcr.io/sanksu/...:develop）
+docker pull ghcr.io/sanksu/zhigang-compass-api:develop
+docker pull ghcr.io/sanksu/zhigang-compass-worker:develop
+docker compose -f docker-compose.yml -f docker-compose.local-images.yml up -d --force-recreate api worker
+```
+
+**与 3.1 本地构建的关系**：3.1 是默认路径（`build`），3.1.1 是加速/应急路径——**两条路径只能同时用一条**（override 会 `build: !reset null` 关闭本地构建）。若启用 override，3.1 的 `docker compose build` 会被覆盖。
+
+> ⚠️ **部署漂移教训（08-31）**：并行会话可能用裸 `docker compose up -d`（不挂 override + 本地构建 + `backend/app` 热挂载覆盖镜像），导致栈实际跑的是**工作区旧分支源码**而非 develop 镜像。诊断：`docker inspect <api> --format '{{.Config.Image}}'` 是否 `ghcr.io/sanksu/...`；容器是否含 `/app/app` bind mount。**修复：用上命令重建**。
+
+> ⚠️ **匹配权重 w_edu**：`configs/match_weights.json` 现为 BT v4（`w_edu=0.15`）。若对 education 进评分有异议，改 w_edu 为 0（或删该键即回退三维）并重启 api 即可，无需改代码——单点回退。
 
 ## 4. 初始化
 
@@ -129,8 +206,67 @@ curl http://localhost:8000/health
 | 停止（保留数据） | `docker compose down`（数据卷不删；`-v` 才删卷） |
 | 查看日志 | `docker compose logs -f api` / `-f worker` |
 | 重启单服务 | `docker compose restart api` |
-| 更新代码 | 见 **§3.1 合并 ≠ 部署清单**（pull → build → 前置检查 → up） |
-| 数据备份 | `pg_dump`（PostgreSQL）+ `neo4j-admin dump`（Neo4j）；数据卷：`pg_data` / `neo4j_data` / `neo4j_logs` / `redis_data` |
+| 更新代码 | 见 **§3.1 合并 ≠ 部署清单**（pull → build → 前置检查 → up）；GHCR 镜像路径见 §3.2 |
+| 回滚 | 镜像 `sha-<commit>` 标签指回已知良好提交 + `up -d --force-recreate`，见 **§3.3**（表结构不随镜像回滚） |
+| 数据备份 | `pg_dump`（PostgreSQL）+ `neo4j-admin dump`（Neo4j）；数据卷：`pg_data` / `neo4j_data` / `neo4j_logs` / `redis_data` / `uploads_data` |
+| **快照导入**（跳过冷启动） | `bash scripts/restore_snapshot.sh`（从 `snapshots/` 恢复 PG + Neo4j 全量，见 §6.0） |
+| 重启策略 | 5 服务全部 `restart: unless-stopped`：宿主机重启后自动拉起，进程异常退出自动重启 |
+
+### 6.0 数据快照导入（2026-09-03）
+
+`snapshots/` 目录内置本机导出的完整数据快照（`pg.dump` 123MB + `neo4j.dump` 42MB，Git LFS 托管），新部署 **跳过冷启动**（爬虫 + bootstrap 13 阶段需数天）直接获得可用数据：图谱 118 岗位节点 / JD 11115 条 / 演化快照 27 期。
+
+```bash
+# 克隆后先拉取 LFS 二进制
+git lfs pull
+
+# 一键导入（Linux/226 部署机）
+bash scripts/restore_snapshot.sh
+```
+
+- 前置：`docker compose` 5 服务镜像已构建（api/worker 需含 `20260903_001` 及此前全部迁移，旧镜像会因 alembic 找不到 DB 已处修订而启动失败——重建镜像即可）
+- 导入会**覆盖**现有 PG 数据与 Neo4j 图谱（`pg_restore --clean` / `neo4j-admin database load --overwrite-destination`）
+- 交付提交包用户（非 git 克隆）：源码包不含 dump（数据在提交包 `6-测试数据/数据快照/`）。先 `cp <提交包>/6-测试数据/数据快照/*.dump <源码>/snapshots/`，再走一键脚本或下方手工步骤，其余完全相同
+- 快照内容与重新导出步骤见 [`snapshots/README.md`](./snapshots/README.md)；交付演示前建议重新导出最新快照
+
+#### 6.0.1 手工恢复步骤（Win/Linux 通用，等效一键脚本）
+
+若不便运行 bash 脚本（如 Windows 主机 / 自定义卷名），可按下述命令手工恢复。一键脚本在此之上还自动完成镜像构建与配置引导（`backend/.env`、JWT 密钥、`skill_filters_dynamic.json`），手工路径请先完成 §2 前置。**卷名以 `docker volume ls` 实际为准**（compose 项目名不同则前缀不同，本仓库默认 `zhigang-compass_`）：
+
+```bash
+# ① 停依赖服务（Neo4j 离线 load 前必须停止；PG 恢复期间 api/worker 也建议停）
+docker compose stop api worker neo4j
+
+# ② 恢复 PostgreSQL（pg_restore 恢复 custom dump，--clean 覆盖旧数据）
+docker cp snapshots/pg.dump zhigang-postgres:/tmp/pg.dump
+docker compose exec -T postgres pg_restore --clean --if-exists -U zhigang -d zhigang /tmp/pg.dump
+docker compose exec -T postgres rm -f /tmp/pg.dump
+# 验证：docker compose exec -T postgres psql -U zhigang -d zhigang -c "select count(*) from jd_raw;"
+
+# ③ 恢复 Neo4j（数据卷挂到镜像默认路径，离线 load）
+docker run --rm \
+  -v zhigang-compass_neo4j_data:/var/lib/neo4j/data \
+  -v "$(pwd)/snapshots":/dump \
+  --entrypoint "" neo4j:5 \
+  neo4j-admin database load --from-path=/dump --overwrite-destination=true neo4j
+
+# ④ 启动全部服务并验证
+docker compose up -d
+docker compose ps                       # 全部 healthy
+curl http://localhost:8000/health       # {"status":"healthy"}
+```
+
+**关键点与排错**：
+
+| 问题 | 处置 |
+|------|------|
+| `docker volume ls` 无 `zhigang-compass_neo4j_data` | 项目名不同（compose 目录名/`name:` 字段决定），按实际卷名替换 ③ 中 `-v` 参数；`docker compose config` 可查实际卷名 |
+| Neo4j load 报 `database already exists` | 卷内已有旧库，先 `--overwrite-destination=true`（脚本已含）；仍失败则先停全部服务再 load |
+| PG `pg_restore` 权限/连接失败 | 确认 `-U zhigang -d zhigang`（与 compose `POSTGRES_USER/POSTGRES_DB` 一致）；postgres 容器需健康后再恢复 |
+| 导入后 api 启动失败 | 多为镜像缺迁移文件（§6.0 前置说明），重建镜像后 `up -d --force-recreate api worker` |
+| 导入后图谱为空 | 多为 Neo4j load 挂到错误卷（数据落空卷），按「无 `zhigang-compass_neo4j_data`」行核对卷名后重试 |
+
+**Windows 场景补充**：`$(pwd)` 在 PowerShell 下不展开，改用绝对路径或 `(Get-Location).Path`；`docker cp` 路径用正斜杠。其余命令（compose/exec/run）跨平台一致。
 
 ### 6.1 ETL 调度（容器内 ARQ cron，08-21 #348）
 
@@ -144,11 +280,11 @@ ETL 主管线（采集 → 去重 → LLM 抽取 → 时滞/通胀 → 入图 �
 
 > 历史外部任务（Windows `scheduled_tasks.ps1` 的 `ETLDaily` / Linux `crontab.example` 的 `0 5 * * *`）已停用；`scripts/cron/etl_daily.py` 保留，供手动重跑（`--force`）。其余外部任务（maimai/linkedin、GraphHealth、PositionDup）不变；课程源（icourse163/edx/coursera）2026-08-28 起已纳入 ETL 主管线每日采集（`app/workers/etl.py` 的 `course_platforms`），**勿再注册外部课程采集任务，否则每日双跑**。
 
-### 6.2 局域网部署运维实证（2026-08-23 起 192.168.0.226 长期运行沉淀）
+### 6.2 服务器部署运维实证（2026-08-23 起长期运行沉淀）
 
 | 事项 | 说明与处置 |
 |------|-----------|
-| **国际源代理** | 无 Clash 的 Linux 主机上，国际源（LinkedIn/Glassdoor/Coursera/arxiv）需自建代理：226 用 v2ray（http 入站 `127.0.0.1:1083`，nohup 手动拉起），**机器重启后需手动重新拉起**；compose 侧将 `HTTPS_PROXY` 指向该端口（宿主 `.env` 插值）。国内源始终直连 |
+| **国际源代理** | 无 Clash 的 Linux 主机上，国际源（LinkedIn/Glassdoor/Coursera/arxiv）需自建代理：用 v2ray（http 入站 `127.0.0.1:1083`，nohup 手动拉起），**机器重启后需手动重新拉起**；compose 侧将 `HTTPS_PROXY` 指向该端口（宿主 `.env` 插值）。国内源始终直连 |
 | **PG catalog 损坏**（08-27 实证） | 症状：简单 `ORDER BY`/`UNION`/递归 CTE/asyncpg 类型查询**挂起烧满 CPU**（load 飙至 100+，接口报「推荐失败」），而非报错。诊断：`pg_stat_activity` 配合常量 UNION 探针区分库级/实例级问题。处置：整机重启 + `REINDEX SYSTEM <db>` 根治。原则：重大库故障走 `pg_dump` → 新库 restore，不要只靠重启赌恢复 |
 | **uploads 卷属主** | 数据卷被 root 创建后容器内应用用户（非 root）写入 500：`docker exec` 进入 chown 或删除卷重建（上传目录卷） |
 | **SBERT 模型冷启动** | 首次涉及语义匹配/归一化的请求需加载模型，**50–90s 属正常**，非故障；演示/压测前先预热（任打一次 match 或学习路径请求） |
@@ -192,4 +328,4 @@ grounding 双路检索中 Neo4j 不可达自动降级 ILIKE（设计内，不阻
 
 ---
 
-> 补充：环境变量完整清单与本地开发配置见 `docs/guides/团队启动指南.md`；架构与部署设计见 `docs/design/设计文档.md` §11。
+> 补充：环境变量完整清单与本地开发配置见 `docs/guides/团队启动指南.md`；从零环境/空库到产出可用数据的冷启动流程（爬虫前置 + bootstrap 13 阶段）见 `docs/guides/冷启动指南.md`；架构与部署设计见 `docs/design/设计文档.md` §11。

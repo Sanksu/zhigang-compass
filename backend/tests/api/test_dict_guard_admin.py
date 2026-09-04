@@ -15,6 +15,7 @@ import pytest
 
 import app.api.v1.admin_routes.dict_guard as dg
 from app.schemas.admin_requests import AdminReviewActionRequest
+from app.services import dict_guard_effect as effect
 
 
 def _req(raw: dict) -> AdminReviewActionRequest:
@@ -29,6 +30,7 @@ def _proposal(**kw):
         reason="噪音词条", llm_confidence=0.6, evidence=[],
         impact_stats={"graph_nodes": 3, "jd_snapshots": 5}, run_date="2026-08-21",
         reviewed_by="", review_reason="", reviewed_at=None, created_at=None,
+        effects_applied=None, effects_error="", effects_retry_count=0,
     )
     base.update(kw)
     return types.SimpleNamespace(**base)
@@ -80,7 +82,8 @@ def dyn_spy(monkeypatch):
         lambda kind, term: (state["removes"].append((kind, term)), state["remove_result"])[1],
     )
     monkeypatch.setattr(dg.dyn, "is_dynamically_blocked", lambda term: state["blocked"])
-    monkeypatch.setattr(dg, "_cleanup_skill_nodes", lambda term: 3)
+    # 2026-09-03 副作用统一收至 dict_guard_effect 服务：清理桩改 patch 服务侧
+    monkeypatch.setattr(effect, "_cleanup_skill_nodes", lambda term: 3)
     return state
 
 
@@ -195,18 +198,30 @@ async def test_review_non_uuid_operator_rejected_before_side_effects(dyn_spy):
 
 
 @pytest.mark.asyncio
-async def test_approve_side_effect_failure_keeps_approved_state(dyn_spy, monkeypatch):
-    """副作用阶段失败不得回滚已提交的批准状态——返回 effects_applied=False
-    由巡检对账，而不是让调用方误以为审核未生效。"""
+async def test_approve_side_effect_success_sets_applied_true(dyn_spy):
+    """副作用成功 → 提案 effects_applied 持久化为 True（非瞬时）。"""
+    db = _FakeDB(_proposal())
+    resp = await dg.review_proposal("p1", _req({"action": "approve", "reason": "r"}), db, _ADMIN)
+    assert resp.code == 0 and db.row.effects_applied is True
+
+
+@pytest.mark.asyncio
+async def test_approve_side_effect_failure_persists_failed_marker(dyn_spy, monkeypatch):
+    """副作用阶段失败不得回滚已提交的批准状态——返回 effects_applied=False 并
+    **持久化** effects_applied=False + effects_error 到提案（2026-09-03 非原子性
+    处理），供每日巡检幂等重试，而非仅瞬时响应。"""
     def _boom(term):
         raise RuntimeError("neo4j down")
-    monkeypatch.setattr(dg, "_cleanup_skill_nodes", _boom)
+    monkeypatch.setattr(effect, "_cleanup_skill_nodes", _boom)
     db = _FakeDB(_proposal())
     resp = await dg.review_proposal("p1", _req({"action": "approve", "reason": "r"}), db, _ADMIN)
     assert resp.code == 0 and resp.data["status"] == "approved"
     assert resp.data["effects_applied"] is False
     # 状态与审计已先于副作用提交（commit 至少一次），changelog 已写
     assert [o for o in db.added if getattr(o, "source", "") == "manual"]
+    # 失败标记已持久化到提案（副作用失败原因入库，供巡检对账）
+    assert db.row.effects_applied is False
+    assert "neo4j down" in db.row.effects_error
 
 
 # ── 回滚 ─────────────────────────────────────────────────────────

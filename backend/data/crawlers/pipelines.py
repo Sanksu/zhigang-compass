@@ -341,7 +341,7 @@ class CleaningPipeline:
                     item[field] = self._desensitize(item[field])
             item["is_desensitized"] = True
         else:
-            for field in ("title", "description", "raw_text"):
+            for field in ("title", "description", "raw_text", "readme"):
                 if item.get(field) and isinstance(item.get(field), str):
                     item[field] = self._desensitize(item[field])
             item["is_desensitized"] = True

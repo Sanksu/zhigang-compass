@@ -130,7 +130,7 @@ async def test_graph_view_smoke_mocked(monkeypatch):
     from app.api.v1 import graph as graph_mod
     from app.core import middleware as middleware_mod
 
-    async def _mock_view_main(limit, status_filter):
+    async def _mock_view_main(limit, status_filter, level=None):
         return [
             {"p": {"id": "pos_1", "name": "测试岗位", "status": "stable"},
              "s": {"id": "sk_1", "name": "测试技能", "category": "软技能"},

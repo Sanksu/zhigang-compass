@@ -37,6 +37,8 @@ import {
   type Schema,
   type ReviewItem,
 } from './review-types'
+import { useIsDesktop } from '@/hooks/use-media-query'
+import { StructuredDefinition } from './definition-block'
 
 /**
  * 候选晋升审核 Tab — 设计文档 §7.2.2 + AL-M4-01
@@ -54,6 +56,7 @@ export function CandidateReviewTab() {
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const isDesktop = useIsDesktop()
 
   const loadQueue = () => {
     apiGet<Schema['DiscoveryCandidateData']>('/admin/positions/pending')
@@ -175,53 +178,102 @@ export function CandidateReviewTab() {
                 </p>
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>岗位名</TableHead>
-                    <TableHead>命中信号</TableHead>
-                    <TableHead>发现时间</TableHead>
-                    <TableHead>置信度</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {queue.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          {item.rag_matched && <Badge variant="outline" className="text-[11px]">RAG</Badge>}
-                          {item.seed_matched && <Badge variant="outline" className="text-[11px]">种子</Badge>}
-                          {!item.rag_matched && !item.seed_matched && (
-                            <span className="text-[11px] text-ink-faint">—</span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs font-mono text-ink-muted">{item.detected_at}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}
-                            title={`证据距离 ${Math.round(evidenceScoreOf(item) * 100)}%`}
-                          >
-                            {Math.round(confidenceOf(item) * 100)}%
-                          </span>
-                          {needsReview(item) && (
-                            <Badge
-                              variant="archived"
-                              className="text-[11px]"
-                              title={`final_confidence < ${Math.round(REVIEW_BLOCK_THRESHOLD * 100)}%，证据不足，已阻断并需人工复核`}
+              isDesktop ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>岗位名</TableHead>
+                      <TableHead>命中信号</TableHead>
+                      <TableHead>发现时间</TableHead>
+                      <TableHead>置信度</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {queue.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell className="font-medium max-w-48 truncate">{item.position_name}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            {item.rag_matched && <Badge variant="outline" className="text-[11px]">RAG</Badge>}
+                            {item.seed_matched && <Badge variant="outline" className="text-[11px]">种子</Badge>}
+                            {!item.rag_matched && !item.seed_matched && (
+                              <span className="text-[11px] text-ink-faint">—</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs font-mono text-ink-muted">{item.detected_at}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}
+                              title={`证据距离 ${Math.round(evidenceScoreOf(item) * 100)}%`}
                             >
-                              需复核
-                            </Badge>
-                          )}
+                              {Math.round(confidenceOf(item) * 100)}%
+                            </span>
+                            {needsReview(item) && (
+                              <Badge
+                                variant="archived"
+                                className="text-[11px]"
+                                title={`final_confidence < ${Math.round(REVIEW_BLOCK_THRESHOLD * 100)}%，证据不足，已阻断并需人工复核`}
+                              >
+                                需复核
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setReviewTarget(item)
+                              setReason('')
+                              setNotice(null)
+                            }}
+                          >
+                            审核
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="space-y-3">
+                  {queue.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-lg border border-border bg-canvas p-4 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-ink truncate">{item.position_name}</div>
+                          <div className="mt-1 flex items-center gap-2">
+                            <div className="flex gap-1">
+                              {item.rag_matched && <Badge variant="outline" className="text-[10px]">RAG</Badge>}
+                              {item.seed_matched && <Badge variant="outline" className="text-[10px]">种子</Badge>}
+                            </div>
+                            {needsReview(item) && (
+                              <Badge variant="archived" className="text-[10px]">需复核</Badge>
+                            )}
+                          </div>
                         </div>
-                      </TableCell>
-                      <TableCell className="text-right">
+                        <div className="text-right shrink-0">
+                          <div className={`font-mono tabular-nums text-sm ${CONFIDENCE_TONE(confidenceOf(item))}`}>
+                            {Math.round(confidenceOf(item) * 100)}%
+                          </div>
+                          <div className="text-[10px] text-ink-faint">置信度</div>
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-ink-faint font-mono">
+                        发现于 {item.detected_at}
+                      </div>
+                      <div className="pt-1">
                         <Button
                           size="sm"
                           variant="outline"
+                          className="w-full"
                           onClick={() => {
                             setReviewTarget(item)
                             setReason('')
@@ -230,11 +282,11 @@ export function CandidateReviewTab() {
                         >
                           审核
                         </Button>
-                      </TableCell>
-                    </TableRow>
+                      </div>
+                    </div>
                   ))}
-                </TableBody>
-              </Table>
+                </div>
+              )
             )}
           </CardContent>
         </Card>
@@ -284,6 +336,9 @@ export function CandidateReviewTab() {
                   <p className="max-h-40 overflow-auto text-xs text-ink-secondary leading-relaxed">
                     {reviewTarget.definition_draft || '（无定义草案）'}
                   </p>
+                  <div className="text-xs text-ink-secondary leading-relaxed">
+                    <StructuredDefinition data={reviewTarget.definition_structured} />
+                  </div>
                   {reviewTarget.evidence_refs.length > 0 && (
                     <CitationGroup
                       className="border-t border-border pt-2"
@@ -329,6 +384,11 @@ export function CandidateReviewTab() {
             <div className="rounded-md bg-subtle p-3 text-xs text-ink-secondary">
               <div className="mb-1 font-medium text-ink">定义草案</div>
               <p className="leading-relaxed">{reviewTarget?.definition_draft || '（无定义草案）'}</p>
+              {reviewTarget && (
+                <div className="mt-2">
+                  <StructuredDefinition data={reviewTarget.definition_structured} />
+                </div>
+              )}
               {reviewTarget && reviewTarget.evidence_refs.length > 0 && (
                 <div className="mt-2">
                   <div className="mb-1 font-medium text-ink">证据引用</div>

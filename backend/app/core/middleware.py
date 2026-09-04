@@ -95,7 +95,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # 原子窗口：SET NX EX 创建计数（08-16 审查：原 incr+expire 两步在
             # Redis 瞬时错误时可能留下无 TTL 的 key，该 IP+模块永久 429）
             created = await redis_client.set(key, 1, nx=True, ex=self.WINDOW_SECONDS)
-            count = 1 if created else await redis_client.incr(key)
+            if created:
+                count = 1
+            else:
+                count = await redis_client.incr(key)
+                # 自愈遗留无 TTL 键（历史 incr+expire bug 产物），保证窗口有界，
+                # 防止计数无声累积导致该 IP+模块永久 429
+                await redis_client.expire(key, self.WINDOW_SECONDS)
         except Exception:
             return await call_next(request)
         if count > limit:

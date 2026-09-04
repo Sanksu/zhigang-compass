@@ -34,8 +34,8 @@
   --color-accent-foreground: #ffffff;
 
   /* 岗位五状态机 — 状态色仅用于状态指示，不作装饰 */
-  --color-state-active: #64748b;     /* 活跃 — 蓝灰，常态在位（08-15 岗位状态语义修正） */
-  --color-state-candidate: #71717a;  /* 候选 — 灰，中性等待 */
+  --color-state-active: #a855f7;     /* 活跃 — 亮紫，与画布 GRAPH_STATUS_META 同步（08-15 岗位状态语义修正） */
+  --color-state-candidate: #475569;  /* 候选 — 深中性板岩，中性等待（与画布同步；与活跃明度/饱和双维拉开） */
   --color-state-emerging: #10b981;   /* 新兴 — 绿，信号出现 */
   --color-state-stable: #3b82f6;     /* 稳定 — 蓝，已确立 */
   --color-state-declining: #f59e0b;  /* 衰退 — 橙，警示 */
@@ -75,6 +75,10 @@
 
 /* 深色模式 — 在 .dark 下覆盖设计令牌 */
 .dark {
+  /* 原生控件跟随深色渲染：否则 select/option 弹层保持 UA 白底，
+     而文字继承 text-ink 变白，出现白字白底 */
+  color-scheme: dark;
+
   --color-canvas: #09090b;
   --color-subtle: #18181b;
   --color-elevated: #27272a;
@@ -114,6 +118,9 @@
 }
 
 html {
+  /* 锚定浅色原生控件（配合 .dark 下的 color-scheme: dark），
+     避免 OS 深色偏好污染浅色主题下的 select 弹层 */
+  color-scheme: light;
   font-family: var(--font-sans);
   font-feature-settings: 'cv01', 'cv02', 'cv03', 'cv04', 'ss01';
   -webkit-font-smoothing: antialiased;
@@ -128,18 +135,10 @@ body {
   min-height: 100vh;
 }
 
-/* 图谱画布容器：仅保留方位椭圆环（::before）；浅蓝底色、网格与中线装饰已按演示口径移除 */
+/* 图谱画布容器：浅蓝底色、网格、中线与方位椭圆环装饰均已按演示口径移除，
+   画布保持纯净，仅节点/边渲染 */
 .atlas-surface {
   isolation: isolate;
-}
-
-.atlas-surface::before {
-  content: '';
-  position: absolute;
-  pointer-events: none;
-  inset: 13% 22%;
-  border: 1px solid color-mix(in srgb, var(--color-atlas-grid) 78%, transparent);
-  border-radius: 50%;
 }
 
 /* 滚动条 — 细线样式 */

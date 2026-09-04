@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Reveal } from '@/components/ui/reveal'
 import { cn } from '@/lib/utils'
 import { apiGet } from '@/lib/api'
 import type { components } from '@/types/api'
@@ -106,46 +107,87 @@ function SignalsView() {
     }
     const toneColor = tone === 'emerging' ? 'text-state-emerging' : 'text-state-declining'
     return (
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-8">#</TableHead>
-            <TableHead>技能</TableHead>
-            <TableHead className="text-right">Z-score</TableHead>
-            <TableHead className="text-right">当期频次</TableHead>
-            <TableHead className="text-right">占比口径</TableHead>
-            <TableHead className="text-right">置信度</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+      <>
+        {/* 桌面端：表格视图 */}
+        <div className="hidden md:block">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-8">#</TableHead>
+                <TableHead>技能</TableHead>
+                <TableHead className="text-right">Z-score</TableHead>
+                <TableHead className="text-right">当期频次</TableHead>
+                <TableHead className="text-right">占比口径</TableHead>
+                <TableHead className="text-right">置信度</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((s, i) => (
+                <TableRow key={s.skill_id}>
+                  <TableCell className="text-xs font-mono text-ink-faint">{i + 1}</TableCell>
+                  <TableCell className="font-medium text-ink">
+                    {s.skill_name}
+                    {s.warning && (
+                      <span
+                        title="证据量异常期（样本量对比告警命中），信号读数受采集波动影响，谨慎解读"
+                        className="ml-1.5 inline-flex items-center rounded-sm border border-state-declining/40 bg-state-declining/10 px-1 text-[11px] font-normal text-state-declining"
+                      >
+                        ⚠ 证据量异常
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className={cn('text-right font-mono tabular-nums', toneColor)}>
+                    {s.z_score != null ? s.z_score.toFixed(2) : '—'}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums text-ink-secondary">{s.current_freq}</TableCell>
+                  <TableCell className="text-right font-mono tabular-nums text-ink-faint">
+                    {s.freq_ratio != null ? `${(s.freq_ratio * 100).toFixed(1)}%` : '—'}
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums text-ink-muted">
+                    {(s.confidence * 100).toFixed(0)}%
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        {/* 移动端：卡片视图 */}
+        <div className="space-y-2 md:hidden">
           {items.map((s, i) => (
-            <TableRow key={s.skill_id}>
-              <TableCell className="text-xs font-mono text-ink-faint">{i + 1}</TableCell>
-              <TableCell className="font-medium text-ink">
-                {s.skill_name}
-                {s.warning && (
-                  <span
-                    title="证据量异常期（样本量对比告警命中），信号读数受采集波动影响，谨慎解读"
-                    className="ml-1.5 inline-flex items-center rounded-sm border border-state-declining/40 bg-state-declining/10 px-1 text-[11px] font-normal text-state-declining"
-                  >
-                    ⚠ 证据量异常
-                  </span>
-                )}
-              </TableCell>
-              <TableCell className={cn('text-right font-mono tabular-nums', toneColor)}>
-                {s.z_score != null ? s.z_score.toFixed(2) : '—'}
-              </TableCell>
-              <TableCell className="text-right font-mono tabular-nums text-ink-secondary">{s.current_freq}</TableCell>
-              <TableCell className="text-right font-mono tabular-nums text-ink-faint">
-                {s.freq_ratio != null ? `${(s.freq_ratio * 100).toFixed(1)}%` : '—'}
-              </TableCell>
-              <TableCell className="text-right font-mono tabular-nums text-ink-muted">
-                {(s.confidence * 100).toFixed(0)}%
-              </TableCell>
-            </TableRow>
+            <div
+              key={s.skill_id}
+              className="rounded-md border border-border bg-canvas p-3"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-mono text-ink-faint">#{i + 1}</span>
+                    <span className="font-medium text-ink text-sm">{s.skill_name}</span>
+                  </div>
+                  {s.warning && (
+                    <div className="mt-1">
+                      <span
+                        className="inline-flex items-center rounded-sm border border-state-declining/40 bg-state-declining/10 px-1 text-[10px] text-state-declining"
+                      >
+                        ⚠ 证据量异常
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className={cn('text-right font-mono tabular-nums text-sm', toneColor)}>
+                  {s.z_score != null ? s.z_score.toFixed(2) : '—'}
+                </div>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-[11px] text-ink-faint">
+                <span>频次 {s.current_freq}</span>
+                <span>{s.freq_ratio != null ? `${(s.freq_ratio * 100).toFixed(1)}%` : '—'}</span>
+                <span>置信 {(s.confidence * 100).toFixed(0)}%</span>
+              </div>
+            </div>
           ))}
-        </TableBody>
-      </Table>
+        </div>
+      </>
     )
   }
 
@@ -241,6 +283,10 @@ function SkillDeclineWarningCard() {
 
 export function EvolutionPage() {
   const [versions, setVersions] = useState<EvolutionVersion[]>([])
+  // 版本总数（分页 total）：size=30 的页长会截断 versions.length，指标卡须展示真实总数
+  const [versionTotal, setVersionTotal] = useState(0)
+  // 新兴/衰退信号数（与 SignalsView 共享 loadSignals 60s 缓存，真实指标替代恒 '—' 占位卡）
+  const [signalCount, setSignalCount] = useState<number | null>(null)
   // Tab 以 URL ?tab= 为单一来源（对齐 admin-review-page 口径）：刷新/分享链接
   // 直达目标 Tab；默认 signals 不写 query，保持 URL 干净
   const [searchParams, setSearchParams] = useSearchParams()
@@ -255,25 +301,39 @@ export function EvolutionPage() {
     }, { replace: true })
   }
 
-  // 加载真实版本列表（顶部指标 + diff 下拉共用），按 version_id 降序保证稳定
+  // 加载真实版本列表（顶部指标 + diff 下拉共用），按 version_id 降序保证稳定。
+  // 60s TTL：Tab 来回切换不重复拉取、不闪「加载中」（对齐仪表盘缓存口径）
   useEffect(() => {
-    apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=30')
-      .then((res) => setVersions([...res.items].sort((a, b) => b.version_id.localeCompare(a.version_id))))
+    apiGet<components['schemas']['EvolutionVersionListData']>('/evolution/versions?page=1&size=30', { ttl: 60 })
+      .then((res) => {
+        setVersions([...res.items].sort((a, b) => b.version_id.localeCompare(a.version_id)))
+        setVersionTotal(res.total ?? res.items.length)
+      })
       .catch(() => {
         /* diff 视图内会提示错误 */
       })
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    loadSignals().then((r) => {
+      if (!cancelled && r) setSignalCount((r.emerging?.length ?? 0) + (r.declining?.length ?? 0))
+    })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const metrics = useMemo<MetricCardData[]>(() => {
     const latest = versions[0]
     return [
       // delta 仅在语义明确时展示（如最新版新增节点数）；总数/版本号/信号数配 delta 会渲染出无意义的 "+N"/"0" 徽标
-      { label: '图谱版本数', value: versions.length, hint: 'T+1 05:00 发布 · 保留 90 天', bar: true },
+      { label: '图谱版本数', value: versionTotal || versions.length, hint: 'T+1 05:00 发布 · 保留 90 天', bar: true },
       { label: '当前版本号', value: latest?.version_id ?? '—', hint: latest?.change_summary || '暂无版本快照', bar: true },
-      { label: '最新版本节点变化', value: latest ? latest.node_added + latest.node_changed : 0, delta: latest?.node_added ?? 0, deltaTone: 'emerging', hint: `新增 ${latest?.node_added ?? 0} · 变化 ${latest?.node_changed ?? 0}`, bar: true },
-      { label: '新兴/衰退信号', value: '—', hint: '下方"新兴/衰退技能 Top-10"实时展示', bar: true },
+      { label: '最新版本节点变化', value: latest ? latest.node_added + latest.node_changed : 0, delta: latest && latest.node_added > 0 ? latest.node_added : undefined, deltaTone: 'emerging', hint: `新增 ${latest?.node_added ?? 0} · 变化 ${latest?.node_changed ?? 0}`, bar: true },
+      { label: '新兴/衰退信号', value: signalCount ?? '—', hint: '下方"新兴/衰退技能 Top-10"实时展示', bar: true },
     ]
-  }, [versions])
+  }, [versions, versionTotal, signalCount])
 
   return (
     <>
@@ -292,13 +352,16 @@ export function EvolutionPage() {
       {versions[0]?.data_warning && <DataWarningBanner warning={versions[0].data_warning} />}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        {metrics.map((m) => (
-          <MetricCard key={m.label} data={m} />
+        {metrics.map((m, i) => (
+          <Reveal key={m.label} delay={i * 90} className="h-full">
+            <MetricCard className="h-full" data={m} />
+          </Reveal>
         ))}
       </div>
 
       {/* 演化看板 4 区块按 信号 / 趋势与流向 / 版本与状态机 分组，不再无限下滑 */}
-      <Tabs value={tab} onValueChange={onTabChange}>
+      <Reveal delay={380}>
+        <Tabs value={tab} onValueChange={onTabChange}>
         <TabsList className="mb-4">
           <TabsTrigger value="signals" className="text-xs">信号</TabsTrigger>
           <TabsTrigger value="trend" className="text-xs">趋势与流向</TabsTrigger>
@@ -326,6 +389,7 @@ export function EvolutionPage() {
           <EvolutionEventsView />
         </TabsContent>
       </Tabs>
+      </Reveal>
     </>
   )
 }

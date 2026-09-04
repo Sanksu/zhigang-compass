@@ -210,7 +210,7 @@ async def _align_scores_with_full_jd(
         )
         if found is None:
             continue
-        _, best_result = found
+        _, best_result, _scored, _compared = found
         item.update({
             "total_score": round(best_result.total_score, 4),
             "must_score": best_result.must_score,
@@ -247,7 +247,7 @@ async def score_jd_compare(
     project_vectors: dict,
     semantic=None,
     sim_threshold: float | None = None,
-) -> tuple[PositionProfile, MatchResult] | None:
+) -> tuple[PositionProfile, MatchResult, list[tuple[PositionProfile, MatchResult]], int] | None:
     """compare 路径：该岗位名下 JD → COMPARE 评分 → 取最高分一条。
 
     position_name：岗位名（recommend 列表 position_id=岗位名，normalized_position
@@ -257,7 +257,8 @@ async def score_jd_compare(
     保证列表分数与详情同口径单 JD。最高分口径 = 最近 N 条宽 JD 中的最高分，
     非全局全量（SQL 侧同步 limit 兜底，防大岗位全量拉取 snapshot）。
 
-    返回 (最佳 PositionProfile, 最佳 MatchResult)；无该岗位 JD 返回 None。
+    返回 (最佳 PositionProfile, 最佳 MatchResult, 全部评分 JD(sorted desc) 即
+    (PositionProfile, MatchResult) 列表, 参与评分 JD 条数)；无该岗位 JD 返回 None。
     """
     embedder = semantic or SkillEmbedder.get()
     min_skills = _read_min_jd_skills()
@@ -288,7 +289,33 @@ async def score_jd_compare(
     if not profiles:
         return None
 
+    # 语义预热（2026-09-02 性能优化）：评分前批量 encode 候选 + 全部 JD 技能，
+    # 避免 _score 逐条 similarity 时每条即时前向推理（50 条 JD × 数百技能对，
+    # 冷缓存下 29s）。warm 一次 batch encode（~20s）后评分全命中缓存 → ~4.5s。
+    # 纯性能：向量值与逐条 encode 结果一致，匹配语义不变；embedder 无 warm
+    # 方法（旧版）时跳过。
+    try:
+        _warm_callable = getattr(embedder, "warm", None)
+        if callable(_warm_callable):
+            _skill_names: set[str] = set()
+            for prof in profiles:
+                for sk in prof.must_skills:
+                    if sk.skill_name:
+                        _skill_names.add(sk.skill_name)
+                for sk in prof.nice_skills:
+                    if sk.skill_name:
+                        _skill_names.add(sk.skill_name)
+            for sk in candidate.skills:
+                if sk.skill_name:
+                    _skill_names.add(sk.skill_name)
+            if _skill_names:
+                await _run_in_thread(lambda: _warm_callable(list(_skill_names)))
+    except Exception:
+        # warm 失败不阻断评分（模型不可用会降级纯规则，见 _skill_similarity）
+        pass
+
     def _score():
+        scored_items: list[tuple[PositionProfile, MatchResult]] = []
         best_profile: PositionProfile | None = None
         best: MatchResult | None = None
         for prof in profiles:
@@ -296,11 +323,58 @@ async def score_jd_compare(
                 candidate, prof, semantic=embedder, sim_threshold=sim_threshold,
                 project_vectors=project_vectors,
             )
+            scored_items.append((prof, result))
             if best is None or result.total_score > best.total_score:
                 best, best_profile = result, prof
-        return best_profile, best
+        scored_items.sort(key=lambda pr: pr[1].total_score, reverse=True)
+        return scored_items, best_profile, best
 
-    return await _run_in_thread(_score)
+    scored_items, best_profile, best = await _run_in_thread(_score)
+    if not scored_items or best_profile is None or best is None:
+        return None
+    # 评分溯源（2026-09-01）：同岗参与评分的 JD 条数，供前端展示
+    # 「同岗 N 条 JD 中的最佳匹配」；scored_items 为全部参与评分 JD 按分降序，
+    # 供前端下拉逐条查看各 JD 详情
+    return best_profile, best, scored_items, len(scored_items)
+
+
+async def score_jd_one(
+    session: AsyncSession,
+    candidate: CandidateProfile,
+    jd_id: str,
+    project_vectors: dict,
+    semantic=None,
+    sim_threshold: float | None = None,
+) -> tuple[PositionProfile, MatchResult] | None:
+    """按 jd_id 评分单条 JD（compare 下拉切换用）。
+
+    加载该行抽取快照构建单 JD 画像并评分，返回 (profile, result)。用户显式
+    选中某条 JD 时不过窄 JD 过滤（体会到的是它自身真实分数）；该 JD 在
+    score_jd_compare 的 breakdown 中已存在时分数与组内一致（每条 JD 独立评分）。
+    """
+    embedder = semantic or SkillEmbedder.get()
+    try:
+        jd_pk = int(jd_id)
+    except (TypeError, ValueError):
+        return None
+    row = await session.get(JDRaw, jd_pk)
+    if row is None or (row.snapshot or {}).get("extraction") is None:
+        return None
+    prof = jd_profile_from_snapshot(
+        row.snapshot or {}, str(row.id),
+        source=row.source or "", source_url=row.source_url or "",
+    )
+    if prof is None:
+        return None
+
+    def _score():
+        return score_position(
+            candidate, prof, semantic=embedder, sim_threshold=sim_threshold,
+            project_vectors=project_vectors,
+        )
+
+    result = await _run_in_thread(_score)
+    return prof, result
 
 
 async def load_jd_evidence_refs(

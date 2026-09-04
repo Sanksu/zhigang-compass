@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { PaginationBar } from '@/components/ui/pagination'
 import { apiGet, errMsg } from '@/lib/api'
-import { cn } from '@/lib/utils'
+import { cn, formatDateTime } from '@/lib/utils'
 import type { components } from '@/types/api'
 import type { EvolutionDiff, EvolutionDiffNode, EvolutionVersion, EvolutionVersionDetail, TrendTone, VersionDiffItem } from './types'
 import { SearchableSelect } from './shared'
@@ -92,7 +92,7 @@ export function VersionDiffView() {
   // 初始加载不设 loading 态（effect 内同步 setState 违反 react-hooks/set-state-in-effect）
   useEffect(() => {
     let cancelled = false
-    apiGet<components['schemas']['EvolutionVersionListData']>(`/evolution/versions?page=1&size=100`)
+    apiGet<components['schemas']['EvolutionVersionListData']>(`/evolution/versions?page=1&size=100`, { ttl: 60 })
       .then((res) => {
         if (cancelled) return
         // 快照可能在同一事务写入导致 created_at 相同，按 version_id（graph_vYYYYMMDD）降序保证稳定
@@ -221,7 +221,7 @@ export function VersionDiffView() {
         <DialogHeader>
           <DialogTitle>版本详情：{detailVersion}</DialogTitle>
           <DialogDescription>
-            {detail?.created_at ?? '加载中…'} · 快照节点 {detail?.stats.nodes ?? '—'} · 边 {detail?.stats.edges ?? '—'}
+            {detail ? formatDateTime(detail.created_at) : '加载中…'} · 快照节点 {detail?.stats.nodes ?? '—'} · 边 {detail?.stats.edges ?? '—'}
           </DialogDescription>
         </DialogHeader>
         {detailLoading && (

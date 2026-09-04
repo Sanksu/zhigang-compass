@@ -81,8 +81,14 @@ ENV HTTP_PROXY=
 COPY app/ ./app/
 COPY alembic/ ./alembic/
 COPY alembic.ini .
-COPY keys/ ./keys/
+# JWT 密钥（keys/）不 COPY 进镜像：经 compose 同名目录 volume 挂载注入
+# （left = ./backend/keys），镜像层内不残留任何密钥副本，重建镜像不失效 token
 COPY configs/ ./configs/
+# 治理脚本（2026-08-31 域治理：graph-governance resync/summary 端点运行时
+# import scripts.sync_position_domains / evaluate_position_domains）
+COPY scripts/ ./scripts/
+# 域基准文件（evaluate_position_domains 默认路径，缺失时基准显示 null）
+COPY data/golden_set/position_domain_eval.jsonl ./data/golden_set/position_domain_eval.jsonl
 # 爬虫项目（crawl_platform 以 data/crawlers 为 cwd 调 scrapy crawl）
 COPY data/crawlers/ ./data/crawlers/
 
@@ -92,8 +98,12 @@ COPY data/crawlers/ ./data/crawlers/
 ENV PYTHONPATH=/app:/app/data
 
 # dict-guard 运行时需在 configs/ 下创建 skill_filters_dynamic.json（COPY 产物
-# 默认 root 属主，app 用户不可写）——目录属主预先让渡给 app 用户
-RUN mkdir -p /app/configs /app/reports && chown -R app:app /app/configs /app/reports
+# 默认 root 属主，app 用户不可写）——目录属主预先让渡给 app 用户。
+# /app/uploads 必须在镜像内预建为 app 属主：uploads_data 具名卷首次挂载时
+# Docker 按镜像内目录属主 copy-up，缺失则挂载点落为 root:root，运行时
+# app 用户写简历文件直接 PermissionError（09-04 事故）
+RUN mkdir -p /app/configs /app/reports /app/uploads && \
+    chown -R app:app /app/configs /app/reports /app/uploads
 
 USER app
 

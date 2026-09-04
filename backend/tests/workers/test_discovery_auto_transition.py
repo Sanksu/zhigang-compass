@@ -149,6 +149,7 @@ def _candidate_row(name: str = "RAG", state: str = "emerging", confidence: float
         seed_matched=True,
         rag_matched=True,
         definition_draft="RAG 工程师负责检索增强生成系统的构建与优化。",
+        definition_structured={"core_duties": [], "typical_scenarios": []},
     )
 
 
@@ -193,7 +194,7 @@ class TestAutoTransitionTask:
         # 候选池状态落库 + Neo4j 幂等 MERGE（08-14：Counter 自增 + MERGE 共 2 条）
         assert row.state == "stable"
         assert cand_session.committed is True
-        assert len(driver.queries) == 3
+        assert len(driver.queries) == 4  # 方案 A（09-02）：多 1 条图谱岗位名查询排最后
         query, params = driver.queries[2]
         assert "MERGE (p:Position {name: $name})" in query
         assert "SET p.status = $state" in query
@@ -272,7 +273,7 @@ class TestAutoTransitionTask:
         }]
         assert row.state == "stable"
         assert cand_session.committed is True
-        assert len(driver.queries) == 3  # 08-15：novelty REQUIRES 查询 + Counter 自增 + MERGE
+        assert len(driver.queries) == 4  # 方案 A（09-02）：多 1 条图谱岗位名查询排最后
         query, params = driver.queries[2]
         assert "SET p.status = $state" in query
         assert params["state"] == "stable"
@@ -512,4 +513,5 @@ class TestCandidateNormalizationMigration:
         assert result["transitions"] == 1
         assert candidate.position_name == current_name
         assert candidate.state == "stable"
-        assert driver.queries[-1][1]["name"] == current_name
+        # 方案 A（09-02）：最后一条是图谱岗位名查询，MERGE 在倒数第二条
+        assert driver.queries[-2][1]["name"] == current_name

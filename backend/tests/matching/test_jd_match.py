@@ -117,7 +117,7 @@ class TestScoreJdCompare:
             )
 
         monkeypatch.setattr(jd_match, "score_position", _fake_score)
-        best, result = asyncio.run(jd_match.score_jd_compare(
+        best, result, _scored, _compared = asyncio.run(jd_match.score_jd_compare(
             _FakeSession(rows), _candidate(["Python", "Docker"]), "后端工程师", {},
         ))
         # 高分 JD（全栈，技能更多）胜出：result=0.92，best 为全栈 JD
@@ -151,11 +151,92 @@ class TestScoreJdCompare:
             )
 
         monkeypatch.setattr(jd_match, "score_position", _fake_score)
-        best, _ = asyncio.run(jd_match.score_jd_compare(
+        best, _, _scored, _c = asyncio.run(jd_match.score_jd_compare(
             _FakeSession([ok_row, no_ext_row]), _candidate(["Java"]), "后端工程师", {},
         ))
         # 只有 1 条带 extraction 的参与评分（无 extraction 行跳过）
         assert seen == ["后端工程师 JD"]
+
+
+class TestScoreJdOneAndRankedBreakdown:
+    """2026-09-02：下拉逐条查看同岗位各 JD 评分/详情。
+
+    - score_jd_compare 返回全部评分 JD（降序列表）+ 条数（供 jd_breakdown 下拉）。
+    - score_jd_one 按 jd_id 评分单条 JD（下拉切换）；显式选中不过窄 JD 过滤。
+    """
+
+    def test_returns_ranked_scored_items(self, monkeypatch):
+        """score_jd_compare 返回全部评分 JD（降序）+ 条数，供前端下拉。"""
+        rows = [
+            _row("后端工程师", ["Java", "Spring"], title="后端 JD-基础", jd_id=1),
+            _row("后端工程师", ["Python", "Docker", "K8s"], title="后端 JD-全栈", jd_id=2),
+        ]
+
+        def _fake_score(candidate, profile: PositionProfile, *a, **kw):
+            score = 0.7 if profile.name == "后端 JD-基础" else 0.92
+            return MatchResult(
+                position_id=profile.position_id, position_name=profile.name,
+                total_score=score, must_score=score, nice_score=1.0, exp_score=1.0,
+                matched_must=[], missing_must=[],
+            )
+
+        monkeypatch.setattr(jd_match, "score_position", _fake_score)
+        best, result, scored, compared = asyncio.run(jd_match.score_jd_compare(
+            _FakeSession(rows), _candidate(["Python"]), "后端工程师", {},
+        ))
+        assert compared == 2
+        assert len(scored) == 2
+        # 降序：全栈(0.92) 在前，基础(0.7) 在后
+        assert scored[0][1].total_score == 0.92
+        assert scored[1][1].total_score == 0.7
+        assert result.total_score == 0.92
+
+    def test_score_jd_one_scores_single_jd(self, monkeypatch):
+        """按 jd_id 评分单条 JD（下拉切换）；单技能窄 JD 显式选中仍可评分。"""
+        rows = [
+            _row("后端工程师", ["Java", "Spring"], title="后端 JD-A", jd_id=1),
+            _row("后端工程师", ["Python"], title="后端 JD-B", jd_id=2),
+        ]
+
+        def _fake_score(candidate, profile: PositionProfile, *a, **kw):
+            return MatchResult(
+                position_id=profile.position_id, position_name=profile.name,
+                total_score=0.8, must_score=0.8, nice_score=1.0, exp_score=1.0,
+                matched_must=[], missing_must=[],
+            )
+
+        monkeypatch.setattr(jd_match, "score_position", _fake_score)
+
+        class _GetSession:
+            def __init__(self, rows):
+                self._by_id = {r.id: r for r in rows}
+
+            async def get(self, model, pk):
+                return self._by_id.get(int(pk))
+
+        out = asyncio.run(jd_match.score_jd_one(
+            _GetSession(rows), _candidate(["Java"]), "2", {},
+        ))
+        assert out is not None
+        prof, result = out
+        assert prof.position_id == "2"
+        assert prof.name == "后端 JD-B"
+        assert result.total_score == 0.8
+
+    def test_score_jd_one_returns_none_for_unknown(self):
+        """jd_id 不存在 / 无抽取快照 → None。"""
+        class _GetSession:
+            def __init__(self, rows):
+                self._by_id = {r.id: r for r in rows}
+
+            async def get(self, model, pk):
+                return self._by_id.get(int(pk))
+
+        rows = [_row("后端工程师", ["Java", "Spring"], title="后端 JD-A", jd_id=1)]
+        out = asyncio.run(jd_match.score_jd_one(
+            _GetSession(rows), _candidate(["Java"]), "999", {},
+        ))
+        assert out is None
 
 
 class TestLoadJdEvidenceRefs:
@@ -226,7 +307,7 @@ class TestNarrowJdFilter:
             )
 
         monkeypatch.setattr(jd_match, "score_position", _fake_score)
-        best, result = asyncio.run(jd_match.score_jd_compare(
+        best, result, _scored, _compared = asyncio.run(jd_match.score_jd_compare(
             _FakeSession(rows), _candidate(["Python"]), "后端工程师", {},
         ))
         assert "后端 JD-窄" not in scored_names  # 窄 JD 未参与评分
@@ -337,7 +418,7 @@ class TestAlignScoresWithFullJd:
         )
 
         async def _fake_compare(session, candidate, position_name, project_vectors, semantic=None, sim_threshold=None):
-            return (None, best)
+            return (None, best, [], 0)
 
         monkeypatch.setattr(jd_match, "score_jd_compare", _fake_compare)
         out = asyncio.run(jd_match._align_scores_with_full_jd(

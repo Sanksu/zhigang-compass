@@ -83,6 +83,12 @@ services:
       ARQ_REDIS_URL: redis://redis:6379/1  # 08-15 修复：env_file 的 ARQ_REDIS_URL=localhost 覆盖 ARQ 队列（容器内 localhost=自身），任务入队 Connection refused
       # 前端静态资源挂载点（backend/.env 的相对路径 ../frontend/dist 在容器内不成立）
       FRONTEND_DIST_DIR: /app/frontend-dist
+      # SBERT 离线加载（2026-09-02 性能优化）：模型已在 backend/models/sbert 本地
+      # 挂载（见 volumes），强制 HF 库只用本地缓存、绝不联网下载——此前每次都走
+      # HuggingFace（无 token 限速）导致首个 compare 800000 (80s) 级冷启动。
+      # 匹配语义不受影响（模型文件齐全，同模型同权重），仅禁联网。
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
     depends_on:
       postgres:
         condition: service_healthy
@@ -116,6 +122,15 @@ services:
       # 报告目录（08-18 压测核验）：freshness/diversity 等报告落容器内 /app/reports，
       # 无挂载则容器重建即丢失——与宿主机 backend/reports 共享持久化
       - ./backend/reports:/app/reports
+    # 覆盖 Dockerfile 健康检查（start-period 10s 过短）：api 启动时要加载
+      # SentenceTransformer 模型（外网受限时 HuggingFace 重试最坏 1 分钟+），
+      # 10s 内未就绪即被判 unhealthy——调大 start_period 90s 不计入失败
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
     restart: unless-stopped  # 08-18 观察：api 曾因引擎/资源事件被优雅停止且无重启策略而宕机，与 worker 对齐
 
   # ARQ 异步任务 worker（BE-M3-04）：消费 resume_parse / run_etl_pipeline 等队列任务

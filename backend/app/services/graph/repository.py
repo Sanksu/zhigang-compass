@@ -43,6 +43,12 @@ def query_position_skills_by_name(driver, name) -> tuple[str | None, dict[str, d
         return pid, queries.query_position_skills_by_necessity(session, pid)
 
 
+def query_position_definition_by_name(driver, name) -> dict:
+    """按岗位名查定义图源属性（core_duties/scenarios）；无图内岗位返回 {}。"""
+    with driver.session() as session:
+        return queries.query_position_definition_by_name(session, name)
+
+
 def query_prereq_chain(driver, skill_name) -> list[str]:
     with driver.session() as session:
         return queries.query_prereq_chain(session, skill_name)
@@ -73,14 +79,14 @@ def query_shortest_path(driver, from_skill, to_skill, statuses) -> list | None:
         return queries.query_shortest_path(session, from_skill, to_skill, statuses)
 
 
-def query_view_techstack(driver, limit, status_filter) -> list:
+def query_view_techstack(driver, limit, status_filter, level=None) -> list:
     with driver.session() as session:
-        return queries.query_view_techstack(session, limit, status_filter)
+        return queries.query_view_techstack(session, limit, status_filter, level)
 
 
-def query_view_main(driver, limit, status_filter) -> list:
+def query_view_main(driver, limit, status_filter, level=None) -> list:
     with driver.session() as session:
-        return queries.query_view_main(session, limit, status_filter)
+        return queries.query_view_main(session, limit, status_filter, level)
 
 
 def load_skill(driver, skill_id) -> dict | None:
@@ -111,16 +117,21 @@ async def query_graph_counts_async(driver) -> dict:
         return await queries_async.query_graph_counts(session)
 
 
-async def query_view_techstack_async(driver, limit, status_filter) -> list:
+async def query_view_techstack_async(driver, limit, status_filter, level=None) -> list:
     async with driver.session() as session:
-        return await queries_async.query_view_techstack(session, limit, status_filter)
+        return await queries_async.query_view_techstack(session, limit, status_filter, level)
 
 
-async def query_view_main_async(driver, limit, status_filter) -> list:
+async def query_view_main_async(driver, limit, status_filter, level=None) -> list:
     async with driver.session() as session:
-        return await queries_async.query_view_main(session, limit, status_filter)
+        return await queries_async.query_view_main(session, limit, status_filter, level)
 
 
 async def query_view_position_portrait_async(driver, position_id: str, limit: int, status_filter: str) -> list:
     async with driver.session() as session:
         return await queries_async.query_view_position_portrait(session, position_id, limit, status_filter)
+
+
+async def query_stable_positions_async(driver) -> list[dict]:
+    async with driver.session() as session:
+        return await queries_async.query_stable_positions(session)

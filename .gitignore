@@ -23,8 +23,10 @@ ehthumbs.db
 *.sublime-workspace
 *.sublime-project
 
-# Trae IDE 本地配置（不进入版本控制）
+# Trae IDE 本地配置与产物（不进入版本控制）
 .trae/
+.trae-html-share-packages/
+.uploads/
 
 # ---------- Python ----------
 __pycache__/
@@ -98,6 +100,9 @@ dist-ssr/
 build/
 *.local
 
+# pnpm 全局 store（本地缓存，不进入版本控制）
+.pnpm-store/
+
 # 前端测试与缓存
 coverage/
 .nyc_output/
@@ -167,6 +172,9 @@ dumps/
 # 不误伤图谱 schema 定义（backend/app/services/kg/schema.cypher 需入库）
 backups/*.cypher
 dumps/*.cypher
+# 2026-09-03：快照入库（snapshots/，Git LFS）需放行 *.dump（否则被上面规则忽略）
+!snapshots/
+!snapshots/*.dump
 
 # 模型权重与缓存
 backend/models/
@@ -192,6 +200,14 @@ reference/
 # ---------- 临时文件 ----------
 temp/
 
+# 本地 build/临时产物（避免误提交噪音）
+backend/.tmp/
+frontend/dist.old/
+frontend/dist.old*/
+/zhigang-compass-*.tar.gz
+# 本机部署 override（不入库，文件头有说明）
+/docker-compose.local-images.yml
+
 # ---------- AI 会话产物（根目录验证截图 / Playwright MCP / pytest basetemp） ----------
 /*.png
 .playwright-mcp/
@@ -199,3 +215,7 @@ backend/.pytest_tmp_*/
 
 # ---------- 工具本地目录（ZCode 计划文件等，不入版本控制） ----------
 .zcode/
+# ---------- 竞赛提交精简（09-02）：三轮评测中间产物不入库 ----------
+# 110 条官方黄金集评测以 evaluation_110/（最终报告）为准；r1/r2/r3 是
+# 08-26 验收复测的中间跑，报告已并入主目录，提交包不收录
+backend/data/golden_set/review/evaluation_110_r*/

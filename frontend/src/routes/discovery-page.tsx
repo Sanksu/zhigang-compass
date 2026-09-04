@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react'
 import { Sparkles, Radar, ArrowUpRight, ArrowDownRight, Minus, AlertCircle } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
+import { formatDateTime } from '@/lib/utils'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { PositionStateBadge } from '@/components/shared/position-state-badge'
@@ -20,6 +21,7 @@ import {
   type PositionSkillsDeltaSummaryData,
 } from '@/components/discovery/types'
 import { MetricCard } from '@/components/shared/metric-card'
+import { Reveal } from '@/components/ui/reveal'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 type Tab = 'new' | 'delta'
@@ -71,13 +73,14 @@ function NewPositionsView({ data, loading }: { data: DiscoveryRecentData | null;
 
   return (
     <div className="space-y-2">
-      {data.candidates.map((c) => {
+      {data.candidates.map((c, i) => {
         const isOpen = expanded.has(c.position_name)
         const mustCount = c.skills?.must?.length ?? 0
         const niceCount = c.skills?.nice?.length ?? 0
         return (
-          <Card key={c.position_name}>
-            <CardContent className="py-3">
+          <Reveal key={c.position_name} delay={i * 60}>
+            <Card>
+              <CardContent className="py-3">
               <button
                 type="button"
                 className="w-full text-left"
@@ -94,7 +97,7 @@ function NewPositionsView({ data, loading }: { data: DiscoveryRecentData | null;
                   <span className="text-sm font-medium text-ink">{c.position_name}</span>
                   {stateBadge(c.state)}
                   <span className="text-[11px] text-ink-faint font-mono ml-auto">
-                    发现于 {new Date(c.detected_at).toLocaleDateString('zh-CN')}
+                    发现于 {formatDateTime(c.detected_at)}
                   </span>
                 </div>
                 {c.skill_pending ? (
@@ -109,7 +112,37 @@ function NewPositionsView({ data, loading }: { data: DiscoveryRecentData | null;
                 )}
               </button>
               {isOpen && (
-                <div className="mt-2 border-t border-border pt-2">
+                <div className="mt-2 border-t border-border pt-2 space-y-2">
+                  {/* 岗位结构化定义（赛题五字段：职责/场景 + 一句话定义；技能见下方图谱证据边） */}
+                  {c.definition?.summary && (
+                    <p className="text-xs text-ink-secondary leading-relaxed">{c.definition.summary}</p>
+                  )}
+                  {(c.definition?.core_duties?.length ?? 0) > 0 && (
+                    <div>
+                      <div className="text-[11px] text-ink-faint">核心职责</div>
+                      <ul className="mt-1 space-y-0.5">
+                        {c.definition!.core_duties!.map((d, j) => (
+                          <li key={j} className="text-xs text-ink-muted flex gap-1.5">
+                            <span className="text-ink-faint select-none">·</span>
+                            <span>{d}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {(c.definition?.typical_scenarios?.length ?? 0) > 0 && (
+                    <div>
+                      <div className="text-[11px] text-ink-faint">典型行业应用场景</div>
+                      <ul className="mt-1 space-y-0.5">
+                        {c.definition!.typical_scenarios!.map((s, j) => (
+                          <li key={j} className="text-xs text-ink-muted flex gap-1.5">
+                            <span className="text-ink-faint select-none">·</span>
+                            <span>{s}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   {c.skill_pending || !c.skills ? (
                     <p className="text-xs text-ink-faint">暂无技能明细</p>
                   ) : (
@@ -125,7 +158,8 @@ function NewPositionsView({ data, loading }: { data: DiscoveryRecentData | null;
                 </div>
               )}
             </CardContent>
-          </Card>
+            </Card>
+          </Reveal>
         )
       })}
     </div>
@@ -220,8 +254,7 @@ function SkillsDeltaView() {
     a.skill_name.localeCompare(b.skill_name, 'zh-Hans-CN')
 
   // 快照日期（版本 id 无阅读意义，放 title 溯源）
-  const fmtSnapDate = (iso: string | null | undefined) =>
-    iso ? new Date(iso).toLocaleDateString('zh-CN') : '?'
+  const fmtSnapDate = (iso: string | null | undefined) => formatDateTime(iso)
 
   const versionOptions = summary?.versions ?? []
   // 下拉仅显示有增减的岗位；稳定岗位归入下方独立面板
@@ -238,9 +271,10 @@ function SkillsDeltaView() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">岗位技能增减（快照对比）</CardTitle>
+      <Reveal delay={0}>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">岗位技能增减（快照对比）</CardTitle>
           <CardDescription>
             任选两个图谱版本快照对比；下拉仅列出该对比范围内有技能增减的岗位
           </CardDescription>
@@ -381,9 +415,11 @@ function SkillsDeltaView() {
           )}
         </CardContent>
       </Card>
+      </Reveal>
 
       {/* 稳定面板：两版间技能集合完全一致（有技能且零增减）的岗位 */}
-      <Card>
+      <Reveal delay={140}>
+        <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">稳定岗位（无技能增减）</CardTitle>
           <CardDescription>
@@ -423,6 +459,7 @@ function SkillsDeltaView() {
           )}
         </CardContent>
       </Card>
+      </Reveal>
     </div>
   )
 }
@@ -473,9 +510,18 @@ export function DiscoveryPage() {
 
       {/* 顶部指标卡 */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-        <MetricCard data={{ label: '近 30 天候选', value: total, delta: 0, deltaTone: 'stable', hint: '进入发现候选池', bar: true }} />
-        <MetricCard data={{ label: '已聚合成图', value: withSkillsCount, delta: 0, deltaTone: 'stable', hint: '有图谱技能清单', bar: true }} />
-        <MetricCard data={{ label: '待审核', value: pendingCount, delta: 0, deltaTone: 'declining', hint: 'candidate 态，技能待聚合', bar: true }} />
+        {([
+          { label: '近 30 天候选', value: total, hint: '进入发现候选池', tone: 'stable' },
+          { label: '已聚合成图', value: withSkillsCount, hint: '有图谱技能清单', tone: 'stable' },
+          { label: '待审核', value: pendingCount, hint: 'candidate 态，技能待聚合', tone: 'declining' },
+        ] as { label: string; value: number; hint: string; tone: 'stable' | 'declining' }[]).map((s, i) => (
+          <Reveal key={s.label} delay={i * 90} className="h-full">
+            <MetricCard
+              className="h-full"
+              data={{ label: s.label, value: s.value, deltaTone: s.tone, hint: s.hint, bar: true }}
+            />
+          </Reveal>
+        ))}
       </div>
 
       {/* Tab 切换 */}

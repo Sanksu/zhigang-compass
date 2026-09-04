@@ -1,6 +1,6 @@
 """ETL 事实门禁测试（08-23 全流程闭环审查 P0）。
 
-- 事实阶段（去重/抽取入图/岗位聚合）任一硬失败 → pipeline_status=degraded，
+- 事实阶段（去重/抽取入图/交叉验证/岗位聚合）任一硬失败 → pipeline_status=degraded，
   快照/演化/画像缓存/新岗位发现整体跳过并记 skipped 审计项；治理/报告阶段
   （健康检查/字典守卫/统计）不依赖当日数据完整性，继续执行。
 - complete 路径阶段顺序：先发布当日快照，演化关系推导在其后（基于
@@ -18,7 +18,7 @@ sys.path.insert(0, str(_BACKEND))
 sys.path.insert(0, str(_BACKEND / "data"))
 
 
-def _build_env(monkeypatch, *, aggregate_fails: bool):
+def _build_env(monkeypatch, *, aggregate_fails: bool, cross_validate_fails: bool = False):
     """构造 run_etl_pipeline 的最小桩环境，返回 (calls, _FakeTasks)。"""
     from app.workers import etl
 
@@ -35,6 +35,9 @@ def _build_env(monkeypatch, *, aggregate_fails: bool):
 
     async def _fail_aggregate(ctx):
         raise RuntimeError("聚合失败（模拟事实阶段硬失败）")
+
+    async def _fail_cross_validate(ctx):
+        raise RuntimeError("交叉验证失败（模拟验证服务故障）")
 
     class _FakeNeo4jSession:
         def __enter__(self):
@@ -72,7 +75,9 @@ def _build_env(monkeypatch, *, aggregate_fails: bool):
         aggregate_positions = staticmethod(
             _fail_aggregate if aggregate_fails else _make_task("aggregate_positions")
         )
-        cross_validate_jds = staticmethod(_ok_task)
+        cross_validate_jds = staticmethod(
+            _fail_cross_validate if cross_validate_fails else _make_task("cross_validate")
+        )
         sync_skill_normalization = staticmethod(_ok_task)
         diversity_report = staticmethod(_ok_task)
         check_data_freshness = staticmethod(_ok_task)
@@ -151,4 +156,36 @@ def test_complete_path_snapshots_before_evolved_from(monkeypatch):
     assert "snapshot_graph" in result["stages"] and "error" not in result["stages"]["snapshot_graph"]
     assert calls.index("snapshot_graph") < calls.index("evolved_from")
     assert calls.index("aggregate_positions") < calls.index("snapshot_graph")
+    # 交叉验证先于聚合（§4.5 入图门控前置条件）：聚合消费置信度拦截低置信 JD
+    assert calls.index("cross_validate") < calls.index("aggregate_positions")
     assert "discovery_daily" in calls
+
+
+def test_cross_validate_failure_degrades_pipeline(monkeypatch):
+    """交叉验证（验证门控）硬失败 → 快照/演化/发现跳过（未验证 JD 不作为新事实发布）。"""
+    from app.workers import etl
+
+    calls, fake_tasks = _build_env(
+        monkeypatch, aggregate_fails=False, cross_validate_fails=True
+    )
+
+    result = asyncio.run(
+        etl.run_etl_pipeline({}, run_date="2026-08-23", tasks_module=fake_tasks)
+    )
+
+    assert result["pipeline_status"] == "degraded"
+    for stage in (
+        "backfill_embeddings",
+        "snapshot_graph",
+        "evolved_from",
+        "discovery_daily",
+        "discovery_auto_transition",
+    ):
+        assert result["stages"][stage] == {
+            "skipped": "pipeline_degraded",
+            "failed_fact_stages": ["cross_validate"],
+        }, stage
+        assert stage not in calls  # 门禁阶段未执行
+    assert result["stages"]["cross_validate"]["error"].startswith("RuntimeError")
+    # 治理/报告阶段不依赖当日数据完整性，继续执行
+    assert "graph_health_check" in calls

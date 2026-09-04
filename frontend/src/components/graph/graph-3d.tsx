@@ -412,7 +412,14 @@ export const Graph3D = forwardRef<Graph3DHandle, Graph3DProps>(function Graph3D(
           nodeThreeObject={getNodeObject}
           linkColor={linkColor}
           linkWidth={0.5}
-          linkDirectionalParticles={2}
+          linkDirectionalParticles={(link: unknown) => {
+            // 粒子仅在选中节点的邻域边开启：全边常开粒子是持续 GPU 动画，集显设备大图掉帧
+            if (!selectedId) return 0
+            const l = link as { source?: { id?: string } | string; target?: { id?: string } | string }
+            const src = typeof l.source === 'string' ? l.source : l.source?.id
+            const tgt = typeof l.target === 'string' ? l.target : l.target?.id
+            return src === selectedId || tgt === selectedId ? 2 : 0
+          }}
           linkDirectionalParticleWidth={2}
           linkDirectionalParticleSpeed={0.005}
           onNodeClick={handleNodeClick}

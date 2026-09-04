@@ -207,6 +207,38 @@ class TestScorePosition:
         assert two_hits.nice_score == pytest.approx(0.2)
         assert two_hits.unqualified is False
 
+    def test_no_must_without_years_uses_pure_nice(self):
+        """P1：无门槛岗位若 required_years=None（无准入年限信息），总分纯由
+        nice（技能）决定，不让 exp 恒满以 86.7% 权重主导——曾虚抬无门槛技术岗。"""
+        cand = _candidate(["Go", "Rust"], total_years=0)
+        pos = _position(
+            "p1",
+            musts=[],
+            nices=[_req("Go", Necessity.NICE, weight=1.0), _req("Rust", Necessity.NICE, weight=1.0)],
+            required_years=None,
+        )
+        result = score_position(cand, pos, weights=W)
+        assert result.nice_score == 1.0
+        assert result.exp_score == 1.0  # 记录值仍为满分，但不参与无年限分支的总分
+        assert result.total_score == pytest.approx(1.0)
+
+        # 只命中 1/2 nice → total=0.5（纯技能，不被 exp 满分抬升）
+        partial = score_position(_candidate(["Go"], total_years=0), pos, weights=W)
+        assert partial.total_score == pytest.approx(0.5)
+
+    def test_no_must_with_years_still_renormalizes(self):
+        """P1：无门槛岗位有 required_years 时仍保留 exp 参与重归一（不破坏 A1 口径）。"""
+        cand = _candidate(["Go"], total_years=0)
+        pos = _position(
+            "p1",
+            musts=[],
+            nices=[_req("Go", Necessity.NICE, weight=1.0), _req("Rust", Necessity.NICE, weight=1.0)],
+            required_years=2,
+        )
+        result = score_position(cand, pos, weights=W)
+        # (0.5×0.2 + 0×0.2)/0.4 = 0.25（candidate 0 年满足 0/2）
+        assert result.total_score == pytest.approx(0.25)
+
     def test_nice_score_is_weighted_average(self):
         """nice_score = 命中技能权重和 / 总权重。"""
         cand = _candidate(["Go"])

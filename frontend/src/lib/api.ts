@@ -139,9 +139,11 @@ async function refreshAccessToken(): Promise<string | null> {
 }
 
 // 可选请求标记：401 时静默降级，不触发全局登出（用于游客可访问页面的增强性数据）
+// ttl：apiGet 缓存秒数（仅对系统级概览等低实时性接口显式启用；缺省的 GET 仅做并发单飞去重）
 declare module 'axios' {
   interface AxiosRequestConfig {
     skipAuthRedirect?: boolean
+    ttl?: number
   }
 }
 
@@ -184,8 +186,64 @@ http.interceptors.response.use(
 
 /** 便捷方法 — 返回 data 字段（已剔除 ApiResponse 外壳） */
 export async function apiGet<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
-  const res = await http.get<ApiResponse<T>>(url, config)
-  return res.data.data as T
+  const ttl = config?.ttl
+  return (ttl !== undefined ? cachedGet(url, config, ttl) : dedupedGet(url, config)) as Promise<T>
+}
+
+/* ── GET 加载提速：并发单飞去重 + 可选短 TTL 缓存 ──────────────────────
+ * 目标：减少重复网络往返，加速「切页返回」与「多组件同屏并发拉取」。
+ * - 单飞去重（所有 GET 默认）：同一 url+params 的并发请求合并为一次网络请求；
+ *   最终各调用方拿到同一结果，数据一致，仅省重复请求，不引入陈旧数据风险。
+ * - TTL 缓存（显式 config.ttl>0 启用）：仅用于系统级低实时性概览接口（如首页
+ *   指标卡）；实时页面（审核/爬取分页等）不传 ttl 则永不缓存。
+ * 缓存以内存 Map 存储、未区分用户——前端为单用户会话，短 TTL 下安全。 */
+
+const _inFlight = new Map<string, Promise<unknown>>()
+const _getCache = new Map<string, { expires: number; data: unknown }>()
+
+let _unserializableSeq = 0
+
+/** GET 缓存/去重 key：url + 序列化 params（query string 形式的 url 本身已含参数） */
+function getKey(url: string, config?: AxiosRequestConfig): string {
+  const params = config?.params
+  if (!params) return url
+  try {
+    return `${url}\u0000${JSON.stringify(params)}`
+  } catch {
+    // 序列化失败不能与裸 url 共享 key（否则不同请求被误合并）：递增序号
+    // 保证每次 key 唯一 → 各自独立发请求（审查④）
+    return `${url}\u0000\u0000unserializable#${++_unserializableSeq}`
+  }
+}
+
+function dedupedGet<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
+  const key = getKey(url, config)
+  const prior = _inFlight.get(key)
+  if (prior) return prior as Promise<T>
+  const p = http
+    .get<ApiResponse<T>>(url, config)
+    .then((res) => res.data.data as T)
+    .finally(() => _inFlight.delete(key))
+  _inFlight.set(key, p)
+  return p
+}
+
+function cachedGet<T>(url: string, config: AxiosRequestConfig | undefined, ttl: number): Promise<T> {
+  const key = getKey(url, config)
+  const hit = _getCache.get(key)
+  if (hit && hit.expires > Date.now()) return Promise.resolve(hit.data as T)
+  const prior = _inFlight.get(key)
+  if (prior) return prior as Promise<T>
+  const p = http
+    .get<ApiResponse<T>>(url, config)
+    .then((res) => res.data.data as T)
+    .then((data) => {
+      if (ttl > 0) _getCache.set(key, { expires: Date.now() + ttl * 1000, data })
+      return data
+    })
+    .finally(() => _inFlight.delete(key))
+  _inFlight.set(key, p)
+  return p
 }
 
 export async function apiPost<T>(url: string, body?: unknown, config?: AxiosRequestConfig): Promise<T> {

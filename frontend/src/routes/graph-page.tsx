@@ -19,7 +19,6 @@ import { GraphCommunityTree } from '@/components/graph/graph-community-tree'
 import { GraphDetailRail } from '@/components/graph/graph-detail-rail'
 import { toGraphData } from '@/components/graph/graph-adapter'
 import { aggregateByDomain, buildDomainView } from '@/components/graph/graph-domain'
-import { EvolutionTimeline, type EvolutionMarks } from '@/components/graph/evolution-timeline'
 import {
   NodeDetailPanel,
   type PositionDetail,
@@ -31,11 +30,12 @@ import {
   type SkillPositionItem,
 } from '@/components/graph/node-detail-panel'
 import type { GraphData, GraphEdge, GraphViewType, NodeDetail } from '@/components/graph/types'
-import { SKILL_CATEGORY_PALETTE } from '@/components/graph/graph-visual-tokens'
+import { PORTRAIT_DIM_PALETTE, SKILL_CATEGORY_PALETTE } from '@/components/graph/graph-visual-tokens'
 import type { LearningPathItem } from '@/components/match/types'
 import type { LearningStatus } from '@/components/learning/learning-timeline'
+import { SkeletonLine } from '@/components/ui/skeleton'
 import { apiGet, ApiError } from '@/lib/api'
-import { cn } from '@/lib/utils'
+import { cn, isDark } from '@/lib/utils'
 import type { components } from '@/types/api'
 
 /** 3D 图谱懒加载 — Three.js 约 1.4MB，仅在用户点击"3D"时按需加载 */
@@ -138,12 +138,28 @@ export function GraphPage() {
   >([])
   // 岗位簇（职能域）两级下拉：簇选中后岗位选项联动过滤
   const [portraitCluster, setPortraitCluster] = useState('')
+  // 岗位画像切换加载：切换岗位时置 true，数据到达后 false——画布右上角显示
+  // 轻量加载提示（消除切换岗位时"旧图保持→数据到达瞬间替换"的突兀感）
+  const [portraitLoading, setPortraitLoading] = useState(false)
+  // 岗位画像子图数据（独立于共享 raw）：按当前选中岗位加载，避免切换瞬间用旧
+  // （techStack/panorama）画布数据渲染成"先技术栈后画像"的闪现；未就绪为 null。
+  const [portraitData, setPortraitData] = useState<GraphData | null>(null)
+  // 岗位原始 JD 列表（画像侧栏「原始 JD」下拉数据源，GET /graph/position/{id}/jds）
+  const [positionJds, setPositionJds] = useState<components['schemas']['PositionRawJdListData'] | null>(null)
   // 视图数据缓存（session 级，08-16 性能优化）：同视图切换回来不重复请求/转换。
   // 数据随每日 ETL 更新，session 内缓存可接受（页面刷新即失效）
   const viewCacheRef = useRef<Map<GraphViewType, GraphData>>(new Map())
   const [loading, setLoading] = useState(true)
+  // 视图就绪键：viewReady !== view 即该视图数据在途（非缓存切换时画布叠轻量加载角标，
+  // 旧视图数据保持可见避免闪屏；岗位画像有自己的切换提示不走此键）
+  const [viewReady, setViewReady] = useState<GraphTab>('panorama')
   // 错误含业务码（08-14 审查：此前仅存 message，4040 与后端未启动混淆归因）
   const [error, setError] = useState<{ code: number; message: string } | null>(null)
+  // 视图重载令牌：错误态"重试"按钮触发视图 effect 重跑（画像数据流见渲染处单独处理）
+  const [reloadToken, setReloadToken] = useState(0)
+  // 熟练度级别筛选（赛题「按技术栈和级别切换视图」）：''=全部；
+  // 仅 panorama/techStack 生效（后端按 REQUIRES.level 过滤边与热次统计）
+  const [levelFilter, setLevelFilter] = useState<'' | '初级' | '中级' | '高级' | '专家'>('')
   // 全文检索（GET /graph/search）
   const [query, setQuery] = useState('')
   const [searchResults, setSearchResults] = useState<components['schemas']['SearchResultItem'][]>([])
@@ -160,8 +176,6 @@ export function GraphPage() {
   const [expandedPositions, setExpandedPositions] = useState<Set<string>>(() => new Set())
   // 展开的职能域 id 集合（panorama 聚合下钻第二级）：双击域超节点展开域内岗位
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(() => new Set())
-  // 演化时间轴标记（P0-2）：滑到某版本 → 本版新增/消亡节点画布打标
-  const [evolutionMarks, setEvolutionMarks] = useState<EvolutionMarks | null>(null)
   // 定位请求：搜索/相似技能点击后聚焦画布节点（含时间戳，连续点击同一技能也生效）
   const [focusRequest, setFocusRequest] = useState<{ id: string; ts: number } | null>(null)
   // 2D 画布命令句柄（重置视角）
@@ -216,6 +230,7 @@ export function GraphPage() {
     const applyViewData = (g: GraphData) => {
       setRaw(g)
       setError(null)
+      setViewReady(view)
       if (view === 'panorama') {
         // 聚合下钻：全部岗位以域超节点常驻；首屏自动展开最大域呈现岗位层
         const agg = aggregateByDomain(g)
@@ -223,21 +238,40 @@ export function GraphPage() {
       }
       setLoading(false)
     }
+    // 空闲预热技术栈视图缓存：全景渲染稳定后 1.5s 后台拉取并转换入缓存，
+    // 首次切技术栈页签即秒开（预热失败静默，进入视图时正常加载）
+    const warmTechStackCache = () => {
+      if (view !== 'panorama' || levelFilter || viewCacheRef.current.has('techStack')) return
+      window.setTimeout(() => {
+        if (cancelled || viewCacheRef.current.has('techStack')) return
+        apiGet<PanoramaData>('/graph/view/techStack?limit=120')
+          .then((res) => {
+            if (!cancelled) viewCacheRef.current.set('techStack', toGraphData(res))
+          })
+          .catch(() => {
+            /* 预热失败静默：进入技术栈视图时由主链路正常请求 */
+          })
+      }, 1500)
+    }
     const cached = viewCacheRef.current.get(view)
     if (cached) {
       // 命中缓存：跳过网络请求与转换（08-16 性能优化）
       applyViewData(cached)
+      warmTechStackCache()
       return
     }
-    apiGet<PanoramaData>(`/graph/view/${view}?limit=120`)
+    const levelQ = levelFilter ? `&level=${encodeURIComponent(levelFilter)}` : ''
+    apiGet<PanoramaData>(`/graph/view/${view}?limit=120${levelQ}`)
       .then((res) => {
         if (cancelled) return
         const g = toGraphData(res)
         viewCacheRef.current.set(view, g)
         applyViewData(g)
+        warmTechStackCache()
       })
       .catch((e) => {
         if (!cancelled) {
+          setViewReady(view)
           setError(
             e instanceof ApiError
               ? { code: e.code, message: e.message }
@@ -251,7 +285,10 @@ export function GraphPage() {
     return () => {
       cancelled = true
     }
-  }, [view])
+  }, [view, reloadToken, levelFilter])
+
+  // 非缓存视图数据在途（如首次进入技术栈）：画布叠轻量加载角标
+  const viewLoading = view !== 'positionPortrait' && viewReady !== view
 
   // 岗位画像下拉选项：进入视图时从 positionCenter 视图取岗位节点（freq 降序）。
   // session 内仅拉取一次（选项为空才请求），再次进入视图不重复请求；
@@ -289,12 +326,19 @@ export function GraphPage() {
   useEffect(() => {
     if (view !== 'positionPortrait' || !portraitPosition) return
     let cancelled = false
+    // 切换加载态置位宏任务化：避免 effect 内同步 setState（级联渲染 lint）；
+    // 数据到达后清除（catch 同样清除，失败后画布回到旧数据但提示由 error 表达）
+    const t = window.setTimeout(() => {
+      if (!cancelled) setPortraitLoading(true)
+    }, 0)
     apiGet<PanoramaData>('/graph/view/positionPortrait', {
       params: { position: portraitPosition, limit: 200 },
     })
       .then((res) => {
         if (cancelled) return
-        setRaw(toGraphData(res))
+        // 写入独立 portraitData，不覆盖共享 raw：否则切换瞬间画布会用旧的
+        // techStack/panorama 数据渲染一帧（"先技术栈后画像"闪现）
+        setPortraitData(toGraphData(res))
         setError(null)
       })
       .catch((e) => {
@@ -305,6 +349,34 @@ export function GraphPage() {
               : { code: 0, message: '岗位画像加载失败' },
           )
         }
+      })
+      .finally(() => {
+        window.clearTimeout(t)
+        if (!cancelled) setPortraitLoading(false)
+      })
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [view, portraitPosition])
+
+  // 岗位画像：加载当前画像岗位的原始 JD 列表（侧栏「原始 JD」下拉数据源）
+  useEffect(() => {
+    if (view !== 'positionPortrait' || !portraitPosition) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 视图切换清除旧画像 JD 残留
+      setPositionJds(null)
+      return
+    }
+    let cancelled = false
+    apiGet<components['schemas']['PositionRawJdListData']>(
+      `/graph/position/${encodeURIComponent(portraitPosition)}/jds`,
+      { params: { limit: 100 } },
+    )
+      .then((r) => {
+        if (!cancelled) setPositionJds(r)
+      })
+      .catch(() => {
+        if (!cancelled) setPositionJds(null)
       })
     return () => {
       cancelled = true
@@ -369,11 +441,26 @@ export function GraphPage() {
     const similar = apiGet<{ similar: SimilarSkillItem[] }>(`/graph/skill/similar?skill_id=${sid}&top_k=6`)
       .then((r) => r.similar)
       .catch(() => [] as SimilarSkillItem[])
-    Promise.all([positions, prerequisites, courses, evidence, similar]).then(([p, prereq, c, ev, sim]) => {
-      if (!cancelled) {
-        setSkillDetail({ skill_id: selected.id, positions: p, prerequisites: prereq, courses: c, loading: false })
-        setSkillEvidence(ev)
-        setSimilarSkills(sim)
+    // 5 个详情接口用 Promise.all 并发；任一个迟迟不回则整体永不 settle → 技能详情
+    // 恒停 loading 占位（用户感知为"无详情内容"）。加超时兜底：8s 未全部返回则以
+    // 空数据收尾（明确空态而非永久骨架），杜绝整段空白。
+    const results = Promise.all([positions, prerequisites, courses, evidence, similar]).then(
+      ([p, prereq, c, ev, sim]) => ({ ok: true as const, p, prereq, c, ev, sim }),
+    )
+    const timedOut = new Promise<{ ok: false }>((resolve) =>
+      window.setTimeout(() => resolve({ ok: false }), 8000),
+    )
+    Promise.race([results, timedOut]).then((res) => {
+      if (cancelled) return
+      if (res.ok) {
+        setSkillDetail({ skill_id: selected.id, positions: res.p, prerequisites: res.prereq, courses: res.c, loading: false })
+        setSkillEvidence(res.ev)
+        setSimilarSkills(res.sim)
+      } else {
+        // 超时：不卡骨架，落明确定空态（各处显示"暂无"占位）
+        setSkillDetail({ skill_id: selected.id, positions: [], prerequisites: [], courses: [], loading: false })
+        setSkillEvidence([])
+        setSimilarSkills([])
       }
     })
     return () => {
@@ -457,14 +544,20 @@ export function GraphPage() {
     setSearchDone(true)
     const seq = ++searchSeqRef.current
     setSearching(true)
-    apiGet<components['schemas']['SearchResultsData']>(
-      `/graph/search?q=${encodeURIComponent(term)}&type=skill&size=8`,
-    )
-      .then((r) => {
-        if (searchSeqRef.current === seq) setSearchResults(r.items)
-      })
-      .catch(() => {
-        if (searchSeqRef.current === seq) setSearchResults([])
+    // 技能 + 岗位双通道并发（后端 type 为单值枚举），按相关度合并排序——
+    // "搜岗位→定位"是答辩最自然的演示动作，仅搜技能会漏掉岗位名查询
+    const fetchType = (type: 'skill' | 'position') =>
+      apiGet<components['schemas']['SearchResultsData']>(
+        `/graph/search?q=${encodeURIComponent(term)}&type=${type}&size=8`,
+      )
+        .then((r) => r.items)
+        .catch(() => [] as components['schemas']['SearchResultItem'][])
+    Promise.all([fetchType('skill'), fetchType('position')])
+      .then(([skills, positions]) => {
+        if (searchSeqRef.current !== seq) return
+        setSearchResults(
+          [...skills, ...positions].sort((a, b) => b.score - a.score).slice(0, 8),
+        )
       })
       .finally(() => {
         if (searchSeqRef.current === seq) setSearching(false)
@@ -525,6 +618,28 @@ export function GraphPage() {
     [view, data, domainAgg, expandedDomains],
   )
 
+  // 点击岗位搜索结果 → 选中岗位节点 + 展开所属域 + 定位画布。
+  // panorama 聚合模式下岗位仅在其域展开后才上画布，故先展开域再触发 focusRequest
+  const focusPosition = useCallback(
+    (id: string, name: string) => {
+      setSelected({ id, name, type: 'position' })
+      if (view === 'panorama' && domainAgg && data) {
+        const target = data.nodes.find((n) => n.id === id || n.name === name)
+        const dom = target ? domainAgg.domainOfPosition.get(target.id) : undefined
+        if (dom && !expandedDomains.has(dom)) {
+          setExpandedDomains((prev) => {
+            if (prev.has(dom)) return prev
+            const next = new Set(prev)
+            next.add(dom)
+            return next
+          })
+        }
+      }
+      setFocusRequest((prev) => ({ id, ts: (prev?.ts ?? 0) + 1 }))
+    },
+    [view, data, domainAgg, expandedDomains],
+  )
+
   // 画布可见数据（08-29 视图收敛后仅三个页签视图）：
   // - panorama：域聚合三级下钻（域超节点 → 展开域 → 展开岗位技能）
   // - techStack（技能为中心）：岗位 Top-30 保底 + 每技能 Top-K 岗位边降噪
@@ -539,8 +654,8 @@ export function GraphPage() {
 
     // 岗位画像：后端已按选中岗位返回完整子图（中心岗位 + 属性维度 + 技能，limit=200），
     // 前端不再做 Top-30 / Top-N 裁剪（attr 节点非技能，通用裁剪路径会误删）；
-    // 未选岗位时返回 null，画布区显示引导空态（见渲染处）
-    if (view === 'positionPortrait') return portraitPosition ? data : null
+    // 未选岗位或画像数据未就绪时返回 null（画布显示加载/引导空态，绝不渲染旧视图数据）
+    if (view === 'positionPortrait') return portraitPosition ? portraitData : null
 
     // panorama：三级下钻——域超节点（全部岗位可见）→ 展开域 → 展开岗位技能。
     // data 非空 ⇒ domainAgg 非空（二者同源 memo），断言仅为类型收窄
@@ -552,10 +667,12 @@ export function GraphPage() {
       })
     }
 
-    // techStack：岗位显示数量限制（Top-30 按关联度降序，2026-08-15 画布容量限制）：
-    // 岗位全量 100+，物理上放不下岗位防重叠所需间距
-    // （enforceSpread minGap 60 → 每岗位约 1.06 万 px²，画布仅 ~54 万 px² 容量 ~30 岗位），
-    // 且全量渲染节点爆炸不可读。低频岗位不显示，可在搜索/详情面板中触达。
+    // techStack 降噪（2026-09-02 组合调优）：
+    // - 岗位 Top-30 按关联度降序（2026-08-15 画布容量限制：岗位全量 100+，
+    //   物理上放不下岗位防重叠所需间距 enforceSpread minGap 60 → 每岗位约
+    //   1.06 万 px²，画布仅 ~54 万 px² 容量 ~30 岗位，且全量渲染不可读）——
+    //   低频岗位不显示，可在搜索/详情面板中触达
+    // - 技能 Top-60：低频技能裁剪（全量 120 仍致环带过密；被裁技能保留搜索触达）
     const MAX_POSITIONS = 30
     const keepPositions = new Set<string>(
       data.nodes
@@ -564,11 +681,25 @@ export function GraphPage() {
         .slice(0, MAX_POSITIONS)
         .map((p) => p.id),
     )
-    const nodes = data.nodes.filter((n) => n.type !== 'position' || keepPositions.has(n.id))
+    const MAX_SKILLS = 60
+    const keepSkills = new Set<string>(
+      data.nodes
+        .filter((n) => n.type === 'skill')
+        .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+        .slice(0, MAX_SKILLS)
+        .map((n) => n.id),
+    )
+    const nodes = data.nodes.filter(
+      (n) =>
+        (n.type === 'position' && keepPositions.has(n.id)) ||
+        (n.type === 'skill' && keepSkills.has(n.id)) ||
+        (n.type !== 'position' && n.type !== 'skill'),
+    )
     const nodeIds = new Set(nodes.map((n) => n.id))
     // 08-28 技术栈降噪：每技能仅保留权重 Top-K 的岗位边（该视图边为技能→岗位）。
-    // 全量 1719 边交叉成毛线团是视觉混乱主因；Top-4 裁至 ~1/4，配合边透明度渐变。
-    const TECH_STACK_EDGES_PER_SKILL = 4
+    // 全量 1719 边交叉成毛线团是视觉混乱主因；09-02 Top-4 → Top-3 进一步收束，
+    // 配合边透明度渐变。被裁技能/岗位边经 nodeIds 过滤自然剔除。
+    const TECH_STACK_EDGES_PER_SKILL = 3
     const bySkill = new Map<string, GraphEdge[]>()
     for (const e of data.edges) {
       if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue
@@ -582,22 +713,29 @@ export function GraphPage() {
       for (const e of list.slice(0, TECH_STACK_EDGES_PER_SKILL)) kept.add(e)
     }
     return { ...data, nodes, edges: [...kept] }
-  }, [data, view, portraitPosition, expandedPositions, expandedDomains, domainAgg])
-  // 技术栈视图标签降噪白名单：仅 Top-30 高频技能在 LOD band 1 常显标签
+  }, [data, view, portraitPosition, portraitData, expandedPositions, expandedDomains, domainAgg])
+  // 技术栈视图标签降噪白名单：仅 Top-20 高频技能在 LOD band 1 常显标签
   // （其余技能放大到 band 2 才显示；非 techStack 视图传 null 走原中位阈值口径）
   const skillLabelTopIds = useMemo(() => {
     if (view !== 'techStack' || !data) return null
     const top = data.nodes
       .filter((n) => n.type === 'skill')
       .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-      .slice(0, 30)
+      .slice(0, 20)
     return new Set(top.map((n) => n.id))
   }, [view, data])
 
   // WebGL2 不可用时 3D 按钮禁用，自动保持 2D（设计文档 §6.3 降级策略）
   const webgl2Available = useMemo(() => isWebGL2Available(), [])
-  // 触控设备（移动/平板，粗指针）固定 2D 模式（设计文档 §6.3：平板/移动端固定 2D）
-  const isCoarsePointer = useMemo(() => window.matchMedia('(pointer: coarse)').matches, [])
+  // 触控设备（移动/平板，粗指针）固定 2D 模式（设计文档 §6.3：平板/移动端固定 2D）。
+  // 响应式监听：平板旋转/插拔鼠标等 pointer 特性变化时实时更新（挂载时判定一次会过期）
+  const [isCoarsePointer, setIsCoarsePointer] = useState(() => window.matchMedia('(pointer: coarse)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse)')
+    const onChange = () => setIsCoarsePointer(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
   /** 3D 模式是否被锁定（WebGL2 不可用或触控设备） */
   const mode3dLocked = !webgl2Available || isCoarsePointer
 
@@ -686,11 +824,35 @@ export function GraphPage() {
 
   // 加载 / 错误 / 空态
   if (loading) {
+    // 整体加载增强：骨架屏模拟图谱画布（工具栏行 + 图例行 + 主体区），
+    // 比纯文字 spinner 更有"即将成形"的预期；spinner 居中叠加提示
     return (
-      <Card className="h-[640px] flex items-center justify-center text-sm text-ink-muted">
-        <div className="flex items-center gap-3">
-          <div className="size-6 rounded-full border-2 border-ink border-t-transparent animate-spin" />
-          正在加载图谱全景…
+      <Card className="h-[min(720px,calc(100dvh-210px))] min-h-[560px] overflow-hidden border-atlas-grid">
+        <div className="flex h-full flex-col gap-4 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <SkeletonLine className="h-8 w-56" />
+            <div className="flex gap-2">
+              <SkeletonLine className="h-8 w-24" />
+              <SkeletonLine className="h-8 w-24" />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <SkeletonLine className="h-7 w-24" />
+            <SkeletonLine className="h-7 w-24" />
+            <SkeletonLine className="h-7 w-24" />
+          </div>
+          <div className="relative flex flex-1 items-center justify-center rounded-xl border border-atlas-grid bg-subtle/30">
+            <div className="flex items-center gap-3 text-sm text-ink-muted">
+              <div className="size-6 rounded-full border-2 border-ink border-t-transparent animate-spin" />
+              正在加载图谱全景…
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <SkeletonLine className="h-4 w-20" />
+            <SkeletonLine className="h-4 w-20" />
+            <SkeletonLine className="h-4 w-20" />
+            <SkeletonLine className="h-4 w-24" />
+          </div>
         </div>
       </Card>
     )
@@ -698,9 +860,28 @@ export function GraphPage() {
 
   if (error) {
     return (
-      <Card className="h-[640px] flex items-center justify-center text-sm text-state-archived">
-        {error.message}
-        {error.code === 4040 ? '（未找到对应数据）' : '（请确认后端服务与数据库已启动）'}
+      <Card className="h-[640px] flex flex-col items-center justify-center gap-3 text-sm text-state-archived">
+        <p>
+          {error.message}
+          {error.code === 4040 ? '（未找到对应数据）' : '（请确认后端服务与数据库已启动）'}
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            setError(null)
+            if (view === 'positionPortrait') {
+              // 画像数据流由 [view, portraitPosition] 驱动，重试令牌无法触达，整页刷新兜底
+              window.location.reload()
+              return
+            }
+            setLoading(true)
+            setReloadToken((t) => t + 1)
+          }}
+        >
+          <RotateCcw className="size-3.5 mr-1" />
+          重试
+        </Button>
       </Card>
     )
   }
@@ -714,7 +895,10 @@ export function GraphPage() {
   }
 
   return (
-    <>
+    // 加载完成入场：从骨架屏切换到真实内容时整体淡入（该树分支从 loading
+    // return 切到本分支即新挂载，fade-in 天然触发一次；后续视图切换不清
+    // loading、不重挂载，动画不重放——只做首屏加载过渡）
+    <div className="animate-in fade-in-0 duration-300">
       <PageHeader
         title="能力图谱"
         description="从职能域进入岗位，再沿技能关系定位能力要求与演化信号"
@@ -739,10 +923,10 @@ export function GraphPage() {
                     setSearchDone(false)
                   }
                 }}
-                placeholder="搜索技能并定位关系"
+                placeholder="搜索技能或岗位，回车定位"
                 className="h-9 pl-8 pr-16 text-xs"
                 role="combobox"
-                aria-label="搜索图谱技能"
+                aria-label="搜索图谱技能或岗位"
                 aria-expanded={searchResults.length > 0 || (searchDone && !searching && !!query.trim())}
                 aria-controls="graph-search-results"
                 aria-autocomplete="list"
@@ -753,11 +937,27 @@ export function GraphPage() {
               {(searchResults.length > 0 || (searchDone && !searching && query.trim())) && (
                 <div id="graph-search-results" role="listbox" className="absolute right-0 top-11 z-40 w-full overflow-hidden rounded-lg border border-border bg-canvas p-1 shadow-lg">
                   {searchResults.length > 0 ? searchResults.map((result) => (
-                    <button key={result.id} type="button" role="option" aria-selected="false" onClick={() => focusSkill(result.id, result.name)} className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs hover:bg-subtle">
-                      <span className="font-medium text-ink">{result.name}</span>
+                    <button
+                      key={`${result.type}:${result.id}`}
+                      type="button"
+                      role="option"
+                      aria-selected="false"
+                      onClick={() =>
+                        result.type === 'position'
+                          ? focusPosition(result.id, result.name)
+                          : focusSkill(result.id, result.name)
+                      }
+                      className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-xs hover:bg-subtle"
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="shrink-0 rounded bg-subtle px-1 py-px text-[10px] text-ink-muted">
+                          {result.type === 'position' ? '岗位' : '技能'}
+                        </span>
+                        <span className="truncate font-medium text-ink">{result.name}</span>
+                      </span>
                       <span className="font-mono text-[12px] text-ink-faint">相关度 {(result.score * 100).toFixed(0)}</span>
                     </button>
-                  )) : <p className="px-2.5 py-2 text-xs text-ink-muted">未找到与“{query.trim()}”相关的技能</p>}
+                  )) : <p className="px-2.5 py-2 text-xs text-ink-muted">未找到与“{query.trim()}”相关的技能或岗位</p>}
                 </div>
               )}
             </div>
@@ -786,7 +986,12 @@ export function GraphPage() {
           setSelected(null)
           setExpandedPositions(new Set())
           setExpandedDomains(new Set())
-          setView(value as GraphTab)
+          const next = value as GraphTab
+          // 缓存命中的视图同步标记就绪（effect 会同步 applyViewData），
+          // 避免缓存秒切时加载角标闪一帧；未缓存视图保持 viewReady 不变 →
+          // viewLoading 为真，数据在途时画布显示轻量加载角标
+          if (viewCacheRef.current.has(next)) setViewReady(next)
+          setView(next)
         }}
       >
         <div className="mb-3 flex flex-col gap-3 rounded-xl border border-border bg-subtle/40 px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
@@ -797,6 +1002,31 @@ export function GraphPage() {
               ))}
             </TabsList>
             <p className="truncate text-[12px] text-ink-muted" title={VIEW_DESC[view]}>{VIEW_DESC[view]}</p>
+            {/* 熟练度级别筛选（panorama/techStack）：后端按 REQUIRES.level 过滤边与热次 */}
+            {(view === 'panorama' || view === 'techStack') && (
+              <Select
+                value={levelFilter || 'all'}
+                onValueChange={(v) => {
+                  // 切级别：清选中/展开态与视图缓存（缓存键不含 level，须失效重建）
+                  setSelected(null)
+                  setExpandedPositions(new Set())
+                  setExpandedDomains(new Set())
+                  viewCacheRef.current.clear()
+                  setLevelFilter(v === 'all' ? '' : (v as '初级' | '中级' | '高级' | '专家'))
+                }}
+              >
+                <SelectTrigger className="h-8 w-32 shrink-0 text-xs" aria-label="熟练度级别">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">全部级别</SelectItem>
+                  <SelectItem value="初级" className="text-xs">初级</SelectItem>
+                  <SelectItem value="中级" className="text-xs">中级</SelectItem>
+                  <SelectItem value="高级" className="text-xs">高级</SelectItem>
+                  <SelectItem value="专家" className="text-xs">专家</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
             {/* 岗位画像：岗位下拉（positionCenter 岗位集，默认选中最高频岗位） */}
             {view === 'positionPortrait' && (() => {
               // 两级下拉：岗位簇（职能域聚合）→ 簇内岗位联动过滤
@@ -809,7 +1039,10 @@ export function GraphPage() {
                   <Select
                     value={portraitCluster || undefined}
                     onValueChange={(v) => {
+                      // 切换簇：清空选中态与展开态，避免上一岗位的画布外节点 / 展开残留
                       setSelected(null)
+                      setExpandedPositions(new Set())
+                      setExpandedDomains(new Set())
                       setPortraitCluster(v)
                       // 切簇：岗位自动切到该簇内最高频岗位（portraitOptions 已按 freq 降序）
                       const first = portraitOptions.find((o) => o.domainId === v)
@@ -828,8 +1061,10 @@ export function GraphPage() {
                   <Select
                     value={portraitPosition || undefined}
                     onValueChange={(v) => {
-                      // 切换岗位：同步清空选中态（详情面板不残留上一岗位的画布外节点）
+                      // 切换岗位：同步清空选中态与展开态（详情面板/展开不残留上一岗位）
                       setSelected(null)
+                      setExpandedPositions(new Set())
+                      setExpandedDomains(new Set())
                       setPortraitPosition(v)
                     }}
                   >
@@ -902,13 +1137,15 @@ export function GraphPage() {
               ))}
             </div>
           )}
-          {view === 'positionPortrait' && !portraitPosition ? (
-            // 空态：未选岗位时不请求数据（visibleData 为 null），画布区仅显示引导提示
+          {view === 'positionPortrait' && (!portraitPosition || !portraitData) ? (
+            // 画像空态/加载：未选岗位显示引导；已选但数据未就绪显示加载占位。
+            // 两者都绝不渲染 Graph2D（避免用旧 techStack/panorama 数据闪现）。
             <div className="flex h-full w-full items-center justify-center text-sm text-ink-muted">
-              请选择岗位查看画像
+              {portraitPosition ? '画像加载中…' : '请选择岗位查看画像'}
             </div>
           ) : mode === '2d' ? (
             <Graph2D
+              key={view}
               ref={graphRef}
               data={visibleData!}
               expandedPositions={expandedUnion}
@@ -919,9 +1156,19 @@ export function GraphPage() {
               onToggleDomain={toggleDomain}
               learningPath={learningPath}
               completedSkills={[]}
-              evolutionMarks={evolutionMarks}
               skillLabelTopIds={skillLabelTopIds}
-              ringLayout={view === 'techStack' || view === 'positionPortrait'}
+              // 环形布局须与视图数据匹配：技术栈走 viewReady 门禁（避免首次点击
+              // 页签时 data 仍是旧视图（全景）而 ringLayout 已为 true——环形坐标
+              // 分支只覆盖 skill/position，旧视图的其余节点落到原点糊成一团）。
+              // 岗位画像不能沿用该门禁：其独立数据流从不写 viewReady，沿用则
+              // ringLayout 恒 false → 画像退化为可拖力导向散团（0905 用户实查
+              // 回归）；画像本身可见数据在子图就绪前为 null（画布不渲染旧视图），
+              // 无"糊一团"风险，故以 portraitData 就绪为门。
+              ringLayout={
+                view === 'positionPortrait'
+                  ? !!portraitData
+                  : view === 'techStack' && viewReady === view
+              }
               className="h-full w-full"
             />
           ) : (
@@ -938,6 +1185,21 @@ export function GraphPage() {
                 className="h-full w-full"
               />
             </Suspense>
+          )}
+          {/* 岗位画像切换加载覆盖：切换岗位期间轻量提示（消除"旧图保持→瞬间替换"突兀感） */}
+          {view === 'positionPortrait' && portraitLoading && (
+            <div className="absolute right-3 top-12 z-10 flex items-center gap-2 rounded-md border border-border bg-canvas/90 px-2.5 py-1.5 shadow-sm backdrop-blur text-xs text-ink-muted animate-in fade-in-0 duration-200">
+              <div className="size-3.5 rounded-full border-2 border-ink border-t-transparent animate-spin" />
+              加载岗位画像…
+            </div>
+          )}
+          {/* 视图切换加载覆盖：非缓存视图（如首次进入技术栈）数据在途时轻量提示；
+              旧视图数据保持可见不闪屏，全景就绪后已后台预热技术栈缓存故通常秒切 */}
+          {viewLoading && (
+            <div className="absolute right-3 top-12 z-10 flex items-center gap-2 rounded-md border border-border bg-canvas/90 px-2.5 py-1.5 shadow-sm backdrop-blur text-xs text-ink-muted animate-in fade-in-0 duration-200">
+              <div className="size-3.5 rounded-full border-2 border-ink border-t-transparent animate-spin" />
+              加载{VIEW_LABEL[view]}…
+            </div>
           )}
           {/* 画布操作提示（可关闭） */}
           {showOperationHint && (
@@ -987,7 +1249,10 @@ export function GraphPage() {
               className={focusMode ? 'h-full shadow-lg' : 'h-[640px]'}
             >
               <TabsContent value="detail" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
-                <NodeDetailPanel
+                {/* 详情面板过渡动画：节点切换时（key 变化）内容区淡入+轻微上移，
+                    弱化"点击节点→内容瞬变"的生硬感（岗位画像证据切换同样生效） */}
+                <div key={selected?.id ?? 'empty'} className="h-full animate-in fade-in-0 slide-in-from-bottom-1 duration-300">
+                  <NodeDetailPanel
                   node={selected}
                   stats={detailStats}
                   skillDetail={skillDetailView}
@@ -1003,6 +1268,11 @@ export function GraphPage() {
                   }
                   onTogglePosition={togglePosition}
                   portraitMode={view === 'positionPortrait'}
+                  positionJds={
+                    view === 'positionPortrait' && selected?.type === 'position'
+                      ? positionJds
+                      : null
+                  }
                   portraitEvidence={
                     selected?.type === 'attr' && portraitEvidence && portraitEvidence.position_id === portraitPosition
                       ? portraitEvidence
@@ -1015,11 +1285,13 @@ export function GraphPage() {
                   learningStatus={skillLearningStatus}
                   learnedSkills={learnedSkills}
                 />
+                </div>
               </TabsContent>
               <TabsContent value="analysis" className="flex-1 overflow-y-auto mt-0 px-0 py-0">
                 <GraphAnalysisPanel
                   skills={data.nodes.filter((n) => n.type === 'skill').map((n) => ({ id: n.id, name: n.name }))}
                   onFocusSkill={focusSkill}
+                  className="rounded-none border-0 bg-canvas shadow-none"
                 />
                 <GraphCommunityTree className="mt-3" />
               </TabsContent>
@@ -1027,9 +1299,6 @@ export function GraphPage() {
           </div>
         )}
       </div>
-
-      {/* 演化时间轴（P0-2）：版本快照滑轨 + 增删打标（接口失败静默隐藏） */}
-      <EvolutionTimeline onMarksChange={setEvolutionMarks} className="mt-3" />
 
       <div className="mt-4 grid gap-3 rounded-lg border border-atlas-grid bg-subtle/60 p-3 text-xs text-ink-muted lg:grid-cols-2 xl:grid-cols-4" role="list" aria-label="图谱图例">
         <div className="space-y-2" role="listitem">
@@ -1040,8 +1309,6 @@ export function GraphPage() {
             <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-graph-skill" role="img" aria-label="技术技能节点" /> 技术技能</span>
             <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full border-2 border-graph-soft-skill" role="img" aria-label="软技能节点：粉色空心圆" /> 软技能</span>
             <span className="flex items-center gap-1.5"><span className="size-0 border-x-4 border-b-[7px] border-x-transparent border-b-graph-evidence" /> 证据地标</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#22c55e]" role="img" aria-label="演化时间轴：本版新增节点绿环" /> 本版新增<span className="text-ink-faint">（时间轴）</span></span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full border-2 border-dashed border-state-declining" role="img" aria-label="演化时间轴：本版消亡节点橙色虚线圈" /> 本版消亡<span className="text-ink-faint">（时间轴）</span></span>
           </div>
         </div>
         <div className="space-y-2" role="listitem">
@@ -1063,6 +1330,27 @@ export function GraphPage() {
             ))}
           </div>
         </div>
+        {view === 'positionPortrait' && (() => {
+          const dimPalette = PORTRAIT_DIM_PALETTE[isDark() ? 'dark' : 'light']
+          const dims = [
+            ['salary', '薪资', dimPalette.salary],
+            ['experience', '经验', dimPalette.experience],
+            ['education', '学历', dimPalette.education],
+          ] as const
+          return (
+            <div className="space-y-2" role="listitem">
+              <p className="font-mono text-[12px] tracking-[0.15em] text-atlas-muted">PORTRAIT DIMENSION / 画像维度</p>
+              <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
+                {dims.map(([key, label, color]) => (
+                  <span key={key} className="flex items-center gap-1">
+                    <span className="size-2 rounded-full" style={{ backgroundColor: color }} />
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
         <div className="space-y-2" role="listitem">
           <p className="font-mono text-[12px] tracking-[0.15em] text-atlas-muted">POSITION STATUS / 岗位状态色</p>
           <div className="flex flex-wrap gap-x-2.5 gap-y-1.5">
@@ -1074,6 +1362,6 @@ export function GraphPage() {
             ))}
           </div>
         </div>      </div>
-    </>
+    </div>
   )
 }

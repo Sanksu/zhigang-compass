@@ -6,11 +6,11 @@ import { Button } from '@/components/ui/button'
 /**
  * 简历上传组件 — 设计文档 §10.4
  *
- * 支持 PDF/Word/图片，≤ 10MB；拖拽或点击触发。
+ * 支持 PDF/Word/文本/图片，≤ 10MB；拖拽或点击触发。
  * 简历文本先经 PII 脱敏处理后再送入 LLM（PIPL/GDPR 合规）。
  */
-const ACCEPTED_TYPES = ['.pdf', '.docx', '.png', '.jpg', '.jpeg']
-const ACCEPTED_MIME = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/png', 'image/jpeg']
+const ACCEPTED_TYPES = ['.pdf', '.docx', '.txt', '.png', '.jpg', '.jpeg']
+const ACCEPTED_MIME = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'image/png', 'image/jpeg']
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
 
 interface ResumeUploaderProps {
@@ -22,7 +22,7 @@ interface ResumeUploaderProps {
 function validate(file: File): string | null {
   const ext = '.' + (file.name.split('.').pop()?.toLowerCase() ?? '')
   if (!ACCEPTED_TYPES.includes(ext) && !ACCEPTED_MIME.includes(file.type)) {
-    return '不支持的文件类型，仅支持 PDF / Word / 图片'
+    return '不支持的文件类型，仅支持 PDF / Word / 文本 / 图片'
   }
   if (file.size > MAX_SIZE) {
     return '文件超过 10MB 限制'
@@ -104,7 +104,7 @@ export function ResumeUploader({ onFileSelected, loading, className }: ResumeUpl
         <p className="text-sm font-medium text-ink mb-1">
           {dragOver ? '释放以上传' : '拖拽简历到此处，或点击选择'}
         </p>
-        <p className="text-xs text-ink-muted">支持 PDF / Word / 图片，最大 10MB</p>
+        <p className="text-xs text-ink-muted">支持 PDF / Word / 文本 / 图片，最大 10MB</p>
       </div>
 
       {error && (

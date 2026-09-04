@@ -19,11 +19,12 @@ from app.core.database import (
     redis_client,
 )
 from app.core.errors import ERR_INTERNAL, ERR_NOT_FOUND, ERR_VALIDATION
-from app.models.business import SkillEmbedding
+from app.models.business import SkillDescription, SkillEmbedding
 from app.models.raw import JDRaw
 from app.schemas.common import error, ok
 from app.services.graph import repository, visibility
-from app.services.graph.portrait_evidence import jd_detail, portrait_evidence
+from app.services.graph.portrait_evidence import jd_detail, load_position_jd_rows, portrait_evidence
+from app.services.graph.skill_descriptions import SKILL_DESCRIPTIONS
 from app.services.graph_algorithms.config import load_graph_algo_config
 from app.services.learning_path.courses import load_courses_for_skill
 from app.services.learning_path.prerequisites import prerequisite_chain
@@ -33,8 +34,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 全文检索缓存 TTL（08-18 TTL 风暴治理：60s → 300s）
-SEARCH_CACHE_TTL = 300
+# 全文检索缓存 TTL（08-18 TTL 风暴治理：60s → 300s；09-02 P99 优化 → 900s：
+# 搜索词重复度高（真实用户/压测同词），延长命中窗把并发 miss 频率降为 1/3；
+# 图数据变更时 invalidate_graph_caches 会主动清缓存，长 TTL 无脏读风险）
+SEARCH_CACHE_TTL = 900
 
 # 缓存穿透合并（08-15 压测扩容）：TTL 失效瞬间 100 并发同时 miss 打
 # Neo4j（to_thread 线程池饱和 → P95 20s 长尾根因）。in-flight 表让同 key
@@ -124,14 +127,14 @@ def _query_shortest_path(from_skill: str, to_skill: str, statuses) -> list | Non
     return repository.query_shortest_path(neo4j_driver, from_skill, to_skill, statuses)
 
 
-async def _query_view_techstack(limit: int, status_filter: str) -> list:
+async def _query_view_techstack(limit: int, status_filter: str, level: str | None = None) -> list:
     """techStack 视图热路径查询（P2：async Neo4j 驱动直查）。"""
-    return await repository.query_view_techstack_async(async_neo4j_driver, limit, status_filter)
+    return await repository.query_view_techstack_async(async_neo4j_driver, limit, status_filter, level)
 
 
-async def _query_view_main(limit: int, status_filter: str) -> list:
+async def _query_view_main(limit: int, status_filter: str, level: str | None = None) -> list:
     """positionCenter/level/panorama 视图热路径查询（P2：async Neo4j 驱动直查）。"""
-    return await repository.query_view_main_async(async_neo4j_driver, limit, status_filter)
+    return await repository.query_view_main_async(async_neo4j_driver, limit, status_filter, level)
 
 
 @router.get("/skill/{skill_id}/positions")
@@ -409,6 +412,44 @@ async def jd_evidence_detail(jd_id: int):
     if row is None:
         return error(ERR_NOT_FOUND, "JD 不存在", http_status=404)
     data = jd_detail(row)
+    await _cache_set(cache_key, data)
+    return ok(data=data)
+
+
+@router.get("/position/{id}/jds")
+async def position_raw_jds(
+    id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user: Optional[dict] = Depends(get_optional_user),
+):
+    """[M5] 岗位原始 JD 列表（含全文）：画像侧栏「原始 JD」下拉数据源。
+
+    复用聚合口径（SimHash 近似重复/归档/岗位级通胀排除一致，见
+    portrait_evidence.load_position_jd_rows），返回最新优先的 JD 及其 raw_text，
+    供前端下拉选择后展开正文。匿名/guest 对 candidate/archived 岗位 404。
+    """
+    scope = _position_scope(user)
+    cache_key = f"graph:pjds:{id}:{scope}:{offset}:{limit}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return ok(data=cached)
+    position = await asyncio.to_thread(_load_position, id, user)
+    if position is None:
+        return error(ERR_NOT_FOUND, "岗位不存在或不可见", http_status=404)
+    position_name = position.get("name") or id
+    rows = await load_position_jd_rows(db, position_name)
+    page = rows[offset : offset + limit]
+    items = [jd_detail(r) for r in page]
+    data = {
+        "position_id": id,
+        "position_name": position_name,
+        "total": len(rows),
+        "offset": offset,
+        "limit": limit,
+        "items": items,
+    }
     await _cache_set(cache_key, data)
     return ok(data=data)
 
@@ -784,6 +825,32 @@ async def graph_shortest_path(
     return ok(data={"from": from_skill, "to": to_skill, "path": path})
 
 
+async def _load_desc_overrides(db: AsyncSession) -> dict[str, str]:
+    """技能解释 DB 覆盖表 → {skill_name: description}（低基数，请求级读取）。"""
+    rows = await db.execute(select(SkillDescription))
+    return {r.skill_name: r.description for r in rows.scalars().all()}
+
+
+def _skill_portrait_desc(sk: dict, overrides: Optional[dict] = None) -> str:
+    """岗位画像技能详述：DB 覆盖 > 内置词典 > 整合模板。"""
+    name = str(sk.get("sname") or "").strip().lower()
+    if overrides:
+        ov = overrides.get(name)
+        if ov:
+            return ov
+    cached = SKILL_DESCRIPTIONS.get(name)
+    if cached:
+        return cached
+    scat = str(sk.get("scat") or "通用")
+    scount = int(sk.get("scount") or 1)
+    need_word = "必备" if sk.get("necessity", "must") == "must" else "加分"
+    return (
+        f"属于「{scat}」类目，当前岗位共有 {scount} 个独立 JD 直接要求该技能"
+        f"（{need_word}）。掌握该技能可直接提升本岗位的必备/加分匹配分，并按其先修链"
+        f"逐步补齐前置技能。"
+    )
+
+
 @router.get("/view/{view_type}")
 async def graph_view(
     view_type: Literal["panorama", "techStack", "positionCenter", "positionPortrait"],
@@ -791,7 +858,11 @@ async def graph_view(
         default=None, max_length=100,
         description="岗位 id/name（positionPortrait 视图必填）"),
     limit: int = Query(default=100, ge=1, le=600),
+    level: Optional[Literal["初级", "中级", "高级", "专家"]] = Query(
+        default=None,
+        description="熟练度级别过滤（REQUIRES.level；panorama/techStack 生效）"),
     user: Optional[dict] = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """[M4] 视图切换（匿名可读，后端过滤，同构于全景图）。
 
@@ -806,16 +877,19 @@ async def graph_view(
     # positionPortrait 缓存按岗位隔离（岗位切换频繁，TTL 内仍命中同岗位）
     cache_key = f"graph:view:{view_type}:{limit}:{scope}" + (
         f":{position}" if view_type == "positionPortrait" else ""
-    )
+    ) + (f":lv-{level}" if level and view_type in ("panorama", "techStack") else "")
     cached = await redis_client.get(cache_key)
     if cached is not None:
         return ok(data=json.loads(cached))
 
     status_filter = _status_clause(scope)
+    # 技能解释 DB 覆盖（仅 positionPortrait 需要；空 dict 时走词典/模板）
+    desc_overrides: dict[str, str] = {}
 
     if view_type == "positionPortrait":
         if not position:
             return error(ERR_VALIDATION, "positionPortrait 视图必须指定 position 参数")
+        desc_overrides = await _load_desc_overrides(db)
         rows = await repository.query_view_position_portrait_async(
             async_neo4j_driver, position, limit, status_filter)
         if not rows:
@@ -864,6 +938,10 @@ async def graph_view(
                     "type": "skill",
                     "skill_category": sk.get("scat"),
                     "value": sk.get("weight", 0),
+                    # 岗位画像独有：该技能被当前岗位几个独立 JD 直接要求（REQUIRES.source_count）
+                    "jd_source_count": sk.get("scount", 1),
+                    # 技能解释：DB 覆盖 > 内置词典 > 整合模板（编辑/LLM 补齐走 DB）
+                    "description": _skill_portrait_desc(sk, desc_overrides),
                 })
                 edges.append({
                     "source": cat_id,
@@ -920,7 +998,7 @@ async def graph_view(
                       **await _query_graph_counts()},
         }
     elif view_type == "techStack":
-        rows = await _query_view_techstack(limit, status_filter)
+        rows = await _query_view_techstack(limit, status_filter, level)
         nodes: dict[str, dict] = {}
         edges: list[dict] = []
         for record in rows:
@@ -952,7 +1030,8 @@ async def graph_view(
                       **await _query_graph_counts()},
         }
     else:
-        rows = await _query_view_main(limit, status_filter)
+        # panorama/positionCenter：level 过滤仅对 REQUIRES 边生效（岗位节点保留）
+        rows = await _query_view_main(limit, status_filter, level)
         nodes = {}
         edges = []
         for record in rows:

@@ -332,11 +332,11 @@ ID 格式 `{prefix}_{seq:04d}`（如 `sk_0042`），通过 Neo4j Counter 节点�
 | 文件 | 关键导出 | 状态 |
 |------|---------|------|
 | [schemas.py](../../backend/app/services/matching/schemas.py) | `Necessity` / `SkillRequirement` / `PositionProfile` / `CandidateProfile` / `MatchRequest` / `MatchResult` | ✅ 完整 |
-| [weights.py](../../backend/app/services/matching/weights.py) | `load_weights()`（默认 0.6/0.2/0.2，可被 configs/match_weights.json 覆盖） | ✅ 完整 |
-| [engine.py](../../backend/app/services/matching/engine.py) | `MatchEngine.match()` / `RuleBasedMatcher`：三维评分（must/nice/exp）+ CII 通胀修正 + 时效衰减 + **领域维度匹配（词面+语义双路，独立阈值 0.5）** + **熟练度匹配与 must 加权优化** | ✅ 完整 |
-| [semantic.py](../../backend/app/services/matching/semantic.py) | paraphrase-multilingual-MiniLM-L12-v2 懒加载 + 依赖注入（不可用降级规则），阈值 Optuna 调优 0.831 | ✅ 完整 |
+| [weights.py](../../backend/app/services/matching/weights.py) | `load_weights()`（默认 0.6/0.2/0.2，可被 configs/match_weights.json 覆盖）+ `load_edu_weight()`（2026-09-01 BT v4，返回 None=三维口径） | ✅ 完整 |
+| [engine.py](../../backend/app/services/matching/engine.py) | `MatchEngine.match()` / `RuleBasedMatcher`：**四维评分**（must/nice/exp + education，w_edu=0.15 凸组合）+ CII 通胀修正 + 时效衰减 + **领域维度匹配（词面+语义双路，独立阈值 0.5）** + **熟练度匹配与 must 加权优化** | ✅ 完整 |
+| [semantic.py](../../backend/app/services/matching/semantic.py) | paraphrase-multilingual-MiniLM-L12-v2 懒加载 + 依赖注入（不可用降级规则），阈值 Optuna 调优 0.938 | ✅ 完整 |
 
-弱监督黄金集 300 对 Optuna 调优：`w_must=0.673 / w_nice=0.129 / sim=0.831` → **Spearman 0.8808 / Accuracy 0.96**。
+**2026-09-01 BT v4**：education 升评分维（`w_edu=0.15`，v3 金标 384 对 Acc 0.9141→0.9714 / Spear 0.7407→0.7853）。核心函数：`score_position`（评分） / `_education_score`（学历近似分） / `_min_experience_years`（`jd_profiles.py`，解析 `experience_range.min_years`→`required_years`）。`jd_profile_from_snapshot` 透传 `required_years`/`required_education`（2026-09-01 修三处字段错位）。
 
 #### 5.3.4 evolution/ — 技能演化检测
 
@@ -515,13 +515,14 @@ SBERT 层次聚类（ETL 阶段 9.5 用）。**2026-08-13 修复为代表链接*
 ### 6.3 匹配引擎
 
 #### `load_weights()` — [matching/weights.py](../../backend/app/services/matching/weights.py)
-加载 `(w_must, w_nice, w_exp)`，默认 `(0.6, 0.2, 0.2)`。读 `configs/match_weights.json`，文件缺失/异常回退默认值（不抛异常）。
+加载 `(w_must, w_nice, w_exp)`，默认 `(0.6, 0.2, 0.2)`。读 `configs/match_weights.json`，文件缺失/异常回退默认值（不抛异常）。**2026-09-01 BT v4**：配置含 `w_edu=0.15`（education 凸组合独立维，`load_edu_weight()` 读取），三维键维持，旧配置无 `w_edu` 时自动三维口径（向后兼容）。
 
 #### `MatchEngine.match(request)` — [matching/engine.py](../../backend/app/services/matching/engine.py)
-匹配接口：① 倒排索引粗筛 Top-200 ② 三维评分（must/nice/exp）+ CII 通胀修正 + 时效衰减 + 领域维度（词面+语义双路）+ 软技能降权（low_confidence ×0.5）+ 熟练度匹配 ③ total DESC 截 Top-N。
+匹配接口：① 倒排索引粗筛 Top-200 ② 四维评分（must/nice/exp + education，w_edu=0.15）+ CII 通胀修正 + 时效衰减 + 领域维度（词面+语义双路）+ 软技能降权（low_confidence ×0.5）+ 熟练度匹配 ③ total DESC 截 Top-N。
 - 缺必备技能比例惩罚：`must_penalty = 1 - (missing/total) × 0.3`
 - 加分技能空集保护：`if len(nice_skills) == 0: nice_score = 1.0`
-- 语义增强：`semantic.py` SBERT sim≥0.831 计入命中（Optuna 调优）
+- 语义增强：`semantic.py` SBERT sim≥0.938 计入命中（BT v3 收紧阈值）
+- education 维：`_education_score`，候选 ≥ 要求 → 1.0 / 低一级 → 0.5 / 其余 → 0；任一侧无层级 → null 不判分
 
 #### `MatchEngine.compare(request)` — [matching/engine.py](../../backend/app/services/matching/engine.py)
 单点比对，附带 gaps（三态差距分析）/ learning_path / 证据引用（MENTIONED_IN 链路）/ 诊断报告（`/match/result/{id}/diagnosis`）。
@@ -846,7 +847,7 @@ ALERT_WEBHOOK_URL=                   # 飞书/钉钉/企微机器人 webhook，�
 - ✅ 测试：后端 1168 用例（17 deselected，integration 隔离）/ 前端 28 测试文件 + Playwright E2E
 - ✅ 运维：Docker Compose 5 服务 + 镜像瘦身 + webhook 告警 + 容器化采集 + 限流（100/10 req/min）
 
-**首轮评测基线**（08.07，`scripts/evaluate.py --task all`）：JD 解析 F1=0.6112（关键词基线，未达标 0.90，M5 补 LLM 在线评测）、简历提取 F1=1.0（50 条）、人岗匹配 Spearman=0.8805 / Accuracy=0.96。
+**首轮评测基线（08.07，历史轨迹，已被后续取代）**（`scripts/evaluate.py --task all`）：JD 解析 F1=0.6112（关键词基线，未达标 0.90，M5 补 LLM 在线评测）、简历提取 F1=1.0（50 条）、人岗匹配 Spearman=0.8805 / Accuracy=0.96。**当前主口径见 §5.3.3 与 [评测报告_初审版_20260901](../reviews/评测报告_初审版_20260901.md)（匹配 BT v4 0.9714）**。
 
 ### 9.2 下一步该怎么做（按优先级）
 

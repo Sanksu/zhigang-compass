@@ -29,6 +29,20 @@ logger = logging.getLogger(__name__)
 _SOFT_SKILL_CATEGORY = "soft-skills"
 
 
+def _min_experience_years(snapshot: dict) -> Optional[float]:
+    """解析 JD 经验要求最小年限（extraction.experience_range.min_years）。
+
+    抽取链路（prompts 规则 11）把"X 年以上 / X-Y 年"落到 extraction.experience_range，
+    与聚合层 _min_experience_years 同口径（P0 字段失联修复：此前读取一个从未抽取
+    的字段导致 required_years 恒 null）。无明确年限返回 None，勿默认 0。
+    """
+    erf = ((snapshot or {}).get("extraction") or {}).get("experience_range") or {}
+    if not isinstance(erf, dict):
+        return None
+    mn = erf.get("min_years")
+    return float(mn) if isinstance(mn, (int, float)) and mn > 0 else None
+
+
 def jd_profile_from_snapshot(
     snapshot: dict,
     jd_id: str,
@@ -80,12 +94,17 @@ def jd_profile_from_snapshot(
         _push(r if isinstance(r, dict) else {"name": r}, is_nice=True, is_soft=False)
 
     title = str((snapshot or {}).get("title") or "").strip() or jd_id
+    # 学历要求透传（2026-09-01 同款字段错位修复）：抽取 education.level
+    # （本科/硕士/大专…，57% 填充率）此前未传入画像，education 雷达维恒
+    # null。"不限"透传后 _edu_level 不识别 → None → 不判分，口径正确。
+    edu = extraction.get("education") or {}
     return PositionProfile(
         position_id=jd_id,
         name=title,
         must_skills=musts,
         nice_skills=nices,
-        required_years=extraction.get("required_years"),
+        required_years=_min_experience_years(snapshot),
+        required_education=(edu.get("level") or None) if isinstance(edu, dict) else None,
         industry=extraction.get("industry") or None,
         typical_scenarios=[str(s) for s in (extraction.get("typical_scenarios") or []) if s],
         soft_requirements=softs,

@@ -61,6 +61,40 @@ describe('DiscoveryPage', () => {
     expect(screen.getByText('Python')).toBeInTheDocument()
   })
 
+  it('展开候选 → 渲染五字段结构化定义（职责/场景）', async () => {
+    mockedApiGet.mockResolvedValue({
+      total: 1,
+      candidates: [
+        {
+          position_id: 'pos_2',
+          position_name: '大模型应用工程师',
+          state: 'emerging',
+          detected_at: '2026-09-01T10:00:00+08:00',
+          definition_draft: '负责大语言模型应用系统设计与开发。',
+          definition: {
+            position_name: '大模型应用工程师',
+            summary: '负责大语言模型应用系统设计与开发。',
+            core_duties: ['构建 RAG 检索链路', '搭建评测集'],
+            must_skills: ['Python'],
+            nice_skills: [],
+            typical_scenarios: ['企业知识库问答'],
+          },
+          confidence: null,
+          skills: null,
+          skill_pending: true,
+        },
+      ],
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('大模型应用工程师')).toBeInTheDocument())
+    await userEvent.click(screen.getByText('大模型应用工程师'))
+    expect(screen.getByText('核心职责')).toBeInTheDocument()
+    expect(screen.getByText('构建 RAG 检索链路')).toBeInTheDocument()
+    expect(screen.getByText('典型行业应用场景')).toBeInTheDocument()
+    expect(screen.getByText('企业知识库问答')).toBeInTheDocument()
+    expect(screen.getByText('负责大语言模型应用系统设计与开发。')).toBeInTheDocument()
+  })
+
   it('candidate 态显示技能待审核标注', async () => {
     mockedApiGet.mockResolvedValue({
       total: 1,
