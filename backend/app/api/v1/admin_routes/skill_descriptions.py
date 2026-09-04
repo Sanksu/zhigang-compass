@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -23,11 +25,19 @@ from app.core.errors import ERR_INTERNAL, ERR_VALIDATION
 from app.models.business import AuditLog, SkillAlias, SkillDescription
 from app.schemas.common import error, ok
 from app.services.extraction.dictionary import SKILL_WHITELIST
-from app.services.extraction.llm_provider import LLMProviderChain
+from app.services.extraction.llm_provider import (
+    LLMConfigurationError,
+    LLMExtractionError,
+    LLMProviderChain,
+)
 from app.services.graph import repository
 from app.services.graph.skill_descriptions import SKILL_DESCRIPTIONS
 
 router = APIRouter()
+
+_logger = logging.getLogger(__name__)
+# LLM 生成解释长度上限（一句话解释；超出视为失控输出拒收，审查③）
+_DESC_MAX_LENGTH = 500
 
 BACKFILL_PROMPT = (
     "你是一名技术技能词典编写者。请用一句简洁的中文解释技能「{skill}」的含义与典型用途，"
@@ -43,7 +53,15 @@ def _call_desc_llm(chain: LLMProviderChain, skill: str) -> str:
     一段自由文本，改走 `call_text_sync` 直接取文本，规避该误报。
     """
     reply = chain.call_text_sync(BACKFILL_PROMPT.format(skill=skill))
-    return (reply or "").strip()
+    text = (reply or "").strip()
+    # 审查③：裸文本 LLM 输出最小校验——空/None/超长一律拒收，防脏数据落库
+    if not text:
+        raise LLMExtractionError(f"LLM 返回空解释: skill={skill}")
+    if len(text) > _DESC_MAX_LENGTH:
+        raise LLMExtractionError(
+            f"LLM 解释超长: skill={skill} len={len(text)}（上限 {_DESC_MAX_LENGTH}）"
+        )
+    return text
 
 
 async def _all_desc_overrides(db: AsyncSession) -> dict[str, str]:
@@ -176,19 +194,23 @@ async def backfill_skill_descriptions(
     failed = 0
     try:
         chain = LLMProviderChain()
-    except Exception:
-        return error(ERR_INTERNAL, "LLM 未配置，无法补齐")
+    except LLMConfigurationError as e:
+        # 审查③：仅配置缺失/非法映射"未配置"，其余异常不再被吞
+        # （补齐循环内逐项记明细日志，可从日志定位）
+        return error(ERR_INTERNAL, f"LLM 未配置，无法补齐: {e}")
 
     for name in missing[:limit]:
         try:
             text = _call_desc_llm(chain, name)
-            if not text:
-                failed += 1
-                continue
             await _upsert(db, name, text, "llm")
             done += 1
-        except Exception:
+        except Exception as exc:
+            # 审查③：失败不再静默——记类型与截断消息，可从日志排查
             failed += 1
+            _logger.warning(
+                "[skill-descriptions] LLM 补齐失败 skill=%s: %s: %s",
+                name, type(exc).__name__, str(exc)[:200],
+            )
 
     if done > 0:
         await _invalidate_portrait_caches()  # 补齐后岗位画像技能说明即时刷新

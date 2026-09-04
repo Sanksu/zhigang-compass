@@ -112,6 +112,10 @@ async def generate_diagnosis(
             }
         except Exception:
             logger.exception("诊断任务失败: task_id=%s match_id=%s", task_id, match_id)
+            # flush 失败后 session 处于 pending-rollback 态，直接 commit 必抛
+            # PendingRollbackError 逃逸、task.status 卡 running（与 matching.py
+            # 第六轮审查 P1-3 同型，本处此前漏改）
+            await session.rollback()
             task.status = "failed"
             task.error = "诊断报告生成失败，请稍后重试"
         await session.commit()

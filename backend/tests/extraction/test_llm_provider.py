@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.services.extraction import llm_provider as llm_provider_module
 from app.services.extraction.llm_provider import (
@@ -67,6 +67,19 @@ class TestLoadProviders:
         ])
         chain = LLMProviderChain(config_path=path)
         assert chain._providers == []
+
+    def test_invalid_protocol_rejected_at_construction(self, tmp_path):
+        """enabled provider 协议非法（如拼写 antropic）→ 构造期即抛错。
+
+        审查①：此前非法值静默回退 openai，请求会发往错误端点且排查困难。
+        """
+        path = tmp_path / "llm.yaml"
+        _write_config(path, [
+            {"name": "typo", "priority": 1, "api_key": "k1",
+             "enabled": True, "protocol": "antropic"},
+        ])
+        with pytest.raises(LLMConfigurationError, match="protocol"):
+            LLMProviderChain(config_path=path)
 
 
 class TestUnconfigured:
@@ -619,6 +632,70 @@ class TestCallProviderErrorMapping:
         with pytest.raises(LLMExtractionError) as exc_info:
             chain._call_provider(self._provider(), "p", _DemoModel, 0, 10)
         assert type(exc_info.value) is LLMExtractionError
+
+
+class TestTranslateProviderExc:
+    """_translate_provider_exc 统一映射（审查②去重 helper，合成异常类隔离 SDK）。"""
+
+    @pytest.fixture()
+    def _sdk(self):
+        class _Timeout(Exception):
+            pass
+
+        class _RateLimit(Exception):
+            pass
+
+        class _Status(Exception):
+            def __init__(self, status_code: int):
+                super().__init__(f"status {status_code}")
+                self.status_code = status_code
+
+        class _Conn(Exception):
+            pass
+
+        return (_Timeout, _RateLimit, _Status, _Conn)
+
+    def _translate(self, sdk, exc, **kwargs):
+        return llm_provider_module._translate_provider_exc("p1", 30, exc, sdk, **kwargs)
+
+    def test_timeout_maps_first(self, _sdk):
+        err = self._translate(_sdk, _sdk[0]("t"))
+        assert isinstance(err, LLMTimeoutError)
+        assert err.outcome == llm_provider_module._OUTCOME_TIMEOUT
+
+    def test_rate_limit(self, _sdk):
+        err = self._translate(_sdk, _sdk[1]("r"))
+        assert isinstance(err, LLMRateLimitError)
+        assert err.outcome == llm_provider_module._OUTCOME_RATE_LIMITED
+
+    def test_status_5xx_server_error(self, _sdk):
+        err = self._translate(_sdk, _sdk[2](503))
+        assert isinstance(err, LLMServerError)
+        assert err.outcome == llm_provider_module._OUTCOME_SERVER_ERROR
+
+    def test_status_4xx_http_4xx(self, _sdk):
+        err = self._translate(_sdk, _sdk[2](403))
+        assert type(err) is LLMExtractionError
+        assert err.outcome == llm_provider_module._OUTCOME_HTTP_4XX
+
+    def test_connection_error(self, _sdk):
+        err = self._translate(_sdk, _sdk[3]("c"))
+        assert type(err) is LLMExtractionError
+        assert err.outcome == llm_provider_module._OUTCOME_CONNECTION_ERROR
+
+    def test_generic_without_validation_aware(self, _sdk):
+        err = self._translate(_sdk, RuntimeError("x"), validation_aware=False)
+        assert type(err) is LLMExtractionError
+        assert err.outcome == llm_provider_module._OUTCOME_EXTRACTION_ERROR
+
+    def test_validation_error_aware(self, _sdk):
+        class _M(BaseModel):
+            v: int
+
+        with pytest.raises(ValidationError) as ei:
+            _M.model_validate({"v": "abc"})
+        err = self._translate(_sdk, ei.value)
+        assert err.outcome == llm_provider_module._OUTCOME_VALIDATION_ERROR
 
 
 class TestAnthropicProtocol:

@@ -8,15 +8,16 @@
 
 | 文件 | 格式 | 说明 | 大小 |
 |------|------|------|------|
-| `pg.dump` | PostgreSQL `pg_dump -Fc`（custom） | 全量 PG：JD 原始数据 / 抽取 / 候选池 / 图谱版本快照 / 用户等 | 129MB |
-| `neo4j.dump` | `neo4j-admin database dump`（DZV1） | 图谱：Position/Skill/Course/Evidence 节点与关系 | 44MB |
+| `pg.dump` | PostgreSQL `pg_dump -Fc`（custom） | 全量 PG：JD 原始数据 / 抽取 / 候选池 / 图谱版本快照 / 用户等 | 123MB |
+| `neo4j.dump` | `neo4j-admin database dump`（DZV1） | 图谱：Position/Skill/Course/Evidence 节点与关系 | 42MB |
 
 ## 导入
 
-一键导入（Linux/226 部署机）：
+一键导入（自动构建镜像、引导 `.env`/JWT 密钥/dict-guard 空层、导入、健康检查；Linux/226 部署机）：
 
 ```bash
-bash scripts/restore_snapshot.sh
+bash scripts/restore_snapshot.sh                  # 缺省读本目录（snapshots/）
+bash scripts/restore_snapshot.sh <其他快照目录>   # 交付提交包用户直接传 6-测试数据/数据快照 目录，免拷贝
 ```
 
 或手工步骤（Win/Linux 通用）：
@@ -35,7 +36,7 @@ docker run --rm \
   -v zhigang-compass_neo4j_data:/var/lib/neo4j/data \
   -v "$(pwd)/snapshots":/dump \
   --entrypoint "" neo4j:5 \
-  neo4j-admin database load --from-path=/dump --database=neo4j --overwrite-destination=true
+  neo4j-admin database load --from-path=/dump --overwrite-destination=true neo4j
 
 # 4. 启动
 docker compose up -d

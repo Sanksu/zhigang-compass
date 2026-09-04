@@ -124,9 +124,19 @@ _ANTHROPIC_VERSION_HEADER = "2023-06-01"
 
 
 def _provider_protocol(provider: dict) -> str:
-    """读取 provider 协议，缺省 openai；非法值按 openai 兜底（配置宽松解析）。"""
+    """读取 provider 协议，缺省 openai；非法值 fail-fast（审查①）。
+
+    原实现非法协议（如拼写 antropic）静默回退 openai，请求会发往错误端点
+    且排查困难；改为构造期（_load_providers）即抛 LLMConfigurationError，
+    不让坏配置静默进重试链。
+    """
     protocol = (provider.get("protocol") or "openai").strip().lower()
-    return protocol if protocol in _PROTOCOLS else "openai"
+    if protocol not in _PROTOCOLS:
+        raise LLMConfigurationError(
+            f"provider '{provider.get('name', '?')}' protocol 非法: {protocol!r}"
+            f"（仅支持: {'/'.join(_PROTOCOLS)}）"
+        )
+    return protocol
 
 
 def _build_client(provider: dict, timeout: int):
@@ -454,6 +464,71 @@ def _with_outcome(exc: LLMExtractionError, outcome: str) -> LLMExtractionError:
     return exc
 
 
+def _translate_provider_exc(
+    provider_name: str,
+    timeout: int,
+    exc: Exception,
+    sdk_errors: tuple,
+    *,
+    validation_aware: bool = True,
+) -> LLMExtractionError:
+    """SDK 异常 → 领域异常统一映射（审查②：openai/裸文本/anthropic 三处复制链去重）。
+
+    映射顺序即优先级：timeout（APITimeoutError 是 APIConnectionError 子类，
+    必须先判）→ 限流 → status（5xx→server_error、4xx→http_4xx）→ 连接 →
+    兜底。兜底分支 validation_aware=True 时细分校验失败
+    （InstructorRetryException / ValidationError → validation_error），
+    裸文本路径传 False 保持 extraction_error。
+
+    Args:
+        sdk_errors: (timeout_cls, rate_limit_cls, status_cls, connection_cls)，
+            openai/anthropic SDK 异常类由调用点懒导入后传入（模块顶部不依赖 SDK）
+    """
+    timeout_cls, rate_limit_cls, status_cls, connection_cls = sdk_errors
+    if isinstance(exc, timeout_cls):
+        return _with_outcome(
+            LLMTimeoutError(f"provider '{provider_name}' 超时（{timeout}s）"),
+            _OUTCOME_TIMEOUT,
+        )
+    if isinstance(exc, rate_limit_cls):
+        return _with_outcome(
+            LLMRateLimitError(f"provider '{provider_name}' 触发限流(429): {exc}"),
+            _OUTCOME_RATE_LIMITED,
+        )
+    if isinstance(exc, status_cls):
+        if exc.status_code >= 500:
+            return _with_outcome(
+                LLMServerError(
+                    f"provider '{provider_name}' 服务不可用({exc.status_code}): {exc}"
+                ),
+                _OUTCOME_SERVER_ERROR,
+            )
+        return _with_outcome(
+            LLMExtractionError(f"provider '{provider_name}' 调用失败: {exc}"),
+            _OUTCOME_HTTP_4XX,
+        )
+    if isinstance(exc, connection_cls):
+        return _with_outcome(
+            LLMExtractionError(f"provider '{provider_name}' 连接失败: {exc}"),
+            _OUTCOME_CONNECTION_ERROR,
+        )
+    outcome = _OUTCOME_EXTRACTION_ERROR
+    if validation_aware:
+        try:
+            from instructor.exceptions import InstructorRetryException
+
+            if isinstance(exc, InstructorRetryException):
+                outcome = _OUTCOME_VALIDATION_ERROR
+        except ImportError:
+            pass
+        if isinstance(exc, ValidationError):
+            outcome = _OUTCOME_VALIDATION_ERROR
+    return _with_outcome(
+        LLMExtractionError(f"provider '{provider_name}' 调用异常: {exc}"),
+        outcome,
+    )
+
+
 def _resolve_api_key(provider: dict) -> str:
     """provider api_key 解析：显式明文优先，其次 api_key_env 环境变量。
 
@@ -508,6 +583,8 @@ class LLMProviderChain:
             if isinstance(p, dict)
         ]
         enabled = [p for p in providers if p.get("enabled")]
+        for p in enabled:
+            _provider_protocol(p)  # 构造期校验：非法协议即拒（审查① fail-fast）
         with_key: list[dict] = []
         dropped: list[str] = []
         for p in enabled:
@@ -813,49 +890,10 @@ class LLMProviderChain:
                 # {"thinking": {"type": "disabled"}}，见 configs/llm_providers.yaml）
                 extra_body=provider.get("extra_body") or None,
             )
-        except APITimeoutError as e:
-            raise _with_outcome(
-                LLMTimeoutError(f"provider '{provider['name']}' 超时（{timeout}s）"),
-                _OUTCOME_TIMEOUT,
-            ) from e
-        except RateLimitError as e:
-            raise _with_outcome(
-                LLMRateLimitError(f"provider '{provider['name']}' 触发限流(429): {e}"),
-                _OUTCOME_RATE_LIMITED,
-            ) from e
-        except APIStatusError as e:
-            if e.status_code >= 500:
-                raise _with_outcome(
-                    LLMServerError(
-                        f"provider '{provider['name']}' 服务不可用({e.status_code}): {e}"
-                    ),
-                    _OUTCOME_SERVER_ERROR,
-                ) from e
-            raise _with_outcome(
-                LLMExtractionError(f"provider '{provider['name']}' 调用失败: {e}"),
-                _OUTCOME_HTTP_4XX,
-            ) from e
-        except APIConnectionError as e:
-            raise _with_outcome(
-                LLMExtractionError(f"provider '{provider['name']}' 连接失败: {e}"),
-                _OUTCOME_CONNECTION_ERROR,
-            ) from e
-        except Exception as e:  # 外部 API/校验异常统一包装，交给重试链
-            # 校验失败细分：instructor 重试耗尽（InstructorRetryException）与
-            # 裸 Pydantic 校验错误 → validation_error；其余保持 extraction_error
-            outcome = _OUTCOME_EXTRACTION_ERROR
-            try:
-                from instructor.exceptions import InstructorRetryException
-
-                if isinstance(e, (InstructorRetryException,)):
-                    outcome = _OUTCOME_VALIDATION_ERROR
-            except ImportError:
-                pass
-            if isinstance(e, ValidationError):
-                outcome = _OUTCOME_VALIDATION_ERROR
-            raise _with_outcome(
-                LLMExtractionError(f"provider '{provider['name']}' 调用异常: {e}"),
-                outcome,
+        except Exception as e:  # SDK/校验异常统一映射（审查②：三处复制链去重）
+            raise _translate_provider_exc(
+                provider["name"], timeout, e,
+                (APITimeoutError, RateLimitError, APIStatusError, APIConnectionError),
             ) from e
 
     def _call_provider_text(
@@ -905,35 +943,11 @@ class LLMProviderChain:
             )
             text = (comp.choices[0].message.content or "").strip()
             return text
-        except APITimeoutError as e:
-            raise _with_outcome(
-                LLMTimeoutError(f"provider '{provider['name']}' 超时（{timeout}s）"),
-                _OUTCOME_TIMEOUT,
-            ) from e
-        except RateLimitError as e:
-            raise _with_outcome(
-                LLMRateLimitError(f"provider '{provider['name']}' 触发限流(429): {e}"),
-                _OUTCOME_RATE_LIMITED,
-            ) from e
-        except APIStatusError as e:
-            if e.status_code >= 500:
-                raise _with_outcome(
-                    LLMServerError(f"provider '{provider['name']}' 服务不可用({e.status_code}): {e}"),
-                    _OUTCOME_SERVER_ERROR,
-                ) from e
-            raise _with_outcome(
-                LLMExtractionError(f"provider '{provider['name']}' 调用失败: {e}"),
-                _OUTCOME_HTTP_4XX,
-            ) from e
-        except APIConnectionError as e:
-            raise _with_outcome(
-                LLMExtractionError(f"provider '{provider['name']}' 连接失败: {e}"),
-                _OUTCOME_CONNECTION_ERROR,
-            ) from e
-        except Exception as e:  # 外部 API/意外异常统一包装，交给重试链（与 _call_provider 一致）
-            raise _with_outcome(
-                LLMExtractionError(f"provider '{provider['name']}' 调用异常: {e}"),
-                _OUTCOME_EXTRACTION_ERROR,
+        except Exception as e:  # SDK/意外异常统一映射（裸文本路径不细分校验异常，审查②）
+            raise _translate_provider_exc(
+                provider["name"], timeout, e,
+                (APITimeoutError, RateLimitError, APIStatusError, APIConnectionError),
+                validation_aware=False,
             ) from e
 
     def _call_provider_anthropic(
@@ -971,45 +985,8 @@ class LLMProviderChain:
                 max_retries=max_retries,
                 extra_body=provider.get("extra_body") or None,
             )
-        except APITimeoutError as e:
-            raise _with_outcome(
-                LLMTimeoutError(f"provider '{provider['name']}' 超时（{timeout}s）"),
-                _OUTCOME_TIMEOUT,
-            ) from e
-        except RateLimitError as e:
-            raise _with_outcome(
-                LLMRateLimitError(f"provider '{provider['name']}' 触发限流(429): {e}"),
-                _OUTCOME_RATE_LIMITED,
-            ) from e
-        except APIStatusError as e:
-            if e.status_code >= 500:
-                raise _with_outcome(
-                    LLMServerError(
-                        f"provider '{provider['name']}' 服务不可用({e.status_code}): {e}"
-                    ),
-                    _OUTCOME_SERVER_ERROR,
-                ) from e
-            raise _with_outcome(
-                LLMExtractionError(f"provider '{provider['name']}' 调用失败: {e}"),
-                _OUTCOME_HTTP_4XX,
-            ) from e
-        except APIConnectionError as e:
-            raise _with_outcome(
-                LLMExtractionError(f"provider '{provider['name']}' 连接失败: {e}"),
-                _OUTCOME_CONNECTION_ERROR,
-            ) from e
-        except Exception as e:  # 外部 API/校验异常统一包装，交给重试链
-            outcome = _OUTCOME_EXTRACTION_ERROR
-            try:
-                from instructor.exceptions import InstructorRetryException
-
-                if isinstance(e, (InstructorRetryException,)):
-                    outcome = _OUTCOME_VALIDATION_ERROR
-            except ImportError:
-                pass
-            if isinstance(e, ValidationError):
-                outcome = _OUTCOME_VALIDATION_ERROR
-            raise _with_outcome(
-                LLMExtractionError(f"provider '{provider['name']}' 调用异常: {e}"),
-                outcome,
+        except Exception as e:  # SDK/校验异常统一映射（与 _call_provider 同语义，审查②）
+            raise _translate_provider_exc(
+                provider["name"], timeout, e,
+                (APITimeoutError, RateLimitError, APIStatusError, APIConnectionError),
             ) from e

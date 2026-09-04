@@ -172,6 +172,8 @@ def filter_rows_for_aggregation(rows, emerging_names: set[str]) -> tuple[list, d
     返回 (放行 rows, 门控统计)：blocked_jds/blocked_positions 为被拦 JD 数与
     岗位数，unvalidated_jds 为无验证结果放行数。
     """
+    from app.services.extraction.position_normalization import normalized_position_from_snapshot
+
     kept: list = []
     blocked_positions: set[str] = set()
     stats = {"blocked_jds": 0, "blocked_positions": 0, "unvalidated_jds": 0}
@@ -183,7 +185,9 @@ def filter_rows_for_aggregation(rows, emerging_names: set[str]) -> tuple[list, d
             stats["unvalidated_jds"] += 1
             kept.append(row)
             continue
-        pos = cv.get("position_name") or ""
+        # 审查⑦：position_name 缺失（历史数据）回退快照归一化岗位名，避免
+        # 回空串错过新兴阈值 0.5 而被既有阈值 0.6 误拦
+        pos = cv.get("position_name") or normalized_position_from_snapshot(snap)
         threshold = aggregation_gate_min("emerging" if pos in emerging_names else None)
         if conf < threshold:
             stats["blocked_jds"] += 1

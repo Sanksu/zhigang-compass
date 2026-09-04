@@ -4,13 +4,12 @@
 - GET  /admin/graph-governance/summary：域划分总览 + 共成员基准得分 +
   cluster_membership 自审待审数（只读）
 - POST /admin/graph-governance/resync：后台触发域重同步（骨干域+归类制，
-  LLM 命名+成员自审；进程内单任务锁，进行中重复触发 409）
+  LLM 命名+成员自审；进程内单任务串行，进行中重复触发 409）
 
 重同步为管理操作，只重算 domain_id/domain_name（幂等覆盖写），不动
 岗位/技能/证据本体；治理口径与 scripts/sync_position_domains 同源。
 """
 
-import threading
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -29,8 +28,9 @@ router = APIRouter(tags=["admin-graph-governance"])
 GENERAL_DOMAIN_ID = "dom_general"
 _TOP_MEMBERS = 12
 
-# 进程内单任务锁（uvicorn 单实例部署口径；多副本部署需换分布式锁，当前口径不存在）
-_resync_lock = threading.Lock()
+# 进程内单任务串行标志（uvicorn 单实例部署口径；多副本部署需换分布式锁，当前口径不存在）
+# 2026-09-04 批次B：删除 _resync_lock——running 标志在 add_task 前同步置位已足以防并发
+# 触发；原锁成功路径从不 release，首次重同步后该功能永久 409（审查 P1）。
 _resync_state = {"running": False, "last_resync": None}
 
 
@@ -172,13 +172,12 @@ async def graph_governance_resync(
     background_tasks: BackgroundTasks,
     current_user: dict = Depends(require_permission("admin:*")),
 ) -> dict:
-    if _resync_state["running"] or not _resync_lock.acquire(blocking=False):
+    if _resync_state["running"]:
         raise HTTPException(status_code=409, detail="已有重同步任务进行中")
     try:
         _resync_state["running"] = True
         background_tasks.add_task(_run_resync_task)
     except Exception:
         _resync_state["running"] = False
-        _resync_lock.release()
         raise
     return {"code": 0, "msg": "ok", "data": {"started": True, "message": "重同步已受理，完成后总览自动更新"}}
