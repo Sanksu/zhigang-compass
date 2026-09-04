@@ -45,8 +45,6 @@ interface Graph2DProps {
   learningPath?: LearningPathItem[]
   /** 已掌握技能集（DAG 节点灰/蓝/绿编码依据） */
   completedSkills?: string[]
-  /** 演化时间轴标记（P0-2）：本版新增绿环 / 消亡橙虚线（打标不剔除） */
-  evolutionMarks?: { addedIds: Set<string>; removedIds: Set<string> } | null
   /** 技能标签 Top-N 白名单（技术栈视图降噪：仅集合内技能在 LOD band 1 常显标签） */
   skillLabelTopIds?: Set<string> | null
   /** 环形布局（技术栈/岗位画像视图）：技能按频次顺时针排外圈、岗位/属性维度聚内圈，
@@ -415,7 +413,6 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
     onToggleDomain,
     learningPath,
     completedSkills,
-    evolutionMarks,
     skillLabelTopIds,
     ringLayout,
     className,
@@ -796,13 +793,6 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
             : {}),
           // 待归类桶弱化（P1-2）：虚线描边 + 降透明度，兜底域不与实域抢视觉权重
           ...(n.isUncategorized && !dimmed ? { borderType: 'dashed' as const, borderWidth: 2, opacity: 0.6 } : {}),
-          // 演化时间轴打标（P0-2）：本版新增绿环高亮 / 消亡橙虚线（打标不剔除）
-          ...(evolutionMarks?.addedIds.has(n.id) && !dimmed
-            ? { borderColor: '#22c55e', borderWidth: 3, shadowBlur: 18, shadowColor: 'rgba(34,197,94,0.7)' }
-            : {}),
-          ...(evolutionMarks?.removedIds.has(n.id) && !dimmed
-            ? { borderColor: '#f97316', borderWidth: 2, borderType: 'dashed' as const }
-            : {}),
           ...(dimmed ? { opacity: FILTER_DIM_OPACITY } : {}),
         },
         label: {
@@ -810,21 +800,18 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           // - band 0（zoom<0.55）：仅岗位 + 画像维度属性
           // - band 1（0.55≤zoom<1.2）：岗位 + 高权重技能（≥中位阈值）
           // - band 2（zoom≥1.2）：全量（含低权技能）
-          // 演化打标节点标签强制显示（不受 LOD 压制——时间轴叙事主角）
           // 画像维度属性（薪资/经验等）与岗位同档常显——属性值即节点信息本体
           show: dimmed
             ? false
-            : evolutionMarks && (evolutionMarks.addedIds.has(n.id) || evolutionMarks.removedIds.has(n.id))
-              ? true
-              : n.isDomain || n.type === 'position' || n.type === 'attr'
-                ? lodBand >= 0
-                : n.type === 'skill'
-                ? lodBand === 2 ||
-                  (lodBand >= 1 &&
-                    ((skillLabelTopIds?.has(n.id) ?? false) ||
-                      (categoryRepIds?.has(n.id) ?? false) ||
-                      (!skillLabelTopIds && !categoryRepIds && (n.value ?? 0) >= labelThreshold)))
-                : false,
+            : n.isDomain || n.type === 'position' || n.type === 'attr'
+              ? lodBand >= 0
+              : n.type === 'skill'
+              ? lodBand === 2 ||
+                (lodBand >= 1 &&
+                  ((skillLabelTopIds?.has(n.id) ?? false) ||
+                    (categoryRepIds?.has(n.id) ?? false) ||
+                    (!skillLabelTopIds && !categoryRepIds && (n.value ?? 0) >= labelThreshold)))
+              : false,
           position: 'right',
           color: textColor,
           fontSize: 11,
@@ -1151,10 +1138,6 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           const lines: string[] = [`<b>${escapeHtml(d.name)}</b>`]
           lines.push(`类型: ${escapeHtml(d.type === 'attr' ? '画像维度' : isSoftSkill(d) ? '软技能' : d.type)}`)
           if (d.type === 'position' && d.status) lines.push(`状态: ${escapeHtml(d.status)}`)
-          if (evolutionMarks?.addedIds.has(d.id))
-            lines.push('<span style="color:#22c55e;font-size:11px">● 本版新增</span>')
-          else if (evolutionMarks?.removedIds.has(d.id))
-            lines.push('<span style="color:#f97316;font-size:11px">◌ 本版消亡</span>')
           if (d.type === 'skill' && d.skill_category && !isSoftSkill(d)) {
             lines.push(`类目: ${escapeHtml(d.skill_category)}`)
           }
@@ -1284,7 +1267,7 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
         }
       }, 2500)
     }
-  }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand, evolutionMarks, ringLayout, skillLabelTopIds])
+  }, [data, filterMarks, themeVersion, expandedPositions, isNarrow, dagData, viewMode, size, lodBand, ringLayout, skillLabelTopIds])
 
   // ── 悬停节点 → 关联连线提亮 ──
   // 邻接表（node id → 关联边下标）与基础视觉快照（与 option 构建同口径）：

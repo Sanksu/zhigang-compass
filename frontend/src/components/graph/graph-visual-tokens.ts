@@ -11,14 +11,16 @@ export const GRAPH_STATUS_ORDER = [
   'archived',
 ] as const satisfies readonly PositionStatus[]
 
-/* 岗位状态 6 色：active/candidate 曾同为中灰（#64748B/#71717A）几乎不可分，
-   现活跃=亮紫、候选=浅灰，色相+明度双维拉开；与稳定蓝/新兴绿/衰退琥珀/
-   归档红四色保持错位。 */
+/* 岗位状态 6 色：活跃=高饱和紫（#A855F7，L*≈53），候选=深中性板岩（#475569，
+   L*≈36，全组唯一近无彩色）——明度差≈18、饱和差悬殊，小节点上一眼可分
+   （上一版候选浅灰 #94A3B8 与活跃明度差仅≈13，区分度不足）；与稳定蓝/新兴绿/
+   衰退琥珀/归档红四色保持错位。globals.css 的 --color-state-active/candidate
+   须与本表同步（图例色块走 CSS 变量，曾与画布数值脱节成双灰）。 */
 export const GRAPH_STATUS_META: Record<PositionStatus, { label: string; color: string }> = {
   active: { label: '活跃', color: '#A855F7' },
   stable: { label: '稳定', color: '#3B82F6' },
   emerging: { label: '新兴', color: '#10B981' },
-  candidate: { label: '候选', color: '#94A3B8' },
+  candidate: { label: '候选', color: '#475569' },
   declining: { label: '衰退', color: '#F59E0B' },
   archived: { label: '归档', color: '#EF4444' },
 }

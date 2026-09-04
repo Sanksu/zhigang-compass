@@ -68,9 +68,45 @@ def _spawn_background(coro) -> None:
     task.add_done_callback(_done)
 
 
+async def _sweep_orphan_running_tasks() -> int:
+    """启动清扫：把 task_status 中残留 running 的僵尸行置 failed，返回行数。
+
+    僵尸产生机制：任务成功/失败状态写在任务函数收尾路径内，worker 容器被重启/
+    杀死时函数体无机会执行，DB 行永久冻结在 running（ARQ 对被杀进程中的 job 不
+    重新入队，故既不重跑也不更新状态）。
+
+    直扫全表无误伤的论证：running 状态只在 worker 进程内写入（API 侧只建
+    pending）；本部署仅单 worker 容器，且 ARQ 先 await on_startup 再开始轮询
+    队列——清扫完成时不可能存在合法的 running 行。
+    """
+    from sqlalchemy import update
+
+    from app.core.database import async_session_factory
+    from app.models.business import TaskStatus
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            update(TaskStatus)
+            .where(TaskStatus.status == "running")
+            .values(status="failed", error="worker 重启中断（启动清扫）")
+        )
+        await session.commit()
+        return result.rowcount
+
+
 async def on_startup(ctx: dict) -> None:
     """Preload the OCR engine without blocking worker startup."""
     logger.info("ARQ worker 启动，PID=%s", ctx.get("worker_pid"))
+
+    # 启动清扫（僵尸态收尸）：见 _sweep_orphan_running_tasks。清扫必须先于
+    # 队列轮询完成，故直接 await 而非 _spawn_background；DB 瞬断不阻塞 worker
+    # 启动（错误落日志，容器重启策略触发下次启动重试）。
+    try:
+        swept = await _sweep_orphan_running_tasks()
+        if swept:
+            logger.warning("启动清扫：%d 条僵尸任务行（running→failed）", swept)
+    except Exception as error:
+        logger.error("启动清扫失败（worker 继续启动）: %s", str(error)[:200])
 
     async def warm_ocr() -> None:
         try:

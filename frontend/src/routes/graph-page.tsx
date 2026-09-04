@@ -19,7 +19,6 @@ import { GraphCommunityTree } from '@/components/graph/graph-community-tree'
 import { GraphDetailRail } from '@/components/graph/graph-detail-rail'
 import { toGraphData } from '@/components/graph/graph-adapter'
 import { aggregateByDomain, buildDomainView } from '@/components/graph/graph-domain'
-import { EvolutionTimeline, type EvolutionMarks } from '@/components/graph/evolution-timeline'
 import {
   NodeDetailPanel,
   type PositionDetail,
@@ -177,8 +176,6 @@ export function GraphPage() {
   const [expandedPositions, setExpandedPositions] = useState<Set<string>>(() => new Set())
   // 展开的职能域 id 集合（panorama 聚合下钻第二级）：双击域超节点展开域内岗位
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(() => new Set())
-  // 演化时间轴标记（P0-2）：滑到某版本 → 本版新增/消亡节点画布打标
-  const [evolutionMarks, setEvolutionMarks] = useState<EvolutionMarks | null>(null)
   // 定位请求：搜索/相似技能点击后聚焦画布节点（含时间戳，连续点击同一技能也生效）
   const [focusRequest, setFocusRequest] = useState<{ id: string; ts: number } | null>(null)
   // 2D 画布命令句柄（重置视角）
@@ -1159,7 +1156,6 @@ export function GraphPage() {
               onToggleDomain={toggleDomain}
               learningPath={learningPath}
               completedSkills={[]}
-              evolutionMarks={evolutionMarks}
               skillLabelTopIds={skillLabelTopIds}
               // 环形布局须与视图数据匹配时才启用（viewReady 就绪键）：避免首次点击
               // 技术栈/画像页签时 data 仍是旧视图（全景）而 ringLayout 已为 true——
@@ -1300,9 +1296,6 @@ export function GraphPage() {
         )}
       </div>
 
-      {/* 演化时间轴（P0-2）：版本快照滑轨 + 增删打标（接口失败静默隐藏） */}
-      <EvolutionTimeline onMarksChange={setEvolutionMarks} className="mt-3" />
-
       <div className="mt-4 grid gap-3 rounded-lg border border-atlas-grid bg-subtle/60 p-3 text-xs text-ink-muted lg:grid-cols-2 xl:grid-cols-4" role="list" aria-label="图谱图例">
         <div className="space-y-2" role="listitem">
           <p className="font-mono text-[12px] tracking-[0.15em] text-atlas-muted">MAP FEATURES / 实体</p>
@@ -1312,8 +1305,6 @@ export function GraphPage() {
             <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-graph-skill" role="img" aria-label="技术技能节点" /> 技术技能</span>
             <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full border-2 border-graph-soft-skill" role="img" aria-label="软技能节点：粉色空心圆" /> 软技能</span>
             <span className="flex items-center gap-1.5"><span className="size-0 border-x-4 border-b-[7px] border-x-transparent border-b-graph-evidence" /> 证据地标</span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-[#22c55e]" role="img" aria-label="演化时间轴：本版新增节点绿环" /> 本版新增<span className="text-ink-faint">（时间轴）</span></span>
-            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full border-2 border-dashed border-state-declining" role="img" aria-label="演化时间轴：本版消亡节点橙色虚线圈" /> 本版消亡<span className="text-ink-faint">（时间轴）</span></span>
           </div>
         </div>
         <div className="space-y-2" role="listitem">
