@@ -1164,8 +1164,8 @@ export const Graph2D = forwardRef<Graph2DHandle, Graph2DProps>(function Graph2D(
           // 不稳定，本轮不再强求（拖拽探索交由力导向视图提供）。
           layout: ringLayout ? 'none' : 'force',
           roam: true,
-          // 固定坐标视图仍允许拖动微调（漂浮语义）；力导向视图天然可拖
-          draggable: !ringLayout || portraitView || techStackRing,
+          // 岗位画像固定排布不可拖（节点位置须稳定）；技术栈环形保留拖动微调（漂浮语义）；力导向视图天然可拖
+          draggable: !ringLayout || techStackRing,
           cursor: 'pointer',
           // 镜头保持：仅首建/视图切换时重置中心，其余重建不动当前视角
           ...(resetCamera ? { center: ['50%', '50%'] as [string, string] } : {}),

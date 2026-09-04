@@ -350,6 +350,9 @@ export function ResumeMatchPage() {
     setStage('parsing')
     setNotice(null)
     setRecommending(true)
+    // 重置中止标志：Fast Refresh 重挂载会执行 cleanup 置 true，但不重跑 useRef 初始化，
+    // 残留 true 会让本轮轮询在首次检查时直接中止（表现为 202 后无任何轮询请求）
+    pollCancelledRef.current = false
     try {
       const submitted = await apiPost<components['schemas']['RecommendTaskResult']>('/match/recommend', {
         resume_id: resumeId,
@@ -412,7 +415,7 @@ export function ResumeMatchPage() {
       const res = await apiPost<BackendMatchResult>('/match/compare', {
         resume_id: activeResumeId,
         position_id: rec.position_id,
-      })
+      }, { timeout: 90_000 })
       setMatchId(res.match_id ?? null)
       const bd = (res.jd_breakdown ?? []) as JdBreakdownItem[]
       setJdBreakdown(bd)
