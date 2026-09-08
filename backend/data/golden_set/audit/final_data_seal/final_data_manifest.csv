@@ -1,0 +1,12 @@
+﻿path,role,records,source,is_gold,allowed_for_eval,allowed_for_training,notes
+backend/data/golden_set/final/jd_golden_110.jsonl,gold_eval_set_110,110,zhilian_candidate_derived+human_annotation,yes,yes,NO,Gold 评测集；gold_eval_exclusion_manifest 明确排除于 train/dev/retrieval/few-shot
+backend/data/golden_set/final/jd_golden_110_data_dictionary.md,gold_data_dictionary,,human_annotation_guideline,no,reference,NOT_DEFINED_DO_NOT_ASSUME,Gold 字段字典说明文档
+backend/data/golden_set/candidate_pool/v1/real_jd_candidates_raw.jsonl,candidate_pool_raw,158,zhaopin.com(智联招聘),no,no,NOT_DEFINED_DO_NOT_ASSUME,158 条原始候选；其中 110 条 Gold 来源按 exclusion manifest 禁止用于 train/dev/retrieval
+backend/data/golden_set/candidate_pool/v1/real_jd_candidates_clean.jsonl,candidate_pool_clean,158,zhaopin.com(智联招聘),no,no,NOT_DEFINED_DO_NOT_ASSUME,"tier: accepted=135, review_required=23；110 Gold 来源排除训练"
+backend/data/golden_set/candidate_pool/v1/real_jd_review_required.csv,triage_queue_review_required,23,unified_audit_triage,no,no,NO,23 条待人工复核队列，非训练样本
+backend/data/golden_set/candidate_pool/v1/real_jd_rejected.csv,triage_queue_rejected,0,unified_audit_triage,no,no,NO,0 条拒绝（仅表头）
+backend/data/golden_set/candidate_pool/official_career_50/official_career_50_clean.jsonl,official_career_candidate_pool,50,tencent+bytedance official career sites,no,no,NOT_DEFINED_DO_NOT_ASSUME,腾讯=25 字节=25；2 条 future publish_time 为 SOURCE_REPORTED_FUTURE_TIME 保留原值
+backend/data/golden_set/candidate_pool/official_career_50/official_career_50_gold.jsonl,official_career_gold_eval_set_50,50,tencent+bytedance official + human_annotation,yes,yes,NOT_DEFINED_DO_NOT_ASSUME,Official Career 50 条评测标注集
+backend/data/golden_set/audit/unified_jd_audit/gold_eval_exclusion_manifest.csv,gold_eval_exclusion_governance,110,unified_jd_audit,no,reference,NO,110 行 Gold↔Zhilian 父子映射；EXPECTED_PARENT_CHILD_OVERLAP；train/dev/retrieval/few-shot 排除依据
+backend/data/golden_set/audit/unified_jd_audit/final_acceptance_summary.json,unified_audit_gate_record,,unified_jd_audit,no,reference,NO,P0=0 P1=0 P2=2 P3=17 BASELINE=BASELINE_READY
+backend/data/golden_set/audit/unified_jd_audit/,unified_audit_artifacts,,unified_jd_audit,no,reference,NO,统一审计报告/issue triage/跨源重复等留痕
