@@ -1,0 +1,787 @@
+{
+  "audit_time_bjt": "2026-09-08 15:20 UTC+08:00",
+  "branch": "feature/data-final-seal",
+  "baseline_develop_sha": "0c111e97d26af7030a7fb9244615b8d5b18367d3",
+  "previous_baseline_sha": "c44504303aaa176d1a5d0251c30f7b0b7a27c8c3",
+  "baseline_refresh": "ff-only c4450430 -> 0c111e97（无 merge commit）",
+  "gate": "DATA_MODULE_READY_FOR_FINAL_SUBMISSION",
+  "gate_checks": {
+    "P0_eq_0": true,
+    "P1_eq_0": true,
+    "gold_unmodified_vs_known_sha": true,
+    "gold_parseable": true,
+    "gold_records_110": true,
+    "gold_sample_id_unique": true,
+    "zhilian_sha_no_mismatch": true,
+    "exclusion_manifest_complete": true,
+    "no_secret_leak": true,
+    "key_files_readable": true,
+    "no_parse_errors": true,
+    "cross_source_no_unexpected_overlap": true,
+    "regression_T1_T2_ok": true
+  },
+  "blockers": [],
+  "counts": {
+    "zhilian_raw": 158,
+    "zhilian_clean": 158,
+    "zhilian_tier_accepted": 135,
+    "zhilian_tier_review_required": 23,
+    "zhilian_tier_other": {},
+    "review_csv_rows": 23,
+    "rejected_csv_rows": 0,
+    "gold": 110,
+    "official_raw": 50,
+    "official_clean": 50,
+    "official_gold": 50,
+    "exclusion_manifest_rows": 110,
+    "cross_source_duplicate_rows": 0
+  },
+  "tier_counts": {
+    "accepted": 135,
+    "review_required": 23
+  },
+  "uniqueness": {
+    "zhilian_clean": [
+      {
+        "field": "source_id",
+        "total": 158,
+        "non_empty": 158,
+        "empty": 0,
+        "unique": 158,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      },
+      {
+        "field": "source_url",
+        "total": 158,
+        "non_empty": 158,
+        "empty": 0,
+        "unique": 158,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      },
+      {
+        "field": "_sha256",
+        "total": 158,
+        "non_empty": 158,
+        "empty": 0,
+        "unique": 158,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      }
+    ],
+    "gold110": [
+      {
+        "field": "sample_id",
+        "total": 110,
+        "non_empty": 110,
+        "empty": 0,
+        "unique": 110,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      },
+      {
+        "field": "source_id",
+        "total": 110,
+        "non_empty": 110,
+        "empty": 0,
+        "unique": 110,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      },
+      {
+        "field": "source_url",
+        "total": 110,
+        "non_empty": 110,
+        "empty": 0,
+        "unique": 110,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      }
+    ],
+    "official50_clean": [
+      {
+        "field": "source_id",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "unique": 50,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      },
+      {
+        "field": "source_url",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "unique": 50,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      },
+      {
+        "field": "_sha256",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "unique": 50,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      }
+    ],
+    "official50_gold": [
+      {
+        "field": "sample_id",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "unique": 50,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      },
+      {
+        "field": "source_id",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "unique": 50,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      },
+      {
+        "field": "source_url",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "unique": 50,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      }
+    ],
+    "exclusion_manifest": [
+      {
+        "field": "source_id",
+        "total": 110,
+        "non_empty": 110,
+        "empty": 0,
+        "unique": 110,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      },
+      {
+        "field": "gold_source_id",
+        "total": 110,
+        "non_empty": 110,
+        "empty": 0,
+        "unique": 110,
+        "duplicate_values": 0,
+        "duplicate_detail": []
+      }
+    ]
+  },
+  "completeness": {
+    "zhilian_clean": [
+      {
+        "field": "title",
+        "key": "job_title_raw",
+        "total": 158,
+        "non_empty": 158,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "company",
+        "key": "company_name",
+        "total": 158,
+        "non_empty": 158,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "location",
+        "key": "location",
+        "total": 158,
+        "non_empty": 158,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "responsibilities",
+        "key": "responsibilities",
+        "total": 158,
+        "non_empty": 158,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "requirements",
+        "key": "requirements",
+        "total": 158,
+        "non_empty": 158,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "detail_raw_text",
+        "key": "detail_raw_text",
+        "total": 158,
+        "non_empty": 158,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "source_id",
+        "key": "source_id",
+        "total": 158,
+        "non_empty": 158,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "source_url",
+        "key": "source_url",
+        "total": 158,
+        "non_empty": 158,
+        "empty": 0,
+        "coverage_pct": 100.0
+      }
+    ],
+    "gold110": [
+      {
+        "field": "title",
+        "key": "job_title_raw",
+        "total": 110,
+        "non_empty": 110,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "company",
+        "key": "company_name",
+        "total": 110,
+        "non_empty": 110,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "location",
+        "key": "location",
+        "total": 110,
+        "non_empty": 110,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "responsibilities",
+        "key": "responsibilities",
+        "total": 110,
+        "non_empty": 110,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "requirements",
+        "key": "requirements",
+        "total": 110,
+        "non_empty": 109,
+        "empty": 1,
+        "coverage_pct": 99.09
+      },
+      {
+        "field": "detail_raw_text",
+        "key": "detail_raw_text",
+        "total": 110,
+        "non_empty": 110,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "source_id",
+        "key": "source_id",
+        "total": 110,
+        "non_empty": 110,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "source_url",
+        "key": "source_url",
+        "total": 110,
+        "non_empty": 110,
+        "empty": 0,
+        "coverage_pct": 100.0
+      }
+    ],
+    "official50_clean": [
+      {
+        "field": "title",
+        "key": "job_title_raw",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "company",
+        "key": "company_name",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "location",
+        "key": "location",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "responsibilities",
+        "key": "responsibilities",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "requirements",
+        "key": "requirements",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "detail_raw_text",
+        "key": "detail_raw_text",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "source_id",
+        "key": "source_id",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "source_url",
+        "key": "source_url",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      }
+    ]
+  },
+  "gold_label_completeness": [
+    {
+      "field": "gold_title",
+      "key": "gold_title",
+      "total": 110,
+      "non_empty": 110,
+      "empty": 0,
+      "coverage_pct": 100.0
+    },
+    {
+      "field": "gold_skills",
+      "key": "gold_skills",
+      "total": 110,
+      "non_empty": 110,
+      "empty": 0,
+      "coverage_pct": 100.0
+    },
+    {
+      "field": "gold_bonus_skills",
+      "key": "gold_bonus_skills",
+      "total": 110,
+      "non_empty": 46,
+      "empty": 64,
+      "coverage_pct": 41.82
+    },
+    {
+      "field": "gold_experience",
+      "key": "gold_experience",
+      "total": 110,
+      "non_empty": 108,
+      "empty": 2,
+      "coverage_pct": 98.18
+    },
+    {
+      "field": "gold_education",
+      "key": "gold_education",
+      "total": 110,
+      "non_empty": 109,
+      "empty": 1,
+      "coverage_pct": 99.09
+    },
+    {
+      "field": "gold_core_duties",
+      "key": "gold_core_duties",
+      "total": 110,
+      "non_empty": 110,
+      "empty": 0,
+      "coverage_pct": 100.0
+    }
+  ],
+  "sha_zhilian": {
+    "total": 158,
+    "match": 158,
+    "mismatch": 0,
+    "mismatch_detail": [],
+    "legacy_resp_only_count": 0,
+    "bad_format": [],
+    "formula": "SHA256(responsibilities + \"\\n\" + requirements)  [与 audit/unified_jd_audit 验收脚本同口径]"
+  },
+  "regression_two_ids": {
+    "CC148739350J40212149403": {
+      "source_id": "CC148739350J40212149403",
+      "present": true,
+      "resp_non_empty": true,
+      "req_non_empty": true,
+      "resp_len": 113,
+      "req_len": 112,
+      "sha_match": true
+    },
+    "CC404298980J40856902010": {
+      "source_id": "CC404298980J40856902010",
+      "present": true,
+      "resp_non_empty": true,
+      "req_non_empty": true,
+      "resp_len": 41,
+      "req_len": 117,
+      "sha_match": true
+    }
+  },
+  "gold_protection": {
+    "path": "backend/data/golden_set/final/jd_golden_110.jsonl",
+    "sha256": "ceedfa6987fee665ea53f17678e8f06cb197a632bc828f99c5b962615c508061",
+    "size_bytes": 391398,
+    "records": 110,
+    "records_eq_110": true,
+    "sample_id_unique": true,
+    "matches_known_baseline_sha": true,
+    "gold_fields_present": {
+      "gold_title": true,
+      "gold_skills": true,
+      "gold_bonus_skills": true,
+      "gold_experience": true,
+      "gold_education": true,
+      "gold_core_duties": true
+    }
+  },
+  "ann0023": {
+    "exists": true,
+    "source_id": "CC148739350J40212149403",
+    "source_id_is_T1": true,
+    "verdict": "GOLD_CORRECT",
+    "basis": "final_acceptance_summary.json ANN0023_correct=true；无新仓库证据推翻旧结论，保持 GOLD_CORRECT（不因 source evidence 边界改 Gold）"
+  },
+  "exclusion_manifest": {
+    "rows": 110,
+    "source_id_non_empty": 110,
+    "source_id_unique": 110,
+    "gold_source_id_non_empty": 110,
+    "gold_source_id_unique": 110,
+    "gold_source_coverage": "110/110",
+    "gold_source_ids_all_in_manifest": true,
+    "T1_in_manifest": true,
+    "ANN0023_in_manifest": true,
+    "expected_parent_child_notes": 110
+  },
+  "cross_source": {
+    "gold_vs_zhilian_source_id_overlap": 110,
+    "gold_vs_zhilian_source_url_overlap": 110,
+    "gold_vs_zhilian_relation": "EXPECTED_PARENT_CHILD_OVERLAP（Gold 由 Zhilian 候选派生+人工标注，110 条父子重叠为设计预期，非 DATA_LEAKAGE）",
+    "zhilian_vs_official_source_id_overlap": 0,
+    "zhilian_vs_official_source_url_overlap": 0,
+    "zhilian_vs_official_sha256_overlap": 0,
+    "gold_vs_official_source_id_overlap": 0,
+    "gold_vs_official_source_url_overlap": 0,
+    "unified_cross_source_duplicate_csv_rows": 0,
+    "unified_cross_csv_relation_counts": {}
+  },
+  "official50": {
+    "total": 50,
+    "source_company_distribution": {
+      "ByteDance": 25,
+      "Tencent": 25
+    },
+    "company_name_distribution": {
+      "bytedance": 25,
+      "tencent": 25
+    },
+    "tencent_count": 25,
+    "bytedance_count": 25,
+    "source_id_unique": true,
+    "source_url_unique": true,
+    "sha256_all_valid_hex64": true,
+    "field_completeness": [
+      {
+        "field": "title",
+        "key": "job_title_raw",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "company",
+        "key": "company_name",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "location",
+        "key": "location",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "responsibilities",
+        "key": "responsibilities",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "requirements",
+        "key": "requirements",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "detail_raw_text",
+        "key": "detail_raw_text",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "source_id",
+        "key": "source_id",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      },
+      {
+        "field": "source_url",
+        "key": "source_url",
+        "total": 50,
+        "non_empty": 50,
+        "empty": 0,
+        "coverage_pct": 100.0
+      }
+    ],
+    "future_publish_time_anomalies": [
+      {
+        "source_id": "7663333383728597301",
+        "company": "北京字节跳动网络技术有限公司",
+        "publish_time": "2026-11-15T00:00:00.000Z",
+        "crawl_time": "2026-08-26T14:05:00.000Z",
+        "classification": "SOURCE_REPORTED_FUTURE_TIME（保留 source-reported 原值，不修正）"
+      },
+      {
+        "source_id": "7660694249809692981",
+        "company": "北京字节跳动网络技术有限公司",
+        "publish_time": "2026-11-08T00:00:00.000Z",
+        "crawl_time": "2026-08-26T14:06:00.000Z",
+        "classification": "SOURCE_REPORTED_FUTURE_TIME（保留 source-reported 原值，不修正）"
+      }
+    ],
+    "future_anomaly_count": 2
+  },
+  "unified_audit_gate": {
+    "P0": 0,
+    "P1": 0,
+    "P2": 2,
+    "P3": 17,
+    "BASELINE": "BASELINE_READY",
+    "source_file": "backend/data/golden_set/audit/unified_jd_audit/final_acceptance_summary.json",
+    "SHA_mismatch_count": 0,
+    "Manifest_rows": 110
+  },
+  "security_scan": {
+    "files_scanned": 39,
+    "suspect_count": 0,
+    "items": []
+  },
+  "historical_baseline_differences": [],
+  "post_baseline_golden_set_changes": [
+    {
+      "path": "backend/data/golden_set/education_semantics_v1.jsonl",
+      "change": "A 新增",
+      "records": 82,
+      "asset_class": "ALGORITHM_EVAL_ASSET",
+      "purpose": "学历语义聚合评测集（scripts/generate_education_semantics.py 生成；匹配/聚合算法调参与测试使用）",
+      "in_core_four": false,
+      "affects_gold110": false,
+      "affects_zhilian158": false,
+      "affects_official50": false,
+      "affects_unified_audit": false,
+      "affects_seal_gate": false
+    },
+    {
+      "path": "backend/data/golden_set/golden_set_match_v3.jsonl",
+      "change": "A 新增",
+      "records": 384,
+      "asset_class": "ALGORITHM_EVAL_ASSET",
+      "purpose": "人岗匹配 v3 评测集（scripts/build_match_golden_v3.py 构建；backend/tests/matching 使用）",
+      "in_core_four": false,
+      "affects_gold110": false,
+      "affects_zhilian158": false,
+      "affects_official50": false,
+      "affects_unified_audit": false,
+      "affects_seal_gate": false
+    },
+    {
+      "path": "backend/data/golden_set/position_domain_eval.jsonl",
+      "change": "M 修改",
+      "records": 73,
+      "asset_class": "TEST_EVAL_ASSET",
+      "purpose": "岗位领域图谱评测集（backend/tests/graph/test_position_domain.py 使用）",
+      "in_core_four": false,
+      "affects_gold110": false,
+      "affects_zhilian158": false,
+      "affects_official50": false,
+      "affects_unified_audit": false,
+      "affects_seal_gate": false
+    },
+    {
+      "path": "backend/data/golden_set/review/evaluation_110_r1/ + r2/ + r3/（manual_jd_eval_cases/data_validation/predictions/report 共 12 文件）",
+      "change": "D 删除（12 文件）",
+      "records": null,
+      "asset_class": "OTHER_GOLDEN_SET_ASSET",
+      "purpose": "历史 r1/r2/r3 人工 JD 评测中间产物，已由 final/jd_golden_110.jsonl 正式集与 unified_jd_audit 取代",
+      "in_core_four": false,
+      "affects_gold110": false,
+      "affects_zhilian158": false,
+      "affects_official50": false,
+      "affects_unified_audit": false,
+      "affects_seal_gate": false
+    }
+  ],
+  "file_checks": [
+    {
+      "path": "backend/data/golden_set/candidate_pool/v1/real_jd_candidates_raw.jsonl",
+      "exists": true,
+      "size_bytes": 494668,
+      "sha256": "fdb406c53122cc3328356a0c8a1539fe06a740fea0631e68d0129e6e265986df",
+      "kind": "jsonl",
+      "parse_ok": true,
+      "records": 158
+    },
+    {
+      "path": "backend/data/golden_set/candidate_pool/v1/real_jd_candidates_clean.jsonl",
+      "exists": true,
+      "size_bytes": 494668,
+      "sha256": "570afc64fbffc0147b7506b278d5165eb6b075ca1fb865a9baa9c29286e7b824",
+      "kind": "jsonl",
+      "parse_ok": true,
+      "records": 158
+    },
+    {
+      "path": "backend/data/golden_set/candidate_pool/v1/real_jd_review_required.csv",
+      "exists": true,
+      "size_bytes": 37996,
+      "sha256": "10148b5c68f1d889e5098935101da7aaebc6f8389b0a59beefe8820a030456ff",
+      "kind": "csv",
+      "parse_ok": true,
+      "records": 23
+    },
+    {
+      "path": "backend/data/golden_set/candidate_pool/v1/real_jd_rejected.csv",
+      "exists": true,
+      "size_bytes": 361,
+      "sha256": "5740d03af6b6a7662076eb2ce63c4dafd1f08036f54dcb1e21390323411b7059",
+      "kind": "csv",
+      "parse_ok": true,
+      "records": 0
+    },
+    {
+      "path": "backend/data/golden_set/final/jd_golden_110.jsonl",
+      "exists": true,
+      "size_bytes": 391398,
+      "sha256": "ceedfa6987fee665ea53f17678e8f06cb197a632bc828f99c5b962615c508061",
+      "kind": "jsonl",
+      "parse_ok": true,
+      "records": 110
+    },
+    {
+      "path": "backend/data/golden_set/final/jd_golden_110_data_dictionary.md",
+      "exists": true,
+      "size_bytes": 3896,
+      "sha256": "8588cfc7faefefcf558418090344f81f0fbace339c321434f767e3ed478bb46f",
+      "kind": "md",
+      "parse_ok": true
+    },
+    {
+      "path": "backend/data/golden_set/candidate_pool/official_career_50/official_career_50_raw.jsonl",
+      "exists": true,
+      "size_bytes": 233446,
+      "sha256": "108f8263f796738aa1c937cae13cd43f8d5c715384b52713577946c1dd6374c7",
+      "kind": "jsonl",
+      "parse_ok": true,
+      "records": 50
+    },
+    {
+      "path": "backend/data/golden_set/candidate_pool/official_career_50/official_career_50_clean.jsonl",
+      "exists": true,
+      "size_bytes": 239459,
+      "sha256": "4a78e218e5a1cde981b2301593aab90048085df471ae44306db425b8db47792a",
+      "kind": "jsonl",
+      "parse_ok": true,
+      "records": 50
+    },
+    {
+      "path": "backend/data/golden_set/candidate_pool/official_career_50/official_career_50_gold.jsonl",
+      "exists": true,
+      "size_bytes": 129972,
+      "sha256": "273afda6ee4b5738365cb1bf38da2bc6f84b7e62e25e2131a2b8460ffd4535bf",
+      "kind": "jsonl",
+      "parse_ok": true,
+      "records": 50
+    },
+    {
+      "path": "backend/data/golden_set/audit/unified_jd_audit/gold_eval_exclusion_manifest.csv",
+      "exists": true,
+      "size_bytes": 35664,
+      "sha256": "bb8ef57df3734b74714be99f6b7b631992a04284e3c79bf7d79eafecc7db3ccf",
+      "kind": "csv",
+      "parse_ok": true,
+      "records": 110
+    },
+    {
+      "path": "backend/data/golden_set/audit/unified_jd_audit/final_acceptance_summary.json",
+      "exists": true,
+      "size_bytes": 516,
+      "sha256": "512ded2efebf5d931522e6c134fb97eae40fefcd139a3f7abf1b74c8a0d949aa",
+      "kind": "json",
+      "parse_ok": true,
+      "records": null
+    },
+    {
+      "path": "backend/data/golden_set/audit/unified_jd_audit/unified_jd_cross_source_duplicates.csv",
+      "exists": true,
+      "size_bytes": 117,
+      "sha256": "10e17eab75aaf738336937453980bb68e508626b5dbda93e9985e42ffe21abcc",
+      "kind": "csv",
+      "parse_ok": true,
+      "records": 0
+    }
+  ],
+  "notes": []
+}
