@@ -219,3 +219,9 @@ backend/.pytest_tmp_*/
 # 110 条官方黄金集评测以 evaluation_110/（最终报告）为准；r1/r2/r3 是
 # 08-26 验收复测的中间跑，报告已并入主目录，提交包不收录
 backend/data/golden_set/review/evaluation_110_r*/
+
+# ---------- m5 演示视频合成中间产物（可再生，不入库；09-05 清理归档） ----------
+# shots/ 截帧、segments/ 分段mp4、tts/ 分段wav 均可由 build_final.js / generate_video.py 重新生成
+docs/m5/video_audio/shots/
+docs/m5/video_audio/segments/
+docs/m5/video_audio/tts/

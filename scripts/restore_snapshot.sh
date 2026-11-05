@@ -20,6 +20,11 @@ done
   exit 1
 }
 
+# 固定 compose 项目名：卷/网络名前缀随之固定（zhigang-compass_*），与解压目录名解耦——
+# compose 缺省以目录名派生项目名，目录名含中文等非 ASCII 字符时会得到空名直接报错；
+# 快照导入（[5/6]）也依赖项目名派生的卷名，异名目录下硬编码卷名会把数据灌进孤儿卷。
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-zhigang-compass}"
+
 # [1/6] 前置检查：快照目录按调用者当前目录解析（支持 ../ 相对路径），再绝对化
 if [ -n "$SNAP_ARG" ]; then
   [ -d "$SNAP_ARG" ] || { echo "错误：快照目录不存在：$SNAP_ARG"; exit 1; }
@@ -53,6 +58,12 @@ if [ ! -f "$ENV_FILE" ]; then
 else
   echo "[2/6] backend/.env 已存在，跳过引导"
 fi
+# 仓库根 .env：让手工 compose 命令（冷启动/手册 §3/§4/排查）与脚本共用同一项目名
+ROOT_ENV="$ROOT/.env"
+if [ ! -f "$ROOT_ENV" ]; then
+  printf 'COMPOSE_PROJECT_NAME=%s\n' "$COMPOSE_PROJECT_NAME" > "$ROOT_ENV"
+  echo "      已写入仓库根 .env（COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME，手工 compose 命令同项目名）"
+fi
 KEYS_DIR="$ROOT/backend/keys"
 if [ ! -f "$KEYS_DIR/private.pem" ] || [ ! -f "$KEYS_DIR/public.pem" ]; then
   mkdir -p "$KEYS_DIR"
@@ -76,7 +87,7 @@ if [ ! -d "$SBERT_DIR" ] || [ -z "$(ls -A "$SBERT_DIR" 2>/dev/null)" ]; then
 fi
 
 cd "$ROOT"
-NEO4J_VOLUME="${NEO4J_VOLUME:-zhigang-compass_neo4j_data}"
+NEO4J_VOLUME="${NEO4J_VOLUME:-${COMPOSE_PROJECT_NAME}_neo4j_data}"
 
 echo "[3/6] 构建镜像（api/worker，有缓存时较快）..."
 docker compose build
@@ -123,5 +134,5 @@ for i in $(seq 1 120); do
 done
 echo "错误：/health 120×2s 内未通过。排查：docker compose logs api --tail 50"
 echo "  生产 fail-fast 四条件：SECRET_KEY≠change-me、ADMIN_PASSWORD≠admin123、DEBUG=false、CORS_ORIGINS 无 *"
-echo "  首次部署另见 DEPLOY.md §7.1。"
+echo "  部署步骤与管理员重置见 DEPLOY.md §2-§5，冒烟清单见 §6。"
 exit 1

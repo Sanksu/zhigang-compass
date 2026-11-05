@@ -54,12 +54,13 @@ const shadow = () => ({ type: "outer", color: "1B3A5C", blur: 7, offset: 2, angl
 const bu = () => ({ code: "25B8", indent: 12 });
 
 let pageNo = 0;
+const TOTAL = 21; // 19 页 + 新增「多 Provider 高可用」「岗位状态机」2 页（09-05）
 function base(dark = false) {
   pageNo += 1;
   const s = p.addSlide();
   s.background = { color: dark ? BG_DARK : BG };
-  if (pageNo > 1 && pageNo < 19) {
-    s.addText(`${pageNo} / 19`, { x: W - 1.3, y: 0.38, w: 0.9, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: "9AA9BA", align: "right", margin: 0 });
+  if (pageNo > 1 && pageNo < TOTAL) {
+    s.addText(`${pageNo} / ${TOTAL}`, { x: W - 1.3, y: 0.38, w: 0.9, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: "9AA9BA", align: "right", margin: 0 });
   }
   return s;
 }
@@ -269,6 +270,38 @@ function shot43(s, file, x, y, w) {
   s.addText("Source: 110 条 gold 人工标注盲审（词面真值对齐口径）", { x: M, y: 6.85, w: 8, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: "9AA9BA", margin: 0 });
 })();
 
+/* ========== LLM 多 Provider 高可用（新增 09-05） ========== */
+(() => {
+  const s = base();
+  title(s, "MULTI-PROVIDER", "LLM 多 Provider 高可用 · 优先级路由 + 自动降级");
+  // 左栏：4 provider 卡片（真实 /admin/llm 配置，09-05 实查）
+  const providers = [
+    ["zai", "glm-5.3-flash", "api.z.ai · Anthropic 兼容", "P1", ACCENT_D],
+    ["deepseek", "deepseek-v4-flash", "api.deepseek.com · OpenAI 兼容", "P2", NAVY_MID],
+    ["commandcode", "deepseek-v4-flash-vision-exp", "commandcode · OpenAI 兼容", "P3", NAVY_MID],
+    ["opencode", "deepseek-v4-flash", "opencode 网关 · OpenAI 兼容", "P4", NAVY_MID],
+  ];
+  providers.forEach((pr, i) => {
+    const y = 1.65 + i * 1.02;
+    s.addShape(p.shapes.ROUNDED_RECTANGLE, { x: M, y, w: 5.9, h: 0.88, fill: { color: i === 0 ? TINT : TINT2 }, line: { color: "D7E2ED", width: 0.75 }, rectRadius: 0.08 });
+    s.addText(pr[0], { x: M + 0.22, y: y + 0.1, w: 1.35, h: 0.34, fontSize: 15, fontFace: FONT_BODY, bold: true, color: NAVY, margin: 0 });
+    s.addText(pr[3] + " · 在线", { x: M + 0.22, y: y + 0.47, w: 1.35, h: 0.3, fontSize: 10.5, fontFace: FONT_BODY, bold: true, color: pr[4], margin: 0 });
+    s.addText(pr[1], { x: M + 1.75, y: y + 0.12, w: 4.0, h: 0.32, fontSize: 12.5, fontFace: FONT_BODY, bold: true, color: INK, margin: 0 });
+    s.addText(pr[2], { x: M + 1.75, y: y + 0.48, w: 4.0, h: 0.3, fontSize: 10.5, fontFace: FONT_BODY, color: MUTED, margin: 0 });
+  });
+  // 右栏：实机截图
+  shot(s, "shot-multiprovider.png", 6.7, 1.72, 6.1);
+  s.addText("▲ 实机截图：/admin/llm 管理页 · provider 优先级 / 开关 / 协议 / 模型", { x: 6.7, y: 5.28, w: 6.1, h: 0.3, fontSize: 11.5, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
+  // 底部：路由与降级策略
+  s.addShape(p.shapes.ROUNDED_RECTANGLE, { x: M, y: 5.75, w: CW, h: 1.3, fill: { color: TINT }, line: { color: "C9D7E5", width: 0.75 }, rectRadius: 0.08 });
+  s.addText("路由与降级策略", { x: M + 0.25, y: 5.92, w: 3.0, h: 0.3, fontSize: 13, fontFace: FONT_BODY, bold: true, color: NAVY, margin: 0 });
+  bullets(s, [
+    "按 priority 升序尝试：同步单次 10s 超时返回 504；异步逐家重试，全部失败延时重入队",
+    "限流 429 指数退避（30/60/120s）自动切换下一家；5xx 连续 3 次切备用通道并告警",
+    "健康检查 5 分钟/次（/models）结果存 Redis；恢复 3 次健康后自动回主通道",
+  ], M + 0.25, 6.28, CW - 0.5, 0.72, { fontSize: 11.5, gap: 4 });
+})();
+
 /* ========== 8 人岗匹配引擎 ========== */
 (() => {
   const s = base();
@@ -305,6 +338,47 @@ function shot43(s, file, x, y, w) {
     if (i < 2) s.addText("→", { x: x + 1.57, y: 5.7, w: 0.36, h: 0.46, fontSize: 16, fontFace: FONT_BODY, bold: true, color: MUTED, align: "center", valign: "middle", margin: 0 });
   });
   s.addText("媒介落差指数 MLI：四维信号综合判定产业拐点", { x: M, y: 6.45, w: 5.9, h: 0.3, fontSize: 12, fontFace: FONT_BODY, color: MUTED, margin: 0 });
+})();
+
+/* ========== 岗位状态机六态（新增 09-05） ========== */
+(() => {
+  const s = base();
+  title(s, "STATE MACHINE", "岗位状态机 · 六态生命周期治理");
+  // 左栏：五态主链（真实 VALID_TRANSITIONS，09-05 实查）
+  const chain = [
+    ["candidate", 1.7, NAVY_MID],
+    ["emerging", 2.85, ACCENT],
+    ["stable", 4.0, NAVY_MID],
+    ["declining", 5.15, "B4552D"],
+    ["archived", 6.3, "8A94A3"],
+  ];
+  chain.forEach(([name, y, c], i) => {
+    s.addShape(p.shapes.ROUNDED_RECTANGLE, { x: M, y, w: 1.7, h: 0.45, fill: { color: c }, rectRadius: 0.22 });
+    s.addText(name, { x: M, y, w: 1.7, h: 0.45, fontSize: 13, fontFace: FONT_BODY, color: "FFFFFF", align: "center", valign: "middle", margin: 0 });
+    if (i < chain.length - 1) {
+      s.addText("↓", { x: M + 0.6, y: y + 0.43, w: 0.5, h: 0.28, fontSize: 11, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
+    }
+  });
+  // 规则标注（右侧）
+  const rules = [
+    ["→ emerging：人工审核 · 置信度≥0.55 且跨源≥2\n→ rejected：人工审核驳回（终态）", 1.7],
+    ["→ stable：自动 · JD≥5 + 连续2窗波动<25% + 跨源≥2 + 技能新颖度<0.2\n→ declining：自动 · 连续3窗下降>40%", 2.85],
+    ["→ declining：自动 · 连续3窗下降>40%", 4.0],
+    ["→ archived：人工确认衰退（终态）\n→ stable：自动 · 连续2窗 z-score 回升（回迁）", 5.15],
+    ["终态 · 不参与后续流转", 6.3],
+  ];
+  rules.forEach(([txt, y]) => {
+    s.addText(txt, { x: M + 1.95, y: y + 0.04, w: 4.2, h: 0.6, fontSize: 10, fontFace: FONT_BODY, color: MUTED, margin: 0, valign: "top" });
+  });
+  s.addText("六态：candidate / emerging / stable / declining / archived / rejected", { x: M, y: 6.92, w: 6.0, h: 0.3, fontSize: 10.5, fontFace: FONT_BODY, color: "9AA9BA", margin: 0 });
+  // 右栏：实机截图
+  shot(s, "shot-statemachine.png", 6.85, 1.72, 5.95);
+  s.addText("▲ 实机截图：/evolution 版本与状态机 Tab · 六态分布 + 最近人工流转记录", { x: 6.85, y: 5.18, w: 5.95, h: 0.3, fontSize: 11.5, fontFace: FONT_BODY, color: MUTED, align: "center", margin: 0 });
+  s.addText([
+    { text: "双轨驱动：", options: { bold: true, color: ACCENT_D } },
+    { text: "每日 ETL 自动扫描候选池并流转（operator=system，幂等写 Neo4j）", options: { color: INK } },
+  ], { x: 6.85, y: 5.62, w: 5.95, h: 0.3, fontSize: 11.5, fontFace: FONT_BODY, margin: 0 });
+  s.addText("人工审核走管理后台（operator=审核员 · reason 必填 · 写 AuditLog）；非法流转一律抛 ValueError 拦截", { x: 6.85, y: 5.98, w: 5.95, h: 0.6, fontSize: 11, fontFace: FONT_BODY, color: MUTED, margin: 0, valign: "top" });
 })();
 
 /* ========== 10 个性化学习路径 ========== */
@@ -499,4 +573,4 @@ function shot43(s, file, x, y, w) {
   s.addText("智岗罗盘团队 · XH-202621 · 2026.09", { x: M, y: 6.4, w: CW, h: 0.4, fontSize: 13, fontFace: FONT_BODY, color: "9FB4CC", margin: 0 });
 })();
 
-p.writeFile({ fileName: "智岗罗盘_答辩PPT_终稿.pptx" }).then(() => console.log("PPT done: 19 slides"));
+p.writeFile({ fileName: "智岗罗盘_答辩PPT_终稿.pptx" }).then(() => console.log(`PPT done: ${TOTAL} slides`));

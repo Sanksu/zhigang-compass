@@ -132,7 +132,9 @@ def _auto_record(entity_type="course", entity_id="某课程", action="remove_nod
         model="m",
         structured_output={"action": action, "reason": "孤立课程"},
     )
-    rec.created_at = created_at or datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
+    # 默认取当前时间：undo 有 7 天窗口守卫（_UNDO_WINDOW_DAYS），用固定过去日期会随
+    # 墙钟推移超出窗口而误触 4090。需要超窗场景的用例显式传入 created_at。
+    rec.created_at = created_at or datetime.now(timezone.utc)
     return rec
 
 
